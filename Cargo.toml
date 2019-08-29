@@ -1,0 +1,13 @@
+[workspace]
+members = [
+        "zebra-chain",
+        "zebra-network",
+        "zebra-storage",
+        "zebra-script",
+        "zebra-consensus",
+        "zebra-rpc",
+        "zebra-client",
+        "zebra-reactor",
+        "zebrad",
+]
+
