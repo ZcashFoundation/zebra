@@ -2,7 +2,7 @@
 
 use crate::{commands::ZebradCmd, config::ZebradConfig};
 use abscissa_core::{
-    application, config, logging, Application, EntryPoint, FrameworkError, StandardPaths,
+    application, config, logging, Application, Component, EntryPoint, FrameworkError, StandardPaths,
 };
 use lazy_static::lazy_static;
 
@@ -76,6 +76,27 @@ impl Application for ZebradApp {
     /// Borrow the application state mutably.
     fn state_mut(&mut self) -> &mut application::State<Self> {
         &mut self.state
+    }
+
+    /// Initialize Zebrad's components.
+    fn framework_components(
+        &mut self,
+        _command: &Self::Cmd,
+    ) -> Result<Vec<Box<dyn Component<Self>>>, FrameworkError> {
+        use abscissa_core::terminal::{component::Terminal, ColorChoice};
+
+        let terminal = Terminal::new(ColorChoice::Auto);
+
+        use crate::{abscissa_tokio::AbscissaTokio, tracing::TracingEndpoint};
+
+        let tokio_component = AbscissaTokio::new()?;
+        let tracing_endpoint = TracingEndpoint::new()?;
+
+        Ok(vec![
+            Box::new(terminal),
+            Box::new(tokio_component),
+            Box::new(tracing_endpoint),
+        ])
     }
 
     /// Register all components used by this application.

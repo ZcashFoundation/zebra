@@ -4,8 +4,11 @@
 //!
 //! [Abscissa]: https://github.com/iqlusioninc/abscissa
 
-#![deny(warnings, missing_docs, trivial_casts, unused_qualifications)]
+//#![deny(warnings, missing_docs, trivial_casts, unused_qualifications)]
 #![forbid(unsafe_code)]
+
+mod tracing;
+mod abscissa_tokio;
 
 pub mod application;
 pub mod commands;

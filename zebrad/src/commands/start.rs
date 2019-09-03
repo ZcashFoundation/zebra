@@ -16,16 +16,21 @@ use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
 /// <https://docs.rs/gumdrop/>
 #[derive(Command, Debug, Options)]
 pub struct StartCmd {
-    /// To whom are we saying hello?
+    /// Filter strings
     #[options(free)]
-    recipient: Vec<String>,
+    filters: Vec<String>,
 }
 
 impl Runnable for StartCmd {
     /// Start the application.
     fn run(&self) {
         let config = app_config();
-        println!("Hello, {}!", &config.hello.recipient);
+        println!("filter: {}!", &config.tracing.filter);
+
+        let default_config = ZebradConfig::default();
+        println!("Default config: {:?}", default_config);
+
+        println!("Toml:\n{}", toml::to_string(&default_config).unwrap());
     }
 }
 
@@ -37,8 +42,8 @@ impl config::Override<ZebradConfig> for StartCmd {
         &self,
         mut config: ZebradConfig,
     ) -> Result<ZebradConfig, FrameworkError> {
-        if !self.recipient.is_empty() {
-            config.hello.recipient = self.recipient.join(" ");
+        if !self.filters.is_empty() {
+            config.tracing.filter = self.filters.join(",");
         }
 
         Ok(config)

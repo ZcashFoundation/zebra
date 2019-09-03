@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Config, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ZebradConfig {
-    /// An example configuration section
-    pub hello: ExampleSection,
+    /// Tracing configuration
+    pub tracing: TracingSection,
 }
 
 /// Default configuration settings.
@@ -22,25 +22,23 @@ pub struct ZebradConfig {
 impl Default for ZebradConfig {
     fn default() -> Self {
         Self {
-            hello: ExampleSection::default(),
+            tracing: TracingSection::default(),
         }
     }
 }
 
-/// Example configuration section.
-///
-/// Delete this and replace it with your actual configuration structs.
+/// Tracing configuration section.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct ExampleSection {
-    /// Example configuration value
-    pub recipient: String,
+pub struct TracingSection {
+    /// The filter used for tracing events.
+    pub filter: String,
 }
 
-impl Default for ExampleSection {
+impl Default for TracingSection {
     fn default() -> Self {
         Self {
-            recipient: "world".to_owned(),
+            filter: "info".to_owned(),
         }
     }
 }
