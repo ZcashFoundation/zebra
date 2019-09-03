@@ -1,0 +1,23 @@
+steps:
+# - name: 'gcr.io/cloud-builders/docker'
+#   entrypoint: 'bash'
+#   args:
+#   - '-c'
+#   - |
+#     docker pull gcr.io/$PROJECT_ID/master:latest || exit 0
+# - name: 'gcr.io/cloud-builders/docker'
+#   entrypoint: 'bash'
+#   args:
+#   - '-c'
+#   - |
+#     docker run gcr.io/kaniko-project/warmer:latest --image=gcr.io/$PROJECT_ID/$BRANCH_NAME:latest --image=gcr.io/$PROJECT_ID/master:latest || exit 0
+- name: 'gcr.io/kaniko-project/executor:latest'
+  args:
+  - --destination=gcr.io/$PROJECT_ID/$BRANCH_NAME #:$SHORT_SHA
+  - --cache=true
+  - --cache-ttl=12h
+
+options:
+    machineType: 'N1_HIGHCPU_32'
+
+timeout: 3600s # One hour for all steps.
