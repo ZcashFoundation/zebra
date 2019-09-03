@@ -3,7 +3,7 @@ steps:
   args:
   - --destination=us.gcr.io/$PROJECT_ID/$BRANCH_NAME # NOTE: zebra2 containers & images are in us.gcr.io, _not_ gcr.io
   - --cache=true
-  - --cache-ttl=12h
+  - --cache-ttl=24h
 
 options:
     machineType: 'N1_HIGHCPU_32'
