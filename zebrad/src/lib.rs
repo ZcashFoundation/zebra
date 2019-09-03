@@ -6,9 +6,12 @@
 
 //#![deny(warnings, missing_docs, trivial_casts, unused_qualifications)]
 #![forbid(unsafe_code)]
+#![feature(async_await)]
 
-mod tracing;
-mod abscissa_tokio;
+#[macro_use]
+extern crate tracing;
+
+mod components;
 
 pub mod application;
 pub mod commands;

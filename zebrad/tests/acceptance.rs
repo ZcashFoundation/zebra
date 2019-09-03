@@ -11,8 +11,8 @@
 #![forbid(unsafe_code)]
 
 use abscissa_core::testing::prelude::*;
-use zebrad::config::ZebradConfig;
 use lazy_static::lazy_static;
+use zebrad::config::ZebradConfig;
 
 lazy_static! {
     /// Executes your application binary via `cargo run`.

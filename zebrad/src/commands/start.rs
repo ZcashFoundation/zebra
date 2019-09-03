@@ -24,6 +24,7 @@ pub struct StartCmd {
 impl Runnable for StartCmd {
     /// Start the application.
     fn run(&self) {
+        warn!("starting application");
         let config = app_config();
         println!("filter: {}!", &config.tracing.filter);
 
@@ -38,10 +39,7 @@ impl config::Override<ZebradConfig> for StartCmd {
     // Process the given command line options, overriding settings from
     // a configuration file using explicit flags taken from command-line
     // arguments.
-    fn override_config(
-        &self,
-        mut config: ZebradConfig,
-    ) -> Result<ZebradConfig, FrameworkError> {
+    fn override_config(&self, mut config: ZebradConfig) -> Result<ZebradConfig, FrameworkError> {
         if !self.filters.is_empty() {
             config.tracing.filter = self.filters.join(",");
         }

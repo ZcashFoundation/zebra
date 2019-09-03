@@ -6,15 +6,14 @@ use tokio::runtime::Runtime;
 
 /// An Abscissa component which owns a Tokio runtime.
 #[derive(Component, Debug)]
-pub struct AbscissaTokio {
-    rt: Runtime,
+pub struct TokioComponent {
+    pub rt: Runtime,
 }
 
-impl AbscissaTokio {
+impl TokioComponent {
     pub fn new() -> Result<Self, FrameworkError> {
-        Ok( Self {
+        Ok(Self {
             rt: Runtime::new().unwrap(),
         })
     }
 }
-            

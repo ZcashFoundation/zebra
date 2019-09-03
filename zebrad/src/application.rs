@@ -78,25 +78,18 @@ impl Application for ZebradApp {
         &mut self.state
     }
 
-    /// Initialize Zebrad's components.
+    /// Override the provided impl to skip the default logging component.
+    ///
+    /// We want to use tracing as the log subscriber in our tracing component,
+    /// so only initialize the abscissa Terminal component.
     fn framework_components(
         &mut self,
-        _command: &Self::Cmd,
+        command: &Self::Cmd,
     ) -> Result<Vec<Box<dyn Component<Self>>>, FrameworkError> {
         use abscissa_core::terminal::{component::Terminal, ColorChoice};
-
+        // XXX abscissa uses self.term_colors(command), check if we should match
         let terminal = Terminal::new(ColorChoice::Auto);
-
-        use crate::{abscissa_tokio::AbscissaTokio, tracing::TracingEndpoint};
-
-        let tokio_component = AbscissaTokio::new()?;
-        let tracing_endpoint = TracingEndpoint::new()?;
-
-        Ok(vec![
-            Box::new(terminal),
-            Box::new(tokio_component),
-            Box::new(tracing_endpoint),
-        ])
+        Ok(vec![Box::new(terminal)])
     }
 
     /// Register all components used by this application.
@@ -105,7 +98,12 @@ impl Application for ZebradApp {
     /// beyond the default ones provided by the framework, this is the place
     /// to do so.
     fn register_components(&mut self, command: &Self::Cmd) -> Result<(), FrameworkError> {
-        let components = self.framework_components(command)?;
+        use crate::components::{tokio::TokioComponent, tracing::TracingEndpoint};
+
+        let mut components = self.framework_components(command)?;
+        components.push(Box::new(TokioComponent::new()?));
+        components.push(Box::new(TracingEndpoint::new()?));
+
         self.state.components.register(components)
     }
 
