@@ -32,6 +32,18 @@ impl Runnable for StartCmd {
         println!("Default config: {:?}", default_config);
 
         println!("Toml:\n{}", toml::to_string(&default_config).unwrap());
+
+        info!("Starting placeholder loop");
+
+        use crate::components::tokio::TokioComponent;
+
+        app_reader()
+            .state()
+            .components
+            .get_downcast_ref::<TokioComponent>()
+            .expect("TokioComponent should be available")
+            .rt
+            .block_on(tokio::future::pending::<()>());
     }
 }
 
