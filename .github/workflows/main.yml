@@ -15,8 +15,6 @@ jobs:
         GCLOUD_AUTH: ${{ secrets.GCLOUD_AUTH }}
     - name: Build, Test, Push to GCR
       uses: actions/gcloud/cli@master
-      with:
-        entrypoint: sh
-        args: -l -c "SHORT_SHA=$(echo ${{ github.sha }} | head -c7) && BRANCH_NAME=$(git
-          name-rev --name-only HEAD) && gcloud builds submit . --config cloudbuild.yaml
-          --project zealous-zebra --substitutions BRANCH_NAME=$BRANCH_NAME"
+      run: |
+        BRANCH_NAME=$(expr $GITHUB_REF : '.*/\(.*\)') && echo $BRANCH_NAME
+        #gcloud builds submit . --config cloudbuild.yaml --project zealous-zebra --substitutions BRANCH_NAME=$BRANCH_NAME
