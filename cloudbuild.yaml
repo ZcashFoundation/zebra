@@ -1,7 +1,7 @@
 steps:
 - name: 'gcr.io/kaniko-project/executor:latest'
   args:
-  - --destination=us.gcr.io/$PROJECT_ID/$BRANCH_NAME # NOTE: zebra2 containers & images are in us.gcr.io, _not_ gcr.io
+  - --destination=gcr.io/$PROJECT_ID/$IMAGE_NAME
   - --cache=true
   - --cache-ttl=24h
 

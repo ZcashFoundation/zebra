@@ -19,5 +19,5 @@ jobs:
       with:
         entrypoint: sh
         args: |
-          -l -c "BRANCH_NAME=$(expr $GITHUB_REF : '.*/\(.*\)') && \
-          gcloud builds submit . --config cloudbuild.yaml --project zealous-zebra --substitutions BRANCH_NAME=$BRANCH_NAME"
+          -l -c "IMAGE_NAME=$GITHUB_REPOSITORY/$(expr $GITHUB_REF : '.*/\(.*\)') && \
+          gcloud builds submit . --config cloudbuild.yaml --project zealous-zebra --substitutions IMAGE_NAME=$IMAGE_NAME"
