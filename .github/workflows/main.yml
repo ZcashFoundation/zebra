@@ -14,12 +14,10 @@ jobs:
       uses: actions/gcloud/auth@master
       env:
         GCLOUD_AUTH: ${{ secrets.GCLOUD_AUTH }}
-    # - run: |
-    #     BRANCH_NAME=$(expr $GITHUB_REF : '.*/\(.*\)')
     - name: Build, Test, Push to GCR
       uses: actions/gcloud/cli@master
       with:
         entrypoint: sh
         args: |
-          -l -c "BRANCH_NAME=$(expr $GITHUB_REF : '.*/\(.*\)') && echo $BRANCH_NAME"
-        #gcloud builds submit . --config cloudbuild.yaml --project zealous-zebra --substitutions BRANCH_NAME=$BRANCH_NAME
+          -l -c "BRANCH_NAME=$(expr $GITHUB_REF : '.*/\(.*\)') && \
+          gcloud builds submit . --config cloudbuild.yaml --project zealous-zebra --substitutions BRANCH_NAME=$BRANCH_NAME"
