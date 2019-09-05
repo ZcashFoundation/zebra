@@ -20,4 +20,5 @@ jobs:
         entrypoint: sh
         args: |
           -l -c "BRANCH_NAME=$GITHUB_REPOSITORY/$(expr $GITHUB_REF : '.*/\(.*\)') && \
+          BRANCH_NAME=${BRANCH_NAME,,} && \
           gcloud builds submit . --config cloudbuild.yaml --project zealous-zebra --substitutions BRANCH_NAME=$BRANCH_NAME"
