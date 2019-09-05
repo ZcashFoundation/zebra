@@ -17,7 +17,7 @@ jobs:
     - name: Build, Test, Push to GCR
       uses: actions/gcloud/cli@master
       with:
-        entrypoint: sh
+        entrypoint: bash
         args: |
           -l -c "BRANCH_NAME=$GITHUB_REPOSITORY/$(expr $GITHUB_REF : '.*/\(.*\)') && \
           BRANCH_NAME=${BRANCH_NAME,,} && \
