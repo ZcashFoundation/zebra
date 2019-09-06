@@ -8,11 +8,7 @@ use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Request, Response, Server};
 
 use tracing_log::LogTracer;
-use tracing_subscriber::{
-    filter::Filter,
-    reload::{Handle},
-    FmtSubscriber,
-};
+use tracing_subscriber::{filter::Filter, reload::Handle, FmtSubscriber};
 
 /// Abscissa component which runs a tracing filter endpoint.
 #[derive(Component)]
