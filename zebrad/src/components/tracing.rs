@@ -4,6 +4,9 @@ use crate::components::tokio::TokioComponent;
 
 use abscissa_core::{err, Component, FrameworkError, FrameworkErrorKind};
 
+use hyper::{Body, Request, Response, Server, Version};
+use hyper::service::{make_service_fn, service_fn};
+
 // XXX upstream API will be reworked soon: fmt is merging with subscriber
 // https://github.com/tokio-rs/tracing/pull/311
 
@@ -75,11 +78,30 @@ impl TracingEndpoint {
         Ok(Self { filter_handle })
     }
 
-    /// Do setup after recieving a tokio runtime.
+    /// Do setup after receiving a tokio runtime.
     pub fn init_tokio(&mut self, tokio_component: &TokioComponent) -> Result<(), FrameworkError> {
-        tokio_component.rt.spawn(async {
-            warn!("warning from a worker thread");
+
+        async fn hello_world_handler(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
+            Ok(Response::new(Body::from("Hello World! 👋")))
+        }
+
+        let service = make_service_fn(|_| {
+            async {
+                Ok::<_, hyper::Error>(service_fn(hello_world_handler))
+            }
         });
+
+        let addr = "127.0.0.1:3000".parse().unwrap();
+
+        let server = Server::bind(&addr).serve(service);
+
+        tokio_component.rt.spawn(
+            async {
+                if let Err(e) = server.await {
+                    error!("Server error: {}", e);
+                }
+            }
+        );
 
         Ok(())
     }

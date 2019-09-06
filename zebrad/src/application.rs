@@ -84,7 +84,7 @@ impl Application for ZebradApp {
     /// so only initialize the abscissa Terminal component.
     fn framework_components(
         &mut self,
-        command: &Self::Cmd,
+        _command: &Self::Cmd,
     ) -> Result<Vec<Box<dyn Component<Self>>>, FrameworkError> {
         use abscissa_core::terminal::{component::Terminal, ColorChoice};
         // XXX abscissa uses self.term_colors(command), check if we should match
