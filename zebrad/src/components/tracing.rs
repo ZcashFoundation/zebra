@@ -5,7 +5,7 @@ use crate::components::tokio::TokioComponent;
 use abscissa_core::{err, Component, FrameworkError, FrameworkErrorKind};
 
 use hyper::service::{make_service_fn, service_fn};
-use hyper::{Body, Request, Response, Server, Version};
+use hyper::{Body, Request, Response, Server};
 
 use tracing_log::LogTracer;
 use tracing_subscriber::{
