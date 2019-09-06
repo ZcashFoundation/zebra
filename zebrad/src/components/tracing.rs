@@ -80,28 +80,22 @@ impl TracingEndpoint {
 
     /// Do setup after receiving a tokio runtime.
     pub fn init_tokio(&mut self, tokio_component: &TokioComponent) -> Result<(), FrameworkError> {
-
         async fn hello_world_handler(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
             Ok(Response::new(Body::from("Hello World! 👋")))
         }
 
-        let service = make_service_fn(|_| {
-            async {
-                Ok::<_, hyper::Error>(service_fn(hello_world_handler))
-            }
-        });
+        let service =
+            make_service_fn(|_| async { Ok::<_, hyper::Error>(service_fn(hello_world_handler)) });
 
         let addr = "127.0.0.1:3000".parse().unwrap();
 
         let server = Server::bind(&addr).serve(service);
 
-        tokio_component.rt.spawn(
-            async {
-                if let Err(e) = server.await {
-                    error!("Server error: {}", e);
-                }
+        tokio_component.rt.spawn(async {
+            if let Err(e) = server.await {
+                error!("Server error: {}", e);
             }
-        );
+        });
 
         Ok(())
     }
