@@ -4,26 +4,15 @@ use crate::components::tokio::TokioComponent;
 
 use abscissa_core::{err, Component, FrameworkError, FrameworkErrorKind};
 
-use hyper::{Body, Request, Response, Server, Version};
 use hyper::service::{make_service_fn, service_fn};
+use hyper::{Body, Request, Response, Server, Version};
 
-// XXX upstream API will be reworked soon: fmt is merging with subscriber
-// https://github.com/tokio-rs/tracing/pull/311
-
-use tracing_fmt::FmtSubscriber;
 use tracing_log::LogTracer;
 use tracing_subscriber::{
     filter::Filter,
-    layer::SubscriberExt,
-    reload::{Handle, Layer},
+    reload::{Handle},
+    FmtSubscriber,
 };
-
-// Horrible compound type
-type OurSubscriber = FmtSubscriber<
-    tracing_fmt::format::NewRecorder,
-    tracing_fmt::format::Format<tracing_fmt::format::Full>,
-    tracing_fmt::filter::NoFilter,
->;
 
 /// Abscissa component which runs a tracing filter endpoint.
 #[derive(Component)]
@@ -31,7 +20,7 @@ type OurSubscriber = FmtSubscriber<
 // XXX ideally this would be TracingEndpoint<S: Subscriber>
 // but this doesn't seem to play well with derive(Component)
 pub struct TracingEndpoint {
-    filter_handle: Handle<Filter, OurSubscriber>,
+    filter_handle: Handle<Filter, FmtSubscriber>,
 }
 
 impl ::std::fmt::Debug for TracingEndpoint {
@@ -55,16 +44,14 @@ impl TracingEndpoint {
             )
         })?;
 
-        // Create a dynamic filter for log events and retain its handle.
-        // XXX pull from config
-        let (filter, filter_handle) = Layer::new(Filter::new("info"));
-
-        // Apply that filter to a tracing subscriber.
-        let subscriber = tracing_fmt::FmtSubscriber::builder()
+        let builder = FmtSubscriber::builder()
             .with_ansi(true)
-            .with_filter(tracing_fmt::filter::none())
-            .finish()
-            .with(filter); // from SubscriberExt
+            // Set the initial filter from the RUST_LOG env variable
+            // XXX pull from config file?
+            .with_filter(Filter::from_default_env())
+            .with_filter_reloading();
+        let filter_handle = builder.reload_handle();
+        let subscriber = builder.finish();
 
         // Set that subscriber to be the global tracing subscriber
         tracing::subscriber::set_global_default(subscriber).map_err(|e| {
