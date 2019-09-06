@@ -67,12 +67,15 @@ impl TracingEndpoint {
 
     /// Do setup after receiving a tokio runtime.
     pub fn init_tokio(&mut self, tokio_component: &TokioComponent) -> Result<(), FrameworkError> {
-        async fn hello_world_handler(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
-            Ok(Response::new(Body::from("Hello World! 👋")))
-        }
-
-        let service =
-            make_service_fn(|_| async { Ok::<_, hyper::Error>(service_fn(hello_world_handler)) });
+        // Clone the filter handle so it can be moved into make_service_fn closure
+        let handle = self.filter_handle.clone();
+        let service = make_service_fn(move |_| {
+            // Clone again to move into the service_fn closure
+            let handle = handle.clone();
+            async move {
+                Ok::<_, hyper::Error>(service_fn(move |req| filter_handler(handle.clone(), req)))
+            }
+        });
 
         let addr = "127.0.0.1:3000".parse().unwrap();
 
@@ -85,5 +88,25 @@ impl TracingEndpoint {
         });
 
         Ok(())
+    }
+}
+
+async fn filter_handler<S>(
+    handle: Handle<Filter, S>,
+    req: Request<Body>,
+) -> Result<Response<Body>, hyper::Error> {
+    use hyper::{Method, StatusCode};
+    match (req.method(), req.uri().path()) {
+        (&Method::POST, "/filter") => {
+            let rsp = Response::new(Body::from("OK"));
+            Ok(rsp)
+        }
+        _ => {
+            let rsp = Response::builder()
+                .status(StatusCode::BAD_REQUEST)
+                .body(Body::from(""))
+                .expect("response with known status cannot fail");
+            Ok(rsp)
+        }
     }
 }
