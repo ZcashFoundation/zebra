@@ -48,9 +48,7 @@ impl Configurable<ZebradConfig> for ZebradCmd {
             dir_path
         });
 
-        println!("looking for config file at: {:?}", filename);
-
-        // TODO clean up with an Option combinator
+        // XXX clean up with an Option combinator
         match filename {
             Some(f) => {
                 if f.exists() {
