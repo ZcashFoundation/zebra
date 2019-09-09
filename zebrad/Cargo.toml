@@ -16,6 +16,8 @@ tracing = "0.1"
 tracing-subscriber = "0.1"
 tracing-log = "=0.0.1-alpha.2"
 hyper = "=0.13.0-alpha.1"
+futures-core-preview = { version = "=0.3.0-alpha.18" }
+futures-util-preview = { version = "=0.3.0-alpha.18" }
 
 [dev-dependencies.abscissa_core]
 version = "0.3.0"
