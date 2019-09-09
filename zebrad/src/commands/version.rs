@@ -12,10 +12,6 @@ pub struct VersionCmd {}
 impl Runnable for VersionCmd {
     /// Print version message
     fn run(&self) {
-        println!(
-            "{} {}",
-            ZebradCmd::name(),
-            ZebradCmd::version()
-        );
+        println!("{} {}", ZebradCmd::name(), ZebradCmd::version());
     }
 }

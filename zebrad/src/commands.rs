@@ -43,16 +43,14 @@ pub enum ZebradCmd {
 impl Configurable<ZebradConfig> for ZebradCmd {
     /// Location of the configuration file
     fn config_path(&self) -> Option<PathBuf> {
-        // Check if the config file exists, and if it does not, ignore it.
-        // If you'd like for a missing configuration file to be a hard error
-        // instead, always return `Some(CONFIG_FILE)` here.
-        let filename = PathBuf::from(CONFIG_FILE);
+        let filename = std::env::current_dir().ok().map(|mut dir_path| {
+            dir_path.push(CONFIG_FILE);
+            dir_path
+        });
 
-        if filename.exists() {
-            Some(filename)
-        } else {
-            None
-        }
+        let if_exists = |f: PathBuf| if f.exists() { Some(f) } else { None };
+
+        filename.and_then(|f| if_exists(f))
     }
 
     /// Apply changes to the config after it's been loaded, e.g. overriding
@@ -60,10 +58,7 @@ impl Configurable<ZebradConfig> for ZebradCmd {
     ///
     /// This can be safely deleted if you don't want to override config
     /// settings from command-line options.
-    fn process_config(
-        &self,
-        config: ZebradConfig,
-    ) -> Result<ZebradConfig, FrameworkError> {
+    fn process_config(&self, config: ZebradConfig) -> Result<ZebradConfig, FrameworkError> {
         match self {
             ZebradCmd::Start(cmd) => cmd.override_config(config),
             _ => Ok(config),

@@ -4,8 +4,14 @@
 //!
 //! [Abscissa]: https://github.com/iqlusioninc/abscissa
 
-#![deny(warnings, missing_docs, trivial_casts, unused_qualifications)]
+//#![deny(warnings, missing_docs, trivial_casts, unused_qualifications)]
 #![forbid(unsafe_code)]
+#![feature(async_await)]
+
+#[macro_use]
+extern crate tracing;
+
+mod components;
 
 pub mod application;
 pub mod commands;

@@ -16,16 +16,34 @@ use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
 /// <https://docs.rs/gumdrop/>
 #[derive(Command, Debug, Options)]
 pub struct StartCmd {
-    /// To whom are we saying hello?
+    /// Filter strings
     #[options(free)]
-    recipient: Vec<String>,
+    filters: Vec<String>,
 }
 
 impl Runnable for StartCmd {
     /// Start the application.
     fn run(&self) {
+        warn!("starting application");
         let config = app_config();
-        println!("Hello, {}!", &config.hello.recipient);
+        println!("filter: {}!", &config.tracing.filter);
+
+        let default_config = ZebradConfig::default();
+        println!("Default config: {:?}", default_config);
+
+        println!("Toml:\n{}", toml::to_string(&default_config).unwrap());
+
+        info!("Starting placeholder loop");
+
+        use crate::components::tokio::TokioComponent;
+
+        app_reader()
+            .state()
+            .components
+            .get_downcast_ref::<TokioComponent>()
+            .expect("TokioComponent should be available")
+            .rt
+            .block_on(tokio::future::pending::<()>());
     }
 }
 
@@ -33,12 +51,9 @@ impl config::Override<ZebradConfig> for StartCmd {
     // Process the given command line options, overriding settings from
     // a configuration file using explicit flags taken from command-line
     // arguments.
-    fn override_config(
-        &self,
-        mut config: ZebradConfig,
-    ) -> Result<ZebradConfig, FrameworkError> {
-        if !self.recipient.is_empty() {
-            config.hello.recipient = self.recipient.join(" ");
+    fn override_config(&self, mut config: ZebradConfig) -> Result<ZebradConfig, FrameworkError> {
+        if !self.filters.is_empty() {
+            config.tracing.filter = self.filters.join(",");
         }
 
         Ok(config)
