@@ -1,5 +1,9 @@
 //! Definitions of network messages.
 
+use std::net::{SocketAddr};
+
+use zebra_chain;
+
 /// A Bitcoin-like network message for the Zcash protocol.
 ///
 /// The Zcash network protocol is mostly inherited from Bitcoin, and a list of
@@ -25,8 +29,25 @@
 pub enum Message {
     /// A `version` message.
     ///
+    /// Note that although this is called `version` in Bitcoin, its role is really
+    /// analogous to a `ClientHello` message in TLS, used to begin a handshake, and
+    /// is distinct from a simple version number.
+    ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#version)
-    Version {/* XXX add fields */},
+    Version {
+        /// The network version number supported by the sender.
+        version: Version,
+        /// The network services advertised by the sender.
+        services: Services,
+        /// The time when the version message was sent.
+        timestamp: Timestamp,
+        address_receiving: NetworkAddress,
+        address_from: NetworkAddress,
+        nonce: Nonce,
+        user_agent: String,
+        start_height: zebra_chain::types::BlockHeight,
+        relay: bool
+    },
 
     /// A `verack` message.
     ///
@@ -36,18 +57,15 @@ pub enum Message {
     /// A `ping` message.
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#ping)
-    Ping {
-        /// A random nonce.
-        nonce: u64,
-    },
+    Ping(Nonce),
 
     /// A `pong` message.
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#pong)
-    Pong {
+    Pong(
         /// The nonce from the `Ping` message this was in response to.
-        nonce: u64,
-    },
+        Nonce,
+    ),
 
     /// A `reject` message.
     ///
@@ -151,3 +169,17 @@ pub enum Message {
 // Q: how do we want to implement serialization, exactly? do we want to have
 // something generic over stdlib Read and Write traits, or over async versions
 // of those traits?
+
+/// A protocol version magic number.
+pub struct Version(pub u32);
+
+// Tower provides utilities for service discovery, so this might go
+// away in the future in favor of that.
+pub struct Services(pub u64);
+
+pub struct Timestamp(pub i64);
+
+pub struct NetworkAddress(pub Services, pub SocketAddr);
+
+/// A nonce used in the networking layer to identify messages.
+pub struct Nonce(pub u64);
