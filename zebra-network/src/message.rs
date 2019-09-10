@@ -35,17 +35,35 @@ pub enum Message {
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#version)
     Version {
+
         /// The network version number supported by the sender.
         version: Version,
+
         /// The network services advertised by the sender.
         services: Services,
+
         /// The time when the version message was sent.
         timestamp: Timestamp,
+
+        /// The network address of the node receiving this message.
         address_receiving: NetworkAddress,
+
+        /// The network address of the node emitting this message.
         address_from: NetworkAddress,
+
+        /// Node random nonce, randomly generated every time a version
+        /// packet is sent. This nonce is used to detect connections
+        /// to self.
         nonce: Nonce,
+
+        /// [User Agent](https://github.com/bitcoin/bips/blob/master/bip-0014.mediawiki) (0x00 if string is 0 bytes long)
         user_agent: String,
+
+        /// The last block received by the emitting node.
         start_height: zebra_chain::types::BlockHeight,
+
+        /// Whether the remote peer should announce relayed
+        /// transactions or not, see [BIP 0037](https://github.com/bitcoin/bips/blob/master/bip-0037.mediawiki)
         relay: bool
     },
 
@@ -173,12 +191,21 @@ pub enum Message {
 /// A protocol version magic number.
 pub struct Version(pub u32);
 
+/// Bitfield of features to be enabled for this connection.
 // Tower provides utilities for service discovery, so this might go
 // away in the future in favor of that.
 pub struct Services(pub u64);
 
+/// Standard UNIX timestamp in seconds since the Epoch.
 pub struct Timestamp(pub i64);
 
+/// A network address but with some extra flavor.
+///
+/// When a network address is needed somewhere, this structure is
+/// used. Network addresses are not prefixed with a timestamp in the
+/// version message.
+///
+/// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#Network_address)
 pub struct NetworkAddress(pub Services, pub SocketAddr);
 
 /// A nonce used in the networking layer to identify messages.
