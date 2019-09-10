@@ -56,7 +56,7 @@ pub enum Message {
         /// to self.
         nonce: Nonce,
 
-        /// [User Agent](https://github.com/bitcoin/bips/blob/master/bip-0014.mediawiki) (0x00 if string is 0 bytes long)
+        /// The Zcash user agent advertised by the sender.
         user_agent: String,
 
         /// The last block received by the emitting node.
