@@ -1,7 +1,5 @@
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
-    }
-}
+//! Networking code for Zebra.
+
+#[deny(missing_docs)]
+
+pub mod message;
