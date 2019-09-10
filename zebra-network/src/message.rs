@@ -17,14 +17,17 @@
 ///
 /// [btc_wiki_protocol]: https://en.bitcoin.it/wiki/Protocol_documentation
 pub enum Message {
+
     /// A `version` message.
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#version)
     Version {/* fields */},
+
     /// A `verack` message.
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#verack)
     Verack {/* fields */},
+
     /// A `ping` message.
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#ping)
@@ -32,6 +35,7 @@ pub enum Message {
         /// A random nonce.
         nonce: u64,
     },
+
     /// A `pong` message.
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#pong)
