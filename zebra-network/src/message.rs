@@ -70,7 +70,7 @@ pub enum Message {
     /// A `verack` message.
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#verack)
-    Verack {/* XXX add fields */},
+    Verack,
 
     /// A `ping` message.
     ///
@@ -88,7 +88,27 @@ pub enum Message {
     /// A `reject` message.
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#reject)
-    Reject {/* XXX add fields */},
+    Reject {
+
+        /// Type of message rejected.
+        // Q: can we just reference the Type, rather than instantiate an instance of the enum type?
+        message: Box<Message>,
+
+        /// RejectReason code relating to rejected message.
+        ccode: RejectReason,
+
+        /// Human-readable version of rejection reason.
+        reason: String,
+
+        /// Optional extra data provided for some errors.
+        // Currently, all errors which provide this field fill it with
+        // the TXID or block header hash of the object being rejected,
+        // so the field is 32 bytes.
+        //
+        // Q: can we tell Rust that this field is optional? Or just
+        // default its value to an empty array, I guess.
+        data: [u8; 32]
+    },
 
     /// An `addr` message.
     ///
@@ -210,3 +230,17 @@ pub struct NetworkAddress(pub Services, pub SocketAddr);
 
 /// A nonce used in the networking layer to identify messages.
 pub struct Nonce(pub u64);
+
+
+#[repr(u8)]
+#[allow(missing_docs)]
+pub enum RejectReason {
+    Malformed = 0x01,
+    Invalid = 0x10,
+    Obsolete = 0x11,
+    Duplicate = 0x12,
+    Nonstandard = 0x40,
+    Dust = 0x41,
+    InsufficientFee = 0x42,
+    Checkpoint = 0x43
+}
