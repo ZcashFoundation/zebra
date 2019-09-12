@@ -4,7 +4,7 @@ use std::net::SocketAddr;
 
 use chrono::{DateTime, Utc};
 
-use zebra_chain;
+use crate::types::*;
 
 /// A Bitcoin-like network message for the Zcash protocol.
 ///
@@ -242,26 +242,10 @@ pub enum Message {
 // Q: how do we want to implement serialization, exactly? do we want to have
 // something generic over stdlib Read and Write traits, or over async versions
 // of those traits?
-
-/// A protocol version magic number.
-pub struct Version(pub u32);
-
-/// Bitfield of features to be enabled for this connection.
-// Tower provides utilities for service discovery, so this might go
-// away in the future in favor of that.
-pub struct Services(pub u64);
-
-/// A network address but with some extra flavor.
-///
-/// When a network address is needed somewhere, this structure is
-/// used. Network addresses are not prefixed with a timestamp in the
-/// version message.
-///
-/// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#Network_address)
-pub struct NetworkAddress(pub Services, pub SocketAddr);
-
-/// A nonce used in the networking layer to identify messages.
-pub struct Nonce(pub u64);
+// 
+// Note: because of the way the message structure is defined (checksum comes
+// first) we can't write the message headers before collecting the whole body
+// into a buffer
 
 /// Reject Reason CCodes
 ///
