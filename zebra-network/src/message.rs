@@ -124,7 +124,7 @@ pub enum Message {
         // confirmed they are up.
         //
         // XXX: I don't know how this serializes.
-        address_list: (Timestamp, Vec<NetworkAddress>),
+        address_list: (DateTime<Utc>, Vec<NetworkAddress>),
     },
 
     /// A `getaddr` message.
