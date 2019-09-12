@@ -123,7 +123,7 @@ pub enum Message {
         //
         // Q: can we tell Rust that this field is optional? Or just
         // default its value to an empty array, I guess.
-        data: [u8; 32],
+        data: Option<[u8; 32]>,
     },
 
     /// An `addr` message.
