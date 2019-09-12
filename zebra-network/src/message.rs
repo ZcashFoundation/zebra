@@ -1,9 +1,8 @@
 //! Definitions of network messages.
 
-use std::net::SocketAddr;
-
 use chrono::{DateTime, Utc};
 
+use crate::meta_addr::MetaAddr;
 use crate::types::*;
 
 /// A Bitcoin-like network message for the Zcash protocol.
@@ -47,10 +46,16 @@ pub enum Message {
         timestamp: DateTime<Utc>,
 
         /// The network address of the node receiving this message.
-        address_receiving: NetworkAddress,
+        ///
+        /// Note that the timestamp field of the [`MetaAddr`] is not included in
+        /// the serialization of `version` messages.
+        address_receiving: MetaAddr,
 
         /// The network address of the node emitting this message.
-        address_from: NetworkAddress,
+        ///
+        /// Note that the timestamp field of the [`MetaAddr`] is not included in
+        /// the serialization of `version` messages.
+        address_from: MetaAddr,
 
         /// Node random nonce, randomly generated every time a version
         /// packet is sent. This nonce is used to detect connections
@@ -113,19 +118,7 @@ pub enum Message {
     /// An `addr` message.
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#addr)
-    Addr {
-        /// Number of address entries (max: 1000)
-        count: u16,
-
-        /// Address of other nodes on the network, preceeded by a timestamp.
-        // Starting version 31402, addresses are prefixed with a
-        // timestamp. If no timestamp is present, the addresses should
-        // not be relayed to other peers, unless it is indeed
-        // confirmed they are up.
-        //
-        // XXX: I don't know how this serializes.
-        address_list: (DateTime<Utc>, Vec<NetworkAddress>),
-    },
+    Addr(Vec<MetaAddr>),
 
     /// A `getaddr` message.
     ///
@@ -242,7 +235,7 @@ pub enum Message {
 // Q: how do we want to implement serialization, exactly? do we want to have
 // something generic over stdlib Read and Write traits, or over async versions
 // of those traits?
-// 
+//
 // Note: because of the way the message structure is defined (checksum comes
 // first) we can't write the message headers before collecting the whole body
 // into a buffer
