@@ -2,6 +2,8 @@
 
 use std::net::{SocketAddr};
 
+use chrono::{DateTime, Utc};
+
 use zebra_chain;
 
 /// A Bitcoin-like network message for the Zcash protocol.
@@ -43,7 +45,7 @@ pub enum Message {
         services: Services,
 
         /// The time when the version message was sent.
-        timestamp: Timestamp,
+        timestamp: DateTime<Utc>,
 
         /// The network address of the node receiving this message.
         address_receiving: NetworkAddress,
@@ -215,9 +217,6 @@ pub struct Version(pub u32);
 // Tower provides utilities for service discovery, so this might go
 // away in the future in favor of that.
 pub struct Services(pub u64);
-
-/// Standard UNIX timestamp in seconds since the Epoch.
-pub struct Timestamp(pub i64);
 
 /// A network address but with some extra flavor.
 ///
