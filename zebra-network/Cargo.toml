@@ -14,6 +14,6 @@ tokio = "=0.2.0-alpha.4"
 tracing = "0.1"
 futures-core-preview = "=0.3.0-alpha.18"
 futures-util-preview = "=0.3.0-alpha.18"
-tower-service = "=0.3.0-alpha.1"
+tower = "=0.3.0-alpha.1a"
 
 zebra-chain = { path = "../zebra-chain" }
