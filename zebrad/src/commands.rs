@@ -10,10 +10,11 @@
 //! See the `impl Configurable` below for how to specify the path to the
 //! application's configuration file.
 
+mod connect;
 mod start;
 mod version;
 
-use self::{start::StartCmd, version::VersionCmd};
+use self::{connect::ConnectCmd, start::StartCmd, version::VersionCmd};
 use crate::config::ZebradConfig;
 use abscissa_core::{
     config::Override, Command, Configurable, FrameworkError, Help, Options, Runnable,
@@ -37,6 +38,10 @@ pub enum ZebradCmd {
     /// The `version` subcommand
     #[options(help = "display version information")]
     Version(VersionCmd),
+
+    /// The `connect` subcommand
+    #[options(help = "testing stub for dumping network messages")]
+    Connect(ConnectCmd),
 }
 
 /// This trait allows you to define how application configuration is loaded.
