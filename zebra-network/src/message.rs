@@ -1,6 +1,6 @@
 //! Definitions of network messages.
 
-use std::net::{SocketAddr};
+use std::net::SocketAddr;
 
 use chrono::{DateTime, Utc};
 
@@ -37,7 +37,6 @@ pub enum Message {
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#version)
     Version {
-
         /// The network version number supported by the sender.
         version: Version,
 
@@ -66,7 +65,7 @@ pub enum Message {
 
         /// Whether the remote peer should announce relayed
         /// transactions or not, see [BIP 0037](https://github.com/bitcoin/bips/blob/master/bip-0037.mediawiki)
-        relay: bool
+        relay: bool,
     },
 
     /// A `verack` message.
@@ -91,7 +90,6 @@ pub enum Message {
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#reject)
     Reject {
-
         /// Type of message rejected.
         // Q: can we just reference the Type, rather than instantiate an instance of the enum type?
         message: Box<Message>,
@@ -109,13 +107,25 @@ pub enum Message {
         //
         // Q: can we tell Rust that this field is optional? Or just
         // default its value to an empty array, I guess.
-        data: [u8; 32]
+        data: [u8; 32],
     },
 
     /// An `addr` message.
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#addr)
-    Addr {/* XXX add fields */},
+    Addr {
+        /// Number of address entries (max: 1000)
+        count: u16,
+
+        /// Address of other nodes on the network, preceeded by a timestamp.
+        // Starting version 31402, addresses are prefixed with a
+        // timestamp. If no timestamp is present, the addresses should
+        // not be relayed to other peers, unless it is indeed
+        // confirmed they are up.
+        //
+        // XXX: I don't know how this serializes.
+        address_list: (Timestamp, Vec<NetworkAddress>),
+    },
 
     /// A `getaddr` message.
     ///
@@ -148,17 +158,40 @@ pub enum Message {
     // XXX the bitcoin reference above suggests this can be 1.8 MB in bitcoin -- maybe
     // larger in Zcash, since Zcash objects could be bigger (?) -- does this tilt towards
     // having serialization be async?
-    Inventory {/* XXX add fields */},
+    Inventory {
+        /// Number of inventory entries.
+        count: u64,
+
+        /// Inventory vectors.
+        inventory: Vec<zebra_chain::types::InventoryVector>,
+    },
 
     /// A `getdata` message.
     ///
+    /// `getdata` is used in response to `inv`, to retrieve the content of
+    /// a specific object, and is usually sent after receiving an `inv`
+    /// packet, after filtering known elements.
+    ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#getdata)
-    GetData {/* XXX add fields */},
+    GetData {
+        /// Number of inventory entries.
+        count: u64,
+
+        /// Inventory vectors.
+        inventory: Vec<zebra_chain::types::InventoryVector>,
+    },
 
     /// A `notfound` message.
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#notfound)
-    NotFound {/* XXX add fields */},
+    // See note above on `Inventory`.
+    NotFound {
+        /// Number of inventory entries.
+        count: u64,
+
+        /// Inventory vectors.
+        inventory: Vec<zebra_chain::types::InventoryVector>,
+    },
 
     /// A `tx` message.
     ///
@@ -230,7 +263,9 @@ pub struct NetworkAddress(pub Services, pub SocketAddr);
 /// A nonce used in the networking layer to identify messages.
 pub struct Nonce(pub u64);
 
-
+/// Reject Reason CCodes
+///
+/// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#reject)
 #[repr(u8)]
 #[allow(missing_docs)]
 pub enum RejectReason {
@@ -241,5 +276,5 @@ pub enum RejectReason {
     Nonstandard = 0x40,
     Dust = 0x41,
     InsufficientFee = 0x42,
-    Checkpoint = 0x43
+    Checkpoint = 0x43,
 }
