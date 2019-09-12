@@ -8,3 +8,4 @@ edition = "2018"
 
 [dependencies]
 zebra-chain = { path = "../zebra-chain" }
+chrono = "0.4"
