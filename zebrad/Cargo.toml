@@ -21,6 +21,9 @@ hyper = { git = "https://github.com/hyperium/hyper" }
 futures-core-preview = { version = "=0.3.0-alpha.18" }
 futures-util-preview = { version = "=0.3.0-alpha.18" }
 
+zebra-chain = { path = "../zebra-chain" }
+zebra-network = { path = "../zebra-network" }
+
 [dev-dependencies.abscissa_core]
 version = "0.3.0"
 features = ["testing"]
