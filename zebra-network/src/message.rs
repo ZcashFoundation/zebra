@@ -1,6 +1,10 @@
 //! Definitions of network messages.
 
+use std::io;
+
 use chrono::{DateTime, Utc};
+
+use zebra_chain::types::Sha256dChecksum;
 
 use crate::meta_addr::MetaAddr;
 use crate::types::*;
@@ -232,14 +236,6 @@ pub enum Message {
     MerkleBlock {/* XXX add fields */},
 }
 
-// Q: how do we want to implement serialization, exactly? do we want to have
-// something generic over stdlib Read and Write traits, or over async versions
-// of those traits?
-//
-// Note: because of the way the message structure is defined (checksum comes
-// first) we can't write the message headers before collecting the whole body
-// into a buffer
-
 /// Reject Reason CCodes
 ///
 /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#reject)
@@ -254,4 +250,74 @@ pub enum RejectReason {
     Dust = 0x41,
     InsufficientFee = 0x42,
     Checkpoint = 0x43,
+}
+
+// Q: how do we want to implement serialization, exactly? do we want to have
+// something generic over stdlib Read and Write traits, or over async versions
+// of those traits?
+//
+// Note: because of the way the message structure is defined (checksum comes
+// first) we can't write the message headers before collecting the whole body
+// into a buffer
+//
+// Maybe just write some functions and refactor later?
+
+impl Message {
+    /// Serialize `self` into the given writer.
+    pub fn write<W: io::Write>(&self, mut writer: W, magic: Magic) -> io::Result<()> {
+        use byteorder::{LittleEndian, WriteBytesExt};
+
+        // Because the header contains a checksum of
+        // the body data, it must be written first.
+        let mut body = Vec::new();
+        self.write_body(&mut body)?;
+
+        use Message::*;
+        // Note: because all match arms must have
+        // the same type, and the array length is
+        // part of the type, having at least one
+        // of length 12 checks that they are all
+        // of length 12, as they must be &[u8; 12].
+        let command = match *self {
+            Version { .. } => b"version\0\0\0\0\0",
+            Verack { .. } => b"verack\0\0\0\0\0\0",
+            Ping { .. } => b"ping\0\0\0\0\0\0\0\0",
+            Pong { .. } => b"pong\0\0\0\0\0\0\0\0",
+            Reject { .. } => b"reject\0\0\0\0\0\0",
+            Addr { .. } => b"addr\0\0\0\0\0\0\0\0",
+            GetAddr { .. } => b"getaddr\0\0\0\0\0",
+            Block { .. } => b"block\0\0\0\0\0\0\0",
+            GetBlocks { .. } => b"getblocks\0\0\0",
+            Headers { .. } => b"headers\0\0\0\0\0",
+            GetHeaders { .. } => b"getheaders\0\0",
+            Inventory { .. } => b"inv\0\0\0\0\0\0\0\0\0",
+            GetData { .. } => b"getdata\0\0\0\0\0",
+            NotFound { .. } => b"notfound\0\0\0\0",
+            Tx { .. } => b"tx\0\0\0\0\0\0\0\0\0\0",
+            Mempool { .. } => b"mempool\0\0\0\0\0",
+            FilterLoad { .. } => b"filterload\0\0",
+            FilterAdd { .. } => b"filteradd\0\0\0",
+            FilterClear { .. } => b"filterclear\0",
+            MerkleBlock { .. } => b"merkleblock\0",
+        };
+
+        // Write the header and then the body.
+        writer.write_u32::<LittleEndian>(magic.0)?;
+        writer.write_all(command)?;
+        writer.write_u32::<LittleEndian>(body.len() as u32)?;
+        writer.write_all(&Sha256dChecksum::from(&body[..]).0)?;
+        writer.write_all(&body)
+    }
+
+    /// Write the body of the message into the given writer. This allows writing
+    /// the message body prior to writing the header, so that the header can
+    /// contain a checksum of the message body.
+    fn write_body<W: io::Write>(&self, _writer: W) -> io::Result<()> {
+        unimplemented!()
+    }
+
+    /// Try to deserialize a [`Message`] from the given reader.
+    pub fn try_read<R: io::Read>(_reader: R) -> Result<Self, String> {
+        unimplemented!()
+    }
 }
