@@ -1,8 +1,9 @@
 //! Newtype wrappers assigning semantic meaning to primitive types.
 
-use std::net::SocketAddr;
+/// A magic number identifying the network.
+pub struct Magic(pub u32);
 
-/// A protocol version magic number.
+/// A protocol version number.
 pub struct Version(pub u32);
 
 /// Bitfield of features to be enabled for this connection.
