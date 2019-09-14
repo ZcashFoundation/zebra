@@ -221,10 +221,13 @@ impl ZcashSerialization for String {
 
     /// Try to read `self` from the given `reader`.
     fn try_read<R: io::Read>(
-        _reader: R,
+        mut reader: R,
         _magic: Magic,
         _version: Version,
     ) -> Result<Self, SerializationError> {
-        unimplemented!()
+        let len = reader.read_compactsize()?;
+        let mut buf = vec![0; len as usize];
+        reader.read_exact(&mut buf)?;
+        String::from_utf8(buf).map_err(|e| SerializationError::ParseError("invalid utf-8"))
     }
 }
