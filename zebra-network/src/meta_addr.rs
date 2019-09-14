@@ -10,7 +10,9 @@ use crate::types::Services;
 /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#Network_address)
 pub struct MetaAddr {
     /// The peer's address.
-    addr: SocketAddr,
-    services: Services,
-    last_seen: DateTime<Utc>,
+    pub addr: SocketAddr,
+    /// The services advertised by the peer.
+    pub services: Services,
+    /// When the peer was last seen.
+    pub last_seen: DateTime<Utc>,
 }
