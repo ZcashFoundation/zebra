@@ -186,11 +186,20 @@ impl ZcashSerialization for std::net::IpAddr {
 
     /// Try to read `self` from the given `reader`.
     fn try_read<R: io::Read>(
-        _reader: R,
+        mut reader: R,
         _magic: Magic,
         _version: Version,
     ) -> Result<Self, SerializationError> {
-        unimplemented!()
+        use std::net::{IpAddr::*, Ipv6Addr};
+
+        let mut octets = [0u8; 16];
+        reader.read_exact(&mut octets)?;
+        let v6_addr = std::net::Ipv6Addr::from(octets);
+
+        match v6_addr.to_ipv4() {
+            Some(v4_addr) => Ok(V4(v4_addr)),
+            None => Ok(V6(v6_addr)),
+        }
     }
 }
 
