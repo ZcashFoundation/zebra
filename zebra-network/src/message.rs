@@ -2,7 +2,7 @@
 
 use std::io;
 
-use byteorder::{LittleEndian, WriteBytesExt};
+use byteorder::{BigEndian, LittleEndian, WriteBytesExt};
 use chrono::{DateTime, Utc};
 
 use zebra_chain::types::Sha256dChecksum;
@@ -264,29 +264,6 @@ pub enum RejectReason {
 //
 // Maybe just write some functions and refactor later?
 
-impl Message {
-    /// Write the body of the message into the given writer. This allows writing
-    /// the message body prior to writing the header, so that the header can
-    /// contain a checksum of the message body.
-    fn write_body<W: io::Write>(
-        &self,
-        _writer: W,
-        _magic: Magic,
-        _version: Version,
-    ) -> Result<(), SerializationError> {
-        unimplemented!()
-    }
-
-    /// Try to deserialize a [`Message`] from the given reader.
-    pub fn try_read_body<R: io::Read>(
-        _reader: R,
-        _magic: Magic,
-        _version: Version,
-    ) -> Result<Self, SerializationError> {
-        unimplemented!()
-    }
-}
-
 impl ZcashSerialization for Message {
     fn write<W: io::Write>(
         &self,
@@ -340,6 +317,64 @@ impl ZcashSerialization for Message {
 
     /// Try to read `self` from the given `reader`.
     fn try_read<R: io::Read>(
+        _reader: R,
+        _magic: Magic,
+        _version: Version,
+    ) -> Result<Self, SerializationError> {
+        unimplemented!()
+    }
+}
+
+impl Message {
+    /// Write the body of the message into the given writer. This allows writing
+    /// the message body prior to writing the header, so that the header can
+    /// contain a checksum of the message body.
+    fn write_body<W: io::Write>(
+        &self,
+        mut writer: W,
+        m: Magic,
+        v: Version,
+    ) -> Result<(), SerializationError> {
+        use Message::*;
+        match *self {
+            Version {
+                ref version,
+                ref services,
+                ref timestamp,
+                ref address_receiving,
+                ref address_from,
+                ref nonce,
+                ref user_agent,
+                ref start_height,
+                ref relay,
+            } => {
+                writer.write_u32::<LittleEndian>(version.0)?;
+                writer.write_u64::<LittleEndian>(services.0)?;
+                writer.write_i64::<LittleEndian>(timestamp.timestamp())?;
+
+                // We represent a Bitcoin net_addr as a `MetaAddr` internally.
+                // However, the version message encodes net_addrs without the
+                // timestamp field, so we encode the `MetaAddr`s manually here.
+                writer.write_u64::<LittleEndian>(address_receiving.services.0)?;
+                address_receiving.addr.ip().write(&mut writer, m, v)?;
+                writer.write_u16::<BigEndian>(address_receiving.addr.port())?;
+
+                writer.write_u64::<LittleEndian>(address_from.services.0)?;
+                address_from.addr.ip().write(&mut writer, m, v)?;
+                writer.write_u16::<BigEndian>(address_from.addr.port())?;
+
+                writer.write_u64::<LittleEndian>(nonce.0)?;
+                user_agent.write(&mut writer, m, v)?;
+                writer.write_u32::<LittleEndian>(start_height.0)?;
+                writer.write_u8(*relay as u8)?;
+            }
+            _ => unimplemented!(),
+        }
+        Ok(())
+    }
+
+    /// Try to deserialize a [`Message`] from the given reader.
+    pub fn try_read_body<R: io::Read>(
         _reader: R,
         _magic: Magic,
         _version: Version,
