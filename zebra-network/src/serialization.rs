@@ -167,3 +167,55 @@ pub trait ZcashSerialization: Sized {
         version: Version,
     ) -> Result<Self, SerializationError>;
 }
+
+impl ZcashSerialization for std::net::IpAddr {
+    fn write<W: io::Write>(
+        &self,
+        mut writer: W,
+        _magic: Magic,
+        _version: Version,
+    ) -> Result<(), SerializationError> {
+        use std::net::IpAddr::*;
+        let v6_addr = match *self {
+            V4(ref addr) => addr.to_ipv6_mapped(),
+            V6(addr) => addr,
+        };
+        writer.write_all(&v6_addr.octets())?;
+        Ok(())
+    }
+
+    /// Try to read `self` from the given `reader`.
+    fn try_read<R: io::Read>(
+        _reader: R,
+        _magic: Magic,
+        _version: Version,
+    ) -> Result<Self, SerializationError> {
+        unimplemented!()
+    }
+}
+
+// XXX because the serialization trait has both read and write methods, we have
+// to implement it for String rather than impl<'a> ... for &'a str (as in that
+// case we can't deserialize into a borrowed &'str, only an owned String), so we
+// can't serialize 'static str
+impl ZcashSerialization for String {
+    fn write<W: io::Write>(
+        &self,
+        mut writer: W,
+        _magic: Magic,
+        _version: Version,
+    ) -> Result<(), SerializationError> {
+        writer.write_compactsize(self.len() as u64)?;
+        writer.write_all(self.as_bytes())?;
+        Ok(())
+    }
+
+    /// Try to read `self` from the given `reader`.
+    fn try_read<R: io::Read>(
+        _reader: R,
+        _magic: Magic,
+        _version: Version,
+    ) -> Result<Self, SerializationError> {
+        unimplemented!()
+    }
+}
