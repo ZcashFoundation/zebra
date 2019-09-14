@@ -14,8 +14,8 @@ pub enum SerializationError {
     #[fail(display = "io error {}", _0)]
     IoError(io::Error),
     /// The data to be deserialized was malformed.
-    #[fail(display = "parse error")]
-    ParseError,
+    #[fail(display = "parse error: {}", _0)]
+    ParseError(&'static str),
 }
 
 // Allow upcasting io::Error to SerializationError
