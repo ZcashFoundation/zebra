@@ -131,3 +131,39 @@ pub trait ReadZcashExt: io::Read {
 
 /// Mark all types implementing `Read` as implementing the extension.
 impl<R: io::Read + ?Sized> ReadZcashExt for R {}
+
+/// Consensus-critical (de)serialization for Zcash.
+///
+/// This trait provides a generic (de)serialization for consensus-critical
+/// formats, such as network messages, transactions, blocks, etc. It is intended
+/// for use only in consensus-critical contexts; in other contexts, such as
+/// internal storage, it would be preferable to use Serde.
+///
+/// # Questions
+///
+/// ## Should this live here in `zebra-network` or in `zebra-chain`?
+///
+/// This is a proxy question for "is this serialization logic required outside of
+/// networking contexts", which requires mapping out the "network context"
+/// concept more precisely.
+///
+/// ## Should the `version` and `magic` parameters always be passed?
+///
+/// These are required for, e.g., serializing message headers, but possibly not
+/// for serializing transactions?
+pub trait ZcashSerialization: Sized {
+    /// Write `self` to the given `writer` using the canonical format.
+    fn write<W: io::Write>(
+        &self,
+        mut writer: W,
+        magic: Magic,
+        version: Version,
+    ) -> Result<(), SerializationError>;
+
+    /// Try to read `self` from the given `reader`.
+    fn try_read<R: io::Read>(
+        reader: R,
+        magic: Magic,
+        version: Version,
+    ) -> Result<Self, SerializationError>;
+}

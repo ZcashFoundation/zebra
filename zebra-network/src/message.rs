@@ -2,11 +2,13 @@
 
 use std::io;
 
+use byteorder::{LittleEndian, WriteBytesExt};
 use chrono::{DateTime, Utc};
 
 use zebra_chain::types::Sha256dChecksum;
 
 use crate::meta_addr::MetaAddr;
+use crate::serialization::{ReadZcashExt, SerializationError, WriteZcashExt, ZcashSerialization};
 use crate::types::*;
 
 /// A Bitcoin-like network message for the Zcash protocol.
@@ -263,14 +265,39 @@ pub enum RejectReason {
 // Maybe just write some functions and refactor later?
 
 impl Message {
-    /// Serialize `self` into the given writer.
-    pub fn write<W: io::Write>(&self, mut writer: W, magic: Magic) -> io::Result<()> {
-        use byteorder::{LittleEndian, WriteBytesExt};
+    /// Write the body of the message into the given writer. This allows writing
+    /// the message body prior to writing the header, so that the header can
+    /// contain a checksum of the message body.
+    fn write_body<W: io::Write>(
+        &self,
+        _writer: W,
+        _magic: Magic,
+        _version: Version,
+    ) -> Result<(), SerializationError> {
+        unimplemented!()
+    }
 
+    /// Try to deserialize a [`Message`] from the given reader.
+    pub fn try_read_body<R: io::Read>(
+        _reader: R,
+        _magic: Magic,
+        _version: Version,
+    ) -> Result<Self, SerializationError> {
+        unimplemented!()
+    }
+}
+
+impl ZcashSerialization for Message {
+    fn write<W: io::Write>(
+        &self,
+        mut writer: W,
+        magic: Magic,
+        version: Version,
+    ) -> Result<(), SerializationError> {
         // Because the header contains a checksum of
         // the body data, it must be written first.
         let mut body = Vec::new();
-        self.write_body(&mut body)?;
+        self.write_body(&mut body, magic, version)?;
 
         use Message::*;
         // Note: because all match arms must have
@@ -306,18 +333,17 @@ impl Message {
         writer.write_all(command)?;
         writer.write_u32::<LittleEndian>(body.len() as u32)?;
         writer.write_all(&Sha256dChecksum::from(&body[..]).0)?;
-        writer.write_all(&body)
+        writer.write_all(&body)?;
+
+        Ok(())
     }
 
-    /// Write the body of the message into the given writer. This allows writing
-    /// the message body prior to writing the header, so that the header can
-    /// contain a checksum of the message body.
-    fn write_body<W: io::Write>(&self, _writer: W) -> io::Result<()> {
-        unimplemented!()
-    }
-
-    /// Try to deserialize a [`Message`] from the given reader.
-    pub fn try_read<R: io::Read>(_reader: R) -> Result<Self, String> {
+    /// Try to read `self` from the given `reader`.
+    fn try_read<R: io::Read>(
+        _reader: R,
+        _magic: Magic,
+        _version: Version,
+    ) -> Result<Self, SerializationError> {
         unimplemented!()
     }
 }
