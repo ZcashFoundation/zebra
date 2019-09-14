@@ -329,7 +329,7 @@ impl ZcashSerialization for Message {
         };
 
         // Write the header and then the body.
-        writer.write_u32::<LittleEndian>(magic.0)?;
+        writer.write_all(&magic.0)?;
         writer.write_all(command)?;
         writer.write_u32::<LittleEndian>(body.len() as u32)?;
         writer.write_all(&Sha256dChecksum::from(&body[..]).0)?;

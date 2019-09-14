@@ -2,7 +2,7 @@
 
 /// A magic number identifying the network.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub struct Magic(pub u32);
+pub struct Magic(pub [u8; 4]);
 
 /// A protocol version number.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
