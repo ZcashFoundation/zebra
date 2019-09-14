@@ -9,7 +9,7 @@ pub const CURRENT_VERSION: Version = Version(170_007);
 pub mod magics {
     use super::*;
     /// The production mainnet.
-    pub const MAINNET: Magic = Magic(0x6427e924);
+    pub const MAINNET: Magic = Magic([0x24, 0xe9, 0x27, 0x64]);
     /// The testnet.
-    pub const TESTNET: Magic = Magic(0xbff91afa);
+    pub const TESTNET: Magic = Magic([0xfa, 0x1a, 0xf9, 0xbf]);
 }
