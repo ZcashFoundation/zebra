@@ -5,7 +5,6 @@
 #[macro_use]
 extern crate failure;
 
-pub mod serialization;
 pub mod message;
 pub mod types;
 mod constants;
