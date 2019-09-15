@@ -37,6 +37,7 @@ use crate::types::*;
 // the serialized message data and the internal representation. Note that this
 // is different from messages like GetAddr which have no data (and so have no
 // fields).
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Message {
     /// A `version` message.
     ///
@@ -245,6 +246,7 @@ pub enum Message {
 /// Reject Reason CCodes
 ///
 /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#reject)
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u8)]
 #[allow(missing_docs)]
 pub enum RejectReason {
