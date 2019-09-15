@@ -1,10 +1,15 @@
-//! Serializat
+//! Serialization for Zcash.
+//!
+//! This module contains four traits: `ZcashSerialize` and `ZcashDeserialize`,
+//! analogs of the Serde `Serialize` and `Deserialize` traits but intended for
+//! consensus-critical Zcash serialization formats, and `WriteZcashExt` and
+//! `ReadZcashExt`, extension traits for `io::Read` and `io::Write` with utility functions
+//! for reading and writing data (e.g., the Bitcoin variable-integer format).
 
 use std::io;
+use std::net::{IpAddr, SocketAddr};
 
-use crate::types::{Magic, Version};
-
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
 
 /// A serialization error.
 // XXX refine error types -- better to use boxed errors?
@@ -14,6 +19,7 @@ pub enum SerializationError {
     #[fail(display = "io error {}", _0)]
     IoError(io::Error),
     /// The data to be deserialized was malformed.
+    // XXX refine errors
     #[fail(display = "parse error: {}", _0)]
     ParseError(&'static str),
 }
@@ -25,6 +31,36 @@ impl From<io::Error> for SerializationError {
     }
 }
 
+/// Consensus-critical serialization for Zcash.
+///
+/// This trait provides a generic serialization for consensus-critical
+/// formats, such as network messages, transactions, blocks, etc. It is intended
+/// for use only in consensus-critical contexts; in other contexts, such as
+/// internal storage, it would be preferable to use Serde.
+pub trait ZcashSerialize: Sized {
+    /// Write `self` to the given `writer` using the canonical format.
+    ///
+    /// This function has a `zcash_` prefix to alert the reader that the
+    /// serialization in use is consensus-critical serialization, rather than
+    /// some other kind of serialization.
+    fn zcash_serialize<W: io::Write>(&self, writer: W) -> Result<(), SerializationError>;
+}
+
+/// Consensus-critical serialization for Zcash.
+///
+/// This trait provides a generic deserialization for consensus-critical
+/// formats, such as network messages, transactions, blocks, etc. It is intended
+/// for use only in consensus-critical contexts; in other contexts, such as
+/// internal storage, it would be preferable to use Serde.
+pub trait ZcashDeserialize: Sized {
+    /// Try to read `self` from the given `reader`.
+    ///
+    /// This function has a `zcash_` prefix to alert the reader that the
+    /// serialization in use is consensus-critical serialization, rather than
+    /// some other kind of serialization.
+    fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError>;
+}
+
 /// Extends [`Write`] with methods for writing Zcash/Bitcoin types.
 ///
 /// [`Write`]: https://doc.rust-lang.org/std/io/trait.Write.html
@@ -34,7 +70,7 @@ pub trait WriteZcashExt: io::Write {
     /// # Examples
     ///
     /// ```rust
-    /// use zebra_network::serialization::WriteZcashExt;
+    /// use zebra_chain::serialization::WriteZcashExt;
     ///
     /// let mut buf = Vec::new();
     /// buf.write_compactsize(0x12).unwrap();
@@ -74,6 +110,31 @@ pub trait WriteZcashExt: io::Write {
             }
         }
     }
+
+    /// Write an `IpAddr` in Bitcoin format.
+    #[inline]
+    fn write_ip_addr(&mut self, addr: IpAddr) -> io::Result<()> {
+        use std::net::IpAddr::*;
+        let v6_addr = match addr {
+            V4(ref v4) => v4.to_ipv6_mapped(),
+            V6(v6) => v6,
+        };
+        self.write_all(&v6_addr.octets())
+    }
+
+    /// Write a `SocketAddr` in Bitcoin format.
+    #[inline]
+    fn write_socket_addr(&mut self, addr: SocketAddr) -> io::Result<()> {
+        self.write_ip_addr(addr.ip())?;
+        self.write_u16::<BigEndian>(addr.port())
+    }
+
+    /// Write a string in Bitcoin format.
+    #[inline]
+    fn write_string(&mut self, string: &str) -> io::Result<()> {
+        self.write_compactsize(string.len() as u64)?;
+        self.write_all(string.as_bytes())
+    }
 }
 
 /// Mark all types implementing `Write` as implementing the extension.
@@ -88,7 +149,7 @@ pub trait ReadZcashExt: io::Read {
     /// # Examples
     ///
     /// ```rust
-    /// use zebra_network::serialization::ReadZcashExt;
+    /// use zebra_chain::serialization::ReadZcashExt;
     ///
     /// use std::io::Cursor;
     /// assert_eq!(
@@ -118,82 +179,23 @@ pub trait ReadZcashExt: io::Read {
     /// );
     /// ```
     #[inline]
-    fn read_compactsize(&mut self) -> Result<u64, SerializationError> {
+    fn read_compactsize(&mut self) -> io::Result<u64> {
         let flag_byte = self.read_u8()?;
         match flag_byte {
-            0xff => Ok(self.read_u64::<LittleEndian>()?),
+            0xff => self.read_u64::<LittleEndian>(),
             0xfe => Ok(self.read_u32::<LittleEndian>()? as u64),
             0xfd => Ok(self.read_u16::<LittleEndian>()? as u64),
             n => Ok(n as u64),
         }
     }
-}
 
-/// Mark all types implementing `Read` as implementing the extension.
-impl<R: io::Read + ?Sized> ReadZcashExt for R {}
-
-/// Consensus-critical (de)serialization for Zcash.
-///
-/// This trait provides a generic (de)serialization for consensus-critical
-/// formats, such as network messages, transactions, blocks, etc. It is intended
-/// for use only in consensus-critical contexts; in other contexts, such as
-/// internal storage, it would be preferable to use Serde.
-///
-/// # Questions
-///
-/// ## Should this live here in `zebra-network` or in `zebra-chain`?
-///
-/// This is a proxy question for "is this serialization logic required outside of
-/// networking contexts", which requires mapping out the "network context"
-/// concept more precisely.
-///
-/// ## Should the `version` and `magic` parameters always be passed?
-///
-/// These are required for, e.g., serializing message headers, but possibly not
-/// for serializing transactions?
-pub trait ZcashSerialization: Sized {
-    /// Write `self` to the given `writer` using the canonical format.
-    fn write<W: io::Write>(
-        &self,
-        mut writer: W,
-        magic: Magic,
-        version: Version,
-    ) -> Result<(), SerializationError>;
-
-    /// Try to read `self` from the given `reader`.
-    fn try_read<R: io::Read>(
-        reader: R,
-        magic: Magic,
-        version: Version,
-    ) -> Result<Self, SerializationError>;
-}
-
-impl ZcashSerialization for std::net::IpAddr {
-    fn write<W: io::Write>(
-        &self,
-        mut writer: W,
-        _magic: Magic,
-        _version: Version,
-    ) -> Result<(), SerializationError> {
-        use std::net::IpAddr::*;
-        let v6_addr = match *self {
-            V4(ref addr) => addr.to_ipv6_mapped(),
-            V6(addr) => addr,
-        };
-        writer.write_all(&v6_addr.octets())?;
-        Ok(())
-    }
-
-    /// Try to read `self` from the given `reader`.
-    fn try_read<R: io::Read>(
-        mut reader: R,
-        _magic: Magic,
-        _version: Version,
-    ) -> Result<Self, SerializationError> {
+    /// Read an IP address in Bitcoin format.
+    #[inline]
+    fn read_ip_addr(&mut self) -> io::Result<IpAddr> {
         use std::net::{IpAddr::*, Ipv6Addr};
 
         let mut octets = [0u8; 16];
-        reader.read_exact(&mut octets)?;
+        self.read_exact(&mut octets)?;
         let v6_addr = std::net::Ipv6Addr::from(octets);
 
         match v6_addr.to_ipv4() {
@@ -201,33 +203,24 @@ impl ZcashSerialization for std::net::IpAddr {
             None => Ok(V6(v6_addr)),
         }
     }
-}
 
-// XXX because the serialization trait has both read and write methods, we have
-// to implement it for String rather than impl<'a> ... for &'a str (as in that
-// case we can't deserialize into a borrowed &'str, only an owned String), so we
-// can't serialize 'static str
-impl ZcashSerialization for String {
-    fn write<W: io::Write>(
-        &self,
-        mut writer: W,
-        _magic: Magic,
-        _version: Version,
-    ) -> Result<(), SerializationError> {
-        writer.write_compactsize(self.len() as u64)?;
-        writer.write_all(self.as_bytes())?;
-        Ok(())
+    /// Read a Bitcoin-encoded `SocketAddr`.
+    #[inline]
+    fn read_socket_addr(&mut self) -> io::Result<SocketAddr> {
+        let ip_addr = self.read_ip_addr()?;
+        let port = self.read_u16::<BigEndian>()?;
+        Ok(SocketAddr::new(ip_addr, port))
     }
 
-    /// Try to read `self` from the given `reader`.
-    fn try_read<R: io::Read>(
-        mut reader: R,
-        _magic: Magic,
-        _version: Version,
-    ) -> Result<Self, SerializationError> {
-        let len = reader.read_compactsize()?;
+    /// Read a Bitcoin-encoded UTF-8 string.
+    #[inline]
+    fn read_string(&mut self) -> io::Result<String> {
+        let len = self.read_compactsize()?;
         let mut buf = vec![0; len as usize];
-        reader.read_exact(&mut buf)?;
-        String::from_utf8(buf).map_err(|e| SerializationError::ParseError("invalid utf-8"))
+        self.read_exact(&mut buf)?;
+        String::from_utf8(buf).map_err(|_| io::ErrorKind::InvalidData.into())
     }
 }
+
+/// Mark all types implementing `Read` as implementing the extension.
+impl<R: io::Read + ?Sized> ReadZcashExt for R {}

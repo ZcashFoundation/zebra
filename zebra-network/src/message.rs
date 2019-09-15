@@ -5,10 +5,14 @@ use std::io;
 use byteorder::{BigEndian, LittleEndian, WriteBytesExt};
 use chrono::{DateTime, Utc};
 
-use zebra_chain::types::Sha256dChecksum;
+use zebra_chain::{
+    serialization::{
+        ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
+    },
+    types::Sha256dChecksum,
+};
 
 use crate::meta_addr::MetaAddr;
-use crate::serialization::{ReadZcashExt, SerializationError, WriteZcashExt, ZcashSerialization};
 use crate::types::*;
 
 /// A Bitcoin-like network message for the Zcash protocol.
@@ -264,8 +268,13 @@ pub enum RejectReason {
 //
 // Maybe just write some functions and refactor later?
 
-impl ZcashSerialization for Message {
-    fn write<W: io::Write>(
+impl Message {
+    /// Serialize `self` into the given writer, similarly to `ZcashSerialize`.
+    ///
+    /// This is similar to [`ZcashSerialize::zcash_serialize`], but not part of
+    /// that trait, because message serialization requires additional parameters
+    /// (the network magic and the network version).
+    pub fn zcash_serialize<W: io::Write>(
         &self,
         mut writer: W,
         magic: Magic,
@@ -356,15 +365,13 @@ impl Message {
                 // However, the version message encodes net_addrs without the
                 // timestamp field, so we encode the `MetaAddr`s manually here.
                 writer.write_u64::<LittleEndian>(address_receiving.services.0)?;
-                address_receiving.addr.ip().write(&mut writer, m, v)?;
-                writer.write_u16::<BigEndian>(address_receiving.addr.port())?;
+                writer.write_socket_addr(address_receiving.addr)?;
 
                 writer.write_u64::<LittleEndian>(address_from.services.0)?;
-                address_from.addr.ip().write(&mut writer, m, v)?;
-                writer.write_u16::<BigEndian>(address_from.addr.port())?;
+                writer.write_socket_addr(address_from.addr)?;
 
                 writer.write_u64::<LittleEndian>(nonce.0)?;
-                user_agent.write(&mut writer, m, v)?;
+                writer.write_string(&user_agent)?;
                 writer.write_u32::<LittleEndian>(start_height.0)?;
                 writer.write_u8(*relay as u8)?;
             }
@@ -373,8 +380,20 @@ impl Message {
         Ok(())
     }
 
-    /// Try to deserialize a [`Message`] from the given reader.
-    pub fn try_read_body<R: io::Read>(
+    /// Try to deserialize a [`Message`] from the given reader, similarly to `ZcashDeserialize`.
+    ///
+    /// This is similar to [`ZcashSerialize::zcash_serialize`], but not part of
+    /// that trait, because message serialization requires additional parameters
+    /// (the network magic and the network version).
+    pub fn zcash_deserialize<R: io::Read>(
+        _reader: R,
+        _magic: Magic,
+        _version: Version,
+    ) -> Result<Self, SerializationError> {
+        unimplemented!()
+    }
+
+    fn deserialize_body<R: io::Read>(
         _reader: R,
         _magic: Magic,
         _version: Version,
