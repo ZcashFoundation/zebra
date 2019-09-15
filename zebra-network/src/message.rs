@@ -2,14 +2,14 @@
 
 use std::io;
 
-use byteorder::{BigEndian, LittleEndian, WriteBytesExt};
-use chrono::{DateTime, Utc};
+use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
+use chrono::{DateTime, TimeZone, Utc};
 
 use zebra_chain::{
     serialization::{
         ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
     },
-    types::Sha256dChecksum,
+    types::{BlockHeight, Sha256dChecksum},
 };
 
 use crate::meta_addr::MetaAddr;
@@ -77,7 +77,7 @@ pub enum Message {
         user_agent: String,
 
         /// The last block received by the emitting node.
-        start_height: zebra_chain::types::BlockHeight,
+        start_height: BlockHeight,
 
         /// Whether the remote peer should announce relayed
         /// transactions or not, see [BIP 0037](https://github.com/bitcoin/bips/blob/master/bip-0037.mediawiki)
@@ -388,18 +388,300 @@ impl Message {
     /// that trait, because message serialization requires additional parameters
     /// (the network magic and the network version).
     pub fn zcash_deserialize<R: io::Read>(
-        _reader: R,
-        _magic: Magic,
-        _version: Version,
+        mut reader: R,
+        magic: Magic,
+        version: Version,
     ) -> Result<Self, SerializationError> {
-        unimplemented!()
-    }
+        use SerializationError::ParseError;
+        let message_magic = {
+            let mut bytes = [0u8; 4];
+            reader.read_exact(&mut bytes)?;
+            Magic(bytes)
+        };
+        if magic != message_magic {
+            return Err(ParseError("Message has incorrect magic value"));
+        }
 
-    fn deserialize_body<R: io::Read>(
-        _reader: R,
-        _magic: Magic,
-        _version: Version,
-    ) -> Result<Self, SerializationError> {
-        unimplemented!()
+        let command = {
+            let mut bytes = [0u8; 12];
+            reader.read_exact(&mut bytes)?;
+            bytes
+        };
+
+        let body_len = reader.read_u32::<LittleEndian>()? as usize;
+        // XXX ugly
+        let checksum = {
+            let mut bytes = [0u8; 4];
+            reader.read_exact(&mut bytes)?;
+            Sha256dChecksum(bytes)
+        };
+
+        // XXX add a ChecksumReader<R: Read>(R) wrapper and avoid this
+        let body = {
+            let mut bytes = vec![0; body_len];
+            reader.read_exact(&mut bytes)?;
+            bytes
+        };
+
+        if checksum != Sha256dChecksum::from(&body[..]) {
+            return Err(SerializationError::ParseError("checksum does not match"));
+        }
+
+        let body_reader = io::Cursor::new(&body);
+        match &command {
+            b"version\0\0\0\0\0" => try_read_version(body_reader, version),
+            b"verack\0\0\0\0\0\0" => try_read_verack(body_reader, version),
+            b"ping\0\0\0\0\0\0\0\0" => try_read_ping(body_reader, version),
+            b"pong\0\0\0\0\0\0\0\0" => try_read_pong(body_reader, version),
+            b"reject\0\0\0\0\0\0" => try_read_reject(body_reader, version),
+            b"addr\0\0\0\0\0\0\0\0" => try_read_addr(body_reader, version),
+            b"getaddr\0\0\0\0\0" => try_read_getaddr(body_reader, version),
+            b"block\0\0\0\0\0\0\0" => try_read_block(body_reader, version),
+            b"getblocks\0\0\0" => try_read_getblocks(body_reader, version),
+            b"headers\0\0\0\0\0" => try_read_headers(body_reader, version),
+            b"getheaders\0\0" => try_read_getheaders(body_reader, version),
+            b"inv\0\0\0\0\0\0\0\0\0" => try_read_inv(body_reader, version),
+            b"getdata\0\0\0\0\0" => try_read_getdata(body_reader, version),
+            b"notfound\0\0\0\0" => try_read_notfound(body_reader, version),
+            b"tx\0\0\0\0\0\0\0\0\0\0" => try_read_tx(body_reader, version),
+            b"mempool\0\0\0\0\0" => try_read_mempool(body_reader, version),
+            b"filterload\0\0" => try_read_filterload(body_reader, version),
+            b"filteradd\0\0\0" => try_read_filteradd(body_reader, version),
+            b"filterclear\0" => try_read_filterclear(body_reader, version),
+            b"merkleblock\0" => try_read_merkleblock(body_reader, version),
+            _ => Err(ParseError("Unknown command")),
+        }
+    }
+}
+
+fn try_read_version<R: io::Read>(
+    mut reader: R,
+    _parsing_version: Version,
+) -> Result<Message, SerializationError> {
+    let version = Version(reader.read_u32::<LittleEndian>()?);
+    let services = Services(reader.read_u64::<LittleEndian>()?);
+    let timestamp = Utc.timestamp(reader.read_i64::<LittleEndian>()?, 0);
+
+    // We represent a Bitcoin `net_addr` as a `MetaAddr` internally. However,
+    // the version message encodes `net_addr`s without timestamps, so we fill in
+    // the timestamp field of the `MetaAddr`s with the version message's
+    // timestamp.
+    let address_receiving = MetaAddr {
+        services: Services(reader.read_u64::<LittleEndian>()?),
+        addr: reader.read_socket_addr()?,
+        last_seen: timestamp,
+    };
+    let address_from = MetaAddr {
+        services: Services(reader.read_u64::<LittleEndian>()?),
+        addr: reader.read_socket_addr()?,
+        last_seen: timestamp,
+    };
+
+    let nonce = Nonce(reader.read_u64::<LittleEndian>()?);
+    let user_agent = reader.read_string()?;
+    let start_height = BlockHeight(reader.read_u32::<LittleEndian>()?);
+    let relay = match reader.read_u8()? {
+        0 => false,
+        1 => true,
+        _ => return Err(SerializationError::ParseError("non-bool value")),
+    };
+
+    Ok(Message::Version {
+        version,
+        services,
+        timestamp,
+        address_receiving,
+        address_from,
+        nonce,
+        user_agent,
+        start_height,
+        relay,
+    })
+}
+
+fn try_read_verack<R: io::Read>(
+    mut _reader: R,
+    _version: Version,
+) -> Result<Message, SerializationError> {
+    unimplemented!()
+}
+
+fn try_read_ping<R: io::Read>(
+    mut _reader: R,
+    _version: Version,
+) -> Result<Message, SerializationError> {
+    unimplemented!()
+}
+
+fn try_read_pong<R: io::Read>(
+    mut _reader: R,
+    _version: Version,
+) -> Result<Message, SerializationError> {
+    unimplemented!()
+}
+
+fn try_read_reject<R: io::Read>(
+    mut _reader: R,
+    _version: Version,
+) -> Result<Message, SerializationError> {
+    unimplemented!()
+}
+
+fn try_read_addr<R: io::Read>(
+    mut _reader: R,
+    _version: Version,
+) -> Result<Message, SerializationError> {
+    unimplemented!()
+}
+
+fn try_read_getaddr<R: io::Read>(
+    mut _reader: R,
+    _version: Version,
+) -> Result<Message, SerializationError> {
+    unimplemented!()
+}
+
+fn try_read_block<R: io::Read>(
+    mut _reader: R,
+    _version: Version,
+) -> Result<Message, SerializationError> {
+    unimplemented!()
+}
+
+fn try_read_getblocks<R: io::Read>(
+    mut _reader: R,
+    _version: Version,
+) -> Result<Message, SerializationError> {
+    unimplemented!()
+}
+
+fn try_read_headers<R: io::Read>(
+    mut _reader: R,
+    _version: Version,
+) -> Result<Message, SerializationError> {
+    unimplemented!()
+}
+
+fn try_read_getheaders<R: io::Read>(
+    mut _reader: R,
+    _version: Version,
+) -> Result<Message, SerializationError> {
+    unimplemented!()
+}
+
+fn try_read_inv<R: io::Read>(
+    mut _reader: R,
+    _version: Version,
+) -> Result<Message, SerializationError> {
+    unimplemented!()
+}
+
+fn try_read_getdata<R: io::Read>(
+    mut _reader: R,
+    _version: Version,
+) -> Result<Message, SerializationError> {
+    unimplemented!()
+}
+
+fn try_read_notfound<R: io::Read>(
+    mut _reader: R,
+    _version: Version,
+) -> Result<Message, SerializationError> {
+    unimplemented!()
+}
+
+fn try_read_tx<R: io::Read>(
+    mut _reader: R,
+    _version: Version,
+) -> Result<Message, SerializationError> {
+    unimplemented!()
+}
+
+fn try_read_mempool<R: io::Read>(
+    mut _reader: R,
+    _version: Version,
+) -> Result<Message, SerializationError> {
+    unimplemented!()
+}
+
+fn try_read_filterload<R: io::Read>(
+    mut _reader: R,
+    _version: Version,
+) -> Result<Message, SerializationError> {
+    unimplemented!()
+}
+
+fn try_read_filteradd<R: io::Read>(
+    mut _reader: R,
+    _version: Version,
+) -> Result<Message, SerializationError> {
+    unimplemented!()
+}
+
+fn try_read_filterclear<R: io::Read>(
+    mut _reader: R,
+    _version: Version,
+) -> Result<Message, SerializationError> {
+    unimplemented!()
+}
+
+fn try_read_merkleblock<R: io::Read>(
+    mut _reader: R,
+    _version: Version,
+) -> Result<Message, SerializationError> {
+    unimplemented!()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn version_message_round_trip() {
+        use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+        let services = Services(0x1);
+        let timestamp = Utc.timestamp(1568000000, 0);
+
+        let v = Message::Version {
+            version: crate::constants::CURRENT_VERSION,
+            services,
+            timestamp,
+            // XXX maybe better to have Version keep only (Services, SocketAddr)
+            address_receiving: MetaAddr {
+                services,
+                addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 6)), 8233),
+                last_seen: timestamp,
+            },
+            address_from: MetaAddr {
+                services,
+                addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 6)), 8233),
+                last_seen: timestamp,
+            },
+            nonce: Nonce(0x9082_4908_8927_9238),
+            user_agent: "Zebra".to_owned(),
+            start_height: BlockHeight(540_000),
+            relay: true,
+        };
+
+        use std::io::Cursor;
+
+        let v_bytes = {
+            let mut bytes = Vec::new();
+            v.zcash_serialize(
+                Cursor::new(&mut bytes),
+                crate::constants::magics::MAINNET,
+                crate::constants::CURRENT_VERSION,
+            );
+            bytes
+        };
+
+        let v_parsed = Message::zcash_deserialize(
+            Cursor::new(&v_bytes),
+            crate::constants::magics::MAINNET,
+            crate::constants::CURRENT_VERSION,
+        )
+        .expect("message should parse successfully");
+
+        assert_eq!(v, v_parsed);
     }
 }
