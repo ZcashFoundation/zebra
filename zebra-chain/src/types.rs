@@ -41,14 +41,6 @@ pub enum InventoryType {
     // XXX: Since we don't intend to include the bloom filter to
     // start, do we need this?
     MsgFilteredBlock = 0x03,
-
-    /// Hash of a block header, but only to be used in getdata
-    /// message. Indicates the reply should be a cmpctblock
-    /// message. See
-    /// [BIP-152](https://github.com/bitcoin/bips/blob/master/bip-0152.mediawiki)
-    /// for more info.
-    // XXX We may not need this, pzec does not.
-    MsgCmpctBlock = 0x04,
 }
 
 /// Inventory Vector
