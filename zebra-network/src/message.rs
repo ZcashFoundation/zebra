@@ -677,7 +677,7 @@ mod tests {
 
         let v_bytes = {
             let mut bytes = Vec::new();
-            v.zcash_serialize(
+            let _ = v.zcash_serialize(
                 Cursor::new(&mut bytes),
                 crate::constants::magics::MAINNET,
                 crate::constants::CURRENT_VERSION,
