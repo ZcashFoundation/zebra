@@ -2,14 +2,14 @@
 
 use std::io;
 
-use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{DateTime, TimeZone, Utc};
 
 use zebra_chain::{
     serialization::{
         ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
     },
-    types::{BlockHeight, Sha256dChecksum},
+    types::{BlockHeight, Sha256dChecksum, Transaction},
 };
 
 use crate::meta_addr::MetaAddr;
@@ -200,7 +200,16 @@ pub enum Message {
     /// A `tx` message.
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#tx)
-    Tx {/* XXX add fields */},
+    // `flag` is not included (it's optional), and therefore
+    // `tx_witnesses` aren't either, as they go if `flag` goes.
+    Tx {
+        /// Transaction data format version (note, this is signed).
+        version: Version,
+
+        /// The `Transaction` type itself.
+        // XXX Is this ~aesthetic~?
+        transaction: Transaction,
+    },
 
     /// A `mempool` message.
     ///
@@ -327,6 +336,7 @@ impl Message {
     }
 
     /// Try to read `self` from the given `reader`.
+    #[allow(dead_code)]
     fn try_read<R: io::Read>(
         _reader: R,
         _magic: Magic,
@@ -343,8 +353,8 @@ impl Message {
     fn write_body<W: io::Write>(
         &self,
         mut writer: W,
-        m: Magic,
-        v: Version,
+        _m: Magic,
+        _v: Version,
     ) -> Result<(), SerializationError> {
         use Message::*;
         match *self {
