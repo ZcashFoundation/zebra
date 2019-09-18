@@ -334,16 +334,6 @@ impl Message {
 
         Ok(())
     }
-
-    /// Try to read `self` from the given `reader`.
-    #[allow(dead_code)]
-    fn try_read<R: io::Read>(
-        _reader: R,
-        _magic: Magic,
-        _version: Version,
-    ) -> Result<Self, SerializationError> {
-        unimplemented!()
-    }
 }
 
 impl Message {
