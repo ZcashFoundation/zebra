@@ -75,7 +75,8 @@ pub struct TransactionInput {
     pub previous_output: OutPoint,
 
     /// Computational Script for confirming transaction authorization.
-    // XXX pzec uses Bytes https://docs.rs/bytes/0.4.12/bytes/
+    // XXX pzec uses their own `Bytes` type that wraps a `Vec<u8>`
+    // with some extra methods.
     pub signature_script: Vec<u8>,
 
     /// Transaction version as defined by the sender. Intended for
