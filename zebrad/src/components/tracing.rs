@@ -17,7 +17,7 @@ use tracing_subscriber::{filter::Filter, reload::Handle, FmtSubscriber};
 // XXX ideally this would be TracingEndpoint<S: Subscriber>
 // but this doesn't seem to play well with derive(Component)
 pub struct TracingEndpoint {
-    filter_handle: Handle<Filter, FmtSubscriber>,
+    filter_handle: Handle<Filter, tracing_subscriber::fmt::Formatter>,
 }
 
 impl ::std::fmt::Debug for TracingEndpoint {
