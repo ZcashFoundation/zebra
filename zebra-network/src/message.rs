@@ -93,13 +93,16 @@ pub enum Message {
     /// A `ping` message.
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#ping)
-    Ping(Nonce),
+    Ping(
+        /// A nonce unique to this [`Ping`] message.
+        Nonce,
+    ),
 
     /// A `pong` message.
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#pong)
     Pong(
-        /// The nonce from the `Ping` message this was in response to.
+        /// The nonce from the [`Ping`] message this was in response to.
         Nonce,
     ),
 
@@ -450,6 +453,13 @@ impl Message {
                 writer.write_u32::<LittleEndian>(start_height.0)?;
                 writer.write_u8(*relay as u8)?;
             }
+            Verack => { /* Empty payload -- no-op */ }
+            Ping(nonce) => {
+                writer.write_u64::<LittleEndian>(nonce.0)?;
+            }
+            Pong(nonce) => {
+                writer.write_u64::<LittleEndian>(nonce.0)?;
+            }
             _ => unimplemented!(),
         }
         Ok(())
@@ -487,21 +497,21 @@ fn try_read_verack<R: io::Read>(
     mut _reader: R,
     _version: Version,
 ) -> Result<Message, SerializationError> {
-    unimplemented!()
+    Ok(Message::Verack)
 }
 
 fn try_read_ping<R: io::Read>(
-    mut _reader: R,
+    mut reader: R,
     _version: Version,
 ) -> Result<Message, SerializationError> {
-    unimplemented!()
+    Ok(Message::Ping(Nonce(reader.read_u64::<LittleEndian>()?)))
 }
 
 fn try_read_pong<R: io::Read>(
-    mut _reader: R,
+    mut reader: R,
     _version: Version,
 ) -> Result<Message, SerializationError> {
-    unimplemented!()
+    Ok(Message::Pong(Nonce(reader.read_u64::<LittleEndian>()?)))
 }
 
 fn try_read_reject<R: io::Read>(
