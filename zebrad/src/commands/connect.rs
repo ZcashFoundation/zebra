@@ -81,6 +81,22 @@ impl ConnectCmd {
             .await
             .expect("version message should serialize into stream");
 
+        let resp_version = Message::zcash_deserialize(
+            &mut stream,
+            constants::magics::MAINNET,
+            constants::CURRENT_VERSION,
+        )
+        .await;
+        info!(resp_version = ?resp_version);
+
+        let resp_verack = Message::zcash_deserialize(
+            &mut stream,
+            constants::magics::MAINNET,
+            constants::CURRENT_VERSION,
+        )
+        .await;
+        info!(resp_verack = ?resp_verack);
+
         stream
             .shutdown(Shutdown::Both)
             .expect("stream should shut down cleanly");
