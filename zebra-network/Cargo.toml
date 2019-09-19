@@ -11,4 +11,6 @@ rand = "0.7"
 byteorder = "1.3"
 chrono = "0.4"
 failure = "0.1"
+tokio = "=0.2.0-alpha.4"
+
 zebra-chain = { path = "../zebra-chain" }
