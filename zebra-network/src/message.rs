@@ -392,29 +392,18 @@ impl Message {
         version: Version,
     ) -> Result<Self, SerializationError> {
         use SerializationError::ParseError;
-        let message_magic = {
-            let mut bytes = [0u8; 4];
-            reader.read_exact(&mut bytes)?;
-            Magic(bytes)
-        };
+
+        // Read header data
+        let message_magic = Magic(reader.read_4_bytes()?);
+        let command = reader.read_12_bytes()?;
+        let body_len = reader.read_u32::<LittleEndian>()? as usize;
+        let checksum = Sha256dChecksum(reader.read_4_bytes()?);
+
         if magic != message_magic {
             return Err(ParseError("Message has incorrect magic value"));
         }
 
-        let command = {
-            let mut bytes = [0u8; 12];
-            reader.read_exact(&mut bytes)?;
-            bytes
-        };
-
-        let body_len = reader.read_u32::<LittleEndian>()? as usize;
-        // XXX ugly
-        let checksum = {
-            let mut bytes = [0u8; 4];
-            reader.read_exact(&mut bytes)?;
-            Sha256dChecksum(bytes)
-        };
-
+        // XXX bound the body_len value to avoid large attacker-controlled allocs
         // XXX add a ChecksumReader<R: Read>(R) wrapper and avoid this
         let body = {
             let mut bytes = vec![0; body_len];
