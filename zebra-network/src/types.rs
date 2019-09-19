@@ -17,3 +17,10 @@ pub struct Services(pub u64);
 /// A nonce used in the networking layer to identify messages.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct Nonce(pub u64);
+
+impl Default for Nonce {
+    fn default() -> Self {
+        use rand::{thread_rng, Rng};
+        Self(thread_rng().gen())
+    }
+}
