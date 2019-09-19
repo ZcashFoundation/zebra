@@ -5,6 +5,10 @@ version = "0.1.0"
 edition = "2018"
 
 [dependencies]
+# temporary, used for debugging
+hex = "*" 
+
+chrono = "0.4"
 abscissa_core = "0.3.0"
 failure = "0.1"
 gumdrop = "0.6"

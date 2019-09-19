@@ -5,7 +5,10 @@
 #[macro_use]
 extern crate failure;
 
-mod constants;
 pub mod message;
-mod meta_addr;
 pub mod types;
+
+// XXX make this private once connect is removed
+pub mod meta_addr;
+// XXX make this private once connect is removed
+pub mod constants;

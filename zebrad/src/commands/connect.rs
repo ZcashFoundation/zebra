@@ -41,35 +41,52 @@ impl Runnable for ConnectCmd {
 impl ConnectCmd {
     async fn connect(&self) {
         use std::net::Shutdown;
+
+        use chrono::{DateTime, TimeZone, Utc};
         use tokio::io::AsyncWriteExt;
         use tokio::net::TcpStream;
+
+        use zebra_chain::types::BlockHeight;
+        use zebra_network::{constants, message::*, meta_addr::*, types::*};
+
         info!("connecting");
 
         let mut stream = TcpStream::connect(self.addr)
             .await
             .expect("connection should succeed");
 
-        /*
-        use chrono::{DateTime, Utc};
-        use zebra_network::message;
-        use zebra_chain::types::BlockHeight;
-        let version = message::Message::Version {
-            version: message::ZCASH_VERSION,
-            services: message::Services(1),
-            timestamp: DateTime::<Utc>::now(),
-            address_receiving: (pub self.addr,
-            address_from: "127.0.0.1:9000".parse().unwrap(),
-            nonce: message::Nonce(1),
+        let version = Message::Version {
+            version: constants::CURRENT_VERSION,
+            services: Services(1),
+            timestamp: Utc::now(),
+            address_recv: (Services(1), self.addr),
+            // We just make something up because at this stage the `connect` command
+            // doesn't run a server or anything -- will the zcashd respond on the
+            // same tcp connection or try to open one to the bogus address below?
+            address_from: (Services(1), "127.0.0.1:9000".parse().unwrap()),
+            nonce: Nonce(1),
             user_agent: "Zebra Connect".to_owned(),
             start_height: BlockHeight(0),
+            relay: false,
         };
-        */
+
+        info!(version = ?version);
+
+        let mut version_bytes = Vec::new();
+        version
+            .zcash_serialize(
+                std::io::Cursor::new(&mut version_bytes),
+                constants::magics::MAINNET,
+                constants::CURRENT_VERSION,
+            )
+            .expect("version message should serialize");
+
+        info!(version_bytes = ?hex::encode(&version_bytes));
 
         stream
-            .write_all(b"hello zcashd -- this is a bogus message, will you accept it or close the connection?")
+            .write_all(&version_bytes)
             .await
             .expect("bytes should be written into stream");
-
         stream
             .shutdown(Shutdown::Both)
             .expect("stream should shut down cleanly");
