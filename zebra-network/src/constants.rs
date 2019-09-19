@@ -2,6 +2,9 @@
 
 use crate::types::*;
 
+/// The User-Agent string provided by the node.
+pub const USER_AGENT: &'static str = "Zebra v2.0.0-alpha.0";
+
 /// The Zcash network protocol version used on mainnet.
 pub const CURRENT_VERSION: Version = Version(170_007);
 
