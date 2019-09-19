@@ -5,7 +5,7 @@
 #[macro_use]
 extern crate failure;
 
-pub mod message;
-pub mod types;
 mod constants;
+pub mod message;
 mod meta_addr;
+pub mod types;
