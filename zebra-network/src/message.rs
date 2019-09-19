@@ -1,6 +1,7 @@
 //! Definitions of network messages.
 
 use std::io;
+use std::net;
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{DateTime, TimeZone, Utc};
@@ -57,17 +58,15 @@ pub enum Message {
         /// The time when the version message was sent.
         timestamp: DateTime<Utc>,
 
-        /// The network address of the node receiving this message.
+        /// The network address of the node receiving this message, and its
+        /// advertised network services.
         ///
-        /// Note that the timestamp field of the [`MetaAddr`] is not included in
-        /// the serialization of `version` messages.
-        address_receiving: MetaAddr,
+        /// Q: how does the handshake know the remote peer's services already?
+        address_recv: (Services, net::SocketAddr),
 
-        /// The network address of the node emitting this message.
-        ///
-        /// Note that the timestamp field of the [`MetaAddr`] is not included in
-        /// the serialization of `version` messages.
-        address_from: MetaAddr,
+        /// The network address of the node sending this message, and its
+        /// advertised network services.
+        address_from: (Services, net::SocketAddr),
 
         /// Node random nonce, randomly generated every time a version
         /// packet is sent. This nonce is used to detect connections
@@ -353,7 +352,7 @@ impl Message {
                 ref version,
                 ref services,
                 ref timestamp,
-                ref address_receiving,
+                ref address_recv,
                 ref address_from,
                 ref nonce,
                 ref user_agent,
@@ -364,14 +363,13 @@ impl Message {
                 writer.write_u64::<LittleEndian>(services.0)?;
                 writer.write_i64::<LittleEndian>(timestamp.timestamp())?;
 
-                // We represent a Bitcoin net_addr as a `MetaAddr` internally.
-                // However, the version message encodes net_addrs without the
-                // timestamp field, so we encode the `MetaAddr`s manually here.
-                writer.write_u64::<LittleEndian>(address_receiving.services.0)?;
-                writer.write_socket_addr(address_receiving.addr)?;
+                let (recv_services, recv_addr) = address_recv;
+                writer.write_u64::<LittleEndian>(recv_services.0)?;
+                writer.write_socket_addr(*recv_addr)?;
 
-                writer.write_u64::<LittleEndian>(address_from.services.0)?;
-                writer.write_socket_addr(address_from.addr)?;
+                let (from_services, from_addr) = address_from;
+                writer.write_u64::<LittleEndian>(from_services.0)?;
+                writer.write_socket_addr(*from_addr)?;
 
                 writer.write_u64::<LittleEndian>(nonce.0)?;
                 writer.write_string(&user_agent)?;
@@ -463,20 +461,14 @@ fn try_read_version<R: io::Read>(
     let services = Services(reader.read_u64::<LittleEndian>()?);
     let timestamp = Utc.timestamp(reader.read_i64::<LittleEndian>()?, 0);
 
-    // We represent a Bitcoin `net_addr` as a `MetaAddr` internally. However,
-    // the version message encodes `net_addr`s without timestamps, so we fill in
-    // the timestamp field of the `MetaAddr`s with the version message's
-    // timestamp.
-    let address_receiving = MetaAddr {
-        services: Services(reader.read_u64::<LittleEndian>()?),
-        addr: reader.read_socket_addr()?,
-        last_seen: timestamp,
-    };
-    let address_from = MetaAddr {
-        services: Services(reader.read_u64::<LittleEndian>()?),
-        addr: reader.read_socket_addr()?,
-        last_seen: timestamp,
-    };
+    let address_recv = (
+        Services(reader.read_u64::<LittleEndian>()?),
+        reader.read_socket_addr()?,
+    );
+    let address_from = (
+        Services(reader.read_u64::<LittleEndian>()?),
+        reader.read_socket_addr()?,
+    );
 
     let nonce = Nonce(reader.read_u64::<LittleEndian>()?);
     let user_agent = reader.read_string()?;
@@ -491,7 +483,7 @@ fn try_read_version<R: io::Read>(
         version,
         services,
         timestamp,
-        address_receiving,
+        address_recv,
         address_from,
         nonce,
         user_agent,
@@ -648,16 +640,14 @@ mod tests {
             services,
             timestamp,
             // XXX maybe better to have Version keep only (Services, SocketAddr)
-            address_receiving: MetaAddr {
+            address_recv: (
                 services,
-                addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 6)), 8233),
-                last_seen: timestamp,
-            },
-            address_from: MetaAddr {
+                SocketAddr::new(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 6)), 8233),
+            ),
+            address_from: (
                 services,
-                addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 6)), 8233),
-                last_seen: timestamp,
-            },
+                SocketAddr::new(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 6)), 8233),
+            ),
             nonce: Nonce(0x9082_4908_8927_9238),
             user_agent: "Zebra".to_owned(),
             start_height: BlockHeight(540_000),
