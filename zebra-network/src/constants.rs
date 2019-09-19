@@ -8,6 +8,9 @@ pub const USER_AGENT: &'static str = "Zebra v2.0.0-alpha.0";
 /// The Zcash network protocol version used on mainnet.
 pub const CURRENT_VERSION: Version = Version(170_007);
 
+/// The minimum version supported for peer connections.
+pub const MIN_VERSION: Version = Version(170_007);
+
 /// Magic numbers used to identify different Zcash networks.
 pub mod magics {
     use super::*;
