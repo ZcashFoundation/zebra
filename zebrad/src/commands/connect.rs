@@ -72,21 +72,15 @@ impl ConnectCmd {
 
         info!(version = ?version);
 
-        let mut version_bytes = Vec::new();
         version
             .zcash_serialize(
-                std::io::Cursor::new(&mut version_bytes),
+                &mut stream,
                 constants::magics::MAINNET,
                 constants::CURRENT_VERSION,
             )
-            .expect("version message should serialize");
-
-        info!(version_bytes = ?hex::encode(&version_bytes));
-
-        stream
-            .write_all(&version_bytes)
             .await
-            .expect("bytes should be written into stream");
+            .expect("version message should serialize into stream");
+
         stream
             .shutdown(Shutdown::Both)
             .expect("stream should shut down cleanly");
