@@ -9,7 +9,8 @@ use zebra_chain::{
     serialization::{
         ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
     },
-    types::{BlockHeight, Sha256dChecksum, Transaction},
+    transaction::Transaction,
+    types::{BlockHeight, Sha256dChecksum},
 };
 
 use crate::meta_addr::MetaAddr;

@@ -5,5 +5,6 @@
 extern crate failure;
 
 pub mod block;
-pub mod types;
 pub mod serialization;
+pub mod transaction;
+pub mod types;
