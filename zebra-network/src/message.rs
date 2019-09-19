@@ -457,38 +457,26 @@ fn try_read_version<R: io::Read>(
     mut reader: R,
     _parsing_version: Version,
 ) -> Result<Message, SerializationError> {
-    let version = Version(reader.read_u32::<LittleEndian>()?);
-    let services = Services(reader.read_u64::<LittleEndian>()?);
-    let timestamp = Utc.timestamp(reader.read_i64::<LittleEndian>()?, 0);
-
-    let address_recv = (
-        Services(reader.read_u64::<LittleEndian>()?),
-        reader.read_socket_addr()?,
-    );
-    let address_from = (
-        Services(reader.read_u64::<LittleEndian>()?),
-        reader.read_socket_addr()?,
-    );
-
-    let nonce = Nonce(reader.read_u64::<LittleEndian>()?);
-    let user_agent = reader.read_string()?;
-    let start_height = BlockHeight(reader.read_u32::<LittleEndian>()?);
-    let relay = match reader.read_u8()? {
-        0 => false,
-        1 => true,
-        _ => return Err(SerializationError::ParseError("non-bool value")),
-    };
-
     Ok(Message::Version {
-        version,
-        services,
-        timestamp,
-        address_recv,
-        address_from,
-        nonce,
-        user_agent,
-        start_height,
-        relay,
+        version: Version(reader.read_u32::<LittleEndian>()?),
+        services: Services(reader.read_u64::<LittleEndian>()?),
+        timestamp: Utc.timestamp(reader.read_i64::<LittleEndian>()?, 0),
+        address_recv: (
+            Services(reader.read_u64::<LittleEndian>()?),
+            reader.read_socket_addr()?,
+        ),
+        address_from: (
+            Services(reader.read_u64::<LittleEndian>()?),
+            reader.read_socket_addr()?,
+        ),
+        nonce: Nonce(reader.read_u64::<LittleEndian>()?),
+        user_agent: reader.read_string()?,
+        start_height: BlockHeight(reader.read_u32::<LittleEndian>()?),
+        relay: match reader.read_u8()? {
+            0 => false,
+            1 => true,
+            _ => return Err(SerializationError::ParseError("non-bool value")),
+        },
     })
 }
 
