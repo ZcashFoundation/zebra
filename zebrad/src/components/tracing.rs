@@ -9,7 +9,7 @@ use hyper::{Body, Request, Response, Server};
 
 use tracing::Subscriber;
 use tracing_log::LogTracer;
-use tracing_subscriber::{filter::Filter, reload::Handle, FmtSubscriber};
+use tracing_subscriber::{EnvFilter, reload::Handle, FmtSubscriber};
 
 /// Abscissa component which runs a tracing filter endpoint.
 #[derive(Component)]
@@ -17,7 +17,7 @@ use tracing_subscriber::{filter::Filter, reload::Handle, FmtSubscriber};
 // XXX ideally this would be TracingEndpoint<S: Subscriber>
 // but this doesn't seem to play well with derive(Component)
 pub struct TracingEndpoint {
-    filter_handle: Handle<Filter, tracing_subscriber::fmt::Formatter>,
+    filter_handle: Handle<EnvFilter, tracing_subscriber::fmt::Formatter>,
 }
 
 impl ::std::fmt::Debug for TracingEndpoint {
@@ -45,7 +45,7 @@ impl TracingEndpoint {
             .with_ansi(true)
             // Set the initial filter from the RUST_LOG env variable
             // XXX pull from config file?
-            .with_filter(Filter::from_default_env())
+            .with_env_filter(EnvFilter::from_default_env())
             .with_filter_reloading();
         let filter_handle = builder.reload_handle();
         let subscriber = builder.finish();
@@ -92,18 +92,18 @@ impl TracingEndpoint {
 }
 
 fn reload_filter_from_chunk<S: Subscriber>(
-    handle: Handle<Filter, S>,
+    handle: Handle<EnvFilter, S>,
     chunk: hyper::Chunk,
 ) -> Result<(), String> {
     let bytes = chunk.into_bytes();
     let body = std::str::from_utf8(bytes.as_ref()).map_err(|e| format!("{}", e))?;
     trace!(request.body = ?body);
-    let filter = body.parse::<Filter>().map_err(|e| format!("{}", e))?;
+    let filter = body.parse::<EnvFilter>().map_err(|e| format!("{}", e))?;
     handle.reload(filter).map_err(|e| format!("{}", e))
 }
 
 async fn filter_handler<S: Subscriber>(
-    handle: Handle<Filter, S>,
+    handle: Handle<EnvFilter, S>,
     req: Request<Body>,
 ) -> Result<Response<Body>, hyper::Error> {
     use futures_util::TryStreamExt;
