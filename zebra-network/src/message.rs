@@ -5,12 +5,11 @@ use std::net;
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{DateTime, TimeZone, Utc};
+use failure::Error;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use zebra_chain::{
-    serialization::{
-        ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
-    },
+    serialization::{ReadZcashExt, WriteZcashExt, ZcashDeserialize, ZcashSerialize},
     transaction::Transaction,
     types::{BlockHeight, Sha256dChecksum},
 };
@@ -290,7 +289,7 @@ impl Message {
         mut writer: W,
         magic: Magic,
         version: Version,
-    ) -> Result<(), SerializationError> {
+    ) -> Result<(), Error> {
         // Because the header contains a checksum of
         // the body data, it must be written first.
         let mut body = Vec::new();
@@ -348,9 +347,7 @@ impl Message {
         mut reader: R,
         magic: Magic,
         version: Version,
-    ) -> Result<Self, SerializationError> {
-        use SerializationError::ParseError;
-
+    ) -> Result<Self, Error> {
         // Read the header into a stack buffer before trying to parse it. This
         // allows using the ReadBytesExt extension trait, which is only defined
         // for sync Readers. Then we can determine the expected message length,
@@ -370,9 +367,10 @@ impl Message {
         let body_len = header_reader.read_u32::<LittleEndian>()? as usize;
         let checksum = Sha256dChecksum(header_reader.read_4_bytes()?);
 
-        if magic != message_magic {
-            return Err(ParseError("Message has incorrect magic value"));
-        }
+        ensure!(
+            magic == message_magic,
+            "supplied magic did not meet expectations",
+        );
 
         // XXX bound the body_len value to avoid large attacker-controlled allocs
         // XXX add a ChecksumReader<R: Read>(R) wrapper and avoid this
@@ -382,9 +380,10 @@ impl Message {
             bytes
         };
 
-        if checksum != Sha256dChecksum::from(&body[..]) {
-            return Err(SerializationError::ParseError("checksum does not match"));
-        }
+        ensure!(
+            checksum == Sha256dChecksum::from(&body[..]),
+            "supplied message checksum does not match computed checksum"
+        );
 
         let body_reader = Cursor::new(&body);
         match &command {
@@ -408,7 +407,7 @@ impl Message {
             b"filteradd\0\0\0" => try_read_filteradd(body_reader, version),
             b"filterclear\0" => try_read_filterclear(body_reader, version),
             b"merkleblock\0" => try_read_merkleblock(body_reader, version),
-            _ => Err(ParseError("Unknown command")),
+            _ => bail!("unknown command"),
         }
     }
 }
@@ -417,12 +416,7 @@ impl Message {
     /// Write the body of the message into the given writer. This allows writing
     /// the message body prior to writing the header, so that the header can
     /// contain a checksum of the message body.
-    fn write_body<W: io::Write>(
-        &self,
-        mut writer: W,
-        _m: Magic,
-        _v: Version,
-    ) -> Result<(), SerializationError> {
+    fn write_body<W: io::Write>(&self, mut writer: W, _m: Magic, _v: Version) -> Result<(), Error> {
         use Message::*;
         match *self {
             Version {
@@ -460,7 +454,7 @@ impl Message {
             Pong(nonce) => {
                 writer.write_u64::<LittleEndian>(nonce.0)?;
             }
-            _ => unimplemented!(),
+            _ => bail!("unimplemented message type"),
         }
         Ok(())
     }
@@ -469,7 +463,7 @@ impl Message {
 fn try_read_version<R: io::Read>(
     mut reader: R,
     _parsing_version: Version,
-) -> Result<Message, SerializationError> {
+) -> Result<Message, Error> {
     Ok(Message::Version {
         version: Version(reader.read_u32::<LittleEndian>()?),
         services: Services(reader.read_u64::<LittleEndian>()?),
@@ -488,142 +482,85 @@ fn try_read_version<R: io::Read>(
         relay: match reader.read_u8()? {
             0 => false,
             1 => true,
-            _ => return Err(SerializationError::ParseError("non-bool value")),
+            _ => bail!("non-bool value supplied in relay field"),
         },
     })
 }
 
-fn try_read_verack<R: io::Read>(
-    mut _reader: R,
-    _version: Version,
-) -> Result<Message, SerializationError> {
+fn try_read_verack<R: io::Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
     Ok(Message::Verack)
 }
 
-fn try_read_ping<R: io::Read>(
-    mut reader: R,
-    _version: Version,
-) -> Result<Message, SerializationError> {
+fn try_read_ping<R: io::Read>(mut reader: R, _version: Version) -> Result<Message, Error> {
     Ok(Message::Ping(Nonce(reader.read_u64::<LittleEndian>()?)))
 }
 
-fn try_read_pong<R: io::Read>(
-    mut reader: R,
-    _version: Version,
-) -> Result<Message, SerializationError> {
+fn try_read_pong<R: io::Read>(mut reader: R, _version: Version) -> Result<Message, Error> {
     Ok(Message::Pong(Nonce(reader.read_u64::<LittleEndian>()?)))
 }
 
-fn try_read_reject<R: io::Read>(
-    mut _reader: R,
-    _version: Version,
-) -> Result<Message, SerializationError> {
-    unimplemented!()
+fn try_read_reject<R: io::Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
+    bail!("unimplemented message type")
 }
 
-fn try_read_addr<R: io::Read>(
-    mut _reader: R,
-    _version: Version,
-) -> Result<Message, SerializationError> {
-    unimplemented!()
+fn try_read_addr<R: io::Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
+    bail!("unimplemented message type")
 }
 
-fn try_read_getaddr<R: io::Read>(
-    mut _reader: R,
-    _version: Version,
-) -> Result<Message, SerializationError> {
-    unimplemented!()
+fn try_read_getaddr<R: io::Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
+    bail!("unimplemented message type")
 }
 
-fn try_read_block<R: io::Read>(
-    mut _reader: R,
-    _version: Version,
-) -> Result<Message, SerializationError> {
-    unimplemented!()
+fn try_read_block<R: io::Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
+    bail!("unimplemented message type")
 }
 
-fn try_read_getblocks<R: io::Read>(
-    mut _reader: R,
-    _version: Version,
-) -> Result<Message, SerializationError> {
-    unimplemented!()
+fn try_read_getblocks<R: io::Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
+    bail!("unimplemented message type")
 }
 
-fn try_read_headers<R: io::Read>(
-    mut _reader: R,
-    _version: Version,
-) -> Result<Message, SerializationError> {
-    unimplemented!()
+fn try_read_headers<R: io::Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
+    bail!("unimplemented message type")
 }
 
-fn try_read_getheaders<R: io::Read>(
-    mut _reader: R,
-    _version: Version,
-) -> Result<Message, SerializationError> {
-    unimplemented!()
+fn try_read_getheaders<R: io::Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
+    bail!("unimplemented message type")
 }
 
-fn try_read_inv<R: io::Read>(
-    mut _reader: R,
-    _version: Version,
-) -> Result<Message, SerializationError> {
-    unimplemented!()
+fn try_read_inv<R: io::Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
+    bail!("unimplemented message type")
 }
 
-fn try_read_getdata<R: io::Read>(
-    mut _reader: R,
-    _version: Version,
-) -> Result<Message, SerializationError> {
-    unimplemented!()
+fn try_read_getdata<R: io::Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
+    bail!("unimplemented message type")
 }
 
-fn try_read_notfound<R: io::Read>(
-    mut _reader: R,
-    _version: Version,
-) -> Result<Message, SerializationError> {
-    unimplemented!()
+fn try_read_notfound<R: io::Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
+    bail!("unimplemented message type")
 }
 
-fn try_read_tx<R: io::Read>(
-    mut _reader: R,
-    _version: Version,
-) -> Result<Message, SerializationError> {
-    unimplemented!()
+fn try_read_tx<R: io::Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
+    bail!("unimplemented message type")
 }
 
-fn try_read_mempool<R: io::Read>(
-    mut _reader: R,
-    _version: Version,
-) -> Result<Message, SerializationError> {
-    unimplemented!()
+fn try_read_mempool<R: io::Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
+    bail!("unimplemented message type")
 }
 
-fn try_read_filterload<R: io::Read>(
-    mut _reader: R,
-    _version: Version,
-) -> Result<Message, SerializationError> {
-    unimplemented!()
+fn try_read_filterload<R: io::Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
+    bail!("unimplemented message type")
 }
 
-fn try_read_filteradd<R: io::Read>(
-    mut _reader: R,
-    _version: Version,
-) -> Result<Message, SerializationError> {
-    unimplemented!()
+fn try_read_filteradd<R: io::Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
+    bail!("unimplemented message type")
 }
 
-fn try_read_filterclear<R: io::Read>(
-    mut _reader: R,
-    _version: Version,
-) -> Result<Message, SerializationError> {
-    unimplemented!()
+fn try_read_filterclear<R: io::Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
+    bail!("unimplemented message type")
 }
 
-fn try_read_merkleblock<R: io::Read>(
-    mut _reader: R,
-    _version: Version,
-) -> Result<Message, SerializationError> {
-    unimplemented!()
+fn try_read_merkleblock<R: io::Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
+    bail!("unimplemented message type")
 }
 
 #[cfg(test)]
