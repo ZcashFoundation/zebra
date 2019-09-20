@@ -106,7 +106,8 @@ async fn filter_handler<S: Subscriber>(
     handle: Handle<EnvFilter, S>,
     req: Request<Body>,
 ) -> Result<Response<Body>, hyper::Error> {
-    use futures_util::TryStreamExt;
+    // XXX see below
+    //use futures_util::TryStreamExt;
     use hyper::{Method, StatusCode};
 
     // We can't use #[instrument] because Handle<_,_> is not Debug,
@@ -126,7 +127,12 @@ curl -X POST localhost:3000/filter -d "zebrad=trace"
         )),
         (&Method::POST, "/filter") => {
             // Combine all HTTP request chunks into one
-            let whole_chunk = req.into_body().try_concat().await?;
+            //let whole_chunk = req.into_body().try_concat().await?;
+            // XXX try_concat extension trait is not applying for some reason,
+            // just pull one chunk
+            let mut body = req.into_body();
+            let maybe_chunk = body.next().await;
+            let whole_chunk = maybe_chunk.unwrap()?;
             match reload_filter_from_chunk(handle, whole_chunk) {
                 Err(e) => Response::builder()
                     .status(StatusCode::BAD_REQUEST)
