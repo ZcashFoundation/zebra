@@ -286,26 +286,26 @@ impl Decoder for Codec {
                 let body_reader = Cursor::new(&body);
                 let v = self.builder.version;
                 match &command {
-                    b"version\0\0\0\0\0" => try_read_version(body_reader, v),
-                    b"verack\0\0\0\0\0\0" => try_read_verack(body_reader, v),
-                    b"ping\0\0\0\0\0\0\0\0" => try_read_ping(body_reader, v),
-                    b"pong\0\0\0\0\0\0\0\0" => try_read_pong(body_reader, v),
-                    b"reject\0\0\0\0\0\0" => try_read_reject(body_reader, v),
-                    b"addr\0\0\0\0\0\0\0\0" => try_read_addr(body_reader, v),
-                    b"getaddr\0\0\0\0\0" => try_read_getaddr(body_reader, v),
-                    b"block\0\0\0\0\0\0\0" => try_read_block(body_reader, v),
-                    b"getblocks\0\0\0" => try_read_getblocks(body_reader, v),
-                    b"headers\0\0\0\0\0" => try_read_headers(body_reader, v),
-                    b"getheaders\0\0" => try_read_getheaders(body_reader, v),
-                    b"inv\0\0\0\0\0\0\0\0\0" => try_read_inv(body_reader, v),
-                    b"getdata\0\0\0\0\0" => try_read_getdata(body_reader, v),
-                    b"notfound\0\0\0\0" => try_read_notfound(body_reader, v),
-                    b"tx\0\0\0\0\0\0\0\0\0\0" => try_read_tx(body_reader, v),
-                    b"mempool\0\0\0\0\0" => try_read_mempool(body_reader, v),
-                    b"filterload\0\0" => try_read_filterload(body_reader, v),
-                    b"filteradd\0\0\0" => try_read_filteradd(body_reader, v),
-                    b"filterclear\0" => try_read_filterclear(body_reader, v),
-                    b"merkleblock\0" => try_read_merkleblock(body_reader, v),
+                    b"version\0\0\0\0\0" => self.read_version(body_reader),
+                    b"verack\0\0\0\0\0\0" => self.read_verack(body_reader),
+                    b"ping\0\0\0\0\0\0\0\0" => self.read_ping(body_reader),
+                    b"pong\0\0\0\0\0\0\0\0" => self.read_pong(body_reader),
+                    b"reject\0\0\0\0\0\0" => self.read_reject(body_reader),
+                    b"addr\0\0\0\0\0\0\0\0" => self.read_addr(body_reader),
+                    b"getaddr\0\0\0\0\0" => self.read_getaddr(body_reader),
+                    b"block\0\0\0\0\0\0\0" => self.read_block(body_reader),
+                    b"getblocks\0\0\0" => self.read_getblocks(body_reader),
+                    b"headers\0\0\0\0\0" => self.read_headers(body_reader),
+                    b"getheaders\0\0" => self.read_getheaders(body_reader),
+                    b"inv\0\0\0\0\0\0\0\0\0" => self.read_inv(body_reader),
+                    b"getdata\0\0\0\0\0" => self.read_getdata(body_reader),
+                    b"notfound\0\0\0\0" => self.read_notfound(body_reader),
+                    b"tx\0\0\0\0\0\0\0\0\0\0" => self.read_tx(body_reader),
+                    b"mempool\0\0\0\0\0" => self.read_mempool(body_reader),
+                    b"filterload\0\0" => self.read_filterload(body_reader),
+                    b"filteradd\0\0\0" => self.read_filteradd(body_reader),
+                    b"filterclear\0" => self.read_filterclear(body_reader),
+                    b"merkleblock\0" => self.read_merkleblock(body_reader),
                     _ => bail!("unknown command"),
                 }
                 // We need Ok(Some(msg)) to signal that we're done decoding
@@ -315,136 +315,122 @@ impl Decoder for Codec {
     }
 }
 
-fn try_read_version<R: Read>(mut reader: R, _parsing_version: Version) -> Result<Message, Error> {
-    Ok(Message::Version {
-        version: Version(reader.read_u32::<LittleEndian>()?),
-        services: Services(reader.read_u64::<LittleEndian>()?),
-        timestamp: Utc.timestamp(reader.read_i64::<LittleEndian>()?, 0),
-        address_recv: (
-            Services(reader.read_u64::<LittleEndian>()?),
-            reader.read_socket_addr()?,
-        ),
-        address_from: (
-            Services(reader.read_u64::<LittleEndian>()?),
-            reader.read_socket_addr()?,
-        ),
-        nonce: Nonce(reader.read_u64::<LittleEndian>()?),
-        user_agent: reader.read_string()?,
-        start_height: BlockHeight(reader.read_u32::<LittleEndian>()?),
-        relay: match reader.read_u8()? {
-            0 => false,
-            1 => true,
-            _ => bail!("non-bool value supplied in relay field"),
-        },
-    })
-}
+impl Codec {
+    fn read_version<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
+        Ok(Message::Version {
+            version: Version(reader.read_u32::<LittleEndian>()?),
+            services: Services(reader.read_u64::<LittleEndian>()?),
+            timestamp: Utc.timestamp(reader.read_i64::<LittleEndian>()?, 0),
+            address_recv: (
+                Services(reader.read_u64::<LittleEndian>()?),
+                reader.read_socket_addr()?,
+            ),
+            address_from: (
+                Services(reader.read_u64::<LittleEndian>()?),
+                reader.read_socket_addr()?,
+            ),
+            nonce: Nonce(reader.read_u64::<LittleEndian>()?),
+            user_agent: reader.read_string()?,
+            start_height: BlockHeight(reader.read_u32::<LittleEndian>()?),
+            relay: match reader.read_u8()? {
+                0 => false,
+                1 => true,
+                _ => bail!("non-bool value supplied in relay field"),
+            },
+        })
+    }
 
-fn try_read_verack<R: Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
-    Ok(Message::Verack)
-}
+    fn read_verack<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
+        Ok(Message::Verack)
+    }
 
-fn try_read_ping<R: Read>(mut reader: R, _version: Version) -> Result<Message, Error> {
-    Ok(Message::Ping(Nonce(reader.read_u64::<LittleEndian>()?)))
-}
+    fn read_ping<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
+        Ok(Message::Ping(Nonce(reader.read_u64::<LittleEndian>()?)))
+    }
 
-fn try_read_pong<R: Read>(mut reader: R, _version: Version) -> Result<Message, Error> {
-    Ok(Message::Pong(Nonce(reader.read_u64::<LittleEndian>()?)))
-}
+    fn read_pong<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
+        Ok(Message::Pong(Nonce(reader.read_u64::<LittleEndian>()?)))
+    }
 
-#[instrument(level = "trace", skip(_reader, _version))]
-fn try_read_reject<R: Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
-    trace!("reject");
-    bail!("unimplemented message type")
-}
+    fn read_reject<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
+        trace!("reject");
+        bail!("unimplemented message type")
+    }
 
-#[instrument(level = "trace", skip(_reader, _version))]
-fn try_read_addr<R: Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
-    trace!("addr");
-    bail!("unimplemented message type")
-}
+    fn read_addr<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
+        trace!("addr");
+        bail!("unimplemented message type")
+    }
 
-#[instrument(level = "trace", skip(_reader, _version))]
-fn try_read_getaddr<R: Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
-    trace!("getaddr");
-    bail!("unimplemented message type")
-}
+    fn read_getaddr<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
+        trace!("getaddr");
+        bail!("unimplemented message type")
+    }
 
-#[instrument(level = "trace", skip(_reader, _version))]
-fn try_read_block<R: Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
-    trace!("block");
-    bail!("unimplemented message type")
-}
+    fn read_block<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
+        trace!("block");
+        bail!("unimplemented message type")
+    }
 
-#[instrument(level = "trace", skip(_reader, _version))]
-fn try_read_getblocks<R: Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
-    trace!("getblocks");
-    bail!("unimplemented message type")
-}
+    fn read_getblocks<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
+        trace!("getblocks");
+        bail!("unimplemented message type")
+    }
 
-#[instrument(level = "trace", skip(_reader, _version))]
-fn try_read_headers<R: Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
-    trace!("headers");
-    bail!("unimplemented message type")
-}
+    fn read_headers<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
+        trace!("headers");
+        bail!("unimplemented message type")
+    }
 
-#[instrument(level = "trace", skip(_reader, _version))]
-fn try_read_getheaders<R: Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
-    trace!("getheaders");
-    bail!("unimplemented message type")
-}
+    fn read_getheaders<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
+        trace!("getheaders");
+        bail!("unimplemented message type")
+    }
 
-#[instrument(level = "trace", skip(_reader, _version))]
-fn try_read_inv<R: Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
-    trace!("inv");
-    bail!("unimplemented message type")
-}
+    fn read_inv<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
+        trace!("inv");
+        bail!("unimplemented message type")
+    }
 
-#[instrument(level = "trace", skip(_reader, _version))]
-fn try_read_getdata<R: Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
-    trace!("getdata");
-    bail!("unimplemented message type")
-}
+    fn read_getdata<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
+        trace!("getdata");
+        bail!("unimplemented message type")
+    }
 
-#[instrument(level = "trace", skip(_reader, _version))]
-fn try_read_notfound<R: Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
-    trace!("notfound");
-    bail!("unimplemented message type")
-}
+    fn read_notfound<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
+        trace!("notfound");
+        bail!("unimplemented message type")
+    }
 
-#[instrument(level = "trace", skip(_reader, _version))]
-fn try_read_tx<R: Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
-    trace!("tx");
-    bail!("unimplemented message type")
-}
+    fn read_tx<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
+        trace!("tx");
+        bail!("unimplemented message type")
+    }
 
-#[instrument(level = "trace", skip(_reader, _version))]
-fn try_read_mempool<R: Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
-    trace!("mempool");
-    bail!("unimplemented message type")
-}
+    fn read_mempool<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
+        trace!("mempool");
+        bail!("unimplemented message type")
+    }
 
-#[instrument(level = "trace", skip(_reader, _version))]
-fn try_read_filterload<R: Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
-    trace!("filterload");
-    bail!("unimplemented message type")
-}
+    fn read_filterload<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
+        trace!("filterload");
+        bail!("unimplemented message type")
+    }
 
-#[instrument(level = "trace", skip(_reader, _version))]
-fn try_read_filteradd<R: Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
-    trace!("filteradd");
-    bail!("unimplemented message type")
-}
+    fn read_filteradd<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
+        trace!("filteradd");
+        bail!("unimplemented message type")
+    }
 
-#[instrument(level = "trace", skip(_reader, _version))]
-fn try_read_filterclear<R: Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
-    trace!("filterclear");
-    bail!("unimplemented message type")
-}
+    fn read_filterclear<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
+        trace!("filterclear");
+        bail!("unimplemented message type")
+    }
 
-#[instrument(level = "trace", skip(_reader, _version))]
-fn try_read_merkleblock<R: Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
-    trace!("merkleblock");
-    bail!("unimplemented message type")
+    fn read_merkleblock<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
+        trace!("merkleblock");
+        bail!("unimplemented message type")
+    }
 }
 
 // XXX replace these interior unit tests with exterior integration tests + proptest
