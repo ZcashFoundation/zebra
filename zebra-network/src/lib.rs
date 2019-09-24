@@ -7,7 +7,7 @@ extern crate failure;
 #[macro_use]
 extern crate tracing;
 
-pub mod message;
+pub mod protocol;
 pub mod types;
 
 // XXX make this private once connect is removed
