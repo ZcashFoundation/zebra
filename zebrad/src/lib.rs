@@ -10,6 +10,8 @@
 
 #[macro_use]
 extern crate tracing;
+#[macro_use]
+extern crate failure;
 
 mod components;
 

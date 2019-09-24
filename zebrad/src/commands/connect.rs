@@ -26,7 +26,18 @@ impl Runnable for ConnectCmd {
         // Combine the connect future with an infinite wait
         // so that the program has to be explicitly killed and
         // won't die before all tracing messages are written.
-        let fut = futures_util::future::join(self.connect(), wait);
+        let fut = futures_util::future::join(
+            async {
+                match self.connect().await {
+                    Ok(()) => {}
+                    Err(e) => {
+                        // Print any error that occurs.
+                        error!(?e);
+                    }
+                }
+            },
+            wait,
+        );
 
         let _ = app_reader()
             .state()
@@ -43,14 +54,22 @@ impl ConnectCmd {
         use std::net::Shutdown;
 
         use chrono::Utc;
-        use tokio::net::TcpStream;
+        use tokio::{codec::Framed, net::TcpStream, prelude::*};
 
         use zebra_chain::types::BlockHeight;
-        use zebra_network::{constants, protocol::message::*, types::*};
+        use zebra_network::{
+            constants,
+            protocol::{codec::*, message::*},
+            types::*,
+            Network,
+        };
 
         info!("connecting");
 
-        let mut stream = TcpStream::connect(self.addr).await?;
+        let mut stream = Framed::new(
+            TcpStream::connect(self.addr).await?,
+            Codec::builder().for_network(Network::Mainnet).finish(),
+        );
 
         let version = Message::Version {
             version: constants::CURRENT_VERSION,
@@ -69,63 +88,28 @@ impl ConnectCmd {
 
         info!(version = ?version);
 
-        version
-            .send(
-                &mut stream,
-                constants::magics::MAINNET,
-                constants::CURRENT_VERSION,
-            )
-            .await?;
+        stream.send(version).await?;
 
-        let resp_version = Message::recv(
-            &mut stream,
-            constants::magics::MAINNET,
-            constants::CURRENT_VERSION,
-        )
-        .await?;
+        let resp_version: Message = stream.next().await.expect("expected data")?;
+
         info!(resp_version = ?resp_version);
 
-        Message::Verack
-            .send(
-                &mut stream,
-                constants::magics::MAINNET,
-                constants::CURRENT_VERSION,
-            )
-            .await?;
+        stream.send(Message::Verack).await?;
 
-        let resp_verack = Message::recv(
-            &mut stream,
-            constants::magics::MAINNET,
-            constants::CURRENT_VERSION,
-        )
-        .await?;
+        let resp_verack = stream.next().await.expect("expected data")?;
         info!(resp_verack = ?resp_verack);
 
-        loop {
-            match Message::recv(
-                &mut stream,
-                constants::magics::MAINNET,
-                constants::CURRENT_VERSION,
-            )
-            .await
-            {
+        while let Some(maybe_msg) = stream.next().await {
+            match maybe_msg {
                 Ok(msg) => match msg {
                     Message::Ping(nonce) => {
-                        let pong = Message::Pong(nonce);
-                        pong.send(
-                            &mut stream,
-                            constants::magics::MAINNET,
-                            constants::CURRENT_VERSION,
-                        )
-                        .await?;
+                        stream.send(Message::Pong(nonce)).await?;
                     }
                     _ => warn!("Unknown message"),
                 },
                 Err(e) => error!("{}", e),
             };
         }
-
-        stream.shutdown(Shutdown::Both)?;
 
         Ok(())
     }

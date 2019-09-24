@@ -7,6 +7,9 @@ extern crate failure;
 #[macro_use]
 extern crate tracing;
 
+mod network;
+pub use network::Network;
+
 pub mod protocol;
 pub mod types;
 
