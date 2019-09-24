@@ -101,6 +101,30 @@ impl ConnectCmd {
         .await?;
         info!(resp_verack = ?resp_verack);
 
+        loop {
+            match Message::recv(
+                &mut stream,
+                constants::magics::MAINNET,
+                constants::CURRENT_VERSION,
+            )
+            .await
+            {
+                Ok(msg) => match msg {
+                    Message::Ping(nonce) => {
+                        let pong = Message::Pong(nonce);
+                        pong.send(
+                            &mut stream,
+                            constants::magics::MAINNET,
+                            constants::CURRENT_VERSION,
+                        )
+                        .await?;
+                    }
+                    _ => warn!("Unknown message"),
+                },
+                Err(e) => error!("{}", e),
+            };
+        }
+
         stream.shutdown(Shutdown::Both)?;
 
         Ok(())

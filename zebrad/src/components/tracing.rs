@@ -9,7 +9,7 @@ use hyper::{Body, Request, Response, Server};
 
 use tracing::Subscriber;
 use tracing_log::LogTracer;
-use tracing_subscriber::{EnvFilter, reload::Handle, FmtSubscriber};
+use tracing_subscriber::{reload::Handle, EnvFilter, FmtSubscriber};
 
 /// Abscissa component which runs a tracing filter endpoint.
 #[derive(Component)]

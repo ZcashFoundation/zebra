@@ -11,3 +11,6 @@ members = [
         "zebrad",
 ]
 
+[patch.crates-io]
+tracing-attributes = { git = "https://github.com/tokio-rs/tracing" }
+tracing = { git = "https://github.com/tokio-rs/tracing" }

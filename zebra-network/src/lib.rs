@@ -4,6 +4,8 @@
 
 #[macro_use]
 extern crate failure;
+#[macro_use]
+extern crate tracing;
 
 pub mod message;
 pub mod types;

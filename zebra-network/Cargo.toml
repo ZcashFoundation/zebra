@@ -11,6 +11,8 @@ rand = "0.7"
 byteorder = "1.3"
 chrono = "0.4"
 failure = "0.1"
-tokio = "=0.2.0-alpha.4"
+tokio = "=0.2.0-alpha.5"
+tracing = { git = "https://github.com/tokio-rs/tracing" }
+tracing-futures = { git = "https://github.com/tokio-rs/tracing", features = ["tokio-alpha"], default-features = false }
 
 zebra-chain = { path = "../zebra-chain" }
