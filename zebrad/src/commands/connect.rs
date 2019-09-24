@@ -46,7 +46,7 @@ impl ConnectCmd {
         use tokio::net::TcpStream;
 
         use zebra_chain::types::BlockHeight;
-        use zebra_network::{constants, message::*, types::*};
+        use zebra_network::{constants, protocol::message::*, types::*};
 
         info!("connecting");
 
