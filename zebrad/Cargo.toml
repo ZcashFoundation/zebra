@@ -12,10 +12,13 @@ gumdrop = "0.6"
 lazy_static = "1"
 serde = { version = "1", features = ["serde_derive"] }
 toml = "0.5"
-tokio = "=0.2.0-alpha.4"
-tracing = "0.1"
-tracing-subscriber = "0.1"
-tracing-log = "=0.0.1-alpha.2"
+tokio = "=0.2.0-alpha.5"
+# Replace with git to pick up instrument derive changes, revert on release.
+#tracing = "0.1"
+tracing = { git = "https://github.com/tokio-rs/tracing" }
+tracing-futures = { git = "https://github.com/tokio-rs/tracing", features = ["tokio-alpha"], default-features = false }
+tracing-subscriber = { git = "https://github.com/tokio-rs/tracing" }
+tracing-log = { git = "https://github.com/tokio-rs/tracing" }
 # Can't use published alpha because of conflicts tracking pin-project alphas
 #hyper = "=0.13.0-alpha.1"
 hyper = { git = "https://github.com/hyperium/hyper" }
@@ -28,4 +31,3 @@ zebra-network = { path = "../zebra-network" }
 [dev-dependencies.abscissa_core]
 version = "0.3.0"
 features = ["testing"]
-

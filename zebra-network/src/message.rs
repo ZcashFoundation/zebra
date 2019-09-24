@@ -284,6 +284,7 @@ pub enum RejectReason {
 
 impl Message {
     /// Send `self` to the given async writer (e.g., a network stream).
+    #[instrument(level = "debug", skip(writer))]
     pub async fn send<W: Unpin + AsyncWrite>(
         &self,
         mut writer: W,
@@ -329,6 +330,7 @@ impl Message {
         // extension trait, which is only defined for sync Writers.
 
         // The header is 4+12+4+4=24 bytes long.
+        trace!(?command, body_len = body.len());
         let mut header = [0u8; 24];
         let mut header_writer = Cursor::new(&mut header[..]);
         header_writer.write_all(&magic.0)?;
@@ -343,6 +345,7 @@ impl Message {
     }
 
     /// Receive a message from the given async reader (e.g., a network stream).
+    #[instrument(level = "debug", skip(reader))]
     pub async fn recv<R: Unpin + AsyncRead>(
         mut reader: R,
         magic: Magic,
@@ -366,6 +369,7 @@ impl Message {
         let command = header_reader.read_12_bytes()?;
         let body_len = header_reader.read_u32::<LittleEndian>()? as usize;
         let checksum = Sha256dChecksum(header_reader.read_4_bytes()?);
+        trace!(?message_magic, ?command, body_len, ?checksum);
 
         ensure!(
             magic == message_magic,
@@ -418,6 +422,7 @@ impl Message {
     /// contain a checksum of the message body.
     fn write_body<W: io::Write>(&self, mut writer: W, _m: Magic, _v: Version) -> Result<(), Error> {
         use Message::*;
+        trace!(?self);
         match *self {
             Version {
                 ref version,
@@ -499,67 +504,99 @@ fn try_read_pong<R: io::Read>(mut reader: R, _version: Version) -> Result<Messag
     Ok(Message::Pong(Nonce(reader.read_u64::<LittleEndian>()?)))
 }
 
+#[instrument(level = "trace", skip(_reader, _version))]
 fn try_read_reject<R: io::Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
+    trace!("reject");
     bail!("unimplemented message type")
 }
 
+#[instrument(level = "trace", skip(_reader, _version))]
 fn try_read_addr<R: io::Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
+    trace!("addr");
     bail!("unimplemented message type")
 }
 
+#[instrument(level = "trace", skip(_reader, _version))]
 fn try_read_getaddr<R: io::Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
+    trace!("getaddr");
     bail!("unimplemented message type")
 }
 
+#[instrument(level = "trace", skip(_reader, _version))]
 fn try_read_block<R: io::Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
+    trace!("block");
     bail!("unimplemented message type")
 }
 
+#[instrument(level = "trace", skip(_reader, _version))]
 fn try_read_getblocks<R: io::Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
+    trace!("getblocks");
     bail!("unimplemented message type")
 }
 
+#[instrument(level = "trace", skip(_reader, _version))]
 fn try_read_headers<R: io::Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
+    trace!("headers");
     bail!("unimplemented message type")
 }
 
+#[instrument(level = "trace", skip(_reader, _version))]
 fn try_read_getheaders<R: io::Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
+    trace!("getheaders");
     bail!("unimplemented message type")
 }
 
+#[instrument(level = "trace", skip(_reader, _version))]
 fn try_read_inv<R: io::Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
+    trace!("inv");
     bail!("unimplemented message type")
 }
 
+#[instrument(level = "trace", skip(_reader, _version))]
 fn try_read_getdata<R: io::Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
+    trace!("getdata");
     bail!("unimplemented message type")
 }
 
+#[instrument(level = "trace", skip(_reader, _version))]
 fn try_read_notfound<R: io::Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
+    trace!("notfound");
     bail!("unimplemented message type")
 }
 
+#[instrument(level = "trace", skip(_reader, _version))]
 fn try_read_tx<R: io::Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
+    trace!("tx");
     bail!("unimplemented message type")
 }
 
+#[instrument(level = "trace", skip(_reader, _version))]
 fn try_read_mempool<R: io::Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
+    trace!("mempool");
     bail!("unimplemented message type")
 }
 
+#[instrument(level = "trace", skip(_reader, _version))]
 fn try_read_filterload<R: io::Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
+    trace!("filterload");
     bail!("unimplemented message type")
 }
 
+#[instrument(level = "trace", skip(_reader, _version))]
 fn try_read_filteradd<R: io::Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
+    trace!("filteradd");
     bail!("unimplemented message type")
 }
 
+#[instrument(level = "trace", skip(_reader, _version))]
 fn try_read_filterclear<R: io::Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
+    trace!("filterclear");
     bail!("unimplemented message type")
 }
 
+#[instrument(level = "trace", skip(_reader, _version))]
 fn try_read_merkleblock<R: io::Read>(mut _reader: R, _version: Version) -> Result<Message, Error> {
+    trace!("merkleblock");
     bail!("unimplemented message type")
 }
 
