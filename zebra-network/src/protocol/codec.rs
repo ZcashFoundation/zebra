@@ -308,8 +308,12 @@ impl Decoder for Codec {
                     b"merkleblock\0" => self.read_merkleblock(body_reader),
                     _ => bail!("unknown command"),
                 }
-                // We need Ok(Some(msg)) to signal that we're done decoding
-                .map(|msg| Some(msg))
+                // We need Ok(Some(msg)) to signal that we're done decoding.
+                // This is also convenient for tracing the parse result.
+                .map(|msg| {
+                    trace!(?msg);
+                    Some(msg)
+                })
             }
         }
     }
