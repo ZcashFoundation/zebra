@@ -1,26 +1,62 @@
 //! Definitions of block datastructures.
 
-use crate::transaction::Transaction;
 use chrono::{DateTime, Utc};
+use std::io;
+
+use crate::merkle_tree::MerkleTree;
+use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
+use crate::sha256d_writer::Sha256dWriter;
+use crate::transaction::Transaction;
+
+/// A SHA-256d hash of a BlockHeader.
+///
+/// This is useful when one block header is pointing to its parent
+/// block header in the block chain. ⛓️
+pub struct BlockHash([u8; 32]);
+
+impl From<BlockHeader> for BlockHash {
+    fn from(block_header: BlockHeader) -> Self {
+        let mut hash_writer = Sha256dWriter::default();
+        block_header
+            .zcash_serialize(&mut hash_writer)
+            .expect("Block headers must serialize.");
+        Self(hash_writer.finish())
+    }
+}
+
+/// A SHA-256d hash of the root node of a merkle tree of SHA256-d
+/// hashed transactions in a block.
+pub struct MerkleRootHash([u8; 32]);
+
+impl From<MerkleTree<Transaction>> for MerkleRootHash {
+    fn from(merkle_tree: MerkleTree<Transaction>) -> Self {
+        let mut hash_writer = Sha256dWriter::default();
+        merkle_tree
+            .zcash_serialize(&mut hash_writer)
+            .expect("The merkle tree of transactions must serialize.");
+        Self(hash_writer.finish())
+    }
+}
 
 /// Block header
 pub struct BlockHeader {
     /// A SHA-256d hash in internal byte order of the previous block’s
     /// header. This ensures no previous block can be changed without
     /// also changing this block’s header .
-    previous_block_hash: [u8; 32],
+    previous_block_hash: BlockHash,
 
     /// A SHA-256d hash in internal byte order. The merkle root is
-    /// derived from the hashes of all transactions included in this
-    /// block, ensuring that none of those transactions can be modied
-    /// without modifying the header.
+    /// derived from the SHA256d hashes of all transactions included
+    /// in this block as assembled in a binary tree, ensuring that
+    /// none of those transactions can be modied without modifying the
+    /// header.
     merkle_root_hash: [u8; 32],
 
     /// [Sapling onward] The root LEBS2OSP256(rt) of the Sapling note
     /// commitment tree corresponding to the nal Sapling treestate of
     /// this block.
     // TODO: replace type with custom SaplingRoot or similar type
-    // hash_final_sapling_root: [u8; 32],
+    // hash_final_sapling_root: SaplingRootHash,
 
     /// The block timestamp is a Unix epoch time (UTC) when the miner
     /// started hashing the header (according to the miner).
@@ -55,12 +91,24 @@ impl BlockHeader {
     }
 }
 
+impl ZcashSerialize for BlockHeader {
+    fn zcash_serialize<W: io::Write>(&self, writer: W) -> Result<(), SerializationError> {
+        unimplemented!();
+    }
+}
+
+impl ZcashDeserialize for BlockHeader {
+    fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
+        unimplemented!();
+    }
+}
+
 /// A block in your blockchain.
 pub struct Block {
     /// First 80 bytes of the block as defined by the encoding used by
-    /// "block" messages
+    /// "block" messages.
     pub header: BlockHeader,
 
-    ///
+    /// Block transactions.
     pub transactions: Vec<Transaction>,
 }

@@ -1,6 +1,6 @@
 //! Newtype wrappers for primitive data types with semantic meaning.
 
-/// A 4-byte checksum using truncated double SHA256.
+/// A 4-byte checksum using truncated double-SHA256 (two rounds of SHA256).
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct Sha256dChecksum(pub [u8; 4]);
 
