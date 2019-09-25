@@ -236,6 +236,14 @@ pub trait ReadZcashExt: io::Read {
         self.read_exact(&mut bytes)?;
         Ok(bytes)
     }
+
+    /// Convenience method to read a `[u8; 32]`.
+    #[inline]
+    fn read_32_bytes(&mut self) -> io::Result<[u8; 32]> {
+        let mut bytes = [0; 32];
+        self.read_exact(&mut bytes)?;
+        Ok(bytes)
+    }
 }
 
 /// Mark all types implementing `Read` as implementing the extension.
