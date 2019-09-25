@@ -11,7 +11,6 @@ mod network;
 pub use network::Network;
 
 pub mod protocol;
-pub mod types;
 
 // XXX make this private once connect is removed
 pub mod meta_addr;

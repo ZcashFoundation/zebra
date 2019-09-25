@@ -13,9 +13,9 @@ use zebra_chain::{
     types::{BlockHeight, Sha256dChecksum},
 };
 
-use crate::{constants, types::*, Network};
+use crate::{constants, Network};
 
-use super::message::Message;
+use super::{message::Message, types::*};
 
 /// The length of a Bitcoin message header.
 const HEADER_LEN: usize = 24usize;

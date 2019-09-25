@@ -1,6 +1,7 @@
 //! Definitions of constants.
 
-use crate::types::*;
+// XXX should these constants be split into protocol also?
+use crate::protocol::types::*;
 
 /// The User-Agent string provided by the node.
 pub const USER_AGENT: &'static str = "Zebra v2.0.0-alpha.0";
