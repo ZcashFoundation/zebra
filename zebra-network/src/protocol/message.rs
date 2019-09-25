@@ -9,6 +9,7 @@ use zebra_chain::{transaction::Transaction, types::BlockHeight};
 
 use crate::meta_addr::MetaAddr;
 
+use super::inv::InventoryHash;
 use super::types::*;
 
 /// A Bitcoin-like network message for the Zcash protocol.
@@ -162,13 +163,7 @@ pub enum Message {
     // XXX the bitcoin reference above suggests this can be 1.8 MB in bitcoin -- maybe
     // larger in Zcash, since Zcash objects could be bigger (?) -- does this tilt towards
     // having serialization be async?
-    Inventory {
-        /// Number of inventory entries.
-        count: u64,
-
-        /// Inventory vectors.
-        inventory: Vec<zebra_chain::types::InventoryVector>,
-    },
+    Inventory(Vec<InventoryHash>),
 
     /// A `getdata` message.
     ///
@@ -177,25 +172,13 @@ pub enum Message {
     /// packet, after filtering known elements.
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#getdata)
-    GetData {
-        /// Number of inventory entries.
-        count: u64,
-
-        /// Inventory vectors.
-        inventory: Vec<zebra_chain::types::InventoryVector>,
-    },
+    GetData(Vec<InventoryHash>),
 
     /// A `notfound` message.
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#notfound)
     // See note above on `Inventory`.
-    NotFound {
-        /// Number of inventory entries.
-        count: u64,
-
-        /// Inventory vectors.
-        inventory: Vec<zebra_chain::types::InventoryVector>,
-    },
+    NotFound(Vec<InventoryHash>),
 
     /// A `tx` message.
     ///
