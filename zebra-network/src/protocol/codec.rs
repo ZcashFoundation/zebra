@@ -285,7 +285,8 @@ impl Decoder for Codec {
                 }
 
                 // Now that we know we have the full body, split off the body,
-                // and reset the decoder state for the next message.
+                // and reset the decoder state for the next message. Otherwise
+                // we will attempt to read the next header as the current body.
                 let body = src.split_to(body_len);
                 self.state = DecodeState::Head;
 
