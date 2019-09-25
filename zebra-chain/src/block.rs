@@ -28,6 +28,18 @@ impl From<BlockHeader> for BlockHash {
 /// hashed transactions in a block.
 pub struct MerkleRootHash([u8; 32]);
 
+impl<Transaction> ZcashSerialize for MerkleTree<Transaction> {
+    fn zcash_serialize<W: io::Write>(&self, writer: W) -> Result<(), SerializationError> {
+        unimplemented!();
+    }
+}
+
+impl<Transaction> ZcashDeserialize for MerkleTree<Transaction> {
+    fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
+        unimplemented!();
+    }
+}
+
 impl From<MerkleTree<Transaction>> for MerkleRootHash {
     fn from(merkle_tree: MerkleTree<Transaction>) -> Self {
         let mut hash_writer = Sha256dWriter::default();
