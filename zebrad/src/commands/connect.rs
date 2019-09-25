@@ -59,8 +59,7 @@ impl ConnectCmd {
         use zebra_chain::types::BlockHeight;
         use zebra_network::{
             constants,
-            protocol::{codec::*, message::*},
-            types::*,
+            protocol::{codec::*, message::*, types::*},
             Network,
         };
 
