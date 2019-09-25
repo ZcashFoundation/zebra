@@ -51,8 +51,6 @@ impl Runnable for ConnectCmd {
 
 impl ConnectCmd {
     async fn connect(&self) -> Result<(), failure::Error> {
-        use std::net::Shutdown;
-
         use chrono::Utc;
         use tokio::{codec::Framed, net::TcpStream, prelude::*};
 
