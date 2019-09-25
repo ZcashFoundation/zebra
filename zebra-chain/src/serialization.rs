@@ -196,7 +196,7 @@ pub trait ReadZcashExt: io::Read {
 
         let mut octets = [0u8; 16];
         self.read_exact(&mut octets)?;
-        let v6_addr = std::net::Ipv6Addr::from(octets);
+        let v6_addr = Ipv6Addr::from(octets);
 
         match v6_addr.to_ipv4() {
             Some(v4_addr) => Ok(V4(v4_addr)),
