@@ -126,7 +126,7 @@ impl Encoder for Codec {
             GetBlocks { .. } => b"getblocks\0\0\0",
             Headers { .. } => b"headers\0\0\0\0\0",
             GetHeaders { .. } => b"getheaders\0\0",
-            Inventory { .. } => b"inv\0\0\0\0\0\0\0\0\0", // XXX Inventory -> Inv ?
+            Inv { .. } => b"inv\0\0\0\0\0\0\0\0\0",
             GetData { .. } => b"getdata\0\0\0\0\0",
             NotFound { .. } => b"notfound\0\0\0\0",
             Tx { .. } => b"tx\0\0\0\0\0\0\0\0\0\0",
@@ -422,7 +422,7 @@ impl Codec {
             hashes.push(InventoryHash::zcash_deserialize(&mut reader)?);
         }
 
-        Ok(Message::Inventory(hashes))
+        Ok(Message::Inv(hashes))
     }
 
     fn read_getdata<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
