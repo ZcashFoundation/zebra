@@ -9,7 +9,7 @@ use failure::Error;
 use tokio::codec::{Decoder, Encoder};
 
 use zebra_chain::{
-    serialization::{ReadZcashExt, WriteZcashExt, ZcashSerialize},
+    serialization::{ReadZcashExt, WriteZcashExt, ZcashDeserialize, ZcashSerialize},
     types::{BlockHeight, Sha256dChecksum},
 };
 
@@ -196,6 +196,12 @@ impl Codec {
             }
             Pong(nonce) => {
                 writer.write_u64::<LittleEndian>(nonce.0)?;
+            }
+            Inv(ref hashes) => {
+                writer.write_compactsize(hashes.len() as u64)?;
+                for hash in hashes {
+                    hash.zcash_serialize(&mut writer)?;
+                }
             }
             Block { ref block } => {
                 block
@@ -395,9 +401,28 @@ impl Codec {
         bail!("unimplemented message type")
     }
 
-    fn read_inv<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
-        trace!("inv");
-        bail!("unimplemented message type")
+    fn read_inv<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
+        use super::inv::InventoryHash;
+
+        let count = reader.read_compactsize()? as usize;
+        // Preallocate a buffer, performing a single allocation in the honest
+        // case. Although the size of the recieved data buffer is bounded by the
+        // codec's max_len field, it's still possible for someone to send a
+        // short message with a large count field, so if we naively trust
+        // the count field we could be tricked into preallocating a large
+        // buffer. Instead, calculate the maximum count for a valid message from
+        // the codec's max_len using ENCODED_INVHASH_SIZE.
+        //
+        // encoding: 4 byte type tag + 32 byte hash
+        const ENCODED_INVHASH_SIZE: usize = 4 + 32;
+        let max_count = self.builder.max_len / ENCODED_INVHASH_SIZE;
+        let mut hashes = Vec::with_capacity(std::cmp::min(count, max_count));
+
+        for _ in 0..count {
+            hashes.push(InventoryHash::zcash_deserialize(&mut reader)?);
+        }
+
+        Ok(Message::Inventory(hashes))
     }
 
     fn read_getdata<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
