@@ -197,6 +197,13 @@ impl Codec {
             Pong(nonce) => {
                 writer.write_u64::<LittleEndian>(nonce.0)?;
             }
+            GetAddr => { /* Empty payload -- no-op */ }
+            Addr(ref addrs) => {
+                writer.write_compactsize(addrs.len() as u64)?;
+                for addr in addrs {
+                    addr.zcash_serialize(&mut writer)?;
+                }
+            }
             Inv(ref hashes) => {
                 writer.write_compactsize(hashes.len() as u64)?;
                 for hash in hashes {
@@ -372,9 +379,31 @@ impl Codec {
         bail!("unimplemented message type")
     }
 
-    fn read_addr<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
-        trace!("addr");
-        bail!("unimplemented message type")
+    fn read_addr<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
+        use crate::meta_addr::MetaAddr;
+
+        // XXX we may want to factor this logic out into
+        // fn read_vec<R: Read, T: ZcashDeserialize>(reader: R) -> Result<Vec<T>, Error>
+        // on ReadZcashExt (and similarly for WriteZcashExt)
+        let count = reader.read_compactsize()? as usize;
+        // Preallocate a buffer, performing a single allocation in the honest
+        // case. Although the size of the recieved data buffer is bounded by the
+        // codec's max_len field, it's still possible for someone to send a
+        // short addr message with a large count field, so if we naively trust
+        // the count field we could be tricked into preallocating a large
+        // buffer. Instead, calculate the maximum count for a valid message from
+        // the codec's max_len using ENCODED_ADDR_SIZE.
+        //
+        // addrs are encoded as: timestamp + services + ipv6 + port
+        const ENCODED_ADDR_SIZE: usize = 4 + 8 + 16 + 2;
+        let max_count = self.builder.max_len / ENCODED_ADDR_SIZE;
+        let mut addrs = Vec::with_capacity(std::cmp::min(count, max_count));
+
+        for _ in 0..count {
+            addrs.push(MetaAddr::zcash_deserialize(&mut reader)?);
+        }
+
+        Ok(Message::Addr(addrs))
     }
 
     fn read_getaddr<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
