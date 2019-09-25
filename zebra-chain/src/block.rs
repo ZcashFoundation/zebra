@@ -12,9 +12,9 @@ use crate::transaction::Transaction;
 ///
 /// This is useful when one block header is pointing to its parent
 /// block header in the block chain. ⛓️
-pub struct BlockHash([u8; 32]);
+pub struct BlockHeaderHash([u8; 32]);
 
-impl From<BlockHeader> for BlockHash {
+impl From<BlockHeader> for BlockHeaderHash {
     fn from(block_header: BlockHeader) -> Self {
         let mut hash_writer = Sha256dWriter::default();
         block_header
@@ -54,8 +54,15 @@ impl From<MerkleTree<Transaction>> for MerkleRootHash {
 pub struct BlockHeader {
     /// A SHA-256d hash in internal byte order of the previous block’s
     /// header. This ensures no previous block can be changed without
-    /// also changing this block’s header .
-    previous_block_hash: BlockHash,
+    /// also changing this block’s header.
+    // This is usually called a 'block hash', as it is frequently used
+    // to identify the entire block, since the hash preimage includes
+    // the merkle root of the transactions in this block. But
+    // _technically_, this is just a hash of the block _header_, not
+    // the direct bytes of the transactions as well as the header. So
+    // for now I want to call it a `BlockHeaderHash` because that's
+    // more explicit.
+    previous_block_hash: BlockHeaderHash,
 
     /// A SHA-256d hash in internal byte order. The merkle root is
     /// derived from the SHA256d hashes of all transactions included
@@ -67,8 +74,8 @@ pub struct BlockHeader {
     /// [Sapling onward] The root LEBS2OSP256(rt) of the Sapling note
     /// commitment tree corresponding to the nal Sapling treestate of
     /// this block.
-    // TODO: replace type with custom SaplingRoot or similar type
-    // hash_final_sapling_root: SaplingRootHash,
+    // TODO: replace type with custom SaplingRootHash or similar type
+    hash_final_sapling_root: [u8; 32],
 
     /// The block timestamp is a Unix epoch time (UTC) when the miner
     /// started hashing the header (according to the miner).
@@ -121,6 +128,6 @@ pub struct Block {
     /// "block" messages.
     pub header: BlockHeader,
 
-    /// Block transactions.
+    /// The block transactions.
     pub transactions: Vec<Transaction>,
 }

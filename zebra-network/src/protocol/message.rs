@@ -4,6 +4,7 @@ use std::net;
 
 use chrono::{DateTime, Utc};
 
+use zebra_chain::block::{BlockHeaderHash, MerkleRootHash};
 use zebra_chain::{transaction::Transaction, types::BlockHeight};
 
 use crate::meta_addr::MetaAddr;
@@ -134,7 +135,40 @@ pub enum Message {
     /// A `block` message.
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#block)
-    Block {/* XXX add fields */},
+    Block {
+        /// Block version information (note, this is signed).
+        version: Version,
+
+        /// The hash value of the previous block (header) this
+        /// particular block references.
+        prev_block: BlockHeaderHash,
+
+        /// The reference to a Merkle tree collection which is a hash
+        /// of all transactions related to this block.
+        merkle_root: MerkleRootHash,
+
+        /// The root of the Sapling note commitment tree corresponding
+        /// to the final Sapling treestate of this block.
+        // TODO: more than just an array of bytes.
+        final_sapling_root: [u8; 32],
+
+        /// A Unix timestamp recording when this block was created.
+        time: DateTime<Utc>,
+
+        /// The calculated difficulty target being used for this
+        /// block.
+        bits: u32,
+
+        /// The nonce used to generate this block, to allow variations
+        /// of the header and compute different hashes.
+        nonce: [u8; 32],
+
+        /// The Equihash solution.
+        solution: [u8; 1344],
+
+        /// Transactions.
+        txns: Vec<Transaction>,
+    },
 
     /// A `getblocks` message.
     ///
