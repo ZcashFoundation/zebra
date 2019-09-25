@@ -17,6 +17,9 @@ use crate::{constants, types::*, Network};
 
 use super::message::Message;
 
+/// The length of a Bitcoin message header.
+const HEADER_LEN: usize = 24usize;
+
 /// A codec which produces Bitcoin messages from byte streams and vice versa.
 pub struct Codec {
     builder: Builder,
@@ -88,9 +91,6 @@ impl Builder {
         self
     }
 }
-
-/// The length of a Bitcoin message header.
-const HEADER_LEN: usize = 24usize;
 
 // ======== Encoding =========
 
