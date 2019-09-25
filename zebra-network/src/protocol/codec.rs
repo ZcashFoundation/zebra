@@ -94,54 +94,6 @@ impl Builder {
 
 // ======== Encoding =========
 
-impl Codec {
-    /// Write the body of the message into the given writer. This allows writing
-    /// the message body prior to writing the header, so that the header can
-    /// contain a checksum of the message body.
-    fn write_body<W: Write>(&self, msg: &Message, mut writer: W) -> Result<(), Error> {
-        use Message::*;
-        match *msg {
-            Version {
-                ref version,
-                ref services,
-                ref timestamp,
-                ref address_recv,
-                ref address_from,
-                ref nonce,
-                ref user_agent,
-                ref start_height,
-                ref relay,
-            } => {
-                writer.write_u32::<LittleEndian>(version.0)?;
-                writer.write_u64::<LittleEndian>(services.0)?;
-                writer.write_i64::<LittleEndian>(timestamp.timestamp())?;
-
-                let (recv_services, recv_addr) = address_recv;
-                writer.write_u64::<LittleEndian>(recv_services.0)?;
-                writer.write_socket_addr(*recv_addr)?;
-
-                let (from_services, from_addr) = address_from;
-                writer.write_u64::<LittleEndian>(from_services.0)?;
-                writer.write_socket_addr(*from_addr)?;
-
-                writer.write_u64::<LittleEndian>(nonce.0)?;
-                writer.write_string(&user_agent)?;
-                writer.write_u32::<LittleEndian>(start_height.0)?;
-                writer.write_u8(*relay as u8)?;
-            }
-            Verack => { /* Empty payload -- no-op */ }
-            Ping(nonce) => {
-                writer.write_u64::<LittleEndian>(nonce.0)?;
-            }
-            Pong(nonce) => {
-                writer.write_u64::<LittleEndian>(nonce.0)?;
-            }
-            _ => bail!("unimplemented message type"),
-        }
-        Ok(())
-    }
-}
-
 impl Encoder for Codec {
     type Item = Message;
     type Error = Error;
@@ -199,6 +151,54 @@ impl Encoder for Codec {
         dst.extend_from_slice(&header);
         dst.extend_from_slice(&body);
 
+        Ok(())
+    }
+}
+
+impl Codec {
+    /// Write the body of the message into the given writer. This allows writing
+    /// the message body prior to writing the header, so that the header can
+    /// contain a checksum of the message body.
+    fn write_body<W: Write>(&self, msg: &Message, mut writer: W) -> Result<(), Error> {
+        use Message::*;
+        match *msg {
+            Version {
+                ref version,
+                ref services,
+                ref timestamp,
+                ref address_recv,
+                ref address_from,
+                ref nonce,
+                ref user_agent,
+                ref start_height,
+                ref relay,
+            } => {
+                writer.write_u32::<LittleEndian>(version.0)?;
+                writer.write_u64::<LittleEndian>(services.0)?;
+                writer.write_i64::<LittleEndian>(timestamp.timestamp())?;
+
+                let (recv_services, recv_addr) = address_recv;
+                writer.write_u64::<LittleEndian>(recv_services.0)?;
+                writer.write_socket_addr(*recv_addr)?;
+
+                let (from_services, from_addr) = address_from;
+                writer.write_u64::<LittleEndian>(from_services.0)?;
+                writer.write_socket_addr(*from_addr)?;
+
+                writer.write_u64::<LittleEndian>(nonce.0)?;
+                writer.write_string(&user_agent)?;
+                writer.write_u32::<LittleEndian>(start_height.0)?;
+                writer.write_u8(*relay as u8)?;
+            }
+            Verack => { /* Empty payload -- no-op */ }
+            Ping(nonce) => {
+                writer.write_u64::<LittleEndian>(nonce.0)?;
+            }
+            Pong(nonce) => {
+                writer.write_u64::<LittleEndian>(nonce.0)?;
+            }
+            _ => bail!("unimplemented message type"),
+        }
         Ok(())
     }
 }
