@@ -19,7 +19,7 @@ use crate::sha256d_writer::Sha256dWriter;
 // similar, it may be worth it to define a NoteCommitmentTree trait.
 
 /// Sapling Note Commitment Tree
-#[derive(Default)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct SaplingNoteCommitmentTree;
 
 /// Sapling note commitment tree root node hash.
@@ -28,6 +28,7 @@ pub struct SaplingNoteCommitmentTree;
 /// commitment tree corresponding to the final Sapling treestate of
 /// this block. A root of a note commitment tree is associated with
 /// each treestate.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct SaplingNoteTreeRootHash([u8; 32]);
 
 impl From<SaplingNoteCommitmentTree> for SaplingNoteTreeRootHash {

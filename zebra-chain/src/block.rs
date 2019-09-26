@@ -13,6 +13,7 @@ use crate::transaction::Transaction;
 ///
 /// This is useful when one block header is pointing to its parent
 /// block header in the block chain. ⛓️
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BlockHeaderHash([u8; 32]);
 
 impl From<BlockHeader> for BlockHeaderHash {
@@ -27,6 +28,7 @@ impl From<BlockHeader> for BlockHeaderHash {
 
 /// A SHA-256d hash of the root node of a merkle tree of SHA256-d
 /// hashed transactions in a block.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MerkleRootHash([u8; 32]);
 
 impl<Transaction> ZcashSerialize for MerkleTree<Transaction> {
@@ -57,6 +59,7 @@ impl From<MerkleTree<Transaction>> for MerkleRootHash {
 /// backwards reference (previous header hash) present in the block
 /// header. Each block points backwards to its parent, all the way
 /// back to the genesis block (the first block in the blockchain).
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BlockHeader {
     /// A SHA-256d hash in internal byte order of the previous block’s
     /// header. This ensures no previous block can be changed without
@@ -80,7 +83,6 @@ pub struct BlockHeader {
     /// [Sapling onward] The root LEBS2OSP256(rt) of the Sapling note
     /// commitment tree corresponding to the finnal Sapling treestate of
     /// this block.
-    // TODO: replace type with custom SaplingRootHash or similar type
     final_sapling_root_hash: SaplingNoteTreeRootHash,
 
     /// The block timestamp is a Unix epoch time (UTC) when the miner
@@ -134,6 +136,7 @@ impl ZcashDeserialize for BlockHeader {
 ///
 /// Block header: a data structure containing the block's metadata
 /// Transactions: an array (vector in Rust) of transactions
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Block {
     /// First 80 bytes of the block as defined by the encoding used by
     /// "block" messages.
