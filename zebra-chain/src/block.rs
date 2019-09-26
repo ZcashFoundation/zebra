@@ -107,8 +107,11 @@ pub struct BlockHeader {
     nonce: [u8; 32],
 
     /// The Equihash solution.
-    // The solution size when serialized should be in bytes ('always 1344').
-    solution: [u8; 1344],
+    // The solution size when serialized should be in bytes ('always
+    // 1344').  I first tried this as a [u8; 1344] but until const
+    // generics land we'd have to implement all our common traits
+    // manually, like in pzec.
+    solution: Vec<u8>,
 }
 
 impl BlockHeader {
