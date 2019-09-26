@@ -50,7 +50,28 @@ impl From<MerkleTree<Transaction>> for MerkleRootHash {
     }
 }
 
-/// Block header
+/// A SHA-256d hash of a BlockHeader.
+///
+/// This is useful when one block header is pointing to its parent
+/// block header in the block chain. ⛓️
+pub struct BlockHeaderHash([u8; 32]);
+
+impl From<BlockHeader> for BlockHeaderHash {
+    fn from(block_header: BlockHeader) -> Self {
+        let mut hash_writer = Sha256dWriter::default();
+        block_header
+            .zcash_serialize(&mut hash_writer)
+            .expect("Block headers must serialize.");
+        Self(hash_writer.finish())
+    }
+}
+
+/// Block header.
+///
+/// How are blocks chained together? They are chained together via the
+/// backwards reference (previous header hash) present in the block
+/// header. Each block points backwards to its parent, all the way
+/// back to the genesis block (the first block in the blockchain).
 pub struct BlockHeader {
     /// A SHA-256d hash in internal byte order of the previous block’s
     /// header. This ensures no previous block can be changed without
@@ -69,13 +90,13 @@ pub struct BlockHeader {
     /// in this block as assembled in a binary tree, ensuring that
     /// none of those transactions can be modied without modifying the
     /// header.
-    merkle_root_hash: [u8; 32],
+    merkle_root_hash: MerkleRootHash,
 
     /// [Sapling onward] The root LEBS2OSP256(rt) of the Sapling note
     /// commitment tree corresponding to the nal Sapling treestate of
     /// this block.
     // TODO: replace type with custom SaplingRootHash or similar type
-    hash_final_sapling_root: [u8; 32],
+    final_sapling_root_hash: [u8; 32],
 
     /// The block timestamp is a Unix epoch time (UTC) when the miner
     /// started hashing the header (according to the miner).
@@ -123,6 +144,11 @@ impl ZcashDeserialize for BlockHeader {
 }
 
 /// A block in your blockchain.
+///
+/// A block is a data structure with two fields:
+///
+/// Block header: a data structure containing the block's metadata
+/// Transactions: an array (vector in Rust) of transactions
 pub struct Block {
     /// First 80 bytes of the block as defined by the encoding used by
     /// "block" messages.
