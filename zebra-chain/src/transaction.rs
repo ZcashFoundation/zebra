@@ -5,10 +5,11 @@
 /// A particular transaction output reference.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct OutPoint {
-    /// The hash of the referenced transaction.
+    /// References the transaction that contains the UTXO being spent.
     pub hash: [u8; 32],
 
-    /// The index of the specific output in the transaction. The first output is 0, etc.
+    /// Identifies which UTXO from that transaction is referenced; the
+    /// first output is 0, etc.
     pub index: u32,
 }
 
@@ -31,6 +32,19 @@ pub struct TransactionInput {
 }
 
 /// Transaction Output
+///
+/// The most fundamental building block of a transaction is a
+/// transaction output -- the ZEC you own in your "wallet" is in
+/// fact a subset of unspent transaction outputs or 'UTXO's of the
+/// global UTXO set.
+///
+/// UTXOs are indivisible, discrete units of value which can only be
+/// consumed in their entirety. Thus, if I want to send you 1 ZEC and
+/// I only own one UTXO worth 2 ZEC, I would construct a transaction
+/// that spends my UTXO and sends 1 ZEC to you and 1 ZEC back to me
+/// (just like receiving change).
+// TODO: sanity check these doc comments
+//
 // `Copy` cannot be implemented for `Vec<u8>`
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TransactionOutput {
@@ -43,7 +57,13 @@ pub struct TransactionOutput {
     pub pk_script: Vec<u8>,
 }
 
-/// Transaction Input
+/// Transaction
+///
+/// a transaction is an encoded data structure that facilitates the
+/// transfer of value between two public key addresses on the Zcash
+/// ecosystem. Everything is designed to ensure that transactions can
+/// created, propagated on the network, validated, and finally added
+/// to the global ledger of transactions (the blockchain).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Transaction {
     /// Transaction data format version (note, this is signed).
