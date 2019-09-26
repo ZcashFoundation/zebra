@@ -59,11 +59,13 @@ pub struct TransactionOutput {
 
 /// Transaction
 ///
-/// a transaction is an encoded data structure that facilitates the
+/// A transaction is an encoded data structure that facilitates the
 /// transfer of value between two public key addresses on the Zcash
 /// ecosystem. Everything is designed to ensure that transactions can
 /// created, propagated on the network, validated, and finally added
 /// to the global ledger of transactions (the blockchain).
+// This is not up to date with the data included in the Zcash
+// transaction format: https://zips.z.cash/protocol/protocol.pdf
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Transaction {
     /// Transaction data format version (note, this is signed).
