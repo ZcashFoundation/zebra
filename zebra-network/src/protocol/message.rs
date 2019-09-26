@@ -164,7 +164,7 @@ pub enum Message {
         nonce: [u8; 32],
 
         /// The Equihash solution.
-        solution: [u8; 1344],
+        solution: Vec<u8>,
 
         /// Transactions.
         txns: Vec<Transaction>,

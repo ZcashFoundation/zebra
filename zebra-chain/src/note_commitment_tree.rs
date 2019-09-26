@@ -13,7 +13,6 @@
 use std::io;
 
 use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
-use crate::sha256d_writer::Sha256dWriter;
 
 // XXX: Depending on if we implement SproutNoteCommitmentTree or
 // similar, it may be worth it to define a NoteCommitmentTree trait.
