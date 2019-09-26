@@ -4,6 +4,7 @@ use chrono::{DateTime, Utc};
 use std::io;
 
 use crate::merkle_tree::MerkleTree;
+use crate::note_commitment_tree::SaplingNoteTreeRootHash;
 use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 use crate::sha256d_writer::Sha256dWriter;
 use crate::transaction::Transaction;
@@ -50,22 +51,6 @@ impl From<MerkleTree<Transaction>> for MerkleRootHash {
     }
 }
 
-/// A SHA-256d hash of a BlockHeader.
-///
-/// This is useful when one block header is pointing to its parent
-/// block header in the block chain. ⛓️
-pub struct BlockHeaderHash([u8; 32]);
-
-impl From<BlockHeader> for BlockHeaderHash {
-    fn from(block_header: BlockHeader) -> Self {
-        let mut hash_writer = Sha256dWriter::default();
-        block_header
-            .zcash_serialize(&mut hash_writer)
-            .expect("Block headers must serialize.");
-        Self(hash_writer.finish())
-    }
-}
-
 /// Block header.
 ///
 /// How are blocks chained together? They are chained together via the
@@ -93,10 +78,10 @@ pub struct BlockHeader {
     merkle_root_hash: MerkleRootHash,
 
     /// [Sapling onward] The root LEBS2OSP256(rt) of the Sapling note
-    /// commitment tree corresponding to the nal Sapling treestate of
+    /// commitment tree corresponding to the finnal Sapling treestate of
     /// this block.
     // TODO: replace type with custom SaplingRootHash or similar type
-    final_sapling_root_hash: [u8; 32],
+    final_sapling_root_hash: SaplingNoteTreeRootHash,
 
     /// The block timestamp is a Unix epoch time (UTC) when the miner
     /// started hashing the header (according to the miner).
