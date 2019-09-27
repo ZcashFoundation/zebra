@@ -114,3 +114,15 @@ pub struct Block {
     /// The block transactions.
     pub transactions: Vec<Transaction>,
 }
+
+impl ZcashSerialize for Block {
+    fn zcash_serialize<W: io::Write>(&self, writer: W) -> Result<(), SerializationError> {
+        unimplemented!();
+    }
+}
+
+impl ZcashDeserialize for Block {
+    fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
+        unimplemented!();
+    }
+}
