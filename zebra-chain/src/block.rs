@@ -3,7 +3,7 @@
 use chrono::{DateTime, Utc};
 use std::io;
 
-use crate::merkle_tree::MerkleTree;
+use crate::merkle_tree::MerkleTreeRootHash;
 use crate::note_commitment_tree::SaplingNoteTreeRootHash;
 use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 use crate::sha256d_writer::Sha256dWriter;
@@ -22,33 +22,6 @@ impl From<BlockHeader> for BlockHeaderHash {
         block_header
             .zcash_serialize(&mut hash_writer)
             .expect("Block headers must serialize.");
-        Self(hash_writer.finish())
-    }
-}
-
-/// A SHA-256d hash of the root node of a merkle tree of SHA256-d
-/// hashed transactions in a block.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct MerkleRootHash([u8; 32]);
-
-impl<Transaction> ZcashSerialize for MerkleTree<Transaction> {
-    fn zcash_serialize<W: io::Write>(&self, writer: W) -> Result<(), SerializationError> {
-        unimplemented!();
-    }
-}
-
-impl<Transaction> ZcashDeserialize for MerkleTree<Transaction> {
-    fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
-        unimplemented!();
-    }
-}
-
-impl From<MerkleTree<Transaction>> for MerkleRootHash {
-    fn from(merkle_tree: MerkleTree<Transaction>) -> Self {
-        let mut hash_writer = Sha256dWriter::default();
-        merkle_tree
-            .zcash_serialize(&mut hash_writer)
-            .expect("The merkle tree of transactions must serialize.");
         Self(hash_writer.finish())
     }
 }
@@ -78,7 +51,7 @@ pub struct BlockHeader {
     /// in this block as assembled in a binary tree, ensuring that
     /// none of those transactions can be modied without modifying the
     /// header.
-    merkle_root_hash: MerkleRootHash,
+    merkle_root_hash: MerkleTreeRootHash,
 
     /// [Sapling onward] The root LEBS2OSP256(rt) of the Sapling note
     /// commitment tree corresponding to the finnal Sapling treestate of
@@ -112,13 +85,6 @@ pub struct BlockHeader {
     // generics land we'd have to implement all our common traits
     // manually, like in pzec.
     solution: Vec<u8>,
-}
-
-impl BlockHeader {
-    /// Get the SHA-256d hash in internal byte order of this block header.
-    pub fn hash(&self) -> [u8; 32] {
-        unimplemented!();
-    }
 }
 
 impl ZcashSerialize for BlockHeader {

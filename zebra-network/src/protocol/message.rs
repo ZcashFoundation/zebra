@@ -4,7 +4,7 @@ use std::net;
 
 use chrono::{DateTime, Utc};
 
-use zebra_chain::block::{BlockHeaderHash, MerkleRootHash};
+use zebra_chain::block::Block;
 use zebra_chain::{transaction::Transaction, types::BlockHeight};
 
 use crate::meta_addr::MetaAddr;
