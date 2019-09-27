@@ -35,7 +35,7 @@ pub struct TransactionInput {
 ///
 /// The most fundamental building block of a transaction is a
 /// transaction output -- the ZEC you own in your "wallet" is in
-/// fact a subset of unspent transaction outputs or 'UTXO's of the
+/// fact a subset of unspent transaction outputs (or "UTXO"s) of the
 /// global UTXO set.
 ///
 /// UTXOs are indivisible, discrete units of value which can only be
