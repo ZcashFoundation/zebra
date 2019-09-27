@@ -1,11 +1,11 @@
 //! Equihash Solution and related items.
 
-use std::fmt;
+// use std::fmt;
 
-use hex::ToHex;
+// use hex::ToHex;
 
 /// The size of an Equihash solution in bytes (always 1344).
-const EQUIHASH_SOLUTION_SIZE = 1344;
+const EQUIHASH_SOLUTION_SIZE: usize = 1344;
 
 /// Equihash Solution.
 ///
@@ -24,8 +24,15 @@ impl Default for EquihashSolution {
     }
 }
 
-impl fmt::Debug for EquihashSolution {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str(&self.0.encode_hex::<String>())
+// TODO: fix hex crate import conflict with tracing-subscriber
+// impl fmt::Debug for EquihashSolution {
+//     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+//         f.write_str(&self.0.encode_hex::<String>())
+//     }
+// }
+
+impl PartialEq<EquihashSolution> for EquihashSolution {
+    fn eq(&self, other: &EquihashSolution) -> bool {
+        self.0.as_ref() == other.0.as_ref()
     }
 }
