@@ -13,6 +13,14 @@ use crate::transaction::Transaction;
 ///
 /// This is useful when one block header is pointing to its parent
 /// block header in the block chain. ⛓️
+///
+/// This is usually called a 'block hash', as it is frequently used
+/// to identify the entire block, since the hash preimage includes
+/// the merkle root of the transactions in this block. But
+/// _technically_, this is just a hash of the block _header_, not
+/// the direct bytes of the transactions as well as the header. So
+/// for now I want to call it a `BlockHeaderHash` because that's
+/// more explicit.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BlockHeaderHash([u8; 32]);
 
@@ -37,13 +45,6 @@ pub struct BlockHeader {
     /// A SHA-256d hash in internal byte order of the previous block’s
     /// header. This ensures no previous block can be changed without
     /// also changing this block’s header.
-    // This is usually called a 'block hash', as it is frequently used
-    // to identify the entire block, since the hash preimage includes
-    // the merkle root of the transactions in this block. But
-    // _technically_, this is just a hash of the block _header_, not
-    // the direct bytes of the transactions as well as the header. So
-    // for now I want to call it a `BlockHeaderHash` because that's
-    // more explicit.
     previous_block_hash: BlockHeaderHash,
 
     /// A SHA-256d hash in internal byte order. The merkle root is
