@@ -9,7 +9,7 @@ use failure::Error;
 use tokio::codec::{Decoder, Encoder};
 
 use zebra_chain::{
-    serialization::{ReadZcashExt, WriteZcashExt},
+    serialization::{ReadZcashExt, WriteZcashExt, ZcashSerialize},
     types::{BlockHeight, Sha256dChecksum},
 };
 
@@ -196,6 +196,11 @@ impl Codec {
             }
             Pong(nonce) => {
                 writer.write_u64::<LittleEndian>(nonce.0)?;
+            }
+            Block { ref block } => {
+                block
+                    .zcash_serialize(&mut writer)
+                    .expect("Blocks must serialize.");
             }
             _ => bail!("unimplemented message type"),
         }
