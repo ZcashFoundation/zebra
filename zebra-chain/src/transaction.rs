@@ -43,8 +43,6 @@ pub struct TransactionInput {
 /// I only own one UTXO worth 2 ZEC, I would construct a transaction
 /// that spends my UTXO and sends 1 ZEC to you and 1 ZEC back to me
 /// (just like receiving change).
-// TODO: sanity check these doc comments
-//
 // `Copy` cannot be implemented for `Vec<u8>`
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TransactionOutput {
