@@ -16,12 +16,6 @@ pub struct MerkleTree<T> {
     leaves: Vec<T>,
 }
 
-impl<T> MerkleTree<T> {
-    pub fn get_root(&self) -> Sha256 {
-        unimplemented!();
-    }
-}
-
 impl<Transaction> ZcashSerialize for MerkleTree<Transaction> {
     fn zcash_serialize<W: io::Write>(&self, writer: W) -> Result<(), SerializationError> {
         unimplemented!();
