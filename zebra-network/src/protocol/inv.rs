@@ -12,10 +12,7 @@ use zebra_chain::block::BlockHeaderHash;
 use zebra_chain::serialization::{
     ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
 };
-
-/// Stub-- delete later.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub struct TxHash(pub [u8; 32]);
+use zebra_chain::transaction::TxHash;
 
 /// An inventory hash which refers to some advertised or requested data.
 ///
