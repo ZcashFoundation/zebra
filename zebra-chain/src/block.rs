@@ -21,8 +21,8 @@ use crate::transaction::Transaction;
 /// the direct bytes of the transactions as well as the header. So
 /// for now I want to call it a `BlockHeaderHash` because that's
 /// more explicit.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct BlockHeaderHash([u8; 32]);
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct BlockHeaderHash(pub [u8; 32]);
 
 impl From<BlockHeader> for BlockHeaderHash {
     fn from(block_header: BlockHeader) -> Self {
