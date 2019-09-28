@@ -17,7 +17,7 @@ impl From<Transaction> for TransactionHash {
         let mut hash_writer = Sha256dWriter::default();
         transaction
             .zcash_serialize(&mut hash_writer)
-            .expect("Block headers must serialize.");
+            .expect("Transactions must serialize into the hash.");
         Self(hash_writer.finish())
     }
 }
