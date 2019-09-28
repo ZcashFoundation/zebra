@@ -1,8 +1,26 @@
 //! Transaction types.
 
-/// Stub-- delete later.
+use std::io;
+
+use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
+use crate::sha256d_writer::Sha256dWriter;
+
+/// A hash of a `Transaction`
+///
+/// TODO: I'm pretty sure this is also a SHA256d hash but I haven't
+/// confirmed it yet.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub struct TxHash(pub [u8; 32]);
+pub struct TransactionHash(pub [u8; 32]);
+
+impl From<Transaction> for TransactionHash {
+    fn from(transaction: Transaction) -> Self {
+        let mut hash_writer = Sha256dWriter::default();
+        transaction
+            .zcash_serialize(&mut hash_writer)
+            .expect("Block headers must serialize.");
+        Self(hash_writer.finish())
+    }
+}
 
 /// OutPoint
 ///
@@ -10,7 +28,7 @@ pub struct TxHash(pub [u8; 32]);
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct OutPoint {
     /// References the transaction that contains the UTXO being spent.
-    pub hash: [u8; 32],
+    pub hash: TransactionHash,
 
     /// Identifies which UTXO from that transaction is referenced; the
     /// first output is 0, etc.
@@ -91,4 +109,16 @@ pub struct Transaction {
     /// numbers, then lock_time is irrelevant. Otherwise, the
     /// transaction may not be added to a block until after `lock_time`.
     pub lock_time: u32,
+}
+
+impl ZcashSerialize for Transaction {
+    fn zcash_serialize<W: io::Write>(&self, writer: W) -> Result<(), SerializationError> {
+        unimplemented!();
+    }
+}
+
+impl ZcashDeserialize for Transaction {
+    fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
+        unimplemented!();
+    }
 }

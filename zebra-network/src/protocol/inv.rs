@@ -12,7 +12,7 @@ use zebra_chain::block::BlockHeaderHash;
 use zebra_chain::serialization::{
     ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
 };
-use zebra_chain::transaction::TxHash;
+use zebra_chain::transaction::TransactionHash;
 
 /// An inventory hash which refers to some advertised or requested data.
 ///
@@ -28,7 +28,7 @@ pub enum InventoryHash {
     /// so we don't include a typed hash.
     Error,
     /// A hash of a transaction.
-    Tx(TxHash),
+    Tx(TransactionHash),
     /// A hash of a block.
     Block(BlockHeaderHash),
     /// A hash of a filtered block.
@@ -60,7 +60,7 @@ impl ZcashDeserialize for InventoryHash {
         let bytes = reader.read_32_bytes()?;
         match code {
             0 => Ok(InventoryHash::Error),
-            1 => Ok(InventoryHash::Tx(TxHash(bytes))),
+            1 => Ok(InventoryHash::Tx(TransactionHash(bytes))),
             2 => Ok(InventoryHash::Block(BlockHeaderHash(bytes))),
             3 => Ok(InventoryHash::FilteredBlock(BlockHeaderHash(bytes))),
             _ => Err(SerializationError::ParseError("invalid inventory code")),
