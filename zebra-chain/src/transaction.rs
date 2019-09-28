@@ -1,5 +1,9 @@
 //! Transaction types.
 
+/// Stub-- delete later.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct TxHash(pub [u8; 32]);
+
 /// OutPoint
 ///
 /// A particular transaction output reference.
