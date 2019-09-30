@@ -31,7 +31,7 @@ pub struct MetaAddr {
 impl ZcashSerialize for MetaAddr {
     fn zcash_serialize<W: Write>(&self, mut writer: W) -> Result<(), SerializationError> {
         writer.write_u32::<LittleEndian>(self.last_seen.timestamp() as u32)?;
-        writer.write_u64::<LittleEndian>(self.services.0)?;
+        writer.write_u64::<LittleEndian>(self.services.bits())?;
         writer.write_socket_addr(self.addr)?;
         Ok(())
     }
@@ -41,7 +41,8 @@ impl ZcashDeserialize for MetaAddr {
     fn zcash_deserialize<R: Read>(mut reader: R) -> Result<Self, SerializationError> {
         Ok(MetaAddr {
             last_seen: Utc.timestamp(reader.read_u32::<LittleEndian>()? as i64, 0),
-            services: PeerServices(reader.read_u64::<LittleEndian>()?),
+            // Discard unknown service bits.
+            services: PeerServices::from_bits_truncate(reader.read_u64::<LittleEndian>()?),
             addr: reader.read_socket_addr()?,
         })
     }

@@ -6,6 +6,8 @@
 extern crate failure;
 #[macro_use]
 extern crate tracing;
+#[macro_use]
+extern crate bitflags;
 
 mod network;
 pub use network::Network;

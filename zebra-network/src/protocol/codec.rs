@@ -174,15 +174,15 @@ impl Codec {
                 ref relay,
             } => {
                 writer.write_u32::<LittleEndian>(version.0)?;
-                writer.write_u64::<LittleEndian>(services.0)?;
+                writer.write_u64::<LittleEndian>(services.bits())?;
                 writer.write_i64::<LittleEndian>(timestamp.timestamp())?;
 
                 let (recv_services, recv_addr) = address_recv;
-                writer.write_u64::<LittleEndian>(recv_services.0)?;
+                writer.write_u64::<LittleEndian>(recv_services.bits())?;
                 writer.write_socket_addr(*recv_addr)?;
 
                 let (from_services, from_addr) = address_from;
-                writer.write_u64::<LittleEndian>(from_services.0)?;
+                writer.write_u64::<LittleEndian>(from_services.bits())?;
                 writer.write_socket_addr(*from_addr)?;
 
                 writer.write_u64::<LittleEndian>(nonce.0)?;
@@ -341,14 +341,15 @@ impl Codec {
     fn read_version<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
         Ok(Message::Version {
             version: Version(reader.read_u32::<LittleEndian>()?),
-            services: PeerServices(reader.read_u64::<LittleEndian>()?),
+            // Use from_bits_truncate to discard unknown service bits.
+            services: PeerServices::from_bits_truncate(reader.read_u64::<LittleEndian>()?),
             timestamp: Utc.timestamp(reader.read_i64::<LittleEndian>()?, 0),
             address_recv: (
-                PeerServices(reader.read_u64::<LittleEndian>()?),
+                PeerServices::from_bits_truncate(reader.read_u64::<LittleEndian>()?),
                 reader.read_socket_addr()?,
             ),
             address_from: (
-                PeerServices(reader.read_u64::<LittleEndian>()?),
+                PeerServices::from_bits_truncate(reader.read_u64::<LittleEndian>()?),
                 reader.read_socket_addr()?,
             ),
             nonce: Nonce(reader.read_u64::<LittleEndian>()?),
@@ -505,7 +506,7 @@ mod tests {
     #[test]
     fn version_message_round_trip() {
         use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-        let services = PeerServices(0x1);
+        let services = PeerServices::NODE_NETWORK;
         let timestamp = Utc.timestamp(1568000000, 0);
 
         let rt = Runtime::new().unwrap();
