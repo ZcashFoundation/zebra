@@ -341,14 +341,14 @@ impl Codec {
     fn read_version<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
         Ok(Message::Version {
             version: Version(reader.read_u32::<LittleEndian>()?),
-            services: Services(reader.read_u64::<LittleEndian>()?),
+            services: PeerServices(reader.read_u64::<LittleEndian>()?),
             timestamp: Utc.timestamp(reader.read_i64::<LittleEndian>()?, 0),
             address_recv: (
-                Services(reader.read_u64::<LittleEndian>()?),
+                PeerServices(reader.read_u64::<LittleEndian>()?),
                 reader.read_socket_addr()?,
             ),
             address_from: (
-                Services(reader.read_u64::<LittleEndian>()?),
+                PeerServices(reader.read_u64::<LittleEndian>()?),
                 reader.read_socket_addr()?,
             ),
             nonce: Nonce(reader.read_u64::<LittleEndian>()?),
@@ -505,7 +505,7 @@ mod tests {
     #[test]
     fn version_message_round_trip() {
         use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-        let services = Services(0x1);
+        let services = PeerServices(0x1);
         let timestamp = Utc.timestamp(1568000000, 0);
 
         let rt = Runtime::new().unwrap();

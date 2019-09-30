@@ -10,7 +10,7 @@ use zebra_chain::serialization::{
     ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
 };
 
-use crate::protocol::types::Services;
+use crate::protocol::types::PeerServices;
 
 /// An address with metadata on its advertised services and last-seen time.
 ///
@@ -23,7 +23,7 @@ pub struct MetaAddr {
     /// The peer's address.
     pub addr: SocketAddr,
     /// The services advertised by the peer.
-    pub services: Services,
+    pub services: PeerServices,
     /// When the peer was last seen.
     pub last_seen: DateTime<Utc>,
 }
@@ -41,7 +41,7 @@ impl ZcashDeserialize for MetaAddr {
     fn zcash_deserialize<R: Read>(mut reader: R) -> Result<Self, SerializationError> {
         Ok(MetaAddr {
             last_seen: Utc.timestamp(reader.read_u32::<LittleEndian>()? as i64, 0),
-            services: Services(reader.read_u64::<LittleEndian>()?),
+            services: PeerServices(reader.read_u64::<LittleEndian>()?),
             addr: reader.read_socket_addr()?,
         })
     }

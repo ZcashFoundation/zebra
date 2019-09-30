@@ -12,7 +12,7 @@ pub struct Version(pub u32);
 // Tower provides utilities for service discovery, so this might go
 // away in the future in favor of that.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub struct Services(pub u64);
+pub struct PeerServices(pub u64);
 
 /// A nonce used in the networking layer to identify messages.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]

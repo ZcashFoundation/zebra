@@ -48,7 +48,7 @@ pub enum Message {
         version: Version,
 
         /// The network services advertised by the sender.
-        services: Services,
+        services: PeerServices,
 
         /// The time when the version message was sent.
         timestamp: DateTime<Utc>,
@@ -57,11 +57,11 @@ pub enum Message {
         /// advertised network services.
         ///
         /// Q: how does the handshake know the remote peer's services already?
-        address_recv: (Services, net::SocketAddr),
+        address_recv: (PeerServices, net::SocketAddr),
 
         /// The network address of the node sending this message, and its
         /// advertised network services.
-        address_from: (Services, net::SocketAddr),
+        address_from: (PeerServices, net::SocketAddr),
 
         /// Node random nonce, randomly generated every time a version
         /// packet is sent. This nonce is used to detect connections
