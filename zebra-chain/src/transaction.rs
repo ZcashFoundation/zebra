@@ -112,13 +112,13 @@ pub struct Transaction {
 }
 
 impl ZcashSerialize for Transaction {
-    fn zcash_serialize<W: io::Write>(&self, writer: W) -> Result<(), SerializationError> {
+    fn zcash_serialize<W: io::Write>(&self, _writer: W) -> Result<(), SerializationError> {
         unimplemented!();
     }
 }
 
 impl ZcashDeserialize for Transaction {
-    fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
+    fn zcash_deserialize<R: io::Read>(_reader: R) -> Result<Self, SerializationError> {
         unimplemented!();
     }
 }
