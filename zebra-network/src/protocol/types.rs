@@ -8,11 +8,21 @@ pub struct Magic(pub [u8; 4]);
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct Version(pub u32);
 
-/// Bitfield of features to be enabled for this connection.
-// Tower provides utilities for service discovery, so this might go
-// away in the future in favor of that.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub struct PeerServices(pub u64);
+bitflags! {
+    /// A bitflag describing services advertised by a node in the network.
+    ///
+    /// Note that bits 24-31 are reserved for temporary experiments; other
+    /// service bits should be allocated via the ZIP process.
+    #[derive(Default)]
+    pub struct PeerServices: u64 {
+        /// NODE_NETWORK means that the node is a full node capable of serving
+        /// blocks, as opposed to a light client that makes network requests but
+        /// does not provide network services.
+        const NODE_NETWORK = (1 << 0);
+        /// NODE_BLOOM means that the node supports bloom-filtered connections.
+        const NODE_BLOOM = (1 << 2);
+    }
+}
 
 /// A nonce used in the networking layer to identify messages.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]

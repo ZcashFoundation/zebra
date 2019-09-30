@@ -70,13 +70,16 @@ impl ConnectCmd {
 
         let version = Message::Version {
             version: constants::CURRENT_VERSION,
-            services: PeerServices(1),
+            services: PeerServices::NODE_NETWORK,
             timestamp: Utc::now(),
-            address_recv: (PeerServices(1), self.addr),
+            address_recv: (PeerServices::NODE_NETWORK, self.addr),
             // We just make something up because at this stage the `connect` command
             // doesn't run a server or anything -- will the zcashd respond on the
             // same tcp connection or try to open one to the bogus address below?
-            address_from: (PeerServices(1), "127.0.0.1:9000".parse().unwrap()),
+            address_from: (
+                PeerServices::NODE_NETWORK,
+                "127.0.0.1:9000".parse().unwrap(),
+            ),
             nonce: Nonce(1),
             user_agent: "Zebra Connect".to_owned(),
             start_height: BlockHeight(0),
