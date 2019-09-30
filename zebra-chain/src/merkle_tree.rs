@@ -3,8 +3,6 @@
 
 use std::io;
 
-use sha2::Sha256;
-
 use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 use crate::sha256d_writer::Sha256dWriter;
 use crate::transaction::Transaction;
@@ -13,17 +11,17 @@ use crate::transaction::Transaction;
 /// node values.
 #[derive(Default)]
 pub struct MerkleTree<T> {
-    leaves: Vec<T>,
+    _leaves: Vec<T>,
 }
 
 impl<Transaction> ZcashSerialize for MerkleTree<Transaction> {
-    fn zcash_serialize<W: io::Write>(&self, writer: W) -> Result<(), SerializationError> {
+    fn zcash_serialize<W: io::Write>(&self, _writer: W) -> Result<(), SerializationError> {
         unimplemented!();
     }
 }
 
 impl<Transaction> ZcashDeserialize for MerkleTree<Transaction> {
-    fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
+    fn zcash_deserialize<R: io::Read>(_reader: R) -> Result<Self, SerializationError> {
         unimplemented!();
     }
 }

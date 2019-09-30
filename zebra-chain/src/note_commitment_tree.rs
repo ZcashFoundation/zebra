@@ -31,7 +31,7 @@ pub struct SaplingNoteCommitmentTree;
 pub struct SaplingNoteTreeRootHash([u8; 32]);
 
 impl From<SaplingNoteCommitmentTree> for SaplingNoteTreeRootHash {
-    fn from(sapling_note_commitment_tree: SaplingNoteCommitmentTree) -> Self {
+    fn from(_tree: SaplingNoteCommitmentTree) -> Self {
         // TODO: The Sapling note commitment tree requires a Pedersen
         // hash function, not SHA256.
 
@@ -54,13 +54,13 @@ impl SaplingNoteCommitmentTree {
 }
 
 impl ZcashSerialize for SaplingNoteCommitmentTree {
-    fn zcash_serialize<W: io::Write>(&self, writer: W) -> Result<(), SerializationError> {
+    fn zcash_serialize<W: io::Write>(&self, _writer: W) -> Result<(), SerializationError> {
         unimplemented!();
     }
 }
 
 impl ZcashDeserialize for SaplingNoteCommitmentTree {
-    fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
+    fn zcash_deserialize<R: io::Read>(_reader: R) -> Result<Self, SerializationError> {
         unimplemented!();
     }
 }
