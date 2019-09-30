@@ -1,0 +1,75 @@
+┌───────────────────────────────────────────────┐
+│Peer: one or more futures                      │
+│                                               │
+│    ┌────────────┐   incoming messages         │
+│    │ TcpStream  │    are sent to the          │
+│    └────────────┘     PeerClient, to          │
+│           ▲         check if they are         │
+│           ║         responses, or else        │
+│           ║         to the PeerServer,        │
+│           ▼          to check if they         │
+│    ┌────────────┐      are requests           │
+│    │   Framed   │                             │
+│    │  Messages  │─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─│─ ─ ─
+│    └────────────┘ last-seen timestamp channel │     │
+│           ▲                                   │
+│           ║ mpsc channel or Service?          │     │
+│           ╠════════════════════════╗          │
+│           ║                        ║          │     │
+│           ▼                        ▼          │
+│ ┌──────────────────┐     ┌──────────────────┐ │     │
+│ │    PeerClient    │     │    PeerServer    │ │
+│ │sends reqs to peer│     │sends reqs to core│ │     │
+│ │sends rsps to core│     │sends rsps to peer│ │
+│ └──────────────────┘     └──────────────────┘ │     │
+│           ▲                        │          │
+└───────────┼────────────────────────┼──────────┘     │
+            │                        │
+            │                        │                │
+┌───────────┼────────────────────────┼──────────┐
+│           │ PeerSet: two Services  │          │     │
+│           │   plus bookkeeping     ▼          │
+│ ┌──────────────────┐     ┌──────────────────┐ │     │
+│ │      Client      │     │      Server      │ │         ┌─────────────────────────────┐
+│ │                  │     │                  │ │     │   │    PeerConnector Service    │
+│ │  load-balances   │     │  routes inbound  │ │         │       req: SocketAddr       │
+│ │outbound reqs over│     │PeerServer reqs to│ │     │   │rsp: (PeerClient, PeerServer)│
+│ │    available     │     │internal Services │ │────────▶│                             │
+│ │   PeerClients    │     │                  │ │     │   │    performs handshakes,     │
+│ │                  │     │  drives peerset  │ │         │   constructs peer futures   │
+│ │  drives peerset  │     │ contraction via  │ │     │   └─────────────────────────────┘
+│ │  expansion via   │     │   backpressure   │ │                        │
+│ │   backpressure   │     │                  │ │     │                  │
+│ └──────────────────┘     └──────────────────┘ │                        │
+│           ▲                        │          │     │                  │
+└───────────┼────────────────────────┼──────────┘                        │
+            │                        │                │                  ▼
+            │                        │                    ┌─────────────────────────────┐
+            │                        │                │   │     PeerAddress Service     │
+            │                        │                    │           req: ()           │
+            │                        │                │   │       rsp: SocketAddr       │
+            └────────────────────────┼────────────────────│                             │
+                                     │                │   │returns the next addr to try │
+                                     │                    │    to connect to or asks    │
+                                     │                │   │existing peers for more addrs│
+                                     │                    └─────────────────────────────┘
+                                     │                │                  │
+                                     │                                   │
+                                     │                │                  │
+                                     │                                   ▼
+                                     │                │   ┌─────────────────────────────┐
+                                     │                    │         AddressBook         │
+                                     │                └ ─▶│                             │
+                                     │                    │   per-addr last-seen info   │
+                                     │                    └─────────────────────────────┘
+                                     │                                   ▲
+                                     │                                   │
+                                     │                                   │
+                                     │                                   │
+                                     │                    ┌─────────────────────────────┐
+                                     │                    │    AddressGossip Service    │
+                                     │                    │           req: ()           │
+                                     └───────────────────▶│     rsp: Vec<MetaAddr>      │
+                                                          │                             │
+                                                          │    truncates timestamps     │
+                                                          └─────────────────────────────┘
