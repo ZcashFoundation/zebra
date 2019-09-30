@@ -77,9 +77,19 @@ impl TracingEndpoint {
         });
 
         // XXX load tracing addr from config
-        let addr = "127.0.0.1:3000".parse().unwrap();
+        let addr = "127.0.0.1:3000"
+            .parse()
+            .expect("Hardcoded address should be parseable");
 
-        let server = Server::bind(&addr).serve(service);
+        let server = match Server::try_bind(&addr) {
+            Ok(s) => s,
+            Err(e) => {
+                error!("Could not open tracing endpoint listener");
+                error!("Error: {}", e);
+                return Ok(());
+            }
+        }
+        .serve(service);
 
         tokio_component.rt.spawn(async {
             if let Err(e) = server.await {
