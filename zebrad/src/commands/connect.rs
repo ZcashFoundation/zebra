@@ -56,10 +56,16 @@ impl ConnectCmd {
 
         use zebra_chain::types::BlockHeight;
         use zebra_network::{
-            constants,
+            constants, peer,
             protocol::{codec::*, message::*, types::*},
             Network,
         };
+
+        info!("tower stub");
+
+        use tower::Service;
+        let mut pc = peer::connector::PeerConnector {};
+        let (_, _) = pc.call(self.addr.clone()).await?;
 
         info!("connecting");
 

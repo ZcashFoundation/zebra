@@ -18,3 +18,6 @@ pub mod protocol;
 pub mod meta_addr;
 // XXX make this private once connect is removed
 pub mod constants;
+
+// XXX make this private once peerset exists
+pub mod peer;

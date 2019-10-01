@@ -24,6 +24,10 @@ tracing-log = { git = "https://github.com/tokio-rs/tracing" }
 hyper = { git = "https://github.com/hyperium/hyper" }
 futures-core-preview = { version = "=0.3.0-alpha.18" }
 futures-util-preview = { version = "=0.3.0-alpha.18" }
+# This revision specification keeps us just behind the change from pin-project
+# 0.4.0-alpha.11 to ^0.4, which we can't use until tokio, hyper, etc. also all change, because
+# Cargo insists on unifying dependencies in the same semver range.
+tower = { git = "https://github.com/tower-rs/tower", rev = "d5b36b54a50cceac7efb6292480424c8dd03f7ec" }
 
 zebra-chain = { path = "../zebra-chain" }
 zebra-network = { path = "../zebra-network" }
