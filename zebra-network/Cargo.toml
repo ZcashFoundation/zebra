@@ -20,5 +20,6 @@ tokio = "=0.2.0-alpha.5"
 tower = { git = "https://github.com/tower-rs/tower", rev = "d5b36b54a50cceac7efb6292480424c8dd03f7ec" }
 tracing = { git = "https://github.com/tokio-rs/tracing" }
 tracing-futures = { git = "https://github.com/tokio-rs/tracing", features = ["tokio-alpha"], default-features = false }
+futures-preview = "=0.3.0-alpha.18"
 
 zebra-chain = { path = "../zebra-chain" }

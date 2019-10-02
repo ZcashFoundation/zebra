@@ -9,12 +9,12 @@ use tokio::prelude::*;
 use tower::Service;
 
 use super::{client::PeerClient, server::PeerServer};
-
 /// A [`Service`] that connects to a remote peer and constructs a client/server pair.
 pub struct PeerConnector {
     // Eventually this will need to have state, but for now just take an address to conncet to.
 }
 
+/*
 impl Service<SocketAddr> for PeerConnector {
     type Response = (PeerClient, PeerServer);
     type Error = Error;
@@ -36,3 +36,4 @@ impl Service<SocketAddr> for PeerConnector {
         fut.boxed()
     }
 }
+*/
