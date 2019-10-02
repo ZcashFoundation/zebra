@@ -60,14 +60,12 @@ where
             match self.req {
                 None => select! {
                     req = self.client_rx.next() => {
-                        info!(req = ?req.as_ref().unwrap());
                         self.handle_client_request(req.as_ref().unwrap()).await;
                         self.req = req;
                     }
                     msg = peer_rx_fut => {
                         peer_rx_fut = peer_rx.next().fuse();
                         let msg = msg.unwrap().unwrap();
-                        info!(msg = ?msg);
                         self.handle_message_as_request(&msg).await;
                     }
                 },
