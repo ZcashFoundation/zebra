@@ -63,9 +63,11 @@ impl ConnectCmd {
 
         info!("tower stub");
 
+        /*
         use tower::Service;
         let mut pc = peer::connector::PeerConnector {};
         let (_, _) = pc.call(self.addr.clone()).await?;
+        */
 
         info!("connecting");
 
