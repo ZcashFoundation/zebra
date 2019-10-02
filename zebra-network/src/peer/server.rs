@@ -38,48 +38,65 @@ where
         // that type before merging them.
         enum EventType {
             M(Message),
-            R(Option<Request>),
-            //RS((Request, StreamFuture<Receiver<Request>>)),
+            R(Request),
         }
         use EventType::*; // Allows using M,R directly.
 
         'outer: loop {
-            match self.req {
-                None => {
-                    let mut events = stream::select(
-                        (&mut peer_rx).map(|m| M(m.unwrap())),
-                        stream::once(self.client_rx.next()).map(|r| R(r)),
-                    );
-                    while let Some(ev) = events.next().await {
-                        match ev {
-                            M(m) => self.handle_message_as_request(&m).await,
-                            R(Some(r)) => {
-                                self.handle_client_request(r).await;
-                                continue 'outer;
-                            }
-                            R(None) => {
-                                panic!("client channel is over, close the peer");
-                            }
-                        }
-                    }
-                }
-                Some(_) => {
-                    let mut events = (&mut peer_rx).map(|m| m.unwrap());
-                    while let Some(m) = events.next().await {
+            let events = match self.req {
+                None => stream::select(
+                    (&mut peer_rx).map(|m| M(m.unwrap())),
+                    stream::once(self.client_rx.next()).map(|r| R(r.unwrap())),
+                ),
+                // this doesn't actually work because match arms have incompatible types
+                Some(_) => (&mut peer_rx).map(|m| M(m.unwrap())),
+            };
+            while let Some(ev) = events.next().await {
+                match ev {
+                    M(m) => {
                         if self.handle_message_as_response(&m).await {
+                            self.req = None;
                             continue 'outer;
                         } else {
                             self.handle_message_as_request(&m).await;
                         }
+                    }
+                    R(r) => {
+                        self.handle_client_request(r).await;
+                        self.req = Some(r);
+                        continue 'outer;
                     }
                 }
             }
         }
     }
 
-    async fn handle_client_request(&mut self, r: Request) {}
-    async fn handle_message_as_request(&mut self, m: &Message) {}
+    async fn handle_client_request(&mut self, r: Request) {
+        if self.req.is_some() {
+            panic!("tried to overwrite a pending client request");
+        }
+        // do other processing, e.g., send messages
+        unimplemented!();
+    }
+
+    async fn handle_message_as_request(&mut self, m: &Message) {
+        // construct internal Req and send to svc
+        unimplemented!();
+    }
+
     async fn handle_message_as_response(&mut self, m: &Message) -> bool {
-        false
+        // if we have no pending request, it cannot be a response
+        if self.req.is_none() {
+            return false;
+        }
+
+        // check if message is a response to request
+        match self.req {
+            Some(_) => {
+                // for each Some(Request::Kind), check if the message is a resp
+                // and if so, process it, send a resp through the channel
+                false
+            }
+        }
     }
 }
