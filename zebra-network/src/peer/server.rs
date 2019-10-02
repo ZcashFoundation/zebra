@@ -31,6 +31,37 @@ where
     S::Error: Into<Error>,
 {
     async fn run(mut self, mut peer: Framed<TcpStream, Codec>) {
+        // At a high level, the event loop we want is as follows: we check for
+        // any incoming messages from the remote peer, check if they should be
+        // interpreted as a response to a pending client request, and if not,
+        // interpret them as a request from the remote peer to our node.
+        //
+        // We also need to handle those client requests in the first place. The
+        // client requests are received from the corresponding `PeerClient` over
+        // a bounded channel (with bound 1, to minimize buffering), but there is
+        // no relationship between the stream of client requests and the stream
+        // of peer messages, so we cannot ignore one kind while waiting on the
+        // other. Moreover, we cannot accept a second client request while the
+        // first one is still pending.
+        //
+        // Handling two async streams simultaneously can be done using
+        // stream::select, which interleaves the two input streams in order of
+        // their items' readiness. However, we cannot just interleave the stream
+        // of incoming peer messages and the stream of incoming client requests,
+        // because we cannot accept a second client request while the first is
+        // still pending.
+        //
+        // Instead, we inspect the current request state.
+        //
+        // If there is a pending request, we process only the stream of incoming
+        // peer messages until we see one that could be interpreted as a
+        // response, and then erase the pending request.
+        //
+        // If there is no pending request, we construct a stream containing only
+        // the next client request and use `stream::select` to join it with the
+        // stream of peer messages, then process the combined stream until we
+        // see a request.
+
         let (mut peer_tx, mut peer_rx) = peer.split();
 
         // Streams must have items of the same type, so to handle both messages
