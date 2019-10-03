@@ -25,7 +25,7 @@ impl Handle {
             .lock()
             .expect("error mutex should be unpoisoned")
             .as_ref()
-            .map(|peer_err| *peer_err.clone())
+            .map(|_peer_err| format_err!("fix error handling"))
             .unwrap_or_else(|| format_err!("missing error"))
     }
 }
@@ -127,8 +127,10 @@ where
                 // requests before we can return and complete the future.
                 ServerState::Failed(ref e) => {
                     match self.client_rx.next().await {
-                        Some(req) => {
-                            self.client_tx.send(Err(*e.clone())).await;
+                        Some(_) => {
+                            self.client_tx
+                                .send(Err(format_err!("fix error handling")))
+                                .await;
                             // Continue until we've errored all queued reqs
                             continue;
                         }
@@ -148,7 +150,7 @@ where
         if handle.is_some() {
             return;
         } else {
-            *handle = Some(e.clone());
+            *handle = Some(e);
         }
         std::mem::drop(handle);
 
@@ -162,10 +164,12 @@ where
         self.state = match &self.state {
             ServerState::AwaitingResponse(req) => {
                 self.client_rx.close();
-                self.client_tx.send(Err(e.clone())).await;
-                ServerState::Failed(e)
+                self.client_tx
+                    .send(Err(format_err!("fix error handling")))
+                    .await;
+                ServerState::Failed(format_err!("fix error handling"))
             }
-            _ => ServerState::Failed(e),
+            _ => ServerState::Failed(format_err!("fix error handling")),
         }
     }
 
