@@ -30,7 +30,7 @@ impl Handle {
     }
 }
 
-enum ServerState {
+pub(super) enum ServerState {
     AwaitingRequest,
     AwaitingResponse(Request),
     Failed(Error),
@@ -49,6 +49,7 @@ impl<S> PeerServer<S>
 where
     S: Service<Request, Response = Response, Error = Error>,
 {
+    /// Run this peer server to completion.
     pub async fn run(mut self, mut peer: Framed<TcpStream, Codec>) {
         // At a high level, the event loop we want is as follows: we check for any
         // incoming messages from the remote peer, check if they should be interpreted
@@ -98,7 +99,7 @@ where
                             // We got a peer message but it was malformed.
                             Some(Err(e)) => self.fail_with(e).await,
                             // We got a peer message and it was well-formed.
-                            Some(Ok(msg)) => self.handle_message_as_request(&msg).await,
+                            Some(Ok(msg)) => self.handle_message_as_request(msg).await,
                         }
                     }
                 },
@@ -158,7 +159,7 @@ where
 
         self.client_rx.close();
 
-        self.state = match self.state {
+        self.state = match &self.state {
             ServerState::AwaitingResponse(req) => {
                 self.client_rx.close();
                 self.client_tx.send(Err(e.clone())).await;
@@ -174,7 +175,7 @@ where
         use Request::*;
         use ServerState::*;
         // XXX figure out a good story on moving out of req
-        match (self.state, req) {
+        match (&self.state, req) {
             (Failed(_), _) => panic!("failed service cannot handle requests"),
             (AwaitingResponse(_), _) => panic!("tried to update pending request"),
             (AwaitingRequest, GetPeers) => {
@@ -201,14 +202,14 @@ where
         // each of which contains the conversion logic for that pair.
         use Request::*;
         use ServerState::*;
-        match (self.state, msg) {
+        match (&self.state, msg) {
             (AwaitingResponse(GetPeers), Message::Addr(addrs)) => {
                 self.client_tx.send(Ok(Response::Peers(addrs))).await;
                 self.state = AwaitingRequest;
                 None
             }
             // By default, messages are not responses.
-            _ => Some(msg),
+            (_, msg) => Some(msg),
         }
     }
 
