@@ -11,6 +11,7 @@ use tokio::codec::{Decoder, Encoder};
 use zebra_chain::{
     block::BlockHeader,
     serialization::{ReadZcashExt, WriteZcashExt, ZcashDeserialize, ZcashSerialize},
+    transaction::Transaction,
     types::{BlockHeight, Sha256dChecksum},
 };
 
@@ -485,9 +486,12 @@ impl Codec {
         bail!("unimplemented message type")
     }
 
-    fn read_tx<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
-        trace!("tx");
-        bail!("unimplemented message type")
+    fn read_tx<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
+        Ok(Message::Tx {
+            version: Version(reader.read_u32::<LittleEndian>()?),
+
+            transaction: Transaction::zcash_deserialize(&mut reader)?,
+        })
     }
 
     fn read_mempool<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
