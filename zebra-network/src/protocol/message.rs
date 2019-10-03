@@ -4,7 +4,7 @@ use std::net;
 
 use chrono::{DateTime, Utc};
 
-use zebra_chain::block::Block;
+use zebra_chain::block::{Block, BlockHeader};
 use zebra_chain::{transaction::Transaction, types::BlockHeight};
 
 use crate::meta_addr::MetaAddr;
@@ -149,8 +149,14 @@ pub enum Message {
 
     /// A `headers` message.
     ///
+    /// Returns block headers in response to a getheaders packet.
+    ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#headers)
-    Headers {/* XXX add fields */},
+    // Note that the block headers in this packet include a
+    // transaction count (a var_int, so there can be more than 81
+    // bytes per header) as opposed to the block headers that are
+    // hashed by miners.
+    Headers(Vec<BlockHeader>),
 
     /// A `getheaders` message.
     ///
@@ -158,6 +164,10 @@ pub enum Message {
     GetHeaders {/* XXX add fields */},
 
     /// An `inv` message.
+    ///
+    /// Allows a node to advertise its knowledge of one or more
+    /// objects. It can be received unsolicited, or in reply to
+    /// `getblocks`.
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#inv)
     // XXX the bitcoin reference above suggests this can be 1.8 MB in bitcoin -- maybe
@@ -167,9 +177,9 @@ pub enum Message {
 
     /// A `getdata` message.
     ///
-    /// `getdata` is used in response to `inv`, to retrieve the content of
-    /// a specific object, and is usually sent after receiving an `inv`
-    /// packet, after filtering known elements.
+    /// `getdata` is used in response to `inv`, to retrieve the
+    /// content of a specific object, and is usually sent after
+    /// receiving an `inv` packet, after filtering known elements.
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#getdata)
     GetData(Vec<InventoryHash>),
