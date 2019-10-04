@@ -83,11 +83,11 @@ where
             // XXX construct the Version message from a config
             let version = Message::Version {
                 version: constants::CURRENT_VERSION,
-                services: PeerServices::default(),
+                services: PeerServices::NODE_NETWORK,
                 timestamp: Utc::now(),
                 address_recv: (PeerServices::NODE_NETWORK, addr),
                 address_from: (
-                    PeerServices::default(),
+                    PeerServices::NODE_NETWORK,
                     "127.0.0.1:9000".parse().unwrap(),
                 ),
                 nonce: Nonce::default(),
