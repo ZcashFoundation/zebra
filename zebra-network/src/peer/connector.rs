@@ -124,14 +124,17 @@ where
                 error_slot: slot.clone(),
             };
 
+            let (peer_tx, peer_rx) = stream.split();
+
             let server = PeerServer {
                 state: ServerState::AwaitingRequest,
                 svc: internal_service,
                 client_rx: rx,
                 error_slot: slot,
+                peer_tx,
             };
 
-            tokio::spawn(server.run(stream).instrument(connection_span).boxed());
+            tokio::spawn(server.run(peer_rx).instrument(connection_span).boxed());
 
             Ok(client)
         };

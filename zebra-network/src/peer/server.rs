@@ -42,21 +42,28 @@ pub(super) enum ServerState {
 }
 
 /// The "server" duplex half of a peer connection.
-pub struct PeerServer<S> {
+pub struct PeerServer<S, Tx> {
     pub(super) state: ServerState,
     pub(super) svc: S,
     pub(super) client_rx: mpsc::Receiver<ClientRequest>,
     /// A slot shared between the PeerServer and PeerClient for storing an error.
     pub(super) error_slot: ErrorSlot,
+    //pub(super) peer_rx: Rx,
+    pub(super) peer_tx: Tx,
 }
 
-impl<S> PeerServer<S>
+impl<S, Tx> PeerServer<S, Tx>
 where
     S: Service<Request, Response = Response>,
     //S::Error: Into<Error>,
+    Tx: Sink<Message> + Unpin,
+    Tx::Error: Into<Error>,
 {
     /// Run this peer server to completion.
-    pub async fn run(mut self, mut peer: Framed<TcpStream, Codec>) {
+    pub async fn run<Rx>(mut self, mut peer_rx: Rx)
+    where
+        Rx: Stream<Item = Result<Message, Error>> + Unpin,
+    {
         // At a high level, the event loop we want is as follows: we check for any
         // incoming messages from the remote peer, check if they should be interpreted
         // as a response to a pending client request, and if not, interpret them as a
@@ -76,7 +83,6 @@ where
         //
         // If there is a pending request, we wait only on an incoming peer message, and
         // check whether it can be interpreted as a response to the pending request.
-        let (mut peer_tx, mut peer_rx) = peer.split();
 
         use futures::future::FutureExt;
         use futures::select;
@@ -187,10 +193,12 @@ where
         match (&self.state, req) {
             (Failed, _) => panic!("failed service cannot handle requests"),
             (AwaitingResponse { .. }, _) => panic!("tried to update pending request"),
-            (AwaitingRequest, GetPeers) => {
-                unimplemented!();
-                self.state = AwaitingResponse(GetPeers, tx);
-            }
+            (AwaitingRequest, GetPeers) => match self.peer_tx.send(Message::GetAddr).await {
+                Ok(()) => {
+                    self.state = AwaitingResponse(GetPeers, tx);
+                }
+                Err(e) => self.fail_with(e.into().into()),
+            },
             (AwaitingRequest, PushPeers(addrs)) => {
                 unimplemented!();
                 self.state = AwaitingResponse(PushPeers(addrs), tx);
@@ -244,9 +252,10 @@ where
                 return;
             }
             Message::Ping(nonce) => {
-                // XXX need to rework the peer transport so it's available here.
-                //tx.send(Message::Pong(nonce)).await;
-                unimplemented!();
+                match self.peer_tx.send(Message::Pong(nonce)).await {
+                    Ok(()) => {}
+                    Err(e) => self.fail_with(e.into().into()),
+                }
                 return;
             }
             _ => {}
