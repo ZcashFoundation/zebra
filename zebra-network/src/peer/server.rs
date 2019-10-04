@@ -17,23 +17,27 @@ use crate::protocol::{
     message::Message,
 };
 
-pub(super) struct Handle(Arc<Mutex<Option<Error>>>);
+use super::PeerError;
 
-impl Handle {
-    pub fn get_error(&self) -> Error {
+pub(super) struct ErrorSlot(Arc<Mutex<Option<PeerError>>>);
+
+impl ErrorSlot {
+    pub fn try_get_error(&self) -> Option<PeerError> {
         self.0
             .lock()
             .expect("error mutex should be unpoisoned")
             .as_ref()
-            .map(|_peer_err| format_err!("fix error handling"))
-            .unwrap_or_else(|| format_err!("missing error"))
+            .map(|e| e.clone())
     }
 }
 
 pub(super) enum ServerState {
+    /// Awaiting a client request or a peer message.
     AwaitingRequest,
+    /// Awaiting a peer message we can interpret as a client request.
     AwaitingResponse(Request),
-    Failed(Error),
+    /// A failure has occurred and we are shutting down the server.
+    Failed,
 }
 
 /// The "server" duplex half of a peer connection.
@@ -41,8 +45,9 @@ pub struct PeerServer<S> {
     pub(super) state: ServerState,
     pub(super) svc: S,
     pub(super) client_rx: mpsc::Receiver<Request>,
-    pub(super) client_tx: mpsc::Sender<Result<Response, Error>>,
-    pub(super) handle: Handle,
+    pub(super) client_tx: mpsc::Sender<Result<Response, PeerError>>,
+    /// A slot shared between the PeerServer and PeerClient for storing an error.
+    pub(super) error_slot: ErrorSlot,
 }
 
 impl<S> PeerServer<S>
@@ -97,7 +102,7 @@ where
                             // The peer channel has closed -- no more messages.
                             None => { return; }
                             // We got a peer message but it was malformed.
-                            Some(Err(e)) => self.fail_with(e).await,
+                            Some(Err(e)) => self.fail_with(e.into()).await,
                             // We got a peer message and it was well-formed.
                             Some(Ok(msg)) => self.handle_message_as_request(msg).await,
                         }
@@ -111,32 +116,33 @@ where
                     match msg {
                         // The peer channel has closed -- no more messages.
                         // However, we still need to flush pending client requests.
-                        None => self.fail_with(format_err!("peer closed connection")).await,
+                        None => {
+                            self.fail_with(format_err!("peer closed connection").into())
+                                .await
+                        }
                         // We got a peer message but it was malformed.
-                        Some(Err(e)) => self.fail_with(e).await,
+                        Some(Err(e)) => self.fail_with(e.into()).await,
                         // We got a peer message and it was well-formed.
                         Some(Ok(msg)) => match self.handle_message_as_response(msg).await {
-                            None => {
-                                continue;
-                            }
+                            None => continue,
                             Some(msg) => self.handle_message_as_request(msg).await,
                         },
                     }
                 }
                 // We've failed, but we need to flush all pending client
                 // requests before we can return and complete the future.
-                ServerState::Failed(ref e) => {
+                ServerState::Failed => {
                     match self.client_rx.next().await {
                         Some(_) => {
-                            self.client_tx
-                                .send(Err(format_err!("fix error handling")))
-                                .await;
+                            let e = self
+                                .error_slot
+                                .try_get_error()
+                                .expect("cannot enter failed state without setting error slot");
+                            self.client_tx.send(Err(e)).await;
                             // Continue until we've errored all queued reqs
                             continue;
                         }
-                        None => {
-                            return;
-                        }
+                        None => return,
                     }
                 }
             }
@@ -144,33 +150,33 @@ where
     }
 
     /// Marks the peer as having failed with error `e`.
-    async fn fail_with(&mut self, e: Error) {
-        // Update the shared error handle
-        let mut handle = self.handle.0.lock().expect("mutex should be unpoisoned");
-        if handle.is_some() {
-            return;
+    async fn fail_with(&mut self, e: PeerError) {
+        // Update the shared error slot
+        let mut guard = self
+            .error_slot
+            .0
+            .lock()
+            .expect("mutex should be unpoisoned");
+        if guard.is_some() {
+            panic!("called fail_with on already-failed server state");
         } else {
-            *handle = Some(e);
+            *guard = Some(e);
         }
-        std::mem::drop(handle);
+        // Drop the guard immediately to release the mutex.
+        std::mem::drop(guard);
 
-        // Prevent any further client requests and error the pending request if
-        // it exists. Finally, set ServerState::Failed so that continuing to
-        // drive the future flushes any remaining requests buffered in the
-        // channel before exiting.
-
+        // We want to close the client channel and set ServerState::Failed so
+        // that we can flush any pending client requests. However, we may have
+        // an outstanding client request in ServerState::AwaitingResponse, so
+        // we need to deal with it first if it exists.
         self.client_rx.close();
-
-        self.state = match &self.state {
-            ServerState::AwaitingResponse(req) => {
-                self.client_rx.close();
-                self.client_tx
-                    .send(Err(format_err!("fix error handling")))
-                    .await;
-                ServerState::Failed(format_err!("fix error handling"))
-            }
-            _ => ServerState::Failed(format_err!("fix error handling")),
+        if let ServerState::AwaitingResponse(_) = &self.state {
+            // We know the slot has Some(e) because we just set it above,
+            // and the error slot is never unset.
+            let e = self.error_slot.try_get_error().unwrap();
+            self.client_tx.send(Err(e)).await;
         }
+        self.state = ServerState::Failed;
     }
 
     /// Handle an incoming client request, possibly generating outgoing messages to the
@@ -178,9 +184,9 @@ where
     async fn handle_client_request(&mut self, req: Request) {
         use Request::*;
         use ServerState::*;
-        // XXX figure out a good story on moving out of req
+        // XXX figure out a good story on moving out of req ?
         match (&self.state, req) {
-            (Failed(_), _) => panic!("failed service cannot handle requests"),
+            (Failed, _) => panic!("failed service cannot handle requests"),
             (AwaitingResponse(_), _) => panic!("tried to update pending request"),
             (AwaitingRequest, GetPeers) => {
                 unimplemented!();
@@ -221,12 +227,12 @@ where
         // These messages are transport-related, handle them separately:
         match msg {
             Message::Version { .. } => {
-                self.fail_with(format_err!("got version message after handshake"))
+                self.fail_with(format_err!("got version message after handshake").into())
                     .await;
                 return;
             }
             Message::Verack { .. } => {
-                self.fail_with(format_err!("got verack message after handshake"))
+                self.fail_with(format_err!("got verack message after handshake").into())
                     .await;
                 return;
             }
@@ -261,7 +267,7 @@ where
         use tower::ServiceExt;
         self.svc.ready().await;
         match self.svc.call(req).await {
-            Err(e) => self.fail_with(e).await,
+            Err(e) => self.fail_with(e.into()).await,
             Ok(Response::Ok) => { /* generic success, do nothing */ }
             Ok(Response::Peers(addrs)) => {
                 let msg = Message::Addr(addrs);
