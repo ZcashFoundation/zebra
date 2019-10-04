@@ -99,15 +99,19 @@ where
                     req = self.client_rx.next() => {
                         match req {
                             Some(req) => self.handle_client_request(req).await,
-                            // The client channel has closed -- no more messages.
-                            None => { return; }
+                            None => {
+                                trace!("client_rx closed, shutting down");
+                                return;
+                            }
                         }
                     }
                     msg = peer_rx_fut => {
                         peer_rx_fut = peer_rx.next().fuse();
                         match msg {
-                            // The peer channel has closed -- no more messages.
-                            None => { return; }
+                            None => {
+                                trace!("peer stream closed, shutting down");
+                                return;
+                            }
                             // We got a peer message but it was malformed.
                             //Some(Err(e)) => self.fail_with(e.into()),
                             // XXX remove this when we parse all message types
@@ -163,6 +167,7 @@ where
 
     /// Marks the peer as having failed with error `e`.
     fn fail_with(&mut self, e: PeerError) {
+        trace!(%e, "failing peer service with error");
         // Update the shared error slot
         let mut guard = self
             .error_slot
@@ -194,6 +199,7 @@ where
     /// Handle an incoming client request, possibly generating outgoing messages to the
     /// remote peer.
     async fn handle_client_request(&mut self, msg: ClientRequest) {
+        trace!(?msg);
         use Request::*;
         use ServerState::*;
         // XXX figure out a good story on moving out of req ?
@@ -221,6 +227,7 @@ where
     /// contents to responses without additional copies.  If the message is not
     /// interpretable as a response, we return ownership to the caller.
     fn handle_message_as_response(&mut self, msg: Message) -> Option<Message> {
+        trace!(?msg);
         // This function is where we statefully interpret Bitcoin/Zcash messages
         // into responses to messages in the internal request/response protocol.
         // This conversion is done by a sequence of (request, message) match arms,
@@ -249,6 +256,7 @@ where
     }
 
     async fn handle_message_as_request(&mut self, msg: Message) {
+        trace!(?msg);
         // These messages are transport-related, handle them separately:
         match msg {
             Message::Version { .. } => {
@@ -288,6 +296,7 @@ where
     /// fail_with to terminate the entire peer connection, shrinking the number
     /// of connected peers.
     async fn drive_peer_request(&mut self, req: Request) {
+        trace!(?req);
         use tower::ServiceExt;
         // XXX Drop the errors on the floor for now so that
         // we can ignore error type alignment

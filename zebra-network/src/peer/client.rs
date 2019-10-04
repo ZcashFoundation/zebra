@@ -27,6 +27,7 @@ pub struct PeerClient {
 /// included is because `PeerClient::call` returns a future that may be moved
 /// around before it resolves, so the future must have ownership of the channel
 /// on which it receives the response.
+#[derive(Debug)]
 pub(super) struct ClientRequest(
     pub(super) Request,
     pub(super) oneshot::Sender<Result<Response, PeerError>>,
