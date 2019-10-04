@@ -88,7 +88,9 @@ impl ConnectCmd {
         let rsp = client.call(Request::GetPeers).await?;
         info!(?rsp);
 
-        info!("connecting");
+        loop {
+            // empty loop ensures we don't exit the application
+        }
 
         Ok(())
     }
