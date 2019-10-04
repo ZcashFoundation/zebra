@@ -57,17 +57,22 @@ impl ConnectCmd {
         use zebra_chain::types::BlockHeight;
         use zebra_network::{
             constants, peer,
-            protocol::{codec::*, internal::Response, message::*, types::*},
+            protocol::{
+                codec::*,
+                internal::{Request, Response},
+                message::*,
+                types::*,
+            },
             Network,
         };
 
         info!("tower stub");
 
-        use tower::{buffer::Buffer, service_fn, Service};
+        use tower::{buffer::Buffer, service_fn, Service, ServiceExt};
 
         let node = Buffer::new(
             service_fn(|req| {
-                async {
+                async move {
                     info!(?req);
                     Ok::<Response, failure::Error>(Response::Ok)
                 }
@@ -76,7 +81,12 @@ impl ConnectCmd {
         );
 
         let mut pc = peer::connector::PeerConnector::new(Network::Mainnet, node);
-        let client = pc.call(self.addr.clone()).await?;
+        // no need to call ready because pc is always ready
+        let mut client = pc.call(self.addr.clone()).await?;
+
+        client.ready().await?;
+        let rsp = client.call(Request::GetPeers).await?;
+        info!(?rsp);
 
         info!("connecting");
 
