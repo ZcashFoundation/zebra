@@ -17,7 +17,7 @@ use zebra_chain::{
 
 use crate::{constants, Network};
 
-use super::{message::Message, types::*};
+use super::{inv::InventoryHash, message::Message, types::*};
 
 /// The length of a Bitcoin message header.
 const HEADER_LEN: usize = 24usize;
@@ -452,9 +452,10 @@ impl Codec {
         bail!("unimplemented message type")
     }
 
-    fn read_inv<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
-        use super::inv::InventoryHash;
-
+    fn _read_generic_inventory_hash_vector<R: Read>(
+        &self,
+        mut reader: R,
+    ) -> Result<Vec<InventoryHash>, Error> {
         let count = reader.read_compactsize()? as usize;
         // Preallocate a buffer, performing a single allocation in the honest
         // case. Although the size of the recieved data buffer is bounded by the
@@ -473,17 +474,22 @@ impl Codec {
             hashes.push(InventoryHash::zcash_deserialize(&mut reader)?);
         }
 
+        return Ok(hashes);
+    }
+
+    fn read_inv<R: Read>(&self, reader: R) -> Result<Message, Error> {
+        let hashes = self._read_generic_inventory_hash_vector(reader)?;
         Ok(Message::Inv(hashes))
     }
 
-    fn read_getdata<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
-        trace!("getdata");
-        bail!("unimplemented message type")
+    fn read_getdata<R: Read>(&self, reader: R) -> Result<Message, Error> {
+        let hashes = self._read_generic_inventory_hash_vector(reader)?;
+        Ok(Message::GetData(hashes))
     }
 
-    fn read_notfound<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
-        trace!("notfound");
-        bail!("unimplemented message type")
+    fn read_notfound<R: Read>(&self, reader: R) -> Result<Message, Error> {
+        let hashes = self._read_generic_inventory_hash_vector(reader)?;
+        Ok(Message::GetData(hashes))
     }
 
     fn read_tx<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
