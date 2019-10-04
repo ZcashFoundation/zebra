@@ -9,7 +9,7 @@ use failure::Error;
 use tokio::codec::{Decoder, Encoder};
 
 use zebra_chain::{
-    block::BlockHeader,
+    block::{BlockHeader, BlockHeaderHash},
     serialization::{ReadZcashExt, WriteZcashExt, ZcashDeserialize, ZcashSerialize},
     transaction::Transaction,
     types::{BlockHeight, Sha256dChecksum},
@@ -417,9 +417,24 @@ impl Codec {
         bail!("unimplemented message type")
     }
 
-    fn read_getblocks<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
-        trace!("getblocks");
-        bail!("unimplemented message type")
+    fn read_getblocks<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
+        let version = Version(reader.read_u32::<LittleEndian>()?);
+
+        let count = reader.read_compactsize()? as usize;
+        let max_count = self.builder.max_len / 32;
+        let mut block_locator_hashes = Vec::with_capacity(std::cmp::min(count, max_count));
+
+        for _ in 0..count {
+            block_locator_hashes.push(BlockHeaderHash(reader.read_32_bytes()?));
+        }
+
+        let hash_stop = BlockHeaderHash(reader.read_32_bytes()?);
+
+        Ok(Message::GetBlocks {
+            version,
+            block_locator_hashes,
+            hash_stop,
+        })
     }
 
     /// Deserialize a `headers` message.
@@ -458,7 +473,7 @@ impl Codec {
     ) -> Result<Vec<InventoryHash>, Error> {
         let count = reader.read_compactsize()? as usize;
         // Preallocate a buffer, performing a single allocation in the honest
-        // case. Although the size of the recieved data buffer is bounded by the
+        // case. Although the size of the received data buffer is bounded by the
         // codec's max_len field, it's still possible for someone to send a
         // short message with a large count field, so if we naively trust
         // the count field we could be tricked into preallocating a large

@@ -4,7 +4,7 @@ use std::net;
 
 use chrono::{DateTime, Utc};
 
-use zebra_chain::block::{Block, BlockHeader};
+use zebra_chain::block::{Block, BlockHeader, BlockHeaderHash};
 use zebra_chain::{transaction::Transaction, types::BlockHeight};
 
 use crate::meta_addr::MetaAddr;
@@ -144,8 +144,36 @@ pub enum Message {
 
     /// A `getblocks` message.
     ///
+    /// Requests the list of blocks starting right after the last
+    /// known hash in `block_locator_hashes`, up to `hash_stop` or 500
+    /// blocks, whichever comes first.
+    ///
+    /// You can send in fewer known hashes down to a minimum of just
+    /// one hash. However, the purpose of the block locator object is
+    /// to detect a wrong branch in the caller's main chain. If the
+    /// peer detects that you are off the main chain, it will send in
+    /// block hashes which are earlier than your last known block. So
+    /// if you just send in your last known hash and it is off the
+    /// main chain, the peer starts over at block #1.
+    ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#getblocks)
-    GetBlocks {/* XXX add fields */},
+    // The locator hashes are processed by a node in the order as they
+    // appear in the message. If a block hash is found in the node's
+    // main chain, the list of its children is returned back via the
+    // inv message and the remaining locators are ignored, no matter
+    // if the requested limit was reached, or not.
+    GetBlocks {
+        /// The protocol version.
+        version: Version,
+
+        /// Block locators, from newest back to genesis block.
+        block_locator_hashes: Vec<BlockHeaderHash>,
+
+        /// `BlockHeaderHash` of the last desired block.
+        ///
+        /// Set to zero to get as many blocks as possible (500).
+        hash_stop: BlockHeaderHash,
+    },
 
     /// A `headers` message.
     ///
