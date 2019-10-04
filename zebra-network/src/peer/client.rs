@@ -4,7 +4,10 @@ use std::{
 };
 
 use failure::Error;
-use futures::{channel::mpsc, future, ready};
+use futures::{
+    channel::{mpsc, oneshot},
+    future, ready,
+};
 use tokio::prelude::*;
 use tower::Service;
 
@@ -14,10 +17,19 @@ use super::{server::ErrorSlot, PeerError};
 
 /// The "client" duplex half of a peer connection.
 pub struct PeerClient {
-    pub(super) server_rx: mpsc::Receiver<Result<Response, PeerError>>,
-    pub(super) server_tx: mpsc::Sender<Request>,
+    pub(super) server_tx: mpsc::Sender<ClientRequest>,
     pub(super) error_slot: ErrorSlot,
 }
+
+/// A message from the `PeerClient` to the `PeerServer`, containing both a
+/// request and a return message channel. The reason the return channel is
+/// included is because `PeerClient::call` returns a future that may be moved
+/// around before it resolves, so the future must have ownership of the channel
+/// on which it receives the response.
+pub(super) struct ClientRequest(
+    pub(super) Request,
+    pub(super) oneshot::Sender<Result<Response, PeerError>>,
+);
 
 impl Service<Request> for PeerClient {
     type Response = Response;
@@ -36,9 +48,9 @@ impl Service<Request> for PeerClient {
     }
 
     fn call(&mut self, req: Request) -> Self::Future {
-        unimplemented!();
-        /*
-        match self.server_tx.try_send(req) {
+        use futures::future::{FutureExt, TryFutureExt};
+        let (tx, rx) = oneshot::channel();
+        match self.server_tx.try_send(ClientRequest(req, tx)) {
             Err(e) => {
                 if e.is_disconnected() {
                     future::ready(Err(self
@@ -52,16 +64,15 @@ impl Service<Request> for PeerClient {
                     panic!("called call without poll_ready");
                 }
             }
-            // This doesn't work, because the returned future's lifetime
-            // needs to be independent of the lifetime of `self`, but
-            // because the returned future references the `rx` channel,
-            // the channel must outlive the returned future.
-            Ok(()) => self
-                .server_rx
-                .next()
-                .map(|opt| opt.unwrap_or_else(|| Err(format_err!("server disconnected"))))
+            // need a bit of yoga to get result types to align,
+            // because the oneshot future can error
+            Ok(()) => rx
+                .map(|val| match val {
+                    Ok(Ok(rsp)) => Ok(rsp),
+                    Ok(Err(e)) => Err(e),
+                    Err(_) => Err(format_err!("oneshot died").into()),
+                })
                 .boxed(),
         }
-        */
     }
 }
