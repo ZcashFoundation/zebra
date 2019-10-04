@@ -188,8 +188,31 @@ pub enum Message {
 
     /// A `getheaders` message.
     ///
+    /// Requests a series of block headers starting right after the
+    /// last known hash in `block_locator_hashes`, up to `hash_stop`
+    /// or 2000 blocks, whichever comes first.
+    ///
+    /// You can send in fewer known hashes down to a minimum of just
+    /// one hash. However, the purpose of the block locator object is
+    /// to detect a wrong branch in the caller's main chain. If the
+    /// peer detects that you are off the main chain, it will send in
+    /// block hashes which are earlier than your last known block. So
+    /// if you just send in your last known hash and it is off the
+    /// main chain, the peer starts over at block #1.
+    ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#getheaders)
-    GetHeaders {/* XXX add fields */},
+    GetHeaders {
+        /// The protocol version.
+        version: Version,
+
+        /// Block locators, from newest back to genesis block.
+        block_locator_hashes: Vec<BlockHeaderHash>,
+
+        /// `BlockHeaderHash` of the last desired block header.
+        ///
+        /// Set to zero to get as many block headers as possible (2000).
+        hash_stop: BlockHeaderHash,
+    },
 
     /// An `inv` message.
     ///
