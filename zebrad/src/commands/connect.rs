@@ -90,57 +90,6 @@ impl ConnectCmd {
 
         info!("connecting");
 
-        /*
-
-        let mut stream = Framed::new(
-            TcpStream::connect(self.addr).await?,
-            Codec::builder().for_network(Network::Mainnet).finish(),
-        );
-
-        let version = Message::Version {
-            version: constants::CURRENT_VERSION,
-            services: PeerServices::NODE_NETWORK,
-            timestamp: Utc::now(),
-            address_recv: (PeerServices::NODE_NETWORK, self.addr),
-            // We just make something up because at this stage the `connect` command
-            // doesn't run a server or anything -- will the zcashd respond on the
-            // same tcp connection or try to open one to the bogus address below?
-            address_from: (
-                PeerServices::NODE_NETWORK,
-                "127.0.0.1:9000".parse().unwrap(),
-            ),
-            nonce: Nonce(1),
-            user_agent: "Zebra Connect".to_owned(),
-            start_height: BlockHeight(0),
-            relay: false,
-        };
-
-        info!(version = ?version);
-
-        stream.send(version).await?;
-
-        let resp_version: Message = stream.next().await.expect("expected data")?;
-
-        info!(resp_version = ?resp_version);
-
-        stream.send(Message::Verack).await?;
-
-        let resp_verack = stream.next().await.expect("expected data")?;
-        info!(resp_verack = ?resp_verack);
-
-        while let Some(maybe_msg) = stream.next().await {
-            match maybe_msg {
-                Ok(msg) => match msg {
-                    Message::Ping(nonce) => {
-                        stream.send(Message::Pong(nonce)).await?;
-                    }
-                    _ => warn!("Unknown message"),
-                },
-                Err(e) => error!("{}", e),
-            };
-        }
-        */
-
         Ok(())
     }
 }
