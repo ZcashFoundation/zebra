@@ -36,8 +36,9 @@ pub struct PeerConnector<S> {
 
 impl<S> PeerConnector<S>
 where
-    S: Service<Request, Response = Response, Error = Error> + Clone + Send + 'static,
+    S: Service<Request, Response = Response> + Clone + Send + 'static,
     S::Future: Send,
+    //S::Error: Into<Error>,
 {
     /// XXX replace with a builder
     pub fn new(network: Network, internal_service: S) -> Self {
@@ -50,8 +51,9 @@ where
 
 impl<S> Service<SocketAddr> for PeerConnector<S>
 where
-    S: Service<Request, Response = Response, Error = Error> + Clone + Send + 'static,
+    S: Service<Request, Response = Response> + Clone + Send + 'static,
     S::Future: Send,
+    //S::Error: Into<Error>,
 {
     type Response = PeerClient;
     type Error = Error;

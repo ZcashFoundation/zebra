@@ -52,7 +52,8 @@ pub struct PeerServer<S> {
 
 impl<S> PeerServer<S>
 where
-    S: Service<Request, Response = Response, Error = Error>,
+    S: Service<Request, Response = Response>,
+    //S::Error: Into<Error>,
 {
     /// Run this peer server to completion.
     pub async fn run(mut self, mut peer: Framed<TcpStream, Codec>) {
@@ -271,12 +272,14 @@ where
     /// of connected peers.
     async fn drive_peer_request(&mut self, req: Request) {
         use tower::ServiceExt;
+        // XXX Drop the errors on the floor for now so that
+        // we can ignore error type alignment
         match self.svc.ready().await {
-            Err(e) => self.fail_with(e.into()),
+            Err(_) => self.fail_with(format_err!("svc err").into()),
             Ok(()) => {}
         }
         match self.svc.call(req).await {
-            Err(e) => self.fail_with(e.into()),
+            Err(_) => self.fail_with(format_err!("svc err").into()),
             Ok(Response::Ok) => { /* generic success, do nothing */ }
             Ok(Response::Peers(addrs)) => {
                 let msg = Message::Addr(addrs);
