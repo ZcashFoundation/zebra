@@ -98,7 +98,6 @@ impl Encoder for Codec {
     type Item = Message;
     type Error = Error;
 
-    #[instrument(skip(src))]
     fn encode(&mut self, item: Self::Item, dst: &mut BytesMut) -> Result<(), Self::Error> {
         // XXX(HACK): this is inefficient and does an extra allocation.
         // instead, we should have a size estimator for the message, reserve
@@ -136,7 +135,7 @@ impl Encoder for Codec {
             FilterClear { .. } => b"filterclear\0",
             MerkleBlock { .. } => b"merkleblock\0",
         };
-        trace!(?command, len = body.len());
+        trace!(?item, len = body.len());
 
         // XXX this should write directly into the buffer,
         // but leave it for now until we fix the issue above.
@@ -237,7 +236,6 @@ impl Decoder for Codec {
     type Item = Message;
     type Error = Error;
 
-    #[instrument(skip(src))]
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         match self.state {
             DecodeState::Head => {
@@ -329,7 +327,7 @@ impl Decoder for Codec {
                 // We need Ok(Some(msg)) to signal that we're done decoding.
                 // This is also convenient for tracing the parse result.
                 .map(|msg| {
-                    trace!(?msg);
+                    trace!("finished message decoding");
                     Some(msg)
                 })
             }
