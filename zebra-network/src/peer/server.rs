@@ -109,7 +109,11 @@ where
                             // The peer channel has closed -- no more messages.
                             None => { return; }
                             // We got a peer message but it was malformed.
-                            Some(Err(e)) => self.fail_with(e.into()),
+                            //Some(Err(e)) => self.fail_with(e.into()),
+                            // XXX remove this when we parse all message types
+                            Some(Err(e)) => {
+                                error!(%e);
+                            }
                             // We got a peer message and it was well-formed.
                             Some(Ok(msg)) => self.handle_message_as_request(msg).await,
                         }
@@ -125,7 +129,11 @@ where
                         // However, we still need to flush pending client requests.
                         None => self.fail_with(format_err!("peer closed connection").into()),
                         // We got a peer message but it was malformed.
-                        Some(Err(e)) => self.fail_with(e.into()),
+                        //Some(Err(e)) => self.fail_with(e.into()),
+                        // XXX remove this when we parse all message types
+                        Some(Err(e)) => {
+                            error!(%e);
+                        }
                         // We got a peer message and it was well-formed.
                         Some(Ok(msg)) => match self.handle_message_as_response(msg) {
                             None => continue,
