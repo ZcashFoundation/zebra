@@ -17,6 +17,7 @@ use super::{server::ErrorSlot, PeerError};
 
 /// The "client" duplex half of a peer connection.
 pub struct PeerClient {
+    pub(super) span: tracing::Span,
     pub(super) server_tx: mpsc::Sender<ClientRequest>,
     pub(super) error_slot: ErrorSlot,
 }
@@ -49,6 +50,7 @@ impl Service<Request> for PeerClient {
 
     fn call(&mut self, req: Request) -> Self::Future {
         use futures::future::{FutureExt, TryFutureExt};
+        use tracing_futures::Instrument;
         let (tx, rx) = oneshot::channel();
         match self.server_tx.try_send(ClientRequest(req, tx)) {
             Err(e) => {
@@ -57,6 +59,7 @@ impl Service<Request> for PeerClient {
                         .error_slot
                         .try_get_error()
                         .expect("failed PeerServers must set their error slot")))
+                    .instrument(self.span.clone())
                     .boxed()
                 } else {
                     // sending fails when there's not enough
@@ -72,6 +75,7 @@ impl Service<Request> for PeerClient {
                     Ok(Err(e)) => Err(e),
                     Err(_) => Err(format_err!("oneshot died").into()),
                 })
+                .instrument(self.span.clone())
                 .boxed(),
         }
     }

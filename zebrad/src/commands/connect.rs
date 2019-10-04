@@ -57,19 +57,30 @@ impl ConnectCmd {
         use zebra_chain::types::BlockHeight;
         use zebra_network::{
             constants, peer,
-            protocol::{codec::*, message::*, types::*},
+            protocol::{codec::*, internal::Response, message::*, types::*},
             Network,
         };
 
         info!("tower stub");
 
-        /*
-        use tower::Service;
-        let mut pc = peer::connector::PeerConnector {};
-        let (_, _) = pc.call(self.addr.clone()).await?;
-        */
+        use tower::{buffer::Buffer, service_fn, Service};
+
+        let node = Buffer::new(
+            service_fn(|req| {
+                async {
+                    info!(?req);
+                    Ok::<Response, failure::Error>(Response::Ok)
+                }
+            }),
+            1,
+        );
+
+        let mut pc = peer::connector::PeerConnector::new(Network::Mainnet, node);
+        let client = pc.call(self.addr.clone()).await?;
 
         info!("connecting");
+
+        /*
 
         let mut stream = Framed::new(
             TcpStream::connect(self.addr).await?,
@@ -118,6 +129,7 @@ impl ConnectCmd {
                 Err(e) => error!("{}", e),
             };
         }
+        */
 
         Ok(())
     }

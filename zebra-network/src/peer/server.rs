@@ -19,6 +19,7 @@ use crate::protocol::{
 
 use super::{client::ClientRequest, PeerError};
 
+#[derive(Default, Clone)]
 pub(super) struct ErrorSlot(Arc<Mutex<Option<PeerError>>>);
 
 impl ErrorSlot {

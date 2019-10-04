@@ -4,19 +4,56 @@ use std::{
     task::{Context, Poll},
 };
 
+use chrono::Utc;
 use failure::Error;
-use tokio::prelude::*;
+use futures::{
+    channel::{mpsc, oneshot},
+    future, ready,
+};
+use tokio::{codec::Framed, net::TcpStream, prelude::*};
 use tower::Service;
+use tracing::{span, Level};
+use tracing_futures::Instrument;
 
-use super::{client::PeerClient, server::PeerServer};
+use zebra_chain::types::BlockHeight;
+
+use crate::{
+    constants,
+    protocol::{codec::*, internal::*, message::*, types::*},
+    Network,
+};
+
+use super::{
+    client::PeerClient,
+    server::{ErrorSlot, PeerServer, ServerState},
+};
+
 /// A [`Service`] that connects to a remote peer and constructs a client/server pair.
-pub struct PeerConnector {
-    // Eventually this will need to have state, but for now just take an address to conncet to.
+pub struct PeerConnector<S> {
+    network: Network,
+    internal_service: S,
 }
 
-/*
-impl Service<SocketAddr> for PeerConnector {
-    type Response = (PeerClient, PeerServer);
+impl<S> PeerConnector<S>
+where
+    S: Service<Request, Response = Response, Error = Error> + Clone + Send + 'static,
+    S::Future: Send,
+{
+    /// XXX replace with a builder
+    pub fn new(network: Network, internal_service: S) -> Self {
+        PeerConnector {
+            network,
+            internal_service,
+        }
+    }
+}
+
+impl<S> Service<SocketAddr> for PeerConnector<S>
+where
+    S: Service<Request, Response = Response, Error = Error> + Clone + Send + 'static,
+    S::Future: Send,
+{
+    type Response = PeerClient;
     type Error = Error;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
 
@@ -27,13 +64,75 @@ impl Service<SocketAddr> for PeerConnector {
     }
 
     fn call(&mut self, addr: SocketAddr) -> Self::Future {
+        let connector_span = span!(Level::INFO, "connector", addr = ?addr);
+        let connection_span = span!(Level::INFO, "peer", addr = ?addr);
+
+        // Clone these upfront, so they can be moved into the future.
+        let network = self.network.clone();
+        let internal_service = self.internal_service.clone();
+
         let fut = async move {
-            warn!(addr = ?addr);
+            info!("beginning connection");
+            let mut stream = Framed::new(
+                TcpStream::connect(addr).await?,
+                Codec::builder().for_network(network).finish(),
+            );
 
-            Ok((PeerClient {}, PeerServer {}))
+            // XXX construct the Version message from a config
+            let version = Message::Version {
+                version: constants::CURRENT_VERSION,
+                services: PeerServices::NODE_NETWORK,
+                timestamp: Utc::now(),
+                address_recv: (PeerServices::NODE_NETWORK, addr),
+                address_from: (
+                    PeerServices::NODE_NETWORK,
+                    "127.0.0.1:9000".parse().unwrap(),
+                ),
+                nonce: Nonce::default(),
+                user_agent: "Zebra Peer".to_owned(),
+                start_height: BlockHeight(0),
+                relay: false,
+            };
+
+            stream.send(version).await?;
+
+            let remote_version = stream
+                .next()
+                .await
+                .ok_or_else(|| format_err!("stream closed during handshake"))??;
+
+            stream.send(Message::Verack).await?;
+            let remote_verack = stream
+                .next()
+                .await
+                .ok_or_else(|| format_err!("stream closed during handshake"))??;
+
+            // XXX here is where we would set the version to the minimum of the
+            // two versions, etc. -- actually is it possible to edit the `Codec`
+            // after using it to make a framed adapter?
+
+            // Construct a PeerClient, PeerServer pair
+
+            let (tx, rx) = mpsc::channel(0);
+            let slot = ErrorSlot::default();
+
+            let client = PeerClient {
+                span: connection_span.clone(),
+                server_tx: tx,
+                error_slot: slot.clone(),
+            };
+
+            let server = PeerServer {
+                state: ServerState::AwaitingRequest,
+                svc: internal_service,
+                client_rx: rx,
+                error_slot: slot,
+            };
+
+            tokio::spawn(server.run(stream).instrument(connection_span).boxed());
+
+            Ok(client)
         };
-
-        fut.boxed()
+        fut.instrument(connector_span).boxed()
     }
 }
-*/
