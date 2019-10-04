@@ -270,7 +270,10 @@ where
     /// of connected peers.
     async fn drive_peer_request(&mut self, req: Request) {
         use tower::ServiceExt;
-        self.svc.ready().await;
+        match self.svc.ready().await {
+            Err(e) => self.fail_with(e.into()),
+            Ok(()) => {}
+        }
         match self.svc.call(req).await {
             Err(e) => self.fail_with(e.into()),
             Ok(Response::Ok) => { /* generic success, do nothing */ }
