@@ -21,7 +21,7 @@ tracing-subscriber = { git = "https://github.com/tokio-rs/tracing" }
 tracing-log = { git = "https://github.com/tokio-rs/tracing" }
 # Can't use published alpha because of conflicts tracking pin-project alphas
 #hyper = "=0.13.0-alpha.1"
-hyper = { git = "https://github.com/hyperium/hyper" }
+hyper = { git = "https://github.com/hyperium/hyper", rev = "d40978ce089b44d82eedbe0c16203727a0580ff2" }
 futures-core-preview = { version = "=0.3.0-alpha.18" }
 futures-util-preview = { version = "=0.3.0-alpha.18" }
 # This revision specification keeps us just behind the change from pin-project
