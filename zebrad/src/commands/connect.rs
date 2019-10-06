@@ -56,6 +56,7 @@ impl ConnectCmd {
 
         use zebra_chain::types::BlockHeight;
         use zebra_network::{
+            address_book::AddressBook,
             constants, peer,
             protocol::{
                 codec::*,
@@ -80,7 +81,9 @@ impl ConnectCmd {
             1,
         );
 
-        let mut pc = peer::connector::PeerConnector::new(Network::Mainnet, node);
+        let ab = AddressBook::new();
+
+        let mut pc = peer::connector::PeerConnector::new(Network::Mainnet, node, &ab);
         // no need to call ready because pc is always ready
         let mut client = pc.call(self.addr.clone()).await?;
 

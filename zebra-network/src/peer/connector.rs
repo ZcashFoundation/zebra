@@ -18,6 +18,7 @@ use tracing_futures::Instrument;
 use zebra_chain::types::BlockHeight;
 
 use crate::{
+    address_book::{AddressBook, AddressBookSender},
     constants,
     protocol::{codec::*, internal::*, message::*, types::*},
     Network,
@@ -32,6 +33,7 @@ use super::{
 pub struct PeerConnector<S> {
     network: Network,
     internal_service: S,
+    sender: AddressBookSender,
 }
 
 impl<S> PeerConnector<S>
@@ -41,10 +43,12 @@ where
     //S::Error: Into<Error>,
 {
     /// XXX replace with a builder
-    pub fn new(network: Network, internal_service: S) -> Self {
+    pub fn new(network: Network, internal_service: S, address_book: &AddressBook) -> Self {
+        let sender = address_book.sender_handle();
         PeerConnector {
             network,
             internal_service,
+            sender,
         }
     }
 }
@@ -72,6 +76,7 @@ where
         // Clone these upfront, so they can be moved into the future.
         let network = self.network.clone();
         let internal_service = self.internal_service.clone();
+        let sender = self.sender.clone();
 
         let fut = async move {
             info!("beginning connection");
@@ -134,7 +139,25 @@ where
                 peer_tx,
             };
 
-            tokio::spawn(server.run(peer_rx).instrument(connection_span).boxed());
+            let hooked_peer_rx = peer_rx
+                .then(move |msg| {
+                    let mut sender = sender.clone();
+                    async move {
+                        if let Ok(_) = msg {
+                            use futures::sink::SinkExt;
+                            sender.send((addr, Utc::now())).await;
+                        }
+                        msg
+                    }
+                })
+                .boxed();
+
+            tokio::spawn(
+                server
+                    .run(hooked_peer_rx)
+                    .instrument(connection_span)
+                    .boxed(),
+            );
 
             Ok(client)
         };
