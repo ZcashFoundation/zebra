@@ -26,7 +26,7 @@ impl Runnable for ConnectCmd {
         // Combine the connect future with an infinite wait
         // so that the program has to be explicitly killed and
         // won't die before all tracing messages are written.
-        let fut = futures_util::future::join(
+        let fut = futures::future::join(
             async {
                 match self.connect().await {
                     Ok(()) => {}
@@ -51,64 +51,40 @@ impl Runnable for ConnectCmd {
 
 impl ConnectCmd {
     async fn connect(&self) -> Result<(), failure::Error> {
-        use chrono::Utc;
-        use tokio::{codec::Framed, net::TcpStream, prelude::*};
-
-        use zebra_chain::types::BlockHeight;
         use zebra_network::{
-            constants,
-            protocol::{codec::*, message::*, types::*},
+            peer::connector::PeerConnector,
+            protocol::internal::{Request, Response},
+            timestamp_collector::TimestampCollector,
             Network,
         };
 
-        info!("connecting");
+        info!("begin tower-based peer handling test stub");
 
-        let mut stream = Framed::new(
-            TcpStream::connect(self.addr).await?,
-            Codec::builder().for_network(Network::Mainnet).finish(),
+        use tower::{buffer::Buffer, service_fn, Service, ServiceExt};
+
+        let node = Buffer::new(
+            service_fn(|req| {
+                async move {
+                    info!(?req);
+                    Ok::<Response, failure::Error>(Response::Ok)
+                }
+            }),
+            1,
         );
 
-        let version = Message::Version {
-            version: constants::CURRENT_VERSION,
-            services: PeerServices::NODE_NETWORK,
-            timestamp: Utc::now(),
-            address_recv: (PeerServices::NODE_NETWORK, self.addr),
-            // We just make something up because at this stage the `connect` command
-            // doesn't run a server or anything -- will the zcashd respond on the
-            // same tcp connection or try to open one to the bogus address below?
-            address_from: (
-                PeerServices::NODE_NETWORK,
-                "127.0.0.1:9000".parse().unwrap(),
-            ),
-            nonce: Nonce(1),
-            user_agent: "Zebra Connect".to_owned(),
-            start_height: BlockHeight(0),
-            relay: false,
-        };
+        let collector = TimestampCollector::new();
 
-        info!(version = ?version);
+        let mut pc = PeerConnector::new(Network::Mainnet, node, &collector);
+        // no need to call ready because pc is always ready
+        let mut client = pc.call(self.addr.clone()).await?;
 
-        stream.send(version).await?;
+        client.ready().await?;
+        let rsp = client.call(Request::GetPeers).await?;
+        info!(?rsp);
 
-        let resp_version: Message = stream.next().await.expect("expected data")?;
-
-        info!(resp_version = ?resp_version);
-
-        stream.send(Message::Verack).await?;
-
-        let resp_verack = stream.next().await.expect("expected data")?;
-        info!(resp_verack = ?resp_verack);
-
-        while let Some(maybe_msg) = stream.next().await {
-            match maybe_msg {
-                Ok(msg) => match msg {
-                    Message::Ping(nonce) => {
-                        stream.send(Message::Pong(nonce)).await?;
-                    }
-                    _ => warn!("Unknown message"),
-                },
-                Err(e) => error!("{}", e),
-            };
+        loop {
+            // empty loop ensures we don't exit the application,
+            // and this is throwaway code
         }
 
         Ok(())

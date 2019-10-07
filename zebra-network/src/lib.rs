@@ -14,7 +14,8 @@ pub use network::Network;
 
 pub mod protocol;
 
-// XXX make this private once connect is removed
-pub mod meta_addr;
-// XXX make this private once connect is removed
+// XXX revisit privacy once we finish encapsulation.
 pub mod constants;
+pub mod meta_addr;
+pub mod peer;
+pub mod timestamp_collector;
