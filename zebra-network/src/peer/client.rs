@@ -3,7 +3,6 @@ use std::{
     task::{Context, Poll},
 };
 
-use failure::Error;
 use futures::{
     channel::{mpsc, oneshot},
     future, ready,
@@ -50,7 +49,7 @@ impl Service<Request> for PeerClient {
     }
 
     fn call(&mut self, req: Request) -> Self::Future {
-        use futures::future::{FutureExt, TryFutureExt};
+        use futures::future::FutureExt;
         use tracing_futures::Instrument;
         let (tx, rx) = oneshot::channel();
         match self.server_tx.try_send(ClientRequest(req, tx)) {

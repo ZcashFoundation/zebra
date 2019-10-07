@@ -6,10 +6,7 @@ use std::{
 
 use chrono::Utc;
 use failure::Error;
-use futures::{
-    channel::{mpsc, oneshot},
-    future, ready,
-};
+use futures::channel::mpsc;
 use tokio::{codec::Framed, net::TcpStream, prelude::*};
 use tower::Service;
 use tracing::{span, Level};
@@ -20,7 +17,7 @@ use zebra_chain::types::BlockHeight;
 use crate::{
     constants,
     protocol::{codec::*, internal::*, message::*, types::*},
-    timestamp_collector::{TimestampCollector, PeerTimestamp},
+    timestamp_collector::{PeerTimestamp, TimestampCollector},
     Network,
 };
 
@@ -63,7 +60,7 @@ where
     type Error = Error;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         // XXX when this asks a second service for
         // an address to connect to, it should call inner.ready
         Poll::Ready(Ok(()))
@@ -103,13 +100,13 @@ where
 
             stream.send(version).await?;
 
-            let remote_version = stream
+            let _remote_version = stream
                 .next()
                 .await
                 .ok_or_else(|| format_err!("stream closed during handshake"))??;
 
             stream.send(Message::Verack).await?;
-            let remote_verack = stream
+            let _remote_verack = stream
                 .next()
                 .await
                 .ok_or_else(|| format_err!("stream closed during handshake"))??;

@@ -51,18 +51,9 @@ impl Runnable for ConnectCmd {
 
 impl ConnectCmd {
     async fn connect(&self) -> Result<(), failure::Error> {
-        use chrono::Utc;
-        use tokio::{codec::Framed, net::TcpStream, prelude::*};
-
-        use zebra_chain::types::BlockHeight;
         use zebra_network::{
-            constants, peer,
-            protocol::{
-                codec::*,
-                internal::{Request, Response},
-                message::*,
-                types::*,
-            },
+            peer::connector::PeerConnector,
+            protocol::internal::{Request, Response},
             timestamp_collector::TimestampCollector,
             Network,
         };
@@ -83,7 +74,7 @@ impl ConnectCmd {
 
         let collector = TimestampCollector::new();
 
-        let mut pc = peer::connector::PeerConnector::new(Network::Mainnet, node, &collector);
+        let mut pc = PeerConnector::new(Network::Mainnet, node, &collector);
         // no need to call ready because pc is always ready
         let mut client = pc.call(self.addr.clone()).await?;
 

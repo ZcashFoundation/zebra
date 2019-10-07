@@ -1,18 +1,14 @@
-use std::{
-    net::SocketAddr,
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 
 use failure::Error;
 use futures::{
     channel::{mpsc, oneshot},
-    stream::{self, Stream, StreamExt},
+    stream::Stream,
 };
-use tokio::{codec::Framed, net::TcpStream, prelude::*};
+use tokio::prelude::*;
 use tower::Service;
 
 use crate::protocol::{
-    codec::Codec,
     internal::{Request, Response},
     message::Message,
 };
