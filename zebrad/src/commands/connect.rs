@@ -58,7 +58,7 @@ impl ConnectCmd {
             Network,
         };
 
-        info!("tower stub");
+        info!("begin tower-based peer handling test stub");
 
         use tower::{buffer::Buffer, service_fn, Service, ServiceExt};
 
@@ -83,7 +83,8 @@ impl ConnectCmd {
         info!(?rsp);
 
         loop {
-            // empty loop ensures we don't exit the application
+            // empty loop ensures we don't exit the application,
+            // and this is throwaway code
         }
 
         Ok(())
