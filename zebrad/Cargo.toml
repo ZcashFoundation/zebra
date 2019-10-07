@@ -12,22 +12,16 @@ gumdrop = "0.6"
 lazy_static = "1"
 serde = { version = "1", features = ["serde_derive"] }
 toml = "0.5"
-tokio = "=0.2.0-alpha.5"
+tokio = "=0.2.0-alpha.6"
 # Replace with git to pick up instrument derive changes, revert on release.
 #tracing = "0.1"
 tracing = { git = "https://github.com/tokio-rs/tracing" }
 tracing-futures = { git = "https://github.com/tokio-rs/tracing", features = ["tokio-alpha"], default-features = false }
 tracing-subscriber = { git = "https://github.com/tokio-rs/tracing" }
 tracing-log = { git = "https://github.com/tokio-rs/tracing" }
-# Can't use published alpha because of conflicts tracking pin-project alphas
-#hyper = "=0.13.0-alpha.1"
-hyper = { git = "https://github.com/hyperium/hyper", rev = "d40978ce089b44d82eedbe0c16203727a0580ff2" }
-futures-core-preview = { version = "=0.3.0-alpha.18" }
-futures-util-preview = { version = "=0.3.0-alpha.18" }
-# This revision specification keeps us just behind the change from pin-project
-# 0.4.0-alpha.11 to ^0.4, which we can't use until tokio, hyper, etc. also all change, because
-# Cargo insists on unifying dependencies in the same semver range.
-tower = { git = "https://github.com/tower-rs/tower", rev = "d5b36b54a50cceac7efb6292480424c8dd03f7ec" }
+hyper = { git = "https://github.com/hyperium/hyper"}
+tower = { git = "https://github.com/tower-rs/tower", branch = "v0.3.x" }
+futures-preview = { version = "=0.3.0-alpha.19", features = ["async-await"] }
 
 zebra-chain = { path = "../zebra-chain" }
 zebra-network = { path = "../zebra-network" }

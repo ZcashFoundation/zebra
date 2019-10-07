@@ -26,7 +26,7 @@ impl Runnable for ConnectCmd {
         // Combine the connect future with an infinite wait
         // so that the program has to be explicitly killed and
         // won't die before all tracing messages are written.
-        let fut = futures_util::future::join(
+        let fut = futures::future::join(
             async {
                 match self.connect().await {
                     Ok(()) => {}
