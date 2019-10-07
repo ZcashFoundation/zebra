@@ -54,6 +54,7 @@ impl<S> Service<SocketAddr> for PeerConnector<S>
 where
     S: Service<Request, Response = Response> + Clone + Send + 'static,
     S::Future: Send,
+    S::Error: Send,
     //S::Error: Into<Error>,
 {
     type Response = PeerClient;

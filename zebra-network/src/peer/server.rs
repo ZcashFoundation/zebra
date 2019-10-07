@@ -51,6 +51,7 @@ pub struct PeerServer<S, Tx> {
 impl<S, Tx> PeerServer<S, Tx>
 where
     S: Service<Request, Response = Response>,
+    S::Error: Send,
     //S::Error: Into<Error>,
     Tx: Sink<Message> + Unpin,
     Tx::Error: Into<Error>,
@@ -198,21 +199,36 @@ where
         trace!(?msg);
         use Request::*;
         use ServerState::*;
-        // XXX figure out a good story on moving out of req ?
         let ClientRequest(req, tx) = msg;
-        match (&self.state, req) {
+
+        // Inner match returns Result with the new state or an error.
+        // Outer match updates state or fails.
+        match match (&self.state, req) {
             (Failed, _) => panic!("failed service cannot handle requests"),
             (AwaitingResponse { .. }, _) => panic!("tried to update pending request"),
-            (AwaitingRequest, GetPeers) => match self.peer_tx.send(Message::GetAddr).await {
-                Ok(()) => {
-                    self.state = AwaitingResponse(GetPeers, tx);
-                }
-                Err(e) => self.fail_with(e.into().into()),
-            },
-            (AwaitingRequest, PushPeers(addrs)) => {
-                unimplemented!();
-                self.state = AwaitingResponse(PushPeers(addrs), tx);
-            }
+            (AwaitingRequest, GetPeers) => self
+                .peer_tx
+                .send(Message::GetAddr)
+                .await
+                .map_err(|e| e.into().into())
+                .map(|()| AwaitingResponse(GetPeers, tx)),
+            (AwaitingRequest, PushPeers(addrs)) => self
+                .peer_tx
+                .send(Message::Addr(addrs))
+                .await
+                .map_err(|e| e.into().into())
+                .map(|()| {
+                    // PushPeers does not have a response, so we return OK as
+                    // soon as we send the request. Sending through a oneshot
+                    // can only fail if the rx end is dropped before calling
+                    // send, which we can safely ignore (the request future was
+                    // cancelled).
+                    let _ = tx.send(Ok(Response::Ok));
+                    AwaitingRequest
+                }),
+        } {
+            Ok(new_state) => self.state = new_state,
+            Err(e) => self.fail_with(e),
         }
     }
 
@@ -304,9 +320,9 @@ where
             Err(_) => self.fail_with(format_err!("svc err").into()),
             Ok(Response::Ok) => { /* generic success, do nothing */ }
             Ok(Response::Peers(addrs)) => {
-                let msg = Message::Addr(addrs);
-                // Now send msg into the peer tx sink
-                unimplemented!();
+                if let Err(e) = self.peer_tx.send(Message::Addr(addrs)).await {
+                    self.fail_with(e.into().into());
+                }
             }
         }
     }
