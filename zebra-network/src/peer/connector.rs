@@ -18,9 +18,9 @@ use tracing_futures::Instrument;
 use zebra_chain::types::BlockHeight;
 
 use crate::{
-    address_book::{AddressBook, AddressBookSender},
     constants,
     protocol::{codec::*, internal::*, message::*, types::*},
+    timestamp_collector::{TimestampCollector, TimestampEvent},
     Network,
 };
 
@@ -33,7 +33,7 @@ use super::{
 pub struct PeerConnector<S> {
     network: Network,
     internal_service: S,
-    sender: AddressBookSender,
+    sender: mpsc::Sender<TimestampEvent>,
 }
 
 impl<S> PeerConnector<S>
@@ -43,8 +43,8 @@ where
     //S::Error: Into<Error>,
 {
     /// XXX replace with a builder
-    pub fn new(network: Network, internal_service: S, address_book: &AddressBook) -> Self {
-        let sender = address_book.sender_handle();
+    pub fn new(network: Network, internal_service: S, collector: &TimestampCollector) -> Self {
+        let sender = collector.sender_handle();
         PeerConnector {
             network,
             internal_service,
@@ -145,7 +145,7 @@ where
                     async move {
                         if let Ok(_) = msg {
                             use futures::sink::SinkExt;
-                            sender.send((addr, Utc::now())).await;
+                            let _ = sender.send((addr, Utc::now())).await;
                         }
                         msg
                     }

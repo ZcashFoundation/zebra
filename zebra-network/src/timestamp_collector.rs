@@ -9,30 +9,38 @@ use std::{
 use chrono::{DateTime, Utc};
 use futures::channel::mpsc;
 use tokio::prelude::*;
-use tracing::Level;
-use tracing_futures::Instrument;
+
+/// A type alias for a timestamp event sent to a `TimestampCollector`.
+pub(crate) type TimestampEvent = (SocketAddr, DateTime<Utc>);
 
 /// Maintains a lookup table from peer addresses to last-seen times.
+///
+/// On creation, the `TimestampCollector` spawns a worker task to process new
+/// timestamp events. The resulting `TimestampCollector` can be cloned, and the
+/// worker task and state are shared among all of the clones.
+///
+/// XXX add functionality for querying the timestamp data
 #[derive(Clone, Debug)]
-pub struct AddressBook {
-    data: Arc<Mutex<AddressData>>,
+pub struct TimestampCollector {
+    // We do not expect mutex contention to be a problem, because
+    // the dominant accessor is the collector worker, and it has a long
+    // event buffer to hide latency if other tasks block it temporarily.
+    data: Arc<Mutex<TimestampData>>,
     shutdown: Arc<ShutdownSignal>,
-    worker_tx: AddressBookSender,
+    worker_tx: mpsc::Sender<TimestampEvent>,
 }
 
 #[derive(Default, Debug)]
-struct AddressData {
+struct TimestampData {
     by_addr: HashMap<SocketAddr, DateTime<Utc>>,
     by_time: BTreeMap<DateTime<Utc>, SocketAddr>,
 }
 
-/// A handle for sending data to an AddressBook.
-pub(crate) type AddressBookSender = mpsc::Sender<(SocketAddr, DateTime<Utc>)>;
-
-impl AddressData {
-    fn update(&mut self, addr: SocketAddr, timestamp: DateTime<Utc>) {
+impl TimestampData {
+    fn update(&mut self, event: TimestampEvent) {
         use std::collections::hash_map::Entry;
-        trace!(?addr, ?timestamp, "updating entry in addressdata");
+        let (addr, timestamp) = event;
+        trace!(?addr, ?timestamp);
         match self.by_addr.entry(addr) {
             Entry::Occupied(mut entry) => {
                 let last_timestamp = entry.get();
@@ -50,18 +58,18 @@ impl AddressData {
     }
 }
 
-impl AddressBook {
-    /// Constructs a new `AddressBook`, spawning a worker task to process updates.
-    pub fn new() -> AddressBook {
-        let data = Arc::new(Mutex::new(AddressData::default()));
+impl TimestampCollector {
+    /// Constructs a new `TimestampCollector`, spawning a worker task to process updates.
+    pub fn new() -> TimestampCollector {
+        let data = Arc::new(Mutex::new(TimestampData::default()));
         // We need to make a copy now so we can move data into the async block.
         let data2 = data.clone();
 
-        // Construct and then spawn a worker.
-        let worker_span = span!(Level::TRACE, "AddressBookWorker");
-        const ADDRESS_WORKER_BUFFER_SIZE: usize = 100;
-        let (worker_tx, mut worker_rx) = mpsc::channel(ADDRESS_WORKER_BUFFER_SIZE);
+        const TIMESTAMP_WORKER_BUFFER_SIZE: usize = 100;
+        let (worker_tx, mut worker_rx) = mpsc::channel(TIMESTAMP_WORKER_BUFFER_SIZE);
         let (shutdown_tx, mut shutdown_rx) = mpsc::channel(0);
+
+        // Construct and then spawn a worker.
         let worker = async move {
             use futures::select;
             loop {
@@ -69,11 +77,11 @@ impl AddressBook {
                     _ = shutdown_rx.next() => return,
                     msg = worker_rx.next() => {
                         match msg {
-                            Some((addr, timestamp)) => {
+                            Some(event) => {
                                 data2
                                     .lock()
                                     .expect("mutex should be unpoisoned")
-                                    .update(addr, timestamp)
+                                    .update(event)
                             }
                             None => return,
                         }
@@ -81,16 +89,16 @@ impl AddressBook {
                 }
             }
         };
-        tokio::spawn(worker.instrument(worker_span).boxed());
+        tokio::spawn(worker.boxed());
 
-        AddressBook {
+        TimestampCollector {
             data,
             worker_tx,
             shutdown: Arc::new(ShutdownSignal { tx: shutdown_tx }),
         }
     }
 
-    pub(crate) fn sender_handle(&self) -> AddressBookSender {
+    pub(crate) fn sender_handle(&self) -> mpsc::Sender<TimestampEvent> {
         self.worker_tx.clone()
     }
 }
