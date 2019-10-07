@@ -20,7 +20,7 @@ use zebra_chain::types::BlockHeight;
 use crate::{
     constants,
     protocol::{codec::*, internal::*, message::*, types::*},
-    timestamp_collector::{TimestampCollector, TimestampEvent},
+    timestamp_collector::{TimestampCollector, PeerTimestamp},
     Network,
 };
 
@@ -33,7 +33,7 @@ use super::{
 pub struct PeerConnector<S> {
     network: Network,
     internal_service: S,
-    sender: mpsc::Sender<TimestampEvent>,
+    sender: mpsc::Sender<PeerTimestamp>,
 }
 
 impl<S> PeerConnector<S>

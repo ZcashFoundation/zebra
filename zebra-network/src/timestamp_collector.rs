@@ -11,7 +11,7 @@ use futures::channel::mpsc;
 use tokio::prelude::*;
 
 /// A type alias for a timestamp event sent to a `TimestampCollector`.
-pub(crate) type TimestampEvent = (SocketAddr, DateTime<Utc>);
+pub(crate) type PeerTimestamp = (SocketAddr, DateTime<Utc>);
 
 /// Maintains a lookup table from peer addresses to last-seen times.
 ///
@@ -27,7 +27,7 @@ pub struct TimestampCollector {
     // event buffer to hide latency if other tasks block it temporarily.
     data: Arc<Mutex<TimestampData>>,
     shutdown: Arc<ShutdownSignal>,
-    worker_tx: mpsc::Sender<TimestampEvent>,
+    worker_tx: mpsc::Sender<PeerTimestamp>,
 }
 
 #[derive(Default, Debug)]
@@ -37,7 +37,7 @@ struct TimestampData {
 }
 
 impl TimestampData {
-    fn update(&mut self, event: TimestampEvent) {
+    fn update(&mut self, event: PeerTimestamp) {
         use std::collections::hash_map::Entry;
         let (addr, timestamp) = event;
         trace!(?addr, ?timestamp);
@@ -98,7 +98,7 @@ impl TimestampCollector {
         }
     }
 
-    pub(crate) fn sender_handle(&self) -> mpsc::Sender<TimestampEvent> {
+    pub(crate) fn sender_handle(&self) -> mpsc::Sender<PeerTimestamp> {
         self.worker_tx.clone()
     }
 }
