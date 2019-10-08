@@ -8,9 +8,12 @@ use futures::{
 use tokio::prelude::*;
 use tower::Service;
 
-use crate::protocol::{
-    internal::{Request, Response},
-    message::Message,
+use crate::{
+    protocol::{
+        internal::{Request, Response},
+        message::Message,
+    },
+    BoxedStdError,
 };
 
 use super::{client::ClientRequest, PeerError};
@@ -51,8 +54,7 @@ pub struct PeerServer<S, Tx> {
 impl<S, Tx> PeerServer<S, Tx>
 where
     S: Service<Request, Response = Response>,
-    S::Error: Send,
-    //S::Error: Into<Error>,
+    S::Error: Into<BoxedStdError>,
     Tx: Sink<Message> + Unpin,
     Tx::Error: Into<Error>,
 {
@@ -310,14 +312,21 @@ where
     async fn drive_peer_request(&mut self, req: Request) {
         trace!(?req);
         use tower::ServiceExt;
-        // XXX Drop the errors on the floor for now so that
-        // we can ignore error type alignment
-        match self.svc.ready().await {
-            Err(_) => self.fail_with(format_err!("svc err").into()),
-            Ok(()) => {}
+        if let Err(e) = self
+            .svc
+            .ready()
+            .await
+            .map_err(|e| Error::from_boxed_compat(e.into()))
+        {
+            self.fail_with(e.into());
         }
-        match self.svc.call(req).await {
-            Err(_) => self.fail_with(format_err!("svc err").into()),
+        match self
+            .svc
+            .call(req)
+            .await
+            .map_err(|e| Error::from_boxed_compat(e.into()))
+        {
+            Err(e) => self.fail_with(e.into()),
             Ok(Response::Ok) => { /* generic success, do nothing */ }
             Ok(Response::Peers(addrs)) => {
                 if let Err(e) = self.peer_tx.send(Message::Addr(addrs)).await {

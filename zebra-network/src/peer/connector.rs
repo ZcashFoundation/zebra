@@ -18,7 +18,7 @@ use crate::{
     constants,
     protocol::{codec::*, internal::*, message::*, types::*},
     timestamp_collector::{PeerLastSeen, TimestampCollector},
-    Network,
+    BoxedStdError, Network,
 };
 
 use super::{
@@ -37,7 +37,7 @@ impl<S> PeerConnector<S>
 where
     S: Service<Request, Response = Response> + Clone + Send + 'static,
     S::Future: Send,
-    //S::Error: Into<Error>,
+    S::Error: Into<BoxedStdError>,
 {
     /// XXX replace with a builder
     pub fn new(network: Network, internal_service: S, collector: &TimestampCollector) -> Self {
@@ -54,8 +54,7 @@ impl<S> Service<SocketAddr> for PeerConnector<S>
 where
     S: Service<Request, Response = Response> + Clone + Send + 'static,
     S::Future: Send,
-    S::Error: Send,
-    //S::Error: Into<Error>,
+    S::Error: Send + Into<BoxedStdError>,
 {
     type Response = PeerClient;
     type Error = Error;
