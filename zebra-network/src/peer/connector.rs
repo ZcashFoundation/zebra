@@ -18,7 +18,7 @@ use crate::{
     constants,
     protocol::{codec::*, internal::*, message::*, types::*},
     timestamp_collector::{PeerLastSeen, TimestampCollector},
-    BoxedStdError, Network,
+    BoxedStdError, Config, Network,
 };
 
 use super::{
@@ -28,6 +28,7 @@ use super::{
 
 /// A [`Service`] that connects to a remote peer and constructs a client/server pair.
 pub struct PeerConnector<S> {
+    config: Config,
     network: Network,
     internal_service: S,
     sender: mpsc::Sender<PeerLastSeen>,
@@ -39,10 +40,21 @@ where
     S::Future: Send,
     S::Error: Into<BoxedStdError>,
 {
-    /// XXX replace with a builder
-    pub fn new(network: Network, internal_service: S, collector: &TimestampCollector) -> Self {
+    /// Construct a new `PeerConnector`.
+    pub fn new(
+        config: Config,
+        network: Network,
+        internal_service: S,
+        collector: &TimestampCollector,
+    ) -> Self {
+        // XXX this function has too many parameters, but it's not clear how to
+        // do a nice builder as all fields are mandatory. Could have Builder1,
+        // Builder2, ..., with Builder1::with_config() -> Builder2;
+        // Builder2::with_internal_service() -> ... or use Options in a single
+        // Builder type or use the derive_builder crate.
         let sender = collector.sender_handle();
         PeerConnector {
+            config,
             network,
             internal_service,
             sender,
@@ -74,6 +86,7 @@ where
         let network = self.network.clone();
         let internal_service = self.internal_service.clone();
         let sender = self.sender.clone();
+        let user_agent = self.config.user_agent.clone();
 
         let fut = async move {
             info!("beginning connection");
@@ -93,7 +106,9 @@ where
                     "127.0.0.1:9000".parse().unwrap(),
                 ),
                 nonce: Nonce::default(),
-                user_agent: "Zebra Peer".to_owned(),
+                user_agent,
+                // XXX eventually the `PeerConnector` will need to have a handle
+                // for a service that gets the current block height.
                 start_height: BlockHeight(0),
                 relay: false,
             };

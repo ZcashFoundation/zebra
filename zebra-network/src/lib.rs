@@ -3,6 +3,8 @@
 #![deny(missing_docs)]
 
 #[macro_use]
+extern crate serde;
+#[macro_use]
 extern crate failure;
 #[macro_use]
 extern crate tracing;
@@ -18,6 +20,9 @@ pub(crate) type BoxedStdError = Box<dyn std::error::Error + Send + Sync + 'stati
 
 mod network;
 pub use network::Network;
+
+mod config;
+pub use config::Config;
 
 pub mod protocol;
 

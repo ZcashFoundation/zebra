@@ -14,6 +14,7 @@ rand = "0.7"
 byteorder = "1.3"
 chrono = "0.4"
 failure = "0.1"
+serde = { version = "1", features = ["serde_derive"] }
 tokio = "=0.2.0-alpha.6"
 tower = { git = "https://github.com/tower-rs/tower", branch = "v0.3.x" }
 tracing = { git = "https://github.com/tokio-rs/tracing" }
