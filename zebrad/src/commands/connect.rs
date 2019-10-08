@@ -72,9 +72,9 @@ impl ConnectCmd {
             1,
         );
 
+        let config = app_config().network.clone();
         let collector = TimestampCollector::new();
-
-        let mut pc = PeerConnector::new(Network::Mainnet, node, &collector);
+        let mut pc = PeerConnector::new(config, Network::Mainnet, node, &collector);
         // no need to call ready because pc is always ready
         let mut client = pc.call(self.addr.clone()).await?;
 
