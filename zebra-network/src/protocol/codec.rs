@@ -383,26 +383,11 @@ impl Codec {
     fn read_addr<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
         use crate::meta_addr::MetaAddr;
 
-        // XXX we may want to factor this logic out into
-        // fn read_vec<R: Read, T: ZcashDeserialize>(reader: R) -> Result<Vec<T>, Error>
-        // on ReadZcashExt (and similarly for WriteZcashExt)
-        let count = reader.read_compactsize()? as usize;
-        // Preallocate a buffer, performing a single allocation in the honest
-        // case. Although the size of the recieved data buffer is bounded by the
-        // codec's max_len field, it's still possible for someone to send a
-        // short addr message with a large count field, so if we naively trust
-        // the count field we could be tricked into preallocating a large
-        // buffer. Instead, calculate the maximum count for a valid message from
-        // the codec's max_len using ENCODED_ADDR_SIZE.
-        //
         // addrs are encoded as: timestamp + services + ipv6 + port
         const ENCODED_ADDR_SIZE: usize = 4 + 8 + 16 + 2;
         let max_count = self.builder.max_len / ENCODED_ADDR_SIZE;
-        let mut addrs = Vec::with_capacity(std::cmp::min(count, max_count));
 
-        for _ in 0..count {
-            addrs.push(MetaAddr::zcash_deserialize(&mut reader)?);
-        }
+        let addrs: Vec<MetaAddr> = reader.read_list(max_count)?;
 
         Ok(Message::Addr(addrs))
     }
@@ -483,43 +468,31 @@ impl Codec {
         })
     }
 
-    fn _read_generic_inventory_hash_vector<R: Read>(
-        &self,
-        mut reader: R,
-    ) -> Result<Vec<InventoryHash>, Error> {
-        let count = reader.read_compactsize()? as usize;
-        // Preallocate a buffer, performing a single allocation in the honest
-        // case. Although the size of the received data buffer is bounded by the
-        // codec's max_len field, it's still possible for someone to send a
-        // short message with a large count field, so if we naively trust
-        // the count field we could be tricked into preallocating a large
-        // buffer. Instead, calculate the maximum count for a valid message from
-        // the codec's max_len using ENCODED_INVHASH_SIZE.
-        //
+    fn read_inv<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
         // encoding: 4 byte type tag + 32 byte hash
         const ENCODED_INVHASH_SIZE: usize = 4 + 32;
         let max_count = self.builder.max_len / ENCODED_INVHASH_SIZE;
-        let mut hashes = Vec::with_capacity(std::cmp::min(count, max_count));
 
-        for _ in 0..count {
-            hashes.push(InventoryHash::zcash_deserialize(&mut reader)?);
-        }
-
-        return Ok(hashes);
-    }
-
-    fn read_inv<R: Read>(&self, reader: R) -> Result<Message, Error> {
-        let hashes = self._read_generic_inventory_hash_vector(reader)?;
+        let hashes: Vec<InventoryHash> = reader.read_list(max_count)?;
         Ok(Message::Inv(hashes))
     }
 
-    fn read_getdata<R: Read>(&self, reader: R) -> Result<Message, Error> {
-        let hashes = self._read_generic_inventory_hash_vector(reader)?;
+    fn read_getdata<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
+        // encoding: 4 byte type tag + 32 byte hash
+        const ENCODED_INVHASH_SIZE: usize = 4 + 32;
+        let max_count = self.builder.max_len / ENCODED_INVHASH_SIZE;
+
+        let hashes: Vec<InventoryHash> = reader.read_list(max_count)?;
         Ok(Message::GetData(hashes))
     }
 
-    fn read_notfound<R: Read>(&self, reader: R) -> Result<Message, Error> {
-        let hashes = self._read_generic_inventory_hash_vector(reader)?;
+    fn read_notfound<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
+        // encoding: 4 byte type tag + 32 byte hash
+        const ENCODED_INVHASH_SIZE: usize = 4 + 32;
+        let max_count = self.builder.max_len / ENCODED_INVHASH_SIZE;
+
+        let hashes: Vec<InventoryHash> = reader.read_list(max_count)?;
+
         Ok(Message::GetData(hashes))
     }
 
