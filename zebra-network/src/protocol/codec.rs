@@ -405,13 +405,9 @@ impl Codec {
     fn read_getblocks<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
         let version = Version(reader.read_u32::<LittleEndian>()?);
 
-        let count = reader.read_compactsize()? as usize;
         let max_count = self.builder.max_len / 32;
-        let mut block_locator_hashes = Vec::with_capacity(std::cmp::min(count, max_count));
 
-        for _ in 0..count {
-            block_locator_hashes.push(BlockHeaderHash(reader.read_32_bytes()?));
-        }
+        let block_locator_hashes: Vec<BlockHeaderHash> = reader.read_list(max_count)?;
 
         let hash_stop = BlockHeaderHash(reader.read_32_bytes()?);
 
@@ -428,21 +424,10 @@ impl Codec {
     ///
     /// [Zcash block header](https://zips.z.cash/protocol/protocol.pdf#page=84)
     fn read_headers<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
-        let count = reader.read_compactsize()? as usize;
-        // Preallocate a buffer, performing a single allocation in the honest
-        // case. Although the size of the received data buffer is bounded by the
-        // codec's max_len field, it's still possible for someone to send a
-        // short message with a large count field, so if we naively trust
-        // the count field we could be tricked into preallocating a large
-        // buffer. Instead, calculate the maximum count for a valid message from
-        // the codec's max_len using ENCODED_HEADER_SIZE.
         const ENCODED_HEADER_SIZE: usize = 4 + 32 + 32 + 32 + 4 + 4 + 32 + 3 + 1344;
         let max_count = self.builder.max_len / ENCODED_HEADER_SIZE;
-        let mut headers = Vec::with_capacity(std::cmp::min(count, max_count));
 
-        for _ in 0..count {
-            headers.push(BlockHeader::zcash_deserialize(&mut reader)?);
-        }
+        let headers: Vec<BlockHeader> = reader.read_list(max_count)?;
 
         Ok(Message::Headers(headers))
     }
@@ -451,13 +436,9 @@ impl Codec {
     fn read_getheaders<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
         let version = Version(reader.read_u32::<LittleEndian>()?);
 
-        let count = reader.read_compactsize()? as usize;
         let max_count = self.builder.max_len / 32;
-        let mut block_locator_hashes = Vec::with_capacity(std::cmp::min(count, max_count));
 
-        for _ in 0..count {
-            block_locator_hashes.push(BlockHeaderHash(reader.read_32_bytes()?));
-        }
+        let block_locator_hashes: Vec<BlockHeaderHash> = reader.read_list(max_count)?;
 
         let hash_stop = BlockHeaderHash(reader.read_32_bytes()?);
 
