@@ -244,6 +244,36 @@ pub trait ReadZcashExt: io::Read {
         self.read_exact(&mut bytes)?;
         Ok(bytes)
     }
+
+    /// Convenience method to read a `Vec<T>` with a leading count in a safer manner.
+    #[inline]
+    fn read_list<T: ZcashDeserialize>(
+        &mut self,
+        max_count: usize,
+    ) -> Result<Vec<T>, SerializationError> {
+        // This prevents the inferred type for zcash_deserialize from
+        // taking ownership of &mut self. This wouldn't really be an
+        // issue if the target impl's `Copy`, but we need to own it.
+        let mut self2 = self;
+
+        let count = self2.read_compactsize()? as usize;
+
+        // Preallocate a buffer, performing a single allocation in the
+        // honest case. Although the size of the received data buffer
+        // is bounded by the codec's max_len field, it's still
+        // possible for someone to send a short message with a large
+        // count field, so if we naively trust the count field we
+        // could be tricked into preallocating a large
+        // buffer. Instead, calculate the maximum count for a valid
+        // message from the codec's max_len using encoded_type_size.
+        let mut items = Vec::with_capacity(std::cmp::min(count, max_count));
+
+        for _ in 0..count {
+            items.push(T::zcash_deserialize(&mut self2)?);
+        }
+
+        return Ok(items);
+    }
 }
 
 /// Mark all types implementing `Read` as implementing the extension.
