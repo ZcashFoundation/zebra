@@ -5,7 +5,7 @@ use std::io;
 
 use crate::merkle_tree::MerkleTreeRootHash;
 use crate::note_commitment_tree::SaplingNoteTreeRootHash;
-use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
+use crate::serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize};
 use crate::sha256d_writer::Sha256dWriter;
 use crate::transaction::Transaction;
 
@@ -31,6 +31,20 @@ impl From<BlockHeader> for BlockHeaderHash {
             .zcash_serialize(&mut hash_writer)
             .expect("Block headers must serialize.");
         Self(hash_writer.finish())
+    }
+}
+
+impl ZcashSerialize for BlockHeaderHash {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+        writer.write_all(&self.0)?;
+        Ok(())
+    }
+}
+
+impl ZcashDeserialize for BlockHeaderHash {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        let bytes = reader.read_32_bytes()?;
+        Ok(BlockHeaderHash(bytes))
     }
 }
 
