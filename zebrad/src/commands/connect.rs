@@ -52,7 +52,7 @@ impl Runnable for ConnectCmd {
 impl ConnectCmd {
     async fn connect(&self) -> Result<(), failure::Error> {
         use zebra_network::{
-            peer::connector::PeerConnector,
+            peer::PeerConnector,
             protocol::internal::{Request, Response},
             timestamp_collector::TimestampCollector,
             Network,
