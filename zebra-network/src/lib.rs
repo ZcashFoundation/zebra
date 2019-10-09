@@ -30,4 +30,5 @@ pub mod protocol;
 pub mod constants;
 pub mod meta_addr;
 pub mod peer;
+pub mod peer_set;
 pub mod timestamp_collector;
