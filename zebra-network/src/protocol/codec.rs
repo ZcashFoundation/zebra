@@ -432,7 +432,6 @@ impl Codec {
         Ok(Message::Headers(headers))
     }
 
-    // XXX This and `read_getblocks` are pretty similar, abstract away?
     fn read_getheaders<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
         let version = Version(reader.read_u32::<LittleEndian>()?);
 

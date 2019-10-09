@@ -251,7 +251,6 @@ pub enum Message {
         version: Version,
 
         /// The `Transaction` type itself.
-        // XXX Is this ~aesthetic~?
         transaction: Transaction,
     },
 
