@@ -18,7 +18,7 @@ use crate::{
     constants,
     protocol::{codec::*, internal::*, message::*, types::*},
     timestamp_collector::{PeerLastSeen, TimestampCollector},
-    BoxedStdError, Network,
+    BoxedStdError, Config, Network,
 };
 
 use super::{
@@ -28,6 +28,7 @@ use super::{
 
 /// A [`Service`] that connects to a remote peer and constructs a client/server pair.
 pub struct PeerConnector<S> {
+    config: Config,
     network: Network,
     internal_service: S,
     sender: mpsc::Sender<PeerLastSeen>,
@@ -39,10 +40,21 @@ where
     S::Future: Send,
     S::Error: Into<BoxedStdError>,
 {
-    /// XXX replace with a builder
-    pub fn new(network: Network, internal_service: S, collector: &TimestampCollector) -> Self {
+    /// Construct a new `PeerConnector`.
+    pub fn new(
+        config: Config,
+        network: Network,
+        internal_service: S,
+        collector: &TimestampCollector,
+    ) -> Self {
+        // XXX this function has too many parameters, but it's not clear how to
+        // do a nice builder as all fields are mandatory. Could have Builder1,
+        // Builder2, ..., with Builder1::with_config() -> Builder2;
+        // Builder2::with_internal_service() -> ... or use Options in a single
+        // Builder type or use the derive_builder crate.
         let sender = collector.sender_handle();
         PeerConnector {
+            config,
             network,
             internal_service,
             sender,
@@ -74,15 +86,17 @@ where
         let network = self.network.clone();
         let internal_service = self.internal_service.clone();
         let sender = self.sender.clone();
+        let user_agent = self.config.user_agent.clone();
 
         let fut = async move {
-            info!("beginning connection");
+            info!("connecting to remote peer");
+            debug!("opening tcp stream");
+
             let mut stream = Framed::new(
                 TcpStream::connect(addr).await?,
                 Codec::builder().for_network(network).finish(),
             );
 
-            // XXX construct the Version message from a config
             let version = Message::Version {
                 version: constants::CURRENT_VERSION,
                 services: PeerServices::NODE_NETWORK,
@@ -93,29 +107,45 @@ where
                     "127.0.0.1:9000".parse().unwrap(),
                 ),
                 nonce: Nonce::default(),
-                user_agent: "Zebra Peer".to_owned(),
+                user_agent,
+                // XXX eventually the `PeerConnector` will need to have a handle
+                // for a service that gets the current block height.
                 start_height: BlockHeight(0),
                 relay: false,
             };
 
+            debug!(?version, "sending initial version message");
+
             stream.send(version).await?;
 
-            let _remote_version = stream
+            let remote_version = stream
                 .next()
                 .await
                 .ok_or_else(|| format_err!("stream closed during handshake"))??;
 
+            debug!(
+                ?remote_version,
+                "got remote peer's version message, sending verack"
+            );
+
             stream.send(Message::Verack).await?;
-            let _remote_verack = stream
+            let remote_verack = stream
                 .next()
                 .await
                 .ok_or_else(|| format_err!("stream closed during handshake"))??;
+
+            debug!(?remote_verack, "got remote peer's verack");
 
             // XXX here is where we would set the version to the minimum of the
             // two versions, etc. -- actually is it possible to edit the `Codec`
             // after using it to make a framed adapter?
 
-            // Construct a PeerClient, PeerServer pair
+            // XXX do we want to use the random nonces to detect
+            // self-connections or do a different mechanism? if we use the
+            // nonces for their intended purpose we need communication between
+            // PeerConnector and PeerListener.
+
+            debug!("constructing PeerClient, spawning PeerServer");
 
             let (tx, rx) = mpsc::channel(0);
             let slot = ErrorSlot::default();
