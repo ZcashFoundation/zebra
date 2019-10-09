@@ -162,6 +162,11 @@ pub enum Message {
     // main chain, the list of its children is returned back via the
     // inv message and the remaining locators are ignored, no matter
     // if the requested limit was reached, or not.
+    //
+    // The 500 headers number is from the Bitcoin docs, we are not
+    // certain (yet) that other implementations of Zcash obey this
+    // restriction, or if they don't, what happens if we send them too
+    // many results.
     GetBlocks {
         /// The protocol version.
         version: Version,
@@ -201,6 +206,10 @@ pub enum Message {
     /// main chain, the peer starts over at block #1.
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#getheaders)
+    // The 2000 headers number is from the Bitcoin docs, we are not
+    // certain (yet) that other implementations of Zcash obey this
+    // restriction, or if they don't, what happens if we send them too
+    // many results.
     GetHeaders {
         /// The protocol version.
         version: Version,
