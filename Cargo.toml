@@ -7,6 +7,5 @@ members = [
         "zebra-consensus",
         "zebra-rpc",
         "zebra-client",
-        "zebra-reactor",
         "zebrad",
 ]
