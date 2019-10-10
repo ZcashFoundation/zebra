@@ -211,9 +211,7 @@ impl Codec {
                 ref block,
             } => {
                 writer.write_u32::<LittleEndian>(version.0)?;
-                block
-                    .zcash_serialize(&mut writer)
-                    .expect("Blocks must serialize.");
+                block.zcash_serialize(&mut writer)?
             }
             GetBlocks {
                 ref version,
@@ -268,9 +266,7 @@ impl Codec {
                 ref transaction,
             } => {
                 writer.write_u32::<LittleEndian>(version.0)?;
-                transaction
-                    .zcash_serialize(&mut writer)
-                    .expect("Transactions must serialize.");
+                transaction.zcash_serialize(&mut writer)?
             }
             // Mempool => {}
             // FilterLoad => {}
