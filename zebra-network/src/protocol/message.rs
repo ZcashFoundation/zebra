@@ -138,6 +138,9 @@ pub enum Message {
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#block)
     Block {
+        /// Transaction data format version (note, this is signed).
+        version: Version,
+
         /// The block itself.
         block: Block,
     },

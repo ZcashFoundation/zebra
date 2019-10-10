@@ -9,7 +9,7 @@ use failure::Error;
 use tokio::codec::{Decoder, Encoder};
 
 use zebra_chain::{
-    block::{BlockHeader, BlockHeaderHash},
+    block::{Block, BlockHeader, BlockHeaderHash},
     serialization::{ReadZcashExt, WriteZcashExt, ZcashDeserialize, ZcashSerialize},
     transaction::Transaction,
     types::{BlockHeight, Sha256dChecksum},
@@ -211,7 +211,11 @@ impl Codec {
                     hash.zcash_serialize(&mut writer)?;
                 }
             }
-            Block { ref block } => {
+            Block {
+                ref version,
+                ref block,
+            } => {
+                writer.write_u32::<LittleEndian>(version.0)?;
                 block
                     .zcash_serialize(&mut writer)
                     .expect("Blocks must serialize.");
@@ -246,7 +250,15 @@ impl Codec {
                     header.zcash_serialize(&mut writer)?;
                 }
             }
-
+            Tx {
+                ref version,
+                ref transaction,
+            } => {
+                writer.write_u32::<LittleEndian>(version.0)?;
+                transaction
+                    .zcash_serialize(&mut writer)
+                    .expect("Transactions must serialize.");
+            }
             _ => bail!("unimplemented message type"),
         }
         Ok(())
@@ -427,9 +439,12 @@ impl Codec {
         Ok(Message::Verack)
     }
 
-    fn read_block<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
-        trace!("block");
-        bail!("unimplemented message type")
+    fn read_block<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
+        Ok(Message::Block {
+            version: Version(reader.read_u32::<LittleEndian>()?),
+
+            block: Block::zcash_deserialize(&mut reader)?,
+        })
     }
 
     fn read_getblocks<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
