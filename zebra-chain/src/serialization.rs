@@ -245,7 +245,16 @@ pub trait ReadZcashExt: io::Read {
         Ok(bytes)
     }
 
-    /// Convenience method to read a `Vec<T>` with a leading count in a safer manner.
+    /// Convenience method to read a `Vec<T>` with a leading count in
+    /// a safer manner.
+    ///
+    /// This method preallocates a buffer, performing a single
+    /// allocation in the honest case. It's possible for someone to
+    /// send a short message with a large count field, so if we
+    /// naively trust the count field we could be tricked into
+    /// preallocating a large buffer. Instead, we rely on the passed
+    /// maximum count for a valid message and select the min of the
+    /// two values.
     #[inline]
     fn read_list<T: ZcashDeserialize>(
         &mut self,
@@ -258,14 +267,6 @@ pub trait ReadZcashExt: io::Read {
 
         let count = self2.read_compactsize()? as usize;
 
-        // Preallocate a buffer, performing a single allocation in the
-        // honest case. Although the size of the received data buffer
-        // is bounded by the codec's max_len field, it's still
-        // possible for someone to send a short message with a large
-        // count field, so if we naively trust the count field we
-        // could be tricked into preallocating a large
-        // buffer. Instead, calculate the maximum count for a valid
-        // message from the codec's max_len using encoded_type_size.
         let mut items = Vec::with_capacity(std::cmp::min(count, max_count));
 
         for _ in 0..count {
