@@ -53,6 +53,7 @@ impl ConnectCmd {
     async fn connect(&self) -> Result<(), failure::Error> {
         use zebra_network::{
             peer::PeerConnector,
+            peer_set::PeerSet,
             protocol::internal::{Request, Response},
             timestamp_collector::TimestampCollector,
             Network,
@@ -79,8 +80,69 @@ impl ConnectCmd {
         let mut client = pc.call(self.addr.clone()).await?;
 
         client.ready().await?;
-        let rsp = client.call(Request::GetPeers).await?;
-        info!(?rsp);
+
+        let addrs = match client.call(Request::GetPeers).await? {
+            Response::Peers(addrs) => addrs,
+            _ => bail!("Got wrong response type"),
+        };
+        info!(
+            addrs.len = addrs.len(),
+            "got addresses from first connected peer"
+        );
+
+        use failure::Error;
+        use futures::{
+            future,
+            stream::{FuturesUnordered, StreamExt},
+        };
+        use std::time::Duration;
+        use tower::discover::{Change, ServiceStream};
+        use tower_load::{peak_ewma::PeakEwmaDiscover, NoInstrument};
+
+        // construct a stream of services
+        let client_stream = PeakEwmaDiscover::new(
+            ServiceStream::new(
+                addrs
+                    .into_iter()
+                    .map(|meta| {
+                        let svc_fut = pc.call(meta.addr);
+                        async move { Ok::<_, Error>(Change::Insert(meta.addr, svc_fut.await?)) }
+                    })
+                    .collect::<FuturesUnordered<_>>()
+                    // Discard any errored connections...
+                    .filter(|result| future::ready(result.is_ok())),
+            ),
+            Duration::from_secs(1),  // default rtt estimate
+            Duration::from_secs(60), // decay time
+            NoInstrument,
+        );
+
+        info!("finished constructing discover");
+
+        let mut peer_set = PeerSet::new(client_stream);
+
+        info!("waiting for peer_set ready");
+        peer_set.ready().await.map_err(Error::from_boxed_compat)?;
+
+        info!("peer_set became ready, constructing addr requests");
+
+        let mut addr_reqs = FuturesUnordered::new();
+        for i in 0..10usize {
+            info!(i, "awaiting peer_set ready");
+            peer_set.ready().await.map_err(Error::from_boxed_compat)?;
+            info!(i, "calling peer_set");
+            addr_reqs.push(peer_set.call(Request::GetPeers));
+        }
+
+        let mut all_addrs = Vec::new();
+        while let Some(Ok(Response::Peers(addrs))) = addr_reqs.next().await {
+            info!(
+                all_addrs.len = all_addrs.len(),
+                addrs.len = addrs.len(),
+                "got address response"
+            );
+            all_addrs.extend(addrs);
+        }
 
         loop {
             // empty loop ensures we don't exit the application,

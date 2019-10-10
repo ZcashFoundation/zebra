@@ -88,8 +88,15 @@ where
     <D::Service as Service<Request>>::Future: Send + 'static,
     <D::Service as Load>::Metric: Debug,
 {
-    fn new() -> Self {
-        unimplemented!();
+    /// Construct a peerset which uses `discover` internally.
+    pub fn new(discover: D) -> Self {
+        Self {
+            discover,
+            ready_services: IndexMap::new(),
+            cancel_handles: HashMap::new(),
+            unready_services: FuturesUnordered::new(),
+            next_idx: None,
+        }
     }
 
     fn poll_discover(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), BoxedStdError>> {

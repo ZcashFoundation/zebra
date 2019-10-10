@@ -24,3 +24,10 @@ impl From<failure::Error> for PeerError {
         PeerError::Inner(std::sync::Arc::new(e))
     }
 }
+
+// XXX hack
+impl Into<crate::BoxedStdError> for PeerError {
+    fn into(self) -> crate::BoxedStdError {
+        Box::new(format_err!("dropped error info").compat())
+    }
+}

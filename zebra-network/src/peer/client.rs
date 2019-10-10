@@ -35,7 +35,8 @@ pub(super) struct ClientRequest(
 impl Service<Request> for PeerClient {
     type Response = Response;
     type Error = PeerError;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
+    type Future =
+        Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         if let Err(_) = ready!(self.server_tx.poll_ready(cx)) {
