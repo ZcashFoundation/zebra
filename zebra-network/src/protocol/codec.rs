@@ -393,8 +393,7 @@ impl Codec {
     }
 
     fn read_getaddr<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
-        trace!("getaddr");
-        bail!("unimplemented message type")
+        Ok(Message::Verack)
     }
 
     fn read_block<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
