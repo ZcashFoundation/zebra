@@ -3,6 +3,8 @@
 #![deny(missing_docs)]
 
 #[macro_use]
+extern crate pin_project;
+#[macro_use]
 extern crate serde;
 #[macro_use]
 extern crate failure;
