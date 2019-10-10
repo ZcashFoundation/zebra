@@ -272,6 +272,11 @@ impl Codec {
                     .zcash_serialize(&mut writer)
                     .expect("Transactions must serialize.");
             }
+            // Mempool => {}
+            // FilterLoad => {}
+            // FilterAdd => {}
+            // FilterClear => {}
+            // MerkleBlock => {}
             _ => bail!("unimplemented message type"),
         }
         Ok(())
