@@ -216,6 +216,37 @@ impl Codec {
                     .zcash_serialize(&mut writer)
                     .expect("Blocks must serialize.");
             }
+            GetBlocks {
+                ref version,
+                ref block_locator_hashes,
+                ref hash_stop,
+            } => {
+                writer.write_u32::<LittleEndian>(version.0)?;
+                writer.write_compactsize(block_locator_hashes.len() as u64)?;
+                for hash in block_locator_hashes {
+                    hash.zcash_serialize(&mut writer)?;
+                }
+                hash_stop.zcash_serialize(&mut writer)?;
+            }
+            GetHeaders {
+                ref version,
+                ref block_locator_hashes,
+                ref hash_stop,
+            } => {
+                writer.write_u32::<LittleEndian>(version.0)?;
+                writer.write_compactsize(block_locator_hashes.len() as u64)?;
+                for hash in block_locator_hashes {
+                    hash.zcash_serialize(&mut writer)?;
+                }
+                hash_stop.zcash_serialize(&mut writer)?;
+            }
+            Headers(ref headers) => {
+                writer.write_compactsize(headers.len() as u64)?;
+                for header in headers {
+                    header.zcash_serialize(&mut writer)?;
+                }
+            }
+
             _ => bail!("unimplemented message type"),
         }
         Ok(())
