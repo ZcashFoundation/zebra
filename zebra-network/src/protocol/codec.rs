@@ -198,19 +198,14 @@ impl Codec {
             Pong(nonce) => {
                 writer.write_u64::<LittleEndian>(nonce.0)?;
             }
-            GetAddr => { /* Empty payload -- no-op */ }
+            // Reject {} => {}
             Addr(ref addrs) => {
                 writer.write_compactsize(addrs.len() as u64)?;
                 for addr in addrs {
                     addr.zcash_serialize(&mut writer)?;
                 }
             }
-            Inv(ref hashes) => {
-                writer.write_compactsize(hashes.len() as u64)?;
-                for hash in hashes {
-                    hash.zcash_serialize(&mut writer)?;
-                }
-            }
+            GetAddr => { /* Empty payload -- no-op */ }
             Block {
                 ref version,
                 ref block,
@@ -248,6 +243,24 @@ impl Codec {
                 writer.write_compactsize(headers.len() as u64)?;
                 for header in headers {
                     header.zcash_serialize(&mut writer)?;
+                }
+            }
+            Inv(ref hashes) => {
+                writer.write_compactsize(hashes.len() as u64)?;
+                for hash in hashes {
+                    hash.zcash_serialize(&mut writer)?;
+                }
+            }
+            GetData(ref hashes) => {
+                writer.write_compactsize(hashes.len() as u64)?;
+                for hash in hashes {
+                    hash.zcash_serialize(&mut writer)?;
+                }
+            }
+            NotFound(ref hashes) => {
+                writer.write_compactsize(hashes.len() as u64)?;
+                for hash in hashes {
+                    hash.zcash_serialize(&mut writer)?;
                 }
             }
             Tx {
