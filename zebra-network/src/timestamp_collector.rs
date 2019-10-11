@@ -87,21 +87,15 @@ impl TimestampCollector {
 
         // Construct and then spawn a worker.
         let worker = async move {
-            use futures::select;
+            use futures::future::{self, Either};
             loop {
-                select! {
-                    _ = shutdown_rx.next() => return,
-                    msg = worker_rx.next() => {
-                        match msg {
-                            Some(event) => {
-                                data2
-                                    .lock()
-                                    .expect("mutex should be unpoisoned")
-                                    .update(event)
-                            }
-                            None => return,
-                        }
-                    }
+                match future::select(shutdown_rx.next(), worker_rx.next()).await {
+                    Either::Left((_, _)) => return,     // shutdown signal
+                    Either::Right((None, _)) => return, // all workers are gone
+                    Either::Right((Some(event), _)) => data2
+                        .lock()
+                        .expect("mutex should be unpoisoned")
+                        .update(event),
                 }
             }
         };
