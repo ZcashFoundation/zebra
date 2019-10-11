@@ -5,6 +5,9 @@ use std::time::Duration;
 // XXX should these constants be split into protocol also?
 use crate::protocol::types::*;
 
+/// The timeout for requests made to a remote peer.
+pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// We expect to receive a message from a live peer at least once in this time duration.
 /// XXX this needs to be synchronized with the ping transmission times.
 pub const LIVE_PEER_DURATION: Duration = Duration::from_secs(12);

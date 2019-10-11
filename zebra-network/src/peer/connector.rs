@@ -164,6 +164,7 @@ where
                 client_rx: rx,
                 error_slot: slot,
                 peer_tx,
+                request_timer: None,
             };
 
             let hooked_peer_rx = peer_rx
