@@ -10,6 +10,8 @@ use chrono::{DateTime, Utc};
 use futures::channel::mpsc;
 use tokio::prelude::*;
 
+use crate::constants;
+
 /// A type alias for a timestamp event sent to a `TimestampCollector`.
 pub(crate) type PeerLastSeen = (SocketAddr, DateTime<Utc>);
 
@@ -38,9 +40,23 @@ struct TimestampData {
 
 impl TimestampData {
     fn update(&mut self, event: PeerLastSeen) {
+        use chrono::Duration as CD;
         use std::collections::hash_map::Entry;
         let (addr, timestamp) = event;
-        trace!(?addr, ?timestamp);
+        trace!(
+            ?addr,
+            ?timestamp,
+            data.total = self.by_time.len(),
+            // This would be cleaner if it used "variables" but keeping
+            // it inside the trace! invocation prevents running the range
+            // query unless the output will actually be used.
+            data.recent = self
+                .by_time
+                .range(
+                    (Utc::now() - CD::from_std(constants::LIVE_PEER_DURATION).unwrap())..Utc::now()
+                )
+                .count()
+        );
         match self.by_addr.entry(addr) {
             Entry::Occupied(mut entry) => {
                 let last_timestamp = entry.get();
