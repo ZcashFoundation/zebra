@@ -3,6 +3,8 @@
 #![deny(missing_docs)]
 
 #[macro_use]
+extern crate pin_project;
+#[macro_use]
 extern crate serde;
 #[macro_use]
 extern crate failure;
@@ -30,4 +32,5 @@ pub mod protocol;
 pub mod constants;
 pub mod meta_addr;
 pub mod peer;
+pub mod peer_set;
 pub mod timestamp_collector;

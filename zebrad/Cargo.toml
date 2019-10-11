@@ -25,6 +25,7 @@ tracing-log = "0.1"
 hyper = "=0.13.0-alpha.4"
 
 tower = "=0.3.0-alpha.2"
+tower-load = { git = "https://github.com/tower-rs/tower", branch = "v0.3.x"}
 
 zebra-chain = { path = "../zebra-chain" }
 zebra-network = { path = "../zebra-network" }

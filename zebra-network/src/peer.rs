@@ -1,11 +1,15 @@
 //! Peer handling.
 
 /// Handles outbound requests from our node to the network.
-pub mod client;
+mod client;
 /// Asynchronously connects to peers.
-pub mod connector;
+mod connector;
 /// Handles inbound requests from the network to our node.
-pub mod server;
+mod server;
+
+pub use client::PeerClient;
+pub use connector::PeerConnector;
+pub use server::PeerServer;
 
 /// An error related to a peer connection.
 #[derive(Fail, Debug, Clone)]
@@ -18,5 +22,12 @@ pub enum PeerError {
 impl From<failure::Error> for PeerError {
     fn from(e: failure::Error) -> PeerError {
         PeerError::Inner(std::sync::Arc::new(e))
+    }
+}
+
+// XXX hack
+impl Into<crate::BoxedStdError> for PeerError {
+    fn into(self) -> crate::BoxedStdError {
+        Box::new(format_err!("dropped error info").compat())
     }
 }
