@@ -5,7 +5,7 @@ use std::time::Duration;
 // XXX should these constants be split into protocol also?
 use crate::protocol::types::*;
 
-/// We expect to recieve a message from a live peer at least once in this time duration.
+/// We expect to receive a message from a live peer at least once in this time duration.
 /// XXX this needs to be synchronized with the ping transmission times.
 pub const LIVE_PEER_DURATION: Duration = Duration::from_secs(12);
 
