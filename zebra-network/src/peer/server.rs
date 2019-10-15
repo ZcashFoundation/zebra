@@ -127,14 +127,14 @@ where
                         }
                         // XXX switch back to hard failure when we parse all message types
                         //Either::Left((Some(Err(e)), _)) => self.fail_with(e.into()),
-                        Either::Left((Some(Err(e)), _)) => error!(%e),
-                        Either::Left((Some(Ok(msg)), _)) => {
-                            match self.handle_message_as_response(msg) {
+                        Either::Left((Some(Err(peer_err)), _timer)) => error!(%peer_err),
+                        Either::Left((Some(Ok(peer_msg)), _timer)) => {
+                            match self.handle_message_as_response(peer_msg) {
                                 None => continue,
                                 Some(msg) => self.handle_message_as_request(msg).await,
                             }
                         }
-                        Either::Right(((), _)) => {
+                        Either::Right(((), _peer_fut)) => {
                             trace!("client request timed out");
                             // Re-matching lets us take ownership of tx
                             self.state = match self.state {
