@@ -161,7 +161,7 @@ mod tests {
     use crate::sha256d_writer::Sha256dWriter;
 
     #[test]
-    fn test_blockheaderhash_debug() {
+    fn blockheaderhash_debug() {
         let preimage = b"foo bar baz";
         let mut sha_writer = Sha256dWriter::default();
         let _ = sha_writer.write_all(preimage);
