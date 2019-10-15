@@ -69,8 +69,6 @@ where
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        // XXX when this asks a second service for
-        // an address to connect to, it should call inner.ready
         Poll::Ready(Ok(()))
     }
 
