@@ -1,6 +1,8 @@
 use std::{
+    collections::HashSet,
     net::SocketAddr,
     pin::Pin,
+    sync::{Arc, Mutex},
     task::{Context, Poll},
 };
 
@@ -20,7 +22,7 @@ use crate::{
     BoxedStdError, Config, Network,
 };
 
-use super::{error::ErrorSlot, server::ServerState, PeerClient, PeerError, PeerServer};
+use super::{error::ErrorSlot, server::ServerState, HandshakeError, PeerClient, PeerServer};
 
 /// A [`Service`] that connects to a remote peer and constructs a client/server pair.
 pub struct PeerConnector<S> {
@@ -28,13 +30,13 @@ pub struct PeerConnector<S> {
     network: Network,
     internal_service: S,
     sender: mpsc::Sender<PeerLastSeen>,
+    nonces: Arc<Mutex<HashSet<Nonce>>>,
 }
 
 impl<S> PeerConnector<S>
 where
-    S: Service<Request, Response = Response> + Clone + Send + 'static,
+    S: Service<Request, Response = Response, Error = BoxedStdError> + Clone + Send + 'static,
     S::Future: Send,
-    S::Error: Into<BoxedStdError>,
 {
     /// Construct a new `PeerConnector`.
     pub fn new(
@@ -54,6 +56,7 @@ where
             network,
             internal_service,
             sender,
+            nonces: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 }
@@ -62,10 +65,9 @@ impl<S> Service<(TcpStream, SocketAddr)> for PeerConnector<S>
 where
     S: Service<Request, Response = Response, Error = BoxedStdError> + Clone + Send + 'static,
     S::Future: Send,
-    S::Error: Send + Into<BoxedStdError>,
 {
     type Response = PeerClient;
-    type Error = PeerError;
+    type Error = HandshakeError;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -83,12 +85,19 @@ where
         let internal_service = self.internal_service.clone();
         let sender = self.sender.clone();
         let user_agent = self.config.user_agent.clone();
+        let nonces = self.nonces.clone();
 
         let fut = async move {
             info!("connecting to remote peer");
 
             let mut stream =
                 Framed::new(tcp_stream, Codec::builder().for_network(network).finish());
+
+            let local_nonce = Nonce::default();
+            nonces
+                .lock()
+                .expect("mutex should be unpoisoned")
+                .insert(local_nonce);
 
             let version = Message::Version {
                 version: constants::CURRENT_VERSION,
@@ -99,7 +108,7 @@ where
                     PeerServices::NODE_NETWORK,
                     "127.0.0.1:9000".parse().unwrap(),
                 ),
-                nonce: Nonce::default(),
+                nonce: local_nonce,
                 user_agent,
                 // XXX eventually the `PeerConnector` will need to have a handle
                 // for a service that gets the current block height.
@@ -108,35 +117,47 @@ where
             };
 
             debug!(?version, "sending initial version message");
-
             stream.send(version).await?;
 
-            let remote_version = stream
+            let remote_msg = stream
                 .next()
                 .await
-                .ok_or_else(|| PeerError::ConnectionClosed)??;
+                .ok_or_else(|| HandshakeError::ConnectionClosed)??;
 
-            debug!(
-                ?remote_version,
-                "got remote peer's version message, sending verack"
-            );
+            // Check that we got a Version and destructure its fields into the local scope.
+            debug!(?remote_msg, "got message from remote peer");
+            let remote_nonce = if let Message::Version { nonce, .. } = remote_msg {
+                nonce
+            } else {
+                return Err(HandshakeError::UnexpectedMessage(remote_msg));
+            };
+
+            // Check for nonce reuse, indicating self-connection.
+            if {
+                let mut locked_nonces = nonces.lock().expect("mutex should be unpoisoned");
+                let nonce_reuse = locked_nonces.contains(&remote_nonce);
+                // Regardless of whether we observed nonce reuse, clean up the nonce set.
+                locked_nonces.remove(&local_nonce);
+                nonce_reuse
+            } {
+                return Err(HandshakeError::NonceReuse);
+            }
 
             stream.send(Message::Verack).await?;
-            let remote_verack = stream
+
+            let remote_msg = stream
                 .next()
                 .await
-                .ok_or_else(|| PeerError::ConnectionClosed)??;
-
-            debug!(?remote_verack, "got remote peer's verack");
+                .ok_or_else(|| HandshakeError::ConnectionClosed)??;
+            if let Message::Verack = remote_msg {
+                debug!("got verack from remote peer");
+            } else {
+                return Err(HandshakeError::UnexpectedMessage(remote_msg));
+            }
 
             // XXX here is where we would set the version to the minimum of the
             // two versions, etc. -- actually is it possible to edit the `Codec`
             // after using it to make a framed adapter?
-
-            // XXX do we want to use the random nonces to detect
-            // self-connections or do a different mechanism? if we use the
-            // nonces for their intended purpose we need communication between
-            // PeerConnector and PeerListener.
 
             debug!("constructing PeerClient, spawning PeerServer");
 

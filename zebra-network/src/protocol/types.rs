@@ -34,7 +34,7 @@ bitflags! {
 }
 
 /// A nonce used in the networking layer to identify messages.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Nonce(pub u64);
 
 impl Default for Nonce {
