@@ -71,18 +71,27 @@ impl ListenCmd {
         );
 
         use tokio::net::{TcpListener, TcpStream};
+        use tokio::prelude::*;
 
         let config = app_config().network.clone();
         let collector = TimestampCollector::new();
-        let mut pc = PeerConnector::new(config, Network::Mainnet, node, &collector);
+        let mut pc = Buffer::new(
+            PeerConnector::new(config, Network::Mainnet, node, &collector),
+            1,
+        );
 
         let mut listener = TcpListener::bind(self.addr).await?;
 
         loop {
             let (tcp_stream, addr) = listener.accept().await?;
 
-            pc.ready().await?;
-            let mut client = pc.call((tcp_stream, addr)).await?;
+            pc.ready()
+                .await
+                .map_err(failure::Error::from_boxed_compat)?;
+            let mut client = pc
+                .call((tcp_stream, addr))
+                .await
+                .map_err(failure::Error::from_boxed_compat)?;
 
             let addrs = match client.call(Request::GetPeers).await? {
                 Response::Peers(addrs) => addrs,

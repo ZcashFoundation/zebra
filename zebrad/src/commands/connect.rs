@@ -80,8 +80,11 @@ impl ConnectCmd {
         let mut pc = PeerConnector::new(config, Network::Mainnet, node, &collector);
 
         let tcp_stream = TcpStream::connect(self.addr).await?;
-        pc.ready().await?;
-        let mut client = pc.call((tcp_stream, self.addr)).await?;
+        pc.ready()
+            .await?;
+        let mut client = pc
+            .call((tcp_stream, self.addr))
+            .await?;
 
         client.ready().await?;
 
