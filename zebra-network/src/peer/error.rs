@@ -51,3 +51,20 @@ impl ErrorSlot {
             .map(|e| e.clone())
     }
 }
+
+/// An error during a handshake with a remote peer.
+#[derive(Error, Debug)]
+pub enum HandshakeError {
+    /// The remote peer sent an unexpected message during the handshake.
+    #[error("The remote peer sent an unexpected message: {0:?}")]
+    UnexpectedMessage(crate::protocol::message::Message),
+    /// The peer connector detected handshake nonce reuse, possibly indicating self-connection.
+    #[error("Detected nonce reuse, possible self-connection")]
+    NonceReuse,
+    /// The remote peer closed the connection.
+    #[error("Peer closed connection")]
+    ConnectionClosed,
+    /// A serialization error occurred while reading or writing a message.
+    #[error("Serialization error")]
+    Serialization(#[from] SerializationError),
+}
