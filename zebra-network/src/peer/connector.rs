@@ -58,7 +58,7 @@ where
     }
 }
 
-impl<S> Service<SocketAddr> for PeerConnector<S>
+impl<S> Service<(TcpStream, SocketAddr)> for PeerConnector<S>
 where
     S: Service<Request, Response = Response, Error = BoxedStdError> + Clone + Send + 'static,
     S::Future: Send,
@@ -74,7 +74,9 @@ where
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, addr: SocketAddr) -> Self::Future {
+    fn call(&mut self, req: (TcpStream, SocketAddr)) -> Self::Future {
+        let (tcp_stream, addr) = req;
+
         let connector_span = span!(Level::INFO, "connector", addr = ?addr);
         let connection_span = span!(Level::INFO, "peer", addr = ?addr);
 
@@ -86,12 +88,9 @@ where
 
         let fut = async move {
             info!("connecting to remote peer");
-            debug!("opening tcp stream");
 
-            let mut stream = Framed::new(
-                TcpStream::connect(addr).await.expect("PeerError does not contain an io::Error variant, but this code will be removed in the next PR, so there's no need to handle this error"),
-                Codec::builder().for_network(network).finish(),
-            );
+            let mut stream =
+                Framed::new(tcp_stream, Codec::builder().for_network(network).finish());
 
             let version = Message::Version {
                 version: constants::CURRENT_VERSION,

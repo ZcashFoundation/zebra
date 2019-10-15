@@ -73,11 +73,15 @@ impl ConnectCmd {
             1,
         );
 
+        use tokio::net::TcpStream;
+
         let config = app_config().network.clone();
         let collector = TimestampCollector::new();
         let mut pc = PeerConnector::new(config, Network::Mainnet, node, &collector);
-        // no need to call ready because pc is always ready
-        let mut client = pc.call(self.addr.clone()).await?;
+
+        let tcp_stream = TcpStream::connect(self.addr).await?;
+        pc.ready().await?;
+        let mut client = pc.call((tcp_stream, self.addr)).await?;
 
         client.ready().await?;
 
@@ -90,6 +94,7 @@ impl ConnectCmd {
             "got addresses from first connected peer"
         );
 
+/*
         use failure::Error;
         use futures::{
             future,
@@ -148,6 +153,7 @@ impl ConnectCmd {
             // empty loop ensures we don't exit the application,
             // and this is throwaway code
         }
+        */
 
         Ok(())
     }
