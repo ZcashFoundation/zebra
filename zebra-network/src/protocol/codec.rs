@@ -468,7 +468,7 @@ impl Codec {
     }
 
     fn read_getaddr<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
-        Ok(Message::Verack)
+        Ok(Message::GetAddr)
     }
 
     fn read_block<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
