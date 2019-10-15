@@ -1,7 +1,8 @@
 //! Definitions of block datastructures.
 
 use chrono::{DateTime, Utc};
-use std::io;
+use hex;
+use std::{fmt, io};
 
 use crate::merkle_tree::MerkleTreeRootHash;
 use crate::note_commitment_tree::SaplingNoteTreeRootHash;
@@ -21,8 +22,16 @@ use crate::transaction::Transaction;
 /// the direct bytes of the transactions as well as the header. So
 /// for now I want to call it a `BlockHeaderHash` because that's
 /// more explicit.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Eq, PartialEq)]
 pub struct BlockHeaderHash(pub [u8; 32]);
+
+impl fmt::Debug for BlockHeaderHash {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple("BlockHeaderHash")
+            .field(&hex::encode(&self.0))
+            .finish()
+    }
+}
 
 impl From<BlockHeader> for BlockHeaderHash {
     fn from(block_header: BlockHeader) -> Self {
@@ -139,5 +148,29 @@ impl ZcashSerialize for Block {
 impl ZcashDeserialize for Block {
     fn zcash_deserialize<R: io::Read>(_reader: R) -> Result<Self, SerializationError> {
         unimplemented!();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use std::io::Write;
+
+    use super::BlockHeaderHash;
+
+    use crate::sha256d_writer::Sha256dWriter;
+
+    #[test]
+    fn test_blockheaderhash_debug() {
+        let preimage = b"foo bar baz";
+        let mut sha_writer = Sha256dWriter::default();
+        let _ = sha_writer.write_all(preimage);
+
+        let hash = BlockHeaderHash(sha_writer.finish());
+
+        assert_eq!(
+            format!("{:?}", hash),
+            "BlockHeaderHash(\"bf46b4b5030752fedac6f884976162bbfb29a9398f104a280b3e34d51b416631\")"
+        );
     }
 }
