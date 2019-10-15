@@ -27,6 +27,17 @@ impl Write for Sha256dWriter {
         Ok(buf.len())
     }
 
+    fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
+        let mut length = 0;
+
+        while length != buf.len() {
+            length += buf.len();
+            self.hash.input(buf);
+        }
+
+        Ok(())
+    }
+
     fn flush(&mut self) -> std::io::Result<()> {
         Ok(())
     }
