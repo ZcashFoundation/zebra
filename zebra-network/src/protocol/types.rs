@@ -1,8 +1,17 @@
 //! Newtype wrappers assigning semantic meaning to primitive types.
 
+use hex;
+use std::fmt;
+
 /// A magic number identifying the network.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Eq, PartialEq)]
 pub struct Magic(pub [u8; 4]);
+
+impl fmt::Debug for Magic {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple("Magic").field(&hex::encode(&self.0)).finish()
+    }
+}
 
 /// A protocol version number.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -32,5 +41,17 @@ impl Default for Nonce {
     fn default() -> Self {
         use rand::{thread_rng, Rng};
         Self(thread_rng().gen())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use crate::constants::magics;
+
+    #[test]
+    fn magic_debug() {
+        assert_eq!(format!("{:?}", magics::MAINNET), "Magic(\"24e92764\")");
+        assert_eq!(format!("{:?}", magics::TESTNET), "Magic(\"fa1af9bf\")");
     }
 }
