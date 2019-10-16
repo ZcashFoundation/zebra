@@ -63,7 +63,7 @@ impl ZcashDeserialize for InventoryHash {
             1 => Ok(InventoryHash::Tx(TransactionHash(bytes))),
             2 => Ok(InventoryHash::Block(BlockHeaderHash(bytes))),
             3 => Ok(InventoryHash::FilteredBlock(BlockHeaderHash(bytes))),
-            _ => Err(SerializationError::ParseError("invalid inventory code")),
+            _ => Err(SerializationError::Parse("invalid inventory code")),
         }
     }
 }

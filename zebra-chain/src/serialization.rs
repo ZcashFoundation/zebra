@@ -10,25 +10,19 @@ use std::io;
 use std::net::{IpAddr, SocketAddr};
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
+use thiserror::Error;
 
 /// A serialization error.
 // XXX refine error types -- better to use boxed errors?
-#[derive(Fail, Debug)]
+#[derive(Error, Debug)]
 pub enum SerializationError {
     /// An underlying IO error.
-    #[fail(display = "io error {}", _0)]
-    IoError(io::Error),
+    #[error("io error")]
+    Io(#[from] io::Error),
     /// The data to be deserialized was malformed.
     // XXX refine errors
-    #[fail(display = "parse error: {}", _0)]
-    ParseError(&'static str),
-}
-
-// Allow upcasting io::Error to SerializationError
-impl From<io::Error> for SerializationError {
-    fn from(e: io::Error) -> Self {
-        Self::IoError(e)
-    }
+    #[error("parse error: {0}")]
+    Parse(&'static str),
 }
 
 /// Consensus-critical serialization for Zcash.

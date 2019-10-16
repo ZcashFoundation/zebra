@@ -5,12 +5,13 @@ use std::io::{Cursor, Read, Write};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use bytes::BytesMut;
 use chrono::{TimeZone, Utc};
-use failure::Error;
 use tokio::codec::{Decoder, Encoder};
 
 use zebra_chain::{
     block::{Block, BlockHeader, BlockHeaderHash},
-    serialization::{ReadZcashExt, WriteZcashExt, ZcashDeserialize, ZcashSerialize},
+    serialization::{
+        ReadZcashExt, SerializationError as Error, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
+    },
     transaction::Transaction,
     types::{BlockHeight, Sha256dChecksum},
 };
@@ -273,7 +274,7 @@ impl Codec {
             // FilterAdd => {}
             // FilterClear => {}
             // MerkleBlock => {}
-            _ => bail!("unimplemented message type"),
+            _ => return Err(Error::Parse("unimplemented message type")),
         }
         Ok(())
     }
@@ -296,6 +297,7 @@ impl Decoder for Codec {
     type Error = Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        use Error::Parse;
         match self.state {
             DecodeState::Head => {
                 // First check that the src buffer contains an entire header.
@@ -316,14 +318,12 @@ impl Decoder for Codec {
                 let checksum = Sha256dChecksum(header_reader.read_4_bytes()?);
                 trace!(?self.state, ?magic, ?command, body_len, ?checksum, "read header from src buffer");
 
-                ensure!(
-                    magic == self.builder.network.magic(),
-                    "supplied magic did not meet expectations"
-                );
-                ensure!(
-                    body_len < self.builder.max_len,
-                    "body length exceeded maximum size",
-                );
+                if magic != self.builder.network.magic() {
+                    return Err(Parse("supplied magic did not meet expectations"));
+                }
+                if body_len >= self.builder.max_len {
+                    return Err(Parse("body length exceeded maximum size"));
+                }
 
                 // Reserve buffer space for the expected body and the following header.
                 src.reserve(body_len + HEADER_LEN);
@@ -354,10 +354,11 @@ impl Decoder for Codec {
                 let body = src.split_to(body_len);
                 self.state = DecodeState::Head;
 
-                ensure!(
-                    checksum == Sha256dChecksum::from(&body[..]),
-                    "supplied message checksum does not match computed checksum"
-                );
+                if checksum != Sha256dChecksum::from(&body[..]) {
+                    return Err(Parse(
+                        "supplied message checksum does not match computed checksum",
+                    ));
+                }
 
                 let body_reader = Cursor::new(&body);
                 match &command {
@@ -381,7 +382,7 @@ impl Decoder for Codec {
                     b"filteradd\0\0\0" => self.read_filteradd(body_reader),
                     b"filterclear\0" => self.read_filterclear(body_reader),
                     b"merkleblock\0" => self.read_merkleblock(body_reader),
-                    _ => bail!("unknown command"),
+                    _ => return Err(Parse("unknown command")),
                 }
                 // We need Ok(Some(msg)) to signal that we're done decoding.
                 // This is also convenient for tracing the parse result.
@@ -415,7 +416,7 @@ impl Codec {
             relay: match reader.read_u8()? {
                 0 => false,
                 1 => true,
-                _ => bail!("non-bool value supplied in relay field"),
+                _ => return Err(Error::Parse("non-bool value supplied in relay field")),
             },
         })
     }
@@ -433,8 +434,7 @@ impl Codec {
     }
 
     fn read_reject<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
-        trace!("reject");
-        bail!("unimplemented message type")
+        return Err(Error::Parse("reject messages are not implemented"));
     }
 
     fn read_addr<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
@@ -544,28 +544,23 @@ impl Codec {
     }
 
     fn read_mempool<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
-        trace!("mempool");
-        bail!("unimplemented message type")
+        return Err(Error::Parse("mempool messages are not implemented"));
     }
 
     fn read_filterload<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
-        trace!("filterload");
-        bail!("unimplemented message type")
+        return Err(Error::Parse("filterload messages are not implemented"));
     }
 
     fn read_filteradd<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
-        trace!("filteradd");
-        bail!("unimplemented message type")
+        return Err(Error::Parse("filteradd messages are not implemented"));
     }
 
     fn read_filterclear<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
-        trace!("filterclear");
-        bail!("unimplemented message type")
+        return Err(Error::Parse("filterclear messages are not implemented"));
     }
 
     fn read_merkleblock<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
-        trace!("merkleblock");
-        bail!("unimplemented message type")
+        return Err(Error::Parse("merkleblock messages are not implemented"));
     }
 }
 

@@ -4,11 +4,10 @@ use std::{
     task::{Context, Poll},
 };
 
-use failure::Error;
 use tokio::prelude::*;
 use tower::discover::{Change, Discover};
 
-use crate::peer::PeerClient;
+use crate::peer::{PeerClient, PeerError};
 
 /// A [`tower::discover::Discover`] implementation to report new `PeerClient`s.
 ///
@@ -22,7 +21,7 @@ pub struct PeerDiscover {
 impl Discover for PeerDiscover {
     type Key = SocketAddr;
     type Service = PeerClient;
-    type Error = Error;
+    type Error = PeerError;
 
     fn poll_discover(
         self: Pin<&mut Self>,
