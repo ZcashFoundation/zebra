@@ -27,7 +27,6 @@ use super::{error::ErrorSlot, server::ServerState, HandshakeError, PeerClient, P
 /// A [`Service`] that connects to a remote peer and constructs a client/server pair.
 pub struct PeerConnector<S> {
     config: Config,
-    network: Network,
     internal_service: S,
     sender: mpsc::Sender<PeerLastSeen>,
     nonces: Arc<Mutex<HashSet<Nonce>>>,
@@ -39,12 +38,7 @@ where
     S::Future: Send,
 {
     /// Construct a new `PeerConnector`.
-    pub fn new(
-        config: Config,
-        network: Network,
-        internal_service: S,
-        collector: &TimestampCollector,
-    ) -> Self {
+    pub fn new(config: Config, internal_service: S, collector: &TimestampCollector) -> Self {
         // XXX this function has too many parameters, but it's not clear how to
         // do a nice builder as all fields are mandatory. Could have Builder1,
         // Builder2, ..., with Builder1::with_config() -> Builder2;
@@ -53,7 +47,6 @@ where
         let sender = collector.sender_handle();
         PeerConnector {
             config,
-            network,
             internal_service,
             sender,
             nonces: Arc::new(Mutex::new(HashSet::new())),
@@ -82,11 +75,11 @@ where
         let connection_span = span!(Level::INFO, "peer", addr = ?addr);
 
         // Clone these upfront, so they can be moved into the future.
-        let network = self.network.clone();
+        let nonces = self.nonces.clone();
         let internal_service = self.internal_service.clone();
         let sender = self.sender.clone();
         let user_agent = self.config.user_agent.clone();
-        let nonces = self.nonces.clone();
+        let network = self.config.network.clone();
 
         let fut = async move {
             info!("connecting to remote peer");
