@@ -1,6 +1,5 @@
 use std::sync::{Arc, Mutex};
 
-use failure::Error;
 use futures::{
     channel::{mpsc, oneshot},
     future::{self, Either},
@@ -11,6 +10,7 @@ use tokio::{
     timer::{delay_for, Delay},
 };
 use tower::Service;
+use zebra_chain::serialization::SerializationError;
 
 use crate::{
     constants,
@@ -21,26 +21,13 @@ use crate::{
     BoxedStdError,
 };
 
-use super::{client::ClientRequest, PeerError};
-
-#[derive(Default, Clone)]
-pub(super) struct ErrorSlot(Arc<Mutex<Option<PeerError>>>);
-
-impl ErrorSlot {
-    pub fn try_get_error(&self) -> Option<PeerError> {
-        self.0
-            .lock()
-            .expect("error mutex should be unpoisoned")
-            .as_ref()
-            .map(|e| e.clone())
-    }
-}
+use super::{client::ClientRequest, error::ErrorSlot, PeerError, SharedPeerError};
 
 pub(super) enum ServerState {
     /// Awaiting a client request or a peer message.
     AwaitingRequest,
     /// Awaiting a peer message we can interpret as a client request.
-    AwaitingResponse(Request, oneshot::Sender<Result<Response, PeerError>>),
+    AwaitingResponse(Request, oneshot::Sender<Result<Response, SharedPeerError>>),
     /// A failure has occurred and we are shutting down the server.
     Failed,
 }
@@ -62,15 +49,14 @@ pub struct PeerServer<S, Tx> {
 
 impl<S, Tx> PeerServer<S, Tx>
 where
-    S: Service<Request, Response = Response>,
+    S: Service<Request, Response = Response, Error = BoxedStdError>,
     S::Error: Into<BoxedStdError>,
-    Tx: Sink<Message> + Unpin,
-    Tx::Error: Into<Error>,
+    Tx: Sink<Message, Error = SerializationError> + Unpin,
 {
     /// Run this peer server to completion.
     pub async fn run<Rx>(mut self, mut peer_rx: Rx)
     where
-        Rx: Stream<Item = Result<Message, Error>> + Unpin,
+        Rx: Stream<Item = Result<Message, SerializationError>> + Unpin,
     {
         // At a high level, the event loop we want is as follows: we check for any
         // incoming messages from the remote peer, check if they should be interpreted
@@ -122,9 +108,7 @@ where
                         .as_mut()
                         .expect("timeout must be set while awaiting response");
                     match future::select(peer_rx.next(), timer_ref).await {
-                        Either::Left((None, _)) => {
-                            self.fail_with(format_err!("peer closed connection").into())
-                        }
+                        Either::Left((None, _)) => self.fail_with(PeerError::ConnectionClosed),
                         // XXX switch back to hard failure when we parse all message types
                         //Either::Left((Some(Err(e)), _)) => self.fail_with(e.into()),
                         Either::Left((Some(Err(peer_err)), _timer)) => error!(%peer_err),
@@ -139,7 +123,8 @@ where
                             // Re-matching lets us take ownership of tx
                             self.state = match self.state {
                                 ServerState::AwaitingResponse(_, tx) => {
-                                    let _ = tx.send(Err(format_err!("request timed out").into()));
+                                    let e = PeerError::ClientRequestTimeout;
+                                    let _ = tx.send(Err(Arc::new(e).into()));
                                     ServerState::AwaitingRequest
                                 }
                                 _ => panic!("unreachable"),
@@ -179,7 +164,7 @@ where
         if guard.is_some() {
             panic!("called fail_with on already-failed server state");
         } else {
-            *guard = Some(e);
+            *guard = Some(Arc::new(e).into());
         }
         // Drop the guard immediately to release the mutex.
         std::mem::drop(guard);
@@ -215,13 +200,13 @@ where
                 .peer_tx
                 .send(Message::GetAddr)
                 .await
-                .map_err(|e| e.into().into())
+                .map_err(|e| e.into())
                 .map(|()| AwaitingResponse(GetPeers, tx)),
             (AwaitingRequest, PushPeers(addrs)) => self
                 .peer_tx
                 .send(Message::Addr(addrs))
                 .await
-                .map_err(|e| e.into().into())
+                .map_err(|e| e.into())
                 .map(|()| {
                     // PushPeers does not have a response, so we return OK as
                     // soon as we send the request. Sending through a oneshot
@@ -280,17 +265,17 @@ where
         // These messages are transport-related, handle them separately:
         match msg {
             Message::Version { .. } => {
-                self.fail_with(format_err!("got version message after handshake").into());
+                self.fail_with(PeerError::DuplicateHandshake);
                 return;
             }
             Message::Verack { .. } => {
-                self.fail_with(format_err!("got verack message after handshake").into());
+                self.fail_with(PeerError::DuplicateHandshake);
                 return;
             }
             Message::Ping(nonce) => {
                 match self.peer_tx.send(Message::Pong(nonce)).await {
                     Ok(()) => {}
-                    Err(e) => self.fail_with(e.into().into()),
+                    Err(e) => self.fail_with(e.into()),
                 }
                 return;
             }
@@ -317,26 +302,31 @@ where
     /// of connected peers.
     async fn drive_peer_request(&mut self, req: Request) {
         trace!(?req);
-        use tower::ServiceExt;
-        if let Err(e) = self
-            .svc
-            .ready()
-            .await
-            .map_err(|e| Error::from_boxed_compat(e.into()))
-        {
-            self.fail_with(e.into());
+        use tower::{load_shed::error::Overloaded, ServiceExt};
+
+        if let Err(_) = self.svc.ready().await {
+            // Treat all service readiness errors as Overloaded
+            self.fail_with(PeerError::Overloaded);
         }
-        match self
-            .svc
-            .call(req)
-            .await
-            .map_err(|e| Error::from_boxed_compat(e.into()))
-        {
-            Err(e) => self.fail_with(e.into()),
-            Ok(Response::Ok) => { /* generic success, do nothing */ }
-            Ok(Response::Peers(addrs)) => {
+
+        let rsp = match self.svc.call(req).await {
+            Err(e) => {
+                if e.is::<Overloaded>() {
+                    self.fail_with(PeerError::Overloaded);
+                } else {
+                    // We could send a reject to the remote peer.
+                    error!(%e);
+                }
+                return;
+            }
+            Ok(rsp) => rsp,
+        };
+
+        match rsp {
+            Response::Ok => { /* generic success, do nothing */ }
+            Response::Peers(addrs) => {
                 if let Err(e) = self.peer_tx.send(Message::Addr(addrs)).await {
-                    self.fail_with(e.into().into());
+                    self.fail_with(e.into());
                 }
             }
         }

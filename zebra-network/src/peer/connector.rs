@@ -5,7 +5,6 @@ use std::{
 };
 
 use chrono::Utc;
-use failure::Error;
 use futures::channel::mpsc;
 use tokio::{codec::Framed, net::TcpStream, prelude::*};
 use tower::Service;
@@ -21,10 +20,7 @@ use crate::{
     BoxedStdError, Config, Network,
 };
 
-use super::{
-    client::PeerClient,
-    server::{ErrorSlot, PeerServer, ServerState},
-};
+use super::{error::ErrorSlot, server::ServerState, PeerClient, PeerError, PeerServer};
 
 /// A [`Service`] that connects to a remote peer and constructs a client/server pair.
 pub struct PeerConnector<S> {
@@ -64,12 +60,12 @@ where
 
 impl<S> Service<SocketAddr> for PeerConnector<S>
 where
-    S: Service<Request, Response = Response> + Clone + Send + 'static,
+    S: Service<Request, Response = Response, Error = BoxedStdError> + Clone + Send + 'static,
     S::Future: Send,
     S::Error: Send + Into<BoxedStdError>,
 {
     type Response = PeerClient;
-    type Error = Error;
+    type Error = PeerError;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -93,7 +89,7 @@ where
             debug!("opening tcp stream");
 
             let mut stream = Framed::new(
-                TcpStream::connect(addr).await?,
+                TcpStream::connect(addr).await.expect("PeerError does not contain an io::Error variant, but this code will be removed in the next PR, so there's no need to handle this error"),
                 Codec::builder().for_network(network).finish(),
             );
 
@@ -121,7 +117,7 @@ where
             let remote_version = stream
                 .next()
                 .await
-                .ok_or_else(|| format_err!("stream closed during handshake"))??;
+                .ok_or_else(|| PeerError::ConnectionClosed)??;
 
             debug!(
                 ?remote_version,
@@ -132,7 +128,7 @@ where
             let remote_verack = stream
                 .next()
                 .await
-                .ok_or_else(|| format_err!("stream closed during handshake"))??;
+                .ok_or_else(|| PeerError::ConnectionClosed)??;
 
             debug!(?remote_verack, "got remote peer's verack");
 

@@ -12,7 +12,7 @@ use tower::Service;
 
 use crate::protocol::internal::{Request, Response};
 
-use super::{server::ErrorSlot, PeerError};
+use super::{error::ErrorSlot, SharedPeerError};
 
 /// The "client" duplex half of a peer connection.
 pub struct PeerClient {
@@ -29,12 +29,12 @@ pub struct PeerClient {
 #[derive(Debug)]
 pub(super) struct ClientRequest(
     pub(super) Request,
-    pub(super) oneshot::Sender<Result<Response, PeerError>>,
+    pub(super) oneshot::Sender<Result<Response, SharedPeerError>>,
 );
 
 impl Service<Request> for PeerClient {
     type Response = Response;
-    type Error = PeerError;
+    type Error = SharedPeerError;
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
@@ -52,6 +52,7 @@ impl Service<Request> for PeerClient {
     fn call(&mut self, req: Request) -> Self::Future {
         use futures::future::FutureExt;
         use tracing_futures::Instrument;
+
         let (tx, rx) = oneshot::channel();
         match self.server_tx.try_send(ClientRequest(req, tx)) {
             Err(e) => {
@@ -68,16 +69,15 @@ impl Service<Request> for PeerClient {
                     panic!("called call without poll_ready");
                 }
             }
-            // need a bit of yoga to get result types to align,
-            // because the oneshot future can error
-            Ok(()) => rx
-                .map(|val| match val {
-                    Ok(Ok(rsp)) => Ok(rsp),
-                    Ok(Err(e)) => Err(e),
-                    Err(_) => Err(format_err!("oneshot died").into()),
+            Ok(()) => {
+                // The reciever end of the oneshot is itself a future.
+                rx.map(|oneshot_recv_result| {
+                    oneshot_recv_result
+                        .expect("ClientRequest oneshot sender must not be dropped before send")
                 })
                 .instrument(self.span.clone())
-                .boxed(),
+                .boxed()
+            }
         }
     }
 }
