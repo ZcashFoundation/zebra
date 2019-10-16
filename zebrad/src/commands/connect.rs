@@ -77,14 +77,19 @@ impl ConnectCmd {
 
         let config = app_config().network.clone();
         let collector = TimestampCollector::new();
-        let mut pc = PeerConnector::new(config, Network::Mainnet, node, &collector);
+        let mut pc = Buffer::new(
+            PeerConnector::new(config, Network::Mainnet, node, &collector),
+            1,
+        );
 
         let tcp_stream = TcpStream::connect(self.addr).await?;
         pc.ready()
-            .await?;
+            .await
+            .map_err(failure::Error::from_boxed_compat)?;
         let mut client = pc
             .call((tcp_stream, self.addr))
-            .await?;
+            .await
+            .map_err(failure::Error::from_boxed_compat)?;
 
         client.ready().await?;
 
@@ -97,7 +102,6 @@ impl ConnectCmd {
             "got addresses from first connected peer"
         );
 
-/*
         use failure::Error;
         use futures::{
             future,
@@ -113,8 +117,13 @@ impl ConnectCmd {
                 addrs
                     .into_iter()
                     .map(|meta| {
-                        let svc_fut = pc.call(meta.addr);
-                        async move { Ok::<_, Error>(Change::Insert(meta.addr, svc_fut.await?)) }
+                        let mut pc = pc.clone();
+                        async move {
+                            let stream = TcpStream::connect(meta.addr).await?;
+                            pc.ready().await?;
+                            let client = pc.call((stream, meta.addr)).await?;
+                            Ok::<_, BoxedStdError>(Change::Insert(meta.addr, client))
+                        }
                     })
                     .collect::<FuturesUnordered<_>>()
                     // Discard any errored connections...
@@ -156,7 +165,6 @@ impl ConnectCmd {
             // empty loop ensures we don't exit the application,
             // and this is throwaway code
         }
-        */
 
         Ok(())
     }
