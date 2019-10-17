@@ -28,21 +28,12 @@ impl AddressBook {
     /// Update the address book with `event`, a [`MetaAddr`] representing
     /// observation of a peer.
     pub fn update(&mut self, event: MetaAddr) {
-        use chrono::Duration as CD;
         use std::collections::hash_map::Entry;
 
-        trace!(
+        debug!(
             ?event,
             data.total = self.by_time.len(),
-            // This would be cleaner if it used "variables" but keeping
-            // it inside the trace! invocation prevents running the range
-            // query unless the output will actually be used.
-            data.recent = self
-                .by_time
-                .range(
-                    (Utc::now() - CD::from_std(constants::LIVE_PEER_DURATION).unwrap())..Utc::now()
-                )
-                .count()
+            data.recent = (self.by_time.len() - self.disconnected_peers().count()),
         );
 
         let MetaAddr {
@@ -72,5 +63,40 @@ impl AddressBook {
                 self.by_time.insert(last_seen, (addr, services));
             }
         }
+    }
+
+    /// Return an iterator over all peers, ordered from most recently seen to
+    /// least recently seen.
+    pub fn peers<'a>(&'a self) -> impl Iterator<Item = MetaAddr> + 'a {
+        self.by_time.iter().rev().map(from_by_time_kv)
+    }
+
+    /// Return an iterator over peers known to be disconnected, ordered from most
+    /// recently seen to least recently seen.
+    pub fn disconnected_peers<'a>(&'a self) -> impl Iterator<Item = MetaAddr> + 'a {
+        use chrono::Duration as CD;
+        use std::ops::Bound::{Excluded, Unbounded};
+
+        // LIVE_PEER_DURATION represents the time interval in which we are
+        // guaranteed to receive at least one message from a peer or close the
+        // connection. Therefore, if the last-seen timestamp is older than
+        // LIVE_PEER_DURATION ago, we know we must have disconnected from it.
+        let cutoff = Utc::now() - CD::from_std(constants::LIVE_PEER_DURATION).unwrap();
+
+        self.by_time
+            .range((Unbounded, Excluded(cutoff)))
+            .rev()
+            .map(from_by_time_kv)
+    }
+}
+
+// Helper impl to convert by_time Iterator Items back to MetaAddrs
+// This could easily be a From impl, but trait impls are public, and this shouldn't be.
+fn from_by_time_kv(by_time_kv: (&DateTime<Utc>, &(SocketAddr, PeerServices))) -> MetaAddr {
+    let (last_seen, (addr, services)) = by_time_kv;
+    MetaAddr {
+        last_seen: last_seen.clone(),
+        addr: addr.clone(),
+        services: services.clone(),
     }
 }
