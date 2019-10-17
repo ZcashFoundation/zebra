@@ -18,8 +18,9 @@ use zebra_chain::types::BlockHeight;
 use crate::{
     constants,
     protocol::{codec::*, internal::*, message::*, types::*},
-    timestamp_collector::{PeerLastSeen, TimestampCollector},
-    BoxedStdError, Config, types::Network,
+    timestamp_collector::TimestampCollector,
+    types::{MetaAddr, Network},
+    BoxedStdError, Config,
 };
 
 use super::{error::ErrorSlot, server::ServerState, HandshakeError, PeerClient, PeerServer};
@@ -28,7 +29,7 @@ use super::{error::ErrorSlot, server::ServerState, HandshakeError, PeerClient, P
 pub struct PeerConnector<S> {
     config: Config,
     internal_service: S,
-    sender: mpsc::Sender<PeerLastSeen>,
+    sender: mpsc::Sender<MetaAddr>,
     nonces: Arc<Mutex<HashSet<Nonce>>>,
 }
 
@@ -120,8 +121,11 @@ where
 
             // Check that we got a Version and destructure its fields into the local scope.
             debug!(?remote_msg, "got message from remote peer");
-            let remote_nonce = if let Message::Version { nonce, .. } = remote_msg {
-                nonce
+            let (remote_nonce, remote_services) = if let Message::Version {
+                nonce, services, ..
+            } = remote_msg
+            {
+                (nonce, services)
             } else {
                 return Err(HandshakeError::UnexpectedMessage(remote_msg));
             };
@@ -181,7 +185,13 @@ where
                     async move {
                         if let Ok(_) = msg {
                             use futures::sink::SinkExt;
-                            let _ = sender.send((addr, Utc::now())).await;
+                            let _ = sender
+                                .send(MetaAddr {
+                                    addr,
+                                    services: remote_services,
+                                    last_seen: Utc::now(),
+                                })
+                                .await;
                         }
                         msg
                     }

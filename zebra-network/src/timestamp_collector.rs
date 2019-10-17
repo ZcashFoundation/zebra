@@ -10,10 +10,10 @@ use chrono::{DateTime, Utc};
 use futures::channel::mpsc;
 use tokio::prelude::*;
 
-use crate::constants;
-
-/// A type alias for a timestamp event sent to a `TimestampCollector`.
-pub(crate) type PeerLastSeen = (SocketAddr, DateTime<Utc>);
+use crate::{
+    constants,
+    types::{MetaAddr, PeerServices},
+};
 
 /// Maintains a lookup table from peer addresses to last-seen times.
 ///
@@ -29,23 +29,22 @@ pub struct TimestampCollector {
     // event buffer to hide latency if other tasks block it temporarily.
     data: Arc<Mutex<TimestampData>>,
     shutdown: Arc<ShutdownSignal>,
-    worker_tx: mpsc::Sender<PeerLastSeen>,
+    worker_tx: mpsc::Sender<MetaAddr>,
 }
 
 #[derive(Default, Debug)]
 struct TimestampData {
-    by_addr: HashMap<SocketAddr, DateTime<Utc>>,
-    by_time: BTreeMap<DateTime<Utc>, SocketAddr>,
+    by_addr: HashMap<SocketAddr, (DateTime<Utc>, PeerServices)>,
+    by_time: BTreeMap<DateTime<Utc>, (SocketAddr, PeerServices)>,
 }
 
 impl TimestampData {
-    fn update(&mut self, event: PeerLastSeen) {
+    fn update(&mut self, event: MetaAddr) {
         use chrono::Duration as CD;
         use std::collections::hash_map::Entry;
-        let (addr, timestamp) = event;
+
         trace!(
-            ?addr,
-            ?timestamp,
+            ?event,
             data.total = self.by_time.len(),
             // This would be cleaner if it used "variables" but keeping
             // it inside the trace! invocation prevents running the range
@@ -57,18 +56,32 @@ impl TimestampData {
                 )
                 .count()
         );
+
+        let MetaAddr {
+            addr,
+            services,
+            last_seen,
+        } = event;
+
         match self.by_addr.entry(addr) {
             Entry::Occupied(mut entry) => {
-                let last_timestamp = entry.get();
+                let (prev_last_seen, _) = entry.get();
+                // If the new timestamp event is older than the current
+                // one, discard it.  This is irrelevant for the timestamp
+                // collector but is important for combining address
+                // information from different peers.
+                if *prev_last_seen > last_seen {
+                    return;
+                }
                 self.by_time
-                    .remove(last_timestamp)
+                    .remove(prev_last_seen)
                     .expect("cannot have by_addr entry without by_time entry");
-                entry.insert(timestamp);
-                self.by_time.insert(timestamp, addr);
+                entry.insert((last_seen, services));
+                self.by_time.insert(last_seen, (addr, services));
             }
             Entry::Vacant(entry) => {
-                entry.insert(timestamp);
-                self.by_time.insert(timestamp, addr);
+                entry.insert((last_seen, services));
+                self.by_time.insert(last_seen, (addr, services));
             }
         }
     }
@@ -108,7 +121,7 @@ impl TimestampCollector {
         }
     }
 
-    pub(crate) fn sender_handle(&self) -> mpsc::Sender<PeerLastSeen> {
+    pub(crate) fn sender_handle(&self) -> mpsc::Sender<MetaAddr> {
         self.worker_tx.clone()
     }
 }
