@@ -334,7 +334,14 @@ impl Decoder for Codec {
                 let command = header_reader.read_12_bytes()?;
                 let body_len = header_reader.read_u32::<LittleEndian>()? as usize;
                 let checksum = Sha256dChecksum(header_reader.read_4_bytes()?);
-                trace!(?self.state, ?magic, ?command, body_len, ?checksum, "read header from src buffer");
+                trace!(
+                    ?self.state,
+                    ?magic,
+                    command = %String::from_utf8_lossy(&command),
+                    body_len,
+                    ?checksum,
+                    "read header from src buffer"
+                );
 
                 if magic != self.builder.network.magic() {
                     return Err(Parse("supplied magic did not meet expectations"));
