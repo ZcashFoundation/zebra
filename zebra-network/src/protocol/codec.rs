@@ -17,7 +17,7 @@ use zebra_chain::{
     types::{BlockHeight, Sha256dChecksum},
 };
 
-use crate::{constants, Network};
+use crate::{constants, types::Network};
 
 use super::{inv::InventoryHash, message::Message, types::*};
 
