@@ -16,19 +16,25 @@ extern crate bitflags;
 /// Note: the 'static lifetime bound means that the *type* cannot have any
 /// non-'static lifetimes, (e.g., when a type contains a borrow and is
 /// parameterized by 'a), *not* that the object itself has 'static lifetime.
-pub(crate) type BoxedStdError = Box<dyn std::error::Error + Send + Sync + 'static>;
-
-mod network;
-pub use network::Network;
+pub type BoxedStdError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 mod config;
+mod constants;
+mod meta_addr;
+mod network;
+mod peer;
+mod peer_set;
+mod protocol;
+mod timestamp_collector;
+
 pub use config::Config;
+pub use meta_addr::MetaAddr;
+pub use network::Network;
+pub use peer_set::init;
+pub use protocol::internal::{Request, Response};
+pub use timestamp_collector::TimestampCollector;
 
-pub mod protocol;
-
-// XXX revisit privacy once we finish encapsulation.
-pub mod constants;
-pub mod meta_addr;
-pub mod peer;
-pub mod peer_set;
-pub mod timestamp_collector;
+/// This will be removed when we finish encapsulation
+pub mod should_be_private {
+    pub use crate::peer::PeerConnector;
+}
