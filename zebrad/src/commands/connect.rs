@@ -108,7 +108,7 @@ impl ConnectCmd {
             addrs.into_iter().map(|meta| meta.addr).collect::<Vec<_>>()
         };
 
-        let (mut peer_set, _address_book) = zebra_network::init(config, node);
+        let (mut peer_set, address_book) = zebra_network::init(config, node);
 
         info!("waiting for peer_set ready");
         peer_set.ready().await.map_err(Error::from_boxed_compat)?;
