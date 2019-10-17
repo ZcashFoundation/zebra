@@ -56,7 +56,7 @@ mod timestamp_collector;
 pub use config::Config;
 pub use meta_addr::MetaAddr;
 pub use network::Network;
-pub use peer_set::init;
+pub use peer_set::{init, BoxedZebraService};
 pub use protocol::internal::{Request, Response};
 pub use timestamp_collector::TimestampCollector;
 

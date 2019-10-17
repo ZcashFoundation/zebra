@@ -36,7 +36,8 @@ use crate::{
     BoxedStdError,
 };
 
-type BoxedZebraService = Box<
+/// A type alias for a boxed [`tower::Service`] used to process [`Request`]s into [`Response`]s.
+pub type BoxedZebraService = Box<
     dyn Service<
             Request,
             Response = Response,
