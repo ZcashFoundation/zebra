@@ -6,6 +6,8 @@ use crate::network::Network;
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    /// The address on which this node should listen for connections.
+    pub listen_addr: SocketAddr,
     /// The network to connect to.
     pub network: Network,
     /// The user-agent to advertise.
@@ -23,6 +25,9 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Config {
         Config {
+            listen_addr: "127.0.0.1:28233"
+                .parse()
+                .expect("Hardcoded address should be parseable"),
             user_agent: crate::constants::USER_AGENT.to_owned(),
             network: Network::Mainnet,
             initial_peers: Vec::new(),
