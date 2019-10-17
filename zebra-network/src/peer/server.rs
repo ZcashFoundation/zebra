@@ -286,7 +286,10 @@ where
         // and try to construct an appropriate request object.
         let req = match msg {
             Message::Addr(addrs) => Some(Request::PushPeers(addrs)),
-            _ => None,
+            _ => {
+                debug!("unhandled message type");
+                None
+            }
         };
 
         match req {
