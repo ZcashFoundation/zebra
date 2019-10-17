@@ -75,10 +75,7 @@ impl ListenCmd {
 
         let config = app_config().network.clone();
         let collector = TimestampCollector::new();
-        let mut pc = Buffer::new(
-            PeerConnector::new(config, Network::Mainnet, node, &collector),
-            1,
-        );
+        let mut pc = Buffer::new(PeerConnector::new(config, node, &collector), 1);
 
         let mut listener = TcpListener::bind(self.addr).await?;
 
