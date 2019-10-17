@@ -44,6 +44,7 @@ extern crate bitflags;
 /// parameterized by 'a), *not* that the object itself has 'static lifetime.
 pub type BoxedStdError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
+mod address_book;
 mod config;
 mod constants;
 mod meta_addr;
@@ -54,11 +55,10 @@ mod protocol;
 mod timestamp_collector;
 
 pub use crate::{
+    address_book::AddressBook,
     config::Config,
     peer_set::{init, BoxedZebraService},
     protocol::internal::{Request, Response},
-    // XXX replace with `AddressBook`
-    timestamp_collector::TimestampCollector,
 };
 
 /// Types used in the definition of [`Request`] and [`Response`] messages.
@@ -68,5 +68,5 @@ pub mod types {
 
 /// This will be removed when we finish encapsulation
 pub mod should_be_private {
-    pub use crate::peer::PeerConnector;
+    pub use crate::{peer::PeerConnector, timestamp_collector::TimestampCollector};
 }
