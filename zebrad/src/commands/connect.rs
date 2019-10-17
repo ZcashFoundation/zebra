@@ -51,7 +51,7 @@ impl Runnable for ConnectCmd {
 
 impl ConnectCmd {
     async fn connect(&self) -> Result<(), failure::Error> {
-        use zebra_network::{Request, Response, TimestampCollector};
+        use zebra_network::{Request, Response};
 
         info!("begin tower-based peer handling test stub");
         use tower::{buffer::Buffer, service_fn, Service, ServiceExt};
@@ -77,7 +77,7 @@ impl ConnectCmd {
         // Later, this should turn into initial_peers = vec![self.addr];
         config.initial_peers = {
             use tokio::net::TcpStream;
-            use zebra_network::should_be_private::PeerConnector;
+            use zebra_network::should_be_private::{PeerConnector, TimestampCollector};
 
             let collector = TimestampCollector::new();
             let mut pc = Buffer::new(
@@ -108,7 +108,7 @@ impl ConnectCmd {
             addrs.into_iter().map(|meta| meta.addr).collect::<Vec<_>>()
         };
 
-        let (mut peer_set, _tc) = zebra_network::init(config, node);
+        let (mut peer_set, _address_book) = zebra_network::init(config, node);
 
         info!("waiting for peer_set ready");
         peer_set.ready().await.map_err(Error::from_boxed_compat)?;

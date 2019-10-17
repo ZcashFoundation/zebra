@@ -10,7 +10,11 @@ mod unready_service;
 pub use discover::PeerDiscover;
 pub use set::PeerSet;
 
-use std::{net::SocketAddr, pin::Pin};
+use std::{
+    net::SocketAddr,
+    pin::Pin,
+    sync::{Arc, Mutex},
+};
 
 use futures::{
     channel::mpsc,
@@ -29,11 +33,9 @@ use tracing::Level;
 use tracing_futures::Instrument;
 
 use crate::{
-    config::Config,
     peer::{HandshakeError, PeerClient, PeerConnector},
-    protocol::internal::{Request, Response},
     timestamp_collector::TimestampCollector,
-    BoxedStdError,
+    AddressBook, BoxedStdError, Config, Request, Response,
 };
 
 /// A type alias for a boxed [`tower::Service`] used to process [`Request`]s into [`Response`]s.
@@ -50,7 +52,7 @@ pub type BoxedZebraService = Box<
 type PeerChange = Result<Change<SocketAddr, PeerClient>, BoxedStdError>;
 
 /// Initialize a peer set with the given `config`, forwarding peer requests to the `inbound_service`.
-pub fn init<S>(config: Config, inbound_service: S) -> (BoxedZebraService, TimestampCollector)
+pub fn init<S>(config: Config, inbound_service: S) -> (BoxedZebraService, Arc<Mutex<AddressBook>>)
 where
     S: Service<Request, Response = Response, Error = BoxedStdError> + Clone + Send + 'static,
     S::Future: Send + 'static,
@@ -96,7 +98,7 @@ where
 
     // 3. Outgoing peers we connect to in response to load.
 
-    (Box::new(peer_set), timestamp_collector)
+    (Box::new(peer_set), timestamp_collector.address_book())
 }
 
 /// Use the provided `peer_connector` to connect to `initial_peers`, then send

@@ -1,4 +1,4 @@
-//! Management of peer liveness / last-seen information.
+//! The timestamp collector collects liveness information from peers.
 
 use std::{
     collections::{BTreeMap, HashMap},
@@ -13,9 +13,11 @@ use tokio::prelude::*;
 use crate::{
     constants,
     types::{MetaAddr, PeerServices},
+    AddressBook,
 };
 
-/// Maintains a lookup table from peer addresses to last-seen times.
+/// The timestamp collector hooks into incoming message streams for each peer and
+/// records per-connection last-seen timestamps into an [`AddressBook`].
 ///
 /// On creation, the `TimestampCollector` spawns a worker task to process new
 /// timestamp events. The resulting `TimestampCollector` can be cloned, and the
@@ -27,70 +29,15 @@ pub struct TimestampCollector {
     // We do not expect mutex contention to be a problem, because
     // the dominant accessor is the collector worker, and it has a long
     // event buffer to hide latency if other tasks block it temporarily.
-    data: Arc<Mutex<TimestampData>>,
+    data: Arc<Mutex<AddressBook>>,
     shutdown: Arc<ShutdownSignal>,
     worker_tx: mpsc::Sender<MetaAddr>,
-}
-
-#[derive(Default, Debug)]
-struct TimestampData {
-    by_addr: HashMap<SocketAddr, (DateTime<Utc>, PeerServices)>,
-    by_time: BTreeMap<DateTime<Utc>, (SocketAddr, PeerServices)>,
-}
-
-impl TimestampData {
-    fn update(&mut self, event: MetaAddr) {
-        use chrono::Duration as CD;
-        use std::collections::hash_map::Entry;
-
-        trace!(
-            ?event,
-            data.total = self.by_time.len(),
-            // This would be cleaner if it used "variables" but keeping
-            // it inside the trace! invocation prevents running the range
-            // query unless the output will actually be used.
-            data.recent = self
-                .by_time
-                .range(
-                    (Utc::now() - CD::from_std(constants::LIVE_PEER_DURATION).unwrap())..Utc::now()
-                )
-                .count()
-        );
-
-        let MetaAddr {
-            addr,
-            services,
-            last_seen,
-        } = event;
-
-        match self.by_addr.entry(addr) {
-            Entry::Occupied(mut entry) => {
-                let (prev_last_seen, _) = entry.get();
-                // If the new timestamp event is older than the current
-                // one, discard it.  This is irrelevant for the timestamp
-                // collector but is important for combining address
-                // information from different peers.
-                if *prev_last_seen > last_seen {
-                    return;
-                }
-                self.by_time
-                    .remove(prev_last_seen)
-                    .expect("cannot have by_addr entry without by_time entry");
-                entry.insert((last_seen, services));
-                self.by_time.insert(last_seen, (addr, services));
-            }
-            Entry::Vacant(entry) => {
-                entry.insert((last_seen, services));
-                self.by_time.insert(last_seen, (addr, services));
-            }
-        }
-    }
 }
 
 impl TimestampCollector {
     /// Constructs a new `TimestampCollector`, spawning a worker task to process updates.
     pub fn new() -> TimestampCollector {
-        let data = Arc::new(Mutex::new(TimestampData::default()));
+        let data = Arc::new(Mutex::new(AddressBook::default()));
         // We need to make a copy now so we can move data into the async block.
         let data2 = data.clone();
 
@@ -119,6 +66,11 @@ impl TimestampCollector {
             worker_tx,
             shutdown: Arc::new(ShutdownSignal { tx: shutdown_tx }),
         }
+    }
+
+    /// Return a shared reference to the [`AddressBook`] this collector updates.
+    pub fn address_book(&self) -> Arc<Mutex<AddressBook>> {
+        self.data.clone()
     }
 
     pub(crate) fn sender_handle(&self) -> mpsc::Sender<MetaAddr> {
