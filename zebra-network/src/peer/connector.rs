@@ -19,7 +19,7 @@ use crate::{
     constants,
     protocol::{codec::*, internal::*, message::*, types::*},
     timestamp_collector::{PeerLastSeen, TimestampCollector},
-    BoxedStdError, Config, Network,
+    BoxedStdError, Config, types::Network,
 };
 
 use super::{error::ErrorSlot, server::ServerState, HandshakeError, PeerClient, PeerServer};

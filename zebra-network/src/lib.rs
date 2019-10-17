@@ -53,12 +53,18 @@ mod peer_set;
 mod protocol;
 mod timestamp_collector;
 
-pub use config::Config;
-pub use meta_addr::MetaAddr;
-pub use network::Network;
-pub use peer_set::{init, BoxedZebraService};
-pub use protocol::internal::{Request, Response};
-pub use timestamp_collector::TimestampCollector;
+pub use crate::{
+    config::Config,
+    peer_set::{init, BoxedZebraService},
+    protocol::internal::{Request, Response},
+    // XXX replace with `AddressBook`
+    timestamp_collector::TimestampCollector,
+};
+
+/// Types used in the definition of [`Request`] and [`Response`] messages.
+pub mod types {
+    pub use crate::{meta_addr::MetaAddr, network::Network, protocol::types::PeerServices};
+}
 
 /// This will be removed when we finish encapsulation
 pub mod should_be_private {
