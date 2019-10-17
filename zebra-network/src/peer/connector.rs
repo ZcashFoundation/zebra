@@ -29,7 +29,7 @@ use super::{error::ErrorSlot, server::ServerState, HandshakeError, PeerClient, P
 pub struct PeerConnector<S> {
     config: Config,
     internal_service: S,
-    sender: mpsc::Sender<MetaAddr>,
+    timestamp_collector: mpsc::Sender<MetaAddr>,
     nonces: Arc<Mutex<HashSet<Nonce>>>,
 }
 
@@ -39,17 +39,20 @@ where
     S::Future: Send,
 {
     /// Construct a new `PeerConnector`.
-    pub fn new(config: Config, internal_service: S, collector: &TimestampCollector) -> Self {
+    pub fn new(
+        config: Config,
+        internal_service: S,
+        timestamp_collector: mpsc::Sender<MetaAddr>,
+    ) -> Self {
         // XXX this function has too many parameters, but it's not clear how to
         // do a nice builder as all fields are mandatory. Could have Builder1,
         // Builder2, ..., with Builder1::with_config() -> Builder2;
         // Builder2::with_internal_service() -> ... or use Options in a single
         // Builder type or use the derive_builder crate.
-        let sender = collector.sender_handle();
         PeerConnector {
             config,
             internal_service,
-            sender,
+            timestamp_collector,
             nonces: Arc::new(Mutex::new(HashSet::new())),
         }
     }
@@ -78,7 +81,7 @@ where
         // Clone these upfront, so they can be moved into the future.
         let nonces = self.nonces.clone();
         let internal_service = self.internal_service.clone();
-        let sender = self.sender.clone();
+        let timestamp_collector = self.timestamp_collector.clone();
         let user_agent = self.config.user_agent.clone();
         let network = self.config.network.clone();
 
@@ -181,11 +184,11 @@ where
 
             let hooked_peer_rx = peer_rx
                 .then(move |msg| {
-                    let mut sender = sender.clone();
+                    let mut timestamp_collector = timestamp_collector.clone();
                     async move {
                         if let Ok(_) = msg {
                             use futures::sink::SinkExt;
-                            let _ = sender
+                            let _ = timestamp_collector
                                 .send(MetaAddr {
                                     addr,
                                     services: remote_services,
