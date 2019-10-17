@@ -11,11 +11,10 @@
 //! application's configuration file.
 
 mod connect;
-mod listen;
 mod start;
 mod version;
 
-use self::{connect::ConnectCmd, listen::ListenCmd, start::StartCmd, version::VersionCmd};
+use self::{connect::ConnectCmd, start::StartCmd, version::VersionCmd};
 use crate::config::ZebradConfig;
 use abscissa_core::{
     config::Override, Command, Configurable, FrameworkError, Help, Options, Runnable,
@@ -43,10 +42,6 @@ pub enum ZebradCmd {
     /// The `connect` subcommand
     #[options(help = "testing stub for dumping network messages")]
     Connect(ConnectCmd),
-
-    /// The `listen` subcommand
-    #[options(help = "testing stub for dumping network messages")]
-    Listen(ListenCmd),
 }
 
 /// This trait allows you to define how application configuration is loaded.
