@@ -42,18 +42,6 @@ pub struct Builder {
 
 impl Codec {
     /// Return a builder for constructing a [`Codec`].
-    ///
-    /// # Example
-    /// ```
-    /// # use zebra_network::protocol::codec::Codec;
-    /// use zebra_network::{constants, Network};
-    ///
-    /// let codec = Codec::builder()
-    ///     .for_network(Network::Mainnet)
-    ///     .for_version(constants::CURRENT_VERSION)
-    ///     .with_max_body_len(4_000_000)
-    ///     .finish();
-    /// ```
     pub fn builder() -> Builder {
         Builder {
             network: Network::Mainnet,
