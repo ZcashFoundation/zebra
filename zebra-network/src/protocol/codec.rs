@@ -1,5 +1,6 @@
 //! A Tokio codec mapping byte streams to Bitcoin message streams.
 
+use std::fmt;
 use std::io::{Cursor, Read, Write};
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
@@ -282,7 +283,6 @@ impl Codec {
 
 // ======== Decoding =========
 
-#[derive(Debug)]
 enum DecodeState {
     Head,
     Body {
@@ -290,6 +290,24 @@ enum DecodeState {
         command: [u8; 12],
         checksum: Sha256dChecksum,
     },
+}
+
+impl fmt::Debug for DecodeState {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            DecodeState::Head => write!(f, "DecodeState::Head"),
+            DecodeState::Body {
+                body_len,
+                command,
+                checksum,
+            } => f
+                .debug_struct("DecodeState::Body")
+                .field("body_len", &body_len)
+                .field("command", &String::from_utf8_lossy(command))
+                .field("checksum", &checksum)
+                .finish(),
+        }
+    }
 }
 
 impl Decoder for Codec {
@@ -618,5 +636,28 @@ mod tests {
         });
 
         assert_eq!(v, v_parsed);
+    }
+
+    #[test]
+    fn decode_state_debug() {
+        assert_eq!(format!("{:?}", DecodeState::Head), "DecodeState::Head");
+
+        let decode_state = DecodeState::Body {
+            body_len: 43,
+            command: [118, 101, 114, 115, 105, 111, 110, 0, 0, 0, 0, 0],
+            checksum: Sha256dChecksum([186, 250, 162, 227]),
+        };
+
+        assert_eq!(format!("{:?}", decode_state),
+                   "DecodeState::Body { body_len: 43, command: \"version\\u{0}\\u{0}\\u{0}\\u{0}\\u{0}\", checksum: Sha256dChecksum(\"bafaa2e3\") }");
+
+        let decode_state = DecodeState::Body {
+            body_len: 43,
+            command: [118, 240, 144, 128, 105, 111, 110, 0, 0, 0, 0, 0],
+            checksum: Sha256dChecksum([186, 250, 162, 227]),
+        };
+
+        assert_eq!(format!("{:?}", decode_state),
+                   "DecodeState::Body { body_len: 43, command: \"v�ion\\u{0}\\u{0}\\u{0}\\u{0}\\u{0}\", checksum: Sha256dChecksum(\"bafaa2e3\") }");
     }
 }
