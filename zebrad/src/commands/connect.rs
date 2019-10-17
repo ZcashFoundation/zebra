@@ -73,75 +73,56 @@ impl ConnectCmd {
             1,
         );
 
-        use tokio::net::TcpStream;
+        let mut config = app_config().network.clone();
 
-        let config = app_config().network.clone();
-        let collector = TimestampCollector::new();
-        let mut pc = Buffer::new(
-            PeerConnector::new(config, Network::Mainnet, node, &collector),
-            1,
-        );
+        // Until we finish fleshing out the peerset -- particularly
+        // pulling more peers -- we don't want to start with a single
+        // initial peer.  So make a throwaway connection to the first,
+        // extract a list of addresses, and discard everything else.
+        // All the setup is kept in a sub-scope so we know we're not reusing it.
+        //
+        // Later, this should turn into initial_peers = vec![self.addr];
+        config.initial_peers = {
+            use tokio::net::TcpStream;
 
-        let tcp_stream = TcpStream::connect(self.addr).await?;
-        pc.ready()
-            .await
-            .map_err(failure::Error::from_boxed_compat)?;
-        let mut client = pc
-            .call((tcp_stream, self.addr))
-            .await
-            .map_err(failure::Error::from_boxed_compat)?;
+            let collector = TimestampCollector::new();
+            let mut pc = Buffer::new(
+                PeerConnector::new(config.clone(), node.clone(), &collector),
+                1,
+            );
 
-        client.ready().await?;
+            let tcp_stream = TcpStream::connect(self.addr).await?;
+            pc.ready()
+                .await
+                .map_err(failure::Error::from_boxed_compat)?;
+            let mut client = pc
+                .call((tcp_stream, self.addr))
+                .await
+                .map_err(failure::Error::from_boxed_compat)?;
 
-        let addrs = match client.call(Request::GetPeers).await? {
-            Response::Peers(addrs) => addrs,
-            _ => bail!("Got wrong response type"),
+            client.ready().await?;
+
+            let addrs = match client.call(Request::GetPeers).await? {
+                Response::Peers(addrs) => addrs,
+                _ => bail!("Got wrong response type"),
+            };
+            info!(
+                addrs.len = addrs.len(),
+                "got addresses from first connected peer"
+            );
+
+            addrs.into_iter().map(|meta| meta.addr).collect::<Vec<_>>()
         };
-        info!(
-            addrs.len = addrs.len(),
-            "got addresses from first connected peer"
-        );
 
-        use failure::Error;
-        use futures::{
-            future,
-            stream::{FuturesUnordered, StreamExt},
-        };
-        use std::time::Duration;
-        use tower::discover::{Change, ServiceStream};
-        use tower_load::{peak_ewma::PeakEwmaDiscover, NoInstrument};
-
-        // construct a stream of services
-        let client_stream = PeakEwmaDiscover::new(
-            ServiceStream::new(
-                addrs
-                    .into_iter()
-                    .map(|meta| {
-                        let mut pc = pc.clone();
-                        async move {
-                            let stream = TcpStream::connect(meta.addr).await?;
-                            pc.ready().await?;
-                            let client = pc.call((stream, meta.addr)).await?;
-                            Ok::<_, BoxedStdError>(Change::Insert(meta.addr, client))
-                        }
-                    })
-                    .collect::<FuturesUnordered<_>>()
-                    // Discard any errored connections...
-                    .filter(|result| future::ready(result.is_ok())),
-            ),
-            Duration::from_secs(1),  // default rtt estimate
-            Duration::from_secs(60), // decay time
-            NoInstrument,
-        );
-
-        info!("finished constructing discover");
-
-        let mut peer_set = PeerSet::new(client_stream);
+        let (mut peer_set, _tc) = zebra_network::peer_set::init(config, node);
 
         info!("waiting for peer_set ready");
         peer_set.ready().await.map_err(Error::from_boxed_compat)?;
 
         info!("peer_set became ready, constructing addr requests");
+
+        use failure::Error;
+        use futures::stream::{FuturesUnordered, StreamExt};
 
         let mut addr_reqs = FuturesUnordered::new();
         for i in 0..10usize {
