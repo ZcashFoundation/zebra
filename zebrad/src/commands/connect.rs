@@ -79,9 +79,9 @@ impl ConnectCmd {
             use tokio::net::TcpStream;
             use zebra_network::should_be_private::{PeerConnector, TimestampCollector};
 
-            let collector = TimestampCollector::new();
+            let (_, collector) = TimestampCollector::spawn();
             let mut pc = Buffer::new(
-                PeerConnector::new(config.clone(), node.clone(), &collector),
+                PeerConnector::new(config.clone(), node.clone(), collector),
                 1,
             );
 

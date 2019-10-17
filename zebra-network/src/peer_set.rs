@@ -57,9 +57,9 @@ where
     S: Service<Request, Response = Response, Error = BoxedStdError> + Clone + Send + 'static,
     S::Future: Send + 'static,
 {
-    let timestamp_collector = TimestampCollector::new();
+    let (address_book, timestamp_collector) = TimestampCollector::spawn();
     let peer_connector = Buffer::new(
-        PeerConnector::new(config.clone(), inbound_service, &timestamp_collector),
+        PeerConnector::new(config.clone(), inbound_service, timestamp_collector),
         1,
     );
 
@@ -98,7 +98,7 @@ where
 
     // 3. Outgoing peers we connect to in response to load.
 
-    (Box::new(peer_set), timestamp_collector.address_book())
+    (Box::new(peer_set), address_book)
 }
 
 /// Use the provided `peer_connector` to connect to `initial_peers`, then send
