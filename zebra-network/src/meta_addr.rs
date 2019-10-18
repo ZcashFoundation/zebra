@@ -1,7 +1,10 @@
 //! An address-with-metadata type used in Bitcoin networking.
 
-use std::io::{Read, Write};
-use std::net::SocketAddr;
+use std::{
+    cmp::{Ord, Ordering},
+    io::{Read, Write},
+    net::SocketAddr,
+};
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{DateTime, TimeZone, Utc};
@@ -26,6 +29,34 @@ pub struct MetaAddr {
     pub services: PeerServices,
     /// When the peer was last seen.
     pub last_seen: DateTime<Utc>,
+}
+
+impl Ord for MetaAddr {
+    /// `MetaAddr`s are sorted newest-first, and then in an arbitrary
+    /// but determinate total order.
+    fn cmp(&self, other: &Self) -> Ordering {
+        let newest_first = self.last_seen.cmp(&other.last_seen).reverse();
+        newest_first.then_with(|| {
+            // The remainder is meaningless as an ordering, but required so that we
+            // have a total order on `MetaAddr` values: self and other must compare
+            // as Ordering::Equal iff they are equal.
+            use std::net::IpAddr::{V4, V6};
+            match (self.addr.ip(), other.addr.ip()) {
+                (V4(a), V4(b)) => a.octets().cmp(&b.octets()),
+                (V6(a), V6(b)) => a.octets().cmp(&b.octets()),
+                (V4(_), V6(_)) => Ordering::Less,
+                (V6(_), V4(_)) => Ordering::Greater,
+            }
+            .then(self.addr.port().cmp(&other.addr.port()))
+            .then(self.services.bits().cmp(&other.services.bits()))
+        })
+    }
+}
+
+impl PartialOrd for MetaAddr {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 impl ZcashSerialize for MetaAddr {

@@ -142,6 +142,11 @@ impl ConnectCmd {
         let addrs = all_addrs.drain_recent().collect::<Vec<_>>();
 
         info!(addrs.len = addrs.len(), ab.len = all_addrs.peers().count());
+        let mut head = Vec::new();
+        head.extend_from_slice(&addrs[0..5]);
+        let mut tail = Vec::new();
+        tail.extend_from_slice(&addrs[addrs.len() - 5..]);
+        info!(addrs.first = ?head, addrs.last = ?tail);
 
         loop {
             // empty loop ensures we don't exit the application,
