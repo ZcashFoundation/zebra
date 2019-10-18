@@ -26,6 +26,9 @@ pub struct AddressBook {
 }
 
 impl AddressBook {
+    /// Check consistency of the address book invariants or panic, doing work
+    /// quadratic in the address book size.
+    #[cfg(test)]
     fn assert_consistency(&self) {
         for (a, (t, s)) in self.by_addr.iter() {
             for meta in self.by_time.iter().filter(|meta| meta.addr == *a) {
@@ -36,47 +39,49 @@ impl AddressBook {
         }
     }
 
-    /// Update the address book with `event`, a [`MetaAddr`] representing
-    /// observation of a peer.
-    pub fn update(&mut self, event: MetaAddr) {
-        use std::collections::hash_map::Entry;
+    /// Returns true if the address book has an entry for `addr`.
+    pub fn contains_addr(&self, addr: &SocketAddr) -> bool {
+        self.by_addr.contains_key(addr)
+    }
 
+    /// Returns the entry corresponding to `addr`, or `None` if it does not exist.
+    pub fn get_by_addr(&self, addr: SocketAddr) -> Option<MetaAddr> {
+        let (last_seen, services) = self.by_addr.get(&addr).cloned()?;
+        Some(MetaAddr {
+            addr,
+            last_seen,
+            services,
+        })
+    }
+
+    /// Add `new` to the address book, updating the previous entry if `new` is
+    /// more recent or discarding `new` if it is stale.
+    pub fn update(&mut self, new: MetaAddr) {
         trace!(
-            ?event,
+            ?new,
             data.total = self.by_time.len(),
             data.recent = (self.by_time.len() - self.disconnected_peers().count()),
         );
-        //self.assert_consistency();
+        #[cfg(test)]
+        self.assert_consistency();
 
-        let MetaAddr {
-            addr,
-            services,
-            last_seen,
-        } = event;
-
-        match self.by_addr.entry(addr) {
-            Entry::Occupied(mut entry) => {
-                let (prev_last_seen, prev_services) = entry.get().clone();
-                // Ignore stale entries.
-                if prev_last_seen > last_seen {
+        match self.get_by_addr(new.addr) {
+            Some(prev) => {
+                if prev.last_seen > new.last_seen {
                     return;
+                } else {
+                    self.by_time
+                        .take(&prev)
+                        .expect("cannot have by_addr entry without by_time entry");
                 }
-                self.by_time
-                    .take(&MetaAddr {
-                        addr,
-                        services: prev_services,
-                        last_seen: prev_last_seen,
-                    })
-                    .expect("cannot have by_addr entry without by_time entry");
-                entry.insert((last_seen, services));
-                self.by_time.insert(event);
             }
-            Entry::Vacant(entry) => {
-                entry.insert((last_seen, services));
-                self.by_time.insert(event);
-            }
+            None => {}
         }
-        //self.assert_consistency();
+        self.by_time.insert(new);
+        self.by_addr.insert(new.addr, (new.last_seen, new.services));
+
+        #[cfg(test)]
+        self.assert_consistency();
     }
 
     /// Compute a cutoff time that can determine whether an entry
