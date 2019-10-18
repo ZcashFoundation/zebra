@@ -51,7 +51,7 @@ impl Runnable for ConnectCmd {
 
 impl ConnectCmd {
     async fn connect(&self) -> Result<(), failure::Error> {
-        use zebra_network::{Request, Response};
+        use zebra_network::{AddressBook, Request, Response};
 
         info!("begin tower-based peer handling test stub");
         use tower::{buffer::Buffer, service_fn, Service, ServiceExt};
@@ -126,15 +126,22 @@ impl ConnectCmd {
             addr_reqs.push(peer_set.call(Request::GetPeers));
         }
 
-        let mut all_addrs = Vec::new();
+        let mut all_addrs = AddressBook::default();
         while let Some(Ok(Response::Peers(addrs))) = addr_reqs.next().await {
+            info!(addrs.len = addrs.len(), "got address response");
+
+            let prev_count = all_addrs.peers().count();
+            all_addrs.extend(addrs.into_iter());
+            let count = all_addrs.peers().count();
             info!(
-                all_addrs.len = all_addrs.len(),
-                addrs.len = addrs.len(),
-                "got address response"
+                new_addrs = count - prev_count,
+                count, "added addrs to addressbook"
             );
-            all_addrs.extend(addrs);
         }
+
+        let addrs = all_addrs.drain_recent().collect::<Vec<_>>();
+
+        info!(addrs.len = addrs.len(), ab.len = all_addrs.peers().count());
 
         loop {
             // empty loop ensures we don't exit the application,
