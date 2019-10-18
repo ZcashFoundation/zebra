@@ -79,6 +79,30 @@ impl AddressBook {
         //self.assert_consistency();
     }
 
+    /// Compute a cutoff time that can determine whether an entry
+    /// in an address book being updated with peer message timestamps
+    /// represents a known-disconnected peer or a potentially-connected peer.
+    ///
+    /// [`constants::LIVE_PEER_DURATION`] represents the time interval in which
+    /// we are guaranteed to receive at least one message from a peer or close
+    /// the connection. Therefore, if the last-seen timestamp is older than
+    /// [`constants::LIVE_PEER_DURATION`] ago, we know we must have disconnected
+    /// from it. Otherwise, we could potentially be connected to it.
+    fn cutoff_time() -> DateTime<Utc> {
+        // chrono uses signed durations while stdlib uses unsigned durations
+        use chrono::Duration as CD;
+        Utc::now() - CD::from_std(constants::LIVE_PEER_DURATION).unwrap()
+    }
+
+    /// Returns true if the given [`SocketAddr`] could potentially be connected
+    /// to a node feeding timestamps into this address book.
+    pub fn is_potentially_connected(&self, addr: &SocketAddr) -> bool {
+        match self.by_addr.get(addr) {
+            None => return false,
+            Some((ref last_seen, _)) => last_seen > &AddressBook::cutoff_time(),
+        }
+    }
+
     /// Return an iterator over all peers, ordered from most recently seen to
     /// least recently seen.
     pub fn peers<'a>(&'a self) -> impl Iterator<Item = MetaAddr> + 'a {
@@ -88,17 +112,10 @@ impl AddressBook {
     /// Return an iterator over peers known to be disconnected, ordered from most
     /// recently seen to least recently seen.
     pub fn disconnected_peers<'a>(&'a self) -> impl Iterator<Item = MetaAddr> + 'a {
-        use chrono::Duration as CD;
         use std::net::{IpAddr, Ipv4Addr};
         use std::ops::Bound::{Excluded, Unbounded};
-
-        // LIVE_PEER_DURATION represents the time interval in which we are
-        // guaranteed to receive at least one message from a peer or close the
-        // connection. Therefore, if the last-seen timestamp is older than
-        // LIVE_PEER_DURATION ago, we know we must have disconnected from it.
-        let cutoff = Utc::now() - CD::from_std(constants::LIVE_PEER_DURATION).unwrap();
         let cutoff_meta = MetaAddr {
-            last_seen: cutoff,
+            last_seen: AddressBook::cutoff_time(),
             // The ordering on MetaAddrs is newest-first, then arbitrary,
             // so any fields will do here.
             addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 0),
