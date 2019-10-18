@@ -121,6 +121,7 @@ where
                         Either::Right(((), _peer_fut)) => {
                             trace!("client request timed out");
                             // Re-matching lets us take ownership of tx
+                            // XXX check here for Ping heartbeat timeout?
                             self.state = match self.state {
                                 ServerState::AwaitingResponse(_, tx) => {
                                     let e = PeerError::ClientRequestTimeout;
@@ -216,6 +217,13 @@ where
                     let _ = tx.send(Ok(Response::Ok));
                     AwaitingRequest
                 }),
+            (AwaitingRequest, Ping(nonce)) => self
+                .peer_tx
+                .send(Message::Ping(nonce))
+                .await
+                .map_err(|e| e.into())
+                .map(|()| AwaitingResponse(Ping(nonce), tx)),
+            // XXX timeout handling here?
         } {
             Ok(new_state) => {
                 self.state = new_state;
@@ -248,6 +256,12 @@ where
             (AwaitingResponse(GetPeers, tx), Message::Addr(addrs)) => {
                 tx.send(Ok(Response::Peers(addrs)))
                     .expect("response oneshot should be unused");
+                AwaitingRequest
+            }
+            (AwaitingResponse(Ping(req_nonce), tx), Message::Pong(res_nonce)) => {
+                if req_nonce != res_nonce {
+                    self.fail_with(PeerError::HeartbeatNonceMismatch);
+                }
                 AwaitingRequest
             }
             // By default, messages are not responses.
