@@ -33,6 +33,9 @@ pub enum PeerError {
     /// already complete.
     #[error("Remote peer sent handshake messages after handshake")]
     DuplicateHandshake,
+    /// A badly-behaved remote peer sent the wrong nonce in response to a heartbeat `Ping`.
+    #[error("Remote peer sent the wrong heartbeat nonce")]
+    HeartbeatNonceMismatch,
     /// This node's internal services were overloaded, so the connection was dropped
     /// to shed load.
     #[error("Internal services over capacity")]

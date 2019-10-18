@@ -6,6 +6,8 @@
 
 use crate::meta_addr::MetaAddr;
 
+use super::types::Nonce;
+
 /// A network request, represented in internal format.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Request {
@@ -13,6 +15,8 @@ pub enum Request {
     GetPeers,
     /// Advertises peers to the remote server.
     PushPeers(Vec<MetaAddr>),
+    /// Heartbeats triggered on peer connection start.
+    Ping(Nonce),
 }
 
 /// A response to a network request, represented in internal format.
