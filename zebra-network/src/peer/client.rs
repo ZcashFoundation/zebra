@@ -70,7 +70,7 @@ impl Service<Request> for PeerClient {
                 }
             }
             Ok(()) => {
-                // The reciever end of the oneshot is itself a future.
+                // The receiver end of the oneshot is itself a future.
                 rx.map(|oneshot_recv_result| {
                     oneshot_recv_result
                         .expect("ClientRequest oneshot sender must not be dropped before send")
