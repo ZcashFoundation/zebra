@@ -113,8 +113,20 @@ impl AddressBook {
 
     /// Returns an iterator that drains entries from the address book, removing
     /// them in order from most recent to least recent.
-    pub fn drain_recent<'a>(&'a mut self) -> impl Iterator<Item = MetaAddr> + 'a {
-        Drain { book: self }
+    pub fn drain_newest<'a>(&'a mut self) -> impl Iterator<Item = MetaAddr> + 'a {
+        Drain {
+            book: self,
+            newest_first: true,
+        }
+    }
+
+    /// Returns an iterator that drains entries from the address book, removing
+    /// them in order from most recent to least recent.
+    pub fn drain_oldest<'a>(&'a mut self) -> impl Iterator<Item = MetaAddr> + 'a {
+        Drain {
+            book: self,
+            newest_first: false,
+        }
     }
 }
 
@@ -131,18 +143,23 @@ impl Extend<MetaAddr> for AddressBook {
 
 struct Drain<'a> {
     book: &'a mut AddressBook,
+    newest_first: bool,
 }
 
 impl<'a> Iterator for Drain<'a> {
     type Item = MetaAddr;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let most_recent = self.book.by_time.iter().next()?.clone();
-        self.book.by_time.remove(&most_recent);
+        let next_item = if self.newest_first {
+            self.book.by_time.iter().next()?.clone()
+        } else {
+            self.book.by_time.iter().rev().next()?.clone()
+        };
+        self.book.by_time.remove(&next_item);
         self.book
             .by_addr
-            .remove(&most_recent.addr)
+            .remove(&next_item.addr)
             .expect("cannot have by_time entry without by_addr entry");
-        Some(most_recent)
+        Some(next_item)
     }
 }

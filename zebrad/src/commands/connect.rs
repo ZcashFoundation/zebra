@@ -139,7 +139,7 @@ impl ConnectCmd {
             );
         }
 
-        let addrs = all_addrs.drain_recent().collect::<Vec<_>>();
+        let addrs = all_addrs.drain_newest().collect::<Vec<_>>();
 
         info!(addrs.len = addrs.len(), ab.len = all_addrs.peers().count());
         let mut head = Vec::new();
