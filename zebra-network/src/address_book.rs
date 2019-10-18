@@ -3,6 +3,7 @@
 
 use std::{
     collections::{BTreeMap, HashMap},
+    iter::Extend,
     net::SocketAddr,
     sync::{Arc, Mutex},
 };
@@ -88,6 +89,12 @@ impl AddressBook {
             .rev()
             .map(from_by_time_kv)
     }
+
+    /// Returns an iterator that drains entries from the address book, removing
+    /// them in order from most recent to least recent.
+    pub fn drain_recent<'a>(&'a mut self) -> impl Iterator<Item = MetaAddr> + 'a {
+        Drain { book: self }
+    }
 }
 
 // Helper impl to convert by_time Iterator Items back to MetaAddrs
@@ -98,5 +105,39 @@ fn from_by_time_kv(by_time_kv: (&DateTime<Utc>, &(SocketAddr, PeerServices))) ->
         last_seen: last_seen.clone(),
         addr: addr.clone(),
         services: services.clone(),
+    }
+}
+
+impl Extend<MetaAddr> for AddressBook {
+    fn extend<T>(&mut self, iter: T)
+    where
+        T: IntoIterator<Item = MetaAddr>,
+    {
+        for meta in iter.into_iter() {
+            self.update(meta);
+        }
+    }
+}
+
+struct Drain<'a> {
+    book: &'a mut AddressBook,
+}
+
+impl<'a> Iterator for Drain<'a> {
+    type Item = MetaAddr;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let most_recent = self.book.by_time.keys().rev().next()?.clone();
+        let (addr, services) = self
+            .book
+            .by_time
+            .remove(&most_recent)
+            .expect("key from keys() must be present in btreemap");
+        self.book.by_addr.remove(&addr);
+        Some(MetaAddr {
+            addr,
+            services,
+            last_seen: most_recent,
+        })
     }
 }
