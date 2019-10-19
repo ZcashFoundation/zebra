@@ -121,8 +121,11 @@ where
                         Either::Right(((), _peer_fut)) => {
                             trace!("client request timed out");
                             // Re-matching lets us take ownership of tx
-                            // XXX check here for Ping heartbeat timeout?
                             self.state = match self.state {
+                                ServerState::AwaitingResponse(Request::Ping(_), _) => {
+                                    self.fail_with(PeerError::ClientRequestTimeout);
+                                    ServerState::Failed
+                                }
                                 ServerState::AwaitingResponse(_, tx) => {
                                     let e = PeerError::ClientRequestTimeout;
                                     let _ = tx.send(Err(Arc::new(e).into()));
