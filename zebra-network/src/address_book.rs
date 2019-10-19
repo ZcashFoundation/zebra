@@ -143,7 +143,7 @@ impl AddressBook {
     }
 
     /// Returns an iterator that drains entries from the address book, removing
-    /// them in order from most recent to least recent.
+    /// them in order from least recent to most recent.
     pub fn drain_oldest<'a>(&'a mut self) -> impl Iterator<Item = MetaAddr> + 'a {
         Drain {
             book: self,
