@@ -10,11 +10,12 @@
 //! See the `impl Configurable` below for how to specify the path to the
 //! application's configuration file.
 
+mod config;
 mod connect;
 mod start;
 mod version;
 
-use self::{connect::ConnectCmd, start::StartCmd, version::VersionCmd};
+use self::{config::ConfigCmd, connect::ConnectCmd, start::StartCmd, version::VersionCmd};
 use crate::config::ZebradConfig;
 use abscissa_core::{
     config::Override, Command, Configurable, FrameworkError, Help, Options, Runnable,
@@ -34,6 +35,10 @@ pub enum ZebradCmd {
     /// The `start` subcommand
     #[options(help = "start the application")]
     Start(StartCmd),
+
+    /// The `config` subcommand
+    #[options(help = "generate a skeleton configuration")]
+    Config(ConfigCmd),
 
     /// The `version` subcommand
     #[options(help = "display version information")]
