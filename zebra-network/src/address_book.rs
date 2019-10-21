@@ -11,6 +11,7 @@ use std::{
 use chrono::{DateTime, Utc};
 use futures::channel::mpsc;
 use tokio::prelude::*;
+use tracing::Span;
 
 use crate::{
     constants,
@@ -19,13 +20,23 @@ use crate::{
 
 /// A database of peers, their advertised services, and information on when they
 /// were last seen.
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct AddressBook {
     by_addr: HashMap<SocketAddr, (DateTime<Utc>, PeerServices)>,
     by_time: BTreeSet<MetaAddr>,
+    span: Span,
 }
 
 impl AddressBook {
+    /// Construct an `AddressBook` with the given [`tracing::Span`].
+    pub fn new(span: Span) -> AddressBook {
+        AddressBook {
+            by_addr: HashMap::default(),
+            by_time: BTreeSet::default(),
+            span,
+        }
+    }
+
     /// Check consistency of the address book invariants or panic, doing work
     /// quadratic in the address book size.
     #[cfg(test)]
@@ -41,11 +52,13 @@ impl AddressBook {
 
     /// Returns true if the address book has an entry for `addr`.
     pub fn contains_addr(&self, addr: &SocketAddr) -> bool {
+        let _guard = self.span.enter();
         self.by_addr.contains_key(addr)
     }
 
     /// Returns the entry corresponding to `addr`, or `None` if it does not exist.
     pub fn get_by_addr(&self, addr: SocketAddr) -> Option<MetaAddr> {
+        let _guard = self.span.enter();
         let (last_seen, services) = self.by_addr.get(&addr).cloned()?;
         Some(MetaAddr {
             addr,
@@ -57,6 +70,7 @@ impl AddressBook {
     /// Add `new` to the address book, updating the previous entry if `new` is
     /// more recent or discarding `new` if it is stale.
     pub fn update(&mut self, new: MetaAddr) {
+        let _guard = self.span.enter();
         trace!(
             ?new,
             data.total = self.by_time.len(),
@@ -102,6 +116,7 @@ impl AddressBook {
     /// Returns true if the given [`SocketAddr`] could potentially be connected
     /// to a node feeding timestamps into this address book.
     pub fn is_potentially_connected(&self, addr: &SocketAddr) -> bool {
+        let _guard = self.span.enter();
         match self.by_addr.get(addr) {
             None => return false,
             Some((ref last_seen, _)) => last_seen > &AddressBook::cutoff_time(),
@@ -111,12 +126,14 @@ impl AddressBook {
     /// Return an iterator over all peers, ordered from most recently seen to
     /// least recently seen.
     pub fn peers<'a>(&'a self) -> impl Iterator<Item = MetaAddr> + 'a {
+        let _guard = self.span.enter();
         self.by_time.iter().rev().cloned()
     }
 
     /// Return an iterator over peers known to be disconnected, ordered from most
     /// recently seen to least recently seen.
     pub fn disconnected_peers<'a>(&'a self) -> impl Iterator<Item = MetaAddr> + 'a {
+        let _guard = self.span.enter();
         use std::net::{IpAddr, Ipv4Addr};
         use std::ops::Bound::{Excluded, Unbounded};
         let cutoff_meta = MetaAddr {

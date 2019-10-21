@@ -88,7 +88,8 @@ impl ConnectCmd {
             addr_reqs.push(peer_set.call(Request::GetPeers));
         }
 
-        let mut all_addrs = AddressBook::default();
+        use tracing::Level;
+        let mut all_addrs = AddressBook::new(span!(Level::TRACE, "connect stub addressbook"));
         while let Some(Ok(Response::Peers(addrs))) = addr_reqs.next().await {
             info!(addrs.len = addrs.len(), "got address response");
 
