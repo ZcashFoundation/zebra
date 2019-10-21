@@ -16,9 +16,13 @@ impl TimestampCollector {
     /// transmission channel for timestamp events and for the [`AddressBook`] it
     /// updates.
     pub fn spawn() -> (Arc<Mutex<AddressBook>>, mpsc::Sender<MetaAddr>) {
+        use tracing::Level;
         const TIMESTAMP_WORKER_BUFFER_SIZE: usize = 100;
         let (worker_tx, mut worker_rx) = mpsc::channel(TIMESTAMP_WORKER_BUFFER_SIZE);
-        let address_book = Arc::new(Mutex::new(AddressBook::default()));
+        let address_book = Arc::new(Mutex::new(AddressBook::new(span!(
+            Level::TRACE,
+            "timestamp collector"
+        ))));
         let worker_address_book = address_book.clone();
 
         let worker = async move {

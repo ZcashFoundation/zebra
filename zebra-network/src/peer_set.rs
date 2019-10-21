@@ -277,10 +277,11 @@ where
     S: Service<Request, Response = Response, Error = BoxedStdError>,
     S::Future: Send + 'static,
 {
+    use tracing::Level;
     let mut candidates = CandidateSet {
-        disconnected: AddressBook::default(),
-        gossiped: AddressBook::default(),
-        failed: AddressBook::default(),
+        disconnected: AddressBook::new(span!(Level::TRACE, "disconnected peers")),
+        gossiped: AddressBook::new(span!(Level::TRACE, "gossiped peers")),
+        failed: AddressBook::new(span!(Level::TRACE, "failed peers")),
         peer_set: peer_set_address_book.clone(),
         peer_service: peer_set_service,
     };
