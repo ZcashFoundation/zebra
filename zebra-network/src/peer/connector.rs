@@ -4,12 +4,13 @@ use std::{
     pin::Pin,
     sync::{Arc, Mutex},
     task::{Context, Poll},
+    time::Duration,
 };
 
 use chrono::Utc;
 use futures::channel::mpsc;
-use tokio::{codec::Framed, net::TcpStream, prelude::*};
-use tower::Service;
+use tokio::{codec::Framed, net::TcpStream, prelude::*, timer::Interval};
+use tower::{Service, ServiceExt};
 use tracing::{span, Level};
 use tracing_futures::Instrument;
 
@@ -18,8 +19,7 @@ use zebra_chain::types::BlockHeight;
 use crate::{
     constants,
     protocol::{codec::*, internal::*, message::*, types::*},
-    timestamp_collector::TimestampCollector,
-    types::{MetaAddr, Network},
+    types::MetaAddr,
     BoxedStdError, Config,
 };
 
@@ -206,6 +206,13 @@ where
                     .run(hooked_peer_rx)
                     .instrument(connection_span)
                     .boxed(),
+            );
+
+            // client.ready().await?;
+
+            tokio::spawn(
+                Interval::new_interval(Duration::from_secs(60))
+                    .for_each(|_| client.call(Request::Ping(Nonce::default()))),
             );
 
             Ok(client)
