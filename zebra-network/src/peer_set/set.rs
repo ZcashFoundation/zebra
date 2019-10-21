@@ -7,7 +7,10 @@ use std::{
     task::{Context, Poll},
 };
 
-use futures::{channel::oneshot, stream::FuturesUnordered};
+use futures::{
+    channel::{mpsc, oneshot},
+    stream::FuturesUnordered,
+};
 use indexmap::IndexMap;
 use tokio::prelude::*;
 use tower::{
@@ -76,6 +79,7 @@ where
     cancel_handles: HashMap<D::Key, oneshot::Sender<()>>,
     unready_services: FuturesUnordered<UnreadyService<D::Key, D::Service, Request>>,
     next_idx: Option<usize>,
+    demand_signal: mpsc::Sender<()>,
 }
 
 impl<D> PeerSet<D>
@@ -89,13 +93,14 @@ where
     <D::Service as Load>::Metric: Debug,
 {
     /// Construct a peerset which uses `discover` internally.
-    pub fn new(discover: D) -> Self {
+    pub fn new(discover: D, demand_signal: mpsc::Sender<()>) -> Self {
         Self {
             discover,
             ready_services: IndexMap::new(),
             cancel_handles: HashMap::new(),
             unready_services: FuturesUnordered::new(),
             next_idx: None,
+            demand_signal,
         }
     }
 
@@ -264,7 +269,8 @@ where
             self.next_idx = self.select_next_ready_index();
 
             if self.next_idx.is_none() {
-                trace!("no ready services, returning Poll::Pending");
+                trace!("no ready services, sending demand signal");
+                let _ = self.demand_signal.try_send(());
                 return Poll::Pending;
             }
         }

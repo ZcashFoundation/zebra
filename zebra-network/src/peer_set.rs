@@ -3,13 +3,6 @@
 // Portions of this submodule were adapted from tower-balance,
 // which is (c) 2019 Tower Contributors (MIT licensed).
 
-mod discover;
-mod set;
-mod unready_service;
-
-pub use discover::PeerDiscover;
-pub use set::PeerSet;
-
 use std::{
     net::SocketAddr,
     pin::Pin,
@@ -38,6 +31,15 @@ use crate::{
     AddressBook, BoxedStdError, Config, Request, Response,
 };
 
+mod candidate_set;
+mod discover;
+mod set;
+mod unready_service;
+
+use candidate_set::CandidateSet;
+pub use discover::PeerDiscover;
+pub use set::PeerSet;
+
 /// A type alias for a boxed [`tower::Service`] used to process [`Request`]s into [`Response`]s.
 pub type BoxedZebraService = Box<
     dyn Service<
@@ -52,7 +54,13 @@ pub type BoxedZebraService = Box<
 type PeerChange = Result<Change<SocketAddr, PeerClient>, BoxedStdError>;
 
 /// Initialize a peer set with the given `config`, forwarding peer requests to the `inbound_service`.
-pub fn init<S>(config: Config, inbound_service: S) -> (BoxedZebraService, Arc<Mutex<AddressBook>>)
+pub fn init<S>(
+    config: Config,
+    inbound_service: S,
+) -> (
+    impl Service<Request, Response = Response, Error = BoxedStdError> + Send + Clone + 'static,
+    Arc<Mutex<AddressBook>>,
+)
 where
     S: Service<Request, Response = Response, Error = BoxedStdError> + Clone + Send + 'static,
     S::Future: Send + 'static,
@@ -65,18 +73,26 @@ where
 
     // Create an mpsc channel for peer changes, with a generous buffer.
     let (peerset_tx, peerset_rx) = mpsc::channel::<PeerChange>(100);
+    // Create an mpsc channel for peerset demand signaling.
+    let (demand_tx, demand_rx) = mpsc::channel::<()>(100);
 
     // Connect the rx end to a PeerSet, wrapping new peers in load instruments.
-    let peer_set = PeerSet::new(PeakEwmaDiscover::new(
-        ServiceStream::new(
-            // ServiceStream interprets an error as stream termination,
-            // so discard any errored connections...
-            peerset_rx.filter(|result| future::ready(result.is_ok())),
+    let peer_set = Buffer::new(
+        PeerSet::new(
+            PeakEwmaDiscover::new(
+                ServiceStream::new(
+                    // ServiceStream interprets an error as stream termination,
+                    // so discard any errored connections...
+                    peerset_rx.filter(|result| future::ready(result.is_ok())),
+                ),
+                config.ewma_default_rtt,
+                config.ewma_decay_time,
+                NoInstrument,
+            ),
+            demand_tx,
         ),
-        config.ewma_default_rtt,
-        config.ewma_decay_time,
-        NoInstrument,
-    ));
+        config.peerset_request_buffer_size,
+    );
 
     // Connect the tx end to the 3 peer sources:
 
@@ -89,7 +105,12 @@ where
 
     // 2. Incoming peer connections, via a listener.
     tokio::spawn(
-        listen(config.listen_addr, peer_connector, peerset_tx).map(|result| {
+        listen(
+            config.listen_addr,
+            peer_connector.clone(),
+            peerset_tx.clone(),
+        )
+        .map(|result| {
             if let Err(e) = result {
                 error!(%e);
             }
@@ -97,6 +118,20 @@ where
     );
 
     // 3. Outgoing peers we connect to in response to load.
+    tokio::spawn(
+        crawl_and_dial(
+            demand_rx,
+            peer_set.clone(),
+            address_book.clone(),
+            peer_connector,
+            peerset_tx,
+        )
+        .map(|result| {
+            if let Err(e) = result {
+                error!(%e);
+            }
+        }),
+    );
 
     (Box::new(peer_set), address_book)
 }
@@ -158,4 +193,129 @@ where
             });
         }
     }
+}
+
+/// Given a channel that signals a need for new peers, try to connect to a peer
+/// and send the resulting `PeerClient` through a channel.
+///
+/// ```ascii,no_run
+///                         ┌─────────────────┐
+///                         │     PeerSet     │
+///                         │GetPeers Requests│
+///                         └─────────────────┘
+///                                  │
+///                                  │
+///                                  │
+///                                  │
+///                                  ▼
+///    ┌─────────────┐   filter by   Λ     filter by
+///    │   PeerSet   │!contains_addr╱ ╲ !contains_addr
+/// ┌──│ AddressBook │────────────▶▕   ▏◀───────────────────┐
+/// │  └─────────────┘              ╲ ╱                     │
+/// │         │                      V                      │
+/// │         │disconnected_peers    │                      │
+/// │         ▼                      │                      │
+/// │         Λ     filter by        │                      │
+/// │        ╱ ╲ !contains_addr      │                      │
+/// │       ▕   ▏◀───────────────────┼──────────────────────┤
+/// │        ╲ ╱                     │                      │
+/// │         V                      │                      │
+/// │         │                      │                      │
+/// │┌────────┼──────────────────────┼──────────────────────┼────────┐
+/// ││        ▼                      ▼                      │        │
+/// ││ ┌─────────────┐        ┌─────────────┐        ┌─────────────┐ │
+/// ││ │Disconnected │        │  Gossiped   │        │Failed Peers │ │
+/// ││ │    Peers    │        │    Peers    │        │ AddressBook │◀┼┐
+/// ││ │ AddressBook │        │ AddressBook │        │             │ ││
+/// ││ └─────────────┘        └─────────────┘        └─────────────┘ ││
+/// ││        │                      │                      │        ││
+/// ││ #1 drain_oldest        #2 drain_newest        #3 drain_oldest ││
+/// ││        │                      │                      │        ││
+/// ││        ├──────────────────────┴──────────────────────┘        ││
+/// ││        │           disjoint candidate sets                    ││
+/// │└────────┼──────────────────────────────────────────────────────┘│
+/// │         ▼                                                       │
+/// │         Λ                                                       │
+/// │        ╱ ╲         filter by                                    │
+/// └──────▶▕   ▏!is_potentially_connected                            │
+///          ╲ ╱                                                      │
+///           V                                                       │
+///           │                                                       │
+///           │                                                       │
+///           ▼                                                       │
+///           Λ                                                       │
+///          ╱ ╲                                                      │
+///         ▕   ▏─────────────────────────────────────────────────────┘
+///          ╲ ╱   connection failed, update last_seen to now()
+///           V
+///           │
+///           │
+///           ▼
+///    ┌────────────┐
+///    │    send    │
+///    │ PeerClient │
+///    │to Discover │
+///    └────────────┘
+/// ```
+#[instrument(skip(
+    demand_signal,
+    peer_set_service,
+    peer_set_address_book,
+    peer_connector,
+    success_tx
+))]
+async fn crawl_and_dial<C, S>(
+    mut demand_signal: mpsc::Receiver<()>,
+    peer_set_service: S,
+    peer_set_address_book: Arc<Mutex<AddressBook>>,
+    mut peer_connector: C,
+    mut success_tx: mpsc::Sender<PeerChange>,
+) -> Result<(), BoxedStdError>
+where
+    C: Service<(TcpStream, SocketAddr), Response = PeerClient, Error = BoxedStdError> + Clone,
+    C::Future: Send + 'static,
+    S: Service<Request, Response = Response, Error = BoxedStdError>,
+    S::Future: Send + 'static,
+{
+    let mut candidates = CandidateSet {
+        disconnected: AddressBook::default(),
+        gossiped: AddressBook::default(),
+        failed: AddressBook::default(),
+        peer_set: peer_set_address_book.clone(),
+        peer_service: peer_set_service,
+    };
+
+    // XXX instead of just responding to demand, we could respond to demand *or*
+    // to a interval timer (to continuously grow the peer set).
+    while let Some(()) = demand_signal.next().await {
+        debug!("Got demand signal from peer set");
+        loop {
+            candidates.update().await?;
+            // If we were unable to get a candidate, keep looping to crawl more.
+            let addr = match candidates.next() {
+                Some(candidate) => candidate.addr,
+                None => continue,
+            };
+
+            // Check that we have not connected to the candidate since it was
+            // pulled into the candidate set.
+            if peer_set_address_book
+                .lock()
+                .unwrap()
+                .is_potentially_connected(&addr)
+            {
+                continue;
+            };
+
+            if let Ok(stream) = TcpStream::connect(addr).await {
+                peer_connector.ready().await?;
+                if let Ok(client) = peer_connector.call((stream, addr)).await {
+                    debug!("Successfully dialed new peer, sending to peerset");
+                    success_tx.send(Ok(Change::Insert(addr, client))).await?;
+                    break;
+                }
+            }
+        }
+    }
+    Ok(())
 }
