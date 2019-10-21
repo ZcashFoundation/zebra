@@ -162,6 +162,8 @@ where
 
             debug!("constructing PeerClient, spawning PeerServer");
 
+            // These channels should not be cloned more than they are
+            // in this block, see constants.rs for more.
             let (server_tx, server_rx) = mpsc::channel(0);
             let slot = ErrorSlot::default();
 

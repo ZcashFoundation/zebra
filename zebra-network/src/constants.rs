@@ -9,7 +9,7 @@ use crate::protocol::types::*;
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// We expect to receive a message from a live peer at least once in this time duration.
-/// XXX this needs to be synchronized with the ping transmission times.
+// XXX this needs to be synchronized with the ping transmission times.
 pub const LIVE_PEER_DURATION: Duration = Duration::from_secs(12);
 
 /// The User-Agent string provided by the node.
