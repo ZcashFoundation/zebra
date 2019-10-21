@@ -150,6 +150,11 @@ impl AddressBook {
             newest_first: false,
         }
     }
+
+    /// Returns the number of entries in this address book.
+    pub fn len(&self) -> usize {
+        self.by_time.len()
+    }
 }
 
 impl Extend<MetaAddr> for AddressBook {

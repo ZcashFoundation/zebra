@@ -20,6 +20,8 @@ pub struct Config {
     pub ewma_default_rtt: Duration,
     /// The decay time for the exponentially-weighted moving average response time.
     pub ewma_decay_time: Duration,
+    /// The outgoing request buffer size for the peer set.
+    pub peerset_request_buffer_size: usize,
 }
 
 impl Default for Config {
@@ -33,6 +35,7 @@ impl Default for Config {
             initial_peers: Vec::new(),
             ewma_default_rtt: Duration::from_secs(1),
             ewma_decay_time: Duration::from_secs(60),
+            peerset_request_buffer_size: 1,
         }
     }
 }

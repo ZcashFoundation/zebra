@@ -68,45 +68,7 @@ impl ConnectCmd {
 
         let mut config = app_config().network.clone();
 
-        // Until we finish fleshing out the peerset -- particularly
-        // pulling more peers -- we don't want to start with a single
-        // initial peer.  So make a throwaway connection to the first,
-        // extract a list of addresses, and discard everything else.
-        // All the setup is kept in a sub-scope so we know we're not reusing it.
-        //
-        // Later, this should turn into initial_peers = vec![self.addr];
-        config.initial_peers = {
-            use tokio::net::TcpStream;
-            use zebra_network::should_be_private::{PeerConnector, TimestampCollector};
-
-            let (_, collector) = TimestampCollector::spawn();
-            let mut pc = Buffer::new(
-                PeerConnector::new(config.clone(), node.clone(), collector),
-                1,
-            );
-
-            let tcp_stream = TcpStream::connect(self.addr).await?;
-            pc.ready()
-                .await
-                .map_err(failure::Error::from_boxed_compat)?;
-            let mut client = pc
-                .call((tcp_stream, self.addr))
-                .await
-                .map_err(failure::Error::from_boxed_compat)?;
-
-            client.ready().await?;
-
-            let addrs = match client.call(Request::GetPeers).await? {
-                Response::Peers(addrs) => addrs,
-                _ => bail!("Got wrong response type"),
-            };
-            info!(
-                addrs.len = addrs.len(),
-                "got addresses from first connected peer"
-            );
-
-            addrs.into_iter().map(|meta| meta.addr).collect::<Vec<_>>()
-        };
+        config.initial_peers = vec![self.addr];
 
         let (mut peer_set, address_book) = zebra_network::init(config, node);
 
