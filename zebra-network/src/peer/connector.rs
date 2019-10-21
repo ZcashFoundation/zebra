@@ -217,7 +217,7 @@ where
 
                 let mut server_tx = server_tx;
 
-                let mut interval_stream = Interval::new_interval(Duration::from_secs(60));
+                let mut interval_stream = Interval::new_interval(constants::HEARTBEAT_INTERVAL);
 
                 loop {
                     interval_stream.next().await;
