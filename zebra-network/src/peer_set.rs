@@ -285,6 +285,9 @@ where
         peer_service: peer_set_service,
     };
 
+    info!("Sending initial request for peers");
+    let _ = candidates.update().await;
+
     // XXX instead of just responding to demand, we could respond to demand *or*
     // to a interval timer (to continuously grow the peer set).
     while let Some(()) = demand_signal.next().await {
