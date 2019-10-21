@@ -162,12 +162,12 @@ where
 
             debug!("constructing PeerClient, spawning PeerServer");
 
-            let (tx, rx) = mpsc::channel(0);
+            let (server_tx, server_rx) = mpsc::channel(0);
             let slot = ErrorSlot::default();
 
             let client = PeerClient {
                 span: connection_span.clone(),
-                server_tx: tx,
+                server_tx: server_tx.clone(),
                 error_slot: slot.clone(),
             };
 
@@ -176,7 +176,7 @@ where
             let server = PeerServer {
                 state: ServerState::AwaitingRequest,
                 svc: internal_service,
-                client_rx: rx,
+                client_rx: server_rx,
                 error_slot: slot,
                 peer_tx,
                 request_timer: None,
@@ -208,12 +208,29 @@ where
                     .boxed(),
             );
 
-            // client.ready().await?;
+            tokio::spawn(async move {
+                use futures::channel::oneshot;
 
-            tokio::spawn(
-                Interval::new_interval(Duration::from_secs(60))
-                    .for_each(|_| client.call(Request::Ping(Nonce::default()))),
-            );
+                use super::client::ClientRequest;
+
+                let mut server_tx = server_tx;
+
+                let mut interval_stream = Interval::new_interval(Duration::from_secs(60));
+
+                loop {
+                    interval_stream.next().await;
+
+                    // We discard the server handle because our
+                    // heartbeat `Ping`s are a special case, and we
+                    // don't actually care about the response here.
+                    let (request_tx, _) = oneshot::channel();
+                    let msg = ClientRequest(Request::Ping(Nonce::default()), request_tx);
+
+                    if server_tx.send(msg).await.is_err() {
+                        return;
+                    }
+                }
+            });
 
             Ok(client)
         };
