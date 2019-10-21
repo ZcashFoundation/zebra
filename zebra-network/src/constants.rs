@@ -10,7 +10,11 @@ pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// We expect to receive a message from a live peer at least once in this time duration.
 // XXX this needs to be synchronized with the ping transmission times.
-pub const LIVE_PEER_DURATION: Duration = Duration::from_secs(12);
+pub const LIVE_PEER_DURATION: Duration = Duration::from_secs(60 + 10 + 10 + 10);
+
+/// Regular interval for sending keepalive `Ping` messages to each
+/// connected peer.
+pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(60);
 
 /// The User-Agent string provided by the node.
 pub const USER_AGENT: &'static str = "🦓Zebra v2.0.0-alpha.0🦓";
@@ -28,4 +32,18 @@ pub mod magics {
     pub const MAINNET: Magic = Magic([0x24, 0xe9, 0x27, 0x64]);
     /// The testnet.
     pub const TESTNET: Magic = Magic([0xfa, 0x1a, 0xf9, 0xbf]);
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+
+    #[test]
+    fn ensure_live_peer_duration_value_matches_others() {
+        let constructed_live_peer_duration =
+            HEARTBEAT_INTERVAL + REQUEST_TIMEOUT + REQUEST_TIMEOUT + REQUEST_TIMEOUT;
+
+        assert_eq!(LIVE_PEER_DURATION, constructed_live_peer_duration);
+    }
 }
