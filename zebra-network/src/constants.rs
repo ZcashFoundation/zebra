@@ -9,7 +9,16 @@ use crate::protocol::types::*;
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// We expect to receive a message from a live peer at least once in this time duration.
-// XXX this needs to be synchronized with the ping transmission times.
+///
+/// This is the sum of:
+/// - the interval between connection heartbeats
+/// - the timeout of a possible pending (already-sent) request
+/// - the timeout for a possible queued request
+/// - the timeout for the heartbeat request itself
+///
+/// This avoids explicit synchronization, but relies on the peer
+/// connector actually setting up channels and these heartbeats in a
+/// specific manner that matches up with this math.
 pub const LIVE_PEER_DURATION: Duration = Duration::from_secs(60 + 10 + 10 + 10);
 
 /// Regular interval for sending keepalive `Ping` messages to each
@@ -39,6 +48,9 @@ mod tests {
 
     use super::*;
 
+    /// This assures that the `Duration` value we are computing for
+    /// LIVE_PEER_DURATION actually matches the other const values it
+    /// relies on.
     #[test]
     fn ensure_live_peer_duration_value_matches_others() {
         let constructed_live_peer_duration =
