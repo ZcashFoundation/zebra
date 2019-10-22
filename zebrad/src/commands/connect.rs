@@ -70,7 +70,7 @@ impl ConnectCmd {
 
         config.initial_peers = vec![self.addr];
 
-        let (mut peer_set, address_book) = zebra_network::init(config, node);
+        let (mut peer_set, address_book) = zebra_network::init(config, node).await;
 
         info!("waiting for peer_set ready");
         peer_set.ready().await.map_err(Error::from_boxed_compat)?;
