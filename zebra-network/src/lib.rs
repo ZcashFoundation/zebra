@@ -57,7 +57,7 @@ mod timestamp_collector;
 pub use crate::{
     address_book::AddressBook,
     config::Config,
-    peer_set::{init, BoxedZebraService},
+    peer_set::init,
     protocol::internal::{Request, Response},
 };
 
