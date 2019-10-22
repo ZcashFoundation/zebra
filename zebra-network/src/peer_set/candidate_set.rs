@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
-use chrono::{TimeZone, Utc};
-use futures::stream::{FuturesUnordered, Stream, StreamExt};
+use chrono::Utc;
+use futures::stream::{FuturesUnordered, StreamExt};
 use tower::{Service, ServiceExt};
 use tracing::Level;
 
