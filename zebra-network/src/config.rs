@@ -24,6 +24,8 @@ pub struct Config {
     pub peerset_request_buffer_size: usize,
     /// The timeout for peer handshakes.
     pub handshake_timeout: Duration,
+    /// How frequently we attempt to connect to a new peer.
+    pub new_peer_interval: Duration,
 }
 
 impl Default for Config {
@@ -39,6 +41,7 @@ impl Default for Config {
             ewma_decay_time: Duration::from_secs(60),
             peerset_request_buffer_size: 1,
             handshake_timeout: Duration::from_secs(4),
+            new_peer_interval: Duration::from_secs(120),
         }
     }
 }
