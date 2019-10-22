@@ -16,12 +16,15 @@ pub struct Config {
     ///
     /// XXX this should be replaced with DNS names, not SocketAddrs
     pub initial_peers: Vec<SocketAddr>,
+    /// The outgoing request buffer size for the peer set.
+    pub peerset_request_buffer_size: usize,
+
+    // Note: due to the way this is rendered by the toml
+    // serializer, the Duration fields should come last.
     /// The default RTT estimate for peer responses, used in load-balancing.
     pub ewma_default_rtt: Duration,
     /// The decay time for the exponentially-weighted moving average response time.
     pub ewma_decay_time: Duration,
-    /// The outgoing request buffer size for the peer set.
-    pub peerset_request_buffer_size: usize,
     /// The timeout for peer handshakes.
     pub handshake_timeout: Duration,
     /// How frequently we attempt to connect to a new peer.
