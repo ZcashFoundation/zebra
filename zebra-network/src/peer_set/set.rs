@@ -25,10 +25,7 @@ use crate::{
     BoxedStdError,
 };
 
-use super::{
-    unready_service::{Error as UnreadyError, UnreadyService},
-    PeerDiscover,
-};
+use super::unready_service::{Error as UnreadyError, UnreadyService};
 
 /// A [`tower::Service`] that abstractly represents "the rest of the network".
 ///
