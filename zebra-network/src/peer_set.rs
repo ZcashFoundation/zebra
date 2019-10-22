@@ -28,7 +28,7 @@ use tracing::Level;
 use tracing_futures::Instrument;
 
 use crate::{
-    peer::{HandshakeError, PeerClient, PeerConnector},
+    peer::{HandshakeError, PeerClient, PeerHandshake},
     timestamp_collector::TimestampCollector,
     AddressBook, BoxedStdError, Config, Request, Response,
 };
@@ -75,9 +75,9 @@ where
     S::Future: Send + 'static,
 {
     let (address_book, timestamp_collector) = TimestampCollector::spawn();
-    let peer_connector = Buffer::new(
+    let handshaker = Buffer::new(
         Timeout::new(
-            PeerConnector::new(config.clone(), inbound_service, timestamp_collector),
+            PeerHandshake::new(config.clone(), inbound_service, timestamp_collector),
             config.handshake_timeout,
         ),
         1,
@@ -111,18 +111,13 @@ where
     // 1. Initial peers, specified in the config.
     tokio::spawn(add_initial_peers(
         config.initial_peers.clone(),
-        peer_connector.clone(),
+        handshaker.clone(),
         peerset_tx.clone(),
     ));
 
     // 2. Incoming peer connections, via a listener.
     tokio::spawn(
-        listen(
-            config.listen_addr,
-            peer_connector.clone(),
-            peerset_tx.clone(),
-        )
-        .map(|result| {
+        listen(config.listen_addr, handshaker.clone(), peerset_tx.clone()).map(|result| {
             if let Err(e) = result {
                 error!(%e);
             }
@@ -145,7 +140,7 @@ where
             config.new_peer_interval,
             demand_rx,
             candidates,
-            peer_connector,
+            handshaker,
             peerset_tx,
         )
         .map(|result| {
@@ -158,12 +153,12 @@ where
     (peer_set, address_book)
 }
 
-/// Use the provided `peer_connector` to connect to `initial_peers`, then send
+/// Use the provided `handshaker` to connect to `initial_peers`, then send
 /// the results over `tx`.
-#[instrument(skip(initial_peers, tx, peer_connector))]
+#[instrument(skip(initial_peers, tx, handshaker))]
 async fn add_initial_peers<S>(
     initial_peers: Vec<SocketAddr>,
-    peer_connector: S,
+    handshaker: S,
     mut tx: mpsc::Sender<PeerChange>,
 ) where
     S: Service<(TcpStream, SocketAddr), Response = PeerClient, Error = BoxedStdError> + Clone,
@@ -173,11 +168,11 @@ async fn add_initial_peers<S>(
     let mut handshakes = initial_peers
         .into_iter()
         .map(|addr| {
-            let mut pc = peer_connector.clone();
+            let mut hs = handshaker.clone();
             async move {
                 let stream = TcpStream::connect(addr).await?;
-                pc.ready().await?;
-                let client = pc.call((stream, addr)).await?;
+                hs.ready().await?;
+                let client = hs.call((stream, addr)).await?;
                 Ok::<_, BoxedStdError>(Change::Insert(addr, client))
             }
         })
@@ -187,12 +182,12 @@ async fn add_initial_peers<S>(
     }
 }
 
-/// Bind to `addr`, listen for peers using `peer_connector`, then send the
+/// Bind to `addr`, listen for peers using `handshaker`, then send the
 /// results over `tx`.
-#[instrument(skip(tx, peer_connector))]
+#[instrument(skip(tx, handshaker))]
 async fn listen<S>(
     addr: SocketAddr,
-    mut peer_connector: S,
+    mut handshaker: S,
     tx: mpsc::Sender<PeerChange>,
 ) -> Result<(), BoxedStdError>
 where
@@ -203,9 +198,9 @@ where
     loop {
         if let Ok((tcp_stream, addr)) = listener.accept().await {
             debug!(?addr, "got incoming connection");
-            peer_connector.ready().await?;
+            handshaker.ready().await?;
             // Construct a handshake future but do not drive it yet....
-            let handshake = peer_connector.call((tcp_stream, addr));
+            let handshake = handshaker.call((tcp_stream, addr));
             // ... instead, spawn a new task to handle this connection
             let mut tx2 = tx.clone();
             tokio::spawn(async move {
@@ -220,18 +215,12 @@ where
 /// Given a channel that signals a need for new peers, try to connect to a peer
 /// and send the resulting `PeerClient` through a channel.
 ///
-#[instrument(skip(
-    new_peer_interval,
-    demand_signal,
-    candidates,
-    peer_connector,
-    success_tx
-))]
+#[instrument(skip(new_peer_interval, demand_signal, candidates, handshaker, success_tx))]
 async fn crawl_and_dial<C, S>(
     new_peer_interval: Duration,
     demand_signal: mpsc::Receiver<()>,
     mut candidates: CandidateSet<S>,
-    peer_connector: C,
+    handshaker: C,
     mut success_tx: mpsc::Sender<PeerChange>,
 ) -> Result<(), BoxedStdError>
 where
@@ -251,11 +240,11 @@ where
     use crate::types::MetaAddr;
     use futures::TryFutureExt;
     let try_connect = |candidate: MetaAddr| {
-        let mut pc = peer_connector.clone();
+        let mut hs = handshaker.clone();
         async move {
             let stream = TcpStream::connect(candidate.addr).await?;
-            pc.ready().await?;
-            pc.call((stream, candidate.addr))
+            hs.ready().await?;
+            hs.call((stream, candidate.addr))
                 .await
                 .map(|client| Change::Insert(candidate.addr, client))
         }
