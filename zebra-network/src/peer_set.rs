@@ -7,7 +7,6 @@
 
 use std::{
     net::SocketAddr,
-    pin::Pin,
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -26,11 +25,9 @@ use tower::{
     Service, ServiceExt,
 };
 use tower_load::{peak_ewma::PeakEwmaDiscover, NoInstrument};
-use tracing::Level;
-use tracing_futures::Instrument;
 
 use crate::{
-    peer::{HandshakeError, PeerClient, PeerConnector, PeerHandshake},
+    peer::{PeerClient, PeerConnector, PeerHandshake},
     timestamp_collector::TimestampCollector,
     AddressBook, BoxedStdError, Config, Request, Response,
 };
@@ -86,7 +83,7 @@ where
     let (demand_tx, demand_rx) = mpsc::channel::<()>(100);
 
     // Connect the rx end to a PeerSet, wrapping new peers in load instruments.
-    let mut peer_set = Buffer::new(
+    let peer_set = Buffer::new(
         PeerSet::new(
             PeakEwmaDiscover::new(
                 ServiceStream::new(
