@@ -3,6 +3,8 @@
 // Portions of this submodule were adapted from tower-balance,
 // which is (c) 2019 Tower Contributors (MIT licensed).
 
+// XXX these imports should go in a peer_set::initialize submodule
+
 use std::{
     net::SocketAddr,
     pin::Pin,
@@ -20,7 +22,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tower::{
     buffer::Buffer,
     discover::{Change, ServiceStream},
-    timeout::Timeout,
+    layer::Layer,
     Service, ServiceExt,
 };
 use tower_load::{peak_ewma::PeakEwmaDiscover, NoInstrument};
@@ -28,7 +30,7 @@ use tracing::Level;
 use tracing_futures::Instrument;
 
 use crate::{
-    peer::{HandshakeError, PeerClient, PeerHandshake},
+    peer::{HandshakeError, PeerClient, PeerConnector, PeerHandshake},
     timestamp_collector::TimestampCollector,
     AddressBook, BoxedStdError, Config, Request, Response,
 };
@@ -39,19 +41,7 @@ mod set;
 mod unready_service;
 
 use candidate_set::CandidateSet;
-pub use discover::PeerDiscover;
-pub use set::PeerSet;
-
-/// A type alias for a boxed [`tower::Service`] used to process [`Request`]s into [`Response`]s.
-pub type BoxedZebraService = Box<
-    dyn Service<
-            Request,
-            Response = Response,
-            Error = BoxedStdError,
-            Future = Pin<Box<dyn Future<Output = Result<Response, BoxedStdError>> + Send>>,
-        > + Send
-        + 'static,
->;
+use set::PeerSet;
 
 type PeerChange = Result<Change<SocketAddr, PeerClient>, BoxedStdError>;
 
@@ -75,13 +65,20 @@ where
     S::Future: Send + 'static,
 {
     let (address_book, timestamp_collector) = TimestampCollector::spawn();
-    let handshaker = Buffer::new(
-        Timeout::new(
-            PeerHandshake::new(config.clone(), inbound_service, timestamp_collector),
-            config.handshake_timeout,
-        ),
-        1,
-    );
+
+    // Construct services that handle inbound handshakes and perform outbound
+    // handshakes. These use the same handshake service internally to detect
+    // self-connection attempts. Both are decorated with a tower TimeoutLayer to
+    // enforce timeouts as specified in the Config.
+    let (listener, connector) = {
+        use tower::timeout::TimeoutLayer;
+        let hs_timeout = TimeoutLayer::new(config.handshake_timeout);
+        let hs = PeerHandshake::new(config.clone(), inbound_service, timestamp_collector);
+        (
+            hs_timeout.layer(hs.clone()),
+            hs_timeout.layer(PeerConnector::new(hs)),
+        )
+    };
 
     // Create an mpsc channel for peer changes, with a generous buffer.
     let (peerset_tx, peerset_rx) = mpsc::channel::<PeerChange>(100);
@@ -111,13 +108,13 @@ where
     // 1. Initial peers, specified in the config.
     tokio::spawn(add_initial_peers(
         config.initial_peers.clone(),
-        handshaker.clone(),
+        connector.clone(),
         peerset_tx.clone(),
     ));
 
     // 2. Incoming peer connections, via a listener.
     tokio::spawn(
-        listen(config.listen_addr, handshaker.clone(), peerset_tx.clone()).map(|result| {
+        listen(config.listen_addr, listener, peerset_tx.clone()).map(|result| {
             if let Err(e) = result {
                 error!(%e);
             }
@@ -140,7 +137,7 @@ where
             config.new_peer_interval,
             demand_rx,
             candidates,
-            handshaker,
+            connector,
             peerset_tx,
         )
         .map(|result| {
@@ -155,28 +152,20 @@ where
 
 /// Use the provided `handshaker` to connect to `initial_peers`, then send
 /// the results over `tx`.
-#[instrument(skip(initial_peers, tx, handshaker))]
+#[instrument(skip(initial_peers, connector, tx))]
 async fn add_initial_peers<S>(
     initial_peers: Vec<SocketAddr>,
-    handshaker: S,
+    connector: S,
     mut tx: mpsc::Sender<PeerChange>,
 ) where
-    S: Service<(TcpStream, SocketAddr), Response = PeerClient, Error = BoxedStdError> + Clone,
+    S: Service<SocketAddr, Response = Change<SocketAddr, PeerClient>, Error = BoxedStdError>
+        + Clone,
     S::Future: Send + 'static,
 {
     info!(?initial_peers, "Connecting to initial peer set");
-    let mut handshakes = initial_peers
-        .into_iter()
-        .map(|addr| {
-            let mut hs = handshaker.clone();
-            async move {
-                let stream = TcpStream::connect(addr).await?;
-                hs.ready().await?;
-                let client = hs.call((stream, addr)).await?;
-                Ok::<_, BoxedStdError>(Change::Insert(addr, client))
-            }
-        })
-        .collect::<FuturesUnordered<_>>();
+    use tower::util::CallAllUnordered;
+    let addr_stream = futures::stream::iter(initial_peers.into_iter());
+    let mut handshakes = CallAllUnordered::new(connector, addr_stream);
     while let Some(handshake_result) = handshakes.next().await {
         let _ = tx.send(handshake_result).await;
     }
@@ -215,43 +204,22 @@ where
 /// Given a channel that signals a need for new peers, try to connect to a peer
 /// and send the resulting `PeerClient` through a channel.
 ///
-#[instrument(skip(new_peer_interval, demand_signal, candidates, handshaker, success_tx))]
+#[instrument(skip(new_peer_interval, demand_signal, candidates, connector, success_tx))]
 async fn crawl_and_dial<C, S>(
     new_peer_interval: Duration,
     demand_signal: mpsc::Receiver<()>,
     mut candidates: CandidateSet<S>,
-    handshaker: C,
+    mut connector: C,
     mut success_tx: mpsc::Sender<PeerChange>,
 ) -> Result<(), BoxedStdError>
 where
-    C: Service<(TcpStream, SocketAddr), Response = PeerClient, Error = BoxedStdError> + Clone,
+    C: Service<SocketAddr, Response = Change<SocketAddr, PeerClient>, Error = BoxedStdError>
+        + Clone,
     C::Future: Send + 'static,
     S: Service<Request, Response = Response, Error = BoxedStdError>,
     S::Future: Send + 'static,
 {
-    // XXX this kind of boilerplate didn't exist before we made PeerConnector
-    // take (TcpStream, SocketAddr), which made it so that we could share code
-    // between inbound and outbound handshakes. Probably the cleanest way to
-    // make it go away again is to rename "Connector" to "Handshake" (since it
-    // is really responsible just for the handshake) and to have a "Connector"
-    // Service wrapper around "Handshake" that opens a TCP stream.
-    // We could also probably make the Handshake service `Clone` directly,
-    // which might be more efficient than using a Buffer wrapper.
-    use crate::types::MetaAddr;
     use futures::TryFutureExt;
-    let try_connect = |candidate: MetaAddr| {
-        let mut hs = handshaker.clone();
-        async move {
-            let stream = TcpStream::connect(candidate.addr).await?;
-            hs.ready().await?;
-            hs.call((stream, candidate.addr))
-                .await
-                .map(|client| Change::Insert(candidate.addr, client))
-        }
-            // Use map_err to tag failed connections with the MetaAddr,
-            // so they can be reported to the CandidateSet.
-            .map_err(move |_| candidate)
-    };
 
     // On creation, we are likely to have very few peers, so try to get more
     // connections quickly by concurrently connecting to a large number of
@@ -259,7 +227,14 @@ where
     let mut handshakes = FuturesUnordered::new();
     for _ in 0..50usize {
         if let Some(candidate) = candidates.next() {
-            handshakes.push(try_connect(candidate))
+            connector.ready().await?;
+            handshakes.push(
+                connector
+                    .call(candidate.addr)
+                    // Use map_err to tag failed connections with the MetaAddr,
+                    // so they can be reported to the CandidateSet.
+                    .map_err(move |_| candidate),
+            )
         }
     }
     while let Some(handshake) = handshakes.next().await {
@@ -292,7 +267,12 @@ where
                 }
             };
 
-            match try_connect(candidate).await {
+            connector.ready().await?;
+            match connector
+                .call(candidate.addr)
+                .map_err(move |_| candidate)
+                .await
+            {
                 Ok(change) => {
                     debug!("Successfully dialed new peer, sending to peerset");
                     success_tx.send(Ok(change)).await?;

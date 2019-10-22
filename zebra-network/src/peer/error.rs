@@ -67,6 +67,9 @@ pub enum HandshakeError {
     /// The remote peer closed the connection.
     #[error("Peer closed connection")]
     ConnectionClosed,
+    /// An error occurred while performing an IO operation.
+    #[error("Underlying IO error")]
+    Io(#[from] std::io::Error),
     /// A serialization error occurred while reading or writing a message.
     #[error("Serialization error")]
     Serialization(#[from] SerializationError),

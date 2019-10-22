@@ -4,13 +4,12 @@ use std::{
     pin::Pin,
     sync::{Arc, Mutex},
     task::{Context, Poll},
-    time::Duration,
 };
 
 use chrono::Utc;
 use futures::channel::mpsc;
 use tokio::{codec::Framed, net::TcpStream, prelude::*, timer::Interval};
-use tower::{Service, ServiceExt};
+use tower::Service;
 use tracing::{span, Level};
 use tracing_futures::Instrument;
 
@@ -32,6 +31,17 @@ pub struct PeerHandshake<S> {
     internal_service: S,
     timestamp_collector: mpsc::Sender<MetaAddr>,
     nonces: Arc<Mutex<HashSet<Nonce>>>,
+}
+
+impl<S: Clone> Clone for PeerHandshake<S> {
+    fn clone(&self) -> Self {
+        Self {
+            config: self.config.clone(),
+            internal_service: self.internal_service.clone(),
+            timestamp_collector: self.timestamp_collector.clone(),
+            nonces: self.nonces.clone(),
+        }
+    }
 }
 
 impl<S> PeerHandshake<S>
