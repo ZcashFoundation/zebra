@@ -7,6 +7,7 @@ use std::{
     net::SocketAddr,
     pin::Pin,
     sync::{Arc, Mutex},
+    time::Duration,
 };
 
 use futures::{
@@ -140,7 +141,14 @@ where
 
     info!("Sending initial request for peers");
     tokio::spawn(
-        crawl_and_dial(demand_rx, candidates, peer_connector, peerset_tx).map(|result| {
+        crawl_and_dial(
+            config.new_peer_interval,
+            demand_rx,
+            candidates,
+            peer_connector,
+            peerset_tx,
+        )
+        .map(|result| {
             if let Err(e) = result {
                 error!(%e);
             }
@@ -212,9 +220,16 @@ where
 /// Given a channel that signals a need for new peers, try to connect to a peer
 /// and send the resulting `PeerClient` through a channel.
 ///
-#[instrument(skip(demand_signal, candidates, peer_connector, success_tx))]
+#[instrument(skip(
+    new_peer_interval,
+    demand_signal,
+    candidates,
+    peer_connector,
+    success_tx
+))]
 async fn crawl_and_dial<C, S>(
-    mut demand_signal: mpsc::Receiver<()>,
+    new_peer_interval: Duration,
+    demand_signal: mpsc::Receiver<()>,
     mut candidates: CandidateSet<S>,
     peer_connector: C,
     mut success_tx: mpsc::Sender<PeerChange>,
@@ -271,9 +286,12 @@ where
         }
     }
 
-    // XXX instead of just responding to demand, we could respond to demand *or*
-    // to a interval timer (to continuously grow the peer set).
-    while let Some(()) = demand_signal.next().await {
+    use tokio::timer::Interval;
+    let mut connect_signal = futures::stream::select(
+        Interval::new_interval(new_peer_interval).map(|_| ()),
+        demand_signal,
+    );
+    while let Some(()) = connect_signal.next().await {
         debug!("got demand signal from peer set, updating candidates");
         candidates.update().await?;
         loop {
