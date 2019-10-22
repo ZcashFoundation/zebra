@@ -25,15 +25,16 @@ use crate::{
 
 use super::{error::ErrorSlot, server::ServerState, HandshakeError, PeerClient, PeerServer};
 
-/// A [`Service`] that connects to a remote peer and constructs a client/server pair.
-pub struct PeerConnector<S> {
+/// A [`Service`] that handshakes with a remote peer and constructs a
+/// client/server pair.
+pub struct PeerHandshake<S> {
     config: Config,
     internal_service: S,
     timestamp_collector: mpsc::Sender<MetaAddr>,
     nonces: Arc<Mutex<HashSet<Nonce>>>,
 }
 
-impl<S> PeerConnector<S>
+impl<S> PeerHandshake<S>
 where
     S: Service<Request, Response = Response, Error = BoxedStdError> + Clone + Send + 'static,
     S::Future: Send,
@@ -49,7 +50,7 @@ where
         // Builder2, ..., with Builder1::with_config() -> Builder2;
         // Builder2::with_internal_service() -> ... or use Options in a single
         // Builder type or use the derive_builder crate.
-        PeerConnector {
+        PeerHandshake {
             config,
             internal_service,
             timestamp_collector,
@@ -58,7 +59,7 @@ where
     }
 }
 
-impl<S> Service<(TcpStream, SocketAddr)> for PeerConnector<S>
+impl<S> Service<(TcpStream, SocketAddr)> for PeerHandshake<S>
 where
     S: Service<Request, Response = Response, Error = BoxedStdError> + Clone + Send + 'static,
     S::Future: Send,
