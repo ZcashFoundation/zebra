@@ -19,6 +19,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tower::{
     buffer::Buffer,
     discover::{Change, ServiceStream},
+    timeout::Timeout,
     Service, ServiceExt,
 };
 use tower_load::{peak_ewma::PeakEwmaDiscover, NoInstrument};
@@ -74,7 +75,10 @@ where
 {
     let (address_book, timestamp_collector) = TimestampCollector::spawn();
     let peer_connector = Buffer::new(
-        PeerConnector::new(config.clone(), inbound_service, timestamp_collector),
+        Timeout::new(
+            PeerConnector::new(config.clone(), inbound_service, timestamp_collector),
+            config.handshake_timeout,
+        ),
         1,
     );
 

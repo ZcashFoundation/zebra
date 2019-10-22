@@ -22,6 +22,8 @@ pub struct Config {
     pub ewma_decay_time: Duration,
     /// The outgoing request buffer size for the peer set.
     pub peerset_request_buffer_size: usize,
+    /// The timeout for peer handshakes.
+    pub handshake_timeout: Duration,
 }
 
 impl Default for Config {
@@ -36,6 +38,7 @@ impl Default for Config {
             ewma_default_rtt: Duration::from_secs(1),
             ewma_decay_time: Duration::from_secs(60),
             peerset_request_buffer_size: 1,
+            handshake_timeout: Duration::from_secs(4),
         }
     }
 }
