@@ -118,15 +118,9 @@ where
     );
 
     // 3. Outgoing peers we connect to in response to load.
+    let mut candidates = CandidateSet::new(address_book.clone(), peer_set.clone());
     tokio::spawn(
-        crawl_and_dial(
-            demand_rx,
-            peer_set.clone(),
-            address_book.clone(),
-            peer_connector,
-            peerset_tx,
-        )
-        .map(|result| {
+        crawl_and_dial(demand_rx, candidates, peer_connector, peerset_tx).map(|result| {
             if let Err(e) = result {
                 error!(%e);
             }
@@ -198,76 +192,15 @@ where
 /// Given a channel that signals a need for new peers, try to connect to a peer
 /// and send the resulting `PeerClient` through a channel.
 ///
-/// ```ascii,no_run
-///                         ┌─────────────────┐
-///                         │     PeerSet     │
-///                         │GetPeers Requests│
-///                         └─────────────────┘
-///                                  │
-///                                  │
-///                                  │
-///                                  │
-///                                  ▼
-///    ┌─────────────┐   filter by   Λ     filter by
-///    │   PeerSet   │!contains_addr╱ ╲ !contains_addr
-/// ┌──│ AddressBook │────────────▶▕   ▏◀───────────────────┐
-/// │  └─────────────┘              ╲ ╱                     │
-/// │         │                      V                      │
-/// │         │disconnected_peers    │                      │
-/// │         ▼                      │                      │
-/// │         Λ     filter by        │                      │
-/// │        ╱ ╲ !contains_addr      │                      │
-/// │       ▕   ▏◀───────────────────┼──────────────────────┤
-/// │        ╲ ╱                     │                      │
-/// │         V                      │                      │
-/// │         │                      │                      │
-/// │┌────────┼──────────────────────┼──────────────────────┼────────┐
-/// ││        ▼                      ▼                      │        │
-/// ││ ┌─────────────┐        ┌─────────────┐        ┌─────────────┐ │
-/// ││ │Disconnected │        │  Gossiped   │        │Failed Peers │ │
-/// ││ │    Peers    │        │    Peers    │        │ AddressBook │◀┼┐
-/// ││ │ AddressBook │        │ AddressBook │        │             │ ││
-/// ││ └─────────────┘        └─────────────┘        └─────────────┘ ││
-/// ││        │                      │                      │        ││
-/// ││ #1 drain_oldest        #2 drain_newest        #3 drain_oldest ││
-/// ││        │                      │                      │        ││
-/// ││        ├──────────────────────┴──────────────────────┘        ││
-/// ││        │           disjoint candidate sets                    ││
-/// │└────────┼──────────────────────────────────────────────────────┘│
-/// │         ▼                                                       │
-/// │         Λ                                                       │
-/// │        ╱ ╲         filter by                                    │
-/// └──────▶▕   ▏!is_potentially_connected                            │
-///          ╲ ╱                                                      │
-///           V                                                       │
-///           │                                                       │
-///           │                                                       │
-///           ▼                                                       │
-///           Λ                                                       │
-///          ╱ ╲                                                      │
-///         ▕   ▏─────────────────────────────────────────────────────┘
-///          ╲ ╱   connection failed, update last_seen to now()
-///           V
-///           │
-///           │
-///           ▼
-///    ┌────────────┐
-///    │    send    │
-///    │ PeerClient │
-///    │to Discover │
-///    └────────────┘
-/// ```
 #[instrument(skip(
     demand_signal,
-    peer_set_service,
-    peer_set_address_book,
+    candidates,
     peer_connector,
     success_tx
 ))]
 async fn crawl_and_dial<C, S>(
     mut demand_signal: mpsc::Receiver<()>,
-    peer_set_service: S,
-    peer_set_address_book: Arc<Mutex<AddressBook>>,
+    mut candidates: CandidateSet<S>,
     mut peer_connector: C,
     mut success_tx: mpsc::Sender<PeerChange>,
 ) -> Result<(), BoxedStdError>
@@ -277,18 +210,6 @@ where
     S: Service<Request, Response = Response, Error = BoxedStdError>,
     S::Future: Send + 'static,
 {
-    use tracing::Level;
-    let mut candidates = CandidateSet {
-        disconnected: AddressBook::new(span!(Level::TRACE, "disconnected peers")),
-        gossiped: AddressBook::new(span!(Level::TRACE, "gossiped peers")),
-        failed: AddressBook::new(span!(Level::TRACE, "failed peers")),
-        peer_set: peer_set_address_book.clone(),
-        peer_service: peer_set_service,
-    };
-
-    info!("Sending initial request for peers");
-    let _ = candidates.update().await;
-
     // XXX instead of just responding to demand, we could respond to demand *or*
     // to a interval timer (to continuously grow the peer set).
     while let Some(()) = demand_signal.next().await {
@@ -299,16 +220,6 @@ where
             let addr = match candidates.next() {
                 Some(candidate) => candidate.addr,
                 None => continue,
-            };
-
-            // Check that we have not connected to the candidate since it was
-            // pulled into the candidate set.
-            if peer_set_address_book
-                .lock()
-                .unwrap()
-                .is_potentially_connected(&addr)
-            {
-                continue;
             };
 
             if let Ok(stream) = TcpStream::connect(addr).await {

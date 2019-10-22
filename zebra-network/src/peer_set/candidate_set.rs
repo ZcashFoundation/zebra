@@ -3,9 +3,77 @@ use std::sync::{Arc, Mutex};
 use chrono::{TimeZone, Utc};
 use futures::stream::{FuturesUnordered, Stream, StreamExt};
 use tower::{Service, ServiceExt};
+use tracing::Level;
 
 use crate::{types::MetaAddr, AddressBook, BoxedStdError, Request, Response};
 
+/// The `CandidateSet` maintains a pool of candidate peers.
+///
+/// It divides the set of all possible candidate peers into three disjoint subsets:
+///
+/// 1. Disconnected peers, which we previously connected to but are not currently connected to;
+/// 2. Gossiped peers, which we learned about from other peers but have never connected to;
+/// 3. Failed peers, to whom we attempted to connect but were unable to.
+///
+/// ```ascii,no_run
+///                         ┌─────────────────┐
+///                         │     PeerSet     │
+///                         │GetPeers Requests│
+///                         └─────────────────┘
+///                                  │
+///                                  │
+///                                  │
+///                                  │
+///                                  ▼
+///    ┌─────────────┐   filter by   Λ     filter by
+///    │   PeerSet   │!contains_addr╱ ╲ !contains_addr
+/// ┌──│ AddressBook │────────────▶▕   ▏◀───────────────────┐
+/// │  └─────────────┘              ╲ ╱                     │
+/// │         │                      V                      │
+/// │         │disconnected_peers    │                      │
+/// │         ▼                      │                      │
+/// │         Λ     filter by        │                      │
+/// │        ╱ ╲ !contains_addr      │                      │
+/// │       ▕   ▏◀───────────────────┼──────────────────────┤
+/// │        ╲ ╱                     │                      │
+/// │         V                      │                      │
+/// │         │                      │                      │
+/// │┌────────┼──────────────────────┼──────────────────────┼────────┐
+/// ││        ▼                      ▼                      │        │
+/// ││ ┌─────────────┐        ┌─────────────┐        ┌─────────────┐ │
+/// ││ │Disconnected │        │  Gossiped   │        │Failed Peers │ │
+/// ││ │    Peers    │        │    Peers    │        │ AddressBook │◀┼┐
+/// ││ │ AddressBook │        │ AddressBook │        │             │ ││
+/// ││ └─────────────┘        └─────────────┘        └─────────────┘ ││
+/// ││        │                      │                      │        ││
+/// ││ #1 drain_oldest        #2 drain_newest        #3 drain_oldest ││
+/// ││        │                      │                      │        ││
+/// ││        ├──────────────────────┴──────────────────────┘        ││
+/// ││        │           disjoint candidate sets                    ││
+/// │└────────┼──────────────────────────────────────────────────────┘│
+/// │         ▼                                                       │
+/// │         Λ                                                       │
+/// │        ╱ ╲         filter by                                    │
+/// └──────▶▕   ▏!is_potentially_connected                            │
+///          ╲ ╱                                                      │
+///           V                                                       │
+///           │                                                       │
+///           │                                                       │
+///           ▼                                                       │
+///           Λ                                                       │
+///          ╱ ╲                                                      │
+///         ▕   ▏─────────────────────────────────────────────────────┘
+///          ╲ ╱   connection failed, update last_seen to now()
+///           V
+///           │
+///           │
+///           ▼
+///    ┌────────────┐
+///    │    send    │
+///    │ PeerClient │
+///    │to Discover │
+///    └────────────┘
+/// ```
 pub(super) struct CandidateSet<S> {
     pub(super) disconnected: AddressBook,
     pub(super) gossiped: AddressBook,
@@ -19,6 +87,16 @@ where
     S: Service<Request, Response = Response, Error = BoxedStdError>,
     S::Future: Send + 'static,
 {
+    pub fn new(peer_set: Arc<Mutex<AddressBook>>, peer_service: S) -> CandidateSet<S> {
+        CandidateSet {
+            disconnected: AddressBook::new(span!(Level::TRACE, "disconnected peers")),
+            gossiped: AddressBook::new(span!(Level::TRACE, "gossiped peers")),
+            failed: AddressBook::new(span!(Level::TRACE, "failed peers")),
+            peer_set,
+            peer_service,
+        }
+    }
+
     pub async fn update(&mut self) -> Result<(), BoxedStdError> {
         // Opportunistically crawl the network on every update call to ensure
         // we're actively fetching peers. Continue independently of whether we
@@ -41,8 +119,8 @@ where
                 let peer_set = &self.peer_set;
                 let new_addrs = addrs
                     .into_iter()
-                    .filter(|meta| failed.contains_addr(&meta.addr))
-                    .filter(|meta| peer_set.lock().unwrap().contains_addr(&meta.addr));
+                    .filter(|meta| !failed.contains_addr(&meta.addr))
+                    .filter(|meta| !peer_set.lock().unwrap().contains_addr(&meta.addr));
                 self.gossiped.extend(new_addrs);
                 trace!(
                     addr_len,
@@ -69,10 +147,12 @@ where
     }
 
     pub fn next(&mut self) -> Option<MetaAddr> {
+        let guard = self.peer_set.lock().unwrap();
         self.disconnected
             .drain_oldest()
             .chain(self.gossiped.drain_newest())
             .chain(self.failed.drain_oldest())
+            .filter(|meta| !guard.is_potentially_connected(&meta.addr))
             .next()
     }
 
