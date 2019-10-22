@@ -83,8 +83,7 @@ where
                     trace!("awaiting client request or peer message");
                     match future::select(peer_rx.next(), self.client_rx.next()).await {
                         Either::Left((None, _)) => {
-                            info!("peer stream closed, shutting down");
-                            return;
+                            self.fail_with(PeerError::ConnectionClosed);
                         }
                         // XXX switch back to hard failure when we parse all message types
                         //Either::Left((Some(Err(e)), _)) => self.fail_with(e.into()),
@@ -93,8 +92,7 @@ where
                             self.handle_message_as_request(msg).await
                         }
                         Either::Right((None, _)) => {
-                            info!("client stream closed, shutting down");
-                            return;
+                            self.fail_with(PeerError::DeadPeerClient);
                         }
                         Either::Right((Some(req), _)) => self.handle_client_request(req).await,
                     }
@@ -158,7 +156,7 @@ where
 
     /// Marks the peer as having failed with error `e`.
     fn fail_with(&mut self, e: PeerError) {
-        trace!(%e, "failing peer service with error");
+        debug!(%e, "failing peer service with error");
         // Update the shared error slot
         let mut guard = self
             .error_slot
