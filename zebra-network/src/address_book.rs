@@ -5,12 +5,9 @@ use std::{
     collections::{BTreeSet, HashMap},
     iter::Extend,
     net::SocketAddr,
-    sync::{Arc, Mutex},
 };
 
 use chrono::{DateTime, Utc};
-use futures::channel::mpsc;
-use tokio::prelude::*;
 use tracing::Span;
 
 use crate::{

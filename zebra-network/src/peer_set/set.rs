@@ -2,7 +2,6 @@ use std::{
     collections::HashMap,
     fmt::Debug,
     marker::PhantomData,
-    net::SocketAddr,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -20,7 +19,6 @@ use tower::{
 use tower_load::Load;
 
 use crate::{
-    peer::{PeerClient, PeerError},
     protocol::internal::{Request, Response},
     BoxedStdError,
 };

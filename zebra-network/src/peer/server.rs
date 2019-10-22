@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use futures::{
     channel::{mpsc, oneshot},
@@ -261,7 +261,10 @@ where
                     .expect("response oneshot should be unused");
                 AwaitingRequest
             }
-            (AwaitingResponse(Ping(req_nonce), tx), Message::Pong(res_nonce)) => {
+            // In this special case, we ignore tx, because we handle ping/pong
+            // messages internally; the "shadow client" only serves to generate
+            // outbound pings for us to process.
+            (AwaitingResponse(Ping(req_nonce), _tx), Message::Pong(res_nonce)) => {
                 if req_nonce != res_nonce {
                     self.fail_with(PeerError::HeartbeatNonceMismatch);
                 }
