@@ -33,7 +33,6 @@ use crate::{
 };
 
 mod candidate_set;
-mod discover;
 mod set;
 mod unready_service;
 
