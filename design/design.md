@@ -25,7 +25,7 @@ The following are general desiderata for Zebra:
 * Zebra should be well-factored internally into a collection of
   component libraries which can be used by other applications to
   perform Zcash-related tasks.  Implementation details of each
-  component should not leak into all other components,
+  component should not leak into all other components.
   
 * Zebra should checkpoint on Sapling activation and drop all
   Sprout-related functionality not required post-Sapling.
@@ -214,7 +214,7 @@ all client code to a subprocess.
 
 - [...]
 
-`zebrad2`
+`zebrad`
 ---------
 
 Abscissa-based application which loads configs, all application components,
