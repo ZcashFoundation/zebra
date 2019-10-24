@@ -12,10 +12,13 @@
 
 mod config;
 mod connect;
+mod seed;
 mod start;
 mod version;
 
-use self::{config::ConfigCmd, connect::ConnectCmd, start::StartCmd, version::VersionCmd};
+use self::{
+    config::ConfigCmd, connect::ConnectCmd, seed::SeedCmd, start::StartCmd, version::VersionCmd,
+};
 use crate::config::ZebradConfig;
 use abscissa_core::{
     config::Override, Command, Configurable, FrameworkError, Help, Options, Runnable,
@@ -47,6 +50,10 @@ pub enum ZebradCmd {
     /// The `connect` subcommand
     #[options(help = "testing stub for dumping network messages")]
     Connect(ConnectCmd),
+
+    /// The `seed` subcommand
+    #[options(help = "dns seeder")]
+    Seed(SeedCmd),
 }
 
 /// This trait allows you to define how application configuration is loaded.

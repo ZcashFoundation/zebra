@@ -66,9 +66,7 @@ impl ConnectCmd {
             1,
         );
 
-        let mut config = app_config().network.clone();
-
-        config.initial_peers = vec![self.addr];
+        let config = app_config().network.clone();
 
         let (mut peer_set, address_book) = zebra_network::init(config, node).await;
 
