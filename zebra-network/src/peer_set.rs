@@ -103,7 +103,7 @@ where
 
     // 1. Initial peers, specified in the config.
     tokio::spawn(add_initial_peers(
-        config.initial_peers.clone(),
+        config.initial_peers(),
         connector.clone(),
         peerset_tx.clone(),
     ));
