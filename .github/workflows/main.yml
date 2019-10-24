@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@master
-    - run:
+    # - run:
     - name: Authenticate w/ Google Cloud
       uses: actions/gcloud/auth@master
       env:
