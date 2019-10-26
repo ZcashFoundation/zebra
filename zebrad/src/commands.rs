@@ -9,6 +9,8 @@
 //!
 //! See the `impl Configurable` below for how to specify the path to the
 //! application's configuration file.
+// TODO: update the list of commands above or find a way to keep it
+// automatically up to date.
 
 mod config;
 mod connect;

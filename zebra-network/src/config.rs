@@ -1,5 +1,6 @@
 use std::{
     net::{SocketAddr, ToSocketAddrs},
+    string::String,
     time::Duration,
 };
 
@@ -22,11 +23,11 @@ pub struct Config {
     /// mainnet.
     ///
     /// XXX this should be replaced with DNS names, not SocketAddrs
-    pub initial_mainnet_peers: Vec<SocketAddr>,
+    pub initial_mainnet_peers: Vec<String>,
 
     /// A list of initial peers for the peerset when operating on
     /// testnet.
-    pub initial_testnet_peers: Vec<SocketAddr>,
+    pub initial_testnet_peers: Vec<String>,
 
     /// The outgoing request buffer size for the peer set.
     pub peerset_request_buffer_size: usize,
@@ -58,26 +59,36 @@ impl Config {
     /// Get the initial seed peers based on the configured network.
     pub fn initial_peers(&self) -> Vec<SocketAddr> {
         match self.network {
-            Network::Mainnet => self.initial_mainnet_peers.clone(),
-            Network::Testnet => self.initial_testnet_peers.clone(),
+            Network::Mainnet => Config::parse_peers(self.initial_mainnet_peers.clone()),
+            Network::Testnet => Config::parse_peers(self.initial_testnet_peers.clone()),
         }
     }
 }
 
 impl Default for Config {
     fn default() -> Config {
+        let mainnet_peers = [
+            "dnsseed.z.cash:8233",
+            "dnsseed.str4d.xyz:8233",
+            "dnsseed.znodes.org:8233",
+        ]
+        .iter()
+        .map(|&s| String::from(s))
+        .collect();
+
+        let testnet_peers = ["dnsseed.testnet.z.cash:18233"]
+            .iter()
+            .map(|&s| String::from(s))
+            .collect();
+
         Config {
             listen_addr: "127.0.0.1:28233"
                 .parse()
                 .expect("Hardcoded address should be parseable"),
             user_agent: crate::constants::USER_AGENT.to_owned(),
             network: Network::Mainnet,
-            initial_mainnet_peers: Config::parse_peers(vec![
-                "dnsseed.z.cash:8233",
-                "dnsseed.str4d.xyz:8233",
-                "dnsseed.znodes.org:8233",
-            ]),
-            initial_testnet_peers: Config::parse_peers(vec!["dnsseed.testnet.z.cash:18233"]),
+            initial_mainnet_peers: mainnet_peers,
+            initial_testnet_peers: testnet_peers,
             ewma_default_rtt: Duration::from_secs(1),
             ewma_decay_time: Duration::from_secs(60),
             peerset_request_buffer_size: 1,
