@@ -27,7 +27,7 @@ impl Runnable for ConfigCmd {
 # can be found in Rustdoc. XXX add link to rendered docs.
 
 "
-        .to_owned();
+        .to_owned(); // The default name and location of the config file is defined in ../commands.rs
         output += &toml::to_string_pretty(&default_config)
             .expect("default config should be serializable");
         match self.output_file {
