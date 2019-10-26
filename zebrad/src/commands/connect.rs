@@ -111,10 +111,8 @@ impl ConnectCmd {
         tail.extend_from_slice(&addrs[addrs.len() - 5..]);
         info!(addrs.first = ?head, addrs.last = ?tail);
 
-        loop {
-            // empty loop ensures we don't exit the application,
-            // and this is throwaway code
-        }
+        let eternity = tokio::future::pending::<()>();
+        eternity.await;
 
         Ok(())
     }
