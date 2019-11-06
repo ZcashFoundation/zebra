@@ -1,5 +1,11 @@
 //! `seed` subcommand - test stub for talking to zcashd
 
+use std::{
+    future::Future,
+    pin::Pin,
+    task::{Context, Poll},
+};
+
 use crate::{config::ZebradConfig, prelude::*};
 
 use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
@@ -63,21 +69,48 @@ impl Runnable for SeedCmd {
 impl SeedCmd {
     async fn seed(&self) -> Result<(), failure::Error> {
         use failure::Error;
-        use futures::stream::{FuturesUnordered, StreamExt};
-        use tower::{buffer::Buffer, service_fn, Service, ServiceExt};
+        use futures::stream::StreamExt;
+        use tower::{buffer::Buffer, Service, ServiceExt};
         use zebra_network::{AddressBook, Request, Response};
 
         info!("begin tower-based peer handling test stub");
 
-        let node = Buffer::new(
-            service_fn(|req| {
-                async move {
-                    info!(?req);
-                    Ok::<Response, failure::Error>(Response::Ok)
-                }
-            }),
-            1,
-        );
+        struct SeedService {
+            address_book: Option<AddressBook>,
+        }
+
+        impl SeedService {
+            fn set_address_book(&mut self, address_book: AddressBook) {
+                self.address_book = Some(address_book);
+            }
+        }
+
+        impl Service<Request> for SeedService {
+            type Response = Response;
+            type Error = Error;
+            type Future =
+                Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
+
+            fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+                Ok(()).into()
+            }
+
+            fn call(&mut self, req: Request) -> Self::Future {
+                let response = match req {
+                    Request::GetPeers => match &self.address_book {
+                        Some(address_book) => Ok::<Response, failure::Error>(Response::Peers(
+                            address_book.peers().collect(),
+                        )),
+                        _ => Ok::<Response, failure::Error>(Response::Ok),
+                    },
+                    _ => Ok::<Response, failure::Error>(Response::Ok),
+                };
+
+                return Box::pin(futures::future::ready(response));
+            }
+        }
+
+        let node = Buffer::new(SeedService { address_book: None }, 1);
 
         let config = app_config().network.clone();
 
@@ -92,7 +125,8 @@ impl SeedCmd {
 
         info!("peer_set became ready");
 
-        loop {}
+        let eternity = tokio::future::pending::<()>();
+        eternity.await;
 
         Ok(())
     }
