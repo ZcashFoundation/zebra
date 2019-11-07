@@ -304,6 +304,7 @@ where
         // and try to construct an appropriate request object.
         let req = match msg {
             Message::Addr(addrs) => Some(Request::PushPeers(addrs)),
+            Message::GetAddr => Some(Request::GetPeers),
             _ => {
                 debug!("unhandled message type");
                 None
