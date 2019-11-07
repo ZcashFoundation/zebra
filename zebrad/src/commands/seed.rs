@@ -3,12 +3,69 @@
 use std::{
     future::Future,
     pin::Pin,
+    sync::{Arc, Mutex},
     task::{Context, Poll},
 };
 
+use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
+use futures::stream::StreamExt;
+use tower::{buffer::Buffer, Service, ServiceExt};
+use zebra_network::{AddressBook, BoxedStdError, Request, Response};
+
 use crate::{config::ZebradConfig, prelude::*};
 
-use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
+#[derive(Clone)]
+struct SeedService {
+    address_book: Option<Arc<Mutex<AddressBook>>>,
+}
+
+impl SeedService {
+    fn set_address_book(&mut self, address_book: Arc<Mutex<AddressBook>>) {
+        debug!("Settings SeedService.address_book: {:?}", address_book);
+        self.address_book = Some(address_book);
+    }
+}
+
+impl Service<Request> for SeedService {
+    type Response = Response;
+    type Error = BoxedStdError;
+    type Future =
+        Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
+
+    fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Ok(()).into()
+    }
+
+    fn call(&mut self, req: Request) -> Self::Future {
+        info!("SeedService handling a request: {:?}", req);
+
+        match &self.address_book {
+            Some(address_book) => trace!(
+                "SeedService address_book total: {:?}",
+                address_book.lock().unwrap().len()
+            ),
+            _ => (),
+        };
+
+        let response = match req {
+            Request::GetPeers => match &self.address_book {
+                Some(address_book) => {
+                    info!("Responding to GetPeers");
+
+                    Ok::<Response, Self::Error>(Response::Peers(
+                        address_book.lock().unwrap().peers().collect(),
+                    ))
+                }
+                _ => Ok::<Response, Self::Error>(Response::Ok),
+            },
+            _ => Ok::<Response, Self::Error>(Response::Ok),
+        };
+
+        info!("SeedService response: {:?}", response);
+
+        return Box::pin(futures::future::ready(response));
+    }
+}
 
 /// `seed` subcommand
 ///
@@ -30,6 +87,7 @@ impl config::Override<ZebradConfig> for SeedCmd {
             config.tracing.filter = self.filters.join(",");
         }
 
+        info!("{:?}", config);
         Ok(config)
     }
 }
@@ -69,54 +127,18 @@ impl Runnable for SeedCmd {
 impl SeedCmd {
     async fn seed(&self) -> Result<(), failure::Error> {
         use failure::Error;
-        use futures::stream::StreamExt;
-        use tower::{buffer::Buffer, Service, ServiceExt};
-        use zebra_network::{AddressBook, Request, Response};
 
         info!("begin tower-based peer handling test stub");
 
-        struct SeedService {
-            address_book: Option<AddressBook>,
-        }
-
-        impl SeedService {
-            fn set_address_book(&mut self, address_book: AddressBook) {
-                self.address_book = Some(address_book);
-            }
-        }
-
-        impl Service<Request> for SeedService {
-            type Response = Response;
-            type Error = Error;
-            type Future =
-                Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
-
-            fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-                Ok(()).into()
-            }
-
-            fn call(&mut self, req: Request) -> Self::Future {
-                let response = match req {
-                    Request::GetPeers => match &self.address_book {
-                        Some(address_book) => Ok::<Response, failure::Error>(Response::Peers(
-                            address_book.peers().collect(),
-                        )),
-                        _ => Ok::<Response, failure::Error>(Response::Ok),
-                    },
-                    _ => Ok::<Response, failure::Error>(Response::Ok),
-                };
-
-                return Box::pin(futures::future::ready(response));
-            }
-        }
-
-        let node = Buffer::new(SeedService { address_book: None }, 1);
+        let mut seed_service = SeedService { address_book: None };
+        // let node = Buffer::new(seed_service, 1);
 
         let config = app_config().network.clone();
+        info!("{:?}", config);
 
-        // XXX How do I create a service above that answers questions
-        // about this specific address book?
-        let (mut peer_set, address_book) = zebra_network::init(config, node).await;
+        let (mut peer_set, address_book) = zebra_network::init(config, seed_service.clone()).await;
+
+        seed_service.set_address_book(address_book.clone());
 
         // XXX Do not tell our DNS seed queries about gossiped addrs
         // that we have not connected to before?
@@ -124,6 +146,21 @@ impl SeedCmd {
         peer_set.ready().await.map_err(Error::from_boxed_compat)?;
 
         info!("peer_set became ready");
+
+        use std::time::Duration;
+        use tokio::timer::Interval;
+
+        //#[cfg(dos)]
+        // Fire GetPeers requests at ourselves, for testing.
+        tokio::spawn(async move {
+            let mut interval_stream = Interval::new_interval(Duration::from_secs(1));
+
+            loop {
+                interval_stream.next().await;
+
+                let _ = seed_service.call(Request::GetPeers);
+            }
+        });
 
         let eternity = tokio::future::pending::<()>();
         eternity.await;
