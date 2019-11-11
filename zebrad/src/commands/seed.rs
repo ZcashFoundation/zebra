@@ -8,22 +8,26 @@ use std::{
 };
 
 use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
-use futures::stream::StreamExt;
+use futures::channel::oneshot;
 use tower::{buffer::Buffer, Service, ServiceExt};
 use zebra_network::{AddressBook, BoxedStdError, Request, Response};
 
 use crate::{config::ZebradConfig, prelude::*};
 
-#[derive(Clone)]
-struct SeedService {
-    address_book: Option<Arc<Mutex<AddressBook>>>,
+/// Whether our `SeedService` is poll_ready or not.
+#[derive(Debug)]
+enum SeederState {
+    ///
+    TempState,
+    ///
+    AwaitingAddressBook(oneshot::Receiver<Arc<Mutex<AddressBook>>>),
+    ///
+    Ready(Arc<Mutex<AddressBook>>),
 }
 
-impl SeedService {
-    fn set_address_book(&mut self, address_book: Arc<Mutex<AddressBook>>) {
-        debug!("Settings SeedService.address_book: {:?}", address_book);
-        self.address_book = Some(address_book);
-    }
+#[derive(Debug)]
+struct SeedService {
+    state: SeederState,
 }
 
 impl Service<Request> for SeedService {
@@ -32,33 +36,51 @@ impl Service<Request> for SeedService {
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
-    fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Ok(()).into()
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        info!("State: {:?}", self.state);
+
+        let mut poll_result = Poll::Pending;
+
+        // We want to be able to consume the state, but it's behind a mutable
+        // reference, so we can't move it out of self without swapping in a
+        // placeholder, even if we immediately overwrite the placeholder.
+        let tmp_state = std::mem::replace(&mut self.state, SeederState::TempState);
+
+        self.state = match tmp_state {
+            SeederState::AwaitingAddressBook(mut rx) => match rx.try_recv() {
+                Ok(Some(address_book)) => {
+                    info!("Message received! {:?}", address_book);
+                    poll_result = Poll::Ready(Ok(()));
+                    SeederState::Ready(address_book)
+                }
+                _ => SeederState::AwaitingAddressBook(rx),
+            },
+            SeederState::Ready(_) => {
+                poll_result = Poll::Ready(Ok(()));
+                tmp_state
+            }
+            SeederState::TempState => tmp_state,
+        };
+
+        return poll_result;
     }
 
     fn call(&mut self, req: Request) -> Self::Future {
         info!("SeedService handling a request: {:?}", req);
 
-        match &self.address_book {
-            Some(address_book) => trace!(
-                "SeedService address_book total: {:?}",
-                address_book.lock().unwrap().len()
-            ),
-            _ => (),
-        };
+        let response = match (req, &self.state) {
+            (Request::GetPeers, SeederState::Ready(address_book)) => {
+                info!("Responding to GetPeers");
 
-        let response = match req {
-            Request::GetPeers => match &self.address_book {
-                Some(address_book) => {
-                    info!("Responding to GetPeers");
+                Ok::<Response, Self::Error>(Response::Peers(
+                    address_book.lock().unwrap().peers().collect(),
+                ))
+            }
+            _ => {
+                trace!("Where is my address_book??? {:?}", &self.state);
 
-                    Ok::<Response, Self::Error>(Response::Peers(
-                        address_book.lock().unwrap().peers().collect(),
-                    ))
-                }
-                _ => Ok::<Response, Self::Error>(Response::Ok),
-            },
-            _ => Ok::<Response, Self::Error>(Response::Ok),
+                Ok::<Response, Self::Error>(Response::Ok)
+            }
         };
 
         info!("SeedService response: {:?}", response);
@@ -71,7 +93,7 @@ impl Service<Request> for SeedService {
 ///
 /// A DNS seeder command to spider and collect as many valid peer
 /// addresses as we can.
-#[derive(Command, Debug, Options)]
+#[derive(Command, Debug, Default, Options)]
 pub struct SeedCmd {
     /// Filter strings
     #[options(free)]
@@ -130,15 +152,17 @@ impl SeedCmd {
 
         info!("begin tower-based peer handling test stub");
 
-        let mut seed_service = SeedService { address_book: None };
-        // let node = Buffer::new(seed_service, 1);
+        let (addressbook_tx, addressbook_rx) = oneshot::channel();
+        let seed_service = SeedService {
+            state: SeederState::AwaitingAddressBook(addressbook_rx),
+        };
+        let node = Buffer::new(seed_service, 1);
 
         let config = app_config().network.clone();
-        info!("{:?}", config);
 
-        let (mut peer_set, address_book) = zebra_network::init(config, seed_service.clone()).await;
+        let (mut peer_set, address_book) = zebra_network::init(config, node).await;
 
-        seed_service.set_address_book(address_book.clone());
+        let _ = addressbook_tx.send(address_book);
 
         // XXX Do not tell our DNS seed queries about gossiped addrs
         // that we have not connected to before?
@@ -147,10 +171,11 @@ impl SeedCmd {
 
         info!("peer_set became ready");
 
+        #[cfg(dos)]
         use std::time::Duration;
         use tokio::timer::Interval;
 
-        //#[cfg(dos)]
+        #[cfg(dos)]
         // Fire GetPeers requests at ourselves, for testing.
         tokio::spawn(async move {
             let mut interval_stream = Interval::new_interval(Duration::from_secs(1));
