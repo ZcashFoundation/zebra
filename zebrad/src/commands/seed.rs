@@ -65,10 +65,7 @@ impl Service<Request> for SeedService {
 
         let response = match (req, &self.state) {
             (Request::GetPeers, SeederState::Ready(address_book)) => {
-                debug!(
-                    "address_book.len(): {:?}",
-                    address_book.lock().unwrap().len()
-                );
+                debug!(address_book.len = address_book.lock().unwrap().len());
                 info!("SeedService responding to GetPeers");
                 Ok::<Response, Self::Error>(Response::Peers(
                     address_book.lock().unwrap().peers().collect(),
