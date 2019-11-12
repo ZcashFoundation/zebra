@@ -98,30 +98,13 @@ impl Runnable for SeedCmd {
     fn run(&self) {
         use crate::components::tokio::TokioComponent;
 
-        let wait = tokio::future::pending::<()>();
-        // Combine the seed future with an infinite wait
-        // so that the program has to be explicitly killed and
-        // won't die before all tracing messages are written.
-        let fut = futures::future::join(
-            async {
-                match self.seed().await {
-                    Ok(()) => {}
-                    Err(e) => {
-                        // Print any error that occurs.
-                        error!(?e);
-                    }
-                }
-            },
-            wait,
-        );
-
         let _ = app_reader()
             .state()
             .components
             .get_downcast_ref::<TokioComponent>()
             .expect("TokioComponent should be available")
             .rt
-            .block_on(fut);
+            .block_on(self.seed());
     }
 }
 
