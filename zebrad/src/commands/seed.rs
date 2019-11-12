@@ -83,25 +83,9 @@ impl Service<Request> for SeedService {
 ///
 /// A DNS seeder command to spider and collect as many valid peer
 /// addresses as we can.
+// This is not a unit-like struct because it makes Command and Options sad.
 #[derive(Command, Debug, Default, Options)]
-pub struct SeedCmd {
-    /// Filter strings
-    #[options(free)]
-    filters: Vec<String>,
-}
-
-impl config::Override<ZebradConfig> for SeedCmd {
-    // Process the given command line options, overriding settings
-    // from a configuration file using explicit flags taken from
-    // command-line arguments.
-    fn override_config(&self, mut config: ZebradConfig) -> Result<ZebradConfig, FrameworkError> {
-        if !self.filters.is_empty() {
-            config.tracing.filter = self.filters.join(",");
-        }
-
-        Ok(config)
-    }
-}
+pub struct SeedCmd {}
 
 impl Runnable for SeedCmd {
     /// Start the application.
