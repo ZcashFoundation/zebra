@@ -21,8 +21,6 @@ pub struct Config {
 
     /// A list of initial peers for the peerset when operating on
     /// mainnet.
-    ///
-    /// XXX this should be replaced with DNS names, not SocketAddrs
     pub initial_mainnet_peers: Vec<String>,
 
     /// A list of initial peers for the peerset when operating on
