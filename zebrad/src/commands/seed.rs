@@ -17,11 +17,11 @@ use crate::{config::ZebradConfig, prelude::*};
 /// Whether our `SeedService` is poll_ready or not.
 #[derive(Debug)]
 enum SeederState {
-    ///
+    // This is kinda gross but ¯\_(ツ)_/¯
     TempState,
-    ///
+    /// Waiting for the address book to be shared with us via the oneshot channel.
     AwaitingAddressBook(oneshot::Receiver<Arc<Mutex<AddressBook>>>),
-    ///
+    /// Address book received, ready to service requests.
     Ready(Arc<Mutex<AddressBook>>),
 }
 
@@ -37,7 +37,7 @@ impl Service<Request> for SeedService {
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        info!("State: {:?}", self.state);
+        debug!("SeedService.state: {:?}", self.state);
 
         let mut poll_result = Poll::Pending;
 
@@ -49,10 +49,17 @@ impl Service<Request> for SeedService {
         self.state = match tmp_state {
             SeederState::AwaitingAddressBook(mut rx) => match rx.try_recv() {
                 Ok(Some(address_book)) => {
-                    info!("Message received! {:?}", address_book);
+                    info!(
+                        "SeedService received address_book via oneshot {:?}",
+                        address_book
+                    );
                     poll_result = Poll::Ready(Ok(()));
                     SeederState::Ready(address_book)
                 }
+                // Sets self.state to a new instance of what it
+                // already was; we can't just return `tmp_state`
+                // because we've plucked it apart via `rx` and moved
+                // parts around already in this block.
                 _ => SeederState::AwaitingAddressBook(rx),
             },
             SeederState::Ready(_) => {
@@ -70,21 +77,19 @@ impl Service<Request> for SeedService {
 
         let response = match (req, &self.state) {
             (Request::GetPeers, SeederState::Ready(address_book)) => {
-                info!("Responding to GetPeers");
-
+                debug!(
+                    "address_book.len(): {:?}",
+                    address_book.lock().unwrap().len()
+                );
+                info!("SeedService responding to GetPeers");
                 Ok::<Response, Self::Error>(Response::Peers(
                     address_book.lock().unwrap().peers().collect(),
                 ))
             }
-            _ => {
-                trace!("Where is my address_book??? {:?}", &self.state);
-
-                Ok::<Response, Self::Error>(Response::Ok)
-            }
+            _ => Ok::<Response, Self::Error>(Response::Ok),
         };
 
         info!("SeedService response: {:?}", response);
-
         return Box::pin(futures::future::ready(response));
     }
 }
@@ -109,7 +114,6 @@ impl config::Override<ZebradConfig> for SeedCmd {
             config.tracing.filter = self.filters.join(",");
         }
 
-        info!("{:?}", config);
         Ok(config)
     }
 }
@@ -164,8 +168,6 @@ impl SeedCmd {
 
         let _ = addressbook_tx.send(address_book);
 
-        // XXX Do not tell our DNS seed queries about gossiped addrs
-        // that we have not connected to before?
         info!("waiting for peer_set ready");
         peer_set.ready().await.map_err(Error::from_boxed_compat)?;
 
