@@ -1,4 +1,4 @@
-//! `seed` subcommand - test stub for talking to zcashd
+//! `seed` subcommand - runs a dns seeder
 
 use std::{
     future::Future,
