@@ -45,7 +45,7 @@ impl Service<Request> for SeedService {
                     return Poll::Ready(Err(e.into()));
                 }
                 Ok(None) => {
-                    debug!("SeedService got a message with `None` in it. 🤔");
+                    trace!("SeedService hasn't received a message via the oneshot yet.");
                     return Poll::Pending;
                 }
                 Ok(Some(address_book)) => {
