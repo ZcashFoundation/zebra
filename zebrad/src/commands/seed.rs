@@ -63,8 +63,14 @@ impl Service<Request> for SeedService {
     fn call(&mut self, req: Request) -> Self::Future {
         info!("SeedService handling a request: {:?}", req);
 
-        let response = match (req, &self.state) {
-            (Request::GetPeers, SeederState::Ready(address_book)) => {
+        let address_book = if let SeederState::Ready(address_book) = &self.state {
+            address_book
+        } else {
+            panic!("SeedService::call without SeedService::poll_ready");
+        };
+
+        let response = match req {
+            Request::GetPeers => {
                 debug!(address_book.len = address_book.lock().unwrap().len());
                 info!("SeedService responding to GetPeers");
                 Ok::<Response, Self::Error>(Response::Peers(
