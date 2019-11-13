@@ -54,6 +54,6 @@ where
             let client = hs.call((stream, addr)).await?;
             Ok(Change::Insert(addr, client))
         }
-            .boxed()
+        .boxed()
     }
 }
