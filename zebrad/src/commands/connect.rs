@@ -21,31 +21,13 @@ impl Runnable for ConnectCmd {
         info!(connect.addr = ?self.addr);
 
         use crate::components::tokio::TokioComponent;
-
-        let wait = tokio::future::pending::<()>();
-        // Combine the connect future with an infinite wait
-        // so that the program has to be explicitly killed and
-        // won't die before all tracing messages are written.
-        let fut = futures::future::join(
-            async {
-                match self.connect().await {
-                    Ok(()) => {}
-                    Err(e) => {
-                        // Print any error that occurs.
-                        error!(?e);
-                    }
-                }
-            },
-            wait,
-        );
-
         let _ = app_reader()
             .state()
             .components
             .get_downcast_ref::<TokioComponent>()
             .expect("TokioComponent should be available")
             .rt
-            .block_on(fut);
+            .block_on(self.connect());
     }
 }
 
@@ -66,7 +48,11 @@ impl ConnectCmd {
             1,
         );
 
-        let config = app_config().network.clone();
+        let mut config = app_config().network.clone();
+        // Use a different listen addr so that we don't conflict with another local node.
+        config.listen_addr = "127.0.0.1:38233".parse().unwrap();
+        // Connect only to the specified peer.
+        config.initial_mainnet_peers = vec![self.addr.to_string()];
 
         let (mut peer_set, address_book) = zebra_network::init(config, node).await;
 
