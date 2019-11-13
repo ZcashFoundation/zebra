@@ -36,25 +36,21 @@ impl Service<Request> for SeedService {
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
+    #[instrument(skip(self, _cx))]
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        debug!("SeedService.state: {:?}", self.state);
-
         match self.state {
             SeederState::Ready(_) => return Poll::Ready(Ok(())),
             SeederState::AwaitingAddressBook(ref mut rx) => match rx.try_recv() {
                 Err(e) => {
-                    error!("SeedService oneshot sender dropped: {:?}", e);
+                    error!("oneshot sender dropped, failing service: {:?}", e);
                     return Poll::Ready(Err(e.into()));
                 }
                 Ok(None) => {
-                    trace!("SeedService hasn't received a message via the oneshot yet.");
+                    trace!("awaiting address book, service is unready");
                     return Poll::Pending;
                 }
                 Ok(Some(address_book)) => {
-                    info!(
-                        "SeedService received address_book via oneshot {:?}",
-                        address_book
-                    );
+                    debug!("received address_book via oneshot, service becomes ready");
                     self.state = SeederState::Ready(address_book);
                     return Poll::Ready(Ok(()));
                 }
@@ -62,10 +58,11 @@ impl Service<Request> for SeedService {
         }
     }
 
+    // Note: the generated span applies only to this function, not
+    // to the future, but this is OK because the current implementation
+    // is not actually async.
+    #[instrument]
     fn call(&mut self, req: Request) -> Self::Future {
-        let span = span!(Level::DEBUG, "SeedService::call", req = ?req);
-        let _guard = span.enter();
-
         let address_book = if let SeederState::Ready(address_book) = &self.state {
             address_book
         } else {
@@ -88,12 +85,12 @@ impl Service<Request> for SeedService {
                 // Finally, truncate the list so that we do not trivially
                 // reveal our entire peer set.
                 peers.truncate(50);
-                debug!(peers.len = peers.len(), peers = ?peers);
+                debug!(peers.len = peers.len());
                 Ok(Response::Peers(peers))
             }
             _ => {
                 debug!("ignoring request");
-                Ok::<Response, Self::Error>(Response::Ok)
+                Ok(Response::Ok)
             }
         };
         return Box::pin(futures::future::ready(response));
