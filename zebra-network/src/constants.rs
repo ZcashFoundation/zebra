@@ -25,6 +25,12 @@ pub const LIVE_PEER_DURATION: Duration = Duration::from_secs(60 + 10 + 10 + 10);
 /// connected peer.
 pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(60);
 
+/// Truncate timestamps in outbound address messages to this time interval.
+///
+/// This is intended to prevent a peer from learning exactly when we recieved
+/// messages from each of our peers.
+pub const TIMESTAMP_TRUNCATION_SECONDS: i64 = 30 * 60;
+
 /// The User-Agent string provided by the node.
 pub const USER_AGENT: &'static str = "🦓Zebra v2.0.0-alpha.0🦓";
 

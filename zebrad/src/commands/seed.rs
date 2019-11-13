@@ -10,6 +10,8 @@ use std::{
 use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
 use futures::channel::oneshot;
 use tower::{buffer::Buffer, Service, ServiceExt};
+use tracing::{span, Level};
+
 use zebra_network::{AddressBook, BoxedStdError, Request, Response};
 
 use crate::{config::ZebradConfig, prelude::*};
@@ -61,7 +63,8 @@ impl Service<Request> for SeedService {
     }
 
     fn call(&mut self, req: Request) -> Self::Future {
-        info!("SeedService handling a request: {:?}", req);
+        let span = span!(Level::DEBUG, "SeedService::call", req = ?req);
+        let _guard = span.enter();
 
         let address_book = if let SeederState::Ready(address_book) = &self.state {
             address_book
@@ -71,16 +74,28 @@ impl Service<Request> for SeedService {
 
         let response = match req {
             Request::GetPeers => {
-                debug!(address_book.len = address_book.lock().unwrap().len());
-                info!("SeedService responding to GetPeers");
-                Ok::<Response, Self::Error>(Response::Peers(
-                    address_book.lock().unwrap().peers().collect(),
-                ))
+                // Collect a list of known peers from the address book
+                // and sanitize their timestamps.
+                let mut peers = address_book
+                    .lock()
+                    .unwrap()
+                    .peers()
+                    .map(|addr| addr.sanitize())
+                    .collect::<Vec<_>>();
+                // The peers are still ordered by recency, so shuffle them.
+                use rand::seq::SliceRandom;
+                peers.shuffle(&mut rand::thread_rng());
+                // Finally, truncate the list so that we do not trivially
+                // reveal our entire peer set.
+                peers.truncate(50);
+                debug!(peers.len = peers.len(), peers = ?peers);
+                Ok(Response::Peers(peers))
             }
-            _ => Ok::<Response, Self::Error>(Response::Ok),
+            _ => {
+                debug!("ignoring request");
+                Ok::<Response, Self::Error>(Response::Ok)
+            }
         };
-
-        info!("SeedService response: {:?}", response);
         return Box::pin(futures::future::ready(response));
     }
 }
