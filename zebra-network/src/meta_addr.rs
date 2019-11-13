@@ -31,6 +31,16 @@ pub struct MetaAddr {
     pub last_seen: DateTime<Utc>,
 }
 
+impl MetaAddr {
+    /// Sanitize this `MetaAddr` before sending it to a remote peer.
+    pub fn sanitize(mut self) -> MetaAddr {
+        let interval = crate::constants::TIMESTAMP_TRUNCATION_SECONDS;
+        let ts = self.last_seen.timestamp();
+        self.last_seen = Utc.timestamp(ts - ts.rem_euclid(interval), 0);
+        self
+    }
+}
+
 impl Ord for MetaAddr {
     /// `MetaAddr`s are sorted newest-first, and then in an arbitrary
     /// but determinate total order.
@@ -76,5 +86,25 @@ impl ZcashDeserialize for MetaAddr {
             services: PeerServices::from_bits_truncate(reader.read_u64::<LittleEndian>()?),
             addr: reader.read_socket_addr()?,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    // XXX remove this test and replace it with a proptest instance.
+    #[test]
+    fn sanitize_truncates_timestamps() {
+        let entry = MetaAddr {
+            services: PeerServices::default(),
+            addr: "127.0.0.1:8233".parse().unwrap(),
+            last_seen: Utc.timestamp(1573680222, 0),
+        }
+        .sanitize();
+        // We want the sanitized timestamp to be a multiple of the truncation interval.
+        assert_eq!(
+            entry.last_seen.timestamp() % crate::constants::TIMESTAMP_TRUNCATION_SECONDS,
+            0
+        );
     }
 }
