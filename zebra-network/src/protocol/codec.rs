@@ -258,7 +258,7 @@ impl Codec {
                 writer.write_u32::<LittleEndian>(version.0)?;
                 transaction.zcash_serialize(&mut writer)?
             }
-            // Mempool => {}
+            Mempool => { /* Empty payload -- no-op */ }
             // FilterLoad => {}
             // FilterAdd => {}
             // FilterClear => {}
@@ -557,7 +557,7 @@ impl Codec {
     }
 
     fn read_mempool<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
-        return Err(Error::Parse("mempool messages are not implemented"));
+        Ok(Message::Mempool)
     }
 
     fn read_filterload<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
