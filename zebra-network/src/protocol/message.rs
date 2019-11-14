@@ -272,7 +272,7 @@ pub enum Message {
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#mempool)
     /// [BIP35]: https://github.com/bitcoin/bips/blob/master/bip-0035.mediawiki
-    Mempool {/* XXX add fields */},
+    Mempool,
 
     /// A `filterload` message.
     ///
