@@ -88,13 +88,21 @@ pub struct TransactionOutput {
 // transaction format: https://zips.z.cash/protocol/protocol.pdf
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Transaction {
+    ///  Must not be set before Overwinter has activated.
+    pub overwintered: bool,
+
     /// Transaction data format version (note, this is signed).
     pub version: i32,
 
-    /// A list of 1 or more transaction inputs or sources for coins.
+    /// Version group ID (nonzero).
+    pub version_group_id: u32,
+
+    /// A list of 1 or more transparent transaction inputs or sources
+    /// for coins.
     pub tx_in: Vec<TransactionInput>,
 
-    /// A list of 1 or more transaction outputs or destinations for coins.
+    /// A list of 1 or more transparent transaction outputs or
+    /// destinations for coins.
     pub tx_out: Vec<TransactionOutput>,
 
     /// The block number or timestamp at which this transaction is unlocked:
@@ -109,6 +117,10 @@ pub struct Transaction {
     /// numbers, then lock_time is irrelevant. Otherwise, the
     /// transaction may not be added to a block until after `lock_time`.
     pub lock_time: u32,
+
+    /// A block height in the range {1 .. 499999999} after which the
+    /// transaction will expire, or 0 to disable expiry ([ZIP-203]).
+    pub expiry_height: u32,
 }
 
 impl ZcashSerialize for Transaction {
