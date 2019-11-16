@@ -10,12 +10,14 @@ use tokio::{
     timer::{delay_for, Delay},
 };
 use tower::Service;
-use zebra_chain::serialization::SerializationError;
+
+use zebra_chain::{serialization::SerializationError, transaction::TransactionHash};
 
 use crate::{
     constants,
     protocol::{
         internal::{Request, Response},
+        inv::InventoryHash,
         message::Message,
     },
     BoxedStdError,
@@ -224,6 +226,12 @@ where
                 .await
                 .map_err(|e| e.into())
                 .map(|()| AwaitingResponse(Ping(nonce), tx)),
+            (AwaitingRequest, GetMempool) => self
+                .peer_tx
+                .send(Message::Mempool)
+                .await
+                .map_err(|e| e.into())
+                .map(|()| AwaitingResponse(GetMempool, tx)),
             // XXX timeout handling here?
         } {
             Ok(new_state) => {
@@ -305,6 +313,7 @@ where
         let req = match msg {
             Message::Addr(addrs) => Some(Request::PushPeers(addrs)),
             Message::GetAddr => Some(Request::GetPeers),
+            Message::Mempool => Some(Request::GetMempool),
             _ => {
                 debug!("unhandled message type");
                 None
@@ -348,6 +357,16 @@ where
             Response::Ok => { /* generic success, do nothing */ }
             Response::Peers(addrs) => {
                 if let Err(e) = self.peer_tx.send(Message::Addr(addrs)).await {
+                    self.fail_with(e.into());
+                }
+            }
+            Response::Transactions(txs) => {
+                let hashes = txs
+                    .into_iter()
+                    .map(|tx| InventoryHash::Tx(TransactionHash::from(tx)))
+                    .collect::<Vec<_>>();
+
+                if let Err(e) = self.peer_tx.send(Message::Inv(hashes)).await {
                     self.fail_with(e.into());
                 }
             }
