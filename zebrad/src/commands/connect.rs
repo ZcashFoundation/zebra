@@ -54,7 +54,7 @@ impl ConnectCmd {
         // Connect only to the specified peer.
         config.initial_mainnet_peers = vec![self.addr.to_string()];
 
-        let (mut peer_set, address_book) = zebra_network::init(config, node).await;
+        let (mut peer_set, _address_book) = zebra_network::init(config, node).await;
 
         info!("waiting for peer_set ready");
         peer_set.ready().await.map_err(Error::from_boxed_compat)?;

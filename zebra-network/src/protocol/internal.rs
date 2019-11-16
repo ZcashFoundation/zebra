@@ -4,6 +4,8 @@
 //! responses, so that we have unified types to pass around. No serialization
 //! is performed as these are only internal types.
 
+use zebra_chain::transaction::Transaction;
+
 use crate::meta_addr::MetaAddr;
 
 use super::types::Nonce;
@@ -20,6 +22,9 @@ pub enum Request {
     // internally for connection management. You should not expect to
     // be firing or handling `Ping` requests or `Pong` responses.
     Ping(Nonce),
+    /// Requests the transactions the remote server has verified but
+    /// not yet confirmed.
+    GetMempool,
 }
 
 /// A response to a network request, represented in internal format.
@@ -29,4 +34,6 @@ pub enum Response {
     Ok,
     /// A list of peers, used to respond to `GetPeers`.
     Peers(Vec<MetaAddr>),
+    /// A list of transactions, such as in response to `GetMempool`.
+    Transactions(Vec<Transaction>),
 }
