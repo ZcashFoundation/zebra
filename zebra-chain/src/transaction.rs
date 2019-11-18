@@ -38,10 +38,9 @@ pub struct OutPoint {
     pub index: u32,
 }
 
-/// Transaction Input
-// `Copy` cannot be implemented for `Vec<u8>`
+/// A transparent input to a transaction.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct TransactionInput {
+pub struct TransparentInput {
     /// The previous output transaction reference.
     pub previous_output: OutPoint,
 
@@ -54,7 +53,7 @@ pub struct TransactionInput {
     pub sequence: u32,
 }
 
-/// Transaction Output
+/// A transparent output from a transaction.
 ///
 /// The most fundamental building block of a transaction is a
 /// transaction output -- the ZEC you own in your "wallet" is in
@@ -66,9 +65,8 @@ pub struct TransactionInput {
 /// I only own one UTXO worth 2 ZEC, I would construct a transaction
 /// that spends my UTXO and sends 1 ZEC to you and 1 ZEC back to me
 /// (just like receiving change).
-// `Copy` cannot be implemented for `Vec<u8>`
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct TransactionOutput {
+pub struct TransparentOutput {
     /// Transaction value.
     // At https://en.bitcoin.it/wiki/Protocol_documentation#tx, this is an i64.
     pub value: u64,
@@ -100,11 +98,11 @@ pub struct Transaction {
 
     /// A list of 1 or more transparent transaction inputs or sources
     /// for coins.
-    pub tx_in: Vec<TransactionInput>,
+    pub tx_in: Vec<TransparentInput>,
 
     /// A list of 1 or more transparent transaction outputs or
     /// destinations for coins.
-    pub tx_out: Vec<TransactionOutput>,
+    pub tx_out: Vec<TransparentOutput>,
 
     /// The block number or timestamp at which this transaction is unlocked:
     ///
