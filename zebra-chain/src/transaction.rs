@@ -5,7 +5,7 @@ use std::io;
 use crate::{
     serialization::{SerializationError, ZcashDeserialize, ZcashSerialize},
     sha256d_writer::Sha256dWriter,
-    types::Script,
+    types::{LockTime, Script},
 };
 
 /// A hash of a `Transaction`
@@ -104,18 +104,12 @@ pub struct Transaction {
     /// destinations for coins.
     pub tx_out: Vec<TransparentOutput>,
 
-    /// The block number or timestamp at which this transaction is unlocked:
-    ///
-    /// |Value       |Description                                         |
-    /// |------------|----------------------------------------------------|
-    /// |0           |Not locked (default)                                |
-    /// |< 500000000 |Block number at which this transaction is unlocked  |
-    /// |>= 500000000|UNIX timestamp at which this transaction is unlocked|
+    /// The block number or timestamp at which this transaction is unlocked.
     ///
     /// If all `TransactionInput`s have final (0xffffffff) sequence
     /// numbers, then lock_time is irrelevant. Otherwise, the
     /// transaction may not be added to a block until after `lock_time`.
-    pub lock_time: u32,
+    pub lock_time: LockTime,
 
     /// A block height in the range {1 .. 499999999} after which the
     /// transaction will expire, or 0 to disable expiry ([ZIP-203]).
