@@ -30,6 +30,10 @@ impl fmt::Debug for Sha256dChecksum {
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct BlockHeight(pub u32);
 
+/// An encoding of a Bitcoin script.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Script(pub Vec<u8>);
+
 #[cfg(test)]
 mod tests {
     use super::*;

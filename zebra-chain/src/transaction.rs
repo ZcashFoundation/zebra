@@ -2,8 +2,11 @@
 
 use std::io;
 
-use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
-use crate::sha256d_writer::Sha256dWriter;
+use crate::{
+    serialization::{SerializationError, ZcashDeserialize, ZcashSerialize},
+    sha256d_writer::Sha256dWriter,
+    types::Script,
+};
 
 /// A hash of a `Transaction`
 ///
@@ -43,9 +46,7 @@ pub struct TransactionInput {
     pub previous_output: OutPoint,
 
     /// Computational Script for confirming transaction authorization.
-    // XXX pzec uses their own `Bytes` type that wraps a `Vec<u8>`
-    // with some extra methods.
-    pub signature_script: Vec<u8>,
+    pub signature_script: Script,
 
     /// Transaction version as defined by the sender. Intended for
     /// "replacement" of transactions when information is updated
@@ -74,7 +75,7 @@ pub struct TransactionOutput {
 
     /// Usually contains the public key as a Bitcoin script setting up
     /// conditions to claim this output.
-    pub pk_script: Vec<u8>,
+    pub pk_script: Script,
 }
 
 /// Transaction
