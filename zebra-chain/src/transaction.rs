@@ -124,7 +124,7 @@ pub struct LegacyJoinSplitData {
 /// Post-Sapling JoinSplit data using Sprout-on-Groth16 proofs.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SaplingJoinSplitData {
-    /// A sequence of JoinSplit descriptions using BCTV14 proofs.
+    /// A sequence of JoinSplit descriptions using Groth16 proofs.
     pub joinsplits: Vec<JoinSplitGroth16>,
     /// The public key for the JoinSplit signature.
     // XXX refine to a Zcash-flavored Ed25519 pubkey.
