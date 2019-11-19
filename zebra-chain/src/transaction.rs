@@ -5,7 +5,7 @@ use std::io;
 use crate::{
     serialization::{SerializationError, ZcashDeserialize, ZcashSerialize},
     sha256d_writer::Sha256dWriter,
-    types::{LockTime, Script},
+    types::{BlockHeight, LockTime, Script},
 };
 
 /// A hash of a `Transaction`
@@ -76,44 +76,133 @@ pub struct TransparentOutput {
     pub pk_script: Script,
 }
 
-/// Transaction
-///
-/// A transaction is an encoded data structure that facilitates the
-/// transfer of value between two public key addresses on the Zcash
-/// ecosystem. Everything is designed to ensure that transactions can
-/// created, propagated on the network, validated, and finally added
-/// to the global ledger of transactions (the blockchain).
-// This is not up to date with the data included in the Zcash
-// transaction format: https://zips.z.cash/protocol/protocol.pdf
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Transaction {
-    ///  Must not be set before Overwinter has activated.
-    pub overwintered: bool,
+/// unimplemented.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SpendDescription {}
+/// unimplemented.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OutputDescription {}
 
-    /// Transaction data format version (note, this is signed).
-    pub version: i32,
-
-    /// Version group ID (nonzero).
-    pub version_group_id: u32,
-
-    /// A list of 1 or more transparent transaction inputs or sources
-    /// for coins.
-    pub tx_in: Vec<TransparentInput>,
-
-    /// A list of 1 or more transparent transaction outputs or
-    /// destinations for coins.
-    pub tx_out: Vec<TransparentOutput>,
-
-    /// The block number or timestamp at which this transaction is unlocked.
+/// Sapling-on-Groth16 spend and output descriptions.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ShieldedData {
+    /// A sequence of spend descriptions for this transaction.
     ///
-    /// If all `TransactionInput`s have final (0xffffffff) sequence
-    /// numbers, then lock_time is irrelevant. Otherwise, the
-    /// transaction may not be added to a block until after `lock_time`.
-    pub lock_time: LockTime,
+    /// https://zips.z.cash/protocol/protocol.pdf#spendencoding
+    pub shielded_spends: Vec<SpendDescription>,
+    /// A sequence of shielded outputs for this transaction.
+    ///
+    /// https://zips.z.cash/protocol/protocol.pdf#outputencoding
+    pub shielded_outputs: Vec<OutputDescription>,
+    /// A signature on the transaction hash.
+    // XXX refine this type to a RedJubjub signature.
+    // for now it's [u64; 8] rather than [u8; 64] to get trait impls
+    pub binding_sig: [u64; 8],
+}
 
-    /// A block height in the range {1 .. 499999999} after which the
-    /// transaction will expire, or 0 to disable expiry ([ZIP-203]).
-    pub expiry_height: u32,
+/// unimplemented.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct JoinSplitBctv14 {}
+/// unimplemented.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct JoinSplitGroth16 {}
+
+/// Pre-Sapling JoinSplit data using Sprout-on-BCTV14 proofs.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LegacyJoinSplitData {
+    /// A sequence of JoinSplit descriptions using BCTV14 proofs.
+    pub joinsplits: Vec<JoinSplitBctv14>,
+    /// The public key for the JoinSplit signature.
+    // XXX refine to a Zcash-flavored Ed25519 pubkey.
+    pub pub_key: [u8; 32],
+    /// The JoinSplit signature.
+    // XXX refine to a Zcash-flavored Ed25519 signature.
+    // for now it's [u64; 8] rather than [u8; 64] to get trait impls
+    pub sig: [u64; 8],
+}
+
+/// Post-Sapling JoinSplit data using Sprout-on-Groth16 proofs.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SaplingJoinSplitData {
+    /// A sequence of JoinSplit descriptions using BCTV14 proofs.
+    pub joinsplits: Vec<JoinSplitGroth16>,
+    /// The public key for the JoinSplit signature.
+    // XXX refine to a Zcash-flavored Ed25519 pubkey.
+    pub pub_key: [u8; 32],
+    /// The JoinSplit signature.
+    // XXX refine to a Zcash-flavored Ed25519 signature.
+    // for now it's [u64; 8] rather than [u8; 64] to get trait impls
+    pub sig: [u64; 8],
+}
+
+/// A Zcash transaction.
+///
+/// A transaction is an encoded data structure that facilitates the transfer of
+/// value between two public key addresses on the Zcash ecosystem. Everything is
+/// designed to ensure that transactions can created, propagated on the network,
+/// validated, and finally added to the global ledger of transactions (the
+/// blockchain).
+///
+/// Zcash has a number of different transaction formats. They are represented
+/// internally by different enum variants. Because we checkpoint on Sapling
+/// activation, we do not parse any pre-Sapling transaction types.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Transaction {
+    /// A fully transparent transaction (`version = 1`).
+    Transparent {
+        /// The transparent inputs to the transaction.
+        inputs: Vec<TransparentInput>,
+        /// The transparent outputs from the transaction.
+        outputs: Vec<TransparentOutput>,
+        /// The earliest time or block height that this transaction can be added to the
+        /// chain.
+        lock_time: LockTime,
+    },
+    /// A Sprout transaction (`version = 2`).
+    Sprout {
+        /// The transparent inputs to the transaction.
+        inputs: Vec<TransparentInput>,
+        /// The transparent outputs from the transaction.
+        outputs: Vec<TransparentOutput>,
+        /// The earliest time or block height that this transaction can be added to the
+        /// chain.
+        lock_time: LockTime,
+        /// The JoinSplit data for this transaction, if any.
+        joinsplit_data: Option<LegacyJoinSplitData>,
+    },
+    /// An Overwinter transaction (`version = 3`).
+    Overwinter {
+        /// The transparent inputs to the transaction.
+        inputs: Vec<TransparentInput>,
+        /// The transparent outputs from the transaction.
+        outputs: Vec<TransparentOutput>,
+        /// The earliest time or block height that this transaction can be added to the
+        /// chain.
+        lock_time: LockTime,
+        /// The latest block height that this transaction can be added to the chain.
+        expiry_height: BlockHeight,
+        /// The JoinSplit data for this transaction, if any.
+        joinsplit_data: Option<LegacyJoinSplitData>,
+    },
+    /// A Sapling transaction (`version = 4`).
+    Sapling {
+        /// The transparent inputs to the transaction.
+        inputs: Vec<TransparentInput>,
+        /// The transparent outputs from the transaction.
+        outputs: Vec<TransparentOutput>,
+        /// The earliest time or block height that this transaction can be added to the
+        /// chain.
+        lock_time: LockTime,
+        /// The latest block height that this transaction can be added to the chain.
+        expiry_height: BlockHeight,
+        /// The net value of Sapling spend transfers minus output transfers.
+        // XXX refine this to an Amount type.
+        value_balance: i64,
+        /// The shielded data for this transaction, if any.
+        shielded_data: Option<ShieldedData>,
+        /// The JoinSplit data for this transaction, if any.
+        joinsplit_data: Option<SaplingJoinSplitData>,
+    },
 }
 
 impl ZcashSerialize for Transaction {
