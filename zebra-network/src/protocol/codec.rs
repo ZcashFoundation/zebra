@@ -19,7 +19,11 @@ use zebra_chain::{
 
 use crate::{constants, types::Network};
 
-use super::{inv::InventoryHash, message::{Message, RejectReason}, types::*};
+use super::{
+    inv::InventoryHash,
+    message::{Message, RejectReason},
+    types::*,
+};
 
 /// The length of a Bitcoin message header.
 const HEADER_LEN: usize = 24usize;
@@ -264,7 +268,7 @@ impl Codec {
             Tx {
                 ref version,
                 ref transaction,
-           } => {
+            } => {
                 writer.write_u32::<LittleEndian>(version.0)?;
                 transaction.zcash_serialize(&mut writer)?
             }
@@ -468,10 +472,10 @@ impl Codec {
                 0x41 => RejectReason::Dust,
                 0x42 => RejectReason::InsufficientFee,
                 0x43 => RejectReason::Checkpoint,
-                _    => return Err(Error::Parse("invalid RejectReason value in ccode field")),
+                _ => return Err(Error::Parse("invalid RejectReason value in ccode field")),
             },
             reason: reader.read_string()?,
-            data: Some(reader.read_32_bytes()?)
+            data: Some(reader.read_32_bytes()?),
         })
     }
 
