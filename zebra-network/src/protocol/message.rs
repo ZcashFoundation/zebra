@@ -105,8 +105,9 @@ pub enum Message {
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#reject)
     Reject {
         /// Type of message rejected.
-        // Q: can we just reference the Type, rather than instantiate an instance of the enum type?
-        message: Box<Message>,
+        // It's unclear if this is strictly limited to message command
+        // codes, so leaving it a String.
+        message: String,
 
         /// RejectReason code relating to rejected message.
         ccode: RejectReason,
