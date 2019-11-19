@@ -19,7 +19,7 @@ use zebra_chain::{
 
 use crate::{constants, types::Network};
 
-use super::{inv::InventoryHash, message::Message, types::*};
+use super::{inv::InventoryHash, message::{Message, RejectReason}, types::*};
 
 /// The length of a Bitcoin message header.
 const HEADER_LEN: usize = 24usize;
@@ -188,7 +188,17 @@ impl Codec {
             Pong(nonce) => {
                 writer.write_u64::<LittleEndian>(nonce.0)?;
             }
-            // Reject {} => {}
+            Reject {
+                ref message,
+                ref ccode,
+                ref reason,
+                ref data,
+            } => {
+                writer.write_string(&message)?;
+                writer.write_u8(*ccode as u8)?;
+                writer.write_string(&reason)?;
+                writer.write_all(&data.unwrap())?;
+            }
             Addr(ref addrs) => {
                 writer.write_compactsize(addrs.len() as u64)?;
                 for addr in addrs {
@@ -254,7 +264,7 @@ impl Codec {
             Tx {
                 ref version,
                 ref transaction,
-            } => {
+           } => {
                 writer.write_u32::<LittleEndian>(version.0)?;
                 transaction.zcash_serialize(&mut writer)?
             }
@@ -446,8 +456,23 @@ impl Codec {
         Ok(Message::Pong(Nonce(reader.read_u64::<LittleEndian>()?)))
     }
 
-    fn read_reject<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
-        return Err(Error::Parse("reject messages are not implemented"));
+    fn read_reject<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
+        Ok(Message::Reject {
+            message: reader.read_string()?,
+            ccode: match reader.read_u8()? {
+                0x01 => RejectReason::Malformed,
+                0x10 => RejectReason::Invalid,
+                0x11 => RejectReason::Obsolete,
+                0x12 => RejectReason::Duplicate,
+                0x40 => RejectReason::Nonstandard,
+                0x41 => RejectReason::Dust,
+                0x42 => RejectReason::InsufficientFee,
+                0x43 => RejectReason::Checkpoint,
+                _    => return Err(Error::Parse("invalid RejectReason value in ccode field")),
+            },
+            reason: reader.read_string()?,
+            data: Some(reader.read_32_bytes()?)
+        })
     }
 
     fn read_addr<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
