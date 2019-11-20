@@ -173,13 +173,23 @@ pub trait ReadZcashExt: io::Read {
     /// );
     /// ```
     #[inline]
-    fn read_compactsize(&mut self) -> io::Result<u64> {
+    fn read_compactsize(&mut self) -> Result<u64, SerializationError> {
+        use SerializationError::Parse;
         let flag_byte = self.read_u8()?;
         match flag_byte {
-            0xff => self.read_u64::<LittleEndian>(),
-            0xfe => Ok(self.read_u32::<LittleEndian>()? as u64),
-            0xfd => Ok(self.read_u16::<LittleEndian>()? as u64),
-            n => Ok(n as u64),
+            n @ 0x00..=0xfc => Ok(n as u64),
+            0xfd => match self.read_u16::<LittleEndian>()? {
+                n @ 0x0000_00fd..=0x0000_ffff => Ok(n as u64),
+                _ => Err(Parse("non-canonical compactsize")),
+            },
+            0xfe => match self.read_u32::<LittleEndian>()? {
+                n @ 0x0001_0000..=0xffff_ffff => Ok(n as u64),
+                _ => Err(Parse("non-canonical compactsize")),
+            },
+            0xff => match self.read_u64::<LittleEndian>()? {
+                n @ 0x1_0000_0000..=0xffff_ffff_ffff_ffff => Ok(n),
+                _ => Err(Parse("non-canonical compactsize")),
+            },
         }
     }
 
@@ -208,11 +218,11 @@ pub trait ReadZcashExt: io::Read {
 
     /// Read a Bitcoin-encoded UTF-8 string.
     #[inline]
-    fn read_string(&mut self) -> io::Result<String> {
+    fn read_string(&mut self) -> Result<String, SerializationError> {
         let len = self.read_compactsize()?;
         let mut buf = vec![0; len as usize];
         self.read_exact(&mut buf)?;
-        String::from_utf8(buf).map_err(|_| io::ErrorKind::InvalidData.into())
+        String::from_utf8(buf).map_err(|_| SerializationError::Parse("invalid utf-8"))
     }
 
     /// Convenience method to read a `[u8; 4]`.
@@ -296,16 +306,18 @@ mod tests {
 
         #[test]
         fn compactsize_read_then_write_round_trip(bytes in prop::array::uniform9(0u8..)) {
-            let s = Cursor::new(&bytes[..]).read_compactsize().unwrap();
-            // The compactsize encoding is variable-length, so we may not even
-            // read all of the input bytes, and therefore we can't expect that
-            // the encoding will reproduce bytes that were never read. Instead,
-            // copy the input bytes, and overwrite them with the encoding of s,
-            // so that if the encoding is different, we'll catch it on the part
-            // that's written.
-            let mut expect_bytes = bytes.clone();
-            Cursor::new(&mut expect_bytes[..]).write_compactsize(s).unwrap();
-            prop_assert_eq!(bytes, expect_bytes);
+            // Only do the test if the bytes were valid.
+            if let Ok(s) = Cursor::new(&bytes[..]).read_compactsize() {
+                // The compactsize encoding is variable-length, so we may not even
+                // read all of the input bytes, and therefore we can't expect that
+                // the encoding will reproduce bytes that were never read. Instead,
+                // copy the input bytes, and overwrite them with the encoding of s,
+                // so that if the encoding is different, we'll catch it on the part
+                // that's written.
+                let mut expect_bytes = bytes.clone();
+                Cursor::new(&mut expect_bytes[..]).write_compactsize(s).unwrap();
+                prop_assert_eq!(bytes, expect_bytes);
+            }
         }
     }
 }
