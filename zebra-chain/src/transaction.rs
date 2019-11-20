@@ -150,7 +150,7 @@ pub struct SaplingJoinSplitData {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Transaction {
     /// A fully transparent transaction (`version = 1`).
-    Transparent {
+    V1 {
         /// The transparent inputs to the transaction.
         inputs: Vec<TransparentInput>,
         /// The transparent outputs from the transaction.
@@ -160,7 +160,7 @@ pub enum Transaction {
         lock_time: LockTime,
     },
     /// A Sprout transaction (`version = 2`).
-    Sprout {
+    V2 {
         /// The transparent inputs to the transaction.
         inputs: Vec<TransparentInput>,
         /// The transparent outputs from the transaction.
@@ -172,7 +172,7 @@ pub enum Transaction {
         joinsplit_data: Option<LegacyJoinSplitData>,
     },
     /// An Overwinter transaction (`version = 3`).
-    Overwinter {
+    V3 {
         /// The transparent inputs to the transaction.
         inputs: Vec<TransparentInput>,
         /// The transparent outputs from the transaction.
@@ -186,7 +186,7 @@ pub enum Transaction {
         joinsplit_data: Option<LegacyJoinSplitData>,
     },
     /// A Sapling transaction (`version = 4`).
-    Sapling {
+    V4 {
         /// The transparent inputs to the transaction.
         inputs: Vec<TransparentInput>,
         /// The transparent outputs from the transaction.
