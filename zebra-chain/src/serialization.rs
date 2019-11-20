@@ -273,3 +273,25 @@ pub trait ReadZcashExt: io::Read {
 
 /// Mark all types implementing `Read` as implementing the extension.
 impl<R: io::Read + ?Sized> ReadZcashExt for R {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    use std::io::Cursor;
+
+    proptest! {
+        // The test below is cheap so we can run it a lot.
+        #![proptest_config(ProptestConfig::with_cases(100_000))]
+
+        #[test]
+        fn compactsize_round_trip(s in 0u64..0x2_0000u64) {
+            // Maximum encoding size of a compactsize is 9 bytes.
+            let mut buf = [0u8; 8+1];
+            Cursor::new(&mut buf[..]).write_compactsize(s).unwrap();
+            let expect_s = Cursor::new(&buf[..]).read_compactsize().unwrap();
+            prop_assert_eq!(s, expect_s);
+        }
+    }
+}
