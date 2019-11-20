@@ -69,6 +69,7 @@ pub struct TransparentInput {
 pub struct TransparentOutput {
     /// Transaction value.
     // At https://en.bitcoin.it/wiki/Protocol_documentation#tx, this is an i64.
+    // XXX refine to Amount ?
     pub value: u64,
 
     /// Usually contains the public key as a Bitcoin script setting up
