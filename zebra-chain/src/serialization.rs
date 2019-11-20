@@ -90,7 +90,7 @@ pub trait WriteZcashExt: io::Write {
     fn write_compactsize(&mut self, n: u64) -> io::Result<()> {
         match n {
             0x0000_0000..=0x0000_00fc => self.write_u8(n as u8),
-            0x0000_00fd..=0x0001_0000 => {
+            0x0000_00fd..=0x0000_ffff => {
                 self.write_u8(0xfd)?;
                 self.write_u16::<LittleEndian>(n as u16)
             }
