@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc ddefa5145f08994fb873af028344fc03d656dcd1f9287fac71dfa98cbd6a5090 # shrinks to s = 65536
+cc c04b21f87727bdd1fd9eb7a1616104fd65fa617f507bb6e8163be6542ff2ed68 # shrinks to bytes = [253, 0, 0, 0, 0, 0, 0, 0, 0]
