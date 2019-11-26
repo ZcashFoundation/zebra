@@ -4,6 +4,8 @@
 //! responses, so that we have unified types to pass around. No serialization
 //! is performed as these are only internal types.
 
+use std::error::Error;
+
 use zebra_chain::transaction::Transaction;
 
 use crate::meta_addr::MetaAddr;
@@ -32,8 +34,19 @@ pub enum Request {
 pub enum Response {
     /// Generic success.
     Ok,
+    /// Generic error.
+    Error,
     /// A list of peers, used to respond to `GetPeers`.
     Peers(Vec<MetaAddr>),
     /// A list of transactions, such as in response to `GetMempool`.
     Transactions(Vec<Transaction>),
+}
+
+impl<E> From<E> for Response
+where
+    E: Error,
+{
+    fn from(e: E) -> Self {
+        Self::Error
+    }
 }
