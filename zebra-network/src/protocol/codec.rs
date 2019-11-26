@@ -472,6 +472,7 @@ impl Codec {
                 0x41 => RejectReason::Dust,
                 0x42 => RejectReason::InsufficientFee,
                 0x43 => RejectReason::Checkpoint,
+                0x50 => RejectReason::Other,
                 _ => return Err(Error::Parse("invalid RejectReason value in ccode field")),
             },
             reason: reader.read_string()?,
