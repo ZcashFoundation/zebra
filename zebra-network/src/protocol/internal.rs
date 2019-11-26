@@ -46,7 +46,7 @@ impl<E> From<E> for Response
 where
     E: Error,
 {
-    fn from(e: E) -> Self {
+    fn from(_e: E) -> Self {
         Self::Error
     }
 }
