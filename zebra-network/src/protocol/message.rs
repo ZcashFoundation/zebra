@@ -1,5 +1,6 @@
 //! Definitions of network messages.
 
+use std::error::Error;
 use std::net;
 
 use chrono::{DateTime, Utc};
@@ -7,10 +8,9 @@ use chrono::{DateTime, Utc};
 use zebra_chain::block::{Block, BlockHeader, BlockHeaderHash};
 use zebra_chain::{transaction::Transaction, types::BlockHeight};
 
-use crate::meta_addr::MetaAddr;
-
 use super::inv::InventoryHash;
 use super::types::*;
+use crate::meta_addr::MetaAddr;
 
 /// A Bitcoin-like network message for the Zcash protocol.
 ///
@@ -308,6 +308,26 @@ pub enum Message {
     MerkleBlock {/* XXX add fields */},
 }
 
+impl<E> From<E> for Message
+where
+    E: Error,
+{
+    fn from(e: E) -> Self {
+        Message::Reject {
+            message: e.to_string(),
+
+            // The generic case, impls for specific error types should
+            // use specific varieties of `RejectReason`.
+            ccode: RejectReason::Other,
+
+            reason: e.source().unwrap().to_string(),
+
+            // Allow this to be overriden but not populated by default, methinks.
+            data: None,
+        }
+    }
+}
+
 /// Reject Reason CCodes
 ///
 /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#reject)
@@ -323,4 +343,5 @@ pub enum RejectReason {
     Dust = 0x41,
     InsufficientFee = 0x42,
     Checkpoint = 0x43,
+    Other = 0x50,
 }
