@@ -1,3 +1,4 @@
+use std::error::Error;
 use std::sync::Arc;
 
 use futures::{
@@ -274,6 +275,24 @@ where
                 if req_nonce != res_nonce {
                     self.fail_with(PeerError::HeartbeatNonceMismatch);
                 }
+                AwaitingRequest
+            }
+            (
+                AwaitingResponse(_, tx),
+                Message::Reject {
+                    message,
+                    ccode,
+                    reason,
+                    data,
+                },
+            ) => {
+                tx.send(Err(SharedPeerError::from(Arc::new(PeerError::Rejected))))
+                    .expect("response oneshot should be unused");
+
+                error!(
+                    "{:?} message rejected: {:?}, {:?}, {:?}",
+                    message, ccode, reason, data
+                );
                 AwaitingRequest
             }
             // By default, messages are not responses.
