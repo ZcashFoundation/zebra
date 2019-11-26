@@ -40,6 +40,14 @@ pub enum PeerError {
     /// to shed load.
     #[error("Internal services over capacity")]
     Overloaded,
+    /// We got a `Reject` message. This does not necessarily mean that
+    /// the peer connection is in a bad state, but for the time being
+    /// we are considering it a PeerError.
+    // TODO: Create a different error type (more at the application
+    // level than network/connection level) that will include the
+    // appropriate error when a `Reject` message is received.
+    #[error("Received a Reject message")]
+    Rejected,
 }
 
 #[derive(Default, Clone)]
