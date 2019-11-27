@@ -21,7 +21,7 @@ pub struct Client {
     pub(super) error_slot: ErrorSlot,
 }
 
-/// A message from the `peer::Client` to the `PeerServer`, containing both a
+/// A message from the `peer::Client` to the `peer::Server`, containing both a
 /// request and a return message channel. The reason the return channel is
 /// included is because `peer::Client::call` returns a future that may be moved
 /// around before it resolves, so the future must have ownership of the channel
@@ -43,7 +43,7 @@ impl Service<Request> for Client {
             Poll::Ready(Err(self
                 .error_slot
                 .try_get_error()
-                .expect("failed PeerServers must set their error slot")))
+                .expect("failed servers must set their error slot")))
         } else {
             Poll::Ready(Ok(()))
         }
@@ -60,7 +60,7 @@ impl Service<Request> for Client {
                     future::ready(Err(self
                         .error_slot
                         .try_get_error()
-                        .expect("failed PeerServers must set their error slot")))
+                        .expect("failed servers must set their error slot")))
                     .instrument(self.span.clone())
                     .boxed()
                 } else {
