@@ -11,8 +11,8 @@ mod handshake;
 /// Handles inbound requests from the network to our node.
 mod server;
 
-use error::ErrorSlot;
 use client::ClientRequest;
+use error::ErrorSlot;
 
 pub use client::Client;
 pub use connector::Connector;

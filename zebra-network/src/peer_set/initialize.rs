@@ -25,9 +25,8 @@ use tower::{
 use tower_load::{peak_ewma::PeakEwmaDiscover, NoInstrument};
 
 use crate::{
-    peer,
-    timestamp_collector::TimestampCollector,
-    AddressBook, BoxedStdError, Config, Request, Response,
+    peer, timestamp_collector::TimestampCollector, AddressBook, BoxedStdError, Config, Request,
+    Response,
 };
 
 use super::CandidateSet;
