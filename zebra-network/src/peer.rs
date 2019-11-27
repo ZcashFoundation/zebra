@@ -11,7 +11,7 @@ mod handshake;
 /// Handles inbound requests from the network to our node.
 mod server;
 
-pub use client::PeerClient;
+pub use client::Client;
 pub use connector::PeerConnector;
 pub use error::{HandshakeError, PeerError, SharedPeerError};
 pub use handshake::PeerHandshake;

@@ -9,7 +9,7 @@ use tower::{discover::Change, Service, ServiceExt};
 
 use crate::{BoxedStdError, Request, Response};
 
-use super::{HandshakeError, PeerClient, PeerHandshake};
+use super::{HandshakeError, Client, PeerHandshake};
 
 /// A wrapper around [`PeerHandshake`] that opens a TCP connection before
 /// forwarding to the inner handshake service. Writing this as its own
@@ -37,7 +37,7 @@ where
     S: Service<Request, Response = Response, Error = BoxedStdError> + Clone + Send + 'static,
     S::Future: Send,
 {
-    type Response = Change<SocketAddr, PeerClient>;
+    type Response = Change<SocketAddr, Client>;
     type Error = HandshakeError;
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;

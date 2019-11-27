@@ -27,7 +27,8 @@ use tower::{
 use tower_load::{peak_ewma::PeakEwmaDiscover, NoInstrument};
 
 use crate::{
-    peer::{PeerClient, PeerConnector, PeerHandshake},
+    peer,
+    peer::{PeerConnector, PeerHandshake},
     timestamp_collector::TimestampCollector,
     AddressBook, BoxedStdError, Config, Request, Response,
 };
@@ -35,7 +36,7 @@ use crate::{
 use super::CandidateSet;
 use super::PeerSet;
 
-type PeerChange = Result<Change<SocketAddr, PeerClient>, BoxedStdError>;
+type PeerChange = Result<Change<SocketAddr, peer::Client>, BoxedStdError>;
 
 /// Initialize a peer set with the given `config`, forwarding peer requests to the `inbound_service`.
 pub async fn init<S>(
@@ -150,7 +151,7 @@ async fn add_initial_peers<S>(
     connector: S,
     mut tx: mpsc::Sender<PeerChange>,
 ) where
-    S: Service<SocketAddr, Response = Change<SocketAddr, PeerClient>, Error = BoxedStdError>
+    S: Service<SocketAddr, Response = Change<SocketAddr, peer::Client>, Error = BoxedStdError>
         + Clone,
     S::Future: Send + 'static,
 {
@@ -172,7 +173,7 @@ async fn listen<S>(
     tx: mpsc::Sender<PeerChange>,
 ) -> Result<(), BoxedStdError>
 where
-    S: Service<(TcpStream, SocketAddr), Response = PeerClient, Error = BoxedStdError> + Clone,
+    S: Service<(TcpStream, SocketAddr), Response = peer::Client, Error = BoxedStdError> + Clone,
     S::Future: Send + 'static,
 {
     let mut listener = TcpListener::bind(addr).await?;
@@ -194,7 +195,7 @@ where
 }
 
 /// Given a channel that signals a need for new peers, try to connect to a peer
-/// and send the resulting `PeerClient` through a channel.
+/// and send the resulting `peer::Client` through a channel.
 ///
 #[instrument(skip(new_peer_interval, demand_signal, candidates, connector, success_tx))]
 async fn crawl_and_dial<C, S>(
@@ -205,7 +206,7 @@ async fn crawl_and_dial<C, S>(
     mut success_tx: mpsc::Sender<PeerChange>,
 ) -> Result<(), BoxedStdError>
 where
-    C: Service<SocketAddr, Response = Change<SocketAddr, PeerClient>, Error = BoxedStdError>
+    C: Service<SocketAddr, Response = Change<SocketAddr, peer::Client>, Error = BoxedStdError>
         + Clone,
     C::Future: Send + 'static,
     S: Service<Request, Response = Response, Error = BoxedStdError>,
