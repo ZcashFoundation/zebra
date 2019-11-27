@@ -22,7 +22,7 @@ use crate::{
     BoxedStdError,
 };
 
-use super::{client::ClientRequest, error::ErrorSlot, PeerError, SharedPeerError};
+use super::{ClientRequest, ErrorSlot, PeerError, SharedPeerError};
 
 pub(super) enum State {
     /// Awaiting a client request or a peer message.

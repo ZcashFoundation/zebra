@@ -12,7 +12,7 @@ use tower::Service;
 
 use crate::protocol::internal::{Request, Response};
 
-use super::{error::ErrorSlot, SharedPeerError};
+use super::{ErrorSlot, SharedPeerError};
 
 /// The "client" duplex half of a peer connection.
 pub struct Client {
