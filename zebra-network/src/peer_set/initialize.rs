@@ -26,7 +26,6 @@ use tower_load::{peak_ewma::PeakEwmaDiscover, NoInstrument};
 
 use crate::{
     peer,
-    peer::{PeerConnector},
     timestamp_collector::TimestampCollector,
     AddressBook, BoxedStdError, Config, Request, Response,
 };
@@ -67,7 +66,7 @@ where
         let hs = peer::Handshake::new(config.clone(), inbound_service, timestamp_collector);
         (
             hs_timeout.layer(hs.clone()),
-            hs_timeout.layer(PeerConnector::new(hs)),
+            hs_timeout.layer(peer::Connector::new(hs)),
         )
     };
 
