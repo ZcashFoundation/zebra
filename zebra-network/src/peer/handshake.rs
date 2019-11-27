@@ -25,7 +25,7 @@ use crate::{
     BoxedStdError, Config,
 };
 
-use super::{error::ErrorSlot, HandshakeError, Client, Server};
+use super::{ErrorSlot, HandshakeError, Client, Server};
 
 /// A [`Service`] that handshakes with a remote peer and constructs a
 /// client/server pair.
