@@ -12,7 +12,7 @@ mod handshake;
 mod server;
 
 pub use client::Client;
-pub use connector::PeerConnector;
+pub use connector::Connector;
 pub use error::{HandshakeError, PeerError, SharedPeerError};
 pub use handshake::Handshake;
 pub use server::Server;

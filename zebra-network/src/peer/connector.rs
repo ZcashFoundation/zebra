@@ -14,25 +14,25 @@ use super::{HandshakeError, Client, Handshake};
 /// A wrapper around [`peer::Handshake`] that opens a TCP connection before
 /// forwarding to the inner handshake service. Writing this as its own
 /// [`tower::Service`] lets us apply unified timeout policies, etc.
-pub struct PeerConnector<S> {
+pub struct Connector<S> {
     handshaker: Handshake<S>,
 }
 
-impl<S: Clone> Clone for PeerConnector<S> {
+impl<S: Clone> Clone for Connector<S> {
     fn clone(&self) -> Self {
-        Self {
+        Connector {
             handshaker: self.handshaker.clone(),
         }
     }
 }
 
-impl<S> PeerConnector<S> {
+impl<S> Connector<S> {
     pub fn new(handshaker: Handshake<S>) -> Self {
-        Self { handshaker }
+        Connector { handshaker }
     }
 }
 
-impl<S> Service<SocketAddr> for PeerConnector<S>
+impl<S> Service<SocketAddr> for Connector<S>
 where
     S: Service<Request, Response = Response, Error = BoxedStdError> + Clone + Send + 'static,
     S::Future: Send,
