@@ -16,9 +16,8 @@ use zebra_chain::{serialization::SerializationError, transaction::TransactionHas
 use crate::{
     constants,
     protocol::{
+        external::{InventoryHash, Message},
         internal::{Request, Response},
-        inv::InventoryHash,
-        message::Message,
     },
     BoxedStdError,
 };
