@@ -29,16 +29,16 @@ use super::{error::ErrorSlot, HandshakeError, Client, Server};
 
 /// A [`Service`] that handshakes with a remote peer and constructs a
 /// client/server pair.
-pub struct PeerHandshake<S> {
+pub struct Handshake<S> {
     config: Config,
     internal_service: S,
     timestamp_collector: mpsc::Sender<MetaAddr>,
     nonces: Arc<Mutex<HashSet<Nonce>>>,
 }
 
-impl<S: Clone> Clone for PeerHandshake<S> {
+impl<S: Clone> Clone for Handshake<S> {
     fn clone(&self) -> Self {
-        Self {
+        Handshake {
             config: self.config.clone(),
             internal_service: self.internal_service.clone(),
             timestamp_collector: self.timestamp_collector.clone(),
@@ -47,7 +47,7 @@ impl<S: Clone> Clone for PeerHandshake<S> {
     }
 }
 
-impl<S> PeerHandshake<S>
+impl<S> Handshake<S>
 where
     S: Service<Request, Response = Response, Error = BoxedStdError> + Clone + Send + 'static,
     S::Future: Send,
@@ -63,7 +63,7 @@ where
         // Builder2, ..., with Builder1::with_config() -> Builder2;
         // Builder2::with_internal_service() -> ... or use Options in a single
         // Builder type or use the derive_builder crate.
-        PeerHandshake {
+        Handshake {
             config,
             internal_service,
             timestamp_collector,
@@ -72,7 +72,7 @@ where
     }
 }
 
-impl<S> Service<(TcpStream, SocketAddr)> for PeerHandshake<S>
+impl<S> Service<(TcpStream, SocketAddr)> for Handshake<S>
 where
     S: Service<Request, Response = Response, Error = BoxedStdError> + Clone + Send + 'static,
     S::Future: Send,
