@@ -25,7 +25,7 @@ use crate::{
     BoxedStdError, Config,
 };
 
-use super::{error::ErrorSlot, server::ServerState, HandshakeError, Client, Server};
+use super::{error::ErrorSlot, HandshakeError, Client, Server};
 
 /// A [`Service`] that handshakes with a remote peer and constructs a
 /// client/server pair.
@@ -192,8 +192,9 @@ where
 
             let (peer_tx, peer_rx) = stream.split();
 
+            use super::server;
             let server = Server {
-                state: ServerState::AwaitingRequest,
+                state: server::State::AwaitingRequest,
                 svc: internal_service,
                 client_rx: server_rx,
                 error_slot: slot,
