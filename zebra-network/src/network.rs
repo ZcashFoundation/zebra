@@ -1,4 +1,4 @@
-use crate::{constants::magics, protocol::types::Magic};
+use crate::{constants::magics, protocol::external::types::Magic};
 
 /// An enum describing the possible network choices.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]

@@ -1,14 +1,8 @@
 //! Zcash network protocol handling.
 
-pub mod codec;
-pub mod message;
-pub mod types;
-
-pub mod inv;
-
-// XXX at some later point the above should move to an `external` submodule, so
-// that we have
-// - protocol::external::{all_bitcoin_zcash_types};
-// - protocol::internal::{all_internal_req_rsp_types};
-
+/// The external Bitcoin-based protocol.
+pub mod external;
+/// The internal request/response protocol.
 pub mod internal;
+/// Newtype wrappers giving semantic meaning to primitive datatypes.
+pub mod types;

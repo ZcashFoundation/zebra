@@ -17,7 +17,10 @@ use zebra_chain::types::BlockHeight;
 
 use crate::{
     constants,
-    protocol::{codec::*, internal::*, message::*, types::*},
+    protocol::{
+        external::{types::*, Codec, Message},
+        internal::{Request, Response},
+    },
     types::MetaAddr,
     BoxedStdError, Config,
 };
