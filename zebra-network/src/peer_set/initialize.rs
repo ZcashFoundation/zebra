@@ -3,8 +3,6 @@
 // Portions of this submodule were adapted from tower-balance,
 // which is (c) 2019 Tower Contributors (MIT licensed).
 
-// XXX these imports should go in a peer_set::initialize submodule
-
 use std::{
     net::SocketAddr,
     sync::{Arc, Mutex},
