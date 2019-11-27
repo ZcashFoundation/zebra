@@ -70,7 +70,7 @@ use crate::{types::MetaAddr, AddressBook, BoxedStdError, Request, Response};
 ///           ▼
 ///    ┌────────────┐
 ///    │    send    │
-///    │ PeerClient │
+///    │peer::Client│
 ///    │to Discover │
 ///    └────────────┘
 /// ```

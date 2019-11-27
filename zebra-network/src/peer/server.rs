@@ -42,7 +42,7 @@ pub struct PeerServer<S, Tx> {
     pub(super) request_timer: Option<Delay>,
     pub(super) svc: S,
     pub(super) client_rx: mpsc::Receiver<ClientRequest>,
-    /// A slot shared between the PeerServer and PeerClient for storing an error.
+    /// A slot shared between the client and server for storing an error.
     pub(super) error_slot: ErrorSlot,
     //pub(super) peer_rx: Rx,
     pub(super) peer_tx: Tx,
@@ -65,7 +65,7 @@ where
         // request from the remote peer to our node.
         //
         // We also need to handle those client requests in the first place. The client
-        // requests are received from the corresponding `PeerClient` over a bounded
+        // requests are received from the corresponding `peer::Client` over a bounded
         // channel (with bound 1, to minimize buffering), but there is no relationship
         // between the stream of client requests and the stream of peer messages, so we
         // cannot ignore one kind while waiting on the other. Moreover, we cannot accept
@@ -93,7 +93,7 @@ where
                             self.handle_message_as_request(msg).await
                         }
                         Either::Right((None, _)) => {
-                            self.fail_with(PeerError::DeadPeerClient);
+                            self.fail_with(PeerError::DeadClient);
                         }
                         Either::Right((Some(req), _)) => self.handle_client_request(req).await,
                     }
