@@ -9,13 +9,13 @@ use tower::{discover::Change, Service, ServiceExt};
 
 use crate::{BoxedStdError, Request, Response};
 
-use super::{HandshakeError, Client, PeerHandshake};
+use super::{HandshakeError, Client, Handshake};
 
-/// A wrapper around [`PeerHandshake`] that opens a TCP connection before
+/// A wrapper around [`peer::Handshake`] that opens a TCP connection before
 /// forwarding to the inner handshake service. Writing this as its own
 /// [`tower::Service`] lets us apply unified timeout policies, etc.
 pub struct PeerConnector<S> {
-    handshaker: PeerHandshake<S>,
+    handshaker: Handshake<S>,
 }
 
 impl<S: Clone> Clone for PeerConnector<S> {
@@ -27,7 +27,7 @@ impl<S: Clone> Clone for PeerConnector<S> {
 }
 
 impl<S> PeerConnector<S> {
-    pub fn new(handshaker: PeerHandshake<S>) -> Self {
+    pub fn new(handshaker: Handshake<S>) -> Self {
         Self { handshaker }
     }
 }
