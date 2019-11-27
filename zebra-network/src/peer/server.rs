@@ -34,7 +34,7 @@ pub(super) enum ServerState {
 }
 
 /// The "server" duplex half of a peer connection.
-pub struct PeerServer<S, Tx> {
+pub struct Server<S, Tx> {
     pub(super) state: ServerState,
     /// A timeout for a client request. This is stored separately from
     /// ServerState so that we can move the future out of it independently of
@@ -48,7 +48,7 @@ pub struct PeerServer<S, Tx> {
     pub(super) peer_tx: Tx,
 }
 
-impl<S, Tx> PeerServer<S, Tx>
+impl<S, Tx> Server<S, Tx>
 where
     S: Service<Request, Response = Response, Error = BoxedStdError>,
     S::Error: Into<BoxedStdError>,
