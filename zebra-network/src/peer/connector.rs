@@ -9,7 +9,7 @@ use tower::{discover::Change, Service, ServiceExt};
 
 use crate::{BoxedStdError, Request, Response};
 
-use super::{HandshakeError, Client, Handshake};
+use super::{Client, Handshake, HandshakeError};
 
 /// A wrapper around [`peer::Handshake`] that opens a TCP connection before
 /// forwarding to the inner handshake service. Writing this as its own
