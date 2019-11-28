@@ -10,10 +10,11 @@ mod transparent;
 mod tests;
 
 pub use hash::TransactionHash;
-pub use joinsplit::{JoinSplitBctv14, JoinSplitGroth16, LegacyJoinSplitData, SaplingJoinSplitData};
+pub use joinsplit::{JoinSplit, JoinSplitData, SproutInputNoteData, SproutOutputNoteData};
 pub use shielded_data::{OutputDescription, ShieldedData, SpendDescription};
 pub use transparent::{OutPoint, TransparentInput, TransparentOutput};
 
+use crate::proofs::{Bctv14Proof, Groth16Proof};
 use crate::types::{BlockHeight, LockTime};
 
 /// A Zcash transaction.
@@ -49,7 +50,7 @@ pub enum Transaction {
         /// chain.
         lock_time: LockTime,
         /// The JoinSplit data for this transaction, if any.
-        joinsplit_data: Option<LegacyJoinSplitData>,
+        joinsplit_data: Option<JoinSplitData<Bctv14Proof>>,
     },
     /// An Overwinter transaction (`version = 3`).
     V3 {
@@ -63,7 +64,7 @@ pub enum Transaction {
         /// The latest block height that this transaction can be added to the chain.
         expiry_height: BlockHeight,
         /// The JoinSplit data for this transaction, if any.
-        joinsplit_data: Option<LegacyJoinSplitData>,
+        joinsplit_data: Option<JoinSplitData<Bctv14Proof>>,
     },
     /// A Sapling transaction (`version = 4`).
     V4 {
@@ -82,6 +83,6 @@ pub enum Transaction {
         /// The shielded data for this transaction, if any.
         shielded_data: Option<ShieldedData>,
         /// The JoinSplit data for this transaction, if any.
-        joinsplit_data: Option<SaplingJoinSplitData>,
+        joinsplit_data: Option<JoinSplitData<Groth16Proof>>,
     },
 }
