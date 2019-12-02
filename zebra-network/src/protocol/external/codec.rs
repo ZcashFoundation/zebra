@@ -129,7 +129,6 @@ impl Encoder for Codec {
             FilterLoad { .. } => b"filterload\0\0",
             FilterAdd { .. } => b"filteradd\0\0\0",
             FilterClear { .. } => b"filterclear\0",
-            MerkleBlock { .. } => b"merkleblock\0",
         };
         trace!(?item, len = body.len());
 
@@ -273,11 +272,21 @@ impl Codec {
                 transaction.zcash_serialize(&mut writer)?
             }
             Mempool => { /* Empty payload -- no-op */ }
-            // FilterLoad => {}
-            // FilterAdd => {}
-            // FilterClear => {}
-            // MerkleBlock => {}
-            _ => return Err(Error::Parse("unimplemented message type")),
+            FilterLoad {
+                ref filter,
+                ref hash_functions_count,
+                ref tweak,
+                ref flags,
+            } => {
+                filter.zcash_serialize(&mut writer)?;
+                writer.write_u32::<LittleEndian>(*hash_functions_count)?;
+                writer.write_u32::<LittleEndian>(tweak.0)?;
+                writer.write_u8(*flags)?;
+            }
+            FilterAdd { ref data } => {
+                writer.write_all(data)?;
+            }
+            FilterClear => { /* Empty payload -- no-op */ }
         }
         Ok(())
     }
@@ -408,7 +417,6 @@ impl Decoder for Codec {
                     b"filterload\0\0" => self.read_filterload(body_reader),
                     b"filteradd\0\0\0" => self.read_filteradd(body_reader),
                     b"filterclear\0" => self.read_filterclear(body_reader),
-                    b"merkleblock\0" => self.read_merkleblock(body_reader),
                     _ => return Err(Parse("unknown command")),
                 }
                 // We need Ok(Some(msg)) to signal that we're done decoding.
@@ -590,20 +598,24 @@ impl Codec {
         Ok(Message::Mempool)
     }
 
-    fn read_filterload<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
-        return Err(Error::Parse("filterload messages are not implemented"));
+    fn read_filterload<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
+        Ok(Message::FilterLoad {
+            filter: Filter::zcash_deserialize(&mut reader)?,
+            hash_functions_count: reader.read_u32::<LittleEndian>()?,
+            tweak: Tweak(reader.read_u32::<LittleEndian>()?),
+            flags: reader.read_u8()?,
+        })
     }
 
-    fn read_filteradd<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
-        return Err(Error::Parse("filteradd messages are not implemented"));
+    fn read_filteradd<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
+        let mut bytes = Vec::new();
+        reader.read_to_end(&mut bytes)?;
+
+        Ok(Message::FilterAdd { data: bytes })
     }
 
     fn read_filterclear<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
-        return Err(Error::Parse("filterclear messages are not implemented"));
-    }
-
-    fn read_merkleblock<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
-        return Err(Error::Parse("merkleblock messages are not implemented"));
+        Ok(Message::FilterClear)
     }
 }
 
