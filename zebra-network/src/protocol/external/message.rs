@@ -281,7 +281,22 @@ pub enum Message {
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#filterload.2C_filteradd.2C_filterclear.2C_merkleblock)
     /// [BIP37]: https://github.com/bitcoin/bips/blob/master/bip-0037.mediawiki
-    FilterLoad {/* XXX add fields */},
+    FilterLoad {
+        /// The filter itself is simply a bit field of arbitrary
+        /// byte-aligned size. The maximum size is 36,000 bytes.
+        filter: Filter,
+
+        /// The number of hash functions to use in this filter. The
+        /// maximum value allowed in this field is 50.
+        hash_functions_count: u32,
+
+        /// A random value to add to the seed value in the hash
+        /// function used by the bloom filter.
+        tweak: Tweak,
+
+        /// A set of flags that control how matched items are added to the filter.
+        flags: u8,
+    },
 
     /// A `filteradd` message.
     ///
@@ -289,7 +304,15 @@ pub enum Message {
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#filterload.2C_filteradd.2C_filterclear.2C_merkleblock)
     /// [BIP37]: https://github.com/bitcoin/bips/blob/master/bip-0037.mediawiki
-    FilterAdd {/* XXX add fields */},
+    FilterAdd {
+        /// The data element to add to the current filter.
+        // The data field must be smaller than or equal to 520 bytes
+        // in size (the maximum size of any potentially matched
+        // object).
+        //
+        // A Vec instead of [u8; 520] because of needed traits.
+        data: Vec<u8>,
+    },
 
     /// A `filterclear` message.
     ///
@@ -297,15 +320,7 @@ pub enum Message {
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#filterload.2C_filteradd.2C_filterclear.2C_merkleblock)
     /// [BIP37]: https://github.com/bitcoin/bips/blob/master/bip-0037.mediawiki
-    FilterClear {/* XXX add fields */},
-
-    /// A `merkleblock` message.
-    ///
-    /// This was defined in [BIP37], which is included in Zcash.
-    ///
-    /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#filterload.2C_filteradd.2C_filterclear.2C_merkleblock)
-    /// [BIP37]: https://github.com/bitcoin/bips/blob/master/bip-0037.mediawiki
-    MerkleBlock {/* XXX add fields */},
+    FilterClear,
 }
 
 impl<E> From<E> for Message
