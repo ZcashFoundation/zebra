@@ -1,5 +1,10 @@
 use hex;
-use std::fmt;
+use std::{
+    fmt,
+    io::{Read, Write},
+};
+
+use zebra_chain::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 
 /// A magic number identifying the network.
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -39,6 +44,41 @@ impl Default for Nonce {
     fn default() -> Self {
         use rand::{thread_rng, Rng};
         Self(thread_rng().gen())
+    }
+}
+
+/// A random value to add to the seed value in a hash function.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+pub struct Tweak(pub u32);
+
+impl Default for Tweak {
+    fn default() -> Self {
+        use rand::{thread_rng, Rng};
+        Self(thread_rng().gen())
+    }
+}
+
+/// A Bloom filter consisting of a bit field of arbitrary byte-aligned
+/// size, maximum size is 36,000 bytes.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Filter(pub Vec<u8>);
+
+impl ZcashSerialize for Filter {
+    fn zcash_serialize<W: Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+        writer.write_all(&self.0)?;
+        Ok(())
+    }
+}
+
+impl ZcashDeserialize for Filter {
+    fn zcash_deserialize<R: Read>(reader: R) -> Result<Self, SerializationError> {
+        let mut bytes = Vec::new();
+
+        // Maximum size of a filter is 36,000 bytes.
+        let mut handle = reader.take(36000);
+
+        handle.read(&mut bytes)?;
+        Ok(Self(bytes))
     }
 }
 
