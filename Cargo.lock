@@ -1515,7 +1515,7 @@ dependencies = [
 
 [[package]]
 name = "tracing-futures"
-version = "0.1.1"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "pin-project 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1690,7 +1690,7 @@ dependencies = [
  "tower 0.3.0-alpha.2 (git+https://github.com/tower-rs/tower?branch=v0.3.x)",
  "tower-load 0.3.0-alpha.2 (git+https://github.com/tower-rs/tower?branch=v0.3.x)",
  "tracing 0.1.10 (registry+https://github.com/rust-lang/crates.io-index)",
- "tracing-futures 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "tracing-futures 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "zebra-chain 0.1.0",
 ]
 
@@ -1724,7 +1724,7 @@ dependencies = [
  "tower 0.3.0-alpha.2 (git+https://github.com/tower-rs/tower?branch=v0.3.x)",
  "tower-load 0.3.0-alpha.2 (git+https://github.com/tower-rs/tower?branch=v0.3.x)",
  "tracing 0.1.10 (registry+https://github.com/rust-lang/crates.io-index)",
- "tracing-futures 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "tracing-futures 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "tracing-log 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "tracing-subscriber 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "zebra-chain 0.1.0",
@@ -1902,7 +1902,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum tracing 0.1.10 (registry+https://github.com/rust-lang/crates.io-index)" = "ff4e4f59e752cb3beb5b61c6d5e11191c7946231ba84faec2902c9efdd8691c5"
 "checksum tracing-attributes 0.1.5 (registry+https://github.com/rust-lang/crates.io-index)" = "a4263b12c3d3c403274493eb805966093b53214124796552d674ca1dd5d27c2b"
 "checksum tracing-core 0.1.7 (registry+https://github.com/rust-lang/crates.io-index)" = "bc913647c520c959b6d21e35ed8fa6984971deca9f0a2fcb8c51207e0c56af1d"
-"checksum tracing-futures 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)" = "85a260ae9e7fdf7402955e761af889eb56203284295c0482b1fe33641cb948f0"
+"checksum tracing-futures 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)" = "107ae59580d2a1d994b6b965b16fe94c969fe86d3f7fd2572a1ee243bcaf7f09"
 "checksum tracing-log 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)" = "5e0f8c7178e13481ff6765bd169b33e8d554c5d2bbede5e32c356194be02b9b9"
 "checksum tracing-subscriber 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)" = "192ca16595cdd0661ce319e8eede9c975f227cdaabc4faaefdc256f43d852e45"
 "checksum try-lock 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)" = "e604eb7b43c06650e854be16a2a03155743d3752dd1c943f6829e26b7a36e382"

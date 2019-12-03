@@ -25,7 +25,7 @@ tokio = "=0.2.0-alpha.6"
 futures-preview = "=0.3.0-alpha.19"
 
 tracing = "0.1"
-tracing-futures = { version = "0.1", features = ["tokio-alpha"], default-features = false }
+tracing-futures = { version = "0.2", features = ["tokio-alpha"], default-features = false }
 
 tower = "=0.3.0-alpha.2"
 tower-load = { git = "https://github.com/tower-rs/tower", branch = "v0.3.x"}
