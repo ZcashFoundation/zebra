@@ -31,8 +31,6 @@ bitflags! {
         /// blocks, as opposed to a light client that makes network requests but
         /// does not provide network services.
         const NODE_NETWORK = (1 << 0);
-        /// NODE_BLOOM means that the node supports bloom-filtered connections.
-        const NODE_BLOOM = (1 << 2);
     }
 }
 
