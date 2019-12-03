@@ -607,9 +607,13 @@ impl Codec {
         })
     }
 
-    fn read_filteradd<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
+    fn read_filteradd<R: Read>(&self, reader: R) -> Result<Message, Error> {
         let mut bytes = Vec::new();
-        reader.read_to_end(&mut bytes)?;
+
+        // Maximum size of data is 520 bytes.
+        let mut handle = reader.take(520);
+
+        handle.read(&mut bytes)?;
 
         Ok(Message::FilterAdd { data: bytes })
     }
