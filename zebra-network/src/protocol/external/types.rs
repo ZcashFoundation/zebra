@@ -1,10 +1,5 @@
 use hex;
-use std::{
-    fmt,
-    io::{Read, Write},
-};
-
-use zebra_chain::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
+use std::fmt;
 
 /// A magic number identifying the network.
 #[derive(Copy, Clone, Eq, PartialEq)]
