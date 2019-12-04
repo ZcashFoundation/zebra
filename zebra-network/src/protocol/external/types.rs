@@ -61,25 +61,6 @@ impl Default for Tweak {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Filter(pub Vec<u8>);
 
-impl ZcashSerialize for Filter {
-    fn zcash_serialize<W: Write>(&self, mut writer: W) -> Result<(), SerializationError> {
-        writer.write_all(&self.0)?;
-        Ok(())
-    }
-}
-
-impl ZcashDeserialize for Filter {
-    fn zcash_deserialize<R: Read>(reader: R) -> Result<Self, SerializationError> {
-        let mut bytes = Vec::new();
-
-        // Maximum size of a filter is 36,000 bytes.
-        let mut handle = reader.take(36000);
-
-        handle.read(&mut bytes)?;
-        Ok(Self(bytes))
-    }
-}
-
 #[cfg(test)]
 mod tests {
 
