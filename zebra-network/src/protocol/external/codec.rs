@@ -1,6 +1,5 @@
 //! A Tokio codec mapping byte streams to Bitcoin message streams.
 
-use std::convert::TryInto;
 use std::fmt;
 use std::io::{Cursor, Read, Write};
 
@@ -415,7 +414,7 @@ impl Decoder for Codec {
                     b"notfound\0\0\0\0" => self.read_notfound(body_reader),
                     b"tx\0\0\0\0\0\0\0\0\0\0" => self.read_tx(body_reader),
                     b"mempool\0\0\0\0\0" => self.read_mempool(body_reader),
-                    b"filterload\0\0" => self.read_filterload(body_reader),
+                    b"filterload\0\0" => self.read_filterload(body_reader, body_len),
                     b"filteradd\0\0\0" => self.read_filteradd(body_reader),
                     b"filterclear\0" => self.read_filterclear(body_reader),
                     _ => return Err(Parse("unknown command")),
@@ -599,13 +598,11 @@ impl Codec {
         Ok(Message::Mempool)
     }
 
-    fn read_filterload(&self, mut reader: Cursor<&BytesMut>) -> Result<Message, Error> {
+    fn read_filterload<R: Read>(&self, mut reader: R, body_len: usize) -> Result<Message, Error> {
         const MAX_FILTER_LENGTH: usize = 36000;
         const FILTERLOAD_REMAINDER_LENGTH: usize = 4 + 4 + 1;
 
-        let filter_length: usize = (reader.get_ref().len() - FILTERLOAD_REMAINDER_LENGTH)
-            .try_into()
-            .unwrap();
+        let filter_length: usize = body_len - FILTERLOAD_REMAINDER_LENGTH;
 
         let mut filter_bytes = vec![0; std::cmp::min(filter_length, MAX_FILTER_LENGTH)];
         reader.read_exact(&mut filter_bytes)?;
