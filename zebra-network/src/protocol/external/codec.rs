@@ -599,12 +599,18 @@ impl Codec {
     }
 
     fn read_filterload<R: Read>(&self, mut reader: R, body_len: usize) -> Result<Message, Error> {
+        if !(FILTERLOAD_REMAINDER_LENGTH <= body_len
+            && body_len <= FILTERLOAD_REMAINDER_LENGTH + MAX_FILTER_LENGTH)
+        {
+            return Err(Error::Parse("Invalid filterload message body length."));
+        }
+
         const MAX_FILTER_LENGTH: usize = 36000;
         const FILTERLOAD_REMAINDER_LENGTH: usize = 4 + 4 + 1;
 
         let filter_length: usize = body_len - FILTERLOAD_REMAINDER_LENGTH;
 
-        let mut filter_bytes = vec![0; std::cmp::min(filter_length, MAX_FILTER_LENGTH)];
+        let mut filter_bytes = vec![0; filter_length];
         reader.read_exact(&mut filter_bytes)?;
 
         Ok(Message::FilterLoad {
@@ -746,15 +752,13 @@ mod tests {
             bytes
         });
 
-        let v_parsed = rt.block_on(async {
+        rt.block_on(async {
             let mut fr = FramedRead::new(Cursor::new(&v_bytes), Codec::builder().finish());
             fr.next()
                 .await
                 .expect("a next message should be available")
-                .expect("that message should deserialize")
+                .expect_err("that message should not deserialize")
         });
-
-        assert_ne!(v, v_parsed);
     }
 
     #[test]
