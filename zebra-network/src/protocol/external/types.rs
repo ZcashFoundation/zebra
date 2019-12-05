@@ -26,8 +26,6 @@ bitflags! {
         /// blocks, as opposed to a light client that makes network requests but
         /// does not provide network services.
         const NODE_NETWORK = (1 << 0);
-        /// NODE_BLOOM means that the node supports bloom-filtered connections.
-        const NODE_BLOOM = (1 << 2);
     }
 }
 
@@ -41,6 +39,22 @@ impl Default for Nonce {
         Self(thread_rng().gen())
     }
 }
+
+/// A random value to add to the seed value in a hash function.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+pub struct Tweak(pub u32);
+
+impl Default for Tweak {
+    fn default() -> Self {
+        use rand::{thread_rng, Rng};
+        Self(thread_rng().gen())
+    }
+}
+
+/// A Bloom filter consisting of a bit field of arbitrary byte-aligned
+/// size, maximum size is 36,000 bytes.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Filter(pub Vec<u8>);
 
 #[cfg(test)]
 mod tests {

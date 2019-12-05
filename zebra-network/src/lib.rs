@@ -68,5 +68,5 @@ pub mod types {
 
 /// This will be removed when we finish encapsulation
 pub mod should_be_private {
-    pub use crate::{peer::PeerHandshake, timestamp_collector::TimestampCollector};
+    pub use crate::{peer::Handshake, timestamp_collector::TimestampCollector};
 }

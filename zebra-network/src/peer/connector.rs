@@ -9,35 +9,35 @@ use tower::{discover::Change, Service, ServiceExt};
 
 use crate::{BoxedStdError, Request, Response};
 
-use super::{HandshakeError, PeerClient, PeerHandshake};
+use super::{Client, Handshake, HandshakeError};
 
-/// A wrapper around [`PeerHandshake`] that opens a TCP connection before
+/// A wrapper around [`peer::Handshake`] that opens a TCP connection before
 /// forwarding to the inner handshake service. Writing this as its own
 /// [`tower::Service`] lets us apply unified timeout policies, etc.
-pub struct PeerConnector<S> {
-    handshaker: PeerHandshake<S>,
+pub struct Connector<S> {
+    handshaker: Handshake<S>,
 }
 
-impl<S: Clone> Clone for PeerConnector<S> {
+impl<S: Clone> Clone for Connector<S> {
     fn clone(&self) -> Self {
-        Self {
+        Connector {
             handshaker: self.handshaker.clone(),
         }
     }
 }
 
-impl<S> PeerConnector<S> {
-    pub fn new(handshaker: PeerHandshake<S>) -> Self {
-        Self { handshaker }
+impl<S> Connector<S> {
+    pub fn new(handshaker: Handshake<S>) -> Self {
+        Connector { handshaker }
     }
 }
 
-impl<S> Service<SocketAddr> for PeerConnector<S>
+impl<S> Service<SocketAddr> for Connector<S>
 where
     S: Service<Request, Response = Response, Error = BoxedStdError> + Clone + Send + 'static,
     S::Future: Send,
 {
-    type Response = Change<SocketAddr, PeerClient>;
+    type Response = Change<SocketAddr, Client>;
     type Error = HandshakeError;
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;

@@ -15,15 +15,15 @@ pub enum PeerError {
     /// The remote peer closed the connection.
     #[error("Peer closed connection")]
     ConnectionClosed,
-    /// The [`PeerClient`] half of the [`PeerClient`]/[`PeerServer`] pair died before
-    /// the [`PeerServer`] half did.
-    #[error("PeerClient instance died")]
-    DeadPeerClient,
-    /// The [`PeerServer`] half of the [`PeerServer`]/[`PeerClient`] pair died before
-    /// the [`PeerClient`] half did.
-    #[error("PeerServer instance died")]
-    DeadPeerServer,
-    /// The remote peer did not respond to a [`PeerClient`] request in time.
+    /// The [`peer::Client`] half of the [`peer::Client`]/[`peer::Server`] pair died before
+    /// the [`Server`] half did.
+    #[error("peer::Client instance died")]
+    DeadClient,
+    /// The [`peer::Server`] half of the [`peer::Server`]/[`peer::Client`] pair died before
+    /// the [`peer::Client`] half did.
+    #[error("peer::Server instance died")]
+    DeadServer,
+    /// The remote peer did not respond to a [`peer::Client`] request in time.
     #[error("Client request timed out")]
     ClientRequestTimeout,
     /// A serialization error occurred while reading or writing a message.

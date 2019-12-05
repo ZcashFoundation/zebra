@@ -22,9 +22,9 @@ use crate::{
     BoxedStdError,
 };
 
-use super::{client::ClientRequest, error::ErrorSlot, PeerError, SharedPeerError};
+use super::{ClientRequest, ErrorSlot, PeerError, SharedPeerError};
 
-pub(super) enum ServerState {
+pub(super) enum State {
     /// Awaiting a client request or a peer message.
     AwaitingRequest,
     /// Awaiting a peer message we can interpret as a client request.
@@ -34,21 +34,21 @@ pub(super) enum ServerState {
 }
 
 /// The "server" duplex half of a peer connection.
-pub struct PeerServer<S, Tx> {
-    pub(super) state: ServerState,
+pub struct Server<S, Tx> {
+    pub(super) state: State,
     /// A timeout for a client request. This is stored separately from
-    /// ServerState so that we can move the future out of it independently of
+    /// State so that we can move the future out of it independently of
     /// other state handling.
     pub(super) request_timer: Option<Delay>,
     pub(super) svc: S,
     pub(super) client_rx: mpsc::Receiver<ClientRequest>,
-    /// A slot shared between the PeerServer and PeerClient for storing an error.
+    /// A slot shared between the client and server for storing an error.
     pub(super) error_slot: ErrorSlot,
     //pub(super) peer_rx: Rx,
     pub(super) peer_tx: Tx,
 }
 
-impl<S, Tx> PeerServer<S, Tx>
+impl<S, Tx> Server<S, Tx>
 where
     S: Service<Request, Response = Response, Error = BoxedStdError>,
     S::Error: Into<BoxedStdError>,
@@ -65,7 +65,7 @@ where
         // request from the remote peer to our node.
         //
         // We also need to handle those client requests in the first place. The client
-        // requests are received from the corresponding `PeerClient` over a bounded
+        // requests are received from the corresponding `peer::Client` over a bounded
         // channel (with bound 1, to minimize buffering), but there is no relationship
         // between the stream of client requests and the stream of peer messages, so we
         // cannot ignore one kind while waiting on the other. Moreover, we cannot accept
@@ -80,7 +80,7 @@ where
         // check whether it can be interpreted as a response to the pending request.
         loop {
             match self.state {
-                ServerState::AwaitingRequest => {
+                State::AwaitingRequest => {
                     trace!("awaiting client request or peer message");
                     match future::select(peer_rx.next(), self.client_rx.next()).await {
                         Either::Left((None, _)) => {
@@ -93,14 +93,14 @@ where
                             self.handle_message_as_request(msg).await
                         }
                         Either::Right((None, _)) => {
-                            self.fail_with(PeerError::DeadPeerClient);
+                            self.fail_with(PeerError::DeadClient);
                         }
                         Either::Right((Some(req), _)) => self.handle_client_request(req).await,
                     }
                 }
                 // We're awaiting a response to a client request,
                 // so wait on either a peer message, or on a request timeout.
-                ServerState::AwaitingResponse { .. } => {
+                State::AwaitingResponse { .. } => {
                     trace!("awaiting response to client request");
                     let timer_ref = self
                         .request_timer
@@ -121,14 +121,14 @@ where
                             trace!("client request timed out");
                             // Re-matching lets us take ownership of tx
                             self.state = match self.state {
-                                ServerState::AwaitingResponse(Request::Ping(_), _) => {
+                                State::AwaitingResponse(Request::Ping(_), _) => {
                                     self.fail_with(PeerError::ClientRequestTimeout);
-                                    ServerState::Failed
+                                    State::Failed
                                 }
-                                ServerState::AwaitingResponse(_, tx) => {
+                                State::AwaitingResponse(_, tx) => {
                                     let e = PeerError::ClientRequestTimeout;
                                     let _ = tx.send(Err(Arc::new(e).into()));
-                                    ServerState::AwaitingRequest
+                                    State::AwaitingRequest
                                 }
                                 _ => panic!("unreachable"),
                             };
@@ -137,7 +137,7 @@ where
                 }
                 // We've failed, but we need to flush all pending client
                 // requests before we can return and complete the future.
-                ServerState::Failed => {
+                State::Failed => {
                     match self.client_rx.next().await {
                         Some(ClientRequest(_, tx)) => {
                             let e = self
@@ -172,13 +172,13 @@ where
         // Drop the guard immediately to release the mutex.
         std::mem::drop(guard);
 
-        // We want to close the client channel and set ServerState::Failed so
+        // We want to close the client channel and set State::Failed so
         // that we can flush any pending client requests. However, we may have
-        // an outstanding client request in ServerState::AwaitingResponse, so
+        // an outstanding client request in State::AwaitingResponse, so
         // we need to deal with it first if it exists.
         self.client_rx.close();
-        let old_state = std::mem::replace(&mut self.state, ServerState::Failed);
-        if let ServerState::AwaitingResponse(_, tx) = old_state {
+        let old_state = std::mem::replace(&mut self.state, State::Failed);
+        if let State::AwaitingResponse(_, tx) = old_state {
             // We know the slot has Some(e) because we just set it above,
             // and the error slot is never unset.
             let e = self.error_slot.try_get_error().unwrap();
@@ -191,7 +191,7 @@ where
     async fn handle_client_request(&mut self, msg: ClientRequest) {
         trace!(?msg);
         use Request::*;
-        use ServerState::*;
+        use State::*;
         let ClientRequest(req, tx) = msg;
 
         // Inner match returns Result with the new state or an error.
@@ -254,7 +254,7 @@ where
         // This conversion is done by a sequence of (request, message) match arms,
         // each of which contains the conversion logic for that pair.
         use Request::*;
-        use ServerState::*;
+        use State::*;
         let mut ignored_msg = None;
         // We want to be able to consume the state, but it's behind a mutable
         // reference, so we can't move it out of self without swapping in a

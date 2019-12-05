@@ -25,20 +25,20 @@ use crate::{
     BoxedStdError, Config,
 };
 
-use super::{error::ErrorSlot, server::ServerState, HandshakeError, PeerClient, PeerServer};
+use super::{Client, ErrorSlot, HandshakeError, Server};
 
 /// A [`Service`] that handshakes with a remote peer and constructs a
 /// client/server pair.
-pub struct PeerHandshake<S> {
+pub struct Handshake<S> {
     config: Config,
     internal_service: S,
     timestamp_collector: mpsc::Sender<MetaAddr>,
     nonces: Arc<Mutex<HashSet<Nonce>>>,
 }
 
-impl<S: Clone> Clone for PeerHandshake<S> {
+impl<S: Clone> Clone for Handshake<S> {
     fn clone(&self) -> Self {
-        Self {
+        Handshake {
             config: self.config.clone(),
             internal_service: self.internal_service.clone(),
             timestamp_collector: self.timestamp_collector.clone(),
@@ -47,7 +47,7 @@ impl<S: Clone> Clone for PeerHandshake<S> {
     }
 }
 
-impl<S> PeerHandshake<S>
+impl<S> Handshake<S>
 where
     S: Service<Request, Response = Response, Error = BoxedStdError> + Clone + Send + 'static,
     S::Future: Send,
@@ -63,7 +63,7 @@ where
         // Builder2, ..., with Builder1::with_config() -> Builder2;
         // Builder2::with_internal_service() -> ... or use Options in a single
         // Builder type or use the derive_builder crate.
-        PeerHandshake {
+        Handshake {
             config,
             internal_service,
             timestamp_collector,
@@ -72,12 +72,12 @@ where
     }
 }
 
-impl<S> Service<(TcpStream, SocketAddr)> for PeerHandshake<S>
+impl<S> Service<(TcpStream, SocketAddr)> for Handshake<S>
 where
     S: Service<Request, Response = Response, Error = BoxedStdError> + Clone + Send + 'static,
     S::Future: Send,
 {
-    type Response = PeerClient;
+    type Response = Client;
     type Error = HandshakeError;
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
@@ -177,14 +177,14 @@ where
             // two versions, etc. -- actually is it possible to edit the `Codec`
             // after using it to make a framed adapter?
 
-            debug!("constructing PeerClient, spawning PeerServer");
+            debug!("constructing client, spawning server");
 
             // These channels should not be cloned more than they are
             // in this block, see constants.rs for more.
             let (server_tx, server_rx) = mpsc::channel(0);
             let slot = ErrorSlot::default();
 
-            let client = PeerClient {
+            let client = Client {
                 span: connection_span.clone(),
                 server_tx: server_tx.clone(),
                 error_slot: slot.clone(),
@@ -192,8 +192,9 @@ where
 
             let (peer_tx, peer_rx) = stream.split();
 
-            let server = PeerServer {
-                state: ServerState::AwaitingRequest,
+            use super::server;
+            let server = Server {
+                state: server::State::AwaitingRequest,
                 svc: internal_service,
                 client_rx: server_rx,
                 error_slot: slot,
