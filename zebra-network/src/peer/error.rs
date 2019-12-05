@@ -40,6 +40,10 @@ pub enum PeerError {
     /// to shed load.
     #[error("Internal services over capacity")]
     Overloaded,
+    /// A peer sent us a message we don't support or instructed to
+    /// disconnect from upon receipt.
+    #[error("Remote peer sent an unsupported message type.")]
+    UnsupportedMessage,
     /// We got a `Reject` message. This does not necessarily mean that
     /// the peer connection is in a bad state, but for the time being
     /// we are considering it a PeerError.

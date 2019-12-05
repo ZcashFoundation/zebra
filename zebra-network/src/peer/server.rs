@@ -325,6 +325,24 @@ where
             _ => {}
         }
 
+        // Per BIP-011, since we don't advertise NODE_BLOOM, we MUST
+        // disconnect from this peer immediately.
+        match msg {
+            Message::FilterLoad { .. } => {
+                self.fail_with(PeerError::UnsupportedMessage);
+                return;
+            }
+            Message::FilterAdd { .. } => {
+                self.fail_with(PeerError::UnsupportedMessage);
+                return;
+            }
+            Message::FilterClear { .. } => {
+                self.fail_with(PeerError::UnsupportedMessage);
+                return;
+            }
+            _ => {}
+        }
+
         // Interpret `msg` as a request from the remote peer to our node,
         // and try to construct an appropriate request object.
         let req = match msg {
