@@ -82,7 +82,7 @@ pub struct JoinSplit<P: ZkSnarkProof> {
 /// A bundle of JoinSplit descriptions and signature data.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct JoinSplitData<P: ZkSnarkProof> {
-    /// A sequence of JoinSplit descriptions using BCTV14 proofs.
+    /// A sequence of JoinSplit descriptions using proofs of type `P`.
     pub joinsplits: Vec<JoinSplit<P>>,
     /// The public key for the JoinSplit signature.
     // XXX refine to a Zcash-flavored Ed25519 pubkey.
