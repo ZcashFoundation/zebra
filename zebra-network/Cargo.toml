@@ -17,6 +17,8 @@ hex = "0.4"
 # which we don't use, so disable it to drop the dependencies.
 indexmap = { version = "1.2", default-features = false }
 pin-project = "0.4"
+proptest = "0.9"
+proptest-derive = "0.1.0"
 rand = "0.7"
 serde = { version = "1", features = ["serde_derive"] }
 thiserror = "1"

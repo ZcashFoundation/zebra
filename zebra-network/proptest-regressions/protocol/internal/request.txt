@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc fb728d0d2a16976de785ed8525cc74c4d3f7826f8840ebe5a4fee6b5ab0edad8 # shrinks to req = GetMempool
+cc 3ed95f3a436a15e33b27f4bf1105629860b8e6a895165eb83befcb625e951b1d # shrinks to req = GetPeers
