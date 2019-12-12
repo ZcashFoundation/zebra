@@ -11,3 +11,5 @@ pub mod proofs;
 pub mod serialization;
 pub mod transaction;
 pub mod types;
+
+pub use redjubjub;

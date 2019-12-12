@@ -1,6 +1,8 @@
 // XXX this name seems too long?
 use crate::note_commitment_tree::SaplingNoteTreeRootHash;
 
+use crate::redjubjub::{self, Binding, SpendAuth};
+
 /// A _Spend Description_, as described in [protocol specification §7.3][ps].
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#spendencoding
@@ -17,19 +19,14 @@ pub struct SpendDescription {
     /// XXX refine to a specific type.
     pub nullifier: [u8; 32],
     /// The randomized public key for `spend_auth_sig`.
-    ///
-    /// XXX refine to a specific type.
-    pub rk: [u8; 32],
+    pub rk: redjubjub::PublicKeyBytes<SpendAuth>,
     /// The ZK spend proof.
     ///
     /// XXX add proof types.
     /// XXX for now it's [u64; 24] instead of [u8; 192] to get trait impls
     pub zkproof: [u64; 24],
     /// A signature authorizing this spend.
-    ///
-    /// XXX refine to a specific type: redjubjub signature?
-    /// XXX for now it's [u64; 8] instead of [u8; 64] to get trait impls
-    pub spend_auth_sig: [u64; 8],
+    pub spend_auth_sig: redjubjub::Signature<SpendAuth>,
 }
 
 /// A _Output Description_, as described in [protocol specification §7.4][ps].
@@ -47,7 +44,7 @@ pub struct OutputDescription {
     pub cmu: [u8; 32],
     /// An encoding of an ephemeral Jubjub public key.
     ///
-    /// XXX refine to a specific type.
+    /// XXX refine to a Jubjub key agreement type, not RedJubjub.
     pub ephemeral_key: [u8; 32],
     /// A ciphertext component for the encrypted output note.
     ///
@@ -74,7 +71,5 @@ pub struct ShieldedData {
     /// A sequence of shielded outputs for this transaction.
     pub shielded_outputs: Vec<OutputDescription>,
     /// A signature on the transaction hash.
-    // XXX refine this type to a RedJubjub signature.
-    // for now it's [u64; 8] rather than [u8; 64] to get trait impls
-    pub binding_sig: [u64; 8],
+    pub binding_sig: redjubjub::Signature<Binding>,
 }
