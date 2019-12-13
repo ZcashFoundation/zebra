@@ -239,9 +239,8 @@ where
         }
     }
 
-    use tokio::timer::Interval;
     let mut connect_signal = futures::stream::select(
-        Interval::new_interval(new_peer_interval).map(|_| ()),
+        tokio::time::interval(new_peer_interval).map(|_| ()),
         demand_signal,
     );
     while let Some(()) = connect_signal.next().await {

@@ -5,7 +5,10 @@
 use crate::prelude::*;
 
 use crate::config::ZebradConfig;
+
 use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
+
+use futures::prelude::*;
 
 /// `start` subcommand
 ///
@@ -37,13 +40,13 @@ impl Runnable for StartCmd {
 
         use crate::components::tokio::TokioComponent;
 
-        app_reader()
-            .state()
+        app_writer()
+            .state_mut()
             .components
-            .get_downcast_ref::<TokioComponent>()
+            .get_downcast_mut::<TokioComponent>()
             .expect("TokioComponent should be available")
             .rt
-            .block_on(tokio::future::pending::<()>());
+            .block_on(future::pending::<()>());
     }
 }
 

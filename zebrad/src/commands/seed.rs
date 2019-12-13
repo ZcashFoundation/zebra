@@ -7,14 +7,13 @@ use std::{
     task::{Context, Poll},
 };
 
-use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
-use futures::channel::oneshot;
+use abscissa_core::{Command, Options, Runnable};
+use futures::{channel::oneshot, prelude::*};
 use tower::{buffer::Buffer, Service, ServiceExt};
-use tracing::{span, Level};
 
 use zebra_network::{AddressBook, BoxedStdError, Request, Response};
 
-use crate::{config::ZebradConfig, prelude::*};
+use crate::prelude::*;
 
 /// Whether our `SeedService` is poll_ready or not.
 #[derive(Debug)]
@@ -110,10 +109,10 @@ impl Runnable for SeedCmd {
     fn run(&self) {
         use crate::components::tokio::TokioComponent;
 
-        let _ = app_reader()
-            .state()
+        let _ = app_writer()
+            .state_mut()
             .components
-            .get_downcast_ref::<TokioComponent>()
+            .get_downcast_mut::<TokioComponent>()
             .expect("TokioComponent should be available")
             .rt
             .block_on(self.seed());
@@ -145,12 +144,11 @@ impl SeedCmd {
 
         #[cfg(dos)]
         use std::time::Duration;
-        use tokio::timer::Interval;
 
         #[cfg(dos)]
         // Fire GetPeers requests at ourselves, for testing.
         tokio::spawn(async move {
-            let mut interval_stream = Interval::new_interval(Duration::from_secs(1));
+            let mut interval_stream = tokio::time::interval(Duration::from_secs(1));
 
             loop {
                 interval_stream.next().await;
@@ -159,7 +157,7 @@ impl SeedCmd {
             }
         });
 
-        let eternity = tokio::future::pending::<()>();
+        let eternity = future::pending::<()>();
         eternity.await;
 
         Ok(())

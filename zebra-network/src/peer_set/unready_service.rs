@@ -1,13 +1,13 @@
 // Adapted from tower-balance
 
 use std::{
+    future::Future,
     marker::PhantomData,
     pin::Pin,
     task::{Context, Poll},
 };
 
 use futures::{channel::oneshot, ready};
-use tokio::prelude::*;
 use tower::Service;
 
 /// A Future that becomes satisfied when an `S`-typed service is ready.

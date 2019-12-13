@@ -3,12 +3,10 @@ use std::sync::Arc;
 use futures::{
     channel::{mpsc, oneshot},
     future::{self, Either},
+    prelude::*,
     stream::Stream,
 };
-use tokio::{
-    prelude::*,
-    timer::{delay_for, Delay},
-};
+use tokio::time::{delay_for, Delay};
 use tower::Service;
 
 use zebra_chain::{serialization::SerializationError, transaction::TransactionHash};

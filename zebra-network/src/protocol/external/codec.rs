@@ -6,7 +6,7 @@ use std::io::{Cursor, Read, Write};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use bytes::BytesMut;
 use chrono::{TimeZone, Utc};
-use tokio::codec::{Decoder, Encoder};
+use tokio_util::codec::{Decoder, Encoder};
 
 use zebra_chain::{
     block::{Block, BlockHeader, BlockHeaderHash},
@@ -641,6 +641,7 @@ impl Codec {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::prelude::*;
     use tokio::runtime::Runtime;
 
     #[test]
@@ -649,7 +650,7 @@ mod tests {
         let services = PeerServices::NODE_NETWORK;
         let timestamp = Utc.timestamp(1568000000, 0);
 
-        let rt = Runtime::new().unwrap();
+        let mut rt = Runtime::new().unwrap();
 
         let v = Message::Version {
             version: crate::constants::CURRENT_VERSION,
@@ -669,8 +670,8 @@ mod tests {
             relay: true,
         };
 
-        use tokio::codec::{FramedRead, FramedWrite};
         use tokio::prelude::*;
+        use tokio_util::codec::{FramedRead, FramedWrite};
         let v_bytes = rt.block_on(async {
             let mut bytes = Vec::new();
             {
@@ -695,7 +696,7 @@ mod tests {
 
     #[test]
     fn filterload_message_round_trip() {
-        let rt = Runtime::new().unwrap();
+        let mut rt = Runtime::new().unwrap();
 
         let v = Message::FilterLoad {
             filter: Filter(vec![0; 35999]),
@@ -704,8 +705,8 @@ mod tests {
             flags: 0,
         };
 
-        use tokio::codec::{FramedRead, FramedWrite};
         use tokio::prelude::*;
+        use tokio_util::codec::{FramedRead, FramedWrite};
         let v_bytes = rt.block_on(async {
             let mut bytes = Vec::new();
             {
@@ -730,7 +731,7 @@ mod tests {
 
     #[test]
     fn filterload_message_too_large_round_trip() {
-        let rt = Runtime::new().unwrap();
+        let mut rt = Runtime::new().unwrap();
 
         let v = Message::FilterLoad {
             filter: Filter(vec![0; 40000]),
@@ -739,8 +740,8 @@ mod tests {
             flags: 0,
         };
 
-        use tokio::codec::{FramedRead, FramedWrite};
         use tokio::prelude::*;
+        use tokio_util::codec::{FramedRead, FramedWrite};
         let v_bytes = rt.block_on(async {
             let mut bytes = Vec::new();
             {

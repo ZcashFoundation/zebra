@@ -1,6 +1,7 @@
 use std::{
     collections::HashMap,
     fmt::Debug,
+    future::Future,
     marker::PhantomData,
     pin::Pin,
     task::{Context, Poll},
@@ -8,10 +9,10 @@ use std::{
 
 use futures::{
     channel::{mpsc, oneshot},
+    prelude::*,
     stream::FuturesUnordered,
 };
 use indexmap::IndexMap;
-use tokio::prelude::*;
 use tower::{
     discover::{Change, Discover},
     Service,

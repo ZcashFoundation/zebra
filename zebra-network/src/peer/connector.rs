@@ -1,10 +1,12 @@
 use std::{
+    future::Future,
     net::SocketAddr,
     pin::Pin,
     task::{Context, Poll},
 };
 
-use tokio::{net::TcpStream, prelude::*};
+use futures::prelude::*;
+use tokio::net::TcpStream;
 use tower::{discover::Change, Service, ServiceExt};
 
 use crate::{BoxedStdError, Request, Response};

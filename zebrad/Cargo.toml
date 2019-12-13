@@ -15,18 +15,17 @@ lazy_static = "1"
 serde = { version = "1", features = ["serde_derive"] }
 toml = "0.5"
 
-tokio = "=0.2.0-alpha.6"
-futures-preview = "=0.3.0-alpha.19"
+tokio = { version = "0.2", features = ["time", "rt-threaded", "stream"] }
+futures = "0.3"
 
 tracing = "0.1"
-tracing-futures = { version = "0.1", features = ["tokio-alpha"], default-features = false }
+tracing-futures = "0.2"
 tracing-subscriber = "0.1"
 tracing-log = "0.1"
 
-hyper = "=0.13.0-alpha.4"
+hyper = "0.13.0"
 
-tower = "=0.3.0-alpha.2"
-tower-load = { git = "https://github.com/tower-rs/tower", branch = "v0.3.x"}
+tower = { git = "https://github.com/tower-rs/tower" }
 
 zebra-chain = { path = "../zebra-chain" }
 zebra-network = { path = "../zebra-network" }

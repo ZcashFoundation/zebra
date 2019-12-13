@@ -1,5 +1,6 @@
 use std::{
     collections::HashSet,
+    future::Future,
     net::SocketAddr,
     pin::Pin,
     sync::{Arc, Mutex},
@@ -7,8 +8,9 @@ use std::{
 };
 
 use chrono::Utc;
-use futures::channel::mpsc;
-use tokio::{codec::Framed, net::TcpStream, prelude::*, timer::Interval};
+use futures::{channel::mpsc, prelude::*};
+use tokio::net::TcpStream;
+use tokio_util::codec::Framed;
 use tower::Service;
 use tracing::{span, Level};
 use tracing_futures::Instrument;
@@ -235,10 +237,10 @@ where
 
                 let mut server_tx = server_tx;
 
-                let mut interval_stream = Interval::new_interval(constants::HEARTBEAT_INTERVAL);
+                let mut interval_stream = tokio::time::interval(constants::HEARTBEAT_INTERVAL);
 
                 loop {
-                    interval_stream.next().await;
+                    interval_stream.tick().await;
 
                     // We discard the server handle because our
                     // heartbeat `Ping`s are a special case, and we

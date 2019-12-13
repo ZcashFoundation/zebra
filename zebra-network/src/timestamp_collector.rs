@@ -2,8 +2,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use futures::channel::mpsc;
-use tokio::prelude::*;
+use futures::{channel::mpsc, prelude::*};
 
 use crate::{types::MetaAddr, AddressBook};
 

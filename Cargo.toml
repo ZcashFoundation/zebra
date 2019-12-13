@@ -9,7 +9,3 @@ members = [
         "zebra-client",
         "zebrad",
 ]
-
-[patch.crates-io]
-# Required because we pull tower-load from git
-tower = { git = "https://github.com/tower-rs/tower", branch = "v0.3.x" }
