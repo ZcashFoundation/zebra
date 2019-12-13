@@ -81,17 +81,19 @@ impl TracingEndpoint {
             .parse()
             .expect("Hardcoded address should be parseable");
 
-        let server = match Server::try_bind(&addr) {
-            Ok(s) => s,
-            Err(e) => {
-                error!("Could not open tracing endpoint listener");
-                error!("Error: {}", e);
-                return Ok(());
+        tokio_component.rt.spawn(async move {
+            // try_bind uses the tokio runtime, so we
+            // need to construct it inside the task.
+            let server = match Server::try_bind(&addr) {
+                Ok(s) => s,
+                Err(e) => {
+                    error!("Could not open tracing endpoint listener");
+                    error!("Error: {}", e);
+                    return;
+                }
             }
-        }
-        .serve(service);
+            .serve(service);
 
-        tokio_component.rt.spawn(async {
             if let Err(e) = server.await {
                 error!("Server error: {}", e);
             }
@@ -101,11 +103,10 @@ impl TracingEndpoint {
     }
 }
 
-fn reload_filter_from_chunk<S: Subscriber>(
+fn reload_filter_from_bytes<S: Subscriber>(
     handle: Handle<EnvFilter, S>,
-    chunk: hyper::Chunk,
+    bytes: hyper::body::Bytes,
 ) -> Result<(), String> {
-    let bytes = chunk.into_bytes();
     let body = std::str::from_utf8(bytes.as_ref()).map_err(|e| format!("{}", e))?;
     trace!(request.body = ?body);
     let filter = body.parse::<EnvFilter>().map_err(|e| format!("{}", e))?;
@@ -137,13 +138,8 @@ curl -X POST localhost:3000/filter -d "zebrad=trace"
         )),
         (&Method::POST, "/filter") => {
             // Combine all HTTP request chunks into one
-            //let whole_chunk = req.into_body().try_concat().await?;
-            // XXX try_concat extension trait is not applying for some reason,
-            // just pull one chunk
-            let mut body = req.into_body();
-            let maybe_chunk = body.next().await;
-            let whole_chunk = maybe_chunk.unwrap()?;
-            match reload_filter_from_chunk(handle, whole_chunk) {
+            let body_bytes = hyper::body::to_bytes(req.into_body()).await?;
+            match reload_filter_from_bytes(handle, body_bytes) {
                 Err(e) => Response::builder()
                     .status(StatusCode::BAD_REQUEST)
                     .body(Body::from(e))

@@ -4,6 +4,8 @@ use crate::prelude::*;
 
 use abscissa_core::{Command, Options, Runnable};
 
+use futures::prelude::*;
+
 /// `connect` subcommand
 #[derive(Command, Debug, Options)]
 pub struct ConnectCmd {
@@ -21,10 +23,10 @@ impl Runnable for ConnectCmd {
         info!(connect.addr = ?self.addr);
 
         use crate::components::tokio::TokioComponent;
-        let _ = app_reader()
-            .state()
+        let _ = app_writer()
+            .state_mut()
             .components
-            .get_downcast_ref::<TokioComponent>()
+            .get_downcast_mut::<TokioComponent>()
             .expect("TokioComponent should be available")
             .rt
             .block_on(self.connect());
@@ -95,7 +97,7 @@ impl ConnectCmd {
         tail.extend_from_slice(&addrs[addrs.len() - 5..]);
         info!(addrs.first = ?head, addrs.last = ?tail);
 
-        let eternity = tokio::future::pending::<()>();
+        let eternity = future::pending::<()>();
         eternity.await;
 
         Ok(())

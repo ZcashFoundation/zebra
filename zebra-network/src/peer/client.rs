@@ -1,4 +1,5 @@
 use std::{
+    future::Future,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -7,7 +8,6 @@ use futures::{
     channel::{mpsc, oneshot},
     future, ready,
 };
-use tokio::prelude::*;
 use tower::Service;
 
 use crate::protocol::internal::{Request, Response};
