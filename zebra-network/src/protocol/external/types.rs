@@ -1,8 +1,12 @@
 use hex;
 use std::fmt;
 
+#[cfg(test)]
+use proptest_derive::Arbitrary;
+
 /// A magic number identifying the network.
 #[derive(Copy, Clone, Eq, PartialEq)]
+#[cfg_attr(test, derive(Arbitrary))]
 pub struct Magic(pub [u8; 4]);
 
 impl fmt::Debug for Magic {
@@ -65,5 +69,33 @@ mod tests {
     fn magic_debug() {
         assert_eq!(format!("{:?}", magics::MAINNET), "Magic(\"24e92764\")");
         assert_eq!(format!("{:?}", magics::TESTNET), "Magic(\"fa1af9bf\")");
+    }
+}
+
+#[cfg(test)]
+mod proptest {
+
+    use hex;
+
+    use proptest::prelude::*;
+
+    use super::Magic;
+
+    // impl Arbitrary for Magic {
+    //     type Parameters = ();
+
+    //     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+    //         Magic
+    //     }
+
+    //     type Strategy = BoxedStrategy<Self>;
+    // }
+
+    proptest! {
+
+        #[test]
+        fn proptest_magic_from_array(data in any::<[u8; 4]>()) {
+            assert_eq!(format!("{:?}", Magic(data)), format!("Magic({:x?})", hex::encode(data)));
+        }
     }
 }
