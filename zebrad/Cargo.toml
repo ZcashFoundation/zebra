@@ -8,7 +8,7 @@ edition = "2018"
 [dependencies]
 rand = "0.7"
 chrono = "0.4"
-abscissa_core = "0.3.0"
+abscissa_core = "0.5.0"
 failure = "0.1"
 gumdrop = "0.6"
 lazy_static = "1"
@@ -31,5 +31,5 @@ zebra-chain = { path = "../zebra-chain" }
 zebra-network = { path = "../zebra-network" }
 
 [dev-dependencies.abscissa_core]
-version = "0.3.0"
+version = "0.5.0"
 features = ["testing"]
