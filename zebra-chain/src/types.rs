@@ -8,6 +8,8 @@ use std::{
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{DateTime, TimeZone, Utc};
 use hex;
+#[cfg(test)]
+use proptest_derive::Arbitrary;
 
 use crate::serialization::{
     ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
@@ -122,5 +124,49 @@ mod tests {
         let checksum = Sha256dChecksum::from(&input[..]);
 
         assert_eq!(format!("{:?}", checksum), "Sha256dChecksum(\"9595c9df\")");
+    }
+}
+
+#[cfg(test)]
+mod proptest {
+
+    use std::io::Cursor;
+
+    use chrono::Utc;
+    use proptest::prelude::*;
+
+    use super::{BlockHeight, LockTime};
+    use crate::serialization::{ZcashDeserialize, ZcashSerialize};
+
+    impl Arbitrary for LockTime {
+        type Parameters = ();
+
+        fn arbitrary_with(_args: ()) -> Self::Strategy {
+            prop_oneof![
+                (0u32..500_000_000_u32).prop_map(|n| LockTime::Height(BlockHeight(n))),
+                Just(LockTime::Time(Utc::now()))
+            ]
+            .boxed()
+        }
+
+        type Strategy = BoxedStrategy<Self>;
+    }
+
+    proptest! {
+
+        #[test]
+        fn locktime_roundtrip(locktime in any::<LockTime>()) {
+            let mut bytes = Cursor::new(Vec::new());
+            locktime.zcash_serialize(&mut bytes)?;
+
+            bytes.set_position(0);
+            let other_locktime = LockTime::zcash_deserialize(&mut bytes)?;
+
+            prop_assert_eq![locktime, other_locktime];
+
+
+        }
+
+
     }
 }

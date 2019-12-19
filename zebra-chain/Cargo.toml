@@ -20,3 +20,4 @@ ed25519-zebra = "0.1"
 
 [dev-dependencies]
 proptest = "0.9"
+proptest-derive = "0.1.0"
