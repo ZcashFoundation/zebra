@@ -1231,7 +1231,7 @@ dependencies = [
 [[package]]
 name = "tower"
 version = "0.3.0"
-source = "git+https://github.com/tower-rs/tower#2dc9a72bea615dcbf855bdfcaf3083458d9f15a6"
+source = "git+https://github.com/tower-rs/tower#d63665515c9f69cb047e2e6c9acd8e41c9a6a782"
 dependencies = [
  "futures-core 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "tower-buffer 0.3.0 (git+https://github.com/tower-rs/tower)",
@@ -1248,7 +1248,7 @@ dependencies = [
 [[package]]
 name = "tower-buffer"
 version = "0.3.0"
-source = "git+https://github.com/tower-rs/tower#2dc9a72bea615dcbf855bdfcaf3083458d9f15a6"
+source = "git+https://github.com/tower-rs/tower#d63665515c9f69cb047e2e6c9acd8e41c9a6a782"
 dependencies = [
  "futures-core 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "pin-project 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1261,7 +1261,7 @@ dependencies = [
 [[package]]
 name = "tower-discover"
 version = "0.3.0"
-source = "git+https://github.com/tower-rs/tower#2dc9a72bea615dcbf855bdfcaf3083458d9f15a6"
+source = "git+https://github.com/tower-rs/tower#d63665515c9f69cb047e2e6c9acd8e41c9a6a782"
 dependencies = [
  "futures-core 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "pin-project 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1276,7 +1276,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "tower-limit"
 version = "0.3.0"
-source = "git+https://github.com/tower-rs/tower#2dc9a72bea615dcbf855bdfcaf3083458d9f15a6"
+source = "git+https://github.com/tower-rs/tower#d63665515c9f69cb047e2e6c9acd8e41c9a6a782"
 dependencies = [
  "futures-core 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "pin-project 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1288,7 +1288,7 @@ dependencies = [
 [[package]]
 name = "tower-load"
 version = "0.3.0"
-source = "git+https://github.com/tower-rs/tower#2dc9a72bea615dcbf855bdfcaf3083458d9f15a6"
+source = "git+https://github.com/tower-rs/tower#d63665515c9f69cb047e2e6c9acd8e41c9a6a782"
 dependencies = [
  "futures-core 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.4.8 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1301,7 +1301,7 @@ dependencies = [
 [[package]]
 name = "tower-load-shed"
 version = "0.3.0"
-source = "git+https://github.com/tower-rs/tower#2dc9a72bea615dcbf855bdfcaf3083458d9f15a6"
+source = "git+https://github.com/tower-rs/tower#d63665515c9f69cb047e2e6c9acd8e41c9a6a782"
 dependencies = [
  "futures-core 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "pin-project 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1312,7 +1312,7 @@ dependencies = [
 [[package]]
 name = "tower-retry"
 version = "0.3.0"
-source = "git+https://github.com/tower-rs/tower#2dc9a72bea615dcbf855bdfcaf3083458d9f15a6"
+source = "git+https://github.com/tower-rs/tower#d63665515c9f69cb047e2e6c9acd8e41c9a6a782"
 dependencies = [
  "futures-core 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "pin-project 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1329,7 +1329,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "tower-timeout"
 version = "0.3.0"
-source = "git+https://github.com/tower-rs/tower#2dc9a72bea615dcbf855bdfcaf3083458d9f15a6"
+source = "git+https://github.com/tower-rs/tower#d63665515c9f69cb047e2e6c9acd8e41c9a6a782"
 dependencies = [
  "pin-project 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "tokio 0.2.5 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1340,7 +1340,7 @@ dependencies = [
 [[package]]
 name = "tower-util"
 version = "0.3.0"
-source = "git+https://github.com/tower-rs/tower#2dc9a72bea615dcbf855bdfcaf3083458d9f15a6"
+source = "git+https://github.com/tower-rs/tower#d63665515c9f69cb047e2e6c9acd8e41c9a6a782"
 dependencies = [
  "futures-core 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "futures-util 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
