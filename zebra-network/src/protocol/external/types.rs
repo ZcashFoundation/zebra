@@ -81,16 +81,6 @@ mod proptest {
 
     use super::Magic;
 
-    // impl Arbitrary for Magic {
-    //     type Parameters = ();
-
-    //     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-    //         Magic
-    //     }
-
-    //     type Strategy = BoxedStrategy<Self>;
-    // }
-
     proptest! {
 
         #[test]

@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 77e4c5adc662baed850ecd3142ba2d61fa50d7dc7f75e56a1cb4ac6307a9a7e2 # shrinks to locktime = Height(BlockHeight(0))
+cc dbb060756c70411d81f49af9c742cbea259314ddf03440ff00ef62770047e304 # shrinks to locktime = Time(2019-12-19T19:48:42.288928Z)
