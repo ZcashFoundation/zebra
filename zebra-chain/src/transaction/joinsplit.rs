@@ -52,8 +52,13 @@ pub struct JoinSplit<P: ZkSnarkProof> {
 /// A bundle of JoinSplit descriptions and signature data.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct JoinSplitData<P: ZkSnarkProof> {
-    /// A sequence of JoinSplit descriptions using proofs of type `P`.
-    pub joinsplits: Vec<JoinSplit<P>>,
+    /// The first JoinSplit description, using proofs of type `P`.
+    ///
+    /// Storing this separately from `rest` ensures that it is impossible
+    /// to construct an invalid `JoinSplitData` with no `JoinSplit`s.
+    pub first: JoinSplit<P>,
+    /// The rest of the JoinSplit descriptions, using proofs of type `P`.
+    pub rest: Vec<JoinSplit<P>>,
     /// The public key for the JoinSplit signature.
     // XXX refine to a Zcash-flavored Ed25519 pubkey.
     pub pub_key: [u8; 32],
@@ -61,4 +66,11 @@ pub struct JoinSplitData<P: ZkSnarkProof> {
     // XXX refine to a Zcash-flavored Ed25519 signature.
     // for now it's [u64; 8] rather than [u8; 64] to get trait impls
     pub sig: [u64; 8],
+}
+
+impl<P: ZkSnarkProof> JoinSplitData<P> {
+    /// Iterate over the [`JoinSplit`]s in `self`.
+    pub fn joinsplits(&self) -> impl Iterator<Item = &JoinSplit<P>> {
+        std::iter::once(&self.first).chain(self.rest.iter())
+    }
 }
