@@ -10,7 +10,7 @@ mod transparent;
 mod tests;
 
 pub use hash::TransactionHash;
-pub use joinsplit::{JoinSplit, JoinSplitData, SproutInputNoteData, SproutOutputNoteData};
+pub use joinsplit::{JoinSplit, JoinSplitData};
 pub use shielded_data::{OutputDescription, ShieldedData, SpendDescription};
 pub use transparent::{OutPoint, TransparentInput, TransparentOutput};
 
