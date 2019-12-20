@@ -1,6 +1,9 @@
 //! `connect` subcommand - test stub for talking to zcashd
 
-use crate::prelude::*;
+use crate::{
+    error::{Error, ErrorKind},
+    prelude::*,
+};
 
 use abscissa_core::{Command, Options, Runnable};
 
@@ -34,7 +37,7 @@ impl Runnable for ConnectCmd {
 }
 
 impl ConnectCmd {
-    async fn connect(&self) -> Result<(), failure::Error> {
+    async fn connect(&self) -> Result<(), Error> {
         use zebra_network::{AddressBook, Request, Response};
 
         info!("begin tower-based peer handling test stub");
@@ -44,7 +47,7 @@ impl ConnectCmd {
             service_fn(|req| {
                 async move {
                     info!(?req);
-                    Ok::<Response, failure::Error>(Response::Ok)
+                    Ok::<Response, Error>(Response::Ok)
                 }
             }),
             1,
@@ -59,17 +62,22 @@ impl ConnectCmd {
         let (mut peer_set, _address_book) = zebra_network::init(config, node).await;
 
         info!("waiting for peer_set ready");
-        peer_set.ready().await.map_err(Error::from_boxed_compat)?;
+        peer_set
+            .ready()
+            .await
+            .map_err(|e| Error::from(ErrorKind::Io.context(e)))?;
 
         info!("peer_set became ready, constructing addr requests");
 
-        use failure::Error;
         use futures::stream::{FuturesUnordered, StreamExt};
 
         let mut addr_reqs = FuturesUnordered::new();
         for i in 0..10usize {
             info!(i, "awaiting peer_set ready");
-            peer_set.ready().await.map_err(Error::from_boxed_compat)?;
+            peer_set
+                .ready()
+                .await
+                .map_err(|e| Error::from(ErrorKind::Io.context(e)))?;
             info!(i, "calling peer_set");
             addr_reqs.push(peer_set.call(Request::GetPeers));
         }
