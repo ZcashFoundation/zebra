@@ -4,13 +4,12 @@
 //! application's configuration file and/or command-line options
 //! for specifying it.
 
-use abscissa_core::Config;
 use serde::{Deserialize, Serialize};
 
 use zebra_network::Config as NetworkSection;
 
 /// Zebrad Configuration
-#[derive(Clone, Config, Default, Debug, Deserialize, Serialize)]
+#[derive(Clone, Default, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ZebradConfig {
     /// Tracing configuration

@@ -2,7 +2,7 @@
 
 use crate::components::tokio::TokioComponent;
 
-use abscissa_core::{err, Component, FrameworkError, FrameworkErrorKind};
+use abscissa_core::{format_err, Component, FrameworkError, FrameworkErrorKind};
 
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Request, Response, Server};
@@ -34,7 +34,7 @@ impl TracingEndpoint {
         // XXX this is only required if we have a dependency that uses log;
         // currently this is maybe only abscissa itself?
         LogTracer::init().map_err(|e| {
-            err!(
+            format_err!(
                 FrameworkErrorKind::ComponentError,
                 "could not set log subscriber: {}",
                 e
@@ -52,7 +52,7 @@ impl TracingEndpoint {
 
         // Set that subscriber to be the global tracing subscriber
         tracing::subscriber::set_global_default(subscriber).map_err(|e| {
-            err!(
+            format_err!(
                 FrameworkErrorKind::ComponentError,
                 "could not set tracing subscriber: {}",
                 e
