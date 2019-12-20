@@ -8,8 +8,6 @@ use std::{
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{DateTime, TimeZone, Utc};
 use hex;
-#[cfg(test)]
-use proptest_derive::Arbitrary;
 
 use crate::serialization::{
     ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
@@ -132,7 +130,7 @@ mod proptest {
 
     use std::io::Cursor;
 
-    use chrono::Utc;
+    use chrono::{TimeZone, Utc};
     use proptest::prelude::*;
 
     use super::{BlockHeight, LockTime};
@@ -144,7 +142,9 @@ mod proptest {
         fn arbitrary_with(_args: ()) -> Self::Strategy {
             prop_oneof![
                 (0u32..500_000_000_u32).prop_map(|n| LockTime::Height(BlockHeight(n))),
-                Just(LockTime::Time(Utc::now()))
+                Just(LockTime::Time(
+                    Utc.timestamp(Utc::now().timestamp() as i64, 0)
+                ))
             ]
             .boxed()
         }
