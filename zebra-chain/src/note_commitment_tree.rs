@@ -28,7 +28,7 @@ pub struct SaplingNoteCommitmentTree;
 /// this block. A root of a note commitment tree is associated with
 /// each treestate.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct SaplingNoteTreeRootHash([u8; 32]);
+pub struct SaplingNoteTreeRootHash(pub [u8; 32]);
 
 impl From<SaplingNoteCommitmentTree> for SaplingNoteTreeRootHash {
     fn from(_tree: SaplingNoteCommitmentTree) -> Self {
