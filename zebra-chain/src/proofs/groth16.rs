@@ -1,4 +1,6 @@
-use std::fmt;
+use std::{fmt, io};
+
+use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 
 /// An encoding of a Groth16 proof, as used in Zcash.
 pub struct Groth16Proof(pub [u8; 192]);
@@ -30,3 +32,18 @@ impl PartialEq for Groth16Proof {
 }
 
 impl Eq for Groth16Proof {}
+
+impl ZcashSerialize for Groth16Proof {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+        writer.write_all(&self.0[..])?;
+        Ok(())
+    }
+}
+
+impl ZcashDeserialize for Groth16Proof {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        let mut bytes = [0; 192];
+        reader.read_exact(&mut bytes[..])?;
+        Ok(Self(bytes))
+    }
+}
