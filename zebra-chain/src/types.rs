@@ -1,12 +1,17 @@
 //! Newtype wrappers for primitive data types with semantic meaning.
 
-use std::{fmt, io};
+use std::{
+    fmt,
+    io::{self, Read},
+};
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{DateTime, TimeZone, Utc};
 use hex;
 
-use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
+use crate::serialization::{
+    ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
+};
 
 /// A 4-byte checksum using truncated double-SHA256 (two rounds of SHA256).
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -79,6 +84,24 @@ impl ZcashDeserialize for LockTime {
 /// An encoding of a Bitcoin script.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Script(pub Vec<u8>);
+
+impl ZcashSerialize for Script {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+        writer.write_compactsize(self.0.len() as u64)?;
+        writer.write_all(&self.0[..])?;
+        Ok(())
+    }
+}
+
+impl ZcashDeserialize for Script {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        // XXX what is the max length of a script?
+        let len = reader.read_compactsize()?;
+        let mut bytes = Vec::new();
+        reader.take(len).read_to_end(&mut bytes)?;
+        Ok(Script(bytes))
+    }
+}
 
 #[cfg(test)]
 mod tests {
