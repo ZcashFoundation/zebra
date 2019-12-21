@@ -1,6 +1,6 @@
 // XXX this name seems too long?
 use crate::note_commitment_tree::SaplingNoteTreeRootHash;
-
+use crate::proofs::Groth16Proof;
 use crate::redjubjub::{self, Binding, SpendAuth};
 
 /// A _Spend Description_, as described in [protocol specification §7.3][ps].
@@ -21,10 +21,7 @@ pub struct SpendDescription {
     /// The randomized public key for `spend_auth_sig`.
     pub rk: redjubjub::PublicKeyBytes<SpendAuth>,
     /// The ZK spend proof.
-    ///
-    /// XXX add proof types.
-    /// XXX for now it's [u64; 24] instead of [u8; 192] to get trait impls
-    pub zkproof: [u64; 24],
+    pub zkproof: Groth16Proof,
     /// A signature authorizing this spend.
     pub spend_auth_sig: redjubjub::Signature<SpendAuth>,
 }
@@ -57,10 +54,7 @@ pub struct OutputDescription {
     /// XXX this is a [u64; 10] rather than a [u8; 80] to get trait impls
     pub out_ciphertext: [u64; 10],
     /// The ZK output proof.
-    ///
-    /// XXX add proof types.
-    /// XXX for now it's [u64; 24] instead of [u8; 192] to get trait impls
-    pub zkproof: [u64; 24],
+    pub zkproof: Groth16Proof,
 }
 
 /// Sapling-on-Groth16 spend and output descriptions.
