@@ -55,6 +55,31 @@ pub trait ZcashDeserialize: Sized {
     fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError>;
 }
 
+impl<T: ZcashSerialize> ZcashSerialize for Vec<T> {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+        writer.write_compactsize(self.len() as u64)?;
+        for x in self {
+            x.zcash_serialize(&mut writer)?;
+        }
+        Ok(())
+    }
+}
+
+impl<T: ZcashDeserialize> ZcashDeserialize for Vec<T> {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        let len = reader.read_compactsize()?;
+        // We're given len, so we could preallocate. But blindly preallocating
+        // without a size bound can allow DOS attacks, and there's no way to
+        // pass a size bound in a ZcashDeserialize impl, so instead we allocate
+        // as we read from the reader.
+        let mut vec = Vec::new();
+        for _ in 0..len {
+            vec.push(T::zcash_deserialize(&mut reader)?);
+        }
+        Ok(vec)
+    }
+}
+
 /// Extends [`Write`] with methods for writing Zcash/Bitcoin types.
 ///
 /// [`Write`]: https://doc.rust-lang.org/std/io/trait.Write.html
@@ -247,37 +272,6 @@ pub trait ReadZcashExt: io::Read {
         let mut bytes = [0; 32];
         self.read_exact(&mut bytes)?;
         Ok(bytes)
-    }
-
-    /// Convenience method to read a `Vec<T>` with a leading count in
-    /// a safer manner.
-    ///
-    /// This method preallocates a buffer, performing a single
-    /// allocation in the honest case. It's possible for someone to
-    /// send a short message with a large count field, so if we
-    /// naively trust the count field we could be tricked into
-    /// preallocating a large buffer. Instead, we rely on the passed
-    /// maximum count for a valid message and select the min of the
-    /// two values.
-    #[inline]
-    fn read_list<T: ZcashDeserialize>(
-        &mut self,
-        max_count: usize,
-    ) -> Result<Vec<T>, SerializationError> {
-        // This prevents the inferred type for zcash_deserialize from
-        // taking ownership of &mut self. This wouldn't really be an
-        // issue if the target impl's `Copy`, but we need to own it.
-        let mut self2 = self;
-
-        let count = self2.read_compactsize()? as usize;
-
-        let mut items = Vec::with_capacity(std::cmp::min(count, max_count));
-
-        for _ in 0..count {
-            items.push(T::zcash_deserialize(&mut self2)?);
-        }
-
-        return Ok(items);
     }
 }
 
