@@ -14,6 +14,7 @@ chrono = "0.4"
 hex = "0.4"
 sha2 = "0.8"
 redjubjub = "0.1"
+futures = "0.3"
 
 [dev-dependencies]
 proptest = "0.9"

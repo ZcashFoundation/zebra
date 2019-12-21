@@ -1,3 +1,5 @@
+use futures::future::Either;
+
 // XXX this name seems too long?
 use crate::note_commitment_tree::SaplingNoteTreeRootHash;
 use crate::proofs::Groth16Proof;
@@ -58,12 +60,64 @@ pub struct OutputDescription {
 }
 
 /// Sapling-on-Groth16 spend and output descriptions.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct ShieldedData {
-    /// A sequence of [`SpendDescription`]s for this transaction.
-    pub shielded_spends: Vec<SpendDescription>,
-    /// A sequence of shielded outputs for this transaction.
-    pub shielded_outputs: Vec<OutputDescription>,
+    /// Either a spend or output description.
+    ///
+    /// Storing this separately ensures that it is impossible to construct
+    /// an invalid `ShieldedData` with no spends or outputs.
+    pub first: Either<SpendDescription, OutputDescription>,
+    /// The rest of the [`SpendDescription`]s for this transaction.
+    pub rest_spends: Vec<SpendDescription>,
+    /// The rest of the [`OutputDescription`]s for this transaction.
+    pub rest_outputs: Vec<OutputDescription>,
     /// A signature on the transaction hash.
     pub binding_sig: redjubjub::Signature<Binding>,
 }
+
+impl ShieldedData {
+    /// Iterate over the [`SpendDescription`]s for this transaction.
+    pub fn spends(&self) -> impl Iterator<Item = &SpendDescription> {
+        match self.first {
+            Either::Left(ref spend) => Some(spend),
+            Either::Right(_) => None,
+        }
+        .into_iter()
+        .chain(self.rest_spends.iter())
+    }
+
+    /// Iterate over the [`OutputDescription`]s for this transaction.
+    pub fn outputs(&self) -> impl Iterator<Item = &OutputDescription> {
+        match self.first {
+            Either::Left(_) => None,
+            Either::Right(ref output) => Some(output),
+        }
+        .into_iter()
+        .chain(self.rest_outputs.iter())
+    }
+}
+
+// Technically, it's possible to construct two equivalent representations
+// of a ShieldedData with at least one spend and at least one output, depending
+// on which goes in the `first` slot.  This is annoying but a smallish price to
+// pay for structural validity.
+
+impl std::cmp::PartialEq for ShieldedData {
+    fn eq(&self, other: &Self) -> bool {
+        // First check that the lengths match, so we know it is safe to use zip,
+        // which truncates to the shorter of the two iterators.
+        if self.spends().count() != other.spends().count() {
+            return false;
+        }
+        if self.outputs().count() != other.outputs().count() {
+            return false;
+        }
+
+        // Now check that the binding_sig, spends, outputs match.
+        self.binding_sig == other.binding_sig
+            && self.spends().zip(other.spends()).all(|(a, b)| a == b)
+            && self.outputs().zip(other.outputs()).all(|(a, b)| a == b)
+    }
+}
+
+impl std::cmp::Eq for ShieldedData {}
