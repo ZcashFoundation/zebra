@@ -1,4 +1,6 @@
-use std::fmt;
+use std::{fmt, io};
+
+use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 
 /// An encoding of a BCTV14 proof, as used in Zcash.
 pub struct Bctv14Proof(pub [u8; 296]);
@@ -30,3 +32,18 @@ impl PartialEq for Bctv14Proof {
 }
 
 impl Eq for Bctv14Proof {}
+
+impl ZcashSerialize for Bctv14Proof {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+        writer.write_all(&self.0[..])?;
+        Ok(())
+    }
+}
+
+impl ZcashDeserialize for Bctv14Proof {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        let mut bytes = [0; 296];
+        reader.read_exact(&mut bytes[..])?;
+        Ok(Self(bytes))
+    }
+}
