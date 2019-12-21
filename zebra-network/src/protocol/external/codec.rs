@@ -9,7 +9,7 @@ use chrono::{TimeZone, Utc};
 use tokio_util::codec::{Decoder, Encoder};
 
 use zebra_chain::{
-    block::{Block, BlockHeader, BlockHeaderHash},
+    block::{Block, BlockHeaderHash},
     serialization::{
         ReadZcashExt, SerializationError as Error, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
     },
@@ -20,7 +20,6 @@ use zebra_chain::{
 use crate::{constants, types::Network};
 
 use super::{
-    inv::InventoryHash,
     message::{Message, RejectReason},
     types::*,
 };
@@ -202,12 +201,7 @@ impl Codec {
                 writer.write_string(&reason)?;
                 writer.write_all(&data.unwrap())?;
             }
-            Addr(ref addrs) => {
-                writer.write_compactsize(addrs.len() as u64)?;
-                for addr in addrs {
-                    addr.zcash_serialize(&mut writer)?;
-                }
-            }
+            Addr(ref addrs) => addrs.zcash_serialize(&mut writer)?,
             GetAddr => { /* Empty payload -- no-op */ }
             Block {
                 ref version,
@@ -222,10 +216,7 @@ impl Codec {
                 ref hash_stop,
             } => {
                 writer.write_u32::<LittleEndian>(version.0)?;
-                writer.write_compactsize(block_locator_hashes.len() as u64)?;
-                for hash in block_locator_hashes {
-                    hash.zcash_serialize(&mut writer)?;
-                }
+                block_locator_hashes.zcash_serialize(&mut writer)?;
                 hash_stop.zcash_serialize(&mut writer)?;
             }
             GetHeaders {
@@ -234,36 +225,13 @@ impl Codec {
                 ref hash_stop,
             } => {
                 writer.write_u32::<LittleEndian>(version.0)?;
-                writer.write_compactsize(block_locator_hashes.len() as u64)?;
-                for hash in block_locator_hashes {
-                    hash.zcash_serialize(&mut writer)?;
-                }
+                block_locator_hashes.zcash_serialize(&mut writer)?;
                 hash_stop.zcash_serialize(&mut writer)?;
             }
-            Headers(ref headers) => {
-                writer.write_compactsize(headers.len() as u64)?;
-                for header in headers {
-                    header.zcash_serialize(&mut writer)?;
-                }
-            }
-            Inv(ref hashes) => {
-                writer.write_compactsize(hashes.len() as u64)?;
-                for hash in hashes {
-                    hash.zcash_serialize(&mut writer)?;
-                }
-            }
-            GetData(ref hashes) => {
-                writer.write_compactsize(hashes.len() as u64)?;
-                for hash in hashes {
-                    hash.zcash_serialize(&mut writer)?;
-                }
-            }
-            NotFound(ref hashes) => {
-                writer.write_compactsize(hashes.len() as u64)?;
-                for hash in hashes {
-                    hash.zcash_serialize(&mut writer)?;
-                }
-            }
+            Headers(ref headers) => headers.zcash_serialize(&mut writer)?,
+            Inv(ref hashes) => hashes.zcash_serialize(&mut writer)?,
+            GetData(ref hashes) => hashes.zcash_serialize(&mut writer)?,
+            NotFound(ref hashes) => hashes.zcash_serialize(&mut writer)?,
             Tx {
                 ref version,
                 ref transaction,
@@ -488,16 +456,8 @@ impl Codec {
         })
     }
 
-    fn read_addr<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
-        use crate::meta_addr::MetaAddr;
-
-        // addrs are encoded as: timestamp + services + ipv6 + port
-        const ENCODED_ADDR_SIZE: usize = 4 + 8 + 16 + 2;
-        let max_count = self.builder.max_len / ENCODED_ADDR_SIZE;
-
-        let addrs: Vec<MetaAddr> = reader.read_list(max_count)?;
-
-        Ok(Message::Addr(addrs))
+    fn read_addr<R: Read>(&self, reader: R) -> Result<Message, Error> {
+        Ok(Message::Addr(Vec::zcash_deserialize(reader)?))
     }
 
     fn read_getaddr<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
@@ -507,24 +467,15 @@ impl Codec {
     fn read_block<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
         Ok(Message::Block {
             version: Version(reader.read_u32::<LittleEndian>()?),
-
             block: Block::zcash_deserialize(&mut reader)?,
         })
     }
 
     fn read_getblocks<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
-        let version = Version(reader.read_u32::<LittleEndian>()?);
-
-        let max_count = self.builder.max_len / 32;
-
-        let block_locator_hashes: Vec<BlockHeaderHash> = reader.read_list(max_count)?;
-
-        let hash_stop = BlockHeaderHash(reader.read_32_bytes()?);
-
         Ok(Message::GetBlocks {
-            version,
-            block_locator_hashes,
-            hash_stop,
+            version: Version(reader.read_u32::<LittleEndian>()?),
+            block_locator_hashes: Vec::zcash_deserialize(&mut reader)?,
+            hash_stop: BlockHeaderHash(reader.read_32_bytes()?),
         })
     }
 
@@ -534,62 +485,32 @@ impl Codec {
     ///
     /// [Zcash block header](https://zips.z.cash/protocol/protocol.pdf#page=84)
     fn read_headers<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
-        const ENCODED_HEADER_SIZE: usize = 4 + 32 + 32 + 32 + 4 + 4 + 32 + 3 + 1344;
-        let max_count = self.builder.max_len / ENCODED_HEADER_SIZE;
-
-        let headers: Vec<BlockHeader> = reader.read_list(max_count)?;
-
-        Ok(Message::Headers(headers))
+        Ok(Message::Headers(Vec::zcash_deserialize(&mut reader)?))
     }
 
     fn read_getheaders<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
-        let version = Version(reader.read_u32::<LittleEndian>()?);
-
-        let max_count = self.builder.max_len / 32;
-
-        let block_locator_hashes: Vec<BlockHeaderHash> = reader.read_list(max_count)?;
-
-        let hash_stop = BlockHeaderHash(reader.read_32_bytes()?);
-
         Ok(Message::GetHeaders {
-            version,
-            block_locator_hashes,
-            hash_stop,
+            version: Version(reader.read_u32::<LittleEndian>()?),
+            block_locator_hashes: Vec::zcash_deserialize(&mut reader)?,
+            hash_stop: BlockHeaderHash(reader.read_32_bytes()?),
         })
     }
 
-    fn read_inv<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
-        // encoding: 4 byte type tag + 32 byte hash
-        const ENCODED_INVHASH_SIZE: usize = 4 + 32;
-        let max_count = self.builder.max_len / ENCODED_INVHASH_SIZE;
-
-        let hashes: Vec<InventoryHash> = reader.read_list(max_count)?;
-        Ok(Message::Inv(hashes))
+    fn read_inv<R: Read>(&self, reader: R) -> Result<Message, Error> {
+        Ok(Message::Inv(Vec::zcash_deserialize(reader)?))
     }
 
-    fn read_getdata<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
-        // encoding: 4 byte type tag + 32 byte hash
-        const ENCODED_INVHASH_SIZE: usize = 4 + 32;
-        let max_count = self.builder.max_len / ENCODED_INVHASH_SIZE;
-
-        let hashes: Vec<InventoryHash> = reader.read_list(max_count)?;
-        Ok(Message::GetData(hashes))
+    fn read_getdata<R: Read>(&self, reader: R) -> Result<Message, Error> {
+        Ok(Message::GetData(Vec::zcash_deserialize(reader)?))
     }
 
-    fn read_notfound<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
-        // encoding: 4 byte type tag + 32 byte hash
-        const ENCODED_INVHASH_SIZE: usize = 4 + 32;
-        let max_count = self.builder.max_len / ENCODED_INVHASH_SIZE;
-
-        let hashes: Vec<InventoryHash> = reader.read_list(max_count)?;
-
-        Ok(Message::GetData(hashes))
+    fn read_notfound<R: Read>(&self, reader: R) -> Result<Message, Error> {
+        Ok(Message::GetData(Vec::zcash_deserialize(reader)?))
     }
 
     fn read_tx<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
         Ok(Message::Tx {
             version: Version(reader.read_u32::<LittleEndian>()?),
-
             transaction: Transaction::zcash_deserialize(&mut reader)?,
         })
     }
