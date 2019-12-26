@@ -76,20 +76,6 @@ impl Application for ZebradApp {
         &mut self.state
     }
 
-    /// Override the provided impl to skip the default logging component.
-    ///
-    /// We want to use tracing as the log subscriber in our tracing component,
-    /// so only initialize the abscissa Terminal component.
-    fn framework_components(
-        &mut self,
-        _command: &Self::Cmd,
-    ) -> Result<Vec<Box<dyn Component<Self>>>, FrameworkError> {
-        use abscissa_core::terminal::{component::Terminal, ColorChoice};
-        // XXX abscissa uses self.term_colors(command), check if we should match
-        let terminal = Terminal::new(ColorChoice::Auto);
-        Ok(vec![Box::new(terminal)])
-    }
-
     /// Register all components used by this application.
     ///
     /// If you would like to add additional components to your application

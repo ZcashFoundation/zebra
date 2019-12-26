@@ -1,24 +1,16 @@
 //! An HTTP endpoint for dynamically setting tracing filters.
 
-use crate::components::tokio::TokioComponent;
+use crate::{components::tokio::TokioComponent, prelude::*};
 
-use abscissa_core::{format_err, Component, FrameworkError, FrameworkErrorKind};
+use abscissa_core::{Component, FrameworkError};
 
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Request, Response, Server};
 
-use tracing::Subscriber;
-use tracing_log::LogTracer;
-use tracing_subscriber::{reload::Handle, EnvFilter, FmtSubscriber};
-
 /// Abscissa component which runs a tracing filter endpoint.
 #[derive(Component)]
 #[component(inject = "init_tokio(zebrad::components::tokio::TokioComponent)")]
-// XXX ideally this would be TracingEndpoint<S: Subscriber>
-// but this doesn't seem to play well with derive(Component)
-pub struct TracingEndpoint {
-    filter_handle: Handle<EnvFilter, tracing_subscriber::fmt::Formatter>,
-}
+pub struct TracingEndpoint {}
 
 impl ::std::fmt::Debug for TracingEndpoint {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> Result<(), ::std::fmt::Error> {
@@ -27,54 +19,28 @@ impl ::std::fmt::Debug for TracingEndpoint {
     }
 }
 
+async fn read_filter(req: Request<Body>) -> Result<String, String> {
+    std::str::from_utf8(
+        &hyper::body::to_bytes(req.into_body())
+            .await
+            .map_err(|_| "Error reading body".to_owned())?,
+    )
+    .map(|s| s.to_owned())
+    .map_err(|_| "Filter must be UTF-8".to_owned())
+}
+
 impl TracingEndpoint {
     /// Create the component.
     pub fn new() -> Result<Self, FrameworkError> {
-        // Set the global logger for the log crate to emit tracing events.
-        // XXX this is only required if we have a dependency that uses log;
-        // currently this is maybe only abscissa itself?
-        LogTracer::init().map_err(|e| {
-            format_err!(
-                FrameworkErrorKind::ComponentError,
-                "could not set log subscriber: {}",
-                e
-            )
-        })?;
-
-        let builder = FmtSubscriber::builder()
-            .with_ansi(true)
-            // Set the initial filter from the RUST_LOG env variable
-            // XXX pull from config file?
-            .with_env_filter(EnvFilter::from_default_env())
-            .with_filter_reloading();
-        let filter_handle = builder.reload_handle();
-        let subscriber = builder.finish();
-
-        // Set that subscriber to be the global tracing subscriber
-        tracing::subscriber::set_global_default(subscriber).map_err(|e| {
-            format_err!(
-                FrameworkErrorKind::ComponentError,
-                "could not set tracing subscriber: {}",
-                e
-            )
-        })?;
-
-        Ok(Self { filter_handle })
+        Ok(Self {})
     }
 
     /// Do setup after receiving a tokio runtime.
     pub fn init_tokio(&mut self, tokio_component: &TokioComponent) -> Result<(), FrameworkError> {
         info!("Initializing tracing endpoint");
 
-        // Clone the filter handle so it can be moved into make_service_fn closure
-        let handle = self.filter_handle.clone();
-        let service = make_service_fn(move |_| {
-            // Clone again to move into the service_fn closure
-            let handle = handle.clone();
-            async move {
-                Ok::<_, hyper::Error>(service_fn(move |req| filter_handler(handle.clone(), req)))
-            }
-        });
+        let service =
+            make_service_fn(|_| async { Ok::<_, hyper::Error>(service_fn(request_handler)) });
 
         // XXX load tracing addr from config
         let addr = "127.0.0.1:3000"
@@ -103,50 +69,52 @@ impl TracingEndpoint {
     }
 }
 
-fn reload_filter_from_bytes<S: Subscriber>(
-    handle: Handle<EnvFilter, S>,
-    bytes: hyper::body::Bytes,
-) -> Result<(), String> {
-    let body = std::str::from_utf8(bytes.as_ref()).map_err(|e| format!("{}", e))?;
-    trace!(request.body = ?body);
-    let filter = body.parse::<EnvFilter>().map_err(|e| format!("{}", e))?;
-    handle.reload(filter).map_err(|e| format!("{}", e))
-}
-
-async fn filter_handler<S: Subscriber>(
-    handle: Handle<EnvFilter, S>,
-    req: Request<Body>,
-) -> Result<Response<Body>, hyper::Error> {
-    // XXX see below
-    //use futures_util::TryStreamExt;
+#[instrument]
+async fn request_handler(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
     use hyper::{Method, StatusCode};
-
-    // We can't use #[instrument] because Handle<_,_> is not Debug,
-    // so we create a span manually.
-    let handler_span =
-        info_span!("filter_handler", method = ?req.method(), path = ?req.uri().path());
-    let _enter = handler_span.enter(); // dropping _enter closes the span
 
     let rsp = match (req.method(), req.uri().path()) {
         (&Method::GET, "/") => Response::new(Body::from(
             r#"
 This HTTP endpoint allows dynamic control of the filter applied to
-tracing events.  To set the filter, POST it to /filter:
+tracing events.
 
-curl -X POST localhost:3000/filter -d "zebrad=trace"
+To get the current filter, GET /filter:
+
+    curl -X GET localhost:3000/filter
+
+To set the filter, POST the new filter string to /filter:
+
+    curl -X POST localhost:3000/filter -d "zebrad=trace"
 "#,
         )),
-        (&Method::POST, "/filter") => {
-            // Combine all HTTP request chunks into one
-            let body_bytes = hyper::body::to_bytes(req.into_body()).await?;
-            match reload_filter_from_bytes(handle, body_bytes) {
-                Err(e) => Response::builder()
-                    .status(StatusCode::BAD_REQUEST)
-                    .body(Body::from(e))
-                    .expect("response with known status code cannot fail"),
-                Ok(()) => Response::new(Body::from("")),
+        (&Method::GET, "/filter") => Response::builder()
+            .status(StatusCode::OK)
+            .body(Body::from(
+                app_reader()
+                    .state()
+                    .components
+                    .get_downcast_ref::<abscissa_core::trace::Tracing>()
+                    .expect("Tracing component should be available")
+                    .filter(),
+            ))
+            .expect("response with known status code cannot fail"),
+        (&Method::POST, "/filter") => match read_filter(req).await {
+            Ok(filter) => {
+                app_writer()
+                    .state_mut()
+                    .components
+                    .get_downcast_mut::<abscissa_core::trace::Tracing>()
+                    .expect("Tracing component should be available")
+                    .reload_filter(filter);
+
+                Response::new(Body::from(""))
             }
-        }
+            Err(e) => Response::builder()
+                .status(StatusCode::BAD_REQUEST)
+                .body(Body::from(e))
+                .expect("response with known status code cannot fail"),
+        },
         _ => Response::builder()
             .status(StatusCode::NOT_FOUND)
             .body(Body::from(""))
