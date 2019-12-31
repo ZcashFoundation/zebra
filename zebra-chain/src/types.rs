@@ -8,6 +8,8 @@ use std::{
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{DateTime, TimeZone, Utc};
 use hex;
+#[cfg(test)]
+use proptest_derive::Arbitrary;
 
 use crate::serialization::{
     ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
@@ -83,6 +85,7 @@ impl ZcashDeserialize for LockTime {
 
 /// An encoding of a Bitcoin script.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(test, derive(Arbitrary))]
 pub struct Script(pub Vec<u8>);
 
 impl ZcashSerialize for Script {
@@ -133,7 +136,7 @@ mod proptest {
     use chrono::{TimeZone, Utc};
     use proptest::prelude::*;
 
-    use super::{BlockHeight, LockTime};
+    use super::{BlockHeight, LockTime, Script};
     use crate::serialization::{ZcashDeserialize, ZcashSerialize};
 
     impl Arbitrary for LockTime {
@@ -163,8 +166,17 @@ mod proptest {
             let other_locktime = LockTime::zcash_deserialize(&mut bytes)?;
 
             prop_assert_eq![locktime, other_locktime];
+        }
 
+        #[test]
+        fn script_roundtrip(script in any::<Script>()) {
+            let mut bytes = Cursor::new(Vec::new());
+            script.zcash_serialize(&mut bytes)?;
 
+            bytes.set_position(0);
+            let other_script = Script::zcash_deserialize(&mut bytes)?;
+
+            prop_assert_eq![script, other_script];
         }
 
 
