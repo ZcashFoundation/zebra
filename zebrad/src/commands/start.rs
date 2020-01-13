@@ -40,12 +40,15 @@ impl Runnable for StartCmd {
 
         use crate::components::tokio::TokioComponent;
 
-        app_writer()
+        let rt = app_writer()
             .state_mut()
             .components
             .get_downcast_mut::<TokioComponent>()
             .expect("TokioComponent should be available")
             .rt
+            .take();
+
+        rt.expect("runtime should not already be taken")
             .block_on(future::pending::<()>());
     }
 }
