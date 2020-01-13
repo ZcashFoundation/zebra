@@ -47,23 +47,27 @@ impl TracingEndpoint {
             .parse()
             .expect("Hardcoded address should be parseable");
 
-        tokio_component.rt.spawn(async move {
-            // try_bind uses the tokio runtime, so we
-            // need to construct it inside the task.
-            let server = match Server::try_bind(&addr) {
-                Ok(s) => s,
-                Err(e) => {
-                    error!("Could not open tracing endpoint listener");
-                    error!("Error: {}", e);
-                    return;
+        tokio_component
+            .rt
+            .as_ref()
+            .expect("runtime should not be taken")
+            .spawn(async move {
+                // try_bind uses the tokio runtime, so we
+                // need to construct it inside the task.
+                let server = match Server::try_bind(&addr) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        error!("Could not open tracing endpoint listener");
+                        error!("Error: {}", e);
+                        return;
+                    }
                 }
-            }
-            .serve(service);
+                .serve(service);
 
-            if let Err(e) = server.await {
-                error!("Server error: {}", e);
-            }
-        });
+                if let Err(e) = server.await {
+                    error!("Server error: {}", e);
+                }
+            });
 
         Ok(())
     }

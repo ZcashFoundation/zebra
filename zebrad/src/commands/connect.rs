@@ -26,13 +26,18 @@ impl Runnable for ConnectCmd {
         info!(connect.addr = ?self.addr);
 
         use crate::components::tokio::TokioComponent;
-        let _ = app_writer()
+        let rt = app_writer()
             .state_mut()
             .components
             .get_downcast_mut::<TokioComponent>()
             .expect("TokioComponent should be available")
             .rt
-            .block_on(self.connect());
+            .take();
+
+        rt.expect("runtime should not already be taken")
+            .block_on(self.connect())
+            // Surface any error that occurred executing the future.
+            .unwrap();
     }
 }
 
@@ -44,11 +49,9 @@ impl ConnectCmd {
         use tower::{buffer::Buffer, service_fn, Service, ServiceExt};
 
         let node = Buffer::new(
-            service_fn(|req| {
-                async move {
-                    info!(?req);
-                    Ok::<Response, Error>(Response::Ok)
-                }
+            service_fn(|req| async move {
+                info!(?req);
+                Ok::<Response, Error>(Response::Ok)
             }),
             1,
         );

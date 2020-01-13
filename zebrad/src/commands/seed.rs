@@ -112,13 +112,18 @@ impl Runnable for SeedCmd {
     fn run(&self) {
         use crate::components::tokio::TokioComponent;
 
-        let _ = app_writer()
+        let rt = app_writer()
             .state_mut()
             .components
             .get_downcast_mut::<TokioComponent>()
             .expect("TokioComponent should be available")
             .rt
-            .block_on(self.seed());
+            .take();
+
+        rt.expect("runtime should not already be taken")
+            .block_on(self.seed())
+            // Surface any error that occurred executing the future.
+            .unwrap();
     }
 }
 

@@ -3,7 +3,7 @@
 use crate::{commands::ZebradCmd, config::ZebradConfig};
 use abscissa_core::{
     application::{self, AppCell},
-    config, trace, Application, Component, EntryPoint, FrameworkError, StandardPaths,
+    config, trace, Application, EntryPoint, FrameworkError, StandardPaths,
 };
 
 /// Application state
