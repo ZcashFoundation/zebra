@@ -17,9 +17,7 @@ jobs:
         service_account_key: ${{ secrets.GCLOUD_AUTH }}
 
     - name: Build, Test, Push to GCR
-
-      with:
-        run: |
-          BRANCH_NAME=$GITHUB_REPOSITORY/$(expr $GITHUB_REF : '.*/\(.*\)') && \
-          BRANCH_NAME=${BRANCH_NAME,,} && \
-          gcloud builds submit . --config cloudbuild.yaml --project zealous-zebra --substitutions BRANCH_NAME=$BRANCH_NAME
+      run: |
+        BRANCH_NAME=$GITHUB_REPOSITORY/$(expr $GITHUB_REF : '.*/\(.*\)') && \
+        BRANCH_NAME=${BRANCH_NAME,,} && \
+        gcloud builds submit . --config cloudbuild.yaml --project zealous-zebra --substitutions BRANCH_NAME=$BRANCH_NAME
