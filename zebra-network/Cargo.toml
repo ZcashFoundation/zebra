@@ -28,7 +28,7 @@ futures = "0.3"
 tracing = "0.1"
 tracing-futures = "0.2"
 
-tower = { git = "https://github.com/tower-rs/tower" }
-tower-load = { git = "https://github.com/tower-rs/tower" }
+tower = "0.3"
+tower-load = "0.3"
 
 zebra-chain = { path = "../zebra-chain" }
