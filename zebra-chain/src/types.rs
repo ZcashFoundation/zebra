@@ -9,6 +9,8 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{DateTime, TimeZone, Utc};
 use hex;
 #[cfg(test)]
+use proptest::prelude::*;
+#[cfg(test)]
 use proptest_derive::Arbitrary;
 
 use crate::serialization::{
@@ -83,6 +85,23 @@ impl ZcashDeserialize for LockTime {
     }
 }
 
+#[cfg(test)]
+impl Arbitrary for LockTime {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: ()) -> Self::Strategy {
+        prop_oneof![
+            (0u32..500_000_000_u32).prop_map(|n| LockTime::Height(BlockHeight(n))),
+            Just(LockTime::Time(
+                Utc.timestamp(Utc::now().timestamp() as i64, 0)
+            ))
+        ]
+        .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
+
 /// An encoding of a Bitcoin script.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(test, derive(Arbitrary))]
@@ -129,31 +148,31 @@ mod tests {
 }
 
 #[cfg(test)]
-mod proptest {
+mod proptests {
 
     use std::io::Cursor;
 
-    use chrono::{TimeZone, Utc};
     use proptest::prelude::*;
+    use proptest_derive::Arbitrary;
 
     use super::{BlockHeight, LockTime, Script};
     use crate::serialization::{ZcashDeserialize, ZcashSerialize};
 
-    impl Arbitrary for LockTime {
-        type Parameters = ();
+    // impl Arbitrary for LockTime {
+    //     type Parameters = ();
 
-        fn arbitrary_with(_args: ()) -> Self::Strategy {
-            prop_oneof![
-                (0u32..500_000_000_u32).prop_map(|n| LockTime::Height(BlockHeight(n))),
-                Just(LockTime::Time(
-                    Utc.timestamp(Utc::now().timestamp() as i64, 0)
-                ))
-            ]
-            .boxed()
-        }
+    //     fn arbitrary_with(_args: ()) -> Self::Strategy {
+    //         prop_oneof![
+    //             (0u32..500_000_000_u32).prop_map(|n| LockTime::Height(BlockHeight(n))),
+    //             Just(LockTime::Time(
+    //                 Utc.timestamp(Utc::now().timestamp() as i64, 0)
+    //             ))
+    //         ]
+    //         .boxed()
+    //     }
 
-        type Strategy = BoxedStrategy<Self>;
-    }
+    //     type Strategy = BoxedStrategy<Self>;
+    // }
 
     proptest! {
 
