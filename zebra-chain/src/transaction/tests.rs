@@ -1,6 +1,39 @@
-use crate::serialization::{ZcashDeserialize, ZcashSerialize};
+use std::io::Cursor;
+
+use chrono::{TimeZone, Utc};
+
+use proptest::{
+    collection::{vec, SizeRange},
+    option,
+    prelude::*,
+};
+
+use crate::{
+    serialization::{ZcashDeserialize, ZcashSerialize},
+    types::LockTime,
+};
 
 use super::*;
+
+impl Arbitrary for Transaction {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: ()) -> Self::Strategy {
+        (
+            vec(any::<TransparentInput>(), 0..10),
+            vec(any::<TransparentOutput>(), 0..10),
+            any::<LockTime>(),
+        )
+            .prop_map(|(inputs, outputs, lock_time)| Transaction::V1 {
+                inputs: inputs,
+                outputs: outputs,
+                lock_time: lock_time,
+            })
+            .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
 
 #[test]
 fn librustzcash_tx_deserialize_and_round_trip() {
@@ -153,4 +186,29 @@ fn librustzcash_tx_deserialize_and_round_trip() {
     tx.zcash_serialize(&mut data2).expect("tx should serialize");
 
     assert_eq!(&data[..], &data2[..]);
+}
+
+#[cfg(test)]
+proptest! {
+
+    #[test]
+    fn transaction_roundtrip(mut random in vec(any::<u8>(), 1982)) {
+
+        // Standard header and version group id.
+        let mut data = vec![0x04, 0x00, 0x00, 0x80, 0x85, 0x20, 0x2f, 0x89];
+        data.append(&mut random);
+
+        // println!("{:?}", data);
+
+        let tx = Transaction::zcash_deserialize(&data[..]).expect("randomized tx should deserialize");
+
+        println!("{:?}", tx);
+
+        let mut data2 = Vec::new();
+        tx.zcash_serialize(&mut data2).expect("tx should serialize");
+
+        assert_ne!(&data[..], &data2[..]);
+
+        prop_assert_ne![data, data2];
+    }
 }
