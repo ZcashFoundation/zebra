@@ -10,7 +10,7 @@ rand = "0.7"
 chrono = "0.4"
 abscissa_core = "0.3.0"
 failure = "0.1"
-gumdrop = "0.6"
+gumdrop = "0.7"
 lazy_static = "1"
 serde = { version = "1", features = ["serde_derive"] }
 toml = "0.5"
