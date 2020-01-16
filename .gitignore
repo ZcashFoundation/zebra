@@ -1,2 +1,4 @@
 # Cargo files
 /target/
+# Firebase caches (?)
+.firebase/
