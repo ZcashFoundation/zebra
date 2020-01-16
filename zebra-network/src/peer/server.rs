@@ -27,12 +27,12 @@ pub(super) enum State {
     AwaitingRequest,
     /// Awaiting a peer message we can interpret as a client request.
     AwaitingResponse(Request, oneshot::Sender<Result<Response, SharedPeerError>>),
-    /// A failure has occurred and we are shutting down the server.
+    /// A failure has occurred and we are shutting down the connection.
     Failed,
 }
 
-/// The "server" duplex half of a peer connection.
-pub struct Server<S, Tx> {
+/// The state associated with a peer connection.
+pub struct Connection<S, Tx> {
     pub(super) state: State,
     /// A timeout for a client request. This is stored separately from
     /// State so that we can move the future out of it independently of
@@ -40,19 +40,19 @@ pub struct Server<S, Tx> {
     pub(super) request_timer: Option<Delay>,
     pub(super) svc: S,
     pub(super) client_rx: mpsc::Receiver<ClientRequest>,
-    /// A slot shared between the client and server for storing an error.
+    /// A slot for an error shared between the Connection and the Client that uses it.
     pub(super) error_slot: ErrorSlot,
     //pub(super) peer_rx: Rx,
     pub(super) peer_tx: Tx,
 }
 
-impl<S, Tx> Server<S, Tx>
+impl<S, Tx> Connection<S, Tx>
 where
     S: Service<Request, Response = Response, Error = BoxedStdError>,
     S::Error: Into<BoxedStdError>,
     Tx: Sink<Message, Error = SerializationError> + Unpin,
 {
-    /// Run this peer server to completion.
+    /// Consume this `Connection` to form a spawnable future containing its event loop.
     pub async fn run<Rx>(mut self, mut peer_rx: Rx)
     where
         Rx: Stream<Item = Result<Message, SerializationError>> + Unpin,
@@ -163,7 +163,7 @@ where
             .lock()
             .expect("mutex should be unpoisoned");
         if guard.is_some() {
-            panic!("called fail_with on already-failed server state");
+            panic!("called fail_with on already-failed connection state");
         } else {
             *guard = Some(Arc::new(e).into());
         }
@@ -195,7 +195,7 @@ where
         // Inner match returns Result with the new state or an error.
         // Outer match updates state or fails.
         match match (&self.state, req) {
-            (Failed, _) => panic!("failed service cannot handle requests"),
+            (Failed, _) => panic!("failed connection cannot handle requests"),
             (AwaitingResponse { .. }, _) => panic!("tried to update pending request"),
             (AwaitingRequest, GetPeers) => self
                 .peer_tx

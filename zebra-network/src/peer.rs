@@ -18,4 +18,4 @@ pub use client::Client;
 pub use connector::Connector;
 pub use error::{HandshakeError, PeerError, SharedPeerError};
 pub use handshake::Handshake;
-pub use server::Server;
+pub use server::Connection;
