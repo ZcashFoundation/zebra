@@ -15,7 +15,7 @@ jobs:
     - uses: actions/checkout@master
     - name: Cargo doc
       run: |
-        cargo doc
+        cargo doc --no-deps
     - name: GitHub Action for Firebase
       uses: w9jds/firebase-action@v1.1.0
       with:
