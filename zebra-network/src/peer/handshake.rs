@@ -194,9 +194,9 @@ where
 
             let (peer_tx, peer_rx) = stream.split();
 
-            use super::server;
+            use super::connection;
             let server = Connection {
-                state: server::State::AwaitingRequest,
+                state: connection::State::AwaitingRequest,
                 svc: internal_service,
                 client_rx: server_rx,
                 error_slot: slot,
