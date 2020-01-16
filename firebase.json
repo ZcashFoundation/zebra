@@ -11,6 +11,13 @@
         "source": "**",
         "destination": "/index.html"
       }
+    ],
+    "redirects": [
+       {
+	 "source": "/",
+	 "destination": "/zebrad",
+	 "type": 301
+       }
     ]
   }
 }
