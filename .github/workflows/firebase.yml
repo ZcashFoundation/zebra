@@ -1,0 +1,21 @@
+name: Docs
+
+on: [push]
+
+jobs:
+
+  build:
+    name: Deploy Docs
+    runs-on: ubuntu-latest
+    steps:
+
+    - uses: actions/checkout@master
+    - name: Cargo doc
+      run: |
+        cargo doc
+    - name: GitHub Action for Firebase
+      uses: w9jds/firebase-action@v1.1.0
+      with:
+        args: deploy
+      env:
+        FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
