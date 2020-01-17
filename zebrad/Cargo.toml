@@ -31,4 +31,4 @@ zebra-network = { path = "../zebra-network" }
 
 [dev-dependencies]
 abscissa_core = { version = "0.5", features = ["testing"] }
-once_cell = "1.2"
+once_cell = "1.3"
