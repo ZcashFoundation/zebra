@@ -832,9 +832,9 @@ dependencies = [
 
 [[package]]
 name = "proptest"
-version = "0.9.4"
+version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf147e022eacf0c8a054ab864914a7602618adba841d800a9a9868a5237a529f"
+checksum = "bf6147d103a7c9d7598f4105cf049b15c99e2ecd93179bf024f0fd349be5ada4"
 dependencies = [
  "bit-set",
  "bitflags",
