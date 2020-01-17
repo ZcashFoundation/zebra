@@ -65,8 +65,3 @@ pub use crate::{
 pub mod types {
     pub use crate::{meta_addr::MetaAddr, network::Network, protocol::types::PeerServices};
 }
-
-/// This will be removed when we finish encapsulation
-pub mod should_be_private {
-    pub use crate::{peer::Handshake, timestamp_collector::TimestampCollector};
-}
