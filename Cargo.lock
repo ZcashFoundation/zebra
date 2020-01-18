@@ -1338,9 +1338,9 @@ dependencies = [
 
 [[package]]
 name = "tower"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4b299df54795e6f72bca45063b5803d1f9a1ba9b11a3c7c64d0b84519b451fdd"
+checksum = "fd3169017c090b7a28fce80abaad0ab4f5566423677c9331bb320af7e49cfe62"
 dependencies = [
  "futures-core",
  "tower-buffer",
