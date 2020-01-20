@@ -1,5 +1,8 @@
 //! Transaction types.
 
+#[cfg(test)]
+use proptest_derive::Arbitrary;
+
 use crate::types::Script;
 
 use super::TransactionHash;
@@ -8,6 +11,7 @@ use super::TransactionHash;
 ///
 /// A particular transaction output reference.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(test, derive(Arbitrary))]
 pub struct OutPoint {
     /// References the transaction that contains the UTXO being spent.
     pub hash: TransactionHash,
@@ -19,6 +23,7 @@ pub struct OutPoint {
 
 /// A transparent input to a transaction.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(test, derive(Arbitrary))]
 pub struct TransparentInput {
     /// The previous output transaction reference.
     pub previous_output: OutPoint,
@@ -45,6 +50,7 @@ pub struct TransparentInput {
 /// that spends my UTXO and sends 1 ZEC to you and 1 ZEC back to me
 /// (just like receiving change).
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(test, derive(Arbitrary))]
 pub struct TransparentOutput {
     /// Transaction value.
     // At https://en.bitcoin.it/wiki/Protocol_documentation#tx, this is an i64.
