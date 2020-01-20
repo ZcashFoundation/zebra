@@ -2,6 +2,9 @@ use std::fmt;
 
 use hex;
 
+#[cfg(test)]
+use proptest_derive::Arbitrary;
+
 use crate::{serialization::ZcashSerialize, sha256d_writer::Sha256dWriter};
 
 use super::Transaction;
@@ -11,6 +14,7 @@ use super::Transaction;
 /// TODO: I'm pretty sure this is also a SHA256d hash but I haven't
 /// confirmed it yet.
 #[derive(Copy, Clone, Eq, PartialEq)]
+#[cfg_attr(test, derive(Arbitrary))]
 pub struct TransactionHash(pub [u8; 32]);
 
 impl From<Transaction> for TransactionHash {

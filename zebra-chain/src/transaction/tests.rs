@@ -3,8 +3,8 @@ use std::io::Cursor;
 use chrono::{TimeZone, Utc};
 
 use proptest::{
-    collection::{vec, SizeRange},
-    option,
+    arbitrary::{any, Arbitrary},
+    collection::vec,
     prelude::*,
 };
 
@@ -15,6 +15,7 @@ use crate::{
 
 use super::*;
 
+#[cfg(test)]
 impl Arbitrary for Transaction {
     type Parameters = ();
 
@@ -192,23 +193,14 @@ fn librustzcash_tx_deserialize_and_round_trip() {
 proptest! {
 
     #[test]
-    fn transaction_roundtrip(mut random in vec(any::<u8>(), 1982)) {
+    fn transaction_roundtrip(tx in any::<Transaction>()) {
 
-        // Standard header and version group id.
-        let mut data = vec![0x04, 0x00, 0x00, 0x80, 0x85, 0x20, 0x2f, 0x89];
-        data.append(&mut random);
+        let mut data = Vec::new();
 
-        // println!("{:?}", data);
+        tx.zcash_serialize(&mut data).expect("tx should serialize");
 
-        let tx = Transaction::zcash_deserialize(&data[..]).expect("randomized tx should deserialize");
+        let tx2 = Transaction::zcash_deserialize(&data[..]).expect("randomized tx should deserialize");
 
-        println!("{:?}", tx);
-
-        let mut data2 = Vec::new();
-        tx.zcash_serialize(&mut data2).expect("tx should serialize");
-
-        assert_ne!(&data[..], &data2[..]);
-
-        prop_assert_ne![data, data2];
+        prop_assert_eq![tx, tx2];
     }
 }
