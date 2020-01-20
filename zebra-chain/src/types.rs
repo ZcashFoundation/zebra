@@ -158,22 +158,6 @@ mod proptests {
     use super::{BlockHeight, LockTime, Script};
     use crate::serialization::{ZcashDeserialize, ZcashSerialize};
 
-    // impl Arbitrary for LockTime {
-    //     type Parameters = ();
-
-    //     fn arbitrary_with(_args: ()) -> Self::Strategy {
-    //         prop_oneof![
-    //             (0u32..500_000_000_u32).prop_map(|n| LockTime::Height(BlockHeight(n))),
-    //             Just(LockTime::Time(
-    //                 Utc.timestamp(Utc::now().timestamp() as i64, 0)
-    //             ))
-    //         ]
-    //         .boxed()
-    //     }
-
-    //     type Strategy = BoxedStrategy<Self>;
-    // }
-
     proptest! {
 
         #[test]
