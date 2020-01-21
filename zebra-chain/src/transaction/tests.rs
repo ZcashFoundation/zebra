@@ -49,6 +49,26 @@ impl Transaction {
             )
             .boxed()
     }
+
+    pub fn v3_strategy() -> impl Strategy<Value = Self> {
+        (
+            vec(any::<TransparentInput>(), 0..10),
+            vec(any::<TransparentOutput>(), 0..10),
+            any::<LockTime>(),
+            any::<BlockHeight>(),
+            option::of(any::<JoinSplitData<Bctv14Proof>>()),
+        )
+            .prop_map(
+                |(inputs, outputs, lock_time, expiry_height, joinsplit_data)| Transaction::V3 {
+                    inputs: inputs,
+                    outputs: outputs,
+                    lock_time: lock_time,
+                    expiry_height: expiry_height,
+                    joinsplit_data: joinsplit_data,
+                },
+            )
+            .boxed()
+    }
 }
 
 #[cfg(test)]
@@ -56,7 +76,7 @@ impl Arbitrary for Transaction {
     type Parameters = ();
 
     fn arbitrary_with(_args: ()) -> Self::Strategy {
-        prop_oneof![Self::v1_strategy(), Self::v2_strategy()].boxed()
+        prop_oneof![Self::v1_strategy(), Self::v2_strategy(), Self::v3_strategy()].boxed()
     }
 
     type Strategy = BoxedStrategy<Self>;
