@@ -1,9 +1,14 @@
+use std::{fmt, io};
+
 use futures::future::Either;
+#[cfg(test)]
+use proptest::{arbitrary::Arbitrary, collection::vec, prelude::*};
 
 // XXX this name seems too long?
 use crate::note_commitment_tree::SaplingNoteTreeRootHash;
 use crate::proofs::Groth16Proof;
 use crate::redjubjub::{self, Binding, SpendAuth};
+use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 
 /// A _Spend Description_, as described in [protocol specification §7.3][ps].
 ///
@@ -46,10 +51,7 @@ pub struct OutputDescription {
     /// XXX refine to a Jubjub key agreement type, not RedJubjub.
     pub ephemeral_key: [u8; 32],
     /// A ciphertext component for the encrypted output note.
-    ///
-    /// XXX refine to a specific type.
-    /// XXX this is a Vec<u8> rather than a [u8; 580] to get trait impls
-    pub enc_ciphertext: Vec<u8>,
+    pub enc_ciphertext: EncryptedCiphertext,
     /// A ciphertext component for the encrypted output note.
     ///
     /// XXX refine to a specific type.
@@ -132,3 +134,66 @@ impl std::cmp::PartialEq for ShieldedData {
 }
 
 impl std::cmp::Eq for ShieldedData {}
+
+/// A ciphertext component for encrypted output notes.
+pub struct EncryptedCiphertext(pub [u8; 580]);
+
+impl fmt::Debug for EncryptedCiphertext {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple("EncryptedCiphertext")
+            .field(&hex::encode(&self.0[..]))
+            .finish()
+    }
+}
+
+// These impls all only exist because of array length restrictions.
+
+impl Copy for EncryptedCiphertext {}
+
+impl Clone for EncryptedCiphertext {
+    fn clone(&self) -> Self {
+        let mut bytes = [0; 580];
+        bytes[..].copy_from_slice(&self.0[..]);
+        Self(bytes)
+    }
+}
+
+impl PartialEq for EncryptedCiphertext {
+    fn eq(&self, other: &Self) -> bool {
+        self.0[..] == other.0[..]
+    }
+}
+
+impl Eq for EncryptedCiphertext {}
+
+impl ZcashSerialize for EncryptedCiphertext {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+        writer.write_all(&self.0[..])?;
+        Ok(())
+    }
+}
+
+impl ZcashDeserialize for EncryptedCiphertext {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        let mut bytes = [0; 580];
+        reader.read_exact(&mut bytes[..])?;
+        Ok(Self(bytes))
+    }
+}
+
+#[cfg(test)]
+impl Arbitrary for EncryptedCiphertext {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        (vec(any::<u8>(), 580))
+            .prop_map(|v| {
+                let mut bytes = [0; 580];
+                bytes.copy_from_slice(v.as_slice());
+                return Self(bytes);
+            })
+            .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
