@@ -1,5 +1,8 @@
 use std::{fmt, io};
 
+#[cfg(test)]
+use proptest::{arbitrary::Arbitrary, collection::vec, prelude::*};
+
 use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 
 /// An encoding of a Groth16 proof, as used in Zcash.
@@ -46,4 +49,22 @@ impl ZcashDeserialize for Groth16Proof {
         reader.read_exact(&mut bytes[..])?;
         Ok(Self(bytes))
     }
+}
+
+
+#[cfg(test)]
+impl Arbitrary for Groth16Proof {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        (vec(any::<u8>(), 192))
+            .prop_map(|v| {
+                let mut bytes = [0; 192];
+                bytes.copy_from_slice(v.as_slice());
+                return Self(bytes);
+            })
+            .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
 }
