@@ -42,6 +42,7 @@ impl fmt::Debug for Sha256dChecksum {
 
 /// A u32 which represents a block height value.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(test, derive(Arbitrary))]
 pub struct BlockHeight(pub u32);
 
 /// A Bitcoin-style `locktime`, representing either a block height or an epoch
