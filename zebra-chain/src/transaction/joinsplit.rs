@@ -1,9 +1,23 @@
-use crate::proofs::ZkSnarkProof;
+use std::{
+    fmt,
+    io::{self},
+};
+
+#[cfg(test)]
+use proptest::{collection::vec, prelude::*};
+#[cfg(test)]
+use proptest_derive::Arbitrary;
+
+use crate::{
+    proofs::ZkSnarkProof,
+    serialization::{SerializationError, ZcashDeserialize, ZcashSerialize},
+};
 
 /// A _JoinSplit Description_, as described in [protocol specification §7.2][ps].
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#joinsplitencoding
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(test, derive(Arbitrary))]
 pub struct JoinSplit<P: ZkSnarkProof> {
     /// A value that the JoinSplit transfer removes from the transparent value
     /// pool.
@@ -45,14 +59,12 @@ pub struct JoinSplit<P: ZkSnarkProof> {
     /// [`Bctv14Proof`](crate::proofs::Bctv14Proof).
     pub zkproof: P,
     /// A ciphertext component for this output note.
-    ///
-    /// XXX refine type to [T; 2] -- there are two ctxts
-    /// XXX this should be a [[u8; 601]; 2] but we need trait impls.
-    pub enc_ciphertexts: [Vec<u8>; 2],
+    pub enc_ciphertexts: [EncryptedCiphertext; 2],
 }
 
 /// A bundle of JoinSplit descriptions and signature data.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(test, derive(Arbitrary))]
 pub struct JoinSplitData<P: ZkSnarkProof> {
     /// The first JoinSplit description, using proofs of type `P`.
     ///
@@ -79,4 +91,67 @@ impl<P: ZkSnarkProof> JoinSplitData<P> {
     pub fn joinsplits(&self) -> impl Iterator<Item = &JoinSplit<P>> {
         std::iter::once(&self.first).chain(self.rest.iter())
     }
+}
+
+/// A ciphertext component for encrypted output notes.
+pub struct EncryptedCiphertext(pub [u8; 601]);
+
+impl fmt::Debug for EncryptedCiphertext {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple("EncryptedCiphertext")
+            .field(&hex::encode(&self.0[..]))
+            .finish()
+    }
+}
+
+// These impls all only exist because of array length restrictions.
+
+impl Copy for EncryptedCiphertext {}
+
+impl Clone for EncryptedCiphertext {
+    fn clone(&self) -> Self {
+        let mut bytes = [0; 601];
+        bytes[..].copy_from_slice(&self.0[..]);
+        Self(bytes)
+    }
+}
+
+impl PartialEq for EncryptedCiphertext {
+    fn eq(&self, other: &Self) -> bool {
+        self.0[..] == other.0[..]
+    }
+}
+
+impl Eq for EncryptedCiphertext {}
+
+impl ZcashSerialize for EncryptedCiphertext {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+        writer.write_all(&self.0[..])?;
+        Ok(())
+    }
+}
+
+impl ZcashDeserialize for EncryptedCiphertext {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        let mut bytes = [0; 601];
+        reader.read_exact(&mut bytes[..])?;
+        Ok(Self(bytes))
+    }
+}
+
+#[cfg(test)]
+impl Arbitrary for EncryptedCiphertext {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        (vec(any::<u8>(), 601))
+            .prop_map(|v| {
+                let mut bytes = [0; 601];
+                bytes.copy_from_slice(v.as_slice());
+                return Self(bytes);
+            })
+            .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
 }
