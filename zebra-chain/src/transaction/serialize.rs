@@ -82,10 +82,10 @@ impl<P: ZkSnarkProof> ZcashSerialize for JoinSplit<P> {
         writer.write_all(&self.vmacs[0][..])?;
         writer.write_all(&self.vmacs[1][..])?;
         self.zkproof.zcash_serialize(&mut writer)?;
-        assert_eq!(self.enc_ciphertexts[0].len(), 601); // XXX remove when type is refined
-        writer.write_all(&self.enc_ciphertexts[0][..])?;
-        assert_eq!(self.enc_ciphertexts[1].len(), 601); // XXX remove when type is refined
-        writer.write_all(&self.enc_ciphertexts[1][..])?;
+        // assert_eq!(self.enc_ciphertexts[0].len(), 601); // XXX remove when type is refined
+        self.enc_ciphertexts[0].zcash_serialize(&mut writer)?;
+        // assert_eq!(self.enc_ciphertexts[1].len(), 601); // XXX remove when type is refined
+        self.enc_ciphertexts[1].zcash_serialize(&mut writer)?;
         Ok(())
     }
 }
@@ -102,18 +102,9 @@ impl<P: ZkSnarkProof> ZcashDeserialize for JoinSplit<P> {
             random_seed: reader.read_32_bytes()?,
             vmacs: [reader.read_32_bytes()?, reader.read_32_bytes()?],
             zkproof: P::zcash_deserialize(&mut reader)?,
-            // XXX this is a little ugly but will disappear when we refine types
             enc_ciphertexts: [
-                {
-                    let mut bytes = Vec::new();
-                    (&mut reader).take(601).read_to_end(&mut bytes)?;
-                    bytes
-                },
-                {
-                    let mut bytes = Vec::new();
-                    (&mut reader).take(601).read_to_end(&mut bytes)?;
-                    bytes
-                },
+                joinsplit::EncryptedCiphertext::zcash_deserialize(&mut reader)?,
+                joinsplit::EncryptedCiphertext::zcash_deserialize(&mut reader)?,
             ],
         })
     }
@@ -186,9 +177,8 @@ impl ZcashSerialize for OutputDescription {
         writer.write_all(&self.cv[..])?;
         writer.write_all(&self.cmu[..])?;
         writer.write_all(&self.ephemeral_key[..])?;
-        // XXX remove this assertion when types are refined
-        assert_eq!(self.enc_ciphertext.len(), 580);
-        writer.write_all(&self.enc_ciphertext[..])?;
+        // assert_eq!(self.enc_ciphertext.len(), 580);
+        self.enc_ciphertext.zcash_serialize(&mut writer)?;
         // XXX remove this assertion when types are refined
         assert_eq!(self.out_ciphertext.len(), 80);
         // XXX very ugly, this happens because we used a [u64; 10] instead of
@@ -213,12 +203,7 @@ impl ZcashDeserialize for OutputDescription {
             cv: reader.read_32_bytes()?,
             cmu: reader.read_32_bytes()?,
             ephemeral_key: reader.read_32_bytes()?,
-            enc_ciphertext: {
-                // XXX this will disappear when we refine types
-                let mut bytes = Vec::new();
-                (&mut reader).take(580).read_to_end(&mut bytes)?;
-                bytes
-            },
+            enc_ciphertext: shielded_data::EncryptedCiphertext::zcash_deserialize(&mut reader)?,
             out_ciphertext: {
                 // XXX this is horrible, see above, will be removed with type refinement
                 use byteorder::ByteOrder;
