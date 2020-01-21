@@ -5,6 +5,7 @@ use chrono::{TimeZone, Utc};
 use proptest::{
     arbitrary::{any, Arbitrary},
     collection::vec,
+    option,
     prelude::*,
 };
 
@@ -16,10 +17,8 @@ use crate::{
 use super::*;
 
 #[cfg(test)]
-impl Arbitrary for Transaction {
-    type Parameters = ();
-
-    fn arbitrary_with(_args: ()) -> Self::Strategy {
+impl Transaction {
+    pub fn v1_strategy() -> impl Strategy<Value = Self> {
         (
             vec(any::<TransparentInput>(), 0..10),
             vec(any::<TransparentOutput>(), 0..10),
@@ -31,6 +30,33 @@ impl Arbitrary for Transaction {
                 lock_time: lock_time,
             })
             .boxed()
+    }
+
+    pub fn v2_strategy() -> impl Strategy<Value = Self> {
+        (
+            vec(any::<TransparentInput>(), 0..10),
+            vec(any::<TransparentOutput>(), 0..10),
+            any::<LockTime>(),
+            option::of(any::<JoinSplitData<Bctv14Proof>>()),
+        )
+            .prop_map(
+                |(inputs, outputs, lock_time, joinsplit_data)| Transaction::V2 {
+                    inputs: inputs,
+                    outputs: outputs,
+                    lock_time: lock_time,
+                    joinsplit_data: joinsplit_data,
+                },
+            )
+            .boxed()
+    }
+}
+
+#[cfg(test)]
+impl Arbitrary for Transaction {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: ()) -> Self::Strategy {
+        prop_oneof![Self::v1_strategy(), Self::v2_strategy()].boxed()
     }
 
     type Strategy = BoxedStrategy<Self>;
@@ -195,11 +221,15 @@ proptest! {
     #[test]
     fn transaction_roundtrip(tx in any::<Transaction>()) {
 
+        println!("{:?}", tx);
+
         let mut data = Vec::new();
 
         tx.zcash_serialize(&mut data).expect("tx should serialize");
 
         let tx2 = Transaction::zcash_deserialize(&data[..]).expect("randomized tx should deserialize");
+
+        println!("{:?}", tx2);
 
         prop_assert_eq![tx, tx2];
     }
