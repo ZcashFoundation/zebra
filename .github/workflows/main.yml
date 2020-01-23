@@ -38,8 +38,4 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: tarpaulin
-          args: --release --timeout 180 --out Xml
-      # - name: Upload coverage to Codecov
-      #   uses: codecov/codecov-action@v1.0.3
-      #   with:
-      #     token: ${{secrets.CODECOV_TOKEN}}
+          args: --verbose --count --workspace --timeout 180
