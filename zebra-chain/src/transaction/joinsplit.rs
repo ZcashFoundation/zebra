@@ -56,8 +56,15 @@ pub struct JoinSplitData<P: ZkSnarkProof> {
     ///
     /// Storing this separately from `rest` ensures that it is impossible
     /// to construct an invalid `JoinSplitData` with no `JoinSplit`s.
+    ///
+    /// However, it's not necessary to access or process `first` and `rest`
+    /// separately, as the [`JoinSplitData::joinsplits`] method provides an
+    /// iterator over all of the `JoinSplit`s.
     pub first: JoinSplit<P>,
     /// The rest of the JoinSplit descriptions, using proofs of type `P`.
+    ///
+    /// The [`JoinSplitData::joinsplits`] method provides an iterator over
+    /// all `JoinSplit`s.
     pub rest: Vec<JoinSplit<P>>,
     /// The public key for the JoinSplit signature.
     // XXX refine to a Zcash-flavored Ed25519 pubkey.

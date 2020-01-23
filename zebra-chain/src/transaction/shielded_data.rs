@@ -66,10 +66,21 @@ pub struct ShieldedData {
     ///
     /// Storing this separately ensures that it is impossible to construct
     /// an invalid `ShieldedData` with no spends or outputs.
+    ///
+    /// However, it's not necessary to access or process `first` and `rest`
+    /// separately, as the [`ShieldedData::spends`] and [`ShieldedData::outputs`]
+    /// methods provide iterators over all of the [`SpendDescription`]s and
+    /// [`OutputDescription`]s.
     pub first: Either<SpendDescription, OutputDescription>,
     /// The rest of the [`SpendDescription`]s for this transaction.
+    ///
+    /// Note that the [`ShieldedData::spends`] method provides an iterator
+    /// over all spend descriptions.
     pub rest_spends: Vec<SpendDescription>,
     /// The rest of the [`OutputDescription`]s for this transaction.
+    ///
+    /// Note that the [`ShieldedData::outputs`] method provides an iterator
+    /// over all output descriptions.
     pub rest_outputs: Vec<OutputDescription>,
     /// A signature on the transaction hash.
     pub binding_sig: redjubjub::Signature<Binding>,
