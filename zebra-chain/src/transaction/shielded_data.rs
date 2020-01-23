@@ -30,7 +30,7 @@ pub struct SpendDescription {
 
 /// A _Output Description_, as described in [protocol specification §7.4][ps].
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#outputencoding
+/// [ps]: https://zips.z.cash/protocol/protocol.pdf#outputencoding
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OutputDescription {
     /// A value commitment to the value of the input note.
