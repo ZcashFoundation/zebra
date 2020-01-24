@@ -125,18 +125,8 @@ impl<P: ZkSnarkProof> ZcashSerialize for JoinSplitData<P> {
         for joinsplit in self.joinsplits() {
             joinsplit.zcash_serialize(&mut writer)?;
         }
-        writer.write_all(&self.pub_key[..])?;
-        // XXX very ugly, this happens because we used a [u64; 8] instead of
-        // [u8; 64] to get trait impls and it will disappear when we refine to
-        // Zcash-flavored Ed25519.
-        writer.write_all(
-            &{
-                use byteorder::ByteOrder;
-                let mut bytes = [0u8; 64];
-                LittleEndian::write_u64_into(&self.sig[..], &mut bytes);
-                bytes
-            }[..],
-        )?;
+        writer.write_all(&<[u8; 32]>::from(self.pub_key)[..])?;
+        writer.write_all(&<[u8; 64]>::from(self.sig)[..])?;
         Ok(())
     }
 }
@@ -152,16 +142,8 @@ impl<P: ZkSnarkProof> ZcashDeserialize for Option<JoinSplitData<P>> {
                 for _ in 0..(n - 1) {
                     rest.push(JoinSplit::zcash_deserialize(&mut reader)?);
                 }
-                let pub_key = reader.read_32_bytes()?;
-                // XXX this is horrible, see above, will be removed with type refinement
-                let sig = {
-                    use byteorder::ByteOrder;
-                    let mut bytes = [0u8; 64];
-                    reader.read_exact(&mut bytes[..])?;
-                    let mut u64s = [0u64; 8];
-                    LittleEndian::read_u64_into(&bytes, &mut u64s[..]);
-                    u64s
-                };
+                let pub_key = reader.read_32_bytes()?.into();
+                let sig = reader.read_64_bytes()?.into();
                 Ok(Some(JoinSplitData {
                     first,
                     rest,

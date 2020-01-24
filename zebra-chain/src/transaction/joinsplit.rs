@@ -60,12 +60,9 @@ pub struct JoinSplitData<P: ZkSnarkProof> {
     /// The rest of the JoinSplit descriptions, using proofs of type `P`.
     pub rest: Vec<JoinSplit<P>>,
     /// The public key for the JoinSplit signature.
-    // XXX refine to a Zcash-flavored Ed25519 pubkey.
-    pub pub_key: [u8; 32],
+    pub pub_key: ed25519_zebra::PublicKeyBytes,
     /// The JoinSplit signature.
-    // XXX refine to a Zcash-flavored Ed25519 signature.
-    // for now it's [u64; 8] rather than [u8; 64] to get trait impls
-    pub sig: [u64; 8],
+    pub sig: ed25519_zebra::Signature,
 }
 
 impl<P: ZkSnarkProof> JoinSplitData<P> {
