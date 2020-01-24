@@ -38,4 +38,9 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: tarpaulin
-          args: --verbose --count --workspace --timeout 180
+          args: --verbose --count --workspace --timeout 180 --out Html
+      - name: Archive code coverage results
+        uses: actions/upload-artifact@v1
+        with:
+          name: code-coverage-report
+          path: tarpaulin-report.html
