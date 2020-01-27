@@ -12,6 +12,9 @@
 
 use std::io;
 
+#[cfg(test)]
+use proptest_derive::Arbitrary;
+
 use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 
 // XXX: Depending on if we implement SproutNoteCommitmentTree or
@@ -19,6 +22,7 @@ use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize}
 
 /// Sapling Note Commitment Tree
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[cfg_attr(test, derive(Arbitrary))]
 pub struct SaplingNoteCommitmentTree;
 
 /// Sapling note commitment tree root node hash.
@@ -28,6 +32,7 @@ pub struct SaplingNoteCommitmentTree;
 /// this block. A root of a note commitment tree is associated with
 /// each treestate.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[cfg_attr(test, derive(Arbitrary))]
 pub struct SaplingNoteTreeRootHash(pub [u8; 32]);
 
 impl From<SaplingNoteCommitmentTree> for SaplingNoteTreeRootHash {
