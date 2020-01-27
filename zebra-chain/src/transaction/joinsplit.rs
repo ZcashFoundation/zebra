@@ -64,7 +64,6 @@ pub struct JoinSplit<P: ZkSnarkProof> {
 
 /// A bundle of JoinSplit descriptions and signature data.
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(test, derive(Arbitrary))]
 pub struct JoinSplitData<P: ZkSnarkProof> {
     /// The first JoinSplit description, using proofs of type `P`.
     ///
@@ -91,6 +90,31 @@ impl<P: ZkSnarkProof> JoinSplitData<P> {
     pub fn joinsplits(&self) -> impl Iterator<Item = &JoinSplit<P>> {
         std::iter::once(&self.first).chain(self.rest.iter())
     }
+}
+
+#[cfg(test)]
+impl<P: ZkSnarkProof> Arbitrary for JoinSplitData<P> {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        (
+            any::<JoinSplit<P>>(),
+            vec(any::<JoinSplit<P>>()),
+            vec(any::<u8>(), 32),
+            vec(any::<u8>(), 64),
+        )
+            .prop_map(|first, rest, pub_key_bytes, sig_bytes| {
+                return Self {
+                    first: first,
+                    rest: rest,
+                    pub_key: ed25519_zebra::PublicKeyBytes::from(pub_key_bytes),
+                    sig: ed25519_zebra::Signature::from(sig_bytes),
+                };
+            })
+            .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
 }
 
 /// A ciphertext component for encrypted output notes.
