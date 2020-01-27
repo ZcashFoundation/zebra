@@ -3,6 +3,8 @@ use std::{fmt, io};
 use futures::future::Either;
 #[cfg(test)]
 use proptest::{arbitrary::Arbitrary, collection::vec, prelude::*};
+#[cfg(test)]
+use proptest_derive::Arbitrary;
 
 // XXX this name seems too long?
 use crate::note_commitment_tree::SaplingNoteTreeRootHash;
@@ -14,6 +16,7 @@ use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize}
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#spendencoding
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(test, derive(Arbitrary))]
 pub struct SpendDescription {
     /// A value commitment to the value of the input note.
     ///
@@ -37,6 +40,7 @@ pub struct SpendDescription {
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#outputencoding
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(test, derive(Arbitrary))]
 pub struct OutputDescription {
     /// A value commitment to the value of the input note.
     ///
@@ -134,6 +138,34 @@ impl std::cmp::PartialEq for ShieldedData {
 }
 
 impl std::cmp::Eq for ShieldedData {}
+
+#[cfg(test)]
+impl Arbitrary for ShieldedData {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        (
+            prop_oneof![
+                Either::Left(any::<SpendDescription>()),
+                Either::Right(any::<OutputDescription>())
+            ],
+            vec(any::<SpendDescription>()),
+            vec(any::<OutputDescription>()),
+            vec(any::<u8>(), 64),
+        )
+            .prop_map(|first, rest_spends, rest_outputs, sig_bytes| {
+                return Self {
+                    first: first,
+                    rest_spends: rest_spends,
+                    rest_outputs: rest_outputs,
+                    binding_sig: redjubjub::Signature::from(sig_bytes),
+                };
+            })
+            .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
 
 /// A ciphertext component for encrypted output notes.
 pub struct EncryptedCiphertext(pub [u8; 580]);
