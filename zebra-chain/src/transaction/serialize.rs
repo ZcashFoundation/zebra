@@ -2,7 +2,7 @@
 //! transaction types, so that all of the serialization logic is in one place.
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use std::io::{self, Read};
+use std::io;
 
 use crate::proofs::ZkSnarkProof;
 use crate::serialization::{
@@ -177,21 +177,8 @@ impl ZcashSerialize for OutputDescription {
         writer.write_all(&self.cv[..])?;
         writer.write_all(&self.cmu[..])?;
         writer.write_all(&self.ephemeral_key[..])?;
-        // assert_eq!(self.enc_ciphertext.len(), 580);
         self.enc_ciphertext.zcash_serialize(&mut writer)?;
-        // XXX remove this assertion when types are refined
-        assert_eq!(self.out_ciphertext.len(), 80);
-        // XXX very ugly, this happens because we used a [u64; 10] instead of
-        // [u8; 80] to get trait impls and it will disappear when we refine to
-        // a note ciphertext type
-        writer.write_all(
-            &{
-                use byteorder::ByteOrder;
-                let mut bytes = [0u8; 80];
-                LittleEndian::write_u64_into(&self.out_ciphertext[..], &mut bytes);
-                bytes
-            }[..],
-        )?;
+        self.out_ciphertext.zcash_serialize(&mut writer)?;
         self.zkproof.zcash_serialize(&mut writer)?;
         Ok(())
     }
@@ -204,15 +191,7 @@ impl ZcashDeserialize for OutputDescription {
             cmu: reader.read_32_bytes()?,
             ephemeral_key: reader.read_32_bytes()?,
             enc_ciphertext: shielded_data::EncryptedCiphertext::zcash_deserialize(&mut reader)?,
-            out_ciphertext: {
-                // XXX this is horrible, see above, will be removed with type refinement
-                use byteorder::ByteOrder;
-                let mut bytes = [0u8; 80];
-                reader.read_exact(&mut bytes[..])?;
-                let mut u64s = [0u64; 10];
-                LittleEndian::read_u64_into(&bytes, &mut u64s[..]);
-                u64s
-            },
+            out_ciphertext: shielded_data::OutCiphertext::zcash_deserialize(&mut reader)?,
             zkproof: Groth16Proof::zcash_deserialize(&mut reader)?,
         })
     }
