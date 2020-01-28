@@ -2,7 +2,7 @@ use std::{fmt, io};
 
 use futures::future::Either;
 #[cfg(test)]
-use proptest::{arbitrary::Arbitrary, collection::vec, prelude::*};
+use proptest::{arbitrary::Arbitrary, array, collection::vec, prelude::*};
 #[cfg(test)]
 use proptest_derive::Arbitrary;
 
@@ -16,7 +16,6 @@ use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize}
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#spendencoding
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(test, derive(Arbitrary))]
 pub struct SpendDescription {
     /// A value commitment to the value of the input note.
     ///
@@ -34,6 +33,41 @@ pub struct SpendDescription {
     pub zkproof: Groth16Proof,
     /// A signature authorizing this spend.
     pub spend_auth_sig: redjubjub::Signature<SpendAuth>,
+}
+
+#[cfg(test)]
+impl Arbitrary for SpendDescription {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        (
+            array::uniform32(any::<u8>()),
+            any::<SaplingNoteTreeRootHash>(),
+            array::uniform32(any::<u8>()),
+            array::uniform32(any::<u8>()),
+            any::<Groth16Proof>(),
+            vec(any::<u8>(), 64),
+        )
+            .prop_map(
+                |(cv_bytes, anchor, nullifier_bytes, rpk_bytes, proof, sig_bytes)| {
+                    return Self {
+                        cv: cv_bytes,
+                        anchor: anchor,
+                        nullifier: nullifier_bytes,
+                        rk: redjubjub::PublicKeyBytes::from(rpk_bytes),
+                        zkproof: proof,
+                        spend_auth_sig: redjubjub::Signature::from({
+                            let mut b = [0u8; 64];
+                            b.copy_from_slice(sig_bytes.as_slice());
+                            b
+                        }),
+                    };
+                },
+            )
+            .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
 }
 
 /// A _Output Description_, as described in [protocol specification §7.4][ps].
@@ -146,19 +180,23 @@ impl Arbitrary for ShieldedData {
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         (
             prop_oneof![
-                Either::Left(any::<SpendDescription>()),
-                Either::Right(any::<OutputDescription>())
+                any::<SpendDescription>().prop_map(Either::Left),
+                any::<OutputDescription>().prop_map(Either::Right)
             ],
-            vec(any::<SpendDescription>()),
-            vec(any::<OutputDescription>()),
+            vec(any::<SpendDescription>(), 0..10),
+            vec(any::<OutputDescription>(), 0..10),
             vec(any::<u8>(), 64),
         )
-            .prop_map(|first, rest_spends, rest_outputs, sig_bytes| {
+            .prop_map(|(first, rest_spends, rest_outputs, sig)| {
                 return Self {
                     first: first,
                     rest_spends: rest_spends,
                     rest_outputs: rest_outputs,
-                    binding_sig: redjubjub::Signature::from(sig_bytes),
+                    binding_sig: redjubjub::Signature::from({
+                        let mut b = [0u8; 64];
+                        b.copy_from_slice(sig.as_slice());
+                        b
+                    }),
                 };
             })
             .boxed()
