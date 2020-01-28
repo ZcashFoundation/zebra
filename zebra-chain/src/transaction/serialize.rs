@@ -82,7 +82,6 @@ impl<P: ZkSnarkProof> ZcashSerialize for JoinSplit<P> {
         writer.write_all(&self.vmacs[0][..])?;
         writer.write_all(&self.vmacs[1][..])?;
         self.zkproof.zcash_serialize(&mut writer)?;
-        // assert_eq!(self.enc_ciphertexts[0].len(), 601); // XXX remove when type is refined
         self.enc_ciphertexts[0].zcash_serialize(&mut writer)?;
         // assert_eq!(self.enc_ciphertexts[1].len(), 601); // XXX remove when type is refined
         self.enc_ciphertexts[1].zcash_serialize(&mut writer)?;
