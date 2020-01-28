@@ -183,3 +183,19 @@ impl Arbitrary for EncryptedCiphertext {
 
     type Strategy = BoxedStrategy<Self>;
 }
+
+#[cfg(test)]
+proptest! {
+
+    #[test]
+    fn encrypted_ciphertext_roundtrip(ec in any::<EncryptedCiphertext>()) {
+
+        let mut data = Vec::new();
+
+        ec.zcash_serialize(&mut data).expect("EncryptedCiphertext should serialize");
+
+        let ec2 = EncryptedCiphertext::zcash_deserialize(&data[..]).expect("randomized EncryptedCiphertext should deserialize");
+
+        prop_assert_eq![ec, ec2];
+    }
+}
