@@ -1,8 +1,5 @@
 use std::{fmt, io};
 
-#[cfg(test)]
-use proptest::{arbitrary::Arbitrary, collection::vec, prelude::*};
-
 use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 
 /// An encoding of a Groth16 proof, as used in Zcash.
@@ -50,6 +47,9 @@ impl ZcashDeserialize for Groth16Proof {
         Ok(Self(bytes))
     }
 }
+
+#[cfg(test)]
+use proptest::{arbitrary::Arbitrary, collection::vec, prelude::*};
 
 #[cfg(test)]
 impl Arbitrary for Groth16Proof {

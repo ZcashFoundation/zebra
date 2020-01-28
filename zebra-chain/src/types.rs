@@ -8,8 +8,7 @@ use std::{
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{DateTime, TimeZone, Utc};
 use hex;
-#[cfg(test)]
-use proptest::prelude::*;
+
 #[cfg(test)]
 use proptest_derive::Arbitrary;
 
@@ -125,6 +124,9 @@ impl ZcashDeserialize for Script {
         Ok(Script(bytes))
     }
 }
+
+#[cfg(test)]
+use proptest::prelude::*;
 
 #[cfg(test)]
 mod tests {
