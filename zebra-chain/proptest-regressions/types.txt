@@ -6,3 +6,8 @@
 # everyone who runs the test benefits from these saved cases.
 cc 77e4c5adc662baed850ecd3142ba2d61fa50d7dc7f75e56a1cb4ac6307a9a7e2 # shrinks to locktime = Height(BlockHeight(0))
 cc dbb060756c70411d81f49af9c742cbea259314ddf03440ff00ef62770047e304 # shrinks to locktime = Time(2019-12-19T19:48:42.288928Z)
+cc 27e82ee1a103b24301abb7f17f4bd5847bc5ae5160513122f3bda5d1047b91d8 # shrinks to locktime = Time(1970-01-01T00:00:00Z)
+cc 8b6898df17cc1f1eeba7d5774b58d6aa64355dec7e378c09ed21252f972f96d2 # shrinks to locktime = Time(2106-02-07T06:28:16Z)
+cc a557bbcb707d912c0a44ddce87b243cc5fb42b1e29e05474bf379af31f60cd42 # shrinks to locktime = Time(2106-02-07T06:28:16Z)
+cc c19dc30d284f1832a1d798aa5318f21756c6979bf9c2070e94611af982a97957 # shrinks to locktime = Time(2106-02-07T06:28:16Z)
+cc 725c0cbd91865d02d5193ccafcbddfe4601e119846bb9c4b44689d35fe6594db # shrinks to locktime = Time(2106-02-07T06:28:16Z)
