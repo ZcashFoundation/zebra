@@ -203,6 +203,7 @@ impl Arbitrary for ShieldedData {
 }
 
 /// A ciphertext component for encrypted output notes.
+// XXX move as part of #181 (note encryption implementation)
 pub struct EncryptedCiphertext(pub [u8; 580]);
 
 impl fmt::Debug for EncryptedCiphertext {
