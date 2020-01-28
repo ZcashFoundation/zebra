@@ -154,9 +154,8 @@ mod proptests {
     use std::io::Cursor;
 
     use proptest::prelude::*;
-    use proptest_derive::Arbitrary;
 
-    use super::{BlockHeight, LockTime, Script};
+    use super::{LockTime, Script};
     use crate::serialization::{ZcashDeserialize, ZcashSerialize};
 
     proptest! {

@@ -1,7 +1,3 @@
-use std::io::Cursor;
-
-use chrono::{TimeZone, Utc};
-
 use proptest::{
     arbitrary::{any, Arbitrary},
     collection::vec,
@@ -69,6 +65,38 @@ impl Transaction {
             )
             .boxed()
     }
+
+    pub fn v4_strategy() -> impl Strategy<Value = Self> {
+        (
+            vec(any::<TransparentInput>(), 0..10),
+            vec(any::<TransparentOutput>(), 0..10),
+            any::<LockTime>(),
+            any::<BlockHeight>(),
+            any::<i64>(),
+            option::of(any::<ShieldedData>()),
+            option::of(any::<JoinSplitData<Groth16Proof>>()),
+        )
+            .prop_map(
+                |(
+                    inputs,
+                    outputs,
+                    lock_time,
+                    expiry_height,
+                    value_balance,
+                    shielded_data,
+                    joinsplit_data,
+                )| Transaction::V4 {
+                    inputs: inputs,
+                    outputs: outputs,
+                    lock_time: lock_time,
+                    expiry_height: expiry_height,
+                    value_balance: value_balance,
+                    shielded_data: shielded_data,
+                    joinsplit_data: joinsplit_data,
+                },
+            )
+            .boxed()
+    }
 }
 
 #[cfg(test)]
@@ -76,7 +104,13 @@ impl Arbitrary for Transaction {
     type Parameters = ();
 
     fn arbitrary_with(_args: ()) -> Self::Strategy {
-        prop_oneof![Self::v1_strategy(), Self::v2_strategy(), Self::v3_strategy()].boxed()
+        prop_oneof![
+            Self::v1_strategy(),
+            Self::v2_strategy(),
+            Self::v3_strategy(),
+            Self::v4_strategy()
+        ]
+        .boxed()
     }
 
     type Strategy = BoxedStrategy<Self>;
