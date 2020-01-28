@@ -51,7 +51,6 @@ impl ZcashDeserialize for Groth16Proof {
     }
 }
 
-
 #[cfg(test)]
 impl Arbitrary for Groth16Proof {
     type Parameters = ();

@@ -4,7 +4,7 @@ use std::{
 };
 
 #[cfg(test)]
-use proptest::{collection::vec, prelude::*};
+use proptest::{array, collection::vec, prelude::*};
 #[cfg(test)]
 use proptest_derive::Arbitrary;
 
@@ -93,22 +93,26 @@ impl<P: ZkSnarkProof> JoinSplitData<P> {
 }
 
 #[cfg(test)]
-impl<P: ZkSnarkProof> Arbitrary for JoinSplitData<P> {
+impl<P: ZkSnarkProof + Arbitrary + 'static> Arbitrary for JoinSplitData<P> {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         (
             any::<JoinSplit<P>>(),
-            vec(any::<JoinSplit<P>>()),
-            vec(any::<u8>(), 32),
+            vec(any::<JoinSplit<P>>(), 0..10),
+            array::uniform32(any::<u8>()),
             vec(any::<u8>(), 64),
         )
-            .prop_map(|first, rest, pub_key_bytes, sig_bytes| {
+            .prop_map(|(first, rest, pub_key_bytes, sig_bytes)| {
                 return Self {
                     first: first,
                     rest: rest,
                     pub_key: ed25519_zebra::PublicKeyBytes::from(pub_key_bytes),
-                    sig: ed25519_zebra::Signature::from(sig_bytes),
+                    sig: ed25519_zebra::Signature::from({
+                        let mut b = [0u8; 64];
+                        b.copy_from_slice(sig_bytes.as_slice());
+                        b
+                    }),
                 };
             })
             .boxed()
