@@ -92,9 +92,8 @@ impl Arbitrary for LockTime {
     fn arbitrary_with(_args: ()) -> Self::Strategy {
         prop_oneof![
             (0u32..500_000_000_u32).prop_map(|n| LockTime::Height(BlockHeight(n))),
-            Just(LockTime::Time(
-                Utc.timestamp(Utc::now().timestamp() as i64, 0)
-            ))
+            // XXX Setting max to i64::MAX doesn't work, this is 2**32.
+            (500_000_000i64..4_294_967_296).prop_map(|n| { LockTime::Time(Utc.timestamp(n, 0)) })
         ]
         .boxed()
     }
