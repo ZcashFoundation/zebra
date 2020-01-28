@@ -1,8 +1,10 @@
 use std::{fmt, io};
 
 use futures::future::Either;
+
 #[cfg(test)]
 use proptest::{arbitrary::Arbitrary, array, collection::vec, prelude::*};
+
 #[cfg(test)]
 use proptest_derive::Arbitrary;
 
