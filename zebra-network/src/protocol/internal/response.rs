@@ -14,7 +14,7 @@ pub enum Response {
     Error,
     /// A list of peers, used to respond to `GetPeers`.
     Peers(Vec<MetaAddr>),
-    /// A list of transactions, such as in response to `GetMempool
+    /// A list of transactions, such as in response to `GetMempool`.
     Transactions(Vec<Transaction>),
 }
 
