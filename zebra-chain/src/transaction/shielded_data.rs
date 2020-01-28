@@ -327,3 +327,31 @@ impl Arbitrary for OutCiphertext {
 
     type Strategy = BoxedStrategy<Self>;
 }
+
+#[cfg(test)]
+proptest! {
+
+    #[test]
+    fn encrypted_ciphertext_roundtrip(ec in any::<EncryptedCiphertext>()) {
+
+        let mut data = Vec::new();
+
+        ec.zcash_serialize(&mut data).expect("EncryptedCiphertext should serialize");
+
+        let ec2 = EncryptedCiphertext::zcash_deserialize(&data[..]).expect("randomized EncryptedCiphertext should deserialize");
+
+        prop_assert_eq![ec, ec2];
+    }
+
+    #[test]
+    fn out_ciphertext_roundtrip(oc in any::<OutCiphertext>()) {
+
+        let mut data = Vec::new();
+
+        oc.zcash_serialize(&mut data).expect("OutCiphertext should serialize");
+
+        let oc2 = OutCiphertext::zcash_deserialize(&data[..]).expect("randomized OutCiphertext should deserialize");
+
+        prop_assert_eq![oc, oc2];
+    }
+}
