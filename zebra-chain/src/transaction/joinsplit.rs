@@ -122,6 +122,7 @@ impl<P: ZkSnarkProof + Arbitrary + 'static> Arbitrary for JoinSplitData<P> {
 }
 
 /// A ciphertext component for encrypted output notes.
+// XXX move as part of #181 (note encryption implementation)
 pub struct EncryptedCiphertext(pub [u8; 601]);
 
 impl fmt::Debug for EncryptedCiphertext {
