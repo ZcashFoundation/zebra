@@ -28,12 +28,6 @@ use crate::meta_addr::MetaAddr;
 /// during serialization).
 ///
 /// [btc_wiki_protocol]: https://en.bitcoin.it/wiki/Protocol_documentation
-//
-// XXX not all messages are filled in yet. Messages written as { /* XXX add
-// fields */ } are explicitly incomplete and we need to define a mapping between
-// the serialized message data and the internal representation. Note that this
-// is different from messages like GetAddr which have no data (and so have no
-// fields).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Message {
     /// A `version` message.
