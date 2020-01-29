@@ -20,3 +20,9 @@ RUN cargo fetch --verbose
 COPY . .
 
 RUN rustc -V; cargo -V; rustup -V; cargo test --all && cargo build --release
+
+
+FROM alpine:latest
+COPY --from=base /zebra/target/release/zebrad .
+ENV PORT 8233
+CMD ["./zebrad seed"]
