@@ -31,3 +31,20 @@ impl Write for Sha256dWriter {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+
+    use std::io::Write;
+
+    use crate::sha256d_writer::Sha256dWriter;
+
+    #[test]
+    fn sha256d_flush() {
+        let preimage = b"foo bar baz";
+        let mut sha_writer = Sha256dWriter::default();
+        let _ = sha_writer.write_all(preimage);
+
+        assert_eq!(sha_writer.flush().unwrap(), ());
+    }
+}
