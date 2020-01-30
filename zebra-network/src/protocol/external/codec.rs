@@ -475,7 +475,7 @@ impl Codec {
         Ok(Message::GetBlocks {
             version: Version(reader.read_u32::<LittleEndian>()?),
             block_locator_hashes: Vec::zcash_deserialize(&mut reader)?,
-            hash_stop: BlockHeaderHash(reader.read_32_bytes()?),
+            hash_stop: BlockHeaderHash::zcash_deserialize(&mut reader)?,
         })
     }
 
@@ -492,7 +492,7 @@ impl Codec {
         Ok(Message::GetHeaders {
             version: Version(reader.read_u32::<LittleEndian>()?),
             block_locator_hashes: Vec::zcash_deserialize(&mut reader)?,
-            hash_stop: BlockHeaderHash(reader.read_32_bytes()?),
+            hash_stop: BlockHeaderHash::zcash_deserialize(&mut reader)?,
         })
     }
 
