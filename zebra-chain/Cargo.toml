@@ -16,7 +16,7 @@ sha2 = "0.8"
 futures = "0.3"
 # ZF deps
 redjubjub = "0.1"
-ed25519-zebra = "0.1"
+ed25519-zebra = "0.2"
 
 [dev-dependencies]
 proptest = "0.9"
