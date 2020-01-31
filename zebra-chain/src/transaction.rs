@@ -7,6 +7,8 @@ mod shielded_data;
 mod transparent;
 
 #[cfg(test)]
+mod test_vectors;
+#[cfg(test)]
 mod tests;
 
 pub use hash::TransactionHash;
