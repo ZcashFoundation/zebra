@@ -505,7 +505,7 @@ impl Codec {
     }
 
     fn read_notfound<R: Read>(&self, reader: R) -> Result<Message, Error> {
-        Ok(Message::GetData(Vec::zcash_deserialize(reader)?))
+        Ok(Message::NotFound(Vec::zcash_deserialize(reader)?))
     }
 
     fn read_tx<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
