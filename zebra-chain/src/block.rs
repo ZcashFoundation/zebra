@@ -216,15 +216,26 @@ mod tests {
             time: DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(61, 0), Utc),
             bits: 0,
             nonce: some_bytes,
-            solution: vec![0; 1344],
+            solution: EquihashSolution([0; 1344]),
         };
 
         let hash = BlockHeaderHash::from(blockheader);
 
         assert_eq!(
             format!("{:?}", hash),
-            "BlockHeaderHash(\"35be4a0f97803879ed642d4e10a146c3fba8727a1dca8079e3f107221be1e7e4\")"
+            "BlockHeaderHash(\"738948d714d44f3040c2b6809ba7dbc8f4ba673dad39fd755ea4aeaa514cc386\")"
         );
+
+        let mut bytes = Cursor::new(Vec::new());
+
+        // rustc keeps telling me I can't use `?` here, but unwrap() works fine???
+        blockheader.zcash_serialize(&mut bytes).unwrap();
+
+        bytes.set_position(0);
+        // rustc keeps telling me I can't use `?` here, but unwrap() works fine???
+        let other_header = BlockHeader::zcash_deserialize(&mut bytes).unwrap();
+
+        assert_eq!(blockheader, other_header);
     }
 
     proptest! {
