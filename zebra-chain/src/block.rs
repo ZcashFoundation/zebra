@@ -2,6 +2,8 @@
 
 #[cfg(test)]
 pub mod test_vectors;
+#[cfg(test)]
+mod tests;
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{DateTime, TimeZone, Utc};
@@ -151,7 +153,7 @@ impl ZcashDeserialize for BlockHeader {
 /// Block header: a data structure containing the block's metadata
 /// Transactions: an array (vector in Rust) of transactions
 #[derive(Clone, Debug, Eq, PartialEq)]
-//#[cfg_attr(test, derive(Arbitrary))]
+#[cfg_attr(test, derive(Arbitrary))]
 pub struct Block {
     /// First 80 bytes of the block as defined by the encoding used by
     /// "block" messages.
@@ -175,81 +177,5 @@ impl ZcashDeserialize for Block {
             header: BlockHeader::zcash_deserialize(&mut reader)?,
             transactions: Vec::zcash_deserialize(&mut reader)?,
         })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-
-    use std::io::{Cursor, Write};
-
-    use chrono::NaiveDateTime;
-    use proptest::prelude::*;
-
-    use crate::sha256d_writer::Sha256dWriter;
-
-    use super::*;
-
-    #[test]
-    fn blockheaderhash_debug() {
-        let preimage = b"foo bar baz";
-        let mut sha_writer = Sha256dWriter::default();
-        let _ = sha_writer.write_all(preimage);
-
-        let hash = BlockHeaderHash(sha_writer.finish());
-
-        assert_eq!(
-            format!("{:?}", hash),
-            "BlockHeaderHash(\"bf46b4b5030752fedac6f884976162bbfb29a9398f104a280b3e34d51b416631\")"
-        );
-    }
-
-    #[test]
-    fn blockheaderhash_from_blockheader() {
-        let some_bytes = [0; 32];
-
-        let blockheader = BlockHeader {
-            previous_block_hash: BlockHeaderHash(some_bytes),
-            merkle_root_hash: MerkleTreeRootHash(some_bytes),
-            final_sapling_root_hash: SaplingNoteTreeRootHash(some_bytes),
-            time: DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(61, 0), Utc),
-            bits: 0,
-            nonce: some_bytes,
-            solution: EquihashSolution([0; 1344]),
-        };
-
-        let hash = BlockHeaderHash::from(blockheader);
-
-        assert_eq!(
-            format!("{:?}", hash),
-            "BlockHeaderHash(\"738948d714d44f3040c2b6809ba7dbc8f4ba673dad39fd755ea4aeaa514cc386\")"
-        );
-
-        let mut bytes = Cursor::new(Vec::new());
-
-        // rustc keeps telling me I can't use `?` here, but unwrap() works fine???
-        blockheader.zcash_serialize(&mut bytes).unwrap();
-
-        bytes.set_position(0);
-        // rustc keeps telling me I can't use `?` here, but unwrap() works fine???
-        let other_header = BlockHeader::zcash_deserialize(&mut bytes).unwrap();
-
-        assert_eq!(blockheader, other_header);
-    }
-
-    proptest! {
-
-        #[test]
-        fn blockheaderhash_roundtrip(hash in any::<BlockHeaderHash>()) {
-            let mut bytes = Cursor::new(Vec::new());
-            hash.zcash_serialize(&mut bytes)?;
-
-            bytes.set_position(0);
-            let other_hash = BlockHeaderHash::zcash_deserialize(&mut bytes)?;
-
-            prop_assert_eq![hash, other_hash];
-        }
-
-
     }
 }
