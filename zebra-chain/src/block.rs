@@ -163,14 +163,19 @@ pub struct Block {
 }
 
 impl ZcashSerialize for Block {
-    fn zcash_serialize<W: io::Write>(&self, _writer: W) -> Result<(), SerializationError> {
-        unimplemented!();
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+        self.header.zcash_serialize(&mut writer)?;
+        self.transactions.zcash_serialize(&mut writer)?;
+        Ok(())
     }
 }
 
 impl ZcashDeserialize for Block {
-    fn zcash_deserialize<R: io::Read>(_reader: R) -> Result<Self, SerializationError> {
-        unimplemented!();
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        Ok(Block {
+            header: BlockHeader::zcash_deserialize(&mut reader)?,
+            transactions: Vec::zcash_deserialize(&mut reader)?,
+        })
     }
 }
 
