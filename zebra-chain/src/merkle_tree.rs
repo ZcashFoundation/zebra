@@ -29,7 +29,7 @@ impl<Transaction> ZcashDeserialize for MerkleTree<Transaction> {
 /// A SHA-256d hash of the root node of a merkle tree of SHA256-d
 /// hashed transactions in a block.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct MerkleTreeRootHash([u8; 32]);
+pub struct MerkleTreeRootHash(pub [u8; 32]);
 
 impl From<MerkleTree<Transaction>> for MerkleTreeRootHash {
     fn from(merkle_tree: MerkleTree<Transaction>) -> Self {
