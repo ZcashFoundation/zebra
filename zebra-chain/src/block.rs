@@ -6,19 +6,15 @@ pub mod test_vectors;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{DateTime, TimeZone, Utc};
 use hex;
-use std::{
-    fmt,
-    io::{self, Read},
-};
+use std::{fmt, io};
 
 #[cfg(test)]
 use proptest_derive::Arbitrary;
 
+use crate::equihash_solution::EquihashSolution;
 use crate::merkle_tree::MerkleTreeRootHash;
 use crate::note_commitment_tree::SaplingNoteTreeRootHash;
-use crate::serialization::{
-    ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
-};
+use crate::serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize};
 use crate::sha256d_writer::Sha256dWriter;
 use crate::transaction::Transaction;
 
@@ -76,7 +72,8 @@ impl ZcashDeserialize for BlockHeaderHash {
 /// backwards reference (previous header hash) present in the block
 /// header. Each block points backwards to its parent, all the way
 /// back to the genesis block (the first block in the blockchain).
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//#[cfg_attr(test, derive(Arbitrary))]
 pub struct BlockHeader {
     /// A SHA-256d hash in internal byte order of the previous block’s
     /// header. This ensures no previous block can be changed without
@@ -117,11 +114,7 @@ pub struct BlockHeader {
     nonce: [u8; 32],
 
     /// The Equihash solution.
-    // The solution size when serialized should be in bytes ('always
-    // 1344').  I first tried this as a [u8; 1344] but until const
-    // generics land we'd have to implement all our common traits
-    // manually, like in pzec.
-    solution: Vec<u8>,
+    solution: EquihashSolution,
 }
 
 impl ZcashSerialize for BlockHeader {
@@ -130,30 +123,25 @@ impl ZcashSerialize for BlockHeader {
         writer.write_all(&self.merkle_root_hash.0[..])?;
         writer.write_all(&self.final_sapling_root_hash.0[..])?;
         writer.write_u32::<LittleEndian>(self.time.timestamp() as u32)?;
-        writer.write_u32::<LittleEndian>(self.bits as u32)?;
+        writer.write_u32::<LittleEndian>(self.bits)?;
         writer.write_all(&self.nonce[..])?;
-        writer.write_compactsize(self.solution.len() as u64)?;
-        writer.write_all(&self.solution[..])?;
+        self.solution.zcash_serialize(&mut writer)?;
         Ok(())
     }
 }
 
 impl ZcashDeserialize for BlockHeader {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        Ok(BlockHeader {
+        let thing = BlockHeader {
             previous_block_hash: BlockHeaderHash::zcash_deserialize(&mut reader)?,
             merkle_root_hash: MerkleTreeRootHash(reader.read_32_bytes()?),
             final_sapling_root_hash: SaplingNoteTreeRootHash(reader.read_32_bytes()?),
             time: Utc.timestamp(reader.read_u32::<LittleEndian>()? as i64, 0),
             bits: reader.read_u32::<LittleEndian>()?,
             nonce: reader.read_32_bytes()?,
-            solution: {
-                let len = reader.read_compactsize()?;
-                let mut bytes = Vec::new();
-                reader.take(len).read_to_end(&mut bytes)?;
-                bytes
-            },
-        })
+            solution: EquihashSolution::zcash_deserialize(reader)?,
+        };
+        Ok(thing)
     }
 }
 
@@ -164,6 +152,7 @@ impl ZcashDeserialize for BlockHeader {
 /// Block header: a data structure containing the block's metadata
 /// Transactions: an array (vector in Rust) of transactions
 #[derive(Clone, Debug, Eq, PartialEq)]
+//#[cfg_attr(test, derive(Arbitrary))]
 pub struct Block {
     /// First 80 bytes of the block as defined by the encoding used by
     /// "block" messages.
