@@ -2,3 +2,5 @@
 /target/
 # Firebase caches (?)
 .firebase/
+# Emacs detritus
+*~
