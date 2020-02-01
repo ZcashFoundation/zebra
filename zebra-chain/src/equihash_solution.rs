@@ -85,3 +85,20 @@ impl Arbitrary for EquihashSolution {
 
     type Strategy = BoxedStrategy<Self>;
 }
+
+#[cfg(test)]
+proptest! {
+
+    #[test]
+    fn encrypted_ciphertext_roundtrip(solution in any::<EquihashSolution>()) {
+
+        let mut data = Vec::new();
+
+        solution.zcash_serialize(&mut data).expect("EquihashSolution should serialize");
+
+        let solution2 = EquihashSolution::zcash_deserialize(&data[..]).expect("randomized EquihashSolution should deserialize");
+
+        prop_assert_eq![solution, solution2];
+    }
+
+}
