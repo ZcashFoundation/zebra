@@ -1,12 +1,21 @@
 //! Definitions of block datastructures.
 
-use chrono::{DateTime, Utc};
+#[cfg(test)]
+pub mod test_vectors;
+
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use chrono::{DateTime, TimeZone, Utc};
 use hex;
-use std::{fmt, io};
+use std::{
+    fmt,
+    io::{self, Read},
+};
 
 use crate::merkle_tree::MerkleTreeRootHash;
 use crate::note_commitment_tree::SaplingNoteTreeRootHash;
-use crate::serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize};
+use crate::serialization::{
+    ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
+};
 use crate::sha256d_writer::Sha256dWriter;
 use crate::transaction::Transaction;
 
@@ -112,14 +121,35 @@ pub struct BlockHeader {
 }
 
 impl ZcashSerialize for BlockHeader {
-    fn zcash_serialize<W: io::Write>(&self, _writer: W) -> Result<(), SerializationError> {
-        unimplemented!();
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+        self.previous_block_hash.zcash_serialize(&mut writer)?;
+        writer.write_all(&self.merkle_root_hash.0[..])?;
+        writer.write_all(&self.final_sapling_root_hash.0[..])?;
+        writer.write_u32::<LittleEndian>(self.time.timestamp() as u32)?;
+        writer.write_u32::<LittleEndian>(self.bits as u32)?;
+        writer.write_all(&self.nonce[..])?;
+        writer.write_compactsize(self.solution.len() as u64)?;
+        writer.write_all(&self.solution[..])?;
+        Ok(())
     }
 }
 
 impl ZcashDeserialize for BlockHeader {
-    fn zcash_deserialize<R: io::Read>(_reader: R) -> Result<Self, SerializationError> {
-        unimplemented!();
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        Ok(BlockHeader {
+            previous_block_hash: BlockHeaderHash::zcash_deserialize(&mut reader)?,
+            merkle_root_hash: MerkleTreeRootHash(reader.read_32_bytes()?),
+            final_sapling_root_hash: SaplingNoteTreeRootHash(reader.read_32_bytes()?),
+            time: Utc.timestamp(reader.read_u32::<LittleEndian>()? as i64, 0),
+            bits: reader.read_u32::<LittleEndian>()?,
+            nonce: reader.read_32_bytes()?,
+            solution: {
+                let len = reader.read_compactsize()?;
+                let mut bytes = Vec::new();
+                reader.take(len).read_to_end(&mut bytes)?;
+                bytes
+            },
+        })
     }
 }
 
