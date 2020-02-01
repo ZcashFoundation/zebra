@@ -73,7 +73,6 @@ impl ZcashDeserialize for BlockHeaderHash {
 /// header. Each block points backwards to its parent, all the way
 /// back to the genesis block (the first block in the blockchain).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-//#[cfg_attr(test, derive(Arbitrary))]
 pub struct BlockHeader {
     /// A SHA-256d hash in internal byte order of the previous block’s
     /// header. This ensures no previous block can be changed without
