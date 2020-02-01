@@ -20,12 +20,6 @@ const EQUIHASH_SOLUTION_SIZE: usize = 1344;
 /// length of this type is fixed.
 pub struct EquihashSolution(pub [u8; EQUIHASH_SOLUTION_SIZE]);
 
-impl Default for EquihashSolution {
-    fn default() -> Self {
-        EquihashSolution([0; EQUIHASH_SOLUTION_SIZE])
-    }
-}
-
 impl PartialEq<EquihashSolution> for EquihashSolution {
     fn eq(&self, other: &EquihashSolution) -> bool {
         self.0.as_ref() == other.0.as_ref()
@@ -87,18 +81,24 @@ impl Arbitrary for EquihashSolution {
 }
 
 #[cfg(test)]
-proptest! {
+mod tests {
 
-    #[test]
-    fn encrypted_ciphertext_roundtrip(solution in any::<EquihashSolution>()) {
+    use super::*;
 
-        let mut data = Vec::new();
+    proptest! {
 
-        solution.zcash_serialize(&mut data).expect("EquihashSolution should serialize");
+        #[test]
+        fn equihash_solution_roundtrip(solution in any::<EquihashSolution>()) {
 
-        let solution2 = EquihashSolution::zcash_deserialize(&data[..]).expect("randomized EquihashSolution should deserialize");
+            let mut data = Vec::new();
 
-        prop_assert_eq![solution, solution2];
+            solution.zcash_serialize(&mut data).expect("EquihashSolution should serialize");
+
+            let solution2 = EquihashSolution::zcash_deserialize(&data[..])
+                .expect("randomized EquihashSolution should deserialize");
+
+            prop_assert_eq![solution, solution2];
+        }
+
     }
-
 }

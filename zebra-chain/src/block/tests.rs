@@ -3,8 +3,6 @@ use std::io::{Cursor, Write};
 use chrono::NaiveDateTime;
 use proptest::{
     arbitrary::{any, Arbitrary},
-    collection::vec,
-    option,
     prelude::*,
 };
 
