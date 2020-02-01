@@ -1,8 +1,11 @@
 //! Equihash Solution and related items.
 
-// use std::fmt;
+use std::{fmt, io};
 
-// use hex::ToHex;
+#[cfg(test)]
+use proptest::{arbitrary::Arbitrary, collection::vec, prelude::*};
+
+use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 
 /// The size of an Equihash solution in bytes (always 1344).
 const EQUIHASH_SOLUTION_SIZE: usize = 1344;
@@ -15,8 +18,7 @@ const EQUIHASH_SOLUTION_SIZE: usize = 1344;
 ///
 /// The size of an Equihash solution in bytes is always 1344 so the
 /// length of this type is fixed.
-#[derive(Clone)]
-pub struct EquihashSolution([u8; EQUIHASH_SOLUTION_SIZE]);
+pub struct EquihashSolution(pub [u8; EQUIHASH_SOLUTION_SIZE]);
 
 impl Default for EquihashSolution {
     fn default() -> Self {
@@ -24,15 +26,62 @@ impl Default for EquihashSolution {
     }
 }
 
-// TODO: fix hex crate import conflict with tracing-subscriber
-// impl fmt::Debug for EquihashSolution {
-//     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-//         f.write_str(&self.0.encode_hex::<String>())
-//     }
-// }
-
 impl PartialEq<EquihashSolution> for EquihashSolution {
     fn eq(&self, other: &EquihashSolution) -> bool {
         self.0.as_ref() == other.0.as_ref()
     }
+}
+
+impl fmt::Debug for EquihashSolution {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple("EquihashSolution")
+            .field(&hex::encode(&self.0[..]))
+            .finish()
+    }
+}
+
+// These impls all only exist because of array length restrictions.
+
+impl Copy for EquihashSolution {}
+
+impl Clone for EquihashSolution {
+    fn clone(&self) -> Self {
+        let mut bytes = [0; EQUIHASH_SOLUTION_SIZE];
+        bytes[..].copy_from_slice(&self.0[..]);
+        Self(bytes)
+    }
+}
+
+impl Eq for EquihashSolution {}
+
+impl ZcashSerialize for EquihashSolution {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+        writer.write_all(&self.0[..])?;
+        Ok(())
+    }
+}
+
+impl ZcashDeserialize for EquihashSolution {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        let mut bytes = [0; EQUIHASH_SOLUTION_SIZE];
+        reader.read_exact(&mut bytes[..])?;
+        Ok(Self(bytes))
+    }
+}
+
+#[cfg(test)]
+impl Arbitrary for EquihashSolution {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        (vec(any::<u8>(), EQUIHASH_SOLUTION_SIZE))
+            .prop_map(|v| {
+                let mut bytes = [0; EQUIHASH_SOLUTION_SIZE];
+                bytes.copy_from_slice(v.as_slice());
+                return Self(bytes);
+            })
+            .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
 }
