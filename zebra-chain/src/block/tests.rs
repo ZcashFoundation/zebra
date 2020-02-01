@@ -1,0 +1,136 @@
+use std::io::{Cursor, Write};
+
+use chrono::NaiveDateTime;
+use proptest::{
+    arbitrary::{any, Arbitrary},
+    collection::vec,
+    option,
+    prelude::*,
+};
+
+use crate::sha256d_writer::Sha256dWriter;
+
+use super::*;
+
+#[cfg(test)]
+impl Arbitrary for BlockHeader {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: ()) -> Self::Strategy {
+        (
+            any::<BlockHeaderHash>(),
+            any::<MerkleTreeRootHash>(),
+            any::<SaplingNoteTreeRootHash>(),
+            (0i64..4_294_967_296i64),
+            any::<u32>(),
+            any::<[u8; 32]>(),
+            any::<EquihashSolution>(),
+        )
+            .prop_map(
+                |(
+                    block_hash,
+                    merkle_root_hash,
+                    sapling_root_hash,
+                    timestamp,
+                    bits,
+                    nonce,
+                    equihash_solution,
+                )| BlockHeader {
+                    previous_block_hash: block_hash,
+                    merkle_root_hash: merkle_root_hash,
+                    final_sapling_root_hash: sapling_root_hash,
+                    time: Utc.timestamp(timestamp, 0),
+                    bits: bits,
+                    nonce: nonce,
+                    solution: equihash_solution,
+                },
+            )
+            .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
+
+#[test]
+fn blockheaderhash_debug() {
+    let preimage = b"foo bar baz";
+    let mut sha_writer = Sha256dWriter::default();
+    let _ = sha_writer.write_all(preimage);
+
+    let hash = BlockHeaderHash(sha_writer.finish());
+
+    assert_eq!(
+        format!("{:?}", hash),
+        "BlockHeaderHash(\"bf46b4b5030752fedac6f884976162bbfb29a9398f104a280b3e34d51b416631\")"
+    );
+}
+
+#[test]
+fn blockheaderhash_from_blockheader() {
+    let some_bytes = [0; 32];
+
+    let blockheader = BlockHeader {
+        previous_block_hash: BlockHeaderHash(some_bytes),
+        merkle_root_hash: MerkleTreeRootHash(some_bytes),
+        final_sapling_root_hash: SaplingNoteTreeRootHash(some_bytes),
+        time: DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(61, 0), Utc),
+        bits: 0,
+        nonce: some_bytes,
+        solution: EquihashSolution([0; 1344]),
+    };
+
+    let hash = BlockHeaderHash::from(blockheader);
+
+    assert_eq!(
+        format!("{:?}", hash),
+        "BlockHeaderHash(\"738948d714d44f3040c2b6809ba7dbc8f4ba673dad39fd755ea4aeaa514cc386\")"
+    );
+
+    let mut bytes = Cursor::new(Vec::new());
+
+    // rustc keeps telling me I can't use `?` here, but unwrap() works fine???
+    blockheader.zcash_serialize(&mut bytes).unwrap();
+
+    bytes.set_position(0);
+    // rustc keeps telling me I can't use `?` here, but unwrap() works fine???
+    let other_header = BlockHeader::zcash_deserialize(&mut bytes).unwrap();
+
+    assert_eq!(blockheader, other_header);
+}
+
+proptest! {
+
+    #[test]
+    fn blockheaderhash_roundtrip(hash in any::<BlockHeaderHash>()) {
+        let mut bytes = Cursor::new(Vec::new());
+        hash.zcash_serialize(&mut bytes)?;
+
+        bytes.set_position(0);
+        let other_hash = BlockHeaderHash::zcash_deserialize(&mut bytes)?;
+
+        prop_assert_eq![hash, other_hash];
+    }
+
+    #[test]
+    fn blockheader_roundtrip(header in any::<BlockHeader>()) {
+        let mut bytes = Cursor::new(Vec::new());
+        header.zcash_serialize(&mut bytes)?;
+
+        bytes.set_position(0);
+        let other_header = BlockHeader::zcash_deserialize(&mut bytes)?;
+
+        prop_assert_eq![header, other_header];
+    }
+
+    #[test]
+    fn block_roundtrip(block in any::<Block>()) {
+        let mut bytes = Cursor::new(Vec::new());
+        block.zcash_serialize(&mut bytes)?;
+
+        bytes.set_position(0);
+        let other_block = Block::zcash_deserialize(&mut bytes)?;
+
+        prop_assert_eq![block, other_block];
+    }
+
+}
