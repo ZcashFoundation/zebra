@@ -183,6 +183,5 @@ mod proptests {
             prop_assert_eq![script, other_script];
         }
 
-
     }
 }

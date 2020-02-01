@@ -11,6 +11,9 @@ use std::{
     io::{self, Read},
 };
 
+#[cfg(test)]
+use proptest_derive::Arbitrary;
+
 use crate::merkle_tree::MerkleTreeRootHash;
 use crate::note_commitment_tree::SaplingNoteTreeRootHash;
 use crate::serialization::{
@@ -32,6 +35,7 @@ use crate::transaction::Transaction;
 /// for now I want to call it a `BlockHeaderHash` because that's
 /// more explicit.
 #[derive(Copy, Clone, Eq, PartialEq)]
+#[cfg_attr(test, derive(Arbitrary))]
 pub struct BlockHeaderHash(pub [u8; 32]);
 
 impl fmt::Debug for BlockHeaderHash {
@@ -184,8 +188,10 @@ impl ZcashDeserialize for Block {
 #[cfg(test)]
 mod tests {
 
+    use std::io::{Cursor, Write};
+
     use chrono::NaiveDateTime;
-    use std::io::Write;
+    use proptest::prelude::*;
 
     use crate::sha256d_writer::Sha256dWriter;
 
@@ -225,5 +231,21 @@ mod tests {
             format!("{:?}", hash),
             "BlockHeaderHash(\"35be4a0f97803879ed642d4e10a146c3fba8727a1dca8079e3f107221be1e7e4\")"
         );
+    }
+
+    proptest! {
+
+        #[test]
+        fn blockheaderhash_roundtrip(hash in any::<BlockHeaderHash>()) {
+            let mut bytes = Cursor::new(Vec::new());
+            hash.zcash_serialize(&mut bytes)?;
+
+            bytes.set_position(0);
+            let other_hash = BlockHeaderHash::zcash_deserialize(&mut bytes)?;
+
+            prop_assert_eq![hash, other_hash];
+        }
+
+
     }
 }
