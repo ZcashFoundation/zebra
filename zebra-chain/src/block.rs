@@ -184,11 +184,12 @@ impl ZcashDeserialize for Block {
 #[cfg(test)]
 mod tests {
 
+    use chrono::NaiveDateTime;
     use std::io::Write;
 
-    use super::BlockHeaderHash;
-
     use crate::sha256d_writer::Sha256dWriter;
+
+    use super::*;
 
     #[test]
     fn blockheaderhash_debug() {
@@ -201,6 +202,28 @@ mod tests {
         assert_eq!(
             format!("{:?}", hash),
             "BlockHeaderHash(\"bf46b4b5030752fedac6f884976162bbfb29a9398f104a280b3e34d51b416631\")"
+        );
+    }
+
+    #[test]
+    fn blockheaderhash_from_blockheader() {
+        let some_bytes = [0; 32];
+
+        let blockheader = BlockHeader {
+            previous_block_hash: BlockHeaderHash(some_bytes),
+            merkle_root_hash: MerkleTreeRootHash(some_bytes),
+            final_sapling_root_hash: SaplingNoteTreeRootHash(some_bytes),
+            time: DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(61, 0), Utc),
+            bits: 0,
+            nonce: some_bytes,
+            solution: vec![0; 1344],
+        };
+
+        let hash = BlockHeaderHash::from(blockheader);
+
+        assert_eq!(
+            format!("{:?}", hash),
+            "BlockHeaderHash(\"35be4a0f97803879ed642d4e10a146c3fba8727a1dca8079e3f107221be1e7e4\")"
         );
     }
 }

@@ -121,8 +121,6 @@ fn librustzcash_tx_deserialize_and_round_trip() {
     let tx = Transaction::zcash_deserialize(&test_vectors::GENERIC_TESTNET_TX[..])
         .expect("transaction test vector from librustzcash should deserialize");
 
-    println!("{:?}", tx);
-
     let mut data2 = Vec::new();
     tx.zcash_serialize(&mut data2).expect("tx should serialize");
 
@@ -135,15 +133,11 @@ proptest! {
     #[test]
     fn transaction_roundtrip(tx in any::<Transaction>()) {
 
-        println!("{:?}", tx);
-
         let mut data = Vec::new();
 
         tx.zcash_serialize(&mut data).expect("tx should serialize");
 
         let tx2 = Transaction::zcash_deserialize(&data[..]).expect("randomized tx should deserialize");
-
-        println!("{:?}", tx2);
 
         prop_assert_eq![tx, tx2];
     }
