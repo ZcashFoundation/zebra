@@ -3,6 +3,9 @@
 
 use std::io;
 
+#[cfg(test)]
+use proptest_derive::Arbitrary;
+
 use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 use crate::sha256d_writer::Sha256dWriter;
 use crate::transaction::Transaction;
@@ -28,7 +31,8 @@ impl<Transaction> ZcashDeserialize for MerkleTree<Transaction> {
 
 /// A SHA-256d hash of the root node of a merkle tree of SHA256-d
 /// hashed transactions in a block.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(test, derive(Arbitrary))]
 pub struct MerkleTreeRootHash(pub [u8; 32]);
 
 impl From<MerkleTree<Transaction>> for MerkleTreeRootHash {
