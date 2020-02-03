@@ -40,6 +40,20 @@ pub enum InventoryHash {
     FilteredBlock(BlockHeaderHash),
 }
 
+impl From<TransactionHash> for InventoryHash {
+    fn from(tx: TransactionHash) -> InventoryHash {
+        InventoryHash::Tx(tx)
+    }
+}
+
+impl From<BlockHeaderHash> for InventoryHash {
+    fn from(block: BlockHeaderHash) -> InventoryHash {
+        // Auto-convert to Block rather than FilteredBlock because filtered
+        // blocks aren't useful for Zcash.
+        InventoryHash::Block(block)
+    }
+}
+
 impl ZcashSerialize for InventoryHash {
     fn zcash_serialize<W: Write>(&self, mut writer: W) -> Result<(), SerializationError> {
         let (code, bytes) = match *self {
