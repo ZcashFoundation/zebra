@@ -63,8 +63,7 @@ impl ZcashSerialize for BlockHeaderHash {
 
 impl ZcashDeserialize for BlockHeaderHash {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let bytes = reader.read_32_bytes()?;
-        Ok(BlockHeaderHash(bytes))
+        Ok(BlockHeaderHash(reader.read_32_bytes()?))
     }
 }
 
@@ -133,7 +132,7 @@ impl ZcashSerialize for BlockHeader {
 
 impl ZcashDeserialize for BlockHeader {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let thing = BlockHeader {
+        Ok(BlockHeader {
             previous_block_hash: BlockHeaderHash::zcash_deserialize(&mut reader)?,
             merkle_root_hash: MerkleTreeRootHash(reader.read_32_bytes()?),
             final_sapling_root_hash: SaplingNoteTreeRootHash(reader.read_32_bytes()?),
@@ -141,8 +140,7 @@ impl ZcashDeserialize for BlockHeader {
             bits: reader.read_u32::<LittleEndian>()?,
             nonce: reader.read_32_bytes()?,
             solution: EquihashSolution::zcash_deserialize(reader)?,
-        };
-        Ok(thing)
+        })
     }
 }
 
