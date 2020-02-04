@@ -81,7 +81,7 @@ fn blockheaderhash_from_blockheader() {
 
     assert_eq!(
         format!("{:?}", hash),
-        "BlockHeaderHash(\"738948d714d44f3040c2b6809ba7dbc8f4ba673dad39fd755ea4aeaa514cc386\")"
+        "BlockHeaderHash(\"e942461f17dd1daea4157df9ba7a2aa5c90a885ac205375a0161f682635da207\")"
     );
 
     let mut bytes = Cursor::new(Vec::new());
@@ -99,9 +99,8 @@ fn blockheaderhash_from_blockheader() {
 
 #[test]
 fn deserialize_blockheader() {
-    // This deserializes without error but the result looks wrong.
     // https://explorer.zcha.in/blocks/415000
-    let header = BlockHeader::zcash_deserialize(&test_vectors::HEADER_MAINNET_415000[..])
+    let _header = BlockHeader::zcash_deserialize(&test_vectors::HEADER_MAINNET_415000[..])
         .expect("blockheader test vector should deserialize");
 }
 
