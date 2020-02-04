@@ -119,6 +119,8 @@ pub struct BlockHeader {
 
 impl ZcashSerialize for BlockHeader {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+        // "The current and only defined block version number for Zcash is 4."
+        writer.write_u32::<LittleEndian>(4)?;
         self.previous_block_hash.zcash_serialize(&mut writer)?;
         writer.write_all(&self.merkle_root_hash.0[..])?;
         writer.write_all(&self.final_sapling_root_hash.0[..])?;
@@ -132,6 +134,13 @@ impl ZcashSerialize for BlockHeader {
 
 impl ZcashDeserialize for BlockHeader {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        // "The current and only defined block version number for Zcash is 4."
+        let version = reader.read_u32::<LittleEndian>()?;
+
+        if version != 4 {
+            return Err(SerializationError::Parse("bad block header"));
+        }
+
         Ok(BlockHeader {
             previous_block_hash: BlockHeaderHash::zcash_deserialize(&mut reader)?,
             merkle_root_hash: MerkleTreeRootHash(reader.read_32_bytes()?),
