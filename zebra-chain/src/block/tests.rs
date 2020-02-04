@@ -97,6 +97,14 @@ fn blockheaderhash_from_blockheader() {
     assert_eq!(blockheader, other_header);
 }
 
+#[test]
+fn deserialize_blockheader() {
+    // This deserializes without error but the result looks wrong.
+    // https://explorer.zcha.in/blocks/415000
+    let header = BlockHeader::zcash_deserialize(&test_vectors::HEADER_MAINNET_415000[..])
+        .expect("blockheader test vector should deserialize");
+}
+
 proptest! {
 
     #[test]
