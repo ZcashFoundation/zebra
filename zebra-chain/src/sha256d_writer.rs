@@ -40,6 +40,7 @@ mod tests {
     use crate::sha256d_writer::Sha256dWriter;
 
     #[test]
+    // Just checking that `flush()` succeeds without error.
     fn sha256d_flush() {
         let preimage = b"foo bar baz";
         let mut sha_writer = Sha256dWriter::default();
