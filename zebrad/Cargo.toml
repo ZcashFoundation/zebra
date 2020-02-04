@@ -19,7 +19,7 @@ futures = "0.3"
 
 tracing = "0.1"
 tracing-futures = "0.2"
-tracing-subscriber = "0.1"
+tracing-subscriber = "0.2"
 tracing-log = "0.1"
 
 hyper = "0.13.2"
