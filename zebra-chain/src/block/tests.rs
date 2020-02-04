@@ -81,7 +81,7 @@ fn blockheaderhash_from_blockheader() {
 
     assert_eq!(
         format!("{:?}", hash),
-        "BlockHeaderHash(\"e942461f17dd1daea4157df9ba7a2aa5c90a885ac205375a0161f682635da207\")"
+        "BlockHeaderHash(\"39c92b8c6b582797830827c78d58674c7205fcb21991887c124d1dbe4b97d6d1\")"
     );
 
     let mut bytes = Cursor::new(Vec::new());
