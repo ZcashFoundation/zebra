@@ -86,12 +86,13 @@ fn blockheaderhash_from_blockheader() {
 
     let mut bytes = Cursor::new(Vec::new());
 
-    // rustc keeps telling me I can't use `?` here, but unwrap() works fine???
-    blockheader.zcash_serialize(&mut bytes).unwrap();
+    blockheader
+        .zcash_serialize(&mut bytes)
+        .expect("these bytes to serialize from a blockheader without issue");
 
     bytes.set_position(0);
-    // rustc keeps telling me I can't use `?` here, but unwrap() works fine???
-    let other_header = BlockHeader::zcash_deserialize(&mut bytes).unwrap();
+    let other_header = BlockHeader::zcash_deserialize(&mut bytes)
+        .expect("these bytes to deserialize into a blockheader without issue");
 
     assert_eq!(blockheader, other_header);
 }
