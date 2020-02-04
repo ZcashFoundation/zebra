@@ -5,7 +5,9 @@ use std::{fmt, io};
 #[cfg(test)]
 use proptest::{arbitrary::Arbitrary, collection::vec, prelude::*};
 
-use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
+use crate::serialization::{
+    ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
+};
 
 /// The size of an Equihash solution in bytes (always 1344).
 const EQUIHASH_SOLUTION_SIZE: usize = 1344;
@@ -50,6 +52,7 @@ impl Eq for EquihashSolution {}
 
 impl ZcashSerialize for EquihashSolution {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+        writer.write_compactsize(EQUIHASH_SOLUTION_SIZE as u64)?;
         writer.write_all(&self.0[..])?;
         Ok(())
     }
@@ -57,6 +60,7 @@ impl ZcashSerialize for EquihashSolution {
 
 impl ZcashDeserialize for EquihashSolution {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        reader.read_compactsize()?;
         let mut bytes = [0; EQUIHASH_SOLUTION_SIZE];
         reader.read_exact(&mut bytes[..])?;
         Ok(Self(bytes))
