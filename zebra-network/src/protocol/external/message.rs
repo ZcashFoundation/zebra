@@ -132,14 +132,7 @@ pub enum Message {
     /// A `block` message.
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#block)
-    Block {
-        /// Transaction data format version (note, this is signed).
-        // XXX does this get folded into the Block struct?
-        version: Version,
-
-        /// The block itself.
-        block: Box<Block>,
-    },
+    Block(Box<Block>),
 
     /// A `getblocks` message.
     ///
@@ -252,16 +245,7 @@ pub enum Message {
     /// A `tx` message.
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#tx)
-    // `flag` is not included (it's optional), and therefore
-    // `tx_witnesses` aren't either, as they go if `flag` goes.
-    Tx {
-        /// Transaction data format version (note, this is signed).
-        // XXX do we still need this with the transaction data handling?
-        version: Version,
-
-        /// The `Transaction` type itself.
-        transaction: Box<Transaction>,
-    },
+    Tx(Box<Transaction>),
 
     /// A `mempool` message.
     ///
