@@ -1791,7 +1791,6 @@ dependencies = [
  "tracing",
  "tracing-futures",
  "tracing-log",
- "tracing-subscriber",
  "zebra-chain",
  "zebra-network",
 ]
