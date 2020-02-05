@@ -347,9 +347,8 @@ where
             }
         };
 
-        match req {
-            Some(req) => self.drive_peer_request(req).await,
-            None => {}
+        if let Some(req) = req {
+            self.drive_peer_request(req).await
         }
     }
 
@@ -362,7 +361,7 @@ where
         trace!(?req);
         use tower::{load_shed::error::Overloaded, ServiceExt};
 
-        if let Err(_) = self.svc.ready().await {
+        if self.svc.ready().await.is_err() {
             // Treat all service readiness errors as Overloaded
             self.fail_with(PeerError::Overloaded);
         }

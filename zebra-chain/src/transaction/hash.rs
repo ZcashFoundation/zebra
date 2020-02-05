@@ -1,7 +1,5 @@
 use std::fmt;
 
-use hex;
-
 #[cfg(test)]
 use proptest_derive::Arbitrary;
 

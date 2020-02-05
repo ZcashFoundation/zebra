@@ -53,8 +53,8 @@ impl Arbitrary for SpendDescription {
             .prop_map(
                 |(cv_bytes, anchor, nullifier_bytes, rpk_bytes, proof, sig_bytes)| {
                     return Self {
+                        anchor,
                         cv: cv_bytes,
-                        anchor: anchor,
                         nullifier: nullifier_bytes,
                         rk: redjubjub::PublicKeyBytes::from(rpk_bytes),
                         zkproof: proof,
@@ -186,14 +186,14 @@ impl Arbitrary for ShieldedData {
             vec(any::<OutputDescription>(), 0..10),
             vec(any::<u8>(), 64),
         )
-            .prop_map(|(first, rest_spends, rest_outputs, sig)| {
+            .prop_map(|(first, rest_spends, rest_outputs, sig_bytes)| {
                 return Self {
-                    first: first,
-                    rest_spends: rest_spends,
-                    rest_outputs: rest_outputs,
+                    first,
+                    rest_spends,
+                    rest_outputs,
                     binding_sig: redjubjub::Signature::from({
                         let mut b = [0u8; 64];
-                        b.copy_from_slice(sig.as_slice());
+                        b.copy_from_slice(sig_bytes.as_slice());
                         b
                     }),
                 };

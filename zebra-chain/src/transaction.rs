@@ -31,6 +31,8 @@ use crate::types::{BlockHeight, LockTime};
 /// internally by different enum variants. Because we checkpoint on Sapling
 /// activation, we do not parse any pre-Sapling transaction types.
 #[derive(Clone, Debug, PartialEq, Eq)]
+// XXX consider boxing the Optional fields of V4 txs
+#[allow(clippy::large_enum_variant)]
 pub enum Transaction {
     /// A fully transparent transaction (`version = 1`).
     V1 {

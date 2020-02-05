@@ -293,6 +293,7 @@ impl Decoder for Codec {
     type Item = Message;
     type Error = Error;
 
+    #[allow(clippy::cognitive_complexity)]
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         use Error::Parse;
         match self.state {
@@ -467,7 +468,7 @@ impl Codec {
     fn read_block<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
         Ok(Message::Block {
             version: Version(reader.read_u32::<LittleEndian>()?),
-            block: Block::zcash_deserialize(&mut reader)?,
+            block: Box::new(Block::zcash_deserialize(&mut reader)?),
         })
     }
 
@@ -511,7 +512,7 @@ impl Codec {
     fn read_tx<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
         Ok(Message::Tx {
             version: Version(reader.read_u32::<LittleEndian>()?),
-            transaction: Transaction::zcash_deserialize(&mut reader)?,
+            transaction: Box::new(Transaction::zcash_deserialize(&mut reader)?),
         })
     }
 
@@ -546,9 +547,7 @@ impl Codec {
         let mut bytes = Vec::new();
 
         // Maximum size of data is 520 bytes.
-        let mut handle = reader.take(520);
-
-        handle.read(&mut bytes)?;
+        reader.take(520).read_exact(&mut bytes)?;
 
         Ok(Message::FilterAdd { data: bytes })
     }

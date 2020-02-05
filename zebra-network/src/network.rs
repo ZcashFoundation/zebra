@@ -11,7 +11,7 @@ pub enum Network {
 
 impl Network {
     /// Get the magic value associated to this `Network`.
-    pub fn magic(&self) -> Magic {
+    pub fn magic(self) -> Magic {
         match self {
             Network::Mainnet => magics::MAINNET,
             Network::Testnet => magics::TESTNET,

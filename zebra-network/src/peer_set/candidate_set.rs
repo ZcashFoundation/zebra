@@ -152,8 +152,7 @@ where
             .drain_oldest()
             .chain(self.gossiped.drain_newest())
             .chain(self.failed.drain_oldest())
-            .filter(|meta| !guard.is_potentially_connected(&meta.addr))
-            .next()
+            .find(|meta| !guard.is_potentially_connected(&meta.addr))
     }
 
     pub fn report_failed(&mut self, mut addr: MetaAddr) {

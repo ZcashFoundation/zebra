@@ -7,7 +7,6 @@ mod tests;
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{DateTime, TimeZone, Utc};
-use hex;
 use std::{fmt, io};
 
 #[cfg(test)]

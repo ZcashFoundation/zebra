@@ -102,7 +102,7 @@ where
         let internal_service = self.internal_service.clone();
         let timestamp_collector = self.timestamp_collector.clone();
         let user_agent = self.config.user_agent.clone();
-        let network = self.config.network.clone();
+        let network = self.config.network;
 
         let fut = async move {
             info!("connecting to remote peer");
@@ -149,17 +149,18 @@ where
             {
                 (nonce, services)
             } else {
-                return Err(HandshakeError::UnexpectedMessage(remote_msg));
+                return Err(HandshakeError::UnexpectedMessage(Box::new(remote_msg)));
             };
 
             // Check for nonce reuse, indicating self-connection.
-            if {
+            let nonce_reuse = {
                 let mut locked_nonces = nonces.lock().expect("mutex should be unpoisoned");
                 let nonce_reuse = locked_nonces.contains(&remote_nonce);
                 // Regardless of whether we observed nonce reuse, clean up the nonce set.
                 locked_nonces.remove(&local_nonce);
                 nonce_reuse
-            } {
+            };
+            if nonce_reuse {
                 return Err(HandshakeError::NonceReuse);
             }
 
@@ -172,7 +173,7 @@ where
             if let Message::Verack = remote_msg {
                 debug!("got verack from remote peer");
             } else {
-                return Err(HandshakeError::UnexpectedMessage(remote_msg));
+                return Err(HandshakeError::UnexpectedMessage(Box::new(remote_msg)));
             }
 
             // XXX here is where we would set the version to the minimum of the
@@ -208,7 +209,7 @@ where
                 .then(move |msg| {
                     let mut timestamp_collector = timestamp_collector.clone();
                     async move {
-                        if let Ok(_) = msg {
+                        if msg.is_ok() {
                             use futures::sink::SinkExt;
                             let _ = timestamp_collector
                                 .send(MetaAddr {

@@ -63,7 +63,7 @@ impl ErrorSlot {
             .lock()
             .expect("error mutex should be unpoisoned")
             .as_ref()
-            .map(|e| e.clone())
+            .cloned()
     }
 }
 
@@ -72,7 +72,7 @@ impl ErrorSlot {
 pub enum HandshakeError {
     /// The remote peer sent an unexpected message during the handshake.
     #[error("The remote peer sent an unexpected message: {0:?}")]
-    UnexpectedMessage(crate::protocol::external::Message),
+    UnexpectedMessage(Box<crate::protocol::external::Message>),
     /// The peer connector detected handshake nonce reuse, possibly indicating self-connection.
     #[error("Detected nonce reuse, possible self-connection")]
     NonceReuse,

@@ -12,8 +12,8 @@ use crate::types::Script;
 
 use super::*;
 
-const OVERWINTER_VERSION_GROUP_ID: u32 = 0x03C48270;
-const SAPLING_VERSION_GROUP_ID: u32 = 0x892F2085;
+const OVERWINTER_VERSION_GROUP_ID: u32 = 0x03C4_8270;
+const SAPLING_VERSION_GROUP_ID: u32 = 0x892F_2085;
 
 impl ZcashSerialize for OutPoint {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), SerializationError> {
@@ -373,14 +373,14 @@ impl ZcashDeserialize for Transaction {
                 let joinsplit_data = OptV4JSD::zcash_deserialize(&mut reader)?;
 
                 use futures::future::Either::*;
-                let shielded_data = if shielded_spends.len() > 0 {
+                let shielded_data = if !shielded_spends.is_empty() {
                     Some(ShieldedData {
                         first: Left(shielded_spends.remove(0)),
                         rest_spends: shielded_spends,
                         rest_outputs: shielded_outputs,
                         binding_sig: reader.read_64_bytes()?.into(),
                     })
-                } else if shielded_outputs.len() > 0 {
+                } else if !shielded_outputs.is_empty() {
                     Some(ShieldedData {
                         first: Right(shielded_outputs.remove(0)),
                         rest_spends: shielded_spends,
