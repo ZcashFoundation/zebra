@@ -1,3 +1,4 @@
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{fmt, io};
 
 use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
@@ -45,6 +46,50 @@ impl ZcashDeserialize for Groth16Proof {
         let mut bytes = [0; 192];
         reader.read_exact(&mut bytes[..])?;
         Ok(Self(bytes))
+    }
+}
+
+impl<'de> Deserialize<'de> for Groth16Proof {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct Groth16Visitor;
+        impl<'de> serde::de::Visitor<'de> for Groth16Visitor {
+            type Value = Groth16Proof;
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("192 bytes of data")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Groth16Proof, A::Error>
+            where
+                A: serde::de::SeqAccess<'de>,
+            {
+                let mut bytes = [0u8; 192];
+                for i in 0..192 {
+                    bytes[i] = seq
+                        .next_element()?
+                        .ok_or(serde::de::Error::invalid_length(i, &"expected 192 bytes"))?;
+                }
+                Ok(Groth16Proof(bytes))
+            }
+        }
+
+        deserializer.deserialize_tuple(192, Groth16Visitor)
+    }
+}
+
+impl Serialize for Groth16Proof {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        use serde::ser::SerializeTuple;
+        let mut tup = serializer.serialize_tuple(192)?;
+        for byte in &self.0[..] {
+            tup.serialize_element(byte)?;
+        }
+        tup.end()
     }
 }
 

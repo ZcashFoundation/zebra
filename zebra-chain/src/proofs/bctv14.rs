@@ -1,5 +1,7 @@
 use std::{fmt, io};
 
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
 use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 
 /// An encoding of a BCTV14 proof, as used in Zcash.
@@ -45,6 +47,50 @@ impl ZcashDeserialize for Bctv14Proof {
         let mut bytes = [0; 296];
         reader.read_exact(&mut bytes[..])?;
         Ok(Self(bytes))
+    }
+}
+
+impl<'de> Deserialize<'de> for Bctv14Proof {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct Bctv14Visitor;
+        impl<'de> serde::de::Visitor<'de> for Bctv14Visitor {
+            type Value = Bctv14Proof;
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("296 bytes of data")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Bctv14Proof, A::Error>
+            where
+                A: serde::de::SeqAccess<'de>,
+            {
+                let mut bytes = [0u8; 296];
+                for i in 0..296 {
+                    bytes[i] = seq
+                        .next_element()?
+                        .ok_or(serde::de::Error::invalid_length(i, &"expected 296 bytes"))?;
+                }
+                Ok(Bctv14Proof(bytes))
+            }
+        }
+
+        deserializer.deserialize_tuple(296, Bctv14Visitor)
+    }
+}
+
+impl Serialize for Bctv14Proof {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        use serde::ser::SerializeTuple;
+        let mut tup = serializer.serialize_tuple(296)?;
+        for byte in &self.0[..] {
+            tup.serialize_element(byte)?;
+        }
+        tup.end()
     }
 }
 

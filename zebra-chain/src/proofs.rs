@@ -2,6 +2,8 @@
 
 use std::fmt::Debug;
 
+use serde::{de::DeserializeOwned, Serialize};
+
 use crate::serialization::{ZcashDeserialize, ZcashSerialize};
 
 mod bctv14;
@@ -12,7 +14,16 @@ pub use groth16::Groth16Proof;
 
 /// A marker trait used to abstract over BCTV14 or Groth16 proofs.
 pub trait ZkSnarkProof:
-    Copy + Clone + Debug + PartialEq + Eq + ZcashSerialize + ZcashDeserialize + private::Sealed
+    Copy
+    + Clone
+    + Debug
+    + PartialEq
+    + Eq
+    + Serialize
+    + DeserializeOwned
+    + ZcashSerialize
+    + ZcashDeserialize
+    + private::Sealed
 {
 }
 impl ZkSnarkProof for Bctv14Proof {}
