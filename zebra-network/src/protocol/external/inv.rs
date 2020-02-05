@@ -55,7 +55,7 @@ impl From<BlockHeaderHash> for InventoryHash {
 }
 
 impl ZcashSerialize for InventoryHash {
-    fn zcash_serialize<W: Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+    fn zcash_serialize<W: Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
         let (code, bytes) = match *self {
             InventoryHash::Error => (0, [0; 32]),
             InventoryHash::Tx(hash) => (1, hash.0),

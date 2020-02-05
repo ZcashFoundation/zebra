@@ -60,7 +60,7 @@ pub enum LockTime {
 }
 
 impl ZcashSerialize for LockTime {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         // This implementation does not check the invariants on `LockTime` so that the
         // serialization is fallible only if the underlying writer is. This ensures that
         // we can always compute a hash of a transaction object.
@@ -106,7 +106,7 @@ impl Arbitrary for LockTime {
 pub struct Script(pub Vec<u8>);
 
 impl ZcashSerialize for Script {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_compactsize(self.0.len() as u64)?;
         writer.write_all(&self.0[..])?;
         Ok(())

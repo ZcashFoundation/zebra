@@ -51,7 +51,7 @@ impl Clone for EquihashSolution {
 impl Eq for EquihashSolution {}
 
 impl ZcashSerialize for EquihashSolution {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_compactsize(EQUIHASH_SOLUTION_SIZE as u64)?;
         writer.write_all(&self.0[..])?;
         Ok(())

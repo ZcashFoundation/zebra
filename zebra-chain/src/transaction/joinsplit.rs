@@ -154,7 +154,7 @@ impl PartialEq for EncryptedCiphertext {
 impl Eq for EncryptedCiphertext {}
 
 impl ZcashSerialize for EncryptedCiphertext {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_all(&self.0[..])?;
         Ok(())
     }
