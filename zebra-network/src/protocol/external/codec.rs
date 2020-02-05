@@ -293,7 +293,6 @@ impl Decoder for Codec {
     type Item = Message;
     type Error = Error;
 
-    #[allow(clippy::cognitive_complexity)]
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         use Error::Parse;
         match self.state {
