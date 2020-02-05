@@ -34,7 +34,7 @@ impl PartialEq for Groth16Proof {
 impl Eq for Groth16Proof {}
 
 impl ZcashSerialize for Groth16Proof {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_all(&self.0[..])?;
         Ok(())
     }

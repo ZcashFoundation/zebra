@@ -16,7 +16,7 @@ const OVERWINTER_VERSION_GROUP_ID: u32 = 0x03C4_8270;
 const SAPLING_VERSION_GROUP_ID: u32 = 0x892F_2085;
 
 impl ZcashSerialize for OutPoint {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_all(&self.hash.0[..])?;
         writer.write_u32::<LittleEndian>(self.index)?;
         Ok(())
@@ -33,7 +33,7 @@ impl ZcashDeserialize for OutPoint {
 }
 
 impl ZcashSerialize for TransparentInput {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         self.previous_output.zcash_serialize(&mut writer)?;
         self.signature_script.zcash_serialize(&mut writer)?;
         writer.write_u32::<LittleEndian>(self.sequence)?;
@@ -52,7 +52,7 @@ impl ZcashDeserialize for TransparentInput {
 }
 
 impl ZcashSerialize for TransparentOutput {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_u64::<LittleEndian>(self.value)?;
         self.pk_script.zcash_serialize(&mut writer)?;
         Ok(())
@@ -69,7 +69,7 @@ impl ZcashDeserialize for TransparentOutput {
 }
 
 impl<P: ZkSnarkProof> ZcashSerialize for JoinSplit<P> {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_u64::<LittleEndian>(self.vpub_old)?;
         writer.write_u64::<LittleEndian>(self.vpub_new)?;
         writer.write_all(&self.anchor[..])?;
@@ -109,7 +109,7 @@ impl<P: ZkSnarkProof> ZcashDeserialize for JoinSplit<P> {
 }
 
 impl<P: ZkSnarkProof> ZcashSerialize for JoinSplitData<P> {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_compactsize(self.joinsplits().count() as u64)?;
         for joinsplit in self.joinsplits() {
             joinsplit.zcash_serialize(&mut writer)?;
@@ -145,7 +145,7 @@ impl<P: ZkSnarkProof> ZcashDeserialize for Option<JoinSplitData<P>> {
 }
 
 impl ZcashSerialize for SpendDescription {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_all(&self.cv[..])?;
         writer.write_all(&self.anchor.0[..])?;
         writer.write_all(&self.nullifier[..])?;
@@ -171,7 +171,7 @@ impl ZcashDeserialize for SpendDescription {
 }
 
 impl ZcashSerialize for OutputDescription {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_all(&self.cv[..])?;
         writer.write_all(&self.cmu[..])?;
         writer.write_all(&self.ephemeral_key[..])?;
@@ -196,7 +196,7 @@ impl ZcashDeserialize for OutputDescription {
 }
 
 impl ZcashSerialize for Transaction {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         match self {
             Transaction::V1 {
                 inputs,

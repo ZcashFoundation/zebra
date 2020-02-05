@@ -67,7 +67,7 @@ impl PartialOrd for MetaAddr {
 }
 
 impl ZcashSerialize for MetaAddr {
-    fn zcash_serialize<W: Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+    fn zcash_serialize<W: Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
         writer.write_u32::<LittleEndian>(self.last_seen.timestamp() as u32)?;
         writer.write_u64::<LittleEndian>(self.services.bits())?;
         writer.write_socket_addr(self.addr)?;

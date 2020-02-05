@@ -37,7 +37,12 @@ pub trait ZcashSerialize: Sized {
     /// This function has a `zcash_` prefix to alert the reader that the
     /// serialization in use is consensus-critical serialization, rather than
     /// some other kind of serialization.
-    fn zcash_serialize<W: io::Write>(&self, writer: W) -> Result<(), SerializationError>;
+    ///
+    /// Notice that the error type is [`std::io::Error`]; this indicates that
+    /// serialization MUST be infallible up to errors in the underlying writer.
+    /// In other words, any type implementing `ZcashSerialize` must make illegal
+    /// states unrepresentable.
+    fn zcash_serialize<W: io::Write>(&self, writer: W) -> Result<(), io::Error>;
 }
 
 /// Consensus-critical serialization for Zcash.
@@ -56,7 +61,7 @@ pub trait ZcashDeserialize: Sized {
 }
 
 impl<T: ZcashSerialize> ZcashSerialize for Vec<T> {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_compactsize(self.len() as u64)?;
         for x in self {
             x.zcash_serialize(&mut writer)?;

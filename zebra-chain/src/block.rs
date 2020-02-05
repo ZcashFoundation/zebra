@@ -48,13 +48,13 @@ impl From<BlockHeader> for BlockHeaderHash {
         let mut hash_writer = Sha256dWriter::default();
         block_header
             .zcash_serialize(&mut hash_writer)
-            .expect("Block headers must serialize.");
+            .expect("Sha256dWriter is infallible");
         Self(hash_writer.finish())
     }
 }
 
 impl ZcashSerialize for BlockHeaderHash {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_all(&self.0)?;
         Ok(())
     }
@@ -117,7 +117,7 @@ pub struct BlockHeader {
 }
 
 impl ZcashSerialize for BlockHeader {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         // "The current and only defined block version number for Zcash is 4."
         writer.write_u32::<LittleEndian>(4)?;
         self.previous_block_hash.zcash_serialize(&mut writer)?;
@@ -170,7 +170,7 @@ pub struct Block {
 }
 
 impl ZcashSerialize for Block {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         self.header.zcash_serialize(&mut writer)?;
         self.transactions.zcash_serialize(&mut writer)?;
         Ok(())

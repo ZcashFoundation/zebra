@@ -59,7 +59,7 @@ impl SaplingNoteCommitmentTree {
 }
 
 impl ZcashSerialize for SaplingNoteCommitmentTree {
-    fn zcash_serialize<W: io::Write>(&self, _writer: W) -> Result<(), SerializationError> {
+    fn zcash_serialize<W: io::Write>(&self, _writer: W) -> Result<(), io::Error> {
         unimplemented!();
     }
 }

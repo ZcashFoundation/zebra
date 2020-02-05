@@ -18,7 +18,7 @@ pub struct MerkleTree<T> {
 }
 
 impl<Transaction> ZcashSerialize for MerkleTree<Transaction> {
-    fn zcash_serialize<W: io::Write>(&self, _writer: W) -> Result<(), SerializationError> {
+    fn zcash_serialize<W: io::Write>(&self, _writer: W) -> Result<(), io::Error> {
         unimplemented!();
     }
 }
@@ -40,7 +40,7 @@ impl From<MerkleTree<Transaction>> for MerkleTreeRootHash {
         let mut hash_writer = Sha256dWriter::default();
         merkle_tree
             .zcash_serialize(&mut hash_writer)
-            .expect("The merkle tree of transactions must serialize.");
+            .expect("Sha256dWriter is infallible");
         Self(hash_writer.finish())
     }
 }
