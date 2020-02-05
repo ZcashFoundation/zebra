@@ -203,13 +203,7 @@ impl Codec {
             }
             Addr(ref addrs) => addrs.zcash_serialize(&mut writer)?,
             GetAddr => { /* Empty payload -- no-op */ }
-            Block {
-                ref version,
-                ref block,
-            } => {
-                writer.write_u32::<LittleEndian>(version.0)?;
-                block.zcash_serialize(&mut writer)?
-            }
+            Block(ref block) => block.zcash_serialize(&mut writer)?,
             GetBlocks {
                 ref version,
                 ref block_locator_hashes,
@@ -232,13 +226,7 @@ impl Codec {
             Inv(ref hashes) => hashes.zcash_serialize(&mut writer)?,
             GetData(ref hashes) => hashes.zcash_serialize(&mut writer)?,
             NotFound(ref hashes) => hashes.zcash_serialize(&mut writer)?,
-            Tx {
-                ref version,
-                ref transaction,
-            } => {
-                writer.write_u32::<LittleEndian>(version.0)?;
-                transaction.zcash_serialize(&mut writer)?
-            }
+            Tx(ref transaction) => transaction.zcash_serialize(&mut writer)?,
             Mempool => { /* Empty payload -- no-op */ }
             FilterLoad {
                 ref filter,
@@ -465,10 +453,7 @@ impl Codec {
     }
 
     fn read_block<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
-        Ok(Message::Block {
-            version: Version(reader.read_u32::<LittleEndian>()?),
-            block: Box::new(Block::zcash_deserialize(&mut reader)?),
-        })
+        Ok(Message::Block(Box::new(Block::zcash_deserialize(reader)?)))
     }
 
     fn read_getblocks<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
@@ -508,11 +493,8 @@ impl Codec {
         Ok(Message::NotFound(Vec::zcash_deserialize(reader)?))
     }
 
-    fn read_tx<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
-        Ok(Message::Tx {
-            version: Version(reader.read_u32::<LittleEndian>()?),
-            transaction: Box::new(Transaction::zcash_deserialize(&mut reader)?),
-        })
+    fn read_tx<R: Read>(&self, mut rdr: R) -> Result<Message, Error> {
+        Ok(Message::Tx(Box::new(Transaction::zcash_deserialize(rdr)?)))
     }
 
     fn read_mempool<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
