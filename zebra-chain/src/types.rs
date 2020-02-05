@@ -7,7 +7,6 @@ use std::{
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{DateTime, TimeZone, Utc};
-use hex;
 
 #[cfg(test)]
 use proptest_derive::Arbitrary;

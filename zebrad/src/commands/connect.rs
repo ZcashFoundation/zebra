@@ -49,11 +49,9 @@ impl ConnectCmd {
         use tower::{buffer::Buffer, service_fn, Service, ServiceExt};
 
         let node = Buffer::new(
-            service_fn(|req| {
-                async move {
-                    info!(?req);
-                    Ok::<Response, Error>(Response::Ok)
-                }
+            service_fn(|req| async move {
+                info!(?req);
+                Ok::<Response, Error>(Response::Ok)
             }),
             1,
         );

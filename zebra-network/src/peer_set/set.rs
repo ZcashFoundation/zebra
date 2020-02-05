@@ -220,6 +220,7 @@ where
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
+    #[allow(clippy::cognitive_complexity)]
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         // Process peer discovery updates.
         let _ = self.poll_discover(cx)?;

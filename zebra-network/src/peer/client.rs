@@ -39,7 +39,7 @@ impl Service<Request> for Client {
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        if let Err(_) = ready!(self.server_tx.poll_ready(cx)) {
+        if ready!(self.server_tx.poll_ready(cx)).is_err() {
             Poll::Ready(Err(self
                 .error_slot
                 .try_get_error()

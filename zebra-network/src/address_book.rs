@@ -24,6 +24,7 @@ pub struct AddressBook {
     span: Span,
 }
 
+#[allow(clippy::len_without_is_empty)]
 impl AddressBook {
     /// Construct an `AddressBook` with the given [`tracing::Span`].
     pub fn new(span: Span) -> AddressBook {
@@ -76,17 +77,14 @@ impl AddressBook {
         #[cfg(test)]
         self.assert_consistency();
 
-        match self.get_by_addr(new.addr) {
-            Some(prev) => {
-                if prev.last_seen > new.last_seen {
-                    return;
-                } else {
-                    self.by_time
-                        .take(&prev)
-                        .expect("cannot have by_addr entry without by_time entry");
-                }
+        if let Some(prev) = self.get_by_addr(new.addr) {
+            if prev.last_seen > new.last_seen {
+                return;
+            } else {
+                self.by_time
+                    .take(&prev)
+                    .expect("cannot have by_addr entry without by_time entry");
             }
-            None => {}
         }
         self.by_time.insert(new);
         self.by_addr.insert(new.addr, (new.last_seen, new.services));
@@ -115,7 +113,7 @@ impl AddressBook {
     pub fn is_potentially_connected(&self, addr: &SocketAddr) -> bool {
         let _guard = self.span.enter();
         match self.by_addr.get(addr) {
-            None => return false,
+            None => false,
             Some((ref last_seen, _)) => last_seen > &AddressBook::cutoff_time(),
         }
     }
@@ -192,9 +190,9 @@ impl<'a> Iterator for Drain<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let next_item = if self.newest_first {
-            self.book.by_time.iter().next()?.clone()
+            *self.book.by_time.iter().next()?
         } else {
-            self.book.by_time.iter().rev().next()?.clone()
+            *self.book.by_time.iter().rev().next()?
         };
         self.book.by_time.remove(&next_item);
         self.book

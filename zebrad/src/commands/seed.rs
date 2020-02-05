@@ -41,20 +41,20 @@ impl Service<Request> for SeedService {
     #[instrument(skip(self, _cx))]
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         match self.state {
-            SeederState::Ready(_) => return Poll::Ready(Ok(())),
+            SeederState::Ready(_) => Poll::Ready(Ok(())),
             SeederState::AwaitingAddressBook(ref mut rx) => match rx.try_recv() {
                 Err(e) => {
                     error!("oneshot sender dropped, failing service: {:?}", e);
-                    return Poll::Ready(Err(e.into()));
+                    Poll::Ready(Err(e.into()))
                 }
                 Ok(None) => {
                     trace!("awaiting address book, service is unready");
-                    return Poll::Pending;
+                    Poll::Pending
                 }
                 Ok(Some(address_book)) => {
                     debug!("received address_book via oneshot, service becomes ready");
                     self.state = SeederState::Ready(address_book);
-                    return Poll::Ready(Ok(()));
+                    Poll::Ready(Ok(()))
                 }
             },
         }
@@ -95,7 +95,7 @@ impl Service<Request> for SeedService {
                 Ok(Response::Ok)
             }
         };
-        return Box::pin(futures::future::ready(response));
+        Box::pin(futures::future::ready(response))
     }
 }
 

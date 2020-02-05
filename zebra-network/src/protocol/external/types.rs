@@ -1,4 +1,3 @@
-use hex;
 use std::fmt;
 
 #[cfg(test)]
@@ -29,7 +28,7 @@ bitflags! {
         /// NODE_NETWORK means that the node is a full node capable of serving
         /// blocks, as opposed to a light client that makes network requests but
         /// does not provide network services.
-        const NODE_NETWORK = (1 << 0);
+        const NODE_NETWORK = 1;
     }
 }
 

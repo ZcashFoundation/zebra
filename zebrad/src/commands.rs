@@ -57,7 +57,7 @@ impl Configurable<ZebradConfig> for ZebradCmd {
 
         let if_exists = |f: PathBuf| if f.exists() { Some(f) } else { None };
 
-        filename.and_then(|f| if_exists(f))
+        filename.and_then(if_exists)
     }
 
     /// Apply changes to the config after it's been loaded, e.g. overriding

@@ -105,8 +105,8 @@ impl<P: ZkSnarkProof + Arbitrary + 'static> Arbitrary for JoinSplitData<P> {
         )
             .prop_map(|(first, rest, pub_key_bytes, sig_bytes)| {
                 return Self {
-                    first: first,
-                    rest: rest,
+                    first,
+                    rest,
                     pub_key: ed25519_zebra::PublicKeyBytes::from(pub_key_bytes),
                     sig: ed25519_zebra::Signature::from({
                         let mut b = [0u8; 64];
