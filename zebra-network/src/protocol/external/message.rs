@@ -222,9 +222,6 @@ pub enum Message {
     /// `getblocks`.
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#inv)
-    // XXX the bitcoin reference above suggests this can be 1.8 MB in bitcoin -- maybe
-    // larger in Zcash, since Zcash objects could be bigger (?) -- does this tilt towards
-    // having serialization be async?
     Inv(Vec<InventoryHash>),
 
     /// A `getdata` message.
