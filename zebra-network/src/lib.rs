@@ -27,7 +27,6 @@
 //! when it is overloaded.
 
 #![deny(missing_docs)]
-
 // Tracing causes false positives on this lint:
 // https://github.com/tokio-rs/tracing/issues/553
 #![allow(clippy::cognitive_complexity)]
