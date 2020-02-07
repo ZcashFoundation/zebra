@@ -100,8 +100,17 @@ fn blockheaderhash_from_blockheader() {
 #[test]
 fn deserialize_blockheader() {
     // https://explorer.zcha.in/blocks/415000
-    let _header = BlockHeader::zcash_deserialize(&test_vectors::HEADER_MAINNET_415000[..])
+    let _header = BlockHeader::zcash_deserialize(&test_vectors::HEADER_MAINNET_415000_BYTES[..])
         .expect("blockheader test vector should deserialize");
+}
+
+#[test]
+fn deserialize_block() {
+    // https://explorer.zcha.in/blocks/415000
+    let block = Block::zcash_deserialize(&test_vectors::BLOCK_MAINNET_415000_BYTES[..])
+        .expect("block test vector should deserialize");
+
+    println!("{:#?}", block);
 }
 
 proptest! {
