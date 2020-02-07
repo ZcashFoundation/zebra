@@ -31,7 +31,7 @@ use crate::transaction::Transaction;
 /// the direct bytes of the transactions as well as the header. So
 /// for now I want to call it a `BlockHeaderHash` because that's
 /// more explicit.
-#[derive(Copy, Clone, Eq, PartialEq)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash)]
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct BlockHeaderHash(pub [u8; 32]);
 
