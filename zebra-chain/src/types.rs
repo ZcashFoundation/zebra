@@ -39,9 +39,23 @@ impl fmt::Debug for Sha256dChecksum {
 }
 
 /// A u32 which represents a block height value.
+///
+/// # Invariants
+///
+/// Users should not construct block heights greater than or equal to `500_000_000`.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-#[cfg_attr(test, derive(Arbitrary))]
 pub struct BlockHeight(pub u32);
+
+#[cfg(test)]
+impl Arbitrary for BlockHeight {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: ()) -> Self::Strategy {
+        (0u32..500_000_000_u32).prop_map(|h| BlockHeight(h)).boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
 
 /// A Bitcoin-style `locktime`, representing either a block height or an epoch
 /// time.

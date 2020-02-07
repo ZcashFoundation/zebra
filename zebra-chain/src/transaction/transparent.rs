@@ -3,7 +3,7 @@
 #[cfg(test)]
 use proptest_derive::Arbitrary;
 
-use crate::types::Script;
+use crate::types::{BlockHeight, Script};
 
 use super::TransactionHash;
 
@@ -35,7 +35,10 @@ pub enum TransparentInput {
     },
     /// New coins created by the block reward.
     Coinbase {
-        /// 100 bytes of arbitrary data.
+        /// The height of this block.
+        height: BlockHeight,
+        /// Approximately 100 bytes of data (95 to be safe).
+        /// XXX refine this type.
         data: Vec<u8>,
         /// The sequence number for the output.
         sequence: u32,
