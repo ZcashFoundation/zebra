@@ -108,7 +108,7 @@ where
         let mut responses = FuturesUnordered::new();
         for _ in 0..2usize {
             self.peer_service.ready().await?;
-            responses.push(self.peer_service.call(Request::GetPeers));
+            responses.push(self.peer_service.call(Request::Peers));
         }
         while let Some(rsp) = responses.next().await {
             if let Ok(Response::Peers(addrs)) = rsp {

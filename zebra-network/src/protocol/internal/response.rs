@@ -1,12 +1,12 @@
 use std::error::Error;
 
 // XXX clean module layout of zebra_chain
-use zebra_chain::transaction::Transaction;
+use zebra_chain::block::Block;
 
 use crate::meta_addr::MetaAddr;
 
 /// A response to a network request, represented in internal format.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum Response {
     /// Generic success.
     Ok,
@@ -14,8 +14,8 @@ pub enum Response {
     Error,
     /// A list of peers, used to respond to `GetPeers`.
     Peers(Vec<MetaAddr>),
-    /// A list of transactions, such as in response to `GetMempool`.
-    Transactions(Vec<Transaction>),
+    /// A list of blocks.
+    Blocks(Vec<Block>),
 }
 
 impl<E> From<E> for Response

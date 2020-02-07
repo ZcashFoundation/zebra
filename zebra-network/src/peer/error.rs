@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use thiserror::Error;
 
-use zebra_chain::serialization::SerializationError;
+use zebra_chain::{serialization::SerializationError};
 
 /// A wrapper around `Arc<PeerError>` that implements `Error`.
 #[derive(Error, Debug, Clone)]
@@ -33,9 +33,6 @@ pub enum PeerError {
     /// already complete.
     #[error("Remote peer sent handshake messages after handshake")]
     DuplicateHandshake,
-    /// A badly-behaved remote peer sent the wrong nonce in response to a heartbeat `Ping`.
-    #[error("Remote peer sent the wrong heartbeat nonce")]
-    HeartbeatNonceMismatch,
     /// This node's internal services were overloaded, so the connection was dropped
     /// to shed load.
     #[error("Internal services over capacity")]
@@ -52,6 +49,9 @@ pub enum PeerError {
     // appropriate error when a `Reject` message is received.
     #[error("Received a Reject message")]
     Rejected,
+    /// The remote peer responded with a block we didn't ask for.
+    #[error("Remote peer responded with a block we didn't ask for.")]
+    WrongBlock,
 }
 
 #[derive(Default, Clone)]
