@@ -106,10 +106,15 @@ fn deserialize_blockheader() {
 
 #[test]
 fn deserialize_block() {
+    let block = Block::zcash_deserialize(&test_vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
+        .expect("block test vector should deserialize");
+    println!("{:#?}", block);
+    let block = Block::zcash_deserialize(&test_vectors::BLOCK_MAINNET_1_BYTES[..])
+        .expect("block test vector should deserialize");
+    println!("{:#?}", block);
     // https://explorer.zcha.in/blocks/415000
     let block = Block::zcash_deserialize(&test_vectors::BLOCK_MAINNET_415000_BYTES[..])
         .expect("block test vector should deserialize");
-
     println!("{:#?}", block);
 }
 
