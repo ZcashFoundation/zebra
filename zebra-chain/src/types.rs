@@ -101,9 +101,17 @@ impl Arbitrary for LockTime {
 }
 
 /// An encoding of a Bitcoin script.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct Script(pub Vec<u8>);
+
+impl fmt::Debug for Script {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple("Script")
+            .field(&hex::encode(&self.0))
+            .finish()
+    }
+}
 
 impl ZcashSerialize for Script {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
