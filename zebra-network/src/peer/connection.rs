@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use futures::{
@@ -9,12 +10,15 @@ use futures::{
 use tokio::time::{delay_for, Delay};
 use tower::Service;
 
-use zebra_chain::{serialization::SerializationError, transaction::TransactionHash};
+use zebra_chain::{
+    block::{Block, BlockHeaderHash},
+    serialization::SerializationError,
+};
 
 use crate::{
     constants,
     protocol::{
-        external::{InventoryHash, Message},
+        external::{types::Nonce, Message},
         internal::{Request, Response},
     },
     BoxedStdError,
@@ -22,11 +26,77 @@ use crate::{
 
 use super::{ClientRequest, ErrorSlot, PeerError, SharedPeerError};
 
+pub(super) enum Handler {
+    /// Indicates that the handler has finished processing the request.
+    Finished(Result<Response, SharedPeerError>),
+    Ping(Nonce),
+    GetPeers,
+    GetBlocksByHash {
+        hashes: HashSet<BlockHeaderHash>,
+        blocks: Vec<Block>,
+    },
+}
+
+impl Handler {
+    /// Try to handle `msg` as a response to a client request, possibly consuming
+    /// it in the process.
+    ///
+    /// Taking ownership of the message means that we can pass ownership of its
+    /// contents to responses without additional copies.  If the message is not
+    /// interpretable as a response, we return ownership to the caller.
+    fn process_message(&mut self, msg: Message) -> Option<Message> {
+        trace!(?msg);
+        // This function is where we statefully interpret Bitcoin/Zcash messages
+        // into responses to messages in the internal request/response protocol.
+        // This conversion is done by a sequence of (request, message) match arms,
+        // each of which contains the conversion logic for that pair.
+        use Handler::*;
+        let mut ignored_msg = None;
+        // XXX can this be avoided?
+        let tmp_state = std::mem::replace(self, Finished(Ok(Response::Ok)));
+        *self = match (tmp_state, msg) {
+            (Ping(req_nonce), Message::Pong(rsp_nonce)) => {
+                if req_nonce == rsp_nonce {
+                    Finished(Ok(Response::Ok))
+                } else {
+                    Ping(req_nonce)
+                }
+            }
+            (GetPeers, Message::Addr(addrs)) => Finished(Ok(Response::Peers(addrs))),
+            (
+                GetBlocksByHash {
+                    mut hashes,
+                    mut blocks,
+                },
+                Message::Block(block),
+            ) => {
+                if hashes.remove(&BlockHeaderHash::from(block.as_ref())) {
+                    blocks.push(*block);
+                    if hashes.is_empty() {
+                        Finished(Ok(Response::Blocks(blocks)))
+                    } else {
+                        GetBlocksByHash { hashes, blocks }
+                    }
+                } else {
+                    Finished(Err(Arc::new(PeerError::WrongBlock).into()))
+                }
+            }
+            // By default, messages are not responses.
+            (state, msg) => {
+                ignored_msg = Some(msg);
+                state
+            }
+        };
+
+        ignored_msg
+    }
+}
+
 pub(super) enum State {
     /// Awaiting a client request or a peer message.
     AwaitingRequest,
     /// Awaiting a peer message we can interpret as a client request.
-    AwaitingResponse(Request, oneshot::Sender<Result<Response, SharedPeerError>>),
+    AwaitingResponse(Handler, oneshot::Sender<Result<Response, SharedPeerError>>),
     /// A failure has occurred and we are shutting down the connection.
     Failed,
 }
@@ -84,9 +154,7 @@ where
                         Either::Left((None, _)) => {
                             self.fail_with(PeerError::ConnectionClosed);
                         }
-                        // XXX switch back to hard failure when we parse all message types
-                        //Either::Left((Some(Err(e)), _)) => self.fail_with(e.into()),
-                        Either::Left((Some(Err(e)), _)) => error!(%e),
+                        Either::Left((Some(Err(e)), _)) => self.fail_with(e.into()),
                         Either::Left((Some(Ok(msg)), _)) => {
                             self.handle_message_as_request(msg).await
                         }
@@ -106,29 +174,53 @@ where
                         .expect("timeout must be set while awaiting response");
                     match future::select(peer_rx.next(), timer_ref).await {
                         Either::Left((None, _)) => self.fail_with(PeerError::ConnectionClosed),
-                        // XXX switch back to hard failure when we parse all message types
-                        //Either::Left((Some(Err(e)), _)) => self.fail_with(e.into()),
-                        Either::Left((Some(Err(peer_err)), _timer)) => error!(%peer_err),
+                        Either::Left((Some(Err(e)), _)) => self.fail_with(e.into()),
                         Either::Left((Some(Ok(peer_msg)), _timer)) => {
-                            match self.handle_message_as_response(peer_msg) {
-                                None => continue,
-                                Some(msg) => self.handle_message_as_request(msg).await,
+                            // Try to process the message using the handler.
+                            // This extremely awkward construction avoids
+                            // keeping a live reference to handler across the
+                            // call to handle_message_as_request, which takes
+                            // &mut self. This is a sign that we don't properly
+                            // factor the state required for inbound and
+                            // outbound requests.
+                            let request_msg = match self.state {
+                                State::AwaitingResponse(ref mut handler, _) => {
+                                    handler.process_message(peer_msg)
+                                }
+                                _ => unreachable!(),
+                            };
+                            // If the message was not consumed, check whether it
+                            // should be handled as a request.
+                            if let Some(msg) = request_msg {
+                                self.handle_message_as_request(msg).await;
+                            } else {
+                                // Otherwise, check whether the handler is finished
+                                // processing messages and update the state.
+                                self.state = match self.state {
+                                    State::AwaitingResponse(Handler::Finished(response), tx) => {
+                                        let _ = tx.send(response);
+                                        State::AwaitingRequest
+                                    }
+                                    pending @ State::AwaitingResponse(_, _) => pending,
+                                    _ => unreachable!(),
+                                };
                             }
                         }
                         Either::Right(((), _peer_fut)) => {
                             trace!("client request timed out");
-                            // Re-matching lets us take ownership of tx
+                            let e = PeerError::ClientRequestTimeout;
                             self.state = match self.state {
-                                State::AwaitingResponse(Request::Ping(_), _) => {
-                                    self.fail_with(PeerError::ClientRequestTimeout);
+                                // Special case: ping timeouts fail the connection.
+                                State::AwaitingResponse(Handler::Ping(_), _) => {
+                                    self.fail_with(e);
                                     State::Failed
                                 }
+                                // Other request timeouts fail the request.
                                 State::AwaitingResponse(_, tx) => {
-                                    let e = PeerError::ClientRequestTimeout;
                                     let _ = tx.send(Err(Arc::new(e).into()));
                                     State::AwaitingRequest
                                 }
-                                _ => panic!("unreachable"),
+                                _ => unreachable!(),
                             };
                         }
                     }
@@ -197,12 +289,12 @@ where
         match match (&self.state, req) {
             (Failed, _) => panic!("failed connection cannot handle requests"),
             (AwaitingResponse { .. }, _) => panic!("tried to update pending request"),
-            (AwaitingRequest, GetPeers) => self
+            (AwaitingRequest, Peers) => self
                 .peer_tx
                 .send(Message::GetAddr)
                 .await
                 .map_err(|e| e.into())
-                .map(|()| AwaitingResponse(GetPeers, tx)),
+                .map(|()| AwaitingResponse(Handler::GetPeers, tx)),
             (AwaitingRequest, PushPeers(addrs)) => self
                 .peer_tx
                 .send(Message::Addr(addrs))
@@ -222,14 +314,23 @@ where
                 .send(Message::Ping(nonce))
                 .await
                 .map_err(|e| e.into())
-                .map(|()| AwaitingResponse(Ping(nonce), tx)),
-            (AwaitingRequest, GetMempool) => self
+                .map(|()| AwaitingResponse(Handler::Ping(nonce), tx)),
+            (AwaitingRequest, BlocksByHash(hashes)) => self
                 .peer_tx
-                .send(Message::Mempool)
+                .send(Message::GetData(
+                    hashes.iter().map(|h| (*h).into()).collect(),
+                ))
                 .await
                 .map_err(|e| e.into())
-                .map(|()| AwaitingResponse(GetMempool, tx)),
-            // XXX timeout handling here?
+                .map(|()| {
+                    AwaitingResponse(
+                        Handler::GetBlocksByHash {
+                            blocks: Vec::with_capacity(hashes.len()),
+                            hashes,
+                        },
+                        tx,
+                    )
+                }),
         } {
             Ok(new_state) => {
                 self.state = new_state;
@@ -237,68 +338,6 @@ where
             }
             Err(e) => self.fail_with(e),
         }
-    }
-
-    /// Try to handle `msg` as a response to a client request, possibly consuming
-    /// it in the process.
-    ///
-    /// Taking ownership of the message means that we can pass ownership of its
-    /// contents to responses without additional copies.  If the message is not
-    /// interpretable as a response, we return ownership to the caller.
-    fn handle_message_as_response(&mut self, msg: Message) -> Option<Message> {
-        trace!(?msg);
-        // This function is where we statefully interpret Bitcoin/Zcash messages
-        // into responses to messages in the internal request/response protocol.
-        // This conversion is done by a sequence of (request, message) match arms,
-        // each of which contains the conversion logic for that pair.
-        use Request::*;
-        use State::*;
-        let mut ignored_msg = None;
-        // We want to be able to consume the state, but it's behind a mutable
-        // reference, so we can't move it out of self without swapping in a
-        // placeholder, even if we immediately overwrite the placeholder.
-        let tmp_state = std::mem::replace(&mut self.state, AwaitingRequest);
-        self.state = match (tmp_state, msg) {
-            (AwaitingResponse(GetPeers, tx), Message::Addr(addrs)) => {
-                tx.send(Ok(Response::Peers(addrs)))
-                    .expect("response oneshot should be unused");
-                AwaitingRequest
-            }
-            // In this special case, we ignore tx, because we handle ping/pong
-            // messages internally; the "shadow client" only serves to generate
-            // outbound pings for us to process.
-            (AwaitingResponse(Ping(req_nonce), _tx), Message::Pong(res_nonce)) => {
-                if req_nonce != res_nonce {
-                    self.fail_with(PeerError::HeartbeatNonceMismatch);
-                }
-                AwaitingRequest
-            }
-            (
-                AwaitingResponse(_, tx),
-                Message::Reject {
-                    message,
-                    ccode,
-                    reason,
-                    data,
-                },
-            ) => {
-                tx.send(Err(SharedPeerError::from(Arc::new(PeerError::Rejected))))
-                    .expect("response oneshot should be unused");
-
-                error!(
-                    "{:?} message rejected: {:?}, {:?}, {:?}",
-                    message, ccode, reason, data
-                );
-                AwaitingRequest
-            }
-            // By default, messages are not responses.
-            (state, msg) => {
-                ignored_msg = Some(msg);
-                state
-            }
-        };
-
-        ignored_msg
     }
 
     async fn handle_message_as_request(&mut self, msg: Message) {
@@ -339,8 +378,7 @@ where
         // and try to construct an appropriate request object.
         let req = match msg {
             Message::Addr(addrs) => Some(Request::PushPeers(addrs)),
-            Message::GetAddr => Some(Request::GetPeers),
-            Message::Mempool => Some(Request::GetMempool),
+            Message::GetAddr => Some(Request::Peers),
             _ => {
                 debug!("unhandled message type");
                 None
@@ -391,14 +429,12 @@ where
                     self.fail_with(e.into());
                 }
             }
-            Response::Transactions(txs) => {
-                let hashes = txs
-                    .into_iter()
-                    .map(|tx| InventoryHash::Tx(TransactionHash::from(tx)))
-                    .collect::<Vec<_>>();
-
-                if let Err(e) = self.peer_tx.send(Message::Inv(hashes)).await {
-                    self.fail_with(e.into());
+            Response::Blocks(blocks) => {
+                // Generate one block message per block.
+                for block in blocks.into_iter() {
+                    if let Err(e) = self.peer_tx.send(Message::Block(Box::new(block))).await {
+                        self.fail_with(e.into());
+                    }
                 }
             }
         }

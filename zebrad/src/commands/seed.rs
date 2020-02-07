@@ -72,7 +72,7 @@ impl Service<Request> for SeedService {
         };
 
         let response = match req {
-            Request::GetPeers => {
+            Request::Peers => {
                 // Collect a list of known peers from the address book
                 // and sanitize their timestamps.
                 let mut peers = address_book

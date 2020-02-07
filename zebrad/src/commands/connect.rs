@@ -43,7 +43,7 @@ impl Runnable for ConnectCmd {
 
 impl ConnectCmd {
     async fn connect(&self) -> Result<(), Error> {
-        use zebra_network::{AddressBook, Request, Response};
+        use zebra_network::{Request, Response};
 
         info!("begin tower-based peer handling test stub");
         use tower::{buffer::Buffer, service_fn, Service, ServiceExt};
@@ -70,43 +70,47 @@ impl ConnectCmd {
             .await
             .map_err(|e| Error::from(ErrorKind::Io.context(e)))?;
 
-        info!("peer_set became ready, constructing addr requests");
+        info!("peer_set became ready");
 
-        use futures::stream::{FuturesUnordered, StreamExt};
+        peer_set.ready().await.unwrap();
 
-        let mut addr_reqs = FuturesUnordered::new();
-        for i in 0..10usize {
-            info!(i, "awaiting peer_set ready");
-            peer_set
-                .ready()
-                .await
-                .map_err(|e| Error::from(ErrorKind::Io.context(e)))?;
-            info!(i, "calling peer_set");
-            addr_reqs.push(peer_set.call(Request::GetPeers));
+        use zebra_chain::block::BlockHeaderHash;
+        use zebra_chain::serialization::ZcashDeserialize;
+        let hash_415000 = BlockHeaderHash::zcash_deserialize(
+            &[
+                104, 97, 133, 175, 186, 67, 219, 26, 10, 37, 145, 232, 63, 170, 25, 37, 8, 250, 47,
+                43, 38, 113, 231, 60, 121, 55, 171, 1, 0, 0, 0, 0,
+            ][..],
+        )
+        .unwrap();
+        let rsp = peer_set
+            .call(Request::BlocksByHash(
+                std::iter::once(hash_415000).collect(),
+            ))
+            .await;
+
+        info!(?rsp);
+
+        let block_415000 = if let Ok(Response::Blocks(blocks)) = rsp {
+            blocks[0].clone()
+        } else {
+            panic!("did not get block");
+        };
+
+        let hash_414999 = block_415000.header.previous_block_hash;
+
+        let two_blocks =
+            Request::BlocksByHash([hash_415000, hash_414999].iter().cloned().collect());
+        info!(?two_blocks);
+        peer_set.ready().await.unwrap();
+        let mut rsp = peer_set.call(two_blocks.clone()).await;
+        info!(?rsp);
+        while let Err(_) = rsp {
+            info!("retry");
+            peer_set.ready().await.unwrap();
+            rsp = peer_set.call(two_blocks.clone()).await;
+            info!(?rsp);
         }
-
-        use tracing::Level;
-        let mut all_addrs = AddressBook::new(span!(Level::TRACE, "connect stub addressbook"));
-        while let Some(Ok(Response::Peers(addrs))) = addr_reqs.next().await {
-            info!(addrs.len = addrs.len(), "got address response");
-
-            let prev_count = all_addrs.peers().count();
-            all_addrs.extend(addrs.into_iter());
-            let count = all_addrs.peers().count();
-            info!(
-                new_addrs = count - prev_count,
-                count, "added addrs to addressbook"
-            );
-        }
-
-        let addrs = all_addrs.drain_newest().collect::<Vec<_>>();
-
-        info!(addrs.len = addrs.len(), ab.len = all_addrs.peers().count());
-        let mut head = Vec::new();
-        head.extend_from_slice(&addrs[0..5]);
-        let mut tail = Vec::new();
-        tail.extend_from_slice(&addrs[addrs.len() - 5..]);
-        info!(addrs.first = ?head, addrs.last = ?tail);
 
         let eternity = future::pending::<()>();
         eternity.await;
