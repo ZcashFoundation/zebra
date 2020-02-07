@@ -1719,6 +1719,7 @@ dependencies = [
  "ed25519-zebra",
  "futures",
  "hex",
+ "lazy_static",
  "proptest",
  "proptest-derive",
  "redjubjub",
