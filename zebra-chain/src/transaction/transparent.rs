@@ -23,18 +23,23 @@ pub struct OutPoint {
 
 /// A transparent input to a transaction.
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[cfg_attr(test, derive(Arbitrary))]
-pub struct TransparentInput {
-    /// The previous output transaction reference.
-    pub previous_output: OutPoint,
-
-    /// Computational Script for confirming transaction authorization.
-    pub signature_script: Script,
-
-    /// Transaction version as defined by the sender. Intended for
-    /// "replacement" of transactions when information is updated
-    /// before inclusion into a block.
-    pub sequence: u32,
+pub enum TransparentInput {
+    /// A reference to an output of a previous transaction.
+    PrevOut {
+        /// The previous output transaction reference.
+        outpoint: OutPoint,
+        /// The script that authorizes spending `outpoint`.
+        script: Script,
+        /// The sequence number for the output.
+        sequence: u32,
+    },
+    /// New coins created by the block reward.
+    Coinbase {
+        /// 100 bytes of arbitrary data.
+        data: Vec<u8>,
+        /// The sequence number for the output.
+        sequence: u32,
+    },
 }
 
 /// A transparent output from a transaction.

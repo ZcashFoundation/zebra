@@ -2,7 +2,7 @@
 //! transaction types, so that all of the serialization logic is in one place.
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use std::io;
+use std::io::{self, Read};
 
 use crate::proofs::ZkSnarkProof;
 use crate::serialization::{
@@ -34,20 +34,56 @@ impl ZcashDeserialize for OutPoint {
 
 impl ZcashSerialize for TransparentInput {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        self.previous_output.zcash_serialize(&mut writer)?;
-        self.signature_script.zcash_serialize(&mut writer)?;
-        writer.write_u32::<LittleEndian>(self.sequence)?;
+        match self {
+            TransparentInput::PrevOut {
+                outpoint,
+                script,
+                sequence,
+            } => {
+                outpoint.zcash_serialize(&mut writer)?;
+                script.zcash_serialize(&mut writer)?;
+                writer.write_u32::<LittleEndian>(*sequence)?;
+            }
+            TransparentInput::Coinbase { data, sequence } => {
+                writer.write_all(&[0; 32][..])?;
+                writer.write_u32::<LittleEndian>(0xffff_ffff)?;
+                assert!(data.len() <= 100);
+                writer.write_compactsize(data.len() as u64)?;
+                writer.write_all(&data[..])?;
+                writer.write_u32::<LittleEndian>(*sequence)?;
+            }
+        }
         Ok(())
     }
 }
 
 impl ZcashDeserialize for TransparentInput {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        Ok(TransparentInput {
-            previous_output: OutPoint::zcash_deserialize(&mut reader)?,
-            signature_script: Script::zcash_deserialize(&mut reader)?,
-            sequence: reader.read_u32::<LittleEndian>()?,
-        })
+        // This inlines the OutPoint deserialization to peek at the hash value
+        // and detect whether we have a coinbase input.
+        let bytes = reader.read_32_bytes()?;
+        if bytes == [0; 32] {
+            if reader.read_u32::<LittleEndian>()? != 0xffff_ffff {
+                return Err(SerializationError::Parse("wrong index in coinbase"));
+            }
+            let len = reader.read_compactsize()?;
+            if len > 100 {
+                return Err(SerializationError::Parse("coinbase has too much data"));
+            }
+            let mut data = Vec::with_capacity(len as usize);
+            (&mut reader).take(len).read_to_end(&mut data)?;
+            let sequence = reader.read_u32::<LittleEndian>()?;
+            Ok(TransparentInput::Coinbase { data, sequence })
+        } else {
+            Ok(TransparentInput::PrevOut {
+                outpoint: OutPoint {
+                    hash: TransactionHash(bytes),
+                    index: reader.read_u32::<LittleEndian>()?,
+                },
+                script: Script::zcash_deserialize(&mut reader)?,
+                sequence: reader.read_u32::<LittleEndian>()?,
+            })
+        }
     }
 }
 
