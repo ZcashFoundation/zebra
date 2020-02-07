@@ -10,7 +10,9 @@
 //!
 //! A root of a note commitment tree is associated with each treestate.
 
-use std::io;
+use std::{fmt, io};
+
+use hex;
 
 #[cfg(test)]
 use proptest_derive::Arbitrary;
@@ -31,9 +33,17 @@ pub struct SaplingNoteCommitmentTree;
 /// commitment tree corresponding to the final Sapling treestate of
 /// this block. A root of a note commitment tree is associated with
 /// each treestate.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Default, Eq, PartialEq)]
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct SaplingNoteTreeRootHash(pub [u8; 32]);
+
+impl fmt::Debug for SaplingNoteTreeRootHash {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple("SaplingNoteTreeRootHash")
+            .field(&hex::encode(&self.0))
+            .finish()
+    }
+}
 
 impl From<SaplingNoteCommitmentTree> for SaplingNoteTreeRootHash {
     fn from(_tree: SaplingNoteCommitmentTree) -> Self {

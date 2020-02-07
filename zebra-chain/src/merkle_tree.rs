@@ -1,7 +1,7 @@
 //! A binary hash tree of SHA256d (two rounds of SHA256) hashes for
 //! node values.
 
-use std::io;
+use std::{fmt, io};
 
 #[cfg(test)]
 use proptest_derive::Arbitrary;
@@ -31,7 +31,7 @@ impl<Transaction> ZcashDeserialize for MerkleTree<Transaction> {
 
 /// A SHA-256d hash of the root node of a merkle tree of SHA256-d
 /// hashed transactions in a block.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct MerkleTreeRootHash(pub [u8; 32]);
 
@@ -42,5 +42,13 @@ impl From<MerkleTree<Transaction>> for MerkleTreeRootHash {
             .zcash_serialize(&mut hash_writer)
             .expect("Sha256dWriter is infallible");
         Self(hash_writer.finish())
+    }
+}
+
+impl fmt::Debug for MerkleTreeRootHash {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple("MerkleTreeRootHash")
+            .field(&hex::encode(&self.0))
+            .finish()
     }
 }
