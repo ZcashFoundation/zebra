@@ -152,19 +152,13 @@ impl ZcashDeserialize for BlockHeader {
     }
 }
 
-/// A block in your blockchain.
-///
-/// A block is a data structure with two fields:
-///
-/// Block header: a data structure containing the block's metadata
-/// Transactions: an array (vector in Rust) of transactions
+/// A Zcash block, containing a [`BlockHeader`] and a sequence of
+/// [`Transaction`]s.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct Block {
-    /// First 80 bytes of the block as defined by the encoding used by
-    /// "block" messages.
+    /// The block header, containing block metadata.
     pub header: BlockHeader,
-
     /// The block transactions.
     pub transactions: Vec<Transaction>,
 }

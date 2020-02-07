@@ -7,7 +7,7 @@ use proptest::{
 
 use crate::{
     serialization::{ZcashDeserialize, ZcashSerialize},
-    types::LockTime,
+    types::{LockTime, Script},
 };
 
 use super::*;
@@ -109,6 +109,31 @@ impl Arbitrary for Transaction {
             Self::v2_strategy(),
             Self::v3_strategy(),
             Self::v4_strategy()
+        ]
+        .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
+
+#[cfg(test)]
+impl Arbitrary for TransparentInput {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: ()) -> Self::Strategy {
+        prop_oneof![
+            (any::<OutPoint>(), any::<Script>(), any::<u32>())
+                .prop_map(|(outpoint, script, sequence)| {
+                    TransparentInput::PrevOut {
+                        outpoint,
+                        script,
+                        sequence,
+                    }
+                })
+                .boxed(),
+            (vec(any::<u8>(), 0..100), any::<u32>())
+                .prop_map(|(data, sequence)| { TransparentInput::Coinbase { data, sequence } })
+                .boxed(),
         ]
         .boxed()
     }
