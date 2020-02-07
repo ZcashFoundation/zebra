@@ -77,23 +77,23 @@ pub struct BlockHeader {
     /// A SHA-256d hash in internal byte order of the previous block’s
     /// header. This ensures no previous block can be changed without
     /// also changing this block’s header.
-    previous_block_hash: BlockHeaderHash,
+    pub previous_block_hash: BlockHeaderHash,
 
     /// A SHA-256d hash in internal byte order. The merkle root is
     /// derived from the SHA256d hashes of all transactions included
     /// in this block as assembled in a binary tree, ensuring that
     /// none of those transactions can be modied without modifying the
     /// header.
-    merkle_root_hash: MerkleTreeRootHash,
+    pub merkle_root_hash: MerkleTreeRootHash,
 
     /// [Sapling onward] The root LEBS2OSP256(rt) of the Sapling note
     /// commitment tree corresponding to the finnal Sapling treestate of
     /// this block.
-    final_sapling_root_hash: SaplingNoteTreeRootHash,
+    pub final_sapling_root_hash: SaplingNoteTreeRootHash,
 
     /// The block timestamp is a Unix epoch time (UTC) when the miner
     /// started hashing the header (according to the miner).
-    time: DateTime<Utc>,
+    pub time: DateTime<Utc>,
 
     /// An encoded version of the target threshold this block’s header
     /// hash must be less than or equal to, in the same nBits format
@@ -105,15 +105,15 @@ pub struct BlockHeader {
     /// [Bitcoin-nBits](https://bitcoin.org/en/developer-reference#target-nbits)
     // pzec has their own wrapper around u32 for this field:
     // https://github.com/ZcashFoundation/zebra/blob/master/zebra-primitives/src/compact.rs
-    bits: u32,
+    pub bits: u32,
 
     /// An arbitrary field that miners can change to modify the header
     /// hash in order to produce a hash less than or equal to the
     /// target threshold.
-    nonce: [u8; 32],
+    pub nonce: [u8; 32],
 
     /// The Equihash solution.
-    solution: EquihashSolution,
+    pub solution: EquihashSolution,
 }
 
 impl ZcashSerialize for BlockHeader {
