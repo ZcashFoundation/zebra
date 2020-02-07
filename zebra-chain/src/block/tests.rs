@@ -77,7 +77,7 @@ fn blockheaderhash_from_blockheader() {
         solution: EquihashSolution([0; 1344]),
     };
 
-    let hash = BlockHeaderHash::from(blockheader);
+    let hash = BlockHeaderHash::from(&blockheader);
 
     assert_eq!(
         format!("{:?}", hash),

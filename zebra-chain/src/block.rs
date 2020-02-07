@@ -43,8 +43,8 @@ impl fmt::Debug for BlockHeaderHash {
     }
 }
 
-impl From<BlockHeader> for BlockHeaderHash {
-    fn from(block_header: BlockHeader) -> Self {
+impl<'a> From<&'a BlockHeader> for BlockHeaderHash {
+    fn from(block_header: &'a BlockHeader) -> Self {
         let mut hash_writer = Sha256dWriter::default();
         block_header
             .zcash_serialize(&mut hash_writer)
@@ -167,6 +167,12 @@ pub struct Block {
 
     /// The block transactions.
     pub transactions: Vec<Transaction>,
+}
+
+impl<'a> From<&'a Block> for BlockHeaderHash {
+    fn from(block: &'a Block) -> BlockHeaderHash {
+        (&block.header).into()
+    }
 }
 
 impl ZcashSerialize for Block {
