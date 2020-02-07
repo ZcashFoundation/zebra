@@ -131,8 +131,14 @@ impl Arbitrary for TransparentInput {
                     }
                 })
                 .boxed(),
-            (vec(any::<u8>(), 0..100), any::<u32>())
-                .prop_map(|(data, sequence)| { TransparentInput::Coinbase { data, sequence } })
+            (any::<BlockHeight>(), vec(any::<u8>(), 0..95), any::<u32>())
+                .prop_map(|(height, data, sequence)| {
+                    TransparentInput::Coinbase {
+                        height,
+                        data,
+                        sequence,
+                    }
+                })
                 .boxed(),
         ]
         .boxed()
