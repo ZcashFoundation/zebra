@@ -1,6 +1,6 @@
 //! Note encryption types.
 
-use std::fmt;
+use std::{convert::From, fmt};
 
 /// A 512-byte _Memo_ field associated with a note, as described in
 /// [protocol specification §5.5][ps].
@@ -12,12 +12,34 @@ use std::fmt;
 #[derive(Clone, Copy)]
 pub struct Memo([u8; 512]);
 
-impl Memo {}
+impl From<String> for Memo {
+    fn from(input: String) -> Self {
+        let input_bytes = input.as_bytes();
+
+        let mut full_bytes = [0; 512];
+
+        if input_bytes.len() < 512 {
+            full_bytes[0..input_bytes.len()].copy_from_slice(input_bytes);
+            Memo(full_bytes)
+        } else if input_bytes.len() == 512 {
+            full_bytes[..].copy_from_slice(input_bytes);
+            Memo(full_bytes)
+        } else {
+            // Because this is a From impl, we truncate your input
+            // rather than return any Memo at all.
+            full_bytes.copy_from_slice(&input_bytes[0..512]);
+            Memo(full_bytes)
+        }
+    }
+}
 
 impl fmt::Debug for Memo {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let output: String;
 
+        // This saves work but if the 'valid utf8 string' is just a
+        // bunch of numbers, it prints them out like
+        // 'Memo("\u{0}\u{0}..")', so. ¯\_(ツ)_/¯
         match String::from_utf8(self.0.to_vec()) {
             Ok(memo) => output = memo,
             _ => output = hex::encode(&self.0[..]),
@@ -35,13 +57,25 @@ fn memo_fmt() {
 
     let memo2 = Memo(
         *b"thiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiis \
-                 iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiis \
-                 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
-                 veeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeryyyyyyyyyyyyyyyyyyyyyyyyyy \
-                 looooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooong \
-                 meeeeeeeeeeeeeeeeeeemooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo \
-                 but it's just short enough",
+           iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiis \
+           aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+           veeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeryyyyyyyyyyyyyyyyyyyyyyyyyy \
+           looooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooong \
+           meeeeeeeeeeeeeeeeeeemooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo \
+           but it's just short enough",
     );
 
     println!("{:?}", memo2);
+
+    let mut some_bytes = [0u8; 512];
+    some_bytes[0] = 0xF6;
+
+    println!("{:?}", Memo(some_bytes));
+}
+
+#[test]
+fn memo_from_string() {
+    let memo = Memo::from("foo bar baz".to_string());
+
+    println!("{:?}", memo);
 }
