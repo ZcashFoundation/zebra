@@ -1,5 +1,5 @@
 // XXX clean module layout of zebra_chain
-use zebra_chain::block::Block;
+use zebra_chain::block::{Block, BlockHeaderHash};
 
 use crate::meta_addr::MetaAddr;
 
@@ -14,4 +14,7 @@ pub enum Response {
 
     /// A list of blocks.
     Blocks(Vec<Block>),
+
+    /// A list of block hashes.
+    BlockHeaderHashes(Vec<BlockHeaderHash>),
 }

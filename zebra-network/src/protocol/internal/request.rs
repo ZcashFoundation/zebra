@@ -28,4 +28,13 @@ pub enum Request {
     /// didn't start with a `Vec` but with, e.g., an iterator, they can collect
     /// directly into a `HashSet` and save work.
     BlocksByHash(HashSet<BlockHeaderHash>),
+
+    /// Request block hashes of subsequent blocks in the chain, giving hashes of
+    /// known blocks.
+    FindBlocks {
+        /// Hashes of known blocks, ordered from highest height to lowest height.
+        known_blocks: Vec<BlockHeaderHash>,
+        /// Optionally, the last header to request.
+        stop: Option<BlockHeaderHash>,
+    },
 }

@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use thiserror::Error;
 
-use zebra_chain::{serialization::SerializationError};
+use zebra_chain::serialization::SerializationError;
 
 /// A wrapper around `Arc<PeerError>` that implements `Error`.
 #[derive(Error, Debug, Clone)]

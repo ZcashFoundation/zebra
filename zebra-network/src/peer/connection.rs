@@ -18,7 +18,7 @@ use zebra_chain::{
 use crate::{
     constants,
     protocol::{
-        external::{types::Nonce, Message},
+        external::{types::Nonce, InventoryHash, Message},
         internal::{Request, Response},
     },
     BoxedStdError,
@@ -35,6 +35,7 @@ pub(super) enum Handler {
         hashes: HashSet<BlockHeaderHash>,
         blocks: Vec<Block>,
     },
+    FindBlocks,
 }
 
 impl Handler {
@@ -81,6 +82,15 @@ impl Handler {
                     Finished(Err(Arc::new(PeerError::WrongBlock).into()))
                 }
             }
+            (FindBlocks, Message::Inv(inv_hashes)) => Finished(Ok(Response::BlockHeaderHashes(
+                inv_hashes
+                    .into_iter()
+                    .filter_map(|inv| match inv {
+                        InventoryHash::Block(hash) => Some(hash),
+                        _ => None,
+                    })
+                    .collect(),
+            ))),
             // By default, messages are not responses.
             (state, msg) => {
                 ignored_msg = Some(msg);
@@ -317,6 +327,15 @@ where
                         tx,
                     )
                 }),
+            (AwaitingRequest, FindBlocks { known_blocks, stop }) => self
+                .peer_tx
+                .send(Message::GetBlocks {
+                    block_locator_hashes: known_blocks,
+                    hash_stop: stop.unwrap_or(BlockHeaderHash([0; 32])),
+                })
+                .await
+                .map_err(|e| e.into())
+                .map(|()| AwaitingResponse(Handler::FindBlocks, tx)),
         } {
             Ok(new_state) => {
                 self.state = new_state;
@@ -419,6 +438,15 @@ where
                     if let Err(e) = self.peer_tx.send(Message::Block(Box::new(block))).await {
                         self.fail_with(e.into());
                     }
+                }
+            }
+            Response::BlockHeaderHashes(hashes) => {
+                if let Err(e) = self
+                    .peer_tx
+                    .send(Message::Inv(hashes.into_iter().map(Into::into).collect()))
+                    .await
+                {
+                    self.fail_with(e.into())
                 }
             }
         }
