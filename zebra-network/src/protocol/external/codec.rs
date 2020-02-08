@@ -452,7 +452,7 @@ impl Codec {
         Ok(Message::GetAddr)
     }
 
-    fn read_block<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
+    fn read_block<R: Read>(&self, reader: R) -> Result<Message, Error> {
         Ok(Message::Block(Box::new(Block::zcash_deserialize(reader)?)))
     }
 
@@ -493,7 +493,7 @@ impl Codec {
         Ok(Message::NotFound(Vec::zcash_deserialize(reader)?))
     }
 
-    fn read_tx<R: Read>(&self, mut rdr: R) -> Result<Message, Error> {
+    fn read_tx<R: Read>(&self, rdr: R) -> Result<Message, Error> {
         Ok(Message::Tx(Box::new(Transaction::zcash_deserialize(rdr)?)))
     }
 
@@ -571,7 +571,6 @@ mod tests {
             relay: true,
         };
 
-        use tokio::prelude::*;
         use tokio_util::codec::{FramedRead, FramedWrite};
         let v_bytes = rt.block_on(async {
             let mut bytes = Vec::new();
@@ -606,7 +605,6 @@ mod tests {
             flags: 0,
         };
 
-        use tokio::prelude::*;
         use tokio_util::codec::{FramedRead, FramedWrite};
         let v_bytes = rt.block_on(async {
             let mut bytes = Vec::new();
@@ -641,7 +639,6 @@ mod tests {
             flags: 0,
         };
 
-        use tokio::prelude::*;
         use tokio_util::codec::{FramedRead, FramedWrite};
         let v_bytes = rt.block_on(async {
             let mut bytes = Vec::new();
