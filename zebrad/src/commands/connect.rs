@@ -112,6 +112,15 @@ impl ConnectCmd {
             info!(?rsp);
         }
 
+        peer_set.ready().await.unwrap();
+        let mut rsp = peer_set
+            .call(Request::FindBlocks {
+                known_blocks: Vec::new(),
+                stop: None,
+            })
+            .await;
+        info!(?rsp);
+
         let eternity = future::pending::<()>();
         eternity.await;
 
