@@ -43,7 +43,7 @@ impl fmt::Debug for Sha256dChecksum {
 /// # Invariants
 ///
 /// Users should not construct block heights greater than or equal to `500_000_000`.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 pub struct BlockHeight(pub u32);
 
 #[cfg(test)]
