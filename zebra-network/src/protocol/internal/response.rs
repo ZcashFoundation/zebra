@@ -10,10 +10,13 @@ use crate::meta_addr::MetaAddr;
 pub enum Response {
     /// Generic success.
     Ok,
+
     /// Generic error.
     Error,
+
     /// A list of peers, used to respond to `GetPeers`.
     Peers(Vec<MetaAddr>),
+
     /// A list of blocks.
     Blocks(Vec<Block>),
 }
