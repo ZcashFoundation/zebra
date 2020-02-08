@@ -408,11 +408,6 @@ where
 
         match rsp {
             Response::Nil => { /* generic success, do nothing */ }
-            Response::Error => {
-                if let Err(e) = self.peer_tx.send(Message::from(PeerError::Rejected)).await {
-                    self.fail_with(e.into());
-                }
-            }
             Response::Peers(addrs) => {
                 if let Err(e) = self.peer_tx.send(Message::Addr(addrs)).await {
                     self.fail_with(e.into());
