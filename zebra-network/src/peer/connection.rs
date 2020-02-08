@@ -53,11 +53,11 @@ impl Handler {
         use Handler::*;
         let mut ignored_msg = None;
         // XXX can this be avoided?
-        let tmp_state = std::mem::replace(self, Finished(Ok(Response::Ok)));
+        let tmp_state = std::mem::replace(self, Finished(Ok(Response::Nil)));
         *self = match (tmp_state, msg) {
             (Ping(req_nonce), Message::Pong(rsp_nonce)) => {
                 if req_nonce == rsp_nonce {
-                    Finished(Ok(Response::Ok))
+                    Finished(Ok(Response::Nil))
                 } else {
                     Ping(req_nonce)
                 }
@@ -407,7 +407,7 @@ where
         };
 
         match rsp {
-            Response::Ok => { /* generic success, do nothing */ }
+            Response::Nil => { /* generic success, do nothing */ }
             Response::Error => {
                 if let Err(e) = self.peer_tx.send(Message::from(PeerError::Rejected)).await {
                     self.fail_with(e.into());
