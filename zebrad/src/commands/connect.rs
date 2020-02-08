@@ -51,7 +51,7 @@ impl ConnectCmd {
         let node = Buffer::new(
             service_fn(|req| async move {
                 info!(?req);
-                Ok::<Response, Error>(Response::Ok)
+                Ok::<Response, Error>(Response::Nil)
             }),
             1,
         );

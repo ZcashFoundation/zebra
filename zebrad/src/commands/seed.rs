@@ -92,7 +92,7 @@ impl Service<Request> for SeedService {
             }
             _ => {
                 debug!("ignoring request");
-                Ok(Response::Ok)
+                Ok(Response::Nil)
             }
         };
         Box::pin(futures::future::ready(response))

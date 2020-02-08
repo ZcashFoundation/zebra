@@ -8,8 +8,8 @@ use crate::meta_addr::MetaAddr;
 /// A response to a network request, represented in internal format.
 #[derive(Clone, Debug)]
 pub enum Response {
-    /// Generic success.
-    Ok,
+    /// A response with no data.
+    Nil,
 
     /// Generic error.
     Error,
