@@ -295,20 +295,6 @@ where
                 .await
                 .map_err(|e| e.into())
                 .map(|()| AwaitingResponse(Handler::GetPeers, tx)),
-            (AwaitingRequest, PushPeers(addrs)) => self
-                .peer_tx
-                .send(Message::Addr(addrs))
-                .await
-                .map_err(|e| e.into())
-                .map(|()| {
-                    // PushPeers does not have a response, so we return OK as
-                    // soon as we send the request. Sending through a oneshot
-                    // can only fail if the rx end is dropped before calling
-                    // send, which we can safely ignore (the request future was
-                    // cancelled).
-                    let _ = tx.send(Ok(Response::Ok));
-                    AwaitingRequest
-                }),
             (AwaitingRequest, Ping(nonce)) => self
                 .peer_tx
                 .send(Message::Ping(nonce))
@@ -377,7 +363,10 @@ where
         // Interpret `msg` as a request from the remote peer to our node,
         // and try to construct an appropriate request object.
         let req = match msg {
-            Message::Addr(addrs) => Some(Request::PushPeers(addrs)),
+            Message::Addr(_) => {
+                debug!("ignoring unsolicited addr message");
+                None
+            }
             Message::GetAddr => Some(Request::Peers),
             _ => {
                 debug!("unhandled message type");

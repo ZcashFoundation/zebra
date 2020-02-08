@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 
-use crate::meta_addr::MetaAddr;
 use zebra_chain::block::BlockHeaderHash;
 
 use super::super::types::Nonce;
@@ -10,15 +9,14 @@ use super::super::types::Nonce;
 pub enum Request {
     /// Requests additional peers from the server.
     Peers,
-    /// Advertises peers to the remote server.
-    // XXX potentially remove this -- we don't use it?
-    PushPeers(Vec<MetaAddr>),
+
     /// Heartbeats triggered on peer connection start.
     ///
     /// This is included as a bit of a hack, it should only be used
     /// internally for connection management. You should not expect to
     /// be firing or handling `Ping` requests or `Pong` responses.
     Ping(Nonce),
+
     /// Request block data by block hashes.
     ///
     /// This uses a `HashSet` rather than a `Vec` for two reasons. First, it
