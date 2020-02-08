@@ -205,20 +205,18 @@ impl Codec {
             GetAddr => { /* Empty payload -- no-op */ }
             Block(ref block) => block.zcash_serialize(&mut writer)?,
             GetBlocks {
-                ref version,
                 ref block_locator_hashes,
                 ref hash_stop,
             } => {
-                writer.write_u32::<LittleEndian>(version.0)?;
+                writer.write_u32::<LittleEndian>(self.builder.version.0)?;
                 block_locator_hashes.zcash_serialize(&mut writer)?;
                 hash_stop.zcash_serialize(&mut writer)?;
             }
             GetHeaders {
-                ref version,
                 ref block_locator_hashes,
                 ref hash_stop,
             } => {
-                writer.write_u32::<LittleEndian>(version.0)?;
+                writer.write_u32::<LittleEndian>(self.builder.version.0)?;
                 block_locator_hashes.zcash_serialize(&mut writer)?;
                 hash_stop.zcash_serialize(&mut writer)?;
             }
@@ -457,11 +455,14 @@ impl Codec {
     }
 
     fn read_getblocks<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
-        Ok(Message::GetBlocks {
-            version: Version(reader.read_u32::<LittleEndian>()?),
-            block_locator_hashes: Vec::zcash_deserialize(&mut reader)?,
-            hash_stop: BlockHeaderHash::zcash_deserialize(&mut reader)?,
-        })
+        if self.builder.version == Version(reader.read_u32::<LittleEndian>()?) {
+            Ok(Message::GetBlocks {
+                block_locator_hashes: Vec::zcash_deserialize(&mut reader)?,
+                hash_stop: BlockHeaderHash::zcash_deserialize(&mut reader)?,
+            })
+        } else {
+            Err(Error::Parse("getblocks version did not match negotiation"))
+        }
     }
 
     /// Deserialize a `headers` message.
@@ -474,11 +475,14 @@ impl Codec {
     }
 
     fn read_getheaders<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
-        Ok(Message::GetHeaders {
-            version: Version(reader.read_u32::<LittleEndian>()?),
-            block_locator_hashes: Vec::zcash_deserialize(&mut reader)?,
-            hash_stop: BlockHeaderHash::zcash_deserialize(&mut reader)?,
-        })
+        if self.builder.version == Version(reader.read_u32::<LittleEndian>()?) {
+            Ok(Message::GetHeaders {
+                block_locator_hashes: Vec::zcash_deserialize(&mut reader)?,
+                hash_stop: BlockHeaderHash::zcash_deserialize(&mut reader)?,
+            })
+        } else {
+            Err(Error::Parse("getblocks version did not match negotiation"))
+        }
     }
 
     fn read_inv<R: Read>(&self, reader: R) -> Result<Message, Error> {

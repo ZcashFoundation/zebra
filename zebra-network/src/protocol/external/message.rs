@@ -160,9 +160,6 @@ pub enum Message {
     // restriction, or if they don't, what happens if we send them too
     // many results.
     GetBlocks {
-        /// The protocol version.
-        version: Version,
-
         /// Block locators, from newest back to genesis block.
         block_locator_hashes: Vec<BlockHeaderHash>,
 
@@ -203,9 +200,6 @@ pub enum Message {
     // restriction, or if they don't, what happens if we send them too
     // many results.
     GetHeaders {
-        /// The protocol version.
-        version: Version,
-
         /// Block locators, from newest back to genesis block.
         block_locator_hashes: Vec<BlockHeaderHash>,
 
