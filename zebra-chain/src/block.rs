@@ -18,6 +18,7 @@ use crate::note_commitment_tree::SaplingNoteTreeRootHash;
 use crate::serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize};
 use crate::sha256d_writer::Sha256dWriter;
 use crate::transaction::Transaction;
+use crate::types::BlockHeight;
 
 /// A SHA-256d hash of a BlockHeader.
 ///
@@ -161,6 +162,20 @@ pub struct Block {
     pub header: BlockHeader,
     /// The block transactions.
     pub transactions: Vec<Transaction>,
+}
+
+impl Block {
+    /// Return the block height reported in the coinbase transaction, if any.
+    pub fn coinbase_height(&self) -> Option<BlockHeight> {
+        use crate::transaction::TransparentInput;
+        self.transactions
+            .get(0)
+            .and_then(|tx| tx.inputs().next())
+            .and_then(|input| match input {
+                TransparentInput::Coinbase { ref height, .. } => Some(*height),
+                _ => None,
+            })
+    }
 }
 
 impl<'a> From<&'a Block> for BlockHeaderHash {
