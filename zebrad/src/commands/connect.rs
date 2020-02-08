@@ -72,54 +72,77 @@ impl ConnectCmd {
 
         info!("peer_set became ready");
 
-        peer_set.ready().await.unwrap();
-
+        use futures::stream::{FuturesUnordered, StreamExt};
+        use std::collections::BTreeSet;
         use zebra_chain::block::BlockHeaderHash;
-        use zebra_chain::serialization::ZcashDeserialize;
-        let hash_415000 = BlockHeaderHash::zcash_deserialize(
-            &[
-                104, 97, 133, 175, 186, 67, 219, 26, 10, 37, 145, 232, 63, 170, 25, 37, 8, 250, 47,
-                43, 38, 113, 231, 60, 121, 55, 171, 1, 0, 0, 0, 0,
-            ][..],
-        )
-        .unwrap();
-        let rsp = peer_set
-            .call(Request::BlocksByHash(
-                std::iter::once(hash_415000).collect(),
-            ))
-            .await;
+        use zebra_chain::types::BlockHeight;
 
-        info!(?rsp);
-
-        let block_415000 = if let Ok(Response::Blocks(blocks)) = rsp {
-            blocks[0].clone()
-        } else {
-            panic!("did not get block");
-        };
-
-        let hash_414999 = block_415000.header.previous_block_hash;
-
-        let two_blocks =
-            Request::BlocksByHash([hash_415000, hash_414999].iter().cloned().collect());
-        info!(?two_blocks);
         peer_set.ready().await.unwrap();
-        let mut rsp = peer_set.call(two_blocks.clone()).await;
-        info!(?rsp);
-        while let Err(_) = rsp {
-            info!("retry");
+
+        // genesis
+        let mut tip = BlockHeaderHash([
+            8, 206, 61, 151, 49, 176, 0, 192, 131, 56, 69, 92, 138, 74, 107, 208, 93, 161, 110, 38,
+            177, 29, 170, 27, 145, 113, 132, 236, 232, 15, 4, 0,
+        ]);
+
+        let mut downloaded_block_heights = BTreeSet::<BlockHeight>::new();
+        downloaded_block_heights.insert(BlockHeight(0));
+        let mut block_requests = FuturesUnordered::new();
+        let mut requested_block_heights = 0;
+        while requested_block_heights < 700_000 {
+            // Request the next 500 hashes.
             peer_set.ready().await.unwrap();
-            rsp = peer_set.call(two_blocks.clone()).await;
-            info!(?rsp);
+            let hashes = if let Ok(Response::BlockHeaderHashes(hashes)) = peer_set
+                .call(Request::FindBlocks {
+                    known_blocks: vec![tip],
+                    stop: None,
+                })
+                .await
+            {
+                info!(
+                    new_hashes = hashes.len(),
+                    requested = requested_block_heights,
+                    in_flight = block_requests.len(),
+                    downloaded = downloaded_block_heights.len(),
+                    highest = downloaded_block_heights.iter().next_back().unwrap().0,
+                    "requested more hashes"
+                );
+                requested_block_heights += hashes.len();
+                hashes
+            } else {
+                panic!("request failed, TODO implement retry");
+            };
+
+            tip = *hashes.last().unwrap();
+
+            // Request the corresponding blocks in chunks
+            for chunk in hashes.chunks(10usize) {
+                peer_set.ready().await.unwrap();
+                block_requests
+                    .push(peer_set.call(Request::BlocksByHash(chunk.iter().cloned().collect())));
+            }
+
+            // Allow at most 300 block requests in flight.
+            while block_requests.len() > 300 {
+                match block_requests.next().await {
+                    Some(Ok(Response::Blocks(blocks))) => {
+                        for block in &blocks {
+                            downloaded_block_heights.insert(block.coinbase_height().unwrap());
+                        }
+                    }
+                    Some(Err(e)) => {
+                        error!(%e);
+                    }
+                    _ => continue,
+                }
+            }
         }
 
-        peer_set.ready().await.unwrap();
-        let mut rsp = peer_set
-            .call(Request::FindBlocks {
-                known_blocks: Vec::new(),
-                stop: None,
-            })
-            .await;
-        info!(?rsp);
+        while let Some(Ok(Response::Blocks(blocks))) = block_requests.next().await {
+            for block in &blocks {
+                downloaded_block_heights.insert(block.coinbase_height().unwrap());
+            }
+        }
 
         let eternity = future::pending::<()>();
         eternity.await;
