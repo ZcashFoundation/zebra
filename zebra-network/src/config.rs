@@ -43,6 +43,9 @@ pub struct Config {
 
     /// How frequently we attempt to connect to a new peer.
     pub new_peer_interval: Duration,
+
+    /// The initial target size for the peer set.
+    pub peerset_initial_target_size: usize,
 }
 
 impl Config {
@@ -92,6 +95,7 @@ impl Default for Config {
             peerset_request_buffer_size: 1,
             handshake_timeout: Duration::from_secs(4),
             new_peer_interval: Duration::from_secs(120),
+            peerset_initial_target_size: 50,
         }
     }
 }
