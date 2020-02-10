@@ -80,5 +80,8 @@ fn memo_fmt() {
 fn memo_from_string() {
     let memo = Memo::from("foo bar baz");
 
-    println!("{:?}", memo);
+    let mut bytes = [0; 512];
+    bytes[0..11].copy_from_slice(&[102, 111, 111, 32, 98, 97, 114, 32, 98, 97, 122]);
+
+    assert!(memo.0.iter().eq(bytes.iter()));
 }
