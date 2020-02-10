@@ -90,3 +90,45 @@ pub enum Transaction {
         joinsplit_data: Option<JoinSplitData<Groth16Proof>>,
     },
 }
+
+impl Transaction {
+    /// Iterate over the transparent inputs of this transaction, if any.
+    pub fn inputs(&self) -> impl Iterator<Item=&TransparentInput> {
+        match self {
+            Transaction::V1 { ref inputs, .. } => inputs.iter(),
+            Transaction::V2 { ref inputs, .. } => inputs.iter(),
+            Transaction::V3 { ref inputs, .. } => inputs.iter(),
+            Transaction::V4 { ref inputs, .. } => inputs.iter(),
+        }
+    }
+
+    /// Iterate over the transparent outputs of this transaction, if any.
+    pub fn outputs(&self) -> impl Iterator<Item=&TransparentOutput> {
+        match self {
+            Transaction::V1 { ref outputs, .. } => outputs.iter(),
+            Transaction::V2 { ref outputs, .. } => outputs.iter(),
+            Transaction::V3 { ref outputs, .. } => outputs.iter(),
+            Transaction::V4 { ref outputs, .. } => outputs.iter(),
+        }
+    }
+
+    /// Get this transaction's lock time.
+    pub fn lock_time(&self) -> LockTime {
+        match self {
+            Transaction::V1 { lock_time, .. } => *lock_time,
+            Transaction::V2 { lock_time, .. } => *lock_time,
+            Transaction::V3 { lock_time, .. } => *lock_time,
+            Transaction::V4 { lock_time, .. } => *lock_time,
+        }
+    }
+
+    /// Get this transaction's expiry height, if any.
+    pub fn expiry_height(&self) -> Option<BlockHeight> {
+        match self {
+            Transaction::V1 { .. } => None,
+            Transaction::V2 { .. } => None,
+            Transaction::V3 { expiry_height, .. } => Some(*expiry_height),
+            Transaction::V4 { expiry_height, .. } => Some(*expiry_height),
+        }
+    }
+}
