@@ -1,6 +1,9 @@
 //! Note encryption types.
 
-use std::{convert::From, fmt};
+use std::{
+    convert::{AsRef, From},
+    fmt,
+};
 
 /// A 512-byte _Memo_ field associated with a note, as described in
 /// [protocol specification §5.5][ps].
@@ -12,9 +15,9 @@ use std::{convert::From, fmt};
 #[derive(Clone, Copy)]
 pub struct Memo([u8; 512]);
 
-impl From<String> for Memo {
-    fn from(input: String) -> Self {
-        let input_bytes = input.as_bytes();
+impl<T: AsRef<[u8]>> From<T> for Memo {
+    fn from(input: T) -> Self {
+        let input_bytes: &[u8] = input.as_ref();
 
         let mut full_bytes = [0; 512];
 
@@ -75,7 +78,7 @@ fn memo_fmt() {
 
 #[test]
 fn memo_from_string() {
-    let memo = Memo::from("foo bar baz".to_string());
+    let memo = Memo::from("foo bar baz");
 
     println!("{:?}", memo);
 }
