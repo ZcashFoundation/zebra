@@ -105,7 +105,7 @@ where
         let network = self.config.network;
 
         let fut = async move {
-            info!("connecting to remote peer");
+            debug!("connecting to remote peer");
 
             let mut stream =
                 Framed::new(tcp_stream, Codec::builder().for_network(network).finish());
