@@ -5,6 +5,9 @@ use std::{
     fmt,
 };
 
+mod sapling;
+mod sprout;
+
 /// A 512-byte _Memo_ field associated with a note, as described in
 /// [protocol specification §5.5][ps].
 ///
