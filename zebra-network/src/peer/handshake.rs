@@ -30,7 +30,7 @@ use crate::{
 use super::{Client, Connection, ErrorSlot, HandshakeError};
 
 /// A [`Service`] that handshakes with a remote peer and constructs a
-/// client/server pair.
+/// client/server pair.d
 pub struct Handshake<S> {
     config: Config,
     internal_service: S,
@@ -128,7 +128,9 @@ where
                 nonce: local_nonce,
                 user_agent,
                 // XXX eventually the `PeerConnector` will need to have a handle
-                // for a service that gets the current block height.
+                // for a service that gets the current block height. Among other
+                // things we need it to reject peers who don't know about the
+                // current protocol epoch.
                 start_height: BlockHeight(0),
                 relay: false,
             };
@@ -143,11 +145,14 @@ where
 
             // Check that we got a Version and destructure its fields into the local scope.
             debug!(?remote_msg, "got message from remote peer");
-            let (remote_nonce, remote_services) = if let Message::Version {
-                nonce, services, ..
+            let (remote_nonce, remote_services, remote_version) = if let Message::Version {
+                nonce,
+                services,
+                version,
+                ..
             } = remote_msg
             {
-                (nonce, services)
+                (nonce, services, version)
             } else {
                 return Err(HandshakeError::UnexpectedMessage(Box::new(remote_msg)));
             };
@@ -176,9 +181,29 @@ where
                 return Err(HandshakeError::UnexpectedMessage(Box::new(remote_msg)));
             }
 
-            // XXX here is where we would set the version to the minimum of the
-            // two versions, etc. -- actually is it possible to edit the `Codec`
-            // after using it to make a framed adapter?
+            // XXX in zcashd remote peer can only send one version message and we would disconnect here if it received a second one. Is it even possible for that to happen to us here?
+
+            if remote_version < constants::MIN_VERSION {
+                // Disconnect if peer is using an obsolete version.
+                return Err(HandshakeError::ObsoleteVersion(remote_version));
+            }
+
+            // TODO: Reject incoming connections from nodes that don't know about the current epoch.
+            // zcashd does this:
+            //  const Consensus::Params& consensusParams = chainparams.GetConsensus();
+            //  auto currentEpoch = CurrentEpoch(GetHeight(), consensusParams);
+            //  if (pfrom->nVersion < consensusParams.vUpgrades[currentEpoch].nProtocolVersion)
+
+            // Set the connection's version to the minimum of the received version or our own.
+            let negotiated_version = std::cmp::min(remote_version, constants::CURRENT_VERSION);
+
+            // Reconfigure the codec to use the negotiated version.
+            //
+            // XXX The tokio documentation says not to do this while any frames are still being processed.
+            // Since we don't know that here, another way might be to release the tcp
+            // stream from the unversioned Framed wrapper and construct a new one with a versioned codec.
+            let bare_codec = stream.codec_mut();
+            bare_codec.reconfigure_version(negotiated_version);
 
             debug!("constructing client, spawning server");
 
