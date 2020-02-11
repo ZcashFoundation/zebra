@@ -18,12 +18,23 @@ jobs:
       with:
         toolchain: nightly
         override: true
-    - name: Build docs
+    - name: Build external docs
       run: |
         cargo doc --no-deps
-    - name: Deploy to firebase
+    - name: Deploy external docs to firebase
       uses: w9jds/firebase-action@v1.1.0
       with:
         args: deploy
       env:
         FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+        PROJECT_ID: zealous-zebra
+    - name: Build internal docs
+      run: |
+        cargo doc --no-deps --document-private-items
+    - name: Deploy external docs to firebase
+      uses: w9jds/firebase-action@v1.1.0
+      with:
+        args: deploy
+      env:
+        FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+        PROJECT_ID: zebra-doc-internal
