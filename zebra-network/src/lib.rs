@@ -52,6 +52,7 @@ mod config;
 mod constants;
 mod meta_addr;
 mod network;
+mod policies;
 mod peer;
 mod peer_set;
 mod protocol;
@@ -62,6 +63,7 @@ pub use crate::{
     config::Config,
     peer_set::init,
     protocol::internal::{Request, Response},
+    policies::{RetryErrors, RetryLimit},
 };
 
 /// Types used in the definition of [`Request`] and [`Response`] messages.
