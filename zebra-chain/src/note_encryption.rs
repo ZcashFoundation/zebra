@@ -11,7 +11,9 @@ mod sprout;
 /// A 512-byte _Memo_ field associated with a note, as described in
 /// [protocol specification §5.5][ps].
 ///
-/// The usage of the memo field is by agreement between the sender and
+/// The _Memo- field of a note is a plaintext type; the parent note is
+/// what is encrypted and stored on the blockchain. The underlying
+/// usage of the memo field is by agreement between the sender and
 /// recipient of the note.
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#notept
