@@ -14,7 +14,7 @@ mod sprout;
 /// The usage of the memo field is by agreement between the sender and
 /// recipient of the note.
 ///
-/// [ps]: https://zips.z.cash/protocol/protocol.pdf#spendencoding
+/// [ps]: https://zips.z.cash/protocol/protocol.pdf#notept
 #[derive(Clone, Copy)]
 pub struct Memo([u8; 512]);
 
