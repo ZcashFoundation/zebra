@@ -48,8 +48,8 @@ impl fmt::Debug for Memo {
         // This saves work but if the 'valid utf8 string' is just a
         // bunch of numbers, it prints them out like
         // 'Memo("\u{0}\u{0}..")', so. ¯\_(ツ)_/¯
-        match String::from_utf8(self.0.to_vec()) {
-            Ok(memo) => output = memo,
+        match std::str::from_utf8(&self.0[..]) {
+            Ok(memo) => output = String::from(memo),
             _ => output = hex::encode(&self.0[..]),
         }
 
