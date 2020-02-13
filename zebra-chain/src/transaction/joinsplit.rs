@@ -48,6 +48,7 @@ pub struct JoinSplit<P: ZkSnarkProof> {
     /// A ZK JoinSplit proof, either a
     /// [`Groth16Proof`](crate::proofs::Groth16Proof) or a
     /// [`Bctv14Proof`](crate::proofs::Bctv14Proof).
+    #[serde(bound(serialize  = "P: ZkSnarkProof", deserialize = "P: ZkSnarkProof"))]
     pub zkproof: P,
     /// A ciphertext component for this output note.
     pub enc_ciphertexts: [sprout::EncryptedCiphertext; 2],
@@ -138,6 +139,7 @@ pub struct JoinSplitData<P: ZkSnarkProof> {
     ///
     /// The [`JoinSplitData::joinsplits`] method provides an iterator over
     /// all `JoinSplit`s.
+    #[serde(bound(serialize  = "P: ZkSnarkProof", deserialize = "P: ZkSnarkProof"))]
     pub rest: Vec<JoinSplit<P>>,
     /// The public key for the JoinSplit signature.
     pub pub_key: ed25519_zebra::PublicKeyBytes,
