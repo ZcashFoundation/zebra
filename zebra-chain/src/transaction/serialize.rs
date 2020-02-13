@@ -70,7 +70,7 @@ fn parse_coinbase_height(mut data: Vec<u8>) -> Result<(BlockHeight, Vec<u8>), Se
         // while remaining below the maximum `BlockHeight` of 500_000_000 forced by `LockTime`.
         // While it's unlikely this code will ever process a block height that high, this means
         // we don't need to maintain a cascade of different invariants for allowable `BlockHeight`s.
-        (Some(0x04), _) if &data[..] == &GENESIS_COINBASE_DATA[..] => Ok((BlockHeight(0), data)),
+        (Some(0x04), _) if data[..] == GENESIS_COINBASE_DATA[..] => Ok((BlockHeight(0), data)),
         // As noted above, this is included for completeness.
         (Some(0x04), len) if len >= 5 => {
             let h = data[1] as u32
@@ -100,9 +100,9 @@ fn coinbase_height_len(height: BlockHeight) -> usize {
         2
     } else if let _h @ 256..=65535 = height.0 {
         3
-    } else if let _h @ 65536..=16777215 = height.0 {
+    } else if let _h @ 65536..=16_777_215 = height.0 {
         4
-    } else if let _h @ 16777216..=499_999_999 = height.0 {
+    } else if let _h @ 16_777_216..=499_999_999 = height.0 {
         5
     } else {
         panic!("Invalid coinbase height");
@@ -122,12 +122,12 @@ fn write_coinbase_height<W: io::Write>(height: BlockHeight, mut w: W) -> Result<
     } else if let h @ 256..=65535 = height.0 {
         w.write_u8(0x02)?;
         w.write_u16::<LittleEndian>(h as u16)?;
-    } else if let h @ 65536..=16777215 = height.0 {
+    } else if let h @ 65536..=16_777_215 = height.0 {
         w.write_u8(0x03)?;
         w.write_u8(h as u8)?;
         w.write_u8((h >> 8) as u8)?;
         w.write_u8((h >> 16) as u8)?;
-    } else if let h @ 16777216..=499_999_999 = height.0 {
+    } else if let h @ 16_777_216..=499_999_999 = height.0 {
         w.write_u8(0x04)?;
         w.write_u32::<LittleEndian>(h)?;
     } else {
