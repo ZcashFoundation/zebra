@@ -20,11 +20,13 @@ const EQUIHASH_SOLUTION_SIZE: usize = 1344;
 ///
 /// The size of an Equihash solution in bytes is always 1344 so the
 /// length of this type is fixed.
-pub struct EquihashSolution(pub [u8; EQUIHASH_SOLUTION_SIZE]);
+pub struct EquihashSolution(pub Box<[u8; EQUIHASH_SOLUTION_SIZE]>);
 
 impl PartialEq<EquihashSolution> for EquihashSolution {
     fn eq(&self, other: &EquihashSolution) -> bool {
-        self.0.as_ref() == other.0.as_ref()
+        let unboxed_self = *(self.0);
+        let unboxed_other = *(other.0);
+        unboxed_self.as_ref() == unboxed_other.as_ref()
     }
 }
 
@@ -38,13 +40,11 @@ impl fmt::Debug for EquihashSolution {
 
 // These impls all only exist because of array length restrictions.
 
-impl Copy for EquihashSolution {}
-
 impl Clone for EquihashSolution {
     fn clone(&self) -> Self {
         let mut bytes = [0; EQUIHASH_SOLUTION_SIZE];
         bytes[..].copy_from_slice(&self.0[..]);
-        Self(bytes)
+        Self(Box::new(bytes))
     }
 }
 
@@ -63,7 +63,7 @@ impl ZcashDeserialize for EquihashSolution {
         reader.read_compactsize()?;
         let mut bytes = [0; EQUIHASH_SOLUTION_SIZE];
         reader.read_exact(&mut bytes[..])?;
-        Ok(Self(bytes))
+        Ok(Self(Box::new(bytes)))
     }
 }
 
@@ -76,7 +76,7 @@ impl Arbitrary for EquihashSolution {
             .prop_map(|v| {
                 let mut bytes = [0; EQUIHASH_SOLUTION_SIZE];
                 bytes.copy_from_slice(v.as_slice());
-                return Self(bytes);
+                return Self(Box::new(bytes));
             })
             .boxed()
     }

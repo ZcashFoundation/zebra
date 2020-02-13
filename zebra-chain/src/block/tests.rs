@@ -74,7 +74,7 @@ fn blockheaderhash_from_blockheader() {
         time: DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(61, 0), Utc),
         bits: 0,
         nonce: some_bytes,
-        solution: EquihashSolution([0; 1344]),
+        solution: EquihashSolution(Box::new([0; 1344])),
     };
 
     let hash = BlockHeaderHash::from(&blockheader);

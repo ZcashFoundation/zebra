@@ -31,7 +31,7 @@ use crate::transaction::Transaction;
 /// the direct bytes of the transactions as well as the header. So
 /// for now I want to call it a `BlockHeaderHash` because that's
 /// more explicit.
-#[derive(Copy, Clone, Eq, PartialEq, Hash)]
+#[derive(Clone, Eq, PartialEq, Hash)]
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct BlockHeaderHash(pub [u8; 32]);
 
@@ -72,7 +72,7 @@ impl ZcashDeserialize for BlockHeaderHash {
 /// backwards reference (previous header hash) present in the block
 /// header. Each block points backwards to its parent, all the way
 /// back to the genesis block (the first block in the blockchain).
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BlockHeader {
     /// A SHA-256d hash in internal byte order of the previous block’s
     /// header. This ensures no previous block can be changed without
