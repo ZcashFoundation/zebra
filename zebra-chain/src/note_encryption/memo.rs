@@ -9,8 +9,8 @@ use std::{cmp, convert::TryFrom, fmt};
 /// recipient of the note.
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#notept
-#[derive(Clone, Copy)]
-pub struct Memo([u8; 512]);
+#[derive(Clone)]
+pub struct Memo(Box<[u8; 512]>);
 
 impl<'a> TryFrom<&'a [u8]> for Memo {
     type Error = &'static str;
@@ -21,11 +21,11 @@ impl<'a> TryFrom<&'a [u8]> for Memo {
         match input.len().cmp(&512) {
             cmp::Ordering::Less => {
                 full_bytes[0..input.len()].copy_from_slice(input);
-                Ok(Memo(full_bytes))
+                Ok(Memo(Box::new(full_bytes)))
             }
             cmp::Ordering::Equal => {
                 full_bytes[..].copy_from_slice(input);
-                Ok(Memo(full_bytes))
+                Ok(Memo(Box::new(full_bytes)))
             }
             cmp::Ordering::Greater => Err("Memos have a max length of 512 bytes."),
         }
@@ -50,7 +50,7 @@ impl fmt::Debug for Memo {
 
 #[test]
 fn memo_fmt() {
-    let memo = Memo(
+    let memo = Memo(Box::new(
         *b"thiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiis \
            iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiis \
            aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
@@ -58,7 +58,7 @@ fn memo_fmt() {
            looooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooong \
            meeeeeeeeeeeeeeeeeeemooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo \
            but it's just short enough",
-    );
+    ));
 
     assert_eq!(format!("{:?}", memo),
                "Memo(\"thiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiis iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiis aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa veeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeryyyyyyyyyyyyyyyyyyyyyyyyyy looooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooong meeeeeeeeeeeeeeeeeeemooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo but it\\\'s just short enough\")"
@@ -67,7 +67,7 @@ fn memo_fmt() {
     let mut some_bytes = [0u8; 512];
     some_bytes[0] = 0xF6;
 
-    assert_eq!(format!("{:?}", Memo(some_bytes)),
+    assert_eq!(format!("{:?}", Memo(Box::new(some_bytes))),
                "Memo(\"f600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\")"
     );
 }
