@@ -1566,9 +1566,9 @@ dependencies = [
 
 [[package]]
 name = "tracing-futures"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "33848db47a7c848ab48b66aab3293cb9c61ea879a3586ecfcd17302fcea0baf1"
+checksum = "58b6233e421bf43203d36a8cd430acd24a75bed39832b0e07bec24541f9759e9"
 dependencies = [
  "pin-project",
  "tracing",
