@@ -1,0 +1,7 @@
+scrape_configs:
+  - job_name: 'zebrad'
+    scrape_interval: 1s
+    metrics_path: '/'
+    static_configs:
+      - targets: ['localhost:9999']
+
