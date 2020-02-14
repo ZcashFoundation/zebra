@@ -4,6 +4,8 @@
 //! application's configuration file and/or command-line options
 //! for specifying it.
 
+use std::net::SocketAddr;
+
 use serde::{Deserialize, Serialize};
 
 use zebra_network::Config as NetworkSection;
@@ -14,8 +16,10 @@ use zebra_network::Config as NetworkSection;
 pub struct ZebradConfig {
     /// Tracing configuration
     pub tracing: TracingSection,
-    /// Networking configuration,
+    /// Networking configuration
     pub network: NetworkSection,
+    /// Metrics configuration
+    pub metrics: MetricsSection,
 }
 
 /// Tracing configuration section.
@@ -30,6 +34,21 @@ impl Default for TracingSection {
     fn default() -> Self {
         Self {
             filter: "info".to_owned(),
+        }
+    }
+}
+
+/// Metrics configuration section.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct MetricsSection {
+    pub endpoint_addr: SocketAddr,
+}
+
+impl Default for MetricsSection {
+    fn default() -> Self {
+        Self {
+            endpoint_addr: "127.0.0.1:9999".parse().unwrap(),
         }
     }
 }

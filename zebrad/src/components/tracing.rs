@@ -8,16 +8,9 @@ use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Request, Response, Server};
 
 /// Abscissa component which runs a tracing filter endpoint.
-#[derive(Component)]
+#[derive(Debug, Component)]
 #[component(inject = "init_tokio(zebrad::components::tokio::TokioComponent)")]
 pub struct TracingEndpoint {}
-
-impl ::std::fmt::Debug for TracingEndpoint {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> Result<(), ::std::fmt::Error> {
-        // Debug is required by Component, can't be derived as a Handle is not Debug
-        write!(f, "TracingEndpoint")
-    }
-}
 
 async fn read_filter(req: Request<Body>) -> Result<String, String> {
     std::str::from_utf8(

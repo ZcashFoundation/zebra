@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    convert::TryInto,
     fmt::Debug,
     future::Future,
     marker::PhantomData,
@@ -229,6 +230,14 @@ where
         trace!(
             num_ready = self.ready_services.len(),
             num_unready = self.unready_services.len(),
+        );
+        metrics::gauge!(
+            "pool.num_ready",
+            self.ready_services.len().try_into().unwrap()
+        );
+        metrics::gauge!(
+            "pool.num_unready",
+            self.unready_services.len().try_into().unwrap()
         );
 
         loop {
