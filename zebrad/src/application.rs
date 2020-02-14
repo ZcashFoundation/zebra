@@ -82,11 +82,14 @@ impl Application for ZebradApp {
     /// beyond the default ones provided by the framework, this is the place
     /// to do so.
     fn register_components(&mut self, command: &Self::Cmd) -> Result<(), FrameworkError> {
-        use crate::components::{tokio::TokioComponent, tracing::TracingEndpoint};
+        use crate::components::{
+            metrics::MetricsEndpoint, tokio::TokioComponent, tracing::TracingEndpoint,
+        };
 
         let mut components = self.framework_components(command)?;
         components.push(Box::new(TokioComponent::new()?));
         components.push(Box::new(TracingEndpoint::new()?));
+        components.push(Box::new(MetricsEndpoint::new()?));
 
         self.state.components.register(components)
     }

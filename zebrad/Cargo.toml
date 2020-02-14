@@ -25,6 +25,9 @@ hyper = "0.13.2"
 
 tower = "0.3"
 
+metrics-runtime = "0.13"
+metrics = "0.12"
+
 zebra-chain = { path = "../zebra-chain" }
 zebra-network = { path = "../zebra-network" }
 
