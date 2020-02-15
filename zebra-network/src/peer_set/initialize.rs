@@ -262,7 +262,10 @@ where
                             .boxed(),
                     );
                 } else {
-                    warn!("demand for peers but no available candidates");
+                    debug!("demand for peers but no available candidates");
+                    candidates.update().await?;
+                    // Try to connect to a new peer.
+                    let _ = demand_tx.try_send(());
                 }
             }
             // did a drill sergeant write this? no there's just no Either3
