@@ -80,7 +80,7 @@ where
     S::Future: Send,
 {
     type Response = Client;
-    type Error = HandshakeError;
+    type Error = BoxedStdError;
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
@@ -257,6 +257,16 @@ where
 
             Ok(client)
         };
-        fut.instrument(connector_span).boxed()
+
+        // Spawn a new task to drive this handshake.
+        tokio::spawn(fut.instrument(connector_span))
+            // This is required to get error types to line up.
+            // Probably there's a nicer way to express this using combinators.
+            .map(|x| match x {
+                Ok(Ok(client)) => Ok(client),
+                Ok(Err(handshake_err)) => Err(handshake_err.into()),
+                Err(join_err) => Err(join_err.into()),
+            })
+            .boxed()
     }
 }
