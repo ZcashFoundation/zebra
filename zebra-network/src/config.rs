@@ -94,7 +94,7 @@ impl Default for Config {
             ewma_decay_time: Duration::from_secs(60),
             peerset_request_buffer_size: 1,
             handshake_timeout: Duration::from_secs(4),
-            new_peer_interval: Duration::from_secs(120),
+            new_peer_interval: Duration::from_secs(60),
             peerset_initial_target_size: 50,
         }
     }
