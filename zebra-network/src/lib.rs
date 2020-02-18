@@ -52,9 +52,9 @@ mod config;
 mod constants;
 mod meta_addr;
 mod network;
-mod policies;
 mod peer;
 mod peer_set;
+mod policies;
 mod protocol;
 mod timestamp_collector;
 
@@ -62,8 +62,8 @@ pub use crate::{
     address_book::AddressBook,
     config::Config,
     peer_set::init,
-    protocol::internal::{Request, Response},
     policies::{RetryErrors, RetryLimit},
+    protocol::internal::{Request, Response},
 };
 
 /// Types used in the definition of [`Request`] and [`Response`] messages.

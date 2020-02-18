@@ -1,5 +1,5 @@
-use tower::retry::Policy;
 use futures::future;
+use tower::retry::Policy;
 
 /// A very basic retry policy with a limited number of retry attempts.
 ///

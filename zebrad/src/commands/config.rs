@@ -28,11 +28,11 @@ impl Runnable for ConfigCmd {
 
 "
         .to_owned(); // The default name and location of the config file is defined in ../commands.rs
+
         // this avoids a ValueAfterTable error
         // https://github.com/alexcrichton/toml-rs/issues/145
         let conf = toml::Value::try_from(default_config).unwrap();
-        output += &toml::to_string_pretty(&conf)
-            .expect("default config should be serializable");
+        output += &toml::to_string_pretty(&conf).expect("default config should be serializable");
         match self.output_file {
             Some(ref output_file) => {
                 use std::{fs::File, io::Write};
