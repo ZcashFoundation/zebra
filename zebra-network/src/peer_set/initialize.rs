@@ -197,7 +197,14 @@ where
 
 /// Given a channel that signals a need for new peers, try to connect to a peer
 /// and send the resulting `peer::Client` through a channel.
-#[instrument(skip(new_peer_interval, demand_tx, demand_rx, candidates, connector, success_tx))]
+#[instrument(skip(
+    new_peer_interval,
+    demand_tx,
+    demand_rx,
+    candidates,
+    connector,
+    success_tx
+))]
 async fn crawl_and_dial<C, S>(
     new_peer_interval: std::time::Duration,
     mut demand_tx: mpsc::Sender<()>,
@@ -213,7 +220,13 @@ where
     S: Service<Request, Response = Response, Error = BoxedStdError>,
     S::Future: Send + 'static,
 {
-    use futures::{future::{select, Either::{Left, Right}}, TryFutureExt};
+    use futures::{
+        future::{
+            select,
+            Either::{Left, Right},
+        },
+        TryFutureExt,
+    };
 
     let mut handshakes = FuturesUnordered::new();
     // <FuturesUnordered as Stream> returns None when empty.
