@@ -2,12 +2,14 @@
 
 mod config;
 mod connect;
+mod revhex;
 mod seed;
 mod start;
 mod version;
 
 use self::{
-    config::ConfigCmd, connect::ConnectCmd, seed::SeedCmd, start::StartCmd, version::VersionCmd,
+    config::ConfigCmd, connect::ConnectCmd, revhex::RevhexCmd, seed::SeedCmd, start::StartCmd,
+    version::VersionCmd,
 };
 use crate::config::ZebradConfig;
 use abscissa_core::{
@@ -21,29 +23,33 @@ pub const CONFIG_FILE: &str = "zebrad.toml";
 /// Zebrad Subcommands
 #[derive(Command, Debug, Options, Runnable)]
 pub enum ZebradCmd {
-    /// The `help` subcommand
-    #[options(help = "get usage information")]
-    Help(Help<Self>),
-
-    /// The `start` subcommand
-    #[options(help = "start the application")]
-    Start(StartCmd),
-
     /// The `config` subcommand
     #[options(help = "generate a skeleton configuration")]
     Config(ConfigCmd),
-
-    /// The `version` subcommand
-    #[options(help = "display version information")]
-    Version(VersionCmd),
 
     /// The `connect` subcommand
     #[options(help = "testing stub for dumping network messages")]
     Connect(ConnectCmd),
 
+    /// The `help` subcommand
+    #[options(help = "get usage information")]
+    Help(Help<Self>),
+
+    /// The `revhex` subcommand
+    #[options(help = "reverses the endianness of a hex string, like a block or transaction hash")]
+    Revhex(RevhexCmd),
+
     /// The `seed` subcommand
     #[options(help = "dns seeder")]
     Seed(SeedCmd),
+
+    /// The `start` subcommand
+    #[options(help = "start the application")]
+    Start(StartCmd),
+
+    /// The `version` subcommand
+    #[options(help = "display version information")]
+    Version(VersionCmd),
 }
 
 /// This trait allows you to define how application configuration is loaded.
