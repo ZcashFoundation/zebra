@@ -46,23 +46,28 @@ impl ZcashDeserialize for OutPoint {
 // unrepresentable, we need just enough parsing of Bitcoin scripts to parse the
 // coinbase height and split off the rest of the (inert) coinbase data.
 
-fn parse_coinbase_height(mut data: Vec<u8>) -> Result<(BlockHeight, Vec<u8>), SerializationError> {
+fn parse_coinbase_height(
+    mut data: Vec<u8>,
+) -> Result<(BlockHeight, CoinbaseData), SerializationError> {
     match (data.get(0), data.len()) {
         // Blocks 1 through 16 inclusive encode block height with OP_N opcodes.
-        (Some(op_n @ 0x51..=0x60), len) if len >= 1 => {
-            Ok((BlockHeight((op_n - 0x50) as u32), data.split_off(1)))
-        }
+        (Some(op_n @ 0x51..=0x60), len) if len >= 1 => Ok((
+            BlockHeight((op_n - 0x50) as u32),
+            CoinbaseData(data.split_off(1)),
+        )),
         // Blocks 17 through 256 exclusive encode block height with the `0x01` opcode.
-        (Some(0x01), len) if len >= 2 => Ok((BlockHeight(data[1] as u32), data.split_off(2))),
+        (Some(0x01), len) if len >= 2 => {
+            Ok((BlockHeight(data[1] as u32), CoinbaseData(data.split_off(2))))
+        }
         // Blocks 256 through 65536 exclusive encode block height with the `0x02` opcode.
         (Some(0x02), len) if len >= 3 => Ok((
             BlockHeight(data[1] as u32 + ((data[2] as u32) << 8)),
-            data.split_off(3),
+            CoinbaseData(data.split_off(3)),
         )),
         // Blocks 65536 through 2**24 exclusive encode block height with the `0x03` opcode.
         (Some(0x03), len) if len >= 4 => Ok((
             BlockHeight(data[1] as u32 + ((data[2] as u32) << 8) + ((data[3] as u32) << 16)),
-            data.split_off(4),
+            CoinbaseData(data.split_off(4)),
         )),
         // The genesis block does not encode the block height by mistake; special case it.
         // The first five bytes are [4, 255, 255, 7, 31], the little-endian encoding of
@@ -70,7 +75,9 @@ fn parse_coinbase_height(mut data: Vec<u8>) -> Result<(BlockHeight, Vec<u8>), Se
         // while remaining below the maximum `BlockHeight` of 500_000_000 forced by `LockTime`.
         // While it's unlikely this code will ever process a block height that high, this means
         // we don't need to maintain a cascade of different invariants for allowable `BlockHeight`s.
-        (Some(0x04), _) if data[..] == GENESIS_COINBASE_DATA[..] => Ok((BlockHeight(0), data)),
+        (Some(0x04), _) if data[..] == GENESIS_COINBASE_DATA[..] => {
+            Ok((BlockHeight(0), CoinbaseData(data)))
+        }
         // As noted above, this is included for completeness.
         (Some(0x04), len) if len >= 5 => {
             let h = data[1] as u32
@@ -78,7 +85,7 @@ fn parse_coinbase_height(mut data: Vec<u8>) -> Result<(BlockHeight, Vec<u8>), Se
                 + ((data[3] as u32) << 16)
                 + ((data[4] as u32) << 24);
             if h < 500_000_000 {
-                Ok((BlockHeight(h), data.split_off(5)))
+                Ok((BlockHeight(h), CoinbaseData(data.split_off(5))))
             } else {
                 Err(SerializationError::Parse("Invalid block height"))
             }
@@ -156,11 +163,10 @@ impl ZcashSerialize for TransparentInput {
                 writer.write_all(&[0; 32][..])?;
                 writer.write_u32::<LittleEndian>(0xffff_ffff)?;
                 let height_len = coinbase_height_len(*height);
-                let total_len = height_len + data.len();
-                assert!(total_len <= 100);
+                let total_len = height_len + data.as_ref().len();
                 writer.write_compactsize(total_len as u64)?;
                 write_coinbase_height(*height, &mut writer)?;
-                writer.write_all(&data[..])?;
+                writer.write_all(&data.as_ref()[..])?;
                 writer.write_u32::<LittleEndian>(*sequence)?;
             }
         }

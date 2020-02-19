@@ -135,7 +135,7 @@ impl Arbitrary for TransparentInput {
                 .prop_map(|(height, data, sequence)| {
                     TransparentInput::Coinbase {
                         height,
-                        data,
+                        data: CoinbaseData(data),
                         sequence,
                     }
                 })

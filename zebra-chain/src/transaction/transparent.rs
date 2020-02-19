@@ -7,6 +7,24 @@ use crate::types::{BlockHeight, Script};
 
 use super::TransactionHash;
 
+/// Arbitrary data inserted by miners into a coinbase transaction.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CoinbaseData(
+    /// Invariant: this vec, together with the coinbase height, must be less than
+    /// 100 bytes. We enforce this by only constructing CoinbaseData fields by
+    /// parsing blocks with 100-byte data fields. When we implement block
+    /// creation, we should provide a constructor for the coinbase data field
+    /// that restricts it to 95 = 100 -1 -4 bytes (safe for any block height up
+    /// to 500_000_000).
+    pub(super) Vec<u8>,
+);
+
+impl AsRef<[u8]> for CoinbaseData {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_ref()
+    }
+}
+
 /// OutPoint
 ///
 /// A particular transaction output reference.
@@ -37,9 +55,8 @@ pub enum TransparentInput {
     Coinbase {
         /// The height of this block.
         height: BlockHeight,
-        /// Approximately 100 bytes of data (95 to be safe).
-        /// XXX refine this type.
-        data: Vec<u8>,
+        /// Free data inserted by miners after the block height.
+        data: CoinbaseData,
         /// The sequence number for the output.
         sequence: u32,
     },
