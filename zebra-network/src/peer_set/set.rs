@@ -209,7 +209,7 @@ where
 impl<D> Service<Request> for PeerSet<D>
 where
     D: Discover + Unpin,
-    D::Key: Clone + Debug,
+    D::Key: Clone + Debug + ToString,
     D::Service: Service<Request, Response = Response> + Load,
     D::Error: Into<BoxedStdError>,
     <D::Service as Service<Request>>::Error: Into<BoxedStdError> + 'static,
@@ -227,17 +227,13 @@ where
 
         // Poll unready services to drive them to readiness.
         self.poll_unready(cx);
-        trace!(
-            num_ready = self.ready_services.len(),
-            num_unready = self.unready_services.len(),
-        );
+        let num_ready = self.ready_services.len();
+        let num_unready = self.unready_services.len();
+        metrics::gauge!("pool.num_ready", num_ready.try_into().unwrap(),);
+        metrics::gauge!("pool.num_unready", num_unready.try_into().unwrap(),);
         metrics::gauge!(
-            "pool.num_ready",
-            self.ready_services.len().try_into().unwrap()
-        );
-        metrics::gauge!(
-            "pool.num_unready",
-            self.unready_services.len().try_into().unwrap()
+            "pool.num_peers",
+            (num_ready + num_unready).try_into().unwrap(),
         );
 
         loop {
@@ -290,6 +286,13 @@ where
             .ready_services
             .swap_remove_index(index)
             .expect("preselected index must be valid");
+
+        // XXX add a dimension tagging request metrics by type
+        metrics::counter!(
+            "outbound_requests",
+            1,
+            "key" => key.to_string(),
+        );
 
         let fut = svc.call(req);
         self.push_unready(key, svc);
