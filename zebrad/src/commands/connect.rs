@@ -63,6 +63,8 @@ impl ConnectCmd {
         config.initial_mainnet_peers = vec![self.addr.to_string()];
 
         let (mut peer_set, _address_book) = zebra_network::init(config, node).await;
+        let mut retry_peer_set =
+            tower::retry::Retry::new(zebra_network::RetryErrors, peer_set.clone());
 
         info!("waiting for peer_set ready");
         peer_set
@@ -77,8 +79,6 @@ impl ConnectCmd {
         use zebra_chain::block::BlockHeaderHash;
         use zebra_chain::types::BlockHeight;
 
-        peer_set.ready().await.unwrap();
-
         // genesis
         let mut tip = BlockHeaderHash([
             8, 206, 61, 151, 49, 176, 0, 192, 131, 56, 69, 92, 138, 74, 107, 208, 93, 161, 110, 38,
@@ -91,8 +91,8 @@ impl ConnectCmd {
         let mut requested_block_heights = 0;
         while requested_block_heights < 700_000 {
             // Request the next 500 hashes.
-            peer_set.ready().await.unwrap();
-            let hashes = if let Ok(Response::BlockHeaderHashes(hashes)) = peer_set
+            retry_peer_set.ready().await.unwrap();
+            let hashes = if let Ok(Response::BlockHeaderHashes(hashes)) = retry_peer_set
                 .call(Request::FindBlocks {
                     known_blocks: vec![tip],
                     stop: None,
