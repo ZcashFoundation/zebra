@@ -92,7 +92,7 @@ impl Default for Config {
             initial_testnet_peers: testnet_peers,
             ewma_default_rtt: Duration::from_secs(1),
             ewma_decay_time: Duration::from_secs(60),
-            peerset_request_buffer_size: 1,
+            peerset_request_buffer_size: 10,
             handshake_timeout: Duration::from_secs(4),
             new_peer_interval: Duration::from_secs(60),
             peerset_initial_target_size: 50,
