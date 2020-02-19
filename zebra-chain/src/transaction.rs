@@ -14,7 +14,7 @@ mod tests;
 pub use hash::TransactionHash;
 pub use joinsplit::{JoinSplit, JoinSplitData};
 pub use shielded_data::{OutputDescription, ShieldedData, SpendDescription};
-pub use transparent::{OutPoint, TransparentInput, TransparentOutput};
+pub use transparent::{CoinbaseData, OutPoint, TransparentInput, TransparentOutput};
 
 use crate::proofs::{Bctv14Proof, Groth16Proof};
 use crate::types::{BlockHeight, LockTime};
