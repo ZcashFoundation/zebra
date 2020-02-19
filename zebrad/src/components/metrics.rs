@@ -4,7 +4,7 @@ use metrics_runtime::{exporters::HttpExporter, observers::PrometheusBuilder, Rec
 
 use abscissa_core::{Component, FrameworkError};
 
-use crate::{components::tokio::TokioComponent, prelude::*};
+use crate::components::tokio::TokioComponent;
 
 /// Abscissa component which runs a metrics endpoint.
 #[derive(Debug, Component)]
