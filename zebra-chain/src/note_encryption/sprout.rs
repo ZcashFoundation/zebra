@@ -8,6 +8,17 @@ use proptest::{collection::vec, prelude::*};
 
 use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 
+pub struct Note {}
+
+pub struct NotePlaintext {
+    value: u64,
+    // TODO: refine type
+    rho: [u8; 32],
+    // TODO: refine as jub-jub appropriate in the base field.
+    note_committment_randomness: NoteCommitmentRandomness,
+    memo: Memo,
+}
+
 /// A ciphertext component for encrypted output notes.
 pub struct EncryptedCiphertext(pub [u8; 601]);
 

@@ -5,6 +5,21 @@ use proptest::{arbitrary::Arbitrary, collection::vec, prelude::*};
 
 use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 
+use super::{Diversifier, Memo, NoteCommitmentRandomness};
+
+pub struct Note {
+    value: u64,
+    diversifier: Diversifier,
+}
+
+pub struct NotePlaintext {
+    diversifier: Diversifier,
+    value: u64,
+    // TODO: refine as jub-jub appropriate in the base field.
+    note_committment_randomness: NoteCommitmentRandomness,
+    memo: Memo,
+}
+
 /// A ciphertext component for encrypted output notes.
 pub struct EncryptedCiphertext(pub [u8; 580]);
 
