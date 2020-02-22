@@ -5,19 +5,28 @@ use proptest::{arbitrary::Arbitrary, collection::vec, prelude::*};
 
 use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 
-use super::{Diversifier, Memo, NoteCommitmentRandomness};
+use super::*;
+
+/// A _Diversifier_, an 11 byte value used to randomize the
+/// recipient's final public shielded payment address to create a
+/// _diversified payment address_.
+///
+/// When used, this value is mapped to an affine JubJub group element.
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct Diversifier(pub [u8; 11]);
 
 pub struct Note {
     value: u64,
     diversifier: Diversifier,
 }
 
+/// The decrypted form of encrypted Sapling notes on the blockchain.
 pub struct NotePlaintext {
     diversifier: Diversifier,
     value: u64,
     // TODO: refine as jub-jub appropriate in the base field.
     note_committment_randomness: NoteCommitmentRandomness,
-    memo: Memo,
+    memo: memo::Memo,
 }
 
 /// A ciphertext component for encrypted output notes.

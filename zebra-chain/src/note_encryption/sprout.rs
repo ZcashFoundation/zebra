@@ -8,15 +8,18 @@ use proptest::{collection::vec, prelude::*};
 
 use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 
+use super::*;
+
 pub struct Note {}
 
+/// The decrypted form of encrypted Sprout notes on the blockchain.
 pub struct NotePlaintext {
     value: u64,
     // TODO: refine type
     rho: [u8; 32],
     // TODO: refine as jub-jub appropriate in the base field.
     note_committment_randomness: NoteCommitmentRandomness,
-    memo: Memo,
+    memo: memo::Memo,
 }
 
 /// A ciphertext component for encrypted output notes.
