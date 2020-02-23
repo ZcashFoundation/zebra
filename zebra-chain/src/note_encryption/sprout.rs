@@ -10,7 +10,14 @@ use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize}
 
 use super::*;
 
-pub struct Note {}
+pub struct Note {
+    // TODO: refine type as a SHA-256d output derived from a spending key.
+    paying_key: [u8; 32],
+    value: u64,
+    // TODO: refine type as the input to the PRF that results in a nullifier.
+    nullifier_seed: [u8; 32],
+    note_commitment_randomness: NoteCommitmentRandomness,
+}
 
 /// The decrypted form of encrypted Sprout notes on the blockchain.
 pub struct NotePlaintext {
@@ -18,7 +25,7 @@ pub struct NotePlaintext {
     // TODO: refine type
     rho: [u8; 32],
     // TODO: refine as jub-jub appropriate in the base field.
-    note_committment_randomness: NoteCommitmentRandomness,
+    note_commitment_randomness: NoteCommitmentRandomness,
     memo: memo::Memo,
 }
 
