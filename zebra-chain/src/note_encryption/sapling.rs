@@ -16,8 +16,13 @@ use super::*;
 pub struct Diversifier(pub [u8; 11]);
 
 pub struct Note {
-    value: u64,
     diversifier: Diversifier,
+    // TODO: refine as a type, derived from a scalar mult of the
+    // diversifier as a jubjub group element and the incoming view key
+    // scalar.
+    transmission_key: [u8; 32],
+    value: u64,
+    note_commitment_randomness: NoteCommitmentRandomness,
 }
 
 /// The decrypted form of encrypted Sapling notes on the blockchain.
@@ -25,7 +30,7 @@ pub struct NotePlaintext {
     diversifier: Diversifier,
     value: u64,
     // TODO: refine as jub-jub appropriate in the base field.
-    note_committment_randomness: NoteCommitmentRandomness,
+    note_commitment_randomness: NoteCommitmentRandomness,
     memo: memo::Memo,
 }
 
