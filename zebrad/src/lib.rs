@@ -10,7 +10,7 @@
 //!
 //! [Rendered docs from the `main` branch](https://doc.zebra.zfnd.org).
 //!
-//! [Join us on Discord](https://discord.gg/na6QZNd).
+//! [Join us on the Zcash Foundation Engineering Discord](https://discord.gg/na6QZNd).
 
 #![doc(html_logo_url = "https://www.zfnd.org/images/zebra-icon.png")]
 #![doc(html_root_url = "https://doc.zebra.zfnd.org/zebrad")]
