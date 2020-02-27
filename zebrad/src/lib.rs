@@ -1,3 +1,5 @@
+//! ![Zebra logotype](https://www.zfnd.org/images/zebra-logotype.png)
+//!
 //! Hello! I am Zebra, an ongoing Rust implementation of a Zcash node.
 //!
 //! Zebra is a work in progress.  It is developed as a collection of `zebra-*`
