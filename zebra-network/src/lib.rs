@@ -26,6 +26,9 @@
 //! to close, and the outbound service can connect to additional peers
 //! when it is overloaded.
 
+#![doc(html_logo_url = "https://www.zfnd.org/images/zebra-icon.png")]
+#![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_network")]
+
 #![deny(missing_docs)]
 // Tracing causes false positives on this lint:
 // https://github.com/tokio-rs/tracing/issues/553
