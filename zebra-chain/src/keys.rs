@@ -2,3 +2,4 @@
 
 mod sapling;
 mod sprout;
+mod transparent;
