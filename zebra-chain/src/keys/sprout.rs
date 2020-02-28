@@ -13,6 +13,6 @@ use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize}
 #[cfg(test)]
 proptest! {
 
-    #[test]
-    fn test() {}
+    // #[test]
+    // fn test() {}
 }
