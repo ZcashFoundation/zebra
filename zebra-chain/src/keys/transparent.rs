@@ -2,9 +2,7 @@ use std::io;
 
 use secp256k1::PublicKey;
 
-use crate::serialization::{
-    ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
-};
+use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 
 impl ZcashSerialize for PublicKey {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
