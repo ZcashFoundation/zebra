@@ -30,7 +30,7 @@ use crate::{
 use super::{Client, Connection, ErrorSlot, HandshakeError};
 
 /// A [`Service`] that handshakes with a remote peer and constructs a
-/// client/server pair.d
+/// client/server pair.
 pub struct Handshake<S> {
     config: Config,
     internal_service: S,
