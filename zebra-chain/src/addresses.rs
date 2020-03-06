@@ -107,7 +107,7 @@ impl fmt::Debug for TransparentAddress {
         let _ = self.zcash_serialize(&mut bytes);
 
         f.debug_tuple("TransparentAddress")
-            .field(&bs58::encode(bytes.get_ref()).into_vec())
+            .field(&bs58::encode(bytes.get_ref()).into_string())
             .finish()
     }
 }
