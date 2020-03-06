@@ -107,7 +107,7 @@ impl fmt::Debug for TransparentAddress {
         let _ = self.zcash_serialize(&mut bytes);
 
         f.debug_tuple("TransparentAddress")
-            .field(&bs58::encode(bytes.get_ref()).into_string())
+            .field(&bs58::encode(bytes.get_ref()).with_check().into_string())
             .finish()
     }
 }
@@ -146,6 +146,7 @@ impl ZcashSerialize for TransparentAddress {
                 writer.write_all(&pub_key_hash.0)?
             }
         }
+
         Ok(())
     }
 }
@@ -179,5 +180,43 @@ impl ZcashDeserialize for TransparentAddress {
             }),
             _ => Err(SerializationError::Parse("bad t-addr version/type")),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use secp256k1::PublicKey;
+
+    use crate::types::Script;
+
+    use super::*;
+
+    #[test]
+    fn pubkey() {
+        let pub_key = PublicKey::from_slice(&[
+            3, 23, 183, 225, 206, 31, 159, 148, 195, 42, 67, 115, 146, 41, 248, 140, 11, 3, 51, 41,
+            111, 180, 110, 143, 114, 134, 88, 73, 198, 174, 52, 184, 78,
+        ])
+        .expect("A PublicKey from slice");
+
+        let t_addr = TransparentAddress::from(pub_key);
+
+        assert_eq!(
+            format!("{:?}", t_addr),
+            "TransparentAddress(\"t1bmMa1wJDFdbc2TiURQP5BbBz6jHjUBuHq\")"
+        );
+    }
+
+    #[test]
+    fn empty_script() {
+        let script = Script(vec![0; 20]);
+
+        let t_addr = TransparentAddress::from(script);
+
+        assert_eq!(
+            format!("{:?}", t_addr),
+            "TransparentAddress(\"t3Y5pHwfgHbS6pDjj1HLuMFxhFFip1fcJ6g\")"
+        );
     }
 }

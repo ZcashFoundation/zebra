@@ -196,6 +196,9 @@ name = "bs58"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b170cd256a3f9fa6b9edae3e44a7dfdfc77e8124dbc3e2612d75f9c3e2396dae"
+dependencies = [
+ "sha2",
+]
 
 [[package]]
 name = "byte-tools"
