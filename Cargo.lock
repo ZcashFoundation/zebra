@@ -192,6 +192,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "bs58"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b170cd256a3f9fa6b9edae3e44a7dfdfc77e8124dbc3e2612d75f9c3e2396dae"
+
+[[package]]
 name = "byte-tools"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2036,6 +2042,7 @@ dependencies = [
 name = "zebra-chain"
 version = "0.1.0"
 dependencies = [
+ "bs58",
  "byteorder",
  "chrono",
  "ed25519-zebra",
