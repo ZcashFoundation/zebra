@@ -2,12 +2,12 @@
 
 #![doc(html_logo_url = "https://www.zfnd.org/images/zebra-icon.png")]
 #![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_chain")]
-
 #![deny(missing_docs)]
 
 mod merkle_tree;
 mod sha256d_writer;
 
+pub mod addresses;
 pub mod block;
 pub mod equihash_solution;
 pub mod keys;
