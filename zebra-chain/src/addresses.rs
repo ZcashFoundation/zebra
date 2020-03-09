@@ -126,8 +126,6 @@ impl ZcashSerialize for TransparentAddress {
                     // default to testnet bytes.
                     writer.write_all(&[0x1C, 0xBA][..])?
                 }
-                // XXX I'm asuming this is BigEndian because we're not
-                // explicitly making it LittleEndian?
                 writer.write_all(&script_hash.0)?
             }
             TransparentAddress::PayToPublicKeyHash {
