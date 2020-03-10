@@ -119,11 +119,11 @@ impl ZcashSerialize for TransparentAddress {
                 network,
                 script_hash,
             } => {
+                // Dev network doesn't have a recommendation so we
+                // default to testnet bytes if it's not mainnet.
                 if *network == Network::Mainnet {
                     writer.write_all(&[0x1C, 0xBD][..])?
                 } else {
-                    // Dev network doesn't have a recommendation so we
-                    // default to testnet bytes.
                     writer.write_all(&[0x1C, 0xBA][..])?
                 }
                 writer.write_all(&script_hash.0)?
@@ -132,15 +132,13 @@ impl ZcashSerialize for TransparentAddress {
                 network,
                 pub_key_hash,
             } => {
+                // Dev network doesn't have a recommendation so we
+                // default to testnet bytes if it's not mainnet.
                 if *network == Network::Mainnet {
                     writer.write_all(&[0x1C, 0xB8][..])?
                 } else {
-                    // Dev network doesn't have a recommendation so we
-                    // default to testnet bytes.
                     writer.write_all(&[0x1D, 0x25][..])?
                 }
-                // XXX I'm asuming this is BigEndian because we're not
-                // explicitly making it LittleEndian?
                 writer.write_all(&pub_key_hash.0)?
             }
         }
@@ -162,7 +160,6 @@ impl ZcashDeserialize for TransparentAddress {
                 network: Network::Mainnet,
                 script_hash: AddressPayloadHash(hash_bytes),
             }),
-            // Currently only reading !mainnet versions as testnet.
             [0x1c, 0xba] => Ok(TransparentAddress::PayToScriptHash {
                 network: Network::Testnet,
                 script_hash: AddressPayloadHash(hash_bytes),
@@ -171,7 +168,6 @@ impl ZcashDeserialize for TransparentAddress {
                 network: Network::Mainnet,
                 pub_key_hash: AddressPayloadHash(hash_bytes),
             }),
-            // Currently only reading !mainnet versions as testnet.
             [0x1d, 0x25] => Ok(TransparentAddress::PayToPublicKeyHash {
                 network: Network::Testnet,
                 pub_key_hash: AddressPayloadHash(hash_bytes),
