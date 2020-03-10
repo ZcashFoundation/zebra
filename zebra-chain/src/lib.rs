@@ -4,6 +4,9 @@
 #![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_chain")]
 #![deny(missing_docs)]
 
+#[macro_use]
+extern crate serde;
+
 mod merkle_tree;
 mod sha256d_writer;
 
@@ -11,6 +14,7 @@ pub mod addresses;
 pub mod block;
 pub mod equihash_solution;
 pub mod keys;
+pub mod network;
 pub mod note_commitment_tree;
 pub mod note_encryption;
 pub mod proofs;

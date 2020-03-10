@@ -3,17 +3,6 @@ use std::fmt;
 #[cfg(test)]
 use proptest_derive::Arbitrary;
 
-/// A magic number identifying the network.
-#[derive(Copy, Clone, Eq, PartialEq)]
-#[cfg_attr(test, derive(Arbitrary))]
-pub struct Magic(pub [u8; 4]);
-
-impl fmt::Debug for Magic {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple("Magic").field(&hex::encode(&self.0)).finish()
-    }
-}
-
 /// A protocol version number.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct Version(pub u32);

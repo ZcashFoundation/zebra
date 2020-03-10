@@ -10,14 +10,15 @@ use tokio_util::codec::{Decoder, Encoder};
 
 use zebra_chain::{
     block::{Block, BlockHeaderHash},
+    network::Network,
     serialization::{
         ReadZcashExt, SerializationError as Error, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
     },
     transaction::Transaction,
-    types::{BlockHeight, Sha256dChecksum},
+    types::{BlockHeight, Magic, Sha256dChecksum},
 };
 
-use crate::{constants, types::Network};
+use crate::constants;
 
 use super::{
     message::{Message, RejectReason},
