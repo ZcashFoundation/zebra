@@ -28,7 +28,6 @@
 
 #![doc(html_logo_url = "https://www.zfnd.org/images/zebra-icon.png")]
 #![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_network")]
-
 #![deny(missing_docs)]
 // Tracing causes false positives on this lint:
 // https://github.com/tokio-rs/tracing/issues/553
@@ -54,7 +53,6 @@ mod address_book;
 mod config;
 mod constants;
 mod meta_addr;
-mod network;
 mod peer;
 mod peer_set;
 mod policies;
@@ -71,5 +69,5 @@ pub use crate::{
 
 /// Types used in the definition of [`Request`] and [`Response`] messages.
 pub mod types {
-    pub use crate::{meta_addr::MetaAddr, network::Network, protocol::types::PeerServices};
+    pub use crate::{meta_addr::MetaAddr, protocol::types::PeerServices};
 }

@@ -2057,6 +2057,7 @@ dependencies = [
  "redjubjub",
  "ripemd160",
  "secp256k1",
+ "serde",
  "sha2",
  "thiserror",
 ]

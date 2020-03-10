@@ -10,9 +10,11 @@ use sha2::Sha256;
 #[cfg(test)]
 use proptest_derive::Arbitrary;
 
-use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
-
-use crate::types::Script;
+use crate::{
+    network::Network,
+    serialization::{SerializationError, ZcashDeserialize, ZcashSerialize},
+    types::Script,
+};
 
 /// A hash of a redeem script, as used in transparent
 /// pay-to-script-hash and pay-to-publickey-hash addresses.
@@ -40,16 +42,6 @@ impl fmt::Debug for AddressPayloadHash {
             .field(&hex::encode(&self.0))
             .finish()
     }
-}
-
-/// An enum describing the possible network choices.
-// XXX Stolen from zebra-network for now.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-pub enum Network {
-    /// The production mainnet.
-    Mainnet,
-    /// The testnet.
-    Testnet,
 }
 
 /// Transparent Zcash Addresses
