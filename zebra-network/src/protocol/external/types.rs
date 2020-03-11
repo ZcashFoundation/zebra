@@ -51,7 +51,7 @@ pub struct Filter(pub Vec<u8>);
 #[cfg(test)]
 mod tests {
 
-    use crate::constants::magics;
+    use zebra_chain::network::magics;
 
     #[test]
     fn magic_debug() {
@@ -67,7 +67,7 @@ mod proptest {
 
     use proptest::prelude::*;
 
-    use super::Magic;
+    use zebra_chain::types::Magic;
 
     proptest! {
 
