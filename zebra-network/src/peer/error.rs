@@ -19,10 +19,6 @@ pub enum PeerError {
     /// the [`Server`] half did.
     #[error("peer::Client instance died")]
     DeadClient,
-    /// The [`peer::Server`] half of the [`peer::Server`]/[`peer::Client`] pair died before
-    /// the [`peer::Client`] half did.
-    #[error("peer::Server instance died")]
-    DeadServer,
     /// The remote peer did not respond to a [`peer::Client`] request in time.
     #[error("Client request timed out")]
     ClientRequestTimeout,
