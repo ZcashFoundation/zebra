@@ -15,17 +15,6 @@ use crate::serialization::{
     ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
 };
 
-/// A magic number identifying the network.
-#[derive(Copy, Clone, Eq, PartialEq)]
-#[cfg_attr(test, derive(Arbitrary))]
-pub struct Magic(pub [u8; 4]);
-
-impl fmt::Debug for Magic {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple("Magic").field(&hex::encode(&self.0)).finish()
-    }
-}
-
 /// A 4-byte checksum using truncated double-SHA256 (two rounds of SHA256).
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub struct Sha256dChecksum(pub [u8; 4]);
