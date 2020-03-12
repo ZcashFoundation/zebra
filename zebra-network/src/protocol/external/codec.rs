@@ -10,12 +10,12 @@ use tokio_util::codec::{Decoder, Encoder};
 
 use zebra_chain::{
     block::{Block, BlockHeaderHash},
-    network::Network,
     serialization::{
         ReadZcashExt, SerializationError as Error, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
     },
     transaction::Transaction,
-    types::{BlockHeight, Magic, Sha256dChecksum},
+    types::{BlockHeight, Sha256dChecksum},
+    Network,
 };
 
 use crate::constants;
@@ -136,7 +136,7 @@ impl Encoder for Codec {
         // but leave it for now until we fix the issue above.
         let mut header = [0u8; HEADER_LEN];
         let mut header_writer = Cursor::new(&mut header[..]);
-        header_writer.write_all(&self.builder.network.magic().0)?;
+        header_writer.write_all(&Magic::from(self.builder.network).0[..])?;
         header_writer.write_all(command)?;
         header_writer.write_u32::<LittleEndian>(body.len() as u32)?;
         header_writer.write_all(&Sha256dChecksum::from(&body[..]).0)?;
@@ -309,7 +309,7 @@ impl Decoder for Codec {
                     "read header from src buffer"
                 );
 
-                if magic != self.builder.network.magic() {
+                if magic != Magic::from(self.builder.network) {
                     return Err(Parse("supplied magic did not meet expectations"));
                 }
                 if body_len >= self.builder.max_len {

@@ -14,7 +14,6 @@ pub mod addresses;
 pub mod block;
 pub mod equihash_solution;
 pub mod keys;
-pub mod network;
 pub mod note_commitment_tree;
 pub mod note_encryption;
 pub mod proofs;
@@ -23,3 +22,12 @@ pub mod transaction;
 pub mod types;
 
 pub use redjubjub;
+
+/// An enum describing the possible network choices.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub enum Network {
+    /// The production mainnet.
+    Mainnet,
+    /// The testnet.
+    Testnet,
+}

@@ -11,9 +11,9 @@ use sha2::Sha256;
 use proptest_derive::Arbitrary;
 
 use crate::{
-    network::Network,
     serialization::{SerializationError, ZcashDeserialize, ZcashSerialize},
     types::Script,
+    Network,
 };
 
 /// A hash of a redeem script, as used in transparent

@@ -3,6 +3,31 @@ use std::fmt;
 #[cfg(test)]
 use proptest_derive::Arbitrary;
 
+use zebra_chain::Network;
+
+use crate::constants::magics;
+
+/// A magic number identifying the network.
+#[derive(Copy, Clone, Eq, PartialEq)]
+#[cfg_attr(test, derive(Arbitrary))]
+pub struct Magic(pub [u8; 4]);
+
+impl fmt::Debug for Magic {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple("Magic").field(&hex::encode(&self.0)).finish()
+    }
+}
+
+impl From<Network> for Magic {
+    /// Get the magic value associated to this `Network`.
+    fn from(network: Network) -> Self {
+        match network {
+            Network::Mainnet => magics::MAINNET,
+            Network::Testnet => magics::TESTNET,
+        }
+    }
+}
+
 /// A protocol version number.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct Version(pub u32);
@@ -49,25 +74,21 @@ impl Default for Tweak {
 pub struct Filter(pub Vec<u8>);
 
 #[cfg(test)]
-mod tests {
-
-    use zebra_chain::network::magics;
-
-    #[test]
-    fn magic_debug() {
-        assert_eq!(format!("{:?}", magics::MAINNET), "Magic(\"24e92764\")");
-        assert_eq!(format!("{:?}", magics::TESTNET), "Magic(\"fa1af9bf\")");
-    }
-}
-
-#[cfg(test)]
 mod proptest {
 
     use hex;
 
     use proptest::prelude::*;
 
-    use zebra_chain::types::Magic;
+    use super::Magic;
+
+    use crate::constants::magics;
+
+    #[test]
+    fn magic_debug() {
+        assert_eq!(format!("{:?}", magics::MAINNET), "Magic(\"24e92764\")");
+        assert_eq!(format!("{:?}", magics::TESTNET), "Magic(\"fa1af9bf\")");
+    }
 
     proptest! {
 
