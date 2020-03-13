@@ -16,34 +16,6 @@ use crate::{
     Network,
 };
 
-/// A hash of a redeem script, as used in transparent
-/// pay-to-script-hash and pay-to-publickey-hash addresses.
-///
-/// The resulting hash in both of these cases is always exactly 20
-/// bytes. These are big-endian.
-/// https://en.bitcoin.it/Base58Check_encoding#Encoding_a_Bitcoin_address
-#[derive(Copy, Clone, Eq, PartialEq)]
-#[cfg_attr(test, derive(Arbitrary))]
-pub struct AddressPayloadHash(pub [u8; 20]);
-
-impl<'a> From<&'a [u8]> for AddressPayloadHash {
-    fn from(bytes: &'a [u8]) -> Self {
-        let sha_hash = Sha256::digest(bytes);
-        let ripe_hash = Ripemd160::digest(&sha_hash);
-        let mut payload = [0u8; 20];
-        payload[..].copy_from_slice(&ripe_hash[..]);
-        Self(payload)
-    }
-}
-
-impl fmt::Debug for AddressPayloadHash {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple("AddressPayloadHash")
-            .field(&hex::encode(&self.0))
-            .finish()
-    }
-}
-
 /// Transparent Zcash Addresses
 ///
 /// In Bitcoin a single byte is used for the version field identifying
@@ -63,7 +35,7 @@ pub enum TransparentAddress {
         /// Production, test, or other network
         network: Network,
         /// 20 bytes specifying a script hash.
-        script_hash: AddressPayloadHash,
+        script_hash: [u8; 20],
     },
     /// P2PKH (Pay to Public Key Hash) addresses
     PayToPublicKeyHash {
@@ -71,15 +43,32 @@ pub enum TransparentAddress {
         network: Network,
         /// 20 bytes specifying a public key hash, which is a RIPEMD-160
         /// hash of a SHA-256 hash of a compressed ECDSA key encoding.
-        pub_key_hash: AddressPayloadHash,
+        pub_key_hash: [u8; 20],
     },
+}
+
+impl TransparentAddress {
+    /// A hash of a transparent address payload, as used in
+    /// transparent pay-to-script-hash and pay-to-publickey-hash
+    /// addresses.
+    ///
+    /// The resulting hash in both of these cases is always exactly 20
+    /// bytes. These are big-endian.
+    /// https://en.bitcoin.it/Base58Check_encoding#Encoding_a_Bitcoin_address
+    fn hash_payload(bytes: &[u8]) -> [u8; 20] {
+        let sha_hash = Sha256::digest(bytes);
+        let ripe_hash = Ripemd160::digest(&sha_hash);
+        let mut payload = [0u8; 20];
+        payload[..].copy_from_slice(&ripe_hash[..]);
+        return payload;
+    }
 }
 
 impl From<Script> for TransparentAddress {
     fn from(script: Script) -> Self {
         TransparentAddress::PayToScriptHash {
             network: Network::Mainnet,
-            script_hash: AddressPayloadHash::from(&script.0[..]),
+            script_hash: Self::hash_payload(&script.0[..]),
         }
     }
 }
@@ -88,7 +77,7 @@ impl From<PublicKey> for TransparentAddress {
     fn from(pub_key: PublicKey) -> Self {
         TransparentAddress::PayToPublicKeyHash {
             network: Network::Mainnet,
-            pub_key_hash: AddressPayloadHash::from(&pub_key.serialize()[..]),
+            pub_key_hash: Self::hash_payload(&pub_key.serialize()[..]),
         }
     }
 }
@@ -118,7 +107,7 @@ impl ZcashSerialize for TransparentAddress {
                 } else {
                     writer.write_all(&[0x1C, 0xBA][..])?
                 }
-                writer.write_all(&script_hash.0)?
+                writer.write_all(script_hash)?
             }
             TransparentAddress::PayToPublicKeyHash {
                 network,
@@ -131,7 +120,7 @@ impl ZcashSerialize for TransparentAddress {
                 } else {
                     writer.write_all(&[0x1D, 0x25][..])?
                 }
-                writer.write_all(&pub_key_hash.0)?
+                writer.write_all(pub_key_hash)?
             }
         }
 
@@ -150,19 +139,19 @@ impl ZcashDeserialize for TransparentAddress {
         match version_bytes {
             [0x1c, 0xbd] => Ok(TransparentAddress::PayToScriptHash {
                 network: Network::Mainnet,
-                script_hash: AddressPayloadHash(hash_bytes),
+                script_hash: hash_bytes,
             }),
             [0x1c, 0xba] => Ok(TransparentAddress::PayToScriptHash {
                 network: Network::Testnet,
-                script_hash: AddressPayloadHash(hash_bytes),
+                script_hash: hash_bytes,
             }),
             [0x1c, 0xb8] => Ok(TransparentAddress::PayToPublicKeyHash {
                 network: Network::Mainnet,
-                pub_key_hash: AddressPayloadHash(hash_bytes),
+                pub_key_hash: hash_bytes,
             }),
             [0x1d, 0x25] => Ok(TransparentAddress::PayToPublicKeyHash {
                 network: Network::Testnet,
-                pub_key_hash: AddressPayloadHash(hash_bytes),
+                pub_key_hash: hash_bytes,
             }),
             _ => Err(SerializationError::Parse("bad t-addr version/type")),
         }
