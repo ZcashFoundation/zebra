@@ -1,5 +1,5 @@
 //! Key types.
 
-mod sapling;
-mod sprout;
-mod transparent;
+pub mod sapling;
+pub mod sprout;
+pub mod transparent;
