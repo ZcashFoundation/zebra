@@ -1,3 +1,5 @@
+//! Sapling key types
+
 use std::{
     fmt,
     io::{self},
