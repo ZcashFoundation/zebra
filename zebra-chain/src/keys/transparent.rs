@@ -1,3 +1,8 @@
+//! Transparent key trait impls, around secp256k1::PublicKey
+//!
+//! We don't impl Arbitrary for PublicKey since it's being pulled in
+//! from secp256k1 and we don't want to wrap it.
+
 use std::io;
 
 use secp256k1::PublicKey;
