@@ -59,7 +59,7 @@ impl TransparentAddress {
         let ripe_hash = Ripemd160::digest(&sha_hash);
         let mut payload = [0u8; 20];
         payload[..].copy_from_slice(&ripe_hash[..]);
-        return payload;
+        payload
     }
 }
 
@@ -165,7 +165,7 @@ impl TransparentAddress {
                 let mut bytes = [0; 20];
                 bytes.copy_from_slice(payload_bytes.as_slice());
                 return Self::PayToPublicKeyHash {
-                    network: network,
+                    network,
                     pub_key_hash: bytes,
                 };
             })
@@ -178,7 +178,7 @@ impl TransparentAddress {
                 let mut bytes = [0; 20];
                 bytes.copy_from_slice(payload_bytes.as_slice());
                 return Self::PayToScriptHash {
-                    network: network,
+                    network,
                     script_hash: bytes,
                 };
             })
