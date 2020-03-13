@@ -8,7 +8,7 @@ use secp256k1::PublicKey;
 use sha2::Sha256;
 
 #[cfg(test)]
-use proptest_derive::Arbitrary;
+use proptest::{arbitrary::Arbitrary, collection::vec, prelude::*};
 
 use crate::{
     serialization::{SerializationError, ZcashDeserialize, ZcashSerialize},
@@ -28,7 +28,6 @@ use crate::{
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#transparentaddrencoding
 #[derive(Copy, Clone, Eq, PartialEq)]
-// #[cfg_attr(test, derive(Arbitrary))]
 pub enum TransparentAddress {
     /// P2SH (Pay to Script Hash) addresses
     PayToScriptHash {
@@ -159,6 +158,46 @@ impl ZcashDeserialize for TransparentAddress {
 }
 
 #[cfg(test)]
+impl TransparentAddress {
+    fn p2pkh_strategy() -> impl Strategy<Value = Self> {
+        (any::<Network>(), vec(any::<u8>(), 20))
+            .prop_map(|(network, payload_bytes)| {
+                let mut bytes = [0; 20];
+                bytes.copy_from_slice(payload_bytes.as_slice());
+                return Self::PayToPublicKeyHash {
+                    network: network,
+                    pub_key_hash: bytes,
+                };
+            })
+            .boxed()
+    }
+
+    fn p2sh_strategy() -> impl Strategy<Value = Self> {
+        (any::<Network>(), vec(any::<u8>(), 20))
+            .prop_map(|(network, payload_bytes)| {
+                let mut bytes = [0; 20];
+                bytes.copy_from_slice(payload_bytes.as_slice());
+                return Self::PayToScriptHash {
+                    network: network,
+                    script_hash: bytes,
+                };
+            })
+            .boxed()
+    }
+}
+
+#[cfg(test)]
+impl Arbitrary for TransparentAddress {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        prop_oneof![Self::p2pkh_strategy(), Self::p2sh_strategy(),].boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
+
+#[cfg(test)]
 mod tests {
 
     use secp256k1::PublicKey;
@@ -193,5 +232,21 @@ mod tests {
             format!("{:?}", t_addr),
             "TransparentAddress(\"t3Y5pHwfgHbS6pDjj1HLuMFxhFFip1fcJ6g\")"
         );
+    }
+}
+
+#[cfg(test)]
+proptest! {
+
+    #[test]
+    fn transparent_address_roundtrip(taddr in any::<TransparentAddress>()) {
+
+        let mut data = Vec::new();
+
+        taddr.zcash_serialize(&mut data).expect("t-addr should serialize");
+
+        let taddr2 = TransparentAddress::zcash_deserialize(&data[..]).expect("randomized t-addr should deserialize");
+
+        prop_assert_eq![taddr, taddr2];
     }
 }
