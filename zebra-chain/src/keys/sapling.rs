@@ -1,4 +1,11 @@
 //! Sapling key types
+//!
+//! "The spend authorizing key ask, proof authorizing key (ak, nsk),
+//! full viewing key (ak, nk, ovk), incoming viewing key ivk, and each
+//! diversied payment address addr_d = (d, pk_d ) are derived from sk,
+//! as described in [Sapling Key Components][ps]."
+//!
+//! [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
 
 use std::{
     fmt,
