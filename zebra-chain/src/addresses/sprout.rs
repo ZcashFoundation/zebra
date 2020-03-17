@@ -3,9 +3,7 @@
 use std::{fmt, io};
 
 use bs58;
-use ripemd160::{Digest, Ripemd160};
 use sha2::Sha256;
-use x25519_dalek;
 
 #[cfg(test)]
 use proptest::{arbitrary::Arbitrary, collection::vec, prelude::*};
@@ -18,6 +16,13 @@ use crate::{
     Network,
 };
 
+/// Magic numbers used to identify what networks Sprout Shielded
+/// Addresses are associated with.
+mod magics {
+    pub const MAINNET: [u8; 2] = [0x16, 0x9A];
+    pub const TESTNET: [u8; 2] = [0x16, 0xB6];
+}
+
 /// Sprout Shielded Payment Addresses
 ///
 /// In Bitcoin a single byte is used for the version field identifying
@@ -29,11 +34,11 @@ use crate::{
 /// to a Bitcoin address just by removing the “t”.)
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#transparentaddrencoding
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Copy, Clone)]
 pub struct SproutShieldedAddress {
     network: Network,
     paying_key: sprout::PayingKey,
-    transmission_key: x25519_dalek::PublicKey,
+    transmission_key: sprout::TransmissionKey,
 }
 
 impl fmt::Debug for SproutShieldedAddress {
@@ -50,13 +55,11 @@ impl fmt::Debug for SproutShieldedAddress {
 impl ZcashSerialize for SproutShieldedAddress {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         if self.network == Network::Mainnet {
-            writer.write_all(&[0x16, 0x9A][..])?
+            writer.write_all(&magics::MAINNET[..])?
         } else {
-            writer.write_all(&[0x16, 0xB6][..])?
+            writer.write_all(&magics::TESTNET[..])?
         }
         writer.write_all(&self.paying_key.0[..])?;
-        // XXX revisit to see if we want to impl ZcashSerialize on
-        // x25519_dalek::PublicKey
         writer.write_all(self.transmission_key.as_bytes())?;
 
         Ok(())
@@ -69,8 +72,8 @@ impl ZcashDeserialize for SproutShieldedAddress {
         reader.read_exact(&mut version_bytes)?;
 
         let network = match version_bytes {
-            [0x16, 0x9A] => Network::Mainnet,
-            [0x16, 0xB6] => Network::Testnet,
+            magics::MAINNET => Network::Mainnet,
+            magics::TESTNET => Network::Testnet,
             _ => panic!(SerializationError::Parse(
                 "bad sprout shielded addr version/type",
             )),
@@ -79,7 +82,7 @@ impl ZcashDeserialize for SproutShieldedAddress {
         Ok(SproutShieldedAddress {
             network,
             paying_key: sprout::PayingKey(reader.read_32_bytes()?),
-            transmission_key: sprout::TransmissionKey(reader.read_32_bytes()?),
+            transmission_key: sprout::TransmissionKey::from(reader.read_32_bytes()?),
         })
     }
 }
