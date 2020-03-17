@@ -21,12 +21,17 @@ use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize}
 /// All other Sprout key types derive from the SpendingKey value.
 pub struct SpendingKey;
 
+///
 pub struct ReceivingKey;
 
-pub struct PayingKey;
+///
+#[derive(Copy, Clone, Eq, PartialEq)]
+pub struct PayingKey(pub [u8; 32]);
 
-pub struct TransmissionKey;
+///
+pub type TransmissionKey = x25519_dalek::PublicKey;
 
+///
 pub struct IncomingViewingKey {
     paying_key: PayingKey,
     receiving_key: ReceivingKey,
