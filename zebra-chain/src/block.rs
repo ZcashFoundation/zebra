@@ -75,6 +75,16 @@ impl ZcashDeserialize for BlockHeaderHash {
 /// back to the genesis block (the first block in the blockchain).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct BlockHeader {
+    /// The block's version field. This is supposed to be `4`:
+    ///
+    /// > The current and only defined block version number for Zcash is 4.
+    ///
+    /// but this was not enforced by the consensus rules, and defective mining
+    /// software created blocks with other versions, so instead it's effectively
+    /// a free field. The only constraint is that it must be at least `4` when
+    /// interpreted as an `i32`.
+    pub version: u32,
+
     /// A SHA-256d hash in internal byte order of the previous block’s
     /// header. This ensures no previous block can be changed without
     /// also changing this block’s header.
@@ -119,8 +129,7 @@ pub struct BlockHeader {
 
 impl ZcashSerialize for BlockHeader {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        // "The current and only defined block version number for Zcash is 4."
-        writer.write_u32::<LittleEndian>(4)?;
+        writer.write_u32::<LittleEndian>(self.version)?;
         self.previous_block_hash.zcash_serialize(&mut writer)?;
         writer.write_all(&self.merkle_root_hash.0[..])?;
         writer.write_all(&self.final_sapling_root_hash.0[..])?;
@@ -134,14 +143,38 @@ impl ZcashSerialize for BlockHeader {
 
 impl ZcashDeserialize for BlockHeader {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        // The Zcash specification says that
         // "The current and only defined block version number for Zcash is 4."
-        let version = reader.read_u32::<LittleEndian>()?;
+        // but this is not actually part of the consensus rules, and in fact
+        // broken mining software created blocks that do not have version 4.
+        // There are approximately 4,000 blocks with version 536870912; this
+        // is the bit-reversal of the value 4, indicating that that mining pool
+        // reversed bit-ordering of the version field. Because the version field
+        // was not properly validated, these blocks were added to the chain.
+        //
+        // The only possible way to work around this is to do a similar hack
+        // as the overwintered field in transaction parsing, which we do here:
+        // treat the high bit (which zcashd interprets as a sign bit) as an
+        // indicator that the version field is meaningful.
+        //
+        //
+        let (version, future_version_flag) = {
+            const LOW_31_BITS: u32 = (1 << 31) - 1;
+            let raw_version = reader.read_u32::<LittleEndian>()?;
+            (raw_version & LOW_31_BITS, raw_version >> 31 != 0)
+        };
 
-        if version != 4 {
-            return Err(SerializationError::Parse("bad block header"));
+        if future_version_flag {
+            return Err(SerializationError::Parse(
+                "high bit was set in version field",
+            ));
+        }
+        if version < 4 {
+            return Err(SerializationError::Parse("version must be at least 4"));
         }
 
         Ok(BlockHeader {
+            version,
             previous_block_hash: BlockHeaderHash::zcash_deserialize(&mut reader)?,
             merkle_root_hash: MerkleTreeRootHash(reader.read_32_bytes()?),
             final_sapling_root_hash: SaplingNoteTreeRootHash(reader.read_32_bytes()?),

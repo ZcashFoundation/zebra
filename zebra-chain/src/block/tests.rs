@@ -16,6 +16,7 @@ impl Arbitrary for BlockHeader {
 
     fn arbitrary_with(_args: ()) -> Self::Strategy {
         (
+            (4u32..2_147_483_647u32),
             any::<BlockHeaderHash>(),
             any::<MerkleTreeRootHash>(),
             any::<SaplingNoteTreeRootHash>(),
@@ -26,21 +27,23 @@ impl Arbitrary for BlockHeader {
         )
             .prop_map(
                 |(
-                    block_hash,
+                    version,
+                    previous_block_hash,
                     merkle_root_hash,
-                    sapling_root_hash,
+                    final_sapling_root_hash,
                     timestamp,
                     bits,
                     nonce,
-                    equihash_solution,
+                    solution,
                 )| BlockHeader {
-                    previous_block_hash: block_hash,
-                    merkle_root_hash: merkle_root_hash,
-                    final_sapling_root_hash: sapling_root_hash,
+                    version,
+                    previous_block_hash,
+                    merkle_root_hash,
+                    final_sapling_root_hash,
                     time: Utc.timestamp(timestamp, 0),
-                    bits: bits,
-                    nonce: nonce,
-                    solution: equihash_solution,
+                    bits,
+                    nonce,
+                    solution,
                 },
             )
             .boxed()
@@ -68,6 +71,7 @@ fn blockheaderhash_from_blockheader() {
     let some_bytes = [0; 32];
 
     let blockheader = BlockHeader {
+        version: 4,
         previous_block_hash: BlockHeaderHash(some_bytes),
         merkle_root_hash: MerkleTreeRootHash(some_bytes),
         final_sapling_root_hash: SaplingNoteTreeRootHash(some_bytes),
