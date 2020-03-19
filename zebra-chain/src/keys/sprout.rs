@@ -16,13 +16,24 @@ use proptest::{array, collection::vec, prelude::*};
 #[cfg(test)]
 use proptest_derive::Arbitrary;
 
+use sha2::sha256_utils::compress256;
+
 use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 
+/// Our root secret key of the Sprout key derivation tree.
+///
 /// All other Sprout key types derive from the SpendingKey value.
-pub struct SpendingKey;
+/// Actually 252 bits.
+pub struct SpendingKey(pub [u8; 32]);
 
 /// Derived from a _SpendingKey_.
 pub type ReceivingKey = x25519_dalek::StaticSecret;
+
+impl From<SpendingKey> for ReceivingKey {
+    fn from(spending_key: SpendingKey) -> ReceivingKey {
+        ReceivingKey::from(spending_key.0)
+    }
+}
 
 /// Derived from a _SpendingKey_.
 #[derive(Copy, Clone, Eq, PartialEq)]

@@ -197,7 +197,7 @@ version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b170cd256a3f9fa6b9edae3e44a7dfdfc77e8124dbc3e2612d75f9c3e2396dae"
 dependencies = [
- "sha2",
+ "sha2 0.8.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -390,7 +390,7 @@ dependencies = [
  "curve25519-dalek",
  "rand_core 0.5.1",
  "serde",
- "sha2",
+ "sha2 0.8.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "thiserror",
 ]
 
@@ -1514,6 +1514,17 @@ dependencies = [
 [[package]]
 name = "sha2"
 version = "0.8.1"
+source = "git+https://github.com/ZcashFoundation/hashes?branch=expose-utils#a968a8db2bffae75fbb31596897be9088ddbb821"
+dependencies = [
+ "block-buffer",
+ "digest",
+ "fake-simd",
+ "opaque-debug",
+]
+
+[[package]]
+name = "sha2"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "27044adfd2e1f077f649f59deb9490d3941d674002f7d062870a60ebe9bd47a0"
 dependencies = [
@@ -2070,7 +2081,7 @@ dependencies = [
  "ripemd160",
  "secp256k1",
  "serde",
- "sha2",
+ "sha2 0.8.1 (git+https://github.com/ZcashFoundation/hashes?branch=expose-utils)",
  "thiserror",
  "x25519-dalek",
 ]
