@@ -49,6 +49,16 @@ impl fmt::Debug for SproutShieldedAddress {
     }
 }
 
+impl PartialEq for SproutShieldedAddress {
+    fn eq(&self, other: &Self) -> bool {
+        self.network == other.network
+            && self.paying_key.0 == other.paying_key.0
+            && self.transmission_key.as_bytes() == other.transmission_key.as_bytes()
+    }
+}
+
+impl Eq for SproutShieldedAddress {}
+
 impl ZcashSerialize for SproutShieldedAddress {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         if self.network == Network::Mainnet {
