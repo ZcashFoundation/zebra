@@ -13,7 +13,7 @@ use proptest::{array, collection::vec, prelude::*};
 #[cfg(test)]
 use proptest_derive::Arbitrary;
 
-use sha2::sha256_utils::compress256;
+use sha2::compress256;
 
 /// Our root secret key of the Sprout key derivation tree.
 ///
