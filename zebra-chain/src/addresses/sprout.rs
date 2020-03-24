@@ -3,16 +3,13 @@
 use std::{fmt, io};
 
 use bs58;
-use sha2::Sha256;
 
 #[cfg(test)]
 use proptest::{arbitrary::Arbitrary, collection::vec, prelude::*};
 
 use crate::{
     keys::sprout,
-    serialization::{
-        ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
-    },
+    serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize},
     Network,
 };
 

@@ -6,11 +6,6 @@
 //!
 //! [ps]: https://zips.z.cash/protocol/protocol.pdf#sproutkeycomponents
 
-use std::{
-    fmt,
-    io::{self},
-};
-
 use byteorder::{ByteOrder, LittleEndian};
 
 #[cfg(test)]
@@ -19,8 +14,6 @@ use proptest::{array, collection::vec, prelude::*};
 use proptest_derive::Arbitrary;
 
 use sha2::sha256_utils::compress256;
-
-use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 
 /// Our root secret key of the Sprout key derivation tree.
 ///
@@ -44,7 +37,7 @@ impl From<SpendingKey> for ReceivingKey {
         let mut block = [0u8; 64]; // Thus, t = 0
 
         block[0..32].copy_from_slice(&spending_key.0[..]);
-        block[0] |= 0b11000000;
+        block[0] |= 0b1100_0000;
 
         compress256(&mut state, &block);
 
@@ -69,7 +62,7 @@ impl From<SpendingKey> for PayingKey {
         let mut block = [0u8; 64];
 
         block[0..32].copy_from_slice(&spending_key.0[..]);
-        block[0] |= 0b11000000;
+        block[0] |= 0b1100_0000;
 
         block[32] = 1u8; // t = 1
 
