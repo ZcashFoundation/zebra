@@ -24,7 +24,7 @@ x25519-dalek = "0.6"
 # ZF deps
 ed25519-zebra = "0.2"
 redjubjub = "0.1"
-sha2 = {git="https://github.com/ZcashFoundation/hashes", branch = "expose-utils", features=["utils"]}
+sha2 = {git="https://github.com/ZcashFoundation/hashes", branch = "expose-utils", features=["compress"]}
 
 [dev-dependencies]
 proptest = "0.9"
