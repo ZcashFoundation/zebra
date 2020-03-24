@@ -33,9 +33,15 @@ pub struct SpendingKey(pub [u8; 32]);
 pub type ReceivingKey = x25519_dalek::StaticSecret;
 
 impl From<SpendingKey> for ReceivingKey {
+    /// For this invocation of SHA256Compress as the PRF, t=0, which
+    /// is populated by default in an empty block of all zeros to
+    /// start.
+    ///
+    /// https://zips.z.cash/protocol/protocol.pdf#sproutkeycomponents
+    /// https://zips.z.cash/protocol/protocol.pdf#concreteprfs
     fn from(spending_key: SpendingKey) -> ReceivingKey {
         let mut state = [0u32; 8];
-        let mut block = [0u8; 64];
+        let mut block = [0u8; 64]; // Thus, t = 0
 
         block[0..32].copy_from_slice(&spending_key.0[..]);
         block[0] |= 0b11000000;
@@ -52,6 +58,29 @@ impl From<SpendingKey> for ReceivingKey {
 /// Derived from a _SpendingKey_.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct PayingKey(pub [u8; 32]);
+
+impl From<SpendingKey> for PayingKey {
+    /// For this invocation of SHA256Compress as the PRF, t=1.
+    ///
+    /// https://zips.z.cash/protocol/protocol.pdf#sproutkeycomponents
+    /// https://zips.z.cash/protocol/protocol.pdf#concreteprfs
+    fn from(spending_key: SpendingKey) -> PayingKey {
+        let mut state = [0u32; 8];
+        let mut block = [0u8; 64];
+
+        block[0..32].copy_from_slice(&spending_key.0[..]);
+        block[0] |= 0b11000000;
+
+        block[32] = 1u8; // t = 1
+
+        compress256(&mut state, &block);
+
+        let mut derived_bytes = [0u8; 32];
+        LittleEndian::write_u32_into(&state, &mut derived_bytes);
+
+        PayingKey(derived_bytes)
+    }
+}
 
 /// Derived from a _ReceivingKey_.
 pub type TransmissionKey = x25519_dalek::PublicKey;
@@ -70,7 +99,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn derive_receiving_key() {
+    fn derive_keys() {
         let mut bytes = [0u8; 32];
         OsRng.fill_bytes(&mut bytes);
 
@@ -81,6 +110,10 @@ mod tests {
         let receiving_key = ReceivingKey::from(spending_key);
 
         // println!("{}", receiving_key);
+
+        let transmission_key = TransmissionKey::from(&receiving_key);
+
+        println!("{:?}", transmission_key);
     }
 }
 
