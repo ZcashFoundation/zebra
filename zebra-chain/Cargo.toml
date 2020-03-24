@@ -18,13 +18,12 @@ rand_core = "0.5.1"
 ripemd160 = "0.8.0"
 secp256k1 = { version = "0.17.2", features = ["serde"] }
 serde = { version = "1", features = ["serde_derive"] }
-# sha2 = "0.8"
+sha2 = {git="https://github.com/RustCrypto/hashes", rev="30b416a", features=["compress"]}
 thiserror = "1"
 x25519-dalek = "0.6"
 # ZF deps
 ed25519-zebra = "0.2"
 redjubjub = "0.1"
-sha2 = {git="https://github.com/ZcashFoundation/hashes", branch = "expose-utils", features=["compress"]}
 
 [dev-dependencies]
 proptest = "0.9"
