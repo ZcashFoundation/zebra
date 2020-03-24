@@ -99,6 +99,7 @@ mod tests {
     use super::*;
 
     #[test]
+    // TODO: test vectors, not just random data
     fn derive_keys() {
         let mut bytes = [0u8; 32];
         OsRng.fill_bytes(&mut bytes);
