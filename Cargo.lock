@@ -2077,6 +2077,7 @@ dependencies = [
  "lazy_static",
  "proptest",
  "proptest-derive",
+ "rand_core 0.5.1",
  "redjubjub",
  "ripemd160",
  "secp256k1",
