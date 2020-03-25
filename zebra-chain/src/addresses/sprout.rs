@@ -5,7 +5,7 @@ use std::{fmt, io};
 use bs58;
 
 #[cfg(test)]
-use proptest::{arbitrary::Arbitrary, collection::vec, prelude::*};
+use proptest::{arbitrary::Arbitrary, array, prelude::*};
 
 use crate::{
     keys::sprout,
@@ -91,5 +91,45 @@ impl ZcashDeserialize for SproutShieldedAddress {
             paying_key: sprout::PayingKey(reader.read_32_bytes()?),
             transmission_key: sprout::TransmissionKey::from(reader.read_32_bytes()?),
         })
+    }
+}
+
+#[cfg(test)]
+impl Arbitrary for SproutShieldedAddress {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        (
+            any::<Network>(),
+            array::uniform32(any::<u8>()),
+            array::uniform32(any::<u8>()),
+        )
+            .prop_map(|(network, paying_key_bytes, transmission_key_bytes)| {
+                return Self {
+                    network,
+                    paying_key: sprout::PayingKey(paying_key_bytes),
+                    transmission_key: sprout::TransmissionKey::from(transmission_key_bytes),
+                };
+            })
+            .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
+
+#[cfg(test)]
+proptest! {
+
+    #[test]
+    fn sprout_address_roundtrip(zaddr in any::<SproutShieldedAddress>()) {
+
+        let mut data = Vec::new();
+
+        zaddr.zcash_serialize(&mut data).expect("sprout z-addr should serialize");
+
+        let zaddr2 = SproutShieldedAddress::zcash_deserialize(&data[..])
+            .expect("randomized sprout z-addr should deserialize");
+
+        prop_assert_eq![zaddr, zaddr2];
     }
 }
