@@ -21,6 +21,6 @@ impl ZcashDeserialize for PublicKey {
         let mut bytes = [0; 33];
         reader.read_exact(&mut bytes[..])?;
         Self::from_slice(&bytes[..])
-            .map_err(|_| SerializationError::Parse("weird secp256k1 compressed public key"))
+            .map_err(|_| SerializationError::Parse("invalid secp256k1 compressed public key"))
     }
 }
