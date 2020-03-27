@@ -99,11 +99,47 @@ impl<T: ?Sized + AsRef<[u8]>> From<&T> for TransparentAddress {
     fn from(s: &T) -> Self {
         let bytes = &bs58::decode(s).with_check(None).into_vec().unwrap();
 
-        return Self::zcash_deserialize(&bytes[..]).expect("t-addr should deserialize");
+        Self::zcash_deserialize(&bytes[..]).expect("t-addr should deserialize")
+    }
+}
+
+impl std::str::FromStr for TransparentAddress {
+    type Err = SerializationError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let result = &bs58::decode(s).with_check(None).into_vec();
+
+        match result {
+            Ok(bytes) => Self::zcash_deserialize(&bytes[..]),
+            Err(_) => Err(SerializationError::Parse("t-addr decoding error")),
+        }
     }
 }
 
 impl fmt::Debug for TransparentAddress {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut debug_struct = f.debug_struct("TransparentAddress");
+
+        match self {
+            TransparentAddress::PayToScriptHash {
+                network,
+                script_hash,
+            } => debug_struct
+                .field("network", network)
+                .field("script_hash", &hex::encode(script_hash))
+                .finish(),
+            TransparentAddress::PayToPublicKeyHash {
+                network,
+                pub_key_hash,
+            } => debug_struct
+                .field("network", network)
+                .field("pub_key_hash", &hex::encode(pub_key_hash))
+                .finish(),
+        }
+    }
+}
+
+impl fmt::Display for TransparentAddress {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut bytes = io::Cursor::new(Vec::new());
         let _ = self.zcash_serialize(&mut bytes);
@@ -239,7 +275,7 @@ mod tests {
         let t_addr = TransparentAddress::from(pub_key);
 
         assert_eq!(
-            format!("{:?}", t_addr),
+            format!("{}", t_addr),
             "TransparentAddress(\"t1bmMa1wJDFdbc2TiURQP5BbBz6jHjUBuHq\")"
         );
     }
@@ -251,7 +287,7 @@ mod tests {
         let t_addr = TransparentAddress::from(script);
 
         assert_eq!(
-            format!("{:?}", t_addr),
+            format!("{}", t_addr),
             "TransparentAddress(\"t3Y5pHwfgHbS6pDjj1HLuMFxhFFip1fcJ6g\")"
         );
     }
@@ -261,8 +297,18 @@ mod tests {
         let t_addr = TransparentAddress::from("t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd");
 
         assert_eq!(
-            format!("{:?}", t_addr),
+            format!("{}", t_addr),
             "TransparentAddress(\"t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd\")"
+        );
+    }
+
+    #[test]
+    fn debug() {
+        let t_addr = TransparentAddress::from("t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd");
+
+        assert_eq!(
+            format!("{:?}", t_addr),
+            "TransparentAddress { network: Mainnet, script_hash: \"7d46a730d31f97b1930d3368a967c309bd4d136a\" }"
         );
     }
 }
