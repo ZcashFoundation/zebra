@@ -15,7 +15,7 @@ use proptest::{array, collection::vec, prelude::*};
 #[cfg(test)]
 use proptest_derive::Arbitrary;
 
-use sha2::compress256;
+use sha2;
 
 /// Our root secret key of the Sprout key derivation tree.
 ///
@@ -41,7 +41,7 @@ impl From<SpendingKey> for ReceivingKey {
         block[0..32].copy_from_slice(&spending_key.0[..]);
         block[0] |= 0b1100_0000;
 
-        compress256(&mut state, &block);
+        sha2::compress256(&mut state, &block);
 
         let mut derived_bytes = [0u8; 32];
         LittleEndian::write_u32_into(&state, &mut derived_bytes);
@@ -76,7 +76,7 @@ impl From<SpendingKey> for PayingKey {
 
         block[32] = 1u8; // t = 1
 
-        compress256(&mut state, &block);
+        sha2::compress256(&mut state, &block);
 
         let mut derived_bytes = [0u8; 32];
         LittleEndian::write_u32_into(&state, &mut derived_bytes);
