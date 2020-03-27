@@ -1,6 +1,6 @@
 //! Sprout Shielded Payment Address types.
 
-use std::{fmt, io};
+use std::{fmt, io, str::FromStr};
 
 use bs58;
 
@@ -111,7 +111,20 @@ impl<T: ?Sized + AsRef<[u8]>> From<&T> for SproutShieldedAddress {
     fn from(s: &T) -> Self {
         let bytes = &bs58::decode(s).with_check(None).into_vec().unwrap();
 
-        return Self::zcash_deserialize(&bytes[..]).expect("sprout z-addr should deserialize");
+        Self::zcash_deserialize(&bytes[..]).expect("sprout z-addr should deserialize")
+    }
+}
+
+impl std::str::FromStr for SproutShieldedAddress {
+    type Err = SerializationError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let result = &bs58::decode(s).with_check(None).into_vec();
+
+        match result {
+            Ok(bytes) => Self::zcash_deserialize(&bytes[..]),
+            Err(_) => Err(SerializationError::Parse("bs58 decoding error")),
+        }
     }
 }
 
@@ -148,6 +161,18 @@ mod tests {
         let zc_addr = SproutShieldedAddress::from(
             "zcU1Cd6zYyZCd2VJF8yKgmzjxdiiU1rgTTjEwoN1CGUWCziPkUTXUjXmX7TMqdMNsTfuiGN1jQoVN4kGxUR4sAPN4XZ7pxb"
         );
+
+        assert_eq!(
+            format!("{:?}", zc_addr),
+                "SproutShieldedAddress { network: Mainnet, paying_key: PayingKey(\"972caa450769480a995064693db07e0302afe6c3a737e8cc083215dfdfbea3a7\"), transmission_key: \"92c223a94d39e539b85fad3debadc980b4c64294ab8a66d04ca80be3dd7da763\" }"
+        );
+    }
+
+    #[test]
+    fn from_str_debug() {
+        let zc_addr = SproutShieldedAddress::from_str(
+            "zcU1Cd6zYyZCd2VJF8yKgmzjxdiiU1rgTTjEwoN1CGUWCziPkUTXUjXmX7TMqdMNsTfuiGN1jQoVN4kGxUR4sAPN4XZ7pxb"
+        ).expect("sprout z-addr string to parse");
 
         assert_eq!(
             format!("{:?}", zc_addr),
