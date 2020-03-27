@@ -179,6 +179,18 @@ mod tests {
                 "SproutShieldedAddress { network: Mainnet, paying_key: PayingKey(\"972caa450769480a995064693db07e0302afe6c3a737e8cc083215dfdfbea3a7\"), transmission_key: \"92c223a94d39e539b85fad3debadc980b4c64294ab8a66d04ca80be3dd7da763\" }"
         );
     }
+
+    #[test]
+    fn display() {
+        let zc_addr = SproutShieldedAddress::from(
+            "zcU1Cd6zYyZCd2VJF8yKgmzjxdiiU1rgTTjEwoN1CGUWCziPkUTXUjXmX7TMqdMNsTfuiGN1jQoVN4kGxUR4sAPN4XZ7pxb"
+        );
+
+        assert_eq!(
+            format!("{}", zc_addr),
+                "SproutShieldedAddress(\"zcU1Cd6zYyZCd2VJF8yKgmzjxdiiU1rgTTjEwoN1CGUWCziPkUTXUjXmX7TMqdMNsTfuiGN1jQoVN4kGxUR4sAPN4XZ7pxb\")"
+        );
+    }
 }
 
 #[cfg(test)]
