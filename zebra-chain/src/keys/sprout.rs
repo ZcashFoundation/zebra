@@ -51,8 +51,16 @@ impl From<SpendingKey> for ReceivingKey {
 }
 
 /// Derived from a _SpendingKey_.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Eq, PartialEq)]
 pub struct PayingKey(pub [u8; 32]);
+
+impl fmt::Debug for PayingKey {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple("PayingKey")
+            .field(&hex::encode(&self.0))
+            .finish()
+    }
+}
 
 impl From<SpendingKey> for PayingKey {
     /// For this invocation of SHA256Compress as the PRF, t=1.
