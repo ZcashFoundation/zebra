@@ -40,6 +40,20 @@ pub struct SproutShieldedAddress {
 
 impl fmt::Debug for SproutShieldedAddress {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("SproutShieldedAddress")
+            .field("network", &self.network)
+            .field("paying_key", &self.paying_key)
+            // Because x25519_dalek::PublicKey doesn't impl Debug.
+            .field(
+                "transmission_key",
+                &hex::encode(&self.transmission_key.as_bytes()),
+            )
+            .finish()
+    }
+}
+
+impl fmt::Display for SproutShieldedAddress {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut bytes = io::Cursor::new(Vec::new());
         let _ = self.zcash_serialize(&mut bytes);
 
@@ -94,6 +108,14 @@ impl ZcashDeserialize for SproutShieldedAddress {
     }
 }
 
+impl<T: ?Sized + AsRef<[u8]>> From<&T> for SproutShieldedAddress {
+    fn from(s: &T) -> Self {
+        let bytes = &bs58::decode(s).with_check(None).into_vec().unwrap();
+
+        return Self::zcash_deserialize(&bytes[..]).expect("sprout z-addr should deserialize");
+    }
+}
+
 #[cfg(test)]
 impl Arbitrary for SproutShieldedAddress {
     type Parameters = ();
@@ -115,6 +137,24 @@ impl Arbitrary for SproutShieldedAddress {
     }
 
     type Strategy = BoxedStrategy<Self>;
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+
+    #[test]
+    fn from_string_debug() {
+        let zc_addr = SproutShieldedAddress::from(
+            "zcU1Cd6zYyZCd2VJF8yKgmzjxdiiU1rgTTjEwoN1CGUWCziPkUTXUjXmX7TMqdMNsTfuiGN1jQoVN4kGxUR4sAPN4XZ7pxb"
+        );
+
+        assert_eq!(
+            format!("{:?}", zc_addr),
+                "SproutShieldedAddress { network: Mainnet, paying_key: PayingKey(\"972caa450769480a995064693db07e0302afe6c3a737e8cc083215dfdfbea3a7\"), transmission_key: \"92c223a94d39e539b85fad3debadc980b4c64294ab8a66d04ca80be3dd7da763\" }"
+        );
+    }
 }
 
 #[cfg(test)]

@@ -95,6 +95,14 @@ impl From<PublicKey> for TransparentAddress {
     }
 }
 
+impl<T: ?Sized + AsRef<[u8]>> From<&T> for TransparentAddress {
+    fn from(s: &T) -> Self {
+        let bytes = &bs58::decode(s).with_check(None).into_vec().unwrap();
+
+        return Self::zcash_deserialize(&bytes[..]).expect("t-addr should deserialize");
+    }
+}
+
 impl fmt::Debug for TransparentAddress {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut bytes = io::Cursor::new(Vec::new());
@@ -245,6 +253,16 @@ mod tests {
         assert_eq!(
             format!("{:?}", t_addr),
             "TransparentAddress(\"t3Y5pHwfgHbS6pDjj1HLuMFxhFFip1fcJ6g\")"
+        );
+    }
+
+    #[test]
+    fn from_string() {
+        let t_addr = TransparentAddress::from("t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd");
+
+        assert_eq!(
+            format!("{:?}", t_addr),
+            "TransparentAddress(\"t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd\")"
         );
     }
 }

@@ -6,6 +6,8 @@
 //!
 //! [ps]: https://zips.z.cash/protocol/protocol.pdf#sproutkeycomponents
 
+use std::fmt;
+
 use byteorder::{ByteOrder, LittleEndian};
 
 #[cfg(test)]
