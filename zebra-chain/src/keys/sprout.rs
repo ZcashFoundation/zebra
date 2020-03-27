@@ -11,7 +11,7 @@ use std::fmt;
 use byteorder::{ByteOrder, LittleEndian};
 
 #[cfg(test)]
-use proptest::{array, collection::vec, prelude::*};
+use proptest::prelude::*;
 #[cfg(test)]
 use proptest_derive::Arbitrary;
 
@@ -114,11 +114,7 @@ mod tests {
 
         let receiving_key = ReceivingKey::from(spending_key);
 
-        // println!("{}", receiving_key);
-
         let transmission_key = TransmissionKey::from(&receiving_key);
-
-        println!("{:?}", transmission_key);
     }
 }
 
