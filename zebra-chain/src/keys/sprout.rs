@@ -88,7 +88,8 @@ impl From<SpendingKey> for PayingKey {
 /// Derived from a _ReceivingKey_.
 pub type TransmissionKey = x25519_dalek::PublicKey;
 
-///
+/// The recipient’s possession of the associated incoming viewing key
+/// is used to reconstruct the original note and memo field.
 pub struct IncomingViewingKey {
     paying_key: PayingKey,
     receiving_key: ReceivingKey,
