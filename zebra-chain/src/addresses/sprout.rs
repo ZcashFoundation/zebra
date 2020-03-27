@@ -75,10 +75,9 @@ impl Eq for SproutShieldedAddress {}
 
 impl ZcashSerialize for SproutShieldedAddress {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        if self.network == Network::Mainnet {
-            writer.write_all(&magics::MAINNET[..])?
-        } else {
-            writer.write_all(&magics::TESTNET[..])?
+        match self.network {
+            Network::Mainnet => writer.write_all(&magics::MAINNET[..])?,
+            _ => writer.write_all(&magics::TESTNET[..])?,
         }
         writer.write_all(&self.paying_key.0[..])?;
         writer.write_all(self.transmission_key.as_bytes())?;
