@@ -9,6 +9,7 @@
 use std::fmt;
 
 use byteorder::{ByteOrder, LittleEndian};
+use rand_core::{CryptoRng, RngCore};
 
 #[cfg(test)]
 use proptest::prelude::*;
@@ -24,11 +25,34 @@ use sha2;
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct SpendingKey(pub [u8; 32]);
 
+impl SpendingKey {
+    /// Generate a new _SpendingKey_ with the highest 4 bits set to
+    /// zero (ie, 256 random bits, clamped to 252).
+    pub fn new<T>(csprng: &mut T) -> Self
+    where
+        T: RngCore + CryptoRng,
+    {
+        let mut bytes = [0u8; 32];
+        csprng.fill_bytes(&mut bytes);
+
+        Self::from(bytes)
+    }
+}
+
+impl From<[u8; 32]> for SpendingKey {
+    /// Generate a _SpendingKey_ from existing bytes, with the highest
+    /// 4 bits set to zero (ie, 256 bits clamped to 252).
+    fn from(mut bytes: [u8; 32]) -> SpendingKey {
+        bytes[0] &= 0b0000_1111; // Force the 4 high-order bits to zero.
+        SpendingKey(bytes)
+    }
+}
+
 /// Derived from a _SpendingKey_.
 pub type ReceivingKey = x25519_dalek::StaticSecret;
 
 impl From<SpendingKey> for ReceivingKey {
-    /// For this invocation of SHA256Compress as the PRF, t=0, which
+    /// For this invocation of SHA256Compress as PRF^addr, t=0, which
     /// is populated by default in an empty block of all zeros to
     /// start.
     ///
@@ -63,7 +87,7 @@ impl fmt::Debug for PayingKey {
 }
 
 impl From<SpendingKey> for PayingKey {
-    /// For this invocation of SHA256Compress as the PRF, t=1.
+    /// For this invocation of SHA256Compress as PRF^addr, t=1.
     ///
     /// https://zips.z.cash/protocol/protocol.pdf#sproutkeycomponents
     /// https://zips.z.cash/protocol/protocol.pdf#concreteprfs
@@ -98,17 +122,14 @@ pub struct IncomingViewingKey {
 #[cfg(test)]
 mod tests {
 
-    use rand_core::{OsRng, RngCore};
+    use rand_core::OsRng;
 
     use super::*;
 
     #[test]
     // TODO: test vectors, not just random data
     fn derive_keys() {
-        let mut bytes = [0u8; 32];
-        OsRng.fill_bytes(&mut bytes);
-
-        let spending_key = SpendingKey(bytes);
+        let spending_key = SpendingKey::new(&mut OsRng);
 
         println!("{:?}", spending_key);
 

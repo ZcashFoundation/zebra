@@ -1,6 +1,6 @@
 //! Sprout Shielded Payment Address types.
 
-use std::{fmt, io, str::FromStr};
+use std::{fmt, io};
 
 use bs58;
 
@@ -153,6 +153,8 @@ impl Arbitrary for SproutShieldedAddress {
 
 #[cfg(test)]
 mod tests {
+
+    use std::str::FromStr;
 
     use super::*;
 
