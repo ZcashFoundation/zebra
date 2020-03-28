@@ -166,6 +166,17 @@ impl fmt::Debug for Diversifier {
 /// pkd = gd * ivk
 pub type TransmissionKey = redjubjub::PublicKeyBytes;
 
+/// Full Viewing Keys
+///
+/// For incoming viewing keys on the production network, the
+/// Human-Readable Part is “zviews”. For incoming viewing keys on the
+/// test network, the Human-Readable Part is “zviewtestsapling”.
+pub struct FullViewingKey {
+    authorizing_key: AuthorizingKey,
+    nullifier_deriving_key: NullifierDerivingKey,
+    outgoing_viewing_key: OutgoingViewingKey,
+}
+
 #[cfg(test)]
 mod tests {
 
