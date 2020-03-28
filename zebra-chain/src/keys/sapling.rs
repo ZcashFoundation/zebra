@@ -175,9 +175,14 @@ pub type TransmissionKey = redjubjub::PublicKeyBytes;
 
 /// Full Viewing Keys
 ///
+/// Allows recognizing both incoming and outgoing notes without having
+/// spend authority.
+///
 /// For incoming viewing keys on the production network, the
 /// Human-Readable Part is “zviews”. For incoming viewing keys on the
 /// test network, the Human-Readable Part is “zviewtestsapling”.
+///
+/// https://zips.z.cash/protocol/protocol.pdf#saplingfullviewingkeyencoding
 pub struct FullViewingKey {
     authorizing_key: AuthorizingKey,
     nullifier_deriving_key: NullifierDerivingKey,
