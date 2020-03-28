@@ -159,7 +159,7 @@ impl fmt::Debug for Diversifier {
     }
 }
 
-/// Derived from a _IncomingViewingKey_ and a _Diversifier_
+/// Derived from an _IncomingViewingKey_ and a _Diversifier_
 ///
 /// Derived by multiplying the diversifier (converted to an affine
 /// point on the Jubjub curve) by the incoming view key:
