@@ -111,7 +111,7 @@ impl fmt::Debug for OutgoingViewingKey {
 }
 
 impl From<SpendingKey> for OutgoingViewingKey {
-    /// For this invocation of Blake2b-512 as PRF^expand, t=1.
+    /// For this invocation of Blake2b-512 as PRF^expand, t=2.
     ///
     /// https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
     /// https://zips.z.cash/protocol/protocol.pdf#concreteprfs
