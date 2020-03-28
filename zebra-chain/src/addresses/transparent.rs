@@ -159,10 +159,9 @@ impl ZcashSerialize for TransparentAddress {
             } => {
                 // Dev network doesn't have a recommendation so we
                 // default to testnet bytes if it's not mainnet.
-                if *network == Network::Mainnet {
-                    writer.write_all(&magics::p2sh::MAINNET[..])?
-                } else {
-                    writer.write_all(&magics::p2sh::TESTNET[..])?
+                match *network {
+                    Network::Mainnet => writer.write_all(&magics::p2sh::MAINNET[..])?,
+                    _ => writer.write_all(&magics::p2sh::TESTNET[..])?,
                 }
                 writer.write_all(script_hash)?
             }
@@ -172,10 +171,9 @@ impl ZcashSerialize for TransparentAddress {
             } => {
                 // Dev network doesn't have a recommendation so we
                 // default to testnet bytes if it's not mainnet.
-                if *network == Network::Mainnet {
-                    writer.write_all(&magics::p2pkh::MAINNET[..])?
-                } else {
-                    writer.write_all(&magics::p2pkh::TESTNET[..])?
+                match *network {
+                    Network::Mainnet => writer.write_all(&magics::p2pkh::MAINNET[..])?,
+                    _ => writer.write_all(&magics::p2pkh::TESTNET[..])?,
                 }
                 writer.write_all(pub_key_hash)?
             }
