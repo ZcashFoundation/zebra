@@ -26,8 +26,8 @@ use sha2;
 pub struct SpendingKey(pub [u8; 32]);
 
 impl SpendingKey {
-    /// Generate a new _SpendingKey_ with the highest 4 bits set to
-    /// zero (ie, 256 random bits, clamped to 252).
+    /// Generate a new _SpendingKey_ with the high 4 bits of the first
+    /// byte set to zero (ie, 256 random bits, clamped to 252).
     pub fn new<T>(csprng: &mut T) -> Self
     where
         T: RngCore + CryptoRng,
@@ -40,8 +40,9 @@ impl SpendingKey {
 }
 
 impl From<[u8; 32]> for SpendingKey {
-    /// Generate a _SpendingKey_ from existing bytes, with the highest
-    /// 4 bits set to zero (ie, 256 bits clamped to 252).
+    /// Generate a _SpendingKey_ from existing bytes, with the high 4
+    /// bits of the first byte set to zero (ie, 256 bits clamped to
+    /// 252).
     fn from(mut bytes: [u8; 32]) -> SpendingKey {
         bytes[0] &= 0b0000_1111; // Force the 4 high-order bits to zero.
         SpendingKey(bytes)
