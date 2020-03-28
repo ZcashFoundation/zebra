@@ -159,11 +159,18 @@ impl fmt::Debug for Diversifier {
     }
 }
 
-/// Derived from an _IncomingViewingKey_ and a _Diversifier_
+/// A (diversified) _TransmissionKey_
 ///
-/// Derived by multiplying the diversifier (converted to an affine
-/// point on the Jubjub curve) by the incoming view key:
-/// pkd = gd * ivk
+/// In Sapling, secrets need to be transmitted to a recipient of funds
+/// in order for them to be later spent. To transmit these secrets
+/// securely to a recipient without requiring an out-of-band
+/// communication channel, the diversied transmission key is used to
+/// encrypt them.
+///
+/// Derived by multiplying a JubJub point [derived][ps] from a
+/// _Diversifier_ by the _IncomingViewingKey_ scalar.
+///
+/// [ps]: https://zips.z.cash/protocol/protocol.pdf#concretediversifyhash
 pub type TransmissionKey = redjubjub::PublicKeyBytes;
 
 /// Full Viewing Keys
