@@ -9,7 +9,8 @@
 
 use std::fmt;
 
-use blake2::{Blake2b, Digest};
+use blake2b_simd;
+use jubjub;
 use rand_core::{CryptoRng, RngCore};
 
 #[cfg(test)]
