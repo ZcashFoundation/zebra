@@ -131,7 +131,7 @@ impl From<SpendingKey> for OutgoingViewingKey {
 }
 
 ///
-pub type AuthorizingKey = redjubjub::PublicKeyBytes;
+pub type AuthorizingKey = redjubjub::PublicKeyBytes<redjubjub::SpendAuth>;
 
 impl fmt::Debug for AuthorizingKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
