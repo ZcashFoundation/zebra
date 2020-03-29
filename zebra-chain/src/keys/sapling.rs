@@ -53,22 +53,21 @@ impl From<[u8; 32]> for SpendingKey {
 pub type SpendAuthorizationKey = Scalar;
 
 impl From<SpendingKey> for SpendAuthorizationKey {
-    /// Invokes Blake2b-512 as PRF^expand to derive a
+    /// Invokes Blake2b-512 as PRF^expand, t=0, to derive a
     /// SpendAuthorizationKey from a SpendingKey.
     ///
     /// https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
     /// https://zips.z.cash/protocol/protocol.pdf#concreteprfs
     fn from(spending_key: SpendingKey) -> SpendAuthorizationKey {
-        let mut block = [0u8; 33]; // Last byte is t=0;
+        let hash = blake2b_simd::Params::new()
+            .hash_length(64) // Blake2b-512
+            .personal(b"Zcash_ExpandSeed")
+            .to_state()
+            .update(spending_key.0[..])
+            .update([0]) // t=0
+            .finalize();
 
-        block[0..32].copy_from_slice(&spending_key.0[..]);
-
-        let mut hasher = Blake2b::new();
-        // TODO: check that this counts as personalization.
-        hasher.input("Zcash_ExpandSeed");
-        hasher.input(block);
-
-        Self::from(hasher.result())
+        Self::from(hash)
     }
 }
 
@@ -89,17 +88,15 @@ impl From<SpendingKey> for ProofAuthorizingKey {
     /// https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
     /// https://zips.z.cash/protocol/protocol.pdf#concreteprfs
     fn from(spending_key: SpendingKey) -> ProofAuthorizingKey {
-        let mut block = [0u8; 33];
-        block[33] = 1; // Last byte is t=1;
+        let hash = blake2b_simd::Params::new()
+            .hash_length(64)
+            .personal(b"Zcash_ExpandSeed")
+            .to_state()
+            .update(spending_key.0[..])
+            .update([1])
+            .finalize();
 
-        block[0..32].copy_from_slice(&spending_key.0[..]);
-
-        let mut hasher = Blake2b::new();
-        // TODO: check that this counts as personalization.
-        hasher.input("Zcash_ExpandSeed");
-        hasher.input(block);
-
-        Self::from(hasher.result())
+        Self::from(hash)
     }
 }
 
@@ -121,17 +118,15 @@ impl From<SpendingKey> for OutgoingViewingKey {
     /// https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
     /// https://zips.z.cash/protocol/protocol.pdf#concreteprfs
     fn from(spending_key: SpendingKey) -> OutgoingViewingKey {
-        let mut block = [0u8; 33];
-        block[33] = 2u8; // Last byte is t=2;
+        let hash = blake2b_simd::Params::new()
+            .hash_length(64)
+            .personal(b"Zcash_ExpandSeed")
+            .to_state()
+            .update(spending_key.0[..])
+            .update([2])
+            .finalize();
 
-        block[0..32].copy_from_slice(&spending_key.0[..]);
-
-        let mut hasher = Blake2b::new();
-        // TODO: check that this counts as personalization.
-        hasher.input("Zcash_ExpandSeed");
-        hasher.input(block);
-
-        Self(hasher.result()[0..31])
+        Self::from(hash[0..32])
     }
 }
 
