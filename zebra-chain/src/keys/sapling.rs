@@ -7,9 +7,10 @@
 //!
 //! [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
 
-use std::fmt;
+use std::{fmt, ops::Deref};
 
 use blake2b_simd;
+use blake2s_simd;
 use jubjub;
 use rand_core::{CryptoRng, RngCore};
 
@@ -44,13 +45,21 @@ impl SpendingKey {
 
 impl From<[u8; 32]> for SpendingKey {
     /// Generate a _SpendingKey_ from existing bytes.
-    fn from(mut bytes: [u8; 32]) -> SpendingKey {
+    fn from(bytes: [u8; 32]) -> SpendingKey {
         SpendingKey(bytes)
     }
 }
 
 /// Derived from a _SpendingKey_.
-pub type SpendAuthorizationKey = Scalar;
+pub struct SpendAuthorizationKey(Scalar);
+
+impl Deref for SpendAuthorizationKey {
+    type Target = Scalar;
+
+    fn deref(&self) -> &Scalar {
+        &self.0
+    }
+}
 
 impl From<SpendingKey> for SpendAuthorizationKey {
     /// Invokes Blake2b-512 as PRF^expand, t=0, to derive a
@@ -63,24 +72,32 @@ impl From<SpendingKey> for SpendAuthorizationKey {
             .hash_length(64) // Blake2b-512
             .personal(b"Zcash_ExpandSeed")
             .to_state()
-            .update(spending_key.0[..])
-            .update([0]) // t=0
+            .update(&spending_key.0[..])
+            .update(&[0]) // t=0
             .finalize();
 
-        Self::from(hash)
+        Self(Scalar::from_bytes_wide(hash.as_array()))
     }
 }
 
 /// Derived from a _SpendingKey_.
-pub type ProofAuthorizingKey = Scalar;
+pub struct ProofAuthorizingKey(pub Scalar);
 
-impl fmt::Debug for ProofAuthorizingKey {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple("ProofAuthorizingKey")
-            .field(&hex::encode(&self.0))
-            .finish()
+impl Deref for ProofAuthorizingKey {
+    type Target = Scalar;
+
+    fn deref(&self) -> &Scalar {
+        &self.0
     }
 }
+
+// impl fmt::Debug for ProofAuthorizingKey {
+//     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+//         f.debug_tuple("ProofAuthorizingKey")
+//             .field(&hex::encode(&self.0))
+//             .finish()
+//     }
+// }
 
 impl From<SpendingKey> for ProofAuthorizingKey {
     /// For this invocation of Blake2b-512 as PRF^expand, t=1.
@@ -92,11 +109,11 @@ impl From<SpendingKey> for ProofAuthorizingKey {
             .hash_length(64)
             .personal(b"Zcash_ExpandSeed")
             .to_state()
-            .update(spending_key.0[..])
-            .update([1])
+            .update(&spending_key.0[..])
+            .update(&[1])
             .finalize();
 
-        Self::from(hash)
+        Self(Scalar::from_bytes_wide(hash.as_array()))
     }
 }
 
@@ -122,33 +139,75 @@ impl From<SpendingKey> for OutgoingViewingKey {
             .hash_length(64)
             .personal(b"Zcash_ExpandSeed")
             .to_state()
-            .update(spending_key.0[..])
-            .update([2])
+            .update(&spending_key.0[..])
+            .update(&[2])
             .finalize();
 
-        Self::from(hash[0..32])
+        let mut bytes = [0u8; 32];
+        bytes[..].copy_from_slice(hash.as_bytes());
+        Self(bytes)
     }
 }
 
 ///
-pub type AuthorizingKey = redjubjub::PublicKeyBytes<redjubjub::SpendAuth>;
+pub type AuthorizingKey = jubjub::AffinePoint;
 
-impl fmt::Debug for AuthorizingKey {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple("AuthorizingKey")
-            .field(&hex::encode(&self.0))
-            .finish()
+// impl fmt::Debug for AuthorizingKey {
+//     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+//         f.debug_struct("AuthorizingKey")
+//             .field("u", &hex::encode(&self.u))
+//             .field("v", &hex::encode(&self.v))
+//             .finish()
+//     }
+// }
+
+///
+pub type NullifierDerivingKey = jubjub::AffinePoint;
+
+///
+pub struct IncomingViewingKey(pub Scalar);
+
+impl Deref for IncomingViewingKey {
+    type Target = Scalar;
+
+    fn deref(&self) -> &Scalar {
+        &self.0
+    }
+}
+
+// impl fmt::Debug for IncomingViewingKey {
+//     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+//         f.debug_tuple("IncomingViewingKey")
+//             .field(&hex::encode(&self.0))
+//             .finish()
+//     }
+// }
+
+impl IncomingViewingKey {
+    /// For this invocation of Blake2s-256 as CRH^ivk.
+    ///
+    /// https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
+    /// https://zips.z.cash/protocol/protocol.pdf#concreteprfs
+    /// https://zips.z.cash/protocol/protocol.pdf#jubjub
+    fn new(
+        authorizing_key: AuthorizingKey,
+        nullifier_deriving_key: NullifierDerivingKey,
+    ) -> IncomingViewingKey {
+        let hash = blake2s_simd::Params::new()
+            .hash_length(32)
+            .personal(b"Zcashivk")
+            .to_state()
+            // TODO: double-check that `to_bytes()` == repr_J
+            .update(&authorizing_key.to_bytes()[..])
+            .update(&nullifier_deriving_key.to_bytes()[..])
+            .finalize();
+
+        Self(Scalar::from_bytes(hash.as_array()).unwrap())
     }
 }
 
 ///
-pub type NullifierDerivingKey = redjubjub::PublicKeyBytes;
-
-///
-pub type IncomingViewingKey = Scalar;
-
-///
-#[derive(Copy, Clone, Display, Eq, PartialEq)]
+#[derive(Copy, Clone, Eq, PartialEq)]
 pub struct Diversifier(pub [u8; 11]);
 
 impl fmt::Debug for Diversifier {
@@ -171,7 +230,7 @@ impl fmt::Debug for Diversifier {
 /// _Diversifier_ by the _IncomingViewingKey_ scalar.
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#concretediversifyhash
-pub type TransmissionKey = redjubjub::PublicKeyBytes;
+pub type TransmissionKey = jubjub::AffinePoint;
 
 /// Full Viewing Keys
 ///
@@ -192,14 +251,14 @@ pub struct FullViewingKey {
 #[cfg(test)]
 mod tests {
 
-    use rand_core::OsRng;
-
     use super::*;
 
-    // #[test]
-    // TODO: test vectors, not just random data
-    // fn derive_keys() {
-    // }
+    #[test]
+    fn check_deref() {
+        let ivk = IncomingViewingKey(jubjub::Fr::zero());
+
+        ivk.to_bytes();
+    }
 }
 
 #[cfg(test)]
