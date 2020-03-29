@@ -18,6 +18,10 @@ use proptest::prelude::*;
 #[cfg(test)]
 use proptest_derive::Arbitrary;
 
+// TODO: replace with reference to redjubjub or jubjub when merged and
+// exported.
+type Scalar = jubjub::Fr;
+
 /// Our root secret key of the Sprout key derivation tree.
 ///
 /// All other Sprout key types derive from the SpendingKey value.
@@ -46,7 +50,7 @@ impl From<[u8; 32]> for SpendingKey {
 }
 
 /// Derived from a _SpendingKey_.
-pub type SpendAuthorizationKey = redjubjub::Scalar;
+pub type SpendAuthorizationKey = Scalar;
 
 impl From<SpendingKey> for SpendAuthorizationKey {
     /// Invokes Blake2b-512 as PRF^expand to derive a
@@ -69,7 +73,7 @@ impl From<SpendingKey> for SpendAuthorizationKey {
 }
 
 /// Derived from a _SpendingKey_.
-pub type ProofAuthorizingKey = redjubjub::Scalar;
+pub type ProofAuthorizingKey = Scalar;
 
 impl fmt::Debug for ProofAuthorizingKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -146,7 +150,7 @@ impl fmt::Debug for AuthorizingKey {
 pub type NullifierDerivingKey = redjubjub::PublicKeyBytes;
 
 ///
-pub type IncomingViewingKey = redjubjub::Scalar;
+pub type IncomingViewingKey = Scalar;
 
 ///
 #[derive(Copy, Clone, Display, Eq, PartialEq)]
