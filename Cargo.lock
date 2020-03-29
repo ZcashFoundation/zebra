@@ -162,6 +162,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "blake2s_simd"
+version = "0.5.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab9e07352b829279624ceb7c64adb4f585dacdb81d35cafae81139ccd617cf44"
+dependencies = [
+ "arrayref",
+ "arrayvec",
+ "constant_time_eq",
+]
+
+[[package]]
 name = "block-buffer"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2049,6 +2060,7 @@ name = "zebra-chain"
 version = "0.1.0"
 dependencies = [
  "blake2b_simd",
+ "blake2s_simd",
  "bs58",
  "byteorder",
  "chrono",
