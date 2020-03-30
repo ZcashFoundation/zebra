@@ -15,9 +15,7 @@ use jubjub;
 use rand_core::{CryptoRng, RngCore};
 
 #[cfg(test)]
-use proptest::prelude::*;
-#[cfg(test)]
-use proptest_derive::Arbitrary;
+use proptest::{arbitrary::Arbitrary, array, prelude::*};
 
 // TODO: replace with reference to redjubjub or jubjub when merged and
 // exported.
@@ -69,11 +67,11 @@ impl From<SpendingKey> for SpendAuthorizationKey {
     /// https://zips.z.cash/protocol/protocol.pdf#concreteprfs
     fn from(spending_key: SpendingKey) -> SpendAuthorizationKey {
         let hash = blake2b_simd::Params::new()
-            .hash_length(64) // Blake2b-512
+            .hash_length(64)
             .personal(b"Zcash_ExpandSeed")
             .to_state()
             .update(&spending_key.0[..])
-            .update(&[0]) // t=0
+            .update(&[0])
             .finalize();
 
         Self(Scalar::from_bytes_wide(hash.as_array()))
@@ -91,13 +89,13 @@ impl Deref for ProofAuthorizingKey {
     }
 }
 
-// impl fmt::Debug for ProofAuthorizingKey {
-//     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-//         f.debug_tuple("ProofAuthorizingKey")
-//             .field(&hex::encode(&self.0))
-//             .finish()
-//     }
-// }
+impl fmt::Debug for ProofAuthorizingKey {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple("ProofAuthorizingKey")
+            .field(&hex::encode(&self.to_bytes()))
+            .finish()
+    }
+}
 
 impl From<SpendingKey> for ProofAuthorizingKey {
     /// For this invocation of Blake2b-512 as PRF^expand, t=1.
@@ -231,6 +229,21 @@ impl fmt::Debug for Diversifier {
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#concretediversifyhash
 pub type TransmissionKey = jubjub::AffinePoint;
+
+// #[cfg(test)]
+// impl Arbitrary for TransmissionKey {
+//     type Parameters = ();
+
+//     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+//         (array::uniform32(any::<u8>()))
+//             .prop_map(|transmission_key_bytes| {
+//                 return Self::from_bytes(transmission_key_bytes).unwrap();
+//             })
+//             .boxed()
+//     }
+
+//     type Strategy = BoxedStrategy<Self>;
+// }
 
 /// Full Viewing Keys
 ///
