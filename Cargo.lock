@@ -130,6 +130,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "bech32"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cdcf67bb7ba7797a081cd19009948ab533af7c355d5caf1d08c777582d351e9c"
+
+[[package]]
 name = "bit-set"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2059,6 +2065,7 @@ dependencies = [
 name = "zebra-chain"
 version = "0.1.0"
 dependencies = [
+ "bech32",
  "blake2b_simd",
  "blake2s_simd",
  "bs58",
