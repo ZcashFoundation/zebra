@@ -15,8 +15,8 @@ use crate::{
 
 /// Human-Readable Parts for input to bech32 encoding.
 mod human_readable_parts {
-    pub const MAINNET: &'static str = "zs";
-    pub const TESTNET: &'static str = "ztestsapling";
+    pub const MAINNET: &str = "zs";
+    pub const TESTNET: &str = "ztestsapling";
 }
 
 ///
