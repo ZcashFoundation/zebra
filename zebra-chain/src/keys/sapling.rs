@@ -18,6 +18,19 @@ use redjubjub::{self, SpendAuth};
 #[cfg(test)]
 use proptest::{arbitrary::Arbitrary, array, prelude::*};
 
+/// The [Randomness Beacon][1] ("URS").
+///
+/// First 64 bytes of the BLAKE2s input during JubJub group hash.  URS
+/// is a 64-byte US-ASCII string, i.e. the first byte is 0x30, not
+/// 0x09.
+///
+/// From [zcash_primitives][0].
+///
+/// [0]: https://docs.rs/zcash_primitives/0.2.0/zcash_primitives/constants/constant.GH_FIRST_BLOCK.html
+/// [1]: https://zips.z.cash/protocol/protocol.pdf#beacon
+pub const RANDOMNESS_BEACON_URS: &[u8; 64] =
+    b"096b36a5804bfacef1691e173c366a47ff5ba84a44f26ddd7e8d9f79d5b42df0";
+
 /// Invokes Blake2b-512 as PRF^expand with parameter t, to derive a
 /// SpendAuthorizingKey and ProofAuthorizingKey from SpendingKey.
 ///
@@ -48,6 +61,76 @@ fn crh_ivk(ak: [u8; 32], nk: [u8; 32]) -> [u8; 32] {
         .finalize();
 
     return *hash.as_array();
+}
+
+/// GroupHash_URS
+///
+/// Produces a random point in the Jubjub curve. The point is
+/// guaranteed to be prime order and not the identity. From
+/// [zcash_primitives][0].
+///
+/// d is an 8-byte domain separator ("personalization"), m is the hash
+/// input.
+///
+/// [0]: https://github.com/zcash/librustzcash/blob/master/zcash_primitives/src/group_hash.rs#L15
+/// https://zips.z.cash/protocol/protocol.pdf#concretegrouphashjubjub
+fn jubjub_group_hash(d: &[u8; 8], m: &[u8]) -> Option<jubjub::ExtendedPoint> {
+    let hash = blake2s_simd::Params::new()
+        .hash_length(32)
+        .personal(d)
+        .to_state()
+        .update(RANDOMNESS_BEACON_URS)
+        .update(m)
+        .finalize();
+
+    let ct_option = jubjub::AffinePoint::from_bytes(*hash.as_array());
+
+    if ct_option.is_some().unwrap_u8() == 1 {
+        let extended_point = ct_option.unwrap().mul_by_cofactor();
+
+        if extended_point != jubjub::ExtendedPoint::identity() {
+            Some(extended_point)
+        } else {
+            None
+        }
+    } else {
+        return None;
+    }
+}
+
+/// From [zcash_primitives][0]
+///
+/// d is an 8-byte domain separator ("personalization"), m is the hash
+/// input.
+///
+/// [0]: https://github.com/zcash/librustzcash/blob/master/zcash_primitives/src/jubjub/mod.rs#L409
+/// https://zips.z.cash/protocol/protocol.pdf#concretegrouphashjubjub
+fn find_group_hash(d: &[u8; 8], m: &[u8]) -> jubjub::ExtendedPoint {
+    // TODO: tidy
+
+    let mut tag = m.to_vec();
+    let i = tag.len();
+    tag.push(0u8);
+
+    loop {
+        let gh = jubjub_group_hash(d, &tag[..]);
+
+        // We don't want to overflow and start reusing generators
+        assert!(tag[i] != u8::max_value());
+        tag[i] += 1;
+
+        if let Some(gh) = gh {
+            break gh;
+        }
+    }
+}
+
+/// Instance of FindGroupHash for JubJub, using personalized by
+/// BLAKE2s for the proof generation key base point.
+///
+/// https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
+fn zcash_h() -> jubjub::ExtendedPoint {
+    find_group_hash(b"Zcash_H_", b"")
 }
 
 // TODO: replace with reference to redjubjub or jubjub when merged and
@@ -223,8 +306,9 @@ impl fmt::Debug for NullifierDerivingKey {
 }
 
 impl From<ProofAuthorizingKey> for NullifierDerivingKey {
-    /// Requires jubjub's FindGroupHash^J("Zcash_H_", "")
-    ///
+    /// Requires jubjub's FindGroupHash^J("Zcash_H_", ""), looks like
+    /// available here:
+    /// https://github.com/zcash/librustzcash/blob/master/zcash_primitives/src/group_hash.rs
     /// https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
     /// https://zips.z.cash/protocol/protocol.pdf#concretegrouphashjubjub
     fn from(nsk: ProofAuthorizingKey) -> Self {
@@ -366,6 +450,11 @@ mod tests {
         let ivk = IncomingViewingKey(jubjub::Fr::zero());
 
         ivk.to_bytes();
+    }
+
+    #[test]
+    fn group_hash() {
+        let _point = zcash_h();
     }
 
     // TODO: finish
