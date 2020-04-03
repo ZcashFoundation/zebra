@@ -32,6 +32,23 @@ fn prf_expand(sk: [u8; 32], t: u8) -> [u8; 64] {
     return *hash.as_array();
 }
 
+/// Invokes Blake2s-256 as CRH^ivk, to derive the IncomingViewingKey
+/// bytes from an AuthorizingKey and NullifierDerivingKey.
+///
+/// https://zips.z.cash/protocol/protocol.pdf#concretecrhivk
+fn crh_ivk(ak: [u8; 32], nk: [u8; 32]) -> [u8; 32] {
+    let hash = blake2s_simd::Params::new()
+        .hash_length(32)
+        .personal(b"Zcashivk")
+        .to_state()
+        // TODO: double-check that `to_bytes()` == repr_J
+        .update(&ak[..])
+        .update(&nk[..])
+        .finalize();
+
+    return *hash.as_array();
+}
+
 // TODO: replace with reference to redjubjub or jubjub when merged and
 // exported.
 type Scalar = jubjub::Fr;
@@ -189,16 +206,12 @@ impl IncomingViewingKey {
         authorizing_key: AuthorizingKey,
         nullifier_deriving_key: NullifierDerivingKey,
     ) -> IncomingViewingKey {
-        let hash = blake2s_simd::Params::new()
-            .hash_length(32)
-            .personal(b"Zcashivk")
-            .to_state()
-            // TODO: double-check that `to_bytes()` == repr_J
-            .update(&authorizing_key.to_bytes()[..])
-            .update(&nullifier_deriving_key.to_bytes()[..])
-            .finalize();
+        let hash_bytes = crh_ivk(
+            authorizing_key.to_bytes(),
+            nullifier_deriving_key.to_bytes(),
+        );
 
-        Self(Scalar::from_bytes(hash.as_array()).unwrap())
+        Self(Scalar::from_bytes(&hash_bytes).unwrap())
     }
 }
 
