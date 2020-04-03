@@ -71,7 +71,7 @@ impl ZcashDeserialize for SaplingShieldedAddress {
 
         Ok(SaplingShieldedAddress {
             diversifier: sapling::Diversifier(diversifier_bytes),
-            transmission_key: sapling::TransmissionKey::from_bytes(transmission_key_bytes).unwrap(),
+            transmission_key: sapling::TransmissionKey::from_bytes(transmission_key_bytes),
         })
     }
 }
@@ -99,8 +99,7 @@ impl Arbitrary for SaplingShieldedAddress {
             .prop_map(|(diversifier_bytes, transmission_key_bytes)| {
                 return Self {
                     diversifier: sapling::Diversifier(diversifier_bytes),
-                    transmission_key: sapling::TransmissionKey::from_bytes(transmission_key_bytes)
-                        .unwrap(),
+                    transmission_key: sapling::TransmissionKey::from_bytes(transmission_key_bytes),
                 };
             })
             .boxed()
@@ -126,7 +125,7 @@ mod tests {
         assert_eq!(
             format!("{:?}", zs_addr),
 
-            "SaplingShieldedAddress { diversifier: Diversifier(\"0000000000000000000000\"), transmission_key: AffinePoint { u: 0x038c2b77a9a63b652905adb192ad7d535beef23468d12c6e6033d7aa9753a98a, v: 0x1935e5d4172dceb9ca1217c8edf23bf786d5e8babe4be50c6efab84d64d207e4 } }"
+            "SaplingShieldedAddress { diversifier: Diversifier(\"0000000000000000000000\"), transmission_key: TransmissionKey { u: \"8aa95397aad733606e2cd16834f2ee5b537dad92b1ad0529653ba6a9772b8c03\", v: \"e407d2644db8fa6e0ce54bbebae8d586f73bf2edc81712cab9ce2d17d4e53519\" } }"
         );
     }
 

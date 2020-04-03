@@ -81,9 +81,9 @@ impl From<[u8; 32]> for SpendingKey {
 }
 
 /// Derived from a _SpendingKey_.
-pub struct SpendAuthorizationKey(Scalar);
+pub struct SpendAuthorizingKey(Scalar);
 
-impl Deref for SpendAuthorizationKey {
+impl Deref for SpendAuthorizingKey {
     type Target = Scalar;
 
     fn deref(&self) -> &Scalar {
@@ -91,13 +91,21 @@ impl Deref for SpendAuthorizationKey {
     }
 }
 
-impl From<SpendingKey> for SpendAuthorizationKey {
+impl fmt::Debug for SpendAuthorizingKey {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple("SpendAuthorizingKey")
+            .field(&hex::encode(self.to_bytes()))
+            .finish()
+    }
+}
+
+impl From<SpendingKey> for SpendAuthorizingKey {
     /// Invokes Blake2b-512 as PRF^expand, t=0, to derive a
-    /// SpendAuthorizationKey from a SpendingKey.
+    /// SpendAuthorizingKey from a SpendingKey.
     ///
     /// https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
     /// https://zips.z.cash/protocol/protocol.pdf#concreteprfs
-    fn from(spending_key: SpendingKey) -> SpendAuthorizationKey {
+    fn from(spending_key: SpendingKey) -> SpendAuthorizingKey {
         let hash_bytes = prf_expand(spending_key.0, 0);
 
         Self(Scalar::from_bytes_wide(&hash_bytes))
@@ -163,19 +171,44 @@ impl From<SpendingKey> for OutgoingViewingKey {
 }
 
 ///
-pub type AuthorizingKey = jubjub::AffinePoint;
+pub struct AuthorizingKey(pub jubjub::AffinePoint);
 
-// impl fmt::Debug for AuthorizingKey {
-//     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-//         f.debug_struct("AuthorizingKey")
-//             .field("u", &hex::encode(&self.u))
-//             .field("v", &hex::encode(&self.v))
-//             .finish()
-//     }
-// }
+impl Deref for AuthorizingKey {
+    type Target = jubjub::AffinePoint;
+
+    fn deref(&self) -> &jubjub::AffinePoint {
+        &self.0
+    }
+}
+
+impl fmt::Debug for AuthorizingKey {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("AuthorizingKey")
+            .field("u", &hex::encode(self.get_u().to_bytes()))
+            .field("v", &hex::encode(self.get_v().to_bytes()))
+            .finish()
+    }
+}
 
 ///
-pub type NullifierDerivingKey = jubjub::AffinePoint;
+pub struct NullifierDerivingKey(pub jubjub::AffinePoint);
+
+impl Deref for NullifierDerivingKey {
+    type Target = jubjub::AffinePoint;
+
+    fn deref(&self) -> &jubjub::AffinePoint {
+        &self.0
+    }
+}
+
+impl fmt::Debug for NullifierDerivingKey {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("NullifierDerivingKey")
+            .field("u", &hex::encode(self.get_u().to_bytes()))
+            .field("v", &hex::encode(self.get_v().to_bytes()))
+            .finish()
+    }
+}
 
 ///
 pub struct IncomingViewingKey(pub Scalar);
@@ -188,13 +221,13 @@ impl Deref for IncomingViewingKey {
     }
 }
 
-// impl fmt::Debug for IncomingViewingKey {
-//     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-//         f.debug_tuple("IncomingViewingKey")
-//             .field(&hex::encode(&self.0))
-//             .finish()
-//     }
-// }
+impl fmt::Debug for IncomingViewingKey {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple("IncomingViewingKey")
+            .field(&hex::encode(self.to_bytes()))
+            .finish()
+    }
+}
 
 impl IncomingViewingKey {
     /// For this invocation of Blake2s-256 as CRH^ivk.
@@ -239,7 +272,36 @@ impl fmt::Debug for Diversifier {
 /// _Diversifier_ by the _IncomingViewingKey_ scalar.
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#concretediversifyhash
-pub type TransmissionKey = jubjub::AffinePoint;
+#[derive(Copy, Clone, PartialEq)]
+pub struct TransmissionKey(pub jubjub::AffinePoint);
+
+impl Deref for TransmissionKey {
+    type Target = jubjub::AffinePoint;
+
+    fn deref(&self) -> &jubjub::AffinePoint {
+        &self.0
+    }
+}
+
+impl fmt::Debug for TransmissionKey {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("TransmissionKey")
+            .field("u", &hex::encode(self.get_u().to_bytes()))
+            .field("v", &hex::encode(self.get_v().to_bytes()))
+            .finish()
+    }
+}
+
+impl TransmissionKey {
+    /// Attempts to interpret a byte representation of an
+    /// affine point, failing if the element is not on
+    /// the curve or non-canonical.
+    ///
+    /// https://github.com/zkcrypto/jubjub/blob/master/src/lib.rs#L411
+    pub fn from_bytes(b: [u8; 32]) -> Self {
+        Self(jubjub::AffinePoint::from_bytes(b).unwrap())
+    }
+}
 
 // #[cfg(test)]
 // impl Arbitrary for TransmissionKey {
