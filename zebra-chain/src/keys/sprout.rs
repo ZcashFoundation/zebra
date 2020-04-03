@@ -29,6 +29,29 @@ mod sk_magics {
     pub const TESTNET: [u8; 2] = [0xAC, 0x08];
 }
 
+/// PRF^addr is used to derive a Sprout shielded payment address from
+/// a spending key, and instantiated using the SHA-256 compression
+/// function.
+///
+/// https://zips.z.cash/protocol/protocol.pdf#abstractprfs
+/// https://zips.z.cash/protocol/protocol.pdf#sproutkeycomponents
+fn prf_addr(x: [u8; 32], t: u8) -> [u8; 32] {
+    let mut state = [0u32; 8];
+    let mut block = [0u8; 64];
+
+    block[0..32].copy_from_slice(&x[..]);
+    block[0] |= 0b1100_0000;
+
+    block[32] = t;
+
+    sha2::compress256(&mut state, &block);
+
+    let mut derived_bytes = [0u8; 32];
+    LittleEndian::write_u32_into(&state, &mut derived_bytes);
+
+    return derived_bytes;
+}
+
 /// Our root secret key of the Sprout key derivation tree.
 ///
 /// All other Sprout key types derive from the SpendingKey value.
@@ -136,16 +159,7 @@ impl From<SpendingKey> for ReceivingKey {
     /// https://zips.z.cash/protocol/protocol.pdf#sproutkeycomponents
     /// https://zips.z.cash/protocol/protocol.pdf#concreteprfs
     fn from(spending_key: SpendingKey) -> ReceivingKey {
-        let mut state = [0u32; 8];
-        let mut block = [0u8; 64]; // Thus, t = 0
-
-        block[0..32].copy_from_slice(&spending_key.bytes[..]);
-        block[0] |= 0b1100_0000;
-
-        sha2::compress256(&mut state, &block);
-
-        let mut derived_bytes = [0u8; 32];
-        LittleEndian::write_u32_into(&state, &mut derived_bytes);
+        let derived_bytes = prf_addr(spending_key.bytes, 0);
 
         ReceivingKey::from(derived_bytes)
     }
@@ -169,18 +183,7 @@ impl From<SpendingKey> for PayingKey {
     /// https://zips.z.cash/protocol/protocol.pdf#sproutkeycomponents
     /// https://zips.z.cash/protocol/protocol.pdf#concreteprfs
     fn from(spending_key: SpendingKey) -> PayingKey {
-        let mut state = [0u32; 8];
-        let mut block = [0u8; 64];
-
-        block[0..32].copy_from_slice(&spending_key.bytes[..]);
-        block[0] |= 0b1100_0000;
-
-        block[32] = 1u8; // t = 1
-
-        sha2::compress256(&mut state, &block);
-
-        let mut derived_bytes = [0u8; 32];
-        LittleEndian::write_u32_into(&state, &mut derived_bytes);
+        let derived_bytes = prf_addr(spending_key.bytes, 1);
 
         PayingKey(derived_bytes)
     }
