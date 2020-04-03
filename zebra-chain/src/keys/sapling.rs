@@ -7,12 +7,13 @@
 //!
 //! [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
 
-use std::{fmt, ops::Deref};
+use std::{convert::TryFrom, fmt, ops::Deref};
 
 use blake2b_simd;
 use blake2s_simd;
 use jubjub;
 use rand_core::{CryptoRng, RngCore};
+use redjubjub::{self, SpendAuth};
 
 #[cfg(test)]
 use proptest::{arbitrary::Arbitrary, array, prelude::*};
@@ -81,7 +82,7 @@ impl From<[u8; 32]> for SpendingKey {
 }
 
 /// Derived from a _SpendingKey_.
-pub struct SpendAuthorizingKey(Scalar);
+pub struct SpendAuthorizingKey(pub Scalar);
 
 impl Deref for SpendAuthorizingKey {
     type Target = Scalar;
@@ -164,29 +165,40 @@ impl From<SpendingKey> for OutgoingViewingKey {
         let hash_bytes = prf_expand(spending_key.0, 2);
 
         let mut bytes = [0u8; 32];
-        bytes[..].copy_from_slice(&hash_bytes);
+        bytes[..].copy_from_slice(&hash_bytes[0..32]);
 
         Self(bytes)
     }
 }
 
 ///
-pub struct AuthorizingKey(pub jubjub::AffinePoint);
+pub struct AuthorizingKey(pub redjubjub::PublicKey<SpendAuth>);
 
 impl Deref for AuthorizingKey {
-    type Target = jubjub::AffinePoint;
+    type Target = redjubjub::PublicKey<SpendAuth>;
 
-    fn deref(&self) -> &jubjub::AffinePoint {
+    fn deref(&self) -> &redjubjub::PublicKey<SpendAuth> {
         &self.0
     }
 }
 
-impl fmt::Debug for AuthorizingKey {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("AuthorizingKey")
-            .field("u", &hex::encode(self.get_u().to_bytes()))
-            .field("v", &hex::encode(self.get_v().to_bytes()))
-            .finish()
+impl From<[u8; 32]> for AuthorizingKey {
+    fn from(bytes: [u8; 32]) -> Self {
+        let sk = redjubjub::SecretKey::<SpendAuth>::try_from(bytes).unwrap();
+        Self(redjubjub::PublicKey::from(&sk))
+    }
+}
+
+impl From<AuthorizingKey> for [u8; 32] {
+    fn from(ak: AuthorizingKey) -> [u8; 32] {
+        ak.into()
+    }
+}
+
+impl From<SpendAuthorizingKey> for AuthorizingKey {
+    fn from(ask: SpendAuthorizingKey) -> Self {
+        let sk = redjubjub::SecretKey::<SpendAuth>::try_from(ask.to_bytes()).unwrap();
+        Self(redjubjub::PublicKey::from(&sk))
     }
 }
 
@@ -207,6 +219,16 @@ impl fmt::Debug for NullifierDerivingKey {
             .field("u", &hex::encode(self.get_u().to_bytes()))
             .field("v", &hex::encode(self.get_v().to_bytes()))
             .finish()
+    }
+}
+
+impl From<ProofAuthorizingKey> for NullifierDerivingKey {
+    /// Requires jubjub's FindGroupHash^J("Zcash_H_", "")
+    ///
+    /// https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
+    /// https://zips.z.cash/protocol/protocol.pdf#concretegrouphashjubjub
+    fn from(nsk: ProofAuthorizingKey) -> Self {
+        unimplemented!()
     }
 }
 
@@ -235,14 +257,11 @@ impl IncomingViewingKey {
     /// https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
     /// https://zips.z.cash/protocol/protocol.pdf#concreteprfs
     /// https://zips.z.cash/protocol/protocol.pdf#jubjub
-    fn new(
+    pub fn from(
         authorizing_key: AuthorizingKey,
         nullifier_deriving_key: NullifierDerivingKey,
     ) -> IncomingViewingKey {
-        let hash_bytes = crh_ivk(
-            authorizing_key.to_bytes(),
-            nullifier_deriving_key.to_bytes(),
-        );
+        let hash_bytes = crh_ivk(authorizing_key.into(), nullifier_deriving_key.to_bytes());
 
         Self(Scalar::from_bytes(&hash_bytes).unwrap())
     }
@@ -303,20 +322,21 @@ impl TransmissionKey {
     }
 }
 
-// #[cfg(test)]
-// impl Arbitrary for TransmissionKey {
-//     type Parameters = ();
+// TODO: fix
+#[cfg(test)]
+impl Arbitrary for TransmissionKey {
+    type Parameters = ();
 
-//     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-//         (array::uniform32(any::<u8>()))
-//             .prop_map(|transmission_key_bytes| {
-//                 return Self::from_bytes(transmission_key_bytes).unwrap();
-//             })
-//             .boxed()
-//     }
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        (array::uniform32(any::<u8>()))
+            .prop_map(|transmission_key_bytes| {
+                return Self::from_bytes(transmission_key_bytes);
+            })
+            .boxed()
+    }
 
-//     type Strategy = BoxedStrategy<Self>;
-// }
+    type Strategy = BoxedStrategy<Self>;
+}
 
 /// Full Viewing Keys
 ///
@@ -337,6 +357,8 @@ pub struct FullViewingKey {
 #[cfg(test)]
 mod tests {
 
+    use rand_core::OsRng;
+
     use super::*;
 
     #[test]
@@ -344,6 +366,23 @@ mod tests {
         let ivk = IncomingViewingKey(jubjub::Fr::zero());
 
         ivk.to_bytes();
+    }
+
+    // TODO: finish
+    #[test]
+    fn derive() {
+        let spending_key = SpendingKey::new(&mut OsRng);
+
+        println!("{:?}", spending_key);
+
+        let spend_authorizing_key = SpendAuthorizingKey::from(spending_key);
+        let proof_authorizing_key = ProofAuthorizingKey::from(spending_key);
+        let outgoing_viewing_key = OutgoingViewingKey::from(spending_key);
+
+        let authorizing_key = AuthorizingKey::from(spend_authorizing_key);
+        // let nullifier_deriving_key = NullifierDerivingKey::from(proof_authorizing_key);
+        // let incoming_viewing_key =
+        //     IncomingViewingKey::from(authorizing_key, nullifier_deriving_key);
     }
 }
 
