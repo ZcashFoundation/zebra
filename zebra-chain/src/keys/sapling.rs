@@ -17,6 +17,21 @@ use rand_core::{CryptoRng, RngCore};
 #[cfg(test)]
 use proptest::{arbitrary::Arbitrary, array, prelude::*};
 
+/// Invokes Blake2b-512 as PRF^expand with parameter t, to derive a
+/// SpendAuthorizingKey and ProofAuthorizingKey from SpendingKey.
+///
+/// https://zips.z.cash/protocol/protocol.pdf#concreteprfs
+fn prf_expand(sk: [u8; 32], t: u8) -> [u8; 64] {
+    let hash = blake2b_simd::Params::new()
+        .hash_length(64)
+        .personal(b"Zcash_ExpandSeed")
+        .to_state()
+        .update(&sk[..])
+        .update(&[t])
+        .finalize();
+    return *hash.as_array();
+}
+
 // TODO: replace with reference to redjubjub or jubjub when merged and
 // exported.
 type Scalar = jubjub::Fr;
@@ -66,15 +81,9 @@ impl From<SpendingKey> for SpendAuthorizationKey {
     /// https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
     /// https://zips.z.cash/protocol/protocol.pdf#concreteprfs
     fn from(spending_key: SpendingKey) -> SpendAuthorizationKey {
-        let hash = blake2b_simd::Params::new()
-            .hash_length(64)
-            .personal(b"Zcash_ExpandSeed")
-            .to_state()
-            .update(&spending_key.0[..])
-            .update(&[0])
-            .finalize();
+        let hash_bytes = prf_expand(spending_key.0, 0);
 
-        Self(Scalar::from_bytes_wide(hash.as_array()))
+        Self(Scalar::from_bytes_wide(&hash_bytes))
     }
 }
 
@@ -103,15 +112,9 @@ impl From<SpendingKey> for ProofAuthorizingKey {
     /// https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
     /// https://zips.z.cash/protocol/protocol.pdf#concreteprfs
     fn from(spending_key: SpendingKey) -> ProofAuthorizingKey {
-        let hash = blake2b_simd::Params::new()
-            .hash_length(64)
-            .personal(b"Zcash_ExpandSeed")
-            .to_state()
-            .update(&spending_key.0[..])
-            .update(&[1])
-            .finalize();
+        let hash_bytes = prf_expand(spending_key.0, 1);
 
-        Self(Scalar::from_bytes_wide(hash.as_array()))
+        Self(Scalar::from_bytes_wide(&hash_bytes))
     }
 }
 
@@ -133,16 +136,11 @@ impl From<SpendingKey> for OutgoingViewingKey {
     /// https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
     /// https://zips.z.cash/protocol/protocol.pdf#concreteprfs
     fn from(spending_key: SpendingKey) -> OutgoingViewingKey {
-        let hash = blake2b_simd::Params::new()
-            .hash_length(64)
-            .personal(b"Zcash_ExpandSeed")
-            .to_state()
-            .update(&spending_key.0[..])
-            .update(&[2])
-            .finalize();
+        let hash_bytes = prf_expand(spending_key.0, 2);
 
         let mut bytes = [0u8; 32];
-        bytes[..].copy_from_slice(hash.as_bytes());
+        bytes[..].copy_from_slice(&hash_bytes);
+
         Self(bytes)
     }
 }
