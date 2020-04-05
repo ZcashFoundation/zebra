@@ -111,6 +111,7 @@ impl Arbitrary for SaplingShieldedAddress {
 #[cfg(test)]
 mod tests {
 
+    use rand_core::OsRng;
     use std::str::FromStr;
 
     use super::*;
@@ -144,6 +145,27 @@ mod tests {
             format!("{}", address),
             "zs1qqqqqqqqqqqqqqqqqrjq05nyfku05msvu49mawhg6kr0wwljahypwyk2h88z6975u563j8nfaxd"
         );
+    }
+
+    #[test]
+    fn derive_keys_and_addresses() {
+        let spending_key = sapling::SpendingKey::new(&mut OsRng);
+
+        let spend_authorizing_key = sapling::SpendAuthorizingKey::from(spending_key);
+        let proof_authorizing_key = sapling::ProofAuthorizingKey::from(spending_key);
+
+        let authorizing_key = sapling::AuthorizingKey::from(spend_authorizing_key);
+        let nullifier_deriving_key = sapling::NullifierDerivingKey::from(proof_authorizing_key);
+        let incoming_viewing_key =
+            sapling::IncomingViewingKey::from(authorizing_key, nullifier_deriving_key);
+
+        let diversifier = sapling::Diversifier::new(&mut OsRng);
+        let transmission_key = sapling::TransmissionKey::from(incoming_viewing_key, diversifier);
+
+        let _sapling_shielded_address = SaplingShieldedAddress {
+            diversifier,
+            transmission_key,
+        };
     }
 }
 
