@@ -49,7 +49,7 @@ fn prf_addr(x: [u8; 32], t: u8) -> [u8; 32] {
     let mut derived_bytes = [0u8; 32];
     LittleEndian::write_u32_into(&state, &mut derived_bytes);
 
-    return derived_bytes;
+    derived_bytes
 }
 
 /// Our root secret key of the Sprout key derivation tree.
@@ -321,8 +321,6 @@ mod tests {
     // TODO: test vectors, not just random data
     fn derive_keys() {
         let spending_key = SpendingKey::new(&mut OsRng);
-
-        println!("{:?}", spending_key);
 
         let receiving_key = ReceivingKey::from(spending_key);
 
