@@ -43,7 +43,8 @@ fn prf_expand(sk: [u8; 32], t: u8) -> [u8; 64] {
         .update(&sk[..])
         .update(&[t])
         .finalize();
-    return *hash.as_array();
+
+    *hash.as_array()
 }
 
 /// Invokes Blake2s-256 as CRH^ivk, to derive the IncomingViewingKey
@@ -60,7 +61,7 @@ fn crh_ivk(ak: [u8; 32], nk: [u8; 32]) -> [u8; 32] {
         .update(&nk[..])
         .finalize();
 
-    return *hash.as_array();
+    *hash.as_array()
 }
 
 /// GroupHash_URS
@@ -74,10 +75,10 @@ fn crh_ivk(ak: [u8; 32], nk: [u8; 32]) -> [u8; 32] {
 ///
 /// [0]: https://github.com/zcash/librustzcash/blob/master/zcash_primitives/src/group_hash.rs#L15
 /// https://zips.z.cash/protocol/protocol.pdf#concretegrouphashjubjub
-fn jubjub_group_hash(d: &[u8; 8], m: &[u8]) -> Option<jubjub::ExtendedPoint> {
+fn jubjub_group_hash(d: [u8; 8], m: &[u8]) -> Option<jubjub::ExtendedPoint> {
     let hash = blake2s_simd::Params::new()
         .hash_length(32)
-        .personal(d)
+        .personal(&d)
         .to_state()
         .update(RANDOMNESS_BEACON_URS)
         .update(m)
@@ -94,7 +95,7 @@ fn jubjub_group_hash(d: &[u8; 8], m: &[u8]) -> Option<jubjub::ExtendedPoint> {
             None
         }
     } else {
-        return None;
+        None
     }
 }
 
@@ -105,7 +106,7 @@ fn jubjub_group_hash(d: &[u8; 8], m: &[u8]) -> Option<jubjub::ExtendedPoint> {
 ///
 /// [0]: https://github.com/zcash/librustzcash/blob/master/zcash_primitives/src/jubjub/mod.rs#L409
 /// https://zips.z.cash/protocol/protocol.pdf#concretegrouphashjubjub
-fn find_group_hash(d: &[u8; 8], m: &[u8]) -> jubjub::ExtendedPoint {
+fn find_group_hash(d: [u8; 8], m: &[u8]) -> jubjub::ExtendedPoint {
     // TODO: tidy
 
     let mut tag = m.to_vec();
@@ -126,11 +127,18 @@ fn find_group_hash(d: &[u8; 8], m: &[u8]) -> jubjub::ExtendedPoint {
 }
 
 /// Instance of FindGroupHash for JubJub, using personalized by
-/// BLAKE2s for the proof generation key base point.
+/// BLAKE2s for picking the proof generation key base point.
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
 fn zcash_h() -> jubjub::ExtendedPoint {
-    find_group_hash(b"Zcash_H_", b"")
+    find_group_hash(*b"Zcash_H_", b"")
+}
+
+/// Used to derive a diversied base point from a diversier value.
+///
+/// https://zips.z.cash/protocol/protocol.pdf#concretediversifyhash
+fn diversify_hash(d: [u8; 11]) -> Option<jubjub::ExtendedPoint> {
+    jubjub_group_hash(*b"Zcash_gd", &d)
 }
 
 // TODO: replace with reference to redjubjub or jubjub when merged and
@@ -255,6 +263,7 @@ impl From<SpendingKey> for OutgoingViewingKey {
 }
 
 ///
+#[derive(Copy, Clone, Debug)]
 pub struct AuthorizingKey(pub redjubjub::PublicKey<SpendAuth>);
 
 impl Deref for AuthorizingKey {
@@ -274,7 +283,7 @@ impl From<[u8; 32]> for AuthorizingKey {
 
 impl From<AuthorizingKey> for [u8; 32] {
     fn from(ak: AuthorizingKey) -> [u8; 32] {
-        ak.into()
+        ak.0.into()
     }
 }
 
@@ -286,6 +295,7 @@ impl From<SpendAuthorizingKey> for AuthorizingKey {
 }
 
 ///
+#[derive(Copy, Clone, PartialEq)]
 pub struct NullifierDerivingKey(pub jubjub::AffinePoint);
 
 impl Deref for NullifierDerivingKey {
@@ -306,17 +316,28 @@ impl fmt::Debug for NullifierDerivingKey {
 }
 
 impl From<ProofAuthorizingKey> for NullifierDerivingKey {
-    /// Requires jubjub's FindGroupHash^J("Zcash_H_", ""), looks like
-    /// available here:
+    /// Requires JubJub's FindGroupHash^J("Zcash_H_", ""), then uses
+    /// the resulting generator point to scalar multiply the
+    /// ProofAuthorizingKey into the new NullifierDerivingKey
+    ///
     /// https://github.com/zcash/librustzcash/blob/master/zcash_primitives/src/group_hash.rs
     /// https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
     /// https://zips.z.cash/protocol/protocol.pdf#concretegrouphashjubjub
     fn from(nsk: ProofAuthorizingKey) -> Self {
-        unimplemented!()
+        // Should this point, when generated, be fixed for the rest of
+        // the protocol instance? Since this is kind of hash-and-pray, it
+        // seems it might not always return the same result?
+        let generator_point = zcash_h();
+
+        // TODO: impl Mul<ExtendedPoint> for Fr, so we can reverse
+        // this to match the math in the spec / general scalar mult
+        // notation convention.
+        Self(jubjub::AffinePoint::from(generator_point * nsk.0))
     }
 }
 
 ///
+#[derive(Copy, Clone, Eq, PartialEq)]
 pub struct IncomingViewingKey(pub Scalar);
 
 impl Deref for IncomingViewingKey {
@@ -341,11 +362,22 @@ impl IncomingViewingKey {
     /// https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
     /// https://zips.z.cash/protocol/protocol.pdf#concreteprfs
     /// https://zips.z.cash/protocol/protocol.pdf#jubjub
+    // TODO: return None if ivk = 0
+    //
+    // "If ivk = 0, discard this key and start over with a new
+    // [spending key]."
+    //
+    // https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
     pub fn from(
         authorizing_key: AuthorizingKey,
         nullifier_deriving_key: NullifierDerivingKey,
     ) -> IncomingViewingKey {
-        let hash_bytes = crh_ivk(authorizing_key.into(), nullifier_deriving_key.to_bytes());
+        let mut hash_bytes = crh_ivk(authorizing_key.into(), nullifier_deriving_key.to_bytes());
+
+        // Drop the most significant five bits, so it can be interpreted
+        // as a scalar.
+        // https://github.com/zcash/librustzcash/blob/master/zcash_primitives/src/primitives.rs#L86
+        hash_bytes[31] &= 0b0000_0111;
 
         Self(Scalar::from_bytes(&hash_bytes).unwrap())
     }
@@ -360,6 +392,29 @@ impl fmt::Debug for Diversifier {
         f.debug_tuple("Diversifier")
             .field(&hex::encode(&self.0))
             .finish()
+    }
+}
+
+impl Diversifier {
+    /// Generate a new _Diversifier_ that has already been confirmed
+    /// as a preimage to a valid diversied base point when used to
+    /// derive a diversified payment address.
+    ///
+    /// https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
+    /// https://zips.z.cash/protocol/protocol.pdf#concretediversifyhash
+    pub fn new<T>(csprng: &mut T) -> Self
+    where
+        T: RngCore + CryptoRng,
+    {
+        // Is this loop overkill?
+        loop {
+            let mut bytes = [0u8; 11];
+            csprng.fill_bytes(&mut bytes);
+
+            if diversify_hash(bytes).is_some() {
+                break Self(bytes);
+            }
+        }
     }
 }
 
@@ -396,6 +451,17 @@ impl fmt::Debug for TransmissionKey {
 }
 
 impl TransmissionKey {
+    /// This includes KA^Sapling.DerivePublic(ivk, G_d), which is just a
+    /// scalar mult [ivk]G_d
+    ///
+    /// https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
+    /// https://zips.z.cash/protocol/protocol.pdf#concretesaplingkeyagreement
+    pub fn from(ivk: IncomingViewingKey, d: Diversifier) -> Self {
+        Self(jubjub::AffinePoint::from(
+            diversify_hash(d.0).unwrap() * ivk.0,
+        ))
+    }
+
     /// Attempts to interpret a byte representation of an
     /// affine point, failing if the element is not on
     /// the curve or non-canonical.
@@ -453,26 +519,32 @@ mod tests {
     }
 
     #[test]
-    fn group_hash() {
-        let _point = zcash_h();
-    }
-
-    // TODO: finish
-    #[test]
     fn derive() {
         let spending_key = SpendingKey::new(&mut OsRng);
-
-        println!("{:?}", spending_key);
 
         let spend_authorizing_key = SpendAuthorizingKey::from(spending_key);
         let proof_authorizing_key = ProofAuthorizingKey::from(spending_key);
         let outgoing_viewing_key = OutgoingViewingKey::from(spending_key);
 
         let authorizing_key = AuthorizingKey::from(spend_authorizing_key);
-        // let nullifier_deriving_key = NullifierDerivingKey::from(proof_authorizing_key);
-        // let incoming_viewing_key =
-        //     IncomingViewingKey::from(authorizing_key, nullifier_deriving_key);
+        let nullifier_deriving_key = NullifierDerivingKey::from(proof_authorizing_key);
+        // "If ivk = 0, discard this key and start over with a new
+        // [spending key]."
+        // https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
+        let incoming_viewing_key =
+            IncomingViewingKey::from(authorizing_key, nullifier_deriving_key);
+
+        let diversifier = Diversifier::new(&mut OsRng);
+        let _transmission_key = TransmissionKey::from(incoming_viewing_key, diversifier);
+
+        let _full_viewing_key = FullViewingKey {
+            authorizing_key,
+            nullifier_deriving_key,
+            outgoing_viewing_key,
+        };
     }
+
+    // TODO: test vectors, not just random data
 }
 
 #[cfg(test)]
