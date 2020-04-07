@@ -3,9 +3,10 @@
 //! "The spend authorizing key ask, proof authorizing key (ak, nsk),
 //! full viewing key (ak, nk, ovk), incoming viewing key ivk, and each
 //! diversified payment address addr_d = (d, pk_d ) are derived from sk,
-//! as described in [Sapling Key Components][ps]."
+//! as described in [Sapling Key Components][ps]." - [§3.1][3.1]
 //!
 //! [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
+//! [3.1]: https://zips.z.cash/protocol/protocol.pdf#addressesandkeys
 
 use std::{convert::TryFrom, fmt, ops::Deref};
 
@@ -34,6 +35,8 @@ pub const RANDOMNESS_BEACON_URS: &[u8; 64] =
 /// Invokes Blake2b-512 as PRF^expand with parameter t, to derive a
 /// SpendAuthorizingKey and ProofAuthorizingKey from SpendingKey.
 ///
+/// PRF^expand(sk, t) := BLAKE2b-512("Zcash_ExpandSeed", sk || t)
+///
 /// https://zips.z.cash/protocol/protocol.pdf#concreteprfs
 fn prf_expand(sk: [u8; 32], t: u8) -> [u8; 64] {
     let hash = blake2b_simd::Params::new()
@@ -47,8 +50,10 @@ fn prf_expand(sk: [u8; 32], t: u8) -> [u8; 64] {
     *hash.as_array()
 }
 
-/// Invokes Blake2s-256 as CRH^ivk, to derive the IncomingViewingKey
+/// Invokes Blake2s-256 as _CRH^ivk_, to derive the IncomingViewingKey
 /// bytes from an AuthorizingKey and NullifierDerivingKey.
+///
+/// _CRH^ivk(ak, nk) := BLAKE2s-256("Zcashivk", ak || nk)_
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#concretecrhivk
 fn crh_ivk(ak: [u8; 32], nk: [u8; 32]) -> [u8; 32] {
@@ -56,7 +61,6 @@ fn crh_ivk(ak: [u8; 32], nk: [u8; 32]) -> [u8; 32] {
         .hash_length(32)
         .personal(b"Zcashivk")
         .to_state()
-        // TODO: double-check that `to_bytes()` == repr_J
         .update(&ak[..])
         .update(&nk[..])
         .finalize();
@@ -64,7 +68,7 @@ fn crh_ivk(ak: [u8; 32], nk: [u8; 32]) -> [u8; 32] {
     *hash.as_array()
 }
 
-/// GroupHash_URS
+/// GroupHash into Jubjub, aka _GroupHash_URS_
 ///
 /// Produces a random point in the Jubjub curve. The point is
 /// guaranteed to be prime order and not the identity. From
@@ -99,7 +103,7 @@ fn jubjub_group_hash(d: [u8; 8], m: &[u8]) -> Option<jubjub::ExtendedPoint> {
     }
 }
 
-/// From [zcash_primitives][0]
+/// FindGroupHash for JubJub, from [zcash_primitives][0]
 ///
 /// d is an 8-byte domain separator ("personalization"), m is the hash
 /// input.
@@ -107,8 +111,6 @@ fn jubjub_group_hash(d: [u8; 8], m: &[u8]) -> Option<jubjub::ExtendedPoint> {
 /// [0]: https://github.com/zcash/librustzcash/blob/master/zcash_primitives/src/jubjub/mod.rs#L409
 /// https://zips.z.cash/protocol/protocol.pdf#concretegrouphashjubjub
 fn find_group_hash(d: [u8; 8], m: &[u8]) -> jubjub::ExtendedPoint {
-    // TODO: tidy
-
     let mut tag = m.to_vec();
     let i = tag.len();
     tag.push(0u8);
@@ -134,7 +136,7 @@ fn zcash_h() -> jubjub::ExtendedPoint {
     find_group_hash(*b"Zcash_H_", b"")
 }
 
-/// Used to derive a diversied base point from a diversier value.
+/// Used to derive a diversified base point from a diversifier value.
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#concretediversifyhash
 fn diversify_hash(d: [u8; 11]) -> Option<jubjub::ExtendedPoint> {
@@ -145,10 +147,13 @@ fn diversify_hash(d: [u8; 11]) -> Option<jubjub::ExtendedPoint> {
 // exported.
 type Scalar = jubjub::Fr;
 
-/// Our root secret key of the Sprout key derivation tree.
+/// A _Spending Key_, as described in [protocol specification
+/// §4.2.2][ps].
 ///
-/// All other Sprout key types derive from the SpendingKey value.
+/// Our root secret key of the Sapling key derivation tree. All other
+/// Sprout key types derive from the SpendingKey value.
 ///
+/// [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct SpendingKey(pub [u8; 32]);
 
@@ -172,7 +177,13 @@ impl From<[u8; 32]> for SpendingKey {
     }
 }
 
-/// Derived from a _SpendingKey_.
+/// A _Spend Authorizing Key_, as described in [protocol specification
+/// §4.2.2][ps].
+///
+/// Used to generate _spend authorization randomizers_ to sign each
+/// _Spend Description_, proving ownership of notes.
+///
+/// [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
 pub struct SpendAuthorizingKey(pub Scalar);
 
 impl Deref for SpendAuthorizingKey {
@@ -192,7 +203,7 @@ impl fmt::Debug for SpendAuthorizingKey {
 }
 
 impl From<SpendingKey> for SpendAuthorizingKey {
-    /// Invokes Blake2b-512 as PRF^expand, t=0, to derive a
+    /// Invokes Blake2b-512 as _PRF^expand_, t=0, to derive a
     /// SpendAuthorizingKey from a SpendingKey.
     ///
     /// https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
@@ -204,7 +215,12 @@ impl From<SpendingKey> for SpendAuthorizingKey {
     }
 }
 
-/// Derived from a _SpendingKey_.
+/// A _Proof Authorizing Key_, as described in [protocol specification
+/// §4.2.2][ps].
+///
+/// Used in the _Spend Statement_ to prove nullifier integrity.
+///
+/// [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
 pub struct ProofAuthorizingKey(pub Scalar);
 
 impl Deref for ProofAuthorizingKey {
@@ -224,7 +240,7 @@ impl fmt::Debug for ProofAuthorizingKey {
 }
 
 impl From<SpendingKey> for ProofAuthorizingKey {
-    /// For this invocation of Blake2b-512 as PRF^expand, t=1.
+    /// For this invocation of Blake2b-512 as _PRF^expand_, t=1.
     ///
     /// https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
     /// https://zips.z.cash/protocol/protocol.pdf#concreteprfs
@@ -235,7 +251,12 @@ impl From<SpendingKey> for ProofAuthorizingKey {
     }
 }
 
-/// Derived from a _SpendingKey_.
+/// An _Outgoing Viewing Key_, as described in [protocol specification
+/// §4.2.2][ps].
+///
+/// Used to decrypt outgoing notes without spending them.
+///
+/// [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub struct OutgoingViewingKey(pub [u8; 32]);
 
@@ -248,7 +269,7 @@ impl fmt::Debug for OutgoingViewingKey {
 }
 
 impl From<SpendingKey> for OutgoingViewingKey {
-    /// For this invocation of Blake2b-512 as PRF^expand, t=2.
+    /// For this invocation of Blake2b-512 as _PRF^expand_, t=2.
     ///
     /// https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
     /// https://zips.z.cash/protocol/protocol.pdf#concreteprfs
@@ -262,7 +283,13 @@ impl From<SpendingKey> for OutgoingViewingKey {
     }
 }
 
+/// An _Authorizing Key_, as described in [protocol specification
+/// §4.2.2][ps].
 ///
+/// Used to validate _Spend Authorization Signatures_, proving
+/// ownership of notes.
+///
+/// [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
 #[derive(Copy, Clone, Debug)]
 pub struct AuthorizingKey(pub redjubjub::PublicKey<SpendAuth>);
 
@@ -294,7 +321,12 @@ impl From<SpendAuthorizingKey> for AuthorizingKey {
     }
 }
 
+/// A _Nullifier Deriving Key_, as described in [protocol
+/// specification §4.2.2][ps].
 ///
+/// Used to create a _Nullifier_ per note.
+///
+/// [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
 #[derive(Copy, Clone, PartialEq)]
 pub struct NullifierDerivingKey(pub jubjub::AffinePoint);
 
@@ -316,7 +348,7 @@ impl fmt::Debug for NullifierDerivingKey {
 }
 
 impl From<ProofAuthorizingKey> for NullifierDerivingKey {
-    /// Requires JubJub's FindGroupHash^J("Zcash_H_", ""), then uses
+    /// Requires JubJub's _FindGroupHash^J("Zcash_H_", "")_, then uses
     /// the resulting generator point to scalar multiply the
     /// ProofAuthorizingKey into the new NullifierDerivingKey
     ///
@@ -336,7 +368,12 @@ impl From<ProofAuthorizingKey> for NullifierDerivingKey {
     }
 }
 
+/// An _Incoming Viewing Key_, as described in [protocol specification
+/// §4.2.2][ps].
 ///
+/// Used to decrypt incoming notes without spending them.
+///
+/// [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub struct IncomingViewingKey(pub Scalar);
 
@@ -357,7 +394,7 @@ impl fmt::Debug for IncomingViewingKey {
 }
 
 impl IncomingViewingKey {
-    /// For this invocation of Blake2s-256 as CRH^ivk.
+    /// For this invocation of Blake2s-256 as _CRH^ivk_.
     ///
     /// https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
     /// https://zips.z.cash/protocol/protocol.pdf#concreteprfs
@@ -365,9 +402,9 @@ impl IncomingViewingKey {
     // TODO: return None if ivk = 0
     //
     // "If ivk = 0, discard this key and start over with a new
-    // [spending key]."
+    // [spending key]." - [§4.2.2][ps]
     //
-    // https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
+    // [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
     pub fn from(
         authorizing_key: AuthorizingKey,
         nullifier_deriving_key: NullifierDerivingKey,
@@ -376,6 +413,11 @@ impl IncomingViewingKey {
 
         // Drop the most significant five bits, so it can be interpreted
         // as a scalar.
+        //
+        // I don't want to put this inside crh_ivk, but does it belong
+        // inside Scalar/Fr::from_bytes()? That seems the better
+        // place...
+        //
         // https://github.com/zcash/librustzcash/blob/master/zcash_primitives/src/primitives.rs#L86
         hash_bytes[31] &= 0b0000_0111;
 
@@ -383,7 +425,12 @@ impl IncomingViewingKey {
     }
 }
 
+/// A _Diversifier_, as described in [protocol specification §4.2.2][ps].
 ///
+/// Combined with an _IncomingViewingKey_, produces a _diversified
+/// payment address_.
+///
+/// [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub struct Diversifier(pub [u8; 11]);
 
@@ -397,7 +444,7 @@ impl fmt::Debug for Diversifier {
 
 impl Diversifier {
     /// Generate a new _Diversifier_ that has already been confirmed
-    /// as a preimage to a valid diversied base point when used to
+    /// as a preimage to a valid diversified base point when used to
     /// derive a diversified payment address.
     ///
     /// https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
@@ -423,7 +470,7 @@ impl Diversifier {
 /// In Sapling, secrets need to be transmitted to a recipient of funds
 /// in order for them to be later spent. To transmit these secrets
 /// securely to a recipient without requiring an out-of-band
-/// communication channel, the diversied transmission key is used to
+/// communication channel, the diversified transmission key is used to
 /// encrypt them.
 ///
 /// Derived by multiplying a JubJub point [derived][ps] from a
@@ -451,8 +498,8 @@ impl fmt::Debug for TransmissionKey {
 }
 
 impl TransmissionKey {
-    /// This includes KA^Sapling.DerivePublic(ivk, G_d), which is just a
-    /// scalar mult [ivk]G_d
+    /// This includes _KA^Sapling.DerivePublic(ivk, G_d)_, which is just a
+    /// scalar mult _[ivk]G_d_.
     ///
     /// https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
     /// https://zips.z.cash/protocol/protocol.pdf#concretesaplingkeyagreement
