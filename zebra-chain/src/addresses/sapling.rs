@@ -19,7 +19,12 @@ mod human_readable_parts {
     pub const TESTNET: &str = "ztestsapling";
 }
 
+/// A Sapling _shielded payment address_.
 ///
+/// Also known as a _diversified payment address_ for Sapling, as
+/// defined in [§4.2.2][4.2.2].
+///
+/// [4.2.2]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
 #[derive(Clone, Copy, PartialEq)]
 pub struct SaplingShieldedAddress {
     diversifier: sapling::Diversifier,
