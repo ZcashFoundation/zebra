@@ -45,7 +45,7 @@ impl SaplingShieldedAddress {
         let mut bytes = io::Cursor::new(Vec::new());
         let _ = self.zcash_serialize(&mut bytes);
 
-        let mut hrp = "";
+        let hrp;
 
         match network {
             Network::Mainnet => hrp = human_readable_parts::MAINNET,
