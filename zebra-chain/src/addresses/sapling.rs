@@ -122,20 +122,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn from_str_debug() {
-        let zs_addr = SaplingShieldedAddress::from_str(
-            "zs1qqqqqqqqqqqqqqqqqrjq05nyfku05msvu49mawhg6kr0wwljahypwyk2h88z6975u563j8nfaxd",
-        )
-        .expect("sapling z-addr string to parse");
-
-        assert_eq!(
-            format!("{:?}", zs_addr),
-
-            "SaplingShieldedAddress { diversifier: Diversifier(\"0000000000000000000000\"), transmission_key: TransmissionKey { u: \"8aa95397aad733606e2cd16834f2ee5b537dad92b1ad0529653ba6a9772b8c03\", v: \"e407d2644db8fa6e0ce54bbebae8d586f73bf2edc81712cab9ce2d17d4e53519\" } }"
-        );
-    }
-
-    #[test]
     fn to_human_readable_address() {
         let zs_addr = SaplingShieldedAddress::from_str(
             "zs1qqqqqqqqqqqqqqqqqrjq05nyfku05msvu49mawhg6kr0wwljahypwyk2h88z6975u563j8nfaxd",
@@ -177,6 +163,7 @@ mod tests {
 #[cfg(test)]
 proptest! {
 
+    // TODO: uncomment when key strategies are fixed.
     // #[test]
     // fn sapling_address_roundtrip(zaddr in any::<SaplingShieldedAddress>()) {
 
