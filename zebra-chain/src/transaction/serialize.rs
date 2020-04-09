@@ -302,7 +302,7 @@ impl<P: ZkSnarkProof> ZcashDeserialize for Option<JoinSplitData<P>> {
     }
 }
 
-impl ZcashSerialize for SpendDescription {
+impl ZcashSerialize for Spend {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_all(&self.cv[..])?;
         writer.write_all(&self.anchor.0[..])?;
@@ -314,10 +314,10 @@ impl ZcashSerialize for SpendDescription {
     }
 }
 
-impl ZcashDeserialize for SpendDescription {
+impl ZcashDeserialize for Spend {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         use crate::note_commitment_tree::SaplingNoteTreeRootHash;
-        Ok(SpendDescription {
+        Ok(Spend {
             cv: reader.read_32_bytes()?,
             anchor: SaplingNoteTreeRootHash(reader.read_32_bytes()?),
             nullifier: reader.read_32_bytes()?,
@@ -328,7 +328,7 @@ impl ZcashDeserialize for SpendDescription {
     }
 }
 
-impl ZcashSerialize for OutputDescription {
+impl ZcashSerialize for Output {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_all(&self.cv[..])?;
         writer.write_all(&self.cmu[..])?;
@@ -340,9 +340,9 @@ impl ZcashSerialize for OutputDescription {
     }
 }
 
-impl ZcashDeserialize for OutputDescription {
+impl ZcashDeserialize for Output {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        Ok(OutputDescription {
+        Ok(Output {
             cv: reader.read_32_bytes()?,
             cmu: reader.read_32_bytes()?,
             ephemeral_key: reader.read_32_bytes()?,
