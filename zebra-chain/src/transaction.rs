@@ -13,7 +13,7 @@ mod tests;
 
 pub use hash::TransactionHash;
 pub use joinsplit::{JoinSplit, JoinSplitData};
-pub use shielded_data::{OutputDescription, ShieldedData, SpendDescription};
+pub use shielded_data::{Output, ShieldedData, Spend};
 pub use transparent::{CoinbaseData, OutPoint, TransparentInput, TransparentOutput};
 
 use crate::proofs::{Bctv14Proof, Groth16Proof};

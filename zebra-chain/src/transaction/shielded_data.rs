@@ -18,7 +18,7 @@ use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize}
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#spendencoding
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SpendDescription {
+pub struct Spend {
     /// A value commitment to the value of the input note.
     ///
     /// XXX refine to a specific type.
@@ -38,7 +38,7 @@ pub struct SpendDescription {
 }
 
 #[cfg(test)]
-impl Arbitrary for SpendDescription {
+impl Arbitrary for Spend {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
@@ -77,7 +77,7 @@ impl Arbitrary for SpendDescription {
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#outputencoding
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(test, derive(Arbitrary))]
-pub struct OutputDescription {
+pub struct Output {
     /// A value commitment to the value of the input note.
     ///
     /// XXX refine to a specific type.
@@ -109,25 +109,25 @@ pub struct ShieldedData {
     /// However, it's not necessary to access or process `first` and `rest`
     /// separately, as the [`ShieldedData::spends`] and [`ShieldedData::outputs`]
     /// methods provide iterators over all of the [`SpendDescription`]s and
-    /// [`OutputDescription`]s.
-    pub first: Either<SpendDescription, OutputDescription>,
-    /// The rest of the [`SpendDescription`]s for this transaction.
+    /// [`Output`]s.
+    pub first: Either<Spend, Output>,
+    /// The rest of the [`Spend`]s for this transaction.
     ///
     /// Note that the [`ShieldedData::spends`] method provides an iterator
     /// over all spend descriptions.
-    pub rest_spends: Vec<SpendDescription>,
-    /// The rest of the [`OutputDescription`]s for this transaction.
+    pub rest_spends: Vec<Spend>,
+    /// The rest of the [`Output`]s for this transaction.
     ///
     /// Note that the [`ShieldedData::outputs`] method provides an iterator
     /// over all output descriptions.
-    pub rest_outputs: Vec<OutputDescription>,
+    pub rest_outputs: Vec<Output>,
     /// A signature on the transaction hash.
     pub binding_sig: redjubjub::Signature<Binding>,
 }
 
 impl ShieldedData {
-    /// Iterate over the [`SpendDescription`]s for this transaction.
-    pub fn spends(&self) -> impl Iterator<Item = &SpendDescription> {
+    /// Iterate over the [`Spend`]s for this transaction.
+    pub fn spends(&self) -> impl Iterator<Item = &Spend> {
         match self.first {
             Either::Left(ref spend) => Some(spend),
             Either::Right(_) => None,
@@ -136,8 +136,8 @@ impl ShieldedData {
         .chain(self.rest_spends.iter())
     }
 
-    /// Iterate over the [`OutputDescription`]s for this transaction.
-    pub fn outputs(&self) -> impl Iterator<Item = &OutputDescription> {
+    /// Iterate over the [`Output`]s for this transaction.
+    pub fn outputs(&self) -> impl Iterator<Item = &Output> {
         match self.first {
             Either::Left(_) => None,
             Either::Right(ref output) => Some(output),
@@ -179,11 +179,11 @@ impl Arbitrary for ShieldedData {
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         (
             prop_oneof![
-                any::<SpendDescription>().prop_map(Either::Left),
-                any::<OutputDescription>().prop_map(Either::Right)
+                any::<Spend>().prop_map(Either::Left),
+                any::<Output>().prop_map(Either::Right)
             ],
-            vec(any::<SpendDescription>(), 0..10),
-            vec(any::<OutputDescription>(), 0..10),
+            vec(any::<Spend>(), 0..10),
+            vec(any::<Output>(), 0..10),
             vec(any::<u8>(), 64),
         )
             .prop_map(|(first, rest_spends, rest_outputs, sig_bytes)| {
