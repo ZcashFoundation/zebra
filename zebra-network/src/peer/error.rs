@@ -81,4 +81,7 @@ pub enum HandshakeError {
     /// A serialization error occurred while reading or writing a message.
     #[error("Serialization error")]
     Serialization(#[from] SerializationError),
+    /// The remote peer offered a version older than our minimum version.
+    #[error("Peer offered obsolete version: {0:?}")]
+    ObsoleteVersion(crate::protocol::external::types::Version),
 }

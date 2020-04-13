@@ -29,7 +29,7 @@ impl From<Network> for Magic {
 }
 
 /// A protocol version number.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Version(pub u32);
 
 bitflags! {
