@@ -181,7 +181,9 @@ where
                 return Err(HandshakeError::UnexpectedMessage(Box::new(remote_msg)));
             }
 
-            // XXX in zcashd remote peer can only send one version message and we would disconnect here if it received a second one. Is it even possible for that to happen to us here?
+            // XXX in zcashd remote peer can only send one version message and 
+            // we would disconnect here if it received a second one. Is it even possible 
+            // for that to happen to us here?
 
             if remote_version < constants::MIN_VERSION {
                 // Disconnect if peer is using an obsolete version.
