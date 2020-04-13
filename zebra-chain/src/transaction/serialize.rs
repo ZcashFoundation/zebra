@@ -235,7 +235,7 @@ impl<P: ZkSnarkProof> ZcashSerialize for JoinSplit<P> {
         writer.write_all(&self.nullifiers[1][..])?;
         writer.write_all(&self.commitments[0][..])?;
         writer.write_all(&self.commitments[1][..])?;
-        writer.write_all(&self.ephemeral_key[..])?;
+        writer.write_all(&self.ephemeral_key.as_bytes()[..])?;
         writer.write_all(&self.random_seed[..])?;
         writer.write_all(&self.vmacs[0][..])?;
         writer.write_all(&self.vmacs[1][..])?;
@@ -254,7 +254,7 @@ impl<P: ZkSnarkProof> ZcashDeserialize for JoinSplit<P> {
             anchor: reader.read_32_bytes()?,
             nullifiers: [reader.read_32_bytes()?, reader.read_32_bytes()?],
             commitments: [reader.read_32_bytes()?, reader.read_32_bytes()?],
-            ephemeral_key: reader.read_32_bytes()?,
+            ephemeral_key: x25519_dalek::PublicKey::from(reader.read_32_bytes()?),
             random_seed: reader.read_32_bytes()?,
             vmacs: [reader.read_32_bytes()?, reader.read_32_bytes()?],
             zkproof: P::zcash_deserialize(&mut reader)?,
