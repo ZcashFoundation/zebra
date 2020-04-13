@@ -16,8 +16,7 @@ use crate::{
 /// A _JoinSplit Description_, as described in [protocol specification §7.2][ps].
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#joinsplitencoding
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(test, derive(Arbitrary))]
+#[derive(Clone, Debug)]
 pub struct JoinSplit<P: ZkSnarkProof> {
     /// A value that the JoinSplit transfer removes from the transparent value
     /// pool.
@@ -46,7 +45,7 @@ pub struct JoinSplit<P: ZkSnarkProof> {
     /// An X25519 public key.
     ///
     /// XXX refine to an x25519-dalek type?
-    pub ephemeral_key: [u8; 32],
+    pub ephemeral_key: x25519_dalek::PublicKey,
     /// A 256-bit seed that must be chosen independently at random for each
     /// JoinSplit description.
     pub random_seed: [u8; 32],
@@ -62,8 +61,77 @@ pub struct JoinSplit<P: ZkSnarkProof> {
     pub enc_ciphertexts: [EncryptedCiphertext; 2],
 }
 
+// Because x25519_dalek::PublicKey does not impl PartialEq
+impl<P: ZkSnarkProof> PartialEq for JoinSplit<P> {
+    fn eq(&self, other: &Self) -> bool {
+        self.vpub_old == other.vpub_old
+            && self.vpub_new == other.vpub_new
+            && self.anchor == other.anchor
+            && self.nullifiers == other.nullifiers
+            && self.commitments == other.commitments
+            && self.ephemeral_key.as_bytes() == other.ephemeral_key.as_bytes()
+            && self.random_seed == other.random_seed
+            && self.vmacs == other.vmacs
+            && self.zkproof == other.zkproof
+            && self.enc_ciphertexts == other.enc_ciphertexts
+    }
+}
+
+// Because x25519_dalek::PublicKey does not impl Eq
+impl<P: ZkSnarkProof> Eq for JoinSplit<P> {}
+
+#[cfg(test)]
+impl<P: ZkSnarkProof + Arbitrary + 'static> Arbitrary for JoinSplit<P> {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        (
+            any::<u64>(),
+            any::<u64>(),
+            array::uniform32(any::<u8>()),
+            array::uniform2(array::uniform32(any::<u8>())),
+            array::uniform2(array::uniform32(any::<u8>())),
+            array::uniform32(any::<u8>()),
+            array::uniform32(any::<u8>()),
+            array::uniform2(array::uniform32(any::<u8>())),
+            any::<P>(),
+            array::uniform2(any::<EncryptedCiphertext>()),
+        )
+            .prop_map(
+                |(
+                    vpub_old,
+                    vpub_new,
+                    anchor,
+                    nullifiers,
+                    commitments,
+                    ephemeral_key_bytes,
+                    random_seed,
+                    vmacs,
+                    zkproof,
+                    enc_ciphertexts,
+                )| {
+                    return Self {
+                        vpub_old,
+                        vpub_new,
+                        anchor,
+                        nullifiers,
+                        commitments,
+                        ephemeral_key: x25519_dalek::PublicKey::from(ephemeral_key_bytes),
+                        random_seed,
+                        vmacs,
+                        zkproof,
+                        enc_ciphertexts,
+                    };
+                },
+            )
+            .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
+
 /// A bundle of JoinSplit descriptions and signature data.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct JoinSplitData<P: ZkSnarkProof> {
     /// The first JoinSplit description, using proofs of type `P`.
     ///
