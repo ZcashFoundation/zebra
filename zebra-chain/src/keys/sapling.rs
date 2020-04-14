@@ -480,6 +480,8 @@ impl Diversifier {
 #[derive(Copy, Clone, PartialEq)]
 pub struct TransmissionKey(pub jubjub::AffinePoint);
 
+impl Eq for TransmissionKey {}
+
 impl Deref for TransmissionKey {
     type Target = jubjub::AffinePoint;
 
