@@ -1,6 +1,9 @@
 //! Sapling Shielded Payment Address types.
 
-use std::{fmt, io};
+use std::{
+    fmt,
+    io::{self, Read, Write},
+};
 
 use bech32::{self, FromBase32, ToBase32};
 
@@ -9,7 +12,7 @@ use proptest::{arbitrary::Arbitrary, array, prelude::*};
 
 use crate::{
     keys::sapling,
-    serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize},
+    serialization::{ReadZcashExt, SerializationError},
     Network,
 };
 
@@ -25,8 +28,9 @@ mod human_readable_parts {
 /// defined in [§4.2.2][4.2.2].
 ///
 /// [4.2.2]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub struct SaplingShieldedAddress {
+    network: Network,
     diversifier: sapling::Diversifier,
     transmission_key: sapling::TransmissionKey,
 }
@@ -34,50 +38,26 @@ pub struct SaplingShieldedAddress {
 impl fmt::Debug for SaplingShieldedAddress {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("SaplingShieldedAddress")
+            .field("network", &self.network)
             .field("diversifier", &self.diversifier)
             .field("transmission_key", &self.transmission_key)
             .finish()
     }
 }
 
-impl SaplingShieldedAddress {
-    fn to_human_readable_address(&self, network: Network) -> Result<String, bech32::Error> {
+impl fmt::Display for SaplingShieldedAddress {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut bytes = io::Cursor::new(Vec::new());
-        let _ = self.zcash_serialize(&mut bytes);
 
-        let hrp;
+        let _ = bytes.write_all(&self.diversifier.0[..]);
+        let _ = bytes.write_all(&self.transmission_key.to_bytes());
 
-        match network {
-            Network::Mainnet => hrp = human_readable_parts::MAINNET,
-            _ => hrp = human_readable_parts::TESTNET,
-        }
+        let hrp = match self.network {
+            Network::Mainnet => human_readable_parts::MAINNET,
+            _ => human_readable_parts::TESTNET,
+        };
 
-        bech32::encode(hrp, bytes.get_ref().to_base32())
-    }
-}
-
-impl Eq for SaplingShieldedAddress {}
-
-impl ZcashSerialize for SaplingShieldedAddress {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        writer.write_all(&self.diversifier.0[..])?;
-        writer.write_all(&self.transmission_key.to_bytes())?;
-
-        Ok(())
-    }
-}
-
-impl ZcashDeserialize for SaplingShieldedAddress {
-    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let mut diversifier_bytes = [0; 11];
-        reader.read_exact(&mut diversifier_bytes)?;
-
-        let transmission_key_bytes = reader.read_32_bytes()?;
-
-        Ok(SaplingShieldedAddress {
-            diversifier: sapling::Diversifier(diversifier_bytes),
-            transmission_key: sapling::TransmissionKey::from_bytes(transmission_key_bytes),
-        })
+        bech32::encode_to_fmt(f, hrp, bytes.get_ref().to_base32()).unwrap()
     }
 }
 
@@ -86,9 +66,22 @@ impl std::str::FromStr for SaplingShieldedAddress {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match bech32::decode(s) {
-            Ok((_, bytes)) => {
-                let decoded = Vec::<u8>::from_base32(&bytes).unwrap();
-                Self::zcash_deserialize(io::Cursor::new(decoded))
+            Ok((hrp, bytes)) => {
+                let mut decoded_bytes = io::Cursor::new(Vec::<u8>::from_base32(&bytes).unwrap());
+
+                let mut diversifier_bytes = [0; 11];
+                decoded_bytes.read_exact(&mut diversifier_bytes)?;
+
+                let transmission_key_bytes = decoded_bytes.read_32_bytes()?;
+
+                Ok(SaplingShieldedAddress {
+                    network: match hrp.as_str() {
+                        human_readable_parts::MAINNET => Network::Mainnet,
+                        _ => Network::Testnet,
+                    },
+                    diversifier: sapling::Diversifier(diversifier_bytes),
+                    transmission_key: sapling::TransmissionKey::from_bytes(transmission_key_bytes),
+                })
             }
             Err(_) => Err(SerializationError::Parse("bech32 decoding error")),
         }
@@ -100,9 +93,14 @@ impl Arbitrary for SaplingShieldedAddress {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        (array::uniform11(any::<u8>()), array::uniform32(any::<u8>()))
-            .prop_map(|(diversifier_bytes, transmission_key_bytes)| {
+        (
+            any::<Network>(),
+            array::uniform11(any::<u8>()),
+            array::uniform32(any::<u8>()),
+        )
+            .prop_map(|(network, diversifier_bytes, transmission_key_bytes)| {
                 return Self {
+                    network,
                     diversifier: sapling::Diversifier(diversifier_bytes),
                     transmission_key: sapling::TransmissionKey::from_bytes(transmission_key_bytes),
                 };
@@ -122,15 +120,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn to_human_readable_address() {
+    fn from_str_display() {
         let zs_addr = SaplingShieldedAddress::from_str(
             "zs1qqqqqqqqqqqqqqqqqrjq05nyfku05msvu49mawhg6kr0wwljahypwyk2h88z6975u563j8nfaxd",
         )
         .expect("sapling z-addr string to parse");
 
-        let address = zs_addr
-            .to_human_readable_address(Network::Mainnet)
-            .expect("z-addr to serialize in a human-readable way");
+        let address = zs_addr.to_string();
 
         assert_eq!(
             format!("{}", address),
@@ -154,6 +150,7 @@ mod tests {
         let transmission_key = sapling::TransmissionKey::from(incoming_viewing_key, diversifier);
 
         let _sapling_shielded_address = SaplingShieldedAddress {
+            network: Network::Mainnet,
             diversifier,
             transmission_key,
         };
@@ -167,11 +164,9 @@ proptest! {
     // #[test]
     // fn sapling_address_roundtrip(zaddr in any::<SaplingShieldedAddress>()) {
 
-    //     let mut data = Vec::new();
+    //     let string = zaddr.to_string();
 
-    //     zaddr.zcash_serialize(&mut data).expect("sapling z-addr should serialize");
-
-    //     let zaddr2 = SaplingShieldedAddress::zcash_deserialize(&data[..])
+    //     let zaddr2 = string.parse::<SaplingShieldedAddress>()
     //         .expect("randomized sapling z-addr should deserialize");
 
     //     prop_assert_eq![zaddr, zaddr2];
