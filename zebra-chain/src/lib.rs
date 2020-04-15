@@ -35,3 +35,9 @@ pub enum Network {
     /// The testnet.
     Testnet,
 }
+
+impl Default for Network {
+    fn default() -> Self {
+        Network::Mainnet
+    }
+}
