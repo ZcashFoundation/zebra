@@ -8,6 +8,11 @@
 //! [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
 //! [3.1]: https://zips.z.cash/protocol/protocol.pdf#addressesandkeys
 
+#[cfg(test)]
+mod test_vectors;
+#[cfg(test)]
+mod tests;
+
 use std::{
     convert::{From, Into, TryFrom},
     fmt,
@@ -22,8 +27,8 @@ use jubjub;
 use rand_core::{CryptoRng, RngCore};
 use redjubjub::{self, SpendAuth};
 
-#[cfg(test)]
-use proptest::{array, prelude::*};
+// #[cfg(test)]
+// use proptest::{array, prelude::*};
 #[cfg(test)]
 use proptest_derive::Arbitrary;
 
@@ -339,6 +344,12 @@ impl From<[u8; 32]> for OutgoingViewingKey {
     }
 }
 
+impl From<OutgoingViewingKey> for [u8; 32] {
+    fn from(nk: OutgoingViewingKey) -> [u8; 32] {
+        nk.0
+    }
+}
+
 impl From<SpendingKey> for OutgoingViewingKey {
     /// For this invocation of Blake2b-512 as _PRF^expand_, t=2.
     ///
@@ -407,6 +418,12 @@ impl From<[u8; 32]> for NullifierDerivingKey {
     }
 }
 
+impl From<NullifierDerivingKey> for [u8; 32] {
+    fn from(nk: NullifierDerivingKey) -> [u8; 32] {
+        nk.0.to_bytes()
+    }
+}
+
 impl Deref for NullifierDerivingKey {
     type Target = jubjub::AffinePoint;
 
@@ -465,6 +482,8 @@ pub struct IncomingViewingKey {
     scalar: Scalar,
 }
 
+// TODO: impl a top-level to_bytes or PartialEq between this and [u8; 32]
+
 // TODO: impl a From that accepts a Network?
 
 impl Deref for IncomingViewingKey {
@@ -472,6 +491,32 @@ impl Deref for IncomingViewingKey {
 
     fn deref(&self) -> &Scalar {
         &self.scalar
+    }
+}
+
+impl From<[u8; 32]> for IncomingViewingKey {
+    /// Generate an _IncomingViewingKey_ from existing bytes.
+    fn from(mut bytes: [u8; 32]) -> Self {
+        // Drop the most significant five bits, so it can be interpreted
+        // as a scalar.
+        //
+        // I don't want to put this inside crh_ivk, but does it belong
+        // inside Scalar/Fr::from_bytes()? That seems the better
+        // place...
+        //
+        // https://github.com/zcash/librustzcash/blob/master/zcash_primitives/src/primitives.rs#L86
+        bytes[31] &= 0b0000_0111;
+
+        Self {
+            network: Network::default(),
+            scalar: Scalar::from_bytes(&bytes).unwrap(),
+        }
+    }
+}
+
+impl From<IncomingViewingKey> for [u8; 32] {
+    fn from(ivk: IncomingViewingKey) -> [u8; 32] {
+        ivk.scalar.to_bytes()
     }
 }
 
@@ -530,26 +575,15 @@ impl IncomingViewingKey {
     // [spending key]." - [§4.2.2][ps]
     //
     // [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
-    pub fn from(
+    //
+    // TODO: won't let me name this `from(arg1, arg2)` when I have From impl'd above?
+    pub fn from_keys(
         authorizing_key: AuthorizingKey,
         nullifier_deriving_key: NullifierDerivingKey,
-    ) -> IncomingViewingKey {
-        let mut hash_bytes = crh_ivk(authorizing_key.into(), nullifier_deriving_key.to_bytes());
+    ) -> Self {
+        let hash_bytes = crh_ivk(authorizing_key.into(), nullifier_deriving_key.to_bytes());
 
-        // Drop the most significant five bits, so it can be interpreted
-        // as a scalar.
-        //
-        // I don't want to put this inside crh_ivk, but does it belong
-        // inside Scalar/Fr::from_bytes()? That seems the better
-        // place...
-        //
-        // https://github.com/zcash/librustzcash/blob/master/zcash_primitives/src/primitives.rs#L86
-        hash_bytes[31] &= 0b0000_0111;
-
-        Self {
-            network: Network::default(),
-            scalar: Scalar::from_bytes(&hash_bytes).unwrap(),
-        }
+        IncomingViewingKey::from(hash_bytes)
     }
 }
 
@@ -562,6 +596,8 @@ impl IncomingViewingKey {
 #[derive(Copy, Clone, Eq, PartialEq)]
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct Diversifier(pub [u8; 11]);
+
+// TODO: _DefaultDiversifier_
 
 impl fmt::Debug for Diversifier {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -650,25 +686,6 @@ impl TransmissionKey {
     }
 }
 
-#[cfg(test)]
-impl Arbitrary for TransmissionKey {
-    type Parameters = ();
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        (array::uniform32(any::<u8>()))
-            .prop_map(|_transmission_key_bytes| {
-                // TODO: actually generate something better than the identity.
-                //
-                // return Self::from_bytes(transmission_key_bytes);
-
-                return Self(jubjub::AffinePoint::identity());
-            })
-            .boxed()
-    }
-
-    type Strategy = BoxedStrategy<Self>;
-}
-
 /// Magic human-readable strings used to identify what networks
 /// Sapling FullViewingKeys are associated with when encoded/decoded
 /// with bech32.
@@ -753,48 +770,4 @@ impl std::str::FromStr for FullViewingKey {
             Err(_) => Err(SerializationError::Parse("bech32 decoding error")),
         }
     }
-}
-
-#[cfg(test)]
-mod tests {
-
-    use rand_core::OsRng;
-
-    use super::*;
-
-    #[test]
-    fn derive() {
-        let spending_key = SpendingKey::new(&mut OsRng);
-
-        let spend_authorizing_key = SpendAuthorizingKey::from(spending_key);
-        let proof_authorizing_key = ProofAuthorizingKey::from(spending_key);
-        let outgoing_viewing_key = OutgoingViewingKey::from(spending_key);
-
-        let authorizing_key = AuthorizingKey::from(spend_authorizing_key);
-        let nullifier_deriving_key = NullifierDerivingKey::from(proof_authorizing_key);
-        // "If ivk = 0, discard this key and start over with a new
-        // [spending key]."
-        // https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
-        let incoming_viewing_key =
-            IncomingViewingKey::from(authorizing_key, nullifier_deriving_key);
-
-        let diversifier = Diversifier::new(&mut OsRng);
-        let _transmission_key = TransmissionKey::from(incoming_viewing_key, diversifier);
-
-        let _full_viewing_key = FullViewingKey {
-            network: Network::default(),
-            authorizing_key,
-            nullifier_deriving_key,
-            outgoing_viewing_key,
-        };
-    }
-
-    // TODO: test vectors, not just random data
-}
-
-#[cfg(test)]
-proptest! {
-
-    //#[test]
-    // fn test() {}
 }
