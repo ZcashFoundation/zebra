@@ -6,17 +6,21 @@
 //!
 //! [ps]: https://zips.z.cash/protocol/protocol.pdf#sproutkeycomponents
 
-use std::fmt;
+use std::{fmt, io};
 
 use byteorder::{ByteOrder, LittleEndian};
 use rand_core::{CryptoRng, RngCore};
+use sha2;
 
 #[cfg(test)]
-use proptest::prelude::*;
+use proptest::{array, prelude::*};
 #[cfg(test)]
 use proptest_derive::Arbitrary;
 
-use sha2;
+use crate::{
+    serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize},
+    Network,
+};
 
 /// Our root secret key of the Sprout key derivation tree.
 ///
@@ -113,11 +117,122 @@ impl From<SpendingKey> for PayingKey {
 /// Derived from a _ReceivingKey_.
 pub type TransmissionKey = x25519_dalek::PublicKey;
 
+/// Magic numbers used to identify what networks Sprout Shielded
+/// Addresses are associated with.
+mod ivk_magics {
+    pub const MAINNET: [u8; 3] = [0xA8, 0xAB, 0xD3];
+    pub const TESTNET: [u8; 3] = [0xA8, 0xAC, 0x0C];
+}
+
 /// The recipient’s possession of the associated incoming viewing key
 /// is used to reconstruct the original note and memo field.
 pub struct IncomingViewingKey {
+    network: Network,
     paying_key: PayingKey,
     receiving_key: ReceivingKey,
+}
+
+// Can't derive PartialEq because ReceivingKey aka
+// x25519_dalek::StaticSecret does not impl it.
+impl PartialEq for IncomingViewingKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.network == other.network
+            && self.paying_key.0 == other.paying_key.0
+            && self.receiving_key.to_bytes() == other.receiving_key.to_bytes()
+    }
+}
+
+impl fmt::Debug for IncomingViewingKey {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("IncomingViewingKey")
+            .field("network", &self.network)
+            .field("paying_key", &hex::encode(&self.paying_key.0))
+            .field(
+                "receiving_key",
+                &hex::encode(&self.receiving_key.to_bytes()),
+            )
+            .finish()
+    }
+}
+
+impl ZcashSerialize for IncomingViewingKey {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        match self.network {
+            Network::Mainnet => writer.write_all(&ivk_magics::MAINNET[..])?,
+            _ => writer.write_all(&ivk_magics::TESTNET[..])?,
+        }
+        writer.write_all(&self.paying_key.0[..])?;
+        writer.write_all(&self.receiving_key.to_bytes())?;
+
+        Ok(())
+    }
+}
+
+impl ZcashDeserialize for IncomingViewingKey {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        let mut version_bytes = [0; 3];
+        reader.read_exact(&mut version_bytes)?;
+
+        let network = match version_bytes {
+            ivk_magics::MAINNET => Network::Mainnet,
+            ivk_magics::TESTNET => Network::Testnet,
+            _ => panic!(SerializationError::Parse(
+                "bad sprout shielded addr version/type",
+            )),
+        };
+
+        Ok(IncomingViewingKey {
+            network,
+            paying_key: PayingKey(reader.read_32_bytes()?),
+            receiving_key: ReceivingKey::from(reader.read_32_bytes()?),
+        })
+    }
+}
+
+impl fmt::Display for IncomingViewingKey {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut bytes = io::Cursor::new(Vec::new());
+
+        let _ = self.zcash_serialize(&mut bytes);
+
+        f.write_str(&bs58::encode(bytes.get_ref()).with_check().into_string())
+    }
+}
+
+impl std::str::FromStr for IncomingViewingKey {
+    type Err = SerializationError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let result = &bs58::decode(s).with_check(None).into_vec();
+
+        match result {
+            Ok(bytes) => Self::zcash_deserialize(&bytes[..]),
+            Err(_) => Err(SerializationError::Parse("bs58 decoding error")),
+        }
+    }
+}
+
+#[cfg(test)]
+impl Arbitrary for IncomingViewingKey {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        (
+            any::<Network>(),
+            array::uniform32(any::<u8>()),
+            array::uniform32(any::<u8>()),
+        )
+            .prop_map(|(network, paying_key_bytes, receiving_key_bytes)| {
+                return Self {
+                    network,
+                    paying_key: PayingKey(paying_key_bytes),
+                    receiving_key: ReceivingKey::from(receiving_key_bytes),
+                };
+            })
+            .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
 }
 
 #[cfg(test)]
@@ -143,6 +258,27 @@ mod tests {
 #[cfg(test)]
 proptest! {
 
-    // #[test]
-    // fn test() {}
+    #[test]
+    fn incoming_viewing_key_roundtrip(ivk in any::<IncomingViewingKey>()) {
+
+        let mut data = Vec::new();
+
+        ivk.zcash_serialize(&mut data).expect("t-addr should serialize");
+
+        let ivk2 = IncomingViewingKey::zcash_deserialize(&data[..]).expect("randomized ivk should deserialize");
+
+        prop_assert_eq![ivk, ivk2];
+
+    }
+
+    #[test]
+    fn incoming_viewing_key_string_roundtrip(ivk in any::<IncomingViewingKey>()) {
+
+        let string = ivk.to_string();
+
+        let ivk2 = string.parse::<IncomingViewingKey>().unwrap();
+
+        prop_assert_eq![ivk, ivk2];
+
+    }
 }
