@@ -514,6 +514,25 @@ impl From<[u8; 32]> for IncomingViewingKey {
     }
 }
 
+impl From<(AuthorizingKey, NullifierDerivingKey)> for IncomingViewingKey {
+    /// For this invocation of Blake2s-256 as _CRH^ivk_.
+    ///
+    /// https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
+    /// https://zips.z.cash/protocol/protocol.pdf#concreteprfs
+    /// https://zips.z.cash/protocol/protocol.pdf#jubjub
+    // TODO: return None if ivk = 0
+    //
+    // "If ivk = 0, discard this key and start over with a new
+    // [spending key]." - [§4.2.2][ps]
+    //
+    // [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
+    fn from((ask, nk): (AuthorizingKey, NullifierDerivingKey)) -> Self {
+        let hash_bytes = crh_ivk(ask.into(), nk.to_bytes());
+
+        IncomingViewingKey::from(hash_bytes)
+    }
+}
+
 impl From<IncomingViewingKey> for [u8; 32] {
     fn from(ivk: IncomingViewingKey) -> [u8; 32] {
         ivk.scalar.to_bytes()
@@ -560,30 +579,6 @@ impl std::str::FromStr for IncomingViewingKey {
             }
             Err(_) => Err(SerializationError::Parse("bech32 decoding error")),
         }
-    }
-}
-
-impl IncomingViewingKey {
-    /// For this invocation of Blake2s-256 as _CRH^ivk_.
-    ///
-    /// https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
-    /// https://zips.z.cash/protocol/protocol.pdf#concreteprfs
-    /// https://zips.z.cash/protocol/protocol.pdf#jubjub
-    // TODO: return None if ivk = 0
-    //
-    // "If ivk = 0, discard this key and start over with a new
-    // [spending key]." - [§4.2.2][ps]
-    //
-    // [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
-    //
-    // TODO: won't let me name this `from(arg1, arg2)` when I have From impl'd above?
-    pub fn from_keys(
-        authorizing_key: AuthorizingKey,
-        nullifier_deriving_key: NullifierDerivingKey,
-    ) -> Self {
-        let hash_bytes = crh_ivk(authorizing_key.into(), nullifier_deriving_key.to_bytes());
-
-        IncomingViewingKey::from(hash_bytes)
     }
 }
 

@@ -144,7 +144,7 @@ mod tests {
         let authorizing_key = sapling::AuthorizingKey::from(spend_authorizing_key);
         let nullifier_deriving_key = sapling::NullifierDerivingKey::from(proof_authorizing_key);
         let incoming_viewing_key =
-            sapling::IncomingViewingKey::from_keys(authorizing_key, nullifier_deriving_key);
+            sapling::IncomingViewingKey::from((authorizing_key, nullifier_deriving_key));
 
         let diversifier = sapling::Diversifier::new(&mut OsRng);
         let transmission_key = sapling::TransmissionKey::from(incoming_viewing_key, diversifier);
