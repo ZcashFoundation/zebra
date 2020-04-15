@@ -22,8 +22,8 @@ use crate::{
     Network,
 };
 
-/// Magic numbers used to identify what networks Sprout Shielded
-/// Addresses are associated with.
+/// Magic numbers used to identify with what networks Sprout Spending
+/// Keys are associated.
 mod sk_magics {
     pub const MAINNET: [u8; 2] = [0xAB, 0x36];
     pub const TESTNET: [u8; 2] = [0xAC, 0x08];
@@ -86,7 +86,7 @@ impl ZcashDeserialize for SpendingKey {
             sk_magics::MAINNET => Network::Mainnet,
             sk_magics::TESTNET => Network::Testnet,
             _ => panic!(SerializationError::Parse(
-                "bad sprout shielded addr version/type",
+                "bad sprout spending key version/type",
             )),
         };
 
