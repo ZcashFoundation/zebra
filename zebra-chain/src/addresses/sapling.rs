@@ -8,7 +8,7 @@ use std::{
 use bech32::{self, FromBase32, ToBase32};
 
 #[cfg(test)]
-use proptest::{arbitrary::Arbitrary, array, prelude::*};
+use proptest::prelude::*;
 
 use crate::{
     keys::sapling,
