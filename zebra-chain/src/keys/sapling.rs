@@ -160,6 +160,14 @@ fn diversify_hash(d: [u8; 11]) -> Option<jubjub::ExtendedPoint> {
 // exported.
 type Scalar = jubjub::Fr;
 
+/// Magic human-readable strings used to identify what networks
+/// Sapling Spending Keys are associated with when encoded/decoded
+/// with bech32.
+mod sk_hrp {
+    pub const MAINNET: &str = "secret-spending-key-main";
+    pub const TESTNET: &str = "secret-spending-key-test";
+}
+
 /// A _Spending Key_, as described in [protocol specification
 /// §4.2.2][ps].
 ///
@@ -168,7 +176,57 @@ type Scalar = jubjub::Fr;
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub struct SpendingKey(pub [u8; 32]);
+pub struct SpendingKey {
+    network: Network,
+    bytes: [u8; 32],
+}
+
+// TODO: impl a From that accepts a Network?
+
+impl From<[u8; 32]> for SpendingKey {
+    /// Generate a _SpendingKey_ from existing bytes.
+    fn from(bytes: [u8; 32]) -> Self {
+        Self {
+            network: Network::default(),
+            bytes,
+        }
+    }
+}
+
+impl fmt::Display for SpendingKey {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let hrp = match self.network {
+            Network::Mainnet => sk_hrp::MAINNET,
+            _ => sk_hrp::TESTNET,
+        };
+
+        bech32::encode_to_fmt(f, hrp, &self.bytes.to_base32()).unwrap()
+    }
+}
+
+impl std::str::FromStr for SpendingKey {
+    type Err = SerializationError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match bech32::decode(s) {
+            Ok((hrp, bytes)) => {
+                let decoded = Vec::<u8>::from_base32(&bytes).unwrap();
+
+                let mut decoded_bytes = [0u8; 32];
+                decoded_bytes[..].copy_from_slice(&decoded[0..32]);
+
+                Ok(SpendingKey {
+                    network: match hrp.as_str() {
+                        ivk_hrp::MAINNET => Network::Mainnet,
+                        _ => Network::Testnet,
+                    },
+                    bytes: decoded_bytes,
+                })
+            }
+            Err(_) => Err(SerializationError::Parse("bech32 decoding error")),
+        }
+    }
+}
 
 impl SpendingKey {
     /// Generate a new _SpendingKey_.
@@ -180,13 +238,6 @@ impl SpendingKey {
         csprng.fill_bytes(&mut bytes);
 
         Self::from(bytes)
-    }
-}
-
-impl From<[u8; 32]> for SpendingKey {
-    /// Generate a _SpendingKey_ from existing bytes.
-    fn from(bytes: [u8; 32]) -> SpendingKey {
-        SpendingKey(bytes)
     }
 }
 
@@ -222,7 +273,7 @@ impl From<SpendingKey> for SpendAuthorizingKey {
     /// https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
     /// https://zips.z.cash/protocol/protocol.pdf#concreteprfs
     fn from(spending_key: SpendingKey) -> SpendAuthorizingKey {
-        let hash_bytes = prf_expand(spending_key.0, 0);
+        let hash_bytes = prf_expand(spending_key.bytes, 0);
 
         Self(Scalar::from_bytes_wide(&hash_bytes))
     }
@@ -258,7 +309,7 @@ impl From<SpendingKey> for ProofAuthorizingKey {
     /// https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
     /// https://zips.z.cash/protocol/protocol.pdf#concreteprfs
     fn from(spending_key: SpendingKey) -> ProofAuthorizingKey {
-        let hash_bytes = prf_expand(spending_key.0, 1);
+        let hash_bytes = prf_expand(spending_key.bytes, 1);
 
         Self(Scalar::from_bytes_wide(&hash_bytes))
     }
@@ -294,7 +345,7 @@ impl From<SpendingKey> for OutgoingViewingKey {
     /// https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
     /// https://zips.z.cash/protocol/protocol.pdf#concreteprfs
     fn from(spending_key: SpendingKey) -> OutgoingViewingKey {
-        let hash_bytes = prf_expand(spending_key.0, 2);
+        let hash_bytes = prf_expand(spending_key.bytes, 2);
 
         let mut bytes = [0u8; 32];
         bytes[..].copy_from_slice(&hash_bytes[0..32]);
@@ -642,6 +693,8 @@ pub struct FullViewingKey {
     nullifier_deriving_key: NullifierDerivingKey,
     outgoing_viewing_key: OutgoingViewingKey,
 }
+
+// TODO: impl a From that accepts a Network?
 
 impl fmt::Debug for FullViewingKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
