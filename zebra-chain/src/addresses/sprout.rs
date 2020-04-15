@@ -52,17 +52,6 @@ impl fmt::Debug for SproutShieldedAddress {
     }
 }
 
-impl fmt::Display for SproutShieldedAddress {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut bytes = io::Cursor::new(Vec::new());
-        let _ = self.zcash_serialize(&mut bytes);
-
-        f.debug_tuple("SproutShieldedAddress")
-            .field(&bs58::encode(bytes.get_ref()).with_check().into_string())
-            .finish()
-    }
-}
-
 impl PartialEq for SproutShieldedAddress {
     fn eq(&self, other: &Self) -> bool {
         self.network == other.network
@@ -107,11 +96,13 @@ impl ZcashDeserialize for SproutShieldedAddress {
     }
 }
 
-impl<T: ?Sized + AsRef<[u8]>> From<&T> for SproutShieldedAddress {
-    fn from(s: &T) -> Self {
-        let bytes = &bs58::decode(s).with_check(None).into_vec().unwrap();
+impl fmt::Display for SproutShieldedAddress {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut bytes = io::Cursor::new(Vec::new());
 
-        Self::zcash_deserialize(&bytes[..]).expect("sprout z-addr should deserialize")
+        let _ = self.zcash_serialize(&mut bytes);
+
+        f.write_str(&bs58::encode(bytes.get_ref()).with_check().into_string())
     }
 }
 
@@ -160,38 +151,10 @@ mod tests {
 
     #[test]
     fn from_string_debug() {
-        let zc_addr = SproutShieldedAddress::from(
-            "zcU1Cd6zYyZCd2VJF8yKgmzjxdiiU1rgTTjEwoN1CGUWCziPkUTXUjXmX7TMqdMNsTfuiGN1jQoVN4kGxUR4sAPN4XZ7pxb"
-        );
+        let string = "zcU1Cd6zYyZCd2VJF8yKgmzjxdiiU1rgTTjEwoN1CGUWCziPkUTXUjXmX7TMqdMNsTfuiGN1jQoVN4kGxUR4sAPN4XZ7pxb";
+        let zc_addr = string.parse::<SproutShieldedAddress>().unwrap();
 
-        assert_eq!(
-            format!("{:?}", zc_addr),
-                "SproutShieldedAddress { network: Mainnet, paying_key: PayingKey(\"972caa450769480a995064693db07e0302afe6c3a737e8cc083215dfdfbea3a7\"), transmission_key: \"92c223a94d39e539b85fad3debadc980b4c64294ab8a66d04ca80be3dd7da763\" }"
-        );
-    }
-
-    #[test]
-    fn from_str_debug() {
-        let zc_addr = SproutShieldedAddress::from_str(
-            "zcU1Cd6zYyZCd2VJF8yKgmzjxdiiU1rgTTjEwoN1CGUWCziPkUTXUjXmX7TMqdMNsTfuiGN1jQoVN4kGxUR4sAPN4XZ7pxb"
-        ).expect("sprout z-addr string to parse");
-
-        assert_eq!(
-            format!("{:?}", zc_addr),
-                "SproutShieldedAddress { network: Mainnet, paying_key: PayingKey(\"972caa450769480a995064693db07e0302afe6c3a737e8cc083215dfdfbea3a7\"), transmission_key: \"92c223a94d39e539b85fad3debadc980b4c64294ab8a66d04ca80be3dd7da763\" }"
-        );
-    }
-
-    #[test]
-    fn display() {
-        let zc_addr = SproutShieldedAddress::from(
-            "zcU1Cd6zYyZCd2VJF8yKgmzjxdiiU1rgTTjEwoN1CGUWCziPkUTXUjXmX7TMqdMNsTfuiGN1jQoVN4kGxUR4sAPN4XZ7pxb"
-        );
-
-        assert_eq!(
-            format!("{}", zc_addr),
-                "SproutShieldedAddress(\"zcU1Cd6zYyZCd2VJF8yKgmzjxdiiU1rgTTjEwoN1CGUWCziPkUTXUjXmX7TMqdMNsTfuiGN1jQoVN4kGxUR4sAPN4XZ7pxb\")"
-        );
+        assert_eq!(string, zc_addr.to_string());
     }
 }
 
@@ -199,7 +162,7 @@ mod tests {
 proptest! {
 
     #[test]
-    fn sprout_address_roundtrip(zaddr in any::<SproutShieldedAddress>()) {
+    fn zcash_de_serialize_roundtrip(zaddr in any::<SproutShieldedAddress>()) {
 
         let mut data = Vec::new();
 
@@ -207,6 +170,16 @@ proptest! {
 
         let zaddr2 = SproutShieldedAddress::zcash_deserialize(&data[..])
             .expect("randomized sprout z-addr should deserialize");
+
+        prop_assert_eq![zaddr, zaddr2];
+    }
+
+    #[test]
+    fn zcash_base58check_roundtrip(zaddr in any::<SproutShieldedAddress>()) {
+
+        let string = zaddr.to_string();
+
+        let zaddr2 = string.parse::<SproutShieldedAddress>().unwrap();
 
         prop_assert_eq![zaddr, zaddr2];
     }
