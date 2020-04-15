@@ -5,8 +5,6 @@ use std::{
 
 #[cfg(test)]
 use proptest::{array, collection::vec, prelude::*};
-#[cfg(test)]
-use proptest_derive::Arbitrary;
 
 use crate::{
     proofs::ZkSnarkProof,
