@@ -8,8 +8,14 @@
 //! [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
 //! [3.1]: https://zips.z.cash/protocol/protocol.pdf#addressesandkeys
 
-use std::{convert::TryFrom, fmt, ops::Deref};
+use std::{
+    convert::{From, Into, TryFrom},
+    fmt,
+    io::{self, Write},
+    ops::Deref,
+};
 
+use bech32::{self, FromBase32, ToBase32};
 use blake2b_simd;
 use blake2s_simd;
 use jubjub;
@@ -20,6 +26,11 @@ use redjubjub::{self, SpendAuth};
 use proptest::{array, prelude::*};
 #[cfg(test)]
 use proptest_derive::Arbitrary;
+
+use crate::{
+    serialization::{ReadZcashExt, SerializationError},
+    Network,
+};
 
 /// The [Randomness Beacon][1] ("URS").
 ///
@@ -270,6 +281,13 @@ impl fmt::Debug for OutgoingViewingKey {
     }
 }
 
+impl From<[u8; 32]> for OutgoingViewingKey {
+    /// Generate an _OutgoingViewingKey_ from existing bytes.
+    fn from(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+}
+
 impl From<SpendingKey> for OutgoingViewingKey {
     /// For this invocation of Blake2b-512 as _PRF^expand_, t=2.
     ///
@@ -331,6 +349,12 @@ impl From<SpendAuthorizingKey> for AuthorizingKey {
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
 #[derive(Copy, Clone, PartialEq)]
 pub struct NullifierDerivingKey(pub jubjub::AffinePoint);
+
+impl From<[u8; 32]> for NullifierDerivingKey {
+    fn from(bytes: [u8; 32]) -> Self {
+        Self(jubjub::AffinePoint::from_bytes(bytes).unwrap())
+    }
+}
 
 impl Deref for NullifierDerivingKey {
     type Target = jubjub::AffinePoint;
@@ -543,6 +567,14 @@ impl Arbitrary for TransmissionKey {
     type Strategy = BoxedStrategy<Self>;
 }
 
+/// Magic human-readable strings used to identify what networks
+/// Sapling FullViewingKeys are associated with when encoded/decoded
+/// with bech32.
+mod fvk_hrp {
+    pub const MAINNET: &str = "zviews";
+    pub const TESTNET: &str = "zviewtestsapling";
+}
+
 /// Full Viewing Keys
 ///
 /// Allows recognizing both incoming and outgoing notes without having
@@ -554,9 +586,69 @@ impl Arbitrary for TransmissionKey {
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#saplingfullviewingkeyencoding
 pub struct FullViewingKey {
+    network: Network,
     authorizing_key: AuthorizingKey,
     nullifier_deriving_key: NullifierDerivingKey,
     outgoing_viewing_key: OutgoingViewingKey,
+}
+
+impl fmt::Debug for FullViewingKey {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("FullViewingKey")
+            .field("network", &self.network)
+            .field("authorizing_key", &self.authorizing_key)
+            .field("nullifier_deriving_key", &self.nullifier_deriving_key)
+            .field("outgoing_viewing_key", &self.outgoing_viewing_key)
+            .finish()
+    }
+}
+
+impl fmt::Display for FullViewingKey {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut bytes = io::Cursor::new(Vec::new());
+
+        let auth_key_bytes: [u8; 32] = self.authorizing_key.into();
+
+        let _ = bytes.write_all(&auth_key_bytes);
+        let _ = bytes.write_all(&self.nullifier_deriving_key.to_bytes());
+        let _ = bytes.write_all(&self.outgoing_viewing_key.0);
+
+        let hrp = match self.network {
+            Network::Mainnet => fvk_hrp::MAINNET,
+            _ => fvk_hrp::TESTNET,
+        };
+
+        bech32::encode_to_fmt(f, hrp, bytes.get_ref().to_base32()).unwrap()
+    }
+}
+
+impl std::str::FromStr for FullViewingKey {
+    type Err = SerializationError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match bech32::decode(s) {
+            Ok((hrp, bytes)) => {
+                let mut decoded_bytes = io::Cursor::new(Vec::<u8>::from_base32(&bytes).unwrap());
+
+                let authorizing_key_bytes = decoded_bytes.read_32_bytes()?;
+                let nullifier_deriving_key_bytes = decoded_bytes.read_32_bytes()?;
+                let outgoing_key_bytes = decoded_bytes.read_32_bytes()?;
+
+                Ok(FullViewingKey {
+                    network: match hrp.as_str() {
+                        fvk_hrp::MAINNET => Network::Mainnet,
+                        _ => Network::Testnet,
+                    },
+                    authorizing_key: AuthorizingKey::from(authorizing_key_bytes),
+                    nullifier_deriving_key: NullifierDerivingKey::from(
+                        nullifier_deriving_key_bytes,
+                    ),
+                    outgoing_viewing_key: OutgoingViewingKey::from(outgoing_key_bytes),
+                })
+            }
+            Err(_) => Err(SerializationError::Parse("bech32 decoding error")),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -593,6 +685,7 @@ mod tests {
         let _transmission_key = TransmissionKey::from(incoming_viewing_key, diversifier);
 
         let _full_viewing_key = FullViewingKey {
+            network: Network::default(),
             authorizing_key,
             nullifier_deriving_key,
             outgoing_viewing_key,
