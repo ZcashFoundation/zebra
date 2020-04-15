@@ -95,14 +95,14 @@ impl Arbitrary for SaplingShieldedAddress {
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         (
             any::<Network>(),
-            array::uniform11(any::<u8>()),
-            array::uniform32(any::<u8>()),
+            any::<sapling::Diversifier>(),
+            any::<sapling::TransmissionKey>(),
         )
-            .prop_map(|(network, diversifier_bytes, transmission_key_bytes)| {
+            .prop_map(|(network, diversifier, transmission_key)| {
                 return Self {
                     network,
-                    diversifier: sapling::Diversifier(diversifier_bytes),
-                    transmission_key: sapling::TransmissionKey::from_bytes(transmission_key_bytes),
+                    diversifier,
+                    transmission_key,
                 };
             })
             .boxed()
@@ -160,15 +160,14 @@ mod tests {
 #[cfg(test)]
 proptest! {
 
-    // TODO: uncomment when key strategies are fixed.
-    // #[test]
-    // fn sapling_address_roundtrip(zaddr in any::<SaplingShieldedAddress>()) {
+    #[test]
+    fn sapling_address_roundtrip(zaddr in any::<SaplingShieldedAddress>()) {
 
-    //     let string = zaddr.to_string();
+        let string = zaddr.to_string();
 
-    //     let zaddr2 = string.parse::<SaplingShieldedAddress>()
-    //         .expect("randomized sapling z-addr should deserialize");
+        let zaddr2 = string.parse::<SaplingShieldedAddress>()
+            .expect("randomized sapling z-addr should deserialize");
 
-    //     prop_assert_eq![zaddr, zaddr2];
-    // }
+        prop_assert_eq![zaddr, zaddr2];
+    }
 }
