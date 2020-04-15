@@ -17,7 +17,9 @@ use rand_core::{CryptoRng, RngCore};
 use redjubjub::{self, SpendAuth};
 
 #[cfg(test)]
-use proptest::{arbitrary::Arbitrary, array, prelude::*};
+use proptest::{array, prelude::*};
+#[cfg(test)]
+use proptest_derive::Arbitrary;
 
 /// The [Randomness Beacon][1] ("URS").
 ///
@@ -432,6 +434,7 @@ impl IncomingViewingKey {
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
 #[derive(Copy, Clone, Eq, PartialEq)]
+#[cfg_attr(test, derive(Arbitrary))]
 pub struct Diversifier(pub [u8; 11]);
 
 impl fmt::Debug for Diversifier {
@@ -521,15 +524,18 @@ impl TransmissionKey {
     }
 }
 
-// TODO: fix
 #[cfg(test)]
 impl Arbitrary for TransmissionKey {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         (array::uniform32(any::<u8>()))
-            .prop_map(|transmission_key_bytes| {
-                return Self::from_bytes(transmission_key_bytes);
+            .prop_map(|_transmission_key_bytes| {
+                // TODO: actually generate something better than the identity.
+                //
+                // return Self::from_bytes(transmission_key_bytes);
+
+                return Self(jubjub::AffinePoint::identity());
             })
             .boxed()
     }
