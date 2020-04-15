@@ -36,9 +36,9 @@ mod sk_magics {
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct SpendingKey {
-    ///
+    /// What would normally be the value inside a tuple struct.
     pub bytes: [u8; 32],
-    ///
+    /// The Zcash network with which this key is associated.
     pub network: Network,
 }
 
