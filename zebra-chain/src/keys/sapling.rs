@@ -394,6 +394,14 @@ impl From<ProofAuthorizingKey> for NullifierDerivingKey {
     }
 }
 
+/// Magic human-readable strings used to identify what networks
+/// Sapling IncomingViewingKeys are associated with when
+/// encoded/decoded with bech32.
+mod ivk_hrp {
+    pub const MAINNET: &str = "zivks";
+    pub const TESTNET: &str = "zivktestsapling";
+}
+
 /// An _Incoming Viewing Key_, as described in [protocol specification
 /// §4.2.2][ps].
 ///
@@ -401,13 +409,18 @@ impl From<ProofAuthorizingKey> for NullifierDerivingKey {
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
 #[derive(Copy, Clone, Eq, PartialEq)]
-pub struct IncomingViewingKey(pub Scalar);
+pub struct IncomingViewingKey {
+    network: Network,
+    scalar: Scalar,
+}
+
+// TODO: impl a From that accepts a Network?
 
 impl Deref for IncomingViewingKey {
     type Target = Scalar;
 
     fn deref(&self) -> &Scalar {
-        &self.0
+        &self.scalar
     }
 }
 
@@ -416,6 +429,41 @@ impl fmt::Debug for IncomingViewingKey {
         f.debug_tuple("IncomingViewingKey")
             .field(&hex::encode(self.to_bytes()))
             .finish()
+    }
+}
+
+impl fmt::Display for IncomingViewingKey {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let hrp = match self.network {
+            Network::Mainnet => ivk_hrp::MAINNET,
+            _ => ivk_hrp::TESTNET,
+        };
+
+        bech32::encode_to_fmt(f, hrp, &self.scalar.to_bytes().to_base32()).unwrap()
+    }
+}
+
+impl std::str::FromStr for IncomingViewingKey {
+    type Err = SerializationError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match bech32::decode(s) {
+            Ok((hrp, bytes)) => {
+                let decoded = Vec::<u8>::from_base32(&bytes).unwrap();
+
+                let mut scalar_bytes = [0u8; 32];
+                scalar_bytes[..].copy_from_slice(&decoded[0..32]);
+
+                Ok(IncomingViewingKey {
+                    network: match hrp.as_str() {
+                        ivk_hrp::MAINNET => Network::Mainnet,
+                        _ => Network::Testnet,
+                    },
+                    scalar: Scalar::from_bytes(&scalar_bytes).unwrap(),
+                })
+            }
+            Err(_) => Err(SerializationError::Parse("bech32 decoding error")),
+        }
     }
 }
 
@@ -447,7 +495,10 @@ impl IncomingViewingKey {
         // https://github.com/zcash/librustzcash/blob/master/zcash_primitives/src/primitives.rs#L86
         hash_bytes[31] &= 0b0000_0111;
 
-        Self(Scalar::from_bytes(&hash_bytes).unwrap())
+        Self {
+            network: Network::default(),
+            scalar: Scalar::from_bytes(&hash_bytes).unwrap(),
+        }
     }
 }
 
@@ -534,7 +585,7 @@ impl TransmissionKey {
     /// https://zips.z.cash/protocol/protocol.pdf#concretesaplingkeyagreement
     pub fn from(ivk: IncomingViewingKey, d: Diversifier) -> Self {
         Self(jubjub::AffinePoint::from(
-            diversify_hash(d.0).unwrap() * ivk.0,
+            diversify_hash(d.0).unwrap() * ivk.scalar,
         ))
     }
 
@@ -657,13 +708,6 @@ mod tests {
     use rand_core::OsRng;
 
     use super::*;
-
-    #[test]
-    fn check_deref() {
-        let ivk = IncomingViewingKey(jubjub::Fr::zero());
-
-        ivk.to_bytes();
-    }
 
     #[test]
     fn derive() {
