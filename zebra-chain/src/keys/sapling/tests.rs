@@ -1,7 +1,5 @@
 #[cfg(test)]
 use proptest::{array, prelude::*};
-#[cfg(test)]
-use proptest_derive::Arbitrary;
 
 use super::*;
 
@@ -45,7 +43,7 @@ mod tests {
         // [spending key]."
         // https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
         let incoming_viewing_key =
-            IncomingViewingKey::from_keys(authorizing_key, nullifier_deriving_key);
+            IncomingViewingKey::from((authorizing_key, nullifier_deriving_key));
 
         let diversifier = Diversifier::new(&mut OsRng);
         let _transmission_key = TransmissionKey::from(incoming_viewing_key, diversifier);
@@ -81,7 +79,7 @@ mod tests {
                 test_vector.nk
             );
             let incoming_viewing_key =
-                IncomingViewingKey::from_keys(authorizing_key, nullifier_deriving_key);
+                IncomingViewingKey::from((authorizing_key, nullifier_deriving_key));
             assert_eq!(incoming_viewing_key.scalar.to_bytes(), test_vector.ivk);
 
             // TODO: replace with _DefaultDiversifier_ with spending
