@@ -416,6 +416,12 @@ impl From<SpendAuthorizingKey> for AuthorizingKey {
     }
 }
 
+impl PartialEq for AuthorizingKey {
+    fn eq(&self, other: &Self) -> bool {
+        Into::<[u8; 32]>::into(self.0) == Into::<[u8; 32]>::into(other.0)
+    }
+}
+
 impl PartialEq<[u8; 32]> for AuthorizingKey {
     fn eq(&self, other: &[u8; 32]) -> bool {
         Into::<[u8; 32]>::into(self.0) == *other
@@ -772,6 +778,7 @@ mod fvk_hrp {
 /// test network, the Human-Readable Part is “zviewtestsapling”.
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#saplingfullviewingkeyencoding
+#[derive(Copy, Clone, PartialEq)]
 pub struct FullViewingKey {
     network: Network,
     authorizing_key: AuthorizingKey,
