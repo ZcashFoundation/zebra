@@ -8,13 +8,20 @@ impl Arbitrary for TransmissionKey {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        (array::uniform32(any::<u8>()))
-            .prop_map(|_transmission_key_bytes| {
-                // TODO: actually generate something better than the identity.
-                //
-                // return Self::from_bytes(transmission_key_bytes);
+        (any::<SpendingKey>())
+            .prop_map(|spending_key| {
+                let spend_authorizing_key = SpendAuthorizingKey::from(spending_key);
+                let proof_authorizing_key = ProofAuthorizingKey::from(spending_key);
 
-                return Self(jubjub::AffinePoint::identity());
+                let authorizing_key = AuthorizingKey::from(spend_authorizing_key);
+                let nullifier_deriving_key = NullifierDerivingKey::from(proof_authorizing_key);
+
+                let incoming_viewing_key =
+                    IncomingViewingKey::from((authorizing_key, nullifier_deriving_key));
+
+                let diversifier = Diversifier::from(spending_key);
+
+                return Self::from(incoming_viewing_key, diversifier);
             })
             .boxed()
     }
