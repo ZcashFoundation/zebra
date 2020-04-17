@@ -110,14 +110,20 @@ proptest! {
         let incoming_viewing_key =
             IncomingViewingKey::from((authorizing_key, nullifier_deriving_key));
 
-        // let diversifier = Diversifier::from(spending_key);
-        // let transmission_key = TransmissionKey::from(incoming_viewing_key, diversifier);
-
-
-        let string = incoming_viewing_key.to_string();
-        let incoming_viewing_key_2 = string.parse::<IncomingViewingKey>().unwrap();
-
+        let ivk_string = incoming_viewing_key.to_string();
+        let incoming_viewing_key_2: IncomingViewingKey = ivk_string.parse().unwrap();
         prop_assert_eq![incoming_viewing_key, incoming_viewing_key_2];
+
+        let full_viewing_key = FullViewingKey {
+            network: spending_key.network,
+            authorizing_key,
+            nullifier_deriving_key,
+            outgoing_viewing_key,
+        };
+
+        let fvk_string = full_viewing_key.to_string();
+        let full_viewing_key_2: FullViewingKey = fvk_string.parse().unwrap();
+        prop_assert_eq![full_viewing_key, full_viewing_key_2];
 
     }
 }
