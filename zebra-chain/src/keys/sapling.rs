@@ -399,8 +399,7 @@ impl Deref for AuthorizingKey {
 
 impl From<[u8; 32]> for AuthorizingKey {
     fn from(bytes: [u8; 32]) -> Self {
-        let sk = redjubjub::SecretKey::<SpendAuth>::try_from(bytes).unwrap();
-        Self(redjubjub::PublicKey::from(&sk))
+        Self(redjubjub::PublicKey::try_from(bytes).unwrap())
     }
 }
 
