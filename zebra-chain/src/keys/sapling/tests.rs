@@ -1,7 +1,7 @@
+use super::*;
+
 #[cfg(test)]
 use proptest::{array, prelude::*};
-
-use super::*;
 
 #[cfg(test)]
 impl Arbitrary for TransmissionKey {
@@ -95,6 +95,29 @@ mod tests {
 #[cfg(test)]
 proptest! {
 
-    //#[test]
-    // fn test() {}
+    #[test]
+    fn string_roundtrips(spending_key in any::<SpendingKey>()) {
+        let sk_string = spending_key.to_string();
+        let spending_key_2: SpendingKey = sk_string.parse().unwrap();
+        prop_assert_eq![spending_key, spending_key_2];
+
+        let spend_authorizing_key = SpendAuthorizingKey::from(spending_key);
+        let proof_authorizing_key = ProofAuthorizingKey::from(spending_key);
+        let outgoing_viewing_key = OutgoingViewingKey::from(spending_key);
+
+        let authorizing_key = AuthorizingKey::from(spend_authorizing_key);
+        let nullifier_deriving_key = NullifierDerivingKey::from(proof_authorizing_key);
+        let incoming_viewing_key =
+            IncomingViewingKey::from((authorizing_key, nullifier_deriving_key));
+
+        // let diversifier = Diversifier::from(spending_key);
+        // let transmission_key = TransmissionKey::from(incoming_viewing_key, diversifier);
+
+
+        let string = incoming_viewing_key.to_string();
+        let incoming_viewing_key_2 = string.parse::<IncomingViewingKey>().unwrap();
+
+        prop_assert_eq![incoming_viewing_key, incoming_viewing_key_2];
+
+    }
 }

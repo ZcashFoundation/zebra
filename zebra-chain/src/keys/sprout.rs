@@ -336,7 +336,7 @@ proptest! {
 
         let mut data = Vec::new();
 
-        sk.zcash_serialize(&mut data).expect("sprout spending keyshould serialize");
+        sk.zcash_serialize(&mut data).expect("sprout spending key should serialize");
 
         let sk2 = SpendingKey::zcash_deserialize(&data[..]).expect("randomized sprout spending key should deserialize");
 
@@ -360,7 +360,7 @@ proptest! {
 
         let mut data = Vec::new();
 
-        ivk.zcash_serialize(&mut data).expect("t-addr should serialize");
+        ivk.zcash_serialize(&mut data).expect("sprout z-addr should serialize");
 
         let ivk2 = IncomingViewingKey::zcash_deserialize(&data[..]).expect("randomized ivk should deserialize");
 
