@@ -56,13 +56,13 @@ pub const RANDOMNESS_BEACON_URS: &[u8; 64] =
 /// PRF^expand(sk, t) := BLAKE2b-512("Zcash_ExpandSeed", sk || t)
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#concreteprfs
-fn prf_expand(sk: [u8; 32], t: u8) -> [u8; 64] {
+fn prf_expand(sk: [u8; 32], t: &[u8]) -> [u8; 64] {
     let hash = blake2b_simd::Params::new()
         .hash_length(64)
         .personal(b"Zcash_ExpandSeed")
         .to_state()
         .update(&sk[..])
-        .update(&[t])
+        .update(t)
         .finalize();
 
     *hash.as_array()
@@ -278,7 +278,7 @@ impl From<SpendingKey> for SpendAuthorizingKey {
     /// https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
     /// https://zips.z.cash/protocol/protocol.pdf#concreteprfs
     fn from(spending_key: SpendingKey) -> SpendAuthorizingKey {
-        let hash_bytes = prf_expand(spending_key.bytes, 0);
+        let hash_bytes = prf_expand(spending_key.bytes, &[0]);
 
         Self(Scalar::from_bytes_wide(&hash_bytes))
     }
@@ -314,7 +314,7 @@ impl From<SpendingKey> for ProofAuthorizingKey {
     /// https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
     /// https://zips.z.cash/protocol/protocol.pdf#concreteprfs
     fn from(spending_key: SpendingKey) -> ProofAuthorizingKey {
-        let hash_bytes = prf_expand(spending_key.bytes, 1);
+        let hash_bytes = prf_expand(spending_key.bytes, &[1]);
 
         Self(Scalar::from_bytes_wide(&hash_bytes))
     }
@@ -356,7 +356,7 @@ impl From<SpendingKey> for OutgoingViewingKey {
     /// https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
     /// https://zips.z.cash/protocol/protocol.pdf#concreteprfs
     fn from(spending_key: SpendingKey) -> OutgoingViewingKey {
-        let hash_bytes = prf_expand(spending_key.bytes, 2);
+        let hash_bytes = prf_expand(spending_key.bytes, &[2]);
 
         let mut bytes = [0u8; 32];
         bytes[..].copy_from_slice(&hash_bytes[0..32]);
@@ -592,13 +592,40 @@ impl std::str::FromStr for IncomingViewingKey {
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct Diversifier(pub [u8; 11]);
 
-// TODO: _DefaultDiversifier_
-
 impl fmt::Debug for Diversifier {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_tuple("Diversifier")
             .field(&hex::encode(&self.0))
             .finish()
+    }
+}
+
+impl From<SpendingKey> for Diversifier {
+    /// Derives a [_default diversifier_][4.2.2] from a SpendingKey.
+    ///
+    /// 'For each spending key, there is also a default diversified
+    /// payment address with a “random-looking” diversifier. This
+    /// allows an implementation that does not expose diversified
+    /// addresses as a user-visible feature, to use a default address
+    /// that cannot be distinguished (without knowledge of the
+    /// spending key) from one with a random diversifier...'
+    ///
+    /// [4.2.2]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
+    fn from(sk: SpendingKey) -> Diversifier {
+        let mut i = 0u8;
+
+        loop {
+            let mut d_bytes = [0u8; 11];
+            d_bytes[..].copy_from_slice(&prf_expand(sk.bytes, &[3, i])[..11]);
+
+            if diversify_hash(d_bytes).is_some() {
+                break Self(d_bytes);
+            }
+
+            assert!(i < 255);
+
+            i += 1;
+        }
     }
 }
 
@@ -613,7 +640,6 @@ impl Diversifier {
     where
         T: RngCore + CryptoRng,
     {
-        // Is this loop overkill?
         loop {
             let mut bytes = [0u8; 11];
             csprng.fill_bytes(&mut bytes);

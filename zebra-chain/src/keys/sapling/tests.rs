@@ -82,9 +82,7 @@ mod tests {
                 IncomingViewingKey::from((authorizing_key, nullifier_deriving_key));
             assert_eq!(incoming_viewing_key.scalar.to_bytes(), test_vector.ivk);
 
-            // TODO: replace with _DefaultDiversifier_ with spending
-            // key bytes as input.
-            let diversifier = Diversifier(test_vector.default_d);
+            let diversifier = Diversifier::from(spending_key);
             assert_eq!(diversifier.0, test_vector.default_d);
 
             let transmission_key = TransmissionKey::from(incoming_viewing_key, diversifier);
