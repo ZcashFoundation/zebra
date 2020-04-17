@@ -344,12 +344,6 @@ impl From<[u8; 32]> for OutgoingViewingKey {
     }
 }
 
-impl From<OutgoingViewingKey> for [u8; 32] {
-    fn from(nk: OutgoingViewingKey) -> [u8; 32] {
-        nk.0
-    }
-}
-
 impl From<SpendingKey> for OutgoingViewingKey {
     /// For this invocation of Blake2b-512 as _PRF^expand_, t=2.
     ///
@@ -444,12 +438,6 @@ pub struct NullifierDerivingKey(pub jubjub::AffinePoint);
 impl From<[u8; 32]> for NullifierDerivingKey {
     fn from(bytes: [u8; 32]) -> Self {
         Self(jubjub::AffinePoint::from_bytes(bytes).unwrap())
-    }
-}
-
-impl From<NullifierDerivingKey> for [u8; 32] {
-    fn from(nk: NullifierDerivingKey) -> [u8; 32] {
-        nk.0.to_bytes()
     }
 }
 
@@ -576,12 +564,6 @@ impl From<(AuthorizingKey, NullifierDerivingKey)> for IncomingViewingKey {
         let hash_bytes = crh_ivk(ask.into(), nk.to_bytes());
 
         IncomingViewingKey::from(hash_bytes)
-    }
-}
-
-impl From<IncomingViewingKey> for [u8; 32] {
-    fn from(ivk: IncomingViewingKey) -> [u8; 32] {
-        ivk.scalar.to_bytes()
     }
 }
 
