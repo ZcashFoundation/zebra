@@ -18,6 +18,7 @@ use std::{
     fmt,
     io::{self, Write},
     ops::Deref,
+    str::FromStr,
 };
 
 use bech32::{self, FromBase32, ToBase32};
@@ -209,7 +210,7 @@ impl fmt::Display for SpendingKey {
     }
 }
 
-impl std::str::FromStr for SpendingKey {
+impl FromStr for SpendingKey {
     type Err = SerializationError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -365,6 +366,18 @@ impl From<SpendingKey> for OutgoingViewingKey {
     }
 }
 
+impl PartialEq<[u8; 32]> for OutgoingViewingKey {
+    fn eq(&self, other: &[u8; 32]) -> bool {
+        self.0 == *other
+    }
+}
+
+impl PartialEq<OutgoingViewingKey> for [u8; 32] {
+    fn eq(&self, other: &OutgoingViewingKey) -> bool {
+        *self == other.0
+    }
+}
+
 /// An _Authorizing Key_, as described in [protocol specification
 /// §4.2.2][ps].
 ///
@@ -400,6 +413,18 @@ impl From<SpendAuthorizingKey> for AuthorizingKey {
     fn from(ask: SpendAuthorizingKey) -> Self {
         let sk = redjubjub::SecretKey::<SpendAuth>::try_from(ask.to_bytes()).unwrap();
         Self(redjubjub::PublicKey::from(&sk))
+    }
+}
+
+impl PartialEq<[u8; 32]> for AuthorizingKey {
+    fn eq(&self, other: &[u8; 32]) -> bool {
+        Into::<[u8; 32]>::into(self.0) == *other
+    }
+}
+
+impl PartialEq<AuthorizingKey> for [u8; 32] {
+    fn eq(&self, other: &AuthorizingKey) -> bool {
+        *self == Into::<[u8; 32]>::into(other.0)
     }
 }
 
@@ -482,8 +507,6 @@ pub struct IncomingViewingKey {
     scalar: Scalar,
 }
 
-// TODO: impl a top-level to_bytes or PartialEq between this and [u8; 32]
-
 // TODO: impl a From that accepts a Network?
 
 impl Deref for IncomingViewingKey {
@@ -491,6 +514,25 @@ impl Deref for IncomingViewingKey {
 
     fn deref(&self) -> &Scalar {
         &self.scalar
+    }
+}
+
+impl fmt::Debug for IncomingViewingKey {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple("IncomingViewingKey")
+            .field(&hex::encode(self.to_bytes()))
+            .finish()
+    }
+}
+
+impl fmt::Display for IncomingViewingKey {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let hrp = match self.network {
+            Network::Mainnet => ivk_hrp::MAINNET,
+            _ => ivk_hrp::TESTNET,
+        };
+
+        bech32::encode_to_fmt(f, hrp, &self.scalar.to_bytes().to_base32()).unwrap()
     }
 }
 
@@ -539,26 +581,7 @@ impl From<IncomingViewingKey> for [u8; 32] {
     }
 }
 
-impl fmt::Debug for IncomingViewingKey {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple("IncomingViewingKey")
-            .field(&hex::encode(self.to_bytes()))
-            .finish()
-    }
-}
-
-impl fmt::Display for IncomingViewingKey {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let hrp = match self.network {
-            Network::Mainnet => ivk_hrp::MAINNET,
-            _ => ivk_hrp::TESTNET,
-        };
-
-        bech32::encode_to_fmt(f, hrp, &self.scalar.to_bytes().to_base32()).unwrap()
-    }
-}
-
-impl std::str::FromStr for IncomingViewingKey {
+impl FromStr for IncomingViewingKey {
     type Err = SerializationError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -579,6 +602,18 @@ impl std::str::FromStr for IncomingViewingKey {
             }
             Err(_) => Err(SerializationError::Parse("bech32 decoding error")),
         }
+    }
+}
+
+impl PartialEq<[u8; 32]> for IncomingViewingKey {
+    fn eq(&self, other: &[u8; 32]) -> bool {
+        self.scalar.to_bytes() == *other
+    }
+}
+
+impl PartialEq<IncomingViewingKey> for [u8; 32] {
+    fn eq(&self, other: &IncomingViewingKey) -> bool {
+        *self == other.scalar.to_bytes()
     }
 }
 
@@ -626,6 +661,18 @@ impl From<SpendingKey> for Diversifier {
 
             i += 1;
         }
+    }
+}
+
+impl PartialEq<[u8; 11]> for Diversifier {
+    fn eq(&self, other: &[u8; 11]) -> bool {
+        self.0 == *other
+    }
+}
+
+impl PartialEq<Diversifier> for [u8; 11] {
+    fn eq(&self, other: &Diversifier) -> bool {
+        *self == other.0
     }
 }
 
@@ -764,7 +811,7 @@ impl fmt::Display for FullViewingKey {
     }
 }
 
-impl std::str::FromStr for FullViewingKey {
+impl FromStr for FullViewingKey {
     type Err = SerializationError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
