@@ -344,6 +344,12 @@ impl From<[u8; 32]> for OutgoingViewingKey {
     }
 }
 
+impl From<OutgoingViewingKey> for [u8; 32] {
+    fn from(ovk: OutgoingViewingKey) -> [u8; 32] {
+        ovk.0
+    }
+}
+
 impl From<SpendingKey> for OutgoingViewingKey {
     /// For this invocation of Blake2b-512 as _PRF^expand_, t=2.
     ///
@@ -381,14 +387,6 @@ impl PartialEq<OutgoingViewingKey> for [u8; 32] {
 #[derive(Copy, Clone, Debug)]
 pub struct AuthorizingKey(pub redjubjub::PublicKey<SpendAuth>);
 
-impl Deref for AuthorizingKey {
-    type Target = redjubjub::PublicKey<SpendAuth>;
-
-    fn deref(&self) -> &redjubjub::PublicKey<SpendAuth> {
-        &self.0
-    }
-}
-
 impl From<[u8; 32]> for AuthorizingKey {
     fn from(bytes: [u8; 32]) -> Self {
         Self(redjubjub::PublicKey::try_from(bytes).unwrap())
@@ -420,12 +418,6 @@ impl PartialEq<[u8; 32]> for AuthorizingKey {
     }
 }
 
-impl PartialEq<AuthorizingKey> for [u8; 32] {
-    fn eq(&self, other: &AuthorizingKey) -> bool {
-        *self == Into::<[u8; 32]>::into(other.0)
-    }
-}
-
 /// A _Nullifier Deriving Key_, as described in [protocol
 /// specification §4.2.2][ps].
 ///
@@ -438,6 +430,12 @@ pub struct NullifierDerivingKey(pub jubjub::AffinePoint);
 impl From<[u8; 32]> for NullifierDerivingKey {
     fn from(bytes: [u8; 32]) -> Self {
         Self(jubjub::AffinePoint::from_bytes(bytes).unwrap())
+    }
+}
+
+impl From<NullifierDerivingKey> for [u8; 32] {
+    fn from(nk: NullifierDerivingKey) -> [u8; 32] {
+        nk.0.to_bytes()
     }
 }
 
@@ -501,18 +499,10 @@ pub struct IncomingViewingKey {
 
 // TODO: impl a From that accepts a Network?
 
-impl Deref for IncomingViewingKey {
-    type Target = Scalar;
-
-    fn deref(&self) -> &Scalar {
-        &self.scalar
-    }
-}
-
 impl fmt::Debug for IncomingViewingKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_tuple("IncomingViewingKey")
-            .field(&hex::encode(self.to_bytes()))
+            .field(&hex::encode(self.scalar.to_bytes()))
             .finish()
     }
 }
@@ -542,6 +532,7 @@ impl From<[u8; 32]> for IncomingViewingKey {
         bytes[31] &= 0b0000_0111;
 
         Self {
+            // TODO: handle setting the Network better.
             network: Network::default(),
             scalar: Scalar::from_bytes(&bytes).unwrap(),
         }
@@ -597,12 +588,6 @@ impl PartialEq<[u8; 32]> for IncomingViewingKey {
     }
 }
 
-impl PartialEq<IncomingViewingKey> for [u8; 32] {
-    fn eq(&self, other: &IncomingViewingKey) -> bool {
-        *self == other.scalar.to_bytes()
-    }
-}
-
 /// A _Diversifier_, as described in [protocol specification §4.2.2][ps].
 ///
 /// Combined with an _IncomingViewingKey_, produces a _diversified
@@ -653,12 +638,6 @@ impl From<SpendingKey> for Diversifier {
 impl PartialEq<[u8; 11]> for Diversifier {
     fn eq(&self, other: &[u8; 11]) -> bool {
         self.0 == *other
-    }
-}
-
-impl PartialEq<Diversifier> for [u8; 11] {
-    fn eq(&self, other: &Diversifier) -> bool {
-        *self == other.0
     }
 }
 
@@ -783,11 +762,9 @@ impl fmt::Display for FullViewingKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut bytes = io::Cursor::new(Vec::new());
 
-        let auth_key_bytes: [u8; 32] = self.authorizing_key.into();
-
-        let _ = bytes.write_all(&auth_key_bytes);
-        let _ = bytes.write_all(&self.nullifier_deriving_key.to_bytes());
-        let _ = bytes.write_all(&self.outgoing_viewing_key.0);
+        let _ = bytes.write_all(&Into::<[u8; 32]>::into(self.authorizing_key));
+        let _ = bytes.write_all(&Into::<[u8; 32]>::into(self.nullifier_deriving_key));
+        let _ = bytes.write_all(&Into::<[u8; 32]>::into(self.outgoing_viewing_key));
 
         let hrp = match self.network {
             Network::Mainnet => fvk_hrp::MAINNET,

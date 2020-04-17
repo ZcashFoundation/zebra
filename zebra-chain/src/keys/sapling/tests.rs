@@ -114,8 +114,9 @@ proptest! {
 
         let authorizing_key = AuthorizingKey::from(spend_authorizing_key);
         let nullifier_deriving_key = NullifierDerivingKey::from(proof_authorizing_key);
-        let incoming_viewing_key =
+        let mut incoming_viewing_key =
             IncomingViewingKey::from((authorizing_key, nullifier_deriving_key));
+        incoming_viewing_key.network = spending_key.network;
 
         let ivk_string = incoming_viewing_key.to_string();
         let incoming_viewing_key_2: IncomingViewingKey = ivk_string.parse().unwrap();
