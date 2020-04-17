@@ -28,8 +28,6 @@ use jubjub;
 use rand_core::{CryptoRng, RngCore};
 use redjubjub::{self, SpendAuth};
 
-// #[cfg(test)]
-// use proptest::{array, prelude::*};
 #[cfg(test)]
 use proptest_derive::Arbitrary;
 

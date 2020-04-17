@@ -1,7 +1,7 @@
 use super::*;
 
 #[cfg(test)]
-use proptest::{array, prelude::*};
+use proptest::prelude::*;
 
 #[cfg(test)]
 impl Arbitrary for TransmissionKey {
