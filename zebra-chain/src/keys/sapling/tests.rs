@@ -66,24 +66,18 @@ mod tests {
             let proof_authorizing_key = ProofAuthorizingKey::from(spending_key);
             assert_eq!(proof_authorizing_key.to_bytes(), test_vector.nsk);
             let outgoing_viewing_key = OutgoingViewingKey::from(spending_key);
-            assert_eq!(
-                Into::<[u8; 32]>::into(outgoing_viewing_key),
-                test_vector.ovk
-            );
+            assert_eq!(outgoing_viewing_key, test_vector.ovk);
 
             let authorizing_key = AuthorizingKey::from(spend_authorizing_key);
-            assert_eq!(Into::<[u8; 32]>::into(authorizing_key), test_vector.ak);
+            assert_eq!(authorizing_key, test_vector.ak);
             let nullifier_deriving_key = NullifierDerivingKey::from(proof_authorizing_key);
-            assert_eq!(
-                Into::<[u8; 32]>::into(nullifier_deriving_key),
-                test_vector.nk
-            );
+            assert_eq!(nullifier_deriving_key.to_bytes(), test_vector.nk);
             let incoming_viewing_key =
                 IncomingViewingKey::from((authorizing_key, nullifier_deriving_key));
-            assert_eq!(incoming_viewing_key.scalar.to_bytes(), test_vector.ivk);
+            assert_eq!(incoming_viewing_key, test_vector.ivk);
 
             let diversifier = Diversifier::from(spending_key);
-            assert_eq!(diversifier.0, test_vector.default_d);
+            assert_eq!(diversifier, test_vector.default_d);
 
             let transmission_key = TransmissionKey::from(incoming_viewing_key, diversifier);
             assert_eq!(transmission_key.to_bytes(), test_vector.default_pk_d);
