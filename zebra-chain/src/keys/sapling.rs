@@ -182,6 +182,7 @@ mod sk_hrp {
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(test, derive(Arbitrary))]
 pub struct SpendingKey {
     network: Network,
     bytes: [u8; 32],
@@ -223,7 +224,7 @@ impl FromStr for SpendingKey {
 
                 Ok(SpendingKey {
                     network: match hrp.as_str() {
-                        ivk_hrp::MAINNET => Network::Mainnet,
+                        sk_hrp::MAINNET => Network::Mainnet,
                         _ => Network::Testnet,
                     },
                     bytes: decoded_bytes,
@@ -713,8 +714,6 @@ impl Diversifier {
 #[derive(Copy, Clone, PartialEq)]
 pub struct TransmissionKey(pub jubjub::AffinePoint);
 
-impl Eq for TransmissionKey {}
-
 impl Deref for TransmissionKey {
     type Target = jubjub::AffinePoint;
 
@@ -731,6 +730,8 @@ impl fmt::Debug for TransmissionKey {
             .finish()
     }
 }
+
+impl Eq for TransmissionKey {}
 
 impl TransmissionKey {
     /// This includes _KA^Sapling.DerivePublic(ivk, G_d)_, which is just a
