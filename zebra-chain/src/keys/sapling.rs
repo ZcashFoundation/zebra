@@ -17,7 +17,6 @@ use std::{
     convert::{From, Into, TryFrom},
     fmt,
     io::{self, Write},
-    ops::Deref,
     str::FromStr,
 };
 
@@ -253,21 +252,26 @@ impl SpendingKey {
 /// _Spend Description_, proving ownership of notes.
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
+#[derive(Copy, Clone, Eq, PartialEq)]
 pub struct SpendAuthorizingKey(pub Scalar);
-
-impl Deref for SpendAuthorizingKey {
-    type Target = Scalar;
-
-    fn deref(&self) -> &Scalar {
-        &self.0
-    }
-}
 
 impl fmt::Debug for SpendAuthorizingKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_tuple("SpendAuthorizingKey")
-            .field(&hex::encode(self.to_bytes()))
+            .field(&hex::encode(<[u8; 32]>::from(*self)))
             .finish()
+    }
+}
+
+impl From<[u8; 32]> for SpendAuthorizingKey {
+    fn from(bytes: [u8; 32]) -> Self {
+        Self(Scalar::from_bytes(&bytes).unwrap())
+    }
+}
+
+impl From<SpendAuthorizingKey> for [u8; 32] {
+    fn from(sk: SpendAuthorizingKey) -> Self {
+        sk.0.to_bytes()
     }
 }
 
@@ -284,27 +288,38 @@ impl From<SpendingKey> for SpendAuthorizingKey {
     }
 }
 
+impl PartialEq<[u8; 32]> for SpendAuthorizingKey {
+    fn eq(&self, other: &[u8; 32]) -> bool {
+        <[u8; 32]>::from(*self) == *other
+    }
+}
+
 /// A _Proof Authorizing Key_, as described in [protocol specification
 /// §4.2.2][ps].
 ///
 /// Used in the _Spend Statement_ to prove nullifier integrity.
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
+#[derive(Copy, Clone, Eq, PartialEq)]
 pub struct ProofAuthorizingKey(pub Scalar);
-
-impl Deref for ProofAuthorizingKey {
-    type Target = Scalar;
-
-    fn deref(&self) -> &Scalar {
-        &self.0
-    }
-}
 
 impl fmt::Debug for ProofAuthorizingKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_tuple("ProofAuthorizingKey")
-            .field(&hex::encode(&self.to_bytes()))
+            .field(&hex::encode(<[u8; 32]>::from(*self)))
             .finish()
+    }
+}
+
+impl From<[u8; 32]> for ProofAuthorizingKey {
+    fn from(bytes: [u8; 32]) -> Self {
+        Self(Scalar::from_bytes(&bytes).unwrap())
+    }
+}
+
+impl From<ProofAuthorizingKey> for [u8; 32] {
+    fn from(sk: ProofAuthorizingKey) -> Self {
+        sk.0.to_bytes()
     }
 }
 
@@ -317,6 +332,12 @@ impl From<SpendingKey> for ProofAuthorizingKey {
         let hash_bytes = prf_expand(spending_key.bytes, &[1]);
 
         Self(Scalar::from_bytes_wide(&hash_bytes))
+    }
+}
+
+impl PartialEq<[u8; 32]> for ProofAuthorizingKey {
+    fn eq(&self, other: &[u8; 32]) -> bool {
+        <[u8; 32]>::from(*self) == *other
     }
 }
 
@@ -371,12 +392,6 @@ impl PartialEq<[u8; 32]> for OutgoingViewingKey {
     }
 }
 
-impl PartialEq<OutgoingViewingKey> for [u8; 32] {
-    fn eq(&self, other: &OutgoingViewingKey) -> bool {
-        *self == other.0
-    }
-}
-
 /// An _Authorizing Key_, as described in [protocol specification
 /// §4.2.2][ps].
 ///
@@ -386,6 +401,8 @@ impl PartialEq<OutgoingViewingKey> for [u8; 32] {
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
 #[derive(Copy, Clone, Debug)]
 pub struct AuthorizingKey(pub redjubjub::PublicKey<SpendAuth>);
+
+impl Eq for AuthorizingKey {}
 
 impl From<[u8; 32]> for AuthorizingKey {
     fn from(bytes: [u8; 32]) -> Self {
@@ -401,20 +418,20 @@ impl From<AuthorizingKey> for [u8; 32] {
 
 impl From<SpendAuthorizingKey> for AuthorizingKey {
     fn from(ask: SpendAuthorizingKey) -> Self {
-        let sk = redjubjub::SecretKey::<SpendAuth>::try_from(ask.to_bytes()).unwrap();
+        let sk = redjubjub::SecretKey::<SpendAuth>::try_from(<[u8; 32]>::from(ask)).unwrap();
         Self(redjubjub::PublicKey::from(&sk))
     }
 }
 
 impl PartialEq for AuthorizingKey {
     fn eq(&self, other: &Self) -> bool {
-        Into::<[u8; 32]>::into(self.0) == Into::<[u8; 32]>::into(other.0)
+        <[u8; 32]>::from(self.0) == <[u8; 32]>::from(other.0)
     }
 }
 
 impl PartialEq<[u8; 32]> for AuthorizingKey {
     fn eq(&self, other: &[u8; 32]) -> bool {
-        Into::<[u8; 32]>::into(self.0) == *other
+        <[u8; 32]>::from(self.0) == *other
     }
 }
 
@@ -427,32 +444,26 @@ impl PartialEq<[u8; 32]> for AuthorizingKey {
 #[derive(Copy, Clone, PartialEq)]
 pub struct NullifierDerivingKey(pub jubjub::AffinePoint);
 
+impl fmt::Debug for NullifierDerivingKey {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("NullifierDerivingKey")
+            .field("u", &hex::encode(self.0.get_u().to_bytes()))
+            .field("v", &hex::encode(self.0.get_v().to_bytes()))
+            .finish()
+    }
+}
+
 impl From<[u8; 32]> for NullifierDerivingKey {
     fn from(bytes: [u8; 32]) -> Self {
         Self(jubjub::AffinePoint::from_bytes(bytes).unwrap())
     }
 }
 
+impl Eq for NullifierDerivingKey {}
+
 impl From<NullifierDerivingKey> for [u8; 32] {
     fn from(nk: NullifierDerivingKey) -> [u8; 32] {
         nk.0.to_bytes()
-    }
-}
-
-impl Deref for NullifierDerivingKey {
-    type Target = jubjub::AffinePoint;
-
-    fn deref(&self) -> &jubjub::AffinePoint {
-        &self.0
-    }
-}
-
-impl fmt::Debug for NullifierDerivingKey {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("NullifierDerivingKey")
-            .field("u", &hex::encode(self.get_u().to_bytes()))
-            .field("v", &hex::encode(self.get_v().to_bytes()))
-            .finish()
     }
 }
 
@@ -474,6 +485,12 @@ impl From<ProofAuthorizingKey> for NullifierDerivingKey {
         // this to match the math in the spec / general scalar mult
         // notation convention.
         Self(jubjub::AffinePoint::from(generator_point * nsk.0))
+    }
+}
+
+impl PartialEq<[u8; 32]> for NullifierDerivingKey {
+    fn eq(&self, other: &[u8; 32]) -> bool {
+        <[u8; 32]>::from(*self) == *other
     }
 }
 
@@ -552,7 +569,7 @@ impl From<(AuthorizingKey, NullifierDerivingKey)> for IncomingViewingKey {
     //
     // [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
     fn from((ask, nk): (AuthorizingKey, NullifierDerivingKey)) -> Self {
-        let hash_bytes = crh_ivk(ask.into(), nk.to_bytes());
+        let hash_bytes = crh_ivk(ask.into(), nk.into());
 
         IncomingViewingKey::from(hash_bytes)
     }
@@ -603,6 +620,18 @@ impl fmt::Debug for Diversifier {
         f.debug_tuple("Diversifier")
             .field(&hex::encode(&self.0))
             .finish()
+    }
+}
+
+impl From<[u8; 11]> for Diversifier {
+    fn from(bytes: [u8; 11]) -> Self {
+        Self(bytes)
+    }
+}
+
+impl From<Diversifier> for [u8; 11] {
+    fn from(d: Diversifier) -> [u8; 11] {
+        d.0
     }
 }
 
@@ -678,44 +707,50 @@ impl Diversifier {
 #[derive(Copy, Clone, PartialEq)]
 pub struct TransmissionKey(pub jubjub::AffinePoint);
 
-impl Deref for TransmissionKey {
-    type Target = jubjub::AffinePoint;
-
-    fn deref(&self) -> &jubjub::AffinePoint {
-        &self.0
-    }
-}
-
 impl fmt::Debug for TransmissionKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("TransmissionKey")
-            .field("u", &hex::encode(self.get_u().to_bytes()))
-            .field("v", &hex::encode(self.get_v().to_bytes()))
+            .field("u", &hex::encode(self.0.get_u().to_bytes()))
+            .field("v", &hex::encode(self.0.get_v().to_bytes()))
             .finish()
     }
 }
 
 impl Eq for TransmissionKey {}
 
-impl TransmissionKey {
-    /// This includes _KA^Sapling.DerivePublic(ivk, G_d)_, which is just a
-    /// scalar mult _[ivk]G_d_.
-    ///
-    /// https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
-    /// https://zips.z.cash/protocol/protocol.pdf#concretesaplingkeyagreement
-    pub fn from(ivk: IncomingViewingKey, d: Diversifier) -> Self {
-        Self(jubjub::AffinePoint::from(
-            diversify_hash(d.0).unwrap() * ivk.scalar,
-        ))
-    }
-
+impl From<[u8; 32]> for TransmissionKey {
     /// Attempts to interpret a byte representation of an
     /// affine point, failing if the element is not on
     /// the curve or non-canonical.
     ///
     /// https://github.com/zkcrypto/jubjub/blob/master/src/lib.rs#L411
-    pub fn from_bytes(b: [u8; 32]) -> Self {
-        Self(jubjub::AffinePoint::from_bytes(b).unwrap())
+    fn from(bytes: [u8; 32]) -> Self {
+        Self(jubjub::AffinePoint::from_bytes(bytes).unwrap())
+    }
+}
+
+impl From<TransmissionKey> for [u8; 32] {
+    fn from(pk_d: TransmissionKey) -> [u8; 32] {
+        pk_d.0.to_bytes()
+    }
+}
+
+impl From<(IncomingViewingKey, Diversifier)> for TransmissionKey {
+    /// This includes _KA^Sapling.DerivePublic(ivk, G_d)_, which is just a
+    /// scalar mult _[ivk]G_d_.
+    ///
+    /// https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
+    /// https://zips.z.cash/protocol/protocol.pdf#concretesaplingkeyagreement
+    fn from((ivk, d): (IncomingViewingKey, Diversifier)) -> Self {
+        Self(jubjub::AffinePoint::from(
+            diversify_hash(d.0).unwrap() * ivk.scalar,
+        ))
+    }
+}
+
+impl PartialEq<[u8; 32]> for TransmissionKey {
+    fn eq(&self, other: &[u8; 32]) -> bool {
+        <[u8; 32]>::from(*self) == *other
     }
 }
 
@@ -737,7 +772,7 @@ mod fvk_hrp {
 /// test network, the Human-Readable Part is “zviewtestsapling”.
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#saplingfullviewingkeyencoding
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, Eq, PartialEq)]
 pub struct FullViewingKey {
     network: Network,
     authorizing_key: AuthorizingKey,
@@ -762,9 +797,9 @@ impl fmt::Display for FullViewingKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut bytes = io::Cursor::new(Vec::new());
 
-        let _ = bytes.write_all(&Into::<[u8; 32]>::into(self.authorizing_key));
-        let _ = bytes.write_all(&Into::<[u8; 32]>::into(self.nullifier_deriving_key));
-        let _ = bytes.write_all(&Into::<[u8; 32]>::into(self.outgoing_viewing_key));
+        let _ = bytes.write_all(&<[u8; 32]>::from(self.authorizing_key));
+        let _ = bytes.write_all(&<[u8; 32]>::from(self.nullifier_deriving_key));
+        let _ = bytes.write_all(&<[u8; 32]>::from(self.outgoing_viewing_key));
 
         let hrp = match self.network {
             Network::Mainnet => fvk_hrp::MAINNET,

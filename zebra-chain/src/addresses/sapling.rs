@@ -49,8 +49,8 @@ impl fmt::Display for SaplingShieldedAddress {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut bytes = io::Cursor::new(Vec::new());
 
-        let _ = bytes.write_all(&self.diversifier.0[..]);
-        let _ = bytes.write_all(&self.transmission_key.to_bytes());
+        let _ = bytes.write_all(&<[u8; 11]>::from(self.diversifier));
+        let _ = bytes.write_all(&<[u8; 32]>::from(self.transmission_key));
 
         let hrp = match self.network {
             Network::Mainnet => human_readable_parts::MAINNET,
@@ -79,8 +79,8 @@ impl std::str::FromStr for SaplingShieldedAddress {
                         human_readable_parts::MAINNET => Network::Mainnet,
                         _ => Network::Testnet,
                     },
-                    diversifier: sapling::Diversifier(diversifier_bytes),
-                    transmission_key: sapling::TransmissionKey::from_bytes(transmission_key_bytes),
+                    diversifier: sapling::Diversifier::from(diversifier_bytes),
+                    transmission_key: sapling::TransmissionKey::from(transmission_key_bytes),
                 })
             }
             Err(_) => Err(SerializationError::Parse("bech32 decoding error")),
@@ -147,7 +147,7 @@ mod tests {
             sapling::IncomingViewingKey::from((authorizing_key, nullifier_deriving_key));
 
         let diversifier = sapling::Diversifier::new(&mut OsRng);
-        let transmission_key = sapling::TransmissionKey::from(incoming_viewing_key, diversifier);
+        let transmission_key = sapling::TransmissionKey::from((incoming_viewing_key, diversifier));
 
         let _sapling_shielded_address = SaplingShieldedAddress {
             network: Network::Mainnet,

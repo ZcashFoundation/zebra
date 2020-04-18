@@ -21,7 +21,7 @@ impl Arbitrary for TransmissionKey {
 
                 let diversifier = Diversifier::from(spending_key);
 
-                return Self::from(incoming_viewing_key, diversifier);
+                return Self::from((incoming_viewing_key, diversifier));
             })
             .boxed()
     }
@@ -32,36 +32,7 @@ impl Arbitrary for TransmissionKey {
 #[cfg(test)]
 mod tests {
 
-    use rand_core::OsRng;
-
     use super::*;
-
-    #[test]
-    fn derive() {
-        let spending_key = SpendingKey::new(&mut OsRng);
-
-        let spend_authorizing_key = SpendAuthorizingKey::from(spending_key);
-        let proof_authorizing_key = ProofAuthorizingKey::from(spending_key);
-        let outgoing_viewing_key = OutgoingViewingKey::from(spending_key);
-
-        let authorizing_key = AuthorizingKey::from(spend_authorizing_key);
-        let nullifier_deriving_key = NullifierDerivingKey::from(proof_authorizing_key);
-        // "If ivk = 0, discard this key and start over with a new
-        // [spending key]."
-        // https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
-        let incoming_viewing_key =
-            IncomingViewingKey::from((authorizing_key, nullifier_deriving_key));
-
-        let diversifier = Diversifier::new(&mut OsRng);
-        let _transmission_key = TransmissionKey::from(incoming_viewing_key, diversifier);
-
-        let _full_viewing_key = FullViewingKey {
-            network: Network::default(),
-            authorizing_key,
-            nullifier_deriving_key,
-            outgoing_viewing_key,
-        };
-    }
 
     #[test]
     fn derive_for_each_test_vector() {
@@ -69,16 +40,16 @@ mod tests {
             let spending_key = SpendingKey::from(test_vector.sk);
 
             let spend_authorizing_key = SpendAuthorizingKey::from(spending_key);
-            assert_eq!(spend_authorizing_key.to_bytes(), test_vector.ask);
+            assert_eq!(spend_authorizing_key, test_vector.ask);
             let proof_authorizing_key = ProofAuthorizingKey::from(spending_key);
-            assert_eq!(proof_authorizing_key.to_bytes(), test_vector.nsk);
+            assert_eq!(proof_authorizing_key, test_vector.nsk);
             let outgoing_viewing_key = OutgoingViewingKey::from(spending_key);
             assert_eq!(outgoing_viewing_key, test_vector.ovk);
 
             let authorizing_key = AuthorizingKey::from(spend_authorizing_key);
             assert_eq!(authorizing_key, test_vector.ak);
             let nullifier_deriving_key = NullifierDerivingKey::from(proof_authorizing_key);
-            assert_eq!(nullifier_deriving_key.to_bytes(), test_vector.nk);
+            assert_eq!(nullifier_deriving_key, test_vector.nk);
             let incoming_viewing_key =
                 IncomingViewingKey::from((authorizing_key, nullifier_deriving_key));
             assert_eq!(incoming_viewing_key, test_vector.ivk);
@@ -86,8 +57,8 @@ mod tests {
             let diversifier = Diversifier::from(spending_key);
             assert_eq!(diversifier, test_vector.default_d);
 
-            let transmission_key = TransmissionKey::from(incoming_viewing_key, diversifier);
-            assert_eq!(transmission_key.to_bytes(), test_vector.default_pk_d);
+            let transmission_key = TransmissionKey::from((incoming_viewing_key, diversifier));
+            assert_eq!(transmission_key, test_vector.default_pk_d);
 
             let _full_viewing_key = FullViewingKey {
                 network: Network::default(),
