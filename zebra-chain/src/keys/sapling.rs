@@ -311,15 +311,9 @@ impl fmt::Debug for ProofAuthorizingKey {
     }
 }
 
-impl From<[u8; 32]> for ProofAuthorizingKey {
-    fn from(bytes: [u8; 32]) -> Self {
-        Self(Scalar::from_bytes(&bytes).unwrap())
-    }
-}
-
 impl From<ProofAuthorizingKey> for [u8; 32] {
-    fn from(sk: ProofAuthorizingKey) -> Self {
-        sk.0.to_bytes()
+    fn from(nsk: ProofAuthorizingKey) -> Self {
+        nsk.0.to_bytes()
     }
 }
 
