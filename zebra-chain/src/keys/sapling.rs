@@ -263,12 +263,6 @@ impl fmt::Debug for SpendAuthorizingKey {
     }
 }
 
-impl From<[u8; 32]> for SpendAuthorizingKey {
-    fn from(bytes: [u8; 32]) -> Self {
-        Self(Scalar::from_bytes(&bytes).unwrap())
-    }
-}
-
 impl From<SpendAuthorizingKey> for [u8; 32] {
     fn from(sk: SpendAuthorizingKey) -> Self {
         sk.0.to_bytes()
