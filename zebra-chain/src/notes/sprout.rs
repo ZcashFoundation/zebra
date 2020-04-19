@@ -1,3 +1,5 @@
+//!
+
 use std::{
     fmt,
     io::{self},
@@ -8,8 +10,9 @@ use proptest::{collection::vec, prelude::*};
 
 use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 
-use super::*;
+use super::{memo::Memo, *};
 
+///
 pub struct Note {
     // TODO: refine type as a SHA-256d output derived from a spending key.
     paying_key: [u8; 32],
@@ -26,7 +29,7 @@ pub struct NotePlaintext {
     rho: [u8; 32],
     // TODO: refine as jub-jub appropriate in the base field.
     note_commitment_randomness: NoteCommitmentRandomness,
-    memo: memo::Memo,
+    memo: Memo,
 }
 
 /// A ciphertext component for encrypted output notes.

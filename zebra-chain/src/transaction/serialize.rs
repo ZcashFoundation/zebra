@@ -4,6 +4,7 @@
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io::{self, Read};
 
+use crate::notes;
 use crate::proofs::ZkSnarkProof;
 use crate::serialization::{
     ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
@@ -259,8 +260,8 @@ impl<P: ZkSnarkProof> ZcashDeserialize for JoinSplit<P> {
             vmacs: [reader.read_32_bytes()?, reader.read_32_bytes()?],
             zkproof: P::zcash_deserialize(&mut reader)?,
             enc_ciphertexts: [
-                joinsplit::EncryptedCiphertext::zcash_deserialize(&mut reader)?,
-                joinsplit::EncryptedCiphertext::zcash_deserialize(&mut reader)?,
+                notes::sprout::EncryptedCiphertext::zcash_deserialize(&mut reader)?,
+                notes::sprout::EncryptedCiphertext::zcash_deserialize(&mut reader)?,
             ],
         })
     }
@@ -346,8 +347,8 @@ impl ZcashDeserialize for Output {
             cv: reader.read_32_bytes()?,
             cmu: reader.read_32_bytes()?,
             ephemeral_key: jubjub::AffinePoint::from_bytes(reader.read_32_bytes()?).unwrap(),
-            enc_ciphertext: shielded_data::EncryptedCiphertext::zcash_deserialize(&mut reader)?,
-            out_ciphertext: shielded_data::OutCiphertext::zcash_deserialize(&mut reader)?,
+            enc_ciphertext: notes::sapling::EncryptedCiphertext::zcash_deserialize(&mut reader)?,
+            out_ciphertext: notes::sapling::OutCiphertext::zcash_deserialize(&mut reader)?,
             zkproof: Groth16Proof::zcash_deserialize(&mut reader)?,
         })
     }

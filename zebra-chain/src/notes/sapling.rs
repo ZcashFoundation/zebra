@@ -1,3 +1,5 @@
+//!
+
 use std::{fmt, io};
 
 #[cfg(test)]
@@ -15,6 +17,7 @@ use super::*;
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct Diversifier(pub [u8; 11]);
 
+///
 pub struct Note {
     diversifier: Diversifier,
     // TODO: refine as a type, derived from a scalar mult of the
