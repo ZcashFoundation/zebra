@@ -75,8 +75,7 @@ impl Arbitrary for Spend {
 /// A _Output Description_, as described in [protocol specification §7.4][ps].
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#outputencoding
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(test, derive(Arbitrary))]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Output {
     /// A value commitment to the value of the input note.
     ///
@@ -87,15 +86,49 @@ pub struct Output {
     /// XXX refine to a specific type.
     pub cmu: [u8; 32],
     /// An encoding of an ephemeral Jubjub public key.
-    ///
-    /// XXX refine to a Jubjub key agreement type, not RedJubjub.
-    pub ephemeral_key: [u8; 32],
+    pub ephemeral_key: jubjub::AffinePoint,
     /// A ciphertext component for the encrypted output note.
     pub enc_ciphertext: EncryptedCiphertext,
     /// A ciphertext component for the encrypted output note.
     pub out_ciphertext: OutCiphertext,
     /// The ZK output proof.
     pub zkproof: Groth16Proof,
+}
+
+impl Eq for Output {}
+
+#[cfg(test)]
+impl Arbitrary for Output {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        (
+            array::uniform32(any::<u8>()),
+            array::uniform32(any::<u8>()),
+            array::uniform32(any::<u8>()).prop_filter("Valid jubjub::AffinePoint", |b| {
+                jubjub::AffinePoint::from_bytes(*b).is_some().unwrap_u8() == 1
+            }),
+            any::<EncryptedCiphertext>(),
+            any::<OutCiphertext>(),
+            any::<Groth16Proof>(),
+        )
+            .prop_map(
+                |(cv, cmu, ephemeral_key_bytes, enc_ciphertext, out_ciphertext, zkproof)| {
+                    return Self {
+                        cv,
+                        cmu,
+                        ephemeral_key: jubjub::AffinePoint::from_bytes(ephemeral_key_bytes)
+                            .unwrap(),
+                        enc_ciphertext,
+                        out_ciphertext,
+                        zkproof,
+                    };
+                },
+            )
+            .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
 }
 
 /// Sapling-on-Groth16 spend and output descriptions.
