@@ -66,4 +66,4 @@ jobs:
           path: tarpaulin-report.html
       - uses: codecov/codecov-action@v1
         with:
-          file: ./tarpaulin-report.html # optional
+          file: ./tarpaulin-report.xml # optional
