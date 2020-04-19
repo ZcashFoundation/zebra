@@ -41,8 +41,6 @@ pub struct JoinSplit<P: ZkSnarkProof> {
     /// XXX refine type to [T; 2] -- there are two commitments
     pub commitments: [[u8; 32]; 2],
     /// An X25519 public key.
-    ///
-    /// XXX refine to an x25519-dalek type?
     pub ephemeral_key: x25519_dalek::PublicKey,
     /// A 256-bit seed that must be chosen independently at random for each
     /// JoinSplit description.
