@@ -63,7 +63,7 @@ jobs:
         uses: actions/upload-artifact@v1
         with:
           name: code-coverage-report
-          path: tarpaulin-report.xml
+          path: cobertura.xml
       - uses: codecov/codecov-action@v1
-        with:
-          file: ./tarpaulin-report.xml # optional
+
+
