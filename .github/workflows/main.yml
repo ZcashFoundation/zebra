@@ -58,7 +58,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: tarpaulin
-          args: --verbose --count --workspace --timeout 300 --out Html --out Xml
+          args: --verbose --count --workspace --timeout 300 --out Html Xml
       - name: Archive code coverage results
         uses: actions/upload-artifact@v1
         with:
