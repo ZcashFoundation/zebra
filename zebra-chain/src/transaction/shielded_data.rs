@@ -1,18 +1,13 @@
-use std::{fmt, io};
-
 use futures::future::Either;
 
 #[cfg(test)]
 use proptest::{arbitrary::Arbitrary, array, collection::vec, prelude::*};
 
-#[cfg(test)]
-use proptest_derive::Arbitrary;
-
 // XXX this name seems too long?
 use crate::note_commitment_tree::SaplingNoteTreeRootHash;
+use crate::notes::sapling;
 use crate::proofs::Groth16Proof;
 use crate::redjubjub::{self, Binding, SpendAuth};
-use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 
 /// A _Spend Description_, as described in [protocol specification §7.3][ps].
 ///
@@ -88,9 +83,9 @@ pub struct Output {
     /// An encoding of an ephemeral Jubjub public key.
     pub ephemeral_key: jubjub::AffinePoint,
     /// A ciphertext component for the encrypted output note.
-    pub enc_ciphertext: EncryptedCiphertext,
+    pub enc_ciphertext: sapling::EncryptedCiphertext,
     /// A ciphertext component for the encrypted output note.
-    pub out_ciphertext: OutCiphertext,
+    pub out_ciphertext: sapling::OutCiphertext,
     /// The ZK output proof.
     pub zkproof: Groth16Proof,
 }
@@ -108,8 +103,8 @@ impl Arbitrary for Output {
             array::uniform32(any::<u8>()).prop_filter("Valid jubjub::AffinePoint", |b| {
                 jubjub::AffinePoint::from_bytes(*b).is_some().unwrap_u8() == 1
             }),
-            any::<EncryptedCiphertext>(),
-            any::<OutCiphertext>(),
+            any::<sapling::EncryptedCiphertext>(),
+            any::<sapling::OutCiphertext>(),
             any::<Groth16Proof>(),
         )
             .prop_map(
@@ -235,159 +230,4 @@ impl Arbitrary for ShieldedData {
     }
 
     type Strategy = BoxedStrategy<Self>;
-}
-
-/// A ciphertext component for encrypted output notes.
-// XXX move as part of #181 (note encryption implementation)
-pub struct EncryptedCiphertext(pub [u8; 580]);
-
-impl fmt::Debug for EncryptedCiphertext {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple("EncryptedCiphertext")
-            .field(&hex::encode(&self.0[..]))
-            .finish()
-    }
-}
-
-// These impls all only exist because of array length restrictions.
-
-impl Copy for EncryptedCiphertext {}
-
-impl Clone for EncryptedCiphertext {
-    fn clone(&self) -> Self {
-        let mut bytes = [0; 580];
-        bytes[..].copy_from_slice(&self.0[..]);
-        Self(bytes)
-    }
-}
-
-impl PartialEq for EncryptedCiphertext {
-    fn eq(&self, other: &Self) -> bool {
-        self.0[..] == other.0[..]
-    }
-}
-
-impl Eq for EncryptedCiphertext {}
-
-impl ZcashSerialize for EncryptedCiphertext {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        writer.write_all(&self.0[..])?;
-        Ok(())
-    }
-}
-
-impl ZcashDeserialize for EncryptedCiphertext {
-    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let mut bytes = [0; 580];
-        reader.read_exact(&mut bytes[..])?;
-        Ok(Self(bytes))
-    }
-}
-
-#[cfg(test)]
-impl Arbitrary for EncryptedCiphertext {
-    type Parameters = ();
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        (vec(any::<u8>(), 580))
-            .prop_map(|v| {
-                let mut bytes = [0; 580];
-                bytes.copy_from_slice(v.as_slice());
-                return Self(bytes);
-            })
-            .boxed()
-    }
-
-    type Strategy = BoxedStrategy<Self>;
-}
-
-/// A ciphertext component for encrypted output notes.
-pub struct OutCiphertext(pub [u8; 80]);
-
-impl fmt::Debug for OutCiphertext {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple("OutCiphertext")
-            .field(&hex::encode(&self.0[..]))
-            .finish()
-    }
-}
-
-// These impls all only exist because of array length restrictions.
-
-impl Copy for OutCiphertext {}
-
-impl Clone for OutCiphertext {
-    fn clone(&self) -> Self {
-        let mut bytes = [0; 80];
-        bytes[..].copy_from_slice(&self.0[..]);
-        Self(bytes)
-    }
-}
-
-impl PartialEq for OutCiphertext {
-    fn eq(&self, other: &Self) -> bool {
-        self.0[..] == other.0[..]
-    }
-}
-
-impl Eq for OutCiphertext {}
-
-impl ZcashSerialize for OutCiphertext {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        writer.write_all(&self.0[..])?;
-        Ok(())
-    }
-}
-
-impl ZcashDeserialize for OutCiphertext {
-    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let mut bytes = [0; 80];
-        reader.read_exact(&mut bytes[..])?;
-        Ok(Self(bytes))
-    }
-}
-
-#[cfg(test)]
-impl Arbitrary for OutCiphertext {
-    type Parameters = ();
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        (vec(any::<u8>(), 80))
-            .prop_map(|v| {
-                let mut bytes = [0; 80];
-                bytes.copy_from_slice(v.as_slice());
-                return Self(bytes);
-            })
-            .boxed()
-    }
-
-    type Strategy = BoxedStrategy<Self>;
-}
-
-#[cfg(test)]
-proptest! {
-
-    #[test]
-    fn encrypted_ciphertext_roundtrip(ec in any::<EncryptedCiphertext>()) {
-
-        let mut data = Vec::new();
-
-        ec.zcash_serialize(&mut data).expect("EncryptedCiphertext should serialize");
-
-        let ec2 = EncryptedCiphertext::zcash_deserialize(&data[..]).expect("randomized EncryptedCiphertext should deserialize");
-
-        prop_assert_eq![ec, ec2];
-    }
-
-    #[test]
-    fn out_ciphertext_roundtrip(oc in any::<OutCiphertext>()) {
-
-        let mut data = Vec::new();
-
-        oc.zcash_serialize(&mut data).expect("OutCiphertext should serialize");
-
-        let oc2 = OutCiphertext::zcash_deserialize(&data[..]).expect("randomized OutCiphertext should deserialize");
-
-        prop_assert_eq![oc, oc2];
-    }
 }

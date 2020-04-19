@@ -15,7 +15,7 @@ pub mod block;
 pub mod equihash_solution;
 pub mod keys;
 pub mod note_commitment_tree;
-pub mod note_encryption;
+pub mod notes;
 pub mod proofs;
 pub mod serialization;
 pub mod transaction;
