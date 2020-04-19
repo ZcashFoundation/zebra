@@ -58,12 +58,12 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: tarpaulin
-          args: --verbose --count --workspace --timeout 300 --out Html Xml
+          args: --verbose --count --workspace --timeout 300 --out Xml
       - name: Archive code coverage results
         uses: actions/upload-artifact@v1
         with:
           name: code-coverage-report
-          path: tarpaulin-report.html
+          path: tarpaulin-report.xml
       - uses: codecov/codecov-action@v1
         with:
           file: ./tarpaulin-report.xml # optional
