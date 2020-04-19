@@ -332,7 +332,7 @@ impl ZcashSerialize for Output {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_all(&self.cv[..])?;
         writer.write_all(&self.cmu[..])?;
-        writer.write_all(&self.ephemeral_key[..])?;
+        writer.write_all(&self.ephemeral_key.to_bytes())?;
         self.enc_ciphertext.zcash_serialize(&mut writer)?;
         self.out_ciphertext.zcash_serialize(&mut writer)?;
         self.zkproof.zcash_serialize(&mut writer)?;
@@ -345,7 +345,7 @@ impl ZcashDeserialize for Output {
         Ok(Output {
             cv: reader.read_32_bytes()?,
             cmu: reader.read_32_bytes()?,
-            ephemeral_key: reader.read_32_bytes()?,
+            ephemeral_key: jubjub::AffinePoint::from_bytes(reader.read_32_bytes()?).unwrap(),
             enc_ciphertext: shielded_data::EncryptedCiphertext::zcash_deserialize(&mut reader)?,
             out_ciphertext: shielded_data::OutCiphertext::zcash_deserialize(&mut reader)?,
             zkproof: Groth16Proof::zcash_deserialize(&mut reader)?,
