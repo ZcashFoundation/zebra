@@ -67,21 +67,27 @@ jobs:
       #- uses: codecov/codecov-action@v1
 
   grcov:
+    name:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v1
-      - uses: actions-rs/toolchain@v1
+      - name: rustup install nightly
+        uses: actions-rs/toolchain@v1
         with:
           toolchain: nightly
           override: true
-      - uses: actions-rs/cargo@v1
+      - name: cargo test w/ -Zprofile
+        uses: actions-rs/cargo@v1
         with:
           command: test
           args: --all-features --no-fail-fast
         env:
           CARGO_INCREMENTAL: '0'
           RUSTFLAGS: '-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Clink-dead-code -Coverflow-checks=off -Zno-landing-pads'
-      - uses: actions-rs/grcov@v0.1
-      - uses: codecov/codecov-action@v1
+      - id: grcov
+        name: Collect & aggregate coverage data
+        uses: actions-rs/grcov@v0.1
+      - name: Upload coverage report to Codecov
+        uses: codecov/codecov-action@v1
         with:
           file: ${{steps.grcov.outputs.report}}
