@@ -67,7 +67,7 @@ jobs:
       #- uses: codecov/codecov-action@v1
 
   grcov:
-    name:
+    name: Code Coverage
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v1
@@ -91,3 +91,18 @@ jobs:
         uses: codecov/codecov-action@v1
         with:
           file: ${{steps.grcov.outputs.report}}
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v1
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+      - name: Run clippy
+        uses: actions-rs/clippy-check@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          args: --all-features
