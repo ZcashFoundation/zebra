@@ -115,21 +115,18 @@ impl Arbitrary for SaplingShieldedAddress {
 mod tests {
 
     use rand_core::OsRng;
-    use std::str::FromStr;
 
     use super::*;
 
     #[test]
     fn from_str_display() {
-        let zs_addr = SaplingShieldedAddress::from_str(
-            "zs1qqqqqqqqqqqqqqqqqrjq05nyfku05msvu49mawhg6kr0wwljahypwyk2h88z6975u563j8nfaxd",
-        )
-        .expect("sapling z-addr string to parse");
-
-        let address = zs_addr.to_string();
+        let zs_addr: SaplingShieldedAddress =
+            "zs1qqqqqqqqqqqqqqqqqrjq05nyfku05msvu49mawhg6kr0wwljahypwyk2h88z6975u563j8nfaxd"
+                .parse()
+                .unwrap();
 
         assert_eq!(
-            format!("{}", address),
+            format!("{}", zs_addr),
             "zs1qqqqqqqqqqqqqqqqqrjq05nyfku05msvu49mawhg6kr0wwljahypwyk2h88z6975u563j8nfaxd"
         );
     }

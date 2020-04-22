@@ -60,62 +60,6 @@ pub enum TransparentAddress {
     },
 }
 
-impl TransparentAddress {
-    /// A hash of a transparent address payload, as used in
-    /// transparent pay-to-script-hash and pay-to-publickey-hash
-    /// addresses.
-    ///
-    /// The resulting hash in both of these cases is always exactly 20
-    /// bytes.
-    /// https://en.bitcoin.it/Base58Check_encoding#Encoding_a_Bitcoin_address
-    fn hash_payload(bytes: &[u8]) -> [u8; 20] {
-        let sha_hash = Sha256::digest(bytes);
-        let ripe_hash = Ripemd160::digest(&sha_hash);
-        let mut payload = [0u8; 20];
-        payload[..].copy_from_slice(&ripe_hash[..]);
-        payload
-    }
-}
-
-impl From<Script> for TransparentAddress {
-    fn from(script: Script) -> Self {
-        TransparentAddress::PayToScriptHash {
-            network: Network::Mainnet,
-            script_hash: Self::hash_payload(&script.0[..]),
-        }
-    }
-}
-
-impl From<PublicKey> for TransparentAddress {
-    fn from(pub_key: PublicKey) -> Self {
-        TransparentAddress::PayToPublicKeyHash {
-            network: Network::Mainnet,
-            pub_key_hash: Self::hash_payload(&pub_key.serialize()[..]),
-        }
-    }
-}
-
-impl<T: ?Sized + AsRef<[u8]>> From<&T> for TransparentAddress {
-    fn from(s: &T) -> Self {
-        let bytes = &bs58::decode(s).with_check(None).into_vec().unwrap();
-
-        Self::zcash_deserialize(&bytes[..]).expect("t-addr should deserialize")
-    }
-}
-
-impl std::str::FromStr for TransparentAddress {
-    type Err = SerializationError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let result = &bs58::decode(s).with_check(None).into_vec();
-
-        match result {
-            Ok(bytes) => Self::zcash_deserialize(&bytes[..]),
-            Err(_) => Err(SerializationError::Parse("t-addr decoding error")),
-        }
-    }
-}
-
 impl fmt::Debug for TransparentAddress {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut debug_struct = f.debug_struct("TransparentAddress");
@@ -144,9 +88,38 @@ impl fmt::Display for TransparentAddress {
         let mut bytes = io::Cursor::new(Vec::new());
         let _ = self.zcash_serialize(&mut bytes);
 
-        f.debug_tuple("TransparentAddress")
-            .field(&bs58::encode(bytes.get_ref()).with_check().into_string())
-            .finish()
+        f.write_str(&bs58::encode(bytes.get_ref()).with_check().into_string())
+    }
+}
+
+impl From<Script> for TransparentAddress {
+    fn from(script: Script) -> Self {
+        TransparentAddress::PayToScriptHash {
+            network: Network::Mainnet,
+            script_hash: Self::hash_payload(&script.0[..]),
+        }
+    }
+}
+
+impl From<PublicKey> for TransparentAddress {
+    fn from(pub_key: PublicKey) -> Self {
+        TransparentAddress::PayToPublicKeyHash {
+            network: Network::Mainnet,
+            pub_key_hash: Self::hash_payload(&pub_key.serialize()[..]),
+        }
+    }
+}
+
+impl std::str::FromStr for TransparentAddress {
+    type Err = SerializationError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let result = &bs58::decode(s).with_check(None).into_vec();
+
+        match result {
+            Ok(bytes) => Self::zcash_deserialize(&bytes[..]),
+            Err(_) => Err(SerializationError::Parse("t-addr decoding error")),
+        }
     }
 }
 
@@ -213,6 +186,23 @@ impl ZcashDeserialize for TransparentAddress {
     }
 }
 
+impl TransparentAddress {
+    /// A hash of a transparent address payload, as used in
+    /// transparent pay-to-script-hash and pay-to-publickey-hash
+    /// addresses.
+    ///
+    /// The resulting hash in both of these cases is always exactly 20
+    /// bytes.
+    /// https://en.bitcoin.it/Base58Check_encoding#Encoding_a_Bitcoin_address
+    fn hash_payload(bytes: &[u8]) -> [u8; 20] {
+        let sha_hash = Sha256::digest(bytes);
+        let ripe_hash = Ripemd160::digest(&sha_hash);
+        let mut payload = [0u8; 20];
+        payload[..].copy_from_slice(&ripe_hash[..]);
+        payload
+    }
+}
+
 #[cfg(test)]
 impl TransparentAddress {
     fn p2pkh_strategy() -> impl Strategy<Value = Self> {
@@ -272,10 +262,7 @@ mod tests {
 
         let t_addr = TransparentAddress::from(pub_key);
 
-        assert_eq!(
-            format!("{}", t_addr),
-            "TransparentAddress(\"t1bmMa1wJDFdbc2TiURQP5BbBz6jHjUBuHq\")"
-        );
+        assert_eq!(format!("{}", t_addr), "t1bmMa1wJDFdbc2TiURQP5BbBz6jHjUBuHq");
     }
 
     #[test]
@@ -284,25 +271,19 @@ mod tests {
 
         let t_addr = TransparentAddress::from(script);
 
-        assert_eq!(
-            format!("{}", t_addr),
-            "TransparentAddress(\"t3Y5pHwfgHbS6pDjj1HLuMFxhFFip1fcJ6g\")"
-        );
+        assert_eq!(format!("{}", t_addr), "t3Y5pHwfgHbS6pDjj1HLuMFxhFFip1fcJ6g");
     }
 
     #[test]
     fn from_string() {
-        let t_addr = TransparentAddress::from("t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd");
+        let t_addr: TransparentAddress = "t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd".parse().unwrap();
 
-        assert_eq!(
-            format!("{}", t_addr),
-            "TransparentAddress(\"t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd\")"
-        );
+        assert_eq!(format!("{}", t_addr), "t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd");
     }
 
     #[test]
     fn debug() {
-        let t_addr = TransparentAddress::from("t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd");
+        let t_addr: TransparentAddress = "t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd".parse().unwrap();
 
         assert_eq!(
             format!("{:?}", t_addr),
