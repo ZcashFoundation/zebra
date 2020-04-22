@@ -1,5 +1,8 @@
 ![Zebra logotype](https://www.zfnd.org/images/zebra-logotype.png)
 
+![](https://github.com/actions/hello-world/workflows/.github/workflows/main.yml/badge.svg) \
+[![codecov](https://codecov.io/gh/ZcashFoundation/zebra/branch/main/graph/badge.svg)](https://codecov.io/gh/ZcashFoundation/zebra)
+
 Hello! I am Zebra, an ongoing Rust implementation of a Zcash node.
 
 Zebra is a work in progress.  It is developed as a collection of `zebra-*`
