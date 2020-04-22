@@ -4,6 +4,7 @@
 
 ![](https://github.com/ZcashFoundation/zebra/workflows/CI/badge.svg)
 [![codecov](https://codecov.io/gh/ZcashFoundation/zebra/branch/main/graph/badge.svg)](https://codecov.io/gh/ZcashFoundation/zebra)
+![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)
 
 Hello! I am Zebra, an ongoing Rust implementation of a Zcash node.
 
