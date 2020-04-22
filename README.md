@@ -1,6 +1,6 @@
 ![Zebra logotype](https://www.zfnd.org/images/zebra-logotype.png)
 
-![](https://github.com/ZcashFoundation/zebra/.github/workflows/main.yml/badge.svg) \
+![](https://github.com/ZcashFoundation/zebra/workflows/CI/badge.svg) \
 [![codecov](https://codecov.io/gh/ZcashFoundation/zebra/branch/main/graph/badge.svg)](https://codecov.io/gh/ZcashFoundation/zebra)
 
 Hello! I am Zebra, an ongoing Rust implementation of a Zcash node.
