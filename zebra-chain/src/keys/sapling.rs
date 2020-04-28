@@ -472,7 +472,7 @@ impl From<ProofAuthorizingKey> for NullifierDerivingKey {
         // TODO: impl Mul<ExtendedPoint> for Fr, so we can reverse
         // this to match the math in the spec / general scalar mult
         // notation convention.
-        Self(jubjub::AffinePoint::from(generator_point * nsk.0))
+        Self(jubjub::AffinePoint::from(nsk.0 * generator_point))
     }
 }
 
