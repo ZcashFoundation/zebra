@@ -12,8 +12,6 @@
 
 use std::{fmt, io};
 
-use hex;
-
 #[cfg(test)]
 use proptest_derive::Arbitrary;
 
