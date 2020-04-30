@@ -10,7 +10,6 @@ use std::{fmt, io};
 
 use byteorder::{ByteOrder, LittleEndian};
 use rand_core::{CryptoRng, RngCore};
-use sha2;
 
 #[cfg(test)]
 use proptest::{array, prelude::*};

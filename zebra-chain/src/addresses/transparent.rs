@@ -2,7 +2,6 @@
 
 use std::{fmt, io};
 
-use bs58;
 use ripemd160::{Digest, Ripemd160};
 use secp256k1::PublicKey;
 use sha2::Sha256;

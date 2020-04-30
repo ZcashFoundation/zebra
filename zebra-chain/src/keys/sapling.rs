@@ -21,9 +21,6 @@ use std::{
 };
 
 use bech32::{self, FromBase32, ToBase32};
-use blake2b_simd;
-use blake2s_simd;
-use jubjub;
 use rand_core::{CryptoRng, RngCore};
 use redjubjub::{self, SpendAuth};
 
@@ -175,7 +172,7 @@ mod sk_hrp {
 /// §4.2.2][ps].
 ///
 /// Our root secret key of the Sapling key derivation tree. All other
-/// Sprout key types derive from the SpendingKey value.
+/// Sapling key types derive from the SpendingKey value.
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
