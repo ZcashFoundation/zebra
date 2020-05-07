@@ -1033,18 +1033,18 @@ dependencies = [
 
 [[package]]
 name = "pin-project"
-version = "0.4.10"
+version = "0.4.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "36e3dcd42688c05a66f841d22c5d8390d9a5d4c9aaf57b9285eae4900a080063"
+checksum = "f42715237c4f7d25d0dc172fd7cde280166854a3df524d5a63c832e737b47c6e"
 dependencies = [
  "pin-project-internal",
 ]
 
 [[package]]
 name = "pin-project-internal"
-version = "0.4.10"
+version = "0.4.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4d7346ac577ff1296e06a418e7618e22655bae834d4970cb6e39d6da8119969"
+checksum = "afabeafad68df734e98ae4e54891f6511a0b4a33c0306e5045a172f584389c47"
 dependencies = [
  "proc-macro2 1.0.9",
  "quote 1.0.3",
