@@ -131,7 +131,7 @@ impl SeedCmd {
         info!("begin tower-based peer handling test stub");
 
         let (addressbook_tx, addressbook_rx) = oneshot::channel();
-        let seed_service = SeedService {
+        let mut seed_service = SeedService {
             state: SeederState::AwaitingAddressBook(addressbook_rx),
         };
         let node = Buffer::new(seed_service, 1);
@@ -147,10 +147,10 @@ impl SeedCmd {
 
         info!("peer_set became ready");
 
-        #[cfg(dos)]
+        #[cfg(feature = "dos")]
         use std::time::Duration;
 
-        #[cfg(dos)]
+        #[cfg(feature = "dos")]
         // Fire GetPeers requests at ourselves, for testing.
         tokio::spawn(async move {
             let mut interval_stream = tokio::time::interval(Duration::from_secs(1));
@@ -158,7 +158,7 @@ impl SeedCmd {
             loop {
                 interval_stream.next().await;
 
-                let _ = seed_service.call(Request::GetPeers);
+                let _ = seed_service.call(Request::Peers);
             }
         });
 
