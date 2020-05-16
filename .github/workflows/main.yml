@@ -10,20 +10,21 @@ on:
 
 jobs:
 
-  # build:
-  #   name: Google Cloud Build
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #   - uses: actions/checkout@master
-  #   - uses: GoogleCloudPlatform/github-actions/setup-gcloud@master
-  #     with:
-  #       version: '275.0.0'
-  #       service_account_key: ${{ secrets.GCLOUD_AUTH }}
-  #   - name: Build, Test, Push to GCR
-  #     run: |
-  #       BRANCH_NAME=$GITHUB_REPOSITORY/$(expr $GITHUB_REF : '.*/\(.*\)') && \
-  #       BRANCH_NAME=${BRANCH_NAME,,} && \
-  #       gcloud builds submit . --config cloudbuild.yaml --project zealous-zebra --substitutions BRANCH_NAME=$BRANCH_NAME
+  build:
+    name: Google Cloud Build
+    if: github.head_ref || github.base_ref # This is a pull request, and would fail for external PRs.
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@master
+    - uses: GoogleCloudPlatform/github-actions/setup-gcloud@master
+      with:
+        version: '275.0.0'
+        service_account_key: ${{ secrets.GCLOUD_AUTH }}
+    - name: Build, Test, Push to GCR
+      run: |
+        BRANCH_NAME=$GITHUB_REPOSITORY/$(expr $GITHUB_REF : '.*/\(.*\)') && \
+        BRANCH_NAME=${BRANCH_NAME,,} && \
+        gcloud builds submit . --config cloudbuild.yaml --project zealous-zebra --substitutions BRANCH_NAME=$BRANCH_NAME
 
   test:
     name: Build and test on ${{ matrix.os }}
