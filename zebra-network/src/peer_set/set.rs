@@ -163,6 +163,7 @@ where
                     self.ready_services.insert(key, svc);
                 }
                 Poll::Ready(Some(Err((key, UnreadyError::Canceled)))) => {
+                    trace!(?key, "service was canceled");
                     debug_assert!(!self.cancel_handles.contains_key(&key))
                 }
                 Poll::Ready(Some(Err((key, UnreadyError::Inner(e))))) => {

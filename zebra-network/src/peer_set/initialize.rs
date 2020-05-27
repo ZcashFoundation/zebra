@@ -148,7 +148,7 @@ where
 /// the results over `tx`.
 #[instrument(skip(initial_peers, connector, tx))]
 async fn add_initial_peers<S>(
-    initial_peers: Vec<SocketAddr>,
+    initial_peers: std::collections::HashSet<SocketAddr>,
     connector: S,
     mut tx: mpsc::Sender<PeerChange>,
 ) where
