@@ -154,18 +154,17 @@ impl Codec {
     /// the message body prior to writing the header, so that the header can
     /// contain a checksum of the message body.
     fn write_body<W: Write>(&self, msg: &Message, mut writer: W) -> Result<(), Error> {
-        use Message::*;
-        match *msg {
-            Version {
-                ref version,
-                ref services,
-                ref timestamp,
-                ref address_recv,
-                ref address_from,
-                ref nonce,
-                ref user_agent,
-                ref start_height,
-                ref relay,
+        match msg {
+            Message::Version {
+                version,
+                services,
+                timestamp,
+                address_recv,
+                address_from,
+                nonce,
+                user_agent,
+                start_height,
+                relay,
             } => {
                 writer.write_u32::<LittleEndian>(version.0)?;
                 writer.write_u64::<LittleEndian>(services.bits())?;
@@ -184,64 +183,64 @@ impl Codec {
                 writer.write_u32::<LittleEndian>(start_height.0)?;
                 writer.write_u8(*relay as u8)?;
             }
-            Verack => { /* Empty payload -- no-op */ }
-            Ping(nonce) => {
+            Message::Verack => { /* Empty payload -- no-op */ }
+            Message::Ping(nonce) => {
                 writer.write_u64::<LittleEndian>(nonce.0)?;
             }
-            Pong(nonce) => {
+            Message::Pong(nonce) => {
                 writer.write_u64::<LittleEndian>(nonce.0)?;
             }
-            Reject {
-                ref message,
-                ref ccode,
-                ref reason,
-                ref data,
+            Message::Reject {
+                message,
+                ccode,
+                reason,
+                data,
             } => {
                 writer.write_string(&message)?;
                 writer.write_u8(*ccode as u8)?;
                 writer.write_string(&reason)?;
                 writer.write_all(&data.unwrap())?;
             }
-            Addr(ref addrs) => addrs.zcash_serialize(&mut writer)?,
-            GetAddr => { /* Empty payload -- no-op */ }
-            Block(ref block) => block.zcash_serialize(&mut writer)?,
-            GetBlocks {
-                ref block_locator_hashes,
-                ref hash_stop,
+            Message::Addr(addrs) => addrs.zcash_serialize(&mut writer)?,
+            Message::GetAddr => { /* Empty payload -- no-op */ }
+            Message::Block(block) => block.zcash_serialize(&mut writer)?,
+            Message::GetBlocks {
+                block_locator_hashes,
+                hash_stop,
             } => {
                 writer.write_u32::<LittleEndian>(self.builder.version.0)?;
                 block_locator_hashes.zcash_serialize(&mut writer)?;
                 hash_stop.zcash_serialize(&mut writer)?;
             }
-            GetHeaders {
-                ref block_locator_hashes,
-                ref hash_stop,
+            Message::GetHeaders {
+                block_locator_hashes,
+                hash_stop,
             } => {
                 writer.write_u32::<LittleEndian>(self.builder.version.0)?;
                 block_locator_hashes.zcash_serialize(&mut writer)?;
                 hash_stop.zcash_serialize(&mut writer)?;
             }
-            Headers(ref headers) => headers.zcash_serialize(&mut writer)?,
-            Inv(ref hashes) => hashes.zcash_serialize(&mut writer)?,
-            GetData(ref hashes) => hashes.zcash_serialize(&mut writer)?,
-            NotFound(ref hashes) => hashes.zcash_serialize(&mut writer)?,
-            Tx(ref transaction) => transaction.zcash_serialize(&mut writer)?,
-            Mempool => { /* Empty payload -- no-op */ }
-            FilterLoad {
-                ref filter,
-                ref hash_functions_count,
-                ref tweak,
-                ref flags,
+            Message::Headers(headers) => headers.zcash_serialize(&mut writer)?,
+            Message::Inv(hashes) => hashes.zcash_serialize(&mut writer)?,
+            Message::GetData(hashes) => hashes.zcash_serialize(&mut writer)?,
+            Message::NotFound(hashes) => hashes.zcash_serialize(&mut writer)?,
+            Message::Tx(transaction) => transaction.zcash_serialize(&mut writer)?,
+            Message::Mempool => { /* Empty payload -- no-op */ }
+            Message::FilterLoad {
+                filter,
+                hash_functions_count,
+                tweak,
+                flags,
             } => {
                 writer.write_all(&filter.0)?;
                 writer.write_u32::<LittleEndian>(*hash_functions_count)?;
                 writer.write_u32::<LittleEndian>(tweak.0)?;
                 writer.write_u8(*flags)?;
             }
-            FilterAdd { ref data } => {
+            Message::FilterAdd { data } => {
                 writer.write_all(data)?;
             }
-            FilterClear => { /* Empty payload -- no-op */ }
+            Message::FilterClear => { /* Empty payload -- no-op */ }
         }
         Ok(())
     }

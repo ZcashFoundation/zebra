@@ -292,6 +292,7 @@ pub trait ReadZcashExt: io::Read {
 impl<R: io::Read + ?Sized> ReadZcashExt for R {}
 
 #[cfg(test)]
+#[allow(clippy::unnecessary_operation)]
 mod tests {
     use super::*;
     use proptest::prelude::*;
@@ -321,7 +322,7 @@ mod tests {
                 // copy the input bytes, and overwrite them with the encoding of s,
                 // so that if the encoding is different, we'll catch it on the part
                 // that's written.
-                let mut expect_bytes = bytes.clone();
+                let mut expect_bytes = bytes;
                 Cursor::new(&mut expect_bytes[..]).write_compactsize(s).unwrap();
                 prop_assert_eq!(bytes, expect_bytes);
             }
