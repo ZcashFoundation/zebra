@@ -1,5 +1,6 @@
 //! A binary hash tree of SHA256d (two rounds of SHA256) hashes for
 //! node values.
+#![allow(clippy::unit_arg)]
 
 use std::{fmt, io};
 

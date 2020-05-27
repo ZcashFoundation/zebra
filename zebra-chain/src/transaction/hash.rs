@@ -1,3 +1,4 @@
+#![allow(clippy::unit_arg)]
 use std::fmt;
 
 #[cfg(test)]

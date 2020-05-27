@@ -407,7 +407,7 @@ where
         trace!(?req);
         use tower::{load_shed::error::Overloaded, ServiceExt};
 
-        if self.svc.ready().await.is_err() {
+        if self.svc.ready_and().await.is_err() {
             // Treat all service readiness errors as Overloaded
             self.fail_with(PeerError::Overloaded);
         }

@@ -1,4 +1,5 @@
 //!
+#![allow(dead_code)]
 
 use std::{fmt, io};
 
@@ -92,7 +93,7 @@ impl Arbitrary for EncryptedCiphertext {
             .prop_map(|v| {
                 let mut bytes = [0; 580];
                 bytes.copy_from_slice(v.as_slice());
-                return Self(bytes);
+                Self(bytes)
             })
             .boxed()
     }
@@ -155,7 +156,7 @@ impl Arbitrary for OutCiphertext {
             .prop_map(|v| {
                 let mut bytes = [0; 80];
                 bytes.copy_from_slice(v.as_slice());
-                return Self(bytes);
+                Self(bytes)
             })
             .boxed()
     }

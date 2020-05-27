@@ -1,4 +1,5 @@
 //! Definitions of block datastructures.
+#![allow(clippy::unit_arg)]
 
 #[cfg(test)]
 pub mod test_vectors;

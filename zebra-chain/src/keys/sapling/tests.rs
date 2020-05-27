@@ -1,3 +1,4 @@
+#![allow(clippy::module_inception)]
 use super::*;
 
 #[cfg(test)]
@@ -21,7 +22,7 @@ impl Arbitrary for TransmissionKey {
 
                 let diversifier = Diversifier::from(spending_key);
 
-                return Self::from((incoming_viewing_key, diversifier));
+                Self::from((incoming_viewing_key, diversifier))
             })
             .boxed()
     }

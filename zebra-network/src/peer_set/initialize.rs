@@ -181,7 +181,7 @@ where
     loop {
         if let Ok((tcp_stream, addr)) = listener.accept().await {
             debug!(?addr, "got incoming connection");
-            handshaker.ready().await?;
+            handshaker.ready_and().await?;
             // Construct a handshake future but do not drive it yet....
             let handshake = handshaker.call((tcp_stream, addr));
             // ... instead, spawn a new task to handle this connection
@@ -254,7 +254,7 @@ where
                 }
                 if let Some(candidate) = candidates.next() {
                     debug!(?candidate.addr, "attempting outbound connection in response to demand");
-                    connector.ready().await?;
+                    connector.ready_and().await?;
                     handshakes.push(
                         connector
                             .call(candidate.addr)

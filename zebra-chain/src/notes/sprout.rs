@@ -1,4 +1,5 @@
 //!
+#![allow(dead_code)]
 
 use std::{
     fmt,
@@ -87,7 +88,7 @@ impl Arbitrary for EncryptedCiphertext {
             .prop_map(|v| {
                 let mut bytes = [0; 601];
                 bytes.copy_from_slice(v.as_slice());
-                return Self(bytes);
+                Self(bytes)
             })
             .boxed()
     }

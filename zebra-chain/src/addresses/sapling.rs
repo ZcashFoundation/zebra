@@ -99,11 +99,11 @@ impl Arbitrary for SaplingShieldedAddress {
             any::<sapling::TransmissionKey>(),
         )
             .prop_map(|(network, diversifier, transmission_key)| {
-                return Self {
+                Self {
                     network,
                     diversifier,
                     transmission_key,
-                };
+                }
             })
             .boxed()
     }

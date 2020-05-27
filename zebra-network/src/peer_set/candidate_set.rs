@@ -107,7 +107,7 @@ where
         // called while the peer set is already loaded.
         let mut responses = FuturesUnordered::new();
         for _ in 0..2usize {
-            self.peer_service.ready().await?;
+            self.peer_service.ready_and().await?;
             responses.push(self.peer_service.call(Request::Peers));
         }
         while let Some(rsp) = responses.next().await {

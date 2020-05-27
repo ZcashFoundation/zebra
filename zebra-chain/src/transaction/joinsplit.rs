@@ -98,7 +98,7 @@ impl<P: ZkSnarkProof + Arbitrary + 'static> Arbitrary for JoinSplit<P> {
                     zkproof,
                     enc_ciphertexts,
                 )| {
-                    return Self {
+                    Self {
                         vpub_old,
                         vpub_new,
                         anchor,
@@ -109,7 +109,7 @@ impl<P: ZkSnarkProof + Arbitrary + 'static> Arbitrary for JoinSplit<P> {
                         vmacs,
                         zkproof,
                         enc_ciphertexts,
-                    };
+                    }
                 },
             )
             .boxed()
@@ -160,7 +160,7 @@ impl<P: ZkSnarkProof + Arbitrary + 'static> Arbitrary for JoinSplitData<P> {
             vec(any::<u8>(), 64),
         )
             .prop_map(|(first, rest, pub_key_bytes, sig_bytes)| {
-                return Self {
+                Self {
                     first,
                     rest,
                     pub_key: ed25519_zebra::PublicKeyBytes::from(pub_key_bytes),
@@ -169,7 +169,7 @@ impl<P: ZkSnarkProof + Arbitrary + 'static> Arbitrary for JoinSplitData<P> {
                         b.copy_from_slice(sig_bytes.as_slice());
                         b
                     }),
-                };
+                }
             })
             .boxed()
     }

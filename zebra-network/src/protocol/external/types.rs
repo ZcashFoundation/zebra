@@ -1,3 +1,4 @@
+#![allow(clippy::unit_arg)]
 use std::fmt;
 
 #[cfg(test)]
@@ -76,7 +77,7 @@ pub struct Filter(pub Vec<u8>);
 #[cfg(test)]
 mod proptest {
 
-    use hex;
+    
 
     use proptest::prelude::*;
 

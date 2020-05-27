@@ -145,7 +145,7 @@ impl SeedCmd {
 
         info!("waiting for peer_set ready");
         peer_set
-            .ready()
+            .ready_and()
             .await
             .map_err(|e| Error::from(ErrorKind::Io.context(e)))?;
 
