@@ -1,4 +1,5 @@
 //! Transaction types.
+#![allow(clippy::unit_arg)]
 
 #[cfg(test)]
 use proptest_derive::Arbitrary;

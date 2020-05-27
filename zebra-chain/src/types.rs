@@ -51,7 +51,7 @@ impl Arbitrary for BlockHeight {
     type Parameters = ();
 
     fn arbitrary_with(_args: ()) -> Self::Strategy {
-        (0u32..500_000_000_u32).prop_map(|h| BlockHeight(h)).boxed()
+        (0u32..500_000_000_u32).prop_map(BlockHeight).boxed()
     }
 
     type Strategy = BoxedStrategy<Self>;

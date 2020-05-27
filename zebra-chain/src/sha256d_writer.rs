@@ -46,6 +46,6 @@ mod tests {
         let mut sha_writer = Sha256dWriter::default();
         let _ = sha_writer.write_all(preimage);
 
-        assert_eq!(sha_writer.flush().unwrap(), ());
+        sha_writer.flush().unwrap();
     }
 }

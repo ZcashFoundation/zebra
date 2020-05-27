@@ -47,7 +47,7 @@ impl Arbitrary for Spend {
         )
             .prop_map(
                 |(cv_bytes, anchor, nullifier_bytes, rpk_bytes, proof, sig_bytes)| {
-                    return Self {
+                    Self {
                         anchor,
                         cv: cv_bytes,
                         nullifier: nullifier_bytes,
@@ -58,7 +58,7 @@ impl Arbitrary for Spend {
                             b.copy_from_slice(sig_bytes.as_slice());
                             b
                         }),
-                    };
+                    }
                 },
             )
             .boxed()
@@ -109,7 +109,7 @@ impl Arbitrary for Output {
         )
             .prop_map(
                 |(cv, cmu, ephemeral_key_bytes, enc_ciphertext, out_ciphertext, zkproof)| {
-                    return Self {
+                    Self {
                         cv,
                         cmu,
                         ephemeral_key: jubjub::AffinePoint::from_bytes(ephemeral_key_bytes)
@@ -117,7 +117,7 @@ impl Arbitrary for Output {
                         enc_ciphertext,
                         out_ciphertext,
                         zkproof,
-                    };
+                    }
                 },
             )
             .boxed()
@@ -215,7 +215,7 @@ impl Arbitrary for ShieldedData {
             vec(any::<u8>(), 64),
         )
             .prop_map(|(first, rest_spends, rest_outputs, sig_bytes)| {
-                return Self {
+                Self {
                     first,
                     rest_spends,
                     rest_outputs,
@@ -224,7 +224,7 @@ impl Arbitrary for ShieldedData {
                         b.copy_from_slice(sig_bytes.as_slice());
                         b
                     }),
-                };
+                }
             })
             .boxed()
     }

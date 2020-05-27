@@ -60,7 +60,7 @@ impl Arbitrary for Bctv14Proof {
             .prop_map(|v| {
                 let mut bytes = [0; 296];
                 bytes.copy_from_slice(v.as_slice());
-                return Self(bytes);
+                Self(bytes)
             })
             .boxed()
     }

@@ -14,7 +14,7 @@ use abscissa_core::testing::prelude::*;
 use once_cell::sync::Lazy;
 
 /// Executes your application binary via `cargo run`.
-pub static RUNNER: Lazy<CmdRunner> = Lazy::new(|| CmdRunner::default());
+pub static RUNNER: Lazy<CmdRunner> = Lazy::new(CmdRunner::default);
 
 /*
  * Disabled pending tracing config rework, so that merging abscissa fixes doesn't block on this

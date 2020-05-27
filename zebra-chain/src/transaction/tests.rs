@@ -21,9 +21,9 @@ impl Transaction {
             any::<LockTime>(),
         )
             .prop_map(|(inputs, outputs, lock_time)| Transaction::V1 {
-                inputs: inputs,
-                outputs: outputs,
-                lock_time: lock_time,
+                inputs,
+                outputs,
+                lock_time,
             })
             .boxed()
     }
@@ -37,10 +37,10 @@ impl Transaction {
         )
             .prop_map(
                 |(inputs, outputs, lock_time, joinsplit_data)| Transaction::V2 {
-                    inputs: inputs,
-                    outputs: outputs,
-                    lock_time: lock_time,
-                    joinsplit_data: joinsplit_data,
+                    inputs,
+                    outputs,
+                    lock_time,
+                    joinsplit_data,
                 },
             )
             .boxed()
@@ -56,11 +56,11 @@ impl Transaction {
         )
             .prop_map(
                 |(inputs, outputs, lock_time, expiry_height, joinsplit_data)| Transaction::V3 {
-                    inputs: inputs,
-                    outputs: outputs,
-                    lock_time: lock_time,
-                    expiry_height: expiry_height,
-                    joinsplit_data: joinsplit_data,
+                    inputs,
+                    outputs,
+                    lock_time,
+                    expiry_height,
+                    joinsplit_data,
                 },
             )
             .boxed()
@@ -86,13 +86,13 @@ impl Transaction {
                     shielded_data,
                     joinsplit_data,
                 )| Transaction::V4 {
-                    inputs: inputs,
-                    outputs: outputs,
-                    lock_time: lock_time,
-                    expiry_height: expiry_height,
-                    value_balance: value_balance,
-                    shielded_data: shielded_data,
-                    joinsplit_data: joinsplit_data,
+                    inputs,
+                    outputs,
+                    lock_time,
+                    expiry_height,
+                    value_balance,
+                    shielded_data,
+                    joinsplit_data,
                 },
             )
             .boxed()

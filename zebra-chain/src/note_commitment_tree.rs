@@ -9,6 +9,7 @@
 //! append-only.
 //!
 //! A root of a note commitment tree is associated with each treestate.
+#![allow(clippy::unit_arg)]
 
 use std::{fmt, io};
 

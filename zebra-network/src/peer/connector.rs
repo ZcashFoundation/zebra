@@ -52,7 +52,7 @@ where
         let mut hs = self.handshaker.clone();
         async move {
             let stream = TcpStream::connect(addr).await?;
-            hs.ready().await?;
+            hs.ready_and().await?;
             let client = hs.call((stream, addr)).await?;
             Ok(Change::Insert(addr, client))
         }

@@ -209,10 +209,10 @@ impl TransparentAddress {
             .prop_map(|(network, payload_bytes)| {
                 let mut bytes = [0; 20];
                 bytes.copy_from_slice(payload_bytes.as_slice());
-                return Self::PayToPublicKeyHash {
+                Self::PayToPublicKeyHash {
                     network,
                     pub_key_hash: bytes,
-                };
+                }
             })
             .boxed()
     }
@@ -222,10 +222,10 @@ impl TransparentAddress {
             .prop_map(|(network, payload_bytes)| {
                 let mut bytes = [0; 20];
                 bytes.copy_from_slice(payload_bytes.as_slice());
-                return Self::PayToScriptHash {
+                Self::PayToScriptHash {
                     network,
                     script_hash: bytes,
-                };
+                }
             })
             .boxed()
     }

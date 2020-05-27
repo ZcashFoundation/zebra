@@ -68,7 +68,7 @@ impl ConnectCmd {
 
         info!("waiting for peer_set ready");
         peer_set
-            .ready()
+            .ready_and()
             .await
             .map_err(|e| Error::from(ErrorKind::Io.context(e)))?;
 
@@ -91,7 +91,7 @@ impl ConnectCmd {
         let mut requested_block_heights = 0;
         while requested_block_heights < 700_000 {
             // Request the next 500 hashes.
-            retry_peer_set.ready().await.unwrap();
+            retry_peer_set.ready_and().await.unwrap();
             let hashes = if let Ok(Response::BlockHeaderHashes(hashes)) = retry_peer_set
                 .call(Request::FindBlocks {
                     known_blocks: vec![tip],
@@ -117,7 +117,7 @@ impl ConnectCmd {
 
             // Request the corresponding blocks in chunks
             for chunk in hashes.chunks(10usize) {
-                peer_set.ready().await.unwrap();
+                peer_set.ready_and().await.unwrap();
                 block_requests
                     .push(peer_set.call(Request::BlocksByHash(chunk.iter().cloned().collect())));
             }

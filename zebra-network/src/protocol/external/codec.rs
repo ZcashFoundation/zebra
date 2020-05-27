@@ -554,7 +554,7 @@ mod tests {
     fn version_message_round_trip() {
         use std::net::{IpAddr, Ipv4Addr, SocketAddr};
         let services = PeerServices::NODE_NETWORK;
-        let timestamp = Utc.timestamp(1568000000, 0);
+        let timestamp = Utc.timestamp(1_568_000_000, 0);
 
         let mut rt = Runtime::new().unwrap();
 

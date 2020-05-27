@@ -76,7 +76,7 @@ impl Arbitrary for EquihashSolution {
             .prop_map(|v| {
                 let mut bytes = [0; EQUIHASH_SOLUTION_SIZE];
                 bytes.copy_from_slice(v.as_slice());
-                return Self(bytes);
+                Self(bytes)
             })
             .boxed()
     }

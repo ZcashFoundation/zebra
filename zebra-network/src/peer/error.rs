@@ -37,14 +37,6 @@ pub enum PeerError {
     /// disconnect from upon receipt.
     #[error("Remote peer sent an unsupported message type.")]
     UnsupportedMessage,
-    /// We got a `Reject` message. This does not necessarily mean that
-    /// the peer connection is in a bad state, but for the time being
-    /// we are considering it a PeerError.
-    // TODO: Create a different error type (more at the application
-    // level than network/connection level) that will include the
-    // appropriate error when a `Reject` message is received.
-    #[error("Received a Reject message")]
-    Rejected,
     /// The remote peer responded with a block we didn't ask for.
     #[error("Remote peer responded with a block we didn't ask for.")]
     WrongBlock,

@@ -95,7 +95,7 @@ mod tests {
         let entry = MetaAddr {
             services: PeerServices::default(),
             addr: "127.0.0.1:8233".parse().unwrap(),
-            last_seen: Utc.timestamp(1573680222, 0),
+            last_seen: Utc.timestamp(1_573_680_222, 0),
         }
         .sanitize();
         // We want the sanitized timestamp to be a multiple of the truncation interval.

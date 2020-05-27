@@ -5,6 +5,7 @@
 //! derived from a_sk, as described in [‘Sprout Key Components’][ps]
 //!
 //! [ps]: https://zips.z.cash/protocol/protocol.pdf#sproutkeycomponents
+#![allow(clippy::unit_arg)]
 
 use std::{fmt, io};
 
@@ -297,11 +298,11 @@ impl Arbitrary for IncomingViewingKey {
             array::uniform32(any::<u8>()),
         )
             .prop_map(|(network, paying_key_bytes, receiving_key_bytes)| {
-                return Self {
+                Self {
                     network,
                     paying_key: PayingKey(paying_key_bytes),
                     receiving_key: ReceivingKey::from(receiving_key_bytes),
-                };
+                }
             })
             .boxed()
     }
