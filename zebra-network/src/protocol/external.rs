@@ -1,5 +1,5 @@
 /// A Tokio codec that transforms an `AsyncRead` into a `Stream` of `Message`s.
-mod codec;
+pub mod codec;
 /// Inventory items.
 mod inv;
 /// An enum of all supported Bitcoin message types.

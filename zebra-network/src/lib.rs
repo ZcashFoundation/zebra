@@ -65,6 +65,7 @@ pub use crate::{
     peer_set::init,
     policies::{RetryErrors, RetryLimit},
     protocol::internal::{Request, Response},
+    protocol::external::codec::Builder,
 };
 
 /// Types used in the definition of [`Request`] and [`Response`] messages.
