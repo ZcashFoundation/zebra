@@ -119,12 +119,10 @@ impl Arbitrary for SproutShieldedAddress {
             array::uniform32(any::<u8>()),
             array::uniform32(any::<u8>()),
         )
-            .prop_map(|(network, paying_key_bytes, transmission_key_bytes)| {
-                Self {
-                    network,
-                    paying_key: sprout::PayingKey(paying_key_bytes),
-                    transmission_key: sprout::TransmissionKey::from(transmission_key_bytes),
-                }
+            .prop_map(|(network, paying_key_bytes, transmission_key_bytes)| Self {
+                network,
+                paying_key: sprout::PayingKey(paying_key_bytes),
+                transmission_key: sprout::TransmissionKey::from(transmission_key_bytes),
             })
             .boxed()
     }

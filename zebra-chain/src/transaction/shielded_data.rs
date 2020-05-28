@@ -46,19 +46,17 @@ impl Arbitrary for Spend {
             vec(any::<u8>(), 64),
         )
             .prop_map(
-                |(cv_bytes, anchor, nullifier_bytes, rpk_bytes, proof, sig_bytes)| {
-                    Self {
-                        anchor,
-                        cv: cv_bytes,
-                        nullifier: nullifier_bytes,
-                        rk: redjubjub::PublicKeyBytes::from(rpk_bytes),
-                        zkproof: proof,
-                        spend_auth_sig: redjubjub::Signature::from({
-                            let mut b = [0u8; 64];
-                            b.copy_from_slice(sig_bytes.as_slice());
-                            b
-                        }),
-                    }
+                |(cv_bytes, anchor, nullifier_bytes, rpk_bytes, proof, sig_bytes)| Self {
+                    anchor,
+                    cv: cv_bytes,
+                    nullifier: nullifier_bytes,
+                    rk: redjubjub::PublicKeyBytes::from(rpk_bytes),
+                    zkproof: proof,
+                    spend_auth_sig: redjubjub::Signature::from({
+                        let mut b = [0u8; 64];
+                        b.copy_from_slice(sig_bytes.as_slice());
+                        b
+                    }),
                 },
             )
             .boxed()
@@ -108,16 +106,13 @@ impl Arbitrary for Output {
             any::<Groth16Proof>(),
         )
             .prop_map(
-                |(cv, cmu, ephemeral_key_bytes, enc_ciphertext, out_ciphertext, zkproof)| {
-                    Self {
-                        cv,
-                        cmu,
-                        ephemeral_key: jubjub::AffinePoint::from_bytes(ephemeral_key_bytes)
-                            .unwrap(),
-                        enc_ciphertext,
-                        out_ciphertext,
-                        zkproof,
-                    }
+                |(cv, cmu, ephemeral_key_bytes, enc_ciphertext, out_ciphertext, zkproof)| Self {
+                    cv,
+                    cmu,
+                    ephemeral_key: jubjub::AffinePoint::from_bytes(ephemeral_key_bytes).unwrap(),
+                    enc_ciphertext,
+                    out_ciphertext,
+                    zkproof,
                 },
             )
             .boxed()
@@ -214,17 +209,15 @@ impl Arbitrary for ShieldedData {
             vec(any::<Output>(), 0..10),
             vec(any::<u8>(), 64),
         )
-            .prop_map(|(first, rest_spends, rest_outputs, sig_bytes)| {
-                Self {
-                    first,
-                    rest_spends,
-                    rest_outputs,
-                    binding_sig: redjubjub::Signature::from({
-                        let mut b = [0u8; 64];
-                        b.copy_from_slice(sig_bytes.as_slice());
-                        b
-                    }),
-                }
+            .prop_map(|(first, rest_spends, rest_outputs, sig_bytes)| Self {
+                first,
+                rest_spends,
+                rest_outputs,
+                binding_sig: redjubjub::Signature::from({
+                    let mut b = [0u8; 64];
+                    b.copy_from_slice(sig_bytes.as_slice());
+                    b
+                }),
             })
             .boxed()
     }
