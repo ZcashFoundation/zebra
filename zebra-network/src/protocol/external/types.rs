@@ -77,8 +77,6 @@ pub struct Filter(pub Vec<u8>);
 #[cfg(test)]
 mod proptest {
 
-    
-
     use proptest::prelude::*;
 
     use super::Magic;

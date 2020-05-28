@@ -98,12 +98,10 @@ impl Arbitrary for SaplingShieldedAddress {
             any::<sapling::Diversifier>(),
             any::<sapling::TransmissionKey>(),
         )
-            .prop_map(|(network, diversifier, transmission_key)| {
-                Self {
-                    network,
-                    diversifier,
-                    transmission_key,
-                }
+            .prop_map(|(network, diversifier, transmission_key)| Self {
+                network,
+                diversifier,
+                transmission_key,
             })
             .boxed()
     }

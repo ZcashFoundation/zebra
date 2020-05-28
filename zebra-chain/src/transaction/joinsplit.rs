@@ -159,17 +159,15 @@ impl<P: ZkSnarkProof + Arbitrary + 'static> Arbitrary for JoinSplitData<P> {
             array::uniform32(any::<u8>()),
             vec(any::<u8>(), 64),
         )
-            .prop_map(|(first, rest, pub_key_bytes, sig_bytes)| {
-                Self {
-                    first,
-                    rest,
-                    pub_key: ed25519_zebra::PublicKeyBytes::from(pub_key_bytes),
-                    sig: ed25519_zebra::Signature::from({
-                        let mut b = [0u8; 64];
-                        b.copy_from_slice(sig_bytes.as_slice());
-                        b
-                    }),
-                }
+            .prop_map(|(first, rest, pub_key_bytes, sig_bytes)| Self {
+                first,
+                rest,
+                pub_key: ed25519_zebra::PublicKeyBytes::from(pub_key_bytes),
+                sig: ed25519_zebra::Signature::from({
+                    let mut b = [0u8; 64];
+                    b.copy_from_slice(sig_bytes.as_slice());
+                    b
+                }),
             })
             .boxed()
     }
