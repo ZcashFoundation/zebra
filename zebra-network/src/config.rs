@@ -1,7 +1,8 @@
 use std::{
+    collections::HashSet,
     net::{SocketAddr, ToSocketAddrs},
     string::String,
-    time::Duration, collections::HashSet,
+    time::Duration,
 };
 
 use zebra_chain::Network;
