@@ -64,8 +64,8 @@ pub use crate::{
     config::Config,
     peer_set::init,
     policies::{RetryErrors, RetryLimit},
-    protocol::internal::{Request, Response},
     protocol::external::codec::Builder,
+    protocol::internal::{Request, Response},
 };
 
 /// Types used in the definition of [`Request`] and [`Response`] messages.

@@ -297,12 +297,10 @@ impl Arbitrary for IncomingViewingKey {
             array::uniform32(any::<u8>()),
             array::uniform32(any::<u8>()),
         )
-            .prop_map(|(network, paying_key_bytes, receiving_key_bytes)| {
-                Self {
-                    network,
-                    paying_key: PayingKey(paying_key_bytes),
-                    receiving_key: ReceivingKey::from(receiving_key_bytes),
-                }
+            .prop_map(|(network, paying_key_bytes, receiving_key_bytes)| Self {
+                network,
+                paying_key: PayingKey(paying_key_bytes),
+                receiving_key: ReceivingKey::from(receiving_key_bytes),
             })
             .boxed()
     }
