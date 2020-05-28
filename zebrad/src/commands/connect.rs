@@ -60,7 +60,7 @@ impl ConnectCmd {
         // Use a different listen addr so that we don't conflict with another local node.
         config.listen_addr = "127.0.0.1:38233".parse().unwrap();
         // Connect only to the specified peer.
-        config.initial_mainnet_peers = vec![self.addr.to_string()];
+        config.initial_mainnet_peers.insert(self.addr.to_string());
 
         let (mut peer_set, _address_book) = zebra_network::init(config, node).await;
         let mut retry_peer_set =

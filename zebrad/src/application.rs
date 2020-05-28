@@ -108,7 +108,9 @@ impl Application for ZebradApp {
 
     /// Get logging configuration from command-line options
     fn tracing_config(&self, command: &EntryPoint<ZebradCmd>) -> trace::Config {
-        if command.verbose {
+        if let Ok(env) = std::env::var("ZEBRAD_LOG") {
+            trace::Config::from(env)
+        } else if command.verbose {
             trace::Config::verbose()
         } else {
             trace::Config::default()

@@ -1,7 +1,7 @@
 use std::{
     net::{SocketAddr, ToSocketAddrs},
     string::String,
-    time::Duration,
+    time::Duration, collections::HashSet,
 };
 
 use zebra_chain::Network;
@@ -21,11 +21,11 @@ pub struct Config {
 
     /// A list of initial peers for the peerset when operating on
     /// mainnet.
-    pub initial_mainnet_peers: Vec<String>,
+    pub initial_mainnet_peers: HashSet<String>,
 
     /// A list of initial peers for the peerset when operating on
     /// testnet.
-    pub initial_testnet_peers: Vec<String>,
+    pub initial_testnet_peers: HashSet<String>,
 
     /// The outgoing request buffer size for the peer set.
     pub peerset_request_buffer_size: usize,
@@ -49,16 +49,16 @@ pub struct Config {
 }
 
 impl Config {
-    fn parse_peers<S: ToSocketAddrs>(peers: Vec<S>) -> Vec<SocketAddr> {
+    fn parse_peers<S: ToSocketAddrs>(peers: HashSet<S>) -> HashSet<SocketAddr> {
         peers
             .iter()
             .flat_map(|s| s.to_socket_addrs())
             .flatten()
-            .collect::<Vec<SocketAddr>>()
+            .collect()
     }
 
     /// Get the initial seed peers based on the configured network.
-    pub fn initial_peers(&self) -> Vec<SocketAddr> {
+    pub fn initial_peers(&self) -> HashSet<SocketAddr> {
         match self.network {
             Network::Mainnet => Config::parse_peers(self.initial_mainnet_peers.clone()),
             Network::Testnet => Config::parse_peers(self.initial_testnet_peers.clone()),
