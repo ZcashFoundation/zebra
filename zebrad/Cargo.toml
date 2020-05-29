@@ -30,6 +30,8 @@ metrics = "0.12"
 
 zebra-chain = { path = "../zebra-chain" }
 zebra-network = { path = "../zebra-network" }
+eyre = "0.4.2"
+color-eyre = "0.3.2"
 
 [dev-dependencies]
 abscissa_core = { version = "0.5", features = ["testing"] }

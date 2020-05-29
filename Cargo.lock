@@ -10,7 +10,7 @@ dependencies = [
  "backtrace",
  "canonical-path",
  "chrono",
- "color-backtrace",
+ "color-backtrace 0.3.0",
  "generational-arena",
  "gumdrop",
  "libc",
@@ -24,7 +24,7 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-log",
- "tracing-subscriber",
+ "tracing-subscriber 0.1.6",
  "wait-timeout",
 ]
 
@@ -43,6 +43,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "addr2line"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a49806b9dadc843c61e7c97e72490ad7f7220ae249012fbda9ad0609457c0543"
+dependencies = [
+ "gimli",
+]
+
+[[package]]
 name = "aho-corasick"
 version = "0.7.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -56,6 +65,15 @@ name = "ansi_term"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ee49baf6cb617b853aa8d93bf420db2383fab46d314482ca2803b40d5fde979b"
+dependencies = [
+ "winapi 0.3.8",
+]
+
+[[package]]
+name = "ansi_term"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d52a9bb7ec0cf484c551830a7ce27bd20d67eac647e1befb56b0be4ee39a55d2"
 dependencies = [
  "winapi 0.3.8",
 ]
@@ -109,24 +127,15 @@ checksum = "f8aac770f1885fd7e387acedd76065302551364496e46b3dd00860b2f8359b9d"
 
 [[package]]
 name = "backtrace"
-version = "0.3.46"
+version = "0.3.48"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1e692897359247cc6bb902933361652380af0f1b7651ae5c5013407f30e109e"
+checksum = "0df2f85c8a2abbe3b7d7e748052fdd9b76a0458fdeb16ad4223f5eca78c7c130"
 dependencies = [
- "backtrace-sys",
+ "addr2line",
  "cfg-if",
  "libc",
+ "object",
  "rustc-demangle",
-]
-
-[[package]]
-name = "backtrace-sys"
-version = "0.1.35"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7de8aba10a69c8e8d7622c5710229485ec32e9d55fdad160ea559c086fdcd118"
-dependencies = [
- "cc",
- "libc",
 ]
 
 [[package]]
@@ -286,6 +295,44 @@ dependencies = [
 ]
 
 [[package]]
+name = "color-backtrace"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5356ae4e07c994a2763226a8a991e5829ded78ac23f8ac88b3f3e69970db5163"
+dependencies = [
+ "atty",
+ "backtrace",
+ "termcolor",
+]
+
+[[package]]
+name = "color-eyre"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b3cdd3caab1f4b52914ac0f232a97096f92c8ebac1632a6f8ca437adac85417f"
+dependencies = [
+ "ansi_term 0.12.1",
+ "backtrace",
+ "color-backtrace 0.4.2",
+ "color-spantrace",
+ "eyre",
+ "indenter",
+ "once_cell",
+ "tracing-error",
+]
+
+[[package]]
+name = "color-spantrace"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "424ab1ba38a16ad93b9f895a76a4b238e79dad41a1ef3b15955c7fc785bea93f"
+dependencies = [
+ "ansi_term 0.12.1",
+ "tracing-core",
+ "tracing-error",
+]
+
+[[package]]
 name = "constant_time_eq"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -401,6 +448,15 @@ dependencies = [
  "serde",
  "sha2",
  "thiserror",
+]
+
+[[package]]
+name = "eyre"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d0fd0cbbcb0f8f25b9d9aada7235e1122c1d1a443293ee9efce58a579f9f5c25"
+dependencies = [
+ "indenter",
 ]
 
 [[package]]
@@ -562,6 +618,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "gimli"
+version = "0.21.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bcc8e0c9bce37868955864dbecd2b1ab2bdf967e6f28066d65aaac620444b65c"
+
+[[package]]
 name = "gumdrop"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -692,6 +754,12 @@ dependencies = [
  "sized-chunks",
  "typenum",
 ]
+
+[[package]]
+name = "indenter"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e0bd112d44d9d870a6819eb505d04dd92b5e4d94bb8c304924a0872ae7016fb5"
 
 [[package]]
 name = "indexmap"
@@ -987,6 +1055,12 @@ dependencies = [
  "hermit-abi",
  "libc",
 ]
+
+[[package]]
+name = "object"
+version = "0.19.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9cbca9424c482ee628fa549d9c812e2cd22f1180b9222c9200fdfa6eb31aecb2"
 
 [[package]]
 name = "once_cell"
@@ -1531,6 +1605,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sharded-slab"
+version = "0.0.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "06d5a3f5166fb5b42a5439f2eee8b9de149e235961e3eb21c5808fc3ea17ff3e"
+dependencies = [
+ "lazy_static",
+]
+
+[[package]]
 name = "signal-hook"
 version = "0.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1896,6 +1979,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tracing-error"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b4d7c0b83d4a500748fa5879461652b361edf5c9d51ede2a2ac03875ca185e24"
+dependencies = [
+ "tracing",
+ "tracing-subscriber 0.2.5",
+]
+
+[[package]]
 name = "tracing-futures"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1922,7 +2015,7 @@ version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "192ca16595cdd0661ce319e8eede9c975f227cdaabc4faaefdc256f43d852e45"
 dependencies = [
- "ansi_term",
+ "ansi_term 0.11.0",
  "chrono",
  "lazy_static",
  "matchers",
@@ -1931,6 +2024,16 @@ dependencies = [
  "smallvec",
  "tracing-core",
  "tracing-log",
+]
+
+[[package]]
+name = "tracing-subscriber"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d53c40489aa69c9aed21ff483f26886ca8403df33bdc2d2f87c60c1617826d2"
+dependencies = [
+ "sharded-slab",
+ "tracing-core",
 ]
 
 [[package]]
@@ -2135,6 +2238,8 @@ version = "0.1.0"
 dependencies = [
  "abscissa_core",
  "chrono",
+ "color-eyre",
+ "eyre",
  "futures",
  "gumdrop",
  "hyper",

@@ -30,5 +30,4 @@ mod components;
 pub mod application;
 pub mod commands;
 pub mod config;
-pub mod error;
 pub mod prelude;

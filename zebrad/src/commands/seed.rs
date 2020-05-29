@@ -13,10 +13,9 @@ use tower::{buffer::Buffer, Service, ServiceExt};
 
 use zebra_network::{AddressBook, BoxedStdError, Request, Response};
 
-use crate::{
-    error::{Error, ErrorKind},
-    prelude::*,
-};
+use crate::prelude::*;
+use color_eyre::Report;
+use eyre::eyre;
 
 /// Whether our `SeedService` is poll_ready or not.
 #[derive(Debug)]
@@ -128,7 +127,7 @@ impl Runnable for SeedCmd {
 }
 
 impl SeedCmd {
-    async fn seed(&self) -> Result<(), Error> {
+    async fn seed(&self) -> Result<(), Report> {
         info!("begin tower-based peer handling test stub");
 
         let (addressbook_tx, addressbook_rx) = oneshot::channel();
@@ -144,10 +143,7 @@ impl SeedCmd {
         let _ = addressbook_tx.send(address_book);
 
         info!("waiting for peer_set ready");
-        peer_set
-            .ready_and()
-            .await
-            .map_err(|e| Error::from(ErrorKind::Io.context(e)))?;
+        peer_set.ready_and().await.map_err(|e| eyre!(e))?;
 
         info!("peer_set became ready");
 
