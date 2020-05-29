@@ -1,14 +1,12 @@
 //! `connect` subcommand - test stub for talking to zcashd
 
-use crate::{
-    prelude::*,
-};
+use crate::prelude::*;
 
 use abscissa_core::{Command, Options, Runnable};
 
-use futures::prelude::*;
 use color_eyre::Report;
 use eyre::eyre;
+use futures::prelude::*;
 
 /// `connect` subcommand
 #[derive(Command, Debug, Options)]
@@ -68,10 +66,7 @@ impl ConnectCmd {
             tower::retry::Retry::new(zebra_network::RetryErrors, peer_set.clone());
 
         info!("waiting for peer_set ready");
-        peer_set
-            .ready_and()
-            .await
-            .map_err(|e| eyre!(e))?;
+        peer_set.ready_and().await.map_err(|e| eyre!(e))?;
 
         info!("peer_set became ready");
 

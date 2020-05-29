@@ -13,9 +13,7 @@ use tower::{buffer::Buffer, Service, ServiceExt};
 
 use zebra_network::{AddressBook, BoxedStdError, Request, Response};
 
-use crate::{
-    prelude::*,
-};
+use crate::prelude::*;
 use color_eyre::Report;
 use eyre::eyre;
 
@@ -145,10 +143,7 @@ impl SeedCmd {
         let _ = addressbook_tx.send(address_book);
 
         info!("waiting for peer_set ready");
-        peer_set
-            .ready_and()
-            .await
-            .map_err(|e| eyre!(e))?;
+        peer_set.ready_and().await.map_err(|e| eyre!(e))?;
 
         info!("peer_set became ready");
 
