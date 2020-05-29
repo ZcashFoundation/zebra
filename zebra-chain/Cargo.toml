@@ -30,5 +30,5 @@ ed25519-zebra = "0.2"
 redjubjub = "0.1"
 
 [dev-dependencies]
-proptest = "0.9"
+proptest = "0.10"
 proptest-derive = "0.2.0"
