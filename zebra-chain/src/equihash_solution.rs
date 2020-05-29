@@ -20,6 +20,7 @@ const EQUIHASH_SOLUTION_SIZE: usize = 1344;
 ///
 /// The size of an Equihash solution in bytes is always 1344 so the
 /// length of this type is fixed.
+#[derive(Deserialize, Serialize)]
 pub struct EquihashSolution(pub [u8; EQUIHASH_SOLUTION_SIZE]);
 
 impl PartialEq<EquihashSolution> for EquihashSolution {

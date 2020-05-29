@@ -10,7 +10,6 @@ use crate::{notes::sprout, proofs::ZkSnarkProof};
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#joinsplitencoding
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(test, derive(Arbitrary))]
 pub struct JoinSplit<P: ZkSnarkProof> {
     /// A value that the JoinSplit transfer removes from the transparent value
     /// pool.
@@ -48,7 +47,7 @@ pub struct JoinSplit<P: ZkSnarkProof> {
     /// A ZK JoinSplit proof, either a
     /// [`Groth16Proof`](crate::proofs::Groth16Proof) or a
     /// [`Bctv14Proof`](crate::proofs::Bctv14Proof).
-    #[serde(bound(serialize  = "P: ZkSnarkProof", deserialize = "P: ZkSnarkProof"))]
+    #[serde(bound(serialize = "P: ZkSnarkProof", deserialize = "P: ZkSnarkProof"))]
     pub zkproof: P,
     /// A ciphertext component for this output note.
     pub enc_ciphertexts: [sprout::EncryptedCiphertext; 2],
@@ -134,12 +133,19 @@ pub struct JoinSplitData<P: ZkSnarkProof> {
     /// However, it's not necessary to access or process `first` and `rest`
     /// separately, as the [`JoinSplitData::joinsplits`] method provides an
     /// iterator over all of the `JoinSplit`s.
+    #[serde(bound(
+        serialize = "JoinSplit<P>: Serialize",
+        deserialize = "JoinSplit<P>: Deserialize<'de>"
+    ))]
     pub first: JoinSplit<P>,
     /// The rest of the JoinSplit descriptions, using proofs of type `P`.
     ///
     /// The [`JoinSplitData::joinsplits`] method provides an iterator over
     /// all `JoinSplit`s.
-    #[serde(bound(serialize  = "P: ZkSnarkProof", deserialize = "P: ZkSnarkProof"))]
+    #[serde(bound(
+        serialize = "JoinSplit<P>: Serialize",
+        deserialize = "JoinSplit<P>: Deserialize<'de>"
+    ))]
     pub rest: Vec<JoinSplit<P>>,
     /// The public key for the JoinSplit signature.
     pub pub_key: ed25519_zebra::PublicKeyBytes,
