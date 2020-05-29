@@ -1125,9 +1125,9 @@ dependencies = [
 
 [[package]]
 name = "proptest-derive"
-version = "0.1.2"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d31edb17edac73aeacc947bd61462dda15220584268896a58e12f053d767f15b"
+checksum = "051d9d20dbe9e9dfe594328b6eaab72ccf571fee818991dd1c1ba5469b5f32d4"
 dependencies = [
  "proc-macro2 0.4.30",
  "quote 0.6.13",
