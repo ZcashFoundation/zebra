@@ -1,13 +1,14 @@
 //! `connect` subcommand - test stub for talking to zcashd
 
 use crate::{
-    error::{Error, ErrorKind},
     prelude::*,
 };
 
 use abscissa_core::{Command, Options, Runnable};
 
 use futures::prelude::*;
+use color_eyre::Report;
+use eyre::eyre;
 
 /// `connect` subcommand
 #[derive(Command, Debug, Options)]
@@ -42,7 +43,7 @@ impl Runnable for ConnectCmd {
 }
 
 impl ConnectCmd {
-    async fn connect(&self) -> Result<(), Error> {
+    async fn connect(&self) -> Result<(), Report> {
         use zebra_network::{Request, Response};
 
         info!("begin tower-based peer handling test stub");
@@ -51,7 +52,7 @@ impl ConnectCmd {
         let node = Buffer::new(
             service_fn(|req| async move {
                 info!(?req);
-                Ok::<Response, Error>(Response::Nil)
+                Ok::<Response, Report>(Response::Nil)
             }),
             1,
         );
@@ -70,7 +71,7 @@ impl ConnectCmd {
         peer_set
             .ready_and()
             .await
-            .map_err(|e| Error::from(ErrorKind::Io.context(e)))?;
+            .map_err(|e| eyre!(e))?;
 
         info!("peer_set became ready");
 
