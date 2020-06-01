@@ -2123,7 +2123,7 @@ name = "zebra-script"
 version = "0.1.0"
 
 [[package]]
-name = "zebra-storage"
+name = "zebra-state"
 version = "0.1.0"
 
 [[package]]

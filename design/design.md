@@ -21,15 +21,15 @@ The following are general desiderata for Zebra:
   is usually a proxy for this desideratum, but is not exactly the same:
   for instance, a collection of crates like the tokio crates are all
   developed together and have one trust boundary.
-  
+
 * Zebra should be well-factored internally into a collection of
   component libraries which can be used by other applications to
   perform Zcash-related tasks.  Implementation details of each
   component should not leak into all other components.
-  
+
 * Zebra should checkpoint on Sapling activation and drop all
   Sprout-related functionality not required post-Sapling.
-  
+
 Internal Structure
 ==================
 
@@ -98,7 +98,7 @@ All peerset management (finding new peers, creating new outbound
 connections, etc) is completely encapsulated, as is responsibility for
 routing outbound requests to appropriate peers.
 
-`zebra-storage`
+`zebra-state`
 ----------------
 
 ### Internal Dependencies
@@ -157,7 +157,7 @@ for Zcash script inspection, debugging, etc.
 ### Internal Dependencies
 
 - `zebra-chain`
-- `zebra-storage`
+- `zebra-state`
 - `zebra-script`
 
 ### Responsible for
@@ -194,7 +194,7 @@ for Zcash script inspection, debugging, etc.
 ### Internal Dependencies
 
 - `zebra-chain` for structure definitions
-- `zebra-storage` for transaction queries and client/wallet state storage
+- `zebra-state` for transaction queries and client/wallet state storage
 - `zebra-script` possibly? for constructing transactions
 
 ### Responsible for
@@ -203,7 +203,7 @@ for Zcash script inspection, debugging, etc.
 - would be used to implement a wallet
 - create transactions, monitors shielded wallet state, etc.
 
-### Notes 
+### Notes
 
 Communication between the client code and the rest of the node should be done
 by a tower service interface. Since the `Service` trait can abstract from a
@@ -229,7 +229,7 @@ and connects them to each other.
 
 - `zebra-chain`
 - `zebra-network`
-- `zebra-storage`
+- `zebra-state`
 - `zebra-consensus`
 - `zebra-client`
 - `zebra-rpc`
