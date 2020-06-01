@@ -2125,6 +2125,12 @@ version = "0.1.0"
 [[package]]
 name = "zebra-state"
 version = "0.1.0"
+dependencies = [
+ "eyre",
+ "futures",
+ "tower",
+ "zebra-chain",
+]
 
 [[package]]
 name = "zebrad"
