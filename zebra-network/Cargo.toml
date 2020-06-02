@@ -30,8 +30,7 @@ futures = "0.3"
 tracing = "0.1"
 tracing-futures = "0.2"
 
-tower = "0.3"
-tower-load = "0.3"
+tower = { version = "0.3", features = ["buffer", "util", "load-shed", "retry", "timeout", "discover", "load"] }
 
 metrics = "0.12"
 

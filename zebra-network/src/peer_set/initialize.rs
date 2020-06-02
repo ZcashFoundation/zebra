@@ -15,13 +15,13 @@ use futures::{
     stream::{FuturesUnordered, StreamExt},
 };
 use tokio::net::{TcpListener, TcpStream};
+use tower::load::{completion::CompleteOnResponse, peak_ewma::PeakEwmaDiscover};
 use tower::{
     buffer::Buffer,
-    discover::{Change, ServiceStream},
+    discover::Change,
     layer::Layer,
     Service, ServiceExt,
 };
-use tower_load::{peak_ewma::PeakEwmaDiscover, NoInstrument};
 
 use crate::{
     peer, timestamp_collector::TimestampCollector, AddressBook, BoxedStdError, Config, Request,
@@ -77,14 +77,10 @@ where
     let peer_set = Buffer::new(
         PeerSet::new(
             PeakEwmaDiscover::new(
-                ServiceStream::new(
-                    // ServiceStream interprets an error as stream termination,
-                    // so discard any errored connections...
-                    peerset_rx.filter(|result| future::ready(result.is_ok())),
-                ),
+                peerset_rx.filter(|result| future::ready(result.is_ok())),
                 config.ewma_default_rtt,
                 config.ewma_decay_time,
-                NoInstrument,
+                CompleteOnResponse::default(),
             ),
             demand_tx.clone(),
         ),

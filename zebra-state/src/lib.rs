@@ -1,15 +1,16 @@
 #![doc(html_logo_url = "https://www.zfnd.org/images/zebra-icon.png")]
 #![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_storage")]
+use eyre::Report;
 use futures::prelude::*;
 use std::{
     collections::HashMap,
-    error::Error,
     future::Future,
+    marker::PhantomData,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
 };
-use tower::{buffer::Buffer, Service};
+use tower::{buffer::Buffer, Service, ServiceExt};
 use zebra_chain::block::{Block, BlockHeaderHash};
 
 #[derive(Debug)]
@@ -27,6 +28,7 @@ pub enum Response {
 
 pub mod in_memory {
     use super::*;
+<<<<<<< Updated upstream
     use std::error::Error;
 
     pub fn init() -> impl Service<
@@ -38,17 +40,39 @@ pub mod in_memory {
            + Clone
            + 'static {
         Buffer::new(ZebraState::default(), 1)
+=======
+    use eyre::Report;
+
+    pub fn init<EH: eyre::EyreContext>() -> impl Service<
+        Request,
+        Response = Response,
+        Error = Report<EH>,
+        Future = impl Future<Output = Result<Response, Report<EH>>>,
+    > + Send
+           + Clone
+           + 'static {
+        Buffer::new(ZebraState::<EH>::default(), 1).map_err::<_, Report<EH>>(|e| eyre::eyre!(e))
+>>>>>>> Stashed changes
     }
 }
 
-#[derive(Default)]
-struct ZebraState {
+struct ZebraState<EH> {
     blocks: HashMap<BlockHeaderHash, Arc<Block>>,
+    _error_handler: PhantomData<EH>,
 }
 
-impl Service<Request> for ZebraState {
+impl<EH> Default for ZebraState<EH> {
+    fn default() -> Self {
+        Self {
+            blocks: Default::default(),
+            _error_handler: PhantomData,
+        }
+    }
+}
+
+impl<EH: eyre::EyreContext> Service<Request> for ZebraState<EH> {
     type Response = Response;
-    type Error = Box<dyn Error + Send + Sync + 'static>;
+    type Error = Report<EH>;
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
@@ -70,7 +94,7 @@ impl Service<Request> for ZebraState {
                     .get(&hash)
                     .cloned()
                     .map(|block| Response::Block { block })
-                    .ok_or_else(|| "block could not be found".into());
+                    .ok_or_else(|| eyre::eyre!("block could not be found"));
 
                 async move { result }.boxed()
             }
@@ -82,7 +106,11 @@ impl Service<Request> for ZebraState {
 mod tests {
     use super::*;
     use color_eyre::Report;
+<<<<<<< Updated upstream
     use eyre::{bail, ensure, eyre};
+=======
+    use eyre::{bail, ensure};
+>>>>>>> Stashed changes
     use hex::FromHex;
     use zebra_chain::serialization::ZcashDeserialize;
 
@@ -101,8 +129,12 @@ mod tests {
             .call(Request::AddBlock {
                 block: block.clone(),
             })
+<<<<<<< Updated upstream
             .await
             .map_err(|e| eyre!(e))?;
+=======
+            .await?;
+>>>>>>> Stashed changes
 
         ensure!(
             matches!(response, Response::Added),
@@ -110,10 +142,14 @@ mod tests {
             response
         );
 
+<<<<<<< Updated upstream
         let block_response = service
             .call(Request::GetBlock { hash })
             .await
             .map_err(|e| eyre!(e))?;
+=======
+        let block_response = service.call(Request::GetBlock { hash }).await?;
+>>>>>>> Stashed changes
 
         match block_response {
             Response::Block {

@@ -14,11 +14,11 @@ use futures::{
     stream::FuturesUnordered,
 };
 use indexmap::IndexMap;
+use tower::load::Load;
 use tower::{
     discover::{Change, Discover},
     Service,
 };
-use tower_load::Load;
 
 use crate::{
     protocol::internal::{Request, Response},
@@ -85,6 +85,8 @@ where
     D::Key: Clone + Debug,
     D::Service: Service<Request, Response = Response> + Load,
     D::Error: Into<BoxedStdError>,
+    BoxedStdError: From<<D as Discover>::Error>,
+    <D as Discover>::Key: std::hash::Hash,
     <D::Service as Service<Request>>::Error: Into<BoxedStdError> + 'static,
     <D::Service as Service<Request>>::Future: Send + 'static,
     <D::Service as Load>::Metric: Debug,
@@ -102,18 +104,18 @@ where
     }
 
     fn poll_discover(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), BoxedStdError>> {
-        use futures::ready;
         loop {
-            match ready!(Pin::new(&mut self.discover).poll_discover(cx)).map_err(Into::into)? {
-                Change::Remove(key) => {
+            match futures::ready!(Pin::new(&mut self.discover).poll_discover(cx)).transpose()? {
+                Some(Change::Remove(key)) => {
                     trace!(?key, "got Change::Remove from Discover");
                     self.remove(&key);
                 }
-                Change::Insert(key, svc) => {
+                Some(Change::Insert(key, svc)) => {
                     trace!(?key, "got Change::Insert from Discover");
                     self.remove(&key);
                     self.push_unready(key, svc);
                 }
+                None => return Poll::Ready(Ok(())),
             }
         }
     }
@@ -212,7 +214,8 @@ where
     D: Discover + Unpin,
     D::Key: Clone + Debug + ToString,
     D::Service: Service<Request, Response = Response> + Load,
-    D::Error: Into<BoxedStdError>,
+    BoxedStdError: From<<D as Discover>::Error>,
+    <D as Discover>::Key: std::hash::Hash,
     <D::Service as Service<Request>>::Error: Into<BoxedStdError> + 'static,
     <D::Service as Service<Request>>::Future: Send + 'static,
     <D::Service as Load>::Metric: Debug,
@@ -224,7 +227,7 @@ where
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         // Process peer discovery updates.
-        let _ = self.poll_discover(cx)?;
+        let a = self.poll_discover(cx)?;
 
         // Poll unready services to drive them to readiness.
         self.poll_unready(cx);

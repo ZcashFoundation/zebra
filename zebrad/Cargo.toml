@@ -23,7 +23,7 @@ tracing-log = "0.1"
 
 hyper = "0.13.6"
 
-tower = "0.3"
+tower = { version = "0.3" }
 
 metrics-runtime = "0.13"
 metrics = "0.12"
