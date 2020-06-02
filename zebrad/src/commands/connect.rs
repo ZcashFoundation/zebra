@@ -42,25 +42,25 @@ impl Runnable for ConnectCmd {
 
 impl ConnectCmd {
     async fn connect(&self) -> Result<(), Report> {
-        use zebra_network::{Request, Response};
-
         info!("begin tower-based peer handling test stub");
         use tower::{buffer::Buffer, service_fn, Service, ServiceExt};
 
+        // The service that our node uses to respond to requests by peers
         let node = Buffer::new(
             service_fn(|req| async move {
                 info!(?req);
-                Ok::<Response, Report>(Response::Nil)
+                Ok::<zebra_network::Response, Report>(zebra_network::Response::Nil)
             }),
             1,
         );
 
         let mut config = app_config().network.clone();
         // Use a different listen addr so that we don't conflict with another local node.
-        config.listen_addr = "127.0.0.1:38233".parse().unwrap();
+        config.listen_addr = "127.0.0.1:38233".parse()?;
         // Connect only to the specified peer.
         config.initial_mainnet_peers.insert(self.addr.to_string());
 
+        let mut state = zebra_state::in_memory::init();
         let (mut peer_set, _address_book) = zebra_network::init(config, node).await;
         let mut retry_peer_set =
             tower::retry::Retry::new(zebra_network::RetryErrors, peer_set.clone());
@@ -81,19 +81,25 @@ impl ConnectCmd {
             177, 29, 170, 27, 145, 113, 132, 236, 232, 15, 4, 0,
         ]);
 
+        // TODO(jlusby): Replace with real state service
         let mut downloaded_block_heights = BTreeSet::<BlockHeight>::new();
         downloaded_block_heights.insert(BlockHeight(0));
+
         let mut block_requests = FuturesUnordered::new();
         let mut requested_block_heights = 0;
+
         while requested_block_heights < 700_000 {
             // Request the next 500 hashes.
-            retry_peer_set.ready_and().await.unwrap();
-            let hashes = if let Ok(Response::BlockHeaderHashes(hashes)) = retry_peer_set
-                .call(Request::FindBlocks {
-                    known_blocks: vec![tip],
-                    stop: None,
-                })
-                .await
+            let hashes = if let Ok(zebra_network::Response::BlockHeaderHashes(hashes)) =
+                retry_peer_set
+                    .ready_and()
+                    .await
+                    .map_err(|e| eyre!(e))?
+                    .call(zebra_network::Request::FindBlocks {
+                        known_blocks: vec![tip],
+                        stop: None,
+                    })
+                    .await
             {
                 info!(
                     new_hashes = hashes.len(),
@@ -113,17 +119,27 @@ impl ConnectCmd {
 
             // Request the corresponding blocks in chunks
             for chunk in hashes.chunks(10usize) {
-                peer_set.ready_and().await.unwrap();
-                block_requests
-                    .push(peer_set.call(Request::BlocksByHash(chunk.iter().cloned().collect())));
+                let request = peer_set.ready_and().await.map_err(|e| eyre!(e))?.call(
+                    zebra_network::Request::BlocksByHash(chunk.iter().cloned().collect()),
+                );
+
+                block_requests.push(request);
             }
 
             // Allow at most 300 block requests in flight.
             while block_requests.len() > 300 {
                 match block_requests.next().await {
-                    Some(Ok(Response::Blocks(blocks))) => {
-                        for block in &blocks {
+                    Some(Ok(zebra_network::Response::Blocks(blocks))) => {
+                        for block in blocks {
                             downloaded_block_heights.insert(block.coinbase_height().unwrap());
+                            let block = block.into();
+                            state
+                                .ready_and()
+                                .await
+                                .map_err(|e| eyre!(e))?
+                                .call(zebra_state::Request::AddBlock { block })
+                                .await
+                                .map_err(|e| eyre!(e))?;
                         }
                     }
                     Some(Err(e)) => {
@@ -134,9 +150,17 @@ impl ConnectCmd {
             }
         }
 
-        while let Some(Ok(Response::Blocks(blocks))) = block_requests.next().await {
-            for block in &blocks {
+        while let Some(Ok(zebra_network::Response::Blocks(blocks))) = block_requests.next().await {
+            for block in blocks {
                 downloaded_block_heights.insert(block.coinbase_height().unwrap());
+                let block = block.into();
+                state
+                    .ready_and()
+                    .await
+                    .map_err(|e| eyre!(e))?
+                    .call(zebra_state::Request::AddBlock { block })
+                    .await
+                    .map_err(|e| eyre!(e))?;
             }
         }
 
