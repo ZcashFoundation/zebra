@@ -2114,6 +2114,7 @@ dependencies = [
  "sha2",
  "thiserror",
  "x25519-dalek",
+ "zebra-test-vectors",
 ]
 
 [[package]]
@@ -2171,6 +2172,15 @@ dependencies = [
  "tokio",
  "tower",
  "zebra-chain",
+ "zebra-test-vectors",
+]
+
+[[package]]
+name = "zebra-test-vectors"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "lazy_static",
 ]
 
 [[package]]

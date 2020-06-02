@@ -19,3 +19,4 @@ hex = "0.4.2"
 color-eyre = "0.3.2"
 eyre = "0.4.2"
 tokio = { version = "0.2.21", features = ["full"] }
+zebra-test-vectors = { path = "../zebra-test-vectors/" }

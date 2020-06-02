@@ -2,8 +2,6 @@
 #![allow(clippy::unit_arg)]
 
 #[cfg(test)]
-pub mod test_vectors;
-#[cfg(test)]
 mod tests;
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
