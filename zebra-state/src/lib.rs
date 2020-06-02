@@ -1,5 +1,5 @@
 #![doc(html_logo_url = "https://www.zfnd.org/images/zebra-icon.png")]
-#![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_storage")]
+#![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_state")]
 use futures::prelude::*;
 use std::{
     collections::HashMap,
