@@ -32,6 +32,7 @@ zebra-chain = { path = "../zebra-chain" }
 zebra-network = { path = "../zebra-network" }
 eyre = "0.4.3"
 color-eyre = "0.3.2"
+zebra-state = { path = "../zebra-state" }
 
 [dev-dependencies]
 abscissa_core = { version = "0.5", features = ["testing"] }

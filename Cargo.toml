@@ -2,11 +2,12 @@
 members = [
         "zebra-chain",
         "zebra-network",
-        "zebra-storage",
+        "zebra-state",
         "zebra-script",
         "zebra-consensus",
         "zebra-rpc",
         "zebra-client",
+        "zebra-test-vectors",
         "zebrad",
 ]
 
