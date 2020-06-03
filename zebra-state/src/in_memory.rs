@@ -35,17 +35,11 @@ impl ZebraState {
         query: impl Into<BlockQuery>,
     ) -> Result<Arc<Block>, Box<dyn Error + Send + Sync + 'static>> {
         match query.into() {
-            BlockQuery::ByHash(hash) => self
-                .by_hash
-                .get(&hash)
-                .cloned()
-                .ok_or_else(|| "block could not be found".into()),
-            BlockQuery::ByHeight(height) => self
-                .by_height
-                .get(&height)
-                .cloned()
-                .ok_or_else(|| "block could not be found".into()),
+            BlockQuery::ByHash(hash) => self.by_hash.get(&hash),
+            BlockQuery::ByHeight(height) => self.by_height.get(&height),
         }
+        .cloned()
+        .ok_or_else(|| "block could not be found".into())
     }
 }
 
