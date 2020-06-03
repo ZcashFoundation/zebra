@@ -28,6 +28,23 @@ mod tests {
     use tower::Service;
     use zebra_chain::serialization::ZcashDeserialize;
 
+    fn install_tracing() {
+        use tracing_error::ErrorLayer;
+        use tracing_subscriber::prelude::*;
+        use tracing_subscriber::{fmt, EnvFilter};
+
+        let fmt_layer = fmt::layer().with_target(false);
+        let filter_layer = EnvFilter::try_from_default_env()
+            .or_else(|_| EnvFilter::try_new("info"))
+            .unwrap();
+
+        tracing_subscriber::registry()
+            .with(filter_layer)
+            .with(fmt_layer)
+            .with(ErrorLayer::default())
+            .init();
+    }
+
     #[tokio::test]
     async fn round_trip() -> Result<(), Report> {
         let block: Arc<_> =
@@ -65,7 +82,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[spandoc::spandoc]
     async fn get_tip() -> Result<(), Report> {
+        install_tracing();
+
         let block0: Arc<_> =
             Block::zcash_deserialize(&zebra_test_vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?.into();
         let block1: Arc<_> =
@@ -75,11 +95,9 @@ mod tests {
 
         let mut service = in_memory::init();
 
-        // insert the higher block first
+        /// insert the higher block first
         let response = service
-            .call(Request::AddBlock {
-                block: block1.clone(),
-            })
+            .call(Request::AddBlock { block: block1 })
             .await
             .map_err(|e| eyre!(e))?;
 
@@ -89,7 +107,7 @@ mod tests {
             response
         );
 
-        // genesis block second
+        /// genesis block second
         let response = service
             .call(Request::AddBlock {
                 block: block0.clone(),
@@ -105,8 +123,7 @@ mod tests {
 
         let block_response = service.call(Request::GetTip).await.map_err(|e| eyre!(e))?;
 
-        // assert that the higher block is returned as the tip even tho it was
-        // least recently inserted
+        /// assert that the higher block is returned as the tip even tho it was least recently inserted
         match block_response {
             Response::Tip { hash } => assert_eq!(expected_hash, hash),
             _ => bail!("unexpected response kind: {:?}", block_response),
