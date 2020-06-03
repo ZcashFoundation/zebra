@@ -10,12 +10,14 @@ pub enum Request {
     // TODO(jlusby): deprecate in the future based on our validation story
     AddBlock { block: Arc<Block> },
     GetBlock { hash: BlockHeaderHash },
+    GetTip,
 }
 
 #[derive(Debug)]
 pub enum Response {
     Added,
     Block { block: Arc<Block> },
+    Tip { hash: BlockHeaderHash },
 }
 
 #[cfg(test)]

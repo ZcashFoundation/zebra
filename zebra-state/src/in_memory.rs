@@ -26,20 +26,30 @@ impl ZebraState {
         let hash = block.as_ref().into();
         let height = block.coinbase_height().unwrap();
 
-        self.by_hash.insert(hash, block.clone());
-        self.by_height.insert(height, block);
+        assert!(
+            self.by_hash.insert(hash, block.clone()).is_none(),
+            "blocks shouldn't have the same hash"
+        );
+        assert!(
+            self.by_height.insert(height, block).is_none(),
+            "blocks with the same height are currently unsupported"
+        );
     }
 
-    fn get(
-        &mut self,
-        query: impl Into<BlockQuery>,
-    ) -> Result<Arc<Block>, Box<dyn Error + Send + Sync + 'static>> {
+    fn get(&mut self, query: impl Into<BlockQuery>) -> Option<Arc<Block>> {
         match query.into() {
             BlockQuery::ByHash(hash) => self.by_hash.get(&hash),
             BlockQuery::ByHeight(height) => self.by_height.get(&height),
         }
         .cloned()
-        .ok_or_else(|| "block could not be found".into())
+    }
+
+    fn tip(&self) -> Option<Arc<Block>> {
+        self.by_height
+            .iter()
+            .next_back()
+            .map(|(_key, value)| value)
+            .cloned()
     }
 }
 
@@ -60,7 +70,20 @@ impl Service<Request> for ZebraState {
                 async { Ok(Response::Added) }.boxed()
             }
             Request::GetBlock { hash } => {
-                let result = self.get(hash).map(|block| Response::Block { block });
+                let result = self
+                    .get(hash)
+                    .map(|block| Response::Block { block })
+                    .ok_or_else(|| "block could not be found".into());
+
+                async move { result }.boxed()
+            }
+            Request::GetTip => {
+                let result = self
+                    .tip()
+                    .map(|block| block.as_ref().into())
+                    .map(|hash| Response::Tip { hash })
+                    .ok_or_else(|| "zebra-state contains no blocks".into());
+
                 async move { result }.boxed()
             }
         }
