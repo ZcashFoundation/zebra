@@ -1,5 +1,6 @@
 #![doc(html_logo_url = "https://www.zfnd.org/images/zebra-icon.png")]
 #![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_state")]
+#![allow(clippy::try_err)]
 use std::sync::Arc;
 use zebra_chain::block::{Block, BlockHeaderHash};
 

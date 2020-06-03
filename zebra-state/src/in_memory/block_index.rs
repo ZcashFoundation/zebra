@@ -1,5 +1,6 @@
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{btree_map::Entry, BTreeMap, HashMap},
+    error::Error,
     sync::Arc,
 };
 use zebra_chain::{
@@ -13,19 +14,22 @@ pub(super) struct BlockIndex {
 }
 
 impl BlockIndex {
-    pub(super) fn insert(&mut self, block: impl Into<Arc<Block>>) {
+    pub(super) fn insert(
+        &mut self,
+        block: impl Into<Arc<Block>>,
+    ) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
         let block = block.into();
         let hash = block.as_ref().into();
         let height = block.coinbase_height().unwrap();
 
-        assert!(
-            self.by_hash.insert(hash, block.clone()).is_none(),
-            "blocks shouldn't have the same hash"
-        );
-        assert!(
-            self.by_height.insert(height, block).is_none(),
-            "blocks with the same height are currently unsupported"
-        );
+        match self.by_height.entry(height) {
+            Entry::Vacant(entry) => {
+                let _ = entry.insert(block.clone());
+                let _ = self.by_hash.insert(hash, block);
+                Ok(())
+            }
+            Entry::Occupied(_) => Err("forks in the chain aren't supported yet")?,
+        }
     }
 
     pub(super) fn get(&mut self, query: impl Into<BlockQuery>) -> Option<Arc<Block>> {
