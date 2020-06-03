@@ -30,6 +30,12 @@ The following are general desiderata for Zebra:
 * Zebra should checkpoint on Sapling activation and drop all
   Sprout-related functionality not required post-Sapling.
 
+### Non-Goals
+
+* Zebra keeps a copy of the chain state, so it isn't intended for
+  lightweight applications like light wallets. Those applications
+  should use a light client protocol.
+
 Internal Structure
 ==================
 
@@ -200,7 +206,7 @@ for Zcash script inspection, debugging, etc.
 ### Responsible for
 
 - implementation of some event a user might trigger
-- would be used to implement a wallet
+- would be used to implement a full wallet
 - create transactions, monitors shielded wallet state, etc.
 
 ### Notes
