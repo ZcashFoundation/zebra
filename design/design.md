@@ -41,7 +41,7 @@ a description of functional responsibility.
 
 ### Internal Dependencies
 
-None: this the core data structure definitions.
+None: these are the core data structure definitions.
 
 ### Responsible for
 
