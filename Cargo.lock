@@ -3,6 +3,7 @@
 [[package]]
 name = "abscissa_core"
 version = "0.5.2"
+source = "git+https://github.com/yaahc/abscissa.git?branch=develop#f4a91c0c1e6fd599a42b8894cabd5c9d692ab7cd"
 dependencies = [
  "abscissa_derive",
  "backtrace",
@@ -29,6 +30,7 @@ dependencies = [
 [[package]]
 name = "abscissa_derive"
 version = "0.5.0"
+source = "git+https://github.com/yaahc/abscissa.git?branch=develop#f4a91c0c1e6fd599a42b8894cabd5c9d692ab7cd"
 dependencies = [
  "darling",
  "ident_case",

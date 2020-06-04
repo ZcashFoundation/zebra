@@ -108,16 +108,12 @@ impl Application for ZebradApp {
         self.state.components.after_config(&config)?;
         self.config = Some(config);
 
-        trace!("Test1");
-
         let level = self.level(command);
         self.state
             .components
             .get_downcast_mut::<abscissa_core::trace::Tracing>()
             .expect("Tracing component should be available")
             .reload_filter(level);
-
-        trace!("Test2");
 
         Ok(())
     }

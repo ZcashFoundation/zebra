@@ -18,4 +18,4 @@ panic = "abort"
 panic = "abort"
 
 [patch.crates-io]
-abscissa_core = { path = "/home/jlusby/git/yaahc/abscissa/core" }
+abscissa_core = { git = "https://github.com/yaahc/abscissa.git", branch = "develop" }
