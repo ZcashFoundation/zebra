@@ -109,7 +109,7 @@ pub struct BlockHeader {
     pub merkle_root_hash: MerkleTreeRootHash,
 
     /// [Sapling onward] The root LEBS2OSP256(rt) of the Sapling note
-    /// commitment tree corresponding to the finnal Sapling treestate of
+    /// commitment tree corresponding to the final Sapling treestate of
     /// this block.
     pub final_sapling_root_hash: SaplingNoteTreeRootHash,
 
