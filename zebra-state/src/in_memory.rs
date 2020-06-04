@@ -44,7 +44,7 @@ impl Service<Request> for ZebraState {
             Request::GetTip => {
                 let result = self
                     .index
-                    .tip()
+                    .get_tip()
                     .map(|block| block.as_ref().into())
                     .map(|hash| Response::Tip { hash })
                     .ok_or_else(|| "zebra-state contains no blocks".into());

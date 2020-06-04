@@ -40,7 +40,7 @@ impl BlockIndex {
         .cloned()
     }
 
-    pub(super) fn tip(&self) -> Option<Arc<Block>> {
+    pub(super) fn get_tip(&self) -> Option<Arc<Block>> {
         self.by_height
             .iter()
             .next_back()
