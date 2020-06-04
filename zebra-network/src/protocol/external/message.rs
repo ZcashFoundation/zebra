@@ -1,7 +1,7 @@
 //! Definitions of network messages.
 
 use std::error::Error;
-use std::net;
+use std::{net, sync::Arc};
 
 use chrono::{DateTime, Utc};
 
@@ -132,7 +132,7 @@ pub enum Message {
     /// A `block` message.
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#block)
-    Block(Box<Block>),
+    Block(Arc<Block>),
 
     /// A `getblocks` message.
     ///

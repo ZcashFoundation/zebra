@@ -451,7 +451,7 @@ impl Codec {
     }
 
     fn read_block<R: Read>(&self, reader: R) -> Result<Message, Error> {
-        Ok(Message::Block(Box::new(Block::zcash_deserialize(reader)?)))
+        Ok(Message::Block(Block::zcash_deserialize(reader)?.into()))
     }
 
     fn read_getblocks<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
@@ -498,7 +498,7 @@ impl Codec {
     }
 
     fn read_tx<R: Read>(&self, rdr: R) -> Result<Message, Error> {
-        Ok(Message::Tx(Box::new(Transaction::zcash_deserialize(rdr)?)))
+        Ok(Message::Tx(Transaction::zcash_deserialize(rdr)?.into()))
     }
 
     fn read_mempool<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {

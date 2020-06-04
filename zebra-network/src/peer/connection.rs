@@ -33,7 +33,7 @@ pub(super) enum Handler {
     GetPeers,
     GetBlocksByHash {
         hashes: HashSet<BlockHeaderHash>,
-        blocks: Vec<Block>,
+        blocks: Vec<Arc<Block>>,
     },
     FindBlocks,
 }
@@ -72,7 +72,7 @@ impl Handler {
                 Message::Block(block),
             ) => {
                 if hashes.remove(&BlockHeaderHash::from(block.as_ref())) {
-                    blocks.push(*block);
+                    blocks.push(block);
                     if hashes.is_empty() {
                         Finished(Ok(Response::Blocks(blocks)))
                     } else {
@@ -435,7 +435,7 @@ where
             Response::Blocks(blocks) => {
                 // Generate one block message per block.
                 for block in blocks.into_iter() {
-                    if let Err(e) = self.peer_tx.send(Message::Block(Box::new(block))).await {
+                    if let Err(e) = self.peer_tx.send(Message::Block(block)).await {
                         self.fail_with(e.into());
                     }
                 }
