@@ -132,7 +132,6 @@ impl ConnectCmd {
                     Some(Ok(zebra_network::Response::Blocks(blocks))) => {
                         for block in blocks {
                             downloaded_block_heights.insert(block.coinbase_height().unwrap());
-                            let block = block.into();
                             state
                                 .ready_and()
                                 .await
@@ -153,7 +152,6 @@ impl ConnectCmd {
         while let Some(Ok(zebra_network::Response::Blocks(blocks))) = block_requests.next().await {
             for block in blocks {
                 downloaded_block_heights.insert(block.coinbase_height().unwrap());
-                let block = block.into();
                 state
                     .ready_and()
                     .await
