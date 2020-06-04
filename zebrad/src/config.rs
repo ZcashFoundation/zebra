@@ -13,27 +13,28 @@ use zebra_network::Config as NetworkSection;
 /// Zebrad Configuration
 #[derive(Clone, Default, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
+#[serde(default)]
 pub struct ZebradConfig {
     /// Tracing configuration
-    pub tracing: Option<TracingSection>,
+    pub tracing: TracingSection,
     /// Networking configuration
-    pub network: Option<NetworkSection>,
+    pub network: NetworkSection,
     /// Metrics configuration
-    pub metrics: Option<MetricsSection>,
+    pub metrics: MetricsSection,
 }
 
 /// Tracing configuration section.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct TracingSection {
     /// The filter used for tracing events.
-    pub filter: String,
+    pub filter: Option<String>,
 }
 
-impl Default for TracingSection {
-    fn default() -> Self {
+impl TracingSection {
+    pub fn populated() -> Self {
         Self {
-            filter: "info".to_owned(),
+            filter: Some("info".to_owned()),
         }
     }
 }

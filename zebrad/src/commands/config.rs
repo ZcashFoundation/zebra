@@ -15,9 +15,9 @@ impl Runnable for ConfigCmd {
     /// Start the application.
     fn run(&self) {
         let default_config = ZebradConfig {
-            tracing: Some(Default::default()),
-            network: Some(Default::default()),
-            metrics: Some(Default::default()),
+            tracing: crate::config::TracingSection::populated(),
+            network: Default::default(),
+            metrics: Default::default(),
         };
         let mut output = r"# Default configuration values for zebrad.
 #

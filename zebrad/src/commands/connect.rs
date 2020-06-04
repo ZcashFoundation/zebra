@@ -54,10 +54,7 @@ impl ConnectCmd {
             1,
         );
 
-        let mut config = app_config()
-            .network
-            .clone()
-            .unwrap_or_else(zebra_network::Config::default);
+        let mut config = app_config().network.clone();
 
         // Use a different lNetworkSectionaddr so that we don't conflict with another local node.
         config.listen_addr = "127.0.0.1:38233".parse()?;

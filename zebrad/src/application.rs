@@ -139,11 +139,14 @@ impl ZebradApp {
         } else if command.verbose {
             "debug".to_string()
         } else if let Some(ZebradConfig {
-            tracing: Some(tracing_component),
+            tracing:
+                crate::config::TracingSection {
+                    filter: Some(filter),
+                },
             ..
         }) = &self.config
         {
-            tracing_component.filter.clone()
+            filter.clone()
         } else {
             "info".to_string()
         }
