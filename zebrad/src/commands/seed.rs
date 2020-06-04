@@ -136,7 +136,10 @@ impl SeedCmd {
         };
         let node = Buffer::new(seed_service, 1);
 
-        let config = app_config().network.clone();
+        let config = app_config()
+            .network
+            .clone()
+            .unwrap_or_else(zebra_network::Config::default);
 
         let (mut peer_set, address_book) = zebra_network::init(config, node).await;
 

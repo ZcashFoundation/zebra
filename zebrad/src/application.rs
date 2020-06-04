@@ -99,21 +99,49 @@ impl Application for ZebradApp {
     /// Called regardless of whether config is loaded to indicate this is the
     /// time in app lifecycle when configuration would be loaded if
     /// possible.
-    fn after_config(&mut self, config: Self::Cfg) -> Result<(), FrameworkError> {
+    fn after_config(
+        &mut self,
+        config: Self::Cfg,
+        command: &Self::Cmd,
+    ) -> Result<(), FrameworkError> {
         // Configure components
         self.state.components.after_config(&config)?;
         self.config = Some(config);
+
+        trace!("Test1");
+
+        let level = self.level(command);
+        self.state
+            .components
+            .get_downcast_mut::<abscissa_core::trace::Tracing>()
+            .expect("Tracing component should be available")
+            .reload_filter(level);
+
+        trace!("Test2");
+
         Ok(())
     }
 
     /// Get logging configuration from command-line options
     fn tracing_config(&self, command: &EntryPoint<ZebradCmd>) -> trace::Config {
-        if let Ok(env) = std::env::var("ZEBRAD_LOG") {
-            trace::Config::from(env)
+        trace::Config::from(self.level(command))
+    }
+}
+
+impl ZebradApp {
+    fn level(&self, command: &EntryPoint<ZebradCmd>) -> String {
+        if let Ok(level) = std::env::var("ZEBRAD_LOG") {
+            level
         } else if command.verbose {
-            trace::Config::verbose()
+            "debug".to_string()
+        } else if let Some(ZebradConfig {
+            tracing: Some(tracing_component),
+            ..
+        }) = &self.config
+        {
+            tracing_component.filter.clone()
         } else {
-            trace::Config::default()
+            "info".to_string()
         }
     }
 }

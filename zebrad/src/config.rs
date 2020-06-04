@@ -15,11 +15,11 @@ use zebra_network::Config as NetworkSection;
 #[serde(deny_unknown_fields)]
 pub struct ZebradConfig {
     /// Tracing configuration
-    pub tracing: TracingSection,
+    pub tracing: Option<TracingSection>,
     /// Networking configuration
-    pub network: NetworkSection,
+    pub network: Option<NetworkSection>,
     /// Metrics configuration
-    pub metrics: MetricsSection,
+    pub metrics: Option<MetricsSection>,
 }
 
 /// Tracing configuration section.

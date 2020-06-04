@@ -4,7 +4,7 @@
 /// accessors along with logging macros. Customize as you see fit.
 use crate::prelude::*;
 
-use crate::config::ZebradConfig;
+use crate::config::{TracingSection, ZebradConfig};
 
 use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
 
@@ -29,7 +29,9 @@ impl Runnable for StartCmd {
     fn run(&self) {
         warn!("starting application");
         let config = app_config();
-        println!("filter: {}!", &config.tracing.filter);
+        if let Some(tracing_cfg) = &config.tracing {
+            println!("filter: {}!", tracing_cfg.filter);
+        }
 
         let default_config = ZebradConfig::default();
         println!("Default config: {:?}", default_config);
@@ -59,7 +61,9 @@ impl config::Override<ZebradConfig> for StartCmd {
     // arguments.
     fn override_config(&self, mut config: ZebradConfig) -> Result<ZebradConfig, FrameworkError> {
         if !self.filters.is_empty() {
-            config.tracing.filter = self.filters.join(",");
+            config.tracing = Some(TracingSection {
+                filter: self.filters.join(","),
+            });
         }
 
         Ok(config)

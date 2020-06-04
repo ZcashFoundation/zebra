@@ -54,8 +54,12 @@ impl ConnectCmd {
             1,
         );
 
-        let mut config = app_config().network.clone();
-        // Use a different listen addr so that we don't conflict with another local node.
+        let mut config = app_config()
+            .network
+            .clone()
+            .unwrap_or_else(zebra_network::Config::default);
+
+        // Use a different lNetworkSectionaddr so that we don't conflict with another local node.
         config.listen_addr = "127.0.0.1:38233".parse()?;
         // Connect only to the specified peer.
         config.initial_mainnet_peers.insert(self.addr.to_string());

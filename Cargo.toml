@@ -16,3 +16,6 @@ panic = "abort"
 
 [profile.release]
 panic = "abort"
+
+[patch.crates-io]
+abscissa_core = { path = "/home/jlusby/git/yaahc/abscissa/core" }
