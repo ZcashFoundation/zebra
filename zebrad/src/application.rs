@@ -3,7 +3,10 @@
 use crate::{commands::ZebradCmd, config::ZebradConfig};
 use abscissa_core::{
     application::{self, AppCell},
-    config, trace, Application, EntryPoint, FrameworkError, StandardPaths,
+    config,
+    terminal::component::Terminal,
+    trace::Tracing,
+    Application, Component, EntryPoint, FrameworkError, StandardPaths,
 };
 
 /// Application state
@@ -76,6 +79,16 @@ impl Application for ZebradApp {
         &mut self.state
     }
 
+    fn framework_components(
+        &mut self,
+        command: &Self::Cmd,
+    ) -> Result<Vec<Box<dyn Component<Self>>>, FrameworkError> {
+        let terminal = Terminal::new(self.term_colors(command));
+        let tracing = self.tracing_component(command);
+
+        Ok(vec![Box::new(terminal), Box::new(tracing)])
+    }
+
     /// Register all components used by this application.
     ///
     /// If you would like to add additional components to your application
@@ -111,16 +124,11 @@ impl Application for ZebradApp {
         let level = self.level(command);
         self.state
             .components
-            .get_downcast_mut::<abscissa_core::trace::Tracing>()
+            .get_downcast_mut::<Tracing>()
             .expect("Tracing component should be available")
             .reload_filter(level);
 
         Ok(())
-    }
-
-    /// Get logging configuration from command-line options
-    fn tracing_config(&self, command: &EntryPoint<ZebradCmd>) -> trace::Config {
-        trace::Config::from(self.level(command))
     }
 }
 
@@ -139,5 +147,22 @@ impl ZebradApp {
         } else {
             "info".to_string()
         }
+    }
+
+    fn tracing_component(&self, command: &EntryPoint<ZebradCmd>) -> Tracing {
+        use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+        // Construct a tracing subscriber with the supplied filter and enable reloading.
+        let builder = tracing_subscriber::FmtSubscriber::builder()
+            .with_env_filter(self.level(command))
+            .with_filter_reloading();
+        let filter_handle = builder.reload_handle();
+
+        builder
+            .finish()
+            .with(tracing_error::ErrorLayer::default())
+            .init();
+
+        filter_handle.into()
     }
 }
