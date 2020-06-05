@@ -14,7 +14,7 @@ serde = { version = "1", features = ["serde_derive"] }
 toml = "0.5"
 thiserror = "1"
 
-tokio = { version = "0.2", features = ["time", "rt-threaded", "stream"] }
+tokio = { version = "0.2", features = ["time", "rt-threaded", "stream", "macros"] }
 futures = "0.3"
 
 tracing = "0.1"

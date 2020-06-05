@@ -5,16 +5,22 @@
 
 use std::{
     net::SocketAddr,
+    pin::Pin,
     sync::{Arc, Mutex},
+    task::{Context, Poll},
 };
 
 use futures::{
     channel::mpsc,
     future::{self, Future, FutureExt},
+    ready,
     sink::SinkExt,
     stream::{FuturesUnordered, StreamExt},
 };
-use tokio::net::{TcpListener, TcpStream};
+use tokio::{
+    net::{TcpListener, TcpStream},
+    task::JoinHandle,
+};
 use tower::{
     buffer::Buffer,
     discover::{Change, ServiceStream},
@@ -33,6 +39,28 @@ use super::PeerSet;
 
 type PeerChange = Result<Change<SocketAddr, peer::Client>, BoxedStdError>;
 
+#[must_use = "await this handle to propogate errors from background tasks"]
+#[pin_project]
+///
+pub struct InitHandle {
+    #[pin]
+    guards: FuturesUnordered<JoinHandle<Result<(), BoxedStdError>>>,
+}
+
+impl Future for InitHandle {
+    type Output = Result<(), BoxedStdError>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        use futures::stream::Stream as _;
+        while let Some(()) = ready!(self.as_mut().project().guards.poll_next(cx))
+            .transpose()?
+            .transpose()?
+        {}
+
+        Poll::Ready(Ok(()))
+    }
+}
+
 /// Initialize a peer set with the given `config`, forwarding peer requests to the `inbound_service`.
 pub async fn init<S>(
     config: Config,
@@ -47,6 +75,7 @@ pub async fn init<S>(
         + Clone
         + 'static,
     Arc<Mutex<AddressBook>>,
+    InitHandle,
 )
 where
     S: Service<Request, Response = Response, Error = BoxedStdError> + Clone + Send + 'static,
@@ -94,20 +123,14 @@ where
     // Connect the tx end to the 3 peer sources:
 
     // 1. Initial peers, specified in the config.
-    tokio::spawn(add_initial_peers(
+    let add_guard = tokio::spawn(add_initial_peers(
         config.initial_peers(),
         connector.clone(),
         peerset_tx.clone(),
     ));
 
     // 2. Incoming peer connections, via a listener.
-    tokio::spawn(
-        listen(config.listen_addr, listener, peerset_tx.clone()).map(|result| {
-            if let Err(e) = result {
-                error!(%e);
-            }
-        }),
-    );
+    let listen_guard = tokio::spawn(listen(config.listen_addr, listener, peerset_tx.clone()));
 
     // 3. Outgoing peers we connect to in response to load.
 
@@ -125,23 +148,24 @@ where
         let _ = demand_tx.try_send(());
     }
 
-    tokio::spawn(
-        crawl_and_dial(
-            config.new_peer_interval,
-            demand_tx,
-            demand_rx,
-            candidates,
-            connector,
-            peerset_tx,
-        )
-        .map(|result| {
-            if let Err(e) = result {
-                error!(%e);
-            }
-        }),
-    );
+    let crawl_guard = tokio::spawn(crawl_and_dial(
+        config.new_peer_interval,
+        demand_tx,
+        demand_rx,
+        candidates,
+        connector,
+        peerset_tx,
+    ));
 
-    (peer_set, address_book)
+    let init_handle = InitHandle {
+        guards: FuturesUnordered::new(),
+    };
+
+    init_handle.guards.push(add_guard);
+    init_handle.guards.push(listen_guard);
+    init_handle.guards.push(crawl_guard);
+
+    (peer_set, address_book, init_handle)
 }
 
 /// Use the provided `handshaker` to connect to `initial_peers`, then send
@@ -151,7 +175,8 @@ async fn add_initial_peers<S>(
     initial_peers: std::collections::HashSet<SocketAddr>,
     connector: S,
     mut tx: mpsc::Sender<PeerChange>,
-) where
+) -> Result<(), BoxedStdError>
+where
     S: Service<SocketAddr, Response = Change<SocketAddr, peer::Client>, Error = BoxedStdError>
         + Clone,
     S::Future: Send + 'static,
@@ -160,9 +185,12 @@ async fn add_initial_peers<S>(
     use tower::util::CallAllUnordered;
     let addr_stream = futures::stream::iter(initial_peers.into_iter());
     let mut handshakes = CallAllUnordered::new(connector, addr_stream);
+
     while let Some(handshake_result) = handshakes.next().await {
-        let _ = tx.send(handshake_result).await;
+        tx.send(handshake_result).await?;
     }
+
+    Ok(())
 }
 
 /// Bind to `addr`, listen for peers using `handshaker`, then send the

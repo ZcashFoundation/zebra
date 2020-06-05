@@ -4,3 +4,5 @@
 .firebase/
 # Emacs detritus
 *~
+# Vscode detrius
+.vscode/

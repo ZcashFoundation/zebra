@@ -62,7 +62,7 @@ mod timestamp_collector;
 pub use crate::{
     address_book::AddressBook,
     config::Config,
-    peer_set::init,
+    peer_set::{init, InitHandle},
     policies::{RetryErrors, RetryLimit},
     protocol::external::codec::Builder,
     protocol::internal::{Request, Response},
