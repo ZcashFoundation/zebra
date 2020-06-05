@@ -236,7 +236,7 @@ pub enum Message {
     /// A `tx` message.
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#tx)
-    Tx(Box<Transaction>),
+    Tx(Arc<Transaction>),
 
     /// A `mempool` message.
     ///

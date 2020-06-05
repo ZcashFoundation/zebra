@@ -6,7 +6,7 @@ mod tests;
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{DateTime, TimeZone, Utc};
-use std::{fmt, io};
+use std::{fmt, io, sync::Arc};
 
 #[cfg(test)]
 use proptest_derive::Arbitrary;
@@ -205,7 +205,7 @@ pub struct Block {
     /// The block header, containing block metadata.
     pub header: BlockHeader,
     /// The block transactions.
-    pub transactions: Vec<Transaction>,
+    pub transactions: Vec<Arc<Transaction>>,
 }
 
 impl Block {
