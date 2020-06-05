@@ -138,7 +138,7 @@ impl SeedCmd {
 
         let config = app_config().network.clone();
 
-        let (mut peer_set, address_book, init_handle) = zebra_network::init(config, node).await;
+        let (mut peer_set, address_book) = zebra_network::init(config, node).await;
 
         let _ = addressbook_tx.send(address_book);
 
@@ -162,8 +162,8 @@ impl SeedCmd {
             }
         });
 
-        let eternity = future::pending::<Result<(), _>>();
-        let _ = tokio::try_join!(eternity, init_handle).map_err(|e| eyre!(e))?;
+        let eternity = future::pending::<()>();
+        eternity.await;
 
         Ok(())
     }

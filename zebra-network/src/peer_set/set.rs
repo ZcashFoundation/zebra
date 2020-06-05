@@ -14,6 +14,7 @@ use futures::{
     stream::FuturesUnordered,
 };
 use indexmap::IndexMap;
+use tokio::task::JoinHandle;
 use tower::{
     discover::{Change, Discover},
     Service,
@@ -77,6 +78,7 @@ where
     unready_services: FuturesUnordered<UnreadyService<D::Key, D::Service, Request>>,
     next_idx: Option<usize>,
     demand_signal: mpsc::Sender<()>,
+    guards: futures::stream::FuturesUnordered<JoinHandle<Result<(), BoxedStdError>>>,
 }
 
 impl<D> PeerSet<D>
@@ -98,6 +100,7 @@ where
             unready_services: FuturesUnordered::new(),
             next_idx: None,
             demand_signal,
+            guards: futures::stream::FuturesUnordered::new(),
         }
     }
 
@@ -150,6 +153,17 @@ where
             cancel: rx,
             _req: PhantomData,
         });
+    }
+
+    fn check_for_background_errors(&mut self, cx: &mut Context) -> Result<(), BoxedStdError> {
+        let res = match Pin::new(&mut self.guards).poll_next(cx) {
+            Poll::Ready(res) => res,
+            Poll::Pending => return Ok(()),
+        };
+
+        res.transpose()?
+            .transpose()?
+            .ok_or_else(|| "all background tasks have exited".into())
     }
 
     fn poll_unready(&mut self, cx: &mut Context<'_>) {
@@ -205,6 +219,10 @@ where
         let (_, svc) = self.ready_services.get_index(index).expect("invalid index");
         svc.load()
     }
+
+    pub(crate) fn push_join_handle(&self, handle: JoinHandle<Result<(), BoxedStdError>>) {
+        self.guards.push(handle);
+    }
 }
 
 impl<D> Service<Request> for PeerSet<D>
@@ -223,6 +241,7 @@ where
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.check_for_background_errors(cx)?;
         // Process peer discovery updates.
         let _ = self.poll_discover(cx)?;
 

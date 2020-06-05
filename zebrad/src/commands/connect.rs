@@ -68,7 +68,7 @@ impl ConnectCmd {
         config.initial_mainnet_peers.insert(self.addr.to_string());
 
         let mut state = zebra_state::in_memory::init();
-        let (mut peer_set, _address_book, init_handle) = zebra_network::init(config, node).await;
+        let (mut peer_set, _address_book) = zebra_network::init(config, node).await;
         let mut retry_peer_set =
             tower::retry::Retry::new(zebra_network::RetryErrors, peer_set.clone());
 
@@ -169,8 +169,8 @@ impl ConnectCmd {
             }
         }
 
-        let eternity = future::pending::<Result<(), _>>();
-        let _ = tokio::try_join!(eternity, init_handle).map_err(|e| eyre!(e))?;
+        let eternity = future::pending::<()>();
+        eternity.await;
 
         Ok(())
     }
