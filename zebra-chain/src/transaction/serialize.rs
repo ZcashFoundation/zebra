@@ -2,7 +2,10 @@
 //! transaction types, so that all of the serialization logic is in one place.
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use std::io::{self, Read};
+use std::{
+    io::{self, Read},
+    sync::Arc,
+};
 
 use crate::notes;
 use crate::proofs::ZkSnarkProof;
@@ -562,5 +565,23 @@ impl ZcashDeserialize for Transaction {
             }
             (_, _) => Err(SerializationError::Parse("bad tx header")),
         }
+    }
+}
+
+impl<T> ZcashDeserialize for Arc<T>
+where
+    T: ZcashDeserialize,
+{
+    fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
+        Ok(Arc::new(T::zcash_deserialize(reader)?))
+    }
+}
+
+impl<T> ZcashSerialize for Arc<T>
+where
+    T: ZcashSerialize,
+{
+    fn zcash_serialize<W: io::Write>(&self, writer: W) -> Result<(), io::Error> {
+        T::zcash_serialize(self, writer)
     }
 }
