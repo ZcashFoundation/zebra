@@ -16,6 +16,11 @@ panic = "abort"
 
 [profile.release]
 panic = "abort"
+debug = true
 
 [patch.crates-io]
 abscissa_core = { git = "https://github.com/yaahc/abscissa.git", branch = "develop" }
+tracing-subscriber = { path = "/home/jlusby/git/tokio/tracing/tracing-subscriber" }
+tracing = { path = "/home/jlusby/git/tokio/tracing/tracing" }
+tracing-core = { path = "/home/jlusby/git/tokio/tracing/tracing-core" }
+tracing-log = { path = "/home/jlusby/git/tokio/tracing/tracing-log" }

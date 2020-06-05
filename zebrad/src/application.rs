@@ -8,6 +8,7 @@ use abscissa_core::{
     trace::Tracing,
     Application, Component, EntryPoint, FrameworkError, StandardPaths,
 };
+use std::fmt;
 
 /// Application state
 pub static APPLICATION: AppCell<ZebradApp> = AppCell::new();
@@ -32,10 +33,13 @@ pub fn app_config() -> config::Reader<ZebradApp> {
 }
 
 /// Zebrad Application
-#[derive(Debug)]
 pub struct ZebradApp {
     /// Application configuration.
     config: Option<ZebradConfig>,
+
+    /// drop handle for tracing-flame layer to ensure it flushes its buffer when
+    /// the applicatoin exits
+    flame_guard: Option<Box<dyn Drop + Send + Sync + 'static>>,
 
     /// Application state.
     state: application::State<Self>,
@@ -49,8 +53,26 @@ impl Default for ZebradApp {
     fn default() -> Self {
         Self {
             config: None,
+            flame_guard: None,
             state: application::State::default(),
         }
+    }
+}
+
+impl fmt::Debug for ZebradApp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ZebraApp")
+            .field("config", &self.config)
+            .field(
+                "flame_guard",
+                &self
+                    .flame_guard
+                    .as_ref()
+                    .map(|_| "Some(impl Drop)")
+                    .unwrap_or("None"),
+            )
+            .field("state", &self.state)
+            .finish()
     }
 }
 
@@ -84,7 +106,8 @@ impl Application for ZebradApp {
         command: &Self::Cmd,
     ) -> Result<Vec<Box<dyn Component<Self>>>, FrameworkError> {
         let terminal = Terminal::new(self.term_colors(command));
-        let tracing = self.tracing_component(command);
+        let (tracing, guard) = self.tracing_component(command);
+        self.flame_guard = Some(Box::new(guard));
 
         Ok(vec![Box::new(terminal), Box::new(tracing)])
     }
@@ -152,7 +175,7 @@ impl ZebradApp {
         }
     }
 
-    fn tracing_component(&self, command: &EntryPoint<ZebradCmd>) -> Tracing {
+    fn tracing_component(&self, command: &EntryPoint<ZebradCmd>) -> (Tracing, impl Drop) {
         use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
         // Construct a tracing subscriber with the supplied filter and enable reloading.
@@ -160,12 +183,16 @@ impl ZebradApp {
             .with_env_filter(self.level(command))
             .with_filter_reloading();
         let filter_handle = builder.reload_handle();
+        let (flame_layer, guard) =
+            tracing_flame::FlameLayer::with_file("./tracing.folded").unwrap();
+        let flame_layer = flame_layer.filter_empty().collapse_threads();
 
         builder
             .finish()
             .with(tracing_error::ErrorLayer::default())
+            .with(flame_layer)
             .init();
 
-        filter_handle.into()
+        (filter_handle.into(), guard)
     }
 }

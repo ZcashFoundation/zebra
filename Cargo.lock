@@ -1877,8 +1877,6 @@ dependencies = [
 [[package]]
 name = "tracing"
 version = "0.1.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a41f40ed0e162c911ac6fcb53ecdc8134c46905fdbbae8c50add462a538b495f"
 dependencies = [
  "cfg-if",
  "log",
@@ -1889,8 +1887,6 @@ dependencies = [
 [[package]]
 name = "tracing-attributes"
 version = "0.1.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "99bbad0de3fd923c9c3232ead88510b783e5a4d16a6154adffa3d53308de984c"
 dependencies = [
  "proc-macro2 1.0.9",
  "quote 1.0.3",
@@ -1900,8 +1896,6 @@ dependencies = [
 [[package]]
 name = "tracing-core"
 version = "0.1.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0aa83a9a47081cd522c09c81b31aec2c9273424976f922ad61c053b58350b715"
 dependencies = [
  "lazy_static",
 ]
@@ -1912,6 +1906,15 @@ version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4d7c0b83d4a500748fa5879461652b361edf5c9d51ede2a2ac03875ca185e24"
 dependencies = [
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "tracing-flame"
+version = "0.1.0"
+dependencies = [
+ "lazy_static",
  "tracing",
  "tracing-subscriber",
 ]
@@ -1929,8 +1932,6 @@ dependencies = [
 [[package]]
 name = "tracing-log"
 version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e0f8c7178e13481ff6765bd169b33e8d554c5d2bbede5e32c356194be02b9b9"
 dependencies = [
  "lazy_static",
  "log",
@@ -1940,8 +1941,6 @@ dependencies = [
 [[package]]
 name = "tracing-serde"
 version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6ccba2f8f16e0ed268fc765d9b7ff22e965e7185d32f8f1ec8294fe17d86e79"
 dependencies = [
  "serde",
  "tracing-core",
@@ -1950,8 +1949,6 @@ dependencies = [
 [[package]]
 name = "tracing-subscriber"
 version = "0.2.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d53c40489aa69c9aed21ff483f26886ca8403df33bdc2d2f87c60c1617826d2"
 dependencies = [
  "ansi_term",
  "chrono",
@@ -2210,6 +2207,7 @@ dependencies = [
  "tower",
  "tracing",
  "tracing-error",
+ "tracing-flame",
  "tracing-futures",
  "tracing-log",
  "tracing-subscriber",
