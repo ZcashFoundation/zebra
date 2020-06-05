@@ -14,9 +14,7 @@ use futures::{
     sink::SinkExt,
     stream::{FuturesUnordered, StreamExt},
 };
-use tokio::{
-    net::{TcpListener, TcpStream},
-};
+use tokio::net::{TcpListener, TcpStream};
 use tower::{
     buffer::Buffer,
     discover::{Change, ServiceStream},
