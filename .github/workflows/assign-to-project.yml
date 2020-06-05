@@ -14,6 +14,6 @@ jobs:
     steps:
       - uses: alex-page/github-project-automation-plus@v0.2.4
         with:
-          project: zebra
+          project: 🦓
           column: To Do
           repo-token: ${{ secrets.GITHUB_TOKEN }}
