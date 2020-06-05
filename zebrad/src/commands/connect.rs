@@ -33,15 +33,16 @@ impl Runnable for ConnectCmd {
             .rt
             .take();
 
-        let result = rt.expect("runtime should not already be taken")
+        let result = rt
+            .expect("runtime should not already be taken")
             .block_on(self.connect());
 
         match result {
-            Ok(()) => {},
+            Ok(()) => {}
             Err(e) => {
                 eprintln!("Error: {:?}", e);
                 std::process::exit(1);
-            },
+            }
         }
     }
 }
