@@ -29,7 +29,9 @@ impl Runnable for StartCmd {
     fn run(&self) {
         warn!("starting application");
         let config = app_config();
-        println!("filter: {}!", &config.tracing.filter);
+        if let Some(filter) = &config.tracing.filter {
+            println!("filter: {}!", filter);
+        }
 
         let default_config = ZebradConfig::default();
         println!("Default config: {:?}", default_config);
@@ -59,7 +61,7 @@ impl config::Override<ZebradConfig> for StartCmd {
     // arguments.
     fn override_config(&self, mut config: ZebradConfig) -> Result<ZebradConfig, FrameworkError> {
         if !self.filters.is_empty() {
-            config.tracing.filter = self.filters.join(",");
+            config.tracing.filter = Some(self.filters.join(","));
         }
 
         Ok(config)

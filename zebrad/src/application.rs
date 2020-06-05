@@ -3,7 +3,10 @@
 use crate::{commands::ZebradCmd, config::ZebradConfig};
 use abscissa_core::{
     application::{self, AppCell},
-    config, trace, Application, EntryPoint, FrameworkError, StandardPaths,
+    config,
+    terminal::component::Terminal,
+    trace::Tracing,
+    Application, Component, EntryPoint, FrameworkError, StandardPaths,
 };
 
 /// Application state
@@ -76,6 +79,16 @@ impl Application for ZebradApp {
         &mut self.state
     }
 
+    fn framework_components(
+        &mut self,
+        command: &Self::Cmd,
+    ) -> Result<Vec<Box<dyn Component<Self>>>, FrameworkError> {
+        let terminal = Terminal::new(self.term_colors(command));
+        let tracing = self.tracing_component(command);
+
+        Ok(vec![Box::new(terminal), Box::new(tracing)])
+    }
+
     /// Register all components used by this application.
     ///
     /// If you would like to add additional components to your application
@@ -99,21 +112,60 @@ impl Application for ZebradApp {
     /// Called regardless of whether config is loaded to indicate this is the
     /// time in app lifecycle when configuration would be loaded if
     /// possible.
-    fn after_config(&mut self, config: Self::Cfg) -> Result<(), FrameworkError> {
+    fn after_config(
+        &mut self,
+        config: Self::Cfg,
+        command: &Self::Cmd,
+    ) -> Result<(), FrameworkError> {
         // Configure components
         self.state.components.after_config(&config)?;
         self.config = Some(config);
+
+        let level = self.level(command);
+        self.state
+            .components
+            .get_downcast_mut::<Tracing>()
+            .expect("Tracing component should be available")
+            .reload_filter(level);
+
         Ok(())
     }
+}
 
-    /// Get logging configuration from command-line options
-    fn tracing_config(&self, command: &EntryPoint<ZebradCmd>) -> trace::Config {
-        if let Ok(env) = std::env::var("ZEBRAD_LOG") {
-            trace::Config::from(env)
+impl ZebradApp {
+    fn level(&self, command: &EntryPoint<ZebradCmd>) -> String {
+        if let Ok(level) = std::env::var("ZEBRAD_LOG") {
+            level
         } else if command.verbose {
-            trace::Config::verbose()
+            "debug".to_string()
+        } else if let Some(ZebradConfig {
+            tracing:
+                crate::config::TracingSection {
+                    filter: Some(filter),
+                },
+            ..
+        }) = &self.config
+        {
+            filter.clone()
         } else {
-            trace::Config::default()
+            "info".to_string()
         }
+    }
+
+    fn tracing_component(&self, command: &EntryPoint<ZebradCmd>) -> Tracing {
+        use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+        // Construct a tracing subscriber with the supplied filter and enable reloading.
+        let builder = tracing_subscriber::FmtSubscriber::builder()
+            .with_env_filter(self.level(command))
+            .with_filter_reloading();
+        let filter_handle = builder.reload_handle();
+
+        builder
+            .finish()
+            .with(tracing_error::ErrorLayer::default())
+            .init();
+
+        filter_handle.into()
     }
 }

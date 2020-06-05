@@ -3,36 +3,34 @@
 [[package]]
 name = "abscissa_core"
 version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a07677093120a02583717b6dd1ef81d8de1e8d01bd226c83f0f9bdf3e56bb3a"
+source = "git+https://github.com/yaahc/abscissa.git?branch=develop#41d342a9344e38442b2211b07f28a89505892a21"
 dependencies = [
  "abscissa_derive",
  "backtrace",
  "canonical-path",
  "chrono",
- "color-backtrace 0.3.0",
+ "color-backtrace",
  "generational-arena",
  "gumdrop",
  "libc",
  "once_cell",
  "regex",
  "secrecy",
- "semver",
+ "semver 0.10.0",
  "serde",
  "signal-hook",
  "termcolor",
  "toml",
  "tracing",
  "tracing-log",
- "tracing-subscriber 0.1.6",
+ "tracing-subscriber",
  "wait-timeout",
 ]
 
 [[package]]
 name = "abscissa_derive"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "74f5722bc48763cb9d81d8427ca05b6aa2842f6632cf8e4c0a29eef9baececcc"
+source = "git+https://github.com/yaahc/abscissa.git?branch=develop#41d342a9344e38442b2211b07f28a89505892a21"
 dependencies = [
  "darling",
  "ident_case",
@@ -270,17 +268,6 @@ dependencies = [
 
 [[package]]
 name = "color-backtrace"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "65d13f1078cc63c791d0deba0dd43db37c9ec02b311f10bed10b577016f3a957"
-dependencies = [
- "atty",
- "backtrace",
- "termcolor",
-]
-
-[[package]]
-name = "color-backtrace"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5356ae4e07c994a2763226a8a991e5829ded78ac23f8ac88b3f3e69970db5163"
@@ -298,7 +285,7 @@ checksum = "2aaa5f071a62a9c06ebab653ec2e2ba76cb936548a83e7af7f0c5dac525067ff"
 dependencies = [
  "ansi_term",
  "backtrace",
- "color-backtrace 0.4.2",
+ "color-backtrace",
  "color-spantrace",
  "eyre",
  "indenter",
@@ -1082,15 +1069,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2839e79665f131bdb5782e51f2c6c9599c133c6098982a54c794358bf432529c"
 
 [[package]]
-name = "owning_ref"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ff55baddef9e4ad00f88b6c743a2a8062d4c6ade126c2a528644b8e444d52ce"
-dependencies = [
- "stable_deref_trait",
-]
-
-[[package]]
 name = "parking_lot"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1378,7 +1356,7 @@ version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "138e3e0acb6c9fb258b19b67cb8abd63c00679d2851805ea151465464fe9030a"
 dependencies = [
- "semver",
+ "semver 0.9.0",
 ]
 
 [[package]]
@@ -1439,6 +1417,15 @@ name = "semver"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d7eb9ef2c18661902cc47e535f9bc51b78acd254da71d375c2f6720d9a40403"
+dependencies = [
+ "semver-parser",
+]
+
+[[package]]
+name = "semver"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "394cec28fa623e00903caf7ba4fa6fb9a0e260280bb8cdbbba029611108a0190"
 dependencies = [
  "semver-parser",
  "serde",
@@ -1588,12 +1575,6 @@ dependencies = [
  "tracing",
  "tracing-futures",
 ]
-
-[[package]]
-name = "stable_deref_trait"
-version = "1.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dba1a27d3efae4351c8051072d619e3ade2820635c3958d826bfea39d59b54c8"
 
 [[package]]
 name = "strsim"
@@ -1932,7 +1913,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4d7c0b83d4a500748fa5879461652b361edf5c9d51ede2a2ac03875ca185e24"
 dependencies = [
  "tracing",
- "tracing-subscriber 0.2.5",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -1964,23 +1945,6 @@ checksum = "b6ccba2f8f16e0ed268fc765d9b7ff22e965e7185d32f8f1ec8294fe17d86e79"
 dependencies = [
  "serde",
  "tracing-core",
-]
-
-[[package]]
-name = "tracing-subscriber"
-version = "0.1.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "192ca16595cdd0661ce319e8eede9c975f227cdaabc4faaefdc256f43d852e45"
-dependencies = [
- "ansi_term",
- "chrono",
- "lazy_static",
- "matchers",
- "owning_ref",
- "regex",
- "smallvec 0.6.13",
- "tracing-core",
- "tracing-log",
 ]
 
 [[package]]
@@ -2211,7 +2175,7 @@ dependencies = [
  "tracing",
  "tracing-error",
  "tracing-futures",
- "tracing-subscriber 0.2.5",
+ "tracing-subscriber",
  "zebra-chain",
  "zebra-test-vectors",
 ]
@@ -2245,8 +2209,10 @@ dependencies = [
  "toml",
  "tower",
  "tracing",
+ "tracing-error",
  "tracing-futures",
  "tracing-log",
+ "tracing-subscriber",
  "zebra-chain",
  "zebra-network",
  "zebra-state",
