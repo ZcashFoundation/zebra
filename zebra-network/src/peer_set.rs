@@ -6,4 +6,4 @@ mod unready_service;
 use candidate_set::CandidateSet;
 use set::PeerSet;
 
-pub use initialize::init;
+pub use initialize::{init, InitHandle};
