@@ -5,21 +5,17 @@
 
 use std::{
     net::SocketAddr,
-    pin::Pin,
     sync::{Arc, Mutex},
-    task::{Context, Poll},
 };
 
 use futures::{
     channel::mpsc,
     future::{self, Future, FutureExt},
-    ready,
     sink::SinkExt,
     stream::{FuturesUnordered, StreamExt},
 };
 use tokio::{
     net::{TcpListener, TcpStream},
-    task::JoinHandle,
 };
 use tower::{
     buffer::Buffer,
@@ -39,28 +35,6 @@ use super::PeerSet;
 
 type PeerChange = Result<Change<SocketAddr, peer::Client>, BoxedStdError>;
 
-#[must_use = "await this handle to propogate errors from background tasks"]
-#[pin_project]
-///
-pub struct InitHandle {
-    #[pin]
-    guards: FuturesUnordered<JoinHandle<Result<(), BoxedStdError>>>,
-}
-
-impl Future for InitHandle {
-    type Output = Result<(), BoxedStdError>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        use futures::stream::Stream as _;
-        while let Some(()) = ready!(self.as_mut().project().guards.poll_next(cx))
-            .transpose()?
-            .transpose()?
-        {}
-
-        Poll::Ready(Ok(()))
-    }
-}
-
 /// Initialize a peer set with the given `config`, forwarding peer requests to the `inbound_service`.
 pub async fn init<S>(
     config: Config,
@@ -75,7 +49,6 @@ pub async fn init<S>(
         + Clone
         + 'static,
     Arc<Mutex<AddressBook>>,
-    InitHandle,
 )
 where
     S: Service<Request, Response = Response, Error = BoxedStdError> + Clone + Send + 'static,
@@ -103,21 +76,18 @@ where
     let (mut demand_tx, demand_rx) = mpsc::channel::<()>(100);
 
     // Connect the rx end to a PeerSet, wrapping new peers in load instruments.
-    let peer_set = Buffer::new(
-        PeerSet::new(
-            PeakEwmaDiscover::new(
-                ServiceStream::new(
-                    // ServiceStream interprets an error as stream termination,
-                    // so discard any errored connections...
-                    peerset_rx.filter(|result| future::ready(result.is_ok())),
-                ),
-                config.ewma_default_rtt,
-                config.ewma_decay_time,
-                NoInstrument,
+    let peer_set = PeerSet::new(
+        PeakEwmaDiscover::new(
+            ServiceStream::new(
+                // ServiceStream interprets an error as stream termination,
+                // so discard any errored connections...
+                peerset_rx.filter(|result| future::ready(result.is_ok())),
             ),
-            demand_tx.clone(),
+            config.ewma_default_rtt,
+            config.ewma_decay_time,
+            NoInstrument,
         ),
-        config.peerset_request_buffer_size,
+        demand_tx.clone(),
     );
 
     // Connect the tx end to the 3 peer sources:
@@ -128,12 +98,15 @@ where
         connector.clone(),
         peerset_tx.clone(),
     ));
+    peer_set.push_join_handle(add_guard);
 
     // 2. Incoming peer connections, via a listener.
     let listen_guard = tokio::spawn(listen(config.listen_addr, listener, peerset_tx.clone()));
+    peer_set.push_join_handle(listen_guard);
 
     // 3. Outgoing peers we connect to in response to load.
 
+    let peer_set = Buffer::new(peer_set, config.peerset_request_buffer_size);
     let mut candidates = CandidateSet::new(address_book.clone(), peer_set.clone());
 
     // We need to await candidates.update() here, because Zcashd only sends one
@@ -148,7 +121,7 @@ where
         let _ = demand_tx.try_send(());
     }
 
-    let crawl_guard = tokio::spawn(crawl_and_dial(
+    let _crawl_guard = tokio::spawn(crawl_and_dial(
         config.new_peer_interval,
         demand_tx,
         demand_rx,
@@ -156,16 +129,10 @@ where
         connector,
         peerset_tx,
     ));
+    // TODO(jlusby): impl `DerefMut` for tower::Buffer and uncomment this
+    // peer_set.push_join_handle(crawl_guard);
 
-    let init_handle = InitHandle {
-        guards: FuturesUnordered::new(),
-    };
-
-    init_handle.guards.push(add_guard);
-    init_handle.guards.push(listen_guard);
-    init_handle.guards.push(crawl_guard);
-
-    (peer_set, address_book, init_handle)
+    (peer_set, address_book)
 }
 
 /// Use the provided `handshaker` to connect to `initial_peers`, then send
