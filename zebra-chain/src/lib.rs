@@ -21,6 +21,7 @@ pub mod serialization;
 pub mod transaction;
 pub mod types;
 
+pub use ed25519_zebra;
 pub use redjubjub;
 
 #[cfg(test)]
