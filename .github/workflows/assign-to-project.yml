@@ -20,5 +20,5 @@ jobs:
         if: github.event_name == 'pull_request' && github.event.action == 'opened'
         with:
           project: Zebra
-          column: In Progress
+          column: In progress
           repo-token: ${{ secrets.PROJECT_AUTOMATION }}
