@@ -1,6 +1,4 @@
-# This is a basic workflow to help you get started with Actions
-
-name: Assign to 🦓 Project
+name: Project
 
 on:
   issues:
@@ -9,7 +7,7 @@ on:
     types: [opened]
 
 jobs:
-  automate-project-columns:
+  assign:
     runs-on: ubuntu-latest
     steps:
       - uses: alex-page/github-project-automation-plus@v0.2.4
