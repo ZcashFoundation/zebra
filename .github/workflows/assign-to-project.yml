@@ -16,4 +16,4 @@ jobs:
         with:
           project: 🦓
           column: To Do
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          repo-token: ${{ secrets.PROJECT_AUTOMATION }}
