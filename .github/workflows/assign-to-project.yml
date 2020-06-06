@@ -1,6 +1,4 @@
-# This is a basic workflow to help you get started with Actions
-
-name: Assign to 🦓 Project
+name: Project
 
 on:
   issues:
@@ -9,11 +7,11 @@ on:
     types: [opened]
 
 jobs:
-  automate-project-columns:
+  assign:
     runs-on: ubuntu-latest
     steps:
       - uses: alex-page/github-project-automation-plus@v0.2.4
         with:
-          project: 🦓
+          project: Zebra
           column: To Do
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          repo-token: ${{ secrets.PROJECT_AUTOMATION }}
