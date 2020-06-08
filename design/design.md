@@ -56,6 +56,7 @@ None: these are the core data structure definitions.
   - `Transaction`,
   - `Address`,
   - `KeyPair`...
+- parsing bytes into these data structures
 
 - definitions of core traits, e.g.,
   - `ZcashSerialize` and `ZcashDeserialize`, which perform
@@ -113,8 +114,9 @@ routing outbound requests to appropriate peers.
 
 ### Responsible for
 
-- block storage API
-  - operates on raw bytes for blocks
+- block and transaction storage APIs
+  - operates on parsed block and transaction structs
+    - these structs can be converted from and into raw bytes
   - primarily aimed at network replication, not at processing
   - can be used to rebuild the database below
 - maintaining a database of tx, address, etc data
