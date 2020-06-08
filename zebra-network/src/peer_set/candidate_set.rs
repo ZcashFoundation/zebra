@@ -82,6 +82,12 @@ pub(super) struct CandidateSet<S> {
     pub(super) peer_service: S,
 }
 
+impl<S> Drop for CandidateSet<S> {
+    fn drop(&mut self) {
+        dbg!("dropping candidate set");
+    }
+}
+
 impl<S> CandidateSet<S>
 where
     S: Service<Request, Response = Response, Error = BoxedStdError>,
