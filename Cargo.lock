@@ -2124,6 +2124,12 @@ version = "0.1.0"
 [[package]]
 name = "zebra-consensus"
 version = "0.1.0"
+dependencies = [
+ "futures",
+ "tower",
+ "zebra-chain",
+ "zebra-state",
+]
 
 [[package]]
 name = "zebra-network"
