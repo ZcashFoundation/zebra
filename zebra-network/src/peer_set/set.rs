@@ -82,15 +82,6 @@ where
     handle_rx: tokio::sync::oneshot::Receiver<Vec<JoinHandle<Result<(), BoxedStdError>>>>,
 }
 
-impl<D> Drop for PeerSet<D>
-where
-    D: Discover,
-{
-    fn drop(&mut self) {
-        println!("dropping peer set!");
-    }
-}
-
 impl<D> PeerSet<D>
 where
     D: Discover + Unpin,
@@ -171,15 +162,17 @@ where
     }
 
     fn check_for_background_errors(&mut self, cx: &mut Context) -> Result<(), BoxedStdError> {
-        if let Ok(handles) = dbg!(self.handle_rx.try_recv()) {
-            for handle in handles {
-                self.push_join_handle(handle);
-            }
-        }
-
-        if let Ok(handles) = dbg!(self.handle_rx.try_recv()) {
-            for handle in handles {
-                self.push_join_handle(handle);
+        if self.guards.is_empty() {
+            match self.handle_rx.try_recv() {
+                Ok(handles) => {
+                    for handle in handles {
+                        self.push_join_handle(handle);
+                    }
+                }
+                Err(tokio::sync::oneshot::error::TryRecvError::Closed) => unreachable!(
+                    "try_recv will never be called if the futures have already been received"
+                ),
+                Err(tokio::sync::oneshot::error::TryRecvError::Empty) => return Ok(()),
             }
         }
 

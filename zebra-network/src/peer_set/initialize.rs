@@ -90,8 +90,6 @@ where
         handle_rx,
     );
 
-    dbg!(());
-
     // Connect the tx end to the 3 peer sources:
 
     // 1. Initial peers, specified in the config.
@@ -100,18 +98,14 @@ where
         connector.clone(),
         peerset_tx.clone(),
     ));
-    dbg!(());
 
     // 2. Incoming peer connections, via a listener.
     let listen_guard = tokio::spawn(listen(config.listen_addr, listener, peerset_tx.clone()));
-    dbg!(());
 
     // 3. Outgoing peers we connect to in response to load.
 
     let peer_set = Buffer::new(peer_set, config.peerset_request_buffer_size);
-    dbg!(());
     let mut candidates = CandidateSet::new(address_book.clone(), peer_set.clone());
-    dbg!(());
 
     // We need to await candidates.update() here, because Zcashd only sends one
     // `addr` message per connection, and if we only have one initial peer we
@@ -133,7 +127,6 @@ where
         connector,
         peerset_tx,
     ));
-    dbg!(());
 
     handle_tx
         .send(vec![add_guard, listen_guard, crawl_guard])
