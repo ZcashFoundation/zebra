@@ -79,7 +79,16 @@ where
     next_idx: Option<usize>,
     demand_signal: mpsc::Sender<()>,
     guards: futures::stream::FuturesUnordered<JoinHandle<Result<(), BoxedStdError>>>,
-    handle_rx: mpsc::Receiver<JoinHandle<Result<(), BoxedStdError>>>,
+    handle_rx: tokio::sync::oneshot::Receiver<Vec<JoinHandle<Result<(), BoxedStdError>>>>,
+}
+
+impl<D> Drop for PeerSet<D>
+where
+    D: Discover,
+{
+    fn drop(&mut self) {
+        println!("dropping peer set!");
+    }
 }
 
 impl<D> PeerSet<D>
@@ -96,7 +105,7 @@ where
     pub fn new(
         discover: D,
         demand_signal: mpsc::Sender<()>,
-        handle_rx: mpsc::Receiver<JoinHandle<Result<(), BoxedStdError>>>,
+        handle_rx: tokio::sync::oneshot::Receiver<Vec<JoinHandle<Result<(), BoxedStdError>>>>,
     ) -> Self {
         Self {
             discover,
@@ -162,11 +171,14 @@ where
     }
 
     fn check_for_background_errors(&mut self, cx: &mut Context) -> Result<(), BoxedStdError> {
-        use futures::stream::FusedStream;
+        if let Ok(handles) = dbg!(self.handle_rx.try_recv()) {
+            for handle in handles {
+                self.push_join_handle(handle);
+            }
+        }
 
-        if !self.handle_rx.is_terminated() {
-            dbg!(());
-            while let Poll::Ready(Some(handle)) = Pin::new(&mut self.handle_rx).poll_next(cx) {
+        if let Ok(handles) = dbg!(self.handle_rx.try_recv()) {
+            for handle in handles {
                 self.push_join_handle(handle);
             }
         }
