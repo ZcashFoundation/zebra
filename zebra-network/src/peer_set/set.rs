@@ -79,6 +79,7 @@ where
     next_idx: Option<usize>,
     demand_signal: mpsc::Sender<()>,
     guards: futures::stream::FuturesUnordered<JoinHandle<Result<(), BoxedStdError>>>,
+    handle_rx: mpsc::Receiver<JoinHandle<Result<(), BoxedStdError>>>,
 }
 
 impl<D> PeerSet<D>
@@ -92,7 +93,11 @@ where
     <D::Service as Load>::Metric: Debug,
 {
     /// Construct a peerset which uses `discover` internally.
-    pub fn new(discover: D, demand_signal: mpsc::Sender<()>) -> Self {
+    pub fn new(
+        discover: D,
+        demand_signal: mpsc::Sender<()>,
+        handle_rx: mpsc::Receiver<JoinHandle<Result<(), BoxedStdError>>>,
+    ) -> Self {
         Self {
             discover,
             ready_services: IndexMap::new(),
@@ -101,6 +106,7 @@ where
             next_idx: None,
             demand_signal,
             guards: futures::stream::FuturesUnordered::new(),
+            handle_rx,
         }
     }
 
@@ -156,6 +162,15 @@ where
     }
 
     fn check_for_background_errors(&mut self, cx: &mut Context) -> Result<(), BoxedStdError> {
+        use futures::stream::FusedStream;
+
+        if !self.handle_rx.is_terminated() {
+            dbg!(());
+            while let Poll::Ready(Some(handle)) = Pin::new(&mut self.handle_rx).poll_next(cx) {
+                self.push_join_handle(handle);
+            }
+        }
+
         let res = match Pin::new(&mut self.guards).poll_next(cx) {
             Poll::Ready(res) => res,
             Poll::Pending => return Ok(()),

@@ -72,6 +72,7 @@ where
     let (peerset_tx, peerset_rx) = mpsc::channel::<PeerChange>(100);
     // Create an mpsc channel for peerset demand signaling.
     let (mut demand_tx, demand_rx) = mpsc::channel::<()>(100);
+    let (mut handle_tx, handle_rx) = mpsc::channel(3);
 
     // Connect the rx end to a PeerSet, wrapping new peers in load instruments.
     let peer_set = PeerSet::new(
@@ -86,6 +87,7 @@ where
             NoInstrument,
         ),
         demand_tx.clone(),
+        handle_rx,
     );
 
     // Connect the tx end to the 3 peer sources:
@@ -96,11 +98,9 @@ where
         connector.clone(),
         peerset_tx.clone(),
     ));
-    peer_set.push_join_handle(add_guard);
 
     // 2. Incoming peer connections, via a listener.
     let listen_guard = tokio::spawn(listen(config.listen_addr, listener, peerset_tx.clone()));
-    peer_set.push_join_handle(listen_guard);
 
     // 3. Outgoing peers we connect to in response to load.
 
@@ -119,7 +119,7 @@ where
         let _ = demand_tx.try_send(());
     }
 
-    let _crawl_guard = tokio::spawn(crawl_and_dial(
+    let crawl_guard = tokio::spawn(crawl_and_dial(
         config.new_peer_interval,
         demand_tx,
         demand_rx,
@@ -127,8 +127,10 @@ where
         connector,
         peerset_tx,
     ));
-    // TODO(jlusby): impl `DerefMut` for tower::Buffer and uncomment this
-    // peer_set.push_join_handle(crawl_guard);
+
+    handle_tx.send(add_guard).await.unwrap();
+    handle_tx.send(listen_guard).await.unwrap();
+    handle_tx.send(crawl_guard).await.unwrap();
 
     (peer_set, address_book)
 }
