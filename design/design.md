@@ -62,8 +62,6 @@ None: these are the core data structure definitions.
   - `ZcashSerialize` and `ZcashDeserialize`, which perform
     consensus-critical serialization logic.
 
-- context-free validation behaviour, e.g., signature, proof verification, etc.
-
 ### Exported types
 
 - [...]
@@ -114,8 +112,8 @@ routing outbound requests to appropriate peers.
 
 ### Responsible for
 
-- block and transaction storage APIs
-  - operates on parsed block and transaction structs
+- block storage API
+  - operates on parsed block structs
     - these structs can be converted from and into raw bytes
   - primarily aimed at network replication, not at processing
   - can be used to rebuild the database below
@@ -131,7 +129,17 @@ routing outbound requests to appropriate peers.
 
 ### Exported types
 
-- [...]
+- `Request`, an enum representing all possible requests in the internal protocol;
+  - blocks can be accessed via their chain height or hash
+  - confirmed transactions can be accessed via their block, or directly via their hash
+- `Response`, an enum representing all possible responses in the internal protocol;
+- `init() -> impl Service`, the main entry-point.
+
+The `init` entrypoint returns a `Service` that can be used to
+send requests for the chain state.
+
+All state management (adding blocks, getting blocks by index or hash) is completely
+encapsulated.
 
 `zebra-script`
 ---------------
@@ -143,6 +151,8 @@ routing outbound requests to appropriate peers.
 ### Responsible for
 
 - the minimal Bitcoin script implementation required for Zcash
+- script parsing
+- context-free script validation
 
 ### Notes
 
@@ -164,21 +174,43 @@ for Zcash script inspection, debugging, etc.
 
 ### Internal Dependencies
 
-- `zebra-chain`
-- `zebra-state`
-- `zebra-script`
+- `zebra-chain` for data structures and parsing.
+- `zebra-state` to read and update the state database.
+- `zebra-script` for script parsing and validation.
 
 ### Responsible for
 
 - consensus-specific parameters (network magics, genesis block, pow
   parameters, etc) that determine the network consensus
 - consensus logic to decide which block is the current block
-- all context-dependent validation logic, e.g., determining whether a
-  transaction is accepted in a particular chain state context.
+- block and transaction verification
+  - context-free validation, e.g., signature, proof verification, etc.
+  - context-dependent validation, e.g., determining whether a
+    transaction is accepted in a particular chain state context.
+  - verifying mempool (unconfirmed) transactions
+- block checkpoints
+  - mandatory checkpoints (genesis block, sapling activation)
+  - optional regular checkpoints (every Nth block)
+- modifying the chain state
+  - adding new blocks to `ZebraState`, including chain reorganisation
+  - adding new transactions to `ZebraMempoolState`
+- storing the transaction mempool state
+  - mempool transactions can be accessed via their hash
+- providing `tower::Service` interfaces for all of the above to
+  support backpressure and batch validation.
 
 ### Exported types
 
-- [...]
+- `block::init() -> impl Service`, the main entry-point for block
+  verification.
+- `ZebraMempoolState`
+  - all state management (adding transactions, getting transactions
+    by hash) is completely encapsulated.
+- `mempool::init() -> impl Service`, the main entry-point for
+    mempool transaction verification.
+
+The `init` entrypoints return `Service`s that can be used to
+verify blocks or transactions, and add them to the relevant state.
 
 `zebra-rpc`
 ------------
