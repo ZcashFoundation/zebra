@@ -147,22 +147,6 @@ impl SeedCmd {
 
         info!("peer_set became ready");
 
-        #[cfg(feature = "dos")]
-        use std::time::Duration;
-
-        #[cfg(feature = "dos")]
-        // Fire GetPeers requests at ourselves, for testing.
-        tokio::spawn(async move {
-            let mut interval_stream = tokio::time::interval(Duration::from_secs(1));
-            let mut svc = buffered_svc.clone();
-
-            loop {
-                interval_stream.next().await;
-
-                let _ = svc.call(Request::Peers);
-            }
-        });
-
         let eternity = future::pending::<()>();
         eternity.await;
 
