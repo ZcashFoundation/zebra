@@ -1,5 +1,3 @@
-name: Push CI
-
 on:
   push:
 
@@ -11,7 +9,7 @@ jobs:
     - uses: actions/checkout@master
     - uses: GoogleCloudPlatform/github-actions/setup-gcloud@master
       with:
-        version: '275.0.0'
+        version: '295.0.0'
         service_account_key: ${{ secrets.GCLOUD_AUTH }}
     - name: Build, Test, Push to GCR
       run: |
