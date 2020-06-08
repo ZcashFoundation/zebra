@@ -11,7 +11,7 @@ use self::{
     config::ConfigCmd, connect::ConnectCmd, revhex::RevhexCmd, seed::SeedCmd, start::StartCmd,
     version::VersionCmd,
 };
-use crate::config::ZebradConfig;
+use crate::{application::ZebradApp, config::ZebradConfig};
 use abscissa_core::{
     config::Override, Command, Configurable, FrameworkError, Help, Options, Runnable,
 };
@@ -50,6 +50,23 @@ pub enum ZebradCmd {
     /// The `version` subcommand
     #[options(help = "display version information")]
     Version(VersionCmd),
+}
+
+impl ZebradCmd {
+    #[allow(clippy::single_match, unused_variables)]
+    pub fn add_components(
+        &self,
+        components: &mut Vec<Box<dyn abscissa_core::Component<ZebradApp>>>,
+    ) -> Result<(), FrameworkError> {
+        match self {
+            ZebradCmd::Connect(_) => {
+                // insert components for chain state and verification
+            }
+            _ => {}
+        }
+
+        Ok(())
+    }
 }
 
 /// This trait allows you to define how application configuration is loaded.
