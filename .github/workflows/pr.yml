@@ -1,34 +1,14 @@
 name: CI
 
 on:
-  push:
-    branches:
-      - main
   pull_request:
     branches:
       - main
 
 jobs:
 
-  build:
-    name: Google Cloud Build
-     # This is a pull request, and gcloud would fail for external PRs.
-    if: (!github.head_ref) || (!github.base_ref)
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@master
-    - uses: GoogleCloudPlatform/github-actions/setup-gcloud@master
-      with:
-        version: '275.0.0'
-        service_account_key: ${{ secrets.GCLOUD_AUTH }}
-    - name: Build, Test, Push to GCR
-      run: |
-        BRANCH_NAME=$GITHUB_REPOSITORY/$(expr $GITHUB_REF : '.*/\(.*\)') && \
-        BRANCH_NAME=${BRANCH_NAME,,} && \
-        gcloud builds submit . --config cloudbuild.yaml --project zealous-zebra --substitutions BRANCH_NAME=$BRANCH_NAME
-
   test:
-    name: Build and test on ${{ matrix.os }}
+    name: Build & test on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
