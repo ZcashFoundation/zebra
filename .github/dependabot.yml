@@ -24,3 +24,5 @@ updates:
   - dconnolly
   assignees:
   - dconnolly
+  labels:
+  - "infrastructure"
