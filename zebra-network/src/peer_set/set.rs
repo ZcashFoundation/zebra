@@ -166,7 +166,7 @@ where
             match self.handle_rx.try_recv() {
                 Ok(handles) => {
                     for handle in handles {
-                        self.push_join_handle(handle);
+                        self.guards.push(handle);
                     }
                 }
                 Err(tokio::sync::oneshot::error::TryRecvError::Closed) => unreachable!(
