@@ -14,6 +14,8 @@ use futures::{
     stream::FuturesUnordered,
 };
 use indexmap::IndexMap;
+use tokio::sync::oneshot::error::TryRecvError;
+use tokio::task::JoinHandle;
 use tower::{
     discover::{Change, Discover},
     Service,
@@ -77,6 +79,15 @@ where
     unready_services: FuturesUnordered<UnreadyService<D::Key, D::Service, Request>>,
     next_idx: Option<usize>,
     demand_signal: mpsc::Sender<()>,
+    /// Channel for passing ownership of tokio JoinHandles from PeerSet's background tasks
+    ///
+    /// The join handles passed into the PeerSet are used populate the `guards` member
+    handle_rx: tokio::sync::oneshot::Receiver<Vec<JoinHandle<Result<(), BoxedStdError>>>>,
+    /// Unordered set of handles to background tasks associated with the `PeerSet`
+    ///
+    /// These guards are checked for errors as part of `poll_ready` which lets
+    /// the `PeerSet` propagate errors from background tasks back to the user
+    guards: futures::stream::FuturesUnordered<JoinHandle<Result<(), BoxedStdError>>>,
 }
 
 impl<D> PeerSet<D>
@@ -90,7 +101,11 @@ where
     <D::Service as Load>::Metric: Debug,
 {
     /// Construct a peerset which uses `discover` internally.
-    pub fn new(discover: D, demand_signal: mpsc::Sender<()>) -> Self {
+    pub fn new(
+        discover: D,
+        demand_signal: mpsc::Sender<()>,
+        handle_rx: tokio::sync::oneshot::Receiver<Vec<JoinHandle<Result<(), BoxedStdError>>>>,
+    ) -> Self {
         Self {
             discover,
             ready_services: IndexMap::new(),
@@ -98,6 +113,8 @@ where
             unready_services: FuturesUnordered::new(),
             next_idx: None,
             demand_signal,
+            guards: futures::stream::FuturesUnordered::new(),
+            handle_rx,
         }
     }
 
@@ -150,6 +167,30 @@ where
             cancel: rx,
             _req: PhantomData,
         });
+    }
+
+    fn check_for_background_errors(&mut self, cx: &mut Context) -> Result<(), BoxedStdError> {
+        if self.guards.is_empty() {
+            match self.handle_rx.try_recv() {
+                Ok(handles) => {
+                    for handle in handles {
+                        self.guards.push(handle);
+                    }
+                }
+                Err(TryRecvError::Closed) => unreachable!(
+                    "try_recv will never be called if the futures have already been received"
+                ),
+                Err(TryRecvError::Empty) => return Ok(()),
+            }
+        }
+
+        match Pin::new(&mut self.guards).poll_next(cx) {
+            Poll::Pending => {}
+            Poll::Ready(Some(res)) => res??,
+            Poll::Ready(None) => Err("all background tasks have exited")?,
+        }
+
+        Ok(())
     }
 
     fn poll_unready(&mut self, cx: &mut Context<'_>) {
@@ -223,6 +264,7 @@ where
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.check_for_background_errors(cx)?;
         // Process peer discovery updates.
         let _ = self.poll_discover(cx)?;
 
