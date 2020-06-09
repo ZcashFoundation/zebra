@@ -14,8 +14,8 @@ use futures::{
     stream::FuturesUnordered,
 };
 use indexmap::IndexMap;
-use tokio::task::JoinHandle;
 use tokio::sync::oneshot::error::TryRecvError;
+use tokio::task::JoinHandle;
 use tower::{
     discover::{Change, Discover},
     Service,
@@ -245,10 +245,6 @@ where
     fn ready_index_load(&self, index: usize) -> <D::Service as Load>::Metric {
         let (_, svc) = self.ready_services.get_index(index).expect("invalid index");
         svc.load()
-    }
-
-    pub(crate) fn push_join_handle(&self, handle: JoinHandle<Result<(), BoxedStdError>>) {
-        self.guards.push(handle);
     }
 }
 
