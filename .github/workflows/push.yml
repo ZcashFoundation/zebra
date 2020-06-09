@@ -1,0 +1,20 @@
+name: CI
+
+on:
+  push:
+
+jobs:
+  build:
+    name: Google Cloud Build
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@master
+    - uses: GoogleCloudPlatform/github-actions/setup-gcloud@master
+      with:
+        version: '295.0.0'
+        service_account_key: ${{ secrets.GCLOUD_AUTH }}
+    - name: Build, Test, Push to GCR
+      run: |
+        BRANCH_NAME=$GITHUB_REPOSITORY/$(expr $GITHUB_REF : '.*/\(.*\)') && \
+        BRANCH_NAME=${BRANCH_NAME,,} && \
+        gcloud builds submit . --config cloudbuild.yaml --project zealous-zebra --substitutions BRANCH_NAME=$BRANCH_NAME

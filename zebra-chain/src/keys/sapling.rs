@@ -23,12 +23,12 @@ use std::{
 
 use bech32::{self, FromBase32, ToBase32};
 use rand_core::{CryptoRng, RngCore};
-use redjubjub::{self, SpendAuth};
 
 #[cfg(test)]
 use proptest_derive::Arbitrary;
 
 use crate::{
+    redjubjub::{self, SpendAuth},
     serialization::{ReadZcashExt, SerializationError},
     Network,
 };
