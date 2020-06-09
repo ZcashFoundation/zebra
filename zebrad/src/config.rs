@@ -53,3 +53,16 @@ impl Default for MetricsSection {
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    #[test]
+    fn test_toml_ser() -> color_eyre::Result<()> {
+        let default_config = super::ZebradConfig::default();
+        println!("Default config: {:?}", default_config);
+
+        println!("Toml:\n{}", toml::Value::try_from(&default_config)?);
+
+        Ok(())
+    }
+}

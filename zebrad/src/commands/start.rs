@@ -36,7 +36,7 @@ impl Runnable for StartCmd {
         let default_config = ZebradConfig::default();
         println!("Default config: {:?}", default_config);
 
-        println!("Toml:\n{}", toml::to_string(&default_config).unwrap());
+        println!("Toml:\n{}", toml::Value::try_from(&default_config).unwrap());
 
         info!("Starting placeholder loop");
 

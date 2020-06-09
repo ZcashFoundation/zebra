@@ -138,7 +138,7 @@ impl SeedCmd {
 
         let config = app_config().network.clone();
 
-        let (mut peer_set, address_book) = zebra_network::init(config, buffered_svc.clone()).await;
+        let (mut peer_set, address_book) = zebra_network::init(config, buffered_svc).await;
 
         let _ = addressbook_tx.send(address_book);
 
