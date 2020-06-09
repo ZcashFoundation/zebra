@@ -15,6 +15,7 @@ use futures::{
 };
 use indexmap::IndexMap;
 use tokio::task::JoinHandle;
+use tokio::sync::oneshot::error::TryRecvError;
 use tower::{
     discover::{Change, Discover},
     Service,
@@ -78,8 +79,15 @@ where
     unready_services: FuturesUnordered<UnreadyService<D::Key, D::Service, Request>>,
     next_idx: Option<usize>,
     demand_signal: mpsc::Sender<()>,
-    guards: futures::stream::FuturesUnordered<JoinHandle<Result<(), BoxedStdError>>>,
+    /// Channel for passing ownership of tokio JoinHandles from PeerSet's background tasks
+    ///
+    /// The join handles passed into the PeerSet are used populate the `guards` member
     handle_rx: tokio::sync::oneshot::Receiver<Vec<JoinHandle<Result<(), BoxedStdError>>>>,
+    /// Unordered set of handles to background tasks associated with the `PeerSet`
+    ///
+    /// These guards are checked for errors as part of `poll_ready` which lets
+    /// the `PeerSet` propagate errors from background tasks back to the user
+    guards: futures::stream::FuturesUnordered<JoinHandle<Result<(), BoxedStdError>>>,
 }
 
 impl<D> PeerSet<D>
@@ -169,21 +177,20 @@ where
                         self.guards.push(handle);
                     }
                 }
-                Err(tokio::sync::oneshot::error::TryRecvError::Closed) => unreachable!(
+                Err(TryRecvError::Closed) => unreachable!(
                     "try_recv will never be called if the futures have already been received"
                 ),
-                Err(tokio::sync::oneshot::error::TryRecvError::Empty) => return Ok(()),
+                Err(TryRecvError::Empty) => return Ok(()),
             }
         }
 
-        let res = match Pin::new(&mut self.guards).poll_next(cx) {
-            Poll::Ready(res) => res,
-            Poll::Pending => return Ok(()),
-        };
+        match Pin::new(&mut self.guards).poll_next(cx) {
+            Poll::Pending => {}
+            Poll::Ready(Some(res)) => res??,
+            Poll::Ready(None) => Err("all background tasks have exited")?,
+        }
 
-        res.transpose()?
-            .transpose()?
-            .ok_or_else(|| "all background tasks have exited".into())
+        Ok(())
     }
 
     fn poll_unready(&mut self, cx: &mut Context<'_>) {

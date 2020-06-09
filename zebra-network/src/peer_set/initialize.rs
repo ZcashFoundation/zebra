@@ -89,6 +89,7 @@ where
         demand_tx.clone(),
         handle_rx,
     );
+    let peer_set = Buffer::new(peer_set, config.peerset_request_buffer_size);
 
     // Connect the tx end to the 3 peer sources:
 
@@ -103,8 +104,6 @@ where
     let listen_guard = tokio::spawn(listen(config.listen_addr, listener, peerset_tx.clone()));
 
     // 3. Outgoing peers we connect to in response to load.
-
-    let peer_set = Buffer::new(peer_set, config.peerset_request_buffer_size);
     let mut candidates = CandidateSet::new(address_book.clone(), peer_set.clone());
 
     // We need to await candidates.update() here, because Zcashd only sends one
