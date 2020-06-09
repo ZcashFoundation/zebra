@@ -24,7 +24,7 @@ serde = { version = "1", features = ["serde_derive"] }
 thiserror = "1"
 
 tokio = { version = "0.2", features = ["net", "time", "stream"] }
-tokio-util = { version = "0.2", features = ["codec"] }
+tokio-util = { version = "0.3", features = ["codec"] }
 futures = "0.3"
 
 tracing = "0.1"
