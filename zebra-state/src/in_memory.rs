@@ -1,7 +1,7 @@
 use super::{Request, Response};
 use futures::prelude::*;
 use std::{
-    error::Error,
+    error,
     future::Future,
     pin::Pin,
     task::{Context, Poll},
@@ -15,9 +15,11 @@ struct ZebraState {
     index: block_index::BlockIndex,
 }
 
+type Error = Box<dyn error::Error + Send + Sync + 'static>;
+
 impl Service<Request> for ZebraState {
     type Response = Response;
-    type Error = Box<dyn Error + Send + Sync + 'static>;
+    type Error = Error;
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
@@ -58,8 +60,8 @@ impl Service<Request> for ZebraState {
 pub fn init() -> impl Service<
     Request,
     Response = Response,
-    Error = Box<dyn Error + Send + Sync + 'static>,
-    Future = impl Future<Output = Result<Response, Box<dyn Error + Send + Sync + 'static>>>,
+    Error = Error,
+    Future = impl Future<Output = Result<Response, Error>>,
 > + Send
        + Clone
        + 'static {
