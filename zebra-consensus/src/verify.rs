@@ -4,7 +4,9 @@
 //! verification.
 
 mod block;
+mod redjubjub;
 mod script;
 mod transaction;
 
 pub use block::init;
+pub use redjubjub::{BatchVerifier, Request, SingletonVerifier};
