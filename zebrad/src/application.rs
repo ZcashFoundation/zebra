@@ -104,12 +104,6 @@ impl Application for ZebradApp {
         components.push(Box::new(TracingEndpoint::new()?));
         components.push(Box::new(MetricsEndpoint::new()?));
 
-        command
-            .command
-            .as_ref()
-            .map(|command| command.add_components(&mut components))
-            .transpose()?;
-
         self.state.components.register(components)
     }
 
