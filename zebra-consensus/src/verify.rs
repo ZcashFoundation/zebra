@@ -9,14 +9,14 @@
 //! verification.
 
 use std::{
-    error::Error,
+    error,
     future::Future,
     pin::Pin,
     task::{Context, Poll},
 };
 use tower::{buffer::Buffer, Service};
 
-use zebra_chain::block::Block;
+use zebra_chain::block::{Block, BlockHeaderHash};
 
 mod script;
 mod transaction;
@@ -29,17 +29,16 @@ mod transaction;
 struct BlockVerifier {}
 
 /// The result type for the BlockVerifier Service.
-// TODO(teor): Response = BlockHeaderHash
-type Response = ();
+type Response = BlockHeaderHash;
 
 /// The error type for the BlockVerifier Service.
 // TODO(jlusby): Error = Report ?
-type ServiceError = Box<dyn Error + Send + Sync + 'static>;
+type Error = Box<dyn error::Error + Send + Sync + 'static>;
 
 /// The BlockVerifier service implementation.
 impl Service<Block> for BlockVerifier {
     type Response = Response;
-    type Error = ServiceError;
+    type Error = Error;
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
@@ -52,13 +51,18 @@ impl Service<Block> for BlockVerifier {
     fn call(&mut self, block: Block) -> Self::Future {
         let mut state_service = zebra_state::in_memory::init();
 
-        // Ignore errors, they are already handled correctly.
-        // AddBlock discards invalid blocks.
+        let header_hash: BlockHeaderHash = (&block).into();
+
+        // Ignore errors for now.
+        // TODO(jlusby): Error = Report, handle errors from state_service.
+        // TODO(teor):
+        //   - handle chain reorgs, adjust state_service "unique block height" conditions
+        //   - handle block validation errors (including errors in the block's transactions)
         let _ = state_service.call(zebra_state::Request::AddBlock {
             block: block.into(),
         });
 
-        Box::pin(async { Ok(()) })
+        Box::pin(async move { Ok(header_hash) })
     }
 }
 
@@ -66,8 +70,8 @@ impl Service<Block> for BlockVerifier {
 pub fn init() -> impl Service<
     Block,
     Response = Response,
-    Error = ServiceError,
-    Future = impl Future<Output = Result<Response, ServiceError>>,
+    Error = Error,
+    Future = impl Future<Output = Result<Response, Error>>,
 > + Send
        + Clone
        + 'static {
