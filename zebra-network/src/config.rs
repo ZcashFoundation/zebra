@@ -72,16 +72,21 @@ impl Default for Config {
         let mainnet_peers = [
             "dnsseed.z.cash:8233",
             "dnsseed.str4d.xyz:8233",
-            "dnsseed.znodes.org:8233",
+            "mainnet.seeder.zfnd.org:8233",
+            "mainnet.seeder.yolo.money:8233",
         ]
         .iter()
         .map(|&s| String::from(s))
         .collect();
 
-        let testnet_peers = ["dnsseed.testnet.z.cash:18233"]
-            .iter()
-            .map(|&s| String::from(s))
-            .collect();
+        let testnet_peers = [
+            "dnsseed.testnet.z.cash:18233",
+            "testnet.seeder.zfnd.org:18233",
+            "testnet.seeder.yolo.money:18233",
+        ]
+        .iter()
+        .map(|&s| String::from(s))
+        .collect();
 
         Config {
             listen_addr: "127.0.0.1:8233"
