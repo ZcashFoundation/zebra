@@ -18,6 +18,7 @@ use tower::{buffer::Buffer, Service};
 
 use zebra_chain::block::Block;
 
+mod script;
 mod transaction;
 
 /// Block verification service.
