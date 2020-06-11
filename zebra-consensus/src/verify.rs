@@ -110,7 +110,7 @@ where
 mod tests {
     use super::*;
     use color_eyre::Report;
-    use eyre::{ensure, eyre};
+    use eyre::{bail, ensure, eyre};
     use tower::{util::ServiceExt, Service};
     use zebra_chain::serialization::ZcashDeserialize;
 
@@ -131,10 +131,17 @@ mod tests {
             .init();
     }
 
-    #[tokio::test]
-    async fn verify() -> Result<(), Report> {
-        install_tracing();
+    /// Initialise and return an unwrapped `BlockVerifier`.
+    fn init_block_verifier<ZSF>(state_service: ZS<ZSF>) -> BlockVerifier<ZSF>
+    where
+        ZSF: Future<Output = Result<zebra_state::Response, ZSE>> + Send + 'static,
+    {
+        BlockVerifier::<ZSF> { state_service }
+    }
 
+    #[tokio::test]
+    #[spandoc::spandoc]
+    async fn verify() -> Result<(), Report> {
         let block = Block::zcash_deserialize(&zebra_test_vectors::BLOCK_MAINNET_415000_BYTES[..])?;
         // TODO(teor): why does rustc say that _hash is unused?
         let _hash: BlockHeaderHash = (&block).into();
@@ -155,6 +162,51 @@ mod tests {
             "unexpected response kind: {:?}",
             verify_response
         );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[spandoc::spandoc]
+    async fn round_trip() -> Result<(), Report> {
+        install_tracing();
+
+        let block = Block::zcash_deserialize(&zebra_test_vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
+        // TODO(teor): why does rustc say that _hash is unused?
+        let _hash: BlockHeaderHash = (&block).into();
+
+        let state_service = Box::new(zebra_state::in_memory::init());
+        let mut block_verifier = init_block_verifier(state_service);
+
+        let verify_response = block_verifier
+            .ready_and()
+            .await
+            .map_err(|e| eyre!(e))?
+            .call(block.clone())
+            .await
+            .map_err(|e| eyre!(e))?;
+
+        ensure!(
+            matches!(verify_response, _hash),
+            "unexpected response kind: {:?}",
+            verify_response
+        );
+
+        let state_response = block_verifier
+            .state_service
+            .ready_and()
+            .await
+            .map_err(|e| eyre!(e))?
+            .call(zebra_state::Request::GetBlock { hash: _hash })
+            .await
+            .map_err(|e| eyre!(e))?;
+
+        match state_response {
+            zebra_state::Response::Block {
+                block: returned_block,
+            } => assert_eq!(&block, returned_block.as_ref()),
+            _ => bail!("unexpected response kind: {:?}", state_response),
+        }
 
         Ok(())
     }

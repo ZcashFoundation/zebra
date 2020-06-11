@@ -17,6 +17,7 @@ tower = "0.3.1"
 zebra-test-vectors = { path = "../zebra-test-vectors/" }
 color-eyre = "0.3.4"
 eyre = "0.4.2"
+spandoc = { git = "https://github.com/yaahc/spandoc.git" }
 tokio = { version = "0.2.21", features = ["full"] }
 tracing = "0.1.15"
 tracing-error = "0.1.2"
