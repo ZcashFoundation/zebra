@@ -77,11 +77,18 @@ where
         //   - handle chain reorgs, adjust state_service "unique block height" conditions
         //   - handle block validation errors (including errors in the block's transactions)
         //   - handle state_service AddBlock errors, and add unit tests for those errors
-        let _: ZSF = self.state_service.call(zebra_state::Request::AddBlock {
+
+        // `state_service.call` is OK here because we already called
+        // `state_service.poll_ready` in our `poll_ready`.
+        let add_block = self.state_service.call(zebra_state::Request::AddBlock {
             block: block.into(),
         });
 
-        async move { Ok(header_hash) }.boxed()
+        async move {
+            add_block.await?;
+            Ok(header_hash)
+        }
+        .boxed()
     }
 }
 
