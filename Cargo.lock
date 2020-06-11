@@ -2127,6 +2127,7 @@ version = "0.1.0"
 dependencies = [
  "color-eyre",
  "eyre",
+ "futures-util",
  "tokio",
  "tower",
  "tracing",
