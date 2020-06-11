@@ -125,6 +125,28 @@ where
         + 'static,
     ZSF: Future<Output = Result<zebra_state::Response, Error>> + Send,
 {
+    async fn connect(&mut self) -> Result<(), Report> {
+        // TODO(jlusby): Replace with real state service
+
+        while self.requested_block_heights < 700_000 {
+            let hashes = self.next_hashes().await?;
+            self.tip = *hashes.last().unwrap();
+
+            // Request the corresponding blocks in chunks
+            self.request_blocks(hashes).await?;
+
+            // Allow at most 300 block requests in flight.
+            self.drain_requests(300).await?;
+        }
+
+        self.drain_requests(0).await?;
+
+        let eternity = future::pending::<()>();
+        eternity.await;
+
+        Ok(())
+    }
+
     async fn next_hashes(&mut self) -> Result<Vec<BlockHeaderHash>, Report> {
         // Request the next 500 hashes.
         self.retry_peer_set
@@ -190,28 +212,6 @@ where
                 _ => continue,
             }
         }
-
-        Ok(())
-    }
-
-    async fn connect(&mut self) -> Result<(), Report> {
-        // TODO(jlusby): Replace with real state service
-
-        while self.requested_block_heights < 700_000 {
-            let hashes = self.next_hashes().await?;
-            self.tip = *hashes.last().unwrap();
-
-            // Request the corresponding blocks in chunks
-            self.request_blocks(hashes).await?;
-
-            // Allow at most 300 block requests in flight.
-            self.drain_requests(300).await?;
-        }
-
-        self.drain_requests(0).await?;
-
-        let eternity = future::pending::<()>();
-        eternity.await;
 
         Ok(())
     }
