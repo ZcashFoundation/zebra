@@ -2125,10 +2125,16 @@ version = "0.1.0"
 name = "zebra-consensus"
 version = "0.1.0"
 dependencies = [
- "futures",
+ "color-eyre",
+ "eyre",
+ "tokio",
  "tower",
+ "tracing",
+ "tracing-error",
+ "tracing-subscriber",
  "zebra-chain",
  "zebra-state",
+ "zebra-test-vectors",
 ]
 
 [[package]]

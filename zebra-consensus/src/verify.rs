@@ -34,8 +34,9 @@ type ZS<ZSF> = Box<
 
 /// Block verification service.
 ///
-/// After verification, blocks and their associated transactions are added to
-/// `zebra_state::ZebraState`.
+/// After verification, blocks are added to `state_service`. We use a generic
+/// future `ZSF` for that service, so that the underlying state service can be
+/// wrapped in other services as needed.
 struct BlockVerifier<ZSF>
 where
     ZSF: Future<Output = Result<zebra_state::Response, ZSE>> + Send + 'static,
@@ -51,6 +52,8 @@ type Response = BlockHeaderHash;
 type Error = Box<dyn error::Error + Send + Sync + 'static>;
 
 /// The BlockVerifier service implementation.
+///
+/// After verification, blocks are added to the underlying state service.
 impl<ZSF> Service<Block> for BlockVerifier<ZSF>
 where
     ZSF: Future<Output = Result<zebra_state::Response, ZSE>> + Send + 'static,
@@ -72,6 +75,7 @@ where
         // TODO(teor):
         //   - handle chain reorgs, adjust state_service "unique block height" conditions
         //   - handle block validation errors (including errors in the block's transactions)
+        //   - handle state_service AddBlock errors, and add unit tests for those errors
         let _: ZSF = self.state_service.call(zebra_state::Request::AddBlock {
             block: block.into(),
         });
@@ -81,6 +85,10 @@ where
 }
 
 /// Initialise the BlockVerifier service.
+///
+/// We use a generic type `ZS<ZSF>` for `state_service`, so that the
+/// underlying state service can be wrapped in other services as needed.
+/// For similar reasons, we also return a dynamic service type.
 pub fn init<ZSF>(
     state_service: ZS<ZSF>,
 ) -> impl Service<
@@ -95,4 +103,58 @@ where
     ZSF: Future<Output = Result<zebra_state::Response, ZSE>> + Send + 'static,
 {
     Buffer::new(BlockVerifier::<ZSF> { state_service }, 1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use color_eyre::Report;
+    use eyre::{ensure, eyre};
+    use tower::{util::ServiceExt, Service};
+    use zebra_chain::serialization::ZcashDeserialize;
+
+    fn install_tracing() {
+        use tracing_error::ErrorLayer;
+        use tracing_subscriber::prelude::*;
+        use tracing_subscriber::{fmt, EnvFilter};
+
+        let fmt_layer = fmt::layer().with_target(false);
+        let filter_layer = EnvFilter::try_from_default_env()
+            .or_else(|_| EnvFilter::try_new("info"))
+            .unwrap();
+
+        tracing_subscriber::registry()
+            .with(filter_layer)
+            .with(fmt_layer)
+            .with(ErrorLayer::default())
+            .init();
+    }
+
+    #[tokio::test]
+    async fn verify() -> Result<(), Report> {
+        install_tracing();
+
+        let block = Block::zcash_deserialize(&zebra_test_vectors::BLOCK_MAINNET_415000_BYTES[..])?;
+        // TODO(teor): why does rustc say that _hash is unused?
+        let _hash: BlockHeaderHash = (&block).into();
+
+        let state_service = Box::new(zebra_state::in_memory::init());
+        let mut block_verifier = super::init(state_service);
+
+        let verify_response = block_verifier
+            .ready_and()
+            .await
+            .map_err(|e| eyre!(e))?
+            .call(block.clone())
+            .await
+            .map_err(|e| eyre!(e))?;
+
+        ensure!(
+            matches!(verify_response, _hash),
+            "unexpected response kind: {:?}",
+            verify_response
+        );
+
+        Ok(())
+    }
 }
