@@ -11,4 +11,12 @@ edition = "2018"
 zebra-chain = { path = "../zebra-chain" }
 zebra-state = { path = "../zebra-state" }
 tower = "0.3.1"
-futures = "0.3.5"
+
+[dev-dependencies]
+zebra-test-vectors = { path = "../zebra-test-vectors/" }
+color-eyre = "0.3.4"
+eyre = "0.4.2"
+tokio = { version = "0.2.21", features = ["full"] }
+tracing = "0.1.15"
+tracing-error = "0.1.2"
+tracing-subscriber = "0.2.5"
