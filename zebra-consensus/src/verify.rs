@@ -8,6 +8,7 @@
 //! Verification is provided via a `tower::Service`, to support backpressure and batch
 //! verification.
 
+use futures_util::FutureExt;
 use std::{
     error,
     future::Future,
@@ -80,7 +81,7 @@ where
             block: block.into(),
         });
 
-        Box::pin(async move { Ok(header_hash) })
+        async move { Ok(header_hash) }.boxed()
     }
 }
 
