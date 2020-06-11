@@ -11,7 +11,7 @@ use self::{
     config::ConfigCmd, connect::ConnectCmd, revhex::RevhexCmd, seed::SeedCmd, start::StartCmd,
     version::VersionCmd,
 };
-use crate::{application::ZebradApp, config::ZebradConfig};
+use crate::config::ZebradConfig;
 use abscissa_core::{
     config::Override, Command, Configurable, FrameworkError, Help, Options, Runnable,
 };
