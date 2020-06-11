@@ -98,32 +98,31 @@ impl ConnectCmd {
 
 type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 
-struct Connect<ZN, ZNF, ZS> {
+struct Connect<ZN, ZS>
+where
+    ZN: Service<zebra_network::Request>,
+{
     retry_peer_set: tower::retry::Retry<zebra_network::RetryErrors, ZN>,
     peer_set: ZN,
     state: ZS,
     tip: BlockHeaderHash,
-    block_requests: FuturesUnordered<ZNF>,
+    block_requests: FuturesUnordered<ZN::Future>,
     requested_block_heights: usize,
     downloaded_block_heights: BTreeSet<BlockHeight>,
 }
 
-impl<ZN, ZNF, ZS, ZSF> Connect<ZN, ZNF, ZS>
+impl<ZN, ZS> Connect<ZN, ZS>
 where
-    ZN: Service<
-            zebra_network::Request,
-            Response = zebra_network::Response,
-            Error = Error,
-            Future = ZNF,
-        > + Send
-        + Clone
-        + 'static,
-    ZNF: Future<Output = Result<zebra_network::Response, Error>> + Send,
-    ZS: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error, Future = ZSF>
+    ZN: Service<zebra_network::Request, Response = zebra_network::Response, Error = Error>
         + Send
         + Clone
         + 'static,
-    ZSF: Future<Output = Result<zebra_state::Response, Error>> + Send,
+    ZN::Future: Future<Output = Result<zebra_network::Response, Error>> + Send,
+    ZS: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>
+        + Send
+        + Clone
+        + 'static,
+    ZS::Future: Future<Output = Result<zebra_state::Response, Error>> + Send,
 {
     async fn connect(&mut self) -> Result<(), Report> {
         // TODO(jlusby): Replace with real state service
