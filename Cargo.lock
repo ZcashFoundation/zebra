@@ -2128,6 +2128,7 @@ dependencies = [
  "color-eyre",
  "eyre",
  "futures-util",
+ "spandoc",
  "tokio",
  "tower",
  "tracing",
