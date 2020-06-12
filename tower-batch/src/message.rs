@@ -1,7 +1,7 @@
 use super::error::ServiceError;
 use tokio::sync::oneshot;
 
-/// Message sent over buffer
+/// Message sent to the batch worker
 #[derive(Debug)]
 pub(crate) struct Message<Request, Fut> {
     pub(crate) request: Request,

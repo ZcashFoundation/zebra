@@ -1,15 +1,15 @@
-//! Error types for the `Buffer` middleware.
+//! Error types for the `Batch` middleware.
 
 use crate::BoxError;
 use std::{fmt, sync::Arc};
 
-/// An error produced by a `Service` wrapped by a `Buffer`
+/// An error produced by a `Service` wrapped by a `Batch`.
 #[derive(Debug)]
 pub struct ServiceError {
     inner: Arc<BoxError>,
 }
 
-/// An error produced when the a buffer's worker closes unexpectedly.
+/// An error produced when the batch worker closes unexpectedly.
 pub struct Closed {
     _p: (),
 }
@@ -32,7 +32,7 @@ impl ServiceError {
 
 impl fmt::Display for ServiceError {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        write!(fmt, "buffered service failed: {}", self.inner)
+        write!(fmt, "batching service failed: {}", self.inner)
     }
 }
 
@@ -58,7 +58,7 @@ impl fmt::Debug for Closed {
 
 impl fmt::Display for Closed {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        fmt.write_str("buffer's worker closed unexpectedly")
+        fmt.write_str("batch worker closed unexpectedly")
     }
 }
 

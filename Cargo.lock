@@ -1927,11 +1927,13 @@ dependencies = [
 name = "tower-batch"
 version = "0.1.0"
 dependencies = [
+ "futures",
  "futures-core",
  "pin-project",
  "tokio",
  "tower",
  "tracing",
+ "tracing-futures",
 ]
 
 [[package]]
