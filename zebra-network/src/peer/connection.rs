@@ -79,7 +79,7 @@ impl Handler {
                         GetBlocksByHash { hashes, blocks }
                     }
                 } else {
-                    Finished(Err(Arc::new(PeerError::WrongBlock).into()))
+                    Finished(Err(PeerError::WrongBlock.into()))
                 }
             }
             (FindBlocks, Message::Inv(inv_hashes)) => Finished(Ok(Response::BlockHeaderHashes(
@@ -227,7 +227,7 @@ where
                                 }
                                 // Other request timeouts fail the request.
                                 State::AwaitingResponse(_, tx) => {
-                                    let _ = tx.send(Err(Arc::new(e).into()));
+                                    let _ = tx.send(Err(e.into()));
                                     State::AwaitingRequest
                                 }
                                 _ => unreachable!(),
@@ -267,7 +267,7 @@ where
         if guard.is_some() {
             panic!("called fail_with on already-failed connection state");
         } else {
-            *guard = Some(Arc::new(e).into());
+            *guard = Some(e.into());
         }
         // Drop the guard immediately to release the mutex.
         std::mem::drop(guard);
