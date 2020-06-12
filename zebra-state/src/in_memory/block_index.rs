@@ -17,7 +17,7 @@ impl BlockIndex {
     pub(super) fn insert(
         &mut self,
         block: impl Into<Arc<Block>>,
-    ) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
+    ) -> Result<BlockHeaderHash, Box<dyn Error + Send + Sync + 'static>> {
         let block = block.into();
         let hash = block.as_ref().into();
         let height = block.coinbase_height().unwrap();
@@ -26,7 +26,7 @@ impl BlockIndex {
             Entry::Vacant(entry) => {
                 let _ = entry.insert(block.clone());
                 let _ = self.by_hash.insert(hash, block);
-                Ok(())
+                Ok(hash)
             }
             Entry::Occupied(_) => Err("forks in the chain aren't supported yet")?,
         }
@@ -40,12 +40,12 @@ impl BlockIndex {
         .cloned()
     }
 
-    pub(super) fn get_tip(&self) -> Option<Arc<Block>> {
+    pub(super) fn get_tip(&self) -> Option<BlockHeaderHash> {
         self.by_height
             .iter()
             .next_back()
             .map(|(_key, value)| value)
-            .cloned()
+            .map(|block| block.as_ref().into())
     }
 }
 
