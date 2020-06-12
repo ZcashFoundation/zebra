@@ -27,14 +27,19 @@ pub use redjubjub;
 #[cfg(test)]
 use proptest_derive::Arbitrary;
 
-use serde_big_array::big_array;
+use serde_helpers::*;
 
 /// The size of an Equihash solution in bytes (always 1344).
 const EQUIHASH_SOLUTION_SIZE: usize = 1344;
 
-big_array! {
-    BigArray;
-    +EQUIHASH_SOLUTION_SIZE, 580, 601, 80
+mod serde_helpers {
+    use super::EQUIHASH_SOLUTION_SIZE;
+    use serde_big_array::big_array;
+
+    big_array! {
+        BigArray;
+        +EQUIHASH_SOLUTION_SIZE, 580, 601, 80
+    }
 }
 
 /// An enum describing the possible network choices.

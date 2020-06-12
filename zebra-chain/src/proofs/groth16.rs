@@ -66,10 +66,13 @@ impl<'de> Deserialize<'de> for Groth16Proof {
                 A: serde::de::SeqAccess<'de>,
             {
                 let mut bytes = [0u8; 192];
-                for i in 0..192 {
-                    bytes[i] = seq
-                        .next_element()?
-                        .ok_or(serde::de::Error::invalid_length(i, &"expected 192 bytes"))?;
+                {
+                    let bytes: &mut [_] = &mut bytes;
+                    for (i, byte) in bytes.iter_mut().enumerate() {
+                        *byte = seq.next_element()?.ok_or_else(|| {
+                            serde::de::Error::invalid_length(i, &"expected 192 bytes")
+                        })?;
+                    }
                 }
                 Ok(Groth16Proof(bytes))
             }

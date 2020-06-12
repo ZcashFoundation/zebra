@@ -1,7 +1,5 @@
 #[cfg(test)]
 use proptest::{array, collection::vec, prelude::*};
-#[cfg(test)]
-use proptest_derive::Arbitrary;
 use serde::{Deserialize, Serialize};
 
 use crate::{ed25519_zebra, notes::sprout, proofs::ZkSnarkProof};

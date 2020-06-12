@@ -65,6 +65,19 @@ impl Arbitrary for Spend {
     type Strategy = BoxedStrategy<Self>;
 }
 
+#[derive(Deserialize, Serialize)]
+#[serde(remote = "jubjub::AffinePoint")]
+struct AffinePoint {
+    #[serde(getter = "jubjub::AffinePoint::to_bytes")]
+    bytes: [u8; 32],
+}
+
+impl From<AffinePoint> for jubjub::AffinePoint {
+    fn from(local: AffinePoint) -> Self {
+        jubjub::AffinePoint::from_bytes(local.bytes).unwrap()
+    }
+}
+
 /// A _Output Description_, as described in [protocol specification §7.4][ps].
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#outputencoding
@@ -79,6 +92,7 @@ pub struct Output {
     /// XXX refine to a specific type.
     pub cmu: [u8; 32],
     /// An encoding of an ephemeral Jubjub public key.
+    #[serde(with = "AffinePoint")]
     pub ephemeral_key: jubjub::AffinePoint,
     /// A ciphertext component for the encrypted output note.
     pub enc_ciphertext: sapling::EncryptedCiphertext,
@@ -121,6 +135,13 @@ impl Arbitrary for Output {
     type Strategy = BoxedStrategy<Self>;
 }
 
+#[derive(Deserialize, Serialize)]
+#[serde(remote = "Either")]
+enum LocalEither<A, B> {
+    Left(A),
+    Right(B),
+}
+
 /// Sapling-on-Groth16 spend and output descriptions.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ShieldedData {
@@ -133,6 +154,7 @@ pub struct ShieldedData {
     /// separately, as the [`ShieldedData::spends`] and [`ShieldedData::outputs`]
     /// methods provide iterators over all of the [`SpendDescription`]s and
     /// [`Output`]s.
+    #[serde(with = "LocalEither")]
     pub first: Either<Spend, Output>,
     /// The rest of the [`Spend`]s for this transaction.
     ///

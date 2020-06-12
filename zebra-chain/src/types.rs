@@ -115,7 +115,7 @@ impl Arbitrary for LockTime {
 }
 
 /// An encoding of a Bitcoin script.
-#[derive(Clone, Eq, PartialEq, Serialize)]
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct Script(pub Vec<u8>);
 

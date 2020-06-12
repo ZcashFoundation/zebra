@@ -67,10 +67,13 @@ impl<'de> Deserialize<'de> for Bctv14Proof {
                 A: serde::de::SeqAccess<'de>,
             {
                 let mut bytes = [0u8; 296];
-                for i in 0..296 {
-                    bytes[i] = seq
-                        .next_element()?
-                        .ok_or(serde::de::Error::invalid_length(i, &"expected 296 bytes"))?;
+                {
+                    let bytes: &mut [_] = &mut bytes;
+                    for (i, byte) in bytes.iter_mut().enumerate() {
+                        *byte = seq.next_element()?.ok_or_else(|| {
+                            serde::de::Error::invalid_length(i, &"expected 296 bytes")
+                        })?;
+                    }
                 }
                 Ok(Bctv14Proof(bytes))
             }

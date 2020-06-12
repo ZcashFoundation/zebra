@@ -5,18 +5,12 @@ use std::{fmt, io};
 #[cfg(test)]
 use proptest::{arbitrary::Arbitrary, collection::vec, prelude::*};
 
-use crate::serialization::{
-    ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
+use crate::{
+    serialization::{
+        ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
+    },
+    BigArray, EQUIHASH_SOLUTION_SIZE,
 };
-use serde_big_array::big_array;
-
-/// The size of an Equihash solution in bytes (always 1344).
-const EQUIHASH_SOLUTION_SIZE: usize = 1344;
-
-big_array! {
-    BigArray;
-    +EQUIHASH_SOLUTION_SIZE
-}
 
 /// Equihash Solution.
 ///
