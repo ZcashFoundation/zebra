@@ -33,7 +33,7 @@ pub(super) enum Handler {
     GetPeers,
     GetBlocksByHash {
         hashes: HashSet<BlockHeaderHash>,
-        blocks: Vec<Block>,
+        blocks: Vec<Arc<Block>>,
     },
     FindBlocks,
 }
@@ -72,14 +72,14 @@ impl Handler {
                 Message::Block(block),
             ) => {
                 if hashes.remove(&BlockHeaderHash::from(block.as_ref())) {
-                    blocks.push(*block);
+                    blocks.push(block);
                     if hashes.is_empty() {
                         Finished(Ok(Response::Blocks(blocks)))
                     } else {
                         GetBlocksByHash { hashes, blocks }
                     }
                 } else {
-                    Finished(Err(Arc::new(PeerError::WrongBlock).into()))
+                    Finished(Err(PeerError::WrongBlock.into()))
                 }
             }
             (FindBlocks, Message::Inv(inv_hashes)) => Finished(Ok(Response::BlockHeaderHashes(
@@ -227,7 +227,7 @@ where
                                 }
                                 // Other request timeouts fail the request.
                                 State::AwaitingResponse(_, tx) => {
-                                    let _ = tx.send(Err(Arc::new(e).into()));
+                                    let _ = tx.send(Err(e.into()));
                                     State::AwaitingRequest
                                 }
                                 _ => unreachable!(),
@@ -267,7 +267,7 @@ where
         if guard.is_some() {
             panic!("called fail_with on already-failed connection state");
         } else {
-            *guard = Some(Arc::new(e).into());
+            *guard = Some(e.into());
         }
         // Drop the guard immediately to release the mutex.
         std::mem::drop(guard);
@@ -435,7 +435,7 @@ where
             Response::Blocks(blocks) => {
                 // Generate one block message per block.
                 for block in blocks.into_iter() {
-                    if let Err(e) = self.peer_tx.send(Message::Block(Box::new(block))).await {
+                    if let Err(e) = self.peer_tx.send(Message::Block(block)).await {
                         self.fail_with(e.into());
                     }
                 }

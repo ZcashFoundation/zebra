@@ -72,45 +72,38 @@ where
     let (peerset_tx, peerset_rx) = mpsc::channel::<PeerChange>(100);
     // Create an mpsc channel for peerset demand signaling.
     let (mut demand_tx, demand_rx) = mpsc::channel::<()>(100);
+    let (handle_tx, handle_rx) = tokio::sync::oneshot::channel();
 
     // Connect the rx end to a PeerSet, wrapping new peers in load instruments.
-    let peer_set = Buffer::new(
-        PeerSet::new(
-            PeakEwmaDiscover::new(
-                ServiceStream::new(
-                    // ServiceStream interprets an error as stream termination,
-                    // so discard any errored connections...
-                    peerset_rx.filter(|result| future::ready(result.is_ok())),
-                ),
-                config.ewma_default_rtt,
-                config.ewma_decay_time,
-                NoInstrument,
+    let peer_set = PeerSet::new(
+        PeakEwmaDiscover::new(
+            ServiceStream::new(
+                // ServiceStream interprets an error as stream termination,
+                // so discard any errored connections...
+                peerset_rx.filter(|result| future::ready(result.is_ok())),
             ),
-            demand_tx.clone(),
+            config.ewma_default_rtt,
+            config.ewma_decay_time,
+            NoInstrument,
         ),
-        config.peerset_request_buffer_size,
+        demand_tx.clone(),
+        handle_rx,
     );
+    let peer_set = Buffer::new(peer_set, config.peerset_request_buffer_size);
 
     // Connect the tx end to the 3 peer sources:
 
     // 1. Initial peers, specified in the config.
-    tokio::spawn(add_initial_peers(
+    let add_guard = tokio::spawn(add_initial_peers(
         config.initial_peers(),
         connector.clone(),
         peerset_tx.clone(),
     ));
 
     // 2. Incoming peer connections, via a listener.
-    tokio::spawn(
-        listen(config.listen_addr, listener, peerset_tx.clone()).map(|result| {
-            if let Err(e) = result {
-                error!(%e);
-            }
-        }),
-    );
+    let listen_guard = tokio::spawn(listen(config.listen_addr, listener, peerset_tx.clone()));
 
     // 3. Outgoing peers we connect to in response to load.
-
     let mut candidates = CandidateSet::new(address_book.clone(), peer_set.clone());
 
     // We need to await candidates.update() here, because Zcashd only sends one
@@ -125,21 +118,18 @@ where
         let _ = demand_tx.try_send(());
     }
 
-    tokio::spawn(
-        crawl_and_dial(
-            config.new_peer_interval,
-            demand_tx,
-            demand_rx,
-            candidates,
-            connector,
-            peerset_tx,
-        )
-        .map(|result| {
-            if let Err(e) = result {
-                error!(%e);
-            }
-        }),
-    );
+    let crawl_guard = tokio::spawn(crawl_and_dial(
+        config.new_peer_interval,
+        demand_tx,
+        demand_rx,
+        candidates,
+        connector,
+        peerset_tx,
+    ));
+
+    handle_tx
+        .send(vec![add_guard, listen_guard, crawl_guard])
+        .unwrap();
 
     (peer_set, address_book)
 }
@@ -151,7 +141,8 @@ async fn add_initial_peers<S>(
     initial_peers: std::collections::HashSet<SocketAddr>,
     connector: S,
     mut tx: mpsc::Sender<PeerChange>,
-) where
+) -> Result<(), BoxedStdError>
+where
     S: Service<SocketAddr, Response = Change<SocketAddr, peer::Client>, Error = BoxedStdError>
         + Clone,
     S::Future: Send + 'static,
@@ -160,9 +151,12 @@ async fn add_initial_peers<S>(
     use tower::util::CallAllUnordered;
     let addr_stream = futures::stream::iter(initial_peers.into_iter());
     let mut handshakes = CallAllUnordered::new(connector, addr_stream);
+
     while let Some(handshake_result) = handshakes.next().await {
-        let _ = tx.send(handshake_result).await;
+        tx.send(handshake_result).await?;
     }
+
+    Ok(())
 }
 
 /// Bind to `addr`, listen for peers using `handshaker`, then send the

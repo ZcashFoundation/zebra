@@ -2,14 +2,12 @@
 #![allow(clippy::unit_arg)]
 
 #[cfg(test)]
-pub mod test_vectors;
-#[cfg(test)]
 mod tests;
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{DateTime, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
-use std::{fmt, io};
+use std::{fmt, io, sync::Arc};
 
 #[cfg(test)]
 use proptest_derive::Arbitrary;
@@ -112,7 +110,7 @@ pub struct BlockHeader {
     pub merkle_root_hash: MerkleTreeRootHash,
 
     /// [Sapling onward] The root LEBS2OSP256(rt) of the Sapling note
-    /// commitment tree corresponding to the finnal Sapling treestate of
+    /// commitment tree corresponding to the final Sapling treestate of
     /// this block.
     pub final_sapling_root_hash: SaplingNoteTreeRootHash,
 
@@ -212,7 +210,7 @@ pub struct Block {
     /// The block header, containing block metadata.
     pub header: BlockHeader,
     /// The block transactions.
-    pub transactions: Vec<Transaction>,
+    pub transactions: Vec<Arc<Transaction>>,
 }
 
 impl Block {

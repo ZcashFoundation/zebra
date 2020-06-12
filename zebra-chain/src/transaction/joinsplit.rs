@@ -4,7 +4,7 @@ use proptest::{array, collection::vec, prelude::*};
 use proptest_derive::Arbitrary;
 use serde::{Deserialize, Serialize};
 
-use crate::{notes::sprout, proofs::ZkSnarkProof};
+use crate::{ed25519_zebra, notes::sprout, proofs::ZkSnarkProof};
 
 /// A _JoinSplit Description_, as described in [protocol specification §7.2][ps].
 ///
