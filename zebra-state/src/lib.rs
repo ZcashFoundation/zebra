@@ -6,7 +6,7 @@ use zebra_chain::block::{Block, BlockHeaderHash};
 
 pub mod in_memory;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Request {
     // TODO(jlusby): deprecate in the future based on our validation story
     AddBlock { block: Arc<Block> },
@@ -14,9 +14,9 @@ pub enum Request {
     GetTip,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Response {
-    Added,
+    Added { hash: BlockHeaderHash },
     Block { block: Arc<Block> },
     Tip { hash: BlockHeaderHash },
 }
@@ -62,7 +62,7 @@ mod tests {
             .map_err(|e| eyre!(e))?;
 
         ensure!(
-            matches!(response, Response::Added),
+            response == Response::Added { hash },
             "unexpected response kind: {:?}",
             response
         );
@@ -92,7 +92,9 @@ mod tests {
         let block1: Arc<_> =
             Block::zcash_deserialize(&zebra_test_vectors::BLOCK_MAINNET_1_BYTES[..])?.into();
 
-        let expected_hash: BlockHeaderHash = block1.as_ref().into();
+        let block0_hash: BlockHeaderHash = block0.as_ref().into();
+        let block1_hash: BlockHeaderHash = block1.as_ref().into();
+        let expected_hash: BlockHeaderHash = block1_hash;
 
         let mut service = in_memory::init();
 
@@ -103,7 +105,7 @@ mod tests {
             .map_err(|e| eyre!(e))?;
 
         ensure!(
-            matches!(response, Response::Added),
+            response == Response::Added { hash: block1_hash },
             "unexpected response kind: {:?}",
             response
         );
@@ -117,7 +119,7 @@ mod tests {
             .map_err(|e| eyre!(e))?;
 
         ensure!(
-            matches!(response, Response::Added),
+            response == Response::Added { hash: block0_hash },
             "unexpected response kind: {:?}",
             response
         );
