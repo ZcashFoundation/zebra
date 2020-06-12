@@ -1,17 +1,18 @@
 use super::{
     error::{Closed, ServiceError},
-    message::Message,
+    message::{self, Message},
+    BatchControl,
 };
-use futures_core::ready;
+use futures::future::TryFutureExt;
 use pin_project::pin_project;
 use std::sync::{Arc, Mutex};
-use std::{
-    future::Future,
-    pin::Pin,
-    task::{Context, Poll},
+use tokio::{
+    stream::StreamExt,
+    sync::mpsc,
+    time::{delay_for, Delay},
 };
-use tokio::sync::mpsc;
-use tower::Service;
+use tower::{Service, ServiceExt};
+use tracing_futures::Instrument;
 
 /// Task that handles processing the buffer. This type should not be used
 /// directly, instead `Buffer` requires an `Executor` that can accept this task.
@@ -24,15 +25,15 @@ use tower::Service;
 #[derive(Debug)]
 pub struct Worker<T, Request>
 where
-    T: Service<Request>,
+    T: Service<BatchControl<Request>>,
     T::Error: Into<crate::BoxError>,
 {
-    current_message: Option<Message<Request, T::Future>>,
     rx: mpsc::Receiver<Message<Request, T::Future>>,
     service: T,
-    finish: bool,
     failed: Option<ServiceError>,
     handle: Handle,
+    max_items: usize,
+    max_latency: std::time::Duration,
 }
 
 /// Get the error out
@@ -43,66 +44,125 @@ pub(crate) struct Handle {
 
 impl<T, Request> Worker<T, Request>
 where
-    T: Service<Request>,
+    T: Service<BatchControl<Request>>,
     T::Error: Into<crate::BoxError>,
 {
     pub(crate) fn new(
         service: T,
         rx: mpsc::Receiver<Message<Request, T::Future>>,
+        max_items: usize,
+        max_latency: std::time::Duration,
     ) -> (Handle, Worker<T, Request>) {
         let handle = Handle {
             inner: Arc::new(Mutex::new(None)),
         };
 
         let worker = Worker {
-            current_message: None,
-            finish: false,
-            failed: None,
             rx,
             service,
             handle: handle.clone(),
+            failed: None,
+            max_items,
+            max_latency,
         };
 
         (handle, worker)
     }
 
-    /// Return the next queued Message that hasn't been canceled.
-    ///
-    /// If a `Message` is returned, the `bool` is true if this is the first time we received this
-    /// message, and false otherwise (i.e., we tried to forward it to the backing service before).
-    fn poll_next_msg(
-        &mut self,
-        cx: &mut Context<'_>,
-    ) -> Poll<Option<(Message<Request, T::Future>, bool)>> {
-        if self.finish {
-            // We've already received None and are shutting down
-            return Poll::Ready(None);
-        }
-
-        tracing::trace!("worker polling for next message");
-        if let Some(mut msg) = self.current_message.take() {
-            // poll_closed returns Poll::Ready is the receiver is dropped.
-            // Returning Pending means it is still alive, so we should still
-            // use it.
-            if msg.tx.poll_closed(cx).is_pending() {
-                tracing::trace!("resuming buffered request");
-                return Poll::Ready(Some((msg, false)));
+    async fn process_req(&mut self, req: Request, tx: message::Tx<T::Future>) {
+        if let Some(ref failed) = self.failed {
+            tracing::trace!("notifying caller about worker failure");
+            let _ = tx.send(Err(failed.clone()));
+        } else {
+            match self.service.ready_and().await {
+                Ok(svc) => {
+                    let rsp = svc.call(req.into());
+                    let _ = tx.send(Ok(rsp));
+                }
+                Err(e) => {
+                    self.failed(e.into());
+                    let _ = tx.send(Err(self
+                        .failed
+                        .as_ref()
+                        .expect("Worker::failed did not set self.failed?")
+                        .clone()));
+                }
             }
-
-            tracing::trace!("dropping cancelled buffered request");
         }
+    }
 
-        // Get the next request
-        while let Some(mut msg) = ready!(Pin::new(&mut self.rx).poll_recv(cx)) {
-            if msg.tx.poll_closed(cx).is_pending() {
-                tracing::trace!("processing new request");
-                return Poll::Ready(Some((msg, true)));
+    async fn flush_service(&mut self) {
+        if let Err(e) = self
+            .service
+            .ready_and()
+            .and_then(|svc| svc.call(BatchControl::Flush))
+            .await
+        {
+            self.failed(e.into());
+        }
+    }
+
+    pub async fn run(mut self) {
+        use futures::future::Either::{Left, Right};
+        // The timer is started when the first entry of a new batch is
+        // submitted, so that the batch latency of all entries is at most
+        // self.max_latency. However, we don't keep the timer running unless
+        // there is a pending request to prevent wakeups on idle services.
+        let mut timer: Option<Delay> = None;
+        let mut pending_items = 0usize;
+        loop {
+            match timer {
+                None => match self.rx.next().await {
+                    // The first message in a new batch.
+                    Some(msg) => {
+                        let span = msg.span;
+                        self.process_req(msg.request, msg.tx)
+                            // Apply the provided span to request processing
+                            .instrument(span)
+                            .await;
+                        timer = Some(delay_for(self.max_latency));
+                        pending_items = 1;
+                    }
+                    // No more messages, ever.
+                    None => return,
+                },
+                Some(delay) => {
+                    // Wait on either a new message or the batch timer.
+                    match futures::future::select(self.rx.next(), delay).await {
+                        Left((Some(msg), delay)) => {
+                            let span = msg.span;
+                            self.process_req(msg.request, msg.tx)
+                                // Apply the provided span to request processing.
+                                .instrument(span)
+                                .await;
+                            pending_items += 1;
+                            // Check whether we have too many pending items.
+                            if pending_items >= self.max_items {
+                                // XXX(hdevalence): what span should instrument this?
+                                self.flush_service().await;
+                                // Now we have an empty batch.
+                                timer = None;
+                                pending_items = 0;
+                            } else {
+                                // The timer is still running, set it back!
+                                timer = Some(delay);
+                            }
+                        }
+                        // No more messages, ever.
+                        Left((None, _delay)) => {
+                            return;
+                        }
+                        // The batch timer elapsed.
+                        Right(((), _next)) => {
+                            // XXX(hdevalence): what span should instrument this?
+                            self.flush_service().await;
+                            timer = None;
+                            pending_items = 0;
+                        }
+                    }
+                }
             }
-            // Otherwise, request is canceled, so pop the next one.
-            tracing::trace!("dropping cancelled request");
         }
-
-        Poll::Ready(None)
     }
 
     fn failed(&mut self, error: crate::BoxError) {
@@ -132,79 +192,11 @@ where
 
         self.rx.close();
 
-        // By closing the mpsc::Receiver, we know that poll_next_msg will soon return Ready(None),
-        // which will trigger the `self.finish == true` phase. We just need to make sure that any
-        // requests that we receive before we've exhausted the receiver receive the error:
+        // By closing the mpsc::Receiver, we know that that the run() loop will
+        // drain all pending requests. We just need to make sure that any
+        // requests that we receive before we've exhausted the receiver receive
+        // the error:
         self.failed = Some(error);
-    }
-}
-
-impl<T, Request> Future for Worker<T, Request>
-where
-    T: Service<Request>,
-    T::Error: Into<crate::BoxError>,
-{
-    type Output = ();
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        if self.finish {
-            return Poll::Ready(());
-        }
-
-        loop {
-            match ready!(self.poll_next_msg(cx)) {
-                Some((msg, first)) => {
-                    let _guard = msg.span.enter();
-                    if let Some(ref failed) = self.failed {
-                        tracing::trace!("notifying caller about worker failure");
-                        let _ = msg.tx.send(Err(failed.clone()));
-                        continue;
-                    }
-
-                    // Wait for the service to be ready
-                    tracing::trace!(
-                        resumed = !first,
-                        message = "worker received request; waiting for service readiness"
-                    );
-                    match self.service.poll_ready(cx) {
-                        Poll::Ready(Ok(())) => {
-                            tracing::debug!(service.ready = true, message = "processing request");
-                            let response = self.service.call(msg.request);
-
-                            // Send the response future back to the sender.
-                            //
-                            // An error means the request had been canceled in-between
-                            // our calls, the response future will just be dropped.
-                            tracing::trace!("returning response future");
-                            let _ = msg.tx.send(Ok(response));
-                        }
-                        Poll::Pending => {
-                            tracing::trace!(service.ready = false, message = "delay");
-                            // Put out current message back in its slot.
-                            drop(_guard);
-                            self.current_message = Some(msg);
-                            return Poll::Pending;
-                        }
-                        Poll::Ready(Err(e)) => {
-                            let error = e.into();
-                            tracing::debug!({ %error }, "service failed");
-                            drop(_guard);
-                            self.failed(error);
-                            let _ = msg.tx.send(Err(self
-                                .failed
-                                .as_ref()
-                                .expect("Worker::failed did not set self.failed?")
-                                .clone()));
-                        }
-                    }
-                }
-                None => {
-                    // No more more requests _ever_.
-                    self.finish = true;
-                    return Poll::Ready(());
-                }
-            }
-        }
     }
 }
 

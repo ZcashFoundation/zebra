@@ -7,5 +7,16 @@ mod worker;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
-pub use self::layer::BufferLayer;
-pub use self::service::Buffer;
+pub enum BatchControl<R> {
+    Item(R),
+    Flush,
+}
+
+impl<R> From<R> for BatchControl<R> {
+    fn from(req: R) -> BatchControl<R> {
+        BatchControl::Item(req)
+    }
+}
+
+pub use self::layer::BatchLayer;
+pub use self::service::Batch;

@@ -1,4 +1,4 @@
-//! Future types for the `Buffer` middleware.
+//! Future types for the `Batch` middleware.
 
 use super::{error::Closed, message};
 use futures_core::ready;
@@ -9,7 +9,7 @@ use std::{
     task::{Context, Poll},
 };
 
-/// Future that completes when the buffered service eventually services the submitted request.
+/// Future that completes when the batch processing is complete.
 #[pin_project]
 #[derive(Debug)]
 pub struct ResponseFuture<T> {

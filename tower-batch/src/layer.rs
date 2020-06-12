@@ -1,60 +1,56 @@
-use super::service::Buffer;
+use super::{service::Batch, BatchControl};
 use std::{fmt, marker::PhantomData};
-use tower_layer::Layer;
-use tower_service::Service;
+use tower::layer::Layer;
+use tower::Service;
 
-/// Adds an mpsc buffer in front of an inner service.
+/// Adds a layer performing batch processing of requests.
 ///
 /// The default Tokio executor is used to run the given service,
 /// which means that this layer can only be used on the Tokio runtime.
 ///
 /// See the module documentation for more details.
-pub struct BufferLayer<Request> {
-    bound: usize,
+pub struct BatchLayer<Request> {
+    max_items: usize,
+    max_latency: std::time::Duration,
     _p: PhantomData<fn(Request)>,
 }
 
-impl<Request> BufferLayer<Request> {
-    /// Creates a new `BufferLayer` with the provided `bound`.
+impl<Request> BatchLayer<Request> {
+    /// Creates a new `BatchLayer`.
     ///
-    /// `bound` gives the maximal number of requests that can be queued for the service before
-    /// backpressure is applied to callers.
+    /// The wrapper is responsible for telling the inner service when to flush a
+    /// batch of requests.  Two parameters control this policy:
     ///
-    /// # A note on choosing a `bound`
-    ///
-    /// When `Buffer`'s implementation of `poll_ready` returns `Poll::Ready`, it reserves a
-    /// slot in the channel for the forthcoming `call()`. However, if this call doesn't arrive,
-    /// this reserved slot may be held up for a long time. As a result, it's advisable to set
-    /// `bound` to be at least the maximum number of concurrent requests the `Buffer` will see.
-    /// If you do not, all the slots in the buffer may be held up by futures that have just called
-    /// `poll_ready` but will not issue a `call`, which prevents other senders from issuing new
-    /// requests.
-    pub fn new(bound: usize) -> Self {
-        BufferLayer {
-            bound,
+    /// * `max_items` gives the maximum number of items per batch.
+    /// * `max_latency` gives the maximum latency for a batch item.
+    pub fn new(max_items: usize, max_latency: std::time::Duration) -> Self {
+        BatchLayer {
+            max_items,
+            max_latency,
             _p: PhantomData,
         }
     }
 }
 
-impl<S, Request> Layer<S> for BufferLayer<Request>
+impl<S, Request> Layer<S> for BatchLayer<Request>
 where
-    S: Service<Request> + Send + 'static,
+    S: Service<BatchControl<Request>> + Send + 'static,
     S::Future: Send,
     S::Error: Into<crate::BoxError> + Send + Sync,
     Request: Send + 'static,
 {
-    type Service = Buffer<S, Request>;
+    type Service = Batch<S, Request>;
 
     fn layer(&self, service: S) -> Self::Service {
-        Buffer::new(service, self.bound)
+        Batch::new(service, self.max_items, self.max_latency)
     }
 }
 
-impl<Request> fmt::Debug for BufferLayer<Request> {
+impl<Request> fmt::Debug for BatchLayer<Request> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("BufferLayer")
-            .field("bound", &self.bound)
+            .field("max_items", &self.max_items)
+            .field("max_latency", &self.max_latency)
             .finish()
     }
 }
