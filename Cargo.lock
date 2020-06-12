@@ -355,6 +355,7 @@ dependencies = [
  "byteorder",
  "digest",
  "rand_core",
+ "serde",
  "subtle",
  "zeroize",
 ]
@@ -1447,6 +1448,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde-big-array"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "52309f7932ab258e58bcf73cc89037e307ffef3bcfb7ce7a246580c26f81dc55"
+dependencies = [
+ "serde",
+ "serde_derive",
+]
+
+[[package]]
 name = "serde_derive"
 version = "1.0.111"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2091,6 +2102,7 @@ checksum = "637ff90c9540fa3073bb577e65033069e4bae7c79d49d74aa3ffdf5342a53217"
 dependencies = [
  "curve25519-dalek",
  "rand_core",
+ "serde",
  "zeroize",
 ]
 
@@ -2125,6 +2137,7 @@ dependencies = [
  "ripemd160",
  "secp256k1",
  "serde",
+ "serde-big-array",
  "sha2",
  "thiserror",
  "x25519-dalek",

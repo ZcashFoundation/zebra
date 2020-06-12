@@ -12,7 +12,7 @@ use crate::redjubjub::{self, Binding, SpendAuth};
 /// A _Spend Description_, as described in [protocol specification §7.3][ps].
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#spendencoding
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Spend {
     /// A value commitment to the value of the input note.
     ///
@@ -68,7 +68,7 @@ impl Arbitrary for Spend {
 /// A _Output Description_, as described in [protocol specification §7.4][ps].
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#outputencoding
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Output {
     /// A value commitment to the value of the input note.
     ///
@@ -122,7 +122,7 @@ impl Arbitrary for Output {
 }
 
 /// Sapling-on-Groth16 spend and output descriptions.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ShieldedData {
     /// Either a spend or output description.
     ///
