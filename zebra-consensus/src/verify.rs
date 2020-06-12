@@ -49,14 +49,10 @@ where
     }
 
     fn call(&mut self, block: Arc<Block>) -> Self::Future {
-        let header_hash: BlockHeaderHash = block.as_ref().into();
-
-        // Ignore errors for now.
         // TODO(jlusby): Error = Report, handle errors from state_service.
         // TODO(teor):
         //   - handle chain reorgs, adjust state_service "unique block height" conditions
         //   - handle block validation errors (including errors in the block's transactions)
-        //   - handle state_service AddBlock errors, and add unit tests for those errors
 
         // `state_service.call` is OK here because we already called
         // `state_service.poll_ready` in our `poll_ready`.
@@ -65,8 +61,10 @@ where
             .call(zebra_state::Request::AddBlock { block });
 
         async move {
-            add_block.await?;
-            Ok(header_hash)
+            match add_block.await? {
+                zebra_state::Response::Added { hash } => Ok(hash),
+                _ => Err("adding block to zebra-state failed".into()),
+            }
         }
         .boxed()
     }
@@ -159,8 +157,6 @@ mod tests {
     #[tokio::test]
     #[spandoc::spandoc]
     async fn round_trip() -> Result<(), Report> {
-        install_tracing();
-
         let block =
             Arc::<Block>::zcash_deserialize(&zebra_test_vectors::BLOCK_MAINNET_415000_BYTES[..])?;
         let hash: BlockHeaderHash = block.as_ref().into();
@@ -182,6 +178,86 @@ mod tests {
             verify_response
         );
 
+        let state_response = state_service
+            .ready_and()
+            .await
+            .map_err(|e| eyre!(e))?
+            .call(zebra_state::Request::GetBlock { hash })
+            .await
+            .map_err(|e| eyre!(e))?;
+
+        match state_response {
+            zebra_state::Response::Block {
+                block: returned_block,
+            } => assert_eq!(block, returned_block),
+            _ => bail!("unexpected response kind: {:?}", state_response),
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[spandoc::spandoc]
+    async fn verify_fail_add_block() -> Result<(), Report> {
+        install_tracing();
+
+        let block =
+            Arc::<Block>::zcash_deserialize(&zebra_test_vectors::BLOCK_MAINNET_415000_BYTES[..])?;
+        let hash: BlockHeaderHash = block.as_ref().into();
+
+        let mut state_service = zebra_state::in_memory::init();
+        let mut block_verifier = super::init(state_service.clone());
+
+        // Add the block for the first time
+        let verify_response = block_verifier
+            .ready_and()
+            .await
+            .map_err(|e| eyre!(e))?
+            .call(block.clone())
+            .await
+            .map_err(|e| eyre!(e))?;
+
+        ensure!(
+            verify_response == hash,
+            "unexpected response kind: {:?}",
+            verify_response
+        );
+
+        let state_response = state_service
+            .ready_and()
+            .await
+            .map_err(|e| eyre!(e))?
+            .call(zebra_state::Request::GetBlock { hash })
+            .await
+            .map_err(|e| eyre!(e))?;
+
+        match state_response {
+            zebra_state::Response::Block {
+                block: returned_block,
+            } => assert_eq!(block, returned_block),
+            _ => bail!("unexpected response kind: {:?}", state_response),
+        }
+
+        // Now try to add the block again, verify should fail
+        // TODO(teor): ignore duplicate block verifies?
+        let verify_result = block_verifier
+            .ready_and()
+            .await
+            .map_err(|e| eyre!(e))?
+            .call(block.clone())
+            .await;
+
+        ensure!(
+            match verify_result {
+                Ok(_) => false,
+                // TODO(teor || jlusby): check error string
+                _ => true,
+            },
+            "unexpected result kind: {:?}",
+            verify_result
+        );
+
+        // But the state should still return the original block we added
         let state_response = state_service
             .ready_and()
             .await

@@ -30,7 +30,8 @@ impl Service<Request> for ZebraState {
     fn call(&mut self, req: Request) -> Self::Future {
         match req {
             Request::AddBlock { block } => {
-                let result = self.index.insert(block).map(|_| Response::Added);
+                let hash = block.as_ref().into();
+                let result = self.index.insert(block).map(|_| Response::Added { hash });
 
                 async { result }.boxed()
             }
