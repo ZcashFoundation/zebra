@@ -7,7 +7,16 @@ use zebra_chain::serialization::SerializationError;
 /// A wrapper around `Arc<PeerError>` that implements `Error`.
 #[derive(Error, Debug, Clone)]
 #[error("{0}")]
-pub struct SharedPeerError(#[from] Arc<PeerError>);
+pub struct SharedPeerError(Arc<PeerError>);
+
+impl<E> From<E> for SharedPeerError
+where
+    PeerError: From<E>,
+{
+    fn from(source: E) -> Self {
+        Self(Arc::new(PeerError::from(source)))
+    }
+}
 
 /// An error related to peer connection handling.
 #[derive(Error, Debug)]
