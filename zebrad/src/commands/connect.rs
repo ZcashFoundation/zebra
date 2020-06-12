@@ -117,12 +117,12 @@ where
         + Send
         + Clone
         + 'static,
-    ZN::Future: Future<Output = Result<zebra_network::Response, Error>> + Send,
+    ZN::Future: Send,
     ZS: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>
         + Send
         + Clone
         + 'static,
-    ZS::Future: Future<Output = Result<zebra_state::Response, Error>> + Send,
+    ZS::Future: Send,
 {
     async fn connect(&mut self) -> Result<(), Report> {
         // TODO(jlusby): Replace with real state service
