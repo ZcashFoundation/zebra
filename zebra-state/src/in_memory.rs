@@ -30,8 +30,10 @@ impl Service<Request> for ZebraState {
     fn call(&mut self, req: Request) -> Self::Future {
         match req {
             Request::AddBlock { block } => {
-                let hash = block.as_ref().into();
-                let result = self.index.insert(block).map(|_| Response::Added { hash });
+                let result = self
+                    .index
+                    .insert(block)
+                    .map(|hash| Response::Added { hash });
 
                 async { result }.boxed()
             }
@@ -48,7 +50,6 @@ impl Service<Request> for ZebraState {
                 let result = self
                     .index
                     .get_tip()
-                    .map(|block| block.as_ref().into())
                     .map(|hash| Response::Tip { hash })
                     .ok_or_else(|| "zebra-state contains no blocks".into());
 
