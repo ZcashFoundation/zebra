@@ -54,24 +54,36 @@ impl BlockIndex {
         &mut self,
         query: impl Into<BlockQuery>,
     ) -> Result<Option<Arc<Block>>, Error> {
-        self.cache
-            .get(query)
-            .map(Some)
-            .or_else(|query| self.query_get(query))
+        let query = query.into();
+
+        if let Some(block) = self.cache.get(&query) {
+            Ok(Some(block))
+        } else {
+            self.query_block(query)
+        }
     }
 
-    fn query_get(&mut self, query: BlockQuery) -> Result<Option<Arc<Block>>, Error> {
-        let block = match query {
-            BlockQuery::ByHash(hash) => self.storage.open_tree(b"by_hash")?.get(&hash.0),
-            BlockQuery::ByHeight(height) => self
-                .storage
-                .open_tree(b"by_height")?
-                .get(&height.0.to_be_bytes()),
-        }?
-        .map(|bytes| ZcashDeserialize::zcash_deserialize(bytes.as_ref()))
-        .transpose()?;
+    fn query_block(&mut self, query: BlockQuery) -> Result<Option<Arc<Block>>, Error> {
+        let value = match query {
+            BlockQuery::ByHash(hash) => {
+                let by_hash = self.storage.open_tree(b"by_hash")?;
+                let key = &hash.0;
+                by_hash.get(key)?
+            }
+            BlockQuery::ByHeight(height) => {
+                let by_height = self.storage.open_tree(b"by_height")?;
+                let key = height.0.to_be_bytes();
+                by_height.get(key)?
+            }
+        };
 
-        Ok(block)
+        if let Some(bytes) = value {
+            let bytes = bytes.as_ref();
+            let block = ZcashDeserialize::zcash_deserialize(bytes)?;
+            Ok(Some(block))
+        } else {
+            Ok(None)
+        }
     }
 
     pub(super) fn get_tip(&self) -> Result<Option<BlockHeaderHash>, Error> {
@@ -83,16 +95,17 @@ impl BlockIndex {
     }
 
     fn tip_from_storage(&self) -> Result<Option<BlockHeaderHash>, Error> {
-        Ok(self
-            .storage
-            .open_tree(b"by_height")?
-            .iter()
-            .values()
-            .next_back()
-            .transpose()?
-            .map(|bytes| Arc::<Block>::zcash_deserialize(bytes.as_ref()))
-            .transpose()?
-            .map(|block| block.as_ref().into()))
+        let tree = self.storage.open_tree(b"by_height")?;
+        let last_entry = tree.iter().values().next_back();
+
+        match last_entry {
+            Some(Ok(bytes)) => {
+                let block = Arc::<Block>::zcash_deserialize(bytes.as_ref())?;
+                Ok(Some(block.as_ref().into()))
+            }
+            Some(Err(e)) => Err(e)?,
+            None => Ok(None),
+        }
     }
 }
 
@@ -121,14 +134,12 @@ impl WeakCache {
         }
     }
 
-    pub(super) fn get(&mut self, query: impl Into<BlockQuery>) -> Result<Arc<Block>, BlockQuery> {
-        let query = query.into();
-        match &query {
+    pub(super) fn get(&mut self, query: &BlockQuery) -> Option<Arc<Block>> {
+        match query {
             BlockQuery::ByHash(hash) => self.by_hash.get(&hash),
             BlockQuery::ByHeight(height) => self.by_height.get(&height),
         }
         .and_then(Weak::upgrade)
-        .ok_or(query)
     }
 
     pub(super) fn get_tip(&self) -> Option<BlockHeaderHash> {
