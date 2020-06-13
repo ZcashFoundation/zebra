@@ -44,7 +44,7 @@ impl BlockIndex {
         block.zcash_serialize(&mut bytes)?;
 
         // TODO(jlusby): make this transactional
-        by_height.insert(&height.0.to_le_bytes(), bytes.as_slice())?;
+        by_height.insert(&dbg!(dbg!(height).0.to_be_bytes()), bytes.as_slice())?;
         by_hash.insert(&hash.0, bytes)?;
 
         Ok(hash)
@@ -63,10 +63,11 @@ impl BlockIndex {
     fn query_get(&mut self, query: BlockQuery) -> Result<Option<Arc<Block>>, Error> {
         let block = match query {
             BlockQuery::ByHash(hash) => self.storage.open_tree(b"by_hash")?.get(&hash.0),
-            BlockQuery::ByHeight(height) => self
-                .storage
-                .open_tree(b"by_height")?
-                .get(&height.0.to_le_bytes()),
+            BlockQuery::ByHeight(height) => {
+                self.storage
+                    .open_tree(b"by_height")?
+                    .get(&dbg!(dbg!(height).0.to_be_bytes()))
+            }
         }?
         .map(|bytes| ZcashDeserialize::zcash_deserialize(bytes.as_ref()))
         .transpose()?;
@@ -89,7 +90,10 @@ impl BlockIndex {
             .iter()
             .next_back()
             .transpose()?
-            .map(|(_key, val)| val)
+            .map(|(_key, val)| {
+                dbg!(_key);
+                val
+            })
             .map(|bytes| Arc::<Block>::zcash_deserialize(bytes.as_ref()))
             .transpose()?
             .map(|block| block.as_ref().into()))
