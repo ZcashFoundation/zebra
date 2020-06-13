@@ -1,0 +1,6 @@
+# Configuration for zbot - https://github.com/ZcashFoundation/zbot
+
+issues:
+  column_id: 6927590
+pull_requests:
+  column_id: 6927591
