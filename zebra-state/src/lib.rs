@@ -89,43 +89,43 @@ mod tests {
         Ok(())
     }
 
-    // #[tokio::test]
-    // async fn round_trip_disk() -> Result<(), Report> {
-    //     install_tracing();
+    #[tokio::test]
+    async fn round_trip_disk() -> Result<(), Report> {
+        install_tracing();
 
-    //     let block: Arc<_> =
-    //         Block::zcash_deserialize(&zebra_test_vectors::BLOCK_MAINNET_415000_BYTES[..])?.into();
-    //     let hash = block.as_ref().into();
+        let block: Arc<_> =
+            Block::zcash_deserialize(&zebra_test_vectors::BLOCK_MAINNET_415000_BYTES[..])?.into();
+        let hash = block.as_ref().into();
 
-    //     let mut service = on_disk::init();
+        let mut service = on_disk::init();
 
-    //     let response = service
-    //         .call(Request::AddBlock {
-    //             block: block.clone(),
-    //         })
-    //         .await
-    //         .map_err(|e| eyre!(e))?;
+        let response = service
+            .call(Request::AddBlock {
+                block: block.clone(),
+            })
+            .await
+            .map_err(|e| eyre!(e))?;
 
-    //     ensure!(
-    //         response == Response::Added { hash },
-    //         "unexpected response kind: {:?}",
-    //         response
-    //     );
+        ensure!(
+            response == Response::Added { hash },
+            "unexpected response kind: {:?}",
+            response
+        );
 
-    //     let block_response = service
-    //         .call(Request::GetBlock { hash })
-    //         .await
-    //         .map_err(|e| eyre!(e))?;
+        let block_response = service
+            .call(Request::GetBlock { hash })
+            .await
+            .map_err(|e| eyre!(e))?;
 
-    //     match block_response {
-    //         Response::Block {
-    //             block: returned_block,
-    //         } => assert_eq!(block, returned_block),
-    //         _ => bail!("unexpected response kind: {:?}", block_response),
-    //     }
+        match block_response {
+            Response::Block {
+                block: returned_block,
+            } => assert_eq!(block, returned_block),
+            _ => bail!("unexpected response kind: {:?}", block_response),
+        }
 
-    //     Ok(())
-    // }
+        Ok(())
+    }
 
     #[tokio::test]
     #[spandoc::spandoc]
