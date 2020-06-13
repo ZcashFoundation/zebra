@@ -5,6 +5,7 @@ use std::sync::Arc;
 use zebra_chain::block::{Block, BlockHeaderHash};
 
 pub mod in_memory;
+pub mod on_disk;
 
 #[derive(Debug, PartialEq)]
 pub enum Request {
