@@ -13,7 +13,7 @@ pub struct Sha256dWriter {
 impl Sha256dWriter {
     /// Consume the Writer and produce the hash result.
     pub fn finish(self) -> [u8; 32] {
-        let result1 = self.hash.result();
+        let result1 = self.hash.finalize();
         let result2 = Sha256::digest(&result1);
         let mut buffer = [0u8; 32];
         buffer[0..32].copy_from_slice(&result2[0..32]);
@@ -23,7 +23,7 @@ impl Sha256dWriter {
 
 impl Write for Sha256dWriter {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.hash.input(buf);
+        self.hash.update(buf);
         Ok(buf.len())
     }
 
