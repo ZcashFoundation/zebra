@@ -1,7 +1,7 @@
 use super::{Request, Response};
 use crate::config::Config;
-use block_index::BlockIndex;
 use futures::prelude::*;
+use std::sync::Arc;
 use std::{
     error,
     future::Future,
@@ -9,23 +9,92 @@ use std::{
     task::{Context, Poll},
 };
 use tower::{buffer::Buffer, Service};
+use zebra_chain::serialization::{ZcashDeserialize, ZcashSerialize};
+use zebra_chain::{
+    block::{Block, BlockHeaderHash},
+    types::BlockHeight,
+};
 
-mod block_index;
-
-#[derive(Default)]
+#[derive(Clone)]
 struct SledState {
-    index: BlockIndex,
+    storage: sled::Db,
 }
 
 impl SledState {
-    fn new(config: &Config) -> Self {
+    pub(crate) fn new(config: &Config) -> Self {
+        let config = config.sled_config();
+
         Self {
-            index: BlockIndex::new(config),
+            storage: config.open().unwrap(),
+        }
+    }
+
+    pub(super) fn insert(
+        &mut self,
+        block: impl Into<Arc<Block>>,
+    ) -> Result<BlockHeaderHash, Error> {
+        let block = block.into();
+        let hash: BlockHeaderHash = block.as_ref().into();
+        let height = block.coinbase_height().unwrap();
+
+        let by_height = self.storage.open_tree(b"by_height")?;
+        let by_hash = self.storage.open_tree(b"by_hash")?;
+
+        let mut bytes = Vec::new();
+        block.zcash_serialize(&mut bytes)?;
+
+        // TODO(jlusby): make this transactional
+        by_height.insert(&height.0.to_be_bytes(), bytes.as_slice())?;
+        by_hash.insert(&hash.0, bytes)?;
+
+        Ok(hash)
+    }
+
+    pub(super) fn get(&self, query: impl Into<BlockQuery>) -> Result<Option<Arc<Block>>, Error> {
+        let query = query.into();
+        let value = match query {
+            BlockQuery::ByHash(hash) => {
+                let by_hash = self.storage.open_tree(b"by_hash")?;
+                let key = &hash.0;
+                by_hash.get(key)?
+            }
+            BlockQuery::ByHeight(height) => {
+                let by_height = self.storage.open_tree(b"by_height")?;
+                let key = height.0.to_be_bytes();
+                by_height.get(key)?
+            }
+        };
+
+        if let Some(bytes) = value {
+            let bytes = bytes.as_ref();
+            let block = ZcashDeserialize::zcash_deserialize(bytes)?;
+            Ok(Some(block))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub(super) fn get_tip(&self) -> Result<Option<BlockHeaderHash>, Error> {
+        let tree = self.storage.open_tree(b"by_height")?;
+        let last_entry = tree.iter().values().next_back();
+
+        match last_entry {
+            Some(Ok(bytes)) => {
+                let block = Arc::<Block>::zcash_deserialize(bytes.as_ref())?;
+                Ok(Some(block.as_ref().into()))
+            }
+            Some(Err(e)) => Err(e)?,
+            None => Ok(None),
         }
     }
 }
 
-type Error = Box<dyn error::Error + Send + Sync + 'static>;
+impl Default for SledState {
+    fn default() -> Self {
+        let config = crate::config::Config::default();
+        Self::new(&config)
+    }
+}
 
 impl Service<Request> for SledState {
     type Response = Response;
@@ -40,12 +109,12 @@ impl Service<Request> for SledState {
     fn call(&mut self, req: Request) -> Self::Future {
         match req {
             Request::AddBlock { block } => {
-                let mut storage = self.index.clone();
+                let mut storage = self.clone();
 
                 async move { storage.insert(block).map(|hash| Response::Added { hash }) }.boxed()
             }
             Request::GetBlock { hash } => {
-                let storage = self.index.clone();
+                let storage = self.clone();
                 async move {
                     storage
                         .get(hash)?
@@ -55,7 +124,7 @@ impl Service<Request> for SledState {
                 .boxed()
             }
             Request::GetTip => {
-                let storage = self.index.clone();
+                let storage = self.clone();
                 async move {
                     storage
                         .get_tip()?
@@ -65,6 +134,23 @@ impl Service<Request> for SledState {
                 .boxed()
             }
         }
+    }
+}
+
+pub(super) enum BlockQuery {
+    ByHash(BlockHeaderHash),
+    ByHeight(BlockHeight),
+}
+
+impl From<BlockHeaderHash> for BlockQuery {
+    fn from(hash: BlockHeaderHash) -> Self {
+        Self::ByHash(hash)
+    }
+}
+
+impl From<BlockHeight> for BlockQuery {
+    fn from(height: BlockHeight) -> Self {
+        Self::ByHeight(height)
     }
 }
 
@@ -80,3 +166,5 @@ pub fn init(
        + 'static {
     Buffer::new(SledState::new(&config), 1)
 }
+
+type Error = Box<dyn error::Error + Send + Sync + 'static>;
