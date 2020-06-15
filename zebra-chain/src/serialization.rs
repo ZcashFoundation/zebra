@@ -76,7 +76,8 @@ impl<T: ZcashDeserialize> ZcashDeserialize for Vec<T> {
         // We're given len, so we could preallocate. But blindly preallocating
         // without a size bound can allow DOS attacks, and there's no way to
         // pass a size bound in a ZcashDeserialize impl, so instead we allocate
-        // as we read from the reader.
+        // as we read from the reader. (The maximum block and transaction sizes
+        // limit the eventual size of these allocations.)
         let mut vec = Vec::new();
         for _ in 0..len {
             vec.push(T::zcash_deserialize(&mut reader)?);

@@ -1,4 +1,4 @@
-use std::io::{Cursor, Write};
+use std::io::{Cursor, ErrorKind, Write};
 
 use chrono::NaiveDateTime;
 use proptest::{
@@ -153,10 +153,25 @@ proptest! {
         let mut bytes = Cursor::new(Vec::new());
         block.zcash_serialize(&mut bytes)?;
 
-        bytes.set_position(0);
-        let other_block = Block::zcash_deserialize(&mut bytes)?;
+        // Check the block size limit
+        if bytes.position() <= MAX_BLOCK_BYTES {
+            bytes.set_position(0);
+            let other_block = Block::zcash_deserialize(&mut bytes)?;
 
-        prop_assert_eq![block, other_block];
+            prop_assert_eq![block, other_block];
+        } else {
+            let serialization_err = Block::zcash_deserialize(&mut bytes)
+                .expect_err("blocks larger than the maximum size should fail");
+            match serialization_err {
+                SerializationError::Io(io_err) => {
+                    prop_assert_eq![io_err.kind(), ErrorKind::UnexpectedEof];
+                }
+                _ => {
+                    prop_assert!(false,
+                                 "blocks larger than the maximum size should fail with an io::Error");
+                }
+            }
+        }
     }
 
 }
