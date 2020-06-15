@@ -53,14 +53,32 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn round_trip() -> Result<(), Report> {
+    async fn test_round_trip() -> Result<(), Report> {
         install_tracing();
 
+        let service = in_memory::init();
+        round_trip(service).await?;
+
+        let mut config = crate::config::Config::default();
+        let tmp_dir = tempdir::TempDir::new("round_trip")?;
+        config.path = tmp_dir.path().to_owned();
+        let service = on_disk::init(config);
+        get_tip(service).await?;
+
+        Ok(())
+    }
+
+    async fn round_trip<S>(mut service: S) -> Result<(), Report>
+    where
+        S: Service<
+            Request,
+            Error = Box<dyn std::error::Error + Send + Sync + 'static>,
+            Response = Response,
+        >,
+    {
         let block: Arc<_> =
             Block::zcash_deserialize(&zebra_test_vectors::BLOCK_MAINNET_415000_BYTES[..])?.into();
         let hash = block.as_ref().into();
-
-        let mut service = in_memory::init();
 
         let response = service
             .call(Request::AddBlock {
@@ -91,47 +109,30 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn round_trip_disk() -> Result<(), Report> {
+    async fn test_get_tip() -> Result<(), Report> {
         install_tracing();
 
-        let block: Arc<_> =
-            Block::zcash_deserialize(&zebra_test_vectors::BLOCK_MAINNET_415000_BYTES[..])?.into();
-        let hash = block.as_ref().into();
+        let service = in_memory::init();
+        get_tip(service).await?;
 
-        let config = crate::config::Config::default();
-        let mut service = on_disk::init(config);
-
-        let response = service
-            .call(Request::AddBlock {
-                block: block.clone(),
-            })
-            .await
-            .map_err(|e| eyre!(e))?;
-
-        ensure!(
-            response == Response::Added { hash },
-            "unexpected response kind: {:?}",
-            response
-        );
-
-        let block_response = service
-            .call(Request::GetBlock { hash })
-            .await
-            .map_err(|e| eyre!(e))?;
-
-        match block_response {
-            Response::Block {
-                block: returned_block,
-            } => assert_eq!(block, returned_block),
-            _ => bail!("unexpected response kind: {:?}", block_response),
-        }
+        let mut config = crate::config::Config::default();
+        let tmp_dir = tempdir::TempDir::new("get_tip")?;
+        config.path = tmp_dir.path().to_owned();
+        let service = on_disk::init(config);
+        get_tip(service).await?;
 
         Ok(())
     }
 
-    #[tokio::test]
     #[spandoc::spandoc]
-    async fn get_tip() -> Result<(), Report> {
+    async fn get_tip<S>(mut service: S) -> Result<(), Report>
+    where
+        S: Service<
+            Request,
+            Error = Box<dyn std::error::Error + Send + Sync + 'static>,
+            Response = Response,
+        >,
+    {
         install_tracing();
 
         let block0: Arc<_> =
@@ -142,62 +143,6 @@ mod tests {
         let block0_hash: BlockHeaderHash = block0.as_ref().into();
         let block1_hash: BlockHeaderHash = block1.as_ref().into();
         let expected_hash: BlockHeaderHash = block1_hash;
-
-        let mut service = in_memory::init();
-
-        /// insert the higher block first
-        let response = service
-            .call(Request::AddBlock { block: block1 })
-            .await
-            .map_err(|e| eyre!(e))?;
-
-        ensure!(
-            response == Response::Added { hash: block1_hash },
-            "unexpected response kind: {:?}",
-            response
-        );
-
-        /// genesis block second
-        let response = service
-            .call(Request::AddBlock {
-                block: block0.clone(),
-            })
-            .await
-            .map_err(|e| eyre!(e))?;
-
-        ensure!(
-            response == Response::Added { hash: block0_hash },
-            "unexpected response kind: {:?}",
-            response
-        );
-
-        let block_response = service.call(Request::GetTip).await.map_err(|e| eyre!(e))?;
-
-        /// assert that the higher block is returned as the tip even tho it was least recently inserted
-        match block_response {
-            Response::Tip { hash } => assert_eq!(expected_hash, hash),
-            _ => bail!("unexpected response kind: {:?}", block_response),
-        }
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    #[spandoc::spandoc]
-    async fn get_tip_disk() -> Result<(), Report> {
-        install_tracing();
-
-        let block0: Arc<_> =
-            Block::zcash_deserialize(&zebra_test_vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?.into();
-        let block1: Arc<_> =
-            Block::zcash_deserialize(&zebra_test_vectors::BLOCK_MAINNET_1_BYTES[..])?.into();
-
-        let block0_hash: BlockHeaderHash = block0.as_ref().into();
-        let block1_hash: BlockHeaderHash = block1.as_ref().into();
-        let expected_hash: BlockHeaderHash = block1_hash;
-
-        let config = crate::config::Config::default();
-        let mut service = on_disk::init(config);
 
         /// insert the higher block first
         let response = service
