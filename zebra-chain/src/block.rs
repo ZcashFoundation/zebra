@@ -6,6 +6,7 @@ mod tests;
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{DateTime, TimeZone, Utc};
+use serde::{Deserialize, Serialize};
 use std::{fmt, io, sync::Arc};
 
 #[cfg(test)]
@@ -31,7 +32,7 @@ use crate::types::BlockHeight;
 /// the direct bytes of the transactions as well as the header. So
 /// for now I want to call it a `BlockHeaderHash` because that's
 /// more explicit.
-#[derive(Copy, Clone, Eq, PartialEq, Hash)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct BlockHeaderHash(pub [u8; 32]);
 
@@ -84,7 +85,7 @@ impl std::str::FromStr for BlockHeaderHash {
 /// backwards reference (previous header hash) present in the block
 /// header. Each block points backwards to its parent, all the way
 /// back to the genesis block (the first block in the blockchain).
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct BlockHeader {
     /// The block's version field. This is supposed to be `4`:
     ///
@@ -197,9 +198,13 @@ impl ZcashDeserialize for BlockHeader {
     }
 }
 
-/// A Zcash block, containing a [`BlockHeader`] and a sequence of
-/// [`Transaction`]s.
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// A block in your blockchain.
+///
+/// A block is a data structure with two fields:
+///
+/// Block header: a data structure containing the block's metadata
+/// Transactions: an array (vector in Rust) of transactions
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct Block {
     /// The block header, containing block metadata.

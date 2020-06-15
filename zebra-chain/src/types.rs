@@ -43,7 +43,7 @@ impl fmt::Debug for Sha256dChecksum {
 /// # Invariants
 ///
 /// Users should not construct block heights greater than or equal to `500_000_000`.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct BlockHeight(pub u32);
 
 #[cfg(test)]
@@ -65,7 +65,7 @@ impl Arbitrary for BlockHeight {
 /// Users should not construct a `LockTime` with `BlockHeight` greater than or
 /// equal to `500_000_000` or a timestamp before 4 November 1985 (Unix timestamp
 /// less than `500_000_000`).
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum LockTime {
     /// Unlock at a particular block height.
     Height(BlockHeight),
@@ -115,7 +115,7 @@ impl Arbitrary for LockTime {
 }
 
 /// An encoding of a Bitcoin script.
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct Script(pub Vec<u8>);
 

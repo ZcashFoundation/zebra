@@ -1,12 +1,13 @@
 #[cfg(test)]
 use proptest::{array, collection::vec, prelude::*};
+use serde::{Deserialize, Serialize};
 
 use crate::{ed25519_zebra, notes::sprout, proofs::ZkSnarkProof};
 
 /// A _JoinSplit Description_, as described in [protocol specification §7.2][ps].
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#joinsplitencoding
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct JoinSplit<P: ZkSnarkProof> {
     /// A value that the JoinSplit transfer removes from the transparent value
     /// pool.
@@ -44,6 +45,7 @@ pub struct JoinSplit<P: ZkSnarkProof> {
     /// A ZK JoinSplit proof, either a
     /// [`Groth16Proof`](crate::proofs::Groth16Proof) or a
     /// [`Bctv14Proof`](crate::proofs::Bctv14Proof).
+    #[serde(bound(serialize = "P: ZkSnarkProof", deserialize = "P: ZkSnarkProof"))]
     pub zkproof: P,
     /// A ciphertext component for this output note.
     pub enc_ciphertexts: [sprout::EncryptedCiphertext; 2],
@@ -119,7 +121,7 @@ impl<P: ZkSnarkProof + Arbitrary + 'static> Arbitrary for JoinSplit<P> {
 }
 
 /// A bundle of JoinSplit descriptions and signature data.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JoinSplitData<P: ZkSnarkProof> {
     /// The first JoinSplit description, using proofs of type `P`.
     ///
@@ -129,11 +131,19 @@ pub struct JoinSplitData<P: ZkSnarkProof> {
     /// However, it's not necessary to access or process `first` and `rest`
     /// separately, as the [`JoinSplitData::joinsplits`] method provides an
     /// iterator over all of the `JoinSplit`s.
+    #[serde(bound(
+        serialize = "JoinSplit<P>: Serialize",
+        deserialize = "JoinSplit<P>: Deserialize<'de>"
+    ))]
     pub first: JoinSplit<P>,
     /// The rest of the JoinSplit descriptions, using proofs of type `P`.
     ///
     /// The [`JoinSplitData::joinsplits`] method provides an iterator over
     /// all `JoinSplit`s.
+    #[serde(bound(
+        serialize = "JoinSplit<P>: Serialize",
+        deserialize = "JoinSplit<P>: Deserialize<'de>"
+    ))]
     pub rest: Vec<JoinSplit<P>>,
     /// The public key for the JoinSplit signature.
     pub pub_key: ed25519_zebra::PublicKeyBytes,

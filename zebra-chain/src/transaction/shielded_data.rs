@@ -8,11 +8,12 @@ use crate::note_commitment_tree::SaplingNoteTreeRootHash;
 use crate::notes::sapling;
 use crate::proofs::Groth16Proof;
 use crate::redjubjub::{self, Binding, SpendAuth};
+use crate::serde_helpers;
 
 /// A _Spend Description_, as described in [protocol specification §7.3][ps].
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#spendencoding
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Spend {
     /// A value commitment to the value of the input note.
     ///
@@ -68,7 +69,7 @@ impl Arbitrary for Spend {
 /// A _Output Description_, as described in [protocol specification §7.4][ps].
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#outputencoding
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Output {
     /// A value commitment to the value of the input note.
     ///
@@ -79,6 +80,7 @@ pub struct Output {
     /// XXX refine to a specific type.
     pub cmu: [u8; 32],
     /// An encoding of an ephemeral Jubjub public key.
+    #[serde(with = "serde_helpers::AffinePoint")]
     pub ephemeral_key: jubjub::AffinePoint,
     /// A ciphertext component for the encrypted output note.
     pub enc_ciphertext: sapling::EncryptedCiphertext,
@@ -122,7 +124,7 @@ impl Arbitrary for Output {
 }
 
 /// Sapling-on-Groth16 spend and output descriptions.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ShieldedData {
     /// Either a spend or output description.
     ///
@@ -133,6 +135,7 @@ pub struct ShieldedData {
     /// separately, as the [`ShieldedData::spends`] and [`ShieldedData::outputs`]
     /// methods provide iterators over all of the [`SpendDescription`]s and
     /// [`Output`]s.
+    #[serde(with = "serde_helpers::Either")]
     pub first: Either<Spend, Output>,
     /// The rest of the [`Spend`]s for this transaction.
     ///

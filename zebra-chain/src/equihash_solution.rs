@@ -5,12 +5,15 @@ use std::{fmt, io};
 #[cfg(test)]
 use proptest::{arbitrary::Arbitrary, collection::vec, prelude::*};
 
-use crate::serialization::{
-    ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
+use crate::{
+    serde_helpers,
+    serialization::{
+        ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
+    },
 };
 
 /// The size of an Equihash solution in bytes (always 1344).
-const EQUIHASH_SOLUTION_SIZE: usize = 1344;
+pub(crate) const EQUIHASH_SOLUTION_SIZE: usize = 1344;
 
 /// Equihash Solution.
 ///
@@ -20,7 +23,10 @@ const EQUIHASH_SOLUTION_SIZE: usize = 1344;
 ///
 /// The size of an Equihash solution in bytes is always 1344 so the
 /// length of this type is fixed.
-pub struct EquihashSolution(pub [u8; EQUIHASH_SOLUTION_SIZE]);
+#[derive(Deserialize, Serialize)]
+pub struct EquihashSolution(
+    #[serde(with = "serde_helpers::BigArray")] pub [u8; EQUIHASH_SOLUTION_SIZE],
+);
 
 impl PartialEq<EquihashSolution> for EquihashSolution {
     fn eq(&self, other: &EquihashSolution) -> bool {
