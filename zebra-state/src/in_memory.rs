@@ -1,3 +1,8 @@
+//! A basic implementation of the zebra-state service entirely in memory
+//!
+//! This service is provided as an independent implementation of the
+//! zebra-state service to use in verifying the correctness of `on_disk`'s
+//! `Service` implementation.
 use super::{Request, Response};
 use futures::prelude::*;
 use std::{
@@ -11,13 +16,13 @@ use tower::{buffer::Buffer, Service};
 mod block_index;
 
 #[derive(Default)]
-struct ZebraState {
+struct InMemoryState {
     index: block_index::BlockIndex,
 }
 
 type Error = Box<dyn error::Error + Send + Sync + 'static>;
 
-impl Service<Request> for ZebraState {
+impl Service<Request> for InMemoryState {
     type Response = Response;
     type Error = Error;
     type Future =
@@ -59,6 +64,8 @@ impl Service<Request> for ZebraState {
     }
 }
 
+/// Return's a type that implement's the `zebra_state::Service` entirely in
+/// memory using `HashMaps`
 pub fn init() -> impl Service<
     Request,
     Response = Response,
@@ -67,5 +74,5 @@ pub fn init() -> impl Service<
 > + Send
        + Clone
        + 'static {
-    Buffer::new(ZebraState::default(), 1)
+    Buffer::new(InMemoryState::default(), 1)
 }
