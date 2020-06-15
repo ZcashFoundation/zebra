@@ -1,5 +1,6 @@
+//! The primary implementation of the `zebra_state::Service` built upon an embedded database
 use super::{Request, Response};
-use crate::config::Config;
+use crate::Config;
 use futures::prelude::*;
 use std::sync::Arc;
 use std::{
@@ -91,7 +92,7 @@ impl SledState {
 
 impl Default for SledState {
     fn default() -> Self {
-        let config = crate::config::Config::default();
+        let config = crate::Config::default();
         Self::new(&config)
     }
 }
@@ -154,6 +155,7 @@ impl From<BlockHeight> for BlockQuery {
     }
 }
 
+/// Return's a type that implement's the `zebra_state::Service` using `sled`
 pub fn init(
     config: Config,
 ) -> impl Service<
