@@ -1,4 +1,5 @@
 use super::{Request, Response};
+use block_index::BlockIndex;
 use futures::prelude::*;
 use std::{
     error,
@@ -12,7 +13,7 @@ mod block_index;
 
 #[derive(Default)]
 struct ZebraState {
-    index: block_index::BlockIndex,
+    index: BlockIndex,
 }
 
 type Error = Box<dyn error::Error + Send + Sync + 'static>;
@@ -30,28 +31,25 @@ impl Service<Request> for ZebraState {
     fn call(&mut self, req: Request) -> Self::Future {
         match req {
             Request::AddBlock { block } => {
-                let result = self
-                    .index
-                    .insert(block)
-                    .map(|hash| Response::Added { hash });
+                let mut storage = self.index.clone();
 
-                async { result }.boxed()
+                async move { storage.insert(block).map(|hash| Response::Added { hash }) }.boxed()
             }
             Request::GetBlock { hash } => {
-                let result = self.index.get(hash);
-
+                let storage = self.index.clone();
                 async move {
-                    result?
+                    storage
+                        .get(hash)?
                         .map(|block| Response::Block { block })
                         .ok_or_else(|| "block could not be found".into())
                 }
                 .boxed()
             }
             Request::GetTip => {
-                let result = self.index.get_tip();
-
+                let storage = self.index.clone();
                 async move {
-                    result?
+                    storage
+                        .get_tip()?
                         .map(|hash| Response::Tip { hash })
                         .ok_or_else(|| "zebra-state contains no blocks".into())
                 }
