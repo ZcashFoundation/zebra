@@ -1,4 +1,4 @@
-//! The primary implementation of the `zebra_state::Service` built upon an embedded database
+//! The primary implementation of the `zebra_state::Service` built upon sled
 use super::{Request, Response};
 use crate::Config;
 use futures::prelude::*;
