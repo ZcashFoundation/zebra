@@ -9,7 +9,7 @@ env:
 
 jobs:
   build:
-    name: Google Cloud Build
+    name: Google Cloud / Test, Build, and Deploy
     runs-on: ubuntu-latest
     steps:
 
@@ -18,8 +18,11 @@ jobs:
 
     - name: Set project and image names
       run: |
-        BRANCH_NAME=$GITHUB_REPOSITORY/$(expr $GITHUB_REF : '.*/\(.*\)') && \
+        SHORT_BRANCH_NAME=$(expr $GITHUB_REF : '.*/\(.*\)') && \
+        SHORT_BRANCH_NAME=${SHORT_BRANCH_NAME,,} && \
+        BRANCH_NAME=$GITHUB_REPOSITORY/$SHORT_BRANCH_NAME && \
         BRANCH_NAME=${BRANCH_NAME,,} && \
+        echo "::set-env name=SHORT_BRANCH_NAME::$SHORT_BRANCH_NAME" && \
         echo "::set-env name=BRANCH_NAME::$BRANCH_NAME" && \
         echo "::set-env name=SHA7::$(git rev-parse --short=7 $GITHUB_SHA)"
 
@@ -29,15 +32,6 @@ jobs:
         version: '295.0.0'
         project_id: ${{ env.PROJECT_ID }}
         service_account_key: ${{ secrets.GCLOUD_AUTH }}
-
-    # - name: Build, Test, Push to GCR
-    #   run: |
-    #     BRANCH_NAME=$GITHUB_REPOSITORY/$(expr $GITHUB_REF : '.*/\(.*\)') && \
-    #     BRANCH_NAME=${BRANCH_NAME,,} && \
-    #     gcloud builds submit . \
-    #       --config cloudbuild.yaml \
-    #       --project "$PROJECT_ID" \
-    #       --substitutions "BRANCH_NAME=$BRANCH_NAME" \
 
     # Build and push image to Google Container Registry
     - name: Build
@@ -51,25 +45,16 @@ jobs:
     # Create instance template from container image
     - name: Create instance template
       run: |
-        gcloud compute instance-templates create-with-container "zebrad-$SHA7" \
+        gcloud compute instance-templates create-with-container "zebrad-$SHORT_BRANCH_NAME-$SHA7" \
           --service-account cos-vm@zealous-zebra.iam.gserviceaccount.com \
           --scopes cloud-platform \
           --container-image "gcr.io/$PROJECT_ID/$BRANCH_NAME:$SHA7"
 
-    # Deploy image to Compute Engine
-    # - name: Deploy
-    #   run: |
-    #     gcloud compute instances create-with-container "zebrad-$SHA7" \
-    #       --zone "$GCLOUD_ZONE" \
-    #       --service-account cos-vm@zealous-zebra.iam.gserviceaccount.com \
-    #       --scopes cloud-platform \
-    #       --container-image "gcr.io/$PROJECT_ID/$BRANCH_NAME:$SHA7" \
-
     # Deploy managed instance group using the new instance template
     - name: Deploy managed instance group
       run: |
-        gcloud compute instance-groups managed create "zebrad-$SHA7" \
-          --template "zebrad-$SHA7" \
-          --base-instance-name "zebrad-$SHA7" \
+        gcloud compute instance-groups managed create "zebrad-$SHORT_BRANCH_NAME-$SHA7" \
+          --template "zebrad-$SHORT_BRANCH_NAME-$SHA7" \
+          --base-instance-name "zebrad-$SHORT_BRANCH_NAME-$SHA7" \
           --size 3 \
           --zone "$GCLOUD_ZONE"
