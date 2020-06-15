@@ -208,6 +208,14 @@ pub struct Block {
     pub transactions: Vec<Arc<Transaction>>,
 }
 
+/// The maximum size of a Zcash block, in bytes.
+///
+/// Post-Sapling, this is also the maximum size of a transaction
+/// in the Zcash specification. (But since blocks also contain a
+/// block header and transaction count, the maximum size of a
+/// transaction in the chain is approximately 1.5 kB smaller.)
+const MAX_BLOCK_BYTES: u64 = 2_000_000;
+
 impl Block {
     /// Return the block height reported in the coinbase transaction, if any.
     pub fn coinbase_height(&self) -> Option<BlockHeight> {
@@ -230,6 +238,9 @@ impl<'a> From<&'a Block> for BlockHeaderHash {
 
 impl ZcashSerialize for Block {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        // All block structs are validated when they are parsed.
+        // So we don't need to check MAX_BLOCK_BYTES here, until
+        // we start generating our own blocks (see #483).
         self.header.zcash_serialize(&mut writer)?;
         self.transactions.zcash_serialize(&mut writer)?;
         Ok(())
@@ -237,10 +248,12 @@ impl ZcashSerialize for Block {
 }
 
 impl ZcashDeserialize for Block {
-    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+    fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
+        // If the limit is reached, we'll get an UnexpectedEof error
+        let mut limited_reader = reader.take(MAX_BLOCK_BYTES);
         Ok(Block {
-            header: BlockHeader::zcash_deserialize(&mut reader)?,
-            transactions: Vec::zcash_deserialize(&mut reader)?,
+            header: BlockHeader::zcash_deserialize(&mut limited_reader)?,
+            transactions: Vec::zcash_deserialize(&mut limited_reader)?,
         })
     }
 }
