@@ -1,4 +1,5 @@
 use super::{Request, Response};
+use crate::config::Config;
 use block_index::BlockIndex;
 use futures::prelude::*;
 use std::{
@@ -12,13 +13,21 @@ use tower::{buffer::Buffer, Service};
 mod block_index;
 
 #[derive(Default)]
-struct ZebraState {
+struct SledState {
     index: BlockIndex,
+}
+
+impl SledState {
+    fn new(config: &Config) -> Self {
+        Self {
+            index: BlockIndex::new(config),
+        }
+    }
 }
 
 type Error = Box<dyn error::Error + Send + Sync + 'static>;
 
-impl Service<Request> for ZebraState {
+impl Service<Request> for SledState {
     type Response = Response;
     type Error = Error;
     type Future =
@@ -59,7 +68,9 @@ impl Service<Request> for ZebraState {
     }
 }
 
-pub fn init() -> impl Service<
+pub fn init(
+    config: Config,
+) -> impl Service<
     Request,
     Response = Response,
     Error = Error,
@@ -67,5 +78,5 @@ pub fn init() -> impl Service<
 > + Send
        + Clone
        + 'static {
-    Buffer::new(ZebraState::default(), 1)
+    Buffer::new(SledState::new(&config), 1)
 }

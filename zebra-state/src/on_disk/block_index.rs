@@ -1,3 +1,4 @@
+use crate::config::Config;
 use std::sync::Arc;
 use zebra_chain::serialization::{ZcashDeserialize, ZcashSerialize};
 use zebra_chain::{
@@ -12,16 +13,15 @@ pub(super) struct BlockIndex {
     storage: sled::Db,
 }
 
-impl Default for BlockIndex {
-    fn default() -> Self {
-        let config = sled::Config::default();
+impl BlockIndex {
+    pub(crate) fn new(config: &Config) -> Self {
+        let config = config.sled_config();
+
         Self {
             storage: config.open().unwrap(),
         }
     }
-}
 
-impl BlockIndex {
     pub(super) fn insert(
         &mut self,
         block: impl Into<Arc<Block>>,
@@ -79,6 +79,13 @@ impl BlockIndex {
             Some(Err(e)) => Err(e)?,
             None => Ok(None),
         }
+    }
+}
+
+impl Default for BlockIndex {
+    fn default() -> Self {
+        let config = crate::config::Config::default();
+        Self::new(&config)
     }
 }
 

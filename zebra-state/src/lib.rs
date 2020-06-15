@@ -4,6 +4,7 @@
 use std::sync::Arc;
 use zebra_chain::block::{Block, BlockHeaderHash};
 
+pub mod config;
 pub mod in_memory;
 pub mod on_disk;
 
@@ -97,7 +98,8 @@ mod tests {
             Block::zcash_deserialize(&zebra_test_vectors::BLOCK_MAINNET_415000_BYTES[..])?.into();
         let hash = block.as_ref().into();
 
-        let mut service = on_disk::init();
+        let config = crate::config::Config::default();
+        let mut service = on_disk::init(config);
 
         let response = service
             .call(Request::AddBlock {
@@ -194,7 +196,8 @@ mod tests {
         let block1_hash: BlockHeaderHash = block1.as_ref().into();
         let expected_hash: BlockHeaderHash = block1_hash;
 
-        let mut service = on_disk::init();
+        let config = crate::config::Config::default();
+        let mut service = on_disk::init(config);
 
         /// insert the higher block first
         let response = service

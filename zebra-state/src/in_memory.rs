@@ -11,13 +11,13 @@ use tower::{buffer::Buffer, Service};
 mod block_index;
 
 #[derive(Default)]
-struct ZebraState {
+struct InMemoryState {
     index: block_index::BlockIndex,
 }
 
 type Error = Box<dyn error::Error + Send + Sync + 'static>;
 
-impl Service<Request> for ZebraState {
+impl Service<Request> for InMemoryState {
     type Response = Response;
     type Error = Error;
     type Future =
@@ -67,5 +67,5 @@ pub fn init() -> impl Service<
 > + Send
        + Clone
        + 'static {
-    Buffer::new(ZebraState::default(), 1)
+    Buffer::new(InMemoryState::default(), 1)
 }

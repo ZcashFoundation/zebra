@@ -2251,6 +2251,7 @@ dependencies = [
  "futures",
  "hex",
  "lazy_static",
+ "serde",
  "sled",
  "spandoc",
  "tokio",
