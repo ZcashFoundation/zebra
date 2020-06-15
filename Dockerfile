@@ -26,4 +26,4 @@ FROM debian:buster-slim
 COPY --from=builder /zebra/target/release/zebrad .
 EXPOSE 8233
 EXPOSE 18233
-CMD ["./zebrad", "connect"]
+CMD ["./zebrad", "seed"]
