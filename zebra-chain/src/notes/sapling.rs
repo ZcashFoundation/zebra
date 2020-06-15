@@ -6,8 +6,8 @@ use std::{fmt, io};
 #[cfg(test)]
 use proptest::{arbitrary::Arbitrary, collection::vec, prelude::*};
 
+use crate::serde_helpers;
 use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
-use crate::BigArray;
 
 use super::*;
 
@@ -41,7 +41,7 @@ pub struct NotePlaintext {
 
 /// A ciphertext component for encrypted output notes.
 #[derive(Deserialize, Serialize)]
-pub struct EncryptedCiphertext(#[serde(with = "BigArray")] pub [u8; 580]);
+pub struct EncryptedCiphertext(#[serde(with = "serde_helpers::BigArray")] pub [u8; 580]);
 
 impl fmt::Debug for EncryptedCiphertext {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -105,7 +105,7 @@ impl Arbitrary for EncryptedCiphertext {
 
 /// A ciphertext component for encrypted output notes.
 #[derive(Deserialize, Serialize)]
-pub struct OutCiphertext(#[serde(with = "BigArray")] pub [u8; 80]);
+pub struct OutCiphertext(#[serde(with = "serde_helpers::BigArray")] pub [u8; 80]);
 
 impl fmt::Debug for OutCiphertext {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

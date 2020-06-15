@@ -10,8 +10,8 @@ use std::{
 #[cfg(test)]
 use proptest::{collection::vec, prelude::*};
 
+use crate::serde_helpers;
 use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
-use crate::BigArray;
 
 use super::{memo::Memo, *};
 
@@ -37,7 +37,7 @@ pub struct NotePlaintext {
 
 /// A ciphertext component for encrypted output notes.
 #[derive(Serialize, Deserialize)]
-pub struct EncryptedCiphertext(#[serde(with = "BigArray")] pub [u8; 601]);
+pub struct EncryptedCiphertext(#[serde(with = "serde_helpers::BigArray")] pub [u8; 601]);
 
 impl fmt::Debug for EncryptedCiphertext {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
