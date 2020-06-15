@@ -10,8 +10,10 @@ use crate::{
     serialization::{
         ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
     },
-    EQUIHASH_SOLUTION_SIZE,
 };
+
+/// The size of an Equihash solution in bytes (always 1344).
+pub(crate) const EQUIHASH_SOLUTION_SIZE: usize = 1344;
 
 /// Equihash Solution.
 ///

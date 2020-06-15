@@ -1,4 +1,4 @@
-use super::EQUIHASH_SOLUTION_SIZE;
+use super::equihash_solution::EQUIHASH_SOLUTION_SIZE;
 use serde_big_array::big_array;
 
 big_array! {
