@@ -39,20 +39,13 @@ static GENESIS: BlockHeaderHash = BlockHeaderHash([
 
 /// `start` subcommand
 #[derive(Command, Debug, Options)]
-pub struct StartArgs {
+pub struct StartCmd {
     /// Filter strings
     #[options(free)]
     filters: Vec<String>,
-
-    /// The address of the node to connect to.
-    #[options(
-        help = "The address of the node to connect to.",
-        default = "127.0.0.1:8233"
-    )]
-    addr: std::net::SocketAddr,
 }
 
-impl StartArgs {
+impl StartCmd {
     async fn start(&self) -> Result<(), Report> {
         info!(?self, "begin tower-based peer handling test stub");
 
@@ -65,12 +58,7 @@ impl StartArgs {
             1,
         );
 
-        let mut config = app_config().network.clone();
-        // Use a different listen addr so that we don't conflict with another local node.
-        config.listen_addr = "127.0.0.1:38233".parse()?;
-        // Connect only to the specified peer.
-        config.initial_mainnet_peers.insert(self.addr.to_string());
-
+        let config = app_config().network.clone();
         let state = zebra_state::in_memory::init();
         let (peer_set, _address_book) = zebra_network::init(config, node).await;
         let retry_peer_set = tower::retry::Retry::new(zebra_network::RetryErrors, peer_set.clone());
@@ -78,7 +66,7 @@ impl StartArgs {
         let mut downloaded_block_heights = BTreeSet::<BlockHeight>::new();
         downloaded_block_heights.insert(BlockHeight(0));
 
-        let mut connect = ZebraNode {
+        let mut connect = Core {
             retry_peer_set,
             peer_set,
             state,
@@ -92,11 +80,9 @@ impl StartArgs {
     }
 }
 
-impl Runnable for StartArgs {
+impl Runnable for StartCmd {
     /// Start the application.
     fn run(&self) {
-        info!(connect.addr = ?self.addr);
-
         let rt = app_writer()
             .state_mut()
             .components
@@ -119,7 +105,7 @@ impl Runnable for StartArgs {
     }
 }
 
-impl config::Override<ZebradConfig> for StartArgs {
+impl config::Override<ZebradConfig> for StartCmd {
     // Process the given command line options, overriding settings from
     // a configuration file using explicit flags taken from command-line
     // arguments.
@@ -132,7 +118,7 @@ impl config::Override<ZebradConfig> for StartArgs {
     }
 }
 
-struct ZebraNode<ZN, ZS>
+struct Core<ZN, ZS>
 where
     ZN: Service<zebra_network::Request>,
 {
@@ -145,7 +131,7 @@ where
     downloaded_block_heights: BTreeSet<BlockHeight>,
 }
 
-impl<ZN, ZS> ZebraNode<ZN, ZS>
+impl<ZN, ZS> Core<ZN, ZS>
 where
     ZN: Service<zebra_network::Request, Response = zebra_network::Response, Error = Error>
         + Send
