@@ -8,7 +8,7 @@ mod start;
 mod version;
 
 use self::{
-    config::ConfigCmd, connect::ConnectCmd, revhex::RevhexCmd, seed::SeedCmd, start::StartArgs,
+    config::ConfigCmd, connect::ConnectCmd, revhex::RevhexCmd, seed::SeedCmd, start::StartCmd,
     version::VersionCmd,
 };
 use crate::config::ZebradConfig;
@@ -45,7 +45,7 @@ pub enum ZebradCmd {
 
     /// The `start` subcommand
     #[options(help = "start the application")]
-    Start(StartArgs),
+    Start(StartCmd),
 
     /// The `version` subcommand
     #[options(help = "display version information")]
