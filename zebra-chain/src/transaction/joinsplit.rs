@@ -146,7 +146,7 @@ pub struct JoinSplitData<P: ZkSnarkProof> {
     ))]
     pub rest: Vec<JoinSplit<P>>,
     /// The public key for the JoinSplit signature.
-    pub pub_key: ed25519_zebra::PublicKeyBytes,
+    pub pub_key: ed25519_zebra::VerificationKeyBytes,
     /// The JoinSplit signature.
     pub sig: ed25519_zebra::Signature,
 }
@@ -172,7 +172,7 @@ impl<P: ZkSnarkProof + Arbitrary + 'static> Arbitrary for JoinSplitData<P> {
             .prop_map(|(first, rest, pub_key_bytes, sig_bytes)| Self {
                 first,
                 rest,
-                pub_key: ed25519_zebra::PublicKeyBytes::from(pub_key_bytes),
+                pub_key: ed25519_zebra::VerificationKeyBytes::from(pub_key_bytes),
                 sig: ed25519_zebra::Signature::from({
                     let mut b = [0u8; 64];
                     b.copy_from_slice(sig_bytes.as_slice());

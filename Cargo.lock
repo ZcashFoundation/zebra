@@ -428,9 +428,9 @@ checksum = "4358a9e11b9a09cf52383b451b49a169e8d797b68aa02301ff586d70d9661ea3"
 
 [[package]]
 name = "ed25519-zebra"
-version = "0.2.3"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1a8b1ce4012933385e8a820355e972bcfb8ee55993cd63e70d47a085298020b"
+checksum = "802a065ae2171664a2bf607c0571d21c267a0ad2c6c8dad4a5668f09bf34f661"
 dependencies = [
  "curve25519-dalek",
  "hex",
