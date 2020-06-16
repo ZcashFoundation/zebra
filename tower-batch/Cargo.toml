@@ -15,7 +15,7 @@ tracing-futures = "0.2.4"
 futures = "0.3.5"
 
 [dev-dependencies]
-ed25519-zebra = { git = "https://github.com/zcashfoundation/ed25519-zebra", branch = "batch2" }
+ed25519-zebra = "0.4"
 rand = "0.7"
 tokio = { version = "0.2", features = ["full"]}
 tracing-error = "0.1.2"
