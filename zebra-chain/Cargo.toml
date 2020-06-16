@@ -27,7 +27,7 @@ thiserror = "1"
 x25519-dalek = { version = "0.6", features = ["serde"] }
 serde-big-array = "0.3.0"
 # ZF deps
-ed25519-zebra = "0.3"
+ed25519-zebra = "0.4"
 redjubjub = "0.1"
 
 [dev-dependencies]
