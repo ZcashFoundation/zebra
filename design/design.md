@@ -75,7 +75,7 @@ None: these are the core data structure definitions.
 
 ### Responsible for
 
-- definition of a sane, internal request/response protocol
+- definition of a well structured, internal request/response protocol
 - provides an abstraction for "this node" and "the network" using the
   internal protocol
 - dynamic, backpressure-driven peer set management

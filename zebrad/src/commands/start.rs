@@ -7,8 +7,10 @@
 //!  * Network Service
 //!    * primary interface to the node
 //!    * handles all external network requests for the zcash protocol
+//!      * via zebra_network::Message and zebra_network::Response
 //!    * provides an interface to the rest of the network for other services and
 //!    tasks running within this node
+//!      * via zebra_network::Request
 //!  * Consensus Service
 //!    * handles all validation logic for the node
 //!    * verifies blocks using zebra-chain and zebra-script, then stores verified
@@ -37,7 +39,7 @@ static GENESIS: BlockHeaderHash = BlockHeaderHash([
 
 /// `start` subcommand
 #[derive(Command, Debug, Options)]
-pub struct StartCmd {
+pub struct StartArgs {
     /// Filter strings
     #[options(free)]
     filters: Vec<String>,
@@ -50,48 +52,8 @@ pub struct StartCmd {
     addr: std::net::SocketAddr,
 }
 
-impl Runnable for StartCmd {
-    /// Start the application.
-    fn run(&self) {
-        info!(connect.addr = ?self.addr);
-
-        let rt = app_writer()
-            .state_mut()
-            .components
-            .get_downcast_mut::<TokioComponent>()
-            .expect("TokioComponent should be available")
-            .rt
-            .take();
-
-        let result = rt
-            .expect("runtime should not already be taken")
-            .block_on(self.connect());
-
-        match result {
-            Ok(()) => {}
-            Err(e) => {
-                eprintln!("Error: {:?}", e);
-                std::process::exit(1);
-            }
-        }
-    }
-}
-
-impl config::Override<ZebradConfig> for StartCmd {
-    // Process the given command line options, overriding settings from
-    // a configuration file using explicit flags taken from command-line
-    // arguments.
-    fn override_config(&self, mut config: ZebradConfig) -> Result<ZebradConfig, FrameworkError> {
-        if !self.filters.is_empty() {
-            config.tracing.filter = Some(self.filters.join(","));
-        }
-
-        Ok(config)
-    }
-}
-
-impl StartCmd {
-    async fn connect(&self) -> Result<(), Report> {
+impl StartArgs {
+    async fn start(&self) -> Result<(), Report> {
         info!(?self, "begin tower-based peer handling test stub");
 
         // The service that our node uses to respond to requests by peers
@@ -116,7 +78,7 @@ impl StartCmd {
         let mut downloaded_block_heights = BTreeSet::<BlockHeight>::new();
         downloaded_block_heights.insert(BlockHeight(0));
 
-        let mut connect = Start {
+        let mut connect = ZebraNode {
             retry_peer_set,
             peer_set,
             state,
@@ -126,11 +88,51 @@ impl StartCmd {
             downloaded_block_heights,
         };
 
-        connect.connect().await
+        connect.run().await
     }
 }
 
-struct Start<ZN, ZS>
+impl Runnable for StartArgs {
+    /// Start the application.
+    fn run(&self) {
+        info!(connect.addr = ?self.addr);
+
+        let rt = app_writer()
+            .state_mut()
+            .components
+            .get_downcast_mut::<TokioComponent>()
+            .expect("TokioComponent should be available")
+            .rt
+            .take();
+
+        let result = rt
+            .expect("runtime should not already be taken")
+            .block_on(self.start());
+
+        match result {
+            Ok(()) => {}
+            Err(e) => {
+                eprintln!("Error: {:?}", e);
+                std::process::exit(1);
+            }
+        }
+    }
+}
+
+impl config::Override<ZebradConfig> for StartArgs {
+    // Process the given command line options, overriding settings from
+    // a configuration file using explicit flags taken from command-line
+    // arguments.
+    fn override_config(&self, mut config: ZebradConfig) -> Result<ZebradConfig, FrameworkError> {
+        if !self.filters.is_empty() {
+            config.tracing.filter = Some(self.filters.join(","));
+        }
+
+        Ok(config)
+    }
+}
+
+struct ZebraNode<ZN, ZS>
 where
     ZN: Service<zebra_network::Request>,
 {
@@ -143,7 +145,7 @@ where
     downloaded_block_heights: BTreeSet<BlockHeight>,
 }
 
-impl<ZN, ZS> Start<ZN, ZS>
+impl<ZN, ZS> ZebraNode<ZN, ZS>
 where
     ZN: Service<zebra_network::Request, Response = zebra_network::Response, Error = Error>
         + Send
@@ -156,7 +158,7 @@ where
         + 'static,
     ZS::Future: Send,
 {
-    async fn connect(&mut self) -> Result<(), Report> {
+    async fn run(&mut self) -> Result<(), Report> {
         // TODO(jlusby): Replace with real state service
 
         while self.requested_block_heights < 700_000 {
