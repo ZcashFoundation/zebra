@@ -152,7 +152,7 @@ where
                 Some(j) => Some(j),             // We swapped an unrelated service.
             };
             // No Heisenservices: they must be ready or unready.
-            debug_assert!(!self.cancel_handles.contains_key(key));
+            assert!(!self.cancel_handles.contains_key(key));
         } else if let Some(handle) = self.cancel_handles.remove(key) {
             let _ = handle.send(());
         }
@@ -200,18 +200,22 @@ where
                 Poll::Ready(Some(Ok((key, svc)))) => {
                     trace!(?key, "service became ready");
                     let _cancel = self.cancel_handles.remove(&key);
-                    debug_assert!(_cancel.is_some(), "missing cancel handle");
+                    assert!(_cancel.is_some(), "missing cancel handle");
                     self.ready_services.insert(key, svc);
                 }
                 Poll::Ready(Some(Err((key, UnreadyError::Canceled)))) => {
                     trace!(?key, "service was canceled");
-                    debug_assert!(!self.cancel_handles.contains_key(&key))
+                    // This debug assert is invalid because we can have a
+                    // service be canceled due us connecting to the same service
+                    // twice.
+                    //
+                    // assert!(!self.cancel_handles.contains_key(&key))
                 }
                 Poll::Ready(Some(Err((key, UnreadyError::Inner(e))))) => {
                     let error = e.into();
                     debug!(%error, "service failed while unready, dropped");
                     let _cancel = self.cancel_handles.remove(&key);
-                    debug_assert!(_cancel.is_some(), "missing cancel handle");
+                    assert!(_cancel.is_some(), "missing cancel handle");
                 }
             }
         }
