@@ -1,5 +1,4 @@
 use std::{
-    convert::TryFrom,
     future::Future,
     pin::Pin,
     sync::Once,
@@ -128,19 +127,6 @@ where
         assert!(result.is_ok());
     }
 }
-
-/*
-#[tokio::test]
-async fn individual_verification_with_service_fn() {
-    let verifier = tower::service_fn(|item: Ed25519Item| {
-        // now this is actually impossible to write, oops
-        let result = VerificationKey::try_from(vk_bytes).and_then(|vk| vk.verify(&sig, msg));
-        async move { result }
-    });
-
-    sign_and_verify(verifier, 100).await;
-}
-*/
 
 #[tokio::test]
 async fn batch_flushes_on_max_items() {
