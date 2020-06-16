@@ -16,7 +16,7 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-use tower::{buffer::Buffer, Service};
+use tower::{buffer::Buffer, util::ServiceExt, Service};
 
 use zebra_chain::block::{Block, BlockHeaderHash};
 
@@ -36,7 +36,10 @@ type Error = Box<dyn error::Error + Send + Sync + 'static>;
 /// After verification, blocks are added to the underlying state service.
 impl<S> Service<Arc<Block>> for BlockVerifier<S>
 where
-    S: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>,
+    S: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>
+        + Send
+        + Clone
+        + 'static,
     S::Future: Send + 'static,
 {
     type Response = BlockHeaderHash;
@@ -53,14 +56,15 @@ where
         // TODO(teor):
         //   - handle chain reorgs, adjust state_service "unique block height" conditions
         //   - handle block validation errors (including errors in the block's transactions)
-
-        // `state_service.call` is OK here because we already called
-        // `state_service.poll_ready` in our `poll_ready`.
-        let add_block = self
-            .state_service
-            .call(zebra_state::Request::AddBlock { block });
+        let mut state_clone = self.state_service.clone();
 
         async move {
+            // Since we're in a different thread, we need to call poll_ready() again.
+            let add_block = state_clone
+                .ready_and()
+                .await?
+                .call(zebra_state::Request::AddBlock { block });
+
             match add_block.await? {
                 zebra_state::Response::Added { hash } => Ok(hash),
                 _ => Err("adding block to zebra-state failed".into()),
@@ -96,6 +100,7 @@ pub fn init<S>(
 where
     S: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>
         + Send
+        + Clone
         + 'static,
     S::Future: Send + 'static,
 {
