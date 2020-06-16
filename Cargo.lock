@@ -1927,9 +1927,11 @@ dependencies = [
 name = "tower-batch"
 version = "0.1.0"
 dependencies = [
+ "ed25519-zebra",
  "futures",
  "futures-core",
  "pin-project",
+ "rand 0.7.3",
  "tokio",
  "tower",
  "tracing",
