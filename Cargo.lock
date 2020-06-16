@@ -2327,6 +2327,7 @@ version = "0.1.0"
 name = "zebra-consensus"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "color-eyre",
  "futures-util",
  "spandoc",
