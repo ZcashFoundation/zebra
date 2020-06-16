@@ -225,10 +225,13 @@ where
                             .map_err(|e| eyre!(e))?;
                     }
                 }
+                Some(Ok(_)) => continue,
                 Some(Err(e)) => {
                     error!(%e);
                 }
-                _ => continue,
+                None => {
+                    unreachable!("None is never encountered due to the condition on the while loop")
+                }
             }
         }
 
