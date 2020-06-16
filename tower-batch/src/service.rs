@@ -67,7 +67,7 @@ where
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         // If the inner service has errored, then we error here.
-        if let Err(_) = ready!(self.tx.poll_ready(cx)) {
+        if ready!(self.tx.poll_ready(cx)).is_err() {
             Poll::Ready(Err(self.get_worker_error()))
         } else {
             Poll::Ready(Ok(()))
