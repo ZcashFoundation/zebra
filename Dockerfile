@@ -12,20 +12,15 @@ ENV CARGO_HOME /zebra/.cargo/
 
 # Copy local code to the container image.
 # Assumes that we are in the git repo.
-
 COPY . .
-
 RUN cargo fetch --verbose
-
 COPY . .
-
 RUN rustc -V; cargo -V; rustup -V; cargo test --all && cargo build --release
 
 
 FROM debian:buster-slim
+WORKDIR /zebra
 COPY --from=builder /zebra/target/release/zebrad .
 EXPOSE 8233
 EXPOSE 18233
-
-ENTRYPOINT [ "./zebrad" ]
-CMD [ "seed" ]
+CMD [ "./zebrad", "seed" ]
