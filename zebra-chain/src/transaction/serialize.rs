@@ -359,6 +359,17 @@ impl ZcashDeserialize for Output {
 
 impl ZcashSerialize for Transaction {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        // Post-Sapling, transaction size is limited to MAX_BLOCK_BYTES.
+        // (Strictly, the maximum transaction size is about 1.5 kB less,
+        // because blocks also include a block header.)
+        //
+        // Currently, all transaction structs are parsed as part of a
+        // block. So we don't need to check transaction size here, until
+        // we start parsing mempool transactions, or generating our own
+        // transactions (see #483).
+        //
+        // Since we checkpoint on Sapling activation, we won't ever need
+        // to check the smaller pre-Sapling transaction size limit.
         match self {
             Transaction::V1 {
                 inputs,
