@@ -10,7 +10,11 @@ use serde::{Deserialize, Serialize};
 
 use zebra_network::Config as NetworkSection;
 
-/// Zebrad Configuration
+/// Configuration for `zebrad`.
+///
+/// The `zebrad` config is a TOML-encoded version of this structure. The meaning
+/// of each field is described in the documentation, although it may be necessary
+/// to click through to the sub-structures for each section.
 #[derive(Clone, Default, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 #[serde(default)]
