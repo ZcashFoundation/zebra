@@ -35,10 +35,26 @@ type Error = Box<dyn error::Error + Send + Sync + 'static>;
 mod block {
     use super::Error;
 
-    use chrono::{Duration, Utc};
+    use chrono::{DateTime, Duration, Utc};
     use std::sync::Arc;
 
     use zebra_chain::block::Block;
+
+    /// Helper function for `node_time_check()`, see that function for details.
+    fn node_time_check_helper(
+        block_header_time: DateTime<Utc>,
+        now: DateTime<Utc>,
+    ) -> Result<(), Error> {
+        let two_hours_in_the_future = now
+            .checked_add_signed(Duration::hours(2))
+            .ok_or("overflow when calculating 2 hours in the future")?;
+
+        if block_header_time <= two_hours_in_the_future {
+            Ok(())
+        } else {
+            Err("block header time is more than 2 hours in the future".into())
+        }
+    }
 
     /// Check if the block header time is less than or equal to
     /// 2 hours in the future, according to the node's local clock.
@@ -55,16 +71,7 @@ mod block {
     ///
     /// [7.5]: https://zips.z.cash/protocol/protocol.pdf#blockheader
     pub(super) fn node_time_check(block: Arc<Block>) -> Result<(), Error> {
-        let now = Utc::now();
-        let two_hours_in_the_future = now
-            .checked_add_signed(Duration::hours(2))
-            .ok_or("overflow when calculating 2 hours in the future")?;
-
-        if block.header.time <= two_hours_in_the_future {
-            Ok(())
-        } else {
-            Err("block header time is more than 2 hours in the future".into())
-        }
+        node_time_check_helper(block.header.time, Utc::now())
     }
 }
 
