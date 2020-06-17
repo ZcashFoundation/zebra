@@ -1927,6 +1927,7 @@ dependencies = [
 name = "tower-batch"
 version = "0.1.0"
 dependencies = [
+ "color-eyre",
  "ed25519-zebra",
  "futures",
  "futures-core",

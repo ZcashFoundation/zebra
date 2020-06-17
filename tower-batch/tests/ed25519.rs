@@ -131,31 +131,31 @@ where
 }
 
 #[tokio::test]
-async fn batch_flushes_on_max_items() {
+async fn batch_flushes_on_max_items() -> color_eyre::Result<()> {
     use tokio::time::timeout;
     install_tracing();
 
     // Use a very long max_latency and a short timeout to check that
     // flushing is happening based on hitting max_items.
-    let verifier = Batch::new(Ed25519Verifier::new(), 10, Duration::from_secs(1000));
-    assert!(
-        timeout(Duration::from_secs(1), sign_and_verify(verifier, 100))
-            .await
-            .is_ok()
-    )
+    let verifier = Batch::<_, _, color_eyre::Report>::new(
+        Ed25519Verifier::new(),
+        10,
+        Duration::from_secs(1000),
+    );
+    Ok(timeout(Duration::from_secs(1), sign_and_verify(verifier, 100)).await?)
 }
 
 #[tokio::test]
-async fn batch_flushes_on_max_latency() {
+async fn batch_flushes_on_max_latency() -> color_eyre::Result<()> {
     use tokio::time::timeout;
     install_tracing();
 
     // Use a very high max_items and a short timeout to check that
     // flushing is happening based on hitting max_latency.
-    let verifier = Batch::new(Ed25519Verifier::new(), 100, Duration::from_millis(500));
-    assert!(
-        timeout(Duration::from_secs(1), sign_and_verify(verifier, 10))
-            .await
-            .is_ok()
-    )
+    let verifier = Batch::<_, _, color_eyre::Report>::new(
+        Ed25519Verifier::new(),
+        100,
+        Duration::from_millis(500),
+    );
+    Ok(timeout(Duration::from_secs(1), sign_and_verify(verifier, 10)).await?)
 }

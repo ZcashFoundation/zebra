@@ -1,45 +1,10 @@
 //! Error types for the `Batch` middleware.
 
-use crate::BoxError;
-use std::{fmt, sync::Arc};
-
-/// An error produced by a `Service` wrapped by a `Batch`.
-#[derive(Debug)]
-pub struct ServiceError {
-    inner: Arc<BoxError>,
-}
+use std::fmt;
 
 /// An error produced when the batch worker closes unexpectedly.
 pub struct Closed {
     _p: (),
-}
-
-// ===== impl ServiceError =====
-
-impl ServiceError {
-    pub(crate) fn new(inner: BoxError) -> ServiceError {
-        let inner = Arc::new(inner);
-        ServiceError { inner }
-    }
-
-    // Private to avoid exposing `Clone` trait as part of the public API
-    pub(crate) fn clone(&self) -> ServiceError {
-        ServiceError {
-            inner: self.inner.clone(),
-        }
-    }
-}
-
-impl fmt::Display for ServiceError {
-    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        write!(fmt, "batching service failed: {}", self.inner)
-    }
-}
-
-impl std::error::Error for ServiceError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(&**self.inner)
-    }
 }
 
 // ===== impl Closed =====
