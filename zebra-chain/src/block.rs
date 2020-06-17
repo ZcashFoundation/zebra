@@ -145,6 +145,8 @@ impl ZcashSerialize for BlockHeader {
         self.previous_block_hash.zcash_serialize(&mut writer)?;
         writer.write_all(&self.merkle_root_hash.0[..])?;
         writer.write_all(&self.final_sapling_root_hash.0[..])?;
+        // this is a truncating cast, rather than a saturating cast
+        // but u32 times are valid until 2106
         writer.write_u32::<LittleEndian>(self.time.timestamp() as u32)?;
         writer.write_u32::<LittleEndian>(self.bits)?;
         writer.write_all(&self.nonce[..])?;
@@ -190,6 +192,7 @@ impl ZcashDeserialize for BlockHeader {
             previous_block_hash: BlockHeaderHash::zcash_deserialize(&mut reader)?,
             merkle_root_hash: MerkleTreeRootHash(reader.read_32_bytes()?),
             final_sapling_root_hash: SaplingNoteTreeRootHash(reader.read_32_bytes()?),
+            // This can't panic, because all u32 values are valid `Utc.timestamp`s
             time: Utc.timestamp(reader.read_u32::<LittleEndian>()? as i64, 0),
             bits: reader.read_u32::<LittleEndian>()?,
             nonce: reader.read_32_bytes()?,
