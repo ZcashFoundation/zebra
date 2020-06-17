@@ -1,5 +1,6 @@
 use std::{
     future::Future,
+    mem,
     pin::Pin,
     sync::Once,
     task::{Context, Poll},
@@ -24,6 +25,7 @@ pub struct Ed25519Verifier {
     tx: Sender<Result<(), Error>>,
 }
 
+#[allow(clippy::new_without_default)]
 impl Ed25519Verifier {
     pub fn new() -> Self {
         let batch = batch::Verifier::default();
@@ -65,7 +67,7 @@ impl<'msg> Service<BatchControl<Ed25519Item>> for Ed25519Verifier {
             }
             BatchControl::Flush => {
                 tracing::trace!("got flush command");
-                let batch = std::mem::replace(&mut self.batch, batch::Verifier::default());
+                let batch = mem::take(&mut self.batch);
                 let _ = self.tx.send(batch.verify(thread_rng()));
                 Box::pin(async { Ok(()) })
             }
@@ -76,7 +78,7 @@ impl<'msg> Service<BatchControl<Ed25519Item>> for Ed25519Verifier {
 impl Drop for Ed25519Verifier {
     fn drop(&mut self) {
         // We need to flush the current batch in case there are still any pending futures.
-        let batch = std::mem::replace(&mut self.batch, batch::Verifier::default());
+        let batch = mem::take(&mut self.batch);
         let _ = self.tx.send(batch.verify(thread_rng()));
     }
 }
