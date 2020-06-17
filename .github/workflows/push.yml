@@ -52,7 +52,7 @@ jobs:
     # Deploy managed instance group using the new instance template
     - name: Deploy managed instance group
       run: |
-        gcloud compute instance-groups managed create "zebrad-$SHORT_BRANCH_NAME-$SHA7" \
+        gcloud compute instance-groups managed create \
+          "zebrad-$SHORT_BRANCH_NAME-$SHA7" \
           --template "zebrad-$SHORT_BRANCH_NAME-$SHA7" \
-          --size 1 \
-          --zone us-central1-a
+          --size 2
