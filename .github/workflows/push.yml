@@ -55,6 +55,5 @@ jobs:
       run: |
         gcloud compute instance-groups managed create "zebrad-$SHORT_BRANCH_NAME-$SHA7" \
           --template "zebrad-$SHORT_BRANCH_NAME-$SHA7" \
-          --base-instance-name "zebrad-$SHORT_BRANCH_NAME-$SHA7" \
-          --size 3 \
+          --size 2 \
           --region us-central1
