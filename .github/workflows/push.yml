@@ -5,7 +5,6 @@ on:
 
 env:
   PROJECT_ID: zealous-zebra
-  GCLOUD_ZONE: us-central1-a
 
 jobs:
   build:
@@ -48,7 +47,8 @@ jobs:
         gcloud compute instance-templates create-with-container "zebrad-$SHORT_BRANCH_NAME-$SHA7" \
           --service-account cos-vm@zealous-zebra.iam.gserviceaccount.com \
           --scopes cloud-platform \
-          --container-image "gcr.io/$PROJECT_ID/$BRANCH_NAME:$SHA7"
+          --container-image "gcr.io/$PROJECT_ID/$BRANCH_NAME:$SHA7" \
+          --machine-type m1-ultramem-40
 
     # Deploy managed instance group using the new instance template
     - name: Deploy managed instance group
@@ -56,5 +56,5 @@ jobs:
         gcloud compute instance-groups managed create "zebrad-$SHORT_BRANCH_NAME-$SHA7" \
           --template "zebrad-$SHORT_BRANCH_NAME-$SHA7" \
           --base-instance-name "zebrad-$SHORT_BRANCH_NAME-$SHA7" \
-          --size 1 \
-          --zone "$GCLOUD_ZONE"
+          --size 3 \
+          --region us-central1
