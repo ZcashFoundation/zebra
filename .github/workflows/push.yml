@@ -47,8 +47,7 @@ jobs:
         gcloud compute instance-templates create-with-container "zebrad-$SHORT_BRANCH_NAME-$SHA7" \
           --service-account cos-vm@zealous-zebra.iam.gserviceaccount.com \
           --scopes cloud-platform \
-          --container-image "gcr.io/$PROJECT_ID/$BRANCH_NAME:$SHA7" \
-          --machine-type n1-highmem-8
+          --container-image "gcr.io/$PROJECT_ID/$BRANCH_NAME:$SHA7"
 
     # Deploy managed instance group using the new instance template
     - name: Deploy managed instance group
