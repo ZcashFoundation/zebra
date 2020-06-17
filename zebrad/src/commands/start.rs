@@ -211,8 +211,14 @@ where
 
     async fn drain_requests(&mut self, request_goal: usize) -> Result<(), Report> {
         while self.block_requests.len() > request_goal {
-            match self.block_requests.next().await {
-                Some(Ok(zebra_network::Response::Blocks(blocks))) => {
+            match self
+                .block_requests
+                .next()
+                .await
+                .expect("expected: block_requests is never empty")
+                .map_err::<Report, _>(|e| eyre!(e))
+            {
+                Ok(zebra_network::Response::Blocks(blocks)) => {
                     for block in blocks {
                         self.downloaded_block_heights
                             .insert(block.coinbase_height().unwrap());
@@ -225,12 +231,9 @@ where
                             .map_err(|e| eyre!(e))?;
                     }
                 }
-                Some(Ok(_)) => continue,
-                Some(Err(e)) => {
-                    error!(%e);
-                }
-                None => {
-                    unreachable!("None is never encountered due to the condition on the while loop")
+                Ok(_) => continue,
+                Err(e) => {
+                    error!("{:?}", e);
                 }
             }
         }
