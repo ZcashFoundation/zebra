@@ -6,7 +6,10 @@ use super::{
 };
 
 use futures_core::ready;
-use std::task::{Context, Poll};
+use std::{
+    marker::PhantomData,
+    task::{Context, Poll},
+};
 use tokio::sync::{mpsc, oneshot};
 use tower::Service;
 
@@ -14,18 +17,23 @@ use tower::Service;
 ///
 /// See the module documentation for more details.
 #[derive(Debug)]
-pub struct Batch<T, Request>
+pub struct Batch<T, Request, E = crate::BoxError>
 where
     T: Service<BatchControl<Request>>,
 {
-    tx: mpsc::Sender<Message<Request, T::Future>>,
-    handle: Handle,
+    tx: mpsc::Sender<Message<Request, T::Future, T::Error>>,
+    handle: Handle<E>,
+    _error_type: PhantomData<E>,
 }
 
-impl<T, Request> Batch<T, Request>
+impl<T, Request, E> Batch<T, Request, E>
 where
     T: Service<BatchControl<Request>>,
-    T::Error: Into<crate::BoxError>,
+    T::Error: Into<E>,
+    E: Send + 'static,
+    crate::error::Closed: Into<E>,
+    // crate::error::Closed: Into<<Self as Service<Request>>::Error> + Send + Sync + 'static,
+    // crate::error::ServiceError: Into<<Self as Service<Request>>::Error> + Send + Sync + 'static,
 {
     /// Creates a new `Batch` wrapping `service`.
     ///
@@ -41,29 +49,35 @@ where
     where
         T: Send + 'static,
         T::Future: Send,
-        T::Error: Send + Sync,
+        T::Error: Send + Sync + Clone,
         Request: Send + 'static,
     {
         // XXX(hdevalence): is this bound good
         let (tx, rx) = mpsc::channel(1);
         let (handle, worker) = Worker::new(service, rx, max_items, max_latency);
         tokio::spawn(worker.run());
-        Batch { tx, handle }
+        Batch {
+            tx,
+            handle,
+            _error_type: PhantomData,
+        }
     }
 
-    fn get_worker_error(&self) -> crate::BoxError {
+    fn get_worker_error(&self) -> E {
         self.handle.get_error_on_closed()
     }
 }
 
-impl<T, Request> Service<Request> for Batch<T, Request>
+impl<T, Request, E> Service<Request> for Batch<T, Request, E>
 where
     T: Service<BatchControl<Request>>,
-    T::Error: Into<crate::BoxError>,
+    crate::error::Closed: Into<E>,
+    T::Error: Into<E>,
+    E: Send + 'static,
 {
     type Response = T::Response;
-    type Error = crate::BoxError;
-    type Future = ResponseFuture<T::Future>;
+    type Error = E;
+    type Future = ResponseFuture<T, E, Request>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         // If the inner service has errored, then we error here.
@@ -113,6 +127,7 @@ where
         Self {
             tx: self.tx.clone(),
             handle: self.handle.clone(),
+            _error_type: PhantomData,
         }
     }
 }

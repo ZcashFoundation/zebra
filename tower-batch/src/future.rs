@@ -4,47 +4,68 @@ use super::{error::Closed, message};
 use futures_core::ready;
 use pin_project::pin_project;
 use std::{
+    fmt::Debug,
     future::Future,
     pin::Pin,
     task::{Context, Poll},
 };
+use tower::Service;
 
 /// Future that completes when the batch processing is complete.
 #[pin_project]
 #[derive(Debug)]
-pub struct ResponseFuture<T> {
+pub struct ResponseFuture<T, E, R>
+where
+    T: Service<crate::BatchControl<R>>,
+{
     #[pin]
-    state: ResponseState<T>,
+    state: ResponseState<T, E, R>,
 }
 
 #[pin_project(project = ResponseStateProj)]
-#[derive(Debug)]
-enum ResponseState<T> {
-    Failed(Option<crate::BoxError>),
-    Rx(#[pin] message::Rx<T>),
-    Poll(#[pin] T),
+enum ResponseState<T, E, R>
+where
+    T: Service<crate::BatchControl<R>>,
+{
+    Failed(Option<E>),
+    Rx(#[pin] message::Rx<T::Future, T::Error>),
+    Poll(#[pin] T::Future),
 }
 
-impl<T> ResponseFuture<T> {
-    pub(crate) fn new(rx: message::Rx<T>) -> Self {
+impl<T, E, R> Debug for ResponseState<T, E, R>
+where
+    T: Service<crate::BatchControl<R>>,
+{
+    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        todo!()
+    }
+}
+
+impl<T, E, R> ResponseFuture<T, E, R>
+where
+    T: Service<crate::BatchControl<R>>,
+{
+    pub(crate) fn new(rx: message::Rx<T::Future, T::Error>) -> Self {
         ResponseFuture {
             state: ResponseState::Rx(rx),
         }
     }
 
-    pub(crate) fn failed(err: crate::BoxError) -> Self {
+    pub(crate) fn failed(err: E) -> Self {
         ResponseFuture {
             state: ResponseState::Failed(Some(err)),
         }
     }
 }
 
-impl<F, T, E> Future for ResponseFuture<F>
+impl<S, E2, R> Future for ResponseFuture<S, E2, R>
 where
-    F: Future<Output = Result<T, E>>,
-    E: Into<crate::BoxError>,
+    S: Service<crate::BatchControl<R>>,
+    S::Future: Future<Output = Result<S::Response, S::Error>>,
+    S::Error: Into<E2>,
+    crate::error::Closed: Into<E2>,
 {
-    type Output = Result<T, crate::BoxError>;
+    type Output = Result<S::Response, E2>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut this = self.project();
