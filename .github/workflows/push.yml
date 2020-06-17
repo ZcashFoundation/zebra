@@ -48,7 +48,7 @@ jobs:
           --service-account cos-vm@zealous-zebra.iam.gserviceaccount.com \
           --scopes cloud-platform \
           --container-image "gcr.io/$PROJECT_ID/$BRANCH_NAME:$SHA7" \
-          --machine-type m1-ultramem-40
+          --machine-type n1-highmem-8
 
     # Deploy managed instance group using the new instance template
     - name: Deploy managed instance group
