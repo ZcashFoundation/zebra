@@ -2344,6 +2344,7 @@ dependencies = [
  "tower",
  "tower-load",
  "tracing",
+ "tracing-error",
  "tracing-futures",
  "zebra-chain",
 ]

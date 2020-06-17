@@ -2,19 +2,20 @@ use std::sync::{Arc, Mutex};
 
 use thiserror::Error;
 
+use tracing_error::TracedError;
 use zebra_chain::serialization::SerializationError;
 
 /// A wrapper around `Arc<PeerError>` that implements `Error`.
 #[derive(Error, Debug, Clone)]
-#[error("{0}")]
-pub struct SharedPeerError(Arc<PeerError>);
+#[error(transparent)]
+pub struct SharedPeerError(Arc<TracedError<PeerError>>);
 
 impl<E> From<E> for SharedPeerError
 where
     PeerError: From<E>,
 {
     fn from(source: E) -> Self {
-        Self(Arc::new(PeerError::from(source)))
+        Self(Arc::new(TracedError::from(PeerError::from(source))))
     }
 }
 
