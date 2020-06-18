@@ -4,6 +4,7 @@ use eyre::eyre;
 use futures::stream::{FuturesUnordered, StreamExt};
 use std::{collections::HashSet, iter};
 use tower::{Service, ServiceExt};
+use tracing_futures::Instrument;
 use zebra_chain::{block::BlockHeaderHash, types::BlockHeight};
 
 pub struct Syncer<ZN, ZS>
@@ -97,13 +98,11 @@ where
             match res.map_err::<Report, _>(|e| eyre!(e)) {
                 Ok(zebra_network::Response::Blocks(blocks)) => {
                     for block in blocks {
-                        self.state
-                            .ready_and()
-                            .await
-                            .map_err(|e| eyre!(e))?
-                            .call(zebra_state::Request::AddBlock { block })
-                            .await
-                            .map_err(|e| eyre!(e))?;
+                        assert!(
+                            self.downloading.remove(&block.as_ref().into()),
+                            "all received blocks should be explicitly requested and received once"
+                        );
+                        self.validate_block(block).await?;
                     }
                 }
                 Ok(_) => continue,
@@ -112,6 +111,31 @@ where
                 }
             }
         }
+
+        Ok(())
+    }
+
+    #[tracing::instrument(skip(self))]
+    async fn validate_block(
+        &mut self,
+        block: std::sync::Arc<zebra_chain::block::Block>,
+    ) -> Result<(), Report> {
+        let fut = self
+            .state
+            .ready_and()
+            .await
+            .map_err(|e| eyre!(e))?
+            .call(zebra_state::Request::AddBlock { block });
+
+        let _handle = tokio::spawn(
+            async move {
+                match fut.await.map_err::<Report, _>(|e| eyre!(e)) {
+                    Ok(_) => {}
+                    Err(report) => error!("{:?}", report),
+                }
+            }
+            .in_current_span(),
+        );
 
         Ok(())
     }
