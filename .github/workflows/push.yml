@@ -45,14 +45,23 @@ jobs:
     - name: Create instance template
       run: |
         gcloud compute instance-templates create-with-container "zebrad-$SHORT_BRANCH_NAME-$SHA7" \
+          --container-image "gcr.io/$PROJECT_ID/$BRANCH_NAME:$SHA7" \
           --service-account cos-vm@zealous-zebra.iam.gserviceaccount.com \
           --scopes cloud-platform \
-          --container-image "gcr.io/$PROJECT_ID/$BRANCH_NAME:$SHA7"
+          --machine-type n1-highmem-8 \
 
     # Deploy managed instance group using the new instance template
     - name: Deploy managed instance group
+      # Assumes the 'zebrad-tracing-filter' healthcheck to hit
+      # :3000/filter exists, which requires the
+      # 'allow-tracing-health-check' firewall rule to allow Google
+      # 'spotter' IPs to hit that port be added to the network
+      # attached to the instance template (usually it's 'default').
       run: |
         gcloud compute instance-groups managed create \
           "zebrad-$SHORT_BRANCH_NAME-$SHA7" \
           --template "zebrad-$SHORT_BRANCH_NAME-$SHA7" \
-          --size 2
+          --health-check zebrad-tracing-filter \
+          --initial-delay 60 \
+          --region us-central1 \
+          --size 2 \
