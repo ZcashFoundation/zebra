@@ -16,8 +16,7 @@ use zebra_network::Config as NetworkSection;
 /// of each field is described in the documentation, although it may be necessary
 /// to click through to the sub-structures for each section.
 #[derive(Clone, Default, Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-#[serde(default)]
+#[serde(deny_unknown_fields, default)]
 pub struct ZebradConfig {
     /// Tracing configuration
     pub tracing: TracingSection,
@@ -29,7 +28,7 @@ pub struct ZebradConfig {
 
 /// Tracing configuration section.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default)]
 pub struct TracingSection {
     /// The filter used for tracing events.
     pub filter: Option<String>,
@@ -45,7 +44,7 @@ impl TracingSection {
 
 /// Metrics configuration section.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default)]
 pub struct MetricsSection {
     pub endpoint_addr: SocketAddr,
 }
