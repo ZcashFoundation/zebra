@@ -1,17 +1,17 @@
-//! `config` subcommand - generates a skeleton config.
+//! `generate` subcommand - generates a skeleton config.
 
 use crate::config::ZebradConfig;
 use abscissa_core::{Command, Options, Runnable};
 
-/// `config` subcommand
+/// `generate` subcommand
 #[derive(Command, Debug, Options)]
-pub struct ConfigCmd {
+pub struct GenerateCmd {
     /// The file to write the generated config to.
     #[options(help = "The file to write the generated config to (stdout if unspecified)")]
     output_file: Option<String>,
 }
 
-impl Runnable for ConfigCmd {
+impl Runnable for GenerateCmd {
     /// Start the application.
     fn run(&self) {
         let default_config = ZebradConfig {

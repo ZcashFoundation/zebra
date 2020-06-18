@@ -1,14 +1,14 @@
 //! Zebrad Subcommands
 
-mod config;
 mod connect;
+mod generate;
 mod revhex;
 mod seed;
 mod start;
 mod version;
 
 use self::{
-    config::ConfigCmd, connect::ConnectCmd, revhex::RevhexCmd, seed::SeedCmd, start::StartCmd,
+    connect::ConnectCmd, generate::GenerateCmd, revhex::RevhexCmd, seed::SeedCmd, start::StartCmd,
     version::VersionCmd,
 };
 use crate::config::ZebradConfig;
@@ -23,9 +23,9 @@ pub const CONFIG_FILE: &str = "zebrad.toml";
 /// Zebrad Subcommands
 #[derive(Command, Debug, Options, Runnable)]
 pub enum ZebradCmd {
-    /// The `config` subcommand
+    /// The `generate` subcommand
     #[options(help = "generate a skeleton configuration")]
-    Config(ConfigCmd),
+    Generate(GenerateCmd),
 
     /// The `connect` subcommand
     #[options(help = "testing stub for dumping network messages")]
