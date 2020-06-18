@@ -13,20 +13,20 @@ use tower::Service;
 
 /// Future that completes when the batch processing is complete.
 #[pin_project]
-pub struct ResponseFuture<S, E, Response>
+pub struct ResponseFuture<S, E2, Response>
 where
     S: Service<crate::BatchControl<Response>>,
 {
     #[pin]
-    state: ResponseState<S, E, Response>,
+    state: ResponseState<S, E2, Response>,
 }
 
-impl<S, E, Response> Debug for ResponseFuture<S, E, Response>
+impl<S, E2, Response> Debug for ResponseFuture<S, E2, Response>
 where
     S: Service<crate::BatchControl<Response>>,
     S::Future: Debug,
     S::Error: Debug,
-    E: Debug,
+    E2: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ResponseFuture")
@@ -36,21 +36,21 @@ where
 }
 
 #[pin_project(project = ResponseStateProj)]
-enum ResponseState<S, E, Response>
+enum ResponseState<S, E2, Response>
 where
     S: Service<crate::BatchControl<Response>>,
 {
-    Failed(Option<E>),
+    Failed(Option<E2>),
     Rx(#[pin] message::Rx<S::Future, S::Error>),
     Poll(#[pin] S::Future),
 }
 
-impl<S, E, Response> Debug for ResponseState<S, E, Response>
+impl<S, E2, Response> Debug for ResponseState<S, E2, Response>
 where
     S: Service<crate::BatchControl<Response>>,
     S::Future: Debug,
     S::Error: Debug,
-    E: Debug,
+    E2: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -61,7 +61,7 @@ where
     }
 }
 
-impl<S, E, Response> ResponseFuture<S, E, Response>
+impl<S, E2, Response> ResponseFuture<S, E2, Response>
 where
     S: Service<crate::BatchControl<Response>>,
 {
@@ -71,7 +71,7 @@ where
         }
     }
 
-    pub(crate) fn failed(err: E) -> Self {
+    pub(crate) fn failed(err: E2) -> Self {
         ResponseFuture {
             state: ResponseState::Failed(Some(err)),
         }
