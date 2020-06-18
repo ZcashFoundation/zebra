@@ -40,7 +40,7 @@ where
     S::Future: Send,
     S::Error: Clone + Into<E> + Send + Sync,
     Request: Send + 'static,
-    E: Clone + Send + 'static,
+    E: Send + 'static,
     crate::error::Closed: Into<E>,
 {
     type Service = Batch<S, Request, E>;

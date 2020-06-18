@@ -34,7 +34,7 @@ where
     rx: mpsc::Receiver<Message<Request, T::Future, T::Error>>,
     service: T,
     failed: Option<T::Error>,
-    handle: Handle<E>,
+    handle: Handle<T::Error, E>,
     max_items: usize,
     max_latency: std::time::Duration,
     _error_type: PhantomData<E>,
@@ -42,8 +42,9 @@ where
 
 /// Get the error out
 #[derive(Debug)]
-pub(crate) struct Handle<E> {
+pub(crate) struct Handle<E, E2> {
     inner: Arc<Mutex<Option<E>>>,
+    _e: PhantomData<E2>,
 }
 
 impl<T, Request, E> Worker<T, Request, E>
@@ -56,9 +57,10 @@ where
         rx: mpsc::Receiver<Message<Request, T::Future, T::Error>>,
         max_items: usize,
         max_latency: std::time::Duration,
-    ) -> (Handle<E>, Worker<T, Request, E>) {
+    ) -> (Handle<T::Error, E>, Worker<T, Request, E>) {
         let handle = Handle {
             inner: Arc::new(Mutex::new(None)),
+            _e: PhantomData,
         };
 
         let worker = Worker {
@@ -190,7 +192,7 @@ where
             return;
         }
 
-        *inner = Some(error.clone().into());
+        *inner = Some(error.clone());
         drop(inner);
 
         self.rx.close();
@@ -203,23 +205,26 @@ where
     }
 }
 
-impl<E> Handle<E>
+impl<E, E2> Handle<E, E2>
 where
-    crate::error::Closed: Into<E>,
+    E: Clone + Into<E2>,
+    crate::error::Closed: Into<E2>,
 {
-    pub(crate) fn get_error_on_closed(&self) -> E {
+    pub(crate) fn get_error_on_closed(&self) -> E2 {
         self.inner
             .lock()
             .unwrap()
-            .take()
+            .clone()
+            .map(Into::into)
             .unwrap_or_else(|| Closed::new().into())
     }
 }
 
-impl<E> Clone for Handle<E> {
-    fn clone(&self) -> Handle<E> {
+impl<E, E2> Clone for Handle<E, E2> {
+    fn clone(&self) -> Handle<E, E2> {
         Handle {
             inner: self.inner.clone(),
+            _e: PhantomData,
         }
     }
 }
