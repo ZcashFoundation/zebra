@@ -22,14 +22,14 @@ where
     T: Service<BatchControl<Request>>,
 {
     tx: mpsc::Sender<Message<Request, T::Future, T::Error>>,
-    handle: Handle<E>,
+    handle: Handle<T::Error, E>,
     _error_type: PhantomData<E>,
 }
 
 impl<T, Request, E> Batch<T, Request, E>
 where
     T: Service<BatchControl<Request>>,
-    T::Error: Into<E>,
+    T::Error: Into<E> + Clone,
     E: Send + 'static,
     crate::error::Closed: Into<E>,
     // crate::error::Closed: Into<<Self as Service<Request>>::Error> + Send + Sync + 'static,
@@ -72,7 +72,7 @@ impl<T, Request, E> Service<Request> for Batch<T, Request, E>
 where
     T: Service<BatchControl<Request>>,
     crate::error::Closed: Into<E>,
-    T::Error: Into<E>,
+    T::Error: Into<E> + Clone,
     E: Send + 'static,
 {
     type Response = T::Response;
