@@ -59,7 +59,7 @@ impl StartCmd {
         );
 
         let config = app_config().network.clone();
-        let state = zebra_state::in_memory::init();
+        let state = zebra_state::on_disk::init(zebra_state::Config::default());
         let (peer_set, _address_book) = zebra_network::init(config, node).await;
         let retry_peer_set = tower::retry::Retry::new(zebra_network::RetryErrors, peer_set.clone());
 
