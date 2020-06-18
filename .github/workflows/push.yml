@@ -46,9 +46,28 @@ jobs:
       run: |
         gcloud compute instance-templates create-with-container "zebrad-$SHORT_BRANCH_NAME-$SHA7" \
           --container-image "gcr.io/$PROJECT_ID/$BRANCH_NAME:$SHA7" \
+          --machine-type n1-highmem-8 \
           --service-account cos-vm@zealous-zebra.iam.gserviceaccount.com \
           --scopes cloud-platform \
-          --machine-type n1-highmem-8 \
+          --tags zebrad \
+
+    # Run once: create firewall rule to allow healthchecks
+    # - name: Create healthcheck firewall rule
+    #   run: |
+    #     gcloud compute firewall-rules create "allow-tracing-health-check" \
+    #     --target-tags zebrad \
+    #     --allow tcp:3000 \
+    #     --source-ranges 130.211.0.0/22,35.191.0.0/16 \
+    #     --description="Allow HTTP requests to our tracing endpoint from Google's probes" \
+
+    # Run once: create firewall rule to allow incoming traffic to the nodes
+    # - name: Create Zcash incoming traffic firewall rule
+    #   run: |
+    #     gcloud compute firewall-rules create "allow-zcash" \
+    #     --target-tags zebrad \
+    #     --allow tcp:8233,tcp:18233 \
+    #     --source-ranges 0.0.0.0/0 \
+    #     --description="Allow incoming Zcash traffic from anywhere" \
 
     # Deploy managed instance group using the new instance template
     - name: Deploy managed instance group
@@ -62,6 +81,6 @@ jobs:
           "zebrad-$SHORT_BRANCH_NAME-$SHA7" \
           --template "zebrad-$SHORT_BRANCH_NAME-$SHA7" \
           --health-check zebrad-tracing-filter \
-          --initial-delay 60 \
+          --initial-delay 180 \
           --region us-central1 \
-          --size 2 \
+          --size 2
