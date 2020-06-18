@@ -13,13 +13,26 @@ use tower::Service;
 
 /// Future that completes when the batch processing is complete.
 #[pin_project]
-#[derive(Debug)]
 pub struct ResponseFuture<T, E, R>
 where
     T: Service<crate::BatchControl<R>>,
 {
     #[pin]
     state: ResponseState<T, E, R>,
+}
+
+impl<T, E, R> Debug for ResponseFuture<T, E, R>
+where
+    T: Service<crate::BatchControl<R>>,
+    T::Future: Debug,
+    T::Error: Debug,
+    E: Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ResponseFuture")
+            .field("state", &self.state)
+            .finish()
+    }
 }
 
 #[pin_project(project = ResponseStateProj)]
@@ -35,9 +48,16 @@ where
 impl<T, E, R> Debug for ResponseState<T, E, R>
 where
     T: Service<crate::BatchControl<R>>,
+    T::Future: Debug,
+    T::Error: Debug,
+    E: Debug,
 {
-    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ResponseState::Failed(e) => f.debug_tuple("ResponseState::Failed").field(e).finish(),
+            ResponseState::Rx(rx) => f.debug_tuple("ResponseState::Rx").field(rx).finish(),
+            ResponseState::Poll(fut) => f.debug_tuple("ResponseState::Pool").field(fut).finish(),
+        }
     }
 }
 
