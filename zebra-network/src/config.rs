@@ -9,7 +9,7 @@ use zebra_chain::Network;
 
 /// Configuration for networking code.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default)]
 pub struct Config {
     /// The address on which this node should listen for connections.
     pub listen_addr: SocketAddr,
