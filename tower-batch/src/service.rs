@@ -17,19 +17,19 @@ use tower::Service;
 ///
 /// See the module documentation for more details.
 #[derive(Debug)]
-pub struct Batch<T, Request, E2 = crate::BoxError>
+pub struct Batch<S, Request, E2 = crate::BoxError>
 where
-    T: Service<BatchControl<Request>>,
+    S: Service<BatchControl<Request>>,
 {
-    tx: mpsc::Sender<Message<Request, T::Future, T::Error>>,
-    handle: Handle<T::Error, E2>,
+    tx: mpsc::Sender<Message<Request, S::Future, S::Error>>,
+    handle: Handle<S::Error, E2>,
     _e: PhantomData<E2>,
 }
 
-impl<T, Request, E2> Batch<T, Request, E2>
+impl<S, Request, E2> Batch<S, Request, E2>
 where
-    T: Service<BatchControl<Request>>,
-    T::Error: Into<E2> + Clone,
+    S: Service<BatchControl<Request>>,
+    S::Error: Into<E2> + Clone,
     E2: Send + 'static,
     crate::error::Closed: Into<E2>,
     // crate::error::Closed: Into<<Self as Service<Request>>::Error> + Send + Sync + 'static,
@@ -45,11 +45,11 @@ where
     ///
     /// The default Tokio executor is used to run the given service, which means
     /// that this method must be called while on the Tokio runtime.
-    pub fn new(service: T, max_items: usize, max_latency: std::time::Duration) -> Self
+    pub fn new(service: S, max_items: usize, max_latency: std::time::Duration) -> Self
     where
-        T: Send + 'static,
-        T::Future: Send,
-        T::Error: Send + Sync + Clone,
+        S: Send + 'static,
+        S::Future: Send,
+        S::Error: Send + Sync + Clone,
         Request: Send + 'static,
     {
         // XXX(hdevalence): is this bound good
@@ -68,16 +68,16 @@ where
     }
 }
 
-impl<T, Request, E2> Service<Request> for Batch<T, Request, E2>
+impl<S, Request, E2> Service<Request> for Batch<S, Request, E2>
 where
-    T: Service<BatchControl<Request>>,
+    S: Service<BatchControl<Request>>,
     crate::error::Closed: Into<E2>,
-    T::Error: Into<E2> + Clone,
+    S::Error: Into<E2> + Clone,
     E2: Send + 'static,
 {
-    type Response = T::Response;
+    type Response = S::Response;
     type Error = E2;
-    type Future = ResponseFuture<T, E2, Request>;
+    type Future = ResponseFuture<S, E2, Request>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         // If the inner service has errored, then we error here.
@@ -119,9 +119,9 @@ where
     }
 }
 
-impl<T, Request> Clone for Batch<T, Request>
+impl<S, Request> Clone for Batch<S, Request>
 where
-    T: Service<BatchControl<Request>>,
+    S: Service<BatchControl<Request>>,
 {
     fn clone(&self) -> Self {
         Self {
