@@ -20,7 +20,5 @@ RUN rustc -V; cargo -V; rustup -V; cargo test --all && cargo build --release
 
 FROM debian:buster-slim
 COPY --from=builder /zebra/target/release/zebrad /
-EXPOSE 3000
-EXPOSE 8233
-EXPOSE 18233
+EXPOSE 3000 8233 18233
 CMD [ "/zebrad", "start" ]
