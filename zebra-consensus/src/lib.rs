@@ -13,5 +13,6 @@
 #![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_consensus")]
 #![deny(missing_docs)]
 
+pub mod checkpoint;
 pub mod mempool;
 pub mod verify;
