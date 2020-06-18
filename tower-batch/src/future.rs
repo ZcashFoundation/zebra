@@ -13,19 +13,19 @@ use tower::Service;
 
 /// Future that completes when the batch processing is complete.
 #[pin_project]
-pub struct ResponseFuture<T, E, R>
+pub struct ResponseFuture<S, E, Response>
 where
-    T: Service<crate::BatchControl<R>>,
+    S: Service<crate::BatchControl<Response>>,
 {
     #[pin]
-    state: ResponseState<T, E, R>,
+    state: ResponseState<S, E, Response>,
 }
 
-impl<T, E, R> Debug for ResponseFuture<T, E, R>
+impl<S, E, Response> Debug for ResponseFuture<S, E, Response>
 where
-    T: Service<crate::BatchControl<R>>,
-    T::Future: Debug,
-    T::Error: Debug,
+    S: Service<crate::BatchControl<Response>>,
+    S::Future: Debug,
+    S::Error: Debug,
     E: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -36,20 +36,20 @@ where
 }
 
 #[pin_project(project = ResponseStateProj)]
-enum ResponseState<T, E, R>
+enum ResponseState<S, E, Response>
 where
-    T: Service<crate::BatchControl<R>>,
+    S: Service<crate::BatchControl<Response>>,
 {
     Failed(Option<E>),
-    Rx(#[pin] message::Rx<T::Future, T::Error>),
-    Poll(#[pin] T::Future),
+    Rx(#[pin] message::Rx<S::Future, S::Error>),
+    Poll(#[pin] S::Future),
 }
 
-impl<T, E, R> Debug for ResponseState<T, E, R>
+impl<S, E, Response> Debug for ResponseState<S, E, Response>
 where
-    T: Service<crate::BatchControl<R>>,
-    T::Future: Debug,
-    T::Error: Debug,
+    S: Service<crate::BatchControl<Response>>,
+    S::Future: Debug,
+    S::Error: Debug,
     E: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -61,11 +61,11 @@ where
     }
 }
 
-impl<T, E, R> ResponseFuture<T, E, R>
+impl<S, E, Response> ResponseFuture<S, E, Response>
 where
-    T: Service<crate::BatchControl<R>>,
+    S: Service<crate::BatchControl<Response>>,
 {
-    pub(crate) fn new(rx: message::Rx<T::Future, T::Error>) -> Self {
+    pub(crate) fn new(rx: message::Rx<S::Future, S::Error>) -> Self {
         ResponseFuture {
             state: ResponseState::Rx(rx),
         }
@@ -78,9 +78,9 @@ where
     }
 }
 
-impl<S, E2, R> Future for ResponseFuture<S, E2, R>
+impl<S, E2, Response> Future for ResponseFuture<S, E2, Response>
 where
-    S: Service<crate::BatchControl<R>>,
+    S: Service<crate::BatchControl<Response>>,
     S::Future: Future<Output = Result<S::Response, S::Error>>,
     S::Error: Into<E2>,
     crate::error::Closed: Into<E2>,
