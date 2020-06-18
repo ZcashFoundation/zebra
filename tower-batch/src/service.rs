@@ -17,21 +17,21 @@ use tower::Service;
 ///
 /// See the module documentation for more details.
 #[derive(Debug)]
-pub struct Batch<T, Request, E = crate::BoxError>
+pub struct Batch<T, Request, E2 = crate::BoxError>
 where
     T: Service<BatchControl<Request>>,
 {
     tx: mpsc::Sender<Message<Request, T::Future, T::Error>>,
-    handle: Handle<T::Error, E>,
-    _error_type: PhantomData<E>,
+    handle: Handle<T::Error, E2>,
+    _e: PhantomData<E2>,
 }
 
-impl<T, Request, E> Batch<T, Request, E>
+impl<T, Request, E2> Batch<T, Request, E2>
 where
     T: Service<BatchControl<Request>>,
-    T::Error: Into<E> + Clone,
-    E: Send + 'static,
-    crate::error::Closed: Into<E>,
+    T::Error: Into<E2> + Clone,
+    E2: Send + 'static,
+    crate::error::Closed: Into<E2>,
     // crate::error::Closed: Into<<Self as Service<Request>>::Error> + Send + Sync + 'static,
     // crate::error::ServiceError: Into<<Self as Service<Request>>::Error> + Send + Sync + 'static,
 {
@@ -59,25 +59,25 @@ where
         Batch {
             tx,
             handle,
-            _error_type: PhantomData,
+            _e: PhantomData,
         }
     }
 
-    fn get_worker_error(&self) -> E {
+    fn get_worker_error(&self) -> E2 {
         self.handle.get_error_on_closed()
     }
 }
 
-impl<T, Request, E> Service<Request> for Batch<T, Request, E>
+impl<T, Request, E2> Service<Request> for Batch<T, Request, E2>
 where
     T: Service<BatchControl<Request>>,
-    crate::error::Closed: Into<E>,
-    T::Error: Into<E> + Clone,
-    E: Send + 'static,
+    crate::error::Closed: Into<E2>,
+    T::Error: Into<E2> + Clone,
+    E2: Send + 'static,
 {
     type Response = T::Response;
-    type Error = E;
-    type Future = ResponseFuture<T, E, Request>;
+    type Error = E2;
+    type Future = ResponseFuture<T, E2, Request>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         // If the inner service has errored, then we error here.
@@ -127,7 +127,7 @@ where
         Self {
             tx: self.tx.clone(),
             handle: self.handle.clone(),
-            _error_type: PhantomData,
+            _e: PhantomData,
         }
     }
 }

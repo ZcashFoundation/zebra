@@ -26,18 +26,18 @@ use tracing_futures::Instrument;
 /// implement (only call).
 #[pin_project]
 #[derive(Debug)]
-pub struct Worker<T, Request, E>
+pub struct Worker<S, Request, E2>
 where
-    T: Service<BatchControl<Request>>,
-    T::Error: Into<E>,
+    S: Service<BatchControl<Request>>,
+    S::Error: Into<E2>,
 {
-    rx: mpsc::Receiver<Message<Request, T::Future, T::Error>>,
-    service: T,
-    failed: Option<T::Error>,
-    handle: Handle<T::Error, E>,
+    rx: mpsc::Receiver<Message<Request, S::Future, S::Error>>,
+    service: S,
+    failed: Option<S::Error>,
+    handle: Handle<S::Error, E2>,
     max_items: usize,
     max_latency: std::time::Duration,
-    _error_type: PhantomData<E>,
+    _e: PhantomData<E2>,
 }
 
 /// Get the error out
@@ -47,17 +47,17 @@ pub(crate) struct Handle<E, E2> {
     _e: PhantomData<E2>,
 }
 
-impl<T, Request, E> Worker<T, Request, E>
+impl<S, Request, E2> Worker<S, Request, E2>
 where
-    T: Service<BatchControl<Request>>,
-    T::Error: Into<E> + Clone,
+    S: Service<BatchControl<Request>>,
+    S::Error: Into<E2> + Clone,
 {
     pub(crate) fn new(
-        service: T,
-        rx: mpsc::Receiver<Message<Request, T::Future, T::Error>>,
+        service: S,
+        rx: mpsc::Receiver<Message<Request, S::Future, S::Error>>,
         max_items: usize,
         max_latency: std::time::Duration,
-    ) -> (Handle<T::Error, E>, Worker<T, Request, E>) {
+    ) -> (Handle<S::Error, E2>, Worker<S, Request, E2>) {
         let handle = Handle {
             inner: Arc::new(Mutex::new(None)),
             _e: PhantomData,
@@ -70,13 +70,13 @@ where
             failed: None,
             max_items,
             max_latency,
-            _error_type: PhantomData,
+            _e: PhantomData,
         };
 
         (handle, worker)
     }
 
-    async fn process_req(&mut self, req: Request, tx: message::Tx<T::Future, T::Error>) {
+    async fn process_req(&mut self, req: Request, tx: message::Tx<S::Future, S::Error>) {
         if let Some(failed) = self.failed.clone() {
             tracing::trace!("notifying caller about worker failure");
             let _ = tx.send(Err(failed));
@@ -171,11 +171,12 @@ where
         }
     }
 
-    fn failed(&mut self, error: T::Error) {
-        // The underlying service failed when we called `poll_ready` on it with the given `error`. We
-        // need to communicate this to all the `Buffer` handles. To do so, we wrap up the error in
-        // an `Arc`, send that `Arc<E>` to all pending requests, and store it so that subsequent
-        // requests will also fail with the same error.
+    fn failed(&mut self, error: S::Error) {
+        // The underlying service failed when we called `poll_ready` on it with
+        // the given `error`. We need to communicate this to all the `Buffer`
+        // handles. To do so, we require that `S::Error` implements `Clone`,
+        // clone the error to send to all pending requests, and store it so that
+        // subsequent requests will also fail with the same error.
 
         // Note that we need to handle the case where some handle is concurrently trying to send us
         // a request. We need to make sure that *either* the send of the request fails *or* it
