@@ -34,6 +34,8 @@ where
         + 'static,
     ZS::Future: Send,
 {
+    /// Given a block_locator list fan out request for subsequent hashes to
+    /// multiple peers
     pub async fn populate_prospectives(
         &mut self,
         block_locator: Vec<BlockHeaderHash>,
@@ -53,6 +55,8 @@ where
         Ok(())
     }
 
+    /// Drive all chain extending futures to completion, request unknown blocks,
+    /// and extend prospective chain requests
     pub async fn extend_chains(&mut self) -> Result<(), Report> {
         let mut tip_set = HashSet::<BlockHeaderHash>::new();
         while !self.tip_requests.is_empty() {
@@ -84,6 +88,7 @@ where
         Ok(())
     }
 
+    /// Queue downloads for each block that isn't currently known to our node
     pub async fn request_blocks(&mut self, mut hashes: Vec<BlockHeaderHash>) -> Result<(), Report> {
         hashes.retain(|hash| !self.known_block(hash));
 
@@ -93,6 +98,8 @@ where
         Ok(())
     }
 
+    /// Drive block downloading futures to completion and dispatch downloaded
+    /// blocks to the validator
     pub async fn process_blocks(&mut self) -> Result<(), Report> {
         while let Some(res) = self.block_requests.next().await {
             match res.map_err::<Report, _>(|e| eyre!(e)) {
@@ -115,6 +122,8 @@ where
         Ok(())
     }
 
+    /// Validate a downloaded block using the validator service, inserting the
+    /// block into the state if successful
     #[tracing::instrument(skip(self))]
     async fn validate_block(
         &mut self,
@@ -140,14 +149,18 @@ where
         Ok(())
     }
 
+    /// Returns true if the block is being downloaded or has been validated
     fn known_block(&self, hash: &BlockHeaderHash) -> bool {
         self.downloading.contains(hash) || self.state_contains(hash)
     }
 
+    /// Returns true if the block has been validated and inserted into the chain
+    /// state
     fn state_contains(&self, hash: &BlockHeaderHash) -> bool {
         todo!()
     }
 
+    /// Queue a future to download a set of blocks from the network
     async fn queue_download(&mut self, chunk: &[BlockHeaderHash]) -> Result<(), Report> {
         let set = chunk.iter().cloned().collect();
 
@@ -165,6 +178,7 @@ where
     }
 }
 
+/// Get the heights of the blocks for constructing a block_locator list
 pub fn block_locator_heights(tip_height: BlockHeight) -> impl Iterator<Item = BlockHeight> {
     iter::successors(Some(1u32), |h| h.checked_mul(2))
         .flat_map(move |step| tip_height.0.checked_sub(step))

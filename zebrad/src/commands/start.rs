@@ -74,24 +74,6 @@ impl StartCmd {
             block_locator: Vec::new(),
         };
 
-        // TODO(jlusby): Replace with real state service
-
-        // while syncer.requested_block_heights < 700_000 {
-        //     let hashes = syncer.next_hashes().await?;
-        //     syncer.tip = *hashes.last().unwrap();
-
-        //     // Request the corresponding blocks in chunks
-        //     syncer.request_blocks(hashes).await?;
-
-        //     // Allow at most 300 block requests in flight.
-        //     syncer.drain_requests(300).await?;
-        // }
-
-        // syncer.drain_requests(0).await?;
-
-        // let eternity = future::pending::<()>();
-        // eternity.await;
-
         Ok(())
     }
 }
