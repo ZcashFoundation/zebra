@@ -114,8 +114,10 @@ where
     }
 }
 
-// TODO(teor): add a function for the maximum checkpoint height
-// We can pre-calculate the result in init(), if we want.
+// TODO(teor):
+//   - add a function for the maximum checkpoint height
+//     (We can pre-calculate the result in init(), if we want.)
+//   - check that block.coinbase_height() <= max_checkpoint_height
 
 /// Return a checkpoint verification service, using the provided state service.
 ///
