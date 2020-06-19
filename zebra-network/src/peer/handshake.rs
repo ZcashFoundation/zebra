@@ -121,10 +121,7 @@ where
                 services: PeerServices::NODE_NETWORK,
                 timestamp: Utc::now(),
                 address_recv: (PeerServices::NODE_NETWORK, addr),
-                address_from: (
-                    PeerServices::NODE_NETWORK,
-                    "127.0.0.1:9000".parse().unwrap(),
-                ),
+                address_from: (PeerServices::NODE_NETWORK, "0.0.0.0:9000".parse().unwrap()),
                 nonce: local_nonce,
                 user_agent,
                 // XXX eventually the `PeerConnector` will need to have a handle
