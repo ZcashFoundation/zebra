@@ -14,8 +14,11 @@
 #![allow(clippy::try_err)]
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::sync::Arc;
-use zebra_chain::block::{Block, BlockHeaderHash};
+use std::{ops::Range, sync::Arc};
+use zebra_chain::{
+    block::{Block, BlockHeaderHash},
+    types::BlockHeight,
+};
 
 pub mod in_memory;
 pub mod on_disk;
@@ -58,12 +61,17 @@ pub enum Request {
     },
     /// Get the block that is the tip of the current chain
     GetTip,
+    /// Get the set of hashes for every block in the state service
+    GetKnownBlockHashes {
+        /// the range of heights to restrict the blocks too
+        range: Range<BlockHeight>,
+    },
 }
 
 #[derive(Debug, PartialEq)]
 /// A state response
 pub enum Response {
-    /// A response to a `AddBlock` request indicating a block was successfully
+    /// The response to a `AddBlock` request indicating a block was successfully
     /// added to the state
     Added {
         /// The hash of the block that was added
@@ -78,6 +86,11 @@ pub enum Response {
     Tip {
         /// The hash of the block at the tip of the current chain
         hash: BlockHeaderHash,
+    },
+    /// The  response to a `GetKnownBlockHashes` request
+    KnownBlockHashes {
+        /// the hashes of all known blocks that were requested
+        hashes: Vec<BlockHeaderHash>,
     },
 }
 

@@ -17,6 +17,7 @@ where
     pub block_requests: FuturesUnordered<ZN::Future>,
     pub block_locator: Vec<BlockHeaderHash>,
     pub downloading: HashSet<BlockHeaderHash>,
+    pub downloaded: HashSet<BlockHeaderHash>,
     // TODO(jlusby): move to a config
     pub fanout: u32,
 }
@@ -34,6 +35,15 @@ where
         + 'static,
     ZS::Future: Send,
 {
+    pub async fn run(&mut self) -> Result<(), Report> {
+        loop {
+            if self.tip_requests.is_empty() {
+                self.populate_prospectives(vec![super::GENESIS]).await?;
+            }
+
+            self.extend_chains().await?;
+        }
+    }
     /// Given a block_locator list fan out request for subsequent hashes to
     /// multiple peers
     pub async fn populate_prospectives(
@@ -105,10 +115,12 @@ where
             match res.map_err::<Report, _>(|e| eyre!(e)) {
                 Ok(zebra_network::Response::Blocks(blocks)) => {
                     for block in blocks {
+                        let hash = block.as_ref().into();
                         assert!(
-                            self.downloading.remove(&block.as_ref().into()),
+                            self.downloading.remove(&hash),
                             "all received blocks should be explicitly requested and received once"
                         );
+                        let _ = self.downloaded.insert(hash);
                         self.validate_block(block).await?;
                     }
                 }
@@ -149,15 +161,9 @@ where
         Ok(())
     }
 
-    /// Returns true if the block is being downloaded or has been validated
+    /// Returns true if the block is being downloaded or has been downloaded
     fn known_block(&self, hash: &BlockHeaderHash) -> bool {
-        self.downloading.contains(hash) || self.state_contains(hash)
-    }
-
-    /// Returns true if the block has been validated and inserted into the chain
-    /// state
-    fn state_contains(&self, hash: &BlockHeaderHash) -> bool {
-        todo!()
+        self.downloading.contains(hash) || self.downloaded.contains(hash)
     }
 
     /// Queue a future to download a set of blocks from the network

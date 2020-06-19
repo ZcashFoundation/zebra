@@ -60,6 +60,10 @@ impl Service<Request> for InMemoryState {
 
                 async move { result }.boxed()
             }
+            Request::GetKnownBlockHashes { range } => {
+                let hashes = self.index.range(range);
+                async move { Ok(Response::KnownBlockHashes { hashes }) }.boxed()
+            }
         }
     }
 }

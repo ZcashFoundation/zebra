@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::{
     error,
     future::Future,
+    ops::Range,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -88,6 +89,22 @@ impl SledState {
             None => Ok(None),
         }
     }
+
+    fn range(&self, range: Range<BlockHeight>) -> Result<Vec<BlockHeaderHash>, Error> {
+        let range = BytesHeight::from(range.start)..BytesHeight::from(range.end);
+        let tree = self.storage.open_tree(b"by_height")?;
+
+        tree.range(range)
+            .values()
+            .map(|res| {
+                res.map_err(Error::from).and_then(|bytes| {
+                    ZcashDeserialize::zcash_deserialize(&bytes[..])
+                        .map_err(Into::into)
+                        .map(|block: Block| BlockHeaderHash::from(&block))
+                })
+            })
+            .collect()
+    }
 }
 
 impl Default for SledState {
@@ -134,7 +151,34 @@ impl Service<Request> for SledState {
                 }
                 .boxed()
             }
+            Request::GetKnownBlockHashes { range } => {
+                let storage = self.clone();
+
+                async move {
+                    let hashes = storage.range(range)?;
+
+                    Ok(Response::KnownBlockHashes { hashes })
+                }
+                .boxed()
+            }
         }
+    }
+}
+
+/// An alternate repr for `BlockHeight` that implements `AsRef<[u8]>` for usage
+/// with sled
+struct BytesHeight(u32, [u8; 4]);
+
+impl From<BlockHeight> for BytesHeight {
+    fn from(height: BlockHeight) -> Self {
+        let bytes = height.0.to_be_bytes();
+        Self(height.0, bytes)
+    }
+}
+
+impl AsRef<[u8]> for BytesHeight {
+    fn as_ref(&self) -> &[u8] {
+        &self.1[..]
     }
 }
 

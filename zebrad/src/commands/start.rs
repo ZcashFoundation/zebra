@@ -59,22 +59,22 @@ impl StartCmd {
         let config = app_config().network.clone();
         let state = zebra_state::on_disk::init(zebra_state::Config::default());
         let (peer_set, _address_book) = zebra_network::init(config, node).await;
-        let retry_peer_set = tower::retry::Retry::new(zebra_network::RetryErrors, peer_set.clone());
 
         let mut downloaded_block_heights = BTreeSet::<BlockHeight>::new();
         downloaded_block_heights.insert(BlockHeight(0));
 
-        let mut _syncer = sync::Syncer {
+        let mut syncer = sync::Syncer {
             peer_set,
             state,
             tip_requests: FuturesUnordered::new(),
             block_requests: FuturesUnordered::new(),
             downloading: HashSet::new(),
+            downloaded: HashSet::new(),
             fanout: 4,
             block_locator: Vec::new(),
         };
 
-        Ok(())
+        syncer.run().await
     }
 }
 
