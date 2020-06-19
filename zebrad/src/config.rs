@@ -52,7 +52,7 @@ pub struct MetricsSection {
 impl Default for MetricsSection {
     fn default() -> Self {
         Self {
-            endpoint_addr: "127.0.0.1:9999".parse().unwrap(),
+            endpoint_addr: "0.0.0.0:9999".parse().unwrap(),
         }
     }
 }

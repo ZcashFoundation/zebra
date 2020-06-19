@@ -22,7 +22,7 @@ impl MetricsEndpoint {
         info!("Initializing metrics endpoint");
 
         // XXX load metrics addr from config
-        let addr = "127.0.0.1:9999"
+        let addr = "0.0.0.0:9999"
             .parse()
             .expect("Hardcoded address should be parseable");
 

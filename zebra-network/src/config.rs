@@ -89,7 +89,7 @@ impl Default for Config {
         .collect();
 
         Config {
-            listen_addr: "127.0.0.1:8233"
+            listen_addr: "0.0.0.0:8233"
                 .parse()
                 .expect("Hardcoded address should be parseable"),
             user_agent: crate::constants::USER_AGENT.to_owned(),
