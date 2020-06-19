@@ -44,6 +44,7 @@ where
 
             info!("extending prospective chains");
             self.extend_chains().await?;
+            self.process_blocks().await?;
         }
     }
     /// Given a block_locator list fan out request for subsequent hashes to
@@ -119,9 +120,12 @@ where
     /// Drive block downloading futures to completion and dispatch downloaded
     /// blocks to the validator
     pub async fn process_blocks(&mut self) -> Result<(), Report> {
+        info!(in_flight = self.block_requests.len(), "processing blocks");
+
         while let Some(res) = self.block_requests.next().await {
             match res.map_err::<Report, _>(|e| eyre!(e)) {
                 Ok(zebra_network::Response::Blocks(blocks)) => {
+                    info!(count = blocks.len(), "received blocks");
                     for block in blocks {
                         let hash = block.as_ref().into();
                         assert!(
