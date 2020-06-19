@@ -38,9 +38,11 @@ where
     pub async fn run(&mut self) -> Result<(), Report> {
         loop {
             if self.tip_requests.is_empty() {
+                info!("populating prospective chain list");
                 self.populate_prospectives(vec![super::GENESIS]).await?;
             }
 
+            info!("extending prospective chains");
             self.extend_chains().await?;
         }
     }
@@ -78,6 +80,12 @@ where
                 .map_err::<Report, _>(|e| eyre!(e))
             {
                 Ok(zebra_network::Response::BlockHeaderHashes(hashes)) => {
+                    info!(
+                        new_hashes = hashes.len(),
+                        in_flight = self.block_requests.len(),
+                        downloaded = self.downloaded.len(),
+                        "requested more hashes"
+                    );
                     let new_tip = hashes[0];
                     let _ = tip_set.insert(new_tip);
                     self.request_blocks(hashes).await?;
