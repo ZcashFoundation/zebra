@@ -35,7 +35,7 @@ struct CheckpointVerifier<S> {
     /// which only happen in the last few hundred blocks in the chain.
     /// (zcashd allows chain reorganizations up to 99 blocks, and prunes
     /// orphaned side-chains after 288 blocks.)
-    checkpoint_list: Option<HashMap<BlockHeight, BlockHeaderHash>>,
+    checkpoint_list: HashMap<BlockHeight, BlockHeaderHash>,
 }
 
 /// The error type for the CheckpointVerifier Service.
@@ -64,9 +64,8 @@ where
 
         // These checks are cheap, so we can do them in the call()
 
-        let checkpoints = match &self.checkpoint_list {
-            Some(checkpoints) => checkpoints,
-            None => return async { Err("the checkpoint list is empty".into()) }.boxed(),
+        if self.checkpoint_list.is_empty() {
+            return async { Err("the checkpoint list is empty".into()) }.boxed();
         };
 
         let block_height = match block.coinbase_height() {
@@ -80,16 +79,13 @@ where
         //   - implement chaining from checkpoints to their ancestors
         //   - if chaining is expensive, move this check to the Future
         //   - should the state contain a mapping from previous_block_hash to block?
-        let checkpoint_hash_ref = match checkpoints.get(&block_height) {
-            Some(hash) => hash,
+        let checkpoint_hash = match self.checkpoint_list.get(&block_height) {
+            Some(&hash) => hash,
             None => {
                 return async { Err("the block's height is not a checkpoint height".into()) }
                     .boxed()
             }
         };
-
-        // Avoid moving a reference into the future.
-        let checkpoint_hash = *checkpoint_hash_ref;
 
         // `state_service.call` is OK here because we already called
         // `state_service.poll_ready` in our `poll_ready`.
@@ -131,7 +127,7 @@ where
 /// backed by the same state layer.
 pub fn init<S>(
     state_service: S,
-    checkpoint_list: Option<HashMap<BlockHeight, BlockHeaderHash>>,
+    checkpoint_list: HashMap<BlockHeight, BlockHeaderHash>,
 ) -> impl Service<
     Arc<Block>,
     Response = BlockHeaderHash,
