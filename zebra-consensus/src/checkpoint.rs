@@ -35,7 +35,7 @@ struct CheckpointVerifier<S> {
     /// which only happen in the last few hundred blocks in the chain.
     /// (zcashd allows chain reorganizations up to 99 blocks, and prunes
     /// orphaned side-chains after 288 blocks.)
-    checkpoint_list: HashMap<BlockHeight, BlockHeaderHash>,
+    checkpoint_list: Arc<HashMap<BlockHeight, BlockHeaderHash>>,
 }
 
 /// The error type for the CheckpointVerifier Service.
@@ -47,7 +47,10 @@ type Error = Box<dyn error::Error + Send + Sync + 'static>;
 /// After verification, blocks are added to the underlying state service.
 impl<S> Service<Arc<Block>> for CheckpointVerifier<S>
 where
-    S: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>,
+    S: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>
+        + Send
+        + Clone
+        + 'static,
     S::Future: Send + 'static,
 {
     type Response = BlockHeaderHash;
@@ -61,44 +64,39 @@ where
 
     fn call(&mut self, block: Arc<Block>) -> Self::Future {
         // TODO(jlusby): Error = Report, handle errors from state_service.
-
-        // These checks are cheap, so we can do them in the call()
-
-        if self.checkpoint_list.is_empty() {
-            return async { Err("the checkpoint list is empty".into()) }.boxed();
-        };
-
-        let block_height = match block.coinbase_height() {
-            Some(height) => height,
-            None => {
-                return async { Err("the block does not have a coinbase height".into()) }.boxed()
-            }
-        };
-
-        // TODO(teor):
-        //   - implement chaining from checkpoints to their ancestors
-        //   - if chaining is expensive, move this check to the Future
-        //   - should the state contain a mapping from previous_block_hash to block?
-        let checkpoint_hash = match self.checkpoint_list.get(&block_height) {
-            Some(&hash) => hash,
-            None => {
-                return async { Err("the block's height is not a checkpoint height".into()) }
-                    .boxed()
-            }
-        };
-
-        // `state_service.call` is OK here because we already called
-        // `state_service.poll_ready` in our `poll_ready`.
-        let add_block = self.state_service.call(zebra_state::Request::AddBlock {
-            block: block.clone(),
-        });
+        let mut state_service = self.state_service.clone();
+        let checkpoint_list = self.checkpoint_list.clone();
 
         async move {
-            // Hashing is expensive, so we do it in the Future
+            if checkpoint_list.is_empty() {
+                return Err("the checkpoint list is empty".into());
+            };
+
+            let block_height = match block.coinbase_height() {
+                Some(height) => height,
+                None => return Err("the block does not have a coinbase height".into()),
+            };
+
+            // TODO(teor):
+            //   - implement chaining from checkpoints to their ancestors
+            //   - if chaining is expensive, move this check to the Future
+            //   - should the state contain a mapping from previous_block_hash to block?
+            let checkpoint_hash = match checkpoint_list.get(&block_height) {
+                Some(&hash) => hash,
+                None => return Err("the block's height is not a checkpoint height".into()),
+            };
+
+            // Hashing is expensive, so we do it as late as possible
             if BlockHeaderHash::from(block.as_ref()) != checkpoint_hash {
                 // The block is on a side-chain
                 return Err("the block hash does not match the checkpoint hash".into());
             }
+
+            // `state_service.call` is OK here because we already called
+            // `state_service.poll_ready` in our `poll_ready`.
+            let add_block = state_service.call(zebra_state::Request::AddBlock {
+                block: block.clone(),
+            });
 
             match add_block.await? {
                 zebra_state::Response::Added { hash } => Ok(hash),
@@ -127,7 +125,7 @@ where
 /// backed by the same state layer.
 pub fn init<S>(
     state_service: S,
-    checkpoint_list: HashMap<BlockHeight, BlockHeaderHash>,
+    checkpoint_list: impl Into<Arc<HashMap<BlockHeight, BlockHeaderHash>>>,
 ) -> impl Service<
     Arc<Block>,
     Response = BlockHeaderHash,
@@ -139,13 +137,14 @@ pub fn init<S>(
 where
     S: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>
         + Send
+        + Clone
         + 'static,
     S::Future: Send + 'static,
 {
     Buffer::new(
         CheckpointVerifier {
             state_service,
-            checkpoint_list,
+            checkpoint_list: checkpoint_list.into(),
         },
         1,
     )
