@@ -20,7 +20,7 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-use tower::Service;
+use tower::{Service, ServiceExt};
 
 use zebra_chain::block::{Block, BlockHeaderHash};
 use zebra_chain::types::BlockHeight;
@@ -58,8 +58,10 @@ where
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
-    fn poll_ready(&mut self, context: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.state_service.poll_ready(context)
+    fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        // We don't expect the state to exert backpressure on verifier users,
+        // so we don't need to call `state_service.poll_ready()` here.
+        Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, block: Arc<Block>) -> Self::Future {
@@ -92,11 +94,16 @@ where
                 return Err("the block hash does not match the checkpoint hash".into());
             }
 
-            // `state_service.call` is OK here because we already called
-            // `state_service.poll_ready` in our `poll_ready`.
-            let add_block = state_service.call(zebra_state::Request::AddBlock {
-                block: block.clone(),
-            });
+            // `Tower::Buffer` requires a 1:1 relationship between `poll()`s
+            // and `call()`s, because it reserves a buffer slot in each
+            // `call()`.
+            // TODO(teor): what happens if the await fails?
+            let add_block = state_service
+                .ready_and()
+                .await?
+                .call(zebra_state::Request::AddBlock {
+                    block: block.clone(),
+                });
 
             match add_block.await? {
                 zebra_state::Response::Added { hash } => Ok(hash),
