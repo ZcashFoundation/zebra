@@ -20,7 +20,7 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-use tower::{buffer::Buffer, Service};
+use tower::Service;
 
 use zebra_chain::block::{Block, BlockHeaderHash};
 use zebra_chain::types::BlockHeight;
@@ -132,7 +132,6 @@ pub fn init<S>(
     Error = Error,
     Future = impl Future<Output = Result<BlockHeaderHash, Error>>,
 > + Send
-       + Clone
        + 'static
 where
     S: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>
@@ -141,13 +140,10 @@ where
         + 'static,
     S::Future: Send + 'static,
 {
-    Buffer::new(
-        CheckpointVerifier {
-            state_service,
-            checkpoint_list: checkpoint_list.into(),
-        },
-        1,
-    )
+    CheckpointVerifier {
+        state_service,
+        checkpoint_list: checkpoint_list.into(),
+    }
 }
 
 // TODO(teor): tests
