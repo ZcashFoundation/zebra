@@ -1,4 +1,4 @@
-use chrono::{DateTime, NaiveDateTime, Utc};
+use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 use std::io::{Cursor, ErrorKind, Write};
 
 use proptest::{
@@ -6,6 +6,10 @@ use proptest::{
     prelude::*,
 };
 
+use crate::equihash_solution::EquihashSolution;
+use crate::merkle_tree::MerkleTreeRootHash;
+use crate::note_commitment_tree::SaplingNoteTreeRootHash;
+use crate::serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize};
 use crate::sha256d_writer::Sha256dWriter;
 
 use super::*;
