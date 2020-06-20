@@ -1,6 +1,6 @@
+use chrono::{DateTime, NaiveDateTime, Utc};
 use std::io::{Cursor, ErrorKind, Write};
 
-use chrono::NaiveDateTime;
 use proptest::{
     arbitrary::{any, Arbitrary},
     prelude::*,
