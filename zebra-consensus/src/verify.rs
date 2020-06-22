@@ -267,11 +267,8 @@ mod tests {
             .await;
 
         ensure!(
-            match verify_result {
-                Ok(_) => false,
-                // TODO(teor || jlusby): check error string
-                _ => true,
-            },
+            // TODO(teor || jlusby): check error string
+            verify_result.is_err(),
             "unexpected result kind: {:?}",
             verify_result
         );
