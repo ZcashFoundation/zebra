@@ -289,13 +289,11 @@ dependencies = [
 
 [[package]]
 name = "color-eyre"
-version = "0.3.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2aaa5f071a62a9c06ebab653ec2e2ba76cb936548a83e7af7f0c5dac525067ff"
+version = "0.5.0"
+source = "git+https://github.com/yaahc/color-eyre.git?branch=hooked#f882a88a7037aa621a42c3719d06a2286aa0f8de"
 dependencies = [
  "ansi_term",
  "backtrace",
- "color-backtrace",
  "color-spantrace",
  "eyre",
  "indenter",
@@ -445,11 +443,11 @@ dependencies = [
 
 [[package]]
 name = "eyre"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e9e412cbea04ea7af520b2f4d4ac1677ce546027a7237d8a40b494e34e1e0e31"
+version = "0.6.0"
+source = "git+https://github.com/yaahc/eyre.git?branch=hooked#48e8006298651b3640ba7214f1b3b129b3babe67"
 dependencies = [
  "indenter",
+ "once_cell",
 ]
 
 [[package]]
@@ -2343,7 +2341,6 @@ name = "zebra-consensus"
 version = "0.1.0"
 dependencies = [
  "color-eyre",
- "eyre",
  "futures-util",
  "spandoc",
  "tokio",
@@ -2397,7 +2394,6 @@ name = "zebra-state"
 version = "0.1.0"
 dependencies = [
  "color-eyre",
- "eyre",
  "futures",
  "hex",
  "lazy_static",
@@ -2430,7 +2426,6 @@ dependencies = [
  "abscissa_core",
  "chrono",
  "color-eyre",
- "eyre",
  "futures",
  "gumdrop",
  "hyper",

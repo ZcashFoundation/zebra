@@ -21,8 +21,8 @@
 use crate::config::ZebradConfig;
 use crate::{components::tokio::TokioComponent, prelude::*};
 use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
-use color_eyre::Report;
-use eyre::{eyre, WrapErr};
+use color_eyre::eyre::Report;
+use color_eyre::eyre::{eyre, WrapErr};
 use futures::{
     prelude::*,
     stream::{FuturesUnordered, StreamExt},

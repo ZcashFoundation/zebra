@@ -7,6 +7,7 @@ use std::{
     time::Duration,
 };
 
+use color_eyre::eyre::Result;
 use ed25519_zebra::*;
 use futures::stream::{FuturesUnordered, StreamExt};
 use rand::thread_rng;
@@ -130,7 +131,7 @@ where
 }
 
 #[tokio::test]
-async fn batch_flushes_on_max_items() -> color_eyre::Result<()> {
+async fn batch_flushes_on_max_items() -> Result<()> {
     use tokio::time::timeout;
     install_tracing();
 
@@ -141,7 +142,7 @@ async fn batch_flushes_on_max_items() -> color_eyre::Result<()> {
 }
 
 #[tokio::test]
-async fn batch_flushes_on_max_latency() -> color_eyre::Result<()> {
+async fn batch_flushes_on_max_latency() -> Result<()> {
     use tokio::time::timeout;
     install_tracing();
 

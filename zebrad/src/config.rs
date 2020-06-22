@@ -59,8 +59,10 @@ impl Default for MetricsSection {
 
 #[cfg(test)]
 mod test {
+    use color_eyre::eyre::Result;
+
     #[test]
-    fn test_toml_ser() -> color_eyre::Result<()> {
+    fn test_toml_ser() -> Result<()> {
         let default_config = super::ZebradConfig::default();
         println!("Default config: {:?}", default_config);
 

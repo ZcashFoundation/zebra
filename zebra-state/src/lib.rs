@@ -84,8 +84,8 @@ pub enum Response {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use color_eyre::Report;
-    use eyre::{bail, ensure, eyre};
+    use color_eyre::eyre::Report;
+    use color_eyre::eyre::{bail, ensure, eyre};
     use std::sync::Once;
     use tower::Service;
     use tracing_error::ErrorLayer;

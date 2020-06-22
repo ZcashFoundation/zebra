@@ -2,8 +2,7 @@
 
 use crate::{components::tokio::TokioComponent, prelude::*};
 use abscissa_core::{Command, Options, Runnable};
-use color_eyre::Report;
-use eyre::{eyre, WrapErr};
+use color_eyre::eyre::{eyre, Report, WrapErr};
 use futures::{
     prelude::*,
     stream::{FuturesUnordered, StreamExt},
