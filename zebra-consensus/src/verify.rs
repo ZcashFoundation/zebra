@@ -105,8 +105,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use color_eyre::Report;
-    use eyre::{bail, ensure, eyre};
+    use color_eyre::eyre::Report;
+    use color_eyre::eyre::{bail, ensure, eyre};
     use tower::{util::ServiceExt, Service};
     use zebra_chain::serialization::ZcashDeserialize;
 
