@@ -26,5 +26,5 @@ spandoc = { git = "https://github.com/yaahc/spandoc.git" }
 tracing = "0.1.15"
 tracing-futures = "0.2.4"
 tracing-error = "0.1.2"
-tracing-subscriber = "0.2.5"
+tracing-subscriber = "0.2.6"
 tempdir = "0.3.7"

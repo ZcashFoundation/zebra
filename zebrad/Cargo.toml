@@ -33,7 +33,7 @@ zebra-network = { path = "../zebra-network" }
 eyre = "0.4.3"
 color-eyre = "0.3.4"
 zebra-state = { path = "../zebra-state" }
-tracing-subscriber = { version = "0.2.5", features = ["tracing-log"] }
+tracing-subscriber = { version = "0.2.6", features = ["tracing-log"] }
 tracing-error = "0.1.2"
 
 [dev-dependencies]
