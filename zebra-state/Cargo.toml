@@ -10,7 +10,7 @@ edition = "2018"
 [dependencies]
 zebra-chain = { path = "../zebra-chain" }
 tower = "0.3.1"
-eyre = "0.4.2"
+eyre = "0.5.0"
 futures = "0.3.5"
 lazy_static = "1.4.0"
 hex = "0.4.2"
@@ -19,7 +19,7 @@ serde = { version = "1", features = ["serde_derive"] }
 
 [dev-dependencies]
 color-eyre = "0.3.4"
-eyre = "0.4.2"
+eyre = "0.5.0"
 tokio = { version = "0.2.21", features = ["full"] }
 zebra-test-vectors = { path = "../zebra-test-vectors/" }
 spandoc = { git = "https://github.com/yaahc/spandoc.git" }
