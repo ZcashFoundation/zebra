@@ -51,6 +51,7 @@ pub(crate) fn node_time_check(
 }
 
 struct BlockVerifier<S> {
+    /// The underlying `ZebraState`, possibly wrapped in other services.
     state_service: S,
 }
 
