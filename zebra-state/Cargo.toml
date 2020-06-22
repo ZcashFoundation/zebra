@@ -25,4 +25,4 @@ tracing-futures = "0.2.4"
 tracing-error = "0.1.2"
 tracing-subscriber = "0.2.6"
 tempdir = "0.3.7"
-color-eyre = { git = "https://github.com/yaahc/color-eyre.git", branch = "hooked" }
+color-eyre = { git = "https://github.com/yaahc/color-eyre.git", branch = "hooked", features = ["capture-spantrace"] }

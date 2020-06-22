@@ -85,6 +85,7 @@ impl Application for ZebradApp {
     ) -> Result<Vec<Box<dyn Component<Self>>>, FrameworkError> {
         let terminal = Terminal::new(self.term_colors(command));
         let tracing = self.tracing_component(command);
+        color_eyre::install().unwrap();
 
         Ok(vec![Box::new(terminal), Box::new(tracing)])
     }

@@ -294,9 +294,22 @@ source = "git+https://github.com/yaahc/color-eyre.git?branch=hooked#f882a88a7037
 dependencies = [
  "ansi_term",
  "backtrace",
+ "color-spantrace",
  "eyre",
  "indenter",
  "once_cell",
+ "tracing-error",
+]
+
+[[package]]
+name = "color-spantrace"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "058b1bb1ea9b128049d3aa4cfbf166c6c8e53f3eade5f40ebb2d2a51cef65058"
+dependencies = [
+ "ansi_term",
+ "tracing-core",
+ "tracing-error",
 ]
 
 [[package]]
