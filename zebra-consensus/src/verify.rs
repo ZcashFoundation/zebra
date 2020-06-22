@@ -8,6 +8,7 @@
 //! Verification is provided via a `tower::Service`, to support backpressure and batch
 //! verification.
 
+use chrono::Utc;
 use futures_util::FutureExt;
 use std::{
     error,
@@ -64,7 +65,9 @@ where
         async move {
             // Since errors cause an early exit, try to do the
             // quick checks first.
-            block::node_time_check(block.clone())?;
+
+            let now = Utc::now();
+            block::node_time_check(block.header.time, now)?;
 
             // `Tower::Buffer` requires a 1:1 relationship between `poll()`s
             // and `call()`s, because it reserves a buffer slot in each

@@ -3,12 +3,22 @@
 use super::Error;
 
 use chrono::{DateTime, Duration, Utc};
-use std::sync::Arc;
 
-use zebra_chain::block::Block;
-
-/// Helper function for `node_time_check()`, see that function for details.
-fn node_time_check_helper(
+/// Check if `block_header_time` is less than or equal to
+/// 2 hours in the future, according to the node's local clock (`now`).
+///
+/// This is a non-deterministic rule, as clocks vary over time, and
+/// between different nodes.
+///
+/// "In addition, a full validator MUST NOT accept blocks with nTime
+/// more than two hours in the future according to its clock. This
+/// is not strictly a consensus rule because it is nondeterministic,
+/// and clock time varies between nodes. Also note that a block that
+/// is rejected by this rule at a given point in time may later be
+/// accepted."[S 7.5][7.5]
+///
+/// [7.5]: https://zips.z.cash/protocol/protocol.pdf#blockheader
+pub(super) fn node_time_check(
     block_header_time: DateTime<Utc>,
     now: DateTime<Utc>,
 ) -> Result<(), Error> {
@@ -23,28 +33,13 @@ fn node_time_check_helper(
     }
 }
 
-/// Check if the block header time is less than or equal to
-/// 2 hours in the future, according to the node's local clock.
-///
-/// This is a non-deterministic rule, as clocks vary over time, and
-/// between different nodes.
-///
-/// "In addition, a full validator MUST NOT accept blocks with nTime
-/// more than two hours in the future according to its clock. This
-/// is not strictly a consensus rule because it is nondeterministic,
-/// and clock time varies between nodes. Also note that a block that
-/// is rejected by this rule at a given point in time may later be
-/// accepted."[S 7.5][7.5]
-///
-/// [7.5]: https://zips.z.cash/protocol/protocol.pdf#blockheader
-pub(super) fn node_time_check(block: Arc<Block>) -> Result<(), Error> {
-    node_time_check_helper(block.header.time, Utc::now())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use chrono::offset::{LocalResult, TimeZone};
+    use std::sync::Arc;
+
+    use zebra_chain::block::Block;
     use zebra_chain::serialization::ZcashDeserialize;
 
     #[test]
@@ -54,12 +49,14 @@ mod tests {
         let block =
             Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])
                 .expect("block should deserialize");
+        let now = Utc::now();
 
         // This check is non-deterministic, but BLOCK_MAINNET_415000 is
         // a long time in the past. So it's unlikely that the test machine
         // will have a clock that's far enough in the past for the test to
         // fail.
-        node_time_check(block).expect("the header time from a mainnet block should be valid");
+        node_time_check(block.header.time, now)
+            .expect("the header time from a mainnet block should be valid");
     }
 
     #[test]
@@ -72,24 +69,23 @@ mod tests {
         let two_hours_and_one_second_in_the_future =
             now + Duration::hours(2) + Duration::seconds(1);
 
-        node_time_check_helper(now, now)
-            .expect("the current time should be valid as a block header time");
-        node_time_check_helper(three_hours_in_the_past, now)
+        node_time_check(now, now).expect("the current time should be valid as a block header time");
+        node_time_check(three_hours_in_the_past, now)
             .expect("a past time should be valid as a block header time");
-        node_time_check_helper(two_hours_in_the_future, now)
+        node_time_check(two_hours_in_the_future, now)
             .expect("2 hours in the future should be valid as a block header time");
-        node_time_check_helper(two_hours_and_one_second_in_the_future, now).expect_err(
+        node_time_check(two_hours_and_one_second_in_the_future, now).expect_err(
             "2 hours and 1 second in the future should be invalid as a block header time",
         );
 
         // Now invert the tests
         // 3 hours in the future should fail
-        node_time_check_helper(now, three_hours_in_the_past)
+        node_time_check(now, three_hours_in_the_past)
             .expect_err("3 hours in the future should be invalid as a block header time");
         // The past should succeed
-        node_time_check_helper(now, two_hours_in_the_future)
+        node_time_check(now, two_hours_in_the_future)
             .expect("2 hours in the past should be valid as a block header time");
-        node_time_check_helper(now, two_hours_and_one_second_in_the_future)
+        node_time_check(now, two_hours_and_one_second_in_the_future)
             .expect("2 hours and 1 second in the past should be valid as a block header time");
     }
 
@@ -149,10 +145,10 @@ mod tests {
                     unreachable!();
                 }
             };
-            node_time_check_helper(block_header_time, now)
+            node_time_check(block_header_time, now)
                 .expect("the time should be valid as a block header time");
             // Invert the check, leading to an invalid time
-            node_time_check_helper(now, block_header_time)
+            node_time_check(now, block_header_time)
                 .expect_err("the inverse comparison should be invalid");
         }
 
@@ -168,10 +164,10 @@ mod tests {
                     unreachable!();
                 }
             };
-            node_time_check_helper(block_header_time, now)
+            node_time_check(block_header_time, now)
                 .expect_err("the time should be invalid as a block header time");
             // Invert the check, leading to a valid time
-            node_time_check_helper(now, block_header_time)
+            node_time_check(now, block_header_time)
                 .expect("the inverse comparison should be valid");
         }
     }
