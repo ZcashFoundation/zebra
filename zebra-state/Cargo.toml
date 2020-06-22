@@ -14,7 +14,7 @@ eyre = "0.4.2"
 futures = "0.3.5"
 lazy_static = "1.4.0"
 hex = "0.4.2"
-sled = "0.31.0"
+sled = "0.32.0"
 serde = { version = "1", features = ["serde_derive"] }
 
 [dev-dependencies]
