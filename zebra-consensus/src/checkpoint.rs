@@ -74,10 +74,9 @@ where
                 return Err("the checkpoint list is empty".into());
             };
 
-            let block_height = match block.coinbase_height() {
-                Some(height) => height,
-                None => return Err("the block does not have a coinbase height".into()),
-            };
+            let block_height = block
+                .coinbase_height()
+                .ok_or("the block does not have a coinbase height")?;
 
             // TODO(teor):
             //   - implement chaining from checkpoints to their ancestors
