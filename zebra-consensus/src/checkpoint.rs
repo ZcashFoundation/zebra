@@ -80,7 +80,6 @@ where
 
             // TODO(teor):
             //   - implement chaining from checkpoints to their ancestors
-            //   - if chaining is expensive, move this check to the Future
             //   - should the state contain a mapping from previous_block_hash to block?
             let checkpoint_hash = match checkpoint_list.get(&block_height) {
                 Some(&hash) => hash,
@@ -96,7 +95,6 @@ where
             // `Tower::Buffer` requires a 1:1 relationship between `poll()`s
             // and `call()`s, because it reserves a buffer slot in each
             // `call()`.
-            // TODO(teor): what happens if the await fails?
             let add_block = state_service
                 .ready_and()
                 .await?
