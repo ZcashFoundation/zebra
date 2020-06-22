@@ -146,7 +146,8 @@ impl ZcashSerialize for BlockHeader {
         writer.write_all(&self.merkle_root_hash.0[..])?;
         writer.write_all(&self.final_sapling_root_hash.0[..])?;
         // this is a truncating cast, rather than a saturating cast
-        // but u32 times are valid until 2106
+        // but u32 times are valid until 2106, and our block verification time
+        // checks should detect any truncation.
         writer.write_u32::<LittleEndian>(self.time.timestamp() as u32)?;
         writer.write_u32::<LittleEndian>(self.bits)?;
         writer.write_all(&self.nonce[..])?;
