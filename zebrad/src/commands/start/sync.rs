@@ -1,4 +1,3 @@
-#![allow(unused_variables, dead_code)]
 use color_eyre::Report;
 use eyre::eyre;
 use futures::stream::{FuturesUnordered, StreamExt};
@@ -18,8 +17,7 @@ where
     pub block_locator: Vec<BlockHeaderHash>,
     pub downloading: HashSet<BlockHeaderHash>,
     pub downloaded: HashSet<BlockHeaderHash>,
-    // TODO(jlusby): move to a config
-    pub fanout: u32,
+    pub fanout: NumReq,
 }
 
 impl<ZN, ZS> Syncer<ZN, ZS>
@@ -38,18 +36,18 @@ where
     pub async fn run(&mut self) -> Result<(), Report> {
         loop {
             if self.tip_requests.is_empty() {
-                info!("populating prospective chain list");
-                self.populate_prospectives(vec![super::GENESIS]).await?;
+                info!("populating prospective tips list");
+                self.get_prospective_tips(vec![super::GENESIS]).await?;
             }
 
-            info!("extending prospective chains");
-            self.extend_chains().await?;
+            info!("extending prospective tips");
+            self.extend_tips().await?;
             self.process_blocks().await?;
         }
     }
     /// Given a block_locator list fan out request for subsequent hashes to
     /// multiple peers
-    pub async fn populate_prospectives(
+    pub async fn get_prospective_tips(
         &mut self,
         block_locator: Vec<BlockHeaderHash>,
     ) -> Result<(), Report> {
@@ -70,7 +68,7 @@ where
 
     /// Drive all chain extending futures to completion, request unknown blocks,
     /// and extend prospective chain requests
-    pub async fn extend_chains(&mut self) -> Result<(), Report> {
+    pub async fn extend_tips(&mut self) -> Result<(), Report> {
         let mut tip_set = HashSet::<BlockHeaderHash>::new();
         while !self.tip_requests.is_empty() {
             match self
@@ -101,7 +99,7 @@ where
         for tip in tip_set {
             let mut block_locator = self.block_locator.clone();
             block_locator[0] = tip;
-            self.populate_prospectives(block_locator).await?;
+            self.get_prospective_tips(block_locator).await?;
         }
 
         Ok(())
@@ -197,6 +195,7 @@ where
 }
 
 /// Get the heights of the blocks for constructing a block_locator list
+#[allow(dead_code)]
 pub fn block_locator_heights(tip_height: BlockHeight) -> impl Iterator<Item = BlockHeight> {
     iter::successors(Some(1u32), |h| h.checked_mul(2))
         .flat_map(move |step| tip_height.0.checked_sub(step))
