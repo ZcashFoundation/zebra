@@ -16,7 +16,7 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-use tower::{buffer::Buffer, Service};
+use tower::{buffer::Buffer, Service, ServiceExt};
 
 use zebra_chain::block::{Block, BlockHeaderHash};
 
@@ -37,7 +37,10 @@ type Error = Box<dyn error::Error + Send + Sync + 'static>;
 /// After verification, blocks are added to the underlying state service.
 impl<S> Service<Arc<Block>> for BlockVerifier<S>
 where
-    S: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>,
+    S: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>
+        + Send
+        + Clone
+        + 'static,
     S::Future: Send + 'static,
 {
     type Response = BlockHeaderHash;
@@ -45,8 +48,10 @@ where
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
-    fn poll_ready(&mut self, context: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.state_service.poll_ready(context)
+    fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        // We don't expect the state to exert backpressure on verifier users,
+        // so we don't need to call `state_service.poll_ready()` here.
+        Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, block: Arc<Block>) -> Self::Future {
@@ -54,33 +59,21 @@ where
         // TODO(teor):
         //   - handle chain reorgs
         //   - adjust state_service "unique block height" conditions
-        //   - move expensive checks into the async block
-
-        // Create an AddBlock Future, but don't run it yet.
-        //
-        // `state_service.call` is OK here because we already called
-        // `state_service.poll_ready` in our `poll_ready`.
-        //
-        // `tower::Buffer` expects exactly one `call` for each
-        // `poll_ready`. So we unconditionally create the AddBlock
-        // Future using `state_service.call`. If verification fails,
-        // we return an error, and implicitly cancel the future.
-        let add_block = self.state_service.call(zebra_state::Request::AddBlock {
-            block: block.clone(),
-        });
+        let mut state_service = self.state_service.clone();
 
         async move {
-            // If verification fails, return an error result.
-            // The AddBlock Future is implicitly cancelled by the
-            // error return in `?`.
-
             // Since errors cause an early exit, try to do the
             // quick checks first.
-            block::node_time_check(block)?;
+            block::node_time_check(block.clone())?;
 
-            // Verification was successful.
-            // Add the block to the state by awaiting the AddBlock
-            // Future, and return its result.
+            // `Tower::Buffer` requires a 1:1 relationship between `poll()`s
+            // and `call()`s, because it reserves a buffer slot in each
+            // `call()`.
+            let add_block = state_service
+                .ready_and()
+                .await?
+                .call(zebra_state::Request::AddBlock { block });
+
             match add_block.await? {
                 zebra_state::Response::Added { hash } => Ok(hash),
                 _ => Err("adding block to zebra-state failed".into()),
@@ -116,6 +109,7 @@ pub fn init<S>(
 where
     S: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>
         + Send
+        + Clone
         + 'static,
     S::Future: Send + 'static,
 {
@@ -125,6 +119,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use chrono::{Duration, Utc};
     use color_eyre::eyre::Report;
     use color_eyre::eyre::{bail, ensure, eyre};
     use tower::{util::ServiceExt, Service};
@@ -292,6 +288,62 @@ mod tests {
             } => assert_eq!(block, returned_block),
             _ => bail!("unexpected response kind: {:?}", state_response),
         }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[spandoc::spandoc]
+    async fn verify_fail_future_time() -> Result<(), Report> {
+        let mut block =
+            <Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])?;
+
+        let mut state_service = zebra_state::in_memory::init();
+        let mut block_verifier = super::init(state_service.clone());
+
+        // Modify the block's time
+        // Changing the block header also invalidates the header hashes, but
+        // those checks should be performed later in validation, because they
+        // are more expensive.
+        let three_hours_in_the_future = Utc::now()
+            .checked_add_signed(Duration::hours(3))
+            .ok_or("overflow when calculating 3 hours in the future")
+            .map_err(|e| eyre!(e))?;
+        block.header.time = three_hours_in_the_future;
+
+        let arc_block: Arc<Block> = block.into();
+
+        // Try to add the block, and expect failure
+        let verify_result = block_verifier
+            .ready_and()
+            .await
+            .map_err(|e| eyre!(e))?
+            .call(arc_block.clone())
+            .await;
+
+        ensure!(
+            // TODO(teor || jlusby): check error string
+            verify_result.is_err(),
+            "unexpected result kind: {:?}",
+            verify_result
+        );
+
+        // Now make sure the block isn't in the state
+        let state_result = state_service
+            .ready_and()
+            .await
+            .map_err(|e| eyre!(e))?
+            .call(zebra_state::Request::GetBlock {
+                hash: arc_block.as_ref().into(),
+            })
+            .await;
+
+        ensure!(
+            // TODO(teor || jlusby): check error string
+            state_result.is_err(),
+            "unexpected result kind: {:?}",
+            verify_result
+        );
 
         Ok(())
     }
