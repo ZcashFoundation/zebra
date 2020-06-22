@@ -37,7 +37,7 @@ where
         loop {
             if self.tip_requests.is_empty() {
                 info!("populating prospective tips list");
-                self.get_prospective_tips(vec![super::GENESIS]).await?;
+                self.obtain_tips(vec![super::GENESIS]).await?;
             }
 
             info!("extending prospective tips");
@@ -47,10 +47,7 @@ where
     }
     /// Given a block_locator list fan out request for subsequent hashes to
     /// multiple peers
-    pub async fn get_prospective_tips(
-        &mut self,
-        block_locator: Vec<BlockHeaderHash>,
-    ) -> Result<(), Report> {
+    pub async fn obtain_tips(&mut self, block_locator: Vec<BlockHeaderHash>) -> Result<(), Report> {
         for _ in 0..self.fanout {
             let req = self.peer_set.ready_and().await.map_err(|e| eyre!(e))?.call(
                 zebra_network::Request::FindBlocks {
@@ -99,7 +96,7 @@ where
         for tip in tip_set {
             let mut block_locator = self.block_locator.clone();
             block_locator[0] = tip;
-            self.get_prospective_tips(block_locator).await?;
+            self.obtain_tips(block_locator).await?;
         }
 
         Ok(())
