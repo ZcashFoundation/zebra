@@ -289,15 +289,15 @@ dependencies = [
 
 [[package]]
 name = "color-eyre"
-version = "0.3.4"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2aaa5f071a62a9c06ebab653ec2e2ba76cb936548a83e7af7f0c5dac525067ff"
+checksum = "acbeb28996b1ff2848387e68a2d0a95acd5d2907852b1df6f720328e453b8ca8"
 dependencies = [
  "ansi_term",
  "backtrace",
  "color-backtrace",
  "color-spantrace",
- "eyre",
+ "eyre 0.5.0",
  "indenter",
  "once_cell",
  "tracing-error",
@@ -448,6 +448,15 @@ name = "eyre"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e9e412cbea04ea7af520b2f4d4ac1677ce546027a7237d8a40b494e34e1e0e31"
+dependencies = [
+ "indenter",
+]
+
+[[package]]
+name = "eyre"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "303f5557cec6943e7d16db154bfd2a39e91ce266c6f74c2ba2af189da47db3d2"
 dependencies = [
  "indenter",
 ]
@@ -2343,7 +2352,7 @@ name = "zebra-consensus"
 version = "0.1.0"
 dependencies = [
  "color-eyre",
- "eyre",
+ "eyre 0.4.3",
  "futures-util",
  "spandoc",
  "tokio",
@@ -2397,7 +2406,7 @@ name = "zebra-state"
 version = "0.1.0"
 dependencies = [
  "color-eyre",
- "eyre",
+ "eyre 0.4.3",
  "futures",
  "hex",
  "lazy_static",
@@ -2430,7 +2439,7 @@ dependencies = [
  "abscissa_core",
  "chrono",
  "color-eyre",
- "eyre",
+ "eyre 0.4.3",
  "futures",
  "gumdrop",
  "hyper",

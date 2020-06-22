@@ -18,7 +18,7 @@ sled = "0.32.0"
 serde = { version = "1", features = ["serde_derive"] }
 
 [dev-dependencies]
-color-eyre = "0.3.4"
+color-eyre = "0.4.1"
 eyre = "0.4.2"
 tokio = { version = "0.2.21", features = ["full"] }
 zebra-test-vectors = { path = "../zebra-test-vectors/" }
