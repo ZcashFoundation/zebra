@@ -16,6 +16,7 @@ use std::{
     collections::HashMap,
     error,
     future::Future,
+    iter,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -25,8 +26,17 @@ use tower::{Service, ServiceExt};
 use zebra_chain::block::{Block, BlockHeaderHash};
 use zebra_chain::types::BlockHeight;
 
+/// Each checkpoint interval consists of a sparse array of blocks.
+type CheckpointInterval = Vec<Option<Block>>;
+
+/// A checkpointing block verifier.
+///
+/// Verifies blocks using a supplied list of checkpoints. There must be at
+/// least one checkpoint for the genesis block.
 struct CheckpointVerifier<S> {
-    /// The underlying `ZebraState`.
+    // Inputs
+    //
+    /// The underlying `ZebraState`, possibly wrapped in other services.
     state_service: S,
 
     /// Each checkpoint consists of a coinbase height and block header hash.
@@ -35,7 +45,41 @@ struct CheckpointVerifier<S> {
     /// which only happen in the last few hundred blocks in the chain.
     /// (zcashd allows chain reorganizations up to 99 blocks, and prunes
     /// orphaned side-chains after 288 blocks.)
+    ///
+    /// Checkpoints must start at zero, and have equal spacing. There must
+    /// be at least one checkpoint, the genesis block.
     checkpoint_list: Arc<HashMap<BlockHeight, BlockHeaderHash>>,
+
+    // Derived Variables
+    //
+    /// The height of the maximum checkpoint.
+    ///
+    /// Can be zero, if there is a single genesis block checkpoint.
+    max_checkpoint_height: BlockHeight,
+
+    /// The fixed spacing between checkpoints.
+    ///
+    /// Can be zero, if there is a single genesis block checkpoint.
+    checkpoint_frequency: BlockHeight,
+
+    // Cached Blocks
+    //
+    /// A cache of unverified blocks.
+    ///
+    /// Contains a list of blocks for each checkpoint. The key is the height of
+    /// the ancestor checkpoint. Blocks are verified when there is a chain from
+    /// an ancestor checkpoint to a descendant checkpoint.
+    ///
+    /// Each pair of checkpoints verifies `checkpoint_frequency` blocks, from
+    /// the ancestor checkpoint, to the parent of the descendant checkpoint.
+    /// The final checkpoint does not have any descendant checkpoints, so it
+    /// only verifies a single block.
+    queued: HashMap<BlockHeight, CheckpointInterval>,
+
+    /// The height of the next unverified checkpoint.
+    ///
+    /// `None` means that checkpoint verification has finished.
+    current_checkpoint_height: Option<BlockHeight>,
 }
 
 /// The error type for the CheckpointVerifier Service.
@@ -132,13 +176,16 @@ where
 pub fn init<S>(
     state_service: S,
     checkpoint_list: impl Into<Arc<HashMap<BlockHeight, BlockHeaderHash>>>,
-) -> impl Service<
-    Arc<Block>,
-    Response = BlockHeaderHash,
-    Error = Error,
-    Future = impl Future<Output = Result<BlockHeaderHash, Error>>,
-> + Send
-       + 'static
+) -> Result<
+    impl Service<
+            Arc<Block>,
+            Response = BlockHeaderHash,
+            Error = Error,
+            Future = impl Future<Output = Result<BlockHeaderHash, Error>>,
+        > + Send
+        + 'static,
+    Error,
+>
 where
     S: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>
         + Send
@@ -146,10 +193,51 @@ where
         + 'static,
     S::Future: Send + 'static,
 {
-    CheckpointVerifier {
-        state_service,
-        checkpoint_list: checkpoint_list.into(),
+    let checkpoints: Arc<HashMap<BlockHeight, BlockHeaderHash>> = checkpoint_list.into();
+
+    if checkpoints.is_empty() {
+        // An empty checkpoint list can't actually verify any blocks.
+        return Err("there must be at least one checkpoint".into());
     }
+
+    let mut heights: Vec<BlockHeight> = checkpoints.keys().cloned().collect();
+    heights.sort();
+
+    let min_checkpoint_height = heights[0];
+    if min_checkpoint_height != BlockHeight(0) {
+        // We need to start at a genesis block
+        return Err("checkpoints must start at block height 0".into());
+    }
+
+    let max_checkpoint_height = heights[heights.len() - 1];
+    if (max_checkpoint_height.0 as usize) % heights.len() != 0 {
+        return Err("the final checkpoint must be equally spaced".into());
+    }
+
+    // The result is always in range, because the numerator of the
+    // unsigned division is a BlockHeight.
+    let checkpoint_frequency: BlockHeight =
+        BlockHeight(((max_checkpoint_height.0 as usize) / heights.len()) as u32);
+
+    // Now check the spacing on each checkpoint
+    let expected_heights: Vec<BlockHeight> = iter::successors(Some(BlockHeight(0)), |h| {
+        Some(BlockHeight(h.0 + checkpoint_frequency.0))
+    })
+    .take(heights.len())
+    .collect();
+
+    if heights != expected_heights {
+        return Err("intermediate checkpoints must be equally spaced".into());
+    }
+
+    Ok(CheckpointVerifier {
+        state_service,
+        checkpoint_list: checkpoints,
+        max_checkpoint_height,
+        checkpoint_frequency,
+        queued: <HashMap<BlockHeight, CheckpointInterval>>::new(),
+        current_checkpoint_height: Some(BlockHeight(0)),
+    })
 }
 
 #[cfg(test)]
@@ -179,7 +267,8 @@ mod tests {
                 .collect();
 
         let mut state_service = Box::new(zebra_state::in_memory::init());
-        let mut checkpoint_verifier = super::init(state_service.clone(), genesis_checkpoint_list);
+        let mut checkpoint_verifier =
+            super::init(state_service.clone(), genesis_checkpoint_list).map_err(|e| eyre!(e))?;
 
         /// Make sure the verifier service is ready
         let ready_verifier_service = checkpoint_verifier
@@ -232,7 +321,8 @@ mod tests {
                 .collect();
 
         let mut state_service = Box::new(zebra_state::in_memory::init());
-        let mut checkpoint_verifier = super::init(state_service.clone(), genesis_checkpoint_list);
+        let mut checkpoint_verifier =
+            super::init(state_service.clone(), genesis_checkpoint_list).map_err(|e| eyre!(e))?;
 
         /// Make sure the verifier service is ready
         let ready_verifier_service = checkpoint_verifier
@@ -288,7 +378,8 @@ mod tests {
                 .collect();
 
         let mut state_service = Box::new(zebra_state::in_memory::init());
-        let mut checkpoint_verifier = super::init(state_service.clone(), genesis_checkpoint_list);
+        let mut checkpoint_verifier =
+            super::init(state_service.clone(), genesis_checkpoint_list).map_err(|e| eyre!(e))?;
 
         /// Make sure the verifier service is ready
         let ready_verifier_service = checkpoint_verifier
