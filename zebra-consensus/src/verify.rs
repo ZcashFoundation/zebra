@@ -131,7 +131,7 @@ mod tests {
     #[spandoc::spandoc]
     async fn verify() -> Result<(), Report> {
         let block =
-            Arc::<Block>::zcash_deserialize(&zebra_test_vectors::BLOCK_MAINNET_415000_BYTES[..])?;
+            Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])?;
         let hash: BlockHeaderHash = block.as_ref().into();
 
         let state_service = Box::new(zebra_state::in_memory::init());
@@ -158,7 +158,7 @@ mod tests {
     #[spandoc::spandoc]
     async fn round_trip() -> Result<(), Report> {
         let block =
-            Arc::<Block>::zcash_deserialize(&zebra_test_vectors::BLOCK_MAINNET_415000_BYTES[..])?;
+            Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])?;
         let hash: BlockHeaderHash = block.as_ref().into();
 
         let mut state_service = zebra_state::in_memory::init();
@@ -202,7 +202,7 @@ mod tests {
         install_tracing();
 
         let block =
-            Arc::<Block>::zcash_deserialize(&zebra_test_vectors::BLOCK_MAINNET_415000_BYTES[..])?;
+            Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])?;
         let hash: BlockHeaderHash = block.as_ref().into();
 
         let mut state_service = zebra_state::in_memory::init();

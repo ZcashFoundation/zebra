@@ -146,7 +146,7 @@ mod tests {
         >,
     {
         let block: Arc<_> =
-            Block::zcash_deserialize(&zebra_test_vectors::BLOCK_MAINNET_415000_BYTES[..])?.into();
+            Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])?.into();
         let hash = block.as_ref().into();
 
         let response = service
@@ -205,9 +205,9 @@ mod tests {
         install_tracing();
 
         let block0: Arc<_> =
-            Block::zcash_deserialize(&zebra_test_vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?.into();
+            Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?.into();
         let block1: Arc<_> =
-            Block::zcash_deserialize(&zebra_test_vectors::BLOCK_MAINNET_1_BYTES[..])?.into();
+            Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..])?.into();
 
         let block0_hash: BlockHeaderHash = block0.as_ref().into();
         let block1_hash: BlockHeaderHash = block1.as_ref().into();

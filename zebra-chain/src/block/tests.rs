@@ -105,22 +105,22 @@ fn blockheaderhash_from_blockheader() {
 fn deserialize_blockheader() {
     // https://explorer.zcha.in/blocks/415000
     let _header =
-        BlockHeader::zcash_deserialize(&zebra_test_vectors::HEADER_MAINNET_415000_BYTES[..])
+        BlockHeader::zcash_deserialize(&zebra_test::vectors::HEADER_MAINNET_415000_BYTES[..])
             .expect("blockheader test vector should deserialize");
 }
 
 #[test]
 fn deserialize_block() {
-    Block::zcash_deserialize(&zebra_test_vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
+    Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
         .expect("block test vector should deserialize");
-    Block::zcash_deserialize(&zebra_test_vectors::BLOCK_MAINNET_1_BYTES[..])
+    Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..])
         .expect("block test vector should deserialize");
     // https://explorer.zcha.in/blocks/415000
-    Block::zcash_deserialize(&zebra_test_vectors::BLOCK_MAINNET_415000_BYTES[..])
+    Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])
         .expect("block test vector should deserialize");
     // https://explorer.zcha.in/blocks/434873
     // this one has a bad version field
-    Block::zcash_deserialize(&zebra_test_vectors::BLOCK_MAINNET_434873_BYTES[..])
+    Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_434873_BYTES[..])
         .expect("block test vector should deserialize");
 }
 

@@ -18,7 +18,7 @@ serde = { version = "1", features = ["serde_derive"] }
 
 [dev-dependencies]
 tokio = { version = "0.2.21", features = ["full"] }
-zebra-test-vectors = { path = "../zebra-test-vectors/" }
+zebra-test = { path = "../zebra-test" }
 spandoc = { git = "https://github.com/yaahc/spandoc.git" }
 tracing = "0.1.15"
 tracing-futures = "0.2.4"
