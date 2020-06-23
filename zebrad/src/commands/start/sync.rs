@@ -1,7 +1,8 @@
 use color_eyre::Report;
 use eyre::eyre;
 use futures::stream::{FuturesUnordered, StreamExt};
-use std::{collections::HashSet, iter};
+use std::{collections::HashSet, iter, time::Duration};
+use tokio::time::delay_for;
 use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
 use zebra_chain::{block::BlockHeaderHash, types::BlockHeight};
@@ -11,10 +12,10 @@ where
     ZN: Service<zebra_network::Request>,
 {
     pub peer_set: ZN,
+    // TODO(jlusby): add validator
     pub state: ZS,
-    pub tip_requests: FuturesUnordered<ZN::Future>,
+    pub prospective_tips: HashSet<BlockHeaderHash>,
     pub block_requests: FuturesUnordered<ZN::Future>,
-    pub block_locator: Vec<BlockHeaderHash>,
     pub downloading: HashSet<BlockHeaderHash>,
     pub downloaded: HashSet<BlockHeaderHash>,
     pub fanout: NumReq,
@@ -35,19 +36,41 @@ where
 {
     pub async fn run(&mut self) -> Result<(), Report> {
         loop {
-            if self.tip_requests.is_empty() {
+            if self.prospective_tips.is_empty() {
                 info!("populating prospective tips list");
+                // TODO(jlusby): get the block_locator from the state
                 self.obtain_tips(vec![super::GENESIS]).await?;
             }
 
             info!("extending prospective tips");
-            self.extend_tips().await?;
+            // ObtainTips Step 6
+            //
+            // If there are any prospective tips, call ExtendTips. Continue this step until there are no more prospective tips.
+            while !self.prospective_tips.is_empty() {
+                self.extend_tips().await?;
+            }
+
+            // TODO(jlusby): move this to a background task and check it for errors after each step.
             self.process_blocks().await?;
+
+            delay_for(Duration::from_secs(15)).await;
         }
     }
+
     /// Given a block_locator list fan out request for subsequent hashes to
     /// multiple peers
-    pub async fn obtain_tips(&mut self, block_locator: Vec<BlockHeaderHash>) -> Result<(), Report> {
+    //
+    // ObtainTips Step 1
+    //
+    // Query the current state to construct the sequence of hashes: handled by
+    // the caller
+    async fn obtain_tips(&mut self, block_locator: Vec<BlockHeaderHash>) -> Result<(), Report> {
+        let mut tip_futs = FuturesUnordered::new();
+
+        // ObtainTips Step 2
+        //
+        // Make a FindBlocksByHash request to the network F times, where F is a
+        // fanout parameter, to get resp1, ..., respF
         for _ in 0..self.fanout {
             let req = self.peer_set.ready_and().await.map_err(|e| eyre!(e))?.call(
                 zebra_network::Request::FindBlocks {
@@ -55,26 +78,12 @@ where
                     stop: None,
                 },
             );
-            self.tip_requests.push(req);
+            tip_futs.push(req);
         }
 
-        self.block_locator = block_locator;
-
-        Ok(())
-    }
-
-    /// Drive all chain extending futures to completion, request unknown blocks,
-    /// and extend prospective chain requests
-    pub async fn extend_tips(&mut self) -> Result<(), Report> {
-        let mut tip_set = HashSet::<BlockHeaderHash>::new();
-        while !self.tip_requests.is_empty() {
-            match self
-                .tip_requests
-                .next()
-                .await
-                .expect("expected: tip_requests is never empty")
-                .map_err::<Report, _>(|e| eyre!(e))
-            {
+        let mut download_set = HashSet::new();
+        while let Some(res) = tip_futs.next().await {
+            match res.map_err::<Report, _>(|e| eyre!(e)) {
                 Ok(zebra_network::Response::BlockHeaderHashes(hashes)) => {
                     info!(
                         new_hashes = hashes.len(),
@@ -82,39 +91,154 @@ where
                         downloaded = self.downloaded.len(),
                         "requested more hashes"
                     );
-                    let new_tip = hashes[0];
-                    let _ = tip_set.insert(new_tip);
-                    self.request_blocks(hashes).await?;
+
+                    if hashes.last() != Some(&super::GENESIS) {
+                        continue;
+                    }
+
+                    let mut hashes = hashes.into_iter().peekable();
+                    let new_tip = if let Some(tip) = hashes.next() {
+                        tip
+                    } else {
+                        continue;
+                    };
+
+                    // ObtainTips Step 3
+                    //
+                    // For each response, starting from the beginning of the
+                    // list, prune any block hashes already included in the
+                    // state, stopping at the first unknown hash to get resp1',
+                    // ..., respF'. (These lists may be empty).
+                    while let Some(&next) = hashes.peek() {
+                        let should_download = self
+                            .state
+                            .ready_and()
+                            .await
+                            .map_err(|e| eyre!(e))?
+                            .call(zebra_state::Request::Contains { hash: next })
+                            .await
+                            .is_err();
+
+                        if should_download {
+                            download_set.extend(hashes);
+                            break;
+                        } else {
+                            let _ = hashes.next();
+                        }
+                    }
+
+                    // ObtainTips Step 4
+                    //
+                    // Combine the last elements of each list into a set; this
+                    // is the set of prospective tips.
+                    let _ = self.prospective_tips.insert(new_tip);
                 }
-                Ok(_) => continue,
+                Ok(_) => {}
                 Err(e) => {
                     error!("{:?}", e);
                 }
             }
         }
 
-        for tip in tip_set {
-            let mut block_locator = self.block_locator.clone();
-            block_locator[0] = tip;
-            self.obtain_tips(block_locator).await?;
+        // ObtainTips Step 5
+        //
+        // Combine all elements of each list into a set, and queue
+        // download and verification of those blocks.
+        self.request_blocks(download_set.into_iter().collect())
+            .await?;
+
+        Ok(())
+    }
+
+    async fn extend_tips(&mut self) -> Result<(), Report> {
+        // Extend Tips 1
+        //
+        // remove all prospective tips and iterate over them individually
+        let tips = std::mem::take(&mut self.prospective_tips);
+
+        let mut download_set = HashSet::new();
+        for tip in tips {
+            // ExtendTips Step 2
+            //
+            // Create a FindBlocksByHash request consisting of just the
+            // prospective tip. Send this request to the network F times
+            for _ in 0..self.fanout {
+                let res = self
+                    .peer_set
+                    .ready_and()
+                    .await
+                    .map_err(|e| eyre!(e))?
+                    .call(zebra_network::Request::FindBlocks {
+                        known_blocks: vec![tip],
+                        stop: None,
+                    })
+                    .await;
+                match res.map_err::<Report, _>(|e| eyre!(e)) {
+                    Ok(zebra_network::Response::BlockHeaderHashes(hashes)) => {
+                        info!(
+                            new_hashes = hashes.len(),
+                            in_flight = self.block_requests.len(),
+                            downloaded = self.downloaded.len(),
+                            "requested more hashes"
+                        );
+
+                        // ExtendTips Step 3
+                        //
+                        // For each response, check whether the first hash in the
+                        // response is the genesis block; if so, discard the response.
+                        // It indicates that the remote peer does not have any blocks
+                        // following the prospective tip.
+                        if hashes.last() != Some(&super::GENESIS) {
+                            continue;
+                        }
+
+                        let mut hashes = hashes.into_iter();
+                        let new_tip = if let Some(tip) = hashes.next() {
+                            tip
+                        } else {
+                            continue;
+                        };
+
+                        // ExtendTips Step 4
+                        //
+                        // Combine the last elements of the remaining responses into
+                        // a set, and add this set to the set of prospective tips.
+                        let _ = self.prospective_tips.insert(new_tip);
+
+                        // ExtendTips Step 5
+                        //
+                        // Combine all elements of the remaining responses into a
+                        // set, and queue download and verification of those blocks
+                        download_set.extend(hashes);
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        error!("{:?}", e);
+                    }
+                }
+            }
         }
+
+        self.request_blocks(download_set.into_iter().collect())
+            .await?;
 
         Ok(())
     }
 
     /// Queue downloads for each block that isn't currently known to our node
-    pub async fn request_blocks(&mut self, mut hashes: Vec<BlockHeaderHash>) -> Result<(), Report> {
+    async fn request_blocks(&mut self, mut hashes: Vec<BlockHeaderHash>) -> Result<(), Report> {
         hashes.retain(|hash| !self.known_block(hash));
 
         for chunk in hashes.chunks(10usize) {
             self.queue_download(chunk).await?;
         }
+
         Ok(())
     }
 
     /// Drive block downloading futures to completion and dispatch downloaded
     /// blocks to the validator
-    pub async fn process_blocks(&mut self) -> Result<(), Report> {
+    async fn process_blocks(&mut self) -> Result<(), Report> {
         info!(in_flight = self.block_requests.len(), "processing blocks");
 
         while let Some(res) = self.block_requests.next().await {

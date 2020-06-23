@@ -23,9 +23,9 @@ use crate::{components::tokio::TokioComponent, prelude::*};
 use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
 use color_eyre::Report;
 use futures::stream::FuturesUnordered;
-use std::collections::{BTreeSet, HashSet};
+use std::collections::HashSet;
 use tower::{buffer::Buffer, service_fn};
-use zebra_chain::{block::BlockHeaderHash, types::BlockHeight};
+use zebra_chain::block::BlockHeaderHash;
 
 mod sync;
 
@@ -59,18 +59,14 @@ impl StartCmd {
         let state = zebra_state::on_disk::init(zebra_state::Config::default());
         let (peer_set, _address_book) = zebra_network::init(config, node).await;
 
-        let mut downloaded_block_heights = BTreeSet::<BlockHeight>::new();
-        downloaded_block_heights.insert(BlockHeight(0));
-
         let mut syncer = sync::Syncer {
             peer_set,
             state,
-            tip_requests: FuturesUnordered::new(),
             block_requests: FuturesUnordered::new(),
             downloading: HashSet::new(),
             downloaded: HashSet::new(),
             fanout: 4,
-            block_locator: Vec::new(),
+            prospective_tips: HashSet::new(),
         };
 
         syncer.run().await

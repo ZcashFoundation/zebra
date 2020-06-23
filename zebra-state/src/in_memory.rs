@@ -20,7 +20,14 @@ struct InMemoryState {
     index: block_index::BlockIndex,
 }
 
-type Error = Box<dyn error::Error + Send + Sync + 'static>;
+impl InMemoryState {
+    fn contains(
+        &mut self,
+        _hash: zebra_chain::block::BlockHeaderHash,
+    ) -> Result<zebra_chain::types::BlockHeight, Error> {
+        todo!()
+    }
+}
 
 impl Service<Request> for InMemoryState {
     type Response = Response;
@@ -60,9 +67,15 @@ impl Service<Request> for InMemoryState {
 
                 async move { result }.boxed()
             }
-            Request::GetKnownBlockHashes { range } => {
-                let hashes = self.index.range(range);
-                async move { Ok(Response::KnownBlockHashes { hashes }) }.boxed()
+            Request::Contains { hash } => {
+                let res = self.contains(hash);
+
+                async move {
+                    let depth = res?;
+
+                    Ok(Response::Contained { depth })
+                }
+                .boxed()
             }
         }
     }
@@ -80,3 +93,5 @@ pub fn init() -> impl Service<
        + 'static {
     Buffer::new(InMemoryState::default(), 1)
 }
+
+type Error = Box<dyn error::Error + Send + Sync + 'static>;

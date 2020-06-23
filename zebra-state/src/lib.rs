@@ -14,7 +14,7 @@
 #![allow(clippy::try_err)]
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::{ops::Range, sync::Arc};
+use std::sync::Arc;
 use zebra_chain::{
     block::{Block, BlockHeaderHash},
     types::BlockHeight,
@@ -61,10 +61,10 @@ pub enum Request {
     },
     /// Get the block that is the tip of the current chain
     GetTip,
-    /// Get the set of hashes for every block in the state service
-    GetKnownBlockHashes {
-        /// the range of heights to restrict the blocks too
-        range: Range<BlockHeight>,
+    /// Ask the state if the given hash is part of the current best chain
+    Contains {
+        /// The hash to check against the current chain
+        hash: BlockHeaderHash,
     },
 }
 
@@ -87,10 +87,12 @@ pub enum Response {
         /// The hash of the block at the tip of the current chain
         hash: BlockHeaderHash,
     },
-    /// The  response to a `GetKnownBlockHashes` request
-    KnownBlockHashes {
-        /// the hashes of all known blocks that were requested
-        hashes: Vec<BlockHeaderHash>,
+    /// The response to a `Contains` request indicating that the given has is in
+    /// the current best chain
+    Contained {
+        /// The number of blocks above the given block in the current best chain
+        // TODO(jlusby): should we add a type for relative block heights or block distances?
+        depth: BlockHeight,
     },
 }
 

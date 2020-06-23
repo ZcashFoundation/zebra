@@ -1,7 +1,6 @@
 use std::{
     collections::{btree_map::Entry, BTreeMap, HashMap},
     error::Error,
-    ops::RangeBounds,
     sync::Arc,
 };
 use zebra_chain::{
@@ -47,17 +46,6 @@ impl BlockIndex {
             .next_back()
             .map(|(_key, value)| value)
             .map(|block| block.as_ref().into())
-    }
-
-    pub(super) fn range<R>(&self, range: R) -> Vec<BlockHeaderHash>
-    where
-        R: RangeBounds<BlockHeight>,
-    {
-        self.by_height
-            .range(range)
-            .map(|(_, v)| v)
-            .map(|block| block.as_ref().into())
-            .collect()
     }
 }
 

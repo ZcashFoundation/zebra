@@ -6,7 +6,6 @@ use std::sync::Arc;
 use std::{
     error,
     future::Future,
-    ops::Range,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -76,34 +75,22 @@ impl SledState {
         }
     }
 
-    pub(super) fn get_tip(&self) -> Result<Option<BlockHeaderHash>, Error> {
+    pub(super) fn get_tip(&self) -> Result<Option<Arc<Block>>, Error> {
         let tree = self.storage.open_tree(b"by_height")?;
         let last_entry = tree.iter().values().next_back();
 
         match last_entry {
-            Some(Ok(bytes)) => {
-                let block = Arc::<Block>::zcash_deserialize(bytes.as_ref())?;
-                Ok(Some(block.as_ref().into()))
-            }
+            Some(Ok(bytes)) => Ok(Some(ZcashDeserialize::zcash_deserialize(bytes.as_ref())?)),
             Some(Err(e)) => Err(e)?,
             None => Ok(None),
         }
     }
 
-    fn range(&self, range: Range<BlockHeight>) -> Result<Vec<BlockHeaderHash>, Error> {
-        let range = BytesHeight::from(range.start)..BytesHeight::from(range.end);
-        let tree = self.storage.open_tree(b"by_height")?;
+    fn contains(&self, hash: &BlockHeaderHash) -> Result<bool, Error> {
+        let by_hash = self.storage.open_tree(b"by_hash")?;
+        let key = &hash.0;
 
-        tree.range(range)
-            .values()
-            .map(|res| {
-                res.map_err(Error::from).and_then(|bytes| {
-                    ZcashDeserialize::zcash_deserialize(&bytes[..])
-                        .map_err(Into::into)
-                        .map(|block: Block| BlockHeaderHash::from(&block))
-                })
-            })
-            .collect()
+        Ok(by_hash.contains_key(key)?)
     }
 }
 
@@ -146,18 +133,32 @@ impl Service<Request> for SledState {
                 async move {
                     storage
                         .get_tip()?
+                        .map(|block| block.as_ref().into())
                         .map(|hash| Response::Tip { hash })
                         .ok_or_else(|| "zebra-state contains no blocks".into())
                 }
                 .boxed()
             }
-            Request::GetKnownBlockHashes { range } => {
+            Request::Contains { hash } => {
                 let storage = self.clone();
 
                 async move {
-                    let hashes = storage.range(range)?;
+                    if storage.contains(&hash)? {
+                        Err("unknown block")?
+                    }
 
-                    Ok(Response::KnownBlockHashes { hashes })
+                    let block = storage
+                        .get(hash)?
+                        .expect("block must be present if contains returned true");
+                    let tip = storage
+                        .get_tip()?
+                        .expect("storage must have a tip if it contains the previous block");
+
+                    let depth = BlockHeight(
+                        tip.coinbase_height().unwrap().0 - block.coinbase_height().unwrap().0,
+                    );
+
+                    Ok(Response::Contained { depth })
                 }
                 .boxed()
             }
