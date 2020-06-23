@@ -1,12 +1,12 @@
 //! A [`Service`](tower::Service) implementation based on a fixed transcript.
 
-use color_eyre::eyre::{eyre, Report};
+use color_eyre::eyre::{ensure, eyre, Report};
 use futures::future::{ready, Ready};
 use std::{
     fmt::Debug,
     task::{Context, Poll},
 };
-use tower::Service;
+use tower::{Service, ServiceExt};
 
 pub struct Transcript<R, S, I>
 where
@@ -21,6 +21,32 @@ where
 {
     fn from(messages: I) -> Self {
         Self { messages }
+    }
+}
+
+impl<R, S, I> Transcript<R, S, I>
+where
+    I: Iterator<Item = (R, S)>,
+    R: Debug,
+    S: Debug + Eq,
+{
+    pub async fn check<C>(mut self, mut to_check: C) -> Result<(), Report>
+    where
+        C: Service<R, Response = S>,
+        C::Error: Debug,
+    {
+        while let Some((req, expected_rsp)) = self.messages.next() {
+            // These unwraps could propagate errors with the correct
+            // bound on C::Error
+            let rsp = to_check.ready_and().await.unwrap().call(req).await.unwrap();
+            ensure!(
+                rsp == expected_rsp,
+                "Expected {:?}, got {:?}",
+                expected_rsp,
+                rsp
+            );
+        }
+        Ok(())
     }
 }
 
