@@ -154,9 +154,8 @@ impl Service<Request> for SledState {
                         .get_tip()?
                         .expect("storage must have a tip if it contains the previous block");
 
-                    let depth = BlockHeight(
-                        tip.coinbase_height().unwrap().0 - block.coinbase_height().unwrap().0,
-                    );
+                    let depth =
+                        tip.coinbase_height().unwrap().0 - block.coinbase_height().unwrap().0;
 
                     Ok(Response::Contained { depth })
                 }

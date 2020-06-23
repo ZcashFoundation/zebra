@@ -15,10 +15,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
-use zebra_chain::{
-    block::{Block, BlockHeaderHash},
-    types::BlockHeight,
-};
+use zebra_chain::block::{Block, BlockHeaderHash};
 
 pub mod in_memory;
 pub mod on_disk;
@@ -91,8 +88,7 @@ pub enum Response {
     /// the current best chain
     Contained {
         /// The number of blocks above the given block in the current best chain
-        // TODO(jlusby): should we add a type for relative block heights or block distances?
-        depth: BlockHeight,
+        depth: u32,
     },
 }
 

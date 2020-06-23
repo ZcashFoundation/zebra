@@ -12,6 +12,7 @@ use std::{
     task::{Context, Poll},
 };
 use tower::{buffer::Buffer, Service};
+use zebra_chain::block::BlockHeaderHash;
 
 mod block_index;
 
@@ -21,10 +22,7 @@ struct InMemoryState {
 }
 
 impl InMemoryState {
-    fn contains(
-        &mut self,
-        _hash: zebra_chain::block::BlockHeaderHash,
-    ) -> Result<zebra_chain::types::BlockHeight, Error> {
+    fn contains(&mut self, _hash: BlockHeaderHash) -> Result<u32, Error> {
         todo!()
     }
 }
