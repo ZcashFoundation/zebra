@@ -9,13 +9,14 @@ use tower::Service;
 /// which means that this layer can only be used on the Tokio runtime.
 ///
 /// See the module documentation for more details.
-pub struct BatchLayer<Request> {
+pub struct BatchLayer<Request, E2> {
     max_items: usize,
     max_latency: std::time::Duration,
     _p: PhantomData<fn(Request)>,
+    _e: PhantomData<E2>,
 }
 
-impl<Request> BatchLayer<Request> {
+impl<Request, E2> BatchLayer<Request, E2> {
     /// Creates a new `BatchLayer`.
     ///
     /// The wrapper is responsible for telling the inner service when to flush a
@@ -28,25 +29,28 @@ impl<Request> BatchLayer<Request> {
             max_items,
             max_latency,
             _p: PhantomData,
+            _e: PhantomData,
         }
     }
 }
 
-impl<S, Request> Layer<S> for BatchLayer<Request>
+impl<S, Request, E2> Layer<S> for BatchLayer<Request, E2>
 where
     S: Service<BatchControl<Request>> + Send + 'static,
     S::Future: Send,
-    S::Error: Into<crate::BoxError> + Send + Sync,
+    S::Error: Clone + Into<E2> + Send + Sync,
     Request: Send + 'static,
+    E2: Send + 'static,
+    crate::error::Closed: Into<E2>,
 {
-    type Service = Batch<S, Request>;
+    type Service = Batch<S, Request, E2>;
 
     fn layer(&self, service: S) -> Self::Service {
         Batch::new(service, self.max_items, self.max_latency)
     }
 }
 
-impl<Request> fmt::Debug for BatchLayer<Request> {
+impl<Request, E2> fmt::Debug for BatchLayer<Request, E2> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("BufferLayer")
             .field("max_items", &self.max_items)

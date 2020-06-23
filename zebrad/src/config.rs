@@ -10,10 +10,13 @@ use serde::{Deserialize, Serialize};
 
 use zebra_network::Config as NetworkSection;
 
-/// Zebrad Configuration
+/// Configuration for `zebrad`.
+///
+/// The `zebrad` config is a TOML-encoded version of this structure. The meaning
+/// of each field is described in the documentation, although it may be necessary
+/// to click through to the sub-structures for each section.
 #[derive(Clone, Default, Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-#[serde(default)]
+#[serde(deny_unknown_fields, default)]
 pub struct ZebradConfig {
     /// Tracing configuration
     pub tracing: TracingSection,
@@ -25,7 +28,7 @@ pub struct ZebradConfig {
 
 /// Tracing configuration section.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default)]
 pub struct TracingSection {
     /// The filter used for tracing events.
     pub filter: Option<String>,
@@ -41,7 +44,7 @@ impl TracingSection {
 
 /// Metrics configuration section.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default)]
 pub struct MetricsSection {
     pub endpoint_addr: SocketAddr,
 }
@@ -49,15 +52,17 @@ pub struct MetricsSection {
 impl Default for MetricsSection {
     fn default() -> Self {
         Self {
-            endpoint_addr: "127.0.0.1:9999".parse().unwrap(),
+            endpoint_addr: "0.0.0.0:9999".parse().unwrap(),
         }
     }
 }
 
 #[cfg(test)]
 mod test {
+    use color_eyre::eyre::Result;
+
     #[test]
-    fn test_toml_ser() -> color_eyre::Result<()> {
+    fn test_toml_ser() -> Result<()> {
         let default_config = super::ZebradConfig::default();
         println!("Default config: {:?}", default_config);
 

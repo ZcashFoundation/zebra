@@ -1,17 +1,17 @@
-//! `config` subcommand - generates a skeleton config.
+//! `generate` subcommand - generates a skeleton config.
 
 use crate::config::ZebradConfig;
 use abscissa_core::{Command, Options, Runnable};
 
-/// `config` subcommand
+/// `generate` subcommand
 #[derive(Command, Debug, Options)]
-pub struct ConfigCmd {
+pub struct GenerateCmd {
     /// The file to write the generated config to.
     #[options(help = "The file to write the generated config to (stdout if unspecified)")]
     output_file: Option<String>,
 }
 
-impl Runnable for ConfigCmd {
+impl Runnable for GenerateCmd {
     /// Start the application.
     fn run(&self) {
         let default_config = ZebradConfig {
@@ -27,8 +27,9 @@ impl Runnable for ConfigCmd {
 # values may change, you should delete all entries except
 # for the ones you wish to change.
 #
-# Documentation on the meanings of each config option
-# can be found in Rustdoc. XXX add link to rendered docs.
+# Documentation on the meanings of each config field
+# can be found in Rustdoc here:
+# https://doc.zebra.zfnd.org/zebrad/config/struct.ZebradConfig.html
 
 "
         .to_owned(); // The default name and location of the config file is defined in ../commands.rs

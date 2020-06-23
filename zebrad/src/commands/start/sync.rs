@@ -1,5 +1,4 @@
-use color_eyre::Report;
-use eyre::eyre;
+use color_eyre::eyre::{eyre, Report};
 use futures::stream::{FuturesUnordered, StreamExt};
 use std::{collections::HashSet, iter, time::Duration};
 use tokio::time::delay_for;

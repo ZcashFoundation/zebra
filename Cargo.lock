@@ -36,7 +36,7 @@ dependencies = [
  "ident_case",
  "proc-macro2 1.0.18",
  "quote 1.0.7",
- "syn 1.0.31",
+ "syn 1.0.33",
  "synstructure",
 ]
 
@@ -230,9 +230,12 @@ checksum = "08c48aae112d48ed9f069b33538ea9e3e90aa263cfa3d1c24309612b1f7472de"
 
 [[package]]
 name = "bytes"
-version = "0.5.4"
+version = "0.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "130aac562c0dd69c56b3b1cc8ffd2e17be31d0b6c25b61c96b76231aa23e39e1"
+checksum = "118cf036fbb97d0816e3c34b2d7a1e8cfc60f68fcf63d550ddbe9bd5f59c213b"
+dependencies = [
+ "loom",
+]
 
 [[package]]
 name = "canonical-path"
@@ -286,13 +289,11 @@ dependencies = [
 
 [[package]]
 name = "color-eyre"
-version = "0.3.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2aaa5f071a62a9c06ebab653ec2e2ba76cb936548a83e7af7f0c5dac525067ff"
+version = "0.5.0"
+source = "git+https://github.com/yaahc/color-eyre.git?branch=hooked#f882a88a7037aa621a42c3719d06a2286aa0f8de"
 dependencies = [
  "ansi_term",
  "backtrace",
- "color-backtrace",
  "color-spantrace",
  "eyre",
  "indenter",
@@ -397,7 +398,7 @@ dependencies = [
  "proc-macro2 1.0.18",
  "quote 1.0.7",
  "strsim",
- "syn 1.0.31",
+ "syn 1.0.33",
 ]
 
 [[package]]
@@ -408,7 +409,7 @@ checksum = "d9b5a2f4ac4969822c62224815d069952656cadc7084fdca9751e6d959189b72"
 dependencies = [
  "darling_core",
  "quote 1.0.7",
- "syn 1.0.31",
+ "syn 1.0.33",
 ]
 
 [[package]]
@@ -442,11 +443,11 @@ dependencies = [
 
 [[package]]
 name = "eyre"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e9e412cbea04ea7af520b2f4d4ac1677ce546027a7237d8a40b494e34e1e0e31"
+version = "0.6.0"
+source = "git+https://github.com/yaahc/eyre.git?branch=hooked#48e8006298651b3640ba7214f1b3b129b3babe67"
 dependencies = [
  "indenter",
+ "once_cell",
 ]
 
 [[package]]
@@ -550,7 +551,7 @@ dependencies = [
  "proc-macro-hack",
  "proc-macro2 1.0.18",
  "quote 1.0.7",
- "syn 1.0.31",
+ "syn 1.0.33",
 ]
 
 [[package]]
@@ -607,6 +608,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "generator"
+version = "0.6.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "add72f17bb81521258fcc8a7a3245b1e184e916bfbe34f0ea89558f440df5c68"
+dependencies = [
+ "cc",
+ "libc",
+ "log",
+ "rustc_version",
+ "winapi 0.3.8",
+]
+
+[[package]]
 name = "generic-array"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -649,7 +663,7 @@ checksum = "90454ce4de40b7ca6a8968b5ef367bdab48413962588d0d2b1638d60090c35d7"
 dependencies = [
  "proc-macro2 1.0.18",
  "quote 1.0.7",
- "syn 1.0.31",
+ "syn 1.0.33",
 ]
 
 [[package]]
@@ -848,6 +862,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "14b6052be84e6b71ab17edffc2eeabf5c2c3ae1fdb464aae35ac50c67a44e1f7"
 dependencies = [
  "cfg-if",
+]
+
+[[package]]
+name = "loom"
+version = "0.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ecc775857611e1df29abba5c41355cdf540e7e9d4acfdf0f355eefee82330b7"
+dependencies = [
+ "cfg-if",
+ "generator",
+ "scoped-tls",
 ]
 
 [[package]]
@@ -1187,7 +1212,7 @@ checksum = "6a0ffd45cf79d88737d7cc85bfd5d2894bee1139b356e616fe85dc389c61aaf7"
 dependencies = [
  "proc-macro2 1.0.18",
  "quote 1.0.7",
- "syn 1.0.31",
+ "syn 1.0.33",
 ]
 
 [[package]]
@@ -1491,6 +1516,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "71d301d4193d031abdd79ff7e3dd721168a9572ef3fe51a1517aba235bd8f86e"
 
 [[package]]
+name = "scoped-tls"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "332ffa32bf586782a3efaeb58f127980944bbc8c4d6913a86107ac2a5ab24b28"
+
+[[package]]
 name = "scopeguard"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1552,9 +1583,9 @@ checksum = "388a1df253eca08550bef6c72392cfe7c30914bf41df5269b68cbd6ff8f570a3"
 
 [[package]]
 name = "serde"
-version = "1.0.112"
+version = "1.0.114"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "736aac72d1eafe8e5962d1d1c3d99b0df526015ba40915cb3c49d042e92ec243"
+checksum = "5317f7588f0a5078ee60ef675ef96735a1442132dc645eb1d12c018620ed8cd3"
 dependencies = [
  "serde_derive",
 ]
@@ -1571,13 +1602,13 @@ dependencies = [
 
 [[package]]
 name = "serde_derive"
-version = "1.0.112"
+version = "1.0.114"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf0343ce212ac0d3d6afd9391ac8e9c9efe06b533c8d33f660f6390cc4093f57"
+checksum = "2a0be94b04690fbaed37cddffc5c134bf537c8e3329d53e982fe04c374978f8e"
 dependencies = [
  "proc-macro2 1.0.18",
  "quote 1.0.7",
- "syn 1.0.31",
+ "syn 1.0.33",
 ]
 
 [[package]]
@@ -1661,10 +1692,11 @@ checksum = "c111b5bd5695e56cffe5129854aa230b39c93a305372fdbb2668ca2394eea9f8"
 
 [[package]]
 name = "sled"
-version = "0.31.0"
+version = "0.32.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8fb6824dde66ad33bf20c6e8476f5b82b871bc8bc3c129a10ea2f7dae5060fa3"
+checksum = "cdad3dc85d888056d3bd9954ffdf22d8a22701b6cd3aca4f6df4c436111898c4"
 dependencies = [
+ "backtrace",
  "crc32fast",
  "crossbeam-epoch",
  "crossbeam-utils 0.7.2",
@@ -1710,7 +1742,7 @@ dependencies = [
  "matches",
  "proc-macro2 1.0.18",
  "quote 1.0.7",
- "syn 1.0.31",
+ "syn 1.0.33",
  "tracing",
  "tracing-futures",
 ]
@@ -1740,9 +1772,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "1.0.31"
+version = "1.0.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b5304cfdf27365b7585c25d4af91b35016ed21ef88f17ced89c7093b43dba8b6"
+checksum = "e8d5d96e8cbb005d6959f119f773bfaebb5684296108fb32600c00cde305b2cd"
 dependencies = [
  "proc-macro2 1.0.18",
  "quote 1.0.7",
@@ -1757,7 +1789,7 @@ checksum = "b834f2d66f734cb897113e34aaff2f1ab4719ca946f9a7358dba8f8064148701"
 dependencies = [
  "proc-macro2 1.0.18",
  "quote 1.0.7",
- "syn 1.0.31",
+ "syn 1.0.33",
  "unicode-xid 0.2.0",
 ]
 
@@ -1811,7 +1843,7 @@ checksum = "bd80fc12f73063ac132ac92aceea36734f04a1d93c1240c6944e23a3b8841793"
 dependencies = [
  "proc-macro2 1.0.18",
  "quote 1.0.7",
- "syn 1.0.31",
+ "syn 1.0.33",
 ]
 
 [[package]]
@@ -1865,7 +1897,7 @@ checksum = "f0c3acc6aa564495a0f2e1d59fab677cd7f81a19994cfc7f3ad0e64301560389"
 dependencies = [
  "proc-macro2 1.0.18",
  "quote 1.0.7",
- "syn 1.0.31",
+ "syn 1.0.33",
 ]
 
 [[package]]
@@ -1927,6 +1959,7 @@ dependencies = [
 name = "tower-batch"
 version = "0.1.0"
 dependencies = [
+ "color-eyre",
  "ed25519-zebra",
  "futures",
  "futures-core",
@@ -2074,7 +2107,7 @@ checksum = "99bbad0de3fd923c9c3232ead88510b783e5a4d16a6154adffa3d53308de984c"
 dependencies = [
  "proc-macro2 1.0.18",
  "quote 1.0.7",
- "syn 1.0.31",
+ "syn 1.0.33",
 ]
 
 [[package]]
@@ -2129,9 +2162,9 @@ dependencies = [
 
 [[package]]
 name = "tracing-subscriber"
-version = "0.2.5"
+version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d53c40489aa69c9aed21ff483f26886ca8403df33bdc2d2f87c60c1617826d2"
+checksum = "04a11b459109e38ff6e1b580bafef4142a11d44889f5d07424cbce2fd2a2a119"
 dependencies = [
  "ansi_term",
  "chrono",
@@ -2308,7 +2341,6 @@ name = "zebra-consensus"
 version = "0.1.0"
 dependencies = [
  "color-eyre",
- "eyre",
  "futures-util",
  "spandoc",
  "tokio",
@@ -2362,7 +2394,6 @@ name = "zebra-state"
 version = "0.1.0"
 dependencies = [
  "color-eyre",
- "eyre",
  "futures",
  "hex",
  "lazy_static",
@@ -2395,14 +2426,12 @@ dependencies = [
  "abscissa_core",
  "chrono",
  "color-eyre",
- "eyre",
  "futures",
  "gumdrop",
  "hyper",
  "metrics",
  "metrics-runtime",
  "once_cell",
- "pin-project",
  "rand 0.7.3",
  "serde",
  "thiserror",
@@ -2436,6 +2465,6 @@ checksum = "de251eec69fc7c1bc3923403d18ececb929380e016afe103da75f396704f8ca2"
 dependencies = [
  "proc-macro2 1.0.18",
  "quote 1.0.7",
- "syn 1.0.31",
+ "syn 1.0.33",
  "synstructure",
 ]

@@ -7,6 +7,7 @@ use std::{
     time::Duration,
 };
 
+use color_eyre::eyre::Result;
 use ed25519_zebra::*;
 use futures::stream::{FuturesUnordered, StreamExt};
 use rand::thread_rng;
@@ -106,10 +107,9 @@ fn install_tracing() {
     })
 }
 
-async fn sign_and_verify<V>(mut verifier: V, n: usize)
+async fn sign_and_verify<V>(mut verifier: V, n: usize) -> Result<(), V::Error>
 where
     V: Service<Ed25519Item, Response = ()>,
-    <V as Service<Ed25519Item>>::Error: Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
 {
     let mut results = FuturesUnordered::new();
     for i in 0..n {
@@ -119,43 +119,35 @@ where
         let msg = b"BatchVerifyTest";
         let sig = sk.sign(&msg[..]);
 
-        verifier.ready_and().await.map_err(|e| e.into()).unwrap();
+        verifier.ready_and().await?;
         results.push(span.in_scope(|| verifier.call((vk_bytes, sig, msg).into())))
     }
 
     while let Some(result) = results.next().await {
-        let result = result.map_err(|e| e.into());
-        tracing::trace!(?result);
-        assert!(result.is_ok());
+        result?;
     }
+
+    Ok(())
 }
 
 #[tokio::test]
-async fn batch_flushes_on_max_items() {
+async fn batch_flushes_on_max_items() -> Result<()> {
     use tokio::time::timeout;
     install_tracing();
 
     // Use a very long max_latency and a short timeout to check that
     // flushing is happening based on hitting max_items.
     let verifier = Batch::new(Ed25519Verifier::new(), 10, Duration::from_secs(1000));
-    assert!(
-        timeout(Duration::from_secs(1), sign_and_verify(verifier, 100))
-            .await
-            .is_ok()
-    )
+    timeout(Duration::from_secs(1), sign_and_verify(verifier, 100)).await?
 }
 
 #[tokio::test]
-async fn batch_flushes_on_max_latency() {
+async fn batch_flushes_on_max_latency() -> Result<()> {
     use tokio::time::timeout;
     install_tracing();
 
     // Use a very high max_items and a short timeout to check that
     // flushing is happening based on hitting max_latency.
     let verifier = Batch::new(Ed25519Verifier::new(), 100, Duration::from_millis(500));
-    assert!(
-        timeout(Duration::from_secs(1), sign_and_verify(verifier, 10))
-            .await
-            .is_ok()
-    )
+    timeout(Duration::from_secs(1), sign_and_verify(verifier, 10)).await?
 }

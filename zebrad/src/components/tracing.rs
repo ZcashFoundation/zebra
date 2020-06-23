@@ -36,7 +36,7 @@ impl TracingEndpoint {
             make_service_fn(|_| async { Ok::<_, hyper::Error>(service_fn(request_handler)) });
 
         // XXX load tracing addr from config
-        let addr = "127.0.0.1:3000"
+        let addr = "0.0.0.0:3000"
             .parse()
             .expect("Hardcoded address should be parseable");
 

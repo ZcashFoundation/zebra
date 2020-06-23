@@ -2,8 +2,7 @@
 
 use crate::{components::tokio::TokioComponent, prelude::*};
 use abscissa_core::{Command, Options, Runnable};
-use color_eyre::Report;
-use eyre::{eyre, WrapErr};
+use color_eyre::eyre::{eyre, Report, WrapErr};
 use futures::{
     prelude::*,
     stream::{FuturesUnordered, StreamExt},
@@ -71,7 +70,7 @@ impl ConnectCmd {
 
         let mut config = app_config().network.clone();
         // Use a different listen addr so that we don't conflict with another local node.
-        config.listen_addr = "127.0.0.1:38233".parse()?;
+        config.listen_addr = "0.0.0.0:38233".parse()?;
         // Connect only to the specified peer.
         config.initial_mainnet_peers.insert(self.addr.to_string());
 
