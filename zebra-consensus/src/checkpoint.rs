@@ -165,7 +165,7 @@ mod tests {
     #[spandoc::spandoc]
     async fn checkpoint_single_item_list() -> Result<(), Report> {
         let block0 =
-            Arc::<Block>::zcash_deserialize(&zebra_test_vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
+            Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
         let hash0: BlockHeaderHash = block0.as_ref().into();
 
         // Make a checkpoint list containing only the genesis block
@@ -215,7 +215,7 @@ mod tests {
     #[spandoc::spandoc]
     async fn checkpoint_list_empty_fail() -> Result<(), Report> {
         let block0 =
-            Arc::<Block>::zcash_deserialize(&zebra_test_vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
+            Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
 
         let mut state_service = Box::new(zebra_state::in_memory::init());
         let mut checkpoint_verifier = super::init(
@@ -262,9 +262,9 @@ mod tests {
     #[spandoc::spandoc]
     async fn checkpoint_not_present_fail() -> Result<(), Report> {
         let block0 =
-            Arc::<Block>::zcash_deserialize(&zebra_test_vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
+            Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
         let block415000 =
-            Arc::<Block>::zcash_deserialize(&zebra_test_vectors::BLOCK_MAINNET_415000_BYTES[..])?;
+            Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])?;
 
         // Make a checkpoint list containing only the genesis block
         let genesis_checkpoint_list: HashMap<BlockHeight, BlockHeaderHash> =
@@ -331,7 +331,7 @@ mod tests {
     #[spandoc::spandoc]
     async fn checkpoint_wrong_hash_fail() -> Result<(), Report> {
         let block0 =
-            Arc::<Block>::zcash_deserialize(&zebra_test_vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
+            Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
 
         // Make a checkpoint list containing the genesis block height,
         // but use the wrong hash

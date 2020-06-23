@@ -33,4 +33,4 @@ redjubjub = "0.1"
 [dev-dependencies]
 proptest = "0.10"
 proptest-derive = "0.2.0"
-zebra-test-vectors = { path = "../zebra-test-vectors/" }
+zebra-test = { path = "../zebra-test/" }

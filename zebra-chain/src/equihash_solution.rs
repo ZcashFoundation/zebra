@@ -122,7 +122,7 @@ mod tests {
     #[test]
     fn equihash_solution_test_vector() {
         let solution_bytes =
-            &zebra_test_vectors::HEADER_MAINNET_415000_BYTES[EQUIHASH_SOLUTION_BLOCK_OFFSET..];
+            &zebra_test::vectors::HEADER_MAINNET_415000_BYTES[EQUIHASH_SOLUTION_BLOCK_OFFSET..];
         let solution = EquihashSolution::zcash_deserialize(solution_bytes)
             .expect("Test vector EquihashSolution should deserialize");
 
