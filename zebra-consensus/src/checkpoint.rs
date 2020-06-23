@@ -74,14 +74,12 @@ where
                 return Err("the checkpoint list is empty".into());
             };
 
-            let block_height = match block.coinbase_height() {
-                Some(height) => height,
-                None => return Err("the block does not have a coinbase height".into()),
-            };
+            let block_height = block
+                .coinbase_height()
+                .ok_or("the block does not have a coinbase height")?;
 
             // TODO(teor):
             //   - implement chaining from checkpoints to their ancestors
-            //   - if chaining is expensive, move this check to the Future
             //   - should the state contain a mapping from previous_block_hash to block?
             let checkpoint_hash = match checkpoint_list.get(&block_height) {
                 Some(&hash) => hash,
@@ -97,7 +95,6 @@ where
             // `Tower::Buffer` requires a 1:1 relationship between `poll()`s
             // and `call()`s, because it reserves a buffer slot in each
             // `call()`.
-            // TODO(teor): what happens if the await fails?
             let add_block = state_service
                 .ready_and()
                 .await?
@@ -155,4 +152,231 @@ where
     }
 }
 
-// TODO(teor): tests
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use color_eyre::Report;
+    use eyre::{bail, ensure, eyre};
+    use tower::{util::ServiceExt, Service};
+
+    use zebra_chain::serialization::ZcashDeserialize;
+
+    #[tokio::test]
+    #[spandoc::spandoc]
+    async fn checkpoint_single_item_list() -> Result<(), Report> {
+        let block0 =
+            Arc::<Block>::zcash_deserialize(&zebra_test_vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
+        let hash0: BlockHeaderHash = block0.as_ref().into();
+
+        // Make a checkpoint list containing only the genesis block
+        let genesis_checkpoint_list: HashMap<BlockHeight, BlockHeaderHash> =
+            [(block0.coinbase_height().unwrap(), hash0)]
+                .iter()
+                .cloned()
+                .collect();
+
+        let mut state_service = Box::new(zebra_state::in_memory::init());
+        let mut checkpoint_verifier = super::init(state_service.clone(), genesis_checkpoint_list);
+
+        // Verify block 0
+        let verify_response = checkpoint_verifier
+            .ready_and()
+            .await
+            .map_err(|e| eyre!(e))?
+            .call(block0.clone())
+            .await
+            .map_err(|e| eyre!(e))?;
+
+        ensure!(
+            verify_response == hash0,
+            "unexpected response kind: {:?}",
+            verify_response
+        );
+
+        let state_response = state_service
+            .ready_and()
+            .await
+            .map_err(|e| eyre!(e))?
+            .call(zebra_state::Request::GetBlock { hash: hash0 })
+            .await
+            .map_err(|e| eyre!(e))?;
+
+        match state_response {
+            zebra_state::Response::Block {
+                block: returned_block,
+            } => assert_eq!(block0, returned_block),
+            _ => bail!("unexpected response kind: {:?}", state_response),
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[spandoc::spandoc]
+    async fn checkpoint_list_empty_fail() -> Result<(), Report> {
+        let block0 =
+            Arc::<Block>::zcash_deserialize(&zebra_test_vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
+
+        let mut state_service = Box::new(zebra_state::in_memory::init());
+        let mut checkpoint_verifier = super::init(
+            state_service.clone(),
+            <HashMap<BlockHeight, BlockHeaderHash>>::new(),
+        );
+
+        // Try to verify the block, and expect failure
+        let verify_result = checkpoint_verifier
+            .ready_and()
+            .await
+            .map_err(|e| eyre!(e))?
+            .call(block0.clone())
+            .await;
+
+        ensure!(
+            // TODO(teor || jlusby): check error string
+            verify_result.is_err(),
+            "unexpected result kind: {:?}",
+            verify_result
+        );
+
+        // Now make sure the block isn't in the state
+        let state_result = state_service
+            .ready_and()
+            .await
+            .map_err(|e| eyre!(e))?
+            .call(zebra_state::Request::GetBlock {
+                hash: block0.as_ref().into(),
+            })
+            .await;
+
+        ensure!(
+            // TODO(teor || jlusby): check error string
+            state_result.is_err(),
+            "unexpected result kind: {:?}",
+            verify_result
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[spandoc::spandoc]
+    async fn checkpoint_not_present_fail() -> Result<(), Report> {
+        let block0 =
+            Arc::<Block>::zcash_deserialize(&zebra_test_vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
+        let block415000 =
+            Arc::<Block>::zcash_deserialize(&zebra_test_vectors::BLOCK_MAINNET_415000_BYTES[..])?;
+
+        // Make a checkpoint list containing only the genesis block
+        let genesis_checkpoint_list: HashMap<BlockHeight, BlockHeaderHash> =
+            [(block0.coinbase_height().unwrap(), block0.as_ref().into())]
+                .iter()
+                .cloned()
+                .collect();
+
+        let mut state_service = Box::new(zebra_state::in_memory::init());
+        let mut checkpoint_verifier = super::init(state_service.clone(), genesis_checkpoint_list);
+
+        // Try to verify block 415000, and expect failure
+        let verify_result = checkpoint_verifier
+            .ready_and()
+            .await
+            .map_err(|e| eyre!(e))?
+            .call(block415000.clone())
+            .await;
+
+        ensure!(
+            // TODO(teor || jlusby): check error string
+            verify_result.is_err(),
+            "unexpected result kind: {:?}",
+            verify_result
+        );
+
+        // Now make sure neither block is in the state
+        let state_result = state_service
+            .ready_and()
+            .await
+            .map_err(|e| eyre!(e))?
+            .call(zebra_state::Request::GetBlock {
+                hash: block415000.as_ref().into(),
+            })
+            .await;
+
+        ensure!(
+            // TODO(teor || jlusby): check error string
+            state_result.is_err(),
+            "unexpected result kind: {:?}",
+            verify_result
+        );
+
+        let state_result = state_service
+            .ready_and()
+            .await
+            .map_err(|e| eyre!(e))?
+            .call(zebra_state::Request::GetBlock {
+                hash: block0.as_ref().into(),
+            })
+            .await;
+
+        ensure!(
+            // TODO(teor || jlusby): check error string
+            state_result.is_err(),
+            "unexpected result kind: {:?}",
+            verify_result
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[spandoc::spandoc]
+    async fn checkpoint_wrong_hash_fail() -> Result<(), Report> {
+        let block0 =
+            Arc::<Block>::zcash_deserialize(&zebra_test_vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
+
+        // Make a checkpoint list containing the genesis block height,
+        // but use the wrong hash
+        let genesis_checkpoint_list: HashMap<BlockHeight, BlockHeaderHash> =
+            [(block0.coinbase_height().unwrap(), BlockHeaderHash([0; 32]))]
+                .iter()
+                .cloned()
+                .collect();
+
+        let mut state_service = Box::new(zebra_state::in_memory::init());
+        let mut checkpoint_verifier = super::init(state_service.clone(), genesis_checkpoint_list);
+
+        // Try to verify block 0, and expect failure
+        let verify_result = checkpoint_verifier
+            .ready_and()
+            .await
+            .map_err(|e| eyre!(e))?
+            .call(block0.clone())
+            .await;
+
+        ensure!(
+            // TODO(teor || jlusby): check error string
+            verify_result.is_err(),
+            "unexpected result kind: {:?}",
+            verify_result
+        );
+
+        // Now make sure block 0 is not in the state
+        let state_result = state_service
+            .ready_and()
+            .await
+            .map_err(|e| eyre!(e))?
+            .call(zebra_state::Request::GetBlock {
+                hash: block0.as_ref().into(),
+            })
+            .await;
+
+        ensure!(
+            // TODO(teor || jlusby): check error string
+            state_result.is_err(),
+            "unexpected result kind: {:?}",
+            verify_result
+        );
+
+        Ok(())
+    }
+}
