@@ -2402,8 +2402,12 @@ dependencies = [
 name = "zebra-test"
 version = "0.1.0"
 dependencies = [
+ "color-eyre",
+ "futures",
  "hex",
  "lazy_static",
+ "tokio",
+ "tower",
 ]
 
 [[package]]
