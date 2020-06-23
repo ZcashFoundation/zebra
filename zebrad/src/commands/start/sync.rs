@@ -35,21 +35,19 @@ where
 {
     pub async fn run(&mut self) -> Result<(), Report> {
         loop {
-            if self.prospective_tips.is_empty() {
-                info!("populating prospective tips list");
-                self.obtain_tips().await?;
-            }
+            info!("populating prospective tips list");
+            self.obtain_tips().await?;
 
-            info!("extending prospective tips");
             // ObtainTips Step 6
             //
             // If there are any prospective tips, call ExtendTips. Continue this step until there are no more prospective tips.
             while !self.prospective_tips.is_empty() {
+                info!("extending prospective tips");
                 self.extend_tips().await?;
-            }
 
-            // TODO(jlusby): move this to a background task and check it for errors after each step.
-            self.process_blocks().await?;
+                // TODO(jlusby): move this to a background task and check it for errors after each step.
+                self.process_blocks().await?;
+            }
 
             delay_for(Duration::from_secs(15)).await;
         }
@@ -92,7 +90,7 @@ where
                         "requested more hashes"
                     );
 
-                    if hashes.last() != Some(&super::GENESIS) {
+                    if hashes.last() == Some(&super::GENESIS) {
                         continue;
                     }
 
@@ -190,7 +188,7 @@ where
                         // response is the genesis block; if so, discard the response.
                         // It indicates that the remote peer does not have any blocks
                         // following the prospective tip.
-                        if hashes.last() != Some(&super::GENESIS) {
+                        if hashes.last() == Some(&super::GENESIS) {
                             continue;
                         }
 

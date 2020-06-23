@@ -143,7 +143,7 @@ impl Service<Request> for SledState {
                 let storage = self.clone();
 
                 async move {
-                    if storage.contains(&hash)? {
+                    if !storage.contains(&hash)? {
                         return Ok(Response::Depth(None));
                     }
 
