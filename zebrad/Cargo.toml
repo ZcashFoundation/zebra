@@ -33,7 +33,7 @@ zebra-network = { path = "../zebra-network" }
 zebra-state = { path = "../zebra-state" }
 tracing-subscriber = { version = "0.2.6", features = ["tracing-log"] }
 tracing-error = "0.1.2"
-color-eyre = { git = "https://github.com/yaahc/color-eyre.git", branch = "hooked", features = ["capture-spantrace"] }
+color-eyre = "0.5"
 
 [dev-dependencies]
 abscissa_core = { version = "0.5", features = ["testing"] }

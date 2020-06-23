@@ -3,7 +3,7 @@
 [[package]]
 name = "abscissa_core"
 version = "0.5.2"
-source = "git+https://github.com/yaahc/abscissa.git?branch=develop#41d342a9344e38442b2211b07f28a89505892a21"
+source = "git+https://github.com/yaahc/abscissa.git?rev=41d342a9344e38442b2211b07f28a89505892a21#41d342a9344e38442b2211b07f28a89505892a21"
 dependencies = [
  "abscissa_derive",
  "backtrace",
@@ -30,7 +30,7 @@ dependencies = [
 [[package]]
 name = "abscissa_derive"
 version = "0.5.0"
-source = "git+https://github.com/yaahc/abscissa.git?branch=develop#41d342a9344e38442b2211b07f28a89505892a21"
+source = "git+https://github.com/yaahc/abscissa.git?rev=41d342a9344e38442b2211b07f28a89505892a21#41d342a9344e38442b2211b07f28a89505892a21"
 dependencies = [
  "darling",
  "ident_case",
@@ -290,26 +290,13 @@ dependencies = [
 [[package]]
 name = "color-eyre"
 version = "0.5.0"
-source = "git+https://github.com/yaahc/color-eyre.git?branch=hooked#f882a88a7037aa621a42c3719d06a2286aa0f8de"
+source = "git+https://github.com/yaahc/color-eyre.git?rev=f882a88a7037aa621a42c3719d06a2286aa0f8de#f882a88a7037aa621a42c3719d06a2286aa0f8de"
 dependencies = [
  "ansi_term",
  "backtrace",
- "color-spantrace",
  "eyre",
  "indenter",
  "once_cell",
- "tracing-error",
-]
-
-[[package]]
-name = "color-spantrace"
-version = "0.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "058b1bb1ea9b128049d3aa4cfbf166c6c8e53f3eade5f40ebb2d2a51cef65058"
-dependencies = [
- "ansi_term",
- "tracing-core",
- "tracing-error",
 ]
 
 [[package]]
@@ -1737,7 +1724,7 @@ dependencies = [
 [[package]]
 name = "spandoc"
 version = "0.1.3"
-source = "git+https://github.com/yaahc/spandoc.git#554358be632b156a6f0af963b0b244e2665b4767"
+source = "git+https://github.com/yaahc/spandoc.git?rev=554358be632b156a6f0af963b0b244e2665b4767#554358be632b156a6f0af963b0b244e2665b4767"
 dependencies = [
  "matches",
  "proc-macro2 1.0.18",
