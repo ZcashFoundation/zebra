@@ -19,4 +19,6 @@ panic = "abort"
 panic = "abort"
 
 [patch.crates-io]
-abscissa_core = { git = "https://github.com/yaahc/abscissa.git", branch = "develop" }
+abscissa_core = { git = "https://github.com/yaahc/abscissa.git", rev = "41d342a9344e38442b2211b07f28a89505892a21" }
+color-eyre = { git = "https://github.com/yaahc/color-eyre.git", rev = "f882a88a7037aa621a42c3719d06a2286aa0f8de", features = ["capture-spantrace"] }
+spandoc = { git = "https://github.com/yaahc/spandoc.git", rev = "554358be632b156a6f0af963b0b244e2665b4767" }
