@@ -90,6 +90,7 @@ where
                         "requested more hashes"
                     );
 
+                    // TODO(jlusby): reject both main and test net genesis blocks
                     if hashes.last() == Some(&super::GENESIS) {
                         continue;
                     }
