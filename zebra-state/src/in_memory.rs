@@ -22,7 +22,7 @@ struct InMemoryState {
 }
 
 impl InMemoryState {
-    fn contains(&mut self, _hash: BlockHeaderHash) -> Result<u32, Error> {
+    fn contains(&mut self, _hash: BlockHeaderHash) -> Result<Option<u32>, Error> {
         todo!()
     }
 }
@@ -65,13 +65,13 @@ impl Service<Request> for InMemoryState {
 
                 async move { result }.boxed()
             }
-            Request::Contains { hash } => {
+            Request::GetDepth { hash } => {
                 let res = self.contains(hash);
 
                 async move {
                     let depth = res?;
 
-                    Ok(Response::Contained { depth })
+                    Ok(Response::Depth(depth))
                 }
                 .boxed()
             }

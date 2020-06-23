@@ -59,7 +59,7 @@ pub enum Request {
     /// Get the block that is the tip of the current chain
     GetTip,
     /// Ask the state if the given hash is part of the current best chain
-    Contains {
+    GetDepth {
         /// The hash to check against the current chain
         hash: BlockHeaderHash,
     },
@@ -86,10 +86,10 @@ pub enum Response {
     },
     /// The response to a `Contains` request indicating that the given has is in
     /// the current best chain
-    Contained {
+    Depth(
         /// The number of blocks above the given block in the current best chain
-        depth: u32,
-    },
+        Option<u32>,
+    ),
 }
 
 #[cfg(test)]

@@ -139,12 +139,12 @@ impl Service<Request> for SledState {
                 }
                 .boxed()
             }
-            Request::Contains { hash } => {
+            Request::GetDepth { hash } => {
                 let storage = self.clone();
 
                 async move {
                     if storage.contains(&hash)? {
-                        Err("unknown block")?
+                        return Ok(Response::Depth(None));
                     }
 
                     let block = storage
@@ -157,7 +157,7 @@ impl Service<Request> for SledState {
                     let depth =
                         tip.coinbase_height().unwrap().0 - block.coinbase_height().unwrap().0;
 
-                    Ok(Response::Contained { depth })
+                    Ok(Response::Depth(Some(depth)))
                 }
                 .boxed()
             }

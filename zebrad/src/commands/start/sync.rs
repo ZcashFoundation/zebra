@@ -110,14 +110,16 @@ where
                     // state, stopping at the first unknown hash to get resp1',
                     // ..., respF'. (These lists may be empty).
                     while let Some(&next) = hashes.peek() {
-                        let should_download = self
+                        let resp = self
                             .state
                             .ready_and()
                             .await
                             .map_err(|e| eyre!(e))?
-                            .call(zebra_state::Request::Contains { hash: next })
+                            .call(zebra_state::Request::GetDepth { hash: next })
                             .await
-                            .is_err();
+                            .map_err(|e| eyre!(e))?;
+
+                        let should_download = matches!(resp, zebra_state::Response::Depth(None));
 
                         if should_download {
                             download_set.extend(hashes);
