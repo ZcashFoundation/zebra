@@ -58,12 +58,17 @@ pub enum Request {
     },
     /// Get the block that is the tip of the current chain
     GetTip,
+    /// Ask the state if the given hash is part of the current best chain
+    GetDepth {
+        /// The hash to check against the current chain
+        hash: BlockHeaderHash,
+    },
 }
 
 #[derive(Debug, PartialEq)]
 /// A state response
 pub enum Response {
-    /// A response to a `AddBlock` request indicating a block was successfully
+    /// The response to a `AddBlock` request indicating a block was successfully
     /// added to the state
     Added {
         /// The hash of the block that was added
@@ -79,6 +84,12 @@ pub enum Response {
         /// The hash of the block at the tip of the current chain
         hash: BlockHeaderHash,
     },
+    /// The response to a `Contains` request indicating that the given has is in
+    /// the current best chain
+    Depth(
+        /// The number of blocks above the given block in the current best chain
+        Option<u32>,
+    ),
 }
 
 #[cfg(test)]

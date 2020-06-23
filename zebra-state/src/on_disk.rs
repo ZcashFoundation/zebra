@@ -75,18 +75,22 @@ impl SledState {
         }
     }
 
-    pub(super) fn get_tip(&self) -> Result<Option<BlockHeaderHash>, Error> {
+    pub(super) fn get_tip(&self) -> Result<Option<Arc<Block>>, Error> {
         let tree = self.storage.open_tree(b"by_height")?;
         let last_entry = tree.iter().values().next_back();
 
         match last_entry {
-            Some(Ok(bytes)) => {
-                let block = Arc::<Block>::zcash_deserialize(bytes.as_ref())?;
-                Ok(Some(block.as_ref().into()))
-            }
+            Some(Ok(bytes)) => Ok(Some(ZcashDeserialize::zcash_deserialize(bytes.as_ref())?)),
             Some(Err(e)) => Err(e)?,
             None => Ok(None),
         }
+    }
+
+    fn contains(&self, hash: &BlockHeaderHash) -> Result<bool, Error> {
+        let by_hash = self.storage.open_tree(b"by_hash")?;
+        let key = &hash.0;
+
+        Ok(by_hash.contains_key(key)?)
     }
 }
 
@@ -129,12 +133,52 @@ impl Service<Request> for SledState {
                 async move {
                     storage
                         .get_tip()?
+                        .map(|block| block.as_ref().into())
                         .map(|hash| Response::Tip { hash })
                         .ok_or_else(|| "zebra-state contains no blocks".into())
                 }
                 .boxed()
             }
+            Request::GetDepth { hash } => {
+                let storage = self.clone();
+
+                async move {
+                    if !storage.contains(&hash)? {
+                        return Ok(Response::Depth(None));
+                    }
+
+                    let block = storage
+                        .get(hash)?
+                        .expect("block must be present if contains returned true");
+                    let tip = storage
+                        .get_tip()?
+                        .expect("storage must have a tip if it contains the previous block");
+
+                    let depth =
+                        tip.coinbase_height().unwrap().0 - block.coinbase_height().unwrap().0;
+
+                    Ok(Response::Depth(Some(depth)))
+                }
+                .boxed()
+            }
         }
+    }
+}
+
+/// An alternate repr for `BlockHeight` that implements `AsRef<[u8]>` for usage
+/// with sled
+struct BytesHeight(u32, [u8; 4]);
+
+impl From<BlockHeight> for BytesHeight {
+    fn from(height: BlockHeight) -> Self {
+        let bytes = height.0.to_be_bytes();
+        Self(height.0, bytes)
+    }
+}
+
+impl AsRef<[u8]> for BytesHeight {
+    fn as_ref(&self) -> &[u8] {
+        &self.1[..]
     }
 }
 

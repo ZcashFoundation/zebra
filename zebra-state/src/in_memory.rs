@@ -12,6 +12,7 @@ use std::{
     task::{Context, Poll},
 };
 use tower::{buffer::Buffer, Service};
+use zebra_chain::block::BlockHeaderHash;
 
 mod block_index;
 
@@ -20,7 +21,11 @@ struct InMemoryState {
     index: block_index::BlockIndex,
 }
 
-type Error = Box<dyn error::Error + Send + Sync + 'static>;
+impl InMemoryState {
+    fn contains(&mut self, _hash: BlockHeaderHash) -> Result<Option<u32>, Error> {
+        todo!()
+    }
+}
 
 impl Service<Request> for InMemoryState {
     type Response = Response;
@@ -60,6 +65,16 @@ impl Service<Request> for InMemoryState {
 
                 async move { result }.boxed()
             }
+            Request::GetDepth { hash } => {
+                let res = self.contains(hash);
+
+                async move {
+                    let depth = res?;
+
+                    Ok(Response::Depth(depth))
+                }
+                .boxed()
+            }
         }
     }
 }
@@ -76,3 +91,5 @@ pub fn init() -> impl Service<
        + 'static {
     Buffer::new(InMemoryState::default(), 1)
 }
+
+type Error = Box<dyn error::Error + Send + Sync + 'static>;
