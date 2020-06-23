@@ -6,9 +6,12 @@ use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
 use zebra_chain::{block::BlockHeaderHash, types::BlockHeight};
 
+use zebra_network as zn;
+use zebra_state as zs;
+
 pub struct Syncer<ZN, ZS>
 where
-    ZN: Service<zebra_network::Request>,
+    ZN: Service<zn::Request>,
 {
     pub peer_set: ZN,
     // TODO(jlusby): add validator
@@ -22,15 +25,9 @@ where
 
 impl<ZN, ZS> Syncer<ZN, ZS>
 where
-    ZN: Service<zebra_network::Request, Response = zebra_network::Response, Error = Error>
-        + Send
-        + Clone
-        + 'static,
+    ZN: Service<zn::Request, Response = zn::Response, Error = Error> + Send + Clone + 'static,
     ZN::Future: Send,
-    ZS: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>
-        + Send
-        + Clone
-        + 'static,
+    ZS: Service<zs::Request, Response = zs::Response, Error = Error> + Send + Clone + 'static,
     ZS::Future: Send,
 {
     pub async fn run(&mut self) -> Result<(), Report> {
@@ -71,7 +68,7 @@ where
         // fanout parameter, to get resp1, ..., respF
         for _ in 0..self.fanout {
             let req = self.peer_set.ready_and().await.map_err(|e| eyre!(e))?.call(
-                zebra_network::Request::FindBlocks {
+                zn::Request::FindBlocks {
                     known_blocks: block_locator.clone(),
                     stop: None,
                 },
@@ -82,25 +79,11 @@ where
         let mut download_set = HashSet::new();
         while let Some(res) = tip_futs.next().await {
             match res.map_err::<Report, _>(|e| eyre!(e)) {
-                Ok(zebra_network::Response::BlockHeaderHashes(hashes)) => {
-                    info!(
-                        new_hashes = hashes.len(),
-                        in_flight = self.block_requests.len(),
-                        downloaded = self.downloaded.len(),
-                        "requested more hashes"
-                    );
-
-                    // TODO(jlusby): reject both main and test net genesis blocks
-                    if hashes.last() == Some(&super::GENESIS) {
+                Ok(zn::Response::BlockHeaderHashes(hashes)) => {
+                    if hashes.is_empty() {
+                        tracing::debug!("skipping empty response");
                         continue;
                     }
-
-                    let mut hashes = hashes.into_iter().peekable();
-                    let new_tip = if let Some(tip) = hashes.next() {
-                        tip
-                    } else {
-                        continue;
-                    };
 
                     // ObtainTips Step 3
                     //
@@ -108,36 +91,39 @@ where
                     // list, prune any block hashes already included in the
                     // state, stopping at the first unknown hash to get resp1',
                     // ..., respF'. (These lists may be empty).
-                    while let Some(&next) = hashes.peek() {
-                        let resp = self
+                    let mut first_unknown = 0;
+                    for (i, &hash) in hashes.iter().enumerate() {
+                        let depth = self
                             .state
                             .ready_and()
                             .await
                             .map_err(|e| eyre!(e))?
-                            .call(zebra_state::Request::GetDepth { hash: next })
+                            .call(zebra_state::Request::GetDepth { hash })
                             .await
                             .map_err(|e| eyre!(e))?;
-
-                        let should_download = matches!(resp, zebra_state::Response::Depth(None));
-
-                        if should_download {
-                            download_set.extend(hashes);
+                        if let zs::Response::Depth(None) = depth {
+                            first_unknown = i;
                             break;
-                        } else {
-                            let _ = hashes.next();
                         }
                     }
+                    if first_unknown == hashes.len() {
+                        tracing::debug!("no new hashes, even though we gave our tip?");
+                        continue;
+                    }
+                    let unknown_hashes = &hashes[first_unknown..];
+                    download_set.extend(unknown_hashes);
 
                     // ObtainTips Step 4
                     //
                     // Combine the last elements of each list into a set; this
                     // is the set of prospective tips.
+                    let new_tip = *unknown_hashes
+                        .last()
+                        .expect("already checked first_unknown < hashes.len()");
                     let _ = self.prospective_tips.insert(new_tip);
                 }
-                Ok(_) => {}
-                Err(e) => {
-                    error!("{:?}", e);
-                }
+                Ok(r) => tracing::error!("unexpected response {:?}", r),
+                Err(e) => tracing::error!("{:?}", e),
             }
         }
 
@@ -177,19 +163,17 @@ where
                     .ready_and()
                     .await
                     .map_err(|e| eyre!(e))?
-                    .call(zebra_network::Request::FindBlocks {
+                    .call(zn::Request::FindBlocks {
                         known_blocks: vec![tip],
                         stop: None,
                     })
                     .await;
                 match res.map_err::<Report, _>(|e| eyre!(e)) {
-                    Ok(zebra_network::Response::BlockHeaderHashes(hashes)) => {
-                        info!(
-                            new_hashes = hashes.len(),
-                            in_flight = self.block_requests.len(),
-                            downloaded = self.downloaded.len(),
-                            "requested more hashes"
-                        );
+                    Ok(zn::Response::BlockHeaderHashes(hashes)) => {
+                        if hashes.is_empty() {
+                            tracing::debug!("skipping empty response");
+                            continue;
+                        }
 
                         // ExtendTips Step 3
                         //
@@ -197,29 +181,23 @@ where
                         // response is the genesis block; if so, discard the response.
                         // It indicates that the remote peer does not have any blocks
                         // following the prospective tip.
-                        if hashes.last() == Some(&super::GENESIS) {
+                        // TODO(jlusby): reject both main and test net genesis blocks
+                        if hashes[0] == super::GENESIS {
+                            tracing::debug!("skipping response that does not extend the tip");
                             continue;
                         }
-
-                        let mut hashes = hashes.into_iter();
-                        let new_tip = if let Some(tip) = hashes.next() {
-                            tip
-                        } else {
-                            continue;
-                        };
 
                         // ExtendTips Step 4
                         //
                         // Combine the last elements of the remaining responses into
                         // a set, and add this set to the set of prospective tips.
+                        let new_tip = *hashes.last().expect("already checked is_empty");
                         let _ = self.prospective_tips.insert(new_tip);
 
                         download_set.extend(hashes);
                     }
-                    Ok(_) => {}
-                    Err(e) => {
-                        error!("{:?}", e);
-                    }
+                    Ok(r) => tracing::error!("unexpected response {:?}", r),
+                    Err(e) => tracing::error!("{:?}", e),
                 }
             }
         }
@@ -260,7 +238,7 @@ where
 
         while let Some(res) = self.block_requests.next().await {
             match res.map_err::<Report, _>(|e| eyre!(e)) {
-                Ok(zebra_network::Response::Blocks(blocks)) => {
+                Ok(zn::Response::Blocks(blocks)) => {
                     info!(count = blocks.len(), "received blocks");
                     for block in blocks {
                         let hash = block.as_ref().into();
@@ -294,7 +272,7 @@ where
             .ready_and()
             .await
             .map_err(|e| eyre!(e))?
-            .call(zebra_state::Request::AddBlock { block });
+            .call(zs::Request::AddBlock { block });
 
         let _handle = tokio::spawn(
             async move {
@@ -323,7 +301,7 @@ where
             .ready_and()
             .await
             .map_err(|e| eyre!(e))?
-            .call(zebra_network::Request::BlocksByHash(set));
+            .call(zn::Request::BlocksByHash(set));
 
         self.downloading.extend(chunk);
         self.block_requests.push(request);
