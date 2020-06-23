@@ -127,20 +127,12 @@ where
             }
         }
 
-        self.prospective_tips
-            .retain(|tip| !download_set.contains(tip));
-
         // ObtainTips Step 5
         //
         // Combine all elements of each list into a set, and queue
         // download and verification of those blocks.
-        self.request_blocks(
-            download_set
-                .into_iter()
-                .chain(self.prospective_tips.iter().cloned())
-                .collect(),
-        )
-        .await?;
+        self.request_blocks(download_set.into_iter().collect())
+            .await?;
 
         Ok(())
     }
@@ -169,11 +161,13 @@ where
                     })
                     .await;
                 match res.map_err::<Report, _>(|e| eyre!(e)) {
-                    Ok(zn::Response::BlockHeaderHashes(hashes)) => {
-                        if hashes.is_empty() {
+                    Ok(zn::Response::BlockHeaderHashes(mut hashes)) => {
+                        let new_tip = if let Some(tip) = hashes.pop() {
+                            tip
+                        } else {
                             tracing::debug!("skipping empty response");
                             continue;
-                        }
+                        };
 
                         // ExtendTips Step 3
                         //
@@ -182,7 +176,7 @@ where
                         // It indicates that the remote peer does not have any blocks
                         // following the prospective tip.
                         // TODO(jlusby): reject both main and test net genesis blocks
-                        if hashes[0] == super::GENESIS {
+                        if hashes.first() == Some(&super::GENESIS) {
                             tracing::debug!("skipping response that does not extend the tip");
                             continue;
                         }
@@ -191,7 +185,6 @@ where
                         //
                         // Combine the last elements of the remaining responses into
                         // a set, and add this set to the set of prospective tips.
-                        let new_tip = *hashes.last().expect("already checked is_empty");
                         let _ = self.prospective_tips.insert(new_tip);
 
                         download_set.extend(hashes);
