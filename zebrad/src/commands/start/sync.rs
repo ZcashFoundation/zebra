@@ -141,11 +141,16 @@ where
             }
         }
 
+        self.prospective_tips
+            .retain(|tip| !download_set.contains(tip));
+
         // ObtainTips Step 5
         //
         // Combine all elements of each list into a set, and queue
         // download and verification of those blocks.
         self.request_blocks(download_set.into_iter().collect())
+            .await?;
+        self.request_blocks(self.prospective_tips.iter().cloned().collect())
             .await?;
 
         Ok(())
@@ -206,10 +211,6 @@ where
                         // a set, and add this set to the set of prospective tips.
                         let _ = self.prospective_tips.insert(new_tip);
 
-                        // ExtendTips Step 5
-                        //
-                        // Combine all elements of the remaining responses into a
-                        // set, and queue download and verification of those blocks
                         download_set.extend(hashes);
                     }
                     Ok(_) => {}
@@ -220,7 +221,16 @@ where
             }
         }
 
+        self.prospective_tips
+            .retain(|tip| !download_set.contains(tip));
+
+        // ExtendTips Step 5
+        //
+        // Combine all elements of the remaining responses into a
+        // set, and queue download and verification of those blocks
         self.request_blocks(download_set.into_iter().collect())
+            .await?;
+        self.request_blocks(self.prospective_tips.iter().cloned().collect())
             .await?;
 
         Ok(())
