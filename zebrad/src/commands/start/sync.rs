@@ -3,7 +3,6 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use std::{collections::HashSet, iter, time::Duration};
 use tokio::time::delay_for;
 use tower::{Service, ServiceExt};
-use tracing_futures::Instrument;
 use zebra_chain::{block::BlockHeaderHash, types::BlockHeight};
 
 use zebra_network as zn;
@@ -18,8 +17,6 @@ where
     pub state: ZS,
     pub prospective_tips: HashSet<BlockHeaderHash>,
     pub block_requests: FuturesUnordered<ZN::Future>,
-    pub downloading: HashSet<BlockHeaderHash>,
-    pub downloaded: HashSet<BlockHeaderHash>,
     pub fanout: NumReq,
 }
 
@@ -41,9 +38,6 @@ where
             while !self.prospective_tips.is_empty() {
                 info!("extending prospective tips");
                 self.extend_tips().await?;
-
-                // TODO(jlusby): move this to a background task and check it for errors after each step.
-                self.process_blocks().await?;
             }
 
             delay_for(Duration::from_secs(15)).await;
@@ -214,90 +208,49 @@ where
     }
 
     /// Queue downloads for each block that isn't currently known to our node
-    async fn request_blocks(&mut self, mut hashes: Vec<BlockHeaderHash>) -> Result<(), Report> {
-        hashes.retain(|hash| !self.known_block(hash));
-
+    async fn request_blocks(&mut self, hashes: Vec<BlockHeaderHash>) -> Result<(), Report> {
         for chunk in hashes.chunks(10usize) {
-            self.queue_download(chunk).await?;
-        }
+            let set = chunk.iter().cloned().collect();
 
-        Ok(())
-    }
+            let request = self
+                .peer_set
+                .ready_and()
+                .await
+                .map_err(|e| eyre!(e))?
+                .call(zn::Request::BlocksByHash(set));
 
-    /// Drive block downloading futures to completion and dispatch downloaded
-    /// blocks to the validator
-    async fn process_blocks(&mut self) -> Result<(), Report> {
-        info!(in_flight = self.block_requests.len(), "processing blocks");
+            let mut state = self.state.clone();
 
-        while let Some(res) = self.block_requests.next().await {
-            match res.map_err::<Report, _>(|e| eyre!(e)) {
-                Ok(zn::Response::Blocks(blocks)) => {
-                    info!(count = blocks.len(), "received blocks");
-                    for block in blocks {
-                        let hash = block.as_ref().into();
-                        assert!(
-                            self.downloading.remove(&hash),
-                            "all received blocks should be explicitly requested and received once"
-                        );
-                        let _ = self.downloaded.insert(hash);
-                        self.validate_block(block).await?;
+            let _ = tokio::spawn(async move {
+                match async move {
+                    let resp = request.await?;
+
+                    if let zn::Response::Blocks(blocks) = resp {
+                        debug!(count = blocks.len(), "received blocks");
+
+                        for block in blocks {
+                            state
+                                .ready_and()
+                                .await?
+                                .call(zs::Request::AddBlock { block })
+                                .await?;
+                        }
+                    } else {
+                        debug!(?resp, "unexpected response");
+                    }
+
+                    Ok::<_, Error>(())
+                }
+                .await
+                {
+                    Ok(()) => {}
+                    Err(e) => {
+                        // TODO(jlusby): retry policy?
+                        error!("{:?}", e);
                     }
                 }
-                Ok(_) => continue,
-                Err(e) => {
-                    error!("{:?}", e);
-                }
-            }
+            });
         }
-
-        Ok(())
-    }
-
-    /// Validate a downloaded block using the validator service, inserting the
-    /// block into the state if successful
-    #[tracing::instrument(skip(self))]
-    async fn validate_block(
-        &mut self,
-        block: std::sync::Arc<zebra_chain::block::Block>,
-    ) -> Result<(), Report> {
-        let fut = self
-            .state
-            .ready_and()
-            .await
-            .map_err(|e| eyre!(e))?
-            .call(zs::Request::AddBlock { block });
-
-        let _handle = tokio::spawn(
-            async move {
-                match fut.await.map_err::<Report, _>(|e| eyre!(e)) {
-                    Ok(_) => {}
-                    Err(report) => error!("{:?}", report),
-                }
-            }
-            .in_current_span(),
-        );
-
-        Ok(())
-    }
-
-    /// Returns true if the block is being downloaded or has been downloaded
-    fn known_block(&self, hash: &BlockHeaderHash) -> bool {
-        self.downloading.contains(hash) || self.downloaded.contains(hash)
-    }
-
-    /// Queue a future to download a set of blocks from the network
-    async fn queue_download(&mut self, chunk: &[BlockHeaderHash]) -> Result<(), Report> {
-        let set = chunk.iter().cloned().collect();
-
-        let request = self
-            .peer_set
-            .ready_and()
-            .await
-            .map_err(|e| eyre!(e))?
-            .call(zn::Request::BlocksByHash(set));
-
-        self.downloading.extend(chunk);
-        self.block_requests.push(request);
 
         Ok(())
     }

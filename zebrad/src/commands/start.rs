@@ -63,8 +63,6 @@ impl StartCmd {
             peer_set,
             state,
             block_requests: FuturesUnordered::new(),
-            downloading: HashSet::new(),
-            downloaded: HashSet::new(),
             fanout: 4,
             prospective_tips: HashSet::new(),
         };
