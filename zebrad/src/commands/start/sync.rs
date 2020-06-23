@@ -37,8 +37,7 @@ where
         loop {
             if self.prospective_tips.is_empty() {
                 info!("populating prospective tips list");
-                // TODO(jlusby): get the block_locator from the state
-                self.obtain_tips(vec![super::GENESIS]).await?;
+                self.obtain_tips().await?;
             }
 
             info!("extending prospective tips");
@@ -58,12 +57,14 @@ where
 
     /// Given a block_locator list fan out request for subsequent hashes to
     /// multiple peers
-    //
-    // ObtainTips Step 1
-    //
-    // Query the current state to construct the sequence of hashes: handled by
-    // the caller
-    async fn obtain_tips(&mut self, block_locator: Vec<BlockHeaderHash>) -> Result<(), Report> {
+    async fn obtain_tips(&mut self) -> Result<(), Report> {
+        // ObtainTips Step 1
+        //
+        // Query the current state to construct the sequence of hashes: handled by
+        // the caller
+        //
+        // TODO(jlusby): get the block_locator from the state
+        let block_locator = vec![super::GENESIS];
         let mut tip_futs = FuturesUnordered::new();
 
         // ObtainTips Step 2
