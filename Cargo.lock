@@ -2384,6 +2384,7 @@ dependencies = [
  "futures",
  "hex",
  "lazy_static",
+ "once_cell",
  "serde",
  "sled",
  "spandoc",
