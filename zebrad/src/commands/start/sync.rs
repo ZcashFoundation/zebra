@@ -148,10 +148,13 @@ where
         //
         // Combine all elements of each list into a set, and queue
         // download and verification of those blocks.
-        self.request_blocks(download_set.into_iter().collect())
-            .await?;
-        self.request_blocks(self.prospective_tips.iter().cloned().collect())
-            .await?;
+        self.request_blocks(
+            download_set
+                .into_iter()
+                .chain(self.prospective_tips.iter().cloned())
+                .collect(),
+        )
+        .await?;
 
         Ok(())
     }
@@ -228,10 +231,13 @@ where
         //
         // Combine all elements of the remaining responses into a
         // set, and queue download and verification of those blocks
-        self.request_blocks(download_set.into_iter().collect())
-            .await?;
-        self.request_blocks(self.prospective_tips.iter().cloned().collect())
-            .await?;
+        self.request_blocks(
+            download_set
+                .into_iter()
+                .chain(self.prospective_tips.iter().cloned())
+                .collect(),
+        )
+        .await?;
 
         Ok(())
     }
