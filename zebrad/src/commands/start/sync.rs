@@ -9,18 +9,6 @@ use zebra_chain::{block::BlockHeaderHash, types::BlockHeight};
 use zebra_network as zn;
 use zebra_state as zs;
 
-/// Get the heights of the blocks for constructing a block_locator list
-#[allow(dead_code)]
-pub fn block_locator_heights(tip_height: BlockHeight) -> impl Iterator<Item = BlockHeight> {
-    iter::successors(Some(1u32), |h| h.checked_mul(2))
-        .flat_map(move |step| tip_height.0.checked_sub(step))
-        .map(BlockHeight)
-        .chain(iter::once(BlockHeight(0)))
-}
-
-type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
-type NumReq = u32;
-
 pub struct Syncer<ZN, ZS>
 where
     ZN: Service<zn::Request>,
@@ -305,3 +293,15 @@ where
         Ok(())
     }
 }
+
+/// Get the heights of the blocks for constructing a block_locator list
+#[allow(dead_code)]
+pub fn block_locator_heights(tip_height: BlockHeight) -> impl Iterator<Item = BlockHeight> {
+    iter::successors(Some(1u32), |h| h.checked_mul(2))
+        .flat_map(move |step| tip_height.0.checked_sub(step))
+        .map(BlockHeight)
+        .chain(iter::once(BlockHeight(0)))
+}
+
+type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
+type NumReq = u32;
