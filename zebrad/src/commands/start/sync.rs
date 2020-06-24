@@ -161,11 +161,13 @@ where
                     })
                     .await;
                 match res.map_err::<Report, _>(|e| eyre!(e)) {
-                    Ok(zn::Response::BlockHeaderHashes(hashes)) => {
-                        if hashes.is_empty() {
+                    Ok(zn::Response::BlockHeaderHashes(mut hashes)) => {
+                        let new_tip = if let Some(tip) = hashes.pop() {
+                            tip
+                        } else {
                             tracing::debug!("skipping empty response");
                             continue;
-                        }
+                        };
 
                         // ExtendTips Step 3
                         //
@@ -174,22 +176,20 @@ where
                         // It indicates that the remote peer does not have any blocks
                         // following the prospective tip.
                         // TODO(jlusby): reject both main and test net genesis blocks
-                        if hashes[0] == super::GENESIS {
-                            tracing::debug!("skipping response that does not extend the tip");
-                            continue;
+                        match hashes.first() {
+                            Some(&super::GENESIS) => {
+                                tracing::debug!("skipping response that does not extend the tip");
+                                continue;
+                            }
+                            Some(_) | None => {}
                         }
 
                         // ExtendTips Step 4
                         //
                         // Combine the last elements of the remaining responses into
                         // a set, and add this set to the set of prospective tips.
-                        let new_tip = *hashes.last().expect("already checked is_empty");
                         let _ = self.prospective_tips.insert(new_tip);
 
-                        // ExtendTips Step 5
-                        //
-                        // Combine all elements of the remaining responses into a
-                        // set, and queue download and verification of those blocks
                         download_set.extend(hashes);
                     }
                     Ok(r) => tracing::error!("unexpected response {:?}", r),
@@ -198,8 +198,20 @@ where
             }
         }
 
-        self.request_blocks(download_set.into_iter().collect())
-            .await?;
+        self.prospective_tips
+            .retain(|tip| !download_set.contains(tip));
+
+        // ExtendTips Step 5
+        //
+        // Combine all elements of the remaining responses into a
+        // set, and queue download and verification of those blocks
+        self.request_blocks(
+            download_set
+                .into_iter()
+                .chain(self.prospective_tips.iter().cloned())
+                .collect(),
+        )
+        .await?;
 
         Ok(())
     }
