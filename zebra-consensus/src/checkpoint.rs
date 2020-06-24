@@ -13,10 +13,9 @@
 
 use futures_util::FutureExt;
 use std::{
-    collections::HashMap,
+    collections::BTreeMap,
     error,
     future::Future,
-    iter,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -46,21 +45,9 @@ struct CheckpointVerifier<S> {
     /// (zcashd allows chain reorganizations up to 99 blocks, and prunes
     /// orphaned side-chains after 288 blocks.)
     ///
-    /// Checkpoints must start at zero, and have equal spacing. There must
-    /// be at least one checkpoint, the genesis block.
-    checkpoint_list: Arc<HashMap<BlockHeight, BlockHeaderHash>>,
-
-    // Derived Variables
-    //
-    /// The height of the maximum checkpoint.
-    ///
-    /// Can be zero, if there is a single genesis block checkpoint.
-    max_checkpoint_height: BlockHeight,
-
-    /// The fixed spacing between checkpoints.
-    ///
-    /// Can be zero, if there is a single genesis block checkpoint.
-    checkpoint_frequency: BlockHeight,
+    /// There must be a checkpoint for the genesis block at BlockHeight 0.
+    /// (All other checkpoints are optional.)
+    checkpoint_list: Arc<BTreeMap<BlockHeight, BlockHeaderHash>>,
 
     // Cached Blocks
     //
@@ -70,11 +57,14 @@ struct CheckpointVerifier<S> {
     /// the ancestor checkpoint. Blocks are verified when there is a chain from
     /// an ancestor checkpoint to a descendant checkpoint.
     ///
-    /// Each pair of checkpoints verifies `checkpoint_frequency` blocks, from
-    /// the ancestor checkpoint, to the parent of the descendant checkpoint.
+    /// Each pair of checkpoints is used to verify the blocks between the
+    /// checkpoints. In particular, verification includes the ancestor checkpoint,
+    /// but excludes the descendant checkpoint. (Only the parent of the descendant
+    /// checkpoint is verified.)
+    ///
     /// The final checkpoint does not have any descendant checkpoints, so it
-    /// only verifies a single block.
-    queued: HashMap<BlockHeight, CheckpointInterval>,
+    /// only verifies the single block corresponding to that checkpoint.
+    queued: BTreeMap<BlockHeight, CheckpointInterval>,
 
     /// The height of the next unverified checkpoint.
     ///
@@ -157,7 +147,6 @@ where
 
 // TODO(teor):
 //   - add a function for the maximum checkpoint height
-//     (We can pre-calculate the result in init(), if we want.)
 //   - check that block.coinbase_height() <= max_checkpoint_height
 
 /// Return a checkpoint verification service, using the provided state service.
@@ -175,7 +164,7 @@ where
 /// backed by the same state layer.
 pub fn init<S>(
     state_service: S,
-    checkpoint_list: impl Into<Arc<HashMap<BlockHeight, BlockHeaderHash>>>,
+    checkpoint_list: impl Into<Arc<BTreeMap<BlockHeight, BlockHeaderHash>>>,
 ) -> Result<
     impl Service<
             Arc<Block>,
@@ -193,49 +182,19 @@ where
         + 'static,
     S::Future: Send + 'static,
 {
-    let checkpoints: Arc<HashMap<BlockHeight, BlockHeaderHash>> = checkpoint_list.into();
+    let checkpoints: Arc<BTreeMap<BlockHeight, BlockHeaderHash>> = checkpoint_list.into();
 
-    if checkpoints.is_empty() {
-        // An empty checkpoint list can't actually verify any blocks.
-        return Err("there must be at least one checkpoint".into());
-    }
-
-    let mut heights: Vec<BlockHeight> = checkpoints.keys().cloned().collect();
-    heights.sort();
-
-    let min_checkpoint_height = heights[0];
-    if min_checkpoint_height != BlockHeight(0) {
-        // We need to start at a genesis block
-        return Err("checkpoints must start at block height 0".into());
-    }
-
-    let max_checkpoint_height = heights[heights.len() - 1];
-    if (max_checkpoint_height.0 as usize) % heights.len() != 0 {
-        return Err("the final checkpoint must be equally spaced".into());
-    }
-
-    // The result is always in range, because the numerator of the
-    // unsigned division is a BlockHeight.
-    let checkpoint_frequency: BlockHeight =
-        BlockHeight(((max_checkpoint_height.0 as usize) / heights.len()) as u32);
-
-    // Now check the spacing on each checkpoint
-    let expected_heights: Vec<BlockHeight> = iter::successors(Some(BlockHeight(0)), |h| {
-        Some(BlockHeight(h.0 + checkpoint_frequency.0))
-    })
-    .take(heights.len())
-    .collect();
-
-    if heights != expected_heights {
-        return Err("intermediate checkpoints must be equally spaced".into());
-    }
+    // An empty checkpoint list can't actually verify any blocks.
+    match checkpoints.keys().cloned().next() {
+        None => return Err("there must be at least one checkpoint, for the genesis block".into()),
+        Some(BlockHeight(0)) => {}
+        _ => return Err("checkpoints must start at the genesis block height 0".into()),
+    };
 
     Ok(CheckpointVerifier {
         state_service,
         checkpoint_list: checkpoints,
-        max_checkpoint_height,
-        checkpoint_frequency,
-        queued: <HashMap<BlockHeight, CheckpointInterval>>::new(),
+        queued: <BTreeMap<BlockHeight, CheckpointInterval>>::new(),
         current_checkpoint_height: Some(BlockHeight(0)),
     })
 }
@@ -260,7 +219,7 @@ mod tests {
         let hash0: BlockHeaderHash = block0.as_ref().into();
 
         // Make a checkpoint list containing only the genesis block
-        let genesis_checkpoint_list: HashMap<BlockHeight, BlockHeaderHash> =
+        let genesis_checkpoint_list: BTreeMap<BlockHeight, BlockHeaderHash> =
             [(block0.coinbase_height().unwrap(), hash0)]
                 .iter()
                 .cloned()
@@ -305,6 +264,71 @@ mod tests {
 
     #[tokio::test]
     #[spandoc::spandoc]
+    async fn checkpoint_multi_item_list() -> Result<(), Report> {
+        install_tracing();
+
+        // Parse all the blocks
+        let mut checkpoint_data = Vec::new();
+        for b in &[
+            &zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..],
+            &zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..],
+            &zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..],
+            &zebra_test::vectors::BLOCK_MAINNET_434873_BYTES[..],
+        ] {
+            let block = Arc::<Block>::zcash_deserialize(*b)?;
+            let hash: BlockHeaderHash = block.as_ref().into();
+            checkpoint_data.push((block.clone(), block.coinbase_height().unwrap(), hash));
+        }
+
+        // Make a checkpoint list containing all the blocks
+        let checkpoint_list: BTreeMap<BlockHeight, BlockHeaderHash> = checkpoint_data
+            .iter()
+            .map(|(_block, height, hash)| (*height, *hash))
+            .collect();
+
+        let mut state_service = Box::new(zebra_state::in_memory::init());
+        let mut checkpoint_verifier =
+            super::init(state_service.clone(), checkpoint_list).map_err(|e| eyre!(e))?;
+
+        // Now verify each block, and check the state
+        for (block, _height, hash) in checkpoint_data {
+            /// Make sure the verifier service is ready
+            let ready_verifier_service = checkpoint_verifier
+                .ready_and()
+                .await
+                .map_err(|e| eyre!(e))?;
+
+            /// Verify the block
+            let verify_response = ready_verifier_service
+                .call(block.clone())
+                .await
+                .map_err(|e| eyre!(e))?;
+
+            assert_eq!(verify_response, hash);
+
+            /// Make sure the state service is ready
+            let ready_state_service = state_service.ready_and().await.map_err(|e| eyre!(e))?;
+            /// Make sure the block was added to the state
+            let state_response = ready_state_service
+                .call(zebra_state::Request::GetBlock { hash })
+                .await
+                .map_err(|e| eyre!(e))?;
+
+            if let zebra_state::Response::Block {
+                block: returned_block,
+            } = state_response
+            {
+                assert_eq!(block, returned_block);
+            } else {
+                bail!("unexpected response kind: {:?}", state_response);
+            }
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[spandoc::spandoc]
     async fn checkpoint_not_present_fail() -> Result<(), Report> {
         install_tracing();
 
@@ -314,7 +338,7 @@ mod tests {
             Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])?;
 
         // Make a checkpoint list containing only the genesis block
-        let genesis_checkpoint_list: HashMap<BlockHeight, BlockHeaderHash> =
+        let genesis_checkpoint_list: BTreeMap<BlockHeight, BlockHeaderHash> =
             [(block0.coinbase_height().unwrap(), block0.as_ref().into())]
                 .iter()
                 .cloned()
@@ -371,7 +395,7 @@ mod tests {
 
         // Make a checkpoint list containing the genesis block height,
         // but use the wrong hash
-        let genesis_checkpoint_list: HashMap<BlockHeight, BlockHeaderHash> =
+        let genesis_checkpoint_list: BTreeMap<BlockHeight, BlockHeaderHash> =
             [(block0.coinbase_height().unwrap(), BlockHeaderHash([0; 32]))]
                 .iter()
                 .cloned()
