@@ -30,7 +30,7 @@ use zebra_chain::block::BlockHeaderHash;
 mod sync;
 
 // genesis
-static GENESIS: BlockHeaderHash = BlockHeaderHash([
+const GENESIS: BlockHeaderHash = BlockHeaderHash([
     8, 206, 61, 151, 49, 176, 0, 192, 131, 56, 69, 92, 138, 74, 107, 208, 93, 161, 110, 38, 177,
     29, 170, 27, 145, 113, 132, 236, 232, 15, 4, 0,
 ]);

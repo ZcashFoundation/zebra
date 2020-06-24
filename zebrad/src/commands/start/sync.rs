@@ -176,9 +176,12 @@ where
                         // It indicates that the remote peer does not have any blocks
                         // following the prospective tip.
                         // TODO(jlusby): reject both main and test net genesis blocks
-                        if hashes.first() == Some(&super::GENESIS) {
-                            tracing::debug!("skipping response that does not extend the tip");
-                            continue;
+                        match hashes.first() {
+                            Some(&super::GENESIS) => {
+                                tracing::debug!("skipping response that does not extend the tip");
+                                continue;
+                            }
+                            Some(_) | None => {}
                         }
 
                         // ExtendTips Step 4
