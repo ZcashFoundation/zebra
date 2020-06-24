@@ -18,6 +18,4 @@ zebra-test = { path = "../zebra-test/" }
 spandoc = "0.1"
 tokio = { version = "0.2.21", features = ["full"] }
 tracing = "0.1.15"
-tracing-error = "0.1.2"
-tracing-subscriber = "0.2.6"
 color-eyre = "0.5"

@@ -2,7 +2,7 @@ use tower::{Service, ServiceExt};
 
 use zebra_test::transcript::Transcript;
 
-const TRANSCRIPT_DATA: [(&'static str, &'static str); 4] = [
+const TRANSCRIPT_DATA: [(&str, &str); 4] = [
     ("req1", "rsp1"),
     ("req2", "rsp2"),
     ("req3", "rsp3"),
