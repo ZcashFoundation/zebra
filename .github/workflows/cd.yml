@@ -32,7 +32,6 @@ jobs:
     - name: Set up gcloud Cloud SDK environment
       uses: GoogleCloudPlatform/github-actions/setup-gcloud@master
       with:
-        version: '295.0.0'
         project_id: ${{ env.PROJECT_ID }}
         service_account_key: ${{ secrets.GCLOUD_AUTH }}
 
@@ -52,6 +51,7 @@ jobs:
           --format="value(image_summary.fully_qualified_digest)");
 
         gcloud alpha container binauthz attestations sign-and-create \
+          --quiet \
           --artifact-url="${ARTIFACT_URL}" \
           --attestor="projects/zealous-zebra/attestors/zebrad-attestor" \
           --keyversion="projects/zealous-zebra/locations/global/keyRings/binary-authorization/cryptoKeys/zebrad-attestor/cryptoKeyVersions/1";
