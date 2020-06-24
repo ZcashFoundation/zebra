@@ -58,10 +58,12 @@ impl StartCmd {
         let config = app_config().network.clone();
         let state = zebra_state::on_disk::init(zebra_state::Config::default());
         let (peer_set, _address_book) = zebra_network::init(config, node).await;
+        let verifier = zebra_consensus::verify::init(state.clone());
 
         let mut syncer = sync::Syncer {
             peer_set,
             state,
+            verifier,
             block_requests: FuturesUnordered::new(),
             fanout: 4,
             prospective_tips: HashSet::new(),

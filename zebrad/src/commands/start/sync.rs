@@ -1,31 +1,37 @@
 use color_eyre::eyre::{eyre, Report};
 use futures::stream::{FuturesUnordered, StreamExt};
-use std::{collections::HashSet, iter, time::Duration};
+use std::{collections::HashSet, iter, sync::Arc, time::Duration};
 use tokio::time::delay_for;
 use tower::{Service, ServiceExt};
-use zebra_chain::{block::BlockHeaderHash, types::BlockHeight};
+use tracing_futures::Instrument;
+use zebra_chain::{
+    block::{Block, BlockHeaderHash},
+    types::BlockHeight,
+};
 
 use zebra_network as zn;
 use zebra_state as zs;
 
-pub struct Syncer<ZN, ZS>
+pub struct Syncer<ZN, ZS, ZC>
 where
     ZN: Service<zn::Request>,
 {
     pub peer_set: ZN,
-    // TODO(jlusby): add validator
     pub state: ZS,
+    pub verifier: ZC,
     pub prospective_tips: HashSet<BlockHeaderHash>,
     pub block_requests: FuturesUnordered<ZN::Future>,
     pub fanout: NumReq,
 }
 
-impl<ZN, ZS> Syncer<ZN, ZS>
+impl<ZN, ZS, ZC> Syncer<ZN, ZS, ZC>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = Error> + Send + Clone + 'static,
     ZN::Future: Send,
     ZS: Service<zs::Request, Response = zs::Response, Error = Error> + Send + Clone + 'static,
     ZS::Future: Send,
+    ZC: Service<Arc<Block>, Response = BlockHeaderHash, Error = Error> + Send + Clone + 'static,
+    ZC::Future: Send,
 {
     pub async fn run(&mut self) -> Result<(), Report> {
         loop {
@@ -222,7 +228,7 @@ where
                 .map_err(|e| eyre!(e))?
                 .call(zn::Request::BlocksByHash(set));
 
-            let mut state = self.state.clone();
+            let mut verifier = self.verifier.clone();
 
             let _ = tokio::spawn(async move {
                 match async move {
@@ -232,11 +238,7 @@ where
                         debug!(count = blocks.len(), "received blocks");
 
                         for block in blocks {
-                            state
-                                .ready_and()
-                                .await?
-                                .call(zs::Request::AddBlock { block })
-                                .await?;
+                            let _hash = verifier.ready_and().await?.call(block).await?;
                         }
                     } else {
                         debug!(?resp, "unexpected response");
