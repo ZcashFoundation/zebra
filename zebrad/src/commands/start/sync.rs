@@ -228,14 +228,23 @@ where
                     let resp = request.await?;
 
                     if let zn::Response::Blocks(blocks) = resp {
+                        let mut downloads = FuturesUnordered::new();
+
                         debug!(count = blocks.len(), "received blocks");
 
                         for block in blocks {
-                            state
-                                .ready_and()
-                                .await?
-                                .call(zs::Request::AddBlock { block })
-                                .await?;
+                            let handle = tokio::spawn(
+                                state
+                                    .ready_and()
+                                    .await?
+                                    .call(zs::Request::AddBlock { block }),
+                            );
+                            downloads.push(handle);
+                        }
+
+                        // Propagate back errors from block verifications
+                        while let Some(e) = downloads.next().await {
+                            e??;
                         }
                     } else {
                         debug!(?resp, "unexpected response");
