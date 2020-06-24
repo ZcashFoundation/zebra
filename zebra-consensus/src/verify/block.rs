@@ -315,10 +315,10 @@ mod tests {
         let state_service = Box::new(zebra_state::in_memory::init());
         let mut block_verifier = super::init(state_service);
 
-        let verify_response = block_verifier
-            .ready_and()
-            .await
-            .map_err(|e| eyre!(e))?
+        /// Make sure the verifier service is ready
+        let ready_verifier_service = block_verifier.ready_and().await.map_err(|e| eyre!(e))?;
+        /// Verify the block
+        let verify_response = ready_verifier_service
             .call(block.clone())
             .await
             .map_err(|e| eyre!(e))?;
@@ -342,10 +342,10 @@ mod tests {
         let mut state_service = zebra_state::in_memory::init();
         let mut block_verifier = super::init(state_service.clone());
 
-        let verify_response = block_verifier
-            .ready_and()
-            .await
-            .map_err(|e| eyre!(e))?
+        /// Make sure the verifier service is ready
+        let ready_verifier_service = block_verifier.ready_and().await.map_err(|e| eyre!(e))?;
+        /// Verify the block
+        let verify_response = ready_verifier_service
             .call(block.clone())
             .await
             .map_err(|e| eyre!(e))?;
@@ -356,10 +356,10 @@ mod tests {
             verify_response
         );
 
-        let state_response = state_service
-            .ready_and()
-            .await
-            .map_err(|e| eyre!(e))?
+        /// Make sure the state service is ready
+        let ready_state_service = state_service.ready_and().await.map_err(|e| eyre!(e))?;
+        /// Make sure the block was added to the state
+        let state_response = ready_state_service
             .call(zebra_state::Request::GetBlock { hash })
             .await
             .map_err(|e| eyre!(e))?;
@@ -386,11 +386,10 @@ mod tests {
         let mut state_service = zebra_state::in_memory::init();
         let mut block_verifier = super::init(state_service.clone());
 
-        // Add the block for the first time
-        let verify_response = block_verifier
-            .ready_and()
-            .await
-            .map_err(|e| eyre!(e))?
+        /// Make sure the verifier service is ready (1/2)
+        let ready_verifier_service = block_verifier.ready_and().await.map_err(|e| eyre!(e))?;
+        /// Verify the block for the first time
+        let verify_response = ready_verifier_service
             .call(block.clone())
             .await
             .map_err(|e| eyre!(e))?;
@@ -401,10 +400,10 @@ mod tests {
             verify_response
         );
 
-        let state_response = state_service
-            .ready_and()
-            .await
-            .map_err(|e| eyre!(e))?
+        /// Make sure the state service is ready (1/2)
+        let ready_state_service = state_service.ready_and().await.map_err(|e| eyre!(e))?;
+        /// Make sure the block was added to the state
+        let state_response = ready_state_service
             .call(zebra_state::Request::GetBlock { hash })
             .await
             .map_err(|e| eyre!(e))?;
@@ -416,27 +415,23 @@ mod tests {
             _ => bail!("unexpected response kind: {:?}", state_response),
         }
 
-        // Now try to add the block again, verify should fail
+        /// Make sure the verifier service is ready (2/2)
+        let ready_verifier_service = block_verifier.ready_and().await.map_err(|e| eyre!(e))?;
+        /// Now try to add the block again, verify should fail
         // TODO(teor): ignore duplicate block verifies?
-        let verify_result = block_verifier
-            .ready_and()
-            .await
-            .map_err(|e| eyre!(e))?
-            .call(block.clone())
-            .await;
+        let verify_result = ready_verifier_service.call(block.clone()).await;
 
         ensure!(
-            // TODO(teor || jlusby): check error string
+            // TODO(teor || jlusby): check error kind
             verify_result.is_err(),
             "unexpected result kind: {:?}",
             verify_result
         );
 
-        // But the state should still return the original block we added
-        let state_response = state_service
-            .ready_and()
-            .await
-            .map_err(|e| eyre!(e))?
+        /// Make sure the state service is ready (2/2)
+        let ready_state_service = state_service.ready_and().await.map_err(|e| eyre!(e))?;
+        /// But the state should still return the original block we added
+        let state_response = ready_state_service
             .call(zebra_state::Request::GetBlock { hash })
             .await
             .map_err(|e| eyre!(e))?;
@@ -472,13 +467,10 @@ mod tests {
 
         let arc_block: Arc<Block> = block.into();
 
-        // Try to add the block, and expect failure
-        let verify_result = block_verifier
-            .ready_and()
-            .await
-            .map_err(|e| eyre!(e))?
-            .call(arc_block.clone())
-            .await;
+        /// Make sure the verifier service is ready
+        let ready_verifier_service = block_verifier.ready_and().await.map_err(|e| eyre!(e))?;
+        /// Try to add the block, and expect failure
+        let verify_result = ready_verifier_service.call(arc_block.clone()).await;
 
         ensure!(
             // TODO(teor || jlusby): check error kind
@@ -487,11 +479,10 @@ mod tests {
             verify_result
         );
 
-        // Now make sure the block isn't in the state
-        let state_result = state_service
-            .ready_and()
-            .await
-            .map_err(|e| eyre!(e))?
+        /// Make sure the state service is ready (2/2)
+        let ready_state_service = state_service.ready_and().await.map_err(|e| eyre!(e))?;
+        /// Now make sure the block isn't in the state
+        let state_result = ready_state_service
             .call(zebra_state::Request::GetBlock {
                 hash: arc_block.as_ref().into(),
             })
