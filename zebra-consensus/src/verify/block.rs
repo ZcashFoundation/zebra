@@ -151,7 +151,7 @@ mod tests {
     use chrono::offset::{LocalResult, TimeZone};
     use chrono::{Duration, Utc};
     use color_eyre::eyre::Report;
-    use color_eyre::eyre::{bail, ensure, eyre};
+    use color_eyre::eyre::{bail, eyre};
     use std::sync::Arc;
     use tower::{util::ServiceExt, Service};
 
@@ -323,11 +323,7 @@ mod tests {
             .await
             .map_err(|e| eyre!(e))?;
 
-        ensure!(
-            verify_response == hash,
-            "unexpected response kind: {:?}",
-            verify_response
-        );
+        assert_eq!(verify_response, hash);
 
         Ok(())
     }
@@ -350,11 +346,7 @@ mod tests {
             .await
             .map_err(|e| eyre!(e))?;
 
-        ensure!(
-            verify_response == hash,
-            "unexpected response kind: {:?}",
-            verify_response
-        );
+        assert_eq!(verify_response, hash);
 
         /// Make sure the state service is ready
         let ready_state_service = state_service.ready_and().await.map_err(|e| eyre!(e))?;
@@ -364,11 +356,13 @@ mod tests {
             .await
             .map_err(|e| eyre!(e))?;
 
-        match state_response {
-            zebra_state::Response::Block {
-                block: returned_block,
-            } => assert_eq!(block, returned_block),
-            _ => bail!("unexpected response kind: {:?}", state_response),
+        if let zebra_state::Response::Block {
+            block: returned_block,
+        } = state_response
+        {
+            assert_eq!(block, returned_block);
+        } else {
+            bail!("unexpected response kind: {:?}", state_response);
         }
 
         Ok(())
@@ -394,11 +388,7 @@ mod tests {
             .await
             .map_err(|e| eyre!(e))?;
 
-        ensure!(
-            verify_response == hash,
-            "unexpected response kind: {:?}",
-            verify_response
-        );
+        assert_eq!(verify_response, hash);
 
         /// Make sure the state service is ready (1/2)
         let ready_state_service = state_service.ready_and().await.map_err(|e| eyre!(e))?;
@@ -408,25 +398,24 @@ mod tests {
             .await
             .map_err(|e| eyre!(e))?;
 
-        match state_response {
-            zebra_state::Response::Block {
-                block: returned_block,
-            } => assert_eq!(block, returned_block),
-            _ => bail!("unexpected response kind: {:?}", state_response),
+        if let zebra_state::Response::Block {
+            block: returned_block,
+        } = state_response
+        {
+            assert_eq!(block, returned_block);
+        } else {
+            bail!("unexpected response kind: {:?}", state_response);
         }
 
         /// Make sure the verifier service is ready (2/2)
         let ready_verifier_service = block_verifier.ready_and().await.map_err(|e| eyre!(e))?;
         /// Now try to add the block again, verify should fail
         // TODO(teor): ignore duplicate block verifies?
-        let verify_result = ready_verifier_service.call(block.clone()).await;
-
-        ensure!(
-            // TODO(teor || jlusby): check error kind
-            verify_result.is_err(),
-            "unexpected result kind: {:?}",
-            verify_result
-        );
+        // TODO(teor || jlusby): check error kind
+        ready_verifier_service
+            .call(block.clone())
+            .await
+            .unwrap_err();
 
         /// Make sure the state service is ready (2/2)
         let ready_state_service = state_service.ready_and().await.map_err(|e| eyre!(e))?;
@@ -436,11 +425,13 @@ mod tests {
             .await
             .map_err(|e| eyre!(e))?;
 
-        match state_response {
-            zebra_state::Response::Block {
-                block: returned_block,
-            } => assert_eq!(block, returned_block),
-            _ => bail!("unexpected response kind: {:?}", state_response),
+        if let zebra_state::Response::Block {
+            block: returned_block,
+        } = state_response
+        {
+            assert_eq!(block, returned_block);
+        } else {
+            bail!("unexpected response kind: {:?}", state_response);
         }
 
         Ok(())
@@ -470,30 +461,22 @@ mod tests {
         /// Make sure the verifier service is ready
         let ready_verifier_service = block_verifier.ready_and().await.map_err(|e| eyre!(e))?;
         /// Try to add the block, and expect failure
-        let verify_result = ready_verifier_service.call(arc_block.clone()).await;
-
-        ensure!(
-            // TODO(teor || jlusby): check error kind
-            verify_result.is_err(),
-            "unexpected result kind: {:?}",
-            verify_result
-        );
+        // TODO(teor || jlusby): check error kind
+        ready_verifier_service
+            .call(arc_block.clone())
+            .await
+            .unwrap_err();
 
         /// Make sure the state service is ready (2/2)
         let ready_state_service = state_service.ready_and().await.map_err(|e| eyre!(e))?;
         /// Now make sure the block isn't in the state
-        let state_result = ready_state_service
+        // TODO(teor || jlusby): check error kind
+        ready_state_service
             .call(zebra_state::Request::GetBlock {
                 hash: arc_block.as_ref().into(),
             })
-            .await;
-
-        ensure!(
-            // TODO(teor || jlusby): check error kind
-            state_result.is_err(),
-            "unexpected result kind: {:?}",
-            verify_result
-        );
+            .await
+            .unwrap_err();
 
         Ok(())
     }
