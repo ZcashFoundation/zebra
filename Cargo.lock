@@ -1955,9 +1955,8 @@ dependencies = [
  "tokio",
  "tower",
  "tracing",
- "tracing-error",
  "tracing-futures",
- "tracing-subscriber",
+ "zebra-test",
 ]
 
 [[package]]
@@ -2334,8 +2333,6 @@ dependencies = [
  "tokio",
  "tower",
  "tracing",
- "tracing-error",
- "tracing-subscriber",
  "zebra-chain",
  "zebra-state",
  "zebra-test",
@@ -2393,9 +2390,7 @@ dependencies = [
  "tokio",
  "tower",
  "tracing",
- "tracing-error",
  "tracing-futures",
- "tracing-subscriber",
  "zebra-chain",
  "zebra-test",
 ]
@@ -2410,6 +2405,9 @@ dependencies = [
  "lazy_static",
  "tokio",
  "tower",
+ "tracing",
+ "tracing-error",
+ "tracing-subscriber",
 ]
 
 [[package]]
