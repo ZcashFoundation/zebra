@@ -147,6 +147,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tests::install_tracing;
 
     use chrono::offset::{LocalResult, TimeZone};
     use chrono::{Duration, Utc};
@@ -288,26 +289,11 @@ mod tests {
         }
     }
 
-    fn install_tracing() {
-        use tracing_error::ErrorLayer;
-        use tracing_subscriber::prelude::*;
-        use tracing_subscriber::{fmt, EnvFilter};
-
-        let fmt_layer = fmt::layer().with_target(false);
-        let filter_layer = EnvFilter::try_from_default_env()
-            .or_else(|_| EnvFilter::try_new("info"))
-            .unwrap();
-
-        tracing_subscriber::registry()
-            .with(filter_layer)
-            .with(fmt_layer)
-            .with(ErrorLayer::default())
-            .init();
-    }
-
     #[tokio::test]
     #[spandoc::spandoc]
     async fn verify() -> Result<(), Report> {
+        install_tracing();
+
         let block =
             Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])?;
         let hash: BlockHeaderHash = block.as_ref().into();
@@ -331,6 +317,8 @@ mod tests {
     #[tokio::test]
     #[spandoc::spandoc]
     async fn round_trip() -> Result<(), Report> {
+        install_tracing();
+
         let block =
             Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])?;
         let hash: BlockHeaderHash = block.as_ref().into();
@@ -440,6 +428,8 @@ mod tests {
     #[tokio::test]
     #[spandoc::spandoc]
     async fn verify_fail_future_time() -> Result<(), Report> {
+        install_tracing();
+
         let mut block =
             <Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])?;
 
