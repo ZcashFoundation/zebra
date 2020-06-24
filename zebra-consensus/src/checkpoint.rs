@@ -155,6 +155,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tests::install_tracing;
 
     use color_eyre::eyre::{bail, eyre, Report};
     use tower::{util::ServiceExt, Service};
@@ -164,6 +165,8 @@ mod tests {
     #[tokio::test]
     #[spandoc::spandoc]
     async fn checkpoint_single_item_list() -> Result<(), Report> {
+        install_tracing();
+
         let block0 =
             Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
         let hash0: BlockHeaderHash = block0.as_ref().into();
@@ -214,6 +217,8 @@ mod tests {
     #[tokio::test]
     #[spandoc::spandoc]
     async fn checkpoint_not_present_fail() -> Result<(), Report> {
+        install_tracing();
+
         let block0 =
             Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
         let block415000 =
@@ -269,6 +274,8 @@ mod tests {
     #[tokio::test]
     #[spandoc::spandoc]
     async fn checkpoint_wrong_hash_fail() -> Result<(), Report> {
+        install_tracing();
+
         let block0 =
             Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
 
