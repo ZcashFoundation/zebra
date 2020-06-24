@@ -213,53 +213,6 @@ mod tests {
 
     #[tokio::test]
     #[spandoc::spandoc]
-    async fn checkpoint_list_empty_fail() -> Result<(), Report> {
-        let block0 =
-            Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
-
-        let mut state_service = Box::new(zebra_state::in_memory::init());
-        let mut checkpoint_verifier = super::init(
-            state_service.clone(),
-            <HashMap<BlockHeight, BlockHeaderHash>>::new(),
-        );
-
-        // Try to verify the block, and expect failure
-        let verify_result = checkpoint_verifier
-            .ready_and()
-            .await
-            .map_err(|e| eyre!(e))?
-            .call(block0.clone())
-            .await;
-
-        ensure!(
-            // TODO(teor || jlusby): check error kind
-            verify_result.is_err(),
-            "unexpected result kind: {:?}",
-            verify_result
-        );
-
-        // Now make sure the block isn't in the state
-        let state_result = state_service
-            .ready_and()
-            .await
-            .map_err(|e| eyre!(e))?
-            .call(zebra_state::Request::GetBlock {
-                hash: block0.as_ref().into(),
-            })
-            .await;
-
-        ensure!(
-            // TODO(teor || jlusby): check error kind
-            state_result.is_err(),
-            "unexpected result kind: {:?}",
-            verify_result
-        );
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    #[spandoc::spandoc]
     async fn checkpoint_not_present_fail() -> Result<(), Report> {
         let block0 =
             Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
