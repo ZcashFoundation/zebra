@@ -72,9 +72,61 @@ struct CheckpointVerifier<S> {
     current_checkpoint_height: Option<BlockHeight>,
 }
 
-/// The error type for the CheckpointVerifier Service.
+/// The error type for CheckpointVerifier.
 // TODO(jlusby): Error = Report ?
 type Error = Box<dyn error::Error + Send + Sync + 'static>;
+
+/// The CheckpointVerifier implementation.
+///
+/// Contains non-service utility functions for CheckpointVerifiers.
+impl<S> CheckpointVerifier<S> {
+    /// Return a checkpoint verification service, using the provided state service.
+    ///
+    /// The checkpoint verifier holds a state service of type `S`, into which newly
+    /// verified blocks will be committed. This state is pluggable to allow for
+    /// testing or instrumentation.
+    ///
+    /// The returned type is opaque to allow instrumentation or other wrappers, but
+    /// can be boxed for storage. It is also `Clone` to allow sharing of a
+    /// verification service.
+    ///
+    /// This function should be called only once for a particular state service (and
+    /// the result be shared) rather than constructing multiple verification services
+    /// backed by the same state layer.
+    //
+    // We'll use this function in the overall verifier, which will split blocks
+    // between BlockVerifier and CheckpointVerifier.
+    #[allow(dead_code)]
+    fn new(
+        state_service: S,
+        checkpoint_list: impl Into<Arc<BTreeMap<BlockHeight, BlockHeaderHash>>>,
+    ) -> Result<Self, Error>
+    where
+        S: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>
+            + Send
+            + Clone
+            + 'static,
+        S::Future: Send + 'static,
+    {
+        let checkpoints: Arc<BTreeMap<BlockHeight, BlockHeaderHash>> = checkpoint_list.into();
+
+        // An empty checkpoint list can't actually verify any blocks.
+        match checkpoints.keys().cloned().next() {
+            None => {
+                return Err("there must be at least one checkpoint, for the genesis block".into())
+            }
+            Some(BlockHeight(0)) => {}
+            _ => return Err("checkpoints must start at the genesis block height 0".into()),
+        };
+
+        Ok(CheckpointVerifier {
+            state_service,
+            checkpoint_list: checkpoints,
+            queued: <BTreeMap<BlockHeight, CheckpointInterval>>::new(),
+            current_checkpoint_height: Some(BlockHeight(0)),
+        })
+    }
+}
 
 /// The CheckpointVerifier service implementation.
 ///
@@ -149,56 +201,6 @@ where
 //   - add a function for the maximum checkpoint height
 //   - check that block.coinbase_height() <= max_checkpoint_height
 
-/// Return a checkpoint verification service, using the provided state service.
-///
-/// The checkpoint verifier holds a state service of type `S`, into which newly
-/// verified blocks will be committed. This state is pluggable to allow for
-/// testing or instrumentation.
-///
-/// The returned type is opaque to allow instrumentation or other wrappers, but
-/// can be boxed for storage. It is also `Clone` to allow sharing of a
-/// verification service.
-///
-/// This function should be called only once for a particular state service (and
-/// the result be shared) rather than constructing multiple verification services
-/// backed by the same state layer.
-pub fn init<S>(
-    state_service: S,
-    checkpoint_list: impl Into<Arc<BTreeMap<BlockHeight, BlockHeaderHash>>>,
-) -> Result<
-    impl Service<
-            Arc<Block>,
-            Response = BlockHeaderHash,
-            Error = Error,
-            Future = impl Future<Output = Result<BlockHeaderHash, Error>>,
-        > + Send
-        + 'static,
-    Error,
->
-where
-    S: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>
-        + Send
-        + Clone
-        + 'static,
-    S::Future: Send + 'static,
-{
-    let checkpoints: Arc<BTreeMap<BlockHeight, BlockHeaderHash>> = checkpoint_list.into();
-
-    // An empty checkpoint list can't actually verify any blocks.
-    match checkpoints.keys().cloned().next() {
-        None => return Err("there must be at least one checkpoint, for the genesis block".into()),
-        Some(BlockHeight(0)) => {}
-        _ => return Err("checkpoints must start at the genesis block height 0".into()),
-    };
-
-    Ok(CheckpointVerifier {
-        state_service,
-        checkpoint_list: checkpoints,
-        queued: <BTreeMap<BlockHeight, CheckpointInterval>>::new(),
-        current_checkpoint_height: Some(BlockHeight(0)),
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -227,7 +229,8 @@ mod tests {
 
         let mut state_service = Box::new(zebra_state::in_memory::init());
         let mut checkpoint_verifier =
-            super::init(state_service.clone(), genesis_checkpoint_list).map_err(|e| eyre!(e))?;
+            CheckpointVerifier::new(state_service.clone(), genesis_checkpoint_list)
+                .map_err(|e| eyre!(e))?;
 
         /// Make sure the verifier service is ready
         let ready_verifier_service = checkpoint_verifier
@@ -288,7 +291,8 @@ mod tests {
 
         let mut state_service = Box::new(zebra_state::in_memory::init());
         let mut checkpoint_verifier =
-            super::init(state_service.clone(), checkpoint_list).map_err(|e| eyre!(e))?;
+            CheckpointVerifier::new(state_service.clone(), checkpoint_list)
+                .map_err(|e| eyre!(e))?;
 
         // Now verify each block, and check the state
         for (block, _height, hash) in checkpoint_data {
@@ -346,7 +350,8 @@ mod tests {
 
         let mut state_service = Box::new(zebra_state::in_memory::init());
         let mut checkpoint_verifier =
-            super::init(state_service.clone(), genesis_checkpoint_list).map_err(|e| eyre!(e))?;
+            CheckpointVerifier::new(state_service.clone(), genesis_checkpoint_list)
+                .map_err(|e| eyre!(e))?;
 
         /// Make sure the verifier service is ready
         let ready_verifier_service = checkpoint_verifier
@@ -403,7 +408,8 @@ mod tests {
 
         let mut state_service = Box::new(zebra_state::in_memory::init());
         let mut checkpoint_verifier =
-            super::init(state_service.clone(), genesis_checkpoint_list).map_err(|e| eyre!(e))?;
+            CheckpointVerifier::new(state_service.clone(), genesis_checkpoint_list)
+                .map_err(|e| eyre!(e))?;
 
         /// Make sure the verifier service is ready
         let ready_verifier_service = checkpoint_verifier
