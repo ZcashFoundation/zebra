@@ -1955,9 +1955,8 @@ dependencies = [
  "tokio",
  "tower",
  "tracing",
- "tracing-error",
  "tracing-futures",
- "tracing-subscriber",
+ "zebra-test",
 ]
 
 [[package]]
@@ -2386,6 +2385,7 @@ dependencies = [
  "futures",
  "hex",
  "lazy_static",
+ "once_cell",
  "serde",
  "sled",
  "spandoc",
@@ -2393,9 +2393,7 @@ dependencies = [
  "tokio",
  "tower",
  "tracing",
- "tracing-error",
  "tracing-futures",
- "tracing-subscriber",
  "zebra-chain",
  "zebra-test",
 ]
@@ -2404,8 +2402,15 @@ dependencies = [
 name = "zebra-test"
 version = "0.1.0"
 dependencies = [
+ "color-eyre",
+ "futures",
  "hex",
  "lazy_static",
+ "tokio",
+ "tower",
+ "tracing",
+ "tracing-error",
+ "tracing-subscriber",
 ]
 
 [[package]]
