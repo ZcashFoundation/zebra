@@ -156,13 +156,6 @@ where
                     .await;
                 match res.map_err::<Report, _>(|e| eyre!(e)) {
                     Ok(zn::Response::BlockHeaderHashes(mut hashes)) => {
-                        let new_tip = if let Some(tip) = hashes.pop() {
-                            tip
-                        } else {
-                            tracing::debug!("skipping empty response");
-                            continue;
-                        };
-
                         // ExtendTips Step 3
                         //
                         // For each response, check whether the first hash in the
@@ -175,8 +168,14 @@ where
                                 tracing::debug!("skipping response that does not extend the tip");
                                 continue;
                             }
-                            Some(_) | None => {}
+                            None => {
+                                tracing::debug!("skipping empty response");
+                                continue;
+                            }
+                            Some(_) => {}
                         }
+
+                        let new_tip = hashes.pop().expect("hashes must have at least one block");
 
                         // ExtendTips Step 4
                         //
