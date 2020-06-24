@@ -1,11 +1,8 @@
 use color_eyre::eyre::Report;
 use once_cell::sync::Lazy;
-use std::sync::{Arc};
+use std::sync::Arc;
 use tempdir::TempDir;
-use zebra_chain::{
-    block::{Block},
-    serialization::ZcashDeserialize,
-};
+use zebra_chain::{block::Block, serialization::ZcashDeserialize};
 use zebra_test::transcript::Transcript;
 
 use zebra_state::*;
