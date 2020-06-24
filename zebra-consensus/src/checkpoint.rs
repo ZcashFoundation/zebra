@@ -232,7 +232,7 @@ mod tests {
             .await;
 
         ensure!(
-            // TODO(teor || jlusby): check error string
+            // TODO(teor || jlusby): check error kind
             verify_result.is_err(),
             "unexpected result kind: {:?}",
             verify_result
@@ -249,7 +249,7 @@ mod tests {
             .await;
 
         ensure!(
-            // TODO(teor || jlusby): check error string
+            // TODO(teor || jlusby): check error kind
             state_result.is_err(),
             "unexpected result kind: {:?}",
             verify_result
@@ -285,7 +285,7 @@ mod tests {
             .await;
 
         ensure!(
-            // TODO(teor || jlusby): check error string
+            // TODO(teor || jlusby): check error kind
             verify_result.is_err(),
             "unexpected result kind: {:?}",
             verify_result
@@ -302,7 +302,7 @@ mod tests {
             .await;
 
         ensure!(
-            // TODO(teor || jlusby): check error string
+            // TODO(teor || jlusby): check error kind
             state_result.is_err(),
             "unexpected result kind: {:?}",
             verify_result
@@ -318,7 +318,7 @@ mod tests {
             .await;
 
         ensure!(
-            // TODO(teor || jlusby): check error string
+            // TODO(teor || jlusby): check error kind
             state_result.is_err(),
             "unexpected result kind: {:?}",
             verify_result
@@ -353,7 +353,7 @@ mod tests {
             .await;
 
         ensure!(
-            // TODO(teor || jlusby): check error string
+            // TODO(teor || jlusby): check error kind
             verify_result.is_err(),
             "unexpected result kind: {:?}",
             verify_result
@@ -370,7 +370,7 @@ mod tests {
             .await;
 
         ensure!(
-            // TODO(teor || jlusby): check error string
+            // TODO(teor || jlusby): check error kind
             state_result.is_err(),
             "unexpected result kind: {:?}",
             verify_result
