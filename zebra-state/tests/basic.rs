@@ -1,36 +1,14 @@
 use color_eyre::eyre::Report;
-use color_eyre::eyre::{bail, ensure, eyre};
 use once_cell::sync::Lazy;
-use std::sync::{Arc, Once};
+use std::sync::{Arc};
 use tempdir::TempDir;
-use tower::Service;
-use tracing_error::ErrorLayer;
-use tracing_subscriber::prelude::*;
-use tracing_subscriber::{fmt, EnvFilter};
 use zebra_chain::{
-    block::{Block, BlockHeaderHash},
+    block::{Block},
     serialization::ZcashDeserialize,
 };
 use zebra_test::transcript::Transcript;
 
 use zebra_state::*;
-
-static LOGGER_INIT: Once = Once::new();
-
-fn install_tracing() {
-    LOGGER_INIT.call_once(|| {
-        let fmt_layer = fmt::layer().with_target(false);
-        let filter_layer = EnvFilter::try_from_default_env()
-            .or_else(|_| EnvFilter::try_new("info"))
-            .unwrap();
-
-        tracing_subscriber::registry()
-            .with(filter_layer)
-            .with(fmt_layer)
-            .with(ErrorLayer::default())
-            .init();
-    })
-}
 
 static ADD_BLOCK_TRANSCRIPT: Lazy<Vec<(Request, Response)>> = Lazy::new(|| {
     let block: Arc<_> =
@@ -75,7 +53,7 @@ static GET_TIP_TRANSCRIPT: Lazy<Vec<(Request, Response)>> = Lazy::new(|| {
 
 #[tokio::test]
 async fn check_transcripts() -> Result<(), Report> {
-    install_tracing();
+    zebra_test::init();
 
     for transcript_data in &[&ADD_BLOCK_TRANSCRIPT, &GET_TIP_TRANSCRIPT] {
         let service = in_memory::init();

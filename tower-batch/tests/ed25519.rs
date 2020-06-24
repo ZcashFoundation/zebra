@@ -2,7 +2,6 @@ use std::{
     future::Future,
     mem,
     pin::Pin,
-    sync::Once,
     task::{Context, Poll},
     time::Duration,
 };
@@ -86,27 +85,6 @@ impl Drop for Ed25519Verifier {
 
 // =============== testing code ========
 
-static LOGGER_INIT: Once = Once::new();
-
-fn install_tracing() {
-    use tracing_error::ErrorLayer;
-    use tracing_subscriber::prelude::*;
-    use tracing_subscriber::{fmt, EnvFilter};
-
-    LOGGER_INIT.call_once(|| {
-        let fmt_layer = fmt::layer().with_target(false);
-        let filter_layer = EnvFilter::try_from_default_env()
-            .or_else(|_| EnvFilter::try_new("info"))
-            .unwrap();
-
-        tracing_subscriber::registry()
-            .with(filter_layer)
-            .with(fmt_layer)
-            .with(ErrorLayer::default())
-            .init();
-    })
-}
-
 async fn sign_and_verify<V>(mut verifier: V, n: usize) -> Result<(), V::Error>
 where
     V: Service<Ed25519Item, Response = ()>,
@@ -133,7 +111,7 @@ where
 #[tokio::test]
 async fn batch_flushes_on_max_items() -> Result<()> {
     use tokio::time::timeout;
-    install_tracing();
+    zebra_test::init();
 
     // Use a very long max_latency and a short timeout to check that
     // flushing is happening based on hitting max_items.
@@ -144,7 +122,7 @@ async fn batch_flushes_on_max_items() -> Result<()> {
 #[tokio::test]
 async fn batch_flushes_on_max_latency() -> Result<()> {
     use tokio::time::timeout;
-    install_tracing();
+    zebra_test::init();
 
     // Use a very high max_items and a short timeout to check that
     // flushing is happening based on hitting max_latency.

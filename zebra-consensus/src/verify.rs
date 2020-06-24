@@ -110,23 +110,6 @@ mod tests {
     use tower::{util::ServiceExt, Service};
     use zebra_chain::serialization::ZcashDeserialize;
 
-    fn install_tracing() {
-        use tracing_error::ErrorLayer;
-        use tracing_subscriber::prelude::*;
-        use tracing_subscriber::{fmt, EnvFilter};
-
-        let fmt_layer = fmt::layer().with_target(false);
-        let filter_layer = EnvFilter::try_from_default_env()
-            .or_else(|_| EnvFilter::try_new("info"))
-            .unwrap();
-
-        tracing_subscriber::registry()
-            .with(filter_layer)
-            .with(fmt_layer)
-            .with(ErrorLayer::default())
-            .init();
-    }
-
     #[tokio::test]
     #[spandoc::spandoc]
     async fn verify() -> Result<(), Report> {
@@ -199,7 +182,7 @@ mod tests {
     #[tokio::test]
     #[spandoc::spandoc]
     async fn verify_fail_add_block() -> Result<(), Report> {
-        install_tracing();
+        zebra_test::init();
 
         let block =
             Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])?;
