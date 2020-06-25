@@ -55,9 +55,6 @@ jobs:
           --attestor="projects/zealous-zebra/attestors/zebrad-attestor" \
           --keyversion="projects/zealous-zebra/locations/global/keyRings/binary-authorization/cryptoKeys/zebrad-attestor/cryptoKeyVersions/1";
 
-        gcloud container binauthz attestations list \
-          --attestor="projects/zealous-zebra/attestors/zebrad-attestor" | grep $ARTIFACT_URL;
-
     # Create instance template from container image
     - name: Create instance template
       run: |
