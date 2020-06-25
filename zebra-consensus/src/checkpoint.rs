@@ -286,7 +286,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tests::install_tracing;
 
     use color_eyre::eyre::{bail, eyre, Report};
     use tower::{util::ServiceExt, Service};
@@ -296,7 +295,7 @@ mod tests {
     #[tokio::test]
     #[spandoc::spandoc]
     async fn checkpoint_single_item_list() -> Result<(), Report> {
-        install_tracing();
+        zebra_test::init();
 
         let block0 =
             Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
@@ -360,7 +359,7 @@ mod tests {
     #[tokio::test]
     #[spandoc::spandoc]
     async fn checkpoint_multi_item_list() -> Result<(), Report> {
-        install_tracing();
+        zebra_test::init();
 
         // Parse all the blocks
         let mut checkpoint_data = Vec::new();
@@ -436,7 +435,7 @@ mod tests {
     #[tokio::test]
     #[spandoc::spandoc]
     async fn checkpoint_not_present_fail() -> Result<(), Report> {
-        install_tracing();
+        zebra_test::init();
 
         let block0 =
             Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
@@ -505,7 +504,7 @@ mod tests {
     #[tokio::test]
     #[spandoc::spandoc]
     async fn checkpoint_wrong_hash_fail() -> Result<(), Report> {
-        install_tracing();
+        zebra_test::init();
 
         let block0 =
             Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
