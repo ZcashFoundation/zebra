@@ -16,8 +16,9 @@ use std::{
     collections::BTreeMap,
     error,
     future::Future,
+    ops::Bound::*,
     pin::Pin,
-    sync::Arc,
+    sync::{Arc, Mutex},
     task::{Context, Poll},
 };
 use tower::{Service, ServiceExt};
@@ -25,8 +26,10 @@ use tower::{Service, ServiceExt};
 use zebra_chain::block::{Block, BlockHeaderHash};
 use zebra_chain::types::BlockHeight;
 
-/// Each checkpoint interval consists of a sparse array of blocks.
-type CheckpointInterval = Vec<Option<Block>>;
+/// A list of unverified blocks at a particular height.
+///
+/// Typically contains zero or one block.
+type BlockList = Vec<Arc<Block>>;
 
 /// A checkpointing block verifier.
 ///
@@ -53,23 +56,25 @@ struct CheckpointVerifier<S> {
     //
     /// A cache of unverified blocks.
     ///
-    /// Contains a list of blocks for each checkpoint. The key is the height of
-    /// the ancestor checkpoint. Blocks are verified when there is a chain from
-    /// an ancestor checkpoint to a descendant checkpoint.
+    /// Contains a list of unverified blocks at each block height. In most cases,
+    /// the checkpoint verifier will store zero or one block at each height.
     ///
-    /// Each pair of checkpoints is used to verify the blocks between the
-    /// checkpoints. In particular, verification includes the ancestor checkpoint,
-    /// but excludes the descendant checkpoint. (Only the parent of the descendant
-    /// checkpoint is verified.)
+    /// Blocks are verified in order, when there is a chain from the next
+    /// checkpoint, back to the `current_checkpoint_height`.Each pair of
+    /// checkpoints is used to verify all the blocks between those checkpoints.
     ///
-    /// The final checkpoint does not have any descendant checkpoints, so it
-    /// only verifies the single block corresponding to that checkpoint.
-    queued: BTreeMap<BlockHeight, CheckpointInterval>,
+    /// The first checkpoint does not have any ancestors, so it only verifies the
+    /// genesis block.
+    queued: BTreeMap<BlockHeight, BlockList>,
 
-    /// The height of the next unverified checkpoint.
+    /// The height of the most recently verified checkpoint.
     ///
-    /// `None` means that checkpoint verification has finished.
-    current_checkpoint_height: Option<BlockHeight>,
+    /// `None` means that checkpoint verification has not started yet. The next
+    /// checkpoint to be verified is the genesis checkpoint.
+    ///
+    /// If the current checkpoint height is equal to the maximum checkpoint
+    /// height, checkpoint verification has finished.
+    current_checkpoint_height: Arc<Mutex<Option<BlockHeight>>>,
 }
 
 /// The error type for CheckpointVerifier.
@@ -122,9 +127,85 @@ impl<S> CheckpointVerifier<S> {
         Ok(CheckpointVerifier {
             state_service,
             checkpoint_list: checkpoints,
-            queued: <BTreeMap<BlockHeight, CheckpointInterval>>::new(),
-            current_checkpoint_height: Some(BlockHeight(0)),
+            queued: <BTreeMap<BlockHeight, BlockList>>::new(),
+            current_checkpoint_height: Arc::new(Mutex::new(None)),
         })
+    }
+
+    /// Return the block height of the highest checkpoint for this verifier.
+    ///
+    /// If there is only a single checkpoint, then the maximum height will be
+    /// zero. (The genesis block.)
+    ///
+    /// The maximum height is constant for each checkpoint list.
+    ///
+    /// This function can not fail, as long as the CheckpointVerifier was
+    /// initialised using `new()`.
+    fn get_max_checkpoint_height(&self) -> BlockHeight {
+        self.checkpoint_list
+            .keys()
+            .cloned()
+            .next_back()
+            .expect("there must be at least one checkpoint")
+    }
+
+    /// Return the block height of the current checkpoint for this verifier.
+    ///
+    /// The current checkpoint increases as blocks are verified.
+    ///
+    /// If verification has not started yet, the current checkpoint will be
+    /// None.
+    ///
+    /// If verification has finished, returns the maximum checkpoint height.
+    fn get_current_checkpoint_height(&self) -> Option<BlockHeight> {
+        let current_checkpoint_height = self.current_checkpoint_height.lock().unwrap();
+        *current_checkpoint_height
+    }
+
+    /// Return the block height of the next checkpoint for this verifier.
+    ///
+    /// If verification has not started yet, the next checkpoint will be
+    /// zero. (The genesis block.)
+    ///
+    /// If verification has finished, returns None.
+    fn get_next_checkpoint_height(&self) -> Option<BlockHeight> {
+        let current_checkpoint_height = self.current_checkpoint_height.lock().unwrap();
+        match *current_checkpoint_height {
+            None => Some(BlockHeight(0)),
+            Some(height) => self
+                .checkpoint_list
+                .range((Excluded(height), Unbounded))
+                .next()
+                .map(|(height, _hash)| *height),
+        }
+    }
+
+    /// Increase the current checkpoint height for this verifier, if needed.
+    ///
+    /// The current checkpoint height is only modified if it is equal to
+    /// `verified_block_height`.
+    ///
+    /// Returns an Error
+    fn update_next_checkpoint_height(
+        &self,
+        verified_block_height: BlockHeight,
+    ) -> Result<(), Error> {
+        let mut current_checkpoint_height = self.current_checkpoint_height.lock().unwrap();
+
+        // Ignore blocks that aren't at the current checkpoint height
+        if *current_checkpoint_height != Some(verified_block_height) {
+            return Ok(());
+        }
+
+        // Reject updates that would increase the height past the maximum
+        if *current_checkpoint_height >= Some(self.get_max_checkpoint_height()) {
+            return Err("the maximum checkpoint block should only be verified once".into());
+        }
+
+        // The next checkpoint height
+        *current_checkpoint_height = Some(self.get_next_checkpoint_height().unwrap());
+
+        Ok(())
     }
 }
 
@@ -154,15 +235,16 @@ where
         // TODO(jlusby): Error = Report, handle errors from state_service.
         let mut state_service = self.state_service.clone();
         let checkpoint_list = self.checkpoint_list.clone();
+        let max_checkpoint_height = self.get_max_checkpoint_height();
 
         async move {
-            if checkpoint_list.is_empty() {
-                return Err("the checkpoint list is empty".into());
-            };
-
             let block_height = block
                 .coinbase_height()
                 .ok_or("the block does not have a coinbase height")?;
+
+            if block_height > max_checkpoint_height {
+                return Err("the block is higher than the maximum checkpoint".into());
+            }
 
             // TODO(teor):
             //   - implement chaining from checkpoints to their ancestors
@@ -189,17 +271,17 @@ where
                 });
 
             match add_block.await? {
-                zebra_state::Response::Added { hash } => Ok(hash),
+                zebra_state::Response::Added { hash } => {
+                    // TODO(teor): lifetimes
+                    // self.update_next_checkpoint_height(block_height)?;
+                    Ok(hash)
+                }
                 _ => Err("adding block to zebra-state failed".into()),
             }
         }
         .boxed()
     }
 }
-
-// TODO(teor):
-//   - add a function for the maximum checkpoint height
-//   - check that block.coinbase_height() <= max_checkpoint_height
 
 #[cfg(test)]
 mod tests {
@@ -231,6 +313,16 @@ mod tests {
         let mut checkpoint_verifier =
             CheckpointVerifier::new(state_service.clone(), genesis_checkpoint_list)
                 .map_err(|e| eyre!(e))?;
+
+        assert_eq!(checkpoint_verifier.get_current_checkpoint_height(), None);
+        assert_eq!(
+            checkpoint_verifier.get_next_checkpoint_height(),
+            Some(BlockHeight(0))
+        );
+        assert_eq!(
+            checkpoint_verifier.get_max_checkpoint_height(),
+            BlockHeight(0)
+        );
 
         /// Make sure the verifier service is ready
         let ready_verifier_service = checkpoint_verifier
@@ -294,6 +386,16 @@ mod tests {
             CheckpointVerifier::new(state_service.clone(), checkpoint_list)
                 .map_err(|e| eyre!(e))?;
 
+        assert_eq!(checkpoint_verifier.get_current_checkpoint_height(), None);
+        assert_eq!(
+            checkpoint_verifier.get_next_checkpoint_height(),
+            Some(BlockHeight(0))
+        );
+        assert_eq!(
+            checkpoint_verifier.get_max_checkpoint_height(),
+            BlockHeight(434873)
+        );
+
         // Now verify each block, and check the state
         for (block, _height, hash) in checkpoint_data {
             /// Make sure the verifier service is ready
@@ -353,6 +455,16 @@ mod tests {
             CheckpointVerifier::new(state_service.clone(), genesis_checkpoint_list)
                 .map_err(|e| eyre!(e))?;
 
+        assert_eq!(checkpoint_verifier.get_current_checkpoint_height(), None);
+        assert_eq!(
+            checkpoint_verifier.get_next_checkpoint_height(),
+            Some(BlockHeight(0))
+        );
+        assert_eq!(
+            checkpoint_verifier.get_max_checkpoint_height(),
+            BlockHeight(0)
+        );
+
         /// Make sure the verifier service is ready
         let ready_verifier_service = checkpoint_verifier
             .ready_and()
@@ -410,6 +522,16 @@ mod tests {
         let mut checkpoint_verifier =
             CheckpointVerifier::new(state_service.clone(), genesis_checkpoint_list)
                 .map_err(|e| eyre!(e))?;
+
+        assert_eq!(checkpoint_verifier.get_current_checkpoint_height(), None);
+        assert_eq!(
+            checkpoint_verifier.get_next_checkpoint_height(),
+            Some(BlockHeight(0))
+        );
+        assert_eq!(
+            checkpoint_verifier.get_max_checkpoint_height(),
+            BlockHeight(0)
+        );
 
         /// Make sure the verifier service is ready
         let ready_verifier_service = checkpoint_verifier
