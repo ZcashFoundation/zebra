@@ -45,6 +45,29 @@ jobs:
           --machine-type n1-highcpu-32 \
           --timeout 3600s \
 
+    # Check if we've built and attested to this image already
+    - name: Check for image attestation
+      id: does-attestation-exist
+      continue-on-error: true
+      run: |
+        ATTESTOR="projects/zealous-zebra/attestors/zebrad-attestor";
+        echo "::set-env name=ATTESTOR::$ATTESTOR";
+        ARTIFACT_URL=$(gcloud container images describe "gcr.io/$PROJECT_ID/$BRANCH_NAME:$SHA7" \
+          --format="value(image_summary.fully_qualified_digest)");
+        echo "::set-env name=ARTIFACT_URL::$ARTIFACT_URL";
+        gcloud --quiet container binauthz attestations list --attestor="$ATTESTOR" | grep $ARTIFACT_URL;
+
+    # Create an attestation on the new image with our existing attestor
+    - name: Create attestation
+      if: steps.does-attestation-exist.outcome == 'failure'
+      run: |
+        gcloud --quiet alpha container binauthz attestations sign-and-create \
+          --artifact-url="$ARTIFACT_URL" \
+          --attestor="$ATTESTOR" \
+          --keyversion="projects/zealous-zebra/locations/global/keyRings/binary-authorization/cryptoKeys/zebrad-attestor/cryptoKeyVersions/1";
+
+        gcloud container binauthz attestations list --attestor="$ATTESTOR" | grep $ARTIFACT_URL;
+
     # Create instance template from container image
     - name: Create instance template
       run: |
