@@ -57,6 +57,7 @@ jobs:
         echo "::set-env name=ARTIFACT_URL::$ARTIFACT_URL";
         gcloud --quiet container binauthz attestations list --attestor="$ATTESTOR" | grep $ARTIFACT_URL;
 
+
     # Create an attestation on the new image with our existing attestor
     - name: Create attestation
       if: steps.does-attestation-exist.outcome == 'failure'
