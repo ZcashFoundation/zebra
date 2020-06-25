@@ -50,7 +50,8 @@ jobs:
         ARTIFACT_URL=$(gcloud container images describe "gcr.io/$PROJECT_ID/$BRANCH_NAME:$SHA7" \
           --format="value(image_summary.fully_qualified_digest)");
 
-        gcloud --quiet alpha container binauthz attestations sign-and-create \
+        gcloud alpha container binauthz attestations sign-and-create \
+          --quiet \
           --artifact-url="${ARTIFACT_URL}" \
           --attestor="projects/zealous-zebra/attestors/zebrad-attestor" \
           --keyversion="projects/zealous-zebra/locations/global/keyRings/binary-authorization/cryptoKeys/zebrad-attestor/cryptoKeyVersions/1";
