@@ -1,11 +1,15 @@
+use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 use std::io::{Cursor, ErrorKind, Write};
 
-use chrono::NaiveDateTime;
 use proptest::{
     arbitrary::{any, Arbitrary},
     prelude::*,
 };
 
+use crate::equihash_solution::EquihashSolution;
+use crate::merkle_tree::MerkleTreeRootHash;
+use crate::note_commitment_tree::SaplingNoteTreeRootHash;
+use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 use crate::sha256d_writer::Sha256dWriter;
 
 use super::*;
