@@ -9,7 +9,7 @@ use proptest::{
 use crate::equihash_solution::EquihashSolution;
 use crate::merkle_tree::MerkleTreeRootHash;
 use crate::note_commitment_tree::SaplingNoteTreeRootHash;
-use crate::serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize};
+use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 use crate::sha256d_writer::Sha256dWriter;
 
 use super::*;
