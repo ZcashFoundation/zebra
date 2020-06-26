@@ -163,6 +163,11 @@ impl CheckpointVerifier {
         if block_height > max_checkpoint_height {
             return Err("the block is higher than the maximum checkpoint".into());
         }
+        if let Some(previous_checkpoint_height) = self.get_previous_checkpoint_height() {
+            if block_height <= previous_checkpoint_height {
+                return Err("a block at this height has already been verified".into());
+            }
+        }
         Ok(block_height)
     }
 
@@ -264,6 +269,37 @@ impl CheckpointVerifier {
             self.current_checkpoint_range = None;
         }
     }
+
+    /// Queue `block` for verification, and return `(height, hash)`.
+    ///
+    /// Verification will finish when the chain to the next checkpoint is complete,
+    /// and the caller will be notified via `tx`.
+    ///
+    /// If the block does not have a coinbase height, sends an error on `tx`, does
+    /// not queue the block, and returns None.
+    fn insert_queued_block(
+        &mut self,
+        block: Arc<Block>,
+        tx: oneshot::Sender<Result<BlockHeaderHash, Error>>,
+    ) -> Option<(BlockHeight, BlockHeaderHash)> {
+        // Check for a valid height
+        let height = match self.check_block_height(block.clone()) {
+            Ok(height) => height,
+            Err(error) => {
+                // Sending might fail, depending on what the caller does with rx,
+                // but there's nothing we can do about it.
+                let _ = tx.send(Err(error));
+                return None;
+            }
+        };
+
+        // Add the block to the list of queued blocks at this height
+        let hash = block.as_ref().into();
+        let new_qblock = QueuedBlock { block, hash, tx };
+        self.queued.entry(height).or_default().push(new_qblock);
+
+        Some((height, hash))
+    }
 }
 
 /// The CheckpointVerifier service implementation.
@@ -288,30 +324,13 @@ impl Service<Arc<Block>> for CheckpointVerifier {
         // Set up a oneshot channel as the future
         let (tx, rx) = oneshot::channel();
 
-        // Check for a valid height
-        let height = match self.check_block_height(block.clone()) {
-            Ok(height) => height,
-            Err(error) => {
-                // Sending can not fail, because the matching rx is still in this scope.
-                tx.send(Err(error)).unwrap();
-                return Box::pin(rx.boxed());
-            }
-        };
-
         // Queue the block for verification
-        // Verification will finish when the chain to the next checkpoint is complete
-        let new_qblock = QueuedBlock {
-            block: block.clone(),
-            hash: block.as_ref().into(),
-            tx,
+        let (height, hash) = match self.insert_queued_block(block, tx) {
+            Some(hh) => hh,
+            None => return Box::pin(rx.boxed()),
         };
 
-        // Add this block to the list of queued blocks at this height
-        self.queued.entry(height).or_default().push(new_qblock);
-
-        // TODO(teor):
-        //   - implement chaining from checkpoints to their ancestors
-        //   - should the state contain a mapping from previous_block_hash to block?
+        // Now try to verify, from the next checkpoint to the previous one.
         let checkpoint_hash = match self.checkpoint_list.get(&height) {
             Some(&hash) => hash,
             None => return Box::pin(rx.boxed()),
@@ -332,11 +351,22 @@ impl Service<Arc<Block>> for CheckpointVerifier {
             }
         }
 
+        let mut first = true;
         // Now process the matching blocks (there should be at most one)
         for matching_qblock in matching_qblocks.drain(..) {
-            self.update_current_checkpoint_height(height);
-            // Sending can fail, but there's nothing we can do about it.
-            let _ = matching_qblock.tx.send(Ok(matching_qblock.hash));
+            if first {
+                self.update_current_checkpoint_height(height);
+                // Sending can fail, but there's nothing we can do about it.
+                let _ = matching_qblock.tx.send(Ok(matching_qblock.hash));
+                first = false;
+            } else {
+                // The block is a duplicate
+                // Sending can fail, but only because the receiver has closed
+                // the channel. So there's nothing we can do about the error.
+                let _ = matching_qblock.tx.send(Err(
+                    "duplicate valid blocks at this height, only one was chosen".into(),
+                ));
+            }
         }
 
         // Now remove the empty vector at that height
