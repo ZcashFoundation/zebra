@@ -1,43 +1,14 @@
 use color_eyre::eyre::{eyre, Report};
-use futures::{
-    future,
-    stream::{FuturesUnordered, StreamExt},
-};
+use futures::stream::{FuturesUnordered, StreamExt};
 use std::{collections::HashSet, iter, sync::Arc, time::Duration};
 use tokio::time::delay_for;
-use tower::{
-    retry::{Policy, Retry},
-    Service, ServiceExt,
-};
+use tower::{retry::Retry, Service, ServiceExt};
 use zebra_chain::{
     block::{Block, BlockHeaderHash},
     types::BlockHeight,
 };
-
-use zebra_network as zn;
-use zebra_state as zs;
-
-#[derive(Clone, Debug)]
-pub struct RetryNErrors {
-    /// number of times to retry
-    n: u32,
-}
-
-impl<Req: Clone, Res, E> Policy<Req, Res, E> for RetryNErrors {
-    type Future = future::Ready<Self>;
-
-    fn retry(&self, _: &Req, result: Result<&Res, &E>) -> Option<Self::Future> {
-        if result.is_err() && self.n > 0 {
-            Some(future::ready(Self { n: self.n - 1 }))
-        } else {
-            None
-        }
-    }
-
-    fn clone_request(&self, req: &Req) -> Option<Req> {
-        Some(req.clone())
-    }
-}
+use zebra_network::{self as zn, RetryLimit};
+use zebra_state::{self as zs};
 
 pub struct Syncer<ZN, ZS, ZC>
 where
@@ -46,7 +17,7 @@ where
     pub peer_set: ZN,
     pub state: ZS,
     pub verifier: ZC,
-    pub retry_peer_set: Retry<RetryNErrors, ZN>,
+    pub retry_peer_set: Retry<RetryLimit, ZN>,
     pub prospective_tips: HashSet<BlockHeaderHash>,
     pub block_requests: FuturesUnordered<ZN::Future>,
     pub fanout: NumReq,
@@ -57,7 +28,7 @@ where
     ZN: Service<zn::Request> + Clone,
 {
     pub fn new(peer_set: ZN, state: ZS, verifier: ZC) -> Self {
-        let retry_peer_set = Retry::new(RetryNErrors { n: 3 }, peer_set.clone());
+        let retry_peer_set = Retry::new(RetryLimit::new(3), peer_set.clone());
         Self {
             peer_set,
             state,

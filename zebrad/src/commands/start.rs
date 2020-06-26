@@ -22,8 +22,6 @@ use crate::config::ZebradConfig;
 use crate::{components::tokio::TokioComponent, prelude::*};
 use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
 use color_eyre::eyre::Report;
-use futures::stream::FuturesUnordered;
-use std::collections::HashSet;
 use tower::{buffer::Buffer, service_fn};
 use zebra_chain::block::BlockHeaderHash;
 
