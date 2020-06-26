@@ -3,10 +3,10 @@
 //! Checkpoint-based verification uses a list of checkpoint hashes to speed up the
 //! initial chain sync for Zebra. This list is distributed with Zebra.
 //!
-//! The CheckpointVerifier compares each block's `BlockHeaderHash` against the known
-//! checkpoint hashes. If it matches, then the block is verified, and added to the
-//! `ZebraState`. Otherwise, if the block's height is lower than the maximum checkpoint
-//! height, the block awaits the verification of its child block.
+//! The CheckpointVerifier queues pending blocks. Once there is a chain between
+//! the next pair of checkpoints, it verifies all the blocks in that chain.
+//! Verification starts at the first checkpoint, which is the genesis block for the
+//! configured network.
 //!
 //! Verification is provided via a `tower::Service`, to support backpressure and batch
 //! verification.
@@ -21,26 +21,46 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-use tower::{Service, ServiceExt};
+use tokio::sync::oneshot;
+use tower::Service;
 
 use zebra_chain::block::{Block, BlockHeaderHash};
 use zebra_chain::types::BlockHeight;
 
+/// The inner error type for CheckpointVerifier.
+///
+/// CheckpointVerifier returns two layers of `Result`s. The outer error type is
+/// fixed by the `tokio::sync::oneshot` channel receiver future.
+// TODO(jlusby): Error = Report ?
+type Error = Box<dyn error::Error + Send + Sync + 'static>;
+
+/// An unverified block, which is in the queue for checkpoint verification.
+struct QueuedBlock {
+    /// The block data.
+    block: Arc<Block>,
+    /// `block`'s cached header hash.
+    hash: BlockHeaderHash,
+    /// The transmitting end of a oneshot channel.
+    ///
+    /// The receiving end of this oneshot is passed to the caller as the future.
+    /// It has two layers of `Result`s, an inner `checkpoint::Error`, and an
+    /// outer `tokio::sync::oneshot::error::RecvError`.
+    tx: oneshot::Sender<Result<BlockHeaderHash, Error>>,
+}
+
 /// A list of unverified blocks at a particular height.
 ///
-/// Typically contains zero or one block.
-type BlockList = Vec<Arc<Block>>;
+/// Typically contains zero or one blocks, but might contain more if a peer
+/// has an old chain fork. (Or sends us a bad block.)
+type QueuedBlockList = Vec<QueuedBlock>;
 
 /// A checkpointing block verifier.
 ///
 /// Verifies blocks using a supplied list of checkpoints. There must be at
 /// least one checkpoint for the genesis block.
-struct CheckpointVerifier<S> {
+struct CheckpointVerifier {
     // Inputs
     //
-    /// The underlying `ZebraState`, possibly wrapped in other services.
-    state_service: S,
-
     /// Each checkpoint consists of a coinbase height and block header hash.
     ///
     /// Checkpoints should be chosen to avoid forks or chain reorganizations,
@@ -65,7 +85,7 @@ struct CheckpointVerifier<S> {
     ///
     /// The first checkpoint does not have any ancestors, so it only verifies the
     /// genesis block.
-    queued: BTreeMap<BlockHeight, BlockList>,
+    queued: BTreeMap<BlockHeight, QueuedBlockList>,
 
     /// The height of the most recently verified checkpoint.
     ///
@@ -77,27 +97,19 @@ struct CheckpointVerifier<S> {
     current_checkpoint_height: Option<BlockHeight>,
 }
 
-/// The error type for CheckpointVerifier.
-// TODO(jlusby): Error = Report ?
-type Error = Box<dyn error::Error + Send + Sync + 'static>;
-
 /// The CheckpointVerifier implementation.
 ///
 /// Contains non-service utility functions for CheckpointVerifiers.
-impl<S> CheckpointVerifier<S> {
-    /// Return a checkpoint verification service, using the provided state service.
-    ///
-    /// The checkpoint verifier holds a state service of type `S`, into which newly
-    /// verified blocks will be committed. This state is pluggable to allow for
-    /// testing or instrumentation.
+impl CheckpointVerifier {
+    /// Return a checkpoint verification service, using the provided `checkpoint_list`.
     ///
     /// The returned type is opaque to allow instrumentation or other wrappers, but
     /// can be boxed for storage. It is also `Clone` to allow sharing of a
     /// verification service.
     ///
-    /// This function should be called only once for a particular state service (and
-    /// the result be shared) rather than constructing multiple verification services
-    /// backed by the same state layer.
+    /// This function should be called only once for a particular checkpoint list (and
+    /// network), rather than constructing multiple verification services based on the
+    /// same checkpoint list.
     //
     // Currently only used in tests.
     //
@@ -105,16 +117,8 @@ impl<S> CheckpointVerifier<S> {
     // between BlockVerifier and CheckpointVerifier.
     #[cfg(test)]
     fn new(
-        state_service: S,
         checkpoint_list: impl Into<BTreeMap<BlockHeight, BlockHeaderHash>>,
-    ) -> Result<Self, Error>
-    where
-        S: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>
-            + Send
-            + Clone
-            + 'static,
-        S::Future: Send + 'static,
-    {
+    ) -> Result<Self, Error> {
         let checkpoints: BTreeMap<BlockHeight, BlockHeaderHash> = checkpoint_list.into();
 
         // An empty checkpoint list can't actually verify any blocks.
@@ -127,9 +131,8 @@ impl<S> CheckpointVerifier<S> {
         };
 
         Ok(CheckpointVerifier {
-            state_service,
             checkpoint_list: checkpoints,
-            queued: <BTreeMap<BlockHeight, BlockList>>::new(),
+            queued: <BTreeMap<BlockHeight, QueuedBlockList>>::new(),
             current_checkpoint_height: None,
         })
     }
@@ -178,17 +181,20 @@ impl<S> CheckpointVerifier<S> {
         self.current_checkpoint_height
     }
 
-    /// Return the height of the next checkpoint after `block_height` in the
-    /// checkpoint list.
+    /// Return the height of the next checkpoint higher than `after_block_height`
+    /// in the checkpoint list.
     ///
-    /// If `block_height` is None, assume verification has not started yet,
+    /// If `after_block_height` is None, assume verification has not started yet,
     /// and return zero (the genesis block).
     ///
     /// Returns None if there are no checkpoints.
-    /// Returns the maximum height if verification has finished, or the
-    /// block height is greater than or equal to the maximum height.
-    fn get_next_checkpoint_height(&self, block_height: Option<BlockHeight>) -> Option<BlockHeight> {
-        match block_height {
+    /// Returns the maximum height if `after_block_height` is greater than or equal
+    /// to the maximum height.
+    fn get_next_checkpoint_height(
+        &self,
+        after_block_height: Option<BlockHeight>,
+    ) -> Option<BlockHeight> {
+        match after_block_height {
             None => self.checkpoint_list.keys().cloned().next(),
             Some(height) => self
                 .checkpoint_list
@@ -227,73 +233,78 @@ impl<S> CheckpointVerifier<S> {
 
 /// The CheckpointVerifier service implementation.
 ///
-/// After verification, blocks are added to the underlying state service.
-impl<S> Service<Arc<Block>> for CheckpointVerifier<S>
-where
-    S: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>
-        + Send
-        + Clone
-        + 'static,
-    S::Future: Send + 'static,
-{
-    type Response = BlockHeaderHash;
-    type Error = Error;
+/// After verification, the block futures resolve to their hashes.
+impl Service<Arc<Block>> for CheckpointVerifier {
+    /// The CheckpointVerifier service has two layers of `Result`s, an inner
+    /// `checkpoint::Error`, and an outer `tokio::sync::oneshot::error::RecvError`.
+    type Response = Result<BlockHeaderHash, Error>;
+    type Error = oneshot::error::RecvError;
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        // We don't expect the state to exert backpressure on verifier users,
-        // so we don't need to call `state_service.poll_ready()` here.
+        // We don't expect the verifier to exert backpressure on its users.
         Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, block: Arc<Block>) -> Self::Future {
-        // TODO(jlusby): Error = Report, handle errors from state_service.
-        let mut state_service = self.state_service.clone();
+        // TODO(jlusby): Error = Report
 
-        let block_height = match self.check_block_height(block.clone()) {
+        // Set up a oneshot channel as the future
+        let (tx, rx) = oneshot::channel();
+
+        // Check for a valid height
+        let height = match self.check_block_height(block.clone()) {
             Ok(height) => height,
-            Err(error) => return Box::pin(async { Err(error) }.boxed()),
+            Err(error) => {
+                // Sending can not fail, because the matching rx is still in this scope.
+                tx.send(Err(error)).unwrap();
+                return Box::pin(rx.boxed());
+            }
         };
+
+        // Queue the block for verification
+        // Verification will finish when the chain to the next checkpoint is complete
+        let new_qblock = QueuedBlock {
+            block: block.clone(),
+            hash: block.as_ref().into(),
+            tx,
+        };
+
+        // Add this block to the list of queued blocks at this height
+        self.queued.entry(height).or_default().push(new_qblock);
 
         // TODO(teor):
         //   - implement chaining from checkpoints to their ancestors
         //   - should the state contain a mapping from previous_block_hash to block?
-        let checkpoint_hash = match self.checkpoint_list.get(&block_height) {
+        let checkpoint_hash = match self.checkpoint_list.get(&height) {
             Some(&hash) => hash,
-            None => {
-                return Box::pin(
-                    async { Err("the block's height is not a checkpoint height".into()) }.boxed(),
-                )
-            }
+            None => return Box::pin(rx.boxed()),
         };
 
-        // Hashing is expensive, so we do it as late as possible
-        if BlockHeaderHash::from(block.as_ref()) != checkpoint_hash {
-            // The block is on a side-chain
-            return Box::pin(
-                async { Err("the block hash does not match the checkpoint hash".into()) }.boxed(),
-            );
-        }
-
-        // TODO(teor): do the update after the block is verified
-        self.update_current_checkpoint_height(block_height);
-
-        async move {
-            // `Tower::Buffer` requires a 1:1 relationship between `poll()`s
-            // and `call()`s, because it reserves a buffer slot in each
-            // `call()`.
-            let add_block = state_service
-                .ready_and()
-                .await?
-                .call(zebra_state::Request::AddBlock { block });
-
-            match add_block.await? {
-                zebra_state::Response::Added { hash } => Ok(hash),
-                _ => Err("adding block to zebra-state failed".into()),
+        let mut matching_qblocks = Vec::new();
+        // Get the blocks at this height back out of the queue
+        for potential_qblock in self.queued.entry(height).or_default().drain(..) {
+            if potential_qblock.hash != checkpoint_hash {
+                // The block is on a side-chain
+                // Sending can fail, but only because the receiver has closed
+                // the channel. So there's nothing we can do about the error.
+                let _ = potential_qblock.tx.send(Err(
+                    "the block hash does not match the checkpoint hash".into(),
+                ));
+            } else {
+                matching_qblocks.push(potential_qblock);
             }
         }
-        .boxed()
+
+        // Now process the matching blocks (there should be at most one)
+        for matching_qblock in matching_qblocks.drain(..) {
+            self.update_current_checkpoint_height(height);
+            // Sending can fail, but there's nothing we can do about it.
+            let _ = matching_qblock.tx.send(Ok(matching_qblock.hash));
+        }
+
+        Box::pin(rx.boxed())
     }
 }
 
@@ -301,8 +312,8 @@ where
 mod tests {
     use super::*;
 
-    use color_eyre::eyre::{bail, eyre, Report};
-    use tower::{util::ServiceExt, Service};
+    use color_eyre::eyre::{eyre, Report};
+    use tower::{Service, ServiceExt};
 
     use zebra_chain::serialization::ZcashDeserialize;
 
@@ -322,10 +333,8 @@ mod tests {
                 .cloned()
                 .collect();
 
-        let mut state_service = Box::new(zebra_state::in_memory::init());
         let mut checkpoint_verifier =
-            CheckpointVerifier::new(state_service.clone(), genesis_checkpoint_list)
-                .map_err(|e| eyre!(e))?;
+            CheckpointVerifier::new(genesis_checkpoint_list).map_err(|e| eyre!(e))?;
 
         assert_eq!(checkpoint_verifier.get_current_checkpoint_height(), None);
         assert_eq!(
@@ -347,6 +356,7 @@ mod tests {
         let verify_response = ready_verifier_service
             .call(block0.clone())
             .await
+            .expect("oneshot channel should not fail")
             .map_err(|e| eyre!(e))?;
 
         assert_eq!(verify_response, hash0);
@@ -364,23 +374,6 @@ mod tests {
             checkpoint_verifier.get_max_checkpoint_height(),
             Some(BlockHeight(0))
         );
-
-        /// Make sure the state service is ready
-        let ready_state_service = state_service.ready_and().await.map_err(|e| eyre!(e))?;
-        /// Make sure the block was added to the state
-        let state_response = ready_state_service
-            .call(zebra_state::Request::GetBlock { hash: hash0 })
-            .await
-            .map_err(|e| eyre!(e))?;
-
-        if let zebra_state::Response::Block {
-            block: returned_block,
-        } = state_response
-        {
-            assert_eq!(block0, returned_block);
-        } else {
-            bail!("unexpected response kind: {:?}", state_response);
-        }
 
         Ok(())
     }
@@ -409,10 +402,8 @@ mod tests {
             .map(|(_block, height, hash)| (*height, *hash))
             .collect();
 
-        let mut state_service = Box::new(zebra_state::in_memory::init());
         let mut checkpoint_verifier =
-            CheckpointVerifier::new(state_service.clone(), checkpoint_list)
-                .map_err(|e| eyre!(e))?;
+            CheckpointVerifier::new(checkpoint_list).map_err(|e| eyre!(e))?;
 
         assert_eq!(checkpoint_verifier.get_current_checkpoint_height(), None);
         assert_eq!(
@@ -425,7 +416,7 @@ mod tests {
             Some(BlockHeight(434873))
         );
 
-        // Now verify each block, and check the state
+        // Now verify each block
         for (block, height, hash) in checkpoint_data {
             /// Make sure the verifier service is ready
             let ready_verifier_service = checkpoint_verifier
@@ -437,26 +428,10 @@ mod tests {
             let verify_response = ready_verifier_service
                 .call(block.clone())
                 .await
+                .expect("oneshot channel should not fail")
                 .map_err(|e| eyre!(e))?;
 
             assert_eq!(verify_response, hash);
-
-            /// Make sure the state service is ready
-            let ready_state_service = state_service.ready_and().await.map_err(|e| eyre!(e))?;
-            /// Make sure the block was added to the state
-            let state_response = ready_state_service
-                .call(zebra_state::Request::GetBlock { hash })
-                .await
-                .map_err(|e| eyre!(e))?;
-
-            if let zebra_state::Response::Block {
-                block: returned_block,
-            } = state_response
-            {
-                assert_eq!(block, returned_block);
-            } else {
-                bail!("unexpected response kind: {:?}", state_response);
-            }
 
             // We can't easily calculate the next checkpoint height, but the previous
             // loop iteration uses the next checkpoint height function to set the
@@ -505,10 +480,8 @@ mod tests {
                 .cloned()
                 .collect();
 
-        let mut state_service = Box::new(zebra_state::in_memory::init());
         let mut checkpoint_verifier =
-            CheckpointVerifier::new(state_service.clone(), genesis_checkpoint_list)
-                .map_err(|e| eyre!(e))?;
+            CheckpointVerifier::new(genesis_checkpoint_list).map_err(|e| eyre!(e))?;
 
         assert_eq!(checkpoint_verifier.get_current_checkpoint_height(), None);
         assert_eq!(
@@ -531,6 +504,7 @@ mod tests {
         ready_verifier_service
             .call(block415000.clone())
             .await
+            .expect("oneshot channel should not fail")
             .unwrap_err();
 
         assert_eq!(checkpoint_verifier.get_current_checkpoint_height(), None);
@@ -543,28 +517,6 @@ mod tests {
             checkpoint_verifier.get_max_checkpoint_height(),
             Some(BlockHeight(0))
         );
-
-        /// Make sure the state service is ready (1/2)
-        let ready_state_service = state_service.ready_and().await.map_err(|e| eyre!(e))?;
-        /// Make sure neither block is in the state: expect GetBlock 415000 to fail.
-        // TODO(teor || jlusby): check error kind
-        ready_state_service
-            .call(zebra_state::Request::GetBlock {
-                hash: block415000.as_ref().into(),
-            })
-            .await
-            .unwrap_err();
-
-        /// Make sure the state service is ready (2/2)
-        let ready_state_service = state_service.ready_and().await.map_err(|e| eyre!(e))?;
-        /// Make sure neither block is in the state: expect GetBlock 0 to fail.
-        // TODO(teor || jlusby): check error kind
-        ready_state_service
-            .call(zebra_state::Request::GetBlock {
-                hash: block0.as_ref().into(),
-            })
-            .await
-            .unwrap_err();
 
         Ok(())
     }
@@ -585,10 +537,8 @@ mod tests {
                 .cloned()
                 .collect();
 
-        let mut state_service = Box::new(zebra_state::in_memory::init());
         let mut checkpoint_verifier =
-            CheckpointVerifier::new(state_service.clone(), genesis_checkpoint_list)
-                .map_err(|e| eyre!(e))?;
+            CheckpointVerifier::new(genesis_checkpoint_list).map_err(|e| eyre!(e))?;
 
         assert_eq!(checkpoint_verifier.get_current_checkpoint_height(), None);
         assert_eq!(
@@ -611,6 +561,7 @@ mod tests {
         ready_verifier_service
             .call(block0.clone())
             .await
+            .expect("oneshot channel should not fail")
             .unwrap_err();
 
         assert_eq!(checkpoint_verifier.get_current_checkpoint_height(), None);
@@ -623,17 +574,6 @@ mod tests {
             checkpoint_verifier.get_max_checkpoint_height(),
             Some(BlockHeight(0))
         );
-
-        /// Make sure the state service is ready
-        let ready_state_service = state_service.ready_and().await.map_err(|e| eyre!(e))?;
-        /// Now make sure block 0 is not in the state
-        // TODO(teor || jlusby): check error kind
-        ready_state_service
-            .call(zebra_state::Request::GetBlock {
-                hash: block0.as_ref().into(),
-            })
-            .await
-            .unwrap_err();
 
         Ok(())
     }
