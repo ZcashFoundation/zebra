@@ -63,6 +63,7 @@ impl Service<BatchControl<RedJubjubItem>> for RedJubjubVerifier {
                     }
                 })
             }
+
             BatchControl::Flush => {
                 tracing::trace!("got flush command");
                 let batch = mem::take(&mut self.batch);
