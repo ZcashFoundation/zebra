@@ -30,10 +30,9 @@ pub struct EquihashSolution(
 
 impl EquihashSolution {
     /// Validate an equihash solution
-    pub fn is_valid(&self, nonce: &[u8]) -> bool {
+    pub fn is_valid(&self, input: &[u8], nonce: &[u8]) -> bool {
         let n = 200;
         let k = 9;
-        let input = todo!("Don't know where this come, I still have to understand the spec");
         equihash::is_valid_solution(n, k, input, nonce, &self.0)
     }
 }
@@ -127,7 +126,8 @@ mod tests {
 
     }
 
-    const EQUIHASH_SOLUTION_BLOCK_OFFSET: usize = 4 + 32 * 3 + 4 * 2 + 32;
+    const EQUIHASH_NONCE_BLOCK_OFFSET: usize = 4 + 32 * 3 + 4 * 2;
+    const EQUIHASH_SOLUTION_BLOCK_OFFSET: usize = EQUIHASH_NONCE_BLOCK_OFFSET + 32;
 
     #[test]
     fn equihash_solution_test_vector() {
@@ -152,8 +152,10 @@ mod tests {
         .expect("block test vector should deserialize");
 
         let solution = block.header.solution;
+        let header_bytes =
+            &zebra_test::vectors::HEADER_MAINNET_415000_BYTES[..EQUIHASH_NONCE_BLOCK_OFFSET];
 
-        assert!(solution.is_valid(&block.header.nonce));
+        assert!(solution.is_valid(header_bytes, &block.header.nonce));
     }
 
     static EQUIHASH_SIZE_TESTS: &[u64] = &[
