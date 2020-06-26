@@ -8,5 +8,5 @@ mod redjubjub;
 mod script;
 mod transaction;
 
+pub use self::redjubjub::{RedJubjubItem, RedJubjubVerifier};
 pub use block::init;
-pub use redjubjub::{BatchVerifier, Request, SingletonVerifier};
