@@ -108,6 +108,48 @@ impl Arbitrary for EquihashSolution {
 mod tests {
 
     use super::*;
+    use crate::block::{Block, BlockHeader};
+
+    /// returns a test strategy for generating arbitrary EquihashSolutions
+    /// that filters out instances of HEADER_MAINNET_41500_BYTES's solution
+    fn filtered_solutions() -> impl Strategy<Value = EquihashSolution> {
+        let solution_bytes =
+            &zebra_test::vectors::HEADER_MAINNET_415000_BYTES[EQUIHASH_SOLUTION_BLOCK_OFFSET..];
+        let real_solution = EquihashSolution::zcash_deserialize(solution_bytes)
+            .expect("Test vector EquihashSolution should deserialize");
+
+        any::<EquihashSolution>()
+            .prop_filter("solution must not be the actual solution", move |s| {
+                s != &real_solution
+            })
+    }
+
+    fn filtered_nonce() -> impl Strategy<Value = BlockHeader> {
+        let real_header = BlockHeader::zcash_deserialize(
+            &zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..std::mem::size_of::<BlockHeader>()],
+        )
+        .expect("block test vector should deserialize");
+
+        any::<BlockHeader>().prop_filter("block must not be the actual block", move |h| {
+            h.nonce != real_header.nonce
+        })
+    }
+
+    fn filtered_input() -> impl Strategy<Value = Vec<u8>> {
+        let real_header_bytes =
+            &zebra_test::vectors::HEADER_MAINNET_415000_BYTES[..EQUIHASH_NONCE_BLOCK_OFFSET];
+
+        any::<BlockHeader>()
+            .prop_map(|h| {
+                let mut data = Vec::new();
+                h.zcash_serialize(&mut data)
+                    .expect("randomized EquihashSolution should serialize");
+                data
+            })
+            .prop_filter("input must be diff from actual header", move |input| {
+                input.as_slice() != real_header_bytes
+            })
+    }
 
     proptest! {
 
@@ -124,6 +166,43 @@ mod tests {
             prop_assert_eq![solution, solution2];
         }
 
+        #[test]
+        fn equihash_invalid_solution(fake_solution in filtered_solutions()) {
+            let block = crate::block::Block::zcash_deserialize(
+                &zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..],
+            )
+            .expect("block test vector should deserialize");
+
+            let header_bytes =
+                &zebra_test::vectors::HEADER_MAINNET_415000_BYTES[..EQUIHASH_NONCE_BLOCK_OFFSET];
+
+            assert!(!fake_solution.is_valid(header_bytes, &block.header.nonce));
+        }
+
+        #[test]
+        fn equihash_invalid_nonce(fake_header in filtered_nonce()) {
+            let block = crate::block::Block::zcash_deserialize(
+                &zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..],
+            )
+            .expect("block test vector should deserialize");
+            let solution = block.header.solution;
+
+            let header_bytes =
+                &zebra_test::vectors::HEADER_MAINNET_415000_BYTES[..EQUIHASH_NONCE_BLOCK_OFFSET];
+
+            assert!(!solution.is_valid(header_bytes, &fake_header.nonce));
+        }
+
+        #[test]
+        fn equihash_invalid_input(fake_input in filtered_input()) {
+            let block = crate::block::Block::zcash_deserialize(
+                &zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..],
+            )
+            .expect("block test vector should deserialize");
+            let solution = block.header.solution;
+
+            assert!(!solution.is_valid(fake_input.as_slice(), &block.header.nonce));
+        }
     }
 
     const EQUIHASH_NONCE_BLOCK_OFFSET: usize = 4 + 32 * 3 + 4 * 2;
@@ -146,10 +225,8 @@ mod tests {
 
     #[test]
     fn equihash_solution_test_vector_is_valid() {
-        let block = crate::block::Block::zcash_deserialize(
-            &zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..],
-        )
-        .expect("block test vector should deserialize");
+        let block = Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])
+            .expect("block test vector should deserialize");
 
         let solution = block.header.solution;
         let header_bytes =
