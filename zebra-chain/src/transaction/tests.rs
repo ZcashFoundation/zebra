@@ -1,16 +1,14 @@
-use proptest::{
-    arbitrary::{any, Arbitrary},
-    collection::vec,
-    option,
-    prelude::*,
-};
+use proptest::{arbitrary::any, collection::vec, option, prelude::*};
 
 use crate::{
     serialization::{ZcashDeserialize, ZcashSerialize},
-    types::{LockTime, Script},
+    types::LockTime,
 };
 
 use super::*;
+
+#[cfg(test)]
+mod arbitrary;
 
 #[cfg(test)]
 impl Transaction {
@@ -97,54 +95,6 @@ impl Transaction {
             )
             .boxed()
     }
-}
-
-#[cfg(test)]
-impl Arbitrary for Transaction {
-    type Parameters = ();
-
-    fn arbitrary_with(_args: ()) -> Self::Strategy {
-        prop_oneof![
-            Self::v1_strategy(),
-            Self::v2_strategy(),
-            Self::v3_strategy(),
-            Self::v4_strategy()
-        ]
-        .boxed()
-    }
-
-    type Strategy = BoxedStrategy<Self>;
-}
-
-#[cfg(test)]
-impl Arbitrary for TransparentInput {
-    type Parameters = ();
-
-    fn arbitrary_with(_args: ()) -> Self::Strategy {
-        prop_oneof![
-            (any::<OutPoint>(), any::<Script>(), any::<u32>())
-                .prop_map(|(outpoint, script, sequence)| {
-                    TransparentInput::PrevOut {
-                        outpoint,
-                        script,
-                        sequence,
-                    }
-                })
-                .boxed(),
-            (any::<BlockHeight>(), vec(any::<u8>(), 0..95), any::<u32>())
-                .prop_map(|(height, data, sequence)| {
-                    TransparentInput::Coinbase {
-                        height,
-                        data: CoinbaseData(data),
-                        sequence,
-                    }
-                })
-                .boxed(),
-        ]
-        .boxed()
-    }
-
-    type Strategy = BoxedStrategy<Self>;
 }
 
 #[test]
