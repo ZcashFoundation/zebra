@@ -35,6 +35,7 @@ use zebra_chain::types::BlockHeight;
 type Error = Box<dyn error::Error + Send + Sync + 'static>;
 
 /// An unverified block, which is in the queue for checkpoint verification.
+#[derive(Debug)]
 struct QueuedBlock {
     /// The block data.
     block: Arc<Block>,
@@ -58,6 +59,7 @@ type QueuedBlockList = Vec<QueuedBlock>;
 ///
 /// Verifies blocks using a supplied list of checkpoints. There must be at
 /// least one checkpoint for the genesis block.
+#[derive(Debug)]
 struct CheckpointVerifier {
     // Inputs
     //
@@ -304,6 +306,10 @@ impl Service<Arc<Block>> for CheckpointVerifier {
             let _ = matching_qblock.tx.send(Ok(matching_qblock.hash));
         }
 
+        // Now remove the empty vector at that height
+        let ov = self.queued.remove(&height);
+        debug_assert_eq!(ov.map(|v| v.len()), Some(0));
+
         Box::pin(rx.boxed())
     }
 }
@@ -319,7 +325,7 @@ mod tests {
 
     #[tokio::test]
     #[spandoc::spandoc]
-    async fn checkpoint_single_item_list() -> Result<(), Report> {
+    async fn single_item_checkpoint_list() -> Result<(), Report> {
         zebra_test::init();
 
         let block0 =
@@ -380,7 +386,7 @@ mod tests {
 
     #[tokio::test]
     #[spandoc::spandoc]
-    async fn checkpoint_multi_item_list() -> Result<(), Report> {
+    async fn multi_item_checkpoint_list() -> Result<(), Report> {
         zebra_test::init();
 
         // Parse all the blocks
@@ -465,7 +471,7 @@ mod tests {
 
     #[tokio::test]
     #[spandoc::spandoc]
-    async fn checkpoint_not_present_fail() -> Result<(), Report> {
+    async fn block_higher_than_max_checkpoint_fail() -> Result<(), Report> {
         zebra_test::init();
 
         let block0 =
@@ -523,16 +529,21 @@ mod tests {
 
     #[tokio::test]
     #[spandoc::spandoc]
-    async fn checkpoint_wrong_hash_fail() -> Result<(), Report> {
+    async fn wrong_checkpoint_hash_fail() -> Result<(), Report> {
         zebra_test::init();
 
-        let block0 =
+        let good_block0 =
             Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
+        let good_block0_hash: BlockHeaderHash = good_block0.as_ref().into();
+        let mut bad_block0 =
+            Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
+        // Change the header hash
+        bad_block0.header.version = 0;
+        let bad_block0: Arc<Block> = bad_block0.into();
 
-        // Make a checkpoint list containing the genesis block height,
-        // but use the wrong hash
+        // Make a checkpoint list containing the genesis block checkpoint
         let genesis_checkpoint_list: BTreeMap<BlockHeight, BlockHeaderHash> =
-            [(block0.coinbase_height().unwrap(), BlockHeaderHash([0; 32]))]
+            [(good_block0.coinbase_height().unwrap(), good_block0_hash)]
                 .iter()
                 .cloned()
                 .collect();
@@ -551,20 +562,73 @@ mod tests {
             Some(BlockHeight(0))
         );
 
-        /// Make sure the verifier service is ready
+        /// Make sure the verifier service is ready (1/3)
         let ready_verifier_service = checkpoint_verifier
             .ready_and()
             .await
             .map_err(|e| eyre!(e))?;
-        /// Try to verify block 0, and expect failure
+        /// Try to verify the bad block 0, and expect failure (1/3)
         // TODO(teor || jlusby): check error kind
         ready_verifier_service
-            .call(block0.clone())
+            .call(bad_block0.clone())
             .await
             .expect("oneshot channel should not fail")
             .unwrap_err();
 
         assert_eq!(checkpoint_verifier.get_current_checkpoint_height(), None);
+        assert_eq!(
+            checkpoint_verifier
+                .get_next_checkpoint_height(checkpoint_verifier.get_current_checkpoint_height()),
+            Some(BlockHeight(0))
+        );
+        assert_eq!(
+            checkpoint_verifier.get_max_checkpoint_height(),
+            Some(BlockHeight(0))
+        );
+
+        /// Make sure the verifier service is ready (2/3)
+        let ready_verifier_service = checkpoint_verifier
+            .ready_and()
+            .await
+            .map_err(|e| eyre!(e))?;
+        /// Try to verify the bad block 0 again, and expect failure (2/3)
+        // TODO(teor || jlusby): check error kind
+        ready_verifier_service
+            .call(bad_block0)
+            .await
+            .expect("oneshot channel should not fail")
+            .unwrap_err();
+
+        assert_eq!(checkpoint_verifier.get_current_checkpoint_height(), None);
+        assert_eq!(
+            checkpoint_verifier
+                .get_next_checkpoint_height(checkpoint_verifier.get_current_checkpoint_height()),
+            Some(BlockHeight(0))
+        );
+        assert_eq!(
+            checkpoint_verifier.get_max_checkpoint_height(),
+            Some(BlockHeight(0))
+        );
+
+        /// Make sure the verifier service is ready (3/3)
+        let ready_verifier_service = checkpoint_verifier
+            .ready_and()
+            .await
+            .map_err(|e| eyre!(e))?;
+        /// Try to verify the good block 0, and expect success (3/3)
+        // TODO(teor || jlusby): check error kind
+        let verify_response = ready_verifier_service
+            .call(good_block0.clone())
+            .await
+            .expect("oneshot channel should not fail")
+            .map_err(|e| eyre!(e))?;
+
+        assert_eq!(verify_response, good_block0_hash);
+
+        assert_eq!(
+            checkpoint_verifier.get_current_checkpoint_height(),
+            Some(BlockHeight(0))
+        );
         assert_eq!(
             checkpoint_verifier
                 .get_next_checkpoint_height(checkpoint_verifier.get_current_checkpoint_height()),
