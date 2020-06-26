@@ -51,9 +51,9 @@ pub trait AmountConstraint {
         let range = Self::valid_range();
 
         if value < range.start {
-            Err("Amount's value is less than the start of it's range")
+            Err("Amount's value is less than the start of its range")
         } else if value > range.end {
-            Err("Amount's value is greater than the end of it's range")
+            Err("Amount's value is greater than the end of its range")
         } else {
             Ok(value)
         }
