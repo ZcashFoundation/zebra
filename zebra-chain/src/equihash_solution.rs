@@ -28,6 +28,15 @@ pub struct EquihashSolution(
     #[serde(with = "serde_helpers::BigArray")] pub [u8; EQUIHASH_SOLUTION_SIZE],
 );
 
+impl EquihashSolution {
+    /// Validate an equihash solution
+    pub fn is_valid(&self, input: &[u8], nonce: &[u8]) -> bool {
+        let n = 200;
+        let k = 9;
+        equihash::is_valid_solution(n, k, input, nonce, &self.0)
+    }
+}
+
 impl PartialEq<EquihashSolution> for EquihashSolution {
     fn eq(&self, other: &EquihashSolution) -> bool {
         self.0.as_ref() == other.0.as_ref()
@@ -117,7 +126,8 @@ mod tests {
 
     }
 
-    const EQUIHASH_SOLUTION_BLOCK_OFFSET: usize = 4 + 32 * 3 + 4 * 2 + 32;
+    const EQUIHASH_NONCE_BLOCK_OFFSET: usize = 4 + 32 * 3 + 4 * 2;
+    const EQUIHASH_SOLUTION_BLOCK_OFFSET: usize = EQUIHASH_NONCE_BLOCK_OFFSET + 32;
 
     #[test]
     fn equihash_solution_test_vector() {
@@ -132,6 +142,27 @@ mod tests {
             .expect("Test vector EquihashSolution should serialize");
 
         assert_eq!(solution_bytes, data.as_slice());
+    }
+
+    #[test]
+    fn equihash_solution_test_vector_is_valid() {
+        let block = crate::block::Block::zcash_deserialize(
+            &zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..],
+        )
+        .expect("block test vector should deserialize");
+
+        let solution = block.header.solution;
+        let header_bytes =
+            &zebra_test::vectors::HEADER_MAINNET_415000_BYTES[..EQUIHASH_NONCE_BLOCK_OFFSET];
+
+        assert!(solution.is_valid(header_bytes, &block.header.nonce));
+
+        let heade_bytes =
+            &zebra_test::vectors::HEADER_MAINNET_415000_BYTES[..EQUIHASH_NONCE_BLOCK_OFFSET - 1];
+        let headerr_bytes =
+            &zebra_test::vectors::HEADER_MAINNET_415000_BYTES[..EQUIHASH_NONCE_BLOCK_OFFSET + 1];
+        assert!(!solution.is_valid(heade_bytes, &block.header.nonce));
+        assert!(!solution.is_valid(headerr_bytes, &block.header.nonce));
     }
 
     static EQUIHASH_SIZE_TESTS: &[u64] = &[
