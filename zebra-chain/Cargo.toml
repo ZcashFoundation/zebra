@@ -29,7 +29,7 @@ serde-big-array = "0.3.0"
 # ZF deps
 ed25519-zebra = "0.4"
 redjubjub = "0.1"
-equihash = { git = "https://github.com/str4d/librustzcash.git", branch = "equihash-crate" }
+equihash = { git = "https://github.com/ZcashFoundation/librustzcash.git", branch = "equihash-crate" }
 
 [dev-dependencies]
 proptest = "0.10"
