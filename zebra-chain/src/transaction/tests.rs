@@ -7,10 +7,8 @@ use crate::{
 
 use super::*;
 
-#[cfg(test)]
 mod arbitrary;
 
-#[cfg(test)]
 impl Transaction {
     pub fn v1_strategy() -> impl Strategy<Value = Self> {
         (
@@ -108,7 +106,6 @@ fn librustzcash_tx_deserialize_and_round_trip() {
     assert_eq!(&test_vectors::GENERIC_TESTNET_TX[..], &data2[..]);
 }
 
-#[cfg(test)]
 proptest! {
 
     #[test]

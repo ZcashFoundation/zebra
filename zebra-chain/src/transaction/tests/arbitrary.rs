@@ -1,14 +1,90 @@
 use crate::{
     note_commitment_tree::SaplingNoteTreeRootHash,
-    notes::sapling,
-    proofs::Groth16Proof,
+    notes::{sapling, sprout},
+    proofs::{Groth16Proof, ZkSnarkProof},
     transaction::{
-        CoinbaseData, OutPoint, Output, ShieldedData, Spend, Transaction, TransparentInput,
+        CoinbaseData, JoinSplit, JoinSplitData, OutPoint, Output, ShieldedData, Spend, Transaction,
+        TransparentInput,
     },
     types::{BlockHeight, Script},
 };
 use futures::future::Either;
 use proptest::{array, collection::vec, prelude::*};
+
+impl<P: ZkSnarkProof + Arbitrary + 'static> Arbitrary for JoinSplit<P> {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        (
+            any::<u64>(),
+            any::<u64>(),
+            array::uniform32(any::<u8>()),
+            array::uniform2(array::uniform32(any::<u8>())),
+            array::uniform2(array::uniform32(any::<u8>())),
+            array::uniform32(any::<u8>()),
+            array::uniform32(any::<u8>()),
+            array::uniform2(array::uniform32(any::<u8>())),
+            any::<P>(),
+            array::uniform2(any::<sprout::EncryptedCiphertext>()),
+        )
+            .prop_map(
+                |(
+                    vpub_old,
+                    vpub_new,
+                    anchor,
+                    nullifiers,
+                    commitments,
+                    ephemeral_key_bytes,
+                    random_seed,
+                    vmacs,
+                    zkproof,
+                    enc_ciphertexts,
+                )| {
+                    Self {
+                        vpub_old,
+                        vpub_new,
+                        anchor,
+                        nullifiers,
+                        commitments,
+                        ephemeral_key: x25519_dalek::PublicKey::from(ephemeral_key_bytes),
+                        random_seed,
+                        vmacs,
+                        zkproof,
+                        enc_ciphertexts,
+                    }
+                },
+            )
+            .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
+
+impl<P: ZkSnarkProof + Arbitrary + 'static> Arbitrary for JoinSplitData<P> {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        (
+            any::<JoinSplit<P>>(),
+            vec(any::<JoinSplit<P>>(), 0..10),
+            array::uniform32(any::<u8>()),
+            vec(any::<u8>(), 64),
+        )
+            .prop_map(|(first, rest, pub_key_bytes, sig_bytes)| Self {
+                first,
+                rest,
+                pub_key: ed25519_zebra::VerificationKeyBytes::from(pub_key_bytes),
+                sig: ed25519_zebra::Signature::from({
+                    let mut b = [0u8; 64];
+                    b.copy_from_slice(sig_bytes.as_slice());
+                    b
+                }),
+            })
+            .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
 
 impl Arbitrary for Output {
     type Parameters = ();
