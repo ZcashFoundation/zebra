@@ -1,9 +1,14 @@
 use color_eyre::eyre::{eyre, Report};
-use futures::stream::{FuturesUnordered, StreamExt};
+use futures::{
+    future,
+    stream::{FuturesUnordered, StreamExt},
+};
 use std::{collections::HashSet, iter, sync::Arc, time::Duration};
 use tokio::time::delay_for;
-use tower::{Service, ServiceExt};
-use tracing_futures::Instrument;
+use tower::{
+    retry::{Policy, Retry},
+    Service, ServiceExt,
+};
 use zebra_chain::{
     block::{Block, BlockHeaderHash},
     types::BlockHeight,
@@ -12,6 +17,28 @@ use zebra_chain::{
 use zebra_network as zn;
 use zebra_state as zs;
 
+#[derive(Clone, Debug)]
+pub struct RetryNErrors {
+    /// number of times to retry
+    n: u32,
+}
+
+impl<Req: Clone, Res, E> Policy<Req, Res, E> for RetryNErrors {
+    type Future = future::Ready<Self>;
+
+    fn retry(&self, _: &Req, result: Result<&Res, &E>) -> Option<Self::Future> {
+        if result.is_err() && self.n > 0 {
+            Some(future::ready(Self { n: self.n - 1 }))
+        } else {
+            None
+        }
+    }
+
+    fn clone_request(&self, req: &Req) -> Option<Req> {
+        Some(req.clone())
+    }
+}
+
 pub struct Syncer<ZN, ZS, ZC>
 where
     ZN: Service<zn::Request>,
@@ -19,9 +46,28 @@ where
     pub peer_set: ZN,
     pub state: ZS,
     pub verifier: ZC,
+    pub retry_peer_set: Retry<RetryNErrors, ZN>,
     pub prospective_tips: HashSet<BlockHeaderHash>,
     pub block_requests: FuturesUnordered<ZN::Future>,
     pub fanout: NumReq,
+}
+
+impl<ZN, ZS, ZC> Syncer<ZN, ZS, ZC>
+where
+    ZN: Service<zn::Request> + Clone,
+{
+    pub fn new(peer_set: ZN, state: ZS, verifier: ZC) -> Self {
+        let retry_peer_set = Retry::new(RetryNErrors { n: 3 }, peer_set.clone());
+        Self {
+            peer_set,
+            state,
+            verifier,
+            retry_peer_set,
+            block_requests: FuturesUnordered::new(),
+            fanout: 4,
+            prospective_tips: HashSet::new(),
+        }
+    }
 }
 
 impl<ZN, ZS, ZC> Syncer<ZN, ZS, ZC>
@@ -222,7 +268,7 @@ where
             let set = chunk.iter().cloned().collect();
 
             let request = self
-                .peer_set
+                .retry_peer_set
                 .ready_and()
                 .await
                 .map_err(|e| eyre!(e))?
@@ -249,10 +295,7 @@ where
                 .await
                 {
                     Ok(()) => {}
-                    Err(e) => {
-                        // TODO(jlusby): retry policy?
-                        error!("{:?}", e);
-                    }
+                    Err(e) => error!("{:?}", e),
                 }
             });
         }
