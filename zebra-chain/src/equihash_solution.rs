@@ -28,6 +28,15 @@ pub struct EquihashSolution(
     #[serde(with = "serde_helpers::BigArray")] pub [u8; EQUIHASH_SOLUTION_SIZE],
 );
 
+impl EquihashSolution {
+    /// Validate an equihash solution
+    pub fn is_valid(&self) -> bool {
+        let (n, k, input, nonce) =
+            todo!("Don't know where these come from yet, have to still read the spec");
+        equihash::is_valid_solution(n, k, input, nonce, &self.0)
+    }
+}
+
 impl PartialEq<EquihashSolution> for EquihashSolution {
     fn eq(&self, other: &EquihashSolution) -> bool {
         self.0.as_ref() == other.0.as_ref()
@@ -132,6 +141,16 @@ mod tests {
             .expect("Test vector EquihashSolution should serialize");
 
         assert_eq!(solution_bytes, data.as_slice());
+    }
+
+    #[test]
+    fn equihash_solution_test_vector_is_valid() {
+        let solution_bytes =
+            &zebra_test::vectors::HEADER_MAINNET_415000_BYTES[EQUIHASH_SOLUTION_BLOCK_OFFSET..];
+        let solution = EquihashSolution::zcash_deserialize(solution_bytes)
+            .expect("Test vector EquihashSolution should deserialize");
+
+        assert!(solution.is_valid());
     }
 
     static EQUIHASH_SIZE_TESTS: &[u64] = &[
