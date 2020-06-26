@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 
-use crate::equihash_solution::EquihashSolution;
+use crate::equihash::solution::EquihashSolution;
 use crate::merkle_tree::MerkleTreeRootHash;
 use crate::note_commitment_tree::SaplingNoteTreeRootHash;
 

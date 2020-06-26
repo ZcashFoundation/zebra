@@ -1,12 +1,15 @@
 //! Verification functions for the [Equihash] proof-of-work algorithm.
 //!
 //! [Equihash]: https://zips.z.cash/protocol/protocol.pdf#equihash
+#![allow(clippy::many_single_char_names, clippy::wrong_self_convention)]
 
 use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams, State as Blake2bState};
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
-use log::error;
 use std::io::Cursor;
 use std::mem::size_of;
+use tracing::error;
+
+pub mod solution;
 
 struct Params {
     n: u32,
@@ -214,6 +217,7 @@ fn validate_subtrees(p: &Params, a: &Node, b: &Node) -> bool {
     }
 }
 
+///
 pub fn is_valid_solution_iterative(
     n: u32,
     k: u32,
@@ -273,6 +277,7 @@ fn tree_validator(p: &Params, state: &Blake2bState, indices: &[u32]) -> Option<N
     }
 }
 
+///
 pub fn is_valid_solution_recursive(
     n: u32,
     k: u32,
@@ -295,6 +300,7 @@ pub fn is_valid_solution_recursive(
     }
 }
 
+///
 pub fn is_valid_solution(n: u32, k: u32, input: &[u8], nonce: &[u8], soln: &[u8]) -> bool {
     let p = Params { n, k };
     let indices = indices_from_minimal(soln, p.collision_bit_length());
@@ -467,4 +473,3 @@ mod tests {
         assert!(is_valid_solution(96, 5, input2, &nonce, &indices));
     }
 }
-

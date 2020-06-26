@@ -13,7 +13,7 @@ mod sha256d_writer;
 
 pub mod addresses;
 pub mod block;
-pub mod equihash_solution;
+pub mod equihash;
 pub mod keys;
 pub mod note_commitment_tree;
 pub mod notes;
