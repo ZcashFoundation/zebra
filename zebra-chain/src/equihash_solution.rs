@@ -156,6 +156,13 @@ mod tests {
             &zebra_test::vectors::HEADER_MAINNET_415000_BYTES[..EQUIHASH_NONCE_BLOCK_OFFSET];
 
         assert!(solution.is_valid(header_bytes, &block.header.nonce));
+
+        let heade_bytes =
+            &zebra_test::vectors::HEADER_MAINNET_415000_BYTES[..EQUIHASH_NONCE_BLOCK_OFFSET - 1];
+        let headerr_bytes =
+            &zebra_test::vectors::HEADER_MAINNET_415000_BYTES[..EQUIHASH_NONCE_BLOCK_OFFSET + 1];
+        assert!(!solution.is_valid(heade_bytes, &block.header.nonce));
+        assert!(!solution.is_valid(headerr_bytes, &block.header.nonce));
     }
 
     static EQUIHASH_SIZE_TESTS: &[u64] = &[
