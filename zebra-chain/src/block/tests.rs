@@ -1,11 +1,15 @@
+use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 use std::io::{Cursor, ErrorKind, Write};
 
-use chrono::NaiveDateTime;
 use proptest::{
     arbitrary::{any, Arbitrary},
     prelude::*,
 };
 
+use crate::equihash_solution::EquihashSolution;
+use crate::merkle_tree::MerkleTreeRootHash;
+use crate::note_commitment_tree::SaplingNoteTreeRootHash;
+use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 use crate::sha256d_writer::Sha256dWriter;
 
 use super::*;
@@ -16,11 +20,13 @@ impl Arbitrary for BlockHeader {
 
     fn arbitrary_with(_args: ()) -> Self::Strategy {
         (
-            (4u32..2_147_483_647u32),
+            // version is interpreted as i32 in the spec, so we are limited to i32::MAX here
+            (4u32..(i32::MAX as u32)),
             any::<BlockHeaderHash>(),
             any::<MerkleTreeRootHash>(),
             any::<SaplingNoteTreeRootHash>(),
-            (0i64..4_294_967_296i64),
+            // time is interpreted as u32 in the spec, but rust timestamps are i64
+            (0i64..(u32::MAX as i64)),
             any::<u32>(),
             any::<[u8; 32]>(),
             any::<EquihashSolution>(),

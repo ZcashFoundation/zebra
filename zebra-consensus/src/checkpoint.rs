@@ -155,8 +155,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tests::install_tracing;
 
-    use color_eyre::eyre::{bail, ensure, eyre, Report};
+    use color_eyre::eyre::{bail, eyre, Report};
     use tower::{util::ServiceExt, Service};
 
     use zebra_chain::serialization::ZcashDeserialize;
@@ -164,6 +165,8 @@ mod tests {
     #[tokio::test]
     #[spandoc::spandoc]
     async fn checkpoint_single_item_list() -> Result<(), Report> {
+        install_tracing();
+
         let block0 =
             Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
         let hash0: BlockHeaderHash = block0.as_ref().into();
@@ -178,34 +181,34 @@ mod tests {
         let mut state_service = Box::new(zebra_state::in_memory::init());
         let mut checkpoint_verifier = super::init(state_service.clone(), genesis_checkpoint_list);
 
-        // Verify block 0
-        let verify_response = checkpoint_verifier
+        /// Make sure the verifier service is ready
+        let ready_verifier_service = checkpoint_verifier
             .ready_and()
             .await
-            .map_err(|e| eyre!(e))?
+            .map_err(|e| eyre!(e))?;
+        /// Verify block 0
+        let verify_response = ready_verifier_service
             .call(block0.clone())
             .await
             .map_err(|e| eyre!(e))?;
 
-        ensure!(
-            verify_response == hash0,
-            "unexpected response kind: {:?}",
-            verify_response
-        );
+        assert_eq!(verify_response, hash0);
 
-        let state_response = state_service
-            .ready_and()
-            .await
-            .map_err(|e| eyre!(e))?
+        /// Make sure the state service is ready
+        let ready_state_service = state_service.ready_and().await.map_err(|e| eyre!(e))?;
+        /// Make sure the block was added to the state
+        let state_response = ready_state_service
             .call(zebra_state::Request::GetBlock { hash: hash0 })
             .await
             .map_err(|e| eyre!(e))?;
 
-        match state_response {
-            zebra_state::Response::Block {
-                block: returned_block,
-            } => assert_eq!(block0, returned_block),
-            _ => bail!("unexpected response kind: {:?}", state_response),
+        if let zebra_state::Response::Block {
+            block: returned_block,
+        } = state_response
+        {
+            assert_eq!(block0, returned_block);
+        } else {
+            bail!("unexpected response kind: {:?}", state_response);
         }
 
         Ok(())
@@ -213,54 +216,9 @@ mod tests {
 
     #[tokio::test]
     #[spandoc::spandoc]
-    async fn checkpoint_list_empty_fail() -> Result<(), Report> {
-        let block0 =
-            Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
-
-        let mut state_service = Box::new(zebra_state::in_memory::init());
-        let mut checkpoint_verifier = super::init(
-            state_service.clone(),
-            <HashMap<BlockHeight, BlockHeaderHash>>::new(),
-        );
-
-        // Try to verify the block, and expect failure
-        let verify_result = checkpoint_verifier
-            .ready_and()
-            .await
-            .map_err(|e| eyre!(e))?
-            .call(block0.clone())
-            .await;
-
-        ensure!(
-            // TODO(teor || jlusby): check error string
-            verify_result.is_err(),
-            "unexpected result kind: {:?}",
-            verify_result
-        );
-
-        // Now make sure the block isn't in the state
-        let state_result = state_service
-            .ready_and()
-            .await
-            .map_err(|e| eyre!(e))?
-            .call(zebra_state::Request::GetBlock {
-                hash: block0.as_ref().into(),
-            })
-            .await;
-
-        ensure!(
-            // TODO(teor || jlusby): check error string
-            state_result.is_err(),
-            "unexpected result kind: {:?}",
-            verify_result
-        );
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    #[spandoc::spandoc]
     async fn checkpoint_not_present_fail() -> Result<(), Report> {
+        install_tracing();
+
         let block0 =
             Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
         let block415000 =
@@ -276,53 +234,39 @@ mod tests {
         let mut state_service = Box::new(zebra_state::in_memory::init());
         let mut checkpoint_verifier = super::init(state_service.clone(), genesis_checkpoint_list);
 
-        // Try to verify block 415000, and expect failure
-        let verify_result = checkpoint_verifier
+        /// Make sure the verifier service is ready
+        let ready_verifier_service = checkpoint_verifier
             .ready_and()
             .await
-            .map_err(|e| eyre!(e))?
+            .map_err(|e| eyre!(e))?;
+        /// Try to verify block 415000, and expect failure
+        // TODO(teor || jlusby): check error kind
+        ready_verifier_service
             .call(block415000.clone())
-            .await;
-
-        ensure!(
-            // TODO(teor || jlusby): check error string
-            verify_result.is_err(),
-            "unexpected result kind: {:?}",
-            verify_result
-        );
-
-        // Now make sure neither block is in the state
-        let state_result = state_service
-            .ready_and()
             .await
-            .map_err(|e| eyre!(e))?
+            .unwrap_err();
+
+        /// Make sure the state service is ready (1/2)
+        let ready_state_service = state_service.ready_and().await.map_err(|e| eyre!(e))?;
+        /// Make sure neither block is in the state: expect GetBlock 415000 to fail.
+        // TODO(teor || jlusby): check error kind
+        ready_state_service
             .call(zebra_state::Request::GetBlock {
                 hash: block415000.as_ref().into(),
             })
-            .await;
-
-        ensure!(
-            // TODO(teor || jlusby): check error string
-            state_result.is_err(),
-            "unexpected result kind: {:?}",
-            verify_result
-        );
-
-        let state_result = state_service
-            .ready_and()
             .await
-            .map_err(|e| eyre!(e))?
+            .unwrap_err();
+
+        /// Make sure the state service is ready (2/2)
+        let ready_state_service = state_service.ready_and().await.map_err(|e| eyre!(e))?;
+        /// Make sure neither block is in the state: expect GetBlock 0 to fail.
+        // TODO(teor || jlusby): check error kind
+        ready_state_service
             .call(zebra_state::Request::GetBlock {
                 hash: block0.as_ref().into(),
             })
-            .await;
-
-        ensure!(
-            // TODO(teor || jlusby): check error string
-            state_result.is_err(),
-            "unexpected result kind: {:?}",
-            verify_result
-        );
+            .await
+            .unwrap_err();
 
         Ok(())
     }
@@ -330,6 +274,8 @@ mod tests {
     #[tokio::test]
     #[spandoc::spandoc]
     async fn checkpoint_wrong_hash_fail() -> Result<(), Report> {
+        install_tracing();
+
         let block0 =
             Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
 
@@ -344,37 +290,28 @@ mod tests {
         let mut state_service = Box::new(zebra_state::in_memory::init());
         let mut checkpoint_verifier = super::init(state_service.clone(), genesis_checkpoint_list);
 
-        // Try to verify block 0, and expect failure
-        let verify_result = checkpoint_verifier
+        /// Make sure the verifier service is ready
+        let ready_verifier_service = checkpoint_verifier
             .ready_and()
             .await
-            .map_err(|e| eyre!(e))?
+            .map_err(|e| eyre!(e))?;
+        /// Try to verify block 0, and expect failure
+        // TODO(teor || jlusby): check error kind
+        ready_verifier_service
             .call(block0.clone())
-            .await;
-
-        ensure!(
-            // TODO(teor || jlusby): check error string
-            verify_result.is_err(),
-            "unexpected result kind: {:?}",
-            verify_result
-        );
-
-        // Now make sure block 0 is not in the state
-        let state_result = state_service
-            .ready_and()
             .await
-            .map_err(|e| eyre!(e))?
+            .unwrap_err();
+
+        /// Make sure the state service is ready
+        let ready_state_service = state_service.ready_and().await.map_err(|e| eyre!(e))?;
+        /// Now make sure block 0 is not in the state
+        // TODO(teor || jlusby): check error kind
+        ready_state_service
             .call(zebra_state::Request::GetBlock {
                 hash: block0.as_ref().into(),
             })
-            .await;
-
-        ensure!(
-            // TODO(teor || jlusby): check error string
-            state_result.is_err(),
-            "unexpected result kind: {:?}",
-            verify_result
-        );
+            .await
+            .unwrap_err();
 
         Ok(())
     }

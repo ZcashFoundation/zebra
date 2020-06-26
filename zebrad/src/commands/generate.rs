@@ -31,8 +31,20 @@ impl Runnable for GenerateCmd {
 # can be found in Rustdoc here:
 # https://doc.zebra.zfnd.org/zebrad/config/struct.ZebradConfig.html
 
+# Usage:
+# One option is to locate this file in the same directory the zebrad binary is
+# called from, if the default name zebrad.toml is used the app will load the new
+# configuration automatically. For example if you generate with:
+# zebrad generate -o zebrad.toml
+# Edit the file as needed then execute the following to connect using
+# the new configuration, default values will be overwritten:
+# zebrad connect
+# If you generated with a different name or location then -c flag is required
+# to load the new configuration:
+# zebrad generate -o myzebrad.toml
+# zebrad -c myzebrad.toml connect
 "
-        .to_owned(); // The default name and location of the config file is defined in ../commands.rs
+        .to_owned();
 
         // this avoids a ValueAfterTable error
         // https://github.com/alexcrichton/toml-rs/issues/145
