@@ -16,7 +16,8 @@ use std::{
     collections::BTreeMap,
     error,
     future::Future,
-    ops::{Bound, Bound::*, RangeBounds},
+    iter::successors,
+    ops::{Bound, Bound::*},
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -212,6 +213,30 @@ impl CheckpointVerifier {
         }
     }
 
+    /// Return the most recently verified checkpoint's hash.
+    ///
+    /// If verification has not started yet, returns None.
+    /// If verification has finished, returns the maximum checkpoint's hash.
+    fn get_previous_checkpoint_hash(&self) -> Option<BlockHeaderHash> {
+        match self.get_previous_checkpoint_height() {
+            // Every checkpoint height must have a hash
+            Some(height) => Some(*self.checkpoint_list.get(&height).unwrap()),
+            None => None,
+        }
+    }
+
+    /// Return the hash of the next checkpoint we want to verify.
+    ///
+    /// If verification has not started yet, returns the hash of block zero
+    /// (the genesis block). If verification has finished, returns None.
+    fn get_next_checkpoint_hash(&self) -> Option<BlockHeaderHash> {
+        match self.get_next_checkpoint_height() {
+            // Every checkpoint height must have a hash
+            Some(height) => Some(*self.checkpoint_list.get(&height).unwrap()),
+            None => None,
+        }
+    }
+
     /// Return the height of the next checkpoint higher than `after_block_height`
     /// in the checkpoint list. Ignores the current checkpoint range.
     ///
@@ -324,54 +349,110 @@ impl Service<Arc<Block>> for CheckpointVerifier {
         // Set up a oneshot channel as the future
         let (tx, rx) = oneshot::channel();
 
-        // Queue the block for verification
-        let (height, hash) = match self.insert_queued_block(block, tx) {
-            Some(hh) => hh,
-            None => return Box::pin(rx.boxed()),
-        };
+        // Queue the block for verification, returning early on error
+        if self.insert_queued_block(block, tx).is_none() {
+            return Box::pin(rx.boxed());
+        }
 
         // Now try to verify, from the next checkpoint to the previous one.
-        let checkpoint_hash = match self.checkpoint_list.get(&height) {
-            Some(&hash) => hash,
-            None => return Box::pin(rx.boxed()),
-        };
 
-        let mut matching_qblocks = Vec::new();
-        // Get the blocks at this height back out of the queue
-        for potential_qblock in self.queued.entry(height).or_default().drain(..) {
-            if potential_qblock.hash != checkpoint_hash {
-                // The block is on a side-chain
-                // Sending can fail, but only because the receiver has closed
-                // the channel. So there's nothing we can do about the error.
-                let _ = potential_qblock.tx.send(Err(
-                    "the block hash does not match the checkpoint hash".into(),
-                ));
-            } else {
-                matching_qblocks.push(potential_qblock);
+        let next_checkpoint_height = self.get_next_checkpoint_height();
+        // If the verifier has finished, or there are no checkpoints, queuing a block should
+        // haved failed and returned early.
+        let next_checkpoint_hash = self.get_next_checkpoint_hash().unwrap();
+
+        // The previous height and hash are None, until the genesis block is verified
+        let previous_checkpoint_height = self.get_previous_checkpoint_height();
+        let previous_checkpoint_hash = self.get_previous_checkpoint_hash();
+
+        // Walk the queued blocks, from next checkpoint, to the child of the previous checkpoint
+        // (if we're just starting verifying, we only check the genesis block)
+        if let Some(current_range) = self.current_checkpoint_range {
+            let qrange = self.queued.range(current_range).rev();
+            // Limited by qrange
+            let mut expected_hash = next_checkpoint_hash;
+            let expected_heights = successors(next_checkpoint_height, |n| {
+                n.0.checked_sub(1).map(BlockHeight)
+            });
+            for ((&height, qblocks), expected_height) in qrange.zip(expected_heights) {
+                // Check that the heights are continuous
+                if height != expected_height {
+                    return Box::pin(rx.boxed());
+                }
+                let mut next_hash = None;
+                // Check if any of the queued blocks are part of the hash chain
+                for qblock in qblocks {
+                    if qblock.hash == expected_hash {
+                        next_hash = Some(qblock.block.header.previous_block_hash);
+                    }
+                }
+                if let Some(next_hash) = next_hash {
+                    expected_hash = next_hash;
+                } else {
+                    return Box::pin(rx.boxed());
+                }
             }
-        }
 
-        let mut first = true;
-        // Now process the matching blocks (there should be at most one)
-        for matching_qblock in matching_qblocks.drain(..) {
-            if first {
-                self.update_current_checkpoint_height(height);
-                // Sending can fail, but there's nothing we can do about it.
-                let _ = matching_qblock.tx.send(Ok(matching_qblock.hash));
-                first = false;
-            } else {
-                // The block is a duplicate
-                // Sending can fail, but only because the receiver has closed
-                // the channel. So there's nothing we can do about the error.
-                let _ = matching_qblock.tx.send(Err(
-                    "duplicate valid blocks at this height, only one was chosen".into(),
-                ));
+            // We completed this part of the chain
+            // verify all the blocks, and discard all the bad blocks
+            if Some(expected_hash) == previous_checkpoint_hash {
+                // TODO: refactor duplicate code
+                let mut expected_hash = next_checkpoint_hash;
+                let qrange = self.queued.range_mut(current_range).rev();
+                for (_, qblocks) in qrange {
+                    let mut next_hash = None;
+                    // Check if any of the queued blocks are part of the hash chain
+                    for qblock in qblocks.drain(..) {
+                        if qblock.hash == expected_hash {
+                            if next_hash == None {
+                                // The first valid block
+                                next_hash = Some(qblock.block.header.previous_block_hash);
+                                // Sending can fail, but only because the receiver has closed
+                                // the channel. So there's nothing we can do about the error.
+                                let _ = qblock.tx.send(Ok(qblock.hash));
+                            } else {
+                                // duplicate blocks
+                                // Sending can fail, but there's nothing we can do about it.
+                                let _ = qblock.tx.send(Err(
+                                    "duplicate valid blocks at this height, only one was chosen"
+                                        .into(),
+                                ));
+                            }
+                        } else {
+                            // bad blocks
+                            // Sending can fail, but there's nothing we can do about it.
+                            let _ = qblock.tx.send(Err(
+                                "the block hash does not match the chained checkpoint hash".into(),
+                            ));
+                        }
+                    }
+                    // Can't fail, we just checked it in the previous loop
+                    expected_hash = next_hash.unwrap();
+                }
+
+                // Now remove the empty vectors at all those heights
+                if let (Some(BlockHeight(previous_height)), Some(BlockHeight(next_height))) =
+                    (previous_checkpoint_height, next_checkpoint_height)
+                {
+                    for height in previous_height..=next_height {
+                        let ov = self.queued.remove(&BlockHeight(height));
+                        debug_assert_eq!(ov.map(|v| v.len()), Some(0));
+                    }
+                } else {
+                    // Just delete the genesis block
+                    let ov = self.queued.remove(&BlockHeight(0));
+                    debug_assert_eq!(ov.map(|v| v.len()), Some(0));
+                }
+
+                // Finally, update the checkpoint bounds
+                // The heights have to be valid here, because this part of the chain is valid
+                self.update_current_checkpoint_height(next_checkpoint_height.unwrap());
             }
+        } else {
+            // We've finished verifying, and the queue should be empty
+            debug_assert_eq!(self.queued.len(), 0);
+            self.queued.clear();
         }
-
-        // Now remove the empty vector at that height
-        let ov = self.queued.remove(&height);
-        debug_assert_eq!(ov.map(|v| v.len()), Some(0));
 
         Box::pin(rx.boxed())
     }
@@ -452,8 +533,9 @@ mod tests {
         for b in &[
             &zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..],
             &zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..],
-            &zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..],
-            &zebra_test::vectors::BLOCK_MAINNET_434873_BYTES[..],
+            // TODO(teor): not continuous, so they hang
+            //&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..],
+            //&zebra_test::vectors::BLOCK_MAINNET_434873_BYTES[..],
         ] {
             let block = Arc::<Block>::zcash_deserialize(*b)?;
             let hash: BlockHeaderHash = block.as_ref().into();
@@ -476,7 +558,7 @@ mod tests {
         );
         assert_eq!(
             checkpoint_verifier.get_max_checkpoint_height(),
-            Some(BlockHeight(434873))
+            Some(BlockHeight(1))
         );
 
         // Now verify each block
@@ -505,18 +587,18 @@ mod tests {
             );
             assert_eq!(
                 checkpoint_verifier.get_max_checkpoint_height(),
-                Some(BlockHeight(434873))
+                Some(BlockHeight(1))
             );
         }
 
         assert_eq!(
             checkpoint_verifier.get_previous_checkpoint_height(),
-            Some(BlockHeight(434873))
+            Some(BlockHeight(1))
         );
         assert_eq!(checkpoint_verifier.get_next_checkpoint_height(), None);
         assert_eq!(
             checkpoint_verifier.get_max_checkpoint_height(),
-            Some(BlockHeight(434873))
+            Some(BlockHeight(1))
         );
 
         Ok(())
