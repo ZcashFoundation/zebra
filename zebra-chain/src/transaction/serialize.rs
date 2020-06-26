@@ -3,6 +3,7 @@
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::{
+    convert::TryInto,
     io::{self, Read},
     sync::Arc,
 };
@@ -433,7 +434,7 @@ impl ZcashSerialize for Transaction {
                 outputs.zcash_serialize(&mut writer)?;
                 lock_time.zcash_serialize(&mut writer)?;
                 writer.write_u32::<LittleEndian>(expiry_height.0)?;
-                writer.write_i64::<LittleEndian>(*value_balance)?;
+                writer.write_i64::<LittleEndian>(i64::from(*value_balance))?;
 
                 // The previous match arms serialize in one go, because the
                 // internal structure happens to nicely line up with the
@@ -540,7 +541,10 @@ impl ZcashDeserialize for Transaction {
                 let outputs = Vec::zcash_deserialize(&mut reader)?;
                 let lock_time = LockTime::zcash_deserialize(&mut reader)?;
                 let expiry_height = BlockHeight(reader.read_u32::<LittleEndian>()?);
-                let value_balance = reader.read_i64::<LittleEndian>()?;
+                let value_balance = reader
+                    .read_i64::<LittleEndian>()?
+                    .try_into()
+                    .map_err(SerializationError::Parse)?;
                 let mut shielded_spends = Vec::zcash_deserialize(&mut reader)?;
                 let mut shielded_outputs = Vec::zcash_deserialize(&mut reader)?;
                 let joinsplit_data = OptV4JSD::zcash_deserialize(&mut reader)?;

@@ -3,6 +3,8 @@
 use std::{
     fmt,
     io::{self, Read},
+    marker::PhantomData,
+    ops::Range,
 };
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
@@ -15,26 +17,67 @@ use crate::serialization::{
     ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
 };
 
-/// A 4-byte checksum using truncated double-SHA256 (two rounds of SHA256).
-#[derive(Copy, Clone, Eq, PartialEq)]
-pub struct Sha256dChecksum(pub [u8; 4]);
+/// A runtime validated type for representing amounts of zatoshis
+#[derive(Debug, Eq, PartialEq, Clone, Copy, Serialize, Deserialize)]
+pub struct Amount<C = NegativeAllowed>(i64, PhantomData<C>);
 
-impl<'a> From<&'a [u8]> for Sha256dChecksum {
-    fn from(bytes: &'a [u8]) -> Self {
-        use sha2::{Digest, Sha256};
-        let hash1 = Sha256::digest(bytes);
-        let hash2 = Sha256::digest(&hash1);
-        let mut checksum = [0u8; 4];
-        checksum[0..4].copy_from_slice(&hash2[0..4]);
-        Self(checksum)
+#[cfg(test)]
+impl<C> Arbitrary for Amount<C>
+where
+    C: AmountConstraint + fmt::Debug,
+{
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        C::valid_range().prop_map(|v| Self(v, PhantomData)).boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
+
+impl<C> From<Amount<C>> for i64 {
+    fn from(amount: Amount<C>) -> Self {
+        amount.0
     }
 }
 
-impl fmt::Debug for Sha256dChecksum {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple("Sha256dChecksum")
-            .field(&hex::encode(&self.0))
-            .finish()
+///
+pub trait AmountConstraint {
+    ///
+    fn valid_range() -> Range<i64>;
+
+    ///
+    fn validate(value: i64) -> Result<i64, &'static str> {
+        let range = Self::valid_range();
+
+        if value < range.start {
+            Err("Amount's value is less than the start of it's range")
+        } else if value > range.end {
+            Err("Amount's value is greater than the end of it's range")
+        } else {
+            Ok(value)
+        }
+    }
+}
+
+impl<C> std::convert::TryFrom<i64> for Amount<C>
+where
+    C: AmountConstraint,
+{
+    type Error = &'static str;
+
+    fn try_from(value: i64) -> Result<Self, Self::Error> {
+        C::validate(value).map(|v| Self(v, PhantomData))
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+///
+pub struct NegativeAllowed;
+
+impl AmountConstraint for NegativeAllowed {
+    fn valid_range() -> Range<i64> {
+        -MAX_MONEY..MAX_MONEY + 1
     }
 }
 
@@ -144,6 +187,31 @@ impl ZcashDeserialize for Script {
         Ok(Script(bytes))
     }
 }
+
+/// A 4-byte checksum using truncated double-SHA256 (two rounds of SHA256).
+#[derive(Copy, Clone, Eq, PartialEq)]
+pub struct Sha256dChecksum(pub [u8; 4]);
+
+impl<'a> From<&'a [u8]> for Sha256dChecksum {
+    fn from(bytes: &'a [u8]) -> Self {
+        use sha2::{Digest, Sha256};
+        let hash1 = Sha256::digest(bytes);
+        let hash2 = Sha256::digest(&hash1);
+        let mut checksum = [0u8; 4];
+        checksum[0..4].copy_from_slice(&hash2[0..4]);
+        Self(checksum)
+    }
+}
+
+impl fmt::Debug for Sha256dChecksum {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple("Sha256dChecksum")
+            .field(&hex::encode(&self.0))
+            .finish()
+    }
+}
+
+const MAX_MONEY: i64 = 21_000_000 * 100_000_000;
 
 #[cfg(test)]
 use proptest::prelude::*;
