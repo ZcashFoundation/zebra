@@ -11,10 +11,8 @@ use tokio::sync::broadcast::{channel, RecvError, Sender};
 use tower::Service;
 use tower_batch::BatchControl;
 
-pub struct RedJubjubVerifier<T: SigType>
-where
-    T: SigType + std::default::Default,
-{
+/// RedJubjub signature verifier service
+pub struct RedJubjubVerifier<T: SigType> {
     batch: batch::Verifier<T>,
     // This uses a "broadcast" channel, which is an mpmc channel. Tokio also
     // provides a spmc channel, "watch", but it only keeps the latest value, so
@@ -25,20 +23,19 @@ where
 
 #[allow(clippy::new_without_default)]
 impl<T: SigType> RedJubjubVerifier<T> {
+    /// Create a new RedJubjubVerifier instance
     pub fn new() -> Self {
-        let batch = batch::Verifier::<T>::new();
+        let batch = batch::Verifier::<T>::default();
         // XXX(hdevalence) what's a reasonable choice here?
         let (tx, _) = channel(10);
         Self { tx, batch }
     }
 }
 
-pub type RedJubjubItem<T: SigType> = batch::Item<T>;
+/// Type alias to clarify that this batch::Item is a RedJubjubItem
+pub type RedJubjubItem<T> = batch::Item<T>;
 
-impl<'msg, T> Service<BatchControl<RedJubjubItem<T>>> for RedJubjubVerifier<T>
-where
-    T: SigType + std::default::Default,
-{
+impl<'msg, T: SigType> Service<BatchControl<RedJubjubItem<T>>> for RedJubjubVerifier<T> {
     type Response = ();
     type Error = Error;
     type Future = Pin<Box<dyn Future<Output = Result<(), Error>> + Send + 'static>>;
@@ -79,7 +76,7 @@ where
 impl<T: SigType> Drop for RedJubjubVerifier<T> {
     fn drop(&mut self) {
         // We need to flush the current batch in case there are still any pending futures.
-        let batch = mem::replace(&mut self.batch, batch::Verifier::<T>::new());
+        let batch = mem::take(&mut self.batch);
         let _ = self.tx.send(batch.verify(thread_rng()));
     }
 }
@@ -88,12 +85,14 @@ impl<T: SigType> Drop for RedJubjubVerifier<T> {
 mod tests {
     use super::*;
 
-    use time::Duration;
+    use std::time::Duration;
 
+    use color_eyre::eyre::Result;
     use futures::stream::{FuturesUnordered, StreamExt};
+    use tower::ServiceExt;
     use tower_batch::Batch;
 
-    async fn sign_and_verify<V>(mut verifier: V, n: usize) -> Result<(), V::Error>
+    async fn sign_and_verify<V, T>(mut verifier: V, n: usize) -> Result<(), V::Error>
     where
         T: SigType,
         V: Service<RedJubjubItem<T>, Response = ()>,
@@ -125,7 +124,11 @@ mod tests {
 
         // Use a very long max_latency and a short timeout to check that
         // flushing is happening based on hitting max_items.
-        let verifier = Batch::new(RedJubjubVerifier::new(), 10, Duration::from_secs(1000));
+        let verifier = Batch::new(
+            RedJubjubVerifier::<Binding>::new(),
+            10,
+            Duration::from_secs(1000),
+        );
         timeout(Duration::from_secs(1), sign_and_verify(verifier, 100)).await?
     }
 
@@ -136,7 +139,11 @@ mod tests {
 
         // Use a very high max_items and a short timeout to check that
         // flushing is happening based on hitting max_latency.
-        let verifier = Batch::new(RedJubjubVerifier::new(), 100, Duration::from_millis(500));
+        let verifier = Batch::new(
+            RedJubjubVerifier::<SpendAuth>::new(),
+            100,
+            Duration::from_millis(500),
+        );
         timeout(Duration::from_secs(1), sign_and_verify(verifier, 10)).await?
     }
 }

@@ -1460,7 +1460,7 @@ dependencies = [
 [[package]]
 name = "redjubjub"
 version = "0.1.1"
-source = "git+https://github.com/ZcashFoundation/redjubjub.git?branch=batch#ead5cfcd684c8ff92f601d1bf7c1f541b1782fa4"
+source = "git+https://github.com/ZcashFoundation/redjubjub.git?branch=batch#469e853ac9cf184eeeb11b7aa564f45c49374b76"
 dependencies = [
  "blake2b_simd",
  "byteorder",
