@@ -106,56 +106,13 @@ impl Arbitrary for EquihashSolution {
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
     use crate::block::{Block, BlockHeader};
-
-    /// returns a test strategy for generating arbitrary EquihashSolutions
-    /// that filters out instances of HEADER_MAINNET_41500_BYTES's solution
-    fn filtered_solutions() -> impl Strategy<Value = EquihashSolution> {
-        let solution_bytes =
-            &zebra_test::vectors::HEADER_MAINNET_415000_BYTES[EQUIHASH_SOLUTION_BLOCK_OFFSET..];
-        let real_solution = EquihashSolution::zcash_deserialize(solution_bytes)
-            .expect("Test vector EquihashSolution should deserialize");
-
-        any::<EquihashSolution>()
-            .prop_filter("solution must not be the actual solution", move |s| {
-                s != &real_solution
-            })
-    }
-
-    fn filtered_nonce() -> impl Strategy<Value = BlockHeader> {
-        let real_header = BlockHeader::zcash_deserialize(
-            &zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..std::mem::size_of::<BlockHeader>()],
-        )
-        .expect("block test vector should deserialize");
-
-        any::<BlockHeader>().prop_filter("block must not be the actual block", move |h| {
-            h.nonce != real_header.nonce
-        })
-    }
-
-    fn filtered_input() -> impl Strategy<Value = Vec<u8>> {
-        let real_header_bytes =
-            &zebra_test::vectors::HEADER_MAINNET_415000_BYTES[..EQUIHASH_NONCE_BLOCK_OFFSET];
-
-        any::<BlockHeader>()
-            .prop_map(|h| {
-                let mut data = Vec::new();
-                h.zcash_serialize(&mut data)
-                    .expect("randomized EquihashSolution should serialize");
-                data
-            })
-            .prop_filter("input must be diff from actual header", move |input| {
-                input.as_slice() != real_header_bytes
-            })
-    }
 
     proptest! {
 
         #[test]
         fn equihash_solution_roundtrip(solution in any::<EquihashSolution>()) {
-
             let mut data = Vec::new();
 
             solution.zcash_serialize(&mut data).expect("randomized EquihashSolution should serialize");
@@ -164,44 +121,6 @@ mod tests {
                 .expect("randomized EquihashSolution should deserialize");
 
             prop_assert_eq![solution, solution2];
-        }
-
-        #[test]
-        fn equihash_invalid_solution(fake_solution in filtered_solutions()) {
-            let block = crate::block::Block::zcash_deserialize(
-                &zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..],
-            )
-            .expect("block test vector should deserialize");
-
-            let header_bytes =
-                &zebra_test::vectors::HEADER_MAINNET_415000_BYTES[..EQUIHASH_NONCE_BLOCK_OFFSET];
-
-            assert!(!fake_solution.is_valid(header_bytes, &block.header.nonce));
-        }
-
-        #[test]
-        fn equihash_invalid_nonce(fake_header in filtered_nonce()) {
-            let block = crate::block::Block::zcash_deserialize(
-                &zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..],
-            )
-            .expect("block test vector should deserialize");
-            let solution = block.header.solution;
-
-            let header_bytes =
-                &zebra_test::vectors::HEADER_MAINNET_415000_BYTES[..EQUIHASH_NONCE_BLOCK_OFFSET];
-
-            assert!(!solution.is_valid(header_bytes, &fake_header.nonce));
-        }
-
-        #[test]
-        fn equihash_invalid_input(fake_input in filtered_input()) {
-            let block = crate::block::Block::zcash_deserialize(
-                &zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..],
-            )
-            .expect("block test vector should deserialize");
-            let solution = block.header.solution;
-
-            assert!(!solution.is_valid(fake_input.as_slice(), &block.header.nonce));
         }
     }
 
@@ -240,6 +159,87 @@ mod tests {
             &zebra_test::vectors::HEADER_MAINNET_415000_BYTES[..EQUIHASH_NONCE_BLOCK_OFFSET + 1];
         assert!(!solution.is_valid(heade_bytes, &block.header.nonce));
         assert!(!solution.is_valid(headerr_bytes, &block.header.nonce));
+    }
+
+    prop_compose! {
+        fn randomized_solutions(real_header: BlockHeader)
+            (fake_solution in any::<EquihashSolution>()
+                .prop_filter("solution must not be the actual solution", move |s| {
+                    s != &real_header.solution
+                })
+            ) -> EquihashSolution {
+            fake_solution
+        }
+    }
+
+    #[test]
+    fn equihash_prop_test_solution() {
+        for block_bytes in zebra_test::vectors::TEST_BLOCKS.iter() {
+            let block = crate::block::Block::zcash_deserialize(&block_bytes[..])
+                .expect("block test vector should deserialize");
+            let solution = block.header.solution;
+            let header_bytes = &block_bytes[..EQUIHASH_NONCE_BLOCK_OFFSET];
+
+            assert!(solution.is_valid(header_bytes, &block.header.nonce));
+
+            proptest!(|(fake_solution in randomized_solutions(block.header))| {
+                assert!(!fake_solution.is_valid(header_bytes, &block.header.nonce));
+            });
+        }
+    }
+
+    prop_compose! {
+        fn randomized_nonce(real_nonce: [u8; 32])
+            (fake_nonce in proptest::array::uniform32(any::<u8>())
+                .prop_filter("nonce must not be the actual nonce", move |fake_nonce| {
+                    fake_nonce != &real_nonce
+                })
+            ) -> [u8; 32] {
+                fake_nonce
+        }
+    }
+
+    #[test]
+    fn equihash_prop_test_nonce() {
+        for block_bytes in zebra_test::vectors::TEST_BLOCKS.iter() {
+            let block = crate::block::Block::zcash_deserialize(&block_bytes[..])
+                .expect("block test vector should deserialize");
+            let solution = block.header.solution;
+            let header_bytes = &block_bytes[..EQUIHASH_NONCE_BLOCK_OFFSET];
+
+            assert!(solution.is_valid(header_bytes, &block.header.nonce));
+
+            proptest!(|(fake_nonce in randomized_nonce(block.header.nonce))| {
+                assert!(!solution.is_valid(header_bytes, &fake_nonce));
+            });
+        }
+    }
+
+    prop_compose! {
+        fn randomized_input(real_input: Vec<u8>)
+            (fake_input in vec(any::<u8>(), EQUIHASH_NONCE_BLOCK_OFFSET)
+                .prop_filter("input must not be the actual input", move |fake_input| {
+                    fake_input != &real_input
+                })
+            ) -> Vec<u8> {
+                fake_input
+        }
+    }
+
+    #[test]
+    fn equihash_prop_test_input() {
+        for block_bytes in zebra_test::vectors::TEST_BLOCKS.iter() {
+            let block = crate::block::Block::zcash_deserialize(&block_bytes[..])
+                .expect("block test vector should deserialize");
+            let solution = block.header.solution;
+            let header_bytes = &block_bytes[..EQUIHASH_NONCE_BLOCK_OFFSET];
+
+            assert!(solution.is_valid(header_bytes, &block.header.nonce));
+
+            proptest!(|(fake_input in randomized_input(header_bytes.into()))| {
+                assert!(!solution.is_valid(fake_input.as_slice(), &block.header.nonce));
+            });
+        }
     }
 
     static EQUIHASH_SIZE_TESTS: &[u64] = &[
