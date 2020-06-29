@@ -3,8 +3,6 @@
 use std::{
     fmt,
     io::{self, Read},
-    marker::PhantomData,
-    ops::Range,
 };
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
@@ -17,69 +15,7 @@ use crate::serialization::{
     ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
 };
 
-/// A runtime validated type for representing amounts of zatoshis
-#[derive(Debug, Eq, PartialEq, Clone, Copy, Serialize, Deserialize)]
-pub struct Amount<C = NegativeAllowed>(i64, PhantomData<C>);
-
-#[cfg(test)]
-impl<C> Arbitrary for Amount<C>
-where
-    C: AmountConstraint + fmt::Debug,
-{
-    type Parameters = ();
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        C::valid_range().prop_map(|v| Self(v, PhantomData)).boxed()
-    }
-
-    type Strategy = BoxedStrategy<Self>;
-}
-
-impl<C> From<Amount<C>> for i64 {
-    fn from(amount: Amount<C>) -> Self {
-        amount.0
-    }
-}
-
-///
-pub trait AmountConstraint {
-    ///
-    fn valid_range() -> Range<i64>;
-
-    ///
-    fn validate(value: i64) -> Result<i64, &'static str> {
-        let range = Self::valid_range();
-
-        if value < range.start {
-            Err("Amount's value is less than the start of its range")
-        } else if value > range.end {
-            Err("Amount's value is greater than the end of its range")
-        } else {
-            Ok(value)
-        }
-    }
-}
-
-impl<C> std::convert::TryFrom<i64> for Amount<C>
-where
-    C: AmountConstraint,
-{
-    type Error = &'static str;
-
-    fn try_from(value: i64) -> Result<Self, Self::Error> {
-        C::validate(value).map(|v| Self(v, PhantomData))
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-///
-pub struct NegativeAllowed;
-
-impl AmountConstraint for NegativeAllowed {
-    fn valid_range() -> Range<i64> {
-        -MAX_MONEY..MAX_MONEY + 1
-    }
-}
+pub mod amount;
 
 /// A u32 which represents a block height value.
 ///
@@ -210,8 +146,6 @@ impl fmt::Debug for Sha256dChecksum {
             .finish()
     }
 }
-
-const MAX_MONEY: i64 = 21_000_000 * 100_000_000;
 
 #[cfg(test)]
 use proptest::prelude::*;

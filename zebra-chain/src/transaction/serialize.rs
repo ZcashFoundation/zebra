@@ -216,7 +216,7 @@ impl ZcashDeserialize for TransparentInput {
 
 impl ZcashSerialize for TransparentOutput {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        writer.write_u64::<LittleEndian>(self.value)?;
+        writer.write_u64::<LittleEndian>(self.value.into())?;
         self.pk_script.zcash_serialize(&mut writer)?;
         Ok(())
     }
@@ -225,7 +225,10 @@ impl ZcashSerialize for TransparentOutput {
 impl ZcashDeserialize for TransparentOutput {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         Ok(TransparentOutput {
-            value: reader.read_u64::<LittleEndian>()?,
+            value: reader
+                .read_u64::<LittleEndian>()?
+                .try_into()
+                .map_err(SerializationError::Parse)?,
             pk_script: Script::zcash_deserialize(&mut reader)?,
         })
     }
@@ -233,8 +236,8 @@ impl ZcashDeserialize for TransparentOutput {
 
 impl<P: ZkSnarkProof> ZcashSerialize for JoinSplit<P> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        writer.write_u64::<LittleEndian>(self.vpub_old)?;
-        writer.write_u64::<LittleEndian>(self.vpub_new)?;
+        writer.write_u64::<LittleEndian>(self.vpub_old.into())?;
+        writer.write_u64::<LittleEndian>(self.vpub_new.into())?;
         writer.write_all(&self.anchor[..])?;
         writer.write_all(&self.nullifiers[0][..])?;
         writer.write_all(&self.nullifiers[1][..])?;
@@ -254,8 +257,14 @@ impl<P: ZkSnarkProof> ZcashSerialize for JoinSplit<P> {
 impl<P: ZkSnarkProof> ZcashDeserialize for JoinSplit<P> {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         Ok(JoinSplit::<P> {
-            vpub_old: reader.read_u64::<LittleEndian>()?,
-            vpub_new: reader.read_u64::<LittleEndian>()?,
+            vpub_old: reader
+                .read_u64::<LittleEndian>()?
+                .try_into()
+                .map_err(|msg| io::Error::new(io::ErrorKind::Other, msg))?,
+            vpub_new: reader
+                .read_u64::<LittleEndian>()?
+                .try_into()
+                .map_err(|msg| io::Error::new(io::ErrorKind::Other, msg))?,
             anchor: reader.read_32_bytes()?,
             nullifiers: [reader.read_32_bytes()?, reader.read_32_bytes()?],
             commitments: [reader.read_32_bytes()?, reader.read_32_bytes()?],

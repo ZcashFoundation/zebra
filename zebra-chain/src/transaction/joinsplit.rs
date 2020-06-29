@@ -2,6 +2,7 @@
 use proptest::{array, collection::vec, prelude::*};
 use serde::{Deserialize, Serialize};
 
+use crate::types::amount::{Amount, NonNegative};
 use crate::{ed25519_zebra, notes::sprout, proofs::ZkSnarkProof};
 
 /// A _JoinSplit Description_, as described in [protocol specification §7.2][ps].
@@ -11,14 +12,11 @@ use crate::{ed25519_zebra, notes::sprout, proofs::ZkSnarkProof};
 pub struct JoinSplit<P: ZkSnarkProof> {
     /// A value that the JoinSplit transfer removes from the transparent value
     /// pool.
-    ///
-    /// XXX refine to an Amount
-    pub vpub_old: u64,
+    pub vpub_old: Amount<NonNegative>,
     /// A value that the JoinSplit transfer inserts into the transparent value
     /// pool.
     ///
-    /// XXX refine to an Amount
-    pub vpub_new: u64,
+    pub vpub_new: Amount<NonNegative>,
     /// A root of the Sprout note commitment tree at some block height in the
     /// past, or the root produced by a previous JoinSplit transfer in this
     /// transaction.
@@ -76,8 +74,8 @@ impl<P: ZkSnarkProof + Arbitrary + 'static> Arbitrary for JoinSplit<P> {
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         (
-            any::<u64>(),
-            any::<u64>(),
+            any::<Amount<NonNegative>>(),
+            any::<Amount<NonNegative>>(),
             array::uniform32(any::<u8>()),
             array::uniform2(array::uniform32(any::<u8>())),
             array::uniform2(array::uniform32(any::<u8>())),
