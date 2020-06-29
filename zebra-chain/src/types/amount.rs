@@ -1,4 +1,4 @@
-//!
+//! Module of types for working with validated zatoshi Amounts
 use std::{
     convert::{TryFrom, TryInto},
     marker::PhantomData,
@@ -78,7 +78,7 @@ pub enum Error {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-///
+/// Marker type for `Amount` that restricts the possible values to +- MAX_MONEY
 pub struct NegativeAllowed;
 
 impl AmountConstraint for NegativeAllowed {
@@ -88,7 +88,7 @@ impl AmountConstraint for NegativeAllowed {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-///
+/// Marker type for `Amount
 pub struct NonNegative;
 
 impl AmountConstraint for NonNegative {
@@ -97,14 +97,15 @@ impl AmountConstraint for NonNegative {
     }
 }
 
-const MAX_MONEY: i64 = 21_000_000 * 100_000_000;
+/// The max amount of money that can be obtained in zatoshis
+pub const MAX_MONEY: i64 = 21_000_000 * 100_000_000;
 
-///
+/// A trait for defining constraints on `Amount`
 pub trait AmountConstraint {
-    ///
+    /// Returns the range of values that are valid under this constraint
     fn valid_range() -> Range<i64>;
 
-    ///
+    /// Check if an input value is within the valid range
     fn validate(value: i64) -> Result<i64, Error> {
         let range = Self::valid_range();
 
