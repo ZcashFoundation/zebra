@@ -35,7 +35,7 @@ impl<T: SigType> RedJubjubVerifier<T> {
 /// Type alias to clarify that this batch::Item is a RedJubjubItem
 pub type RedJubjubItem<T> = batch::Item<T>;
 
-impl<'msg, T: SigType> Service<BatchControl<RedJubjubItem<T>>> for RedJubjubVerifier<T> {
+impl<T: SigType> Service<BatchControl<RedJubjubItem<T>>> for RedJubjubVerifier<T> {
     type Response = ();
     type Error = Error;
     type Future = Pin<Box<dyn Future<Output = Result<(), Error>> + Send + 'static>>;
