@@ -463,9 +463,21 @@ mod tests {
     use super::*;
 
     use color_eyre::eyre::{eyre, Report};
+    use std::time::Duration;
+    use tokio::time::timeout;
     use tower::{Service, ServiceExt};
 
     use zebra_chain::serialization::ZcashDeserialize;
+
+    /// The timeout we apply to each verify future during testing.
+    ///
+    /// The checkpoint verifier uses `tokio::sync::oneshot` channels as futures.
+    /// If the verifier doesn't send a message on the channel, any tests that
+    /// await the channel future will hang.
+    ///
+    /// This value is set to a large value, to avoid spurious failures due to
+    /// high system load.
+    const VERIFY_TIMEOUT_SECONDS: u64 = 10;
 
     #[tokio::test]
     #[spandoc::spandoc]
@@ -501,10 +513,16 @@ mod tests {
             .ready_and()
             .await
             .map_err(|e| eyre!(e))?;
-        /// Verify block 0
-        let verify_response = ready_verifier_service
-            .call(block0.clone())
+        /// Set up the future for block 0
+        let verify_future = timeout(
+            Duration::from_secs(VERIFY_TIMEOUT_SECONDS),
+            ready_verifier_service.call(block0.clone()),
+        );
+        /// Wait for the response for block 0
+        // TODO(teor || jlusby): check error kind
+        let verify_response = verify_future
             .await
+            .expect("timeout should not happen")
             .expect("oneshot channel should not fail")
             .map_err(|e| eyre!(e))?;
 
@@ -569,10 +587,16 @@ mod tests {
                 .await
                 .map_err(|e| eyre!(e))?;
 
-            /// Verify the block
-            let verify_response = ready_verifier_service
-                .call(block.clone())
+            /// Set up the future for block {?height}
+            let verify_future = timeout(
+                Duration::from_secs(VERIFY_TIMEOUT_SECONDS),
+                ready_verifier_service.call(block.clone()),
+            );
+            /// Wait for the response for block {?height}
+            // TODO(teor || jlusby): check error kind
+            let verify_response = verify_future
                 .await
+                .expect("timeout should not happen")
                 .expect("oneshot channel should not fail")
                 .map_err(|e| eyre!(e))?;
 
@@ -639,13 +663,18 @@ mod tests {
             .ready_and()
             .await
             .map_err(|e| eyre!(e))?;
-        /// Try to verify block 415000, and expect failure
+        /// Set up the future for block 415000
+        let verify_future = timeout(
+            Duration::from_secs(VERIFY_TIMEOUT_SECONDS),
+            ready_verifier_service.call(block415000.clone()),
+        );
+        /// Wait for the response for block 415000, and expect failure
         // TODO(teor || jlusby): check error kind
-        ready_verifier_service
-            .call(block415000.clone())
+        let _ = verify_future
             .await
+            .expect("timeout should not happen")
             .expect("oneshot channel should not fail")
-            .unwrap_err();
+            .expect_err("bad block hash should fail");
 
         assert_eq!(checkpoint_verifier.get_previous_checkpoint_height(), None);
         assert_eq!(
@@ -699,13 +728,19 @@ mod tests {
             .ready_and()
             .await
             .map_err(|e| eyre!(e))?;
-        /// Try to verify the bad block 0, and expect failure (1/3)
+        /// Set up the future for bad block 0 (1/3)
         // TODO(teor || jlusby): check error kind
-        ready_verifier_service
-            .call(bad_block0.clone())
+        let verify_future = timeout(
+            Duration::from_secs(VERIFY_TIMEOUT_SECONDS),
+            ready_verifier_service.call(bad_block0.clone()),
+        );
+        /// Wait for the response for block 0, and expect failure (1/3)
+        // TODO(teor || jlusby): check error kind
+        let _ = verify_future
             .await
+            .expect("timeout should not happen")
             .expect("oneshot channel should not fail")
-            .unwrap_err();
+            .expect_err("bad block hash should fail");
 
         assert_eq!(checkpoint_verifier.get_previous_checkpoint_height(), None);
         assert_eq!(
@@ -722,13 +757,19 @@ mod tests {
             .ready_and()
             .await
             .map_err(|e| eyre!(e))?;
-        /// Try to verify the bad block 0 again, and expect failure (2/3)
+        /// Set up the future for bad block 0 again (2/3)
         // TODO(teor || jlusby): check error kind
-        ready_verifier_service
-            .call(bad_block0)
+        let verify_future = timeout(
+            Duration::from_secs(VERIFY_TIMEOUT_SECONDS),
+            ready_verifier_service.call(bad_block0.clone()),
+        );
+        /// Wait for the response for block 0, and expect failure again (2/3)
+        // TODO(teor || jlusby): check error kind
+        let _ = verify_future
             .await
+            .expect("timeout should not happen")
             .expect("oneshot channel should not fail")
-            .unwrap_err();
+            .expect_err("bad block hash should fail");
 
         assert_eq!(checkpoint_verifier.get_previous_checkpoint_height(), None);
         assert_eq!(
@@ -745,11 +786,16 @@ mod tests {
             .ready_and()
             .await
             .map_err(|e| eyre!(e))?;
-        /// Try to verify the good block 0, and expect success (3/3)
+        /// Set up the future for good block 0 (3/3)
+        let verify_future = timeout(
+            Duration::from_secs(VERIFY_TIMEOUT_SECONDS),
+            ready_verifier_service.call(good_block0.clone()),
+        );
+        /// Wait for the response for good block 0, and expect success (3/3)
         // TODO(teor || jlusby): check error kind
-        let verify_response = ready_verifier_service
-            .call(good_block0.clone())
+        let verify_response = verify_future
             .await
+            .expect("timeout should not happen")
             .expect("oneshot channel should not fail")
             .map_err(|e| eyre!(e))?;
 
