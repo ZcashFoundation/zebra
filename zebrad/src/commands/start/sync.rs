@@ -161,13 +161,6 @@ where
                     .await;
                 match res.map_err::<Report, _>(|e| eyre!(e)) {
                     Ok(zn::Response::BlockHeaderHashes(mut hashes)) => {
-                        let new_tip = if let Some(tip) = hashes.pop() {
-                            tip
-                        } else {
-                            tracing::debug!("skipping empty response");
-                            continue;
-                        };
-
                         // ExtendTips Step 3
                         //
                         // For each response, check whether the first hash in the
@@ -180,8 +173,14 @@ where
                                 tracing::debug!("skipping response that does not extend the tip");
                                 continue;
                             }
-                            Some(_) | None => {}
+                            None => {
+                                tracing::debug!("skipping empty response");
+                                continue;
+                            }
+                            Some(_) => {}
                         }
+
+                        let new_tip = hashes.pop().expect("expected: hashes must have len > 0");
 
                         // ExtendTips Step 4
                         //
@@ -197,6 +196,10 @@ where
             }
         }
 
+        // ExtendTips Step ??
+        //
+        // Remove tips that are already included behind one of the other
+        // returned tips
         self.prospective_tips
             .retain(|tip| !download_set.contains(tip));
 
@@ -227,31 +230,37 @@ where
                 .map_err(|e| eyre!(e))?
                 .call(zn::Request::BlocksByHash(set));
 
-            let mut verifier = self.verifier.clone();
+            let verifier = self.verifier.clone();
 
             let _ = tokio::spawn(async move {
-                match async move {
+                let result_fut = async move {
+                    let mut handles = FuturesUnordered::new();
                     let resp = request.await?;
 
                     if let zn::Response::Blocks(blocks) = resp {
                         debug!(count = blocks.len(), "received blocks");
 
                         for block in blocks {
-                            let _hash = verifier.ready_and().await?.call(block).await?;
+                            let mut verifier = verifier.clone();
+                            let handle = tokio::spawn(async move {
+                                verifier.ready_and().await?.call(block).await
+                            });
+                            handles.push(handle);
                         }
                     } else {
                         debug!(?resp, "unexpected response");
                     }
 
-                    Ok::<_, Error>(())
-                }
-                .await
-                {
-                    Ok(()) => {}
-                    Err(e) => {
-                        // TODO(jlusby): retry policy?
-                        error!("{:?}", e);
+                    while let Some(res) = handles.next().await {
+                        let _hash = res??;
                     }
+
+                    Ok::<_, Error>(())
+                };
+
+                match result_fut.await {
+                    Ok(()) => {}
+                    Err(e) => error!("{:?}", e),
                 }
             });
         }
