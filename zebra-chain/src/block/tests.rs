@@ -72,11 +72,9 @@ fn blockheaderhash_debug() {
     );
 }
 
-#[test]
-fn blockheaderhash_from_blockheader() {
+fn generate_block_header() -> BlockHeader {
     let some_bytes = [0; 32];
-
-    let blockheader = BlockHeader {
+    BlockHeader {
         version: 4,
         previous_block_hash: BlockHeaderHash(some_bytes),
         merkle_root_hash: MerkleTreeRootHash(some_bytes),
@@ -85,7 +83,12 @@ fn blockheaderhash_from_blockheader() {
         bits: 0,
         nonce: some_bytes,
         solution: EquihashSolution([0; 1344]),
-    };
+    }
+}
+
+#[test]
+fn blockheaderhash_from_blockheader() {
+    let blockheader = generate_block_header();
 
     let hash = BlockHeaderHash::from(&blockheader);
 
@@ -128,6 +131,160 @@ fn deserialize_block() {
     // this one has a bad version field
     Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_434873_BYTES[..])
         .expect("block test vector should deserialize");
+}
+
+#[test]
+fn block_limits_multi_tx() {
+    // Test multiple small transactions to fill a block max size
+    // A dummy transaction
+    let tx = Transaction::zcash_deserialize(&zebra_test::vectors::DUMMY_TX1[..]).unwrap();
+
+    // A block header
+    let blockheader = generate_block_header();
+
+    // 23511 transactions = data.len() = 1999925 bytes
+    // 23512 transactions = data.len() = 2000010 bytes
+    let mut limit_txs = 23511;
+
+    // Create 23511 transactions, this is the limit with our DUMMY_TX1 data
+    let mut many_transactions = std::iter::repeat(Arc::new(tx.clone()))
+        .take(limit_txs)
+        .collect::<Vec<Arc<_>>>();
+
+    assert_eq!(limit_txs, many_transactions.len());
+
+    // Add the transactions into a block
+    let mut block = Block {
+        header: blockheader,
+        transactions: many_transactions.clone(),
+    };
+
+    // Serialize the block
+    let mut data = Vec::new();
+    block
+        .zcash_serialize(&mut data)
+        .expect("block should serialize as we are not limiting generation yet");
+
+    // Check size
+    assert_eq!(data.len(), 1999925);
+
+    // Deserialize by now is ok as we are lower than the limit
+    let block2 = Block::zcash_deserialize(&data[..])
+        .expect("block should deserialize as we are just below limit");
+
+    assert_eq!(block, block2);
+    assert_eq!(limit_txs, block2.transactions.len());
+
+    // Add 1 more transaction to the block, limit will be reached
+    limit_txs = limit_txs + 1;
+    many_transactions.push(Arc::new(tx));
+    block.transactions = many_transactions.clone();
+    assert_eq!(limit_txs, many_transactions.len());
+
+    // Serialize will still be fine
+    let mut data = Vec::new();
+    block
+        .zcash_serialize(&mut data)
+        .expect("block should serialize as we are not limiting generation yet");
+
+    // Check size
+    assert_eq!(data.len(), 2000010);
+
+    // Deserialize will now fail
+    Block::zcash_deserialize(&data[..]).expect_err("block should not deserialize");
+}
+
+#[test]
+fn block_limits_single_tx() {
+    // Test block limit with a big single transaction
+    use crate::transaction::TransparentInput;
+    use crate::transaction::TransparentOutput;
+    use crate::types::LockTime;
+
+    // Dummy input and output
+    let input =
+        TransparentInput::zcash_deserialize(&zebra_test::vectors::DUMMY_INPUT1[..]).unwrap();
+    let output =
+        TransparentOutput::zcash_deserialize(&zebra_test::vectors::DUMMY_OUTPUT1[..]).unwrap();
+
+    // A block header
+    let blockheader = generate_block_header();
+
+    // 48743 inputs = data.len() = 1999972 bytes
+    // 48744 inputs = data.len() = 2000013 bytes
+    let mut limit_inputs = 48743;
+
+    let mut outputs = Vec::new();
+
+    // Create 48743 inputs, this is the limit with our DUMMY_INPUT1 data
+    let mut inputs = std::iter::repeat(input.clone())
+        .take(limit_inputs)
+        .collect::<Vec<_>>();
+
+    assert_eq!(limit_inputs, inputs.len());
+
+    // 1 single output
+    outputs.push(output);
+
+    // Create a big transaction
+    let big_transaction = Transaction::V1 {
+        inputs: inputs.clone(),
+        outputs: outputs.clone(),
+        lock_time: LockTime::Time(DateTime::<Utc>::from_utc(
+            NaiveDateTime::from_timestamp(61, 0),
+            Utc,
+        )),
+    };
+
+    // Put the big transaction into a block
+    let transactions = vec![Arc::new(big_transaction.clone())];
+    let block = Block {
+        header: blockheader,
+        transactions: transactions.clone(),
+    };
+
+    let mut data = Vec::new();
+    block
+        .zcash_serialize(&mut data)
+        .expect("block should serialize as we are not limiting generation yet");
+
+    // Check size
+    assert_eq!(data.len(), 1999972);
+
+    Block::zcash_deserialize(&data[..])
+        .expect("block should deserialize as we are just below limit");
+
+    // Add 1 more input to the transaction, limit will be reached
+    limit_inputs = limit_inputs + 1;
+    inputs.push(input);
+    assert_eq!(limit_inputs, inputs.len());
+
+    let new_big_transaction = Transaction::V1 {
+        inputs: inputs.clone(),
+        outputs: outputs.clone(),
+        lock_time: LockTime::Time(DateTime::<Utc>::from_utc(
+            NaiveDateTime::from_timestamp(61, 0),
+            Utc,
+        )),
+    };
+
+    let mut transactions = Vec::new();
+    transactions.push(Arc::new(new_big_transaction.clone()));
+    let new_block = Block {
+        header: blockheader,
+        transactions: transactions,
+    };
+
+    let mut data = Vec::new();
+    new_block
+        .zcash_serialize(&mut data)
+        .expect("block should serialize as we are not limiting generation yet");
+
+    // Check size
+    assert_eq!(data.len(), 2000013);
+
+    // Will fail as block overall size is above limit
+    Block::zcash_deserialize(&data[..]).expect_err("block should not deserialize");
 }
 
 proptest! {
