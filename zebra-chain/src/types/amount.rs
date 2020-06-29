@@ -15,8 +15,8 @@ impl<C> From<Amount<C>> for i64 {
     }
 }
 
-impl<C> From<Amount<C>> for u64 {
-    fn from(amount: Amount<C>) -> Self {
+impl From<Amount<NonNegative>> for u64 {
+    fn from(amount: Amount<NonNegative>) -> Self {
         amount.0 as _
     }
 }
