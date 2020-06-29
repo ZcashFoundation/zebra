@@ -3,7 +3,6 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use std::{collections::HashSet, iter, sync::Arc, time::Duration};
 use tokio::time::delay_for;
 use tower::{Service, ServiceExt};
-use tracing_futures::Instrument;
 use zebra_chain::{
     block::{Block, BlockHeaderHash},
     types::BlockHeight,
@@ -12,26 +11,26 @@ use zebra_chain::{
 use zebra_network as zn;
 use zebra_state as zs;
 
-pub struct Syncer<ZN, ZS, ZC>
+pub struct Syncer<ZN, ZS, ZV>
 where
     ZN: Service<zn::Request>,
 {
     pub peer_set: ZN,
     pub state: ZS,
-    pub verifier: ZC,
+    pub verifier: ZV,
     pub prospective_tips: HashSet<BlockHeaderHash>,
     pub block_requests: FuturesUnordered<ZN::Future>,
     pub fanout: NumReq,
 }
 
-impl<ZN, ZS, ZC> Syncer<ZN, ZS, ZC>
+impl<ZN, ZS, ZV> Syncer<ZN, ZS, ZV>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = Error> + Send + Clone + 'static,
     ZN::Future: Send,
     ZS: Service<zs::Request, Response = zs::Response, Error = Error> + Send + Clone + 'static,
     ZS::Future: Send,
-    ZC: Service<Arc<Block>, Response = BlockHeaderHash, Error = Error> + Send + Clone + 'static,
-    ZC::Future: Send,
+    ZV: Service<Arc<Block>, Response = BlockHeaderHash, Error = Error> + Send + Clone + 'static,
+    ZV::Future: Send,
 {
     pub async fn run(&mut self) -> Result<(), Report> {
         loop {
