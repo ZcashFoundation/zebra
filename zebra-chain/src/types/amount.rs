@@ -67,9 +67,12 @@ mod test {
 
 #[derive(thiserror::Error, Debug)]
 #[allow(missing_docs)]
+/// Errors that can be returned when validating `Amount`s
 pub enum Error {
+    /// Given `value` doesn't satisfy the given constraints
     #[error("input {value} is outside of the valid range {range:?}")]
     Contains { range: Range<i64>, value: i64 },
+    /// The given value couldn't be converted to an i64
     #[error(transparent)]
     Truncate {
         #[from]
