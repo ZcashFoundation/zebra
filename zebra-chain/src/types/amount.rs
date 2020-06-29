@@ -79,7 +79,7 @@ pub enum Error {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 /// Marker type for `Amount` that restricts the possible values to +- MAX_MONEY
-pub struct NegativeAllowed;
+pub enum NegativeAllowed {}
 
 impl AmountConstraint for NegativeAllowed {
     fn valid_range() -> Range<i64> {
@@ -88,8 +88,8 @@ impl AmountConstraint for NegativeAllowed {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-/// Marker type for `Amount
-pub struct NonNegative;
+/// Marker type for `Amount` that restricts the positive numbers <= MAX_MONEY
+pub enum NonNegative {}
 
 impl AmountConstraint for NonNegative {
     fn valid_range() -> Range<i64> {

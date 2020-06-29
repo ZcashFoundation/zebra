@@ -23,10 +23,10 @@ pub enum SerializationError {
     // XXX refine errors
     #[error("parse error: {0}")]
     Parse(&'static str),
+    /// An error caused when validating a zatoshi `Amount`
     #[error("input couldn't be parsed as a zatoshi `Amount`")]
-    ///
     Amount {
-        ///
+        /// The source error indicating how the num failed to validate
         #[from]
         source: crate::types::amount::Error,
     },
