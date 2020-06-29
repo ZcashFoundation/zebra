@@ -65,3 +65,20 @@ pub struct BlockHeader {
     /// The Equihash solution.
     pub solution: EquihashSolution,
 }
+
+impl BlockHeader {
+    /// Returns true if the header is valid based on its `EquihashSolution`
+    pub fn is_valid(&self) -> bool {
+        use crate::serialization::ZcashSerialize;
+
+        let nonce = &self.nonce;
+        let solution = &self.solution;
+        let mut input = Vec::new();
+
+        if self.zcash_serialize(&mut input).is_err() {
+            return false;
+        };
+
+        solution.is_valid(input.as_slice(), nonce)
+    }
+}

@@ -30,7 +30,7 @@ pub struct EquihashSolution(
 
 impl EquihashSolution {
     /// Validate an equihash solution
-    pub fn is_valid(&self, input: &[u8], nonce: &[u8]) -> bool {
+    pub(crate) fn is_valid(&self, input: &[u8], nonce: &[u8]) -> bool {
         let n = 200;
         let k = 9;
         equihash::is_valid_solution(n, k, input, nonce, &self.0)
