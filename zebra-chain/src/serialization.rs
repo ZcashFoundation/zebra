@@ -23,6 +23,13 @@ pub enum SerializationError {
     // XXX refine errors
     #[error("parse error: {0}")]
     Parse(&'static str),
+    #[error("input couldn't be parsed as a zatoshi `Amount`")]
+    ///
+    Amount {
+        ///
+        #[from]
+        source: crate::types::amount::Error,
+    },
 }
 
 /// Consensus-critical serialization for Zcash.

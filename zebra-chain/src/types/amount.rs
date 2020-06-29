@@ -25,7 +25,7 @@ impl<C> TryFrom<i64> for Amount<C>
 where
     C: AmountConstraint,
 {
-    type Error = &'static str;
+    type Error = Error;
 
     fn try_from(value: i64) -> Result<Self, Self::Error> {
         C::validate(value).map(|v| Self(v, PhantomData))
@@ -36,12 +36,10 @@ impl<C> TryFrom<u64> for Amount<C>
 where
     C: AmountConstraint,
 {
-    type Error = &'static str;
+    type Error = Error;
 
     fn try_from(value: u64) -> Result<Self, Self::Error> {
-        let value = value
-            .try_into()
-            .map_err(|_| "u64 is too large to convert to an i64")?;
+        let value = value.try_into()?;
 
         C::validate(value).map(|v| Self(v, PhantomData))
     }
@@ -65,6 +63,18 @@ mod test {
 
         type Strategy = BoxedStrategy<Self>;
     }
+}
+
+#[derive(thiserror::Error, Debug)]
+#[allow(missing_docs)]
+pub enum Error {
+    #[error("input {value} is outside of the valid range {range:?}")]
+    Contains { range: Range<i64>, value: i64 },
+    #[error(transparent)]
+    Truncate {
+        #[from]
+        source: std::num::TryFromIntError,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -95,13 +105,11 @@ pub trait AmountConstraint {
     fn valid_range() -> Range<i64>;
 
     ///
-    fn validate(value: i64) -> Result<i64, &'static str> {
+    fn validate(value: i64) -> Result<i64, Error> {
         let range = Self::valid_range();
 
-        if value <= range.start {
-            Err("Amount's value is less than the start of its range")
-        } else if value > range.end {
-            Err("Amount's value is greater than the end of its range")
+        if !range.contains(&value) {
+            Err(Error::Contains { range, value })
         } else {
             Ok(value)
         }

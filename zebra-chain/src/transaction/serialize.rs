@@ -225,10 +225,7 @@ impl ZcashSerialize for TransparentOutput {
 impl ZcashDeserialize for TransparentOutput {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         Ok(TransparentOutput {
-            value: reader
-                .read_u64::<LittleEndian>()?
-                .try_into()
-                .map_err(SerializationError::Parse)?,
+            value: reader.read_u64::<LittleEndian>()?.try_into()?,
             pk_script: Script::zcash_deserialize(&mut reader)?,
         })
     }
@@ -550,10 +547,7 @@ impl ZcashDeserialize for Transaction {
                 let outputs = Vec::zcash_deserialize(&mut reader)?;
                 let lock_time = LockTime::zcash_deserialize(&mut reader)?;
                 let expiry_height = BlockHeight(reader.read_u32::<LittleEndian>()?);
-                let value_balance = reader
-                    .read_i64::<LittleEndian>()?
-                    .try_into()
-                    .map_err(SerializationError::Parse)?;
+                let value_balance = reader.read_i64::<LittleEndian>()?.try_into()?;
                 let mut shielded_spends = Vec::zcash_deserialize(&mut reader)?;
                 let mut shielded_outputs = Vec::zcash_deserialize(&mut reader)?;
                 let joinsplit_data = OptV4JSD::zcash_deserialize(&mut reader)?;
