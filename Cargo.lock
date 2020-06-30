@@ -2320,6 +2320,7 @@ dependencies = [
  "bs58",
  "byteorder",
  "chrono",
+ "color-eyre",
  "displaydoc",
  "ed25519-zebra",
  "equihash",
