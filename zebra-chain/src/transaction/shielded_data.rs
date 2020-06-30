@@ -22,9 +22,7 @@ pub struct Spend {
     /// A root of the Sapling note commitment tree at some block height in the past.
     pub anchor: SaplingNoteTreeRootHash,
     /// The nullifier of the input note.
-    ///
-    /// XXX refine to a specific type.
-    pub nullifier: [u8; 32],
+    pub nullifier: crate::nullifier::sapling::Nullifier,
     /// The randomized public key for `spend_auth_sig`.
     pub rk: redjubjub::PublicKeyBytes<SpendAuth>,
     /// The ZK spend proof.
@@ -50,7 +48,7 @@ impl Arbitrary for Spend {
                 |(cv_bytes, anchor, nullifier_bytes, rpk_bytes, proof, sig_bytes)| Self {
                     anchor,
                     cv: cv_bytes,
-                    nullifier: nullifier_bytes,
+                    nullifier: nullifier_bytes.into(),
                     rk: redjubjub::PublicKeyBytes::from(rpk_bytes),
                     zkproof: proof,
                     spend_auth_sig: redjubjub::Signature::from({

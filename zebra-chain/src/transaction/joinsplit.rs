@@ -28,7 +28,7 @@ pub struct JoinSplit<P: ZkSnarkProof> {
     /// A nullifier for the input notes.
     ///
     /// XXX refine type to [T; 2] -- there are two nullifiers
-    pub nullifiers: [[u8; 32]; 2],
+    pub nullifiers: [crate::nullifier::sprout::Nullifier; 2],
     /// A note commitment for this output note.
     ///
     /// XXX refine type to [T; 2] -- there are two commitments
@@ -79,7 +79,7 @@ impl<P: ZkSnarkProof + Arbitrary + 'static> Arbitrary for JoinSplit<P> {
             any::<u64>(),
             any::<u64>(),
             array::uniform32(any::<u8>()),
-            array::uniform2(array::uniform32(any::<u8>())),
+            array::uniform2(any::<crate::nullifier::sprout::Nullifier>()),
             array::uniform2(array::uniform32(any::<u8>())),
             array::uniform32(any::<u8>()),
             array::uniform32(any::<u8>()),

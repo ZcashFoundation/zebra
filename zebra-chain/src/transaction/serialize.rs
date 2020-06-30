@@ -235,8 +235,8 @@ impl<P: ZkSnarkProof> ZcashSerialize for JoinSplit<P> {
         writer.write_u64::<LittleEndian>(self.vpub_old)?;
         writer.write_u64::<LittleEndian>(self.vpub_new)?;
         writer.write_all(&self.anchor[..])?;
-        writer.write_all(&self.nullifiers[0][..])?;
-        writer.write_all(&self.nullifiers[1][..])?;
+        self.nullifiers[0].zcash_serialize(&mut writer)?;
+        self.nullifiers[1].zcash_serialize(&mut writer)?;
         writer.write_all(&self.commitments[0][..])?;
         writer.write_all(&self.commitments[1][..])?;
         writer.write_all(&self.ephemeral_key.as_bytes()[..])?;
@@ -256,7 +256,10 @@ impl<P: ZkSnarkProof> ZcashDeserialize for JoinSplit<P> {
             vpub_old: reader.read_u64::<LittleEndian>()?,
             vpub_new: reader.read_u64::<LittleEndian>()?,
             anchor: reader.read_32_bytes()?,
-            nullifiers: [reader.read_32_bytes()?, reader.read_32_bytes()?],
+            nullifiers: [
+                reader.read_32_bytes()?.into(),
+                reader.read_32_bytes()?.into(),
+            ],
             commitments: [reader.read_32_bytes()?, reader.read_32_bytes()?],
             ephemeral_key: x25519_dalek::PublicKey::from(reader.read_32_bytes()?),
             random_seed: reader.read_32_bytes()?,
@@ -310,7 +313,7 @@ impl ZcashSerialize for Spend {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_all(&self.cv[..])?;
         writer.write_all(&self.anchor.0[..])?;
-        writer.write_all(&self.nullifier[..])?;
+        self.nullifier.zcash_serialize(&mut writer)?;
         writer.write_all(&<[u8; 32]>::from(self.rk)[..])?;
         self.zkproof.zcash_serialize(&mut writer)?;
         writer.write_all(&<[u8; 64]>::from(self.spend_auth_sig)[..])?;
@@ -324,7 +327,7 @@ impl ZcashDeserialize for Spend {
         Ok(Spend {
             cv: reader.read_32_bytes()?,
             anchor: SaplingNoteTreeRootHash(reader.read_32_bytes()?),
-            nullifier: reader.read_32_bytes()?,
+            nullifier: reader.read_32_bytes()?.into(),
             rk: reader.read_32_bytes()?.into(),
             zkproof: Groth16Proof::zcash_deserialize(&mut reader)?,
             spend_auth_sig: reader.read_64_bytes()?.into(),
