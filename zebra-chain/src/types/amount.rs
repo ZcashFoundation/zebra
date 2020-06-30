@@ -91,7 +91,7 @@ impl AmountConstraint for NegativeAllowed {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-/// Marker type for `Amount` that restricts the positive numbers <= MAX_MONEY
+/// Marker type for `Amount` that restricts the value to positive numbers `0..=MAX_MONEY`
 pub enum NonNegative {}
 
 impl AmountConstraint for NonNegative {
