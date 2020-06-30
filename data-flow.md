@@ -1,0 +1,17 @@
+- Started in `ProcessNewBlock`, `main.cpp:4258`
+    - Calls `CheckBlock`, defined at  https://github.com/zcash/zcash/blob/ab2b7c0969391d8a57d90d008665da02f3f618e7/src/main.cpp#L3930
+        - Calls `CheckBlockHeader` https://github.com/zcash/zcash/blob/ab2b7c0969391d8a57d90d008665da02f3f618e7/src/main.cpp#L3900
+            - checks that the block version is not too old
+                - this requires no information
+            - checks that the equihash solution is valid
+                - https://github.com/zcash/zcash/blob/ab2b7c0969391d8a57d90d008665da02f3f618e7/src/pow.cpp#L96
+                - requires no information except `n`, `k` params
+            - checks that the proof of work parameters are valid
+                - requires the current proof of work amount `params.powLimit`
+        - Checks the Merkle root
+        - Checks size limits
+        - Checks that the first transaction is coinbase, and the rest are not
+        - Calls `CheckTransaction` for each transaction
+        - Sum up "LegacySigOps" for each transaction and check that it's less than some maximum
+    - Acquires a lock, then calls `MarkBlockAsReceived` (networking?) and then calls `AcceptBlock`
+        - 
