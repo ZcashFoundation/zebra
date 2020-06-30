@@ -254,14 +254,8 @@ impl<P: ZkSnarkProof> ZcashSerialize for JoinSplit<P> {
 impl<P: ZkSnarkProof> ZcashDeserialize for JoinSplit<P> {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         Ok(JoinSplit::<P> {
-            vpub_old: reader
-                .read_u64::<LittleEndian>()?
-                .try_into()
-                .map_err(|msg| io::Error::new(io::ErrorKind::Other, msg))?,
-            vpub_new: reader
-                .read_u64::<LittleEndian>()?
-                .try_into()
-                .map_err(|msg| io::Error::new(io::ErrorKind::Other, msg))?,
+            vpub_old: reader.read_u64::<LittleEndian>()?.try_into()?,
+            vpub_new: reader.read_u64::<LittleEndian>()?.try_into()?,
             anchor: reader.read_32_bytes()?,
             nullifiers: [reader.read_32_bytes()?, reader.read_32_bytes()?],
             commitments: [reader.read_32_bytes()?, reader.read_32_bytes()?],
@@ -440,7 +434,7 @@ impl ZcashSerialize for Transaction {
                 outputs.zcash_serialize(&mut writer)?;
                 lock_time.zcash_serialize(&mut writer)?;
                 writer.write_u32::<LittleEndian>(expiry_height.0)?;
-                writer.write_i64::<LittleEndian>(i64::from(*value_balance))?;
+                writer.write_i64::<LittleEndian>((*value_balance).into())?;
 
                 // The previous match arms serialize in one go, because the
                 // internal structure happens to nicely line up with the
