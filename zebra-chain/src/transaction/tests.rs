@@ -8,6 +8,7 @@ use crate::{
 use super::*;
 
 mod arbitrary;
+mod test_vectors;
 
 impl Transaction {
     pub fn v1_strategy() -> impl Strategy<Value = Self> {
