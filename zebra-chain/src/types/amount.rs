@@ -275,6 +275,22 @@ mod test {
     }
 
     #[test]
+    fn test_add_opt_both() -> Result<()> {
+        zebra_test::init();
+        let one: Amount = 1.try_into().unwrap();
+        let one = Some(one);
+        let neg_one: Amount = (-1).try_into().unwrap();
+        let neg_one = Some(neg_one);
+
+        let zero: Amount = 0.try_into().unwrap();
+        let new_zero = one.and_then(|one| one + neg_one);
+
+        assert_eq!(Some(zero), new_zero);
+
+        Ok(())
+    }
+
+    #[test]
     fn test_add_assign() -> Result<()> {
         zebra_test::init();
         let one: Amount = 1.try_into().unwrap();
