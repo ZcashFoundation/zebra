@@ -524,6 +524,13 @@ impl CheckpointVerifier {
     }
 }
 
+/// CheckpointVerifier rejects pending futures on drop.
+impl Drop for CheckpointVerifier {
+    fn drop(&mut self) {
+        self.reject_range_with_error(.., "checkpoint verifier was dropped");
+    }
+}
+
 /// The CheckpointVerifier service implementation.
 ///
 /// After verification, the block futures resolve to their hashes.
@@ -621,7 +628,7 @@ mod tests {
     use super::*;
 
     use color_eyre::eyre::{eyre, Report};
-    use std::time::Duration;
+    use std::{cmp::min, mem::drop, time::Duration};
     use tokio::time::timeout;
     use tower::{Service, ServiceExt};
 
@@ -996,6 +1003,98 @@ mod tests {
             checkpoint_verifier.get_max_checkpoint_height(),
             Some(BlockHeight(0))
         );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[spandoc::spandoc]
+    async fn checkpoint_drop_cancel() -> Result<(), Report> {
+        zebra_test::init();
+
+        // Parse all the blocks
+        let mut checkpoint_data = Vec::new();
+        for b in &[
+            &zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..],
+            &zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..],
+            &zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..],
+            &zebra_test::vectors::BLOCK_MAINNET_434873_BYTES[..],
+        ] {
+            let block = Arc::<Block>::zcash_deserialize(*b)?;
+            let hash: BlockHeaderHash = block.as_ref().into();
+            checkpoint_data.push((block.clone(), block.coinbase_height().unwrap(), hash));
+        }
+
+        // Make a checkpoint list containing all the blocks
+        let checkpoint_list: BTreeMap<BlockHeight, BlockHeaderHash> = checkpoint_data
+            .iter()
+            .map(|(_block, height, hash)| (*height, *hash))
+            .collect();
+
+        let mut checkpoint_verifier =
+            CheckpointVerifier::new(checkpoint_list).map_err(|e| eyre!(e))?;
+
+        assert_eq!(checkpoint_verifier.get_previous_checkpoint_height(), None);
+        assert_eq!(
+            checkpoint_verifier.get_next_checkpoint_height(),
+            Some(BlockHeight(0))
+        );
+        assert_eq!(
+            checkpoint_verifier.get_max_checkpoint_height(),
+            Some(BlockHeight(434873))
+        );
+
+        let mut futures = Vec::new();
+        // Now collect verify futures for each block
+        for (block, height, hash) in checkpoint_data {
+            /// Make sure the verifier service is ready
+            let ready_verifier_service = checkpoint_verifier
+                .ready_and()
+                .await
+                .map_err(|e| eyre!(e))?;
+
+            /// Set up the future for block {?height}
+            let verify_future = timeout(
+                Duration::from_secs(VERIFY_TIMEOUT_SECONDS),
+                ready_verifier_service.call(block.clone()),
+            );
+
+            futures.push((verify_future, height, hash));
+
+            // We can't easily calculate the next checkpoint height, but the previous
+            // loop iteration uses the next checkpoint height function to set the
+            // current height we're testing here
+
+            // Only continuous checkpoints verify
+            assert_eq!(
+                checkpoint_verifier.get_previous_checkpoint_height(),
+                Some(BlockHeight(min(height.0, 1)))
+            );
+            assert_eq!(
+                checkpoint_verifier.get_max_checkpoint_height(),
+                Some(BlockHeight(434873))
+            );
+        }
+
+        // Now drop the verifier, to cancel the futures
+        drop(checkpoint_verifier);
+
+        for (verify_future, height, hash) in futures {
+            /// Check the response for block {?height}
+            let verify_response = verify_future
+                .await
+                .expect("timeout should not happen")
+                .expect("oneshot channel should not fail");
+
+            if height <= BlockHeight(1) {
+                // The futures for continuous checkpoints should have succeeded before drop
+                let verify_hash = verify_response.map_err(|e| eyre!(e))?;
+                assert_eq!(verify_hash, hash);
+            } else {
+                // TODO(teor || jlusby): check error kind
+                verify_response.expect_err("Pending futures should fail on drop");
+            }
+        }
 
         Ok(())
     }
