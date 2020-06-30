@@ -10,13 +10,13 @@ use zebra_chain::{
 use zebra_network::{self as zn, RetryLimit};
 use zebra_state::{self as zs};
 
-pub struct Syncer<ZN, ZS, ZC>
+pub struct Syncer<ZN, ZS, ZV>
 where
     ZN: Service<zn::Request>,
 {
     pub peer_set: ZN,
     pub state: ZS,
-    pub verifier: ZC,
+    pub verifier: ZV,
     pub retry_peer_set: Retry<RetryLimit, ZN>,
     pub prospective_tips: HashSet<BlockHeaderHash>,
     pub block_requests: FuturesUnordered<ZN::Future>,
@@ -41,14 +41,14 @@ where
     }
 }
 
-impl<ZN, ZS, ZC> Syncer<ZN, ZS, ZC>
+impl<ZN, ZS, ZV> Syncer<ZN, ZS, ZV>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = Error> + Send + Clone + 'static,
     ZN::Future: Send,
     ZS: Service<zs::Request, Response = zs::Response, Error = Error> + Send + Clone + 'static,
     ZS::Future: Send,
-    ZC: Service<Arc<Block>, Response = BlockHeaderHash, Error = Error> + Send + Clone + 'static,
-    ZC::Future: Send,
+    ZV: Service<Arc<Block>, Response = BlockHeaderHash, Error = Error> + Send + Clone + 'static,
+    ZV::Future: Send,
 {
     pub async fn run(&mut self) -> Result<(), Report> {
         loop {
@@ -179,13 +179,6 @@ where
                     .await;
                 match res.map_err::<Report, _>(|e| eyre!(e)) {
                     Ok(zn::Response::BlockHeaderHashes(mut hashes)) => {
-                        let new_tip = if let Some(tip) = hashes.pop() {
-                            tip
-                        } else {
-                            tracing::debug!("skipping empty response");
-                            continue;
-                        };
-
                         // ExtendTips Step 3
                         //
                         // For each response, check whether the first hash in the
@@ -198,8 +191,14 @@ where
                                 tracing::debug!("skipping response that does not extend the tip");
                                 continue;
                             }
-                            Some(_) | None => {}
+                            None => {
+                                tracing::debug!("skipping empty response");
+                                continue;
+                            }
+                            Some(_) => {}
                         }
+
+                        let new_tip = hashes.pop().expect("expected: hashes must have len > 0");
 
                         // ExtendTips Step 4
                         //
@@ -215,6 +214,10 @@ where
             }
         }
 
+        // ExtendTips Step ??
+        //
+        // Remove tips that are already included behind one of the other
+        // returned tips
         self.prospective_tips
             .retain(|tip| !download_set.contains(tip));
 
@@ -245,26 +248,35 @@ where
                 .map_err(|e| eyre!(e))?
                 .call(zn::Request::BlocksByHash(set));
 
-            let mut verifier = self.verifier.clone();
+            let verifier = self.verifier.clone();
 
             let _ = tokio::spawn(async move {
-                match async move {
+                let result_fut = async move {
+                    let mut handles = FuturesUnordered::new();
                     let resp = request.await?;
 
                     if let zn::Response::Blocks(blocks) = resp {
                         debug!(count = blocks.len(), "received blocks");
 
                         for block in blocks {
-                            let _hash = verifier.ready_and().await?.call(block).await?;
+                            let mut verifier = verifier.clone();
+                            let handle = tokio::spawn(async move {
+                                verifier.ready_and().await?.call(block).await
+                            });
+                            handles.push(handle);
                         }
                     } else {
                         debug!(?resp, "unexpected response");
                     }
 
+                    while let Some(res) = handles.next().await {
+                        let _hash = res??;
+                    }
+
                     Ok::<_, Error>(())
-                }
-                .await
-                {
+                };
+
+                match result_fut.await {
                     Ok(()) => {}
                     Err(e) => error!("{:?}", e),
                 }
