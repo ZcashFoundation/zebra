@@ -80,9 +80,9 @@ struct CheckpointVerifier {
     /// (All other checkpoints are optional.)
     checkpoint_list: BTreeMap<BlockHeight, BlockHeaderHash>,
 
-    // Cached Blocks
+    // Queued Blocks
     //
-    /// A cache of unverified blocks.
+    /// A queue of unverified blocks.
     ///
     /// Contains a list of unverified blocks at each block height. In most cases,
     /// the checkpoint verifier will store zero or one block at each height.
@@ -328,7 +328,7 @@ impl CheckpointVerifier {
     }
 
     /// Return `(height, hash)` for the next block needed to verify the
-    /// current checkpoint range. Walks the chain of cached blocks, starting
+    /// current checkpoint range. Walks the chain of queued blocks, starting
     /// from the next checkpoint, and following the parent hash of each block.
     ///
     /// If the `height` is equal to the previous checkpoint height, then the
@@ -336,7 +336,7 @@ impl CheckpointVerifier {
     /// the genesis block, returns `(None, [0; 32])` because the genesis block
     /// has no parent block. (And in Bitcoin, `null` is `[0; 32]`.)
     ///
-    /// If there are no cached blocks for the current range, returns the next
+    /// If there are no queued blocks for the current range, returns the next
     /// checkpoint height and hash. If checkpoint verification has finished,
     /// returns `(None, None)`.
     fn find_checkpoint_chain_end(&self) -> (Option<BlockHeight>, Option<BlockHeaderHash>) {
@@ -405,10 +405,94 @@ impl CheckpointVerifier {
         // At this point, last_height is the height of the last block, but
         // expected_hash is the hash of the last block's parent block.
         //
+
         // If we're at the genesis block, we want to return None for the parent
         // block height.
         let parent_height = last_height.unwrap().0.checked_sub(1).map(BlockHeight);
         (parent_height, Some(expected_hash))
+    }
+
+    /// Check all the blocks in the current checkpoint range. Send `Ok` for the
+    /// blocks that are in the chain, and `Err` for side-chain blocks.
+    ///
+    /// Does nothing if verification has finished.
+    ///
+    /// Check that the current checkpoint range is complete before calling this
+    /// function.
+    fn submit_current_checkpoint_range(&mut self) {
+        // If checkpoint verification has finished, there should be no queued
+        // blocks.
+        if self.current_checkpoint_range.is_none() {
+            return;
+        }
+        let next_checkpoint_height = self.get_next_checkpoint_height().unwrap();
+        let current_range = self.current_checkpoint_range.unwrap();
+
+        // Verify all the blocks and discard all the bad blocks in the current range.
+        let mut expected_hash = self.get_next_checkpoint_hash().unwrap();
+        let qrange = self.queued.range_mut(current_range).rev();
+        for (_, qblocks) in qrange {
+            // Find a queued block at each height that is part of the
+            // hash chain
+            //
+            // There are two possible outcomes here:
+            //   - there is one block, and it matches the chain
+            //     (the common case)
+            //   - there are multiple blocks, and at least one block
+            //     matches the chain (if there are duplicate blocks, one
+            //     succeeds, and the others fail)
+
+            // The zero block case should be impossible, because we've
+            // just checked for a continuous chain above.
+            debug_assert!(!qblocks.is_empty());
+
+            let mut next_parent_hash = None;
+            for qblock in qblocks.drain(..) {
+                if qblock.hash == expected_hash {
+                    if next_parent_hash == None {
+                        // The first valid block
+                        next_parent_hash = Some(qblock.block.header.previous_block_hash);
+                        // TODO(teor): These futures are sent in reverse order. Make sure
+                        // the overall verifier adds blocks to the state in height order.
+                        //
+                        // Sending can fail, but only because the receiver has closed
+                        // the channel. So there's nothing we can do about the error.
+                        let _ = qblock.tx.send(Ok(qblock.hash));
+                    } else {
+                        // Reject duplicate blocks
+                        // Sending can fail, but there's nothing we can do about it.
+                        let _ = qblock.tx.send(Err(
+                            "duplicate valid blocks at this height, only one was chosen".into(),
+                        ));
+                    }
+                } else {
+                    // A bad block, that isn't part of the chain.
+                    // Sending can fail, but there's nothing we can do about it.
+                    let _ = qblock.tx.send(Err(
+                        "the block hash does not match the chained checkpoint hash".into(),
+                    ));
+                }
+            }
+            // Can't fail, we just checked it in the previous loop
+            expected_hash = next_parent_hash.unwrap();
+        }
+
+        // Double-check that all the block lists are empty
+        #[cfg(any(dev, test))]
+        {
+            let qrange = self.queued.range(current_range).rev();
+            for (_, qblocks) in qrange {
+                debug_assert_eq!(qblocks.len(), 0);
+            }
+        }
+
+        // Now remove the empty vectors at all those heights
+        let after_next_checkpoint = BlockHeight(next_checkpoint_height.0 + 1);
+        self.queued = self.queued.split_off(&after_next_checkpoint);
+
+        // Finally, update the checkpoint bounds
+        // The heights have to be valid here, because this part of the chain is valid
+        self.update_current_checkpoint_height(next_checkpoint_height);
     }
 }
 
@@ -506,75 +590,9 @@ impl Service<Arc<Block>> for CheckpointVerifier {
             self.queued = self.queued.split_off(&after_next_checkpoint);
         }
 
-        let next_checkpoint_height = self.get_next_checkpoint_height().unwrap();
-        let current_range = self.current_checkpoint_range.unwrap();
-
         // Now we know that the hash matches the previous checkpoint, and we
-        // have completed this part of the chain. Verify all the blocks and
-        // discard all the bad blocks in the current range.
-        let mut expected_hash = self.get_next_checkpoint_hash().unwrap();
-        let qrange = self.queued.range_mut(current_range).rev();
-        for (_, qblocks) in qrange {
-            // Find a queued block at each height that is part of the
-            // hash chain
-            //
-            // There are two possible outcomes here:
-            //   - there is one block, and it matches the chain
-            //     (the common case)
-            //   - there are multiple blocks, and at least one block
-            //     matches the chain (if there are duplicate blocks, one
-            //     succeeds, and the others fail)
-
-            // The zero block case should be impossible, because we've
-            // just checked for a continuous chain above.
-            debug_assert!(!qblocks.is_empty());
-
-            let mut next_parent_hash = None;
-            for qblock in qblocks.drain(..) {
-                if qblock.hash == expected_hash {
-                    if next_parent_hash == None {
-                        // The first valid block
-                        next_parent_hash = Some(qblock.block.header.previous_block_hash);
-                        // TODO(teor): These futures are sent in reverse order. Make sure
-                        // the overall verifier adds blocks to the state in height order.
-                        //
-                        // Sending can fail, but only because the receiver has closed
-                        // the channel. So there's nothing we can do about the error.
-                        let _ = qblock.tx.send(Ok(qblock.hash));
-                    } else {
-                        // Reject duplicate blocks
-                        // Sending can fail, but there's nothing we can do about it.
-                        let _ = qblock.tx.send(Err(
-                            "duplicate valid blocks at this height, only one was chosen".into(),
-                        ));
-                    }
-                } else {
-                    // A bad block, that isn't part of the chain.
-                    // Sending can fail, but there's nothing we can do about it.
-                    let _ = qblock.tx.send(Err(
-                        "the block hash does not match the chained checkpoint hash".into(),
-                    ));
-                }
-            }
-            // Can't fail, we just checked it in the previous loop
-            expected_hash = next_parent_hash.unwrap();
-        }
-
-        // Check that all the block lists are empty
-        #[cfg(any(dev, test))]
-        {
-            let qrange = self.queued.range(current_range).rev();
-            for (_, qblocks) in qrange {
-                debug_assert_eq!(qblocks.len(), 0);
-            }
-        }
-        // Now remove the empty vectors at all those heights
-        let after_next_checkpoint = BlockHeight(next_checkpoint_height.0 + 1);
-        self.queued = self.queued.split_off(&after_next_checkpoint);
-
-        // Finally, update the checkpoint bounds
-        // The heights have to be valid here, because this part of the chain is valid
-        self.update_current_checkpoint_height(next_checkpoint_height);
+        // have completed this part of the chain.
+        self.submit_current_checkpoint_range();
 
         Box::pin(rx.boxed())
     }
