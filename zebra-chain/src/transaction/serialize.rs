@@ -257,8 +257,8 @@ impl<P: ZkSnarkProof> ZcashDeserialize for JoinSplit<P> {
             vpub_new: reader.read_u64::<LittleEndian>()?,
             anchor: reader.read_32_bytes()?,
             nullifiers: [
-                reader.read_32_bytes()?.into(),
-                reader.read_32_bytes()?.into(),
+                sapling::Nullifier::zcash_deserialize(&mut reader)?,
+                sapling::Nullifier::zcash_deserialize(&mut reader)?,
             ],
             commitments: [reader.read_32_bytes()?, reader.read_32_bytes()?],
             ephemeral_key: x25519_dalek::PublicKey::from(reader.read_32_bytes()?),
@@ -327,7 +327,7 @@ impl ZcashDeserialize for Spend {
         Ok(Spend {
             cv: reader.read_32_bytes()?,
             anchor: SaplingNoteTreeRootHash(reader.read_32_bytes()?),
-            nullifier: reader.read_32_bytes()?.into(),
+            nullifier: sapling::Nullifier::zcash_deserialize(&mut reader)?,
             rk: reader.read_32_bytes()?.into(),
             zkproof: Groth16Proof::zcash_deserialize(&mut reader)?,
             spend_auth_sig: reader.read_64_bytes()?.into(),
