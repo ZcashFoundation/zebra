@@ -81,7 +81,7 @@ pub enum Error {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-/// Marker type for `Amount` that restricts the possible values to +- MAX_MONEY
+/// Marker type for `Amount` that restricts the values to `-MAX_MONEY..=MAX_MONEY`
 pub enum NegativeAllowed {}
 
 impl AmountConstraint for NegativeAllowed {
