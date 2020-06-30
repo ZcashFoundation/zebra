@@ -2,7 +2,7 @@
 use std::{
     convert::{TryFrom, TryInto},
     marker::PhantomData,
-    ops::Range,
+    ops::RangeInclusive,
 };
 
 /// A runtime validated type for representing amounts of zatoshis
@@ -39,7 +39,9 @@ where
     type Error = Error;
 
     fn try_from(value: u64) -> Result<Self, Self::Error> {
-        let value = value.try_into()?;
+        let value = value
+            .try_into()
+            .map_err(|source| Error::Convert { value, source })?;
 
         C::validate(value).map(|v| Self(v, PhantomData))
     }
@@ -65,17 +67,18 @@ mod test {
     }
 }
 
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, displaydoc::Display)]
 #[allow(missing_docs)]
 /// Errors that can be returned when validating `Amount`s
 pub enum Error {
-    /// Given `value` doesn't satisfy the given constraints
-    #[error("input {value} is outside of the valid range {range:?}")]
-    Contains { range: Range<i64>, value: i64 },
-    /// The given value couldn't be converted to an i64
-    #[error(transparent)]
-    Truncate {
-        #[from]
+    /// input {value} is outside of valid range for zatoshi Amount, valid_range={range:?}
+    Contains {
+        range: RangeInclusive<i64>,
+        value: i64,
+    },
+    /// u64 {value} could not be converted to an i64 Amount
+    Convert {
+        value: u64,
         source: std::num::TryFromIntError,
     },
 }
@@ -85,8 +88,8 @@ pub enum Error {
 pub enum NegativeAllowed {}
 
 impl AmountConstraint for NegativeAllowed {
-    fn valid_range() -> Range<i64> {
-        -MAX_MONEY..MAX_MONEY + 1
+    fn valid_range() -> RangeInclusive<i64> {
+        -MAX_MONEY..=MAX_MONEY
     }
 }
 
@@ -95,8 +98,8 @@ impl AmountConstraint for NegativeAllowed {
 pub enum NonNegative {}
 
 impl AmountConstraint for NonNegative {
-    fn valid_range() -> Range<i64> {
-        0..MAX_MONEY + 1
+    fn valid_range() -> RangeInclusive<i64> {
+        0..=MAX_MONEY
     }
 }
 
@@ -106,7 +109,7 @@ pub const MAX_MONEY: i64 = 21_000_000 * 100_000_000;
 /// A trait for defining constraints on `Amount`
 pub trait AmountConstraint {
     /// Returns the range of values that are valid under this constraint
-    fn valid_range() -> Range<i64>;
+    fn valid_range() -> RangeInclusive<i64>;
 
     /// Check if an input value is within the valid range
     fn validate(value: i64) -> Result<i64, Error> {
