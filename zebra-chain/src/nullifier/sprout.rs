@@ -1,5 +1,5 @@
 #![allow(clippy::unit_arg)]
-use crate::serialization::ZcashSerialize;
+use crate::serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize};
 use serde::{Deserialize, Serialize};
 use std::io;
 
@@ -10,6 +10,14 @@ pub struct Nullifier([u8; 32]);
 impl From<[u8; 32]> for Nullifier {
     fn from(buf: [u8; 32]) -> Self {
         Self(buf)
+    }
+}
+
+impl ZcashDeserialize for Nullifier {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        let bytes = reader.read_32_bytes()?;
+
+        Ok(Self(bytes))
     }
 }
 
