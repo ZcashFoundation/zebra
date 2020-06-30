@@ -30,7 +30,7 @@ use zebra_chain::block::BlockHeaderHash;
 mod sync;
 
 // genesis
-static GENESIS: BlockHeaderHash = BlockHeaderHash([
+const GENESIS: BlockHeaderHash = BlockHeaderHash([
     8, 206, 61, 151, 49, 176, 0, 192, 131, 56, 69, 92, 138, 74, 107, 208, 93, 161, 110, 38, 177,
     29, 170, 27, 145, 113, 132, 236, 232, 15, 4, 0,
 ]);
@@ -58,13 +58,13 @@ impl StartCmd {
         let config = app_config().network.clone();
         let state = zebra_state::on_disk::init(zebra_state::Config::default());
         let (peer_set, _address_book) = zebra_network::init(config, node).await;
+        let verifier = zebra_consensus::verify::init(state.clone());
 
         let mut syncer = sync::Syncer {
             peer_set,
             state,
+            verifier,
             block_requests: FuturesUnordered::new(),
-            downloading: HashSet::new(),
-            downloaded: HashSet::new(),
             fanout: 4,
             prospective_tips: HashSet::new(),
         };

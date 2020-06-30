@@ -2449,6 +2449,7 @@ dependencies = [
  "tracing-log",
  "tracing-subscriber",
  "zebra-chain",
+ "zebra-consensus",
  "zebra-network",
  "zebra-state",
 ]
