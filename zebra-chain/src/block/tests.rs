@@ -11,6 +11,9 @@ use crate::merkle_tree::MerkleTreeRootHash;
 use crate::note_commitment_tree::SaplingNoteTreeRootHash;
 use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 use crate::sha256d_writer::Sha256dWriter;
+use crate::transaction::TransparentInput;
+use crate::transaction::TransparentOutput;
+use crate::types::LockTime;
 
 use super::*;
 
@@ -155,9 +158,7 @@ fn block_limits_multi_tx() {
     // Create transactions to be just below the limit
     let mut many_transactions = std::iter::repeat(Arc::new(tx.clone()))
         .take(max_transactions_in_block)
-        .collect::<Vec<Arc<_>>>();
-
-    assert_eq!(max_transactions_in_block, many_transactions.len());
+        .collect::<Vec<_>>();
 
     // Add the transactions into a block
     let mut block = Block {
@@ -197,10 +198,6 @@ fn block_limits_multi_tx() {
 #[test]
 fn block_limits_single_tx() {
     // Test block limit with a big single transaction
-    use crate::transaction::TransparentInput;
-    use crate::transaction::TransparentOutput;
-    use crate::types::LockTime;
-
     // Dummy input and output
     let input =
         TransparentInput::zcash_deserialize(&zebra_test::vectors::DUMMY_INPUT1[..]).unwrap();
@@ -239,8 +236,6 @@ fn block_limits_single_tx() {
     let mut inputs = std::iter::repeat(input.clone())
         .take(max_inputs_in_tx)
         .collect::<Vec<_>>();
-
-    assert_eq!(max_inputs_in_tx, inputs.len());
 
     // 1 single output
     outputs.push(output);
