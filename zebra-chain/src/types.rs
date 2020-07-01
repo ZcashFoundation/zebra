@@ -15,28 +15,7 @@ use crate::serialization::{
     ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
 };
 
-/// A 4-byte checksum using truncated double-SHA256 (two rounds of SHA256).
-#[derive(Copy, Clone, Eq, PartialEq)]
-pub struct Sha256dChecksum(pub [u8; 4]);
-
-impl<'a> From<&'a [u8]> for Sha256dChecksum {
-    fn from(bytes: &'a [u8]) -> Self {
-        use sha2::{Digest, Sha256};
-        let hash1 = Sha256::digest(bytes);
-        let hash2 = Sha256::digest(&hash1);
-        let mut checksum = [0u8; 4];
-        checksum[0..4].copy_from_slice(&hash2[0..4]);
-        Self(checksum)
-    }
-}
-
-impl fmt::Debug for Sha256dChecksum {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple("Sha256dChecksum")
-            .field(&hex::encode(&self.0))
-            .finish()
-    }
-}
+pub mod amount;
 
 /// A u32 which represents a block height value.
 ///
@@ -142,6 +121,29 @@ impl ZcashDeserialize for Script {
         let mut bytes = Vec::new();
         reader.take(len).read_to_end(&mut bytes)?;
         Ok(Script(bytes))
+    }
+}
+
+/// A 4-byte checksum using truncated double-SHA256 (two rounds of SHA256).
+#[derive(Copy, Clone, Eq, PartialEq)]
+pub struct Sha256dChecksum(pub [u8; 4]);
+
+impl<'a> From<&'a [u8]> for Sha256dChecksum {
+    fn from(bytes: &'a [u8]) -> Self {
+        use sha2::{Digest, Sha256};
+        let hash1 = Sha256::digest(bytes);
+        let hash2 = Sha256::digest(&hash1);
+        let mut checksum = [0u8; 4];
+        checksum[0..4].copy_from_slice(&hash2[0..4]);
+        Self(checksum)
+    }
+}
+
+impl fmt::Debug for Sha256dChecksum {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple("Sha256dChecksum")
+            .field(&hex::encode(&self.0))
+            .finish()
     }
 }
 

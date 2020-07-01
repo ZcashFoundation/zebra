@@ -69,7 +69,7 @@ impl Transaction {
             vec(any::<TransparentOutput>(), 0..10),
             any::<LockTime>(),
             any::<BlockHeight>(),
-            any::<i64>(),
+            any::<Amount>(),
             option::of(any::<ShieldedData>()),
             option::of(any::<JoinSplitData<Groth16Proof>>()),
         )

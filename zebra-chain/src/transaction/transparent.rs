@@ -4,7 +4,10 @@
 #[cfg(test)]
 use proptest_derive::Arbitrary;
 
-use crate::types::{BlockHeight, Script};
+use crate::types::{
+    amount::{Amount, NonNegative},
+    BlockHeight, Script,
+};
 
 use super::TransactionHash;
 
@@ -80,8 +83,7 @@ pub enum TransparentInput {
 pub struct TransparentOutput {
     /// Transaction value.
     // At https://en.bitcoin.it/wiki/Protocol_documentation#tx, this is an i64.
-    // XXX refine to Amount ?
-    pub value: u64,
+    pub value: Amount<NonNegative>,
 
     /// Usually contains the public key as a Bitcoin script setting up
     /// conditions to claim this output.

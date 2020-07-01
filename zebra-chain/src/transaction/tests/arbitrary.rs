@@ -6,7 +6,10 @@ use crate::{
         CoinbaseData, JoinSplit, JoinSplitData, OutPoint, Output, ShieldedData, Spend, Transaction,
         TransparentInput,
     },
-    types::{BlockHeight, Script},
+    types::{
+        amount::{Amount, NonNegative},
+        BlockHeight, Script,
+    },
 };
 use futures::future::Either;
 use proptest::{array, collection::vec, prelude::*};
@@ -16,8 +19,8 @@ impl<P: ZkSnarkProof + Arbitrary + 'static> Arbitrary for JoinSplit<P> {
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         (
-            any::<u64>(),
-            any::<u64>(),
+            any::<Amount<NonNegative>>(),
+            any::<Amount<NonNegative>>(),
             array::uniform32(any::<u8>()),
             array::uniform2(array::uniform32(any::<u8>())),
             array::uniform2(array::uniform32(any::<u8>())),

@@ -1,3 +1,4 @@
+use crate::types::amount::{Amount, NonNegative};
 use crate::{ed25519_zebra, notes::sprout, proofs::ZkSnarkProof};
 use serde::{Deserialize, Serialize};
 
@@ -8,14 +9,11 @@ use serde::{Deserialize, Serialize};
 pub struct JoinSplit<P: ZkSnarkProof> {
     /// A value that the JoinSplit transfer removes from the transparent value
     /// pool.
-    ///
-    /// XXX refine to an Amount
-    pub vpub_old: u64,
+    pub vpub_old: Amount<NonNegative>,
     /// A value that the JoinSplit transfer inserts into the transparent value
     /// pool.
     ///
-    /// XXX refine to an Amount
-    pub vpub_new: u64,
+    pub vpub_new: Amount<NonNegative>,
     /// A root of the Sprout note commitment tree at some block height in the
     /// past, or the root produced by a previous JoinSplit transfer in this
     /// transaction.
