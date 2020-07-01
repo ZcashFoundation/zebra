@@ -53,8 +53,8 @@ pub struct BlockHeader {
     /// ThresholdBits(height).
     ///
     /// [Bitcoin-nBits](https://bitcoin.org/en/developer-reference#target-nbits)
-    // pzec has their own wrapper around u32 for this field:
-    // https://github.com/ZcashFoundation/zebra/blob/master/zebra-primitives/src/compact.rs
+    // parity-zcash has their own wrapper around u32 for this field, see #572 and:
+    // https://github.com/paritytech/parity-zcash/blob/master/primitives/src/compact.rs
     pub bits: u32,
 
     /// An arbitrary field that miners can change to modify the header
