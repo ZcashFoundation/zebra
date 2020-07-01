@@ -1,9 +1,6 @@
-#[cfg(test)]
-use proptest::{array, collection::vec, prelude::*};
-use serde::{Deserialize, Serialize};
-
 use crate::types::amount::{Amount, NonNegative};
 use crate::{ed25519_zebra, notes::sprout, proofs::ZkSnarkProof};
+use serde::{Deserialize, Serialize};
 
 /// A _JoinSplit Description_, as described in [protocol specification §7.2][ps].
 ///
@@ -68,56 +65,6 @@ impl<P: ZkSnarkProof> PartialEq for JoinSplit<P> {
 // Because x25519_dalek::PublicKey does not impl Eq
 impl<P: ZkSnarkProof> Eq for JoinSplit<P> {}
 
-#[cfg(test)]
-impl<P: ZkSnarkProof + Arbitrary + 'static> Arbitrary for JoinSplit<P> {
-    type Parameters = ();
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        (
-            any::<Amount<NonNegative>>(),
-            any::<Amount<NonNegative>>(),
-            array::uniform32(any::<u8>()),
-            array::uniform2(array::uniform32(any::<u8>())),
-            array::uniform2(array::uniform32(any::<u8>())),
-            array::uniform32(any::<u8>()),
-            array::uniform32(any::<u8>()),
-            array::uniform2(array::uniform32(any::<u8>())),
-            any::<P>(),
-            array::uniform2(any::<sprout::EncryptedCiphertext>()),
-        )
-            .prop_map(
-                |(
-                    vpub_old,
-                    vpub_new,
-                    anchor,
-                    nullifiers,
-                    commitments,
-                    ephemeral_key_bytes,
-                    random_seed,
-                    vmacs,
-                    zkproof,
-                    enc_ciphertexts,
-                )| {
-                    Self {
-                        vpub_old,
-                        vpub_new,
-                        anchor,
-                        nullifiers,
-                        commitments,
-                        ephemeral_key: x25519_dalek::PublicKey::from(ephemeral_key_bytes),
-                        random_seed,
-                        vmacs,
-                        zkproof,
-                        enc_ciphertexts,
-                    }
-                },
-            )
-            .boxed()
-    }
-
-    type Strategy = BoxedStrategy<Self>;
-}
-
 /// A bundle of JoinSplit descriptions and signature data.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JoinSplitData<P: ZkSnarkProof> {
@@ -154,31 +101,4 @@ impl<P: ZkSnarkProof> JoinSplitData<P> {
     pub fn joinsplits(&self) -> impl Iterator<Item = &JoinSplit<P>> {
         std::iter::once(&self.first).chain(self.rest.iter())
     }
-}
-
-#[cfg(test)]
-impl<P: ZkSnarkProof + Arbitrary + 'static> Arbitrary for JoinSplitData<P> {
-    type Parameters = ();
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        (
-            any::<JoinSplit<P>>(),
-            vec(any::<JoinSplit<P>>(), 0..10),
-            array::uniform32(any::<u8>()),
-            vec(any::<u8>(), 64),
-        )
-            .prop_map(|(first, rest, pub_key_bytes, sig_bytes)| Self {
-                first,
-                rest,
-                pub_key: ed25519_zebra::VerificationKeyBytes::from(pub_key_bytes),
-                sig: ed25519_zebra::Signature::from({
-                    let mut b = [0u8; 64];
-                    b.copy_from_slice(sig_bytes.as_slice());
-                    b
-                }),
-            })
-            .boxed()
-    }
-
-    type Strategy = BoxedStrategy<Self>;
 }
