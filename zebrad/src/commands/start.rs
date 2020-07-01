@@ -22,8 +22,6 @@ use crate::config::ZebradConfig;
 use crate::{components::tokio::TokioComponent, prelude::*};
 use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
 use color_eyre::eyre::Report;
-use futures::stream::FuturesUnordered;
-use std::collections::HashSet;
 use tower::{buffer::Buffer, service_fn};
 use zebra_chain::block::BlockHeaderHash;
 
@@ -60,14 +58,7 @@ impl StartCmd {
         let (peer_set, _address_book) = zebra_network::init(config, node).await;
         let verifier = zebra_consensus::verify::init(state.clone());
 
-        let mut syncer = sync::Syncer {
-            peer_set,
-            state,
-            verifier,
-            block_requests: FuturesUnordered::new(),
-            fanout: 4,
-            prospective_tips: HashSet::new(),
-        };
+        let mut syncer = sync::Syncer::new(peer_set, state, verifier);
 
         syncer.run().await
     }

@@ -2,14 +2,13 @@ use color_eyre::eyre::{eyre, Report};
 use futures::stream::{FuturesUnordered, StreamExt};
 use std::{collections::HashSet, iter, sync::Arc, time::Duration};
 use tokio::time::delay_for;
-use tower::{Service, ServiceExt};
+use tower::{retry::Retry, Service, ServiceExt};
 use zebra_chain::{
     block::{Block, BlockHeaderHash},
     types::BlockHeight,
 };
-
-use zebra_network as zn;
-use zebra_state as zs;
+use zebra_network::{self as zn, RetryLimit};
+use zebra_state::{self as zs};
 
 pub struct Syncer<ZN, ZS, ZV>
 where
@@ -18,9 +17,28 @@ where
     pub peer_set: ZN,
     pub state: ZS,
     pub verifier: ZV,
+    pub retry_peer_set: Retry<RetryLimit, ZN>,
     pub prospective_tips: HashSet<BlockHeaderHash>,
     pub block_requests: FuturesUnordered<ZN::Future>,
     pub fanout: NumReq,
+}
+
+impl<ZN, ZS, ZC> Syncer<ZN, ZS, ZC>
+where
+    ZN: Service<zn::Request> + Clone,
+{
+    pub fn new(peer_set: ZN, state: ZS, verifier: ZC) -> Self {
+        let retry_peer_set = Retry::new(RetryLimit::new(3), peer_set.clone());
+        Self {
+            peer_set,
+            state,
+            verifier,
+            retry_peer_set,
+            block_requests: FuturesUnordered::new(),
+            fanout: 4,
+            prospective_tips: HashSet::new(),
+        }
+    }
 }
 
 impl<ZN, ZS, ZV> Syncer<ZN, ZS, ZV>
@@ -224,7 +242,7 @@ where
             let set = chunk.iter().cloned().collect();
 
             let request = self
-                .peer_set
+                .retry_peer_set
                 .ready_and()
                 .await
                 .map_err(|e| eyre!(e))?
