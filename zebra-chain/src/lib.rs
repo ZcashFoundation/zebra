@@ -2,7 +2,7 @@
 
 #![doc(html_logo_url = "https://www.zfnd.org/images/zebra-icon.png")]
 #![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_chain")]
-// #![deny(missing_docs)]
+#![deny(missing_docs)]
 
 #[macro_use]
 extern crate serde;

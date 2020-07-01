@@ -1,8 +1,10 @@
+//! Sapling Nullifier Set types and impls
 use crate::serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize};
 use serde::{Deserialize, Serialize};
 use std::io;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// A Nullifier Set for Sapling transactions
 pub struct Nullifier([u8; 32]);
 
 impl From<[u8; 32]> for Nullifier {

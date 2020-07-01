@@ -1,3 +1,4 @@
+//! Sprout Nullifier Set types and impls
 #![allow(clippy::unit_arg)]
 use crate::serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize};
 use serde::{Deserialize, Serialize};
@@ -5,6 +6,7 @@ use std::io;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
+/// A Nullifier Set for Sprout transactions
 pub struct Nullifier([u8; 32]);
 
 impl From<[u8; 32]> for Nullifier {
