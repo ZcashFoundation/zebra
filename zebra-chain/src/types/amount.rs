@@ -5,6 +5,8 @@ use std::{
     ops::RangeInclusive,
 };
 
+type Result<T, E = Error> = std::result::Result<T, E>;
+
 /// A runtime validated type for representing amounts of zatoshis
 #[derive(Debug, Eq, PartialEq, Clone, Copy, Serialize, Deserialize)]
 pub struct Amount<C = NegativeAllowed>(i64, PhantomData<C>);
@@ -14,46 +16,48 @@ where
     C1: AmountConstraint,
     C2: AmountConstraint,
 {
-    type Output = Option<Amount<C1>>;
+    type Output = Result<Amount<C1>>;
 
     fn add(self, rhs: Amount<C2>) -> Self::Output {
         let value = self.0 + rhs.0;
-        value.try_into().ok()
+        value.try_into()
     }
 }
 
-impl<C1, C2> std::ops::Add<Amount<C2>> for Option<Amount<C1>>
+impl<C1, C2> std::ops::Add<Amount<C2>> for Result<Amount<C1>>
 where
     C1: AmountConstraint,
     C2: AmountConstraint,
 {
-    type Output = Option<Amount<C1>>;
+    type Output = Result<Amount<C1>>;
 
     fn add(self, rhs: Amount<C2>) -> Self::Output {
-        self.and_then(|this| this + rhs)
+        self? + rhs
     }
 }
 
-impl<C1, C2> std::ops::Add<Option<Amount<C2>>> for Amount<C1>
+impl<C1, C2> std::ops::Add<Result<Amount<C2>>> for Amount<C1>
 where
     C1: AmountConstraint,
     C2: AmountConstraint,
 {
-    type Output = Option<Amount<C1>>;
+    type Output = Result<Amount<C1>>;
 
-    fn add(self, rhs: Option<Amount<C2>>) -> Self::Output {
-        rhs.and_then(|rhs| self + rhs)
+    fn add(self, rhs: Result<Amount<C2>>) -> Self::Output {
+        self + rhs?
     }
 }
 
-impl<C1, C2> std::ops::AddAssign<Amount<C2>> for Option<Amount<C1>>
+impl<C1, C2> std::ops::AddAssign<Amount<C2>> for Result<Amount<C1>>
 where
-    Option<Amount<C1>>: Copy,
+    Amount<C1>: Copy,
     C1: AmountConstraint,
     C2: AmountConstraint,
 {
     fn add_assign(&mut self, rhs: Amount<C2>) {
-        *self = self.and_then(|this| this + rhs);
+        if let Ok(lhs) = *self {
+            *self = lhs + rhs;
+        }
     }
 }
 
@@ -62,46 +66,48 @@ where
     C1: AmountConstraint,
     C2: AmountConstraint,
 {
-    type Output = Option<Amount<C1>>;
+    type Output = Result<Amount<C1>>;
 
     fn sub(self, rhs: Amount<C2>) -> Self::Output {
         let value = self.0 - rhs.0;
-        value.try_into().ok()
+        value.try_into()
     }
 }
 
-impl<C1, C2> std::ops::Sub<Amount<C2>> for Option<Amount<C1>>
+impl<C1, C2> std::ops::Sub<Amount<C2>> for Result<Amount<C1>>
 where
     C1: AmountConstraint,
     C2: AmountConstraint,
 {
-    type Output = Option<Amount<C1>>;
+    type Output = Result<Amount<C1>>;
 
     fn sub(self, rhs: Amount<C2>) -> Self::Output {
-        self.and_then(|this| this - rhs)
+        self? - rhs
     }
 }
 
-impl<C1, C2> std::ops::Sub<Option<Amount<C2>>> for Amount<C1>
+impl<C1, C2> std::ops::Sub<Result<Amount<C2>>> for Amount<C1>
 where
     C1: AmountConstraint,
     C2: AmountConstraint,
 {
-    type Output = Option<Amount<C1>>;
+    type Output = Result<Amount<C1>>;
 
-    fn sub(self, rhs: Option<Amount<C2>>) -> Self::Output {
-        rhs.and_then(|rhs| self - rhs)
+    fn sub(self, rhs: Result<Amount<C2>>) -> Self::Output {
+        self - rhs?
     }
 }
 
-impl<C1, C2> std::ops::SubAssign<Amount<C2>> for Option<Amount<C1>>
+impl<C1, C2> std::ops::SubAssign<Amount<C2>> for Result<Amount<C1>>
 where
-    Option<Amount<C1>>: Copy,
+    Amount<C1>: Copy,
     C1: AmountConstraint,
     C2: AmountConstraint,
 {
     fn sub_assign(&mut self, rhs: Amount<C2>) {
-        *self = self.and_then(|this| this - rhs);
+        if let Ok(lhs) = *self {
+            *self = lhs - rhs;
+        }
     }
 }
 
@@ -154,7 +160,7 @@ where
     }
 }
 
-#[derive(thiserror::Error, Debug, displaydoc::Display)]
+#[derive(thiserror::Error, Debug, displaydoc::Display, Clone, PartialEq)]
 #[allow(missing_docs)]
 /// Errors that can be returned when validating `Amount`s
 pub enum Error {
@@ -233,13 +239,13 @@ mod test {
     #[test]
     fn test_add_bare() -> Result<()> {
         zebra_test::init();
-        let one: Amount = 1.try_into().unwrap();
-        let neg_one: Amount = (-1).try_into().unwrap();
+        let one: Amount = 1.try_into()?;
+        let neg_one: Amount = (-1).try_into()?;
 
-        let zero: Amount = 0.try_into().unwrap();
+        let zero: Amount = 0.try_into()?;
         let new_zero = one + neg_one;
 
-        assert_eq!(Some(zero), new_zero);
+        assert_eq!(zero, new_zero?);
 
         Ok(())
     }
@@ -247,14 +253,14 @@ mod test {
     #[test]
     fn test_add_opt_lhs() -> Result<()> {
         zebra_test::init();
-        let one: Amount = 1.try_into().unwrap();
-        let one = Some(one);
-        let neg_one: Amount = (-1).try_into().unwrap();
+        let one: Amount = 1.try_into()?;
+        let one = Ok(one);
+        let neg_one: Amount = (-1).try_into()?;
 
-        let zero: Amount = 0.try_into().unwrap();
+        let zero: Amount = 0.try_into()?;
         let new_zero = one + neg_one;
 
-        assert_eq!(Some(zero), new_zero);
+        assert_eq!(zero, new_zero?);
 
         Ok(())
     }
@@ -262,14 +268,14 @@ mod test {
     #[test]
     fn test_add_opt_rhs() -> Result<()> {
         zebra_test::init();
-        let one: Amount = 1.try_into().unwrap();
-        let neg_one: Amount = (-1).try_into().unwrap();
-        let neg_one = Some(neg_one);
+        let one: Amount = 1.try_into()?;
+        let neg_one: Amount = (-1).try_into()?;
+        let neg_one = Ok(neg_one);
 
-        let zero: Amount = 0.try_into().unwrap();
+        let zero: Amount = 0.try_into()?;
         let new_zero = one + neg_one;
 
-        assert_eq!(Some(zero), new_zero);
+        assert_eq!(zero, new_zero?);
 
         Ok(())
     }
@@ -277,15 +283,15 @@ mod test {
     #[test]
     fn test_add_opt_both() -> Result<()> {
         zebra_test::init();
-        let one: Amount = 1.try_into().unwrap();
-        let one = Some(one);
-        let neg_one: Amount = (-1).try_into().unwrap();
-        let neg_one = Some(neg_one);
+        let one: Amount = 1.try_into()?;
+        let one = Ok(one);
+        let neg_one: Amount = (-1).try_into()?;
+        let neg_one = Ok(neg_one);
 
-        let zero: Amount = 0.try_into().unwrap();
+        let zero: Amount = 0.try_into()?;
         let new_zero = one.and_then(|one| one + neg_one);
 
-        assert_eq!(Some(zero), new_zero);
+        assert_eq!(zero, new_zero?);
 
         Ok(())
     }
@@ -293,15 +299,15 @@ mod test {
     #[test]
     fn test_add_assign() -> Result<()> {
         zebra_test::init();
-        let one: Amount = 1.try_into().unwrap();
-        let neg_one: Amount = (-1).try_into().unwrap();
-        let mut neg_one = Some(neg_one);
+        let one: Amount = 1.try_into()?;
+        let neg_one: Amount = (-1).try_into()?;
+        let mut neg_one = Ok(neg_one);
 
-        let zero: Amount = 0.try_into().unwrap();
+        let zero: Amount = 0.try_into()?;
         neg_one += one;
         let new_zero = neg_one;
 
-        assert_eq!(Some(zero), new_zero);
+        assert_eq!(Ok(zero), new_zero);
 
         Ok(())
     }
@@ -309,13 +315,13 @@ mod test {
     #[test]
     fn test_sub_bare() -> Result<()> {
         zebra_test::init();
-        let one: Amount = 1.try_into().unwrap();
-        let zero: Amount = 0.try_into().unwrap();
+        let one: Amount = 1.try_into()?;
+        let zero: Amount = 0.try_into()?;
 
-        let neg_one: Amount = (-1).try_into().unwrap();
+        let neg_one: Amount = (-1).try_into()?;
         let new_neg_one = zero - one;
 
-        assert_eq!(Some(neg_one), new_neg_one);
+        assert_eq!(Ok(neg_one), new_neg_one);
 
         Ok(())
     }
@@ -323,14 +329,14 @@ mod test {
     #[test]
     fn test_sub_opt_lhs() -> Result<()> {
         zebra_test::init();
-        let one: Amount = 1.try_into().unwrap();
-        let one = Some(one);
-        let zero: Amount = 0.try_into().unwrap();
+        let one: Amount = 1.try_into()?;
+        let one = Ok(one);
+        let zero: Amount = 0.try_into()?;
 
-        let neg_one: Amount = (-1).try_into().unwrap();
+        let neg_one: Amount = (-1).try_into()?;
         let new_neg_one = zero - one;
 
-        assert_eq!(Some(neg_one), new_neg_one);
+        assert_eq!(Ok(neg_one), new_neg_one);
 
         Ok(())
     }
@@ -338,14 +344,14 @@ mod test {
     #[test]
     fn test_sub_opt_rhs() -> Result<()> {
         zebra_test::init();
-        let one: Amount = 1.try_into().unwrap();
-        let zero: Amount = 0.try_into().unwrap();
-        let zero = Some(zero);
+        let one: Amount = 1.try_into()?;
+        let zero: Amount = 0.try_into()?;
+        let zero = Ok(zero);
 
-        let neg_one: Amount = (-1).try_into().unwrap();
+        let neg_one: Amount = (-1).try_into()?;
         let new_neg_one = zero - one;
 
-        assert_eq!(Some(neg_one), new_neg_one);
+        assert_eq!(Ok(neg_one), new_neg_one);
 
         Ok(())
     }
@@ -353,15 +359,15 @@ mod test {
     #[test]
     fn test_sub_assign() -> Result<()> {
         zebra_test::init();
-        let one: Amount = 1.try_into().unwrap();
-        let zero: Amount = 0.try_into().unwrap();
-        let mut zero = Some(zero);
+        let one: Amount = 1.try_into()?;
+        let zero: Amount = 0.try_into()?;
+        let mut zero = Ok(zero);
 
-        let neg_one: Amount = (-1).try_into().unwrap();
+        let neg_one: Amount = (-1).try_into()?;
         zero -= one;
         let new_neg_one = zero;
 
-        assert_eq!(Some(neg_one), new_neg_one);
+        assert_eq!(Ok(neg_one), new_neg_one);
 
         Ok(())
     }
