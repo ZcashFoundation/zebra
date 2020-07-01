@@ -1,14 +1,10 @@
-use futures::future::Either;
-
-#[cfg(test)]
-use proptest::{arbitrary::Arbitrary, array, collection::vec, prelude::*};
-
 // XXX this name seems too long?
 use crate::note_commitment_tree::SaplingNoteTreeRootHash;
 use crate::notes::sapling;
 use crate::proofs::Groth16Proof;
 use crate::redjubjub::{self, Binding, SpendAuth};
 use crate::serde_helpers;
+use futures::future::Either;
 
 /// A _Spend Description_, as described in [protocol specification §7.3][ps].
 ///
@@ -29,39 +25,6 @@ pub struct Spend {
     pub zkproof: Groth16Proof,
     /// A signature authorizing this spend.
     pub spend_auth_sig: redjubjub::Signature<SpendAuth>,
-}
-
-#[cfg(test)]
-impl Arbitrary for Spend {
-    type Parameters = ();
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        (
-            array::uniform32(any::<u8>()),
-            any::<SaplingNoteTreeRootHash>(),
-            array::uniform32(any::<u8>()),
-            array::uniform32(any::<u8>()),
-            any::<Groth16Proof>(),
-            vec(any::<u8>(), 64),
-        )
-            .prop_map(
-                |(cv_bytes, anchor, nullifier_bytes, rpk_bytes, proof, sig_bytes)| Self {
-                    anchor,
-                    cv: cv_bytes,
-                    nullifier: nullifier_bytes.into(),
-                    rk: redjubjub::PublicKeyBytes::from(rpk_bytes),
-                    zkproof: proof,
-                    spend_auth_sig: redjubjub::Signature::from({
-                        let mut b = [0u8; 64];
-                        b.copy_from_slice(sig_bytes.as_slice());
-                        b
-                    }),
-                },
-            )
-            .boxed()
-    }
-
-    type Strategy = BoxedStrategy<Self>;
 }
 
 /// A _Output Description_, as described in [protocol specification §7.4][ps].
@@ -89,37 +52,6 @@ pub struct Output {
 }
 
 impl Eq for Output {}
-
-#[cfg(test)]
-impl Arbitrary for Output {
-    type Parameters = ();
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        (
-            array::uniform32(any::<u8>()),
-            array::uniform32(any::<u8>()),
-            array::uniform32(any::<u8>()).prop_filter("Valid jubjub::AffinePoint", |b| {
-                jubjub::AffinePoint::from_bytes(*b).is_some().unwrap_u8() == 1
-            }),
-            any::<sapling::EncryptedCiphertext>(),
-            any::<sapling::OutCiphertext>(),
-            any::<Groth16Proof>(),
-        )
-            .prop_map(
-                |(cv, cmu, ephemeral_key_bytes, enc_ciphertext, out_ciphertext, zkproof)| Self {
-                    cv,
-                    cmu,
-                    ephemeral_key: jubjub::AffinePoint::from_bytes(ephemeral_key_bytes).unwrap(),
-                    enc_ciphertext,
-                    out_ciphertext,
-                    zkproof,
-                },
-            )
-            .boxed()
-    }
-
-    type Strategy = BoxedStrategy<Self>;
-}
 
 /// Sapling-on-Groth16 spend and output descriptions.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -195,33 +127,3 @@ impl std::cmp::PartialEq for ShieldedData {
 }
 
 impl std::cmp::Eq for ShieldedData {}
-
-#[cfg(test)]
-impl Arbitrary for ShieldedData {
-    type Parameters = ();
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        (
-            prop_oneof![
-                any::<Spend>().prop_map(Either::Left),
-                any::<Output>().prop_map(Either::Right)
-            ],
-            vec(any::<Spend>(), 0..10),
-            vec(any::<Output>(), 0..10),
-            vec(any::<u8>(), 64),
-        )
-            .prop_map(|(first, rest_spends, rest_outputs, sig_bytes)| Self {
-                first,
-                rest_spends,
-                rest_outputs,
-                binding_sig: redjubjub::Signature::from({
-                    let mut b = [0u8; 64];
-                    b.copy_from_slice(sig_bytes.as_slice());
-                    b
-                }),
-            })
-            .boxed()
-    }
-
-    type Strategy = BoxedStrategy<Self>;
-}

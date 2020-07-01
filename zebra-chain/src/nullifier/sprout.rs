@@ -4,9 +4,9 @@ use crate::serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, Z
 use serde::{Deserialize, Serialize};
 use std::io;
 
+/// A Nullifier Set for Sprout transactions
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
-/// A Nullifier Set for Sprout transactions
 pub struct Nullifier([u8; 32]);
 
 impl From<[u8; 32]> for Nullifier {
