@@ -11,100 +11,102 @@ type Result<T, E = Error> = std::result::Result<T, E>;
 #[derive(Debug, Eq, PartialEq, Clone, Copy, Serialize, Deserialize)]
 pub struct Amount<C = NegativeAllowed>(i64, PhantomData<C>);
 
-impl<C1, C2> std::ops::Add<Amount<C2>> for Amount<C1>
-where
-    C1: AmountConstraint,
-    C2: AmountConstraint,
-{
-    type Output = Result<Amount<C1>>;
+impl<C> Amount<C> {
+    /// Convert this amount to a different Amount type if it satisfies the new constraint
+    pub fn constrain<C2>(self) -> Result<Amount<C2>>
+    where
+        C2: AmountConstraint,
+    {
+        self.0.try_into()
+    }
+}
 
-    fn add(self, rhs: Amount<C2>) -> Self::Output {
+impl<C> std::ops::Add<Amount<C>> for Amount<C>
+where
+    C: AmountConstraint,
+{
+    type Output = Result<Amount<C>>;
+
+    fn add(self, rhs: Amount<C>) -> Self::Output {
         let value = self.0 + rhs.0;
         value.try_into()
     }
 }
 
-impl<C1, C2> std::ops::Add<Amount<C2>> for Result<Amount<C1>>
+impl<C> std::ops::Add<Amount<C>> for Result<Amount<C>>
 where
-    C1: AmountConstraint,
-    C2: AmountConstraint,
+    C: AmountConstraint,
 {
-    type Output = Result<Amount<C1>>;
+    type Output = Result<Amount<C>>;
 
-    fn add(self, rhs: Amount<C2>) -> Self::Output {
+    fn add(self, rhs: Amount<C>) -> Self::Output {
         self? + rhs
     }
 }
 
-impl<C1, C2> std::ops::Add<Result<Amount<C2>>> for Amount<C1>
+impl<C> std::ops::Add<Result<Amount<C>>> for Amount<C>
 where
-    C1: AmountConstraint,
-    C2: AmountConstraint,
+    C: AmountConstraint,
 {
-    type Output = Result<Amount<C1>>;
+    type Output = Result<Amount<C>>;
 
-    fn add(self, rhs: Result<Amount<C2>>) -> Self::Output {
+    fn add(self, rhs: Result<Amount<C>>) -> Self::Output {
         self + rhs?
     }
 }
 
-impl<C1, C2> std::ops::AddAssign<Amount<C2>> for Result<Amount<C1>>
+impl<C> std::ops::AddAssign<Amount<C>> for Result<Amount<C>>
 where
-    Amount<C1>: Copy,
-    C1: AmountConstraint,
-    C2: AmountConstraint,
+    Amount<C>: Copy,
+    C: AmountConstraint,
 {
-    fn add_assign(&mut self, rhs: Amount<C2>) {
+    fn add_assign(&mut self, rhs: Amount<C>) {
         if let Ok(lhs) = *self {
             *self = lhs + rhs;
         }
     }
 }
 
-impl<C1, C2> std::ops::Sub<Amount<C2>> for Amount<C1>
+impl<C> std::ops::Sub<Amount<C>> for Amount<C>
 where
-    C1: AmountConstraint,
-    C2: AmountConstraint,
+    C: AmountConstraint,
 {
-    type Output = Result<Amount<C1>>;
+    type Output = Result<Amount<C>>;
 
-    fn sub(self, rhs: Amount<C2>) -> Self::Output {
+    fn sub(self, rhs: Amount<C>) -> Self::Output {
         let value = self.0 - rhs.0;
         value.try_into()
     }
 }
 
-impl<C1, C2> std::ops::Sub<Amount<C2>> for Result<Amount<C1>>
+impl<C> std::ops::Sub<Amount<C>> for Result<Amount<C>>
 where
-    C1: AmountConstraint,
-    C2: AmountConstraint,
+    C: AmountConstraint,
 {
-    type Output = Result<Amount<C1>>;
+    type Output = Result<Amount<C>>;
 
-    fn sub(self, rhs: Amount<C2>) -> Self::Output {
+    fn sub(self, rhs: Amount<C>) -> Self::Output {
         self? - rhs
     }
 }
 
-impl<C1, C2> std::ops::Sub<Result<Amount<C2>>> for Amount<C1>
+impl<C> std::ops::Sub<Result<Amount<C>>> for Amount<C>
 where
-    C1: AmountConstraint,
-    C2: AmountConstraint,
+    C: AmountConstraint,
 {
-    type Output = Result<Amount<C1>>;
+    type Output = Result<Amount<C>>;
 
-    fn sub(self, rhs: Result<Amount<C2>>) -> Self::Output {
+    fn sub(self, rhs: Result<Amount<C>>) -> Self::Output {
         self - rhs?
     }
 }
 
-impl<C1, C2> std::ops::SubAssign<Amount<C2>> for Result<Amount<C1>>
+impl<C> std::ops::SubAssign<Amount<C>> for Result<Amount<C>>
 where
-    Amount<C1>: Copy,
-    C1: AmountConstraint,
-    C2: AmountConstraint,
+    Amount<C>: Copy,
+    C: AmountConstraint,
 {
-    fn sub_assign(&mut self, rhs: Amount<C2>) {
+    fn sub_assign(&mut self, rhs: Amount<C>) {
         if let Ok(lhs) = *self {
             *self = lhs - rhs;
         }
@@ -368,6 +370,17 @@ mod test {
         let new_neg_one = zero;
 
         assert_eq!(Ok(neg_one), new_neg_one);
+
+        Ok(())
+    }
+
+    #[test]
+    fn add_with_diff_constraints() -> Result<()> {
+        let one = Amount::<NonNegative>::try_from(1)?;
+        let zero = Amount::<NegativeAllowed>::try_from(0)?;
+
+        (zero - one.constrain()).expect("should allow negative");
+        (zero.constrain() - one).expect_err("shouldn't allow negative");
 
         Ok(())
     }
