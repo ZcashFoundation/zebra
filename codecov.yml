@@ -18,5 +18,5 @@ parsers:
       macro: yes
 
 comment:
-  layout: "files"
+  layout: "diff"
   require_changes: true  # if true: only post the comment if coverage changes
