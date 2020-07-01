@@ -7,7 +7,6 @@
 #[macro_use]
 extern crate serde;
 
-mod merkle_tree;
 mod serde_helpers;
 mod sha256d_writer;
 
@@ -15,6 +14,7 @@ pub mod addresses;
 pub mod block;
 pub mod equihash_solution;
 pub mod keys;
+pub mod merkle_tree;
 pub mod note_commitment_tree;
 pub mod notes;
 pub mod proofs;
@@ -27,6 +27,9 @@ pub use redjubjub;
 
 #[cfg(test)]
 use proptest_derive::Arbitrary;
+
+#[cfg(test)]
+pub mod test;
 
 /// An enum describing the possible network choices.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
