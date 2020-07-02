@@ -17,7 +17,7 @@ use std::{
     error,
     future::Future,
     iter::successors,
-    ops::{Bound, Bound::*, RangeBounds},
+    ops::{Bound, Bound::*},
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -529,49 +529,24 @@ impl CheckpointVerifier {
         // The heights have to be valid here, because this part of the chain is valid
         self.update_current_checkpoint_height(next_checkpoint_height);
     }
-
-    /// Drop the queued blocks in `range`, and return an error for their
-    /// futures based on `err_str`.
-    ///
-    /// Also clears the corresponding keys in `self.queued`.
-    fn reject_range_with_error<R>(&mut self, range: R, err_str: &str)
-    where
-        R: RangeBounds<BlockHeight> + Clone,
-    {
-        let qrange = self.queued.range_mut(range.clone());
-        for (_, qblocks) in qrange {
-            for qblock in qblocks.drain(..) {
-                // Sending can fail, but there's nothing we can do about it.
-                let _ = qblock.tx.send(Err(err_str.to_string().into()));
-            }
-        }
-        self.drop_range(range);
-
-        // Do not update the current range.
-        // Instead, let the caller decide what to do.
-    }
-
-    /// Drop the queued blocks in `range`.
-    ///
-    /// Does not reject their futures, use `reject_range_with_error()` for that.
-    fn drop_range<R>(&mut self, range: R)
-    where
-        R: RangeBounds<BlockHeight>,
-    {
-        let drop_keys: Vec<BlockHeight> =
-            self.queued.range(range).map(|(key, _value)| *key).collect();
-        for k in drop_keys {
-            self.queued.remove(&k);
-        }
-        // Do not update the current range.
-        // Instead, let the caller decide what to do.
-    }
 }
 
 /// CheckpointVerifier rejects pending futures on drop.
 impl Drop for CheckpointVerifier {
     fn drop(&mut self) {
-        self.reject_range_with_error(.., "checkpoint verifier was dropped");
+        let drop_keys: Vec<_> = self.queued.keys().cloned().collect();
+        for key in drop_keys {
+            let mut qblocks = self
+                .queued
+                .remove(&key)
+                .expect("each entry is only removed once");
+            for qblock in qblocks.drain(..) {
+                // Sending can fail, but there's nothing we can do about it.
+                let _ = qblock
+                    .tx
+                    .send(Err("checkpoint verifier was dropped".into()));
+            }
+        }
     }
 }
 
