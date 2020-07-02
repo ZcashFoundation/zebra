@@ -12,6 +12,7 @@
 #![doc(html_logo_url = "https://www.zfnd.org/images/zebra-icon.png")]
 #![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_consensus")]
 #![deny(missing_docs)]
+#![allow(clippy::try_err)]
 
 pub mod checkpoint;
 pub mod mempool;

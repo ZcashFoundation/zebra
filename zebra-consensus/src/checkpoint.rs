@@ -123,11 +123,9 @@ impl CheckpointVerifier {
 
         // An empty checkpoint list can't actually verify any blocks.
         match checkpoints.keys().cloned().next() {
-            None => {
-                return Err("there must be at least one checkpoint, for the genesis block".into())
-            }
+            None => Err("there must be at least one checkpoint, for the genesis block")?,
             Some(BlockHeight(0)) => {}
-            _ => return Err("checkpoints must start at the genesis block height 0".into()),
+            _ => Err("checkpoints must start at the genesis block height 0")?,
         };
 
         Ok(CheckpointVerifier {
@@ -277,11 +275,11 @@ impl CheckpointVerifier {
             .get_max_checkpoint_height()
             .ok_or("the checkpoint list is empty")?;
         if block_height > max_checkpoint_height {
-            return Err("the block is higher than the maximum checkpoint".into());
+            Err("the block is higher than the maximum checkpoint")?;
         }
         if let Some(previous_checkpoint_height) = self.get_previous_checkpoint_height() {
             if block_height <= previous_checkpoint_height {
-                return Err("a block at this height has already been verified".into());
+                Err("a block at this height has already been verified")?;
             }
         }
         Ok(block_height)
