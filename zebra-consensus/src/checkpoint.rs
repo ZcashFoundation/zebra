@@ -126,9 +126,10 @@ impl CheckpointVerifier {
     // between BlockVerifier and CheckpointVerifier.
     #[cfg(test)]
     fn new(
-        checkpoint_list: impl Into<BTreeMap<BlockHeight, BlockHeaderHash>>,
+        checkpoint_list: impl IntoIterator<Item = (BlockHeight, BlockHeaderHash)>,
     ) -> Result<Self, Error> {
-        let checkpoints: BTreeMap<BlockHeight, BlockHeaderHash> = checkpoint_list.into();
+        let checkpoints: BTreeMap<BlockHeight, BlockHeaderHash> =
+            checkpoint_list.into_iter().collect();
 
         // An empty checkpoint list can't actually verify any blocks.
         match checkpoints.keys().cloned().next() {
