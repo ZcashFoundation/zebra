@@ -105,13 +105,10 @@ struct CheckpointVerifier {
 impl CheckpointVerifier {
     /// Return a checkpoint verification service, using the provided `checkpoint_list`.
     ///
-    /// The returned type is opaque to allow instrumentation or other wrappers, but
-    /// can be boxed for storage. It is also `Clone` to allow sharing of a
-    /// verification service.
-    ///
     /// This function should be called only once for a particular checkpoint list (and
     /// network), rather than constructing multiple verification services based on the
-    /// same checkpoint list.
+    /// same checkpoint list. To Clone a CheckpointVerifier, you might need to wrap it
+    /// in a `tower::Buffer` service.
     //
     // Currently only used in tests.
     //
