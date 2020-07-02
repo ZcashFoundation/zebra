@@ -29,9 +29,6 @@ use zebra_chain::block::{Block, BlockHeaderHash};
 use zebra_chain::types::BlockHeight;
 
 /// The inner error type for CheckpointVerifier.
-///
-/// CheckpointVerifier returns two layers of `Result`s. The outer error type is
-/// fixed by the `tokio::sync::oneshot` channel receiver future.
 // TODO(jlusby): Error = Report ?
 type Error = Box<dyn error::Error + Send + Sync + 'static>;
 
@@ -42,11 +39,7 @@ struct QueuedBlock {
     block: Arc<Block>,
     /// `block`'s cached header hash.
     hash: BlockHeaderHash,
-    /// The transmitting end of a oneshot channel.
-    ///
-    /// The receiving end of this oneshot is passed to the caller as the future.
-    /// It has two layers of `Result`s, an inner `checkpoint::Error`, and an
-    /// outer `tokio::sync::oneshot::error::RecvError`.
+    /// The transmitting end of the oneshot channel for this block's result.
     tx: oneshot::Sender<Result<BlockHeaderHash, Error>>,
 }
 
@@ -539,10 +532,8 @@ impl Drop for CheckpointVerifier {
 ///
 /// After verification, the block futures resolve to their hashes.
 impl Service<Arc<Block>> for CheckpointVerifier {
-    /// The CheckpointVerifier service has two layers of `Result`s, an inner
-    /// `checkpoint::Error`, and an outer `tokio::sync::oneshot::error::RecvError`.
-    type Response = Result<BlockHeaderHash, Error>;
-    type Error = oneshot::error::RecvError;
+    type Response = BlockHeaderHash;
+    type Error = Error;
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
@@ -615,7 +606,12 @@ impl Service<Arc<Block>> for CheckpointVerifier {
 
         // The checkpoint chain end hasn't reached the previous checkpoint.
         // We need more blocks before we can verify.
-        Box::pin(rx.boxed())
+        async move {
+            // Remove the Result<..., RecvError> wrapper from the channel future
+            rx.await
+                .expect("CheckpointVerifier does not leave dangling receivers")
+        }
+        .boxed()
     }
 }
 
@@ -684,7 +680,6 @@ mod tests {
         let verify_response = verify_future
             .await
             .expect("timeout should not happen")
-            .expect("oneshot channel should not fail")
             .map_err(|e| eyre!(e))?;
 
         assert_eq!(verify_response, hash0);
@@ -758,7 +753,6 @@ mod tests {
             let verify_response = verify_future
                 .await
                 .expect("timeout should not happen")
-                .expect("oneshot channel should not fail")
                 .map_err(|e| eyre!(e))?;
 
             assert_eq!(verify_response, hash);
@@ -834,7 +828,6 @@ mod tests {
         let _ = verify_future
             .await
             .expect("timeout should not happen")
-            .expect("oneshot channel should not fail")
             .expect_err("bad block hash should fail");
 
         assert_eq!(checkpoint_verifier.get_previous_checkpoint_height(), None);
@@ -947,7 +940,6 @@ mod tests {
         let verify_response = good_verify_future
             .await
             .expect("timeout should not happen")
-            .expect("oneshot channel should not fail")
             .map_err(|e| eyre!(e))?;
 
         assert_eq!(verify_response, good_block0_hash);
@@ -969,7 +961,6 @@ mod tests {
         let _ = bad_verify_future_1
             .await
             .expect("timeout should not happen")
-            .expect("oneshot channel should not fail")
             .expect_err("bad block hash should fail");
 
         assert_eq!(
@@ -987,7 +978,6 @@ mod tests {
         let _ = bad_verify_future_2
             .await
             .expect("timeout should not happen")
-            .expect("oneshot channel should not fail")
             .expect_err("bad block hash should fail");
 
         assert_eq!(
@@ -1077,10 +1067,7 @@ mod tests {
 
         for (verify_future, height, hash) in futures {
             /// Check the response for block {?height}
-            let verify_response = verify_future
-                .await
-                .expect("timeout should not happen")
-                .expect("oneshot channel should not fail");
+            let verify_response = verify_future.await.expect("timeout should not happen");
 
             if height <= BlockHeight(1) {
                 // The futures for continuous checkpoints should have succeeded before drop
