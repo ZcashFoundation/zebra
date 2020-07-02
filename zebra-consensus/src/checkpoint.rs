@@ -501,7 +501,7 @@ impl CheckpointVerifier {
             //     (if there are duplicate blocks, one succeeds, and the others fail)
 
             // The caller should check for a continuous chain.
-            debug_assert!(!qblocks.is_empty());
+            assert!(!qblocks.is_empty());
 
             let mut next_parent_hash = None;
             for qblock in qblocks.drain(..) {
@@ -532,11 +532,10 @@ impl CheckpointVerifier {
         }
 
         // Double-check that all the block lists are empty
-        #[cfg(any(dev, test))]
         {
             let qrange = self.queued.range(current_range).rev();
             for (_, qblocks) in qrange {
-                debug_assert_eq!(qblocks.len(), 0);
+                assert_eq!(qblocks.len(), 0);
             }
         }
 
