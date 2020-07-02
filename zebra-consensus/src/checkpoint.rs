@@ -410,17 +410,74 @@ impl CheckpointVerifier {
         }
     }
 
+    /// Check if the current checkpoint range is complete.
+    ///
+    /// Verification begins with the genesis block, or the first block after
+    /// the previous checkpoint.
+    ///
+    /// Returns Ok(true) if the range is complete, Ok(false) if more blocks
+    /// are needed, and Err if the checkpoints do not match the current chain.
+    fn is_current_checkpoint_range_complete(&self) -> Result<bool, Error> {
+        // The parent of the genesis block has height `None`.
+        let previous_checkpoint_height = self.previous_checkpoint_height();
+        // The genesis block's previous hash field is all zeroes
+        // TODO(teor): put this constant somewhere shared between both validators
+        let previous_checkpoint_hash = self
+            .previous_checkpoint_hash()
+            .unwrap_or(BlockHeaderHash([0; 32]));
+
+        // If checkpoint verification has finished, we should haved returned when
+        // `insert_queued_block()` failed
+        let (end_height, end_hash) = self.checkpoint_chain_end();
+        if end_height == previous_checkpoint_height {
+            // At this point, we know the chain ended at the the previous checkpoint.
+            // Verify the end_hash against the previous checkpoint hash.
+            if end_hash == Some(previous_checkpoint_hash) {
+                // Now we know that the hash matches the previous checkpoint,
+                // and we have completed this part of the chain.
+                return Ok(true);
+            } else {
+                // Somehow, we have a chain back from the next checkpoint, which
+                // doesn't match the previous checkpoint. This is either a
+                // checkpoint list error, or a bug.
+                //
+                // TODO(teor): Signal error to overall validator, and disable
+                // checkpoint verification? Or keep verifying, and let the
+                // network sync try to find the correct blocks?
+                Err("the chain from the next checkpoint does not match the previous checkpoint")?
+            }
+        } else if end_height.is_some() && end_height < previous_checkpoint_height {
+            // TODO(teor): return an error and stop checkpointing?
+            unreachable!("the checkpoint verifier searched outside the current range");
+        } else if end_height.is_none() || end_hash.is_none() {
+            // TODO(teor): return an error and stop checkpointing?
+            unreachable!("the checkpoint verifier tried to verify more blocks after finishing");
+        }
+
+        Ok(false)
+    }
+
     /// Check all the blocks in the current checkpoint range. Send `Ok` for the
     /// blocks that are in the chain, and `Err` for side-chain blocks.
     ///
     /// Does nothing if verification has finished.
     ///
-    /// Check that the current checkpoint range is complete before calling this
-    /// function.
-    fn submit_current_checkpoint_range(&mut self) {
-        // If checkpoint verification has finished, there should be no queued blocks.
-        if self.current_checkpoint_range.is_none() {
-            return;
+    /// Checks that the current checkpoint range is complete before verifying
+    /// any blocks.
+    fn process_current_checkpoint_range(&mut self) {
+        match self.is_current_checkpoint_range_complete() {
+            Err(e) => {
+                self.reject_range_with_error(
+                    self.current_checkpoint_range
+                        .expect("the checkpoint range is valid"),
+                    &e.to_string(),
+                );
+            }
+            Ok(false) => {
+                // We need more blocks
+                return;
+            }
+            Ok(true) => {}
         }
 
         let next_checkpoint_height = self
@@ -566,52 +623,7 @@ impl Service<Arc<Block>> for CheckpointVerifier {
         //     the length of self.current_checkpoint_range, or
         //   - cache the height of the last continuous chain as a new field in self, and start
         //     at that height during the next check.
-
-        // Verification begins with the genesis block, or the first block after
-        // the previous checkpoint.
-        //
-        // The parent of the genesis block has height `None`.
-        let previous_checkpoint_height = self.previous_checkpoint_height();
-        // The genesis block's previous hash field is all zeroes
-        // TODO(teor): put this constant somewhere shared between both validators
-        let previous_checkpoint_hash = self
-            .previous_checkpoint_hash()
-            .unwrap_or(BlockHeaderHash([0; 32]));
-
-        // If checkpoint verification has finished, we should haved returned when
-        // `insert_queued_block()` failed
-        let (end_height, end_hash) = self.checkpoint_chain_end();
-        if end_height == previous_checkpoint_height {
-            // At this point, we know the chain ended at the the previous checkpoint.
-            // Verify the end_hash against the previous checkpoint hash.
-            if end_hash == Some(previous_checkpoint_hash) {
-                // Now we know that the hash matches the previous checkpoint, and we
-                // have completed this part of the chain.
-                self.submit_current_checkpoint_range();
-            } else {
-                let current_range = self
-                    .current_checkpoint_range
-                    .expect("the checkpoint range is valid");
-
-                // Somehow, we have a chain back from the next
-                // checkpoint, which doesn't match the previous
-                // checkpoint. This is either a checkpoint list
-                // error, or a bug.
-                self.reject_range_with_error(
-                    current_range,
-                    "the chain from the next checkpoint does not match the previous checkpoint",
-                );
-
-                // TODO(teor): Signal error to overall validator, and disable checkpoint verification?
-                // Or keep verifying, and let the network sync try to find the correct blocks?
-            }
-        } else if end_height.is_some() && end_height < previous_checkpoint_height {
-            // TODO(teor): return an error and stop checkpointing?
-            unreachable!("the checkpoint verifier searched outside the current range");
-        } else if end_height.is_none() || end_hash.is_none() {
-            // TODO(teor): return an error and stop checkpointing?
-            unreachable!("the checkpoint verifier tried to verify more blocks after finishing");
-        }
+        self.process_current_checkpoint_range();
 
         // The checkpoint chain end hasn't reached the previous checkpoint.
         // We need more blocks before we can verify.
