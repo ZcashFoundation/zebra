@@ -22,6 +22,7 @@ zebra-state = { path = "../zebra-state" }
 
 [dev-dependencies]
 color-eyre = "0.5"
+rand = "0.7"
 spandoc = "0.1"
 tokio = { version = "0.2", features = ["full"] }
 tracing-error = "0.1.2"
