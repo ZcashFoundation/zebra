@@ -269,7 +269,7 @@ impl CheckpointVerifier {
     /// Returns an error if the block's height is greater than the maximum
     /// checkpoint. Also returns an error if the block or maximum heights are
     /// missing.
-    fn check_block_height(&self, block: Arc<Block>) -> Result<BlockHeight, Error> {
+    fn check_block_height(&self, block: &Block) -> Result<BlockHeight, Error> {
         let block_height = block
             .coinbase_height()
             .ok_or("the block does not have a coinbase height")?;
@@ -303,7 +303,7 @@ impl CheckpointVerifier {
         let (tx, rx) = oneshot::channel();
 
         // Check for a valid height
-        let height = match self.check_block_height(block.clone()) {
+        let height = match self.check_block_height(&block) {
             Ok(height) => height,
             Err(error) => {
                 // Sending might fail, depending on what the caller does with rx,
