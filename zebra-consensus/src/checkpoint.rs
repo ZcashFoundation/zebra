@@ -582,45 +582,39 @@ impl Service<Arc<Block>> for CheckpointVerifier {
         // If checkpoint verification has finished, we should haved returned when
         // `insert_queued_block()` failed
         let (end_height, end_hash) = self.find_checkpoint_chain_end();
-        // TODO(teor): rewrite as a match statement
-        if end_height.is_some() && end_height > previous_checkpoint_height {
-            // We need more blocks before we can checkpoint
-            return Box::pin(rx.boxed());
-        } else if end_height != previous_checkpoint_height {
-            // This should be unreachable
-            // If not, we are in an unrecoverable state
+        if end_height == previous_checkpoint_height {
+            // At this point, we know the chain ended at the the previous checkpoint.
+            // Verify the end_hash against the previous checkpoint hash.
+            if end_hash == Some(previous_checkpoint_hash) {
+                // Now we know that the hash matches the previous checkpoint, and we
+                // have completed this part of the chain.
+                self.submit_current_checkpoint_range();
+            } else {
+                // We just checked for a valid checkpoint range
+                let current_range = self.current_checkpoint_range.unwrap();
+
+                // Somehow, we have a chain back from the next
+                // checkpoint, which doesn't match the previous
+                // checkpoint. This is either a checkpoint list
+                // error, or a bug.
+                self.reject_range_with_error(
+                    current_range,
+                    "the chain from the next checkpoint does not match the previous checkpoint",
+                );
+
+                // TODO(teor): Signal error to overall validator, and disable checkpoint verification?
+                // Or keep verifying, and let the network sync try to find the correct blocks?
+            }
+        } else if end_height.is_some() && end_height < previous_checkpoint_height {
             // TODO(teor): return an error and stop checkpointing?
-            panic!("the checkpoint verifier searched outside the current range");
-        } else if end_hash.is_none() {
-            // This should be unreachable
-            // If not, we are in an unrecoverable state
+            unreachable!("the checkpoint verifier searched outside the current range");
+        } else if end_height.is_none() || end_hash.is_none() {
             // TODO(teor): return an error and stop checkpointing?
-            panic!("the checkpoint verifier tried to verify more blocks after finishing");
+            unreachable!("the checkpoint verifier tried to verify more blocks after finishing");
         }
 
-        // At this point, we know the chain ended at the the previous checkpoint.
-        // Verify the end_hash against the previous checkpoint hash.
-        if end_hash != Some(previous_checkpoint_hash) {
-            // We just checked for a valid checkpoint range
-            let current_range = self.current_checkpoint_range.unwrap();
-
-            // Somehow, we have a chain back from the next
-            // checkpoint, which doesn't match the previous
-            // checkpoint. This is either a checkpoint list
-            // error, or a bug.
-            self.reject_range_with_error(
-                current_range,
-                "the chain from the next checkpoint does not match the previous checkpoint",
-            );
-
-            // TODO(teor): Signal error to overall validator, and disable checkpoint verification?
-            // Or keep verifying, and let the network sync try to find the correct blocks?
-        }
-
-        // Now we know that the hash matches the previous checkpoint, and we
-        // have completed this part of the chain.
-        self.submit_current_checkpoint_range();
-
+        // The checkpoint chain end hasn't reached the previous checkpoint.
+        // We need more blocks before we can verify.
         Box::pin(rx.boxed())
     }
 }
