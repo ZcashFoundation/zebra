@@ -89,8 +89,8 @@ struct CheckpointVerifier {
     queued: BTreeMap<BlockHeight, QueuedBlockList>,
 
     /// The range of heights that we are currently verifying. Extends from the
-    /// most recently verified checkpoint (`Excluded`), to the next highest
-    /// checkpoint (`Included`).
+    /// most recently verified checkpoint (`Excluded` or `Unbounded`), to the
+    /// next highest checkpoint (`Included`).
     ///
     /// If checkpoint verification has not started yet, the current range only
     /// contains the genesis checkpoint.
@@ -132,7 +132,7 @@ impl CheckpointVerifier {
             checkpoint_list: checkpoints,
             queued: <BTreeMap<BlockHeight, QueuedBlockList>>::new(),
             // We start by verifying the genesis block, by itself
-            current_checkpoint_range: Some((Included(BlockHeight(0)), Included(BlockHeight(0)))),
+            current_checkpoint_range: Some((Unbounded, Included(BlockHeight(0)))),
         })
     }
 
@@ -156,7 +156,7 @@ impl CheckpointVerifier {
     /// If verification has finished, returns the maximum checkpoint height.
     fn get_previous_checkpoint_height(&self) -> Option<BlockHeight> {
         match self.current_checkpoint_range {
-            Some((Included(BlockHeight(0)), _)) => None,
+            Some((Unbounded, _)) => None,
             Some((Excluded(height), _)) => Some(height),
             None => self.get_max_checkpoint_height(),
             _ => unreachable!(),
