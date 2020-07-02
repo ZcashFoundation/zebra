@@ -295,7 +295,7 @@ impl CheckpointVerifier {
     ///
     /// If the block does not have a coinbase height, sends an error on `tx`,
     /// and does not queue the block.
-    fn insert_queued_block(
+    fn queue_block(
         &mut self,
         block: Arc<Block>,
     ) -> oneshot::Receiver<Result<BlockHeaderHash, Error>> {
@@ -427,7 +427,7 @@ impl CheckpointVerifier {
             .unwrap_or(BlockHeaderHash([0; 32]));
 
         // If checkpoint verification has finished, we should haved returned when
-        // `insert_queued_block()` failed
+        // `queue_block()` failed
         let (end_height, end_hash) = self.checkpoint_chain_end();
         if end_height == previous_checkpoint_height {
             // At this point, we know the chain ended at the the previous checkpoint.
@@ -614,7 +614,7 @@ impl Service<Arc<Block>> for CheckpointVerifier {
 
         // Queue the block for verification, until we receive all the blocks for
         // the current checkpoint range.
-        let rx = self.insert_queued_block(block);
+        let rx = self.queue_block(block);
 
         // TODO(teor): move the chain scan to its own function?
 
