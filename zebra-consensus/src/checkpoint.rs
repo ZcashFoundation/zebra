@@ -245,28 +245,22 @@ impl CheckpointVerifier {
         //  - the previous checkpoint height is the maximum height (checkpoint verifies are finished),
         // because futures might not resolve in height order.
         if let Some(previous) = previous_height {
+            // Do the `<=` separately, because derived Option ordering is confusing
             if verified_block_height <= previous {
                 return;
             }
         }
 
         // Ignore updates if the checkpoint list is empty, or verification has finished.
-        if let Some(next_height) = self.next_checkpoint_height() {
-            if verified_block_height != next_height {
-                return;
-            }
+        if Some(verified_block_height) != self.next_checkpoint_height() {
+            return;
         }
 
-        // Set the new range
-        if let Some(new_checkpoint) = self.descendant_checkpoint_height(Some(verified_block_height))
-        {
-            // Increment the range
-            self.current_checkpoint_range =
-                Some((Excluded(verified_block_height), Included(new_checkpoint)));
-        } else {
-            // Verification has finished
-            self.current_checkpoint_range = None;
-        }
+        // Set the new range.
+        // If descendant_checkpoint_height() returns None, verification has finished.
+        self.current_checkpoint_range = self
+            .descendant_checkpoint_height(Some(verified_block_height))
+            .map(|new_checkpoint| (Excluded(verified_block_height), Included(new_checkpoint)));
     }
 
     /// If the block height of `block` is less than or equal to the maximum
