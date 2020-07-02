@@ -185,8 +185,12 @@ impl CheckpointVerifier {
     /// If verification has finished, returns the maximum checkpoint's hash.
     fn previous_checkpoint_hash(&self) -> Option<BlockHeaderHash> {
         match self.previous_checkpoint_height() {
-            // Every checkpoint height must have a hash
-            Some(height) => Some(*self.checkpoint_list.get(&height).unwrap()),
+            Some(height) => Some(
+                *self
+                    .checkpoint_list
+                    .get(&height)
+                    .expect("every checkpoint height must have a hash"),
+            ),
             None => None,
         }
     }
@@ -198,7 +202,12 @@ impl CheckpointVerifier {
     fn next_checkpoint_hash(&self) -> Option<BlockHeaderHash> {
         match self.next_checkpoint_height() {
             // Every checkpoint height must have a hash
-            Some(height) => Some(*self.checkpoint_list.get(&height).unwrap()),
+            Some(height) => Some(
+                *self
+                    .checkpoint_list
+                    .get(&height)
+                    .expect("every checkpoint height must have a hash"),
+            ),
             None => None,
         }
     }
@@ -340,10 +349,15 @@ impl CheckpointVerifier {
         // child of the previous checkpoint. (Except for the first range, where
         // we only check the genesis block.)
 
-        // We just checked for a valid checkpoint range
-        let next_checkpoint_height = self.next_checkpoint_height().unwrap();
-        let next_checkpoint_hash = self.next_checkpoint_hash().unwrap();
-        let current_range = self.current_checkpoint_range.unwrap();
+        let next_checkpoint_height = self
+            .next_checkpoint_height()
+            .expect("the checkpoint range is valid");
+        let next_checkpoint_hash = self
+            .next_checkpoint_hash()
+            .expect("the checkpoint range is valid");
+        let current_range = self
+            .current_checkpoint_range
+            .expect("the checkpoint range is valid");
 
         let qrange = self.queued.range(current_range).rev();
         // We could try to calculate the correct range here, but it's easier to
@@ -387,20 +401,19 @@ impl CheckpointVerifier {
             }
         }
 
-        // If the loop didn't execute, we're waiting for the next checkpoint block
-        // TODO(teor): add tests for this case
-        if last_height.is_none() {
-            return (Some(next_checkpoint_height), Some(next_checkpoint_hash));
+        if let Some(last_height) = last_height {
+            // At this point, last_height is the height of the last block, but
+            // expected_hash is the hash of the last block's parent block.
+
+            // If we're at the genesis block, we want to return None for the parent
+            // block height.
+            let parent_height = last_height.0.checked_sub(1).map(BlockHeight);
+            (parent_height, Some(expected_hash))
+        } else {
+            // If the loop didn't execute, we're waiting for the next checkpoint block
+            // TODO(teor): add tests for this case
+            (Some(next_checkpoint_height), Some(next_checkpoint_hash))
         }
-
-        // At this point, last_height is the height of the last block, but
-        // expected_hash is the hash of the last block's parent block.
-        //
-
-        // If we're at the genesis block, we want to return None for the parent
-        // block height.
-        let parent_height = last_height.unwrap().0.checked_sub(1).map(BlockHeight);
-        (parent_height, Some(expected_hash))
     }
 
     /// Check all the blocks in the current checkpoint range. Send `Ok` for the
@@ -416,11 +429,17 @@ impl CheckpointVerifier {
             return;
         }
 
-        let next_checkpoint_height = self.next_checkpoint_height().unwrap();
-        let current_range = self.current_checkpoint_range.unwrap();
+        let next_checkpoint_height = self
+            .next_checkpoint_height()
+            .expect("the checkpoint range is valid");
+        let current_range = self
+            .current_checkpoint_range
+            .expect("the checkpoint range is valid");
 
         // Verify all the blocks and discard all the bad blocks in the current range.
-        let mut expected_hash = self.next_checkpoint_hash().unwrap();
+        let mut expected_hash = self
+            .next_checkpoint_hash()
+            .expect("the checkpoint range is valid");
         let qrange = self.queued.range_mut(current_range).rev();
         for (_, qblocks) in qrange {
             // Find a queued block at each height that is part of the hash chain
@@ -456,8 +475,9 @@ impl CheckpointVerifier {
                     ));
                 }
             }
-            // Can't fail, we just checked it in the previous loop
-            expected_hash = next_parent_hash.unwrap();
+
+            expected_hash =
+                next_parent_hash.expect("the current range contains at least one queued block");
         }
 
         // Double-check that all the block lists are empty
@@ -575,8 +595,9 @@ impl Service<Arc<Block>> for CheckpointVerifier {
                 // have completed this part of the chain.
                 self.submit_current_checkpoint_range();
             } else {
-                // We just checked for a valid checkpoint range
-                let current_range = self.current_checkpoint_range.unwrap();
+                let current_range = self
+                    .current_checkpoint_range
+                    .expect("the checkpoint range is valid");
 
                 // Somehow, we have a chain back from the next
                 // checkpoint, which doesn't match the previous
