@@ -159,7 +159,7 @@ impl CheckpointVerifier {
             Some((Unbounded, _)) => None,
             Some((Excluded(height), _)) => Some(height),
             None => self.get_max_checkpoint_height(),
-            _ => unreachable!(),
+            _ => unreachable!("the previous checkpoint should be excluded from the current range"),
         }
     }
 
@@ -173,7 +173,7 @@ impl CheckpointVerifier {
         match self.current_checkpoint_range {
             Some((_, Included(height))) => Some(height),
             None => None,
-            _ => unreachable!(),
+            _ => unreachable!("the next checkpoint should be included in the current range"),
         }
     }
 
