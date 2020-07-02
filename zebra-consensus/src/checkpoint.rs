@@ -602,8 +602,11 @@ impl Service<Arc<Block>> for CheckpointVerifier {
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        // We don't expect the verifier to exert backpressure on its users.
-        Poll::Ready(Ok(()))
+        if self.next_checkpoint_height().is_some() {
+            Poll::Ready(Ok(()))
+        } else {
+            Poll::Ready(Err("there are no checkpoints left to verify".into()))
+        }
     }
 
     fn call(&mut self, block: Arc<Block>) -> Self::Future {
