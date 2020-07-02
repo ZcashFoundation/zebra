@@ -475,8 +475,18 @@ impl CheckpointVerifier {
         let mut expected_hash = self
             .next_checkpoint_hash()
             .expect("the checkpoint range is valid");
-        let qrange = self.queued.range_mut(current_range).rev();
-        for (_, qblocks) in qrange {
+        let range_keys: Vec<BlockHeight> = self
+            .queued
+            .range_mut(current_range)
+            .rev()
+            .map(|(key, _value)| *key)
+            .collect();
+
+        for key in range_keys {
+            let mut qblocks = self
+                .queued
+                .remove(&key)
+                .expect("the current checkpoint range is complete");
             // Find a queued block at each height that is part of the hash chain
             //
             // There are two possible outcomes here:
@@ -514,17 +524,6 @@ impl CheckpointVerifier {
             expected_hash =
                 next_parent_hash.expect("the current range contains at least one queued block");
         }
-
-        // Double-check that all the block lists are empty
-        {
-            let qrange = self.queued.range(current_range).rev();
-            for (_, qblocks) in qrange {
-                assert_eq!(qblocks.len(), 0);
-            }
-        }
-
-        // Now remove the empty vectors at all those heights
-        self.drop_range(current_range);
 
         // Finally, update the checkpoint bounds
         // The heights have to be valid here, because this part of the chain is valid
