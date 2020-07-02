@@ -506,7 +506,7 @@ impl CheckpointVerifier {
             let mut next_parent_hash = None;
             for qblock in qblocks.drain(..) {
                 if qblock.hash == expected_hash {
-                    if next_parent_hash == None {
+                    if next_parent_hash.is_none() {
                         // The first valid block at the current height
                         next_parent_hash = Some(qblock.block.header.previous_block_hash);
                         // TODO(teor): These futures are sent in reverse order. Make sure
