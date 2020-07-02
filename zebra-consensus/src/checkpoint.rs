@@ -144,7 +144,7 @@ impl CheckpointVerifier {
     /// The maximum height is constant for each checkpoint list.
     ///
     /// Returns None if there are no checkpoints.
-    fn get_max_checkpoint_height(&self) -> Option<BlockHeight> {
+    fn max_checkpoint_height(&self) -> Option<BlockHeight> {
         self.checkpoint_list.keys().cloned().next_back()
     }
 
@@ -154,11 +154,11 @@ impl CheckpointVerifier {
     ///
     /// If verification has not started yet, returns None.
     /// If verification has finished, returns the maximum checkpoint height.
-    fn get_previous_checkpoint_height(&self) -> Option<BlockHeight> {
+    fn previous_checkpoint_height(&self) -> Option<BlockHeight> {
         match self.current_checkpoint_range {
             Some((Unbounded, _)) => None,
             Some((Excluded(height), _)) => Some(height),
-            None => self.get_max_checkpoint_height(),
+            None => self.max_checkpoint_height(),
             _ => unreachable!("the previous checkpoint should be excluded from the current range"),
         }
     }
@@ -169,7 +169,7 @@ impl CheckpointVerifier {
     ///
     /// If verification has not started yet, returns zero (the genesis block).
     /// If verification has finished, returns None.
-    fn get_next_checkpoint_height(&self) -> Option<BlockHeight> {
+    fn next_checkpoint_height(&self) -> Option<BlockHeight> {
         match self.current_checkpoint_range {
             Some((_, Included(height))) => Some(height),
             None => None,
@@ -183,8 +183,8 @@ impl CheckpointVerifier {
     /// block, check that the parent block hash is all zeroes. (Bitcoin "null".)
     ///
     /// If verification has finished, returns the maximum checkpoint's hash.
-    fn get_previous_checkpoint_hash(&self) -> Option<BlockHeaderHash> {
-        match self.get_previous_checkpoint_height() {
+    fn previous_checkpoint_hash(&self) -> Option<BlockHeaderHash> {
+        match self.previous_checkpoint_height() {
             // Every checkpoint height must have a hash
             Some(height) => Some(*self.checkpoint_list.get(&height).unwrap()),
             None => None,
@@ -195,8 +195,8 @@ impl CheckpointVerifier {
     ///
     /// If verification has not started yet, returns the hash of block zero
     /// (the genesis block). If verification has finished, returns None.
-    fn get_next_checkpoint_hash(&self) -> Option<BlockHeaderHash> {
-        match self.get_next_checkpoint_height() {
+    fn next_checkpoint_hash(&self) -> Option<BlockHeaderHash> {
+        match self.next_checkpoint_height() {
             // Every checkpoint height must have a hash
             Some(height) => Some(*self.checkpoint_list.get(&height).unwrap()),
             None => None,
@@ -211,7 +211,7 @@ impl CheckpointVerifier {
     ///
     /// Returns None if there are no checkpoints. Also returns None if
     /// `after_block_height` is greater than or equal to the maximum height.
-    fn find_descendant_checkpoint_height(
+    fn descendant_checkpoint_height(
         &self,
         after_block_height: Option<BlockHeight>,
     ) -> Option<BlockHeight> {
@@ -228,7 +228,7 @@ impl CheckpointVerifier {
     /// Increase the current checkpoint height to `verified_block_height`,
     /// if `verified_block_height` is the next checkpoint height.
     fn update_current_checkpoint_height(&mut self, verified_block_height: BlockHeight) {
-        let previous_height = self.get_previous_checkpoint_height();
+        let previous_height = self.previous_checkpoint_height();
         // Ignore blocks that are below the previous checkpoint.
         //
         // We ignore out-of-order verification, such as:
@@ -242,15 +242,14 @@ impl CheckpointVerifier {
         }
 
         // Ignore updates if the checkpoint list is empty, or verification has finished.
-        if let Some(next_height) = self.get_next_checkpoint_height() {
+        if let Some(next_height) = self.next_checkpoint_height() {
             if verified_block_height != next_height {
                 return;
             }
         }
 
         // Set the new range
-        if let Some(new_checkpoint) =
-            self.find_descendant_checkpoint_height(Some(verified_block_height))
+        if let Some(new_checkpoint) = self.descendant_checkpoint_height(Some(verified_block_height))
         {
             // Increment the range
             self.current_checkpoint_range =
@@ -272,12 +271,12 @@ impl CheckpointVerifier {
             .coinbase_height()
             .ok_or("the block does not have a coinbase height")?;
         let max_checkpoint_height = self
-            .get_max_checkpoint_height()
+            .max_checkpoint_height()
             .ok_or("the checkpoint list is empty")?;
         if block_height > max_checkpoint_height {
             Err("the block is higher than the maximum checkpoint")?;
         }
-        if let Some(previous_checkpoint_height) = self.get_previous_checkpoint_height() {
+        if let Some(previous_checkpoint_height) = self.previous_checkpoint_height() {
             if block_height <= previous_checkpoint_height {
                 Err("a block at this height has already been verified")?;
             }
@@ -331,7 +330,7 @@ impl CheckpointVerifier {
     /// If there are no queued blocks for the current range, returns the next
     /// checkpoint height and hash. If checkpoint verification has finished,
     /// returns `(None, None)`.
-    fn find_checkpoint_chain_end(&self) -> (Option<BlockHeight>, Option<BlockHeaderHash>) {
+    fn checkpoint_chain_end(&self) -> (Option<BlockHeight>, Option<BlockHeaderHash>) {
         // If checkpoint verification has finished, there is no chain end.
         if self.current_checkpoint_range.is_none() {
             return (None, None);
@@ -342,8 +341,8 @@ impl CheckpointVerifier {
         // we only check the genesis block.)
 
         // We just checked for a valid checkpoint range
-        let next_checkpoint_height = self.get_next_checkpoint_height().unwrap();
-        let next_checkpoint_hash = self.get_next_checkpoint_hash().unwrap();
+        let next_checkpoint_height = self.next_checkpoint_height().unwrap();
+        let next_checkpoint_hash = self.next_checkpoint_hash().unwrap();
         let current_range = self.current_checkpoint_range.unwrap();
 
         let qrange = self.queued.range(current_range).rev();
@@ -417,11 +416,11 @@ impl CheckpointVerifier {
             return;
         }
 
-        let next_checkpoint_height = self.get_next_checkpoint_height().unwrap();
+        let next_checkpoint_height = self.next_checkpoint_height().unwrap();
         let current_range = self.current_checkpoint_range.unwrap();
 
         // Verify all the blocks and discard all the bad blocks in the current range.
-        let mut expected_hash = self.get_next_checkpoint_hash().unwrap();
+        let mut expected_hash = self.next_checkpoint_hash().unwrap();
         let qrange = self.queued.range_mut(current_range).rev();
         for (_, qblocks) in qrange {
             // Find a queued block at each height that is part of the hash chain
@@ -558,16 +557,16 @@ impl Service<Arc<Block>> for CheckpointVerifier {
         // the previous checkpoint.
         //
         // The parent of the genesis block has height `None`.
-        let previous_checkpoint_height = self.get_previous_checkpoint_height();
+        let previous_checkpoint_height = self.previous_checkpoint_height();
         // The genesis block's previous hash field is all zeroes
         // TODO(teor): put this constant somewhere shared between both validators
         let previous_checkpoint_hash = self
-            .get_previous_checkpoint_hash()
+            .previous_checkpoint_hash()
             .unwrap_or(BlockHeaderHash([0; 32]));
 
         // If checkpoint verification has finished, we should haved returned when
         // `insert_queued_block()` failed
-        let (end_height, end_hash) = self.find_checkpoint_chain_end();
+        let (end_height, end_hash) = self.checkpoint_chain_end();
         if end_height == previous_checkpoint_height {
             // At this point, we know the chain ended at the the previous checkpoint.
             // Verify the end_hash against the previous checkpoint hash.
@@ -650,13 +649,13 @@ mod tests {
         let mut checkpoint_verifier =
             CheckpointVerifier::new(genesis_checkpoint_list).map_err(|e| eyre!(e))?;
 
-        assert_eq!(checkpoint_verifier.get_previous_checkpoint_height(), None);
+        assert_eq!(checkpoint_verifier.previous_checkpoint_height(), None);
         assert_eq!(
-            checkpoint_verifier.get_next_checkpoint_height(),
+            checkpoint_verifier.next_checkpoint_height(),
             Some(BlockHeight(0))
         );
         assert_eq!(
-            checkpoint_verifier.get_max_checkpoint_height(),
+            checkpoint_verifier.max_checkpoint_height(),
             Some(BlockHeight(0))
         );
 
@@ -680,12 +679,12 @@ mod tests {
         assert_eq!(verify_response, hash0);
 
         assert_eq!(
-            checkpoint_verifier.get_previous_checkpoint_height(),
+            checkpoint_verifier.previous_checkpoint_height(),
             Some(BlockHeight(0))
         );
-        assert_eq!(checkpoint_verifier.get_next_checkpoint_height(), None);
+        assert_eq!(checkpoint_verifier.next_checkpoint_height(), None);
         assert_eq!(
-            checkpoint_verifier.get_max_checkpoint_height(),
+            checkpoint_verifier.max_checkpoint_height(),
             Some(BlockHeight(0))
         );
 
@@ -720,13 +719,13 @@ mod tests {
         let mut checkpoint_verifier =
             CheckpointVerifier::new(checkpoint_list).map_err(|e| eyre!(e))?;
 
-        assert_eq!(checkpoint_verifier.get_previous_checkpoint_height(), None);
+        assert_eq!(checkpoint_verifier.previous_checkpoint_height(), None);
         assert_eq!(
-            checkpoint_verifier.get_next_checkpoint_height(),
+            checkpoint_verifier.next_checkpoint_height(),
             Some(BlockHeight(0))
         );
         assert_eq!(
-            checkpoint_verifier.get_max_checkpoint_height(),
+            checkpoint_verifier.max_checkpoint_height(),
             Some(BlockHeight(1))
         );
 
@@ -756,22 +755,22 @@ mod tests {
             // loop iteration uses the next checkpoint height function to set the
             // current height we're testing here
             assert_eq!(
-                checkpoint_verifier.get_previous_checkpoint_height(),
+                checkpoint_verifier.previous_checkpoint_height(),
                 Some(height)
             );
             assert_eq!(
-                checkpoint_verifier.get_max_checkpoint_height(),
+                checkpoint_verifier.max_checkpoint_height(),
                 Some(BlockHeight(1))
             );
         }
 
         assert_eq!(
-            checkpoint_verifier.get_previous_checkpoint_height(),
+            checkpoint_verifier.previous_checkpoint_height(),
             Some(BlockHeight(1))
         );
-        assert_eq!(checkpoint_verifier.get_next_checkpoint_height(), None);
+        assert_eq!(checkpoint_verifier.next_checkpoint_height(), None);
         assert_eq!(
-            checkpoint_verifier.get_max_checkpoint_height(),
+            checkpoint_verifier.max_checkpoint_height(),
             Some(BlockHeight(1))
         );
 
@@ -798,13 +797,13 @@ mod tests {
         let mut checkpoint_verifier =
             CheckpointVerifier::new(genesis_checkpoint_list).map_err(|e| eyre!(e))?;
 
-        assert_eq!(checkpoint_verifier.get_previous_checkpoint_height(), None);
+        assert_eq!(checkpoint_verifier.previous_checkpoint_height(), None);
         assert_eq!(
-            checkpoint_verifier.get_next_checkpoint_height(),
+            checkpoint_verifier.next_checkpoint_height(),
             Some(BlockHeight(0))
         );
         assert_eq!(
-            checkpoint_verifier.get_max_checkpoint_height(),
+            checkpoint_verifier.max_checkpoint_height(),
             Some(BlockHeight(0))
         );
 
@@ -825,13 +824,13 @@ mod tests {
             .expect("timeout should not happen")
             .expect_err("bad block hash should fail");
 
-        assert_eq!(checkpoint_verifier.get_previous_checkpoint_height(), None);
+        assert_eq!(checkpoint_verifier.previous_checkpoint_height(), None);
         assert_eq!(
-            checkpoint_verifier.get_next_checkpoint_height(),
+            checkpoint_verifier.next_checkpoint_height(),
             Some(BlockHeight(0))
         );
         assert_eq!(
-            checkpoint_verifier.get_max_checkpoint_height(),
+            checkpoint_verifier.max_checkpoint_height(),
             Some(BlockHeight(0))
         );
 
@@ -862,13 +861,13 @@ mod tests {
         let mut checkpoint_verifier =
             CheckpointVerifier::new(genesis_checkpoint_list).map_err(|e| eyre!(e))?;
 
-        assert_eq!(checkpoint_verifier.get_previous_checkpoint_height(), None);
+        assert_eq!(checkpoint_verifier.previous_checkpoint_height(), None);
         assert_eq!(
-            checkpoint_verifier.get_next_checkpoint_height(),
+            checkpoint_verifier.next_checkpoint_height(),
             Some(BlockHeight(0))
         );
         assert_eq!(
-            checkpoint_verifier.get_max_checkpoint_height(),
+            checkpoint_verifier.max_checkpoint_height(),
             Some(BlockHeight(0))
         );
 
@@ -886,13 +885,13 @@ mod tests {
         // We can't await the future yet, because bad blocks aren't cleared
         // until the chain is verified
 
-        assert_eq!(checkpoint_verifier.get_previous_checkpoint_height(), None);
+        assert_eq!(checkpoint_verifier.previous_checkpoint_height(), None);
         assert_eq!(
-            checkpoint_verifier.get_next_checkpoint_height(),
+            checkpoint_verifier.next_checkpoint_height(),
             Some(BlockHeight(0))
         );
         assert_eq!(
-            checkpoint_verifier.get_max_checkpoint_height(),
+            checkpoint_verifier.max_checkpoint_height(),
             Some(BlockHeight(0))
         );
 
@@ -910,13 +909,13 @@ mod tests {
         // We can't await the future yet, because bad blocks aren't cleared
         // until the chain is verified
 
-        assert_eq!(checkpoint_verifier.get_previous_checkpoint_height(), None);
+        assert_eq!(checkpoint_verifier.previous_checkpoint_height(), None);
         assert_eq!(
-            checkpoint_verifier.get_next_checkpoint_height(),
+            checkpoint_verifier.next_checkpoint_height(),
             Some(BlockHeight(0))
         );
         assert_eq!(
-            checkpoint_verifier.get_max_checkpoint_height(),
+            checkpoint_verifier.max_checkpoint_height(),
             Some(BlockHeight(0))
         );
 
@@ -940,12 +939,12 @@ mod tests {
         assert_eq!(verify_response, good_block0_hash);
 
         assert_eq!(
-            checkpoint_verifier.get_previous_checkpoint_height(),
+            checkpoint_verifier.previous_checkpoint_height(),
             Some(BlockHeight(0))
         );
-        assert_eq!(checkpoint_verifier.get_next_checkpoint_height(), None);
+        assert_eq!(checkpoint_verifier.next_checkpoint_height(), None);
         assert_eq!(
-            checkpoint_verifier.get_max_checkpoint_height(),
+            checkpoint_verifier.max_checkpoint_height(),
             Some(BlockHeight(0))
         );
 
@@ -959,12 +958,12 @@ mod tests {
             .expect_err("bad block hash should fail");
 
         assert_eq!(
-            checkpoint_verifier.get_previous_checkpoint_height(),
+            checkpoint_verifier.previous_checkpoint_height(),
             Some(BlockHeight(0))
         );
-        assert_eq!(checkpoint_verifier.get_next_checkpoint_height(), None);
+        assert_eq!(checkpoint_verifier.next_checkpoint_height(), None);
         assert_eq!(
-            checkpoint_verifier.get_max_checkpoint_height(),
+            checkpoint_verifier.max_checkpoint_height(),
             Some(BlockHeight(0))
         );
 
@@ -976,12 +975,12 @@ mod tests {
             .expect_err("bad block hash should fail");
 
         assert_eq!(
-            checkpoint_verifier.get_previous_checkpoint_height(),
+            checkpoint_verifier.previous_checkpoint_height(),
             Some(BlockHeight(0))
         );
-        assert_eq!(checkpoint_verifier.get_next_checkpoint_height(), None);
+        assert_eq!(checkpoint_verifier.next_checkpoint_height(), None);
         assert_eq!(
-            checkpoint_verifier.get_max_checkpoint_height(),
+            checkpoint_verifier.max_checkpoint_height(),
             Some(BlockHeight(0))
         );
 
@@ -1015,13 +1014,13 @@ mod tests {
         let mut checkpoint_verifier =
             CheckpointVerifier::new(checkpoint_list).map_err(|e| eyre!(e))?;
 
-        assert_eq!(checkpoint_verifier.get_previous_checkpoint_height(), None);
+        assert_eq!(checkpoint_verifier.previous_checkpoint_height(), None);
         assert_eq!(
-            checkpoint_verifier.get_next_checkpoint_height(),
+            checkpoint_verifier.next_checkpoint_height(),
             Some(BlockHeight(0))
         );
         assert_eq!(
-            checkpoint_verifier.get_max_checkpoint_height(),
+            checkpoint_verifier.max_checkpoint_height(),
             Some(BlockHeight(434873))
         );
 
@@ -1048,11 +1047,11 @@ mod tests {
 
             // Only continuous checkpoints verify
             assert_eq!(
-                checkpoint_verifier.get_previous_checkpoint_height(),
+                checkpoint_verifier.previous_checkpoint_height(),
                 Some(BlockHeight(min(height.0, 1)))
             );
             assert_eq!(
-                checkpoint_verifier.get_max_checkpoint_height(),
+                checkpoint_verifier.max_checkpoint_height(),
                 Some(BlockHeight(434873))
             );
         }
