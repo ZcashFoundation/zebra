@@ -1,7 +1,7 @@
 use proptest::{arbitrary::any, collection::vec, option, prelude::*};
 
 use crate::{
-    serialization::{ZcashDeserialize, ZcashSerialize},
+    serialization::{DeserializeInto, ZcashDeserialize, ZcashSerialize},
     types::LockTime,
 };
 
@@ -111,12 +111,8 @@ proptest! {
 
     #[test]
     fn transaction_roundtrip(tx in any::<Transaction>()) {
-
-        let mut data = Vec::new();
-
-        tx.zcash_serialize(&mut data).expect("tx should serialize");
-
-        let tx2 = Transaction::zcash_deserialize(&data[..]).expect("randomized tx should deserialize");
+        let data = tx.zcash_serialize_to_vec().expect("tx should serialize");
+        let tx2 = data.deserialize_into().expect("randomized tx should deserialize");
 
         prop_assert_eq![tx, tx2];
     }
