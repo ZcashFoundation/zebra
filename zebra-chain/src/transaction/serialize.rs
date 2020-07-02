@@ -242,8 +242,8 @@ impl<P: ZkSnarkProof> ZcashSerialize for JoinSplit<P> {
         writer.write_all(&self.commitments[1][..])?;
         writer.write_all(&self.ephemeral_key.as_bytes()[..])?;
         writer.write_all(&self.random_seed[..])?;
-        writer.write_all(&self.vmacs[0][..])?;
-        writer.write_all(&self.vmacs[1][..])?;
+        self.vmacs[0].zcash_serialize(&mut writer)?;
+        self.vmacs[1].zcash_serialize(&mut writer)?;
         self.zkproof.zcash_serialize(&mut writer)?;
         self.enc_ciphertexts[0].zcash_serialize(&mut writer)?;
         self.enc_ciphertexts[1].zcash_serialize(&mut writer)?;
@@ -261,7 +261,10 @@ impl<P: ZkSnarkProof> ZcashDeserialize for JoinSplit<P> {
             commitments: [reader.read_32_bytes()?, reader.read_32_bytes()?],
             ephemeral_key: x25519_dalek::PublicKey::from(reader.read_32_bytes()?),
             random_seed: reader.read_32_bytes()?,
-            vmacs: [reader.read_32_bytes()?, reader.read_32_bytes()?],
+            vmacs: [
+                crate::types::MAC::zcash_deserialize(&mut reader)?,
+                crate::types::MAC::zcash_deserialize(&mut reader)?,
+            ],
             zkproof: P::zcash_deserialize(&mut reader)?,
             enc_ciphertexts: [
                 notes::sprout::EncryptedCiphertext::zcash_deserialize(&mut reader)?,

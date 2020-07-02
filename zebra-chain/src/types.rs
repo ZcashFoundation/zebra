@@ -1,18 +1,13 @@
 //! Newtype wrappers for primitive data types with semantic meaning.
-
+#![allow(clippy::unit_arg)]
+use crate::serialization::{
+    ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
+};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use chrono::{DateTime, TimeZone, Utc};
 use std::{
     fmt,
     io::{self, Read},
-};
-
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use chrono::{DateTime, TimeZone, Utc};
-
-#[cfg(test)]
-use proptest_derive::Arbitrary;
-
-use crate::serialization::{
-    ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
 };
 
 pub mod amount;
@@ -93,9 +88,30 @@ impl Arbitrary for LockTime {
     type Strategy = BoxedStrategy<Self>;
 }
 
+/// A sequence of message authentication tags ...
+///
+/// binding h_sig to each a_sk of the JoinSplit description, computed as
+/// described in § 4.10 ‘Non-malleability (Sprout)’ on p. 37
+#[derive(PartialEq, Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
+pub struct MAC([u8; 32]);
+
+impl ZcashDeserialize for MAC {
+    fn zcash_deserialize<R: Read>(mut reader: R) -> Result<Self, SerializationError> {
+        let bytes = reader.read_32_bytes()?;
+
+        Ok(Self(bytes))
+    }
+}
+
+impl ZcashSerialize for MAC {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        writer.write_all(&self.0[..])
+    }
+}
 /// An encoding of a Bitcoin script.
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(test, derive(Arbitrary))]
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub struct Script(pub Vec<u8>);
 
 impl fmt::Debug for Script {
