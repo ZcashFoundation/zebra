@@ -415,9 +415,9 @@ impl CheckpointVerifier {
     /// Verification begins with the genesis block, or the first block after
     /// the previous checkpoint.
     ///
-    /// Returns Ok(true) if the range is complete, Ok(false) if more blocks
-    /// are needed, and Err if the checkpoints do not match the current chain.
-    fn is_current_checkpoint_range_complete(&self) -> Result<bool, Error> {
+    /// Returns true if the range is complete, and false if more blocks
+    /// are needed to complete the range.
+    fn is_current_checkpoint_range_complete(&self) -> bool {
         // The parent of the genesis block has height `None`.
         let previous_checkpoint_height = self.previous_checkpoint_height();
         // The genesis block's previous hash field is all zeroes
@@ -435,26 +435,20 @@ impl CheckpointVerifier {
             if end_hash == Some(previous_checkpoint_hash) {
                 // Now we know that the hash matches the previous checkpoint,
                 // and we have completed this part of the chain.
-                return Ok(true);
+                return true;
             } else {
                 // Somehow, we have a chain back from the next checkpoint, which
                 // doesn't match the previous checkpoint. This is either a
-                // checkpoint list error, or a bug.
-                //
-                // TODO(teor): Signal error to overall validator, and disable
-                // checkpoint verification? Or keep verifying, and let the
-                // network sync try to find the correct blocks?
-                Err("the chain from the next checkpoint does not match the previous checkpoint")?
+                // checkpoint list error, or another kind of bug.
+                panic!("the chain back from the next checkpoint does not match the previous checkpoint");
             }
         } else if end_height.is_some() && end_height < previous_checkpoint_height {
-            // TODO(teor): return an error and stop checkpointing?
             unreachable!("the checkpoint verifier searched outside the current range");
         } else if end_height.is_none() || end_hash.is_none() {
-            // TODO(teor): return an error and stop checkpointing?
             unreachable!("the checkpoint verifier tried to verify more blocks after finishing");
         }
 
-        Ok(false)
+        false
     }
 
     /// Check all the blocks in the current checkpoint range. Send `Ok` for the
@@ -465,19 +459,9 @@ impl CheckpointVerifier {
     /// Checks that the current checkpoint range is complete before verifying
     /// any blocks.
     fn process_current_checkpoint_range(&mut self) {
-        match self.is_current_checkpoint_range_complete() {
-            Err(e) => {
-                self.reject_range_with_error(
-                    self.current_checkpoint_range
-                        .expect("the checkpoint range is valid"),
-                    &e.to_string(),
-                );
-            }
-            Ok(false) => {
-                // We need more blocks
-                return;
-            }
-            Ok(true) => {}
+        if !self.is_current_checkpoint_range_complete() {
+            // We need more blocks
+            return;
         }
 
         let next_checkpoint_height = self
