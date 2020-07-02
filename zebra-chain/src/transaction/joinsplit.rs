@@ -34,9 +34,7 @@ pub struct JoinSplit<P: ZkSnarkProof> {
     /// JoinSplit description.
     pub random_seed: [u8; 32],
     /// A message authentication tag.
-    ///
-    /// XXX refine type to [T; 2] -- there are two macs
-    pub vmacs: [[u8; 32]; 2],
+    pub vmacs: [crate::types::MAC; 2],
     /// A ZK JoinSplit proof, either a
     /// [`Groth16Proof`](crate::proofs::Groth16Proof) or a
     /// [`Bctv14Proof`](crate::proofs::Bctv14Proof).
