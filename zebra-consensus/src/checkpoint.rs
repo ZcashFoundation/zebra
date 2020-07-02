@@ -297,18 +297,21 @@ impl CheckpointVerifier {
         Ok(block_height)
     }
 
-    /// Queue `block` for verification, and return `(height, hash)`.
+    /// Queue `block` for verification, and return the `Receiver` for the
+    /// block's verification result.
     ///
-    /// Verification will finish when the chain to the next checkpoint is complete,
-    /// and the caller will be notified via `tx`.
+    /// Verification will finish when the chain to the next checkpoint is
+    /// complete, and the caller will be notified via the channel.
     ///
-    /// If the block does not have a coinbase height, sends an error on `tx`, does
-    /// not queue the block, and returns None.
+    /// If the block does not have a coinbase height, sends an error on `tx`,
+    /// and does not queue the block.
     fn insert_queued_block(
         &mut self,
         block: Arc<Block>,
-        tx: oneshot::Sender<Result<BlockHeaderHash, Error>>,
-    ) -> Option<(BlockHeight, BlockHeaderHash)> {
+    ) -> oneshot::Receiver<Result<BlockHeaderHash, Error>> {
+        // Set up a oneshot channel to send results
+        let (tx, rx) = oneshot::channel();
+
         // Check for a valid height
         let height = match self.check_block_height(block.clone()) {
             Ok(height) => height,
@@ -316,7 +319,7 @@ impl CheckpointVerifier {
                 // Sending might fail, depending on what the caller does with rx,
                 // but there's nothing we can do about it.
                 let _ = tx.send(Err(error));
-                return None;
+                return rx;
             }
         };
 
@@ -325,7 +328,7 @@ impl CheckpointVerifier {
         let new_qblock = QueuedBlock { block, hash, tx };
         self.queued.entry(height).or_default().push(new_qblock);
 
-        Some((height, hash))
+        rx
     }
 
     /// Return `(height, hash)` for the next block needed to verify the
@@ -551,13 +554,11 @@ impl Service<Arc<Block>> for CheckpointVerifier {
     fn call(&mut self, block: Arc<Block>) -> Self::Future {
         // TODO(jlusby): Error = Report
 
-        // Set up a oneshot channel as the future
-        let (tx, rx) = oneshot::channel();
+        // Queue the block for verification, until we receive all the blocks for
+        // the current checkpoint range.
+        let rx = self.insert_queued_block(block);
 
-        // Queue the block for verification, returning early on error
-        if self.insert_queued_block(block, tx).is_none() {
-            return Box::pin(rx.boxed());
-        }
+        // TODO(teor): move the chain scan to its own function?
 
         // Try to verify from the next checkpoint to the previous one.
         //
