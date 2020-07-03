@@ -16,3 +16,7 @@ parsers:
       loop: yes
       method: yes
       macro: yes
+
+comment:
+  layout: "diff"
+  require_changes: true  # if true: only post the comment if coverage changes
