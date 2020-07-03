@@ -1,10 +1,9 @@
-use chrono::{DateTime, Utc};
-
+use super::BlockHeaderHash;
 use crate::equihash_solution::EquihashSolution;
 use crate::merkle_tree::MerkleTreeRootHash;
 use crate::note_commitment_tree::SaplingNoteTreeRootHash;
-
-use super::BlockHeaderHash;
+use crate::serialization::ZcashSerialize;
+use chrono::{DateTime, Utc};
 
 /// Block header.
 ///
@@ -69,15 +68,16 @@ pub struct BlockHeader {
 impl BlockHeader {
     /// Returns true if the header is valid based on its `EquihashSolution`
     pub fn is_equihash_solution_valid(&self) -> Result<(), Error> {
-        use crate::serialization::ZcashSerialize;
-
+        let n = 200;
+        let k = 9;
         let nonce = &self.nonce;
-        let solution = &self.solution;
+        let solution = &self.solution.0;
         let mut input = Vec::new();
 
         self.zcash_serialize(&mut input)?;
+        let input = &input[0..EquihashSolution::INPUT_LENGTH];
 
-        solution.is_valid(&input.as_slice()[0..EquihashSolution::INPUT_LENGTH], nonce)?;
+        equihash::is_valid_solution(n, k, input, nonce, solution)?;
 
         Ok(())
     }
@@ -86,8 +86,8 @@ impl BlockHeader {
 #[non_exhaustive]
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error(transparent)]
+    #[error("invalid equihash solution for BlockHeader")]
     EquihashInvalid(#[from] equihash::Error),
-    #[error("cannot reserialize header for verification")]
+    #[error("cannot reserialize header for equihash verification")]
     Serialize(#[from] std::io::Error),
 }
