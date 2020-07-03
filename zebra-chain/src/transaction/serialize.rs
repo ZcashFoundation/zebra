@@ -3,6 +3,7 @@
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::{
+    convert::TryInto,
     io::{self, Read},
     sync::Arc,
 };
@@ -215,7 +216,7 @@ impl ZcashDeserialize for TransparentInput {
 
 impl ZcashSerialize for TransparentOutput {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        writer.write_u64::<LittleEndian>(self.value)?;
+        writer.write_u64::<LittleEndian>(self.value.into())?;
         self.pk_script.zcash_serialize(&mut writer)?;
         Ok(())
     }
@@ -224,7 +225,7 @@ impl ZcashSerialize for TransparentOutput {
 impl ZcashDeserialize for TransparentOutput {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         Ok(TransparentOutput {
-            value: reader.read_u64::<LittleEndian>()?,
+            value: reader.read_u64::<LittleEndian>()?.try_into()?,
             pk_script: Script::zcash_deserialize(&mut reader)?,
         })
     }
@@ -232,17 +233,17 @@ impl ZcashDeserialize for TransparentOutput {
 
 impl<P: ZkSnarkProof> ZcashSerialize for JoinSplit<P> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        writer.write_u64::<LittleEndian>(self.vpub_old)?;
-        writer.write_u64::<LittleEndian>(self.vpub_new)?;
+        writer.write_u64::<LittleEndian>(self.vpub_old.into())?;
+        writer.write_u64::<LittleEndian>(self.vpub_new.into())?;
         writer.write_all(&self.anchor[..])?;
-        writer.write_all(&self.nullifiers[0][..])?;
-        writer.write_all(&self.nullifiers[1][..])?;
+        self.nullifiers[0].zcash_serialize(&mut writer)?;
+        self.nullifiers[1].zcash_serialize(&mut writer)?;
         writer.write_all(&self.commitments[0][..])?;
         writer.write_all(&self.commitments[1][..])?;
         writer.write_all(&self.ephemeral_key.as_bytes()[..])?;
         writer.write_all(&self.random_seed[..])?;
-        writer.write_all(&self.vmacs[0][..])?;
-        writer.write_all(&self.vmacs[1][..])?;
+        self.vmacs[0].zcash_serialize(&mut writer)?;
+        self.vmacs[1].zcash_serialize(&mut writer)?;
         self.zkproof.zcash_serialize(&mut writer)?;
         self.enc_ciphertexts[0].zcash_serialize(&mut writer)?;
         self.enc_ciphertexts[1].zcash_serialize(&mut writer)?;
@@ -253,14 +254,20 @@ impl<P: ZkSnarkProof> ZcashSerialize for JoinSplit<P> {
 impl<P: ZkSnarkProof> ZcashDeserialize for JoinSplit<P> {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         Ok(JoinSplit::<P> {
-            vpub_old: reader.read_u64::<LittleEndian>()?,
-            vpub_new: reader.read_u64::<LittleEndian>()?,
+            vpub_old: reader.read_u64::<LittleEndian>()?.try_into()?,
+            vpub_new: reader.read_u64::<LittleEndian>()?.try_into()?,
             anchor: reader.read_32_bytes()?,
-            nullifiers: [reader.read_32_bytes()?, reader.read_32_bytes()?],
+            nullifiers: [
+                crate::nullifier::sprout::Nullifier::zcash_deserialize(&mut reader)?,
+                crate::nullifier::sprout::Nullifier::zcash_deserialize(&mut reader)?,
+            ],
             commitments: [reader.read_32_bytes()?, reader.read_32_bytes()?],
             ephemeral_key: x25519_dalek::PublicKey::from(reader.read_32_bytes()?),
             random_seed: reader.read_32_bytes()?,
-            vmacs: [reader.read_32_bytes()?, reader.read_32_bytes()?],
+            vmacs: [
+                crate::types::MAC::zcash_deserialize(&mut reader)?,
+                crate::types::MAC::zcash_deserialize(&mut reader)?,
+            ],
             zkproof: P::zcash_deserialize(&mut reader)?,
             enc_ciphertexts: [
                 notes::sprout::EncryptedCiphertext::zcash_deserialize(&mut reader)?,
@@ -310,7 +317,7 @@ impl ZcashSerialize for Spend {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_all(&self.cv[..])?;
         writer.write_all(&self.anchor.0[..])?;
-        writer.write_all(&self.nullifier[..])?;
+        self.nullifier.zcash_serialize(&mut writer)?;
         writer.write_all(&<[u8; 32]>::from(self.rk)[..])?;
         self.zkproof.zcash_serialize(&mut writer)?;
         writer.write_all(&<[u8; 64]>::from(self.spend_auth_sig)[..])?;
@@ -324,7 +331,7 @@ impl ZcashDeserialize for Spend {
         Ok(Spend {
             cv: reader.read_32_bytes()?,
             anchor: SaplingNoteTreeRootHash(reader.read_32_bytes()?),
-            nullifier: reader.read_32_bytes()?,
+            nullifier: crate::nullifier::sapling::Nullifier::zcash_deserialize(&mut reader)?,
             rk: reader.read_32_bytes()?.into(),
             zkproof: Groth16Proof::zcash_deserialize(&mut reader)?,
             spend_auth_sig: reader.read_64_bytes()?.into(),
@@ -433,7 +440,7 @@ impl ZcashSerialize for Transaction {
                 outputs.zcash_serialize(&mut writer)?;
                 lock_time.zcash_serialize(&mut writer)?;
                 writer.write_u32::<LittleEndian>(expiry_height.0)?;
-                writer.write_i64::<LittleEndian>(*value_balance)?;
+                writer.write_i64::<LittleEndian>((*value_balance).into())?;
 
                 // The previous match arms serialize in one go, because the
                 // internal structure happens to nicely line up with the
@@ -540,7 +547,7 @@ impl ZcashDeserialize for Transaction {
                 let outputs = Vec::zcash_deserialize(&mut reader)?;
                 let lock_time = LockTime::zcash_deserialize(&mut reader)?;
                 let expiry_height = BlockHeight(reader.read_u32::<LittleEndian>()?);
-                let value_balance = reader.read_i64::<LittleEndian>()?;
+                let value_balance = reader.read_i64::<LittleEndian>()?.try_into()?;
                 let mut shielded_spends = Vec::zcash_deserialize(&mut reader)?;
                 let mut shielded_outputs = Vec::zcash_deserialize(&mut reader)?;
                 let joinsplit_data = OptV4JSD::zcash_deserialize(&mut reader)?;
