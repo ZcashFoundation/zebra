@@ -83,8 +83,10 @@ fn multi_transaction_block(oversized: bool) -> Block {
 // Implementation of block generation with one transaction and multiple inputs
 fn single_transaction_block(oversized: bool) -> Block {
     // Dummy input and output
-    let input = TransparentInput::zcash_deserialize(&zebra_test::vectors::DUMMY_INPUT1[..]).unwrap();
-    let output = TransparentOutput::zcash_deserialize(&zebra_test::vectors::DUMMY_OUTPUT1[..]).unwrap();
+    let input =
+        TransparentInput::zcash_deserialize(&zebra_test::vectors::DUMMY_INPUT1[..]).unwrap();
+    let output =
+        TransparentOutput::zcash_deserialize(&zebra_test::vectors::DUMMY_OUTPUT1[..]).unwrap();
 
     // A block header
     let blockheader = block_header();
