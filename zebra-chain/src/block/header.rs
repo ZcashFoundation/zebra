@@ -68,17 +68,26 @@ pub struct BlockHeader {
 
 impl BlockHeader {
     /// Returns true if the header is valid based on its `EquihashSolution`
-    pub fn is_valid(&self) -> bool {
+    pub fn is_equihash_solution_valid(&self) -> Result<(), Error> {
         use crate::serialization::ZcashSerialize;
 
         let nonce = &self.nonce;
         let solution = &self.solution;
         let mut input = Vec::new();
 
-        if self.zcash_serialize(&mut input).is_err() {
-            return false;
-        };
+        self.zcash_serialize(&mut input)?;
 
-        solution.is_valid(input.as_slice(), nonce)
+        solution.is_valid(input.as_slice(), nonce)?;
+
+        Ok(())
     }
+}
+
+#[non_exhaustive]
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error(transparent)]
+    EquihashInvalid(#[from] crate::equihash_solution::Error),
+    #[error("cannot reserialize header for verification")]
+    Serialize(#[from] std::io::Error),
 }
