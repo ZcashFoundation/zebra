@@ -533,6 +533,10 @@ impl CheckpointVerifier {
 
 /// CheckpointVerifier rejects pending futures on drop.
 impl Drop for CheckpointVerifier {
+    /// Send an error on `tx` for any `QueuedBlock`s that haven't been verified.
+    ///
+    /// We can't implement `Drop` on QueuedBlock, because `send()` consumes
+    /// `tx`. And `tx` doesn't implement `Copy` or `Default` (for `take()`).
     fn drop(&mut self) {
         let drop_keys: Vec<_> = self.queued.keys().cloned().collect();
         for key in drop_keys {
