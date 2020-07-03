@@ -2,9 +2,7 @@ use super::*;
 use crate::equihash_solution::EquihashSolution;
 use crate::merkle_tree::MerkleTreeRootHash;
 use crate::note_commitment_tree::SaplingNoteTreeRootHash;
-use crate::serialization::{
-    SerializationError, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
-};
+use crate::serialization::{SerializationError, ZcashDeserializeInto, ZcashSerialize};
 use crate::sha256d_writer::Sha256dWriter;
 use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 use proptest::{
@@ -137,39 +135,32 @@ proptest! {
 
     #[test]
     fn blockheaderhash_roundtrip(hash in any::<BlockHeaderHash>()) {
-        let mut bytes = Cursor::new(Vec::new());
-        hash.zcash_serialize(&mut bytes)?;
-
-        bytes.set_position(0);
-        let other_hash = BlockHeaderHash::zcash_deserialize(&mut bytes)?;
+        let bytes = hash.zcash_serialize_to_vec()?;
+        let other_hash = bytes.zcash_deserialize_into()?;
 
         prop_assert_eq![hash, other_hash];
     }
 
     #[test]
     fn blockheader_roundtrip(header in any::<BlockHeader>()) {
-        let mut bytes = Cursor::new(Vec::new());
-        header.zcash_serialize(&mut bytes)?;
-
-        bytes.set_position(0);
-        let other_header = BlockHeader::zcash_deserialize(&mut bytes)?;
+        let bytes = header.zcash_serialize_to_vec()?;
+        let other_header = bytes.zcash_deserialize_into()?;
 
         prop_assert_eq![header, other_header];
     }
 
     #[test]
     fn block_roundtrip(block in any::<Block>()) {
-        let mut bytes = Cursor::new(Vec::new());
-        block.zcash_serialize(&mut bytes)?;
+        let bytes = block.zcash_serialize_to_vec()?;
+        let bytes = &mut bytes.as_slice();
 
         // Check the block size limit
-        if bytes.position() <= MAX_BLOCK_BYTES {
-            bytes.set_position(0);
-            let other_block = Block::zcash_deserialize(&mut bytes)?;
+        if bytes.len() <= MAX_BLOCK_BYTES as _ {
+            let other_block = bytes.zcash_deserialize_into()?;
 
             prop_assert_eq![block, other_block];
         } else {
-            let serialization_err = Block::zcash_deserialize(&mut bytes)
+            let serialization_err = bytes.zcash_deserialize_into::<Block>()
                 .expect_err("blocks larger than the maximum size should fail");
             match serialization_err {
                 SerializationError::Io(io_err) => {
