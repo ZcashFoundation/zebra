@@ -1,7 +1,7 @@
 use proptest::{arbitrary::any, collection::vec, option, prelude::*};
 
 use crate::{
-    serialization::{ZcashDeserializeInto, ZcashDeserialize, ZcashSerialize},
+    serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
     types::LockTime,
 };
 
