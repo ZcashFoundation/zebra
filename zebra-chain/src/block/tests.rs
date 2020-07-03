@@ -1,20 +1,18 @@
+use super::*;
+use crate::equihash_solution::EquihashSolution;
+use crate::merkle_tree::MerkleTreeRootHash;
+use crate::note_commitment_tree::SaplingNoteTreeRootHash;
+use crate::serialization::{
+    SerializationError, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
+};
+use crate::sha256d_writer::Sha256dWriter;
 use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
-use std::io::{Cursor, ErrorKind, Write};
-
 use proptest::{
     arbitrary::{any, Arbitrary},
     prelude::*,
 };
+use std::io::{Cursor, ErrorKind, Write};
 
-use crate::equihash_solution::EquihashSolution;
-use crate::merkle_tree::MerkleTreeRootHash;
-use crate::note_commitment_tree::SaplingNoteTreeRootHash;
-use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
-use crate::sha256d_writer::Sha256dWriter;
-
-use super::*;
-
-#[cfg(test)]
 impl Arbitrary for BlockHeader {
     type Parameters = ();
 
@@ -117,16 +115,20 @@ fn deserialize_blockheader() {
 
 #[test]
 fn deserialize_block() {
-    Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
+    zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+        .zcash_deserialize_into::<Block>()
         .expect("block test vector should deserialize");
-    Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..])
+    zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into::<Block>()
         .expect("block test vector should deserialize");
     // https://explorer.zcha.in/blocks/415000
-    Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])
+    zebra_test::vectors::BLOCK_MAINNET_415000_BYTES
+        .zcash_deserialize_into::<Block>()
         .expect("block test vector should deserialize");
     // https://explorer.zcha.in/blocks/434873
     // this one has a bad version field
-    Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_434873_BYTES[..])
+    zebra_test::vectors::BLOCK_MAINNET_434873_BYTES
+        .zcash_deserialize_into::<Block>()
         .expect("block test vector should deserialize");
 }
 

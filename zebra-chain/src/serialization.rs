@@ -309,17 +309,17 @@ impl<R: io::Read + ?Sized> ReadZcashExt for R {}
 /// Helper for deserializing more more succinctly via type inference
 pub trait ZcashDeserializeInto {
     /// Deserialize based on type inference
-    fn zcash_deserialize_into<T>(&self) -> Result<T, SerializationError>
+    fn zcash_deserialize_into<T>(self) -> Result<T, SerializationError>
     where
         T: ZcashDeserialize;
 }
 
-impl ZcashDeserializeInto for Vec<u8> {
-    fn zcash_deserialize_into<T>(&self) -> Result<T, SerializationError>
+impl<R: io::Read> ZcashDeserializeInto for R {
+    fn zcash_deserialize_into<T>(self) -> Result<T, SerializationError>
     where
         T: ZcashDeserialize,
     {
-        T::zcash_deserialize(&self[..])
+        T::zcash_deserialize(self)
     }
 }
 
