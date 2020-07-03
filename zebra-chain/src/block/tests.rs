@@ -99,7 +99,8 @@ fn blockheaderhash_from_blockheader() {
         .expect("these bytes to serialize from a blockheader without issue");
 
     bytes.set_position(0);
-    let other_header = BlockHeader::zcash_deserialize(&mut bytes)
+    let other_header = bytes
+        .zcash_deserialize_into()
         .expect("these bytes to deserialize into a blockheader without issue");
 
     assert_eq!(blockheader, other_header);
@@ -108,9 +109,9 @@ fn blockheaderhash_from_blockheader() {
 #[test]
 fn deserialize_blockheader() {
     // https://explorer.zcha.in/blocks/415000
-    let _header =
-        BlockHeader::zcash_deserialize(&zebra_test::vectors::HEADER_MAINNET_415000_BYTES[..])
-            .expect("blockheader test vector should deserialize");
+    let _header = zebra_test::vectors::HEADER_MAINNET_415000_BYTES
+        .zcash_deserialize_into::<BlockHeader>()
+        .expect("blockheader test vector should deserialize");
 }
 
 #[test]

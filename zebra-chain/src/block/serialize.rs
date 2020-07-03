@@ -5,6 +5,7 @@ use std::io;
 use crate::equihash_solution::EquihashSolution;
 use crate::merkle_tree::MerkleTreeRootHash;
 use crate::note_commitment_tree::SaplingNoteTreeRootHash;
+use crate::serialization::ZcashDeserializeInto;
 use crate::serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize};
 
 use super::Block;
@@ -89,10 +90,10 @@ impl ZcashSerialize for Block {
 impl ZcashDeserialize for Block {
     fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
         // If the limit is reached, we'll get an UnexpectedEof error
-        let mut limited_reader = reader.take(MAX_BLOCK_BYTES);
+        let limited_reader = &mut reader.take(MAX_BLOCK_BYTES);
         Ok(Block {
-            header: BlockHeader::zcash_deserialize(&mut limited_reader)?,
-            transactions: Vec::zcash_deserialize(&mut limited_reader)?,
+            header: limited_reader.zcash_deserialize_into()?,
+            transactions: limited_reader.zcash_deserialize_into()?,
         })
     }
 }
