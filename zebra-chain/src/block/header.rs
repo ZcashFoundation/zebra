@@ -77,7 +77,7 @@ impl BlockHeader {
 
         self.zcash_serialize(&mut input)?;
 
-        solution.is_valid(input.as_slice(), nonce)?;
+        solution.is_valid(&input.as_slice()[0..EquihashSolution::INPUT_LENGTH], nonce)?;
 
         Ok(())
     }

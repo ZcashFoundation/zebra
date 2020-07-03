@@ -33,8 +33,14 @@ pub struct EquihashSolution(
 );
 
 impl EquihashSolution {
+    /// The length of the portion of the header used as input when verifying
+    /// equihash solutions, in bytes
+    pub const INPUT_LENGTH: usize = 4 + 32 * 3 + 4 * 2;
+
     /// Validate an equihash solution
     pub(crate) fn is_valid(&self, input: &[u8], nonce: &[u8]) -> Result<(), Error> {
+        assert_eq!(Self::INPUT_LENGTH, input.len());
+
         let n = 200;
         let k = 9;
 
@@ -122,6 +128,7 @@ mod tests {
 
         #[test]
         fn equihash_solution_roundtrip(solution in any::<EquihashSolution>()) {
+            zebra_test::init();
             let mut data = Vec::new();
 
             solution.zcash_serialize(&mut data).expect("randomized EquihashSolution should serialize");
@@ -133,11 +140,11 @@ mod tests {
         }
     }
 
-    const EQUIHASH_NONCE_BLOCK_OFFSET: usize = 4 + 32 * 3 + 4 * 2;
-    const EQUIHASH_SOLUTION_BLOCK_OFFSET: usize = EQUIHASH_NONCE_BLOCK_OFFSET + 32;
+    const EQUIHASH_SOLUTION_BLOCK_OFFSET: usize = EquihashSolution::INPUT_LENGTH + 32;
 
     #[test]
     fn equihash_solution_test_vector() {
+        zebra_test::init();
         let solution_bytes =
             &zebra_test::vectors::HEADER_MAINNET_415000_BYTES[EQUIHASH_SOLUTION_BLOCK_OFFSET..];
         let solution = EquihashSolution::zcash_deserialize(solution_bytes)
@@ -153,27 +160,15 @@ mod tests {
 
     #[test]
     fn equihash_solution_test_vector_is_valid() -> color_eyre::eyre::Result<()> {
+        zebra_test::init();
         let block = Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])
             .expect("block test vector should deserialize");
 
         let solution = block.header.solution;
         let header_bytes =
-            &zebra_test::vectors::HEADER_MAINNET_415000_BYTES[..EQUIHASH_NONCE_BLOCK_OFFSET];
+            &zebra_test::vectors::HEADER_MAINNET_415000_BYTES[..EquihashSolution::INPUT_LENGTH];
 
         solution.is_valid(header_bytes, &block.header.nonce)?;
-
-        let heade_bytes =
-            &zebra_test::vectors::HEADER_MAINNET_415000_BYTES[..EQUIHASH_NONCE_BLOCK_OFFSET - 1];
-        let headerr_bytes =
-            &zebra_test::vectors::HEADER_MAINNET_415000_BYTES[..EQUIHASH_NONCE_BLOCK_OFFSET + 1];
-
-        solution
-            .is_valid(heade_bytes, &block.header.nonce)
-            .expect_err("truncated header shouldn't validate");
-
-        solution
-            .is_valid(headerr_bytes, &block.header.nonce)
-            .expect_err("extra large header shouldn't validate");
 
         Ok(())
     }
@@ -191,11 +186,13 @@ mod tests {
 
     #[test]
     fn equihash_prop_test_solution() -> color_eyre::eyre::Result<()> {
+        zebra_test::init();
+
         for block_bytes in zebra_test::vectors::TEST_BLOCKS.iter() {
             let block = crate::block::Block::zcash_deserialize(&block_bytes[..])
                 .expect("block test vector should deserialize");
             let solution = block.header.solution;
-            let header_bytes = &block_bytes[..EQUIHASH_NONCE_BLOCK_OFFSET];
+            let header_bytes = &block_bytes[..EquihashSolution::INPUT_LENGTH];
 
             solution.is_valid(header_bytes, &block.header.nonce)?;
 
@@ -222,11 +219,13 @@ mod tests {
 
     #[test]
     fn equihash_prop_test_nonce() -> color_eyre::eyre::Result<()> {
+        zebra_test::init();
+
         for block_bytes in zebra_test::vectors::TEST_BLOCKS.iter() {
             let block = crate::block::Block::zcash_deserialize(&block_bytes[..])
                 .expect("block test vector should deserialize");
             let solution = block.header.solution;
-            let header_bytes = &block_bytes[..EQUIHASH_NONCE_BLOCK_OFFSET];
+            let header_bytes = &block_bytes[..EquihashSolution::INPUT_LENGTH];
 
             solution.is_valid(header_bytes, &block.header.nonce)?;
 
@@ -242,7 +241,7 @@ mod tests {
 
     prop_compose! {
         fn randomized_input(real_input: Vec<u8>)
-            (fake_input in vec(any::<u8>(), EQUIHASH_NONCE_BLOCK_OFFSET)
+            (fake_input in vec(any::<u8>(), EquihashSolution::INPUT_LENGTH)
                 .prop_filter("input must not be the actual input", move |fake_input| {
                     fake_input != &real_input
                 })
@@ -253,11 +252,13 @@ mod tests {
 
     #[test]
     fn equihash_prop_test_input() -> color_eyre::eyre::Result<()> {
+        zebra_test::init();
+
         for block_bytes in zebra_test::vectors::TEST_BLOCKS.iter() {
             let block = crate::block::Block::zcash_deserialize(&block_bytes[..])
                 .expect("block test vector should deserialize");
             let solution = block.header.solution;
-            let header_bytes = &block_bytes[..EQUIHASH_NONCE_BLOCK_OFFSET];
+            let header_bytes = &block_bytes[..EquihashSolution::INPUT_LENGTH];
 
             solution.is_valid(header_bytes, &block.header.nonce)?;
 
@@ -283,6 +284,8 @@ mod tests {
 
     #[test]
     fn equihash_solution_size_field() {
+        zebra_test::init();
+
         for size in EQUIHASH_SIZE_TESTS {
             let mut data = Vec::new();
             data.write_compactsize(*size as u64)
