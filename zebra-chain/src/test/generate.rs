@@ -1,5 +1,4 @@
 //! Generate blockchain testing constructions
-use super::vectors;
 use chrono::{DateTime, NaiveDateTime, Utc};
 use std::sync::Arc;
 
@@ -51,7 +50,7 @@ pub fn oversized_single_transaction_block() -> Block {
 // Implementation of block generation with multiple transactions
 fn multi_transaction_block(oversized: bool) -> Block {
     // A dummy transaction
-    let tx = Transaction::zcash_deserialize(&vectors::DUMMY_TX1[..]).unwrap();
+    let tx = Transaction::zcash_deserialize(&zebra_test::vectors::DUMMY_TX1[..]).unwrap();
 
     // A block header
     let blockheader = block_header();
@@ -64,7 +63,7 @@ fn multi_transaction_block(oversized: bool) -> Block {
 
     // Calculate the number of transactions we need
     let mut max_transactions_in_block =
-        (MAX_BLOCK_BYTES as usize - data_header.len()) / *&vectors::DUMMY_TX1[..].len();
+        (MAX_BLOCK_BYTES as usize - data_header.len()) / *&zebra_test::vectors::DUMMY_TX1[..].len();
     if oversized {
         max_transactions_in_block = max_transactions_in_block + 1;
     }
@@ -84,8 +83,8 @@ fn multi_transaction_block(oversized: bool) -> Block {
 // Implementation of block generation with one transaction and multiple inputs
 fn single_transaction_block(oversized: bool) -> Block {
     // Dummy input and output
-    let input = TransparentInput::zcash_deserialize(&vectors::DUMMY_INPUT1[..]).unwrap();
-    let output = TransparentOutput::zcash_deserialize(&vectors::DUMMY_OUTPUT1[..]).unwrap();
+    let input = TransparentInput::zcash_deserialize(&zebra_test::vectors::DUMMY_INPUT1[..]).unwrap();
+    let output = TransparentOutput::zcash_deserialize(&zebra_test::vectors::DUMMY_OUTPUT1[..]).unwrap();
 
     // A block header
     let blockheader = block_header();
@@ -109,9 +108,9 @@ fn single_transaction_block(oversized: bool) -> Block {
     // Calculate the number of inputs we need
     let mut max_inputs_in_tx = (MAX_BLOCK_BYTES as usize
         - data_header.len()
-        - *&vectors::DUMMY_OUTPUT1[..].len()
+        - *&zebra_test::vectors::DUMMY_OUTPUT1[..].len()
         - data_locktime.len())
-        / (*&vectors::DUMMY_INPUT1[..].len() - 1);
+        / (*&zebra_test::vectors::DUMMY_INPUT1[..].len() - 1);
 
     if oversized {
         max_inputs_in_tx = max_inputs_in_tx + 1;
