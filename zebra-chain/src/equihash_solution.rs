@@ -15,10 +15,6 @@ use crate::{
 /// The size of an Equihash solution in bytes (always 1344).
 pub(crate) const EQUIHASH_SOLUTION_SIZE: usize = 1344;
 
-/// equihash solution is invalid
-#[derive(Debug, displaydoc::Display, thiserror::Error)]
-pub struct Error;
-
 /// Equihash Solution.
 ///
 /// A wrapper around [u8; 1344] because Rust doesn't implement common
@@ -38,17 +34,13 @@ impl EquihashSolution {
     pub const INPUT_LENGTH: usize = 4 + 32 * 3 + 4 * 2;
 
     /// Validate an equihash solution
-    pub(crate) fn is_valid(&self, input: &[u8], nonce: &[u8]) -> Result<(), Error> {
+    pub(crate) fn is_valid(&self, input: &[u8], nonce: &[u8]) -> Result<(), equihash::Error> {
         assert_eq!(Self::INPUT_LENGTH, input.len());
 
         let n = 200;
         let k = 9;
 
-        if !equihash::is_valid_solution(n, k, input, nonce, &self.0) {
-            Err(Error)
-        } else {
-            Ok(())
-        }
+        equihash::is_valid_solution(n, k, input, nonce, &self.0)
     }
 }
 

@@ -87,7 +87,7 @@ impl BlockHeader {
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error(transparent)]
-    EquihashInvalid(#[from] crate::equihash_solution::Error),
+    EquihashInvalid(#[from] equihash::Error),
     #[error("cannot reserialize header for verification")]
     Serialize(#[from] std::io::Error),
 }
