@@ -88,42 +88,38 @@ impl ZcashDeserialize for EquihashSolution {
 }
 
 #[cfg(test)]
-impl Arbitrary for EquihashSolution {
-    type Parameters = ();
+mod tests {
+    use super::*;
+    use crate::serialization::ZcashDeserializeInto;
 
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        (vec(any::<u8>(), EQUIHASH_SOLUTION_SIZE))
-            .prop_map(|v| {
-                let mut bytes = [0; EQUIHASH_SOLUTION_SIZE];
-                bytes.copy_from_slice(v.as_slice());
-                Self(bytes)
-            })
-            .boxed()
+    impl Arbitrary for EquihashSolution {
+        type Parameters = ();
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            (vec(any::<u8>(), EQUIHASH_SOLUTION_SIZE))
+                .prop_map(|v| {
+                    let mut bytes = [0; EQUIHASH_SOLUTION_SIZE];
+                    bytes.copy_from_slice(v.as_slice());
+                    Self(bytes)
+                })
+                .boxed()
+        }
+
+        type Strategy = BoxedStrategy<Self>;
     }
 
-    type Strategy = BoxedStrategy<Self>;
-}
-
-#[cfg(test)]
-mod tests {
-
-    use super::*;
-
-    proptest! {
-
-        #[test]
-        fn equihash_solution_roundtrip(solution in any::<EquihashSolution>()) {
-
-            let mut data = Vec::new();
-
-            solution.zcash_serialize(&mut data).expect("randomized EquihashSolution should serialize");
-
-            let solution2 = EquihashSolution::zcash_deserialize(&data[..])
+    #[test]
+    fn equihash_solution_roundtrip() {
+        proptest!(|(solution in any::<EquihashSolution>())| {
+            let data = solution
+                .zcash_serialize_to_vec()
+                .expect("randomized EquihashSolution should serialize");
+            let solution2 = data
+                .zcash_deserialize_into()
                 .expect("randomized EquihashSolution should deserialize");
 
             prop_assert_eq![solution, solution2];
-        }
-
+        });
     }
 
     const EQUIHASH_NONCE_BLOCK_OFFSET: usize = 4 + 32 * 3 + 4 * 2;
@@ -133,7 +129,9 @@ mod tests {
     fn equihash_solution_test_vector() {
         let solution_bytes =
             &zebra_test::vectors::HEADER_MAINNET_415000_BYTES[EQUIHASH_SOLUTION_BLOCK_OFFSET..];
-        let solution = EquihashSolution::zcash_deserialize(solution_bytes)
+
+        let solution = solution_bytes
+            .zcash_deserialize_into::<EquihashSolution>()
             .expect("Test vector EquihashSolution should deserialize");
 
         let mut data = Vec::new();
