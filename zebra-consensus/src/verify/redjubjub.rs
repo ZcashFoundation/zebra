@@ -12,8 +12,8 @@ use tower::Service;
 use tower_batch::BatchControl;
 
 /// RedJubjub signature verifier service
-pub struct RedJubjubVerifier<T: SigType> {
-    batch: batch::Verifier<T>,
+pub struct RedJubjubVerifier {
+    batch: batch::Verifier,
     // This uses a "broadcast" channel, which is an mpmc channel. Tokio also
     // provides a spmc channel, "watch", but it only keeps the latest value, so
     // using it would require thinking through whether it was possible for
@@ -22,10 +22,10 @@ pub struct RedJubjubVerifier<T: SigType> {
 }
 
 #[allow(clippy::new_without_default)]
-impl<T: SigType> RedJubjubVerifier<T> {
+impl RedJubjubVerifier {
     /// Create a new RedJubjubVerifier instance
     pub fn new() -> Self {
-        let batch = batch::Verifier::<T>::default();
+        let batch = batch::Verifier::default();
         // XXX(hdevalence) what's a reasonable choice here?
         let (tx, _) = channel(10);
         Self { tx, batch }
@@ -33,9 +33,9 @@ impl<T: SigType> RedJubjubVerifier<T> {
 }
 
 /// Type alias to clarify that this batch::Item is a RedJubjubItem
-pub type RedJubjubItem<T> = batch::Item<T>;
+pub type RedJubjubItem = batch::Item;
 
-impl<T: SigType> Service<BatchControl<RedJubjubItem<T>>> for RedJubjubVerifier<T> {
+impl<'msg> Service<BatchControl<RedJubjubItem>> for RedJubjubVerifier {
     type Response = ();
     type Error = Error;
     type Future = Pin<Box<dyn Future<Output = Result<(), Error>> + Send + 'static>>;
@@ -44,7 +44,7 @@ impl<T: SigType> Service<BatchControl<RedJubjubItem<T>>> for RedJubjubVerifier<T
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, req: BatchControl<RedJubjubItem<T>>) -> Self::Future {
+    fn call(&mut self, req: BatchControl<RedJubjubItem>) -> Self::Future {
         match req {
             BatchControl::Item(item) => {
                 tracing::trace!("got item");
@@ -73,7 +73,7 @@ impl<T: SigType> Service<BatchControl<RedJubjubItem<T>>> for RedJubjubVerifier<T
     }
 }
 
-impl<T: SigType> Drop for RedJubjubVerifier<T> {
+impl Drop for RedJubjubVerifier {
     fn drop(&mut self) {
         // We need to flush the current batch in case there are still any pending futures.
         let batch = mem::take(&mut self.batch);
@@ -92,22 +92,33 @@ mod tests {
     use tower::ServiceExt;
     use tower_batch::Batch;
 
-    async fn sign_and_verify<V, T>(mut verifier: V, n: usize) -> Result<(), V::Error>
+    async fn sign_and_verify<V>(mut verifier: V, n: usize) -> Result<(), V::Error>
     where
-        T: SigType,
-        V: Service<RedJubjubItem<T>, Response = ()>,
+        V: Service<RedJubjubItem, Response = ()>,
     {
         let rng = thread_rng();
         let mut results = FuturesUnordered::new();
         for i in 0..n {
             let span = tracing::trace_span!("sig", i);
-            let sk = SigningKey::<T>::new(rng);
-            let vk = VerificationKey::from(&sk);
             let msg = b"BatchVerifyTest";
-            let sig = sk.sign(rng, &msg[..]);
 
-            verifier.ready_and().await?;
-            results.push(span.in_scope(|| verifier.call((vk.into(), sig, msg).into())))
+            match i % 2 {
+                0 => {
+                    let sk = SigningKey::<SpendAuth>::new(rng);
+                    let vk = VerificationKey::from(&sk);
+                    let sig = sk.sign(rng, &msg[..]);
+                    verifier.ready_and().await?;
+                    results.push(span.in_scope(|| verifier.call((vk.into(), sig, msg).into())))
+                }
+                1 => {
+                    let sk = SigningKey::<Binding>::new(rng);
+                    let vk = VerificationKey::from(&sk);
+                    let sig = sk.sign(rng, &msg[..]);
+                    verifier.ready_and().await?;
+                    results.push(span.in_scope(|| verifier.call((vk.into(), sig, msg).into())))
+                }
+                _ => panic!(),
+            }
         }
 
         while let Some(result) = results.next().await {
@@ -124,11 +135,7 @@ mod tests {
 
         // Use a very long max_latency and a short timeout to check that
         // flushing is happening based on hitting max_items.
-        let verifier = Batch::new(
-            RedJubjubVerifier::<Binding>::new(),
-            10,
-            Duration::from_secs(1000),
-        );
+        let verifier = Batch::new(RedJubjubVerifier::new(), 10, Duration::from_secs(1000));
         timeout(Duration::from_secs(1), sign_and_verify(verifier, 100)).await?
     }
 
@@ -139,11 +146,7 @@ mod tests {
 
         // Use a very high max_items and a short timeout to check that
         // flushing is happening based on hitting max_latency.
-        let verifier = Batch::new(
-            RedJubjubVerifier::<SpendAuth>::new(),
-            100,
-            Duration::from_millis(500),
-        );
+        let verifier = Batch::new(RedJubjubVerifier::new(), 100, Duration::from_millis(500));
         timeout(Duration::from_secs(1), sign_and_verify(verifier, 10)).await?
     }
 }

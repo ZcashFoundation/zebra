@@ -1460,7 +1460,7 @@ dependencies = [
 [[package]]
 name = "redjubjub"
 version = "0.1.1"
-source = "git+https://github.com/ZcashFoundation/redjubjub.git?branch=batch#469e853ac9cf184eeeb11b7aa564f45c49374b76"
+source = "git+https://github.com/ZcashFoundation/redjubjub.git?branch=main#ba256655ddf84dac7ea6281a1b398495e46d232a"
 dependencies = [
  "blake2b_simd",
  "byteorder",
@@ -2409,7 +2409,7 @@ dependencies = [
  "futures",
  "futures-util",
  "rand 0.7.3",
- "redjubjub 0.1.1 (git+https://github.com/ZcashFoundation/redjubjub.git?branch=batch)",
+ "redjubjub 0.1.1 (git+https://github.com/ZcashFoundation/redjubjub.git?branch=main)",
  "spandoc",
  "tokio",
  "tower",
