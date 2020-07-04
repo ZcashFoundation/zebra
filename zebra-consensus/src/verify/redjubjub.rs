@@ -137,7 +137,7 @@ mod tests {
         // Use a very long max_latency and a short timeout to check that
         // flushing is happening based on hitting max_items.
         let verifier = Batch::new(RedJubjubVerifier::new(), 10, Duration::from_secs(1000));
-        timeout(Duration::from_secs(1), sign_and_verify(verifier, 100)).await?
+        timeout(Duration::from_secs(2), sign_and_verify(verifier, 100)).await?
     }
 
     #[tokio::test]
@@ -148,6 +148,6 @@ mod tests {
         // Use a very high max_items and a short timeout to check that
         // flushing is happening based on hitting max_latency.
         let verifier = Batch::new(RedJubjubVerifier::new(), 100, Duration::from_millis(500));
-        timeout(Duration::from_secs(1), sign_and_verify(verifier, 10)).await?
+        timeout(Duration::from_secs(2), sign_and_verify(verifier, 10)).await?
     }
 }
