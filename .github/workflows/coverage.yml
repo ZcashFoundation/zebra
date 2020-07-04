@@ -1,16 +1,18 @@
-name: Coverage
+name: CI
 
 on:
   pull_request:
     paths:
-    - '**.rs'
+      - '**.rs'
   push:
+    branches:
+      - main
     paths:
-    - '**.rs'
+      - '**.rs'
 
 jobs:
 
-  codecov:
+  coverage:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
