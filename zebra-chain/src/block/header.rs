@@ -48,7 +48,7 @@ pub struct BlockHeader {
     /// hash must be less than or equal to, in the same nBits format
     /// used by Bitcoin.
     ///
-    /// For a block at block height height, bits MUST be equal to
+    /// For a block at block height, bits MUST be equal to
     /// ThresholdBits(height).
     ///
     /// [Bitcoin-nBits](https://bitcoin.org/en/developer-reference#target-nbits)
