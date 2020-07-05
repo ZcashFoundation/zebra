@@ -106,7 +106,7 @@ where
     // 3. Outgoing peers we connect to in response to load.
     let mut candidates = CandidateSet::new(address_book.clone(), peer_set.clone());
 
-    // We need to await candidates.update() here, because Zcashd only sends one
+    // We need to await candidates.update() here, because zcashd only sends one
     // `addr` message per connection, and if we only have one initial peer we
     // need to ensure that its `addr` message is used by the crawler.
     // XXX this should go in CandidateSet::new, but we need init() -> Result<_,_>
