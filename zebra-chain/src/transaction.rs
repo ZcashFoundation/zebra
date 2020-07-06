@@ -9,8 +9,6 @@ mod shielded_data;
 mod transparent;
 
 #[cfg(test)]
-mod test_vectors;
-#[cfg(test)]
 mod tests;
 
 pub use hash::TransactionHash;
@@ -19,7 +17,7 @@ pub use shielded_data::{Output, ShieldedData, Spend};
 pub use transparent::{CoinbaseData, OutPoint, TransparentInput, TransparentOutput};
 
 use crate::proofs::{Bctv14Proof, Groth16Proof};
-use crate::types::{BlockHeight, LockTime};
+use crate::types::{amount::Amount, BlockHeight, LockTime};
 
 /// A Zcash transaction.
 ///
@@ -84,8 +82,7 @@ pub enum Transaction {
         /// The latest block height that this transaction can be added to the chain.
         expiry_height: BlockHeight,
         /// The net value of Sapling spend transfers minus output transfers.
-        // XXX refine this to an Amount type.
-        value_balance: i64,
+        value_balance: Amount,
         /// The shielded data for this transaction, if any.
         shielded_data: Option<ShieldedData>,
         /// The JoinSplit data for this transaction, if any.

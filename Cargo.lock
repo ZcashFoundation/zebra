@@ -409,6 +409,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "displaydoc"
+version = "0.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e6269d127174b18c665e683e23c2c55d3735fadbec4181c7c70b0450b764bfa5"
+dependencies = [
+ "proc-macro2 1.0.18",
+ "quote 1.0.7",
+ "syn 1.0.33",
+]
+
+[[package]]
 name = "dtoa"
 version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -426,6 +437,16 @@ dependencies = [
  "serde",
  "sha2",
  "thiserror",
+]
+
+[[package]]
+name = "equihash"
+version = "0.0.0"
+source = "git+https://github.com/ZcashFoundation/librustzcash.git?branch=equihash-crate#5b2c71e112ade5488ba49bb16f50897d513702f8"
+dependencies = [
+ "blake2b_simd",
+ "byteorder",
+ "log",
 ]
 
 [[package]]
@@ -2299,7 +2320,10 @@ dependencies = [
  "bs58",
  "byteorder",
  "chrono",
+ "color-eyre",
+ "displaydoc",
  "ed25519-zebra",
+ "equihash",
  "futures",
  "hex",
  "jubjub",
@@ -2438,6 +2462,7 @@ dependencies = [
  "tracing-log",
  "tracing-subscriber",
  "zebra-chain",
+ "zebra-consensus",
  "zebra-network",
  "zebra-state",
 ]
