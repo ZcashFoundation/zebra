@@ -306,7 +306,7 @@ pub trait ReadZcashExt: io::Read {
 /// Mark all types implementing `Read` as implementing the extension.
 impl<R: io::Read + ?Sized> ReadZcashExt for R {}
 
-/// Helper for deserializing more more succinctly via type inference
+/// Helper for deserializing more succinctly via type inference
 pub trait ZcashDeserializeInto {
     /// Deserialize based on type inference
     fn zcash_deserialize_into<T>(self) -> Result<T, SerializationError>
