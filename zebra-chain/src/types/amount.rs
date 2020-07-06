@@ -21,6 +21,10 @@ impl<C> Amount<C> {
     {
         self.0.try_into()
     }
+
+    pub fn to_bytes(&self) -> [u8; 8] {
+        self.0.to_le_bytes()
+    }
 }
 
 impl<C> std::ops::Add<Amount<C>> for Amount<C>

@@ -1,33 +1,48 @@
 //!
 #![allow(dead_code)]
 
+use super::{memo::Memo, *};
+use crate::serde_helpers;
+use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
+use crate::types::amount::{Amount, NonNegative};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::{
     fmt,
     io::{self},
 };
 
-#[cfg(test)]
-use proptest::{collection::vec, prelude::*};
-
-use crate::serde_helpers;
-use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
-
-use super::{memo::Memo, *};
-
 ///
 pub struct Note {
     // TODO: refine type as a SHA-256d output derived from a spending key.
     paying_key: [u8; 32],
-    value: u64,
+    value: Amount<NonNegative>,
     // TODO: refine type as the input to the PRF that results in a nullifier.
     nullifier_seed: [u8; 32],
     note_commitment_randomness: NoteCommitmentRandomness,
 }
 
+impl Note {
+    pub fn note_commitment(&self) -> NoteCommitment {
+        let leading_byte: u8 = 0xB0;
+        let mut hasher = Sha256::default();
+        hasher.input([leading_byte]);
+        hasher.input(self.paying_key);
+        hasher.input(self.value.to_bytes());
+        hasher.input(self.nullifier_seed);
+        hasher.input(self.note_commitment_randomness);
+        let hash = hasher.result().into();
+        NoteCommitment { hash }
+    }
+}
+
+pub struct NoteCommitment {
+    hash: [u8; 32],
+}
+
 /// The decrypted form of encrypted Sprout notes on the blockchain.
 pub struct NotePlaintext {
-    value: u64,
+    value: Amount<NonNegative>,
     // TODO: refine type
     rho: [u8; 32],
     // TODO: refine as jub-jub appropriate in the base field.
@@ -81,6 +96,9 @@ impl ZcashDeserialize for EncryptedCiphertext {
         Ok(Self(bytes))
     }
 }
+
+#[cfg(test)]
+use proptest::{collection::vec, prelude::*};
 
 #[cfg(test)]
 impl Arbitrary for EncryptedCiphertext {
