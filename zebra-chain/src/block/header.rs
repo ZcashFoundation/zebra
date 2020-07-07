@@ -48,8 +48,8 @@ pub struct BlockHeader {
     /// hash must be less than or equal to, in the same nBits format
     /// used by Bitcoin.
     ///
-    /// For a block at block height height, bits MUST be equal to
-    /// ThresholdBits(height).
+    /// For a block at block height `height`, bits MUST be equal to
+    /// `ThresholdBits(height)`.
     ///
     /// [Bitcoin-nBits](https://bitcoin.org/en/developer-reference#target-nbits)
     // parity-zcash has their own wrapper around u32 for this field, see #572 and:

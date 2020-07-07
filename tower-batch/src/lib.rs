@@ -62,7 +62,7 @@
 //!
 //! ## Batch processing middleware
 //!
-//! Tower's [`Service`](tower::Service) interface is an an attractive choice for
+//! Tower's [`Service`](tower::Service) interface is an attractive choice for
 //! implementing this model for two reasons. First, it makes it easy to express
 //! generic bounds on [`Service`](tower::Service)s, allowing higher-level
 //! verification services to be written generically with respect to the
