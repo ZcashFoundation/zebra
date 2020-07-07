@@ -456,7 +456,7 @@ dependencies = [
 [[package]]
 name = "equihash"
 version = "0.0.0"
-source = "git+https://github.com/ZcashFoundation/librustzcash.git?branch=equihash-errors#a513e802fd7a4fe322e726b947909e53c522bc40"
+source = "git+https://github.com/ZcashFoundation/librustzcash.git?branch=equihash-crate#ae2a2481333f27b5cdb5eb53b0754fb5901b7e5f"
 dependencies = [
  "blake2b_simd",
  "byteorder",
