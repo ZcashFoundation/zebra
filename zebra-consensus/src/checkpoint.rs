@@ -494,13 +494,6 @@ impl CheckpointVerifier {
             .rev()
             .map(|(key, _)| *key)
             .collect();
-        // There can be zero or more interim checkpoints
-        let mut interim_checkpoint_heights: Vec<BlockHeight> = self
-            .checkpoint_list
-            .range(current_range)
-            .rev()
-            .map(|(key, _)| *key)
-            .collect();
         // A list of pending valid blocks, in reverse chain order
         let mut rev_valid_blocks = Vec::new();
 
@@ -515,23 +508,15 @@ impl CheckpointVerifier {
                 "the current checkpoint range has continous Blocks"
             );
 
-            if !interim_checkpoint_heights.is_empty()
-                && current_height == interim_checkpoint_heights[0]
-            {
-                let checkpoint_hash = self
-                    .checkpoint_list
-                    .get(&current_height)
-                    .expect("the list only contains checkpoint heights");
+            // Check interim checkpoints
+            if let Some(checkpoint_hash) = self.checkpoint_list.get(&current_height) {
                 // We assume the checkpoints are valid. And we have verified back
                 // from the target checkpoint, so the last block must also be valid.
                 // This is probably a bad checkpoint list, a zebra bug, or a bad
                 // chain (in a testing mode like regtest).
-                assert!(
-                    expected_hash == *checkpoint_hash,
-                    "checkpoints in the range should match: bad checkpoint list, zebra bug, or bad chain"
+                assert_eq!(expected_hash, *checkpoint_hash,
+                           "checkpoints in the range should match: bad checkpoint list, zebra bug, or bad chain"
                 );
-                // Delete the checkpoint height we just used.
-                interim_checkpoint_heights.remove(0);
             }
 
             // Find a queued block at each height that is part of the hash chain.
@@ -587,8 +572,9 @@ impl CheckpointVerifier {
                 }
 
                 // Ensure that we're making progress
-                assert!(
-                    self.previous_checkpoint_height() == old_prev_check_height,
+                assert_eq!(
+                    self.previous_checkpoint_height(),
+                    old_prev_check_height,
                     "processing must not change progress on failure"
                 );
                 let current_target = self.target_checkpoint_height();
@@ -605,13 +591,9 @@ impl CheckpointVerifier {
 
         // The checkpoint and the parent hash must match.
         // See the detailed checkpoint comparison comment above.
-        assert!(
-            expected_hash == previous_checkpoint_hash,
+        assert_eq!(
+            expected_hash, previous_checkpoint_hash,
             "the previous checkpoint should match: bad checkpoint list, zebra bug, or bad chain"
-        );
-        assert!(
-            interim_checkpoint_heights.is_empty(),
-            "all interim checkpoints in the target range should be verified"
         );
 
         // All the blocks we've kept are valid, so let's verify them
