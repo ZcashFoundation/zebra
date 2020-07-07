@@ -63,13 +63,13 @@ fn multi_transaction_block(oversized: bool) -> Block {
 
     // Calculate the number of transactions we need
     let mut max_transactions_in_block =
-        (MAX_BLOCK_BYTES as usize - data_header.len()) / *&zebra_test::vectors::DUMMY_TX1[..].len();
+        (MAX_BLOCK_BYTES as usize - data_header.len()) / zebra_test::vectors::DUMMY_TX1[..].len();
     if oversized {
-        max_transactions_in_block = max_transactions_in_block + 1;
+        max_transactions_in_block += 1;
     }
 
     // Create transactions to be just below or just above the limit
-    let many_transactions = std::iter::repeat(Arc::new(tx.clone()))
+    let many_transactions = std::iter::repeat(Arc::new(tx))
         .take(max_transactions_in_block)
         .collect::<Vec<_>>();
 
@@ -110,18 +110,18 @@ fn single_transaction_block(oversized: bool) -> Block {
     // Calculate the number of inputs we need
     let mut max_inputs_in_tx = (MAX_BLOCK_BYTES as usize
         - data_header.len()
-        - *&zebra_test::vectors::DUMMY_OUTPUT1[..].len()
+        - zebra_test::vectors::DUMMY_OUTPUT1[..].len()
         - data_locktime.len())
-        / (*&zebra_test::vectors::DUMMY_INPUT1[..].len() - 1);
+        / (zebra_test::vectors::DUMMY_INPUT1[..].len() - 1);
 
     if oversized {
-        max_inputs_in_tx = max_inputs_in_tx + 1;
+        max_inputs_in_tx += 1;
     }
 
     let mut outputs = Vec::new();
 
     // Create inputs to be just below the limit
-    let inputs = std::iter::repeat(input.clone())
+    let inputs = std::iter::repeat(input)
         .take(max_inputs_in_tx)
         .collect::<Vec<_>>();
 
@@ -130,15 +130,15 @@ fn single_transaction_block(oversized: bool) -> Block {
 
     // Create a big transaction
     let big_transaction = Transaction::V1 {
-        inputs: inputs.clone(),
-        outputs: outputs.clone(),
+        inputs,
+        outputs,
         lock_time: locktime,
     };
 
     // Put the big transaction into a block
-    let transactions = vec![Arc::new(big_transaction.clone())];
+    let transactions = vec![Arc::new(big_transaction)];
     Block {
         header: blockheader,
-        transactions: transactions.clone(),
+        transactions,
     }
 }
