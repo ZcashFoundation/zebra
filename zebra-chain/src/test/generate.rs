@@ -3,10 +3,7 @@ use chrono::{DateTime, NaiveDateTime, Utc};
 use std::sync::Arc;
 
 use crate::{
-    block::{Block, BlockHeader, BlockHeaderHash, MAX_BLOCK_BYTES},
-    equihash_solution::EquihashSolution,
-    merkle_tree::MerkleTreeRootHash,
-    note_commitment_tree::SaplingNoteTreeRootHash,
+    block::{Block, BlockHeader, MAX_BLOCK_BYTES},
     serialization::{ZcashDeserialize, ZcashSerialize},
     transaction::{Transaction, TransparentInput, TransparentOutput},
     types::LockTime,
@@ -14,17 +11,7 @@ use crate::{
 
 /// Generate a block header
 pub fn block_header() -> BlockHeader {
-    let some_bytes = [0; 32];
-    BlockHeader {
-        version: 4,
-        previous_block_hash: BlockHeaderHash(some_bytes),
-        merkle_root_hash: MerkleTreeRootHash(some_bytes),
-        final_sapling_root_hash: SaplingNoteTreeRootHash(some_bytes),
-        time: DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(61, 0), Utc),
-        bits: 0,
-        nonce: some_bytes,
-        solution: EquihashSolution([0; 1344]),
-    }
+    BlockHeader::zcash_deserialize(&zebra_test::vectors::DUMMY_HEADER[..]).unwrap()
 }
 
 /// Generate a block with multiple transactions just below limit
