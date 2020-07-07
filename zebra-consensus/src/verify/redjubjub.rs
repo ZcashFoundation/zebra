@@ -1,3 +1,5 @@
+//! Async RedJubjub batch verifier service
+
 use std::{
     future::Future,
     mem,
@@ -6,13 +8,13 @@ use std::{
 };
 
 use rand::thread_rng;
-use redjubjub::*;
+use redjubjub::{batch, *};
 use tokio::sync::broadcast::{channel, RecvError, Sender};
 use tower::Service;
 use tower_batch::BatchControl;
 
 /// RedJubjub signature verifier service
-pub struct RedJubjubVerifier {
+pub struct Verifier {
     batch: batch::Verifier,
     // This uses a "broadcast" channel, which is an mpmc channel. Tokio also
     // provides a spmc channel, "watch", but it only keeps the latest value, so
@@ -22,7 +24,7 @@ pub struct RedJubjubVerifier {
 }
 
 #[allow(clippy::new_without_default)]
-impl RedJubjubVerifier {
+impl Verifier {
     /// Create a new RedJubjubVerifier instance
     pub fn new() -> Self {
         let batch = batch::Verifier::default();
@@ -33,9 +35,9 @@ impl RedJubjubVerifier {
 }
 
 /// Type alias to clarify that this batch::Item is a RedJubjubItem
-pub type RedJubjubItem = batch::Item;
+pub type Item = batch::Item;
 
-impl Service<BatchControl<RedJubjubItem>> for RedJubjubVerifier {
+impl Service<BatchControl<Item>> for Verifier {
     type Response = ();
     type Error = Error;
     type Future = Pin<Box<dyn Future<Output = Result<(), Error>> + Send + 'static>>;
@@ -44,7 +46,7 @@ impl Service<BatchControl<RedJubjubItem>> for RedJubjubVerifier {
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, req: BatchControl<RedJubjubItem>) -> Self::Future {
+    fn call(&mut self, req: BatchControl<Item>) -> Self::Future {
         match req {
             BatchControl::Item(item) => {
                 tracing::trace!("got item");
@@ -74,7 +76,7 @@ impl Service<BatchControl<RedJubjubItem>> for RedJubjubVerifier {
     }
 }
 
-impl Drop for RedJubjubVerifier {
+impl Drop for Verifier {
     fn drop(&mut self) {
         // We need to flush the current batch in case there are still any pending futures.
         let batch = mem::take(&mut self.batch);
@@ -95,7 +97,7 @@ mod tests {
 
     async fn sign_and_verify<V>(mut verifier: V, n: usize) -> Result<(), V::Error>
     where
-        V: Service<RedJubjubItem, Response = ()>,
+        V: Service<Item, Response = ()>,
     {
         let rng = thread_rng();
         let mut results = FuturesUnordered::new();
@@ -136,7 +138,7 @@ mod tests {
 
         // Use a very long max_latency and a short timeout to check that
         // flushing is happening based on hitting max_items.
-        let verifier = Batch::new(RedJubjubVerifier::new(), 10, Duration::from_secs(1000));
+        let verifier = Batch::new(Verifier::new(), 10, Duration::from_secs(1000));
         timeout(Duration::from_secs(5), sign_and_verify(verifier, 100)).await?
     }
 
@@ -147,7 +149,7 @@ mod tests {
 
         // Use a very high max_items and a short timeout to check that
         // flushing is happening based on hitting max_latency.
-        let verifier = Batch::new(RedJubjubVerifier::new(), 100, Duration::from_millis(500));
+        let verifier = Batch::new(Verifier::new(), 100, Duration::from_millis(500));
         timeout(Duration::from_secs(5), sign_and_verify(verifier, 10)).await?
     }
 }

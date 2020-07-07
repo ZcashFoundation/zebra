@@ -4,9 +4,8 @@
 //! verification.
 
 mod block;
-mod redjubjub;
+pub mod redjubjub;
 mod script;
 mod transaction;
 
-pub use self::redjubjub::{RedJubjubItem, RedJubjubVerifier};
 pub use block::init;
