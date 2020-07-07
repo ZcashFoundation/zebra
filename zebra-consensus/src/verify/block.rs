@@ -50,6 +50,24 @@ pub(crate) fn node_time_check(
     }
 }
 
+/// [3.10]: https://zips.z.cash/protocol/protocol.pdf#coinbasetransactions
+pub(crate) fn coinbase_check(block: &Block) -> Result<(), Error> {
+    if block.coinbase_height().is_some() {
+        // No coinbase inputs in additional transactions allowed
+        if block
+            .transactions
+            .iter()
+            .skip(1)
+            .any(|tx| tx.contains_coinbase_input())
+        {
+            Err("coinbase input found in additional transaction")?
+        }
+        Ok(())
+    } else {
+        Err("no coinbase transaction in block")?
+    }
+}
+
 struct BlockVerifier<S> {
     /// The underlying `ZebraState`, possibly wrapped in other services.
     state_service: S,
@@ -94,6 +112,7 @@ where
 
             let now = Utc::now();
             node_time_check(block.header.time, now)?;
+            coinbase_check(block.as_ref())?;
 
             // `Tower::Buffer` requires a 1:1 relationship between `poll()`s
             // and `call()`s, because it reserves a buffer slot in each
@@ -158,7 +177,9 @@ mod tests {
     use tower::{util::ServiceExt, Service};
 
     use zebra_chain::block::Block;
+    use zebra_chain::block::BlockHeader;
     use zebra_chain::serialization::ZcashDeserialize;
+    use zebra_chain::transaction::Transaction;
 
     #[test]
     fn time_check_past_block() {
@@ -466,6 +487,73 @@ mod tests {
             .call(zebra_state::Request::GetBlock {
                 hash: arc_block.as_ref().into(),
             })
+            .await
+            .unwrap_err();
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[spandoc::spandoc]
+    async fn coinbase() -> Result<(), Report> {
+        install_tracing();
+
+        // Service variables
+        let state_service = Box::new(zebra_state::in_memory::init());
+        let mut block_verifier = super::init(state_service);
+
+        // Get a header of a block
+        let header =
+            BlockHeader::zcash_deserialize(&zebra_test::vectors::DUMMY_HEADER[..]).unwrap();
+
+        let ready_verifier_service = block_verifier.ready_and().await.map_err(|e| eyre!(e))?;
+
+        /// Test 1: Empty transaction
+        let block = Block {
+            header,
+            transactions: Vec::new(),
+        };
+
+        /// Error: no coinbase transaction in block
+        ready_verifier_service
+            .call(Arc::new(block.clone()))
+            .await
+            .unwrap_err();
+
+        let ready_verifier_service = block_verifier.ready_and().await.map_err(|e| eyre!(e))?;
+
+        /// Test 2: Transaction at first position is not coinbase
+        let mut transactions = Vec::new();
+        let tx = Transaction::zcash_deserialize(&zebra_test::vectors::DUMMY_TX1[..]).unwrap();
+        transactions.push(Arc::new(tx));
+        let block = Block {
+            header,
+            transactions,
+        };
+
+        /// Error: no coinbase transaction in block
+        ready_verifier_service
+            .call(Arc::new(block))
+            .await
+            .unwrap_err();
+
+        let ready_verifier_service = block_verifier.ready_and().await.map_err(|e| eyre!(e))?;
+
+        /// Test 3: Invalid coinbase position
+        let mut block =
+            Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])?;
+        assert_eq!(block.transactions.len(), 1);
+
+        // Extract the coinbase transaction from the block
+        let coinbase_transaction = block.transactions.get(0).unwrap().clone();
+
+        // Add another coinbase transaction to block
+        block.transactions.push(coinbase_transaction);
+        assert_eq!(block.transactions.len(), 2);
+
+        /// Error: coinbase input found in additional transaction
+        ready_verifier_service
+            .call(Arc::new(block))
             .await
             .unwrap_err();
 
