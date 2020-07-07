@@ -438,6 +438,63 @@ impl CheckpointVerifier {
         rx
     }
 
+    /// During checkpoint range processing, process all the blocks at `height`.
+    ///
+    /// Returns the first valid block. If there is no valid block, returns None.
+    fn process_height(
+        &mut self,
+        height: BlockHeight,
+        expected_hash: BlockHeaderHash,
+    ) -> Option<QueuedBlock> {
+        let mut qblocks = self
+            .queued
+            .remove(&height)
+            .expect("the current checkpoint range has continuous Vec<QueuedBlock>s");
+        assert!(
+            !qblocks.is_empty(),
+            "the current checkpoint range has continous Blocks"
+        );
+
+        // Check interim checkpoints
+        if let Some(checkpoint_hash) = self.checkpoint_list.get(&height) {
+            // We assume the checkpoints are valid. And we have verified back
+            // from the target checkpoint, so the last block must also be valid.
+            // This is probably a bad checkpoint list, a zebra bug, or a bad
+            // chain (in a testing mode like regtest).
+            assert_eq!(expected_hash, *checkpoint_hash,
+                           "checkpoints in the range should match: bad checkpoint list, zebra bug, or bad chain"
+                );
+        }
+
+        // Find a queued block at this height, which is part of the hash chain.
+        //
+        // There are two possible outcomes here:
+        //   - at least one block matches the chain (the common case)
+        //     (if there are duplicate blocks, one succeeds, and the others fail)
+        //   - no blocks match the chain, verification has failed for this range
+        let mut valid_qblock = None;
+        for qblock in qblocks.drain(..) {
+            if qblock.hash == expected_hash {
+                if valid_qblock.is_none() {
+                    // The first valid block at the current height
+                    valid_qblock = Some(qblock);
+                } else {
+                    // Reject duplicate blocks at the same height
+                    let _ = qblock.tx.send(Err(
+                        "duplicate valid blocks at this height, only one was chosen".into(),
+                    ));
+                }
+            } else {
+                // A bad block, that isn't part of the chain.
+                let _ = qblock.tx.send(Err(
+                    "the block hash does not match the chained checkpoint hash".into(),
+                ));
+            }
+        }
+
+        valid_qblock
+    }
+
     /// Check all the blocks in the current checkpoint range.
     ///
     /// Send `Ok` for the blocks that are in the chain, and `Err` for side-chain
@@ -445,7 +502,7 @@ impl CheckpointVerifier {
     ///
     /// Does nothing if we are waiting for more blocks, or if verification has
     /// finished.
-    fn process_current_checkpoint_range(&mut self) {
+    fn process_checkpoint_range(&mut self) {
         // If this code shows up in profiles, we can try the following
         // optimisations:
         //   - only check the chain when the length of the queue is greater
@@ -497,60 +554,15 @@ impl CheckpointVerifier {
         // A list of pending valid blocks, in reverse chain order
         let mut rev_valid_blocks = Vec::new();
 
-        // Verify all the blocks and discard all the bad blocks in the current range.
+        // Check all the blocks, and discard all the bad blocks
         for current_height in range_heights {
-            let mut qblocks = self
-                .queued
-                .remove(&current_height)
-                .expect("the current checkpoint range has continuous Vec<QueuedBlock>s");
-            assert!(
-                !qblocks.is_empty(),
-                "the current checkpoint range has continous Blocks"
-            );
-
-            // Check interim checkpoints
-            if let Some(checkpoint_hash) = self.checkpoint_list.get(&current_height) {
-                // We assume the checkpoints are valid. And we have verified back
-                // from the target checkpoint, so the last block must also be valid.
-                // This is probably a bad checkpoint list, a zebra bug, or a bad
-                // chain (in a testing mode like regtest).
-                assert_eq!(expected_hash, *checkpoint_hash,
-                           "checkpoints in the range should match: bad checkpoint list, zebra bug, or bad chain"
-                );
-            }
-
-            // Find a queued block at each height that is part of the hash chain.
-            //
-            // There are two possible outcomes here:
-            //   - at least one block matches the chain (the common case)
-            //     (if there are duplicate blocks, one succeeds, and the others fail)
-            //   - no blocks match the chain, verification has failed for this range
-            let mut next_parent_hash = None;
-            for qblock in qblocks.drain(..) {
-                if qblock.hash == expected_hash {
-                    if next_parent_hash.is_none() {
-                        // The first valid block at the current height
-                        next_parent_hash = Some(qblock.block.header.previous_block_hash);
-                        // Add the block to the end of the pending block list
-                        // (since we're walking the chain backwards, the list is
-                        // in reverse chain order)
-                        rev_valid_blocks.push(qblock);
-                    } else {
-                        // Reject duplicate blocks at the same height
-                        let _ = qblock.tx.send(Err(
-                            "duplicate valid blocks at this height, only one was chosen".into(),
-                        ));
-                    }
-                } else {
-                    // A bad block, that isn't part of the chain.
-                    let _ = qblock.tx.send(Err(
-                        "the block hash does not match the chained checkpoint hash".into(),
-                    ));
-                }
-            }
-
-            if let Some(next_parent_hash) = next_parent_hash {
-                expected_hash = next_parent_hash;
+            let valid_qblock = self.process_height(current_height, expected_hash);
+            if let Some(qblock) = valid_qblock {
+                expected_hash = qblock.block.header.previous_block_hash;
+                // Add the block to the end of the pending block list
+                // (since we're walking the chain backwards, the list is
+                // in reverse chain order)
+                rev_valid_blocks.push(qblock);
             } else {
                 // The last block height we processed did not have any blocks
                 // with a matching hash, so chain verification has failed.
@@ -674,7 +686,7 @@ impl Service<Arc<Block>> for CheckpointVerifier {
         // there will be at least one more call().
         //
         // TODO(teor): retry on failure (low priority, failures should be rare)
-        self.process_current_checkpoint_range();
+        self.process_checkpoint_range();
 
         async move {
             // Remove the Result<..., RecvError> wrapper from the channel future
