@@ -290,13 +290,27 @@ dependencies = [
 [[package]]
 name = "color-eyre"
 version = "0.5.0"
-source = "git+https://github.com/yaahc/color-eyre.git?rev=f882a88a7037aa621a42c3719d06a2286aa0f8de#f882a88a7037aa621a42c3719d06a2286aa0f8de"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2c72672243200c10efdf22867bc2e156ac4f27852572a99f5fbbe18f0c417d76"
 dependencies = [
  "ansi_term",
  "backtrace",
+ "color-spantrace",
  "eyre",
  "indenter",
  "once_cell",
+ "tracing-error",
+]
+
+[[package]]
+name = "color-spantrace"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a99aa4aa18448eef4c7d3f86d2720d2d8cad5c860fe9ff9b279293efdc8f5be"
+dependencies = [
+ "ansi_term",
+ "tracing-core",
+ "tracing-error",
 ]
 
 [[package]]
@@ -427,9 +441,9 @@ checksum = "134951f4028bdadb9b84baf4232681efbf277da25144b9b0ad65df75946c422b"
 
 [[package]]
 name = "ed25519-zebra"
-version = "0.4.1"
+version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a76f15c88332faad36abb368aca89deb5cc4f440e5181c8848f8bdd049848f7b"
+checksum = "beeba2b02b91dc7cc2d1f42c96b9e82db4cd20ad1c326f1dbf64ac8943c7bf32"
 dependencies = [
  "curve25519-dalek",
  "hex",
@@ -452,7 +466,8 @@ dependencies = [
 [[package]]
 name = "eyre"
 version = "0.6.0"
-source = "git+https://github.com/yaahc/eyre.git?branch=hooked#48e8006298651b3640ba7214f1b3b129b3babe67"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b0f9683839e579a53258d377fcc0073ca0bf2042ac5e6c60a598069e64403a6d"
 dependencies = [
  "indenter",
  "once_cell",

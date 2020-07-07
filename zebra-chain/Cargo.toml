@@ -27,7 +27,7 @@ thiserror = "1"
 x25519-dalek = { version = "0.6", features = ["serde"] }
 serde-big-array = "0.3.0"
 # ZF deps
-ed25519-zebra = "0.4"
+ed25519-zebra = "2.0"
 redjubjub = "0.1"
 equihash = { git = "https://github.com/ZcashFoundation/librustzcash.git", branch = "equihash-crate" }
 displaydoc = "0.1.6"
