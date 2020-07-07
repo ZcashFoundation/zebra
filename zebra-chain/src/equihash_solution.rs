@@ -83,8 +83,8 @@ impl ZcashDeserialize for EquihashSolution {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::serialization::ZcashDeserializeInto;
     use crate::block::{Block, BlockHeader};
+    use crate::serialization::ZcashDeserializeInto;
     use proptest::{arbitrary::Arbitrary, collection::vec, prelude::*};
 
     impl Arbitrary for EquihashSolution {
