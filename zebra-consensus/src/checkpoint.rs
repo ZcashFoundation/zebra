@@ -17,7 +17,7 @@ use std::{
     collections::BTreeMap,
     error,
     future::Future,
-    ops::Bound::*,
+    ops::{Bound, Bound::*},
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -228,6 +228,17 @@ impl CheckpointVerifier {
         self.verifier_progress
     }
 
+    /// Return the start of the current checkpoint range.
+    ///
+    /// Returns None if verification has finished.
+    fn current_start_bound(&self) -> Option<Bound<BlockHeight>> {
+        match self.previous_checkpoint_height() {
+            BeforeGenesis => Some(Unbounded),
+            PreviousCheckpoint(height) => Some(Excluded(height)),
+            FinalCheckpoint => None,
+        }
+    }
+
     /// Return the target checkpoint height that we want to verify.
     ///
     /// If we need more blocks, returns `WaitingForBlocks`.
@@ -251,11 +262,24 @@ impl CheckpointVerifier {
         // Find the end of the continuous sequence of blocks, starting at the
         // last verified checkpoint. If there is no verified checkpoint, start
         // *after* the genesis block (which we checked above).
+        //
+        // If `btree_map::Range` implements `ExactSizeIterator`, it would be
+        // much faster to walk the checkpoint list, and compare the length of
+        // the `btree_map::Range` to the block height difference between
+        // checkpoints. (In maps, keys are unique, so we don't need to check
+        // each height value.)
+        //
+        // But at the moment, this implementation is slightly faster, because
+        // it stops after the first gap.
         for (&height, _) in self.queued.range((Excluded(pending_height), Unbounded)) {
             // If the queued blocks are continuous.
             //
             // Precondition: queued block heights are within the valid
-            // BlockHeight range.
+            // BlockHeight range, so there is no integer overflow.
+            assert!(
+                pending_height.0 < u32::MAX,
+                "pending block had a height of u32::MAX "
+            );
             if height == BlockHeight(pending_height.0 + 1) {
                 pending_height = height;
             } else {
@@ -264,13 +288,9 @@ impl CheckpointVerifier {
         }
 
         // Now find the start of the checkpoint range
-        let start = match self.previous_checkpoint_height() {
-            BeforeGenesis => Unbounded,
-            PreviousCheckpoint(height) => Excluded(height),
-            FinalCheckpoint => unreachable!(
-                "verification has finished, should have returned earlier in the function"
-            ),
-        };
+        let start = self.current_start_bound().expect(
+            "if verification has finished, we should have returned earlier in the function",
+        );
         // Find the highest checkpoint below pending_height, excluding any
         // previously verified checkpoints
         let target_checkpoint = self
@@ -418,8 +438,10 @@ impl CheckpointVerifier {
         rx
     }
 
-    /// Check all the blocks in the current checkpoint range. Send `Ok` for the
-    /// blocks that are in the chain, and `Err` for side-chain blocks.
+    /// Check all the blocks in the current checkpoint range.
+    ///
+    /// Send `Ok` for the blocks that are in the chain, and `Err` for side-chain
+    /// blocks.
     ///
     /// Does nothing if we are waiting for more blocks, or if verification has
     /// finished.
@@ -432,12 +454,7 @@ impl CheckpointVerifier {
         //   - cache the height of the last continuous chain as a new field in
         //     self, and start at that height during the next check.
 
-        let previous_checkpoint_height = self.previous_checkpoint_height();
-        let start_bound = match previous_checkpoint_height {
-            BeforeGenesis => Unbounded,
-            PreviousCheckpoint(height) => Excluded(height),
-            FinalCheckpoint => return,
-        };
+        // Return early if verification has finished
         let previous_checkpoint_hash = match self.previous_checkpoint_hash() {
             // Since genesis blocks are hard-coded in zcashd, and not verified
             // like other blocks, the genesis parent hash is set by the
@@ -451,35 +468,43 @@ impl CheckpointVerifier {
             PreviousCheckpoint(hash) => hash,
             FinalCheckpoint => return,
         };
+        // Return early if we're still waiting for more blocks
+        let mut expected_hash = match self.target_checkpoint_hash() {
+            Checkpoint(hash) => hash,
+            _ => return,
+        };
         let target_checkpoint_height = match self.target_checkpoint_height() {
             Checkpoint(height) => height,
             _ => return,
         };
-        let target_checkpoint_hash = match self.target_checkpoint_hash() {
-            Checkpoint(hash) => hash,
-            _ => return,
-        };
 
-        // Verify all the blocks and discard all the bad blocks in the current range.
-        let mut expected_hash = target_checkpoint_hash;
-        let current_range = (start_bound, Included(target_checkpoint_height));
+        // Keep the old previous checkpoint height, to make sure we're making
+        // progress
+        let old_prev_check_height = self.previous_checkpoint_height();
+
+        // Work out which blocks and checkpoints we're checking
+        let current_range = (
+            self.current_start_bound()
+                .expect("earlier code checks if verification has finished"),
+            Included(target_checkpoint_height),
+        );
         let range_heights: Vec<BlockHeight> = self
             .queued
             .range_mut(current_range)
             .rev()
-            .map(|(key, _value)| *key)
+            .map(|(key, _)| *key)
             .collect();
         // There can be zero or more interim checkpoints
         let mut interim_checkpoint_heights: Vec<BlockHeight> = self
             .checkpoint_list
             .range(current_range)
             .rev()
-            .map(|(key, _value)| *key)
+            .map(|(key, _)| *key)
             .collect();
-
         // A list of pending valid blocks, in reverse chain order
         let mut rev_valid_blocks = Vec::new();
 
+        // Verify all the blocks and discard all the bad blocks in the current range.
         for current_height in range_heights {
             let mut qblocks = self
                 .queued
@@ -563,7 +588,7 @@ impl CheckpointVerifier {
 
                 // Ensure that we're making progress
                 assert!(
-                    self.previous_checkpoint_height() == previous_checkpoint_height,
+                    self.previous_checkpoint_height() == old_prev_check_height,
                     "processing must not change progress on failure"
                 );
                 let current_target = self.target_checkpoint_height();
@@ -601,7 +626,7 @@ impl CheckpointVerifier {
 
         // Ensure that we're making progress
         assert!(
-            self.previous_checkpoint_height() > previous_checkpoint_height,
+            self.previous_checkpoint_height() > old_prev_check_height,
             "progress must increase on success"
         );
         // We've cleared the target range, so this check should be cheap
