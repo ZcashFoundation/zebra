@@ -17,7 +17,7 @@ use std::{
     collections::BTreeMap,
     error,
     future::Future,
-    ops::{Bound, Bound::*},
+    ops::{Bound, Bound::*, RangeBounds},
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -128,6 +128,77 @@ impl PartialOrd for Target<BlockHeight> {
 use Progress::*;
 use Target::*;
 
+/// Each checkpoint consists of a coinbase height and block header hash.
+///
+/// Checkpoints should be chosen to avoid forks or chain reorganizations,
+/// which only happen in the last few hundred blocks in the chain.
+/// (zcashd allows chain reorganizations up to 99 blocks, and prunes
+/// orphaned side-chains after 288 blocks.)
+///
+/// There must be a checkpoint for the genesis block at BlockHeight 0.
+/// (All other checkpoints are optional.)
+#[derive(Debug)]
+struct CheckpointList(BTreeMap<BlockHeight, BlockHeaderHash>);
+
+impl CheckpointList {
+    /// Create a new checkpoint list from `checkpoint_list`.
+    //
+    // Right now, we only use this function in the tests.
+    #[cfg(test)]
+    fn new(
+        checkpoint_list: impl IntoIterator<Item = (BlockHeight, BlockHeaderHash)>,
+    ) -> Result<Self, Error> {
+        let checkpoints: BTreeMap<BlockHeight, BlockHeaderHash> =
+            checkpoint_list.into_iter().collect();
+
+        // An empty checkpoint list can't actually verify any blocks.
+        match checkpoints.keys().cloned().next() {
+            Some(BlockHeight(0)) => {}
+            None => Err("there must be at least one checkpoint, for the genesis block")?,
+            _ => Err("checkpoints must start at the genesis block height 0")?,
+        };
+
+        Ok(CheckpointList(checkpoints))
+    }
+
+    /// Is there a checkpoint at `height`?
+    ///
+    /// See `BTreeMap::contains_key()` for details.
+    fn contains(&self, height: &BlockHeight) -> bool {
+        self.0.contains_key(height)
+    }
+
+    /// Returns the hash corresponding to the checkpoint at `height`,
+    /// or None if there is no checkpoint at that height.
+    ///
+    /// See `BTreeMap::get()` for details.
+    fn hash(&self, height: &BlockHeight) -> Option<&BlockHeaderHash> {
+        self.0.get(height)
+    }
+
+    /// Return the block height of the highest checkpoint in the checkpoint list.
+    ///
+    /// If there is only a single checkpoint, then the maximum height will be
+    /// zero. (The genesis block.)
+    ///
+    /// The maximum height is constant for each checkpoint list.
+    fn max_height(&self) -> BlockHeight {
+        self.0
+            .keys()
+            .cloned()
+            .next_back()
+            .expect("checkpoint lists must have at least one checkpoint")
+    }
+
+    /// Return the block height of the highest checkpoint in a sub-range.
+    fn max_height_in_range<R>(&self, range: R) -> Option<BlockHeight>
+    where
+        R: RangeBounds<BlockHeight>,
+    {
+        self.0.range(range).map(|(height, _)| *height).next_back()
+    }
+}
+
 /// A checkpointing block verifier.
 ///
 /// Verifies blocks using a supplied list of checkpoints. There must be at
@@ -136,16 +207,8 @@ use Target::*;
 struct CheckpointVerifier {
     // Inputs
     //
-    /// Each checkpoint consists of a coinbase height and block header hash.
-    ///
-    /// Checkpoints should be chosen to avoid forks or chain reorganizations,
-    /// which only happen in the last few hundred blocks in the chain.
-    /// (zcashd allows chain reorganizations up to 99 blocks, and prunes
-    /// orphaned side-chains after 288 blocks.)
-    ///
-    /// There must be a checkpoint for the genesis block at BlockHeight 0.
-    /// (All other checkpoints are optional.)
-    checkpoint_list: BTreeMap<BlockHeight, BlockHeaderHash>,
+    /// The checkpoint list for this verifier.
+    checkpoint_list: CheckpointList,
 
     // Queued Blocks
     //
@@ -186,18 +249,8 @@ impl CheckpointVerifier {
     fn new(
         checkpoint_list: impl IntoIterator<Item = (BlockHeight, BlockHeaderHash)>,
     ) -> Result<Self, Error> {
-        let checkpoints: BTreeMap<BlockHeight, BlockHeaderHash> =
-            checkpoint_list.into_iter().collect();
-
-        // An empty checkpoint list can't actually verify any blocks.
-        match checkpoints.keys().cloned().next() {
-            None => Err("there must be at least one checkpoint, for the genesis block")?,
-            Some(BlockHeight(0)) => {}
-            _ => Err("checkpoints must start at the genesis block height 0")?,
-        };
-
         Ok(CheckpointVerifier {
-            checkpoint_list: checkpoints,
+            checkpoint_list: CheckpointList::new(checkpoint_list)?,
             queued: <BTreeMap<BlockHeight, QueuedBlockList>>::new(),
             // We start by verifying the genesis block, by itself
             verifier_progress: Progress::BeforeGenesis,
@@ -210,10 +263,8 @@ impl CheckpointVerifier {
     /// zero. (The genesis block.)
     ///
     /// The maximum height is constant for each checkpoint list.
-    ///
-    /// Returns None if there are no checkpoints.
-    fn max_checkpoint_height(&self) -> Option<BlockHeight> {
-        self.checkpoint_list.keys().cloned().next_back()
+    fn max_checkpoint_height(&self) -> BlockHeight {
+        self.checkpoint_list.max_height()
     }
 
     /// Return the current verifier's progress.
@@ -295,9 +346,7 @@ impl CheckpointVerifier {
         // previously verified checkpoints
         let target_checkpoint = self
             .checkpoint_list
-            .range((start, Included(pending_height)))
-            .map(|(height, _)| *height)
-            .next_back();
+            .max_height_in_range((start, Included(pending_height)));
 
         if let Some(target_checkpoint) = target_checkpoint {
             Checkpoint(target_checkpoint)
@@ -314,7 +363,7 @@ impl CheckpointVerifier {
             BeforeGenesis => BeforeGenesis,
             PreviousCheckpoint(height) => self
                 .checkpoint_list
-                .get(&height)
+                .hash(&height)
                 .map(|hash| PreviousCheckpoint(*hash))
                 .expect("every checkpoint height must have a hash"),
             FinalCheckpoint => FinalCheckpoint,
@@ -329,7 +378,7 @@ impl CheckpointVerifier {
             WaitingForBlocks => WaitingForBlocks,
             Checkpoint(height) => self
                 .checkpoint_list
-                .get(&height)
+                .hash(&height)
                 .map(|hash| Checkpoint(*hash))
                 .expect("every checkpoint height must have a hash"),
             FinishedVerifying => FinishedVerifying,
@@ -345,10 +394,7 @@ impl CheckpointVerifier {
     ///    checkpoint
     ///  - verification has finished
     fn check_height(&self, height: BlockHeight) -> Result<(), Error> {
-        let max_checkpoint_height = self
-            .max_checkpoint_height()
-            .ok_or("the checkpoint list is empty")?;
-        if height > max_checkpoint_height {
+        if height > self.max_checkpoint_height() {
             Err("block is higher than the maximum checkpoint")?;
         }
 
@@ -381,13 +427,9 @@ impl CheckpointVerifier {
         }
 
         // Ignore heights that aren't checkpoint heights
-        if verified_height
-            == self
-                .max_checkpoint_height()
-                .expect("there is at least one checkpoint")
-        {
+        if verified_height == self.max_checkpoint_height() {
             self.verifier_progress = FinalCheckpoint;
-        } else if self.checkpoint_list.contains_key(&verified_height) {
+        } else if self.checkpoint_list.contains(&verified_height) {
             self.verifier_progress = PreviousCheckpoint(verified_height);
         }
     }
@@ -456,7 +498,7 @@ impl CheckpointVerifier {
         );
 
         // Check interim checkpoints
-        if let Some(checkpoint_hash) = self.checkpoint_list.get(&height) {
+        if let Some(checkpoint_hash) = self.checkpoint_list.hash(&height) {
             // We assume the checkpoints are valid. And we have verified back
             // from the target checkpoint, so the last block must also be valid.
             // This is probably a bad checkpoint list, a zebra bug, or a bad
@@ -745,10 +787,7 @@ mod tests {
             checkpoint_verifier.target_checkpoint_height(),
             WaitingForBlocks
         );
-        assert_eq!(
-            checkpoint_verifier.max_checkpoint_height(),
-            Some(BlockHeight(0))
-        );
+        assert_eq!(checkpoint_verifier.max_checkpoint_height(), BlockHeight(0));
 
         /// Make sure the verifier service is ready
         let ready_verifier_service = checkpoint_verifier
@@ -777,10 +816,7 @@ mod tests {
             checkpoint_verifier.target_checkpoint_height(),
             FinishedVerifying
         );
-        assert_eq!(
-            checkpoint_verifier.max_checkpoint_height(),
-            Some(BlockHeight(0))
-        );
+        assert_eq!(checkpoint_verifier.max_checkpoint_height(), BlockHeight(0));
 
         Ok(())
     }
@@ -821,10 +857,7 @@ mod tests {
             checkpoint_verifier.target_checkpoint_height(),
             WaitingForBlocks
         );
-        assert_eq!(
-            checkpoint_verifier.max_checkpoint_height(),
-            Some(BlockHeight(1))
-        );
+        assert_eq!(checkpoint_verifier.max_checkpoint_height(), BlockHeight(1));
 
         // Now verify each block
         for (block, height, hash) in checkpoint_data {
@@ -848,10 +881,7 @@ mod tests {
 
             assert_eq!(verify_response, hash);
 
-            let max_height = checkpoint_verifier
-                .max_checkpoint_height()
-                .expect("there are checkpoints in the list");
-            if height < max_height {
+            if height < checkpoint_verifier.max_checkpoint_height() {
                 assert_eq!(
                     checkpoint_verifier.previous_checkpoint_height(),
                     PreviousCheckpoint(height)
@@ -870,7 +900,7 @@ mod tests {
                     FinishedVerifying
                 );
             }
-            assert_eq!(max_height, BlockHeight(1));
+            assert_eq!(checkpoint_verifier.max_checkpoint_height(), BlockHeight(1));
         }
 
         assert_eq!(
@@ -881,10 +911,7 @@ mod tests {
             checkpoint_verifier.target_checkpoint_height(),
             FinishedVerifying
         );
-        assert_eq!(
-            checkpoint_verifier.max_checkpoint_height(),
-            Some(BlockHeight(1))
-        );
+        assert_eq!(checkpoint_verifier.max_checkpoint_height(), BlockHeight(1));
 
         Ok(())
     }
@@ -917,10 +944,7 @@ mod tests {
             checkpoint_verifier.target_checkpoint_height(),
             WaitingForBlocks
         );
-        assert_eq!(
-            checkpoint_verifier.max_checkpoint_height(),
-            Some(BlockHeight(0))
-        );
+        assert_eq!(checkpoint_verifier.max_checkpoint_height(), BlockHeight(0));
 
         /// Make sure the verifier service is ready
         let ready_verifier_service = checkpoint_verifier
@@ -947,10 +971,7 @@ mod tests {
             checkpoint_verifier.target_checkpoint_height(),
             WaitingForBlocks
         );
-        assert_eq!(
-            checkpoint_verifier.max_checkpoint_height(),
-            Some(BlockHeight(0))
-        );
+        assert_eq!(checkpoint_verifier.max_checkpoint_height(), BlockHeight(0));
 
         Ok(())
     }
@@ -987,10 +1008,7 @@ mod tests {
             checkpoint_verifier.target_checkpoint_height(),
             WaitingForBlocks
         );
-        assert_eq!(
-            checkpoint_verifier.max_checkpoint_height(),
-            Some(BlockHeight(0))
-        );
+        assert_eq!(checkpoint_verifier.max_checkpoint_height(), BlockHeight(0));
 
         /// Make sure the verifier service is ready (1/3)
         let ready_verifier_service = checkpoint_verifier
@@ -1014,10 +1032,7 @@ mod tests {
             checkpoint_verifier.target_checkpoint_height(),
             WaitingForBlocks
         );
-        assert_eq!(
-            checkpoint_verifier.max_checkpoint_height(),
-            Some(BlockHeight(0))
-        );
+        assert_eq!(checkpoint_verifier.max_checkpoint_height(), BlockHeight(0));
 
         /// Make sure the verifier service is ready (2/3)
         let ready_verifier_service = checkpoint_verifier
@@ -1041,10 +1056,7 @@ mod tests {
             checkpoint_verifier.target_checkpoint_height(),
             WaitingForBlocks
         );
-        assert_eq!(
-            checkpoint_verifier.max_checkpoint_height(),
-            Some(BlockHeight(0))
-        );
+        assert_eq!(checkpoint_verifier.max_checkpoint_height(), BlockHeight(0));
 
         /// Make sure the verifier service is ready (3/3)
         let ready_verifier_service = checkpoint_verifier
@@ -1073,10 +1085,7 @@ mod tests {
             checkpoint_verifier.target_checkpoint_height(),
             FinishedVerifying
         );
-        assert_eq!(
-            checkpoint_verifier.max_checkpoint_height(),
-            Some(BlockHeight(0))
-        );
+        assert_eq!(checkpoint_verifier.max_checkpoint_height(), BlockHeight(0));
 
         // Now, await the bad futures, which should have completed
 
@@ -1095,10 +1104,7 @@ mod tests {
             checkpoint_verifier.target_checkpoint_height(),
             FinishedVerifying
         );
-        assert_eq!(
-            checkpoint_verifier.max_checkpoint_height(),
-            Some(BlockHeight(0))
-        );
+        assert_eq!(checkpoint_verifier.max_checkpoint_height(), BlockHeight(0));
 
         /// Wait for the response for block 0, and expect failure again (2/3)
         // TODO(teor || jlusby): check error kind
@@ -1115,10 +1121,7 @@ mod tests {
             checkpoint_verifier.target_checkpoint_height(),
             FinishedVerifying
         );
-        assert_eq!(
-            checkpoint_verifier.max_checkpoint_height(),
-            Some(BlockHeight(0))
-        );
+        assert_eq!(checkpoint_verifier.max_checkpoint_height(), BlockHeight(0));
 
         Ok(())
     }
@@ -1160,7 +1163,7 @@ mod tests {
         );
         assert_eq!(
             checkpoint_verifier.max_checkpoint_height(),
-            Some(BlockHeight(434873))
+            BlockHeight(434873)
         );
 
         let mut futures = Vec::new();
@@ -1191,7 +1194,7 @@ mod tests {
             );
             assert_eq!(
                 checkpoint_verifier.max_checkpoint_height(),
-                Some(BlockHeight(434873))
+                BlockHeight(434873)
             );
         }
 
