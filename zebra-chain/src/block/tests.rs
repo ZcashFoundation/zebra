@@ -2,9 +2,11 @@ use super::*;
 use crate::equihash_solution::EquihashSolution;
 use crate::merkle_tree::MerkleTreeRootHash;
 use crate::note_commitment_tree::SaplingNoteTreeRootHash;
-use crate::serialization::{SerializationError, ZcashDeserializeInto, ZcashSerialize};
-use crate::sha256d_writer::Sha256dWriter;
-use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
+use crate::serialization::{
+    SerializationError, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
+};
+use crate::{sha256d_writer::Sha256dWriter, test::generate};
+use chrono::{TimeZone, Utc};
 use proptest::{
     arbitrary::{any, Arbitrary},
     prelude::*,
@@ -70,18 +72,7 @@ fn blockheaderhash_debug() {
 
 #[test]
 fn blockheaderhash_from_blockheader() {
-    let some_bytes = [0; 32];
-
-    let blockheader = BlockHeader {
-        version: 4,
-        previous_block_hash: BlockHeaderHash(some_bytes),
-        merkle_root_hash: MerkleTreeRootHash(some_bytes),
-        final_sapling_root_hash: SaplingNoteTreeRootHash(some_bytes),
-        time: DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(61, 0), Utc),
-        bits: 0,
-        nonce: some_bytes,
-        solution: EquihashSolution([0; 1344]),
-    };
+    let blockheader = generate::block_header();
 
     let hash = BlockHeaderHash::from(&blockheader);
 
@@ -129,6 +120,74 @@ fn deserialize_block() {
     zebra_test::vectors::BLOCK_MAINNET_434873_BYTES
         .zcash_deserialize_into::<Block>()
         .expect("block test vector should deserialize");
+}
+
+#[test]
+fn block_limits_multi_tx() {
+    // Test multiple small transactions to fill a block max size
+
+    // Create a block just below the limit
+    let mut block = generate::large_multi_transaction_block();
+
+    // Serialize the block
+    let mut data = Vec::new();
+    block
+        .zcash_serialize(&mut data)
+        .expect("block should serialize as we are not limiting generation yet");
+
+    assert!(data.len() <= MAX_BLOCK_BYTES as usize);
+
+    // Deserialize by now is ok as we are lower than the limit
+    let block2 = Block::zcash_deserialize(&data[..])
+        .expect("block should deserialize as we are just below limit");
+    assert_eq!(block, block2);
+
+    // Add 1 more transaction to the block, limit will be reached
+    block = generate::oversized_multi_transaction_block();
+
+    // Serialize will still be fine
+    let mut data = Vec::new();
+    block
+        .zcash_serialize(&mut data)
+        .expect("block should serialize as we are not limiting generation yet");
+
+    assert!(data.len() > MAX_BLOCK_BYTES as usize);
+
+    // Deserialize will now fail
+    Block::zcash_deserialize(&data[..]).expect_err("block should not deserialize");
+}
+
+#[test]
+fn block_limits_single_tx() {
+    // Test block limit with a big single transaction
+
+    // Create a block just below the limit
+    let mut block = generate::large_single_transaction_block();
+
+    // Serialize the block
+    let mut data = Vec::new();
+    block
+        .zcash_serialize(&mut data)
+        .expect("block should serialize as we are not limiting generation yet");
+
+    assert!(data.len() <= MAX_BLOCK_BYTES as usize);
+
+    // Deserialize by now is ok as we are lower than the limit
+    Block::zcash_deserialize(&data[..])
+        .expect("block should deserialize as we are just below limit");
+
+    // Add 1 more input to the transaction, limit will be reached
+    block = generate::oversized_single_transaction_block();
+
+    let mut data = Vec::new();
+    block
+        .zcash_serialize(&mut data)
+        .expect("block should serialize as we are not limiting generation yet");
+
+    assert!(data.len() > MAX_BLOCK_BYTES as usize);
+
+    // Will fail as block overall size is above limit
+    Block::zcash_deserialize(&data[..]).expect_err("block should not deserialize");
 }
 
 proptest! {

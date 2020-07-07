@@ -290,13 +290,27 @@ dependencies = [
 [[package]]
 name = "color-eyre"
 version = "0.5.0"
-source = "git+https://github.com/yaahc/color-eyre.git?rev=f882a88a7037aa621a42c3719d06a2286aa0f8de#f882a88a7037aa621a42c3719d06a2286aa0f8de"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2c72672243200c10efdf22867bc2e156ac4f27852572a99f5fbbe18f0c417d76"
 dependencies = [
  "ansi_term",
  "backtrace",
+ "color-spantrace",
  "eyre",
  "indenter",
  "once_cell",
+ "tracing-error",
+]
+
+[[package]]
+name = "color-spantrace"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a99aa4aa18448eef4c7d3f86d2720d2d8cad5c860fe9ff9b279293efdc8f5be"
+dependencies = [
+ "ansi_term",
+ "tracing-core",
+ "tracing-error",
 ]
 
 [[package]]
@@ -442,7 +456,7 @@ dependencies = [
 [[package]]
 name = "equihash"
 version = "0.0.0"
-source = "git+https://github.com/ZcashFoundation/librustzcash.git?branch=equihash-crate#5b2c71e112ade5488ba49bb16f50897d513702f8"
+source = "git+https://github.com/ZcashFoundation/librustzcash.git?branch=equihash-crate#ae2a2481333f27b5cdb5eb53b0754fb5901b7e5f"
 dependencies = [
  "blake2b_simd",
  "byteorder",
@@ -452,7 +466,8 @@ dependencies = [
 [[package]]
 name = "eyre"
 version = "0.6.0"
-source = "git+https://github.com/yaahc/eyre.git?branch=hooked#48e8006298651b3640ba7214f1b3b129b3babe67"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b0f9683839e579a53258d377fcc0073ca0bf2042ac5e6c60a598069e64403a6d"
 dependencies = [
  "indenter",
  "once_cell",
