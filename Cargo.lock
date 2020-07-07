@@ -257,9 +257,9 @@ checksum = "4785bdd1c96b2a846b2bd7cc02e86b6b3dbf14e7e53446c4f54c92a361040822"
 
 [[package]]
 name = "chrono"
-version = "0.4.12"
+version = "0.4.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f0fee792e164f78f5fe0c296cc2eb3688a2ca2b70cdff33040922d298203f0c4"
+checksum = "c74d84029116787153e02106bf53e66828452a4b325cc8652b788b5967c0a0b6"
 dependencies = [
  "num-integer",
  "num-traits",
@@ -290,13 +290,27 @@ dependencies = [
 [[package]]
 name = "color-eyre"
 version = "0.5.0"
-source = "git+https://github.com/yaahc/color-eyre.git?rev=f882a88a7037aa621a42c3719d06a2286aa0f8de#f882a88a7037aa621a42c3719d06a2286aa0f8de"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2c72672243200c10efdf22867bc2e156ac4f27852572a99f5fbbe18f0c417d76"
 dependencies = [
  "ansi_term",
  "backtrace",
+ "color-spantrace",
  "eyre",
  "indenter",
  "once_cell",
+ "tracing-error",
+]
+
+[[package]]
+name = "color-spantrace"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a99aa4aa18448eef4c7d3f86d2720d2d8cad5c860fe9ff9b279293efdc8f5be"
+dependencies = [
+ "ansi_term",
+ "tracing-core",
+ "tracing-error",
 ]
 
 [[package]]
@@ -452,7 +466,8 @@ dependencies = [
 [[package]]
 name = "eyre"
 version = "0.6.0"
-source = "git+https://github.com/yaahc/eyre.git?branch=hooked#48e8006298651b3640ba7214f1b3b129b3babe67"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b0f9683839e579a53258d377fcc0073ca0bf2042ac5e6c60a598069e64403a6d"
 dependencies = [
  "indenter",
  "once_cell",
