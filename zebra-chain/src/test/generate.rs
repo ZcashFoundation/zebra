@@ -53,11 +53,11 @@ fn multi_transaction_block(oversized: bool) -> Block {
     let tx = Transaction::zcash_deserialize(&zebra_test::vectors::DUMMY_TX1[..]).unwrap();
 
     // A block header
-    let blockheader = block_header();
+    let header = block_header();
 
     // Serialize header
     let mut data_header = Vec::new();
-    blockheader
+    header
         .zcash_serialize(&mut data_header)
         .expect("Block header should serialize");
 
@@ -69,14 +69,14 @@ fn multi_transaction_block(oversized: bool) -> Block {
     }
 
     // Create transactions to be just below or just above the limit
-    let many_transactions = std::iter::repeat(Arc::new(tx))
+    let transactions = std::iter::repeat(Arc::new(tx))
         .take(max_transactions_in_block)
         .collect::<Vec<_>>();
 
     // Add the transactions into a block
     Block {
-        header: blockheader,
-        transactions: many_transactions,
+        header,
+        transactions,
     }
 }
 
@@ -89,21 +89,21 @@ fn single_transaction_block(oversized: bool) -> Block {
         TransparentOutput::zcash_deserialize(&zebra_test::vectors::DUMMY_OUTPUT1[..]).unwrap();
 
     // A block header
-    let blockheader = block_header();
+    let header = block_header();
 
     // Serialize header
     let mut data_header = Vec::new();
-    blockheader
+    header
         .zcash_serialize(&mut data_header)
         .expect("Block header should serialize");
 
     // Serialize a LockTime
-    let locktime = LockTime::Time(DateTime::<Utc>::from_utc(
+    let lock_time = LockTime::Time(DateTime::<Utc>::from_utc(
         NaiveDateTime::from_timestamp(61, 0),
         Utc,
     ));
     let mut data_locktime = Vec::new();
-    locktime
+    lock_time
         .zcash_serialize(&mut data_locktime)
         .expect("LockTime should serialize");
 
@@ -132,13 +132,13 @@ fn single_transaction_block(oversized: bool) -> Block {
     let big_transaction = Transaction::V1 {
         inputs,
         outputs,
-        lock_time: locktime,
+        lock_time,
     };
 
     // Put the big transaction into a block
     let transactions = vec![Arc::new(big_transaction)];
     Block {
-        header: blockheader,
+        header,
         transactions,
     }
 }
