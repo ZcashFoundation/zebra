@@ -3,8 +3,10 @@
 //! Checkpoint-based verification uses a list of checkpoint hashes to speed up the
 //! initial chain sync for Zebra. This list is distributed with Zebra.
 //!
-//! The CheckpointVerifier queues pending blocks. Once there is a chain between
-//! the next pair of checkpoints, it verifies all the blocks in that chain.
+//! The CheckpointVerifier queues pending blocks. Once there is a chain from the
+//! previous checkpoint to a target checkpoint, it verifies all the blocks in
+//! that chain.
+//!
 //! Verification starts at the first checkpoint, which is the genesis block for the
 //! configured network.
 //!
@@ -218,10 +220,8 @@ struct CheckpointVerifier {
     /// Contains a list of unverified blocks at each block height. In most cases,
     /// the checkpoint verifier will store zero or one block at each height.
     ///
-    /// Blocks are verified in order, when there is a chain from a subsequent
-    /// checkpoint, back to the previous checkpoint. Each checkpoint range is
-    /// used to verify all the blocks between the previous and target
-    /// checkpoints.
+    /// Blocks are verified in order, once there is a chain from the previous
+    /// checkpoint to a target checkpoint.
     ///
     /// The first checkpoint does not have any ancestors, so it only verifies the
     /// genesis block.
@@ -285,8 +285,9 @@ impl CheckpointVerifier {
     /// If we need more blocks, returns `WaitingForBlocks`.
     ///
     /// If the queued blocks are continuous from the previous checkpoint to a
-    /// subsequent checkpoint, returns `Checkpoint(height)`. The target
-    /// checkpoint can be multiple checkpoints ahead of the previous checkpoint.
+    /// target checkpoint, returns `Checkpoint(height)`. The target checkpoint
+    /// can be multiple checkpoints ahead of the previous checkpoint.
+    ///
     /// `height` increases as checkpoints are verified.
     ///
     /// If verification has finished, returns `FinishedVerifying`.
