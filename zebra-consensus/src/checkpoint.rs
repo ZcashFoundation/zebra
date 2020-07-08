@@ -53,9 +53,6 @@ type QueuedBlockList = Vec<QueuedBlock>;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Progress<HeightOrHash> {
     /// We have not verified any blocks yet.
-    // rustc is smart enough to know that this variant isn't used for hashes,
-    // because we always check the height before getting the hash.
-    #[allow(dead_code)]
     BeforeGenesis,
     /// We have verified up to and including this checkpoint.
     PreviousCheckpoint(HeightOrHash),
@@ -142,9 +139,6 @@ struct CheckpointList(BTreeMap<BlockHeight, BlockHeaderHash>);
 
 impl CheckpointList {
     /// Create a new checkpoint list from `checkpoint_list`.
-    //
-    // Right now, we only use this function in the tests.
-    #[cfg(test)]
     fn new(
         checkpoint_list: impl IntoIterator<Item = (BlockHeight, BlockHeaderHash)>,
     ) -> Result<Self, Error> {
@@ -241,11 +235,10 @@ impl CheckpointVerifier {
     /// same checkpoint list. To Clone a CheckpointVerifier, you might need to wrap it
     /// in a `tower::Buffer` service.
     //
-    // Currently only used in tests.
-    //
-    // We'll use this function in the overall verifier, which will split blocks
-    // between BlockVerifier and CheckpointVerifier.
-    #[cfg(test)]
+    // Avoid some dead code lints.
+    // Until we implement the overall verifier in #516, this function, and some of the
+    // functions and enum variants it uses, are only used in the tests.
+    #[allow(dead_code)]
     fn new(
         checkpoint_list: impl IntoIterator<Item = (BlockHeight, BlockHeaderHash)>,
     ) -> Result<Self, Error> {
