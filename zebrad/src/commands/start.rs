@@ -6,7 +6,7 @@
 //!
 //!  * Network Service
 //!    * primary interface to the node
-//!    * handles all external network requests for the zcash protocol
+//!    * handles all external network requests for the Zcash protocol
 //!      * via zebra_network::Message and zebra_network::Response
 //!    * provides an interface to the rest of the network for other services and
 //!    tasks running within this node
@@ -16,7 +16,7 @@
 //!    * verifies blocks using zebra-chain and zebra-script, then stores verified
 //!    blocks in zebra-state
 //!  * Sync Task
-//!    * This task runs in the background and continouously queries the network for
+//!    * This task runs in the background and continuously queries the network for
 //!    new blocks to be verified and added to the local state
 use crate::config::ZebradConfig;
 use crate::{components::tokio::TokioComponent, prelude::*};

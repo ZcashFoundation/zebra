@@ -10,7 +10,7 @@ edition = "2018"
 [dependencies]
 zebra-chain = { path = "../zebra-chain" }
 zebra-state = { path = "../zebra-state" }
-chrono = "0.4.12"
+chrono = "0.4.13"
 futures-util = "0.3.5"
 tokio = { version = "0.2", features = ["sync"] }
 tower = "0.3.1"

@@ -27,7 +27,7 @@ pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(60);
 
 /// Truncate timestamps in outbound address messages to this time interval.
 ///
-/// This is intended to prevent a peer from learning exactly when we recieved
+/// This is intended to prevent a peer from learning exactly when we received
 /// messages from each of our peers.
 pub const TIMESTAMP_TRUNCATION_SECONDS: i64 = 30 * 60;
 

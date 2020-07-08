@@ -52,7 +52,7 @@ impl From<SaplingNoteCommitmentTree> for SaplingNoteTreeRootHash {
         // let mut hash_writer = Sha256dWriter::default();
         // sapling_note_commitment_tree
         //     .zcash_serialize(&mut hash_writer)
-        //     .expect("A Sapling note committment tree must serialize.");
+        //     .expect("A Sapling note commitment tree must serialize.");
         // Self(hash_writer.finish())
 
         unimplemented!();
