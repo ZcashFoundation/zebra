@@ -4,6 +4,7 @@
 //! verification.
 
 mod block;
+pub mod redjubjub;
 mod script;
 mod transaction;
 
