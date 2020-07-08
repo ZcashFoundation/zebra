@@ -165,16 +165,16 @@ impl CheckpointList {
     /// Is there a checkpoint at `height`?
     ///
     /// See `BTreeMap::contains_key()` for details.
-    fn contains(&self, height: &BlockHeight) -> bool {
-        self.0.contains_key(height)
+    fn contains(&self, height: BlockHeight) -> bool {
+        self.0.contains_key(&height)
     }
 
     /// Returns the hash corresponding to the checkpoint at `height`,
     /// or None if there is no checkpoint at that height.
     ///
     /// See `BTreeMap::get()` for details.
-    fn hash(&self, height: &BlockHeight) -> Option<&BlockHeaderHash> {
-        self.0.get(height)
+    fn hash(&self, height: BlockHeight) -> Option<BlockHeaderHash> {
+        self.0.get(&height).cloned()
     }
 
     /// Return the block height of the highest checkpoint in the checkpoint list.
@@ -344,25 +344,10 @@ impl CheckpointVerifier {
             BeforeGenesis => BeforeGenesis,
             PreviousCheckpoint(height) => self
                 .checkpoint_list
-                .hash(&height)
-                .map(|hash| PreviousCheckpoint(*hash))
+                .hash(height)
+                .map(PreviousCheckpoint)
                 .expect("every checkpoint height must have a hash"),
             FinalCheckpoint => FinalCheckpoint,
-        }
-    }
-
-    /// Return the hash of the next checkpoint we want to verify.
-    ///
-    /// See `target_checkpoint_height()` for details.
-    fn target_checkpoint_hash(&self) -> Target<BlockHeaderHash> {
-        match self.target_checkpoint_height() {
-            WaitingForBlocks => WaitingForBlocks,
-            Checkpoint(height) => self
-                .checkpoint_list
-                .hash(&height)
-                .map(|hash| Checkpoint(*hash))
-                .expect("every checkpoint height must have a hash"),
-            FinishedVerifying => FinishedVerifying,
         }
     }
 
@@ -410,7 +395,7 @@ impl CheckpointVerifier {
         // Ignore heights that aren't checkpoint heights
         if verified_height == self.checkpoint_list.max_height() {
             self.verifier_progress = FinalCheckpoint;
-        } else if self.checkpoint_list.contains(&verified_height) {
+        } else if self.checkpoint_list.contains(verified_height) {
             self.verifier_progress = PreviousCheckpoint(verified_height);
         }
     }
@@ -479,12 +464,12 @@ impl CheckpointVerifier {
         );
 
         // Check interim checkpoints
-        if let Some(checkpoint_hash) = self.checkpoint_list.hash(&height) {
+        if let Some(checkpoint_hash) = self.checkpoint_list.hash(height) {
             // We assume the checkpoints are valid. And we have verified back
             // from the target checkpoint, so the last block must also be valid.
             // This is probably a bad checkpoint list, a zebra bug, or a bad
             // chain (in a testing mode like regtest).
-            assert_eq!(expected_hash, *checkpoint_hash,
+            assert_eq!(expected_hash, checkpoint_hash,
                            "checkpoints in the range should match: bad checkpoint list, zebra bug, or bad chain"
                 );
         }
@@ -549,12 +534,13 @@ impl CheckpointVerifier {
             FinalCheckpoint => return,
         };
         // Return early if we're still waiting for more blocks
-        let mut expected_hash = match self.target_checkpoint_hash() {
-            Checkpoint(hash) => hash,
-            _ => return,
-        };
-        let target_checkpoint_height = match self.target_checkpoint_height() {
-            Checkpoint(height) => height,
+        let (target_checkpoint_height, mut expected_hash) = match self.target_checkpoint_height() {
+            Checkpoint(height) => (
+                height,
+                self.checkpoint_list
+                    .hash(height)
+                    .expect("every checkpoint height must have a hash"),
+            ),
             _ => return,
         };
 
