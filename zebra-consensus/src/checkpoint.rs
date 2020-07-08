@@ -153,7 +153,7 @@ impl CheckpointList {
             checkpoint_list.into_iter().collect();
 
         // An empty checkpoint list can't actually verify any blocks.
-        match checkpoints.keys().cloned().next() {
+        match checkpoints.keys().next() {
             Some(BlockHeight(0)) => {}
             None => Err("there must be at least one checkpoint, for the genesis block")?,
             _ => Err("checkpoints must start at the genesis block height 0")?,
