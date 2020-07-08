@@ -314,13 +314,6 @@ impl CheckpointVerifier {
         // it stops after the first gap.
         for (&height, _) in self.queued.range((Excluded(pending_height), Unbounded)) {
             // If the queued blocks are continuous.
-            //
-            // Precondition: queued block heights are within the valid
-            // BlockHeight range, so there is no integer overflow.
-            assert!(
-                pending_height.0 < u32::MAX,
-                "pending block had a height of u32::MAX "
-            );
             if height == BlockHeight(pending_height.0 + 1) {
                 pending_height = height;
             } else {
