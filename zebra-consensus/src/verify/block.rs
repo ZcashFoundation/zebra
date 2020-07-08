@@ -508,21 +508,21 @@ mod tests {
 
         let ready_verifier_service = block_verifier.ready_and().await.map_err(|e| eyre!(e))?;
 
-        /// Test 1: Empty transaction
+        // Test 1: Empty transaction
         let block = Block {
             header,
             transactions: Vec::new(),
         };
 
-        /// Error: no coinbase transaction in block
+        // Error: no coinbase transaction in block
         ready_verifier_service
             .call(Arc::new(block.clone()))
             .await
-            .unwrap_err();
+            .expect_err("fail with no coinbase transaction in block");
 
         let ready_verifier_service = block_verifier.ready_and().await.map_err(|e| eyre!(e))?;
 
-        /// Test 2: Transaction at first position is not coinbase
+        // Test 2: Transaction at first position is not coinbase
         let mut transactions = Vec::new();
         let tx = Transaction::zcash_deserialize(&zebra_test::vectors::DUMMY_TX1[..]).unwrap();
         transactions.push(Arc::new(tx));
@@ -531,15 +531,15 @@ mod tests {
             transactions,
         };
 
-        /// Error: no coinbase transaction in block
+        // Error: no coinbase transaction in block
         ready_verifier_service
             .call(Arc::new(block))
             .await
-            .unwrap_err();
+            .expect_err("fail with no coinbase transaction in block");
 
         let ready_verifier_service = block_verifier.ready_and().await.map_err(|e| eyre!(e))?;
 
-        /// Test 3: Invalid coinbase position
+        // Test 3: Invalid coinbase position
         let mut block =
             Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])?;
         assert_eq!(block.transactions.len(), 1);
@@ -551,11 +551,11 @@ mod tests {
         block.transactions.push(coinbase_transaction);
         assert_eq!(block.transactions.len(), 2);
 
-        /// Error: coinbase input found in additional transaction
+        // Error: coinbase input found in additional transaction
         ready_verifier_service
             .call(Arc::new(block))
             .await
-            .unwrap_err();
+            .expect_err("fail with coinbase input found in additional transaction");
 
         Ok(())
     }
