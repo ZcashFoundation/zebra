@@ -251,7 +251,7 @@ impl CheckpointVerifier {
     ) -> Result<Self, Error> {
         Ok(CheckpointVerifier {
             checkpoint_list: CheckpointList::new(checkpoint_list)?,
-            queued: <BTreeMap<BlockHeight, QueuedBlockList>>::new(),
+            queued: BTreeMap::new(),
             // We start by verifying the genesis block, by itself
             verifier_progress: Progress::BeforeGenesis,
         })
