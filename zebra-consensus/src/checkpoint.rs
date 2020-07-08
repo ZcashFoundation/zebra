@@ -60,7 +60,7 @@ enum Progress<HeightOrHash> {
     ///
     /// The final checkpoint is not included in this variant. The verifier has
     /// finished, so the checkpoints aren't particularly useful.
-    /// To get the value of the final checkpoint, use `max_checkpoint_height()`.
+    /// To get the value of the final checkpoint, use `checkpoint_list.max_height()`.
     FinalCheckpoint,
 }
 
@@ -257,16 +257,6 @@ impl CheckpointVerifier {
         })
     }
 
-    /// Return the block height of the highest checkpoint in the checkpoint list.
-    ///
-    /// If there is only a single checkpoint, then the maximum height will be
-    /// zero. (The genesis block.)
-    ///
-    /// The maximum height is constant for each checkpoint list.
-    fn max_checkpoint_height(&self) -> BlockHeight {
-        self.checkpoint_list.max_height()
-    }
-
     /// Return the current verifier's progress.
     ///
     /// If verification has not started yet, returns `BeforeGenesis`.
@@ -394,7 +384,7 @@ impl CheckpointVerifier {
     ///    checkpoint
     ///  - verification has finished
     fn check_height(&self, height: BlockHeight) -> Result<(), Error> {
-        if height > self.max_checkpoint_height() {
+        if height > self.checkpoint_list.max_height() {
             Err("block is higher than the maximum checkpoint")?;
         }
 
@@ -427,7 +417,7 @@ impl CheckpointVerifier {
         }
 
         // Ignore heights that aren't checkpoint heights
-        if verified_height == self.max_checkpoint_height() {
+        if verified_height == self.checkpoint_list.max_height() {
             self.verifier_progress = FinalCheckpoint;
         } else if self.checkpoint_list.contains(&verified_height) {
             self.verifier_progress = PreviousCheckpoint(verified_height);
@@ -787,7 +777,10 @@ mod tests {
             checkpoint_verifier.target_checkpoint_height(),
             WaitingForBlocks
         );
-        assert_eq!(checkpoint_verifier.max_checkpoint_height(), BlockHeight(0));
+        assert_eq!(
+            checkpoint_verifier.checkpoint_list.max_height(),
+            BlockHeight(0)
+        );
 
         /// Make sure the verifier service is ready
         let ready_verifier_service = checkpoint_verifier
@@ -816,7 +809,10 @@ mod tests {
             checkpoint_verifier.target_checkpoint_height(),
             FinishedVerifying
         );
-        assert_eq!(checkpoint_verifier.max_checkpoint_height(), BlockHeight(0));
+        assert_eq!(
+            checkpoint_verifier.checkpoint_list.max_height(),
+            BlockHeight(0)
+        );
 
         Ok(())
     }
@@ -857,7 +853,10 @@ mod tests {
             checkpoint_verifier.target_checkpoint_height(),
             WaitingForBlocks
         );
-        assert_eq!(checkpoint_verifier.max_checkpoint_height(), BlockHeight(1));
+        assert_eq!(
+            checkpoint_verifier.checkpoint_list.max_height(),
+            BlockHeight(1)
+        );
 
         // Now verify each block
         for (block, height, hash) in checkpoint_data {
@@ -881,7 +880,7 @@ mod tests {
 
             assert_eq!(verify_response, hash);
 
-            if height < checkpoint_verifier.max_checkpoint_height() {
+            if height < checkpoint_verifier.checkpoint_list.max_height() {
                 assert_eq!(
                     checkpoint_verifier.previous_checkpoint_height(),
                     PreviousCheckpoint(height)
@@ -900,7 +899,10 @@ mod tests {
                     FinishedVerifying
                 );
             }
-            assert_eq!(checkpoint_verifier.max_checkpoint_height(), BlockHeight(1));
+            assert_eq!(
+                checkpoint_verifier.checkpoint_list.max_height(),
+                BlockHeight(1)
+            );
         }
 
         assert_eq!(
@@ -911,7 +913,10 @@ mod tests {
             checkpoint_verifier.target_checkpoint_height(),
             FinishedVerifying
         );
-        assert_eq!(checkpoint_verifier.max_checkpoint_height(), BlockHeight(1));
+        assert_eq!(
+            checkpoint_verifier.checkpoint_list.max_height(),
+            BlockHeight(1)
+        );
 
         Ok(())
     }
@@ -944,7 +949,10 @@ mod tests {
             checkpoint_verifier.target_checkpoint_height(),
             WaitingForBlocks
         );
-        assert_eq!(checkpoint_verifier.max_checkpoint_height(), BlockHeight(0));
+        assert_eq!(
+            checkpoint_verifier.checkpoint_list.max_height(),
+            BlockHeight(0)
+        );
 
         /// Make sure the verifier service is ready
         let ready_verifier_service = checkpoint_verifier
@@ -971,7 +979,10 @@ mod tests {
             checkpoint_verifier.target_checkpoint_height(),
             WaitingForBlocks
         );
-        assert_eq!(checkpoint_verifier.max_checkpoint_height(), BlockHeight(0));
+        assert_eq!(
+            checkpoint_verifier.checkpoint_list.max_height(),
+            BlockHeight(0)
+        );
 
         Ok(())
     }
@@ -1008,7 +1019,10 @@ mod tests {
             checkpoint_verifier.target_checkpoint_height(),
             WaitingForBlocks
         );
-        assert_eq!(checkpoint_verifier.max_checkpoint_height(), BlockHeight(0));
+        assert_eq!(
+            checkpoint_verifier.checkpoint_list.max_height(),
+            BlockHeight(0)
+        );
 
         /// Make sure the verifier service is ready (1/3)
         let ready_verifier_service = checkpoint_verifier
@@ -1032,7 +1046,10 @@ mod tests {
             checkpoint_verifier.target_checkpoint_height(),
             WaitingForBlocks
         );
-        assert_eq!(checkpoint_verifier.max_checkpoint_height(), BlockHeight(0));
+        assert_eq!(
+            checkpoint_verifier.checkpoint_list.max_height(),
+            BlockHeight(0)
+        );
 
         /// Make sure the verifier service is ready (2/3)
         let ready_verifier_service = checkpoint_verifier
@@ -1056,7 +1073,10 @@ mod tests {
             checkpoint_verifier.target_checkpoint_height(),
             WaitingForBlocks
         );
-        assert_eq!(checkpoint_verifier.max_checkpoint_height(), BlockHeight(0));
+        assert_eq!(
+            checkpoint_verifier.checkpoint_list.max_height(),
+            BlockHeight(0)
+        );
 
         /// Make sure the verifier service is ready (3/3)
         let ready_verifier_service = checkpoint_verifier
@@ -1085,7 +1105,10 @@ mod tests {
             checkpoint_verifier.target_checkpoint_height(),
             FinishedVerifying
         );
-        assert_eq!(checkpoint_verifier.max_checkpoint_height(), BlockHeight(0));
+        assert_eq!(
+            checkpoint_verifier.checkpoint_list.max_height(),
+            BlockHeight(0)
+        );
 
         // Now, await the bad futures, which should have completed
 
@@ -1104,7 +1127,10 @@ mod tests {
             checkpoint_verifier.target_checkpoint_height(),
             FinishedVerifying
         );
-        assert_eq!(checkpoint_verifier.max_checkpoint_height(), BlockHeight(0));
+        assert_eq!(
+            checkpoint_verifier.checkpoint_list.max_height(),
+            BlockHeight(0)
+        );
 
         /// Wait for the response for block 0, and expect failure again (2/3)
         // TODO(teor || jlusby): check error kind
@@ -1121,7 +1147,10 @@ mod tests {
             checkpoint_verifier.target_checkpoint_height(),
             FinishedVerifying
         );
-        assert_eq!(checkpoint_verifier.max_checkpoint_height(), BlockHeight(0));
+        assert_eq!(
+            checkpoint_verifier.checkpoint_list.max_height(),
+            BlockHeight(0)
+        );
 
         Ok(())
     }
@@ -1162,7 +1191,7 @@ mod tests {
             WaitingForBlocks
         );
         assert_eq!(
-            checkpoint_verifier.max_checkpoint_height(),
+            checkpoint_verifier.checkpoint_list.max_height(),
             BlockHeight(434873)
         );
 
@@ -1193,7 +1222,7 @@ mod tests {
                 WaitingForBlocks
             );
             assert_eq!(
-                checkpoint_verifier.max_checkpoint_height(),
+                checkpoint_verifier.checkpoint_list.max_height(),
                 BlockHeight(434873)
             );
         }
