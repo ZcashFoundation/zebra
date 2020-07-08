@@ -475,7 +475,7 @@ mod tests {
     #[tokio::test]
     #[spandoc::spandoc]
     async fn header_solution() -> Result<(), Report> {
-        install_tracing();
+        zebra_test::init();
 
         // Service variables
         let state_service = Box::new(zebra_state::in_memory::init());
