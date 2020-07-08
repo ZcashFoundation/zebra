@@ -1,3 +1,19 @@
+// NOT A PLACE OF HONOR
+//
+// NO ESTEEMED DEED IS COMMEMORATED HERE
+//
+// NOTHING VALUED IS HERE
+//
+// What is here was dangerous and repulsive to us. This message is a warning
+// about danger.
+//
+// The danger is in a particular module... it increases towards a center... the
+// center of danger is pub async fn Connection::run the danger is still present,
+// in your time, as it was in ours.
+//
+// The danger is to the mind. The danger is unleashed only if you substantially
+// disturb this code. This code is best shunned and left encapsulated.
+
 use std::collections::HashSet;
 use std::sync::Arc;
 
