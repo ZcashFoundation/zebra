@@ -1,10 +1,9 @@
-use chrono::{DateTime, Utc};
-
+use super::BlockHeaderHash;
 use crate::equihash_solution::EquihashSolution;
 use crate::merkle_tree::MerkleTreeRootHash;
 use crate::note_commitment_tree::SaplingNoteTreeRootHash;
-
-use super::BlockHeaderHash;
+use crate::serialization::ZcashSerialize;
+use chrono::{DateTime, Utc};
 
 /// Block header.
 ///
@@ -49,8 +48,8 @@ pub struct BlockHeader {
     /// hash must be less than or equal to, in the same nBits format
     /// used by Bitcoin.
     ///
-    /// For a block at block height height, bits MUST be equal to
-    /// ThresholdBits(height).
+    /// For a block at block height `height`, bits MUST be equal to
+    /// `ThresholdBits(height)`.
     ///
     /// [Bitcoin-nBits](https://bitcoin.org/en/developer-reference#target-nbits)
     // parity-zcash has their own wrapper around u32 for this field, see #572 and:
@@ -64,4 +63,31 @@ pub struct BlockHeader {
 
     /// The Equihash solution.
     pub solution: EquihashSolution,
+}
+
+impl BlockHeader {
+    /// Returns true if the header is valid based on its `EquihashSolution`
+    pub fn is_equihash_solution_valid(&self) -> Result<(), Error> {
+        let n = 200;
+        let k = 9;
+        let nonce = &self.nonce;
+        let solution = &self.solution.0;
+        let mut input = Vec::new();
+
+        self.zcash_serialize(&mut input)?;
+        let input = &input[0..EquihashSolution::INPUT_LENGTH];
+
+        equihash::is_valid_solution(n, k, input, nonce, solution)?;
+
+        Ok(())
+    }
+}
+
+#[non_exhaustive]
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("invalid equihash solution for BlockHeader")]
+    EquihashInvalid(#[from] equihash::Error),
+    #[error("cannot reserialize header for equihash verification")]
+    Serialize(#[from] std::io::Error),
 }

@@ -308,7 +308,7 @@ where
 
             reason: e.source().unwrap().to_string(),
 
-            // Allow this to be overriden but not populated by default, methinks.
+            // Allow this to be overridden but not populated by default, methinks.
             data: None,
         }
     }

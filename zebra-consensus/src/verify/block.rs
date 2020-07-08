@@ -112,6 +112,7 @@ where
 
             let now = Utc::now();
             node_time_check(block.header.time, now)?;
+            block.header.is_equihash_solution_valid()?;
             coinbase_check(block.as_ref())?;
 
             // `Tower::Buffer` requires a 1:1 relationship between `poll()`s
@@ -167,7 +168,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tests::install_tracing;
 
     use chrono::offset::{LocalResult, TimeZone};
     use chrono::{Duration, Utc};
@@ -314,7 +314,7 @@ mod tests {
     #[tokio::test]
     #[spandoc::spandoc]
     async fn verify() -> Result<(), Report> {
-        install_tracing();
+        zebra_test::init();
 
         let block =
             Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])?;
@@ -339,7 +339,7 @@ mod tests {
     #[tokio::test]
     #[spandoc::spandoc]
     async fn round_trip() -> Result<(), Report> {
-        install_tracing();
+        zebra_test::init();
 
         let block =
             Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])?;
@@ -381,7 +381,7 @@ mod tests {
     #[tokio::test]
     #[spandoc::spandoc]
     async fn verify_fail_add_block() -> Result<(), Report> {
-        install_tracing();
+        zebra_test::init();
 
         let block =
             Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])?;
@@ -450,7 +450,7 @@ mod tests {
     #[tokio::test]
     #[spandoc::spandoc]
     async fn verify_fail_future_time() -> Result<(), Report> {
-        install_tracing();
+        zebra_test::init();
 
         let mut block =
             <Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])?;
@@ -495,13 +495,40 @@ mod tests {
 
     #[tokio::test]
     #[spandoc::spandoc]
-    async fn coinbase() -> Result<(), Report> {
+    async fn header_solution() -> Result<(), Report> {
         install_tracing();
 
         // Service variables
         let state_service = Box::new(zebra_state::in_memory::init());
         let mut block_verifier = super::init(state_service);
+      
+        let ready_verifier_service = block_verifier.ready_and().await.map_err(|e| eyre!(e))?;
 
+        // Get a valid block
+        let mut block =
+            Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])
+                .expect("block test vector should deserialize");
+
+        // This should be ok
+        ready_verifier_service
+            .call(Arc::new(block.clone()))
+            .await
+            .map_err(|e| eyre!(e))?;
+
+        // Change nonce to something invalid
+        block.header.nonce = [0; 32];
+
+        // Error: invalid equihash solution for BlockHeader
+        ready_verifier_service
+            .call(Arc::new(block.clone()))
+            .await
+            .expect_err("expected the equihash solution to be invalid");
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[spandoc::spandoc]
+    async fn coinbase() -> Result<(), Report> {
         // Get a header of a block
         let header =
             BlockHeader::zcash_deserialize(&zebra_test::vectors::DUMMY_HEADER[..]).unwrap();
