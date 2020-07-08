@@ -2367,6 +2367,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "color-eyre",
+ "futures",
  "futures-util",
  "spandoc",
  "tokio",

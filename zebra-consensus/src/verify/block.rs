@@ -149,7 +149,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tests::install_tracing;
 
     use chrono::offset::{LocalResult, TimeZone};
     use chrono::{Duration, Utc};
@@ -294,7 +293,7 @@ mod tests {
     #[tokio::test]
     #[spandoc::spandoc]
     async fn verify() -> Result<(), Report> {
-        install_tracing();
+        zebra_test::init();
 
         let block =
             Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])?;
@@ -319,7 +318,7 @@ mod tests {
     #[tokio::test]
     #[spandoc::spandoc]
     async fn round_trip() -> Result<(), Report> {
-        install_tracing();
+        zebra_test::init();
 
         let block =
             Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])?;
@@ -361,7 +360,7 @@ mod tests {
     #[tokio::test]
     #[spandoc::spandoc]
     async fn verify_fail_add_block() -> Result<(), Report> {
-        install_tracing();
+        zebra_test::init();
 
         let block =
             Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])?;
@@ -430,7 +429,7 @@ mod tests {
     #[tokio::test]
     #[spandoc::spandoc]
     async fn verify_fail_future_time() -> Result<(), Report> {
-        install_tracing();
+        zebra_test::init();
 
         let mut block =
             <Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])?;
