@@ -734,6 +734,7 @@ mod tests {
     use super::*;
 
     use color_eyre::eyre::{eyre, Report};
+    use futures::future::TryFutureExt;
     use std::{cmp::min, mem::drop, time::Duration};
     use tokio::time::timeout;
     use tower::{Service, ServiceExt};
@@ -785,8 +786,8 @@ mod tests {
         /// Make sure the verifier service is ready
         let ready_verifier_service = checkpoint_verifier
             .ready_and()
-            .await
-            .map_err(|e| eyre!(e))?;
+            .map_err(|e| eyre!(e))
+            .await?;
         /// Set up the future for block 0
         let verify_future = timeout(
             Duration::from_secs(VERIFY_TIMEOUT_SECONDS),
@@ -795,9 +796,10 @@ mod tests {
         /// Wait for the response for block 0
         // TODO(teor || jlusby): check error kind
         let verify_response = verify_future
+            .map_err(|e| eyre!(e))
             .await
             .expect("timeout should not happen")
-            .map_err(|e| eyre!(e))?;
+            .expect("block should verify");
 
         assert_eq!(verify_response, hash0);
 
@@ -863,8 +865,8 @@ mod tests {
             /// Make sure the verifier service is ready
             let ready_verifier_service = checkpoint_verifier
                 .ready_and()
-                .await
-                .map_err(|e| eyre!(e))?;
+                .map_err(|e| eyre!(e))
+                .await?;
 
             /// Set up the future for block {?height}
             let verify_future = timeout(
@@ -874,9 +876,10 @@ mod tests {
             /// Wait for the response for block {?height}
             // TODO(teor || jlusby): check error kind
             let verify_response = verify_future
+                .map_err(|e| eyre!(e))
                 .await
                 .expect("timeout should not happen")
-                .map_err(|e| eyre!(e))?;
+                .expect("future should succeed");
 
             assert_eq!(verify_response, hash);
 
@@ -957,8 +960,8 @@ mod tests {
         /// Make sure the verifier service is ready
         let ready_verifier_service = checkpoint_verifier
             .ready_and()
-            .await
-            .map_err(|e| eyre!(e))?;
+            .map_err(|e| eyre!(e))
+            .await?;
         /// Set up the future for block 415000
         let verify_future = timeout(
             Duration::from_secs(VERIFY_TIMEOUT_SECONDS),
@@ -967,6 +970,7 @@ mod tests {
         /// Wait for the response for block 415000, and expect failure
         // TODO(teor || jlusby): check error kind
         let _ = verify_future
+            .map_err(|e| eyre!(e))
             .await
             .expect("timeout should not happen")
             .expect_err("bad block hash should fail");
@@ -1027,8 +1031,8 @@ mod tests {
         /// Make sure the verifier service is ready (1/3)
         let ready_verifier_service = checkpoint_verifier
             .ready_and()
-            .await
-            .map_err(|e| eyre!(e))?;
+            .map_err(|e| eyre!(e))
+            .await?;
         /// Set up the future for bad block 0 (1/3)
         // TODO(teor || jlusby): check error kind
         let bad_verify_future_1 = timeout(
@@ -1054,8 +1058,8 @@ mod tests {
         /// Make sure the verifier service is ready (2/3)
         let ready_verifier_service = checkpoint_verifier
             .ready_and()
-            .await
-            .map_err(|e| eyre!(e))?;
+            .map_err(|e| eyre!(e))
+            .await?;
         /// Set up the future for bad block 0 again (2/3)
         // TODO(teor || jlusby): check error kind
         let bad_verify_future_2 = timeout(
@@ -1081,8 +1085,8 @@ mod tests {
         /// Make sure the verifier service is ready (3/3)
         let ready_verifier_service = checkpoint_verifier
             .ready_and()
-            .await
-            .map_err(|e| eyre!(e))?;
+            .map_err(|e| eyre!(e))
+            .await?;
         /// Set up the future for good block 0 (3/3)
         let good_verify_future = timeout(
             Duration::from_secs(VERIFY_TIMEOUT_SECONDS),
@@ -1091,9 +1095,10 @@ mod tests {
         /// Wait for the response for good block 0, and expect success (3/3)
         // TODO(teor || jlusby): check error kind
         let verify_response = good_verify_future
+            .map_err(|e| eyre!(e))
             .await
             .expect("timeout should not happen")
-            .map_err(|e| eyre!(e))?;
+            .expect("future should succeed");
 
         assert_eq!(verify_response, good_block0_hash);
 
@@ -1115,6 +1120,7 @@ mod tests {
         /// Wait for the response for block 0, and expect failure (1/3)
         // TODO(teor || jlusby): check error kind
         let _ = bad_verify_future_1
+            .map_err(|e| eyre!(e))
             .await
             .expect("timeout should not happen")
             .expect_err("bad block hash should fail");
@@ -1135,6 +1141,7 @@ mod tests {
         /// Wait for the response for block 0, and expect failure again (2/3)
         // TODO(teor || jlusby): check error kind
         let _ = bad_verify_future_2
+            .map_err(|e| eyre!(e))
             .await
             .expect("timeout should not happen")
             .expect_err("bad block hash should fail");
@@ -1201,8 +1208,8 @@ mod tests {
             /// Make sure the verifier service is ready
             let ready_verifier_service = checkpoint_verifier
                 .ready_and()
-                .await
-                .map_err(|e| eyre!(e))?;
+                .map_err(|e| eyre!(e))
+                .await?;
 
             /// Set up the future for block {?height}
             let verify_future = timeout(
@@ -1232,11 +1239,14 @@ mod tests {
 
         for (verify_future, height, hash) in futures {
             /// Check the response for block {?height}
-            let verify_response = verify_future.await.expect("timeout should not happen");
+            let verify_response = verify_future
+                .map_err(|e| eyre!(e))
+                .await
+                .expect("timeout should not happen");
 
             if height <= BlockHeight(1) {
-                // The futures for continuous checkpoints should have succeeded before drop
-                let verify_hash = verify_response.map_err(|e| eyre!(e))?;
+                let verify_hash = verify_response
+                    .expect("Continuous checkpoints should have succeeded before drop");
                 assert_eq!(verify_hash, hash);
             } else {
                 // TODO(teor || jlusby): check error kind
