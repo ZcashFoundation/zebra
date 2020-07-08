@@ -496,12 +496,12 @@ mod tests {
     #[tokio::test]
     #[spandoc::spandoc]
     async fn header_solution() -> Result<(), Report> {
-        install_tracing();
+        zebra_test::init();
 
         // Service variables
         let state_service = Box::new(zebra_state::in_memory::init());
-        let mut block_verifier = super::init(state_service);
-      
+        let mut block_verifier = super::init(state_service.clone());
+
         let ready_verifier_service = block_verifier.ready_and().await.map_err(|e| eyre!(e))?;
 
         // Get a valid block
@@ -529,6 +529,12 @@ mod tests {
     #[tokio::test]
     #[spandoc::spandoc]
     async fn coinbase() -> Result<(), Report> {
+        zebra_test::init();
+
+        // Service variables
+        let state_service = Box::new(zebra_state::in_memory::init());
+        let mut block_verifier = super::init(state_service.clone());
+
         // Get a header of a block
         let header =
             BlockHeader::zcash_deserialize(&zebra_test::vectors::DUMMY_HEADER[..]).unwrap();
