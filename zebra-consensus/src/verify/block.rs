@@ -518,11 +518,14 @@ mod tests {
         // Change nonce to something invalid
         block.header.nonce = [0; 32];
 
+        let ready_verifier_service = block_verifier.ready_and().await.map_err(|e| eyre!(e))?;
+
         // Error: invalid equihash solution for BlockHeader
         ready_verifier_service
             .call(Arc::new(block.clone()))
             .await
             .expect_err("expected the equihash solution to be invalid");
+
         Ok(())
     }
 
