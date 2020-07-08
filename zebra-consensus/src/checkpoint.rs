@@ -338,11 +338,9 @@ impl CheckpointVerifier {
             .checkpoint_list
             .max_height_in_range((start, Included(pending_height)));
 
-        if let Some(target_checkpoint) = target_checkpoint {
-            Checkpoint(target_checkpoint)
-        } else {
-            WaitingForBlocks
-        }
+        target_checkpoint
+            .map(Checkpoint)
+            .unwrap_or(WaitingForBlocks)
     }
 
     /// Return the most recently verified checkpoint's hash.
