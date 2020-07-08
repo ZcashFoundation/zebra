@@ -592,17 +592,20 @@ impl CheckpointVerifier {
                     self.queued.entry(height).or_default().push(vblock);
                 }
 
-                // Ensure that we're making progress
+                // Make sure the current progress hasn't changed
                 assert_eq!(
                     self.previous_checkpoint_height(),
                     old_prev_check_height,
-                    "processing must not change progress on failure"
+                    "we must not change the previous checkpoint on failure"
                 );
+                // We've reduced the target
+                //
+                // This check should be cheap, because we just reduced the target
                 let current_target = self.target_checkpoint_height();
                 assert!(
                     current_target == WaitingForBlocks
                         || current_target < Checkpoint(target_checkpoint_height),
-                    "processing must decrease or eliminate target on failure"
+                    "we must decrease or eliminate our target on failure"
                 );
 
                 // Stop verifying, and wait for the next valid block
@@ -628,15 +631,32 @@ impl CheckpointVerifier {
         self.update_progress(target_checkpoint_height);
 
         // Ensure that we're making progress
+        let new_progress = self.previous_checkpoint_height();
         assert!(
-            self.previous_checkpoint_height() > old_prev_check_height,
-            "progress must increase on success"
+            new_progress > old_prev_check_height,
+            "we must make progress on success"
         );
+        // We met the old target
+        if new_progress == FinalCheckpoint {
+            assert_eq!(
+                target_checkpoint_height,
+                self.checkpoint_list.max_height(),
+                "we finish at the maximum checkpoint"
+            );
+        } else {
+            assert_eq!(
+                new_progress,
+                PreviousCheckpoint(target_checkpoint_height),
+                "the new previous checkpoint must match the old target"
+            );
+        }
+        // We processed all available checkpoints
+        //
         // We've cleared the target range, so this check should be cheap
-        let current_target = self.target_checkpoint_height();
+        let new_target = self.target_checkpoint_height();
         assert!(
-            current_target == WaitingForBlocks || current_target == FinishedVerifying,
-            "processing must clear target on success"
+            new_target == WaitingForBlocks || new_target == FinishedVerifying,
+            "processing must cover all available checkpoints"
         );
     }
 }
