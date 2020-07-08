@@ -82,7 +82,9 @@ impl Ord for Progress<BlockHeight> {
     }
 }
 
-/// The partial ordering must match the total ordering.
+/// Partial order for block height progress.
+///
+/// The partial order must match the total order.
 impl PartialOrd for Progress<BlockHeight> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
@@ -109,15 +111,20 @@ enum Target<HeightOrHash> {
 impl PartialOrd for Target<BlockHeight> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         match (self, other) {
+            // FinishedVerifying is the final state
             (FinishedVerifying, FinishedVerifying) => Some(Ordering::Equal),
             (FinishedVerifying, _) => Some(Ordering::Greater),
             (_, FinishedVerifying) => Some(Ordering::Less),
+            // Checkpoints are comparable with each other by height
             (Checkpoint(self_height), Checkpoint(other_height)) => {
                 self_height.partial_cmp(other_height)
             }
-            // We can wait for blocks before or after any target checkpoint.
-            // WaitingForBlocks is also incomparable with itself.
-            _ => None,
+            // We can wait for blocks before or after any target checkpoint,
+            // so there is no ordering between checkpoint and waiting.
+            (WaitingForBlocks, Checkpoint(_)) => None,
+            (Checkpoint(_), WaitingForBlocks) => None,
+            // However, we consider waiting equal to itself.
+            (WaitingForBlocks, WaitingForBlocks) => Some(Ordering::Equal),
         }
     }
 }
