@@ -999,11 +999,11 @@ mod tests {
         let good_block0 =
             Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
         let good_block0_hash: BlockHeaderHash = good_block0.as_ref().into();
-        let mut bad_block0 =
-            Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
         // Change the header hash
+        let mut bad_block0 = good_block0.clone();
+        let mut bad_block0 = Arc::make_mut(&mut bad_block0);
         bad_block0.header.version = 0;
-        let bad_block0: Arc<Block> = bad_block0.into();
+        let bad_block0: Arc<Block> = bad_block0.clone().into();
 
         // Make a checkpoint list containing the genesis block checkpoint
         let genesis_checkpoint_list: BTreeMap<BlockHeight, BlockHeaderHash> =
