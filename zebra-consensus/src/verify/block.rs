@@ -94,6 +94,7 @@ where
 
             let now = Utc::now();
             node_time_check(block.header.time, now)?;
+            block.header.is_equihash_solution_valid()?;
 
             // `Tower::Buffer` requires a 1:1 relationship between `poll()`s
             // and `call()`s, because it reserves a buffer slot in each
@@ -468,6 +469,39 @@ mod tests {
             })
             .await
             .unwrap_err();
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[spandoc::spandoc]
+    async fn header_solution() -> Result<(), Report> {
+        install_tracing();
+
+        // Service variables
+        let state_service = Box::new(zebra_state::in_memory::init());
+        let mut block_verifier = super::init(state_service);
+        let ready_verifier_service = block_verifier.ready_and().await.map_err(|e| eyre!(e))?;
+
+        // Get a valid block
+        let mut block =
+            Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])
+                .expect("block test vector should deserialize");
+
+        // This should be ok
+        ready_verifier_service
+            .call(Arc::new(block.clone()))
+            .await
+            .map_err(|e| eyre!(e))?;
+
+        // Change nonce to something invalid
+        block.header.nonce = [0; 32];
+
+        // Error: invalid equihash solution for BlockHeader
+        ready_verifier_service
+            .call(Arc::new(block.clone()))
+            .await
+            .expect_err("expected the equihash solution to be invalid");
 
         Ok(())
     }
