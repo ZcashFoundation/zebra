@@ -291,6 +291,10 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn verify_test() -> Result<(), Report> {
+        verify().await
+    }
+
     #[spandoc::spandoc]
     async fn verify() -> Result<(), Report> {
         zebra_test::init();
@@ -302,9 +306,9 @@ mod tests {
         let state_service = Box::new(zebra_state::in_memory::init());
         let mut block_verifier = super::init(state_service);
 
-        /// Make sure the verifier service is ready
+        /// SPANDOC: Make sure the verifier service is ready
         let ready_verifier_service = block_verifier.ready_and().await.map_err(|e| eyre!(e))?;
-        /// Verify the block
+        /// SPANDOC: Verify the block
         let verify_response = ready_verifier_service
             .call(block.clone())
             .await
@@ -316,6 +320,10 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn round_trip_test() -> Result<(), Report> {
+        round_trip().await
+    }
+
     #[spandoc::spandoc]
     async fn round_trip() -> Result<(), Report> {
         zebra_test::init();
@@ -327,9 +335,9 @@ mod tests {
         let mut state_service = zebra_state::in_memory::init();
         let mut block_verifier = super::init(state_service.clone());
 
-        /// Make sure the verifier service is ready
+        /// SPANDOC: Make sure the verifier service is ready
         let ready_verifier_service = block_verifier.ready_and().await.map_err(|e| eyre!(e))?;
-        /// Verify the block
+        /// SPANDOC: Verify the block
         let verify_response = ready_verifier_service
             .call(block.clone())
             .await
@@ -337,9 +345,9 @@ mod tests {
 
         assert_eq!(verify_response, hash);
 
-        /// Make sure the state service is ready
+        /// SPANDOC: Make sure the state service is ready
         let ready_state_service = state_service.ready_and().await.map_err(|e| eyre!(e))?;
-        /// Make sure the block was added to the state
+        /// SPANDOC: Make sure the block was added to the state
         let state_response = ready_state_service
             .call(zebra_state::Request::GetBlock { hash })
             .await
@@ -358,6 +366,10 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn verify_fail_add_block_test() -> Result<(), Report> {
+        verify_fail_add_block().await
+    }
+
     #[spandoc::spandoc]
     async fn verify_fail_add_block() -> Result<(), Report> {
         zebra_test::init();
@@ -369,9 +381,9 @@ mod tests {
         let mut state_service = zebra_state::in_memory::init();
         let mut block_verifier = super::init(state_service.clone());
 
-        /// Make sure the verifier service is ready (1/2)
+        /// SPANDOC: Make sure the verifier service is ready (1/2)
         let ready_verifier_service = block_verifier.ready_and().await.map_err(|e| eyre!(e))?;
-        /// Verify the block for the first time
+        /// SPANDOC: Verify the block for the first time
         let verify_response = ready_verifier_service
             .call(block.clone())
             .await
@@ -379,9 +391,9 @@ mod tests {
 
         assert_eq!(verify_response, hash);
 
-        /// Make sure the state service is ready (1/2)
+        /// SPANDOC: Make sure the state service is ready (1/2)
         let ready_state_service = state_service.ready_and().await.map_err(|e| eyre!(e))?;
-        /// Make sure the block was added to the state
+        /// SPANDOC: Make sure the block was added to the state
         let state_response = ready_state_service
             .call(zebra_state::Request::GetBlock { hash })
             .await
@@ -396,9 +408,9 @@ mod tests {
             bail!("unexpected response kind: {:?}", state_response);
         }
 
-        /// Make sure the verifier service is ready (2/2)
+        /// SPANDOC: Make sure the verifier service is ready (2/2)
         let ready_verifier_service = block_verifier.ready_and().await.map_err(|e| eyre!(e))?;
-        /// Now try to add the block again, verify should fail
+        /// SPANDOC: Now try to add the block again, verify should fail
         // TODO(teor): ignore duplicate block verifies?
         // TODO(teor || jlusby): check error kind
         ready_verifier_service
@@ -406,9 +418,9 @@ mod tests {
             .await
             .unwrap_err();
 
-        /// Make sure the state service is ready (2/2)
+        /// SPANDOC: Make sure the state service is ready (2/2)
         let ready_state_service = state_service.ready_and().await.map_err(|e| eyre!(e))?;
-        /// But the state should still return the original block we added
+        /// SPANDOC: But the state should still return the original block we added
         let state_response = ready_state_service
             .call(zebra_state::Request::GetBlock { hash })
             .await
@@ -427,6 +439,10 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn verify_fail_future_time_test() -> Result<(), Report> {
+        verify_fail_future_time().await
+    }
+
     #[spandoc::spandoc]
     async fn verify_fail_future_time() -> Result<(), Report> {
         zebra_test::init();
@@ -449,18 +465,18 @@ mod tests {
 
         let arc_block: Arc<Block> = block.into();
 
-        /// Make sure the verifier service is ready
+        /// SPANDOC: Make sure the verifier service is ready
         let ready_verifier_service = block_verifier.ready_and().await.map_err(|e| eyre!(e))?;
-        /// Try to add the block, and expect failure
+        /// SPANDOC: Try to add the block, and expect failure
         // TODO(teor || jlusby): check error kind
         ready_verifier_service
             .call(arc_block.clone())
             .await
             .unwrap_err();
 
-        /// Make sure the state service is ready (2/2)
+        /// SPANDOC: Make sure the state service is ready (2/2)
         let ready_state_service = state_service.ready_and().await.map_err(|e| eyre!(e))?;
-        /// Now make sure the block isn't in the state
+        /// SPANDOC: Now make sure the block isn't in the state
         // TODO(teor || jlusby): check error kind
         ready_state_service
             .call(zebra_state::Request::GetBlock {
@@ -473,6 +489,10 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn header_solution_test() -> Result<(), Report> {
+        header_solution().await
+    }
+
     #[spandoc::spandoc]
     async fn header_solution() -> Result<(), Report> {
         zebra_test::init();

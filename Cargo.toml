@@ -20,4 +20,5 @@ panic = "abort"
 
 [patch.crates-io]
 abscissa_core = { git = "https://github.com/yaahc/abscissa.git", rev = "41d342a9344e38442b2211b07f28a89505892a21" }
-spandoc = { git = "https://github.com/yaahc/spandoc.git", rev = "554358be632b156a6f0af963b0b244e2665b4767" }
+# spandoc = { git = "https://github.com/yaahc/spandoc.git", rev = "554358be632b156a6f0af963b0b244e2665b4767" }
+# spandoc = { path = "/home/jlusby/git/yaahc/spandoc" }

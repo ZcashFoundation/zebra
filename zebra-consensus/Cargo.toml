@@ -23,7 +23,8 @@ zebra-state = { path = "../zebra-state" }
 [dev-dependencies]
 color-eyre = "0.5"
 rand = "0.7"
-spandoc = "0.1"
+# spandoc = "0.1"
+spandoc = { path = "/home/jlusby/git/yaahc/spandoc" }
 tokio = { version = "0.2", features = ["full"] }
 tracing-error = "0.1.2"
 tracing-subscriber = "0.2.7"
