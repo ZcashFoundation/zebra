@@ -1,29 +1,70 @@
 //!
+#![allow(clippy::unit_arg)]
 #![allow(dead_code)]
 
-use super::{memo::Memo, *};
-use crate::serde_helpers;
-use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
-use crate::types::amount::{Amount, NonNegative};
+use std::{fmt, io};
+
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::{
-    fmt,
-    io::{self},
+
+use crate::{
+    keys::sprout::PayingKey,
+    serde_helpers,
+    serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize},
+    types::amount::{Amount, NonNegative},
 };
 
+use super::{memo::Memo, *};
+
+/// Nullifier seed, named rho in the [spec][ps].
 ///
+/// [ps]: https://zips.z.cash/protocol/protocol.pdf#sproutkeycomponents
+#[derive(Clone, Copy)]
+struct NullifierSeed([u8; 32]);
+
+impl AsRef<[u8]> for NullifierSeed {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+/// A Nullifier Set for Sprout transactions
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
+pub struct Nullifier([u8; 32]);
+
+impl From<[u8; 32]> for Nullifier {
+    fn from(buf: [u8; 32]) -> Self {
+        Self(buf)
+    }
+}
+
+impl ZcashDeserialize for Nullifier {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        let bytes = reader.read_32_bytes()?;
+
+        Ok(Self(bytes))
+    }
+}
+
+impl ZcashSerialize for Nullifier {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        writer.write_all(&self.0[..])
+    }
+}
+
+/// A Note represents that a value is spendable by the recipient who
+/// holds the spending key corresponding to a given shielded payment
+/// address.
 pub struct Note {
-    // TODO: refine type as a SHA-256d output derived from a spending key.
-    paying_key: [u8; 32],
+    paying_key: PayingKey,
     value: Amount<NonNegative>,
-    // TODO: refine type as the input to the PRF that results in a nullifier.
-    nullifier_seed: [u8; 32],
+    nullifier_seed: NullifierSeed,
     note_commitment_randomness: NoteCommitmentRandomness,
 }
 
 impl Note {
-    pub fn note_commitment(&self) -> NoteCommitment {
+    pub fn commitment(&self) -> NoteCommitment {
         let leading_byte: u8 = 0xB0;
         let mut hasher = Sha256::default();
         hasher.input([leading_byte]);
@@ -31,14 +72,13 @@ impl Note {
         hasher.input(self.value.to_bytes());
         hasher.input(self.nullifier_seed);
         hasher.input(self.note_commitment_randomness);
-        let hash = hasher.result().into();
-        NoteCommitment { hash }
+
+        NoteCommitment(hasher.result().into())
     }
 }
 
-pub struct NoteCommitment {
-    hash: [u8; 32],
-}
+///
+pub struct NoteCommitment([u8; 32]);
 
 /// The decrypted form of encrypted Sprout notes on the blockchain.
 pub struct NotePlaintext {

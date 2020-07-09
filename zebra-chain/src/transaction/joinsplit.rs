@@ -23,7 +23,7 @@ pub struct JoinSplit<P: ZkSnarkProof> {
     /// A nullifier for the input notes.
     ///
     /// XXX refine type to [T; 2] -- there are two nullifiers
-    pub nullifiers: [crate::nullifier::sprout::Nullifier; 2],
+    pub nullifiers: [crate::notes::sprout::Nullifier; 2],
     /// A note commitment for this output note.
     ///
     /// XXX refine type to [T; 2] -- there are two commitments

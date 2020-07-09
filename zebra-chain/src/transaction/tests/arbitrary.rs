@@ -22,7 +22,7 @@ impl<P: ZkSnarkProof + Arbitrary + 'static> Arbitrary for JoinSplit<P> {
             any::<Amount<NonNegative>>(),
             any::<Amount<NonNegative>>(),
             array::uniform32(any::<u8>()),
-            array::uniform2(any::<crate::nullifier::sprout::Nullifier>()),
+            array::uniform2(any::<crate::notes::sprout::Nullifier>()),
             array::uniform2(array::uniform32(any::<u8>())),
             array::uniform32(any::<u8>()),
             array::uniform32(any::<u8>()),
@@ -155,7 +155,7 @@ impl Arbitrary for Spend {
         (
             array::uniform32(any::<u8>()),
             any::<SaplingNoteTreeRootHash>(),
-            any::<crate::nullifier::sapling::Nullifier>(),
+            any::<crate::notes::sapling::Nullifier>(),
             array::uniform32(any::<u8>()),
             any::<Groth16Proof>(),
             vec(any::<u8>(), 64),
