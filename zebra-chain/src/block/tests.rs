@@ -1,22 +1,18 @@
+use super::*;
+use crate::equihash_solution::EquihashSolution;
+use crate::merkle_tree::MerkleTreeRootHash;
+use crate::note_commitment_tree::SaplingNoteTreeRootHash;
+use crate::serialization::{
+    SerializationError, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
+};
+use crate::{sha256d_writer::Sha256dWriter, test::generate};
 use chrono::{TimeZone, Utc};
-use std::io::{Cursor, ErrorKind, Write};
-
 use proptest::{
     arbitrary::{any, Arbitrary},
     prelude::*,
 };
+use std::io::{Cursor, ErrorKind, Write};
 
-use crate::equihash_solution::EquihashSolution;
-use crate::merkle_tree::MerkleTreeRootHash;
-use crate::note_commitment_tree::SaplingNoteTreeRootHash;
-use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
-use crate::sha256d_writer::Sha256dWriter;
-
-use crate::test::generate;
-
-use super::*;
-
-#[cfg(test)]
 impl Arbitrary for BlockHeader {
     type Parameters = ();
 
@@ -92,7 +88,8 @@ fn blockheaderhash_from_blockheader() {
         .expect("these bytes to serialize from a blockheader without issue");
 
     bytes.set_position(0);
-    let other_header = BlockHeader::zcash_deserialize(&mut bytes)
+    let other_header = bytes
+        .zcash_deserialize_into()
         .expect("these bytes to deserialize into a blockheader without issue");
 
     assert_eq!(blockheader, other_header);
@@ -101,23 +98,27 @@ fn blockheaderhash_from_blockheader() {
 #[test]
 fn deserialize_blockheader() {
     // https://explorer.zcha.in/blocks/415000
-    let _header =
-        BlockHeader::zcash_deserialize(&zebra_test::vectors::HEADER_MAINNET_415000_BYTES[..])
-            .expect("blockheader test vector should deserialize");
+    let _header = zebra_test::vectors::HEADER_MAINNET_415000_BYTES
+        .zcash_deserialize_into::<BlockHeader>()
+        .expect("blockheader test vector should deserialize");
 }
 
 #[test]
 fn deserialize_block() {
-    Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
+    zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+        .zcash_deserialize_into::<Block>()
         .expect("block test vector should deserialize");
-    Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..])
+    zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into::<Block>()
         .expect("block test vector should deserialize");
     // https://explorer.zcha.in/blocks/415000
-    Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])
+    zebra_test::vectors::BLOCK_MAINNET_415000_BYTES
+        .zcash_deserialize_into::<Block>()
         .expect("block test vector should deserialize");
     // https://explorer.zcha.in/blocks/434873
     // this one has a bad version field
-    Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_434873_BYTES[..])
+    zebra_test::vectors::BLOCK_MAINNET_434873_BYTES
+        .zcash_deserialize_into::<Block>()
         .expect("block test vector should deserialize");
 }
 
@@ -193,39 +194,32 @@ proptest! {
 
     #[test]
     fn blockheaderhash_roundtrip(hash in any::<BlockHeaderHash>()) {
-        let mut bytes = Cursor::new(Vec::new());
-        hash.zcash_serialize(&mut bytes)?;
-
-        bytes.set_position(0);
-        let other_hash = BlockHeaderHash::zcash_deserialize(&mut bytes)?;
+        let bytes = hash.zcash_serialize_to_vec()?;
+        let other_hash = bytes.zcash_deserialize_into()?;
 
         prop_assert_eq![hash, other_hash];
     }
 
     #[test]
     fn blockheader_roundtrip(header in any::<BlockHeader>()) {
-        let mut bytes = Cursor::new(Vec::new());
-        header.zcash_serialize(&mut bytes)?;
-
-        bytes.set_position(0);
-        let other_header = BlockHeader::zcash_deserialize(&mut bytes)?;
+        let bytes = header.zcash_serialize_to_vec()?;
+        let other_header = bytes.zcash_deserialize_into()?;
 
         prop_assert_eq![header, other_header];
     }
 
     #[test]
     fn block_roundtrip(block in any::<Block>()) {
-        let mut bytes = Cursor::new(Vec::new());
-        block.zcash_serialize(&mut bytes)?;
+        let bytes = block.zcash_serialize_to_vec()?;
+        let bytes = &mut bytes.as_slice();
 
         // Check the block size limit
-        if bytes.position() <= MAX_BLOCK_BYTES {
-            bytes.set_position(0);
-            let other_block = Block::zcash_deserialize(&mut bytes)?;
+        if bytes.len() <= MAX_BLOCK_BYTES as _ {
+            let other_block = bytes.zcash_deserialize_into()?;
 
             prop_assert_eq![block, other_block];
         } else {
-            let serialization_err = Block::zcash_deserialize(&mut bytes)
+            let serialization_err = bytes.zcash_deserialize_into::<Block>()
                 .expect_err("blocks larger than the maximum size should fail");
             match serialization_err {
                 SerializationError::Io(io_err) => {
