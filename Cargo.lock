@@ -927,12 +927,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "matches"
-version = "0.1.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7ffc5c5338469d4d3ea17d269fa8ea3512ad247247c30bd2df69e68309ed0a08"
-
-[[package]]
 name = "maybe-uninit"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1792,15 +1786,33 @@ dependencies = [
 
 [[package]]
 name = "spandoc"
-version = "0.1.3"
-source = "git+https://github.com/yaahc/spandoc.git?rev=554358be632b156a6f0af963b0b244e2665b4767#554358be632b156a6f0af963b0b244e2665b4767"
+version = "0.2.0"
 dependencies = [
- "matches",
+ "spandoc-attribute",
+ "tracing",
+ "tracing-futures",
+]
+
+[[package]]
+name = "spandoc"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2c287699b5fa467d5286a2be14bff499f684133c223cf79c46c6251d5920badb"
+dependencies = [
+ "spandoc-attribute",
+ "tracing",
+ "tracing-futures",
+]
+
+[[package]]
+name = "spandoc-attribute"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5254766110c377a921c002ca0775d4e384ba69af951fc4329d9dd77af2c25763"
+dependencies = [
  "proc-macro2 1.0.18",
  "quote 1.0.7",
  "syn 1.0.33",
- "tracing",
- "tracing-futures",
 ]
 
 [[package]]
@@ -2410,7 +2422,7 @@ dependencies = [
  "futures-util",
  "rand 0.7.3",
  "redjubjub 0.1.1 (git+https://github.com/ZcashFoundation/redjubjub.git?branch=main)",
- "spandoc",
+ "spandoc 0.2.0",
  "tokio",
  "tower",
  "tower-batch",
@@ -2470,7 +2482,7 @@ dependencies = [
  "once_cell",
  "serde",
  "sled",
- "spandoc",
+ "spandoc 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "tempdir",
  "tokio",
  "tower",
