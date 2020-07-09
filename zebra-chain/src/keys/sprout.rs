@@ -169,6 +169,12 @@ impl From<SpendingKey> for ReceivingKey {
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub struct PayingKey(pub [u8; 32]);
 
+impl AsRef<[u8]> for PayingKey {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
 impl fmt::Debug for PayingKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_tuple("PayingKey")

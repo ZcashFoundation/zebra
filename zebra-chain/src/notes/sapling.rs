@@ -1,4 +1,5 @@
 //!
+#![allow(clippy::unit_arg)]
 #![allow(dead_code)]
 
 use std::{fmt, io};
@@ -6,27 +7,46 @@ use std::{fmt, io};
 #[cfg(test)]
 use proptest::{arbitrary::Arbitrary, collection::vec, prelude::*};
 
-use crate::serde_helpers;
-use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
-
 use super::*;
+use crate::{
+    keys::sapling::{Diversifier, TransmissionKey},
+    serde_helpers,
+    serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize},
+    types::amount::{Amount, NonNegative},
+};
 
-/// A _Diversifier_, an 11 byte value used to randomize the
-/// recipient's final public shielded payment address to create a
-/// _diversified payment address_.
-///
-/// When used, this value is mapped to an affine JubJub group element.
-#[derive(Copy, Clone, Debug, PartialEq)]
-pub struct Diversifier(pub [u8; 11]);
+/// A Nullifier for Sapling transactions
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
+pub struct Nullifier([u8; 32]);
 
-///
+impl From<[u8; 32]> for Nullifier {
+    fn from(buf: [u8; 32]) -> Self {
+        Self(buf)
+    }
+}
+
+impl ZcashDeserialize for Nullifier {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        let bytes = reader.read_32_bytes()?;
+
+        Ok(Self(bytes))
+    }
+}
+
+impl ZcashSerialize for Nullifier {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        writer.write_all(&self.0[..])
+    }
+}
+
+/// A Note represents that a value is spendable by the recipient who
+/// holds the spending key corresponding to a given shielded payment
+/// address.
 pub struct Note {
     diversifier: Diversifier,
-    // TODO: refine as a type, derived from a scalar mult of the
-    // diversifier as a jubjub group element and the incoming view key
-    // scalar.
-    transmission_key: [u8; 32],
-    value: u64,
+    transmission_key: TransmissionKey,
+    value: Amount<NonNegative>,
     note_commitment_randomness: NoteCommitmentRandomness,
 }
 
