@@ -8,3 +8,11 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+
+[build-dependencies]
+bindgen = "0.54.1"
+
+[dev-dependencies]
+lazy_static = "1.4.0"
+hex = "0.4.2"
+
