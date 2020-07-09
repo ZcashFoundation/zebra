@@ -10,7 +10,7 @@ chrono = "0.4.13"
 futures = "0.3.5"
 futures-util = "0.3.5"
 rand = "0.7"
-redjubjub = { git = "https://github.com/ZcashFoundation/redjubjub.git", branch = "main"}
+redjubjub = "0.2"
 tokio = { version = "0.2", features = ["time", "sync", "stream"] }
 tower = "0.3"
 tracing = "0.1.16"
