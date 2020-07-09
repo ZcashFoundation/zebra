@@ -19,8 +19,13 @@ serde = { version = "1", features = ["serde_derive"] }
 [dev-dependencies]
 tokio = { version = "0.2.21", features = ["full"] }
 zebra-test = { path = "../zebra-test/" }
+<<<<<<< HEAD
 spandoc = "0.2"
 tracing = "0.1.15"
+=======
+spandoc = "0.1"
+tracing = "0.1.16"
+>>>>>>> main
 tracing-futures = "0.2.4"
 tempdir = "0.3.7"
 color-eyre = "0.5"

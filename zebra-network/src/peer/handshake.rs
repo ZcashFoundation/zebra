@@ -212,7 +212,6 @@ where
             let slot = ErrorSlot::default();
 
             let client = Client {
-                span: connection_span.clone(),
                 server_tx: server_tx.clone(),
                 error_slot: slot.clone(),
             };
@@ -268,31 +267,46 @@ where
                 request_timer: None,
             };
 
-            tokio::spawn(server.run(peer_rx).instrument(connection_span).boxed());
+            tokio::spawn(
+                server
+                    .run(peer_rx)
+                    .instrument(connection_span.clone())
+                    .boxed(),
+            );
 
-            tokio::spawn(async move {
-                use futures::channel::oneshot;
+            let heartbeat_span = tracing::debug_span!(parent: connection_span, "heartbeat");
+            tokio::spawn(
+                async move {
+                    use futures::channel::oneshot;
 
-                use super::client::ClientRequest;
+                    use super::client::ClientRequest;
 
-                let mut server_tx = server_tx;
+                    let mut server_tx = server_tx;
 
-                let mut interval_stream = tokio::time::interval(constants::HEARTBEAT_INTERVAL);
+                    let mut interval_stream = tokio::time::interval(constants::HEARTBEAT_INTERVAL);
 
-                loop {
-                    interval_stream.tick().await;
+                    loop {
+                        interval_stream.tick().await;
 
-                    // We discard the server handle because our
-                    // heartbeat `Ping`s are a special case, and we
-                    // don't actually care about the response here.
-                    let (request_tx, _) = oneshot::channel();
-                    let msg = ClientRequest(Request::Ping(Nonce::default()), request_tx);
-
-                    if server_tx.send(msg).await.is_err() {
-                        return;
+                        // We discard the server handle because our
+                        // heartbeat `Ping`s are a special case, and we
+                        // don't actually care about the response here.
+                        let (request_tx, _) = oneshot::channel();
+                        if server_tx
+                            .send(ClientRequest {
+                                request: Request::Ping(Nonce::default()),
+                                tx: request_tx,
+                                span: tracing::Span::current(),
+                            })
+                            .await
+                            .is_err()
+                        {
+                            return;
+                        }
                     }
                 }
-            });
+                .instrument(heartbeat_span),
+            );
 
             Ok(client)
         };

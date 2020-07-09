@@ -165,7 +165,7 @@ impl Arbitrary for Spend {
                     anchor,
                     cv: cv_bytes,
                     nullifier: nullifier_bytes,
-                    rk: redjubjub::PublicKeyBytes::from(rpk_bytes),
+                    rk: redjubjub::VerificationKeyBytes::from(rpk_bytes),
                     zkproof: proof,
                     spend_auth_sig: redjubjub::Signature::from({
                         let mut b = [0u8; 64];

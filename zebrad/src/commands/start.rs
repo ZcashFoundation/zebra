@@ -60,7 +60,7 @@ impl StartCmd {
 
         let mut syncer = sync::Syncer::new(peer_set, state, verifier);
 
-        syncer.run().await
+        syncer.sync().await
     }
 }
 

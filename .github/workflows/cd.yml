@@ -26,7 +26,7 @@ jobs:
         BRANCH_NAME=${BRANCH_NAME,,} && \
         echo "::set-env name=SHORT_BRANCH_NAME::$SHORT_BRANCH_NAME" && \
         echo "::set-env name=BRANCH_NAME::$BRANCH_NAME" && \
-        echo "::set-env name=SHA7::$(git rev-parse --short=7 $GITHUB_SHA)"
+        echo "::set-env name=SHORT_SHA::$(git rev-parse --short=7 $GITHUB_SHA)"
 
     # Setup gcloud CLI
     - name: Set up gcloud Cloud SDK environment
@@ -41,15 +41,14 @@ jobs:
       # Tagging w/ the commit SHA blocks the :latest tag on GCR
       run: |
         gcloud builds submit \
-          --tag "gcr.io/$PROJECT_ID/$BRANCH_NAME:$SHA7" \
-          --machine-type n1-highcpu-32 \
-          --timeout 3600s \
+          --config cloudbuild.yaml \
+          --substitutions SHORT_SHA="$SHORT_SHA"
 
     # Create instance template from container image
     - name: Create instance template
       run: |
-        gcloud compute instance-templates create-with-container "zebrad-$SHORT_BRANCH_NAME-$SHA7" \
-          --container-image "gcr.io/$PROJECT_ID/$BRANCH_NAME:$SHA7" \
+        gcloud compute instance-templates create-with-container "zebrad-$SHORT_BRANCH_NAME-$SHORT_SHA" \
+          --container-image "gcr.io/$PROJECT_ID/$BRANCH_NAME:$SHORT_SHA" \
           --machine-type n1-highmem-8 \
           --service-account cos-vm@zealous-zebra.iam.gserviceaccount.com \
           --scopes cloud-platform \
@@ -86,7 +85,7 @@ jobs:
       run: |
         gcloud compute instance-groups managed create \
           "zebrad-$SHORT_BRANCH_NAME" \
-          --template "zebrad-$SHORT_BRANCH_NAME-$SHA7" \
+          --template "zebrad-$SHORT_BRANCH_NAME-$SHORT_SHA" \
           --health-check zebrad-tracing-filter \
           --initial-delay 30 \
           --region us-central1 \
@@ -98,5 +97,5 @@ jobs:
       run: |
         gcloud compute instance-groups managed rolling-action start-update \
           "zebrad-$SHORT_BRANCH_NAME" \
-          --version template="zebrad-$SHORT_BRANCH_NAME-$SHA7" \
+          --version template="zebrad-$SHORT_BRANCH_NAME-$SHORT_SHA" \
           --region us-central1 \
