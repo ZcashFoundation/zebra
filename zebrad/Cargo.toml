@@ -9,7 +9,7 @@ edition = "2018"
 rand = "0.7"
 chrono = "0.4"
 abscissa_core = "0.5"
-gumdrop = "0.7"
+gumdrop = "0.8"
 serde = { version = "1", features = ["serde_derive"] }
 toml = "0.5"
 thiserror = "1"
