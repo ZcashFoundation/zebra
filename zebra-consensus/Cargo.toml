@@ -13,7 +13,7 @@ rand = "0.7"
 redjubjub = { git = "https://github.com/ZcashFoundation/redjubjub.git", branch = "main"}
 tokio = { version = "0.2", features = ["time", "sync", "stream"] }
 tower = "0.3"
-tracing = "0.1.15"
+tracing = "0.1.16"
 tracing-futures = "0.2.4"
 
 tower-batch = { path = "../tower-batch/" }
