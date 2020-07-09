@@ -130,4 +130,12 @@ impl Transaction {
             Transaction::V4 { expiry_height, .. } => Some(*expiry_height),
         }
     }
+
+    /// Returns `true` if transaction contains any coinbase inputs.
+    pub fn contains_coinbase_input(&self) -> bool {
+        self.inputs().any(|input| match input {
+            TransparentInput::Coinbase { .. } => true,
+            _ => false,
+        })
+    }
 }
