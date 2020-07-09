@@ -39,7 +39,6 @@ jobs:
     # Build and push image to Google Container Registry
     - name: Build
       # Tagging w/ the commit SHA blocks the :latest tag on GCR
-      # This invocation with --tag ignores the cloudbuild.yaml
       run: |
         gcloud builds submit \
           --config cloudbuild.yaml \
