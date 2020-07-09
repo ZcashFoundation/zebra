@@ -20,7 +20,7 @@ pub struct Spend {
     /// The nullifier of the input note.
     pub nullifier: crate::nullifier::sapling::Nullifier,
     /// The randomized public key for `spend_auth_sig`.
-    pub rk: redjubjub::PublicKeyBytes<SpendAuth>,
+    pub rk: redjubjub::VerificationKeyBytes<SpendAuth>,
     /// The ZK spend proof.
     pub zkproof: Groth16Proof,
     /// A signature authorizing this spend.

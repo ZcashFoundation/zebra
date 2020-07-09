@@ -386,13 +386,13 @@ impl PartialEq<[u8; 32]> for OutgoingViewingKey {
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
 #[derive(Copy, Clone, Debug)]
-pub struct AuthorizingKey(pub redjubjub::PublicKey<SpendAuth>);
+pub struct AuthorizingKey(pub redjubjub::VerificationKey<SpendAuth>);
 
 impl Eq for AuthorizingKey {}
 
 impl From<[u8; 32]> for AuthorizingKey {
     fn from(bytes: [u8; 32]) -> Self {
-        Self(redjubjub::PublicKey::try_from(bytes).unwrap())
+        Self(redjubjub::VerificationKey::try_from(bytes).unwrap())
     }
 }
 
@@ -404,8 +404,8 @@ impl From<AuthorizingKey> for [u8; 32] {
 
 impl From<SpendAuthorizingKey> for AuthorizingKey {
     fn from(ask: SpendAuthorizingKey) -> Self {
-        let sk = redjubjub::SecretKey::<SpendAuth>::try_from(<[u8; 32]>::from(ask)).unwrap();
-        Self(redjubjub::PublicKey::from(&sk))
+        let sk = redjubjub::SigningKey::<SpendAuth>::try_from(<[u8; 32]>::from(ask)).unwrap();
+        Self(redjubjub::VerificationKey::from(&sk))
     }
 }
 

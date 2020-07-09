@@ -1459,25 +1459,13 @@ dependencies = [
 
 [[package]]
 name = "redjubjub"
-version = "0.1.1"
-source = "git+https://github.com/ZcashFoundation/redjubjub.git?branch=main#ba256655ddf84dac7ea6281a1b398495e46d232a"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f9717635678eabb203f6806561c7aa976610a9f6f0bfaadf1ca14dca35957741"
 dependencies = [
  "blake2b_simd",
  "byteorder",
  "digest 0.9.0",
- "jubjub",
- "rand_core 0.5.1",
- "serde",
- "thiserror",
-]
-
-[[package]]
-name = "redjubjub"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "05af26cd84133b56adf15179b564320ace234fa926b7a8c5fa8e391ffb65359f"
-dependencies = [
- "blake2b_simd",
  "jubjub",
  "rand_core 0.5.1",
  "serde",
@@ -2385,7 +2373,7 @@ dependencies = [
  "proptest",
  "proptest-derive",
  "rand_core 0.5.1",
- "redjubjub 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "redjubjub",
  "ripemd160",
  "secp256k1",
  "serde",
@@ -2409,7 +2397,7 @@ dependencies = [
  "futures",
  "futures-util",
  "rand 0.7.3",
- "redjubjub 0.1.1 (git+https://github.com/ZcashFoundation/redjubjub.git?branch=main)",
+ "redjubjub",
  "spandoc",
  "tokio",
  "tower",
