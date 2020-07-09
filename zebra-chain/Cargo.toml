@@ -19,7 +19,7 @@ hex = "0.4"
 jubjub = "0.3.0"
 lazy_static = "1.4.0"
 rand_core = "0.5.1"
-ripemd160 = "0.8.0"
+ripemd160 = "0.9.1"
 secp256k1 = { version = "0.17.2", features = ["serde"] }
 serde = { version = "1", features = ["serde_derive", "rc"] }
 sha2 = { version = "0.8.2", features=["compress"] }
