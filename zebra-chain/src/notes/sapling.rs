@@ -40,6 +40,10 @@ impl ZcashSerialize for Nullifier {
     }
 }
 
+/// The randomness used in the Pedersen Hash for note commitment.
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct NoteCommitmentRandomness(redjubjub::Randomizer);
+
 /// A Note represents that a value is spendable by the recipient who
 /// holds the spending key corresponding to a given shielded payment
 /// address.
@@ -53,8 +57,7 @@ pub struct Note {
 /// The decrypted form of encrypted Sapling notes on the blockchain.
 pub struct NotePlaintext {
     diversifier: Diversifier,
-    value: u64,
-    // TODO: refine as jub-jub appropriate in the base field.
+    value: Amount<NonNegative>,
     note_commitment_randomness: NoteCommitmentRandomness,
     memo: memo::Memo,
 }
