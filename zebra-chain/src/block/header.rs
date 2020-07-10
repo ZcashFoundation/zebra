@@ -1,8 +1,11 @@
-use super::{difficulty::CompactDifficulty, BlockHeaderHash, Error};
+use chrono::{DateTime, Duration, Utc};
+
 use crate::equihash_solution::EquihashSolution;
 use crate::merkle_tree::MerkleTreeRootHash;
 use crate::serialization::ZcashSerialize;
-use chrono::{DateTime, Duration, Utc};
+use crate::treestate::note_commitment_tree::SaplingNoteTreeRootHash;
+
+use super::{difficulty::CompactDifficulty, BlockHeaderHash, Error};
 
 /// Block header.
 ///

@@ -7,6 +7,7 @@ use crate::equihash_solution::EquihashSolution;
 use crate::merkle_tree::MerkleTreeRootHash;
 use crate::serialization::ZcashDeserializeInto;
 use crate::serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize};
+use crate::treestate::note_commitment_tree::SaplingNoteTreeRootHash;
 
 use super::Block;
 use super::BlockHeader;

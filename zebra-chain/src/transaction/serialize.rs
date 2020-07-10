@@ -331,7 +331,7 @@ impl ZcashSerialize for Spend {
 
 impl ZcashDeserialize for Spend {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        use crate::note_commitment_tree::SaplingNoteTreeRootHash;
+        use crate::treestate::note_commitment_tree::SaplingNoteTreeRootHash;
         Ok(Spend {
             cv: reader.read_32_bytes()?,
             anchor: SaplingNoteTreeRootHash(reader.read_32_bytes()?),

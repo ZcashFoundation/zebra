@@ -1,11 +1,11 @@
 use crate::{
-    note_commitment_tree::SaplingNoteTreeRootHash,
     notes::{sapling, sprout},
     proofs::{Groth16Proof, ZkSnarkProof},
     transaction::{
         CoinbaseData, JoinSplit, JoinSplitData, OutPoint, Output, ShieldedData, Spend, Transaction,
         TransparentInput,
     },
+    treestate::note_commitment_tree::SaplingNoteTreeRootHash,
     types::{
         amount::{Amount, NonNegative},
         BlockHeight, Script,

@@ -1,9 +1,8 @@
-// XXX this name seems too long?
-use crate::note_commitment_tree::SaplingNoteTreeRootHash;
 use crate::notes::sapling;
 use crate::proofs::Groth16Proof;
 use crate::redjubjub::{self, Binding, SpendAuth};
 use crate::serde_helpers;
+use crate::treestate::note_commitment_tree::SaplingNoteTreeRootHash;
 use futures::future::Either;
 
 /// A _Spend Description_, as described in [protocol specification §7.3][ps].

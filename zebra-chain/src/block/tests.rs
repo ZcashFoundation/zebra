@@ -6,7 +6,7 @@ use crate::merkle_tree::MerkleTreeRootHash;
 use crate::serialization::{
     SerializationError, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
 };
-use crate::types::BlockHeight;
+use crate::treestate::note_commitment_tree::SaplingNoteTreeRootHash;
 use crate::types::LockTime;
 use crate::Network;
 use crate::{sha256d_writer::Sha256dWriter, test::generate};
