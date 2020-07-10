@@ -44,7 +44,7 @@ impl CheckpointList {
         Ok(CheckpointList(checkpoints))
     }
 
-    /// Is there a checkpoint at `height`?
+    /// Return true if there a checkpoint at `height`.
     ///
     /// See `BTreeMap::contains_key()` for details.
     pub fn contains(&self, height: BlockHeight) -> bool {
@@ -63,13 +63,8 @@ impl CheckpointList {
     ///
     /// If there is only a single checkpoint, then the maximum height will be
     /// zero. (The genesis block.)
-    ///
-    /// The maximum height is constant for each checkpoint list.
     pub fn max_height(&self) -> BlockHeight {
-        self.0
-            .keys()
-            .cloned()
-            .next_back()
+        self.max_height_in_range(..)
             .expect("checkpoint lists must have at least one checkpoint")
     }
 
