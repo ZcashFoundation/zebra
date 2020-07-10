@@ -108,11 +108,10 @@ async fn multi_item_checkpoint_list() -> Result<(), Report> {
     // Parse all the blocks
     let mut checkpoint_data = Vec::new();
     for b in &[
+        // This list is used as a checkpoint list, and as a list of blocks to
+        // verify. So it must be continuous.
         &zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..],
         &zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..],
-        // TODO(teor): not continuous, so they hang
-        //&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..],
-        //&zebra_test::vectors::BLOCK_MAINNET_434873_BYTES[..],
     ] {
         let block = Arc::<Block>::zcash_deserialize(*b)?;
         let hash: BlockHeaderHash = block.as_ref().into();
@@ -584,8 +583,10 @@ async fn checkpoint_drop_cancel() -> Result<(), Report> {
     // Parse all the blocks
     let mut checkpoint_data = Vec::new();
     for b in &[
+        // Continous blocks are verified
         &zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..],
         &zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..],
+        // Other blocks can't verify, so they are rejected on drop
         &zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..],
         &zebra_test::vectors::BLOCK_MAINNET_434873_BYTES[..],
     ] {
