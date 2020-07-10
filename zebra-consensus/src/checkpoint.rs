@@ -13,16 +13,19 @@
 //! Verification is provided via a `tower::Service`, to support backpressure and batch
 //! verification.
 
+mod list;
+
 #[cfg(test)]
 mod tests;
 
 use futures_util::FutureExt;
+use list::CheckpointList;
 use std::{
     cmp::Ordering,
     collections::BTreeMap,
     error,
     future::Future,
-    ops::{Bound, Bound::*, RangeBounds},
+    ops::{Bound, Bound::*},
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -136,74 +139,6 @@ impl PartialOrd for Target<BlockHeight> {
 
 use Progress::*;
 use Target::*;
-
-/// Each checkpoint consists of a coinbase height and block header hash.
-///
-/// Checkpoints should be chosen to avoid forks or chain reorganizations,
-/// which only happen in the last few hundred blocks in the chain.
-/// (zcashd allows chain reorganizations up to 99 blocks, and prunes
-/// orphaned side-chains after 288 blocks.)
-///
-/// There must be a checkpoint for the genesis block at BlockHeight 0.
-/// (All other checkpoints are optional.)
-#[derive(Debug)]
-struct CheckpointList(BTreeMap<BlockHeight, BlockHeaderHash>);
-
-impl CheckpointList {
-    /// Create a new checkpoint list from `checkpoint_list`.
-    fn new(
-        checkpoint_list: impl IntoIterator<Item = (BlockHeight, BlockHeaderHash)>,
-    ) -> Result<Self, Error> {
-        let checkpoints: BTreeMap<BlockHeight, BlockHeaderHash> =
-            checkpoint_list.into_iter().collect();
-
-        // An empty checkpoint list can't actually verify any blocks.
-        match checkpoints.keys().next() {
-            Some(BlockHeight(0)) => {}
-            None => Err("there must be at least one checkpoint, for the genesis block")?,
-            _ => Err("checkpoints must start at the genesis block height 0")?,
-        };
-
-        Ok(CheckpointList(checkpoints))
-    }
-
-    /// Is there a checkpoint at `height`?
-    ///
-    /// See `BTreeMap::contains_key()` for details.
-    fn contains(&self, height: BlockHeight) -> bool {
-        self.0.contains_key(&height)
-    }
-
-    /// Returns the hash corresponding to the checkpoint at `height`,
-    /// or None if there is no checkpoint at that height.
-    ///
-    /// See `BTreeMap::get()` for details.
-    fn hash(&self, height: BlockHeight) -> Option<BlockHeaderHash> {
-        self.0.get(&height).cloned()
-    }
-
-    /// Return the block height of the highest checkpoint in the checkpoint list.
-    ///
-    /// If there is only a single checkpoint, then the maximum height will be
-    /// zero. (The genesis block.)
-    ///
-    /// The maximum height is constant for each checkpoint list.
-    fn max_height(&self) -> BlockHeight {
-        self.0
-            .keys()
-            .cloned()
-            .next_back()
-            .expect("checkpoint lists must have at least one checkpoint")
-    }
-
-    /// Return the block height of the highest checkpoint in a sub-range.
-    fn max_height_in_range<R>(&self, range: R) -> Option<BlockHeight>
-    where
-        R: RangeBounds<BlockHeight>,
-    {
-        self.0.range(range).map(|(height, _)| *height).next_back()
-    }
-}
 
 /// A checkpointing block verifier.
 ///
