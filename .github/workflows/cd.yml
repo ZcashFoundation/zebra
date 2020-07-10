@@ -22,9 +22,10 @@ jobs:
       run: |
         BRANCH_NAME=$(expr $GITHUB_REF : '.*/\(.*\)') && \
         BRANCH_NAME=${BRANCH_NAME,,} && \
+        REPOSITORY=${GITHUB_REPOSITORY,,} && \
         echo "::set-env name=BRANCH_NAME::$BRANCH_NAME" && \
         echo "::set-env name=SHORT_SHA::$(git rev-parse --short=7 $GITHUB_SHA)" && \
-        echo "::set-env name=GITHUB_REPOSITORY::${GITHUB_REPOSITORY,,}"
+        echo "::set-env name=REPOSITORY::$REPOSITORY"
 
     # Setup gcloud CLI
     - name: Set up gcloud Cloud SDK environment
@@ -46,7 +47,7 @@ jobs:
     - name: Create instance template
       run: |
         gcloud compute instance-templates create-with-container "zebrad-$BRANCH_NAME-$SHORT_SHA" \
-          --container-image "gcr.io/$PROJECT_ID/$GITHUB_REPOSITORY/$BRANCH_NAME:$SHORT_SHA" \
+          --container-image "gcr.io/$PROJECT_ID/$REPOSITORY/$BRANCH_NAME:$SHORT_SHA" \
           --machine-type n1-highmem-8 \
           --service-account cos-vm@zealous-zebra.iam.gserviceaccount.com \
           --scopes cloud-platform \
