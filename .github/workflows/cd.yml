@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-      - gcloud
+      - cloudbuild
 
 env:
   PROJECT_ID: zealous-zebra
@@ -20,13 +20,12 @@ jobs:
 
     - name: Set project and image names
       run: |
-        SHORT_BRANCH_NAME=$(expr $GITHUB_REF : '.*/\(.*\)') && \
-        SHORT_BRANCH_NAME=${SHORT_BRANCH_NAME,,} && \
-        BRANCH_NAME=$GITHUB_REPOSITORY/$SHORT_BRANCH_NAME && \
+        BRANCH_NAME=$(expr $GITHUB_REF : '.*/\(.*\)') && \
         BRANCH_NAME=${BRANCH_NAME,,} && \
-        echo "::set-env name=SHORT_BRANCH_NAME::$SHORT_BRANCH_NAME" && \
+        REPOSITORY=${GITHUB_REPOSITORY,,} && \
         echo "::set-env name=BRANCH_NAME::$BRANCH_NAME" && \
-        echo "::set-env name=SHORT_SHA::$(git rev-parse --short=7 $GITHUB_SHA)"
+        echo "::set-env name=SHORT_SHA::$(git rev-parse --short=7 $GITHUB_SHA)" && \
+        echo "::set-env name=REPOSITORY::$REPOSITORY"
 
     # Setup gcloud CLI
     - name: Set up gcloud Cloud SDK environment
@@ -42,13 +41,13 @@ jobs:
       run: |
         gcloud builds submit \
           --config cloudbuild.yaml \
-          --substitutions SHORT_SHA="$SHORT_SHA"
+          --substitutions SHORT_SHA="$SHORT_SHA",BRANCH_NAME="$BRANCH_NAME"
 
     # Create instance template from container image
     - name: Create instance template
       run: |
-        gcloud compute instance-templates create-with-container "zebrad-$SHORT_BRANCH_NAME-$SHORT_SHA" \
-          --container-image "gcr.io/$PROJECT_ID/$BRANCH_NAME:$SHORT_SHA" \
+        gcloud compute instance-templates create-with-container "zebrad-$BRANCH_NAME-$SHORT_SHA" \
+          --container-image "gcr.io/$PROJECT_ID/$REPOSITORY/$BRANCH_NAME:$SHORT_SHA" \
           --machine-type n1-highmem-8 \
           --service-account cos-vm@zealous-zebra.iam.gserviceaccount.com \
           --scopes cloud-platform \
@@ -77,15 +76,15 @@ jobs:
       id: does-group-exist
       continue-on-error: true
       run: |
-        gcloud compute instance-groups list | grep "zebrad-$SHORT_BRANCH_NAME"
+        gcloud compute instance-groups list | grep "zebrad-$BRANCH_NAME"
 
     # Deploy new managed instance group using the new instance template
     - name: Create managed instance group
       if: steps.does-group-exist.outcome == 'failure'
       run: |
         gcloud compute instance-groups managed create \
-          "zebrad-$SHORT_BRANCH_NAME" \
-          --template "zebrad-$SHORT_BRANCH_NAME-$SHORT_SHA" \
+          "zebrad-$BRANCH_NAME" \
+          --template "zebrad-$BRANCH_NAME-$SHORT_SHA" \
           --health-check zebrad-tracing-filter \
           --initial-delay 30 \
           --region us-central1 \
@@ -96,6 +95,6 @@ jobs:
       if: steps.does-group-exist.outcome == 'success'
       run: |
         gcloud compute instance-groups managed rolling-action start-update \
-          "zebrad-$SHORT_BRANCH_NAME" \
-          --version template="zebrad-$SHORT_BRANCH_NAME-$SHORT_SHA" \
+          "zebrad-$BRANCH_NAME" \
+          --version template="zebrad-$BRANCH_NAME-$SHORT_SHA" \
           --region us-central1 \
