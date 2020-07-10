@@ -56,9 +56,22 @@ struct QueuedBlock {
 
 /// A list of unverified blocks at a particular height.
 ///
-/// Typically contains zero or one blocks, but might contain more if a peer
+/// Typically contains a single block, but might contain more if a peer
 /// has an old chain fork. (Or sends us a bad block.)
+///
+/// The CheckpointVerifier avoids creating zero-block lists.
 type QueuedBlockList = Vec<QueuedBlock>;
+
+/// The maximum number of queued blocks at any one height.
+///
+/// This value is a tradeoff between:
+/// - rejecting bad blocks: higher is more efficient, and
+/// - avoiding a memory DoS: lower means less memory usage.
+///
+/// If we use a checkpoint interval of 500 blocks, our approximate queued block
+/// memory usage is:
+/// `500 blocks * 2 MB max per block * 2 blocks per height = 2 GB`
+const MAX_QUEUED_BLOCKS_PER_HEIGHT: usize = 2;
 
 /// A checkpointing block verifier.
 ///
@@ -297,10 +310,24 @@ impl CheckpointVerifier {
             }
         };
 
+        // Blocks consist of a header and a transaction vector. Since the header
+        // only takes up about 1.4 kB, we can allocate space for multiple
+        // headers upfront.
+        let qblocks = self
+            .queued
+            .entry(height)
+            .or_insert_with(|| QueuedBlockList::with_capacity(MAX_QUEUED_BLOCKS_PER_HEIGHT));
+
+        // Memory DoS resistance: limit the queued blocks at each height
+        if qblocks.len() >= MAX_QUEUED_BLOCKS_PER_HEIGHT {
+            let _ = tx.send(Err("too many queued blocks at this height".into()));
+            return rx;
+        }
+
         // Add the block to the list of queued blocks at this height
         let hash = block.as_ref().into();
         let new_qblock = QueuedBlock { block, hash, tx };
-        self.queued.entry(height).or_default().push(new_qblock);
+        qblocks.push(new_qblock);
 
         rx
     }
