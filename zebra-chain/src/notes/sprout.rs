@@ -95,7 +95,6 @@ pub struct NotePlaintext {
     value: Amount<NonNegative>,
     // TODO: refine type
     rho: [u8; 32],
-    // TODO: refine as jub-jub appropriate in the base field.
     note_commitment_randomness: NoteCommitmentRandomness,
     memo: Memo,
 }
