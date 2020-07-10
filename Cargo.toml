@@ -9,6 +9,7 @@ members = [
         "zebra-rpc",
         "zebra-client",
         "zebra-test",
+        "zebra-utils",
         "zebrad",
 ]
 

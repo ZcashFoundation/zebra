@@ -1,0 +1,10 @@
+[package]
+name = "zebra-utils"
+authors = ["Zcash Foundation <zebra@zfnd.org>"]
+license = "MIT OR Apache-2.0"
+version = "0.1.0"
+edition = "2018"
+
+[dependencies]
+structopt = "0.3.15"
+color-eyre = "0.5.0"
