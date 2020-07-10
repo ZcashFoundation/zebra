@@ -2,6 +2,9 @@
 
 use super::*;
 
+use super::types::Progress::*;
+use super::types::Target::*;
+
 use color_eyre::eyre::{eyre, Report};
 use futures::future::TryFutureExt;
 use std::{cmp::min, mem::drop, time::Duration};
