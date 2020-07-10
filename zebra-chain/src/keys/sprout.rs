@@ -40,6 +40,9 @@ fn prf_addr(x: [u8; 32], t: u8) -> [u8; 32] {
     let mut block = [0u8; 64];
 
     block[0..32].copy_from_slice(&x[..]);
+    // The first four bits –i.e. the most signicant four bits of the
+    // first byte– are used to separate distinct uses
+    // ofSHA256Compress, ensuring that the functions are independent.
     block[0] |= 0b1100_0000;
 
     block[32] = t;
@@ -107,19 +110,6 @@ impl fmt::Display for SpendingKey {
     }
 }
 
-impl std::str::FromStr for SpendingKey {
-    type Err = SerializationError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let result = &bs58::decode(s).with_check(None).into_vec();
-
-        match result {
-            Ok(bytes) => Self::zcash_deserialize(&bytes[..]),
-            Err(_) => Err(SerializationError::Parse("bs58 decoding error")),
-        }
-    }
-}
-
 impl From<[u8; 32]> for SpendingKey {
     /// Generate a _SpendingKey_ from existing bytes, with the high 4
     /// bits of the first byte set to zero (ie, 256 bits clamped to
@@ -130,6 +120,25 @@ impl From<[u8; 32]> for SpendingKey {
         SpendingKey {
             bytes,
             network: Network::default(),
+        }
+    }
+}
+
+impl From<SpendingKey> for [u8; 32] {
+    fn from(spending_key: SpendingKey) -> [u8; 32] {
+        spending_key.bytes
+    }
+}
+
+impl std::str::FromStr for SpendingKey {
+    type Err = SerializationError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let result = &bs58::decode(s).with_check(None).into_vec();
+
+        match result {
+            Ok(bytes) => Self::zcash_deserialize(&bytes[..]),
+            Err(_) => Err(SerializationError::Parse("bs58 decoding error")),
         }
     }
 }
