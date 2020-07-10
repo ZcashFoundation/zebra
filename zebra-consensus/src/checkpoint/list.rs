@@ -44,7 +44,7 @@ impl CheckpointList {
         Ok(CheckpointList(checkpoints))
     }
 
-    /// Return true if there a checkpoint at `height`.
+    /// Return true if there is a checkpoint at `height`.
     ///
     /// See `BTreeMap::contains_key()` for details.
     pub fn contains(&self, height: BlockHeight) -> bool {
