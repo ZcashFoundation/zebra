@@ -23,7 +23,8 @@ jobs:
         BRANCH_NAME=$(expr $GITHUB_REF : '.*/\(.*\)') && \
         BRANCH_NAME=${BRANCH_NAME,,} && \
         echo "::set-env name=BRANCH_NAME::$BRANCH_NAME" && \
-        echo "::set-env name=SHORT_SHA::$(git rev-parse --short=7 $GITHUB_SHA)"
+        echo "::set-env name=SHORT_SHA::$(git rev-parse --short=7 $GITHUB_SHA)" && \
+        echo "::set-env name=GITHUB_REPOSITORY::${GITHUB_REPOSITORY,,}"
 
     # Setup gcloud CLI
     - name: Set up gcloud Cloud SDK environment
