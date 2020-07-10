@@ -14,7 +14,7 @@ use crate::{
     types::amount::{Amount, NonNegative},
 };
 
-use super::{memo::Memo, *};
+use super::memo::Memo;
 
 /// Nullifier seed, named rho in the [spec][ps].
 ///
