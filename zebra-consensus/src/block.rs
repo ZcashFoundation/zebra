@@ -145,6 +145,9 @@ where
 /// This function should be called only once for a particular state service (and
 /// the result be shared) rather than constructing multiple verification services
 /// backed by the same state layer.
+//
+// Only used by tests and other modules
+#[allow(dead_code)]
 pub fn init<S>(
     state_service: S,
 ) -> impl Service<

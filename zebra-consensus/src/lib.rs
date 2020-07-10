@@ -14,6 +14,9 @@
 #![deny(missing_docs)]
 #![allow(clippy::try_err)]
 
+pub mod block;
 pub mod checkpoint;
 pub mod mempool;
-pub mod verify;
+pub mod redjubjub;
+mod script;
+mod transaction;

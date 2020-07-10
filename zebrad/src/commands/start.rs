@@ -56,7 +56,7 @@ impl StartCmd {
         let config = app_config().network.clone();
         let state = zebra_state::on_disk::init(zebra_state::Config::default());
         let (peer_set, _address_book) = zebra_network::init(config, node).await;
-        let verifier = zebra_consensus::verify::init(state.clone());
+        let verifier = zebra_consensus::block::init(state.clone());
 
         let mut syncer = sync::Syncer::new(peer_set, state, verifier);
 
