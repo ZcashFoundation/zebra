@@ -204,6 +204,121 @@ async fn multi_item_checkpoint_list() -> Result<(), Report> {
 }
 
 #[tokio::test]
+async fn continuous_blockchain_test() -> Result<(), Report> {
+    continuous_blockchain().await
+}
+
+#[spandoc::spandoc]
+async fn continuous_blockchain() -> Result<(), Report> {
+    zebra_test::init();
+
+    // A continuous blockchain
+    let mut blockchain = Vec::new();
+    for b in &[
+        &zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..],
+        &zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..],
+        &zebra_test::vectors::BLOCK_MAINNET_2_BYTES[..],
+        &zebra_test::vectors::BLOCK_MAINNET_3_BYTES[..],
+        &zebra_test::vectors::BLOCK_MAINNET_4_BYTES[..],
+        &zebra_test::vectors::BLOCK_MAINNET_5_BYTES[..],
+        &zebra_test::vectors::BLOCK_MAINNET_6_BYTES[..],
+        &zebra_test::vectors::BLOCK_MAINNET_7_BYTES[..],
+        &zebra_test::vectors::BLOCK_MAINNET_8_BYTES[..],
+        &zebra_test::vectors::BLOCK_MAINNET_9_BYTES[..],
+        &zebra_test::vectors::BLOCK_MAINNET_10_BYTES[..],
+    ] {
+        let block = Arc::<Block>::zcash_deserialize(*b)?;
+        let hash: BlockHeaderHash = block.as_ref().into();
+        blockchain.push((block.clone(), block.coinbase_height().unwrap(), hash));
+    }
+
+    // Parse only some blocks as checkpoints
+    let mut checkpoints = Vec::new();
+    for b in &[
+        &zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..],
+        &zebra_test::vectors::BLOCK_MAINNET_5_BYTES[..],
+        &zebra_test::vectors::BLOCK_MAINNET_10_BYTES[..],
+    ] {
+        let block = Arc::<Block>::zcash_deserialize(*b)?;
+        let hash: BlockHeaderHash = block.as_ref().into();
+        checkpoints.push((block.clone(), block.coinbase_height().unwrap(), hash));
+    }
+
+    // The checkpoint list will contain only block 0, 5 and 10
+    let checkpoint_list: BTreeMap<BlockHeight, BlockHeaderHash> = checkpoints
+        .iter()
+        .map(|(_block, height, hash)| (*height, *hash))
+        .collect();
+
+    let mut checkpoint_verifier = CheckpointVerifier::new(checkpoint_list).map_err(|e| eyre!(e))?;
+
+    // Setup checks
+    assert_eq!(
+        checkpoint_verifier.previous_checkpoint_height(),
+        BeforeGenesis
+    );
+    assert_eq!(
+        checkpoint_verifier.target_checkpoint_height(),
+        WaitingForBlocks
+    );
+    assert_eq!(
+        checkpoint_verifier.checkpoint_list.max_height(),
+        BlockHeight(10)
+    );
+
+    // Now verify each block
+    for (block, height, _hash) in blockchain {
+        /// SPANDOC: Make sure the verifier service is ready
+        let ready_verifier_service = checkpoint_verifier
+            .ready_and()
+            .map_err(|e| eyre!(e))
+            .await?;
+
+        /// SPANDOC: Set up the future for block {?height}
+        let verify_future = timeout(
+            Duration::from_secs(VERIFY_TIMEOUT_SECONDS),
+            ready_verifier_service.call(block.clone()),
+        );
+
+        /// SPANDOC: something here?
+        tokio::spawn(async move { verify_future.await });
+
+        // Execution checks
+        if height < checkpoint_verifier.checkpoint_list.max_height() {
+            assert_eq!(
+                checkpoint_verifier.target_checkpoint_height(),
+                WaitingForBlocks
+            );
+        } else {
+            assert_eq!(
+                checkpoint_verifier.previous_checkpoint_height(),
+                FinalCheckpoint
+            );
+            assert_eq!(
+                checkpoint_verifier.target_checkpoint_height(),
+                FinishedVerifying
+            );
+        }
+    }
+
+    // Final checks
+    assert_eq!(
+        checkpoint_verifier.previous_checkpoint_height(),
+        FinalCheckpoint
+    );
+    assert_eq!(
+        checkpoint_verifier.target_checkpoint_height(),
+        FinishedVerifying
+    );
+    assert_eq!(
+        checkpoint_verifier.checkpoint_list.max_height(),
+        BlockHeight(10)
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn block_higher_than_max_checkpoint_fail_test() -> Result<(), Report> {
     block_higher_than_max_checkpoint_fail().await
 }
