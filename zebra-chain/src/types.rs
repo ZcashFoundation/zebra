@@ -16,7 +16,7 @@ pub mod amount;
 ///
 /// # Invariants
 ///
-/// Users should not construct block heights greater than or equal to `500_000_000`.
+/// Users should not construct block heights greater than `BlockHeight::MAX`.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct BlockHeight(pub u32);
 
@@ -25,7 +25,9 @@ impl Arbitrary for BlockHeight {
     type Parameters = ();
 
     fn arbitrary_with(_args: ()) -> Self::Strategy {
-        (0u32..500_000_000_u32).prop_map(BlockHeight).boxed()
+        (BlockHeight::MIN.0..=BlockHeight::MAX.0)
+            .prop_map(BlockHeight)
+            .boxed()
     }
 
     type Strategy = BoxedStrategy<Self>;
@@ -36,15 +38,70 @@ impl Arbitrary for BlockHeight {
 ///
 /// # Invariants
 ///
-/// Users should not construct a `LockTime` with `BlockHeight` greater than or
-/// equal to `500_000_000` or a timestamp before 4 November 1985 (Unix timestamp
-/// less than `500_000_000`).
+/// Users should not construct a `LockTime` with:
+///   - a `BlockHeight` greater than MAX_BLOCK_HEIGHT,
+///   - a timestamp before 6 November 1985
+///     (Unix timestamp less than MIN_LOCK_TIMESTAMP), or
+///   - a timestamp after 6 February 2106
+///     (Unix timestamp greater than MAX_LOCK_TIMESTAMP).
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum LockTime {
     /// Unlock at a particular block height.
     Height(BlockHeight),
     /// Unlock at a particular time.
     Time(DateTime<Utc>),
+}
+
+impl BlockHeight {
+    /// The minimum BlockHeight.
+    ///
+    /// Due to the underlying type, it is impossible to construct block heights
+    /// less than `BlockHeight::MIN`.
+    ///
+    /// Style note: Sometimes, `BlockHeight::MIN` is less readable than
+    /// `BlockHeight(0)`. Use whichever makes sense in context.
+    pub const MIN: BlockHeight = BlockHeight(0);
+
+    /// The maximum BlockHeight.
+    ///
+    /// Users should not construct block heights greater than `BlockHeight::MAX`.
+    pub const MAX: BlockHeight = BlockHeight(499_999_999);
+
+    /// The maximum BlockHeight as a u32, for range patterns.
+    pub const MAX_U32: u32 = Self::MAX.0;
+}
+
+impl LockTime {
+    /// The minimum LockTime::Time, as a timestamp in seconds.
+    ///
+    /// Users should not construct lock times less than `MIN_TIMESTAMP`.
+    pub const MIN_TIMESTAMP: i64 = 500_000_000;
+
+    /// The maximum LockTime::Time, as a timestamp in seconds.
+    ///
+    /// Users should not construct lock times greater than `MAX_TIMESTAMP`.
+    /// LockTime is u32 in the spec, so times are limited to u32::MAX.
+    pub const MAX_TIMESTAMP: i64 = u32::MAX as i64;
+
+    /// Returns the minimum LockTime::Time, as a LockTime.
+    ///
+    /// Users should not construct lock times less than `min_lock_timestamp`.
+    //
+    // When `Utc.timestamp` stabilises as a const function, we can make this a
+    // const function.
+    pub fn min_lock_time() -> LockTime {
+        LockTime::Time(Utc.timestamp(Self::MIN_TIMESTAMP, 0))
+    }
+
+    /// Returns the maximum LockTime::Time, as a LockTime.
+    ///
+    /// Users should not construct lock times greater than `max_lock_timestamp`.
+    //
+    // When `Utc.timestamp` stabilises as a const function, we can make this a
+    // const function.
+    pub fn max_lock_time() -> LockTime {
+        LockTime::Time(Utc.timestamp(Self::MAX_TIMESTAMP, 0))
+    }
 }
 
 impl ZcashSerialize for LockTime {
@@ -64,7 +121,7 @@ impl ZcashSerialize for LockTime {
 impl ZcashDeserialize for LockTime {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         let n = reader.read_u32::<LittleEndian>()?;
-        if n < 500_000_000 {
+        if n <= BlockHeight::MAX.0 {
             Ok(LockTime::Height(BlockHeight(n)))
         } else {
             Ok(LockTime::Time(Utc.timestamp(n as i64, 0)))
@@ -78,9 +135,10 @@ impl Arbitrary for LockTime {
 
     fn arbitrary_with(_args: ()) -> Self::Strategy {
         prop_oneof![
-            (0u32..500_000_000_u32).prop_map(|n| LockTime::Height(BlockHeight(n))),
-            // LockTime is u32 in the spec, so we are limited to u32::MAX here
-            (500_000_000..u32::MAX).prop_map(|n| { LockTime::Time(Utc.timestamp(n as i64, 0)) })
+            (BlockHeight::MIN.0..=BlockHeight::MAX.0)
+                .prop_map(|n| LockTime::Height(BlockHeight(n))),
+            (LockTime::MIN_TIMESTAMP..=LockTime::MAX_TIMESTAMP)
+                .prop_map(|n| { LockTime::Time(Utc.timestamp(n as i64, 0)) })
         ]
         .boxed()
     }
