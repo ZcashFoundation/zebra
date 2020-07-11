@@ -2,8 +2,23 @@ use std::env;
 use std::path::PathBuf;
 
 fn main() {
+    // cc::Build::new().file("/home/jlusby/git/ecc/zcash/src/.libs/libzcashconsensus.a").cpp(true).compile("zcashconsensus");
+    let host = "x86_64-unknown-linux-gnu";
     println!("cargo:rustc-link-lib=static=zcashconsensus");
+    // println!("cargo:rustc-link-lib=static=bitcoin_util");
+    println!("cargo:rustc-link-lib=static=boost_filesystem");
+    println!("cargo:rustc-link-lib=static=boost_thread");
+    println!("cargo:rustc-link-lib=static=boost_chrono");
+    println!("cargo:rustc-link-lib=static=stdc++");
+    println!("cargo:rustc-link-lib=static=sodium");
+    println!("cargo:rustc-link-lib=static=secp256k1");
+    println!("cargo:rustc-link-lib=static=crypto");
     println!("cargo:rustc-link-search=/home/jlusby/git/ecc/zcash/src/.libs");
+    println!("cargo:rustc-link-search=/home/jlusby/git/ecc/zcash/src/");
+    println!("cargo:rustc-link-search=/home/jlusby/git/ecc/zcash/src/zcash");
+    println!("cargo:rustc-link-search=/home/jlusby/git/ecc/zcash/src/secp256k1/.libs");
+    println!("cargo:rustc-link-search=/home/jlusby/git/ecc/zcash/depends/{}/lib/", host);
+    println!("cargo:rustc-link-search=/usr/lib/gcc/x86_64-linux-gnu/9/");
 
     println!("cargo:rerun-if-changed=cxx-src/zcashconsensus.h");
 
