@@ -38,9 +38,12 @@ impl Arbitrary for BlockHeight {
 ///
 /// # Invariants
 ///
-/// Users should not construct a `LockTime` with `BlockHeight` greater than or
-/// equal to `500_000_000` or a timestamp before 4 November 1985 (Unix timestamp
-/// less than `500_000_000`).
+/// Users should not construct a `LockTime` with:
+///   - a `BlockHeight` greater than MAX_BLOCK_HEIGHT,
+///   - a timestamp before 6 November 1985
+///     (Unix timestamp less than MIN_LOCK_TIMESTAMP), or
+///   - a timestamp after 6 February 2106
+///     (Unix timestamp greater than MAX_LOCK_TIMESTAMP).
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum LockTime {
     /// Unlock at a particular block height.
