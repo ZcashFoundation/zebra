@@ -64,7 +64,18 @@ impl CheckpointList {
             Err("checkpoint hashes must be unique")?;
         }
 
-        Ok(CheckpointList(checkpoints))
+        // Make sure all the hashes are valid. In Bitcoin, [0; 32] is the null
+        // hash. It is also used as the parent hash of genesis blocks.
+        if block_hashes.contains(&BlockHeaderHash([0; 32])) {
+            Err("the null hash is not a valid checkpoint hash")?;
+        }
+
+        let checkpoints = CheckpointList(checkpoints);
+        if checkpoints.max_height() > BlockHeight::MAX {
+            Err("checkpoint heights must be less than or equal to the maxiumum block height")?;
+        }
+
+        Ok(checkpoints)
     }
 
     /// Is there a checkpoint at `height`?
@@ -187,6 +198,46 @@ mod tests {
             checkpoint_data.iter().cloned().collect();
         let _ = CheckpointList::new(checkpoint_list)
             .expect_err("a checkpoint list with no genesis block should fail");
+
+        Ok(())
+    }
+
+    /// Make sure a checkpoint list that contains a null hash fails
+    #[test]
+    fn checkpoint_list_null_hash_fail() -> Result<(), Error> {
+        let checkpoint_data = vec![(BlockHeight(0), BlockHeaderHash([0; 32]))];
+
+        // Make a checkpoint list containing the non-genesis block
+        let checkpoint_list: BTreeMap<BlockHeight, BlockHeaderHash> =
+            checkpoint_data.iter().cloned().collect();
+        let _ = CheckpointList::new(checkpoint_list)
+            .expect_err("a checkpoint list with a null block hash should fail");
+
+        Ok(())
+    }
+
+    /// Make sure a checkpoint list that contains an invalid block height fails
+    #[test]
+    fn checkpoint_list_bad_height_fail() -> Result<(), Error> {
+        let checkpoint_data = vec![(
+            BlockHeight(BlockHeight::MAX.0 + 1),
+            BlockHeaderHash([1; 32]),
+        )];
+
+        // Make a checkpoint list containing the non-genesis block
+        let checkpoint_list: BTreeMap<BlockHeight, BlockHeaderHash> =
+            checkpoint_data.iter().cloned().collect();
+        let _ = CheckpointList::new(checkpoint_list).expect_err(
+            "a checkpoint list with an invalid block height (BlockHeight::MAX + 1) should fail",
+        );
+
+        let checkpoint_data = vec![(BlockHeight(u32::MAX), BlockHeaderHash([1; 32]))];
+
+        // Make a checkpoint list containing the non-genesis block
+        let checkpoint_list: BTreeMap<BlockHeight, BlockHeaderHash> =
+            checkpoint_data.iter().cloned().collect();
+        let _ = CheckpointList::new(checkpoint_list)
+            .expect_err("a checkpoint list with an invalid block height (u32::MAX) should fail");
 
         Ok(())
     }
