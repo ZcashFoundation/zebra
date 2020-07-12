@@ -6,10 +6,11 @@ use super::types::Progress::*;
 use super::types::Target::*;
 
 use color_eyre::eyre::{eyre, Report};
-use futures::future::TryFutureExt;
+use futures::{future::TryFutureExt, stream::FuturesUnordered};
 use std::{cmp::min, mem::drop, time::Duration};
-use tokio::time::timeout;
+use tokio::{stream::StreamExt, time::timeout};
 use tower::{Service, ServiceExt};
+use tracing_futures::Instrument;
 
 use zebra_chain::serialization::ZcashDeserialize;
 
@@ -266,6 +267,8 @@ async fn continuous_blockchain() -> Result<(), Report> {
         BlockHeight(10)
     );
 
+    let mut handles = FuturesUnordered::new();
+
     // Now verify each block
     for (block, height, _hash) in blockchain {
         /// SPANDOC: Make sure the verifier service is ready
@@ -280,8 +283,9 @@ async fn continuous_blockchain() -> Result<(), Report> {
             ready_verifier_service.call(block.clone()),
         );
 
-        /// SPANDOC: something here?
-        tokio::spawn(async move { verify_future.await });
+        /// SPANDOC: spawn verification future in the background
+        let handle = tokio::spawn(verify_future.in_current_span());
+        handles.push(handle);
 
         // Execution checks
         if height < checkpoint_verifier.checkpoint_list.max_height() {
@@ -299,6 +303,10 @@ async fn continuous_blockchain() -> Result<(), Report> {
                 FinishedVerifying
             );
         }
+    }
+
+    while let Some(result) = handles.next().await {
+        result??.map_err(|e| eyre!(e))?;
     }
 
     // Final checks
