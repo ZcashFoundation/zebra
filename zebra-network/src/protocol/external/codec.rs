@@ -698,10 +698,15 @@ mod tests {
     #[test]
     fn max_msg_size_round_trip() {
         use std::sync::Arc;
+        use zebra_chain::serialization::ZcashDeserializeInto;
+        zebra_test::init();
+
         let mut rt = Runtime::new().unwrap();
 
         // make tests with a Tx message
-        let tx = Transaction::zcash_deserialize(&zebra_test::vectors::DUMMY_TX1[..]).unwrap();
+        let tx = zebra_test::vectors::DUMMY_TX1
+            .zcash_deserialize_into()
+            .unwrap();
         let msg = Message::Tx(Arc::new(tx));
 
         use tokio_util::codec::{FramedRead, FramedWrite};
