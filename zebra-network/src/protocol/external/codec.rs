@@ -107,6 +107,10 @@ impl Encoder for Codec {
         let mut body = Vec::new();
         self.write_body(&item, &mut body)?;
 
+        if body.len() >= self.builder.max_len {
+            return Err(Parse("body length exceeded maximum size"));
+        }
+
         use Message::*;
         // Note: because all match arms must have
         // the same type, and the array length is
@@ -144,10 +148,6 @@ impl Encoder for Codec {
         header_writer.write_all(command)?;
         header_writer.write_u32::<LittleEndian>(body.len() as u32)?;
         header_writer.write_all(&Sha256dChecksum::from(&body[..]).0)?;
-
-        if body.len() >= self.builder.max_len {
-            return Err(Parse("body length exceeded maximum size"));
-        }
 
         dst.reserve(HEADER_LEN + body.len());
         dst.extend_from_slice(&header);
