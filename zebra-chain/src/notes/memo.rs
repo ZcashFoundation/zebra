@@ -1,5 +1,8 @@
 use std::{cmp, convert::TryFrom, fmt};
 
+#[cfg(test)]
+use proptest::{arbitrary::Arbitrary, collection::vec, prelude::*};
+
 /// A 512-byte _Memo_ field associated with a note, as described in
 /// [protocol specification §5.5][ps].
 ///
@@ -46,6 +49,23 @@ impl fmt::Debug for Memo {
 
         f.debug_tuple("Memo").field(&output).finish()
     }
+}
+
+#[cfg(test)]
+impl Arbitrary for Memo {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        (vec(any::<u8>(), 512))
+            .prop_map(|v| {
+                let mut bytes = [0; 512];
+                bytes.copy_from_slice(v.as_slice());
+                Memo(Box::new(bytes))
+            })
+            .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
 }
 
 #[test]

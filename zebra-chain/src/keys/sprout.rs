@@ -176,6 +176,7 @@ impl From<SpendingKey> for ReceivingKey {
 
 /// Derived from a _SpendingKey_.
 #[derive(Copy, Clone, Eq, PartialEq)]
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub struct PayingKey(pub [u8; 32]);
 
 impl AsRef<[u8]> for PayingKey {

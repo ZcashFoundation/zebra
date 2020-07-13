@@ -46,8 +46,9 @@ fn prf_nf(a_sk: [u8; 32], rho: [u8; 32]) -> [u8; 32] {
 /// Nullifier seed, named rho in the [spec][ps].
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#sproutkeycomponents
-#[derive(Clone, Copy)]
-struct NullifierSeed([u8; 32]);
+#[derive(Clone, Copy, Debug)]
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
+pub struct NullifierSeed([u8; 32]);
 
 impl AsRef<[u8]> for NullifierSeed {
     fn as_ref(&self) -> &[u8] {
@@ -94,6 +95,7 @@ impl ZcashSerialize for Nullifier {
 
 /// The randomness used in the Pedersen Hash for note commitment.
 #[derive(Copy, Clone, Debug, PartialEq)]
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub struct NoteCommitmentRandomness(pub [u8; 32]);
 
 impl AsRef<[u8]> for NoteCommitmentRandomness {
@@ -102,39 +104,51 @@ impl AsRef<[u8]> for NoteCommitmentRandomness {
     }
 }
 
+///
+#[derive(Clone, Copy, Debug)]
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
+pub struct NoteCommitment([u8; 32]);
+
 /// A Note represents that a value is spendable by the recipient who
 /// holds the spending key corresponding to a given shielded payment
 /// address.
+///
+/// https://zips.z.cash/protocol/protocol.pdf#notes
+#[derive(Clone, Copy, Debug)]
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub struct Note {
+    /// The paying key of the recipient’s shielded payment address
     paying_key: PayingKey,
+    /// An integer representing the value of the note in zatoshi (1 ZEC
+    /// = 10^8 zatoshi)
     value: Amount<NonNegative>,
-    nullifier_seed: NullifierSeed,
-    note_commitment_randomness: NoteCommitmentRandomness,
+    /// Input to PRF^nf to derive the nullifier of the note
+    rho: NullifierSeed,
+    /// A random commitment trapdoor
+    rcm: NoteCommitmentRandomness,
 }
 
 impl Note {
-    pub fn commitment(&self) -> NoteCommitment {
+    pub fn commit(&self) -> NoteCommitment {
         let leading_byte: u8 = 0xB0;
         let mut hasher = Sha256::default();
         hasher.input([leading_byte]);
         hasher.input(self.paying_key);
         hasher.input(self.value.to_bytes());
-        hasher.input(self.nullifier_seed);
-        hasher.input(self.note_commitment_randomness);
+        hasher.input(self.rho);
+        hasher.input(self.rcm);
 
         NoteCommitment(hasher.result().into())
     }
 }
 
-///
-pub struct NoteCommitment([u8; 32]);
-
 /// The decrypted form of encrypted Sprout notes on the blockchain.
+#[derive(Clone, Debug)]
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub struct NotePlaintext {
     value: Amount<NonNegative>,
-    // TODO: refine type
-    rho: [u8; 32],
-    note_commitment_randomness: NoteCommitmentRandomness,
+    rho: NullifierSeed,
+    rcm: NoteCommitmentRandomness,
     memo: Memo,
 }
 
