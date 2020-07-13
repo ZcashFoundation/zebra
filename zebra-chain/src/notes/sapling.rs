@@ -1,4 +1,3 @@
-//!
 #![allow(clippy::unit_arg)]
 #![allow(dead_code)]
 
@@ -51,14 +50,33 @@ pub struct Note {
     diversifier: Diversifier,
     transmission_key: TransmissionKey,
     value: Amount<NonNegative>,
-    note_commitment_randomness: NoteCommitmentRandomness,
+    rcm: NoteCommitmentRandomness,
 }
+
+impl Note {
+    /// Construct a “windowed” Pedersen commitment by reusing a
+    /// Perderson hash constructon, and adding a randomized point on
+    /// the Jubjub curve.
+    ///
+    /// https://zips.z.cash/protocol/protocol.pdf#concretewindowedcommit
+    pub fn commit(&self) -> NoteCommitment {
+        // Windowed Pedersen Commitment
+
+        // NoteCommitment()
+        unimplemented!()
+    }
+}
+
+///
+#[derive(Clone, Copy, Debug)]
+//#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
+pub struct NoteCommitment(jubjub::ExtendedPoint);
 
 /// The decrypted form of encrypted Sapling notes on the blockchain.
 pub struct NotePlaintext {
     diversifier: Diversifier,
     value: Amount<NonNegative>,
-    note_commitment_randomness: NoteCommitmentRandomness,
+    rcm: NoteCommitmentRandomness,
     memo: memo::Memo,
 }
 
@@ -189,6 +207,13 @@ impl Arbitrary for OutCiphertext {
 
     type Strategy = BoxedStrategy<Self>;
 }
+
+/// A Homomorphic Pedersen commitment to the value of a note, used in
+/// Spend and Output Descriptions.
+///
+/// https://zips.z.cash/protocol/protocol.pdf#concretehomomorphiccommit
+#[derive(Clone, Copy, Debug)]
+pub struct ValueCommitment(pub jubjub::ExtendedPoint);
 
 #[cfg(test)]
 proptest! {
