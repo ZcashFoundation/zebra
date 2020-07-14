@@ -1,8 +1,10 @@
-use crate::notes::sapling;
-use crate::proofs::Groth16Proof;
-use crate::redjubjub::{self, Binding, SpendAuth};
-use crate::serde_helpers;
-use crate::treestate::note_commitment_tree::SaplingNoteTreeRootHash;
+use crate::{
+    notes,
+    proofs::Groth16Proof,
+    redjubjub::{self, Binding, SpendAuth},
+    serde_helpers,
+    treestate::note_commitment_tree::SaplingNoteTreeRootHash,
+};
 use futures::future::Either;
 
 /// A _Spend Description_, as described in [protocol specification §7.3][ps].
@@ -11,13 +13,11 @@ use futures::future::Either;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Spend {
     /// A value commitment to the value of the input note.
-    ///
-    /// XXX refine to a specific type.
-    pub cv: [u8; 32],
+    pub cv: notes::sapling::ValueCommitment,
     /// A root of the Sapling note commitment tree at some block height in the past.
     pub anchor: SaplingNoteTreeRootHash,
     /// The nullifier of the input note.
-    pub nullifier: crate::notes::sapling::Nullifier,
+    pub nullifier: notes::sapling::Nullifier,
     /// The randomized public key for `spend_auth_sig`.
     pub rk: redjubjub::VerificationKeyBytes<SpendAuth>,
     /// The ZK spend proof.
@@ -32,20 +32,17 @@ pub struct Spend {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Output {
     /// A value commitment to the value of the input note.
-    ///
-    /// XXX refine to a specific type.
-    pub cv: [u8; 32],
+    pub cv: notes::sapling::ValueCommitment,
     /// The u-coordinate of the note commitment for the output note.
-    ///
-    /// XXX refine to a specific type.
-    pub cmu: [u8; 32],
+    #[serde(with = "serde_helpers::Fq")]
+    pub cm_u: jubjub::Fq,
     /// An encoding of an ephemeral Jubjub public key.
     #[serde(with = "serde_helpers::AffinePoint")]
     pub ephemeral_key: jubjub::AffinePoint,
     /// A ciphertext component for the encrypted output note.
-    pub enc_ciphertext: sapling::EncryptedCiphertext,
+    pub enc_ciphertext: notes::sapling::EncryptedCiphertext,
     /// A ciphertext component for the encrypted output note.
-    pub out_ciphertext: sapling::OutCiphertext,
+    pub out_ciphertext: notes::sapling::OutCiphertext,
     /// The ZK output proof.
     pub zkproof: Groth16Proof,
 }

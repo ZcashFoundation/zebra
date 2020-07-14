@@ -96,9 +96,9 @@ impl ZcashSerialize for Nullifier {
 /// The randomness used in the Pedersen Hash for note commitment.
 #[derive(Copy, Clone, Debug, PartialEq)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
-pub struct NoteCommitmentRandomness(pub [u8; 32]);
+pub struct CommitmentRandomness(pub [u8; 32]);
 
-impl AsRef<[u8]> for NoteCommitmentRandomness {
+impl AsRef<[u8]> for CommitmentRandomness {
     fn as_ref(&self) -> &[u8] {
         &self.0
     }
@@ -125,7 +125,7 @@ pub struct Note {
     /// Input to PRF^nf to derive the nullifier of the note
     rho: NullifierSeed,
     /// A random commitment trapdoor
-    rcm: NoteCommitmentRandomness,
+    rcm: CommitmentRandomness,
 }
 
 impl Note {
@@ -148,7 +148,7 @@ impl Note {
 pub struct NotePlaintext {
     value: Amount<NonNegative>,
     rho: NullifierSeed,
-    rcm: NoteCommitmentRandomness,
+    rcm: CommitmentRandomness,
     memo: Memo,
 }
 

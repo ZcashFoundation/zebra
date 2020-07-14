@@ -21,8 +21,6 @@ pub struct JoinSplit<P: ZkSnarkProof> {
     /// XXX refine type
     pub anchor: [u8; 32],
     /// A nullifier for the input notes.
-    ///
-    /// XXX refine type to [T; 2] -- there are two nullifiers
     pub nullifiers: [crate::notes::sprout::Nullifier; 2],
     /// A note commitment for this output note.
     ///
