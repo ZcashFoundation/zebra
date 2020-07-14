@@ -8,12 +8,14 @@ use std::{
     sync::Arc,
 };
 
-use crate::notes;
-use crate::proofs::ZkSnarkProof;
-use crate::serialization::{
-    ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
+use crate::{
+    notes,
+    proofs::ZkSnarkProof,
+    serialization::{
+        ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
+    },
+    types,
 };
-use crate::types::Script;
 
 use super::*;
 
@@ -211,7 +213,7 @@ impl ZcashDeserialize for TransparentInput {
                     hash: TransactionHash(bytes),
                     index: reader.read_u32::<LittleEndian>()?,
                 },
-                unlock_script: Script::zcash_deserialize(&mut reader)?,
+                unlock_script: types::Script::zcash_deserialize(&mut reader)?,
                 sequence: reader.read_u32::<LittleEndian>()?,
             })
         }
@@ -230,7 +232,7 @@ impl ZcashDeserialize for TransparentOutput {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         Ok(TransparentOutput {
             value: reader.read_u64::<LittleEndian>()?.try_into()?,
-            lock_script: Script::zcash_deserialize(&mut reader)?,
+            lock_script: tyoes::Script::zcash_deserialize(&mut reader)?,
         })
     }
 }
@@ -262,15 +264,15 @@ impl<P: ZkSnarkProof> ZcashDeserialize for JoinSplit<P> {
             vpub_new: reader.read_u64::<LittleEndian>()?.try_into()?,
             anchor: reader.read_32_bytes()?,
             nullifiers: [
-                crate::notes::sprout::Nullifier::zcash_deserialize(&mut reader)?,
-                crate::notes::sprout::Nullifier::zcash_deserialize(&mut reader)?,
+                notes::sprout::Nullifier::zcash_deserialize(&mut reader)?,
+                notes::sprout::Nullifier::zcash_deserialize(&mut reader)?,
             ],
             commitments: [reader.read_32_bytes()?, reader.read_32_bytes()?],
             ephemeral_key: x25519_dalek::PublicKey::from(reader.read_32_bytes()?),
             random_seed: reader.read_32_bytes()?,
             vmacs: [
-                crate::types::MAC::zcash_deserialize(&mut reader)?,
-                crate::types::MAC::zcash_deserialize(&mut reader)?,
+                types::MAC::zcash_deserialize(&mut reader)?,
+                types::MAC::zcash_deserialize(&mut reader)?,
             ],
             zkproof: P::zcash_deserialize(&mut reader)?,
             enc_ciphertexts: [
@@ -319,7 +321,7 @@ impl<P: ZkSnarkProof> ZcashDeserialize for Option<JoinSplitData<P>> {
 
 impl ZcashSerialize for Spend {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        writer.write_all(&self.cv[..])?;
+        self.cv.zcash_serialize(&mut writer)?;
         writer.write_all(&self.anchor.0[..])?;
         self.nullifier.zcash_serialize(&mut writer)?;
         writer.write_all(&<[u8; 32]>::from(self.rk)[..])?;
@@ -333,9 +335,9 @@ impl ZcashDeserialize for Spend {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         use crate::treestate::note_commitment_tree::SaplingNoteTreeRootHash;
         Ok(Spend {
-            cv: reader.read_32_bytes()?,
+            cv: notes::sapling::ValueCommitment::zcash_deserialize(&mut reader)?,
             anchor: SaplingNoteTreeRootHash(reader.read_32_bytes()?),
-            nullifier: crate::notes::sapling::Nullifier::zcash_deserialize(&mut reader)?,
+            nullifier: notes::sapling::Nullifier::zcash_deserialize(&mut reader)?,
             rk: reader.read_32_bytes()?.into(),
             zkproof: Groth16Proof::zcash_deserialize(&mut reader)?,
             spend_auth_sig: reader.read_64_bytes()?.into(),
@@ -345,8 +347,8 @@ impl ZcashDeserialize for Spend {
 
 impl ZcashSerialize for Output {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        writer.write_all(&self.cv[..])?;
-        writer.write_all(&self.cmu[..])?;
+        self.cv.zcash_serialize(&mut writer)?;
+        writer.write_all(&self.cm_u.to_bytes())?;
         writer.write_all(&self.ephemeral_key.to_bytes())?;
         self.enc_ciphertext.zcash_serialize(&mut writer)?;
         self.out_ciphertext.zcash_serialize(&mut writer)?;
@@ -358,8 +360,8 @@ impl ZcashSerialize for Output {
 impl ZcashDeserialize for Output {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         Ok(Output {
-            cv: reader.read_32_bytes()?,
-            cmu: reader.read_32_bytes()?,
+            cv: notes::sapling::ValueCommitment::zcash_deserialize(&mut reader)?,
+            cm_u: jubjub::Fq::from_bytes(&reader.read_32_bytes()?).unwrap(),
             ephemeral_key: jubjub::AffinePoint::from_bytes(reader.read_32_bytes()?).unwrap(),
             enc_ciphertext: notes::sapling::EncryptedCiphertext::zcash_deserialize(&mut reader)?,
             out_ciphertext: notes::sapling::OutCiphertext::zcash_deserialize(&mut reader)?,

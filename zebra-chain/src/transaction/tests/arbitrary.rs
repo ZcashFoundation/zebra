@@ -22,7 +22,7 @@ impl<P: ZkSnarkProof + Arbitrary + 'static> Arbitrary for JoinSplit<P> {
             any::<Amount<NonNegative>>(),
             any::<Amount<NonNegative>>(),
             array::uniform32(any::<u8>()),
-            array::uniform2(any::<crate::notes::sprout::Nullifier>()),
+            array::uniform2(any::<sprout::Nullifier>()),
             array::uniform2(array::uniform32(any::<u8>())),
             array::uniform32(any::<u8>()),
             array::uniform32(any::<u8>()),
@@ -94,8 +94,8 @@ impl Arbitrary for Output {
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         (
-            array::uniform32(any::<u8>()),
-            array::uniform32(any::<u8>()),
+            any::<sapling::ValueCommitment>(),
+            any::<sapling::NoteCommitment>(),
             array::uniform32(any::<u8>()).prop_filter("Valid jubjub::AffinePoint", |b| {
                 jubjub::AffinePoint::from_bytes(*b).is_some().unwrap_u8() == 1
             }),
@@ -104,9 +104,9 @@ impl Arbitrary for Output {
             any::<Groth16Proof>(),
         )
             .prop_map(
-                |(cv, cmu, ephemeral_key_bytes, enc_ciphertext, out_ciphertext, zkproof)| Self {
+                |(cv, cm, ephemeral_key_bytes, enc_ciphertext, out_ciphertext, zkproof)| Self {
                     cv,
-                    cmu,
+                    cm_u: cm.0.get_u(),
                     ephemeral_key: jubjub::AffinePoint::from_bytes(ephemeral_key_bytes).unwrap(),
                     enc_ciphertext,
                     out_ciphertext,
@@ -153,18 +153,18 @@ impl Arbitrary for Spend {
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         (
-            array::uniform32(any::<u8>()),
             any::<SaplingNoteTreeRootHash>(),
-            any::<crate::notes::sapling::Nullifier>(),
+            any::<sapling::ValueCommitment>(),
+            any::<sapling::Nullifier>(),
             array::uniform32(any::<u8>()),
             any::<Groth16Proof>(),
             vec(any::<u8>(), 64),
         )
             .prop_map(
-                |(cv_bytes, anchor, nullifier_bytes, rpk_bytes, proof, sig_bytes)| Self {
+                |(anchor, cv, nullifier, rpk_bytes, proof, sig_bytes)| Self {
                     anchor,
-                    cv: cv_bytes,
-                    nullifier: nullifier_bytes,
+                    cv,
+                    nullifier,
                     rk: redjubjub::VerificationKeyBytes::from(rpk_bytes),
                     zkproof: proof,
                     spend_auth_sig: redjubjub::Signature::from({
