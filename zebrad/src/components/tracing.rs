@@ -35,8 +35,16 @@ impl TracingEndpoint {
         let service =
             make_service_fn(|_| async { Ok::<_, hyper::Error>(service_fn(request_handler)) });
 
-        // XXX load tracing addr from config
-        let addr = "0.0.0.0:3000"
+        // TODO:
+        //  - load tracing addr from config
+        //  - security: disable service by default
+        //    Binding to localhost by default is insecure, because other
+        //    applications on the machine (such as a web browser) can access
+        //    the endpoint.
+        //
+        // The `ToSocketAddrs` trait docs say that host names are supported,
+        // but "localhost" does not work here
+        let addr = "127.0.0.1:3000"
             .parse()
             .expect("Hardcoded address should be parseable");
 

@@ -21,8 +21,16 @@ impl MetricsEndpoint {
     pub fn init_tokio(&mut self, tokio_component: &TokioComponent) -> Result<(), FrameworkError> {
         info!("Initializing metrics endpoint");
 
-        // XXX load metrics addr from config
-        let addr = "0.0.0.0:9999"
+        // TODO:
+        //  - load metrics addr from config
+        //  - security: disable service by default
+        //    Binding to localhost by default is insecure, because other
+        //    applications on the machine (such as a web browser) can access
+        //    the endpoint.
+        //
+        // The `ToSocketAddrs` trait docs say that host names are supported,
+        // but "localhost" does not work here
+        let addr = "127.0.0.1:9999"
             .parse()
             .expect("Hardcoded address should be parseable");
 

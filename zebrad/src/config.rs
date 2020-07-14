@@ -52,7 +52,9 @@ pub struct MetricsSection {
 impl Default for MetricsSection {
     fn default() -> Self {
         Self {
-            endpoint_addr: "0.0.0.0:9999".parse().unwrap(),
+            // The `ToSocketAddrs` trait docs say that host names are supported,
+            // but "localhost" does not work here
+            endpoint_addr: "127.0.0.1:9999".parse().unwrap(),
         }
     }
 }
