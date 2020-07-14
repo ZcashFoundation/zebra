@@ -711,31 +711,34 @@ mod tests {
 
         use tokio_util::codec::{FramedRead, FramedWrite};
 
-        // reducing the max size of the body to 10 bytes
+        // i know the above msg haves a body of 85 bytes
+        let size = 85;
+
+        // reducing the max size to body size - 1
         rt.block_on(async {
             let mut bytes = Vec::new();
             {
                 let mut fw =
-                    FramedWrite::new(&mut bytes, Codec::builder().with_max_body_len(10).finish());
+                    FramedWrite::new(&mut bytes, Codec::builder().with_max_body_len(size - 1).finish());
                 fw.send(msg.clone()).await.expect_err(
                     "message should not encode as it is bigger than the max allowed value",
                 );
             }
         });
 
-        // send again with the default max size
+        // send again with the msg body size as max size
         let msg_bytes = rt.block_on(async {
             let mut bytes = Vec::new();
             {
                 let mut fw = FramedWrite::new(
                     &mut bytes,
                     Codec::builder()
-                        .with_max_body_len(MAX_PROTOCOL_MESSAGE_LEN)
+                        .with_max_body_len(size)
                         .finish(),
                 );
                 fw.send(msg.clone())
                     .await
-                    .expect("message should encode with the default max allowed value");
+                    .expect("message should encode with the msg body size as max allowed value");
             }
             bytes
         });
@@ -744,7 +747,7 @@ mod tests {
         rt.block_on(async {
             let mut fr = FramedRead::new(
                 Cursor::new(&msg_bytes),
-                Codec::builder().with_max_body_len(10).finish(),
+                Codec::builder().with_max_body_len(size - 1).finish(),
             );
             fr.next()
                 .await
@@ -752,18 +755,18 @@ mod tests {
                 .expect_err("message should not decode as it is bigger than the max allowed value")
         });
 
-        // receive again with the default max size
+        // receive again with the tx size as max size
         rt.block_on(async {
             let mut fr = FramedRead::new(
                 Cursor::new(&msg_bytes),
                 Codec::builder()
-                    .with_max_body_len(MAX_PROTOCOL_MESSAGE_LEN)
+                    .with_max_body_len(size)
                     .finish(),
             );
             fr.next()
                 .await
                 .expect("a next message should be available")
-                .expect("message should decode with the default max allowed value")
+                .expect("message should decode with the msg body size as max allowed value")
         });
     }
 }
