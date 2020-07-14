@@ -6,35 +6,34 @@ version = "0.1.0"
 edition = "2018"
 
 [dependencies]
-rand = "0.7"
-chrono = "0.4"
+zebra-chain = { path = "../zebra-chain" }
+zebra-consensus = { path = "../zebra-consensus/" }
+zebra-network = { path = "../zebra-network" }
+zebra-state = { path = "../zebra-state" }
+
 abscissa_core = "0.5"
 gumdrop = "0.7"
 serde = { version = "1", features = ["serde_derive"] }
 toml = "0.5"
-thiserror = "1"
 
-tokio = { version = "0.2", features = ["time", "rt-threaded", "stream", "macros"] }
+chrono = "0.4"
+rand = "0.7"
+
+hyper = "0.13.6"
 futures = "0.3"
+tokio = { version = "0.2", features = ["time", "rt-threaded", "stream", "macros"] }
+tower = "0.3"
 
+color-eyre = "0.5"
+thiserror = "1"
 tracing = "0.1"
 tracing-futures = "0.2"
 tracing-log = "0.1"
-
-hyper = "0.13.6"
-
-tower = "0.3"
+tracing-subscriber = { version = "0.2.7", features = ["tracing-log"] }
+tracing-error = "0.1.2"
 
 metrics-runtime = "0.13"
 metrics = "0.12"
-
-zebra-chain = { path = "../zebra-chain" }
-zebra-network = { path = "../zebra-network" }
-zebra-state = { path = "../zebra-state" }
-tracing-subscriber = { version = "0.2.7", features = ["tracing-log"] }
-tracing-error = "0.1.2"
-color-eyre = "0.5"
-zebra-consensus = { path = "../zebra-consensus/" }
 
 [dev-dependencies]
 abscissa_core = { version = "0.5", features = ["testing"] }
