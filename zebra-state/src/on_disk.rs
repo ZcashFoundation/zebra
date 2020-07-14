@@ -108,7 +108,7 @@ impl Service<Request> for SledState {
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
+        Poll::Ready(Err("haha".into()))
     }
 
     fn call(&mut self, req: Request) -> Self::Future {
