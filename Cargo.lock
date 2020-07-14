@@ -490,6 +490,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "either"
+version = "1.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bb1f6b1ce1c140482ea30ddd3335fc0024ac7ee112895426e0a629a6c20adfe3"
+
+[[package]]
 name = "equihash"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2142,6 +2148,19 @@ dependencies = [
  "futures-core",
  "pin-project",
  "tower-service",
+]
+
+[[package]]
+name = "tower-fallback"
+version = "0.1.0"
+dependencies = [
+ "either",
+ "futures-core",
+ "pin-project",
+ "tokio",
+ "tower",
+ "tracing",
+ "zebra-test",
 ]
 
 [[package]]
