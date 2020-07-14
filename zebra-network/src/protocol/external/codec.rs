@@ -718,8 +718,10 @@ mod tests {
         rt.block_on(async {
             let mut bytes = Vec::new();
             {
-                let mut fw =
-                    FramedWrite::new(&mut bytes, Codec::builder().with_max_body_len(size - 1).finish());
+                let mut fw = FramedWrite::new(
+                    &mut bytes,
+                    Codec::builder().with_max_body_len(size - 1).finish(),
+                );
                 fw.send(msg.clone()).await.expect_err(
                     "message should not encode as it is bigger than the max allowed value",
                 );
@@ -732,9 +734,7 @@ mod tests {
             {
                 let mut fw = FramedWrite::new(
                     &mut bytes,
-                    Codec::builder()
-                        .with_max_body_len(size)
-                        .finish(),
+                    Codec::builder().with_max_body_len(size).finish(),
                 );
                 fw.send(msg.clone())
                     .await
@@ -759,9 +759,7 @@ mod tests {
         rt.block_on(async {
             let mut fr = FramedRead::new(
                 Cursor::new(&msg_bytes),
-                Codec::builder()
-                    .with_max_body_len(size)
-                    .finish(),
+                Codec::builder().with_max_body_len(size).finish(),
             );
             fr.next()
                 .await
