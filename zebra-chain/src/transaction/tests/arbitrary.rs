@@ -106,7 +106,7 @@ impl Arbitrary for Output {
             .prop_map(
                 |(cv, cm, ephemeral_key_bytes, enc_ciphertext, out_ciphertext, zkproof)| Self {
                     cv,
-                    cm_u: cm.0.get_u(),
+                    cm_u: cm.extract_u(),
                     ephemeral_key: jubjub::AffinePoint::from_bytes(ephemeral_key_bytes).unwrap(),
                     enc_ciphertext,
                     out_ciphertext,
