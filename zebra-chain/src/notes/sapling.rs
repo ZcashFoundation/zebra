@@ -109,6 +109,15 @@ impl ZcashDeserialize for NoteCommitment {
     }
 }
 
+impl NoteCommitment {
+    /// Hash Extractor for Jubjub (?)
+    ///
+    /// https://zips.z.cash/protocol/protocol.pdf#concreteextractorjubjub
+    pub fn extract_u(self) -> jubjub::Fq {
+        self.0.get_u()
+    }
+}
+
 /// The decrypted form of encrypted Sapling notes on the blockchain.
 pub struct NotePlaintext {
     diversifier: Diversifier,
