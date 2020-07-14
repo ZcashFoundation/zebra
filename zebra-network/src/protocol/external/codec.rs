@@ -107,7 +107,7 @@ impl Encoder for Codec {
         let mut body = Vec::new();
         self.write_body(&item, &mut body)?;
 
-        if body.len() >= self.builder.max_len {
+        if body.len() > self.builder.max_len {
             return Err(Parse("body length exceeded maximum size"));
         }
 
@@ -319,7 +319,7 @@ impl Decoder for Codec {
                 if magic != Magic::from(self.builder.network) {
                     return Err(Parse("supplied magic did not meet expectations"));
                 }
-                if body_len >= self.builder.max_len {
+                if body_len > self.builder.max_len {
                     return Err(Parse("body length exceeded maximum size"));
                 }
 
