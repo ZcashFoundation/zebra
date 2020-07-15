@@ -56,9 +56,23 @@ struct QueuedBlock {
 
 /// A list of unverified blocks at a particular height.
 ///
-/// Typically contains zero or one blocks, but might contain more if a peer
+/// Typically contains a single block, but might contain more if a peer
 /// has an old chain fork. (Or sends us a bad block.)
+///
+/// The CheckpointVerifier avoids creating zero-block lists.
 type QueuedBlockList = Vec<QueuedBlock>;
+
+/// The maximum number of queued blocks at any one height.
+///
+/// This value is a tradeoff between:
+/// - rejecting bad blocks: if we queue more blocks, we need fewer network
+///                         retries, but use a bit more CPU when verifying,
+/// - avoiding a memory DoS: if we queue fewer blocks, we use less memory.
+///
+/// Memory usage is controlled by the sync service, because it controls block
+/// downloads. When the verifier services process blocks, they reduce memory
+/// usage by committing blocks to the disk state. (Or dropping invalid blocks.)
+pub const MAX_QUEUED_BLOCKS_PER_HEIGHT: usize = 4;
 
 /// A checkpointing block verifier.
 ///
@@ -297,10 +311,26 @@ impl CheckpointVerifier {
             }
         };
 
+        // Since we're using Arc<Block>, each entry is a single pointer to the
+        // Arc. But there are a lot of QueuedBlockLists in the queue, so we keep
+        // allocations as small as possible.
+        let qblocks = self
+            .queued
+            .entry(height)
+            .or_insert_with(|| QueuedBlockList::with_capacity(1));
+
+        // Memory DoS resistance: limit the queued blocks at each height
+        if qblocks.len() >= MAX_QUEUED_BLOCKS_PER_HEIGHT {
+            let _ = tx.send(Err("too many queued blocks at this height".into()));
+            return rx;
+        }
+
         // Add the block to the list of queued blocks at this height
         let hash = block.as_ref().into();
         let new_qblock = QueuedBlock { block, hash, tx };
-        self.queued.entry(height).or_default().push(new_qblock);
+        // This is a no-op for the first block in each QueuedBlockList.
+        qblocks.reserve_exact(1);
+        qblocks.push(new_qblock);
 
         rx
     }

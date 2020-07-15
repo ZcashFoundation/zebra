@@ -10,6 +10,7 @@ use zebra_chain::{
     block::{Block, BlockHeaderHash},
     types::BlockHeight,
 };
+use zebra_consensus::checkpoint;
 use zebra_network::{self as zn, RetryLimit};
 use zebra_state::{self as zs};
 
@@ -38,7 +39,9 @@ where
             verifier,
             retry_peer_set,
             block_requests: FuturesUnordered::new(),
-            fanout: 4,
+            // Limit the fanout to the number of chains that the
+            // CheckpointVerifier can handle
+            fanout: checkpoint::MAX_QUEUED_BLOCKS_PER_HEIGHT,
             prospective_tips: HashSet::new(),
         }
     }
@@ -338,4 +341,4 @@ pub fn block_locator_heights(tip_height: BlockHeight) -> impl Iterator<Item = Bl
 }
 
 type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
-type NumReq = u32;
+type NumReq = usize;
