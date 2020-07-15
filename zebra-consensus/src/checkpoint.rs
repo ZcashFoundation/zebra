@@ -65,13 +65,14 @@ type QueuedBlockList = Vec<QueuedBlock>;
 /// The maximum number of queued blocks at any one height.
 ///
 /// This value is a tradeoff between:
-/// - rejecting bad blocks: higher is more efficient, and
-/// - avoiding a memory DoS: lower means less memory usage.
+/// - rejecting bad blocks: if we queue more blocks, we need fewer network
+///                         retries, but use a bit more CPU when verifying,
+/// - avoiding a memory DoS: if we queue fewer blocks, we use less memory.
 ///
-/// If we use a checkpoint interval of 500 blocks, our approximate queued block
-/// memory usage is:
-/// `500 blocks * 2 MB max per block * 2 blocks per height = 2 GB`
-const MAX_QUEUED_BLOCKS_PER_HEIGHT: usize = 2;
+/// Memory usage is controlled by the sync service, because it controls block
+/// downloads. When the verifier services process blocks, they reduce memory
+/// usage by committing blocks to the disk state. (Or dropping invalid blocks.)
+pub const MAX_QUEUED_BLOCKS_PER_HEIGHT: usize = 4;
 
 /// A checkpointing block verifier.
 ///
@@ -310,13 +311,13 @@ impl CheckpointVerifier {
             }
         };
 
-        // Blocks consist of a header and a transaction vector. Since the header
-        // only takes up about 1.4 kB, we can allocate space for multiple
-        // headers upfront.
+        // Blocks consist of a header and a transaction vector. We expect a
+        // single block at each height, so we only pre-allocate space for one
+        // block.
         let qblocks = self
             .queued
             .entry(height)
-            .or_insert_with(|| QueuedBlockList::with_capacity(MAX_QUEUED_BLOCKS_PER_HEIGHT));
+            .or_insert_with(|| QueuedBlockList::with_capacity(1));
 
         // Memory DoS resistance: limit the queued blocks at each height
         if qblocks.len() >= MAX_QUEUED_BLOCKS_PER_HEIGHT {
@@ -327,6 +328,9 @@ impl CheckpointVerifier {
         // Add the block to the list of queued blocks at this height
         let hash = block.as_ref().into();
         let new_qblock = QueuedBlock { block, hash, tx };
+        // We avoid allocating extra space, because multiple blocks are rare,
+        // and block headers are large.
+        qblocks.reserve_exact(1);
         qblocks.push(new_qblock);
 
         rx
