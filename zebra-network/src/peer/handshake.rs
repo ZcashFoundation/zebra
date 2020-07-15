@@ -121,7 +121,9 @@ where
                 services: PeerServices::NODE_NETWORK,
                 timestamp: Utc::now(),
                 address_recv: (PeerServices::NODE_NETWORK, addr),
-                address_from: (PeerServices::NODE_NETWORK, "0.0.0.0:9000".parse().unwrap()),
+                // TODO: when we've implemented block and transaction relaying,
+                //       send our configured address to the peer
+                address_from: (PeerServices::NODE_NETWORK, "0.0.0.0:8233".parse().unwrap()),
                 nonce: local_nonce,
                 user_agent,
                 // XXX eventually the `PeerConnector` will need to have a handle
