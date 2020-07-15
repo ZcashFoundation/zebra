@@ -68,7 +68,10 @@ impl BlockHeight {
     pub const MAX: BlockHeight = BlockHeight(499_999_999);
 
     /// The maximum BlockHeight as a u32, for range patterns.
-    pub const MAX_U32: u32 = Self::MAX.0;
+    ///
+    /// `BlockHeight::MAX.0` can't be used in match range patterns, use this
+    /// alias instead.
+    pub const MAX_AS_U32: u32 = Self::MAX.0;
 }
 
 impl LockTime {

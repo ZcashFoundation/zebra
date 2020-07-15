@@ -114,7 +114,7 @@ fn coinbase_height_len(height: BlockHeight) -> usize {
         3
     } else if let _h @ 65536..=16_777_215 = height.0 {
         4
-    } else if let _h @ 16_777_216..=BlockHeight::MAX_U32 = height.0 {
+    } else if let _h @ 16_777_216..=BlockHeight::MAX_AS_U32 = height.0 {
         5
     } else {
         panic!("Invalid coinbase height");
@@ -139,7 +139,7 @@ fn write_coinbase_height<W: io::Write>(height: BlockHeight, mut w: W) -> Result<
         w.write_u8(h as u8)?;
         w.write_u8((h >> 8) as u8)?;
         w.write_u8((h >> 16) as u8)?;
-    } else if let h @ 16_777_216..=BlockHeight::MAX_U32 = height.0 {
+    } else if let h @ 16_777_216..=BlockHeight::MAX_AS_U32 = height.0 {
         w.write_u8(0x04)?;
         w.write_u32::<LittleEndian>(h)?;
     } else {
