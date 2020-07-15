@@ -250,18 +250,18 @@ fn time_check_past_block() {
     // fail.
     block
         .header
-        .is_time_valid_local_clock(now)
+        .is_time_valid_at(now)
         .expect("the header time from a mainnet block should be valid");
 }
 
-/// Test wrapper for `BlockHeader.is_time_valid_local_clock`.
+/// Test wrapper for `BlockHeader.is_time_valid_at`.
 ///
 /// Generates a block header, sets its `time` to `block_header_time`, then
-/// calls `is_time_valid_local_clock`.
+/// calls `is_time_valid_at`.
 fn node_time_check(block_header_time: DateTime<Utc>, now: DateTime<Utc>) -> Result<(), Error> {
     let mut header = generate::block_header();
     header.time = block_header_time;
-    header.is_time_valid_local_clock(now)
+    header.is_time_valid_at(now)
 }
 
 #[test]
