@@ -67,7 +67,7 @@ where
             // quick checks first.
 
             let now = Utc::now();
-            block.header.is_time_valid_local_clock(now)?;
+            block.header.is_time_valid_at(now)?;
             block.header.is_equihash_solution_valid()?;
             block.is_coinbase_first()?;
 

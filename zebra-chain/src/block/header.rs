@@ -96,7 +96,7 @@ impl BlockHeader {
     /// accepted." [§7.5][7.5]
     ///
     /// [7.5]: https://zips.z.cash/protocol/protocol.pdf#blockheader
-    pub fn is_time_valid_local_clock(&self, now: DateTime<Utc>) -> Result<(), Error> {
+    pub fn is_time_valid_at(&self, now: DateTime<Utc>) -> Result<(), Error> {
         let two_hours_in_the_future = now
             .checked_add_signed(Duration::hours(2))
             .ok_or("overflow when calculating 2 hours in the future")?;
