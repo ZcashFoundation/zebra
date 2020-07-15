@@ -6,4 +6,5 @@ pub mod future;
 mod service;
 
 pub use self::service::Fallback;
-pub use either::Either;
+
+pub type BoxedError = Box<dyn std::error::Error + Send + Sync + 'static>;
