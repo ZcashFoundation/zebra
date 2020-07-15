@@ -94,7 +94,7 @@ async fn sign_and_verify<V>(
 where
     V: Service<Ed25519Item, Response = ()>,
 {
-    let mut results = FuturesUnordered::new();
+    let results = FuturesUnordered::new();
     for i in 0..n {
         let span = tracing::trace_span!("sig", i);
         let sk = SigningKey::new(thread_rng());
@@ -123,6 +123,10 @@ where
 }
 
 #[tokio::test]
+async fn batch_flushes_on_max_items_test() -> Result<()> {
+    batch_flushes_on_max_items().await
+}
+
 async fn batch_flushes_on_max_items() -> Result<()> {
     use tokio::time::timeout;
     zebra_test::init();
@@ -130,7 +134,9 @@ async fn batch_flushes_on_max_items() -> Result<()> {
     // Use a very long max_latency and a short timeout to check that
     // flushing is happening based on hitting max_items.
     let verifier = Batch::new(Ed25519Verifier::new(), 10, Duration::from_secs(1000));
-    timeout(Duration::from_secs(1), sign_and_verify(verifier, 100, None)).await?
+    timeout(Duration::from_secs(1), sign_and_verify(verifier, 100, None))
+        .await?
+        .map_err(|e| eyre!(e))
 }
 
 #[tokio::test]
@@ -141,7 +147,9 @@ async fn batch_flushes_on_max_latency() -> Result<()> {
     // Use a very high max_items and a short timeout to check that
     // flushing is happening based on hitting max_latency.
     let verifier = Batch::new(Ed25519Verifier::new(), 100, Duration::from_millis(500));
-    timeout(Duration::from_secs(1), sign_and_verify(verifier, 10, None)).await?
+    timeout(Duration::from_secs(1), sign_and_verify(verifier, 10, None))
+        .await?
+        .map_err(|e| eyre!(e))
 }
 
 #[tokio::test]
@@ -153,11 +161,7 @@ async fn fallback_verification() -> Result<()> {
         // we have to specify it explicitly to avoid an inference hole.
         // This is pretty unergonomic -- from the error message it's very unintuitive
         // that the right fix is to change `Batch::new` to `Batch::<_,_,Stuff>::new`.
-        Batch::<_, _, Box<dyn std::error::Error + Send + Sync + 'static>>::new(
-            Ed25519Verifier::new(),
-            10,
-            Duration::from_millis(100),
-        ),
+        Batch::new(Ed25519Verifier::new(), 10, Duration::from_millis(100)),
         tower::service_fn(|item: Ed25519Item| async move { item.verify_single() }),
     );
 

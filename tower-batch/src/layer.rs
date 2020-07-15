@@ -9,11 +9,29 @@ use tower::Service;
 /// which means that this layer can only be used on the Tokio runtime.
 ///
 /// See the module documentation for more details.
-pub struct BatchLayer<Request, E2> {
+pub struct BatchLayer<Request, E2 = crate::BoxError> {
     max_items: usize,
     max_latency: std::time::Duration,
     _p: PhantomData<fn(Request)>,
     _e: PhantomData<E2>,
+}
+
+impl<Request> BatchLayer<Request> {
+    /// Creates a new `BatchLayer`.
+    ///
+    /// The wrapper is responsible for telling the inner service when to flush a
+    /// batch of requests.  Two parameters control this policy:
+    ///
+    /// * `max_items` gives the maximum number of items per batch.
+    /// * `max_latency` gives the maximum latency for a batch item.
+    pub fn new(max_items: usize, max_latency: std::time::Duration) -> Self {
+        BatchLayer {
+            max_items,
+            max_latency,
+            _p: PhantomData,
+            _e: PhantomData,
+        }
+    }
 }
 
 impl<Request, E2> BatchLayer<Request, E2> {
@@ -24,7 +42,7 @@ impl<Request, E2> BatchLayer<Request, E2> {
     ///
     /// * `max_items` gives the maximum number of items per batch.
     /// * `max_latency` gives the maximum latency for a batch item.
-    pub fn new(max_items: usize, max_latency: std::time::Duration) -> Self {
+    pub fn new2(max_items: usize, max_latency: std::time::Duration) -> Self {
         BatchLayer {
             max_items,
             max_latency,
@@ -46,7 +64,7 @@ where
     type Service = Batch<S, Request, E2>;
 
     fn layer(&self, service: S) -> Self::Service {
-        Batch::new(service, self.max_items, self.max_latency)
+        Batch::new2(service, self.max_items, self.max_latency)
     }
 }
 

@@ -26,14 +26,11 @@ where
     _e: PhantomData<E2>,
 }
 
-impl<S, Request, E2> Batch<S, Request, E2>
+impl<S, Request> Batch<S, Request>
 where
     S: Service<BatchControl<Request>>,
-    S::Error: Into<E2> + Clone,
-    E2: Send + 'static,
-    crate::error::Closed: Into<E2>,
-    // crate::error::Closed: Into<<Self as Service<Request>>::Error> + Send + Sync + 'static,
-    // crate::error::ServiceError: Into<<Self as Service<Request>>::Error> + Send + Sync + 'static,
+    S::Error: Into<crate::BoxError> + Clone,
+    crate::error::Closed: Into<crate::BoxError>,
 {
     /// Creates a new `Batch` wrapping `service`.
     ///
@@ -46,6 +43,42 @@ where
     /// The default Tokio executor is used to run the given service, which means
     /// that this method must be called while on the Tokio runtime.
     pub fn new(service: S, max_items: usize, max_latency: std::time::Duration) -> Self
+    where
+        S: Send + 'static,
+        S::Future: Send,
+        S::Error: Send + Sync + Clone,
+        Request: Send + 'static,
+    {
+        // XXX(hdevalence): is this bound good
+        let (tx, rx) = mpsc::channel(1);
+        let (handle, worker) = Worker::new(service, rx, max_items, max_latency);
+        tokio::spawn(worker.run());
+        Batch {
+            tx,
+            handle,
+            _e: PhantomData,
+        }
+    }
+}
+
+impl<S, Request, E2> Batch<S, Request, E2>
+where
+    S: Service<BatchControl<Request>>,
+    S::Error: Into<E2> + Clone,
+    E2: Send + 'static,
+    crate::error::Closed: Into<E2>,
+{
+    /// Creates a new `Batch` wrapping `service`.
+    ///
+    /// The wrapper is responsible for telling the inner service when to flush a
+    /// batch of requests.  Two parameters control this policy:
+    ///
+    /// * `max_items` gives the maximum number of items per batch.
+    /// * `max_latency` gives the maximum latency for a batch item.
+    ///
+    /// The default Tokio executor is used to run the given service, which means
+    /// that this method must be called while on the Tokio runtime.
+    pub fn new2(service: S, max_items: usize, max_latency: std::time::Duration) -> Self
     where
         S: Send + 'static,
         S::Future: Send,
