@@ -577,6 +577,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "ed25519-zebra"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a045d3ca7d15222d578515dc6b54fea6c3591763b8fe2f67a45bbd56d5f1989b"
+dependencies = [
+ "curve25519-dalek",
+ "hex",
+ "rand_core 0.5.1",
+ "serde",
+ "sha2",
+ "thiserror",
+]
+
+[[package]]
 name = "equihash"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2212,13 +2226,15 @@ dependencies = [
 name = "tower-batch"
 version = "0.1.0"
 dependencies = [
- "ed25519-zebra",
+ "color-eyre",
+ "ed25519-zebra 2.1.0",
  "futures",
  "futures-core",
  "pin-project",
  "rand 0.7.3",
  "tokio",
  "tower",
+ "tower-fallback",
  "tracing",
  "tracing-futures",
  "zebra-test",
@@ -2602,7 +2618,7 @@ dependencies = [
  "chrono",
  "color-eyre",
  "displaydoc",
- "ed25519-zebra",
+ "ed25519-zebra 1.0.0",
  "equihash",
  "futures",
  "hex",
