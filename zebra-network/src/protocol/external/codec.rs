@@ -711,7 +711,7 @@ mod tests {
 
         use tokio_util::codec::{FramedRead, FramedWrite};
 
-        // i know the above msg haves a body of 85 bytes
+        // i know the above msg has a body of 85 bytes
         let size = 85;
 
         // reducing the max size to body size - 1
