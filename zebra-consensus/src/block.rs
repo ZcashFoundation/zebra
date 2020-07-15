@@ -61,7 +61,7 @@ pub(crate) fn node_time_check(
 /// fees paid by transactions included in this block."[S 3.10][3.10]
 ///
 /// [3.10]: https://zips.z.cash/protocol/protocol.pdf#coinbasetransactions
-pub(crate) fn coinbase_is_first_check(block: Arc<Block>) -> Result<(), Error> {
+pub(crate) fn coinbase_is_first_check(block: &Block) -> Result<(), Error> {
     if block.coinbase_height().is_some() {
         // No coinbase inputs in additional transactions allowed
         if block
@@ -123,7 +123,7 @@ where
             let now = Utc::now();
             node_time_check(block.header.time, now)?;
             block.header.is_equihash_solution_valid()?;
-            coinbase_is_first_check(block.clone())?;
+            coinbase_is_first_check(block.as_ref())?;
 
             // `Tower::Buffer` requires a 1:1 relationship between `poll()`s
             // and `call()`s, because it reserves a buffer slot in each
