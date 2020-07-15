@@ -23,6 +23,8 @@ use list::CheckpointList;
 use types::{Progress, Progress::*};
 use types::{Target, Target::*};
 
+use crate::parameters;
+
 use futures_util::FutureExt;
 use std::{
     collections::BTreeMap,
@@ -38,6 +40,7 @@ use tower::Service;
 
 use zebra_chain::block::{Block, BlockHeaderHash};
 use zebra_chain::types::BlockHeight;
+use zebra_chain::Network;
 
 /// The inner error type for CheckpointVerifier.
 // TODO(jlusby): Error = Report ?
@@ -82,6 +85,9 @@ pub const MAX_QUEUED_BLOCKS_PER_HEIGHT: usize = 4;
 struct CheckpointVerifier {
     // Inputs
     //
+    /// The network for this verifier.
+    network: Network,
+
     /// The checkpoint list for this verifier.
     checkpoint_list: CheckpointList,
 
@@ -107,7 +113,8 @@ struct CheckpointVerifier {
 ///
 /// Contains non-service utility functions for CheckpointVerifiers.
 impl CheckpointVerifier {
-    /// Return a checkpoint verification service, using the provided `checkpoint_list`.
+    /// Return a checkpoint verification service for `network`, using
+    /// `checkpoint_list`.
     ///
     /// This function should be called only once for a particular checkpoint list (and
     /// network), rather than constructing multiple verification services based on the
@@ -119,10 +126,12 @@ impl CheckpointVerifier {
     // functions and enum variants it uses, are only used in the tests.
     #[allow(dead_code)]
     fn new(
+        network: Network,
         checkpoint_list: impl IntoIterator<Item = (BlockHeight, BlockHeaderHash)>,
     ) -> Result<Self, Error> {
         Ok(CheckpointVerifier {
-            checkpoint_list: CheckpointList::new(checkpoint_list)?,
+            network,
+            checkpoint_list: CheckpointList::new(network, checkpoint_list)?,
             queued: BTreeMap::new(),
             // We start by verifying the genesis block, by itself
             verifier_progress: Progress::BeforeGenesis,
@@ -413,12 +422,7 @@ impl CheckpointVerifier {
             // Since genesis blocks are hard-coded in zcashd, and not verified
             // like other blocks, the genesis parent hash is set by the
             // consensus parameters.
-            //
-            // TODO(teor): get the genesis block parent hash from the consensus
-            //             parameters
-            // In the meantime, try `[0; 32])`, because the genesis block has no
-            // parent block. (And in Bitcoin, `null` is `[0; 32]`.)
-            BeforeGenesis => BlockHeaderHash([0; 32]),
+            BeforeGenesis => parameters::genesis_previous_block_hash(self.network),
             PreviousCheckpoint(hash) => hash,
             FinalCheckpoint => return,
         };
