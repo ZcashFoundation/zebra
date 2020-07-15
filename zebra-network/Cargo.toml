@@ -37,3 +37,5 @@ metrics = "0.12"
 
 zebra-chain = { path = "../zebra-chain" }
 tracing-error = { version = "0.1.2", features = ["traced-error"] }
+
+zebra-test = { path = "../zebra-test/" }
