@@ -17,6 +17,7 @@
 pub mod block;
 pub mod checkpoint;
 pub mod mempool;
+pub mod parameters;
 pub mod redjubjub;
 mod script;
 mod transaction;
