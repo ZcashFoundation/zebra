@@ -1779,12 +1779,11 @@ checksum = "c111b5bd5695e56cffe5129854aa230b39c93a305372fdbb2668ca2394eea9f8"
 
 [[package]]
 name = "sled"
-version = "0.32.1"
+version = "0.33.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e3dbbb8ee10611bd1d020767c27599ccbbf8365f7e0ed7e54429cc8b9433ad8"
+checksum = "701fd6e07375a3ecff6f754e990862fc115e881f602b950518e18658005e262b"
 dependencies = [
  "array-init",
- "backtrace",
  "crc32fast",
  "crossbeam-epoch",
  "crossbeam-utils 0.7.2",
