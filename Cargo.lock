@@ -2570,6 +2570,7 @@ dependencies = [
  "tracing-error",
  "tracing-futures",
  "zebra-chain",
+ "zebra-test",
 ]
 
 [[package]]
