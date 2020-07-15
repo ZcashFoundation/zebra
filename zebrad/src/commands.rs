@@ -52,6 +52,24 @@ pub enum ZebradCmd {
     Version(VersionCmd),
 }
 
+impl ZebradCmd {
+    /// Returns true if this command sends output to stdout.
+    ///
+    /// For example, `Generate` sends a default config file to stdout.
+    ///
+    /// Usage note: `abscissa_core::EntryPoint` stores an `Option<ZerbradCmd>`.
+    /// If the command is `None`, then abscissa writes zebrad usage information
+    /// to stdout.
+    pub(crate) fn uses_stdout(&self) -> bool {
+        use ZebradCmd::*;
+        match self {
+            // List all the commands, so new commands have to make a choice here
+            Generate(_) | Help(_) | Revhex(_) | Version(_) => true,
+            Connect(_) | Seed(_) | Start(_) => false,
+        }
+    }
+}
+
 /// This trait allows you to define how application configuration is loaded.
 impl Configurable<ZebradConfig> for ZebradCmd {
     /// Location of the configuration file

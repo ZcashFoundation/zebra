@@ -136,16 +136,10 @@ impl Application for ZebradApp {
 
 impl ZebradApp {
     fn level(&self, command: &EntryPoint<ZebradCmd>) -> String {
-        use ZebradCmd::*;
-        // Tracing sends output to stdout, so we disable it for some commands.
-        //
-        // TODO: send tracing output to stderr. This change requires an abscissa
-        //       update, because `abscissa_core::component::Tracing` uses
-        //       `tracing_subscriber::fmt::Formatter`, which has `Stdout` as a
-        //       type parameter. We need `MakeWriter` or a similar type.
-        let command_uses_stdout = match command.command {
-            Some(Generate(_)) | Some(Help(_)) | Some(Revhex(_)) | Some(Version(_)) => true,
-            _ => false,
+        // `None` outputs zebrad usage information to stdout
+        let command_uses_stdout = match &command.command {
+            None => true,
+            Some(c) => c.uses_stdout(),
         };
 
         // Allow users to:
@@ -155,6 +149,13 @@ impl ZebradApp {
         if command.verbose {
             "debug".to_string()
         } else if command_uses_stdout {
+            // Tracing sends output to stdout, so we disable info-level logs for
+            // some commands.
+            //
+            // TODO: send tracing output to stderr. This change requires an abscissa
+            //       update, because `abscissa_core::component::Tracing` uses
+            //       `tracing_subscriber::fmt::Formatter`, which has `Stdout` as a
+            //       type parameter. We need `MakeWriter` or a similar type.
             "warn".to_string()
         } else if let Ok(level) = std::env::var("ZEBRAD_LOG") {
             level
