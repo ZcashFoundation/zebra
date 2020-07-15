@@ -93,7 +93,7 @@ impl BlockHeader {
     /// is not strictly a consensus rule because it is nondeterministic,
     /// and clock time varies between nodes. Also note that a block that
     /// is rejected by this rule at a given point in time may later be
-    /// accepted."[S 7.5][7.5]
+    /// accepted." [§7.5][7.5]
     ///
     /// [7.5]: https://zips.z.cash/protocol/protocol.pdf#blockheader
     pub fn is_time_valid_local_clock(&self, now: DateTime<Utc>) -> Result<(), Error> {
