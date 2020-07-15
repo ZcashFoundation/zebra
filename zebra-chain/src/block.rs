@@ -9,7 +9,7 @@ mod serialize;
 mod tests;
 
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::{error, sync::Arc};
 
 #[cfg(test)]
 use proptest_derive::Arbitrary;
@@ -43,6 +43,10 @@ pub struct Block {
 /// transaction in the chain is approximately 1.5 kB smaller.)
 pub const MAX_BLOCK_BYTES: u64 = 2_000_000;
 
+/// The error type for Block checks.
+// TODO(jlusby): Error = Report ?
+type Error = Box<dyn error::Error + Send + Sync + 'static>;
+
 impl Block {
     /// Return the block height reported in the coinbase transaction, if any.
     pub fn coinbase_height(&self) -> Option<BlockHeight> {
@@ -54,6 +58,31 @@ impl Block {
                 TransparentInput::Coinbase { ref height, .. } => Some(*height),
                 _ => None,
             })
+    }
+
+    /// Check that there is exactly one coinbase transaction in `Block`, and that
+    /// the coinbase transaction is the first transaction in the block.
+    ///
+    /// "The first (and only the first) transaction in a block is a coinbase
+    /// transaction, which collects and spends any miner subsidy and transaction
+    /// fees paid by transactions included in this block."[S 3.10][3.10]
+    ///
+    /// [3.10]: https://zips.z.cash/protocol/protocol.pdf#coinbasetransactions
+    pub fn is_coinbase_first(&self) -> Result<(), Error> {
+        if self.coinbase_height().is_some() {
+            // No coinbase inputs in additional transactions allowed
+            if self
+                .transactions
+                .iter()
+                .skip(1)
+                .any(|tx| tx.contains_coinbase_input())
+            {
+                Err("coinbase input found in additional transaction")?
+            }
+            Ok(())
+        } else {
+            Err("no coinbase transaction in block")?
+        }
     }
 }
 
