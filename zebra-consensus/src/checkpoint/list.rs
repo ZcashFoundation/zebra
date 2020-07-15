@@ -67,12 +67,12 @@ impl CheckpointList {
         // Make sure all the hashes are valid. In Bitcoin, [0; 32] is the null
         // hash. It is also used as the parent hash of genesis blocks.
         if block_hashes.contains(&BlockHeaderHash([0; 32])) {
-            Err("the null hash is not a valid checkpoint hash")?;
+            Err("checkpoint list contains invalid checkpoint hash: found null hash")?;
         }
 
         let checkpoints = CheckpointList(checkpoints);
         if checkpoints.max_height() > BlockHeight::MAX {
-            Err("checkpoint heights must be less than or equal to the maxiumum block height")?;
+            Err("checkpoint list contains invalid checkpoint: checkpoint height is greater than the maximum block height")?;
         }
 
         Ok(checkpoints)

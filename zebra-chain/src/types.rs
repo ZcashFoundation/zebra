@@ -42,7 +42,7 @@ impl Arbitrary for BlockHeight {
 ///   - a `BlockHeight` greater than MAX_BLOCK_HEIGHT,
 ///   - a timestamp before 6 November 1985
 ///     (Unix timestamp less than MIN_LOCK_TIMESTAMP), or
-///   - a timestamp after 6 February 2106
+///   - a timestamp after 5 February 2106
 ///     (Unix timestamp greater than MAX_LOCK_TIMESTAMP).
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum LockTime {
