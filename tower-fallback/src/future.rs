@@ -7,10 +7,11 @@ use std::{
     task::{Context, Poll},
 };
 
-use either::Either;
 use futures_core::ready;
 use pin_project::pin_project;
 use tower::Service;
+
+use crate::BoxedError;
 
 /// Future that completes either with the first service's successful response, or
 /// with the second service's response.
@@ -19,6 +20,7 @@ pub struct ResponseFuture<S1, S2, Request>
 where
     S1: Service<Request>,
     S2: Service<Request, Response = <S1 as Service<Request>>::Response>,
+    S2::Error: Into<BoxedError>,
 {
     #[pin]
     state: ResponseState<S1, S2, Request>,
@@ -29,6 +31,7 @@ enum ResponseState<S1, S2, Request>
 where
     S1: Service<Request>,
     S2: Service<Request>,
+    S2::Error: Into<BoxedError>,
 {
     PollResponse1 {
         #[pin]
@@ -52,6 +55,7 @@ impl<S1, S2, Request> ResponseFuture<S1, S2, Request>
 where
     S1: Service<Request>,
     S2: Service<Request, Response = <S1 as Service<Request>>::Response>,
+    S2::Error: Into<BoxedError>,
 {
     pub(crate) fn new(fut: S1::Future, req: Request, svc2: S2) -> Self {
         ResponseFuture {
@@ -64,11 +68,9 @@ impl<S1, S2, Request> Future for ResponseFuture<S1, S2, Request>
 where
     S1: Service<Request>,
     S2: Service<Request, Response = <S1 as Service<Request>>::Response>,
+    S2::Error: Into<BoxedError>,
 {
-    type Output = Result<
-        <S1 as Service<Request>>::Response,
-        Either<<S1 as Service<Request>>::Error, <S2 as Service<Request>>::Error>,
-    >;
+    type Output = Result<<S1 as Service<Request>>::Response, BoxedError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut this = self.project();
@@ -88,7 +90,7 @@ where
                     }
                 },
                 ResponseStateProj::PollReady2 { svc2, .. } => match ready!(svc2.poll_ready(cx)) {
-                    Err(e) => return Poll::Ready(Err(Either::Right(e))),
+                    Err(e) => return Poll::Ready(Err(e.into())),
                     Ok(()) => {
                         if let __ResponseStateProjectionOwned::PollReady2 { mut svc2, req } =
                             this.state.as_mut().project_replace(ResponseState::Tmp)
@@ -102,7 +104,7 @@ where
                     }
                 },
                 ResponseStateProj::PollResponse2 { fut } => {
-                    return fut.poll(cx).map_err(Either::Right)
+                    return fut.poll(cx).map_err(Into::into)
                 }
                 ResponseStateProj::Tmp => unreachable!(),
             }
@@ -118,6 +120,7 @@ where
     S1::Future: Debug,
     S2: Debug,
     S2::Future: Debug,
+    S2::Error: Into<BoxedError>,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ResponseFuture")
@@ -134,6 +137,7 @@ where
     S1::Future: Debug,
     S2: Debug,
     S2::Future: Debug,
+    S2::Error: Into<BoxedError>,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

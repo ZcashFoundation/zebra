@@ -1,8 +1,9 @@
-use super::future::ResponseFuture;
-
-use either::Either;
 use std::task::{Context, Poll};
+
 use tower::Service;
+
+use super::future::ResponseFuture;
+use crate::BoxedError;
 
 /// Provides fallback processing on a second service if the first service returned an error.
 #[derive(Debug)]
@@ -36,15 +37,17 @@ impl<S1, S2, Request> Service<Request> for Fallback<S1, S2>
 where
     S1: Service<Request>,
     S2: Service<Request, Response = <S1 as Service<Request>>::Response>,
+    S1::Error: Into<BoxedError>,
+    S2::Error: Into<BoxedError>,
     S2: Clone,
     Request: Clone,
 {
     type Response = <S1 as Service<Request>>::Response;
-    type Error = Either<<S1 as Service<Request>>::Error, <S2 as Service<Request>>::Error>;
+    type Error = BoxedError;
     type Future = ResponseFuture<S1, S2, Request>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.svc1.poll_ready(cx).map_err(Either::Left)
+        self.svc1.poll_ready(cx).map_err(Into::into)
     }
 
     fn call(&mut self, request: Request) -> Self::Future {

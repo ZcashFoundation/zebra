@@ -1,5 +1,5 @@
 use tower::{service_fn, Service, ServiceExt};
-use tower_fallback::{Either, Fallback};
+use tower_fallback::Fallback;
 
 #[tokio::test]
 async fn fallback() {
@@ -24,10 +24,7 @@ async fn fallback() {
 
     let mut svc = Fallback::new(svc1, svc2);
 
-    assert_eq!(svc.ready_and().await.unwrap().call(1).await, Ok(1));
-    assert_eq!(svc.ready_and().await.unwrap().call(11).await, Ok(111));
-    assert_eq!(
-        svc.ready_and().await.unwrap().call(21).await,
-        Err(Either::Right("too big value on svc2"))
-    );
+    assert_eq!(svc.ready_and().await.unwrap().call(1).await.unwrap(), 1);
+    assert_eq!(svc.ready_and().await.unwrap().call(11).await.unwrap(), 111);
+    assert!(svc.ready_and().await.unwrap().call(21).await.is_err());
 }
