@@ -311,13 +311,13 @@ impl CheckpointVerifier {
             }
         };
 
-        // Blocks consist of a header and a transaction vector. We expect a
-        // single block at each height, so we only pre-allocate space for one
-        // block.
+        // Blocks consist of a header and a transaction vector. Since we're
+        // using Arc<Block>, each entry is a single pointer. So it's more
+        // efficient to allocate them all upfront.
         let qblocks = self
             .queued
             .entry(height)
-            .or_insert_with(|| QueuedBlockList::with_capacity(1));
+            .or_insert_with(|| QueuedBlockList::with_capacity(MAX_QUEUED_BLOCKS_PER_HEIGHT));
 
         // Memory DoS resistance: limit the queued blocks at each height
         if qblocks.len() >= MAX_QUEUED_BLOCKS_PER_HEIGHT {
@@ -328,9 +328,6 @@ impl CheckpointVerifier {
         // Add the block to the list of queued blocks at this height
         let hash = block.as_ref().into();
         let new_qblock = QueuedBlock { block, hash, tx };
-        // We avoid allocating extra space, because multiple blocks are rare,
-        // and block headers are large.
-        qblocks.reserve_exact(1);
         qblocks.push(new_qblock);
 
         rx
