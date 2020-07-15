@@ -29,11 +29,6 @@ jobs:
         with:
           command: test
           args: --verbose --all
-      - name: Build
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --verbose --release
 
   clippy:
     name: Clippy
