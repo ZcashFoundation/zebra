@@ -1508,9 +1508,9 @@ dependencies = [
 
 [[package]]
 name = "redjubjub"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a07921b44f102eef69b63546f25927c9ed0efe561de73d40d3c4b86e5e127f63"
+checksum = "63266b4e0d748bf7514f794bcdb1db681a22b11ed4dea3984a3148d6cd5733c3"
 dependencies = [
  "blake2b_simd",
  "byteorder",
