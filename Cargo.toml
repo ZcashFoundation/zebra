@@ -1,6 +1,6 @@
 [workspace]
 members = [
-        "tower-batch",
+        "zebrad",
         "zebra-chain",
         "zebra-network",
         "zebra-state",
@@ -10,7 +10,8 @@ members = [
         "zebra-client",
         "zebra-test",
         "zebra-utils",
-        "zebrad",
+        "tower-batch",
+        "tower-fallback",
 ]
 
 [profile.dev]

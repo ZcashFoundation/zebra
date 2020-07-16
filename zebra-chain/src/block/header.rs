@@ -1,9 +1,9 @@
-use super::BlockHeaderHash;
+use super::{BlockHeaderHash, Error};
 use crate::equihash_solution::EquihashSolution;
 use crate::merkle_tree::MerkleTreeRootHash;
 use crate::note_commitment_tree::SaplingNoteTreeRootHash;
 use crate::serialization::ZcashSerialize;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 
 /// Block header.
 ///
@@ -67,7 +67,7 @@ pub struct BlockHeader {
 
 impl BlockHeader {
     /// Returns true if the header is valid based on its `EquihashSolution`
-    pub fn is_equihash_solution_valid(&self) -> Result<(), Error> {
+    pub fn is_equihash_solution_valid(&self) -> Result<(), EquihashError> {
         let n = 200;
         let k = 9;
         let nonce = &self.nonce;
@@ -81,11 +81,36 @@ impl BlockHeader {
 
         Ok(())
     }
+
+    /// Check if `self.time` is less than or equal to
+    /// 2 hours in the future, according to the node's local clock (`now`).
+    ///
+    /// This is a non-deterministic rule, as clocks vary over time, and
+    /// between different nodes.
+    ///
+    /// "In addition, a full validator MUST NOT accept blocks with nTime
+    /// more than two hours in the future according to its clock. This
+    /// is not strictly a consensus rule because it is nondeterministic,
+    /// and clock time varies between nodes. Also note that a block that
+    /// is rejected by this rule at a given point in time may later be
+    /// accepted." [§7.5][7.5]
+    ///
+    /// [7.5]: https://zips.z.cash/protocol/protocol.pdf#blockheader
+    pub fn is_time_valid_at(&self, now: DateTime<Utc>) -> Result<(), Error> {
+        let two_hours_in_the_future = now
+            .checked_add_signed(Duration::hours(2))
+            .ok_or("overflow when calculating 2 hours in the future")?;
+        if self.time <= two_hours_in_the_future {
+            Ok(())
+        } else {
+            Err("block header time is more than 2 hours in the future")?
+        }
+    }
 }
 
 #[non_exhaustive]
 #[derive(Debug, thiserror::Error)]
-pub enum Error {
+pub enum EquihashError {
     #[error("invalid equihash solution for BlockHeader")]
     EquihashInvalid(#[from] equihash::Error),
     #[error("cannot reserialize header for equihash verification")]

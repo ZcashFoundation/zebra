@@ -28,6 +28,9 @@ use super::{
 /// The length of a Bitcoin message header.
 const HEADER_LEN: usize = 24usize;
 
+/// Maximum size of a protocol message body.
+const MAX_PROTOCOL_MESSAGE_LEN: usize = 2 * 1024 * 1024;
+
 /// A codec which produces Bitcoin messages from byte streams and vice versa.
 pub struct Codec {
     builder: Builder,
@@ -50,7 +53,7 @@ impl Codec {
         Builder {
             network: Network::Mainnet,
             version: constants::CURRENT_VERSION,
-            max_len: 4_000_000,
+            max_len: MAX_PROTOCOL_MESSAGE_LEN,
         }
     }
 
@@ -95,6 +98,7 @@ impl Encoder for Codec {
     type Error = Error;
 
     fn encode(&mut self, item: Self::Item, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        use Error::Parse;
         // XXX(HACK): this is inefficient and does an extra allocation.
         // instead, we should have a size estimator for the message, reserve
         // that much space, write the header (with zeroed checksum), then the body,
@@ -102,6 +106,10 @@ impl Encoder for Codec {
 
         let mut body = Vec::new();
         self.write_body(&item, &mut body)?;
+
+        if body.len() > self.builder.max_len {
+            return Err(Parse("body length exceeded maximum size"));
+        }
 
         use Message::*;
         // Note: because all match arms must have
@@ -311,7 +319,7 @@ impl Decoder for Codec {
                 if magic != Magic::from(self.builder.network) {
                     return Err(Parse("supplied magic did not meet expectations"));
                 }
-                if body_len >= self.builder.max_len {
+                if body_len > self.builder.max_len {
                     return Err(Parse("body length exceeded maximum size"));
                 }
 
@@ -685,5 +693,78 @@ mod tests {
 
         assert_eq!(format!("{:?}", decode_state),
                    "DecodeState::Body { body_len: 43, command: \"v�ion\\u{0}\\u{0}\\u{0}\\u{0}\\u{0}\", checksum: Sha256dChecksum(\"bafaa2e3\") }");
+    }
+
+    #[test]
+    fn max_msg_size_round_trip() {
+        use std::sync::Arc;
+        use zebra_chain::serialization::ZcashDeserializeInto;
+        zebra_test::init();
+
+        let mut rt = Runtime::new().unwrap();
+
+        // make tests with a Tx message
+        let tx = zebra_test::vectors::DUMMY_TX1
+            .zcash_deserialize_into()
+            .unwrap();
+        let msg = Message::Tx(Arc::new(tx));
+
+        use tokio_util::codec::{FramedRead, FramedWrite};
+
+        // i know the above msg has a body of 85 bytes
+        let size = 85;
+
+        // reducing the max size to body size - 1
+        rt.block_on(async {
+            let mut bytes = Vec::new();
+            {
+                let mut fw = FramedWrite::new(
+                    &mut bytes,
+                    Codec::builder().with_max_body_len(size - 1).finish(),
+                );
+                fw.send(msg.clone()).await.expect_err(
+                    "message should not encode as it is bigger than the max allowed value",
+                );
+            }
+        });
+
+        // send again with the msg body size as max size
+        let msg_bytes = rt.block_on(async {
+            let mut bytes = Vec::new();
+            {
+                let mut fw = FramedWrite::new(
+                    &mut bytes,
+                    Codec::builder().with_max_body_len(size).finish(),
+                );
+                fw.send(msg.clone())
+                    .await
+                    .expect("message should encode with the msg body size as max allowed value");
+            }
+            bytes
+        });
+
+        // receive with a reduced max size
+        rt.block_on(async {
+            let mut fr = FramedRead::new(
+                Cursor::new(&msg_bytes),
+                Codec::builder().with_max_body_len(size - 1).finish(),
+            );
+            fr.next()
+                .await
+                .expect("a next message should be available")
+                .expect_err("message should not decode as it is bigger than the max allowed value")
+        });
+
+        // receive again with the tx size as max size
+        rt.block_on(async {
+            let mut fr = FramedRead::new(
+                Cursor::new(&msg_bytes),
+                Codec::builder().with_max_body_len(size).finish(),
+            );
+            fr.next()
+                .await
+                .expect("a next message should be available")
+                .expect("message should decode with the msg body size as max allowed value")
+        });
     }
 }

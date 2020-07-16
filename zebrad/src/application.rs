@@ -79,6 +79,7 @@ impl Application for ZebradApp {
         &mut self.state
     }
 
+    /// Returns the framework components used by this application.
     fn framework_components(
         &mut self,
         command: &Self::Cmd,
@@ -135,10 +136,29 @@ impl Application for ZebradApp {
 
 impl ZebradApp {
     fn level(&self, command: &EntryPoint<ZebradCmd>) -> String {
-        if let Ok(level) = std::env::var("ZEBRAD_LOG") {
-            level
-        } else if command.verbose {
+        // `None` outputs zebrad usage information to stdout
+        let command_uses_stdout = match &command.command {
+            None => true,
+            Some(c) => c.uses_stdout(),
+        };
+
+        // Allow users to:
+        //  - override all other configs and defaults using the command line
+        //  - see command outputs without spurious log messages, by default
+        //  - override the config file using an environmental variable
+        if command.verbose {
             "debug".to_string()
+        } else if command_uses_stdout {
+            // Tracing sends output to stdout, so we disable info-level logs for
+            // some commands.
+            //
+            // TODO: send tracing output to stderr. This change requires an abscissa
+            //       update, because `abscissa_core::component::Tracing` uses
+            //       `tracing_subscriber::fmt::Formatter`, which has `Stdout` as a
+            //       type parameter. We need `MakeWriter` or a similar type.
+            "warn".to_string()
+        } else if let Ok(level) = std::env::var("ZEBRAD_LOG") {
+            level
         } else if let Some(ZebradConfig {
             tracing:
                 crate::config::TracingSection {

@@ -11,7 +11,7 @@
 #[cfg(test)]
 mod tests;
 
-use chrono::{DateTime, Duration, Utc};
+use chrono::Utc;
 use futures_util::FutureExt;
 use std::{
     error,
@@ -23,53 +23,6 @@ use std::{
 use tower::{buffer::Buffer, Service, ServiceExt};
 
 use zebra_chain::block::{Block, BlockHeaderHash};
-
-/// Check if `block_header_time` is less than or equal to
-/// 2 hours in the future, according to the node's local clock (`now`).
-///
-/// This is a non-deterministic rule, as clocks vary over time, and
-/// between different nodes.
-///
-/// "In addition, a full validator MUST NOT accept blocks with nTime
-/// more than two hours in the future according to its clock. This
-/// is not strictly a consensus rule because it is nondeterministic,
-/// and clock time varies between nodes. Also note that a block that
-/// is rejected by this rule at a given point in time may later be
-/// accepted."[S 7.5][7.5]
-///
-/// [7.5]: https://zips.z.cash/protocol/protocol.pdf#blockheader
-pub(crate) fn node_time_check(
-    block_header_time: DateTime<Utc>,
-    now: DateTime<Utc>,
-) -> Result<(), Error> {
-    let two_hours_in_the_future = now
-        .checked_add_signed(Duration::hours(2))
-        .ok_or("overflow when calculating 2 hours in the future")?;
-
-    if block_header_time <= two_hours_in_the_future {
-        Ok(())
-    } else {
-        Err("block header time is more than 2 hours in the future".into())
-    }
-}
-
-/// [3.10]: https://zips.z.cash/protocol/protocol.pdf#coinbasetransactions
-pub(crate) fn coinbase_check(block: &Block) -> Result<(), Error> {
-    if block.coinbase_height().is_some() {
-        // No coinbase inputs in additional transactions allowed
-        if block
-            .transactions
-            .iter()
-            .skip(1)
-            .any(|tx| tx.contains_coinbase_input())
-        {
-            Err("coinbase input found in additional transaction")?
-        }
-        Ok(())
-    } else {
-        Err("no coinbase transaction in block")?
-    }
-}
 
 struct BlockVerifier<S> {
     /// The underlying `ZebraState`, possibly wrapped in other services.
@@ -114,9 +67,9 @@ where
             // quick checks first.
 
             let now = Utc::now();
-            node_time_check(block.header.time, now)?;
+            block.header.is_time_valid_at(now)?;
             block.header.is_equihash_solution_valid()?;
-            coinbase_check(block.as_ref())?;
+            block.is_coinbase_first()?;
 
             // `Tower::Buffer` requires a 1:1 relationship between `poll()`s
             // and `call()`s, because it reserves a buffer slot in each

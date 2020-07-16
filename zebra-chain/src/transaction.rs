@@ -133,9 +133,7 @@ impl Transaction {
 
     /// Returns `true` if transaction contains any coinbase inputs.
     pub fn contains_coinbase_input(&self) -> bool {
-        self.inputs().any(|input| match input {
-            TransparentInput::Coinbase { .. } => true,
-            _ => false,
-        })
+        self.inputs()
+            .any(|input| matches!(input, TransparentInput::Coinbase { .. }))
     }
 }
