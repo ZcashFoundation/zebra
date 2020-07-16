@@ -1,9 +1,8 @@
+#![allow(clippy::try_err)]
+
 use tower::{Service, ServiceExt};
-
+use zebra_test::transcript::ErrorChecker;
 use zebra_test::transcript::Transcript;
-
-type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
-type ErrorChecker = fn(Error) -> Result<(), Error>;
 
 const TRANSCRIPT_DATA: [(&str, Result<&str, ErrorChecker>); 4] = [
     ("req1", Ok("rsp1")),
@@ -56,9 +55,13 @@ const TRANSCRIPT_DATA2: [(&str, Result<&str, ErrorChecker>); 4] = [
     (
         "req4",
         Err(|e| {
-            if e.is::<zebra_test::transcript::MockError>() {
-                Err("this is bad".into())
-            } else if e.to_string() == "this is bad" {
+            if e.is_none() {
+                Err("this is bad")?;
+            }
+
+            let e = e.unwrap();
+
+            if e.to_string() == "this is bad" {
                 Ok(())
             } else {
                 Err(e)

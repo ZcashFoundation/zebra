@@ -8,7 +8,7 @@ use zebra_test::transcript::Transcript;
 use zebra_state::*;
 
 type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
-type ErrorChecker = fn(Error) -> Result<(), Error>;
+type ErrorChecker = fn(Option<Error>) -> Result<(), Error>;
 
 static ADD_BLOCK_TRANSCRIPT: Lazy<Vec<(Request, Result<Response, ErrorChecker>)>> =
     Lazy::new(|| {

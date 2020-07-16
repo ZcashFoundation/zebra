@@ -12,7 +12,8 @@ use std::{
 };
 use tower::{Service, ServiceExt};
 
-type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
+pub type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
+pub type ErrorChecker = fn(Option<Error>) -> Result<(), Error>;
 
 #[derive(Debug, thiserror::Error)]
 #[error("Service Error: {0}")]
@@ -39,7 +40,7 @@ where
     I: Iterator<Item = (R, Result<S, E>)>,
     R: Debug,
     S: Debug + Eq,
-    E: Fn(Error) -> Result<(), Error>,
+    E: Fn(Option<Error>) -> Result<(), Error>,
 {
     pub async fn check<C>(mut self, mut to_check: C) -> Result<(), Report>
     where
@@ -61,7 +62,7 @@ where
                             format!("{:?}", expected_rsp).header("Expected Response:")
                         }),
                     Err(error_checker) => {
-                        error_checker(e.into())
+                        error_checker(Some(e.into()))
                             .map_err(ServiceError)
                             .wrap_err("service returned an error but it didn't match the expected error")?;
                         continue;
@@ -89,9 +90,11 @@ where
                     expected_rsp
                 ),
                 (Err(e), Err(error_checker)) => {
-                    error_checker(e.into()).map_err(ServiceError).wrap_err(
-                        "service returned an error but it didn't match the expected error",
-                    )?;
+                    error_checker(Some(e.into()))
+                        .map_err(ServiceError)
+                        .wrap_err(
+                            "service returned an error but it didn't match the expected error",
+                        )?;
                     continue;
                 }
             }
@@ -104,46 +107,45 @@ const TRANSCRIPT_MOCK_GUIDE: &str = r#"
 Transcripts that are mocking services that produce errors must construct the
 errors they expect in their error handling closure.
 
-When a transcript encounters an expected error it passes in a `MockError`
-which the `check_fn` should then map to the desired error type.
+When a transcript encounters an expected error it passes in a `None` which is
+the signal to `check_fn` that it should construct the expected Error.
 
 # Example
 
 ```rust
-static EXAMPLE_TRANSCRIPT: Lazy<Vec<(Request, Response)>> = Lazy::new(|| {
-    let block = zebra_test::vectors::BLOCK_MAINNET_415000_BYTES
-        .zcash_deserialize_into::<Arc<_>>()
-        .unwrap();
+const TRANSCRIPT_DATA2: [(&str, Result<&str, ErrorChecker>); 4] = [
+    ("req1", Ok("rsp1")),
+    ("req2", Ok("rsp2")),
+    ("req3", Ok("rsp3")),
+    (
+        "req4",
+        Err(|e| {
+            if e.is_none() {
+                Err("this is bad")?;
+            }
 
-    vec![
-        (
-            Request::AddBlock {
-                block: block.clone(),
-            },
-            Err(|e| {
-                if e.is::<MockError>() {
-                    return Err(zebra_state::Error::ActualError);
-                } else if !e.is::<zebra_state::Error>() {
-                    todo!()
-                } else {
-                    Ok(())
-                }
-            })
-        ),
-    ]
-});
+            let e = e.unwrap();
+
+            if e.to_string() == "this is bad" {
+                Ok(())
+            } else {
+                Err(e)
+            }
+        }),
+    ),
+];
 ```
 "#;
 
 #[derive(Debug, thiserror::Error)]
-#[error("mock error which should be mapped to the desired mock error type")]
+#[error("mock error which should be mapped to the expected error type")]
 pub struct MockError;
 
 impl<R, S, E, I> Service<R> for Transcript<R, S, E, I>
 where
     R: Debug + Eq,
     I: Iterator<Item = (R, Result<S, E>)>,
-    E: Fn(Error) -> Result<(), Error>,
+    E: Fn(Option<Error>) -> Result<(), Error>,
 {
     type Response = S;
     type Error = Report;
@@ -171,8 +173,7 @@ where
                 }
                 Err(check_fn) => {
                     // transcripts that mock errors must handle this and return the mocked error
-                    let err = MockError.into();
-                    let err = match check_fn(err) {
+                    let err = match check_fn(None) {
                         Ok(()) => Err(eyre!("transcript incorrectly handled mock error"))
                             .section(
                                 TRANSCRIPT_MOCK_GUIDE.header("Transcript Error Mocking Guide:"),
