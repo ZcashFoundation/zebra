@@ -9,7 +9,8 @@ set -euo pipefail
 # stdout, as a line with space-separated fields.
 #
 # The block header hash is written out in Bitcoin order, which is different from
-# Zebra's internal byte order.
+# Zebra's internal byte order, as an optimisation. (calculate-checkpoints.sh
+# converts hashes to Zebra's internal order after choosing checkpoints.)
 #
 # Usage: get-height-size-hash.sh | calculate-checkpoints.sh
 #        get-height-size-hash.sh -testnet | calculate-checkpoints.sh
