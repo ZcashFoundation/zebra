@@ -20,8 +20,8 @@ type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 ///
 /// This function serves dual purposes.
 ///
-/// * When a `Transcript` is being used as a validator it is used to validate the
-///   errors returned by the service that is being checked.
+/// * When a `Transcript` is being used as a validator the ErrorChecker is used
+///   to validate the errors returned by the service that is being checked.
 /// * When the `Transcript` is being used as a Mock Service the ErrorChecker is
 ///   used to _produce_ the error that it would otherwise have expected to receive.
 ///
@@ -69,8 +69,8 @@ type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 pub type ErrorChecker = fn(Option<Error>) -> Result<(), Error>;
 
 #[derive(Debug, thiserror::Error)]
-#[error("Service Error: {0}")]
-struct ServiceError(Error);
+#[error("ErrorChecker Error: {0}")]
+struct ErrorCheckerError(Error);
 
 pub struct Transcript<R, S, E, I>
 where
@@ -93,7 +93,7 @@ where
     I: Iterator<Item = (R, Result<S, E>)>,
     R: Debug,
     S: Debug + Eq,
-    E: Fn(Option<Error>) -> Result<(), Error>,
+    E: Fn(Option<Error>) -> Result<(), Error> + std::panic::RefUnwindSafe,
 {
     pub async fn check<C>(mut self, mut to_check: C) -> Result<(), Report>
     where
@@ -122,16 +122,39 @@ where
                         .with_section(|| format!("{:?}", rsp).header("Found Response:"))?;
                     }
                 }
-                (Ok(rsp), Err(_)) => {
-                    todo!("got response when an error was expected. rsp={:?}", rsp)
+                (Ok(rsp), Err(error_checker)) => {
+                    let error = Err(eyre!("received a response when an error was expected"))
+                        .with_section(|| format!("{:?}", rsp).header("Found Response:"));
+
+                    let error = match std::panic::catch_unwind(|| error_checker(None)) {
+                        Ok(expected_rsp) => error.with_section(|| {
+                            format!("{:?}", expected_rsp).header("Expected Response:")
+                        }),
+                        Err(pi) => {
+                            let payload = pi
+                                .downcast_ref::<String>()
+                                .cloned()
+                                .or_else(|| pi.downcast_ref::<&str>().map(ToString::to_string))
+                                .unwrap_or_else(|| "<non string panic payload>".into());
+
+                            error
+                                .section(payload.header("Panic:"))
+                                .wrap_err("ErrorChecker panicked when producing expected response")
+                        }
+                    };
+
+                    error?;
                 }
-                (Err(_), Ok(expected_rsp)) => todo!(
-                    "got an error when a response was expected. expected_rsp={:?}",
-                    expected_rsp
-                ),
+                (Err(e), Ok(expected_rsp)) => {
+                    Err(eyre!("received an error when a response was expected"))
+                        .with_error(|| ErrorCheckerError(e.into()))
+                        .with_section(|| {
+                            format!("{:?}", expected_rsp).header("Expected Response:")
+                        })?
+                }
                 (Err(e), Err(error_checker)) => {
                     error_checker(Some(e.into()))
-                        .map_err(ServiceError)
+                        .map_err(ErrorCheckerError)
                         .wrap_err(
                             "service returned an error but it didn't match the expected error",
                         )?;
