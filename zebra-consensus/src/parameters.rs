@@ -12,16 +12,11 @@
 use zebra_chain::block::BlockHeaderHash;
 use zebra_chain::{Network, Network::*};
 
-/// Returns the previous block hash for the genesis block in `network`.
-pub fn genesis_previous_block_hash(network: Network) -> BlockHeaderHash {
-    // All current networks use all-zeroes for the parent of the genesis block.
-    // (In Bitcoin, `null` is `[0; 32]`.)
-    //
-    // TODO: make this function const when feature(const_if_match) stabilises.
-    match network {
-        Mainnet | Testnet => BlockHeaderHash([0; 32]),
-    }
-}
+/// The previous block hash for the genesis block.
+///
+/// All known networks use the Bitcoin `null` value for the parent of the
+/// genesis block. (In Bitcoin, `null` is `[0; 32]`.)
+pub const GENESIS_PREVIOUS_BLOCK_HASH: BlockHeaderHash = BlockHeaderHash([0; 32]);
 
 /// Returns the hash for the genesis block in `network`.
 pub fn genesis_hash(network: Network) -> BlockHeaderHash {
