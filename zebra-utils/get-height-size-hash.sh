@@ -8,6 +8,9 @@ set -euo pipefail
 # block header hash using zcash RPC via zcash-cli. Writes each block's info to
 # stdout, as a line with space-separated fields.
 #
+# The block header hash is written out in Bitcoin order, which is different from
+# Zebra's internal byte order.
+#
 # Usage: get-height-size-hash.sh | calculate-checkpoints.sh
 #        get-height-size-hash.sh -testnet | calculate-checkpoints.sh
 #
@@ -29,11 +32,11 @@ i=0
 while [ "$i" -lt "$block_count" ]; do
     # Unfortunately, there is no simple RPC for height, size, and hash.
     # So we use the expensive block RPC, and extract fields using jq.
-    block_info=$(zcash-cli "$@" getblock "$i" | \
-                     jq -r '"\(.height) \(.size) \(.hash)"')
-    # Now reverse the byte order of hash
-    read -r height size hash <<< "$block_info"
-    hash=$(zebrad revhex "$hash")
-    echo "$height $size $hash"
+    #
+    # We don't byte-reverse the hash here, because launching a zebrad subprocess
+    # is expensive. (This is a bash-specific optimisation, the Rust
+    # implementation should reverse hashes as it loads them.)
+    zcash-cli "$@" getblock "$i" | \
+        jq -r '"\(.height) \(.size) \(.hash)"'
     i=$((i + 1))
 done

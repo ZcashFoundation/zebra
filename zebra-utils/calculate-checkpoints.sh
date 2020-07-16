@@ -8,6 +8,9 @@ set -euo pipefail
 # from stdin. Writes each checkpoint to stdout, as a line with space-separated
 # fields.
 #
+# The block header hash is read in Bitcoin order, but written out in Zebra's
+# internal byte order.
+#
 # Usage: get-height-size-hash.sh | calculate-checkpoints.sh
 #        get-height-size-hash.sh -testnet | calculate-checkpoints.sh
 #
@@ -29,6 +32,13 @@ while read -r height size hash; do
     cumulative_bytes=$((cumulative_bytes + size))
     if [ "$height" -eq 0 ] || \
        [ "$cumulative_bytes" -ge "$MIN_CHECKPOINT_BYTE_COUNT" ]; then
+        # Reverse the byte order of hash.
+        #
+        # We reverse the hash after selecting the checkpoints, because launching
+        # a zebrad subprocess is expensive. (This is a bash-specific
+        # optimisation, the Rust implementation should reverse hashes as it loads
+        # them.)
+        hash=$(zebrad revhex "$hash")
         echo "$height $hash"
         cumulative_bytes=0
     fi
