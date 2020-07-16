@@ -2,11 +2,14 @@ use tower::{Service, ServiceExt};
 
 use zebra_test::transcript::Transcript;
 
-const TRANSCRIPT_DATA: [(&str, &str); 4] = [
-    ("req1", "rsp1"),
-    ("req2", "rsp2"),
-    ("req3", "rsp3"),
-    ("req4", "rsp4"),
+type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
+type ErrorChecker = fn(Error) -> Result<(), Error>;
+
+const TRANSCRIPT_DATA: [(&str, Result<&str, ErrorChecker>); 4] = [
+    ("req1", Ok("rsp1")),
+    ("req2", Ok("rsp2")),
+    ("req3", Ok("rsp3")),
+    ("req4", Ok("rsp4")),
 ];
 
 #[tokio::test]
@@ -16,7 +19,7 @@ async fn transcript_returns_responses_and_ends() {
     for (req, rsp) in TRANSCRIPT_DATA.iter() {
         assert_eq!(
             svc.ready_and().await.unwrap().call(req).await.unwrap(),
-            *rsp,
+            rsp.unwrap()
         );
     }
     assert!(svc.ready_and().await.unwrap().call("end").await.is_err());
