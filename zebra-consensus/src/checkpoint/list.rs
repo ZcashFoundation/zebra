@@ -50,18 +50,14 @@ impl CheckpointList {
         let checkpoints: BTreeMap<BlockHeight, BlockHeaderHash> =
             original_checkpoints.into_iter().collect();
 
-        // An empty checkpoint list can't actually verify any blocks.
-        match checkpoints.keys().next() {
-            Some(BlockHeight(0)) => {}
+        // Check that the list starts with the correct genesis block
+        match checkpoints.iter().next() {
+            Some((BlockHeight(0), h)) if h == &parameters::genesis_hash(network) => {}
+            Some((BlockHeight(0), _)) => {
+                Err("the genesis checkpoint does not match the network genesis hash")?
+            }
+            Some(_) => Err("checkpoints must start at the genesis block height 0")?,
             None => Err("there must be at least one checkpoint, for the genesis block")?,
-            _ => Err("checkpoints must start at the genesis block height 0")?,
-        };
-
-        // Check the hash of the genesis block against the supplied network
-        match checkpoints.values().next() {
-            Some(h) if h == &parameters::genesis_hash(network) => {}
-            Some(_) => Err("the genesis checkpoint does not match the network genesis hash")?,
-            _ => unreachable!("already checked for an empty list"),
         };
 
         // This check rejects duplicate heights, whether they have the same or
