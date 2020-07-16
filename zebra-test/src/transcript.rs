@@ -45,6 +45,8 @@ type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 /// # Example
 ///
 /// ```rust
+/// use zebra_test::transcript::ErrorChecker;
+///
 /// const TRANSCRIPT_DATA2: [(&str, Result<&str, ErrorChecker>); 4] = [
 ///     ("req1", Ok("rsp1")),
 ///     ("req2", Ok("rsp2")),
@@ -66,6 +68,7 @@ type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 ///         }),
 ///     ),
 /// ];
+/// ```
 pub type ErrorChecker = fn(Option<Error>) -> Result<(), Error>;
 
 #[derive(Debug, thiserror::Error)]
