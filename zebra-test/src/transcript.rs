@@ -14,6 +14,10 @@ use tower::{Service, ServiceExt};
 
 type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 
+#[derive(Debug, thiserror::Error)]
+#[error("Service Error: {0}")]
+struct ServiceError(Error);
+
 pub struct Transcript<R, S, E, I>
 where
     I: Iterator<Item = (R, Result<S, E>)>,
@@ -50,14 +54,15 @@ where
             let fut = match fut {
                 Ok(fut) => Ok(fut),
                 Err(e) => match &expected_rsp {
-                    Ok(expected_rsp) => Err(eyre!(e.into()))
+                    Ok(expected_rsp) => Err(e.into())
+                        .map_err(ServiceError)
                         .wrap_err("service's ready_and returned an error: transcript expected an response")
                         .with_section(|| {
                             format!("{:?}", expected_rsp).header("Expected Response:")
                         }),
                     Err(error_checker) => {
                         error_checker(e.into())
-                            .map_err(|e| eyre!(e))
+                            .map_err(ServiceError)
                             .wrap_err("service returned an error but it didn't match the expected error")?;
                         continue;
                     },
@@ -84,7 +89,7 @@ where
                     expected_rsp
                 ),
                 (Err(e), Err(error_checker)) => {
-                    error_checker(e.into()).map_err(|e| eyre!(e)).wrap_err(
+                    error_checker(e.into()).map_err(ServiceError).wrap_err(
                         "service returned an error but it didn't match the expected error",
                     )?;
                     continue;
@@ -155,11 +160,13 @@ where
                     if request == expected_request {
                         ready(Ok(response))
                     } else {
-                        ready(Err(eyre!(
-                            "Expected {:?}, got {:?}",
-                            expected_request,
-                            request
-                        )))
+                        ready(
+                            Err(eyre!("received unexpected request"))
+                                .with_section(|| {
+                                    format!("{:?}", expected_request).header("Expected Request:")
+                                })
+                                .with_section(|| format!("{:?}", request).header("Found Request:")),
+                        )
                     }
                 }
                 Err(check_fn) => {
