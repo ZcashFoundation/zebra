@@ -85,9 +85,6 @@ pub const MAX_QUEUED_BLOCKS_PER_HEIGHT: usize = 4;
 struct CheckpointVerifier {
     // Inputs
     //
-    /// The network for this verifier.
-    network: Network,
-
     /// The checkpoint list for this verifier.
     checkpoint_list: CheckpointList,
 
@@ -130,7 +127,6 @@ impl CheckpointVerifier {
         checkpoint_list: impl IntoIterator<Item = (BlockHeight, BlockHeaderHash)>,
     ) -> Result<Self, Error> {
         Ok(CheckpointVerifier {
-            network,
             checkpoint_list: CheckpointList::new(network, checkpoint_list)?,
             queued: BTreeMap::new(),
             // We start by verifying the genesis block, by itself
@@ -422,7 +418,7 @@ impl CheckpointVerifier {
             // Since genesis blocks are hard-coded in zcashd, and not verified
             // like other blocks, the genesis parent hash is set by the
             // consensus parameters.
-            BeforeGenesis => parameters::genesis_previous_block_hash(self.network),
+            BeforeGenesis => parameters::GENESIS_PREVIOUS_BLOCK_HASH,
             PreviousCheckpoint(hash) => hash,
             FinalCheckpoint => return,
         };
