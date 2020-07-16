@@ -3,12 +3,9 @@ use once_cell::sync::Lazy;
 use std::sync::Arc;
 use tempdir::TempDir;
 use zebra_chain::{block::Block, serialization::ZcashDeserialize};
-use zebra_test::transcript::Transcript;
+use zebra_test::transcript::{ErrorChecker, Transcript};
 
 use zebra_state::*;
-
-type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
-type ErrorChecker = fn(Option<Error>) -> Result<(), Error>;
 
 static ADD_BLOCK_TRANSCRIPT: Lazy<Vec<(Request, Result<Response, ErrorChecker>)>> =
     Lazy::new(|| {

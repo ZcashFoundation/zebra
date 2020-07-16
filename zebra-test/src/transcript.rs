@@ -78,25 +78,12 @@ where
         while let Some((req, expected_rsp)) = self.messages.next() {
             // These unwraps could propagate errors with the correct
             // bound on C::Error
-            let fut = to_check.ready_and().await;
-
-            let fut = match fut {
-                Ok(fut) => Ok(fut),
-                Err(e) => match &expected_rsp {
-                    Ok(expected_rsp) => Err(e.into())
-                        .map_err(ServiceError)
-                        .wrap_err("service's ready_and returned an error: transcript expected an response")
-                        .with_section(|| {
-                            format!("{:?}", expected_rsp).header("Expected Response:")
-                        }),
-                    Err(error_checker) => {
-                        error_checker(Some(e.into()))
-                            .map_err(ServiceError)
-                            .wrap_err("service returned an error but it didn't match the expected error")?;
-                        continue;
-                    },
-                },
-            }?;
+            let fut = to_check
+                .ready_and()
+                .await
+                .map_err(Into::into)
+                .map_err(|e| eyre!(e))
+                .expect("expected service to not fail during execution of transcript");
 
             let response = fut.call(req).await;
 
