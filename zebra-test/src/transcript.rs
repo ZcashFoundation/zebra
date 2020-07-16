@@ -12,7 +12,7 @@ use std::{
 };
 use tower::{Service, ServiceExt};
 
-pub type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
+type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 /// A function for validating or constructing errors for `Transcript` responses
 ///
@@ -41,6 +41,31 @@ pub type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 ///
 /// When acting as a mock service your `ErrorChecker` should produce the expected
 /// error whenever the input is `None`.
+///
+/// # Example
+///
+/// ```rust
+/// const TRANSCRIPT_DATA2: [(&str, Result<&str, ErrorChecker>); 4] = [
+///     ("req1", Ok("rsp1")),
+///     ("req2", Ok("rsp2")),
+///     ("req3", Ok("rsp3")),
+///     (
+///         "req4",
+///         Err(|e| {
+///             if e.is_none() {
+///                 Err("this is bad")?;
+///             }
+///
+///             let e = e.unwrap();
+///
+///             if e.to_string() == "this is bad" {
+///                 Ok(())
+///             } else {
+///                 Err(e)
+///             }
+///         }),
+///     ),
+/// ];
 pub type ErrorChecker = fn(Option<Error>) -> Result<(), Error>;
 
 #[derive(Debug, thiserror::Error)]
@@ -151,10 +176,6 @@ const TRANSCRIPT_DATA2: [(&str, Result<&str, ErrorChecker>); 4] = [
 ];
 ```
 "#;
-
-#[derive(Debug, thiserror::Error)]
-#[error("mock error which should be mapped to the expected error type")]
-pub struct MockError;
 
 impl<R, S, E, I> Service<R> for Transcript<R, S, E, I>
 where
