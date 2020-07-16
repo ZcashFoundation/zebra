@@ -13,6 +13,34 @@ use std::{
 use tower::{Service, ServiceExt};
 
 pub type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
+
+/// A function for validating or constructing errors for `Transcript` responses
+///
+/// # Details
+///
+/// This function serves dual purposes.
+///
+/// * When a `Transcript` is being used as a validator it is used to validate the
+///   errors returned by the service that is being checked.
+/// * When the `Transcript` is being used as a Mock Service the ErrorChecker is
+///   used to _produce_ the error that it would otherwise have expected to receive.
+///
+/// The input `Option` is used to differentiate between these two roles. When the
+/// input is `Some(error)` the function should validate the error. When the input
+/// is `None` the function should produce the expected error. It is okay to leave
+/// functionality you won't use unimplemented, e.g. if you only need to validate
+/// a service it's okay to unwrap the input and ignore the mocking functionality.
+///
+/// ## Validating Errors
+///
+/// When validating errors you should return `Ok(())` if the input error was the
+/// expected error. If the input error was unexpected you can return any error
+/// you want to indicate what went wrong.
+///
+/// ## Mocking Error Respones
+///
+/// When acting as a mock service your `ErrorChecker` should produce the expected
+/// error whenever the input is `None`.
 pub type ErrorChecker = fn(Option<Error>) -> Result<(), Error>;
 
 #[derive(Debug, thiserror::Error)]
