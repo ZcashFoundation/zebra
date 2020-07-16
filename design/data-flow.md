@@ -15,3 +15,5 @@
         - Sum up "LegacySigOps" for each transaction and check that it's less than some maximum
     - Acquires a lock, then calls `MarkBlockAsReceived` (networking?) and then calls `AcceptBlock`
         - 
+- ContextualCheckBlock
+    
