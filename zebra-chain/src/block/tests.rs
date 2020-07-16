@@ -1,11 +1,14 @@
 use super::*;
+
 use crate::equihash_solution::EquihashSolution;
 use crate::merkle_tree::MerkleTreeRootHash;
 use crate::note_commitment_tree::SaplingNoteTreeRootHash;
 use crate::serialization::{
     SerializationError, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
 };
+use crate::types::LockTime;
 use crate::{sha256d_writer::Sha256dWriter, test::generate};
+
 use chrono::{DateTime, Duration, LocalResult, TimeZone, Utc};
 use proptest::{
     arbitrary::{any, Arbitrary},
@@ -299,20 +302,15 @@ static BLOCK_HEADER_VALID_TIMESTAMPS: &[i64] = &[
     i64::MIN,
     i64::MIN + 1,
     // These times are valid DateTimes
-    (u32::MIN as i64) - 1,
-    (u32::MIN as i64),
-    (u32::MIN as i64) + 1,
     (i32::MIN as i64) - 1,
     (i32::MIN as i64),
     (i32::MIN as i64) + 1,
     -1,
     0,
     1,
-    // maximum nExpiryHeight or lock_time, in blocks
-    499_999_999,
-    // minimum lock_time, in seconds
-    500_000_000,
-    500_000_001,
+    LockTime::MIN_TIMESTAMP - 1,
+    LockTime::MIN_TIMESTAMP,
+    LockTime::MIN_TIMESTAMP + 1,
 ];
 
 /// Invalid unix epoch timestamps for blocks, in seconds
@@ -320,9 +318,9 @@ static BLOCK_HEADER_INVALID_TIMESTAMPS: &[i64] = &[
     (i32::MAX as i64) - 1,
     (i32::MAX as i64),
     (i32::MAX as i64) + 1,
-    (u32::MAX as i64) - 1,
-    (u32::MAX as i64),
-    (u32::MAX as i64) + 1,
+    LockTime::MAX_TIMESTAMP - 1,
+    LockTime::MAX_TIMESTAMP,
+    LockTime::MAX_TIMESTAMP + 1,
     // These times are currently invalid DateTimes, but they could
     // become valid in future chrono versions
     i64::MAX - 1,
