@@ -1,14 +1,11 @@
 use super::{
-    error::Closed,
+    error::{Closed, ServiceError},
     message::{self, Message},
     BatchControl,
 };
 use futures::future::TryFutureExt;
 use pin_project::pin_project;
-use std::{
-    marker::PhantomData,
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 use tokio::{
     stream::StreamExt,
     sync::mpsc,
@@ -26,41 +23,38 @@ use tracing_futures::Instrument;
 /// implement (only call).
 #[pin_project]
 #[derive(Debug)]
-pub struct Worker<S, Request, E2>
+pub struct Worker<T, Request>
 where
-    S: Service<BatchControl<Request>>,
-    S::Error: Into<E2>,
+    T: Service<BatchControl<Request>>,
+    T::Error: Into<crate::BoxError>,
 {
-    rx: mpsc::Receiver<Message<Request, S::Future, S::Error>>,
-    service: S,
-    failed: Option<S::Error>,
-    handle: Handle<S::Error, E2>,
+    rx: mpsc::Receiver<Message<Request, T::Future>>,
+    service: T,
+    failed: Option<ServiceError>,
+    handle: Handle,
     max_items: usize,
     max_latency: std::time::Duration,
-    _e: PhantomData<E2>,
 }
 
 /// Get the error out
 #[derive(Debug)]
-pub(crate) struct Handle<E, E2> {
-    inner: Arc<Mutex<Option<E>>>,
-    _e: PhantomData<E2>,
+pub(crate) struct Handle {
+    inner: Arc<Mutex<Option<ServiceError>>>,
 }
 
-impl<S, Request, E2> Worker<S, Request, E2>
+impl<T, Request> Worker<T, Request>
 where
-    S: Service<BatchControl<Request>>,
-    S::Error: Into<E2> + Clone,
+    T: Service<BatchControl<Request>>,
+    T::Error: Into<crate::BoxError>,
 {
     pub(crate) fn new(
-        service: S,
-        rx: mpsc::Receiver<Message<Request, S::Future, S::Error>>,
+        service: T,
+        rx: mpsc::Receiver<Message<Request, T::Future>>,
         max_items: usize,
         max_latency: std::time::Duration,
-    ) -> (Handle<S::Error, E2>, Worker<S, Request, E2>) {
+    ) -> (Handle, Worker<T, Request>) {
         let handle = Handle {
             inner: Arc::new(Mutex::new(None)),
-            _e: PhantomData,
         };
 
         let worker = Worker {
@@ -70,16 +64,15 @@ where
             failed: None,
             max_items,
             max_latency,
-            _e: PhantomData,
         };
 
         (handle, worker)
     }
 
-    async fn process_req(&mut self, req: Request, tx: message::Tx<S::Future, S::Error>) {
-        if let Some(failed) = self.failed.clone() {
+    async fn process_req(&mut self, req: Request, tx: message::Tx<T::Future>) {
+        if let Some(ref failed) = self.failed {
             tracing::trace!("notifying caller about worker failure");
-            let _ = tx.send(Err(failed));
+            let _ = tx.send(Err(failed.clone()));
         } else {
             match self.service.ready_and().await {
                 Ok(svc) => {
@@ -87,11 +80,12 @@ where
                     let _ = tx.send(Ok(rsp));
                 }
                 Err(e) => {
-                    self.failed(e);
+                    self.failed(e.into());
                     let _ = tx.send(Err(self
                         .failed
-                        .clone()
-                        .expect("Worker::failed did not set self.failed?")));
+                        .as_ref()
+                        .expect("Worker::failed did not set self.failed?")
+                        .clone()));
                 }
             }
         }
@@ -104,7 +98,7 @@ where
             .and_then(|svc| svc.call(BatchControl::Flush))
             .await
         {
-            self.failed(e);
+            self.failed(e.into());
         }
     }
 
@@ -171,12 +165,11 @@ where
         }
     }
 
-    fn failed(&mut self, error: S::Error) {
-        // The underlying service failed when we called `poll_ready` on it with
-        // the given `error`. We need to communicate this to all the `Buffer`
-        // handles. To do so, we require that `S::Error` implements `Clone`,
-        // clone the error to send to all pending requests, and store it so that
-        // subsequent requests will also fail with the same error.
+    fn failed(&mut self, error: crate::BoxError) {
+        // The underlying service failed when we called `poll_ready` on it with the given `error`. We
+        // need to communicate this to all the `Buffer` handles. To do so, we wrap up the error in
+        // an `Arc`, send that `Arc<E>` to all pending requests, and store it so that subsequent
+        // requests will also fail with the same error.
 
         // Note that we need to handle the case where some handle is concurrently trying to send us
         // a request. We need to make sure that *either* the send of the request fails *or* it
@@ -185,6 +178,7 @@ where
         // request. We do this by *first* exposing the error, *then* closing the channel used to
         // send more requests (so the client will see the error when the send fails), and *then*
         // sending the error to all outstanding requests.
+        let error = ServiceError::new(error);
 
         let mut inner = self.handle.inner.lock().unwrap();
 
@@ -206,26 +200,21 @@ where
     }
 }
 
-impl<E, E2> Handle<E, E2>
-where
-    E: Clone + Into<E2>,
-    crate::error::Closed: Into<E2>,
-{
-    pub(crate) fn get_error_on_closed(&self) -> E2 {
+impl Handle {
+    pub(crate) fn get_error_on_closed(&self) -> crate::BoxError {
         self.inner
             .lock()
             .unwrap()
-            .clone()
-            .map(Into::into)
+            .as_ref()
+            .map(|svc_err| svc_err.clone().into())
             .unwrap_or_else(|| Closed::new().into())
     }
 }
 
-impl<E, E2> Clone for Handle<E, E2> {
-    fn clone(&self) -> Handle<E, E2> {
+impl Clone for Handle {
+    fn clone(&self) -> Handle {
         Handle {
             inner: self.inner.clone(),
-            _e: PhantomData,
         }
     }
 }
