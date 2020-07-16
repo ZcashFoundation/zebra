@@ -4,7 +4,7 @@ use super::*;
 
 use std::time::Duration;
 
-use color_eyre::eyre::Result;
+use color_eyre::eyre::{eyre, Result};
 use futures::stream::{FuturesUnordered, StreamExt};
 use tower::ServiceExt;
 use tower_batch::Batch;
@@ -53,7 +53,11 @@ async fn batch_flushes_on_max_items() -> Result<()> {
     // Use a very long max_latency and a short timeout to check that
     // flushing is happening based on hitting max_items.
     let verifier = Batch::new(Verifier::new(), 10, Duration::from_secs(1000));
-    timeout(Duration::from_secs(5), sign_and_verify(verifier, 100)).await?
+    timeout(Duration::from_secs(5), sign_and_verify(verifier, 100))
+        .await
+        .map_err(|e| eyre!(e))?;
+
+    Ok(())
 }
 
 #[tokio::test]
@@ -64,5 +68,9 @@ async fn batch_flushes_on_max_latency() -> Result<()> {
     // Use a very high max_items and a short timeout to check that
     // flushing is happening based on hitting max_latency.
     let verifier = Batch::new(Verifier::new(), 100, Duration::from_millis(500));
-    timeout(Duration::from_secs(5), sign_and_verify(verifier, 10)).await?
+    timeout(Duration::from_secs(5), sign_and_verify(verifier, 10))
+        .await
+        .map_err(|e| eyre!(e))?;
+
+    Ok(())
 }
