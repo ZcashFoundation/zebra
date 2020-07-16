@@ -101,10 +101,19 @@ impl Application for ZebradApp {
             metrics::MetricsEndpoint, tokio::TokioComponent, tracing::TracingEndpoint,
         };
 
+        // `None` outputs zebrad usage information and exits
+        let command_is_server = match &command.command {
+            None => false,
+            Some(c) => c.is_server(),
+        };
+
         let mut components = self.framework_components(command)?;
         components.push(Box::new(TokioComponent::new()?));
-        components.push(Box::new(TracingEndpoint::new()?));
-        components.push(Box::new(MetricsEndpoint::new()?));
+        // Launch network endpoints for long-running commands
+        if command_is_server {
+            components.push(Box::new(TracingEndpoint::new()?));
+            components.push(Box::new(MetricsEndpoint::new()?));
+        }
 
         self.state.components.register(components)
     }
