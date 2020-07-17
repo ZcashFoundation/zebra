@@ -49,12 +49,14 @@ static GET_TIP_TRANSCRIPT: Lazy<Vec<(Request, Response)>> = Lazy::new(|| {
 });
 
 #[tokio::test]
+#[spandoc::spandoc]
 async fn check_transcripts() -> Result<(), Report> {
     zebra_test::init();
 
     for transcript_data in &[&ADD_BLOCK_TRANSCRIPT, &GET_TIP_TRANSCRIPT] {
         let service = in_memory::init();
         let transcript = Transcript::from(transcript_data.iter().cloned());
+        /// SPANDOC: check the in memory service against the transcript
         transcript.check(service).await?;
 
         let storage_guard = TempDir::new("")?;
@@ -62,6 +64,7 @@ async fn check_transcripts() -> Result<(), Report> {
             path: storage_guard.path().to_owned(),
         });
         let transcript = Transcript::from(transcript_data.iter().cloned());
+        /// SPANDOC: check the on disk service against the transcript
         transcript.check(service).await?;
         // Delete the contents of the temp directory before going to the next case.
         std::mem::drop(storage_guard);
