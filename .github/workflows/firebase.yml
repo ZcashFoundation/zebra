@@ -27,11 +27,11 @@ jobs:
         # Add the book directory to the $PATH
         echo "::add-path::$GITHUB_WORKSPACE/book"
 
-    - name: Build book
+    - name: Build Zebra book
       run: |
         mdbook build book/
 
-    - name: Deploy external book to firebase
+    - name: Deploy Zebra book to firebase
       uses: w9jds/firebase-action@v1.5.0
       with:
         args: deploy
