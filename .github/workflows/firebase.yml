@@ -38,3 +38,14 @@ jobs:
       env:
         FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
         PROJECT_ID: zebra-doc-internal
+    - name: Build book
+      run: |
+        mdbook build book/
+    - name: Deploy external book to firebase
+      uses: w9jds/firebase-action@v1.5.0
+      with:
+        args: deploy
+      env:
+        FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+        PROJECT_PATH: book/
+        PROJECT_ID: zebra-book
