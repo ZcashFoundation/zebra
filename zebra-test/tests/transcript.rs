@@ -48,6 +48,10 @@ async fn self_check() {
     assert!(t1.check(t2).await.is_ok());
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("Error")]
+struct Error;
+
 const TRANSCRIPT_DATA2: [(&str, Result<&str, ErrorChecker>); 4] = [
     ("req1", Ok("rsp1")),
     ("req2", Ok("rsp2")),
@@ -55,17 +59,9 @@ const TRANSCRIPT_DATA2: [(&str, Result<&str, ErrorChecker>); 4] = [
     (
         "req4",
         Err(|e| {
-            if e.is_none() {
-                Err("this is bad")?;
-            }
+            let e = e.ok_or(Error)?;
 
-            let e = e.unwrap();
-
-            if e.to_string() == "this is bad" {
-                Ok(())
-            } else {
-                Err(e)
-            }
+            e.downcast::<Error>().map(drop)
         }),
     ),
 ];
