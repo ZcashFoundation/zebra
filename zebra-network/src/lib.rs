@@ -26,6 +26,7 @@
 //! to close, and the outbound service can connect to additional peers
 //! when it is overloaded.
 
+#![doc(html_favicon_url = "https://www.zfnd.org/images/zebra-favicon-128.png")]
 #![doc(html_logo_url = "https://www.zfnd.org/images/zebra-icon.png")]
 #![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_network")]
 #![deny(missing_docs)]
