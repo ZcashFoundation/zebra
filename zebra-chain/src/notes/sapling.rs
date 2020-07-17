@@ -8,7 +8,7 @@ mod commitments;
 mod nullifiers;
 
 use crate::{
-    keys::sapling::{Diversifier, TransmissionKey},
+    keys::sapling::{diversify_hash, find_group_hash, Diversifier, TransmissionKey},
     notes::memo::Memo,
     types::amount::{Amount, NonNegative},
 };
@@ -16,6 +16,11 @@ use crate::{
 pub use ciphertexts::{EncryptedCiphertext, OutCiphertext};
 pub use commitments::{CommitmentRandomness, NoteCommitment, ValueCommitment};
 pub use nullifiers::Nullifier;
+
+///
+///
+/// https://zips.z.cash/protocol/protocol.pdf#concretepedersenhash
+pub fn pedersen_hash_to_point() {}
 
 /// A Note represents that a value is spendable by the recipient who
 /// holds the spending key corresponding to a given shielded payment
@@ -32,9 +37,17 @@ impl Note {
     /// Perderson hash constructon, and adding a randomized point on
     /// the Jubjub curve.
     ///
+    /// WindowedPedersenCommit_r (s) := \
+    ///   PedersenHashToPoint(“Zcash_PH”, s) + [r]FindGroupHash^J^(r)∗(“Zcash_PH”, “r”)
+    ///
+    /// NoteCommit^Sapling_rcm (g*_d , pk*_d , v) := \
+    ///   WindowedPedersenCommit_rcm([1; 6] || I2LEBSP_64(v) || g*_d || pk*_d)
+    ///
     /// https://zips.z.cash/protocol/protocol.pdf#concretewindowedcommit
     pub fn commit(&self) -> NoteCommitment {
-        unimplemented!()
+        let g_d = diversify_hash(self.diversifier.0).unwrap();
+
+        NoteCommitment::new(g_d, self.transmission_key, self.value)
     }
 }
 

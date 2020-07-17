@@ -124,7 +124,9 @@ fn jubjub_group_hash(d: [u8; 8], m: &[u8]) -> Option<jubjub::ExtendedPoint> {
 ///
 /// [0]: https://github.com/zcash/librustzcash/blob/master/zcash_primitives/src/jubjub/mod.rs#L409
 /// https://zips.z.cash/protocol/protocol.pdf#concretegrouphashjubjub
-fn find_group_hash(d: [u8; 8], m: &[u8]) -> jubjub::ExtendedPoint {
+// TODO: move common functions like these out of the keys module into
+// a more appropriate location
+pub fn find_group_hash(d: [u8; 8], m: &[u8]) -> jubjub::ExtendedPoint {
     let mut tag = m.to_vec();
     let i = tag.len();
     tag.push(0u8);
