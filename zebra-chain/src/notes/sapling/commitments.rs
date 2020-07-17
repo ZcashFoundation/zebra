@@ -1,9 +1,16 @@
 use std::{fmt, io};
 
+use rand_core::{CryptoRng, RngCore};
+
 use crate::{
+    keys::sapling::find_group_hash,
     serde_helpers,
     serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize},
 };
+
+// TODO: replace with reference to redjubjub or jubjub when merged and
+// exported.
+type Scalar = jubjub::Fr;
 
 /// The randomness used in the Pedersen Hash for note commitment.
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -38,8 +45,6 @@ impl From<NoteCommitment> for [u8; 32] {
 }
 
 impl ZcashSerialize for NoteCommitment {
-    // The u-coordinate of the note commitment, for the output note
-    // LEBS2OSP256(cm_u) where cm_u = Extract_J(r)(cm). ???
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_all(&self.0.to_bytes())?;
         Ok(())
@@ -55,6 +60,26 @@ impl ZcashDeserialize for NoteCommitment {
 }
 
 impl NoteCommitment {
+    /// Generate a new _NoteCommitment_.
+    ///
+    /// https://zips.z.cash/protocol/protocol.pdf#concretewindowedcommit
+    #[allow(non_snake_case)]
+    pub fn new<T>(csprng: &mut T, value_bytes: [u8; 32]) -> Self
+    where
+        T: RngCore + CryptoRng,
+    {
+        let v = Scalar::from_bytes(&value_bytes).unwrap();
+
+        let mut rcv_bytes = [0u8; 32];
+        csprng.fill_bytes(&mut rcv_bytes);
+        let rcv = Scalar::from_bytes(&rcv_bytes).unwrap();
+
+        let V = find_group_hash(*b"Zcash_cv", b"v");
+        let R = find_group_hash(*b"Zcash_cv", b"r");
+
+        Self::from(V * v + R * rcv)
+    }
+
     /// Hash Extractor for Jubjub (?)
     ///
     /// https://zips.z.cash/protocol/protocol.pdf#concreteextractorjubjub
@@ -86,6 +111,12 @@ impl From<[u8; 32]> for ValueCommitment {
     }
 }
 
+impl From<jubjub::ExtendedPoint> for ValueCommitment {
+    fn from(extended_point: jubjub::ExtendedPoint) -> Self {
+        Self(jubjub::AffinePoint::from(extended_point))
+    }
+}
+
 impl Eq for ValueCommitment {}
 
 impl From<ValueCommitment> for [u8; 32] {
@@ -110,5 +141,28 @@ impl ZcashDeserialize for ValueCommitment {
         Ok(Self(
             jubjub::AffinePoint::from_bytes(reader.read_32_bytes()?).unwrap(),
         ))
+    }
+}
+
+impl ValueCommitment {
+    /// Generate a new _ValueCommitment_.
+    ///
+    /// https://zips.z.cash/protocol/protocol.pdf#concretehomomorphiccommit
+    // TODO: accept an Amount instead?
+    #[allow(non_snake_case)]
+    pub fn new<T>(csprng: &mut T, value_bytes: [u8; 32]) -> Self
+    where
+        T: RngCore + CryptoRng,
+    {
+        let v = Scalar::from_bytes(&value_bytes).unwrap();
+
+        let mut rcv_bytes = [0u8; 32];
+        csprng.fill_bytes(&mut rcv_bytes);
+        let rcv = Scalar::from_bytes(&rcv_bytes).unwrap();
+
+        let V = find_group_hash(*b"Zcash_cv", b"v");
+        let R = find_group_hash(*b"Zcash_cv", b"r");
+
+        Self::from(V * v + R * rcv)
     }
 }
