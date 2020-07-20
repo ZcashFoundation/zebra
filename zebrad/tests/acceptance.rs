@@ -92,7 +92,6 @@ fn revhex_args() {
 #[test]
 fn seed_no_args() {
     let mut runner = RUNNER.clone();
-    runner.exclusive();
     let mut cmd = runner
         .timeout(Duration::from_secs(1))
         .arg("seed")
@@ -104,6 +103,7 @@ fn seed_no_args() {
     cmd.stdout()
         .expect_regex(r"^(.*?)Initializing tracing endpoint");
 
+    cmd.wait().unwrap_err();
     // Problem: Zombie child process is not killed
     //cmd.kill();
 }
