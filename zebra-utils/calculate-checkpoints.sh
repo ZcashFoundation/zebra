@@ -30,7 +30,8 @@ MAX_CHECKPOINT_BYTE_COUNT=$((256*1024*1024))
 # We limit the maximum number of blocks in each checkpoint. Each block uses a
 # constant amount of memory for the supporting data structures and futures.
 #
-# TODO: set this gap to half the sync lookahead distance.
+# TODO: In the Rust implementation, set this gap to half the sync service's
+# LOOKAHEAD_LIMIT.
 MAX_CHECKPOINT_HEIGHT_GAP=2000
 
 cumulative_bytes=0
