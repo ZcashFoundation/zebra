@@ -15,12 +15,12 @@ lazy_static = "1.4.0"
 hex = "0.4.2"
 sled = "0.33.0"
 serde = { version = "1", features = ["serde_derive"] }
+tracing = "0.1.16"
 
 [dev-dependencies]
 tokio = { version = "0.2.21", features = ["full"] }
 zebra-test = { path = "../zebra-test/" }
 spandoc = "0.2"
-tracing = "0.1.16"
 tracing-futures = "0.2.4"
 tempdir = "0.3.7"
 color-eyre = "0.5"

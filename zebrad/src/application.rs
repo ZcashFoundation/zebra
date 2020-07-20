@@ -8,6 +8,7 @@ use abscissa_core::{
     trace::Tracing,
     Application, Component, EntryPoint, FrameworkError, StandardPaths,
 };
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 /// Application state
 pub static APPLICATION: AppCell<ZebradApp> = AppCell::new();
@@ -84,13 +85,17 @@ impl Application for ZebradApp {
         &mut self,
         command: &Self::Cmd,
     ) -> Result<Vec<Box<dyn Component<Self>>>, FrameworkError> {
+        let terminal = Terminal::new(self.term_colors(command));
+
+        // This MUST happen after `Terminal::new` to ensure our preferred panic
+        // handler is the last one installed
         color_eyre::install().unwrap();
 
-        let terminal = Terminal::new(self.term_colors(command));
         if ZebradApp::command_is_server(&command) {
             let tracing = self.tracing_component(command);
             Ok(vec![Box::new(terminal), Box::new(tracing)])
         } else {
+            init_tracing_backup();
             Ok(vec![Box::new(terminal)])
         }
     }
@@ -183,8 +188,6 @@ impl ZebradApp {
     }
 
     fn tracing_component(&self, command: &EntryPoint<ZebradCmd>) -> Tracing {
-        use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-
         // Construct a tracing subscriber with the supplied filter and enable reloading.
         let builder = tracing_subscriber::FmtSubscriber::builder()
             .with_env_filter(self.level(command))
@@ -210,4 +213,10 @@ impl ZebradApp {
             Some(c) => c.is_server(),
         }
     }
+}
+
+fn init_tracing_backup() {
+    tracing_subscriber::Registry::default()
+        .with(tracing_error::ErrorLayer::default())
+        .init();
 }

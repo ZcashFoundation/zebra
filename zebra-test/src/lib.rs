@@ -3,6 +3,11 @@ use std::sync::Once;
 use tracing_error::ErrorLayer;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
+pub mod command;
+pub mod prelude;
+pub mod transcript;
+pub mod vectors;
+
 static INIT: Once = Once::new();
 
 /// Initialize globals for tests such as the tracing subscriber and panic / error
@@ -63,6 +68,3 @@ pub fn init() {
             .unwrap();
     })
 }
-
-pub mod transcript;
-pub mod vectors;

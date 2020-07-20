@@ -1,13 +1,14 @@
 //! Acceptance test: runs zebrad as a subprocess and asserts its
 //! output for given argument combinations matches what is expected.
 
-#![deny(warnings, missing_docs, trivial_casts, unused_qualifications)]
+#![warn(warnings, missing_docs, trivial_casts, unused_qualifications)]
 #![forbid(unsafe_code)]
 
 use abscissa_core::testing::prelude::*;
+use color_eyre::eyre::Result;
 use once_cell::sync::Lazy;
-
 use std::time::Duration;
+use zebra_test::prelude::*;
 
 /// Executes zebrad binary via `cargo run`.
 pub static RUNNER: Lazy<CmdRunner> = Lazy::new(CmdRunner::default);
@@ -124,21 +125,27 @@ fn seed_args() {
 }
 
 #[test]
-fn start_no_args() {
-    let mut runner = RUNNER.clone();
-    runner.exclusive();
-    let mut cmd = runner
-        .timeout(Duration::from_secs(1))
+fn start_no_args() -> Result<()> {
+    zebra_test::init();
+
+    let (mut cmd, _guard) = test_cmd(env!("CARGO_BIN_EXE_zebrad"))?;
+
+    let mut child = cmd
         .arg("start")
-        .capture_stdout()
-        .run();
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn2()?;
 
-    // Todo: maybe add special info!() to start command
-    // Todo: improve the regex
-    cmd.stdout()
-        .expect_regex(r"^(.*?)Initializing tracing endpoint");
+    std::thread::sleep(Duration::from_secs(1));
 
-    // Problem: Zombie child process is not killed
+    child.kill()?;
+
+    let output = child.wait_with_output()?;
+    let output = output.assert_failure()?;
+
+    output.stdout_contains(r"^(.*?)Initializing tracing endpoint")?;
+
+    Ok(())
 }
 
 #[test]

@@ -38,3 +38,4 @@ metrics = "0.12"
 [dev-dependencies]
 abscissa_core = { version = "0.5", features = ["testing"] }
 once_cell = "1.4"
+zebra-test = { path = "../zebra-test" }

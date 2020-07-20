@@ -10,6 +10,7 @@ use std::{
     task::{Context, Poll},
 };
 use tower::{buffer::Buffer, Service};
+use tracing::instrument;
 use zebra_chain::serialization::{ZcashDeserialize, ZcashSerialize};
 use zebra_chain::{
     block::{Block, BlockHeaderHash},
@@ -22,6 +23,7 @@ struct SledState {
 }
 
 impl SledState {
+    #[instrument]
     pub(crate) fn new(config: &Config) -> Self {
         let config = config.sled_config();
 
@@ -41,8 +43,7 @@ impl SledState {
         let by_height = self.storage.open_tree(b"by_height")?;
         let by_hash = self.storage.open_tree(b"by_hash")?;
 
-        let mut bytes = Vec::new();
-        block.zcash_serialize(&mut bytes)?;
+        let bytes = block.zcash_serialize_to_vec()?;
 
         // TODO(jlusby): make this transactional
         by_height.insert(&height.0.to_be_bytes(), bytes.as_slice())?;

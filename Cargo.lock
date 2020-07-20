@@ -2609,6 +2609,9 @@ dependencies = [
  "futures",
  "hex",
  "lazy_static",
+ "regex",
+ "spandoc",
+ "tempdir",
  "tokio",
  "tower",
  "tracing",
@@ -2652,6 +2655,7 @@ dependencies = [
  "zebra-consensus",
  "zebra-network",
  "zebra-state",
+ "zebra-test",
 ]
 
 [[package]]
