@@ -13,7 +13,6 @@ use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
 
 use zebra_chain::serialization::ZcashDeserialize;
-use zebra_chain::Network::*;
 
 /// The timeout we apply to each verify future during testing.
 ///
@@ -46,7 +45,7 @@ async fn single_item_checkpoint_list() -> Result<(), Report> {
             .collect();
 
     let mut checkpoint_verifier =
-        CheckpointVerifier::new(Mainnet, genesis_checkpoint_list).map_err(|e| eyre!(e))?;
+        CheckpointVerifier::from_list(genesis_checkpoint_list).map_err(|e| eyre!(e))?;
 
     assert_eq!(
         checkpoint_verifier.previous_checkpoint_height(),
@@ -126,7 +125,7 @@ async fn multi_item_checkpoint_list() -> Result<(), Report> {
         .collect();
 
     let mut checkpoint_verifier =
-        CheckpointVerifier::new(Mainnet, checkpoint_list).map_err(|e| eyre!(e))?;
+        CheckpointVerifier::from_list(checkpoint_list).map_err(|e| eyre!(e))?;
 
     assert_eq!(
         checkpoint_verifier.previous_checkpoint_height(),
@@ -253,7 +252,7 @@ async fn continuous_blockchain() -> Result<(), Report> {
         .collect();
 
     let mut checkpoint_verifier =
-        CheckpointVerifier::new(Mainnet, checkpoint_list).map_err(|e| eyre!(e))?;
+        CheckpointVerifier::from_list(checkpoint_list).map_err(|e| eyre!(e))?;
 
     // Setup checks
     assert_eq!(
@@ -350,7 +349,7 @@ async fn block_higher_than_max_checkpoint_fail() -> Result<(), Report> {
             .collect();
 
     let mut checkpoint_verifier =
-        CheckpointVerifier::new(Mainnet, genesis_checkpoint_list).map_err(|e| eyre!(e))?;
+        CheckpointVerifier::from_list(genesis_checkpoint_list).map_err(|e| eyre!(e))?;
 
     assert_eq!(
         checkpoint_verifier.previous_checkpoint_height(),
@@ -425,7 +424,7 @@ async fn wrong_checkpoint_hash_fail() -> Result<(), Report> {
             .collect();
 
     let mut checkpoint_verifier =
-        CheckpointVerifier::new(Mainnet, genesis_checkpoint_list).map_err(|e| eyre!(e))?;
+        CheckpointVerifier::from_list(genesis_checkpoint_list).map_err(|e| eyre!(e))?;
 
     assert_eq!(
         checkpoint_verifier.previous_checkpoint_height(),
@@ -605,7 +604,7 @@ async fn checkpoint_drop_cancel() -> Result<(), Report> {
         .collect();
 
     let mut checkpoint_verifier =
-        CheckpointVerifier::new(Mainnet, checkpoint_list).map_err(|e| eyre!(e))?;
+        CheckpointVerifier::from_list(checkpoint_list).map_err(|e| eyre!(e))?;
 
     assert_eq!(
         checkpoint_verifier.previous_checkpoint_height(),
