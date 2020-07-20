@@ -673,3 +673,65 @@ async fn checkpoint_drop_cancel() -> Result<(), Report> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn hard_coded_mainnet_test() -> Result<(), Report> {
+    hard_coded_mainnet().await
+}
+
+#[spandoc::spandoc]
+async fn hard_coded_mainnet() -> Result<(), Report> {
+    zebra_test::init();
+
+    let block0 =
+        Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
+    let hash0: BlockHeaderHash = block0.as_ref().into();
+
+    // Use the hard-coded checkpoint list
+    let mut checkpoint_verifier =
+        CheckpointVerifier::new(Network::Mainnet).map_err(|e| eyre!(e))?;
+
+    assert_eq!(
+        checkpoint_verifier.previous_checkpoint_height(),
+        BeforeGenesis
+    );
+    assert_eq!(
+        checkpoint_verifier.target_checkpoint_height(),
+        WaitingForBlocks
+    );
+    // The lists will get bigger over time, so we just pick a recent height
+    assert!(checkpoint_verifier.checkpoint_list.max_height() > BlockHeight(900_000));
+
+    /// SPANDOC: Make sure the verifier service is ready
+    let ready_verifier_service = checkpoint_verifier
+        .ready_and()
+        .map_err(|e| eyre!(e))
+        .await?;
+    /// SPANDOC: Set up the future for block 0
+    let verify_future = timeout(
+        Duration::from_secs(VERIFY_TIMEOUT_SECONDS),
+        ready_verifier_service.call(block0.clone()),
+    );
+    /// SPANDOC: Wait for the response for block 0
+    // TODO(teor || jlusby): check error kind
+    let verify_response = verify_future
+        .map_err(|e| eyre!(e))
+        .await
+        .expect("timeout should not happen")
+        .expect("block should verify");
+
+    assert_eq!(verify_response, hash0);
+
+    assert_eq!(
+        checkpoint_verifier.previous_checkpoint_height(),
+        PreviousCheckpoint(BlockHeight(0))
+    );
+    assert_eq!(
+        checkpoint_verifier.target_checkpoint_height(),
+        WaitingForBlocks
+    );
+    // The lists will get bigger over time, so we just pick a recent height
+    assert!(checkpoint_verifier.checkpoint_list.max_height() > BlockHeight(900_000));
+
+    Ok(())
+}
