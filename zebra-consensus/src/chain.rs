@@ -80,33 +80,64 @@ where
         let mut state_service = self.state_service.clone();
         let max_checkpoint_height = self.max_checkpoint_height;
 
+        let height = block.coinbase_height();
+        // Report each 1000th block at info level
+        let info_log = match height {
+            Some(BlockHeight(height)) if (height % 1000 == 0) => true,
+            _ => false,
+        };
+
+        if info_log {
+            tracing::info!(?height, "ChainVerifier received block");
+        } else {
+            tracing::debug!(?height, "ChainVerifier received block");
+        }
+
         async move {
-            // Call a verifier based on the block height and checkpoints
-            //
             // TODO(teor): for post-sapling checkpoint blocks, allow callers
             //             to use BlockVerifier, CheckpointVerifier, or both.
-            match block.coinbase_height() {
+
+            // Call a verifier based on the block height and checkpoints.
+            let hash = match height {
                 Some(height) if (height <= max_checkpoint_height) => {
+                    if info_log {
+                        tracing::info!(?height, "sending block to CheckpointVerifier");
+                    } else {
+                        tracing::debug!(?height, "sending block to CheckpointVerifier");
+                    }
                     checkpoint_verifier
                         .ready_and()
                         .await?
                         .call(block.clone())
                         .await?
                 }
-                Some(_) => {
+                Some(height) => {
+                    if info_log {
+                        tracing::info!(?height, "sending block to BlockVerifier");
+                    } else {
+                        tracing::debug!(?height, "sending block to BlockVerifier");
+                    }
                     block_verifier
                         .ready_and()
                         .await?
                         .call(block.clone())
                         .await?
                 }
-                None => return Err("Invalid block: must have a coinbase height".into()),
+                None => {
+                    tracing::debug!("rejecting block with no coinbase height");
+                    return Err("Invalid block: must have a coinbase height".into());
+                }
             };
 
             // TODO(teor):
             //   - handle chain reorgs
             //   - adjust state_service "unique block height" conditions
 
+            if info_log {
+                tracing::info!(?height, ?hash, "ChainVerifier sent block to state");
+            } else {
+                tracing::debug!(?height, ?hash, "ChainVerifier sent block to state");
+            }
             // `Tower::Buffer` requires a 1:1 relationship between `poll()`s
             // and `call()`s, because it reserves a buffer slot in each
             // `call()`.
@@ -153,6 +184,8 @@ where
         + 'static,
     S::Future: Send + 'static,
 {
+    tracing::debug!(?network, "initialising ChainVerifier from network");
+
     let block_verifier = crate::block::init(state_service.clone());
     let checkpoint_verifier = CheckpointVerifier::new(network);
 
@@ -197,6 +230,11 @@ where
     S::Future: Send + 'static,
 {
     let max_checkpoint_height = checkpoint_verifier.list().max_height();
+    tracing::debug!(
+        ?max_checkpoint_height,
+        "initialising ChainVerifier with max checkpoint height"
+    );
+
     // Wrap the checkpoint verifier in a buffer, so we can share it
     let checkpoint_verifier = Buffer::new(checkpoint_verifier, 1);
 
