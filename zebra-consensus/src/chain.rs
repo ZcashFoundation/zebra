@@ -28,6 +28,7 @@ use tower::{buffer::Buffer, Service, ServiceExt};
 
 use zebra_chain::block::{Block, BlockHeaderHash};
 use zebra_chain::types::BlockHeight;
+use zebra_chain::Network;
 
 struct ChainVerifier<BV, S> {
     /// The underlying `BlockVerifier`, possibly wrapped in other services.
@@ -123,6 +124,43 @@ where
     }
 }
 
+/// Return a chain verification service, using `network` and the provided state
+/// service. The network is used to create a block verifier and checkpoint
+/// verifier.
+///
+/// This function should only be called once for a particular state service. If
+/// you need shared block or checkpoint verfiers, create them yourself, and pass
+/// them to `init_from_verifiers`.
+//
+// TODO: revise this interface when we generate our own blocks, or validate
+//       mempool transactions.
+//
+// Only used by tests and other modules
+#[allow(dead_code)]
+pub fn init<S>(
+    network: Network,
+    state_service: S,
+) -> impl Service<
+    Arc<Block>,
+    Response = BlockHeaderHash,
+    Error = Error,
+    Future = impl Future<Output = Result<BlockHeaderHash, Error>>,
+> + Send
+       + Clone
+       + 'static
+where
+    S: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>
+        + Send
+        + Clone
+        + 'static,
+    S::Future: Send + 'static,
+{
+    let block_verifier = crate::block::init(state_service.clone());
+    let checkpoint_verifier = CheckpointVerifier::new(network);
+
+    init_from_verifiers(block_verifier, checkpoint_verifier, state_service)
+}
+
 /// Return a chain verification service, using the provided verifier and state
 /// services.
 ///
@@ -141,8 +179,9 @@ where
 //
 // Only used by tests and other modules
 #[allow(dead_code)]
-pub fn init<BV, S>(
+pub fn init_from_verifiers<BV, S>(
     block_verifier: BV,
+    // We use an explcit type, so callers can't accidentally swap the verifiers
     checkpoint_verifier: CheckpointVerifier,
     state_service: S,
 ) -> impl Service<
