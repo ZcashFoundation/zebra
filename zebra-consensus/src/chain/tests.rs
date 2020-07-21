@@ -64,7 +64,8 @@ fn verifiers_from_checkpoint_list(
     let block_verifier = crate::block::init(state_service.clone());
     let checkpoint_verifier =
         crate::checkpoint::CheckpointVerifier::from_checkpoint_list(checkpoint_list);
-    let chain_verifier = super::init(block_verifier, checkpoint_verifier, state_service.clone());
+    let chain_verifier =
+        super::init_from_verifiers(block_verifier, checkpoint_verifier, state_service.clone());
 
     (chain_verifier, state_service)
 }
@@ -153,7 +154,9 @@ async fn verify_checkpoint_test() -> Result<(), Report> {
     verify_checkpoint().await
 }
 
-/// Test that checkpoint verifies work
+/// Test that checkpoint verifies work.
+///
+/// Also tests the `chain::init` function.
 #[spandoc::spandoc]
 async fn verify_checkpoint() -> Result<(), Report> {
     zebra_test::init();
@@ -162,7 +165,9 @@ async fn verify_checkpoint() -> Result<(), Report> {
         Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
     let hash: BlockHeaderHash = block.as_ref().into();
 
-    let (mut chain_verifier, _) = verifiers_from_network(Mainnet);
+    // Test that the chain::init function works. Most of the other tests use
+    // init_from_verifiers.
+    let mut chain_verifier = super::init(Mainnet, zebra_state::in_memory::init());
 
     /// SPANDOC: Make sure the verifier service is ready
     let ready_verifier_service = chain_verifier.ready_and().await.map_err(|e| eyre!(e))?;
