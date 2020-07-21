@@ -333,10 +333,7 @@ impl CheckpointVerifier {
 
         let height = block.coinbase_height();
         // Report each 1000th block at info level
-        let info_log = match height {
-            Some(BlockHeight(height)) if (height % 1000 == 0) => true,
-            _ => false,
-        };
+        let info_log = matches!(height, Some(BlockHeight(height)) if (height % 1000 == 0));
         if info_log {
             tracing::info!(?height, "queue_block received block");
         } else {
@@ -647,10 +644,7 @@ impl Service<Arc<Block>> for CheckpointVerifier {
 
         let height = block.coinbase_height();
         // Report each 1000th block at info level
-        let info_log = match height {
-            Some(BlockHeight(height)) if (height % 1000 == 0) => true,
-            _ => false,
-        };
+        let info_log = matches!(height, Some(BlockHeight(height)) if (height % 1000 == 0));
 
         if info_log {
             tracing::info!(?height, "CheckpointVerifier received block");

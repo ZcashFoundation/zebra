@@ -30,6 +30,11 @@ use zebra_chain::block::{Block, BlockHeaderHash};
 use zebra_chain::types::BlockHeight;
 use zebra_chain::Network;
 
+/// The maximum expected gap between blocks.
+///
+/// Used to identify unexpected high blocks.
+const MAX_EXPECTED_BLOCK_GAP: u32 = 100_000;
+
 struct ChainVerifier<BV, S> {
     /// The underlying `BlockVerifier`, possibly wrapped in other services.
     block_verifier: BV,
@@ -42,6 +47,11 @@ struct ChainVerifier<BV, S> {
 
     /// The underlying `ZebraState`, possibly wrapped in other services.
     state_service: S,
+
+    /// The last block height. Used for debugging.
+    ///
+    /// Not updated for unexpected high blocks.
+    last_block_height: BlockHeight,
 }
 
 /// The error type for the ChainVerifier Service.
@@ -82,16 +92,28 @@ where
 
         let height = block.coinbase_height();
         // Report each 1000th block at info level
-        let info_log = match height {
-            Some(BlockHeight(height)) if (height % 1000 == 0) => true,
-            _ => false,
-        };
+        let info_log = matches!(height, Some(BlockHeight(height)) if (height % 1000 == 0));
 
         if info_log {
             tracing::info!(?height, "ChainVerifier received block");
         } else {
             tracing::debug!(?height, "ChainVerifier received block");
         }
+
+        // Log a warning on unexpected high blocks
+        let is_unexpected_high_block = match height {
+            Some(BlockHeight(height))
+                if (height > self.last_block_height.0 + MAX_EXPECTED_BLOCK_GAP) =>
+            {
+                true
+            }
+            Some(height) => {
+                // Update the last height if the block height was expected
+                self.last_block_height = height;
+                false
+            }
+            _ => false,
+        };
 
         async move {
             // TODO(teor): for post-sapling checkpoint blocks, allow callers
@@ -112,6 +134,12 @@ where
                         .await?
                 }
                 Some(height) => {
+                    // Temporary trace, for identifying early high blocks.
+                    // We think the downloader or sync service should reject these blocks
+                    if is_unexpected_high_block {
+                        tracing::warn!(?height, "unexpected high block");
+                    }
+
                     if info_log {
                         tracing::info!(?height, "sending block to BlockVerifier");
                     } else {
@@ -244,6 +272,10 @@ where
             checkpoint_verifier,
             max_checkpoint_height,
             state_service,
+            // We haven't actually got the genesis block yet, but that's ok,
+            // because this field is only used for debugging unexpected high
+            // blocks.
+            last_block_height: BlockHeight(0),
         },
         1,
     )
