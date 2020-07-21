@@ -18,12 +18,16 @@
 //!  * Sync Task
 //!    * This task runs in the background and continuously queries the network for
 //!    new blocks to be verified and added to the local state
+
 use crate::config::ZebradConfig;
 use crate::{components::tokio::TokioComponent, prelude::*};
+
 use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
 use color_eyre::eyre::Report;
 use tower::{buffer::Buffer, service_fn};
+
 use zebra_chain::block::BlockHeaderHash;
+use zebra_chain::Network::*;
 
 mod sync;
 
@@ -56,7 +60,7 @@ impl StartCmd {
         let config = app_config().network.clone();
         let state = zebra_state::on_disk::init(zebra_state::Config::default());
         let (peer_set, _address_book) = zebra_network::init(config, node).await;
-        let verifier = zebra_consensus::block::init(state.clone());
+        let verifier = zebra_consensus::chain::init(Mainnet, state.clone());
 
         let mut syncer = sync::Syncer::new(peer_set, state, verifier);
 
