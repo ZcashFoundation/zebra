@@ -13,13 +13,13 @@
 //! Verification is provided via a `tower::Service`, to support backpressure and batch
 //! verification.
 
-mod list;
+pub(crate) mod list;
 mod types;
 
 #[cfg(test)]
 mod tests;
 
-use list::CheckpointList;
+pub(crate) use list::CheckpointList;
 use types::{Progress, Progress::*};
 use types::{Target, Target::*};
 
@@ -82,7 +82,7 @@ pub const MAX_QUEUED_BLOCKS_PER_HEIGHT: usize = 4;
 /// Verifies blocks using a supplied list of checkpoints. There must be at
 /// least one checkpoint for the genesis block.
 #[derive(Debug)]
-struct CheckpointVerifier {
+pub struct CheckpointVerifier {
     // Inputs
     //
     /// The checkpoint list for this verifier.
@@ -156,6 +156,10 @@ impl CheckpointVerifier {
             // We start by verifying the genesis block, by itself
             verifier_progress: Progress::BeforeGenesis,
         }
+    }
+
+    pub(crate) fn list(&self) -> &CheckpointList {
+        &self.checkpoint_list
     }
 
     /// Return the current verifier's progress.
