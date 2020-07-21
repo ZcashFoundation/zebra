@@ -41,7 +41,7 @@ fn generate_no_args() -> Result<()> {
     let output = child.unwrap().wait_with_output()?;
     let output = output.assert_success()?;
 
-    output.stdout_contains(r"# Default configuration values for zebrad.")?;
+    output.stdout_contains(r"# Default configuration for zebrad.")?;
 
     Ok(())
 }
