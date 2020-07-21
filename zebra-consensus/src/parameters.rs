@@ -12,6 +12,28 @@
 use zebra_chain::block::BlockHeaderHash;
 use zebra_chain::{Network, Network::*};
 
+/// A Zcash network protocol upgrade.
+//
+// TODO: are new network upgrades a breaking change, or should we make this
+//       enum non-exhaustive?
+pub enum NetworkUpgrade {
+    /// The Zcash protocol before the Overwinter upgrade.
+    ///
+    /// We avoid using `Sprout`, because the specification says that Sprout
+    /// is the name of the pre-Sapling protocol, before and after Overwinter.
+    BeforeOverwinter,
+    /// The Zcash protocol after the Overwinter upgrade.
+    Overwinter,
+    /// The Zcash protocol after the Sapling upgrade.
+    Sapling,
+    /// The Zcash protocol after the Blossom upgrade.
+    Blossom,
+    /// The Zcash protocol after the Heartwood upgrade.
+    Heartwood,
+    /// The Zcash protocol after the Canopy upgrade.
+    Canopy,
+}
+
 /// The previous block hash for the genesis block.
 ///
 /// All known networks use the Bitcoin `null` value for the parent of the

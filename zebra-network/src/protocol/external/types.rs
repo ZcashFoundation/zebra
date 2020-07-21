@@ -1,12 +1,14 @@
 #![allow(clippy::unit_arg)]
+
+use crate::constants::magics;
+
 use std::fmt;
+
+use zebra_chain::Network::{self, *};
+use zebra_consensus::parameters::NetworkUpgrade::{self, *};
 
 #[cfg(test)]
 use proptest_derive::Arbitrary;
-
-use zebra_chain::Network;
-
-use crate::constants::magics;
 
 /// A magic number identifying the network.
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -32,6 +34,26 @@ impl From<Network> for Magic {
 /// A protocol version number.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Version(pub u32);
+
+impl Version {
+    /// Returns the minimum network protocol version for `network` and
+    /// `network_upgrade`.
+    pub fn min_version(network: Network, network_upgrade: NetworkUpgrade) -> Self {
+        // We might not ever use these older versions.
+        Version(match (network, network_upgrade) {
+            (_, BeforeOverwinter) => 170_002,
+            (Testnet, Overwinter) => 170_003,
+            (Mainnet, Overwinter) => 170_005,
+            (_, Sapling) => 170_007,
+            (Testnet, Blossom) => 170_008,
+            (Mainnet, Blossom) => 170_009,
+            (Testnet, Heartwood) => 170_010,
+            (Mainnet, Heartwood) => 170_011,
+            (Testnet, Canopy) => 170_012,
+            (Mainnet, Canopy) => 170_013,
+        })
+    }
+}
 
 bitflags! {
     /// A bitflag describing services advertised by a node in the network.

@@ -2621,6 +2621,7 @@ dependencies = [
  "tracing-error",
  "tracing-futures",
  "zebra-chain",
+ "zebra-consensus",
  "zebra-test",
 ]
 
