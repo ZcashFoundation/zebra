@@ -51,7 +51,7 @@ impl FromStr for CheckpointList {
             if let [height, hash] = fields[..] {
                 checkpoint_list.push((height.parse()?, hash.parse()?));
             } else {
-                Err(format!("Checkpoint list parse failure. Expected 2 space-separated fields on checkpoint line: '{}'", checkpoint))?;
+                Err(format!("Invalid checkpoint format: expected 2 space-separated fields but found {}: '{}'", fields.len(), checkpoint))?;
             };
         }
 
