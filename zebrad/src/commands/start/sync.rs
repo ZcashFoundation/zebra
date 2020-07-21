@@ -319,7 +319,7 @@ where
         for hash in hashes.into_iter() {
             let mut retry_peer_set = self.block_network.clone();
             let mut verifier = self.verifier.clone();
-            let span = tracing::info_span!("block_fetch_verify", hash = ?hash);
+            let span = tracing::info_span!("block_fetch_verify", ?hash);
             self.pending_blocks.push(
                 tokio::spawn(async move {
                     let block = match retry_peer_set
