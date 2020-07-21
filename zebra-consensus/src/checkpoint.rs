@@ -117,11 +117,6 @@ impl CheckpointVerifier {
     /// than constructing multiple verification services for the same network. To
     /// Clone a CheckpointVerifier, you might need to wrap it in a
     /// `tower::Buffer` service.
-    //
-    // Avoid some dead code lints.
-    // Until we implement the overall verifier in #516, this function, and some of the
-    // functions and enum variants it uses, are only used in the tests.
-    #[allow(dead_code)]
     pub fn new(network: Network) -> Self {
         Self::from_checkpoint_list(CheckpointList::new(network))
     }
@@ -130,12 +125,11 @@ impl CheckpointVerifier {
     ///
     /// Assumes that the provided genesis checkpoint is correct.
     ///
-    /// See `CheckpointVerifier::new` and `CheckpointList::from_list` for more
-    /// details.
+    /// Callers should prefer `CheckpointVerifier::new`, which uses the
+    /// hard-coded checkpoint lists. See `CheckpointVerifier::new` and
+    /// `CheckpointList::from_list` for more details.
     //
-    // Avoid some dead code lints.
-    // Until we implement the overall verifier in #516, this function, and some of the
-    // functions and enum variants it uses, are only used in the tests.
+    // This function is designed for use in tests.
     #[allow(dead_code)]
     pub(crate) fn from_list(
         list: impl IntoIterator<Item = (BlockHeight, BlockHeaderHash)>,
@@ -145,8 +139,9 @@ impl CheckpointVerifier {
 
     /// Return a checkpoint verification service using `checkpoint_list`.
     ///
-    /// See `CheckpointVerifier::new` and `CheckpointList::from_list` for more
-    /// details.
+    /// Callers should prefer `CheckpointVerifier::new`, which uses the
+    /// hard-coded checkpoint lists. See `CheckpointVerifier::new` and
+    /// `CheckpointList::from_list` for more details.
     pub(crate) fn from_checkpoint_list(checkpoint_list: CheckpointList) -> Self {
         // All the initialisers should call this function, so we only have to
         // change fields or default values in one place.

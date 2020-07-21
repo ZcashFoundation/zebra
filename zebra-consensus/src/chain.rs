@@ -133,10 +133,8 @@ where
 /// them to `init_from_verifiers`.
 //
 // TODO: revise this interface when we generate our own blocks, or validate
-//       mempool transactions.
-//
-// Only used by tests and other modules
-#[allow(dead_code)]
+//       mempool transactions. We might want to share the BlockVerifier, and we
+//       might not want to add generated blocks to the state.
 pub fn init<S>(
     network: Network,
     state_service: S,
@@ -176,9 +174,6 @@ where
 /// verifiers (and the result be shared, cloning if needed). Constructing
 /// multiple services from the same underlying state might cause synchronisation
 /// bugs.
-//
-// Only used by tests and other modules
-#[allow(dead_code)]
 pub fn init_from_verifiers<BV, S>(
     block_verifier: BV,
     // We use an explcit type, so callers can't accidentally swap the verifiers
