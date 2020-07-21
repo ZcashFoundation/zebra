@@ -32,7 +32,7 @@ type Error = Box<dyn error::Error + Send + Sync + 'static>;
 /// (zcashd allows chain reorganizations up to 99 blocks, and prunes
 /// orphaned side-chains after 288 blocks.)
 #[derive(Debug)]
-pub struct CheckpointList(BTreeMap<BlockHeight, BlockHeaderHash>);
+pub(crate) struct CheckpointList(BTreeMap<BlockHeight, BlockHeaderHash>);
 
 impl FromStr for CheckpointList {
     type Err = Error;
