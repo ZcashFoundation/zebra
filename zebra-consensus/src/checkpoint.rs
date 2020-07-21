@@ -122,8 +122,8 @@ impl CheckpointVerifier {
     // Until we implement the overall verifier in #516, this function, and some of the
     // functions and enum variants it uses, are only used in the tests.
     #[allow(dead_code)]
-    pub fn new(network: Network) -> Result<Self, Error> {
-        Ok(Self::from_checkpoint_list(CheckpointList::new(network)?))
+    pub fn new(network: Network) -> Self {
+        Self::from_checkpoint_list(CheckpointList::new(network))
     }
 
     /// Return a checkpoint verification service using `list`.
