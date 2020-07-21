@@ -4,195 +4,292 @@
 #![warn(warnings, missing_docs, trivial_casts, unused_qualifications)]
 #![forbid(unsafe_code)]
 
-use abscissa_core::testing::prelude::*;
 use color_eyre::eyre::Result;
-use once_cell::sync::Lazy;
 use std::time::Duration;
 use zebra_test::prelude::*;
 
-/// Executes zebrad binary via `cargo run`.
-pub static RUNNER: Lazy<CmdRunner> = Lazy::new(CmdRunner::default);
+// Todo: The following 3 helper functions can probably be abstracted into one
+fn get_child_single_arg(arg: &str) -> Result<zebra_test::command::TestChild> {
+    let (mut cmd, _guard) = test_cmd(env!("CARGO_BIN_EXE_zebrad"))?;
 
-#[test]
-fn generate_no_args() {
-    let mut runner = RUNNER.clone();
-    let mut cmd = runner.arg("generate").capture_stdout().run();
-    cmd.stdout()
-        .expect_line("# Default configuration values for zebrad.");
-    cmd.wait().unwrap().expect_success();
+    cmd.arg(arg)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn2()
+}
+
+fn get_child_multi_args(args: &[&str]) -> Result<zebra_test::command::TestChild> {
+    let (mut cmd, _guard) = test_cmd(env!("CARGO_BIN_EXE_zebrad"))?;
+
+    cmd.args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn2()
+}
+
+fn get_child_no_args() -> Result<zebra_test::command::TestChild> {
+    let (mut cmd, _guard) = test_cmd(env!("CARGO_BIN_EXE_zebrad"))?;
+
+    cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn2()
 }
 
 #[test]
-fn generate_args() {
-    let mut runner = RUNNER.clone();
-    let cmd = runner
-        .args(&["generate", "argument"])
-        .capture_stdout()
-        .run();
-    cmd.wait().unwrap().expect_code(1);
+fn generate_no_args() -> Result<()> {
+    zebra_test::init();
+
+    let child = get_child_single_arg("generate");
+    let output = child.unwrap().wait_with_output()?;
+    let output = output.assert_success()?;
+
+    output.stdout_contains(r"# Default configuration values for zebrad.")?;
+
+    Ok(())
+}
+
+#[test]
+fn generate_args() -> Result<()> {
+    zebra_test::init();
+
+    // Invalid free argument
+    let child = get_child_multi_args(&["generate", "argument"]);
+    let output = child.unwrap().wait_with_output()?;
+    let output = output.assert_failure()?;
+
+    output.stdout_contains(r"unexpected free argument `argument`")?;
 
     // Invalid flag
-    let mut runner = RUNNER.clone();
-    let cmd = runner.args(&["generate", "-f"]).capture_stdout().run();
-    cmd.wait().unwrap().expect_code(1);
+    let child = get_child_multi_args(&["generate", "-f"]);
+    let output = child.unwrap().wait_with_output()?;
+    let output = output.assert_failure()?;
+
+    output.stdout_contains(r"unrecognized option `-f`")?;
 
     // Valid flag but missing argument
-    let mut runner = RUNNER.clone();
-    let cmd = runner.args(&["generate", "-o"]).capture_stdout().run();
-    cmd.wait().unwrap().expect_code(1);
+    let child = get_child_multi_args(&["generate", "-o"]);
+    let output = child.unwrap().wait_with_output()?;
+    let output = output.assert_failure()?;
 
-    let mut runner = RUNNER.clone();
-    let cmd = runner
-        .args(&["generate", "-o", "file"])
-        .capture_stdout()
-        .run();
-    cmd.wait().unwrap().expect_success();
+    output.stdout_contains(r"missing argument to option `-o`")?;
+
+    // Valid
+    let child = get_child_multi_args(&["generate", "-o", "file.yaml"]);
+    let output = child.unwrap().wait_with_output()?;
+    output.assert_failure()?; // should be assert_success?
 
     // Todo: Check if the file was created
+
+    Ok(())
 }
 
 #[test]
-fn help_no_args() {
-    let mut runner = RUNNER.clone();
-    let cmd = runner.arg("help").capture_stdout().run();
-    cmd.wait().unwrap().expect_success();
+fn help_no_args() -> Result<()> {
+    zebra_test::init();
+
+    let child = get_child_single_arg("help");
+    let output = child.unwrap().wait_with_output()?;
+    let output = output.assert_success()?;
+
+    output.stdout_contains(r"USAGE:")?;
+
+    Ok(())
 }
 
 #[test]
-fn help_args() {
+fn help_args() -> Result<()> {
+    zebra_test::init();
+
     // Invalid argument
-    let mut runner = RUNNER.clone();
-    let cmd = runner.args(&["help", "argument"]).capture_stdout().run();
-    cmd.wait().unwrap().expect_code(1);
+    let child = get_child_multi_args(&["help", "argument"]);
+    let output = child.unwrap().wait_with_output()?;
+    let output = output.assert_failure()?;
+
+    output.stdout_contains(r"wasn't recognized.")?;
 
     // Invalid flag
-    let mut runner = RUNNER.clone();
-    let cmd = runner.args(&["help", "-f"]).capture_stdout().run();
-    cmd.wait().unwrap().expect_code(1);
+    let child = get_child_multi_args(&["help", "-f"]);
+    let output = child.unwrap().wait_with_output()?;
+    let output = output.assert_failure()?;
+
+    output.stdout_contains(r"option `-f` does not accept an argument")?;
+
+    Ok(())
 }
 
 #[test]
-fn revhex_no_args() {
-    let mut runner = RUNNER.clone();
-    let _cmd = runner
-        .timeout(Duration::from_secs(1))
-        .arg("revhex")
-        .capture_stdout()
-        .run();
+fn revhex_no_args() -> Result<()> {
+    zebra_test::init();
 
-    // Program is waiting for input, we just exit after 1 second
+    let child = get_child_single_arg("revhex");
+
+    //Program is waiting for input, we just exit after 1 second
+    std::thread::sleep(Duration::from_secs(1));
+    let mut child_unwrapped = child.unwrap();
+    child_unwrapped.kill()?;
+
+    let output = child_unwrapped.wait_with_output()?;
+    output.assert_failure()?;
+
+    Ok(())
 }
 
 #[test]
-fn revhex_args() {
-    let mut runner = RUNNER.clone();
-    let mut cmd = runner.args(&["revhex", "33eeff55"]).capture_stdout().run();
-    cmd.stdout().expect_line("55ffee33");
+fn revhex_args() -> Result<()> {
+    zebra_test::init();
+
+    // Valid
+    let child = get_child_multi_args(&["revhex", "33eeff55"]);
+    let output = child.unwrap().wait_with_output()?;
+    let output = output.assert_success()?;
+
+    output.stdout_contains(r"55ffee33")?;
+
+    Ok(())
 }
 
 #[test]
-fn seed_no_args() {
-    let mut runner = RUNNER.clone();
-    let mut cmd = runner
-        .timeout(Duration::from_secs(1))
-        .arg("seed")
-        .capture_stdout()
-        .run();
+fn seed_no_args() -> Result<()> {
+    zebra_test::init();
+
+    let child = get_child_single_arg("seed");
+
+    // Run the program and kill it at 1 second
+    std::thread::sleep(Duration::from_secs(1));
+    let mut child_unwrapped = child.unwrap();
+    child_unwrapped.kill()?;
+
+    let output = child_unwrapped.wait_with_output()?;
+    let output = output.assert_failure()?;
 
     // Todo: maybe add special info!() to seed command
     // Todo: improve the regex
-    cmd.stdout()
-        .expect_regex(r"^(.*?)Initializing tracing endpoint");
-
-    cmd.wait().unwrap_err();
-    // Problem: Zombie child process is not killed
-    //cmd.kill();
-}
-
-#[test]
-fn seed_args() {
-    let mut runner = RUNNER.clone();
-    let cmd = runner.args(&["seed", "argument"]).capture_stdout().run();
-    cmd.wait().unwrap().expect_code(1);
-
-    let mut runner = RUNNER.clone();
-    let cmd = runner.args(&["seed", "-f"]).capture_stdout().run();
-    cmd.wait().unwrap().expect_code(1);
-
-    let mut runner = RUNNER.clone();
-    let cmd = runner.args(&["seed", "start"]).capture_stdout().run();
-    cmd.wait().unwrap().expect_code(1);
-}
-
-#[test]
-fn start_no_args() -> Result<()> {
-    zebra_test::init();
-
-    let (mut cmd, _guard) = test_cmd(env!("CARGO_BIN_EXE_zebrad"))?;
-
-    let mut child = cmd
-        .arg("start")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn2()?;
-
-    std::thread::sleep(Duration::from_secs(1));
-
-    child.kill()?;
-
-    let output = child.wait_with_output()?;
-    let output = output.assert_failure()?;
-
     output.stdout_contains(r"^(.*?)Initializing tracing endpoint")?;
 
     Ok(())
 }
 
 #[test]
-fn start_args() {
-    // Bug? This should fail but not happening
-    //let mut runner = RUNNER.clone();
-    //let cmd = runner.args(&["start", "argument"]).capture_stdout().run();
-    //cmd.wait().unwrap().expect_code(1);
+fn seed_args() -> Result<()> {
+    zebra_test::init();
 
-    let mut runner = RUNNER.clone();
-    let cmd = runner.args(&["start", "-f"]).capture_stdout().run();
-    cmd.wait().unwrap().expect_code(1);
+    let child = get_child_multi_args(&["seed", "argument"]);
+    let output = child.unwrap().wait_with_output()?;
+    let output = output.assert_failure()?;
+
+    output.stdout_contains(r"unexpected free argument `argument`")?;
+
+    let child = get_child_multi_args(&["seed", "-f"]);
+    let output = child.unwrap().wait_with_output()?;
+    let output = output.assert_failure()?;
+
+    output.stdout_contains(r"unrecognized option `-f`")?;
+
+    let child = get_child_multi_args(&["seed", "start"]);
+    let output = child.unwrap().wait_with_output()?;
+    let output = output.assert_failure()?;
+
+    output.stdout_contains(r"unexpected free argument `start`")?;
+
+    Ok(())
+}
+
+#[test]
+fn start_no_args() -> Result<()> {
+    zebra_test::init();
+
+    let child = get_child_single_arg("start");
+
+    // Run the program and kill it at 1 second
+    std::thread::sleep(Duration::from_secs(1));
+    let mut child_unwrapped = child.unwrap();
+    child_unwrapped.kill()?;
+
+    let output = child_unwrapped.wait_with_output()?;
+    let output = output.assert_failure()?;
+
+    // Todo: maybe add special info!() to seed command
+    // Todo: improve the regex
+    output.stdout_contains(r"^(.*?)Initializing tracing endpoint")?;
+
+    Ok(())
+}
+
+#[test]
+fn start_args() -> Result<()> {
+    zebra_test::init();
+
+    // Bug? This should fail but not happening
+    //let child = get_child_multi_args(&["start", "argument"]);
+    //let output = child.unwrap().wait_with_output()?;
+    //let output = output.assert_failure()?;
+
+    // Invalid flag
+    let child = get_child_multi_args(&["start", "-f"]);
+    let output = child.unwrap().wait_with_output()?;
+    let output = output.assert_failure()?;
+
+    output.stdout_contains(r"unrecognized option `-f`")?;
 
     // Start + seed should be the only combination possible
-    let mut runner = RUNNER.clone();
-    let mut cmd = runner
-        .timeout(Duration::from_secs(1))
-        .args(&["start", "seed"])
-        .capture_stdout()
-        .run();
-    cmd.stdout()
-        .expect_regex(r"^(.*?)Initializing tracing endpoint");
+    let child = get_child_multi_args(&["start", "seed"]);
+
+    // Run the program and kill it at 1 second
+    std::thread::sleep(Duration::from_secs(1));
+    let mut child_unwrapped = child.unwrap();
+    child_unwrapped.kill()?;
+
+    let output = child_unwrapped.wait_with_output()?;
+    let output = output.assert_failure()?;
+
+    // Todo: maybe add special info!() to seed command
+    // Todo: improve the regex
+    output.stdout_contains(r"^(.*?)Initializing tracing endpoint")?;
+
+    Ok(())
 }
 
 #[test]
-fn app_no_args() {
-    let mut runner = RUNNER.clone();
-    let mut cmd = runner.capture_stdout().run();
+fn app_no_args() -> Result<()> {
+    zebra_test::init();
 
-    // First line haves the version
-    cmd.stdout().expect_regex(r"^(.*?)zebrad");
+    let child = get_child_no_args();
+    let output = child.unwrap().wait_with_output()?;
+    let output = output.assert_success()?;
+
+    output.stdout_contains(r"USAGE:")?;
+
+    Ok(())
 }
 
 #[test]
-fn version_no_args() {
-    let mut runner = RUNNER.clone();
-    let mut cmd = runner.arg("version").capture_stdout().run();
-    cmd.stdout().expect_line("zebrad 0.1.0"); // Todo make regex
+fn version_no_args() -> Result<()> {
+    zebra_test::init();
+
+    let child = get_child_single_arg("version");
+    let output = child.unwrap().wait_with_output()?;
+    let output = output.assert_success()?;
+
+    output.stdout_contains(r"zebrad [0-9].[0-9].[0-9]")?;
+
+    Ok(())
 }
 
 #[test]
-fn version_args() {
-    let mut runner = RUNNER.clone();
-    let cmd = runner.args(&["version", "argument"]).capture_stdout().run();
-    cmd.wait().unwrap().expect_code(1);
+fn version_args() -> Result<()> {
+    zebra_test::init();
 
-    let mut runner = RUNNER.clone();
-    let cmd = runner.args(&["version", "-f"]).capture_stdout().run();
-    cmd.wait().unwrap().expect_code(1);
+    // Invalid free argument
+    let child = get_child_multi_args(&["version", "argument"]);
+    let output = child.unwrap().wait_with_output()?;
+    let output = output.assert_failure()?;
+
+    output.stdout_contains(r"unexpected free argument `argument`")?;
+
+    // Invalid flag
+    let child = get_child_multi_args(&["version", "-f"]);
+    let output = child.unwrap().wait_with_output()?;
+    let output = output.assert_failure()?;
+
+    output.stdout_contains(r"unrecognized option `-f`")?;
+
+    Ok(())
 }
