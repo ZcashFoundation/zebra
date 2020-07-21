@@ -688,8 +688,7 @@ async fn hard_coded_mainnet() -> Result<(), Report> {
     let hash0: BlockHeaderHash = block0.as_ref().into();
 
     // Use the hard-coded checkpoint list
-    let mut checkpoint_verifier =
-        CheckpointVerifier::new(Network::Mainnet).map_err(|e| eyre!(e))?;
+    let mut checkpoint_verifier = CheckpointVerifier::new(Network::Mainnet);
 
     assert_eq!(
         checkpoint_verifier.previous_checkpoint_height(),
