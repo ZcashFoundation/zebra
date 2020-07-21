@@ -51,8 +51,8 @@ fn get_child_no_args() -> Result<(zebra_test::command::TestChild, impl Drop)> {
 fn generate_no_args() -> Result<()> {
     zebra_test::init();
 
-    let child = get_child_single_arg("generate");
-    let output = child.unwrap().0.wait_with_output()?;
+    let (child, _guard) = get_child_single_arg("generate")?;
+    let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
     output.stdout_contains(r"# Default configuration for zebrad.")?;
@@ -65,29 +65,29 @@ fn generate_args() -> Result<()> {
     zebra_test::init();
 
     // Invalid free argument
-    let child = get_child_multi_args(&["generate", "argument"]);
-    let output = child.unwrap().0.wait_with_output()?;
+    let (child, _guard) = get_child_multi_args(&["generate", "argument"])?;
+    let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
 
     output.stdout_contains(r"unexpected free argument `argument`")?;
 
     // Invalid flag
-    let child = get_child_multi_args(&["generate", "-f"]);
-    let output = child.unwrap().0.wait_with_output()?;
+    let (child, _guard) = get_child_multi_args(&["generate", "-f"])?;
+    let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
 
     output.stdout_contains(r"unrecognized option `-f`")?;
 
     // Valid flag but missing argument
-    let child = get_child_multi_args(&["generate", "-o"]);
-    let output = child.unwrap().0.wait_with_output()?;
+    let (child, _guard) = get_child_multi_args(&["generate", "-o"])?;
+    let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
 
     output.stdout_contains(r"missing argument to option `-o`")?;
 
     // Valid
-    let child = get_child_multi_args(&["generate", "-o", "file.yaml"]);
-    let output = child.unwrap().0.wait_with_output()?;
+    let (child, _guard) = get_child_multi_args(&["generate", "-o", "file.yaml"])?;
+    let output = child.wait_with_output()?;
     output.assert_success()?;
 
     // Todo: Check if the file was created
@@ -99,8 +99,8 @@ fn generate_args() -> Result<()> {
 fn help_no_args() -> Result<()> {
     zebra_test::init();
 
-    let child = get_child_single_arg("help");
-    let output = child.unwrap().0.wait_with_output()?;
+    let (child, _guard) = get_child_single_arg("help")?;
+    let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
     output.stdout_contains(r"USAGE:")?;
@@ -113,15 +113,15 @@ fn help_args() -> Result<()> {
     zebra_test::init();
 
     // Invalid argument
-    let child = get_child_multi_args(&["help", "argument"]);
-    let output = child.unwrap().0.wait_with_output()?;
+    let (child, _guard) = get_child_multi_args(&["help", "argument"])?;
+    let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
 
     output.stdout_contains(r"wasn't recognized.")?;
 
     // Invalid flag
-    let child = get_child_multi_args(&["help", "-f"]);
-    let output = child.unwrap().0.wait_with_output()?;
+    let (child, _guard) = get_child_multi_args(&["help", "-f"])?;
+    let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
 
     output.stdout_contains(r"option `-f` does not accept an argument")?;
@@ -133,14 +133,13 @@ fn help_args() -> Result<()> {
 fn revhex_no_args() -> Result<()> {
     zebra_test::init();
 
-    let child = get_child_single_arg("revhex");
+    let (mut child, _guard) = get_child_single_arg("revhex")?;
 
     //Program is waiting for input, we just exit after 1 second
     std::thread::sleep(Duration::from_secs(1));
-    let mut child_unwrapped = child.unwrap();
-    child_unwrapped.0.kill()?;
+    child.kill()?;
 
-    let output = child_unwrapped.0.wait_with_output()?;
+    let output = child.wait_with_output()?;
     output.assert_failure()?;
 
     Ok(())
@@ -151,8 +150,8 @@ fn revhex_args() -> Result<()> {
     zebra_test::init();
 
     // Valid
-    let child = get_child_multi_args(&["revhex", "33eeff55"]);
-    let output = child.unwrap().0.wait_with_output()?;
+    let (child, _guard) = get_child_multi_args(&["revhex", "33eeff55"])?;
+    let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
     output.stdout_contains(r"55ffee33")?;
@@ -164,14 +163,13 @@ fn revhex_args() -> Result<()> {
 fn seed_no_args() -> Result<()> {
     zebra_test::init();
 
-    let child = get_child_single_arg("seed");
+    let (mut child, _guard) = get_child_single_arg("seed")?;
 
     // Run the program and kill it at 1 second
     std::thread::sleep(Duration::from_secs(1));
-    let mut child_unwrapped = child.unwrap();
-    child_unwrapped.0.kill()?;
+    child.kill()?;
 
-    let output = child_unwrapped.0.wait_with_output()?;
+    let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
 
     // Todo: maybe add special info!() to seed command
@@ -185,20 +183,20 @@ fn seed_no_args() -> Result<()> {
 fn seed_args() -> Result<()> {
     zebra_test::init();
 
-    let child = get_child_multi_args(&["seed", "argument"]);
-    let output = child.unwrap().0.wait_with_output()?;
+    let (child, _guard) = get_child_multi_args(&["seed", "argument"])?;
+    let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
 
     output.stdout_contains(r"unexpected free argument `argument`")?;
 
-    let child = get_child_multi_args(&["seed", "-f"]);
-    let output = child.unwrap().0.wait_with_output()?;
+    let (child, _guard) = get_child_multi_args(&["seed", "-f"])?;
+    let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
 
     output.stdout_contains(r"unrecognized option `-f`")?;
 
-    let child = get_child_multi_args(&["seed", "start"]);
-    let output = child.unwrap().0.wait_with_output()?;
+    let (child, _guard) = get_child_multi_args(&["seed", "start"])?;
+    let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
 
     output.stdout_contains(r"unexpected free argument `start`")?;
@@ -210,14 +208,13 @@ fn seed_args() -> Result<()> {
 fn start_no_args() -> Result<()> {
     zebra_test::init();
 
-    let child = get_child_single_arg("start");
+    let (mut child, _guard) = get_child_single_arg("start")?;
 
     // Run the program and kill it at 1 second
     std::thread::sleep(Duration::from_secs(1));
-    let mut child_unwrapped = child.unwrap();
-    child_unwrapped.0.kill()?;
+    child.kill()?;
 
-    let output = child_unwrapped.0.wait_with_output()?;
+    let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
 
     // Todo: maybe add special info!() to seed command
@@ -237,21 +234,20 @@ fn start_args() -> Result<()> {
     //let output = output.assert_failure()?;
 
     // Invalid flag
-    let child = get_child_multi_args(&["start", "-f"]);
-    let output = child.unwrap().0.wait_with_output()?;
+    let (child, _guard) = get_child_multi_args(&["start", "-f"])?;
+    let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
 
     output.stdout_contains(r"unrecognized option `-f`")?;
 
     // Start + seed should be the only combination possible
-    let child = get_child_multi_args(&["start", "seed"]);
+    let (mut child, _guard) = get_child_multi_args(&["start", "seed"])?;
 
     // Run the program and kill it at 1 second
     std::thread::sleep(Duration::from_secs(1));
-    let mut child_unwrapped = child.unwrap();
-    child_unwrapped.0.kill()?;
+    child.kill()?;
 
-    let output = child_unwrapped.0.wait_with_output()?;
+    let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
 
     // Todo: maybe add special info!() to seed command
@@ -265,8 +261,8 @@ fn start_args() -> Result<()> {
 fn app_no_args() -> Result<()> {
     zebra_test::init();
 
-    let child = get_child_no_args();
-    let output = child.unwrap().0.wait_with_output()?;
+    let (child, _guard) = get_child_no_args()?;
+    let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
     output.stdout_contains(r"USAGE:")?;
@@ -278,8 +274,8 @@ fn app_no_args() -> Result<()> {
 fn version_no_args() -> Result<()> {
     zebra_test::init();
 
-    let child = get_child_single_arg("version");
-    let output = child.unwrap().0.wait_with_output()?;
+    let (child, _guard) = get_child_single_arg("version")?;
+    let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
     output.stdout_contains(r"zebrad [0-9].[0-9].[0-9]")?;
@@ -292,15 +288,15 @@ fn version_args() -> Result<()> {
     zebra_test::init();
 
     // Invalid free argument
-    let child = get_child_multi_args(&["version", "argument"]);
-    let output = child.unwrap().0.wait_with_output()?;
+    let (child, _guard) = get_child_multi_args(&["version", "argument"])?;
+    let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
 
     output.stdout_contains(r"unexpected free argument `argument`")?;
 
     // Invalid flag
-    let child = get_child_multi_args(&["version", "-f"]);
-    let output = child.unwrap().0.wait_with_output()?;
+    let (child, _guard) = get_child_multi_args(&["version", "-f"])?;
+    let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
 
     output.stdout_contains(r"unrecognized option `-f`")?;
