@@ -28,11 +28,11 @@ impl Runnable for RevhexCmd {
             while stdin().read_line(&mut input).unwrap_or(0) > 0 {
                 println!(
                     "{}",
-                    zebra_consensus::utils::byte_reverse_hex(&input.trim())
+                    zebra_chain::utils::byte_reverse_hex(&input.trim())
                 );
             }
         } else {
-            println!("{}", zebra_consensus::utils::byte_reverse_hex(&self.input));
+            println!("{}", zebra_chain::utils::byte_reverse_hex(&self.input));
         }
     }
 }

@@ -22,4 +22,3 @@ pub mod parameters;
 pub mod redjubjub;
 mod script;
 mod transaction;
-pub mod utils;
