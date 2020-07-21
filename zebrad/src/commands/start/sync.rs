@@ -169,8 +169,8 @@ where
                         "added hashes to download set"
                     );
                 }
-                Ok(r) => tracing::error!("unexpected response {:?}", r),
-                Err(e) => tracing::error!("{:?}", e),
+                Ok(r) => tracing::info!("unexpected response {:?}", r),
+                Err(e) => tracing::info!("{:?}", e),
             }
         }
 
@@ -240,8 +240,8 @@ where
 
                         download_set.extend(hashes);
                     }
-                    Ok(r) => tracing::error!("unexpected response {:?}", r),
-                    Err(e) => tracing::error!("{:?}", e),
+                    Ok(r) => tracing::info!("unexpected response {:?}", r),
+                    Err(e) => tracing::info!("{:?}", e),
                 }
             }
         }
@@ -320,7 +320,11 @@ where
 
                     match result_fut.await {
                         Ok(()) => {}
-                        Err(e) => error!("{:?}", e),
+                        // Block validation errors are unexpected, they could
+                        // be a bug in our code.
+                        //
+                        // TODO: log request errors at info level
+                        Err(e) => warn!("{:?}", e),
                     }
                 }
                 .instrument(tracing::Span::current()),
