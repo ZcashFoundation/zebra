@@ -320,26 +320,25 @@ where
             let mut retry_peer_set = self.block_network.clone();
             let mut verifier = self.verifier.clone();
             let span = tracing::info_span!("block_fetch_verify", ?hash);
-            self.pending_blocks.push(
-                tokio::spawn(async move {
-                    let block = match retry_peer_set
-                        .ready_and()
-                        .await?
-                        .call(zn::Request::BlocksByHash(iter::once(hash).collect()))
-                        .await
-                    {
-                        Ok(zn::Response::Blocks(blocks)) => blocks
-                            .into_iter()
-                            .next()
-                            .expect("successful response has the block in it"),
-                        Ok(_) => unreachable!("wrong response to block request"),
-                        Err(e) => return Err(e),
-                    };
+            let task = tokio::spawn(async move {
+                let block = match retry_peer_set
+                    .ready_and()
+                    .await?
+                    .call(zn::Request::BlocksByHash(iter::once(hash).collect()))
+                    .await
+                {
+                    Ok(zn::Response::Blocks(blocks)) => blocks
+                        .into_iter()
+                        .next()
+                        .expect("successful response has the block in it"),
+                    Ok(_) => unreachable!("wrong response to block request"),
+                    Err(e) => return Err(e),
+                };
 
-                    verifier.ready_and().await?.call(block).await
-                })
-                .instrument(span),
-            );
+                verifier.ready_and().await?.call(block).await
+            })
+            .instrument(span);
+            self.pending_blocks.push(task);
         }
 
         Ok(())
