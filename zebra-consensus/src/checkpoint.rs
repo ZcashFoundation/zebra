@@ -110,28 +110,52 @@ struct CheckpointVerifier {
 ///
 /// Contains non-service utility functions for CheckpointVerifiers.
 impl CheckpointVerifier {
-    /// Return a checkpoint verification service for `network`, using
-    /// `checkpoint_list`.
+    /// Return a checkpoint verification service for `network`, using the
+    /// hard-coded checkpoint list.
     ///
-    /// This function should be called only once for a particular checkpoint list (and
-    /// network), rather than constructing multiple verification services based on the
-    /// same checkpoint list. To Clone a CheckpointVerifier, you might need to wrap it
-    /// in a `tower::Buffer` service.
+    /// This function should be called only once for a particular network, rather
+    /// than constructing multiple verification services for the same network. To
+    /// Clone a CheckpointVerifier, you might need to wrap it in a
+    /// `tower::Buffer` service.
     //
     // Avoid some dead code lints.
     // Until we implement the overall verifier in #516, this function, and some of the
     // functions and enum variants it uses, are only used in the tests.
     #[allow(dead_code)]
-    fn new(
-        network: Network,
-        checkpoint_list: impl IntoIterator<Item = (BlockHeight, BlockHeaderHash)>,
+    pub fn new(network: Network) -> Result<Self, Error> {
+        Ok(Self::from_checkpoint_list(CheckpointList::new(network)?))
+    }
+
+    /// Return a checkpoint verification service using `list`.
+    ///
+    /// Assumes that the provided genesis checkpoint is correct.
+    ///
+    /// See `CheckpointVerifier::new` and `CheckpointList::from_list` for more
+    /// details.
+    //
+    // Avoid some dead code lints.
+    // Until we implement the overall verifier in #516, this function, and some of the
+    // functions and enum variants it uses, are only used in the tests.
+    #[allow(dead_code)]
+    pub(crate) fn from_list(
+        list: impl IntoIterator<Item = (BlockHeight, BlockHeaderHash)>,
     ) -> Result<Self, Error> {
-        Ok(CheckpointVerifier {
-            checkpoint_list: CheckpointList::new(network, checkpoint_list)?,
+        Ok(Self::from_checkpoint_list(CheckpointList::from_list(list)?))
+    }
+
+    /// Return a checkpoint verification service using `checkpoint_list`.
+    ///
+    /// See `CheckpointVerifier::new` and `CheckpointList::from_list` for more
+    /// details.
+    pub(crate) fn from_checkpoint_list(checkpoint_list: CheckpointList) -> Self {
+        // All the initialisers should call this function, so we only have to
+        // change fields or default values in one place.
+        CheckpointVerifier {
+            checkpoint_list,
             queued: BTreeMap::new(),
             // We start by verifying the genesis block, by itself
             verifier_progress: Progress::BeforeGenesis,
-        })
+        }
     }
 
     /// Return the current verifier's progress.

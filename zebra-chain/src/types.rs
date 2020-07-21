@@ -20,6 +20,21 @@ pub mod amount;
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct BlockHeight(pub u32);
 
+impl std::str::FromStr for BlockHeight {
+    type Err = SerializationError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.parse() {
+            Ok(h) if (BlockHeight(h) <= BlockHeight::MAX) => Ok(BlockHeight(h)),
+            Ok(_) => Err(SerializationError::Parse(
+                "BlockHeight exceeds maximum height",
+            )),
+            Err(_) => Err(SerializationError::Parse(
+                "BlockHeight(u32) integer parse error",
+            )),
+        }
+    }
+}
+
 #[cfg(test)]
 impl Arbitrary for BlockHeight {
     type Parameters = ();
