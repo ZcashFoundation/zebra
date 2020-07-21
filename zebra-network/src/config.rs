@@ -31,6 +31,9 @@ pub struct Config {
     /// The outgoing request buffer size for the peer set.
     pub peerset_request_buffer_size: usize,
 
+    /// The initial target size for the peer set.
+    pub peerset_initial_target_size: usize,
+
     // Note: due to the way this is rendered by the toml
     // serializer, the Duration fields should come last.
     /// The default RTT estimate for peer responses, used in load-balancing.
@@ -44,9 +47,6 @@ pub struct Config {
 
     /// How frequently we attempt to connect to a new peer.
     pub new_peer_interval: Duration,
-
-    /// The initial target size for the peer set.
-    pub peerset_initial_target_size: usize,
 }
 
 impl Config {
