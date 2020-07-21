@@ -18,19 +18,19 @@ use zebra_chain::{
 #[derive(Debug, Display, Error)]
 #[non_exhaustive]
 pub enum Error {
-    /// ErrOk variant, what does this mean?
+    /// Verification failed but tx was valid
     #[non_exhaustive]
     ErrOk,
-    /// Unable to deserialize tx_to input
+    /// Could not to deserialize tx
     #[non_exhaustive]
     TxDeserialize,
-    /// TxIndex
+    /// n_in is invalid for tx
     #[non_exhaustive]
     TxIndex,
-    /// TxSizeMismatch
+    /// tx is an invalid size for it's protocol
     #[non_exhaustive]
     TxSizeMismatch,
-    /// encountered unknown error kind from zcashconsensus: {0}
+    /// Encountered unknown error kind from zcashconsensus: {0}
     #[non_exhaustive]
     Unknown(zcashconsensus_error_t),
 }
@@ -92,8 +92,7 @@ pub fn script_is_valid(block: &Block) -> bool {
         let inputs = trans.inputs();
         let outputs = trans.outputs();
 
-        for (input, output) in inputs.zip(outputs) {
-            let TransparentOutput { value, pk_script } = output;
+        for input in inputs {
             let script = if let TransparentInput::PrevOut { script, .. } = input {
                 script
             } else {
@@ -103,6 +102,7 @@ pub fn script_is_valid(block: &Block) -> bool {
             let n_in = 0;
             let flags = 1;
             let branch_id = 0x2bb40e61;
+            let (value, pk_script) = todo!();
 
             verify_script(pk_script, (*value).into(), script, n_in, flags, branch_id).unwrap();
         }
