@@ -3,29 +3,28 @@ use once_cell::sync::Lazy;
 use std::sync::Arc;
 use tempdir::TempDir;
 use zebra_chain::{block::Block, serialization::ZcashDeserialize};
-use zebra_test::transcript::{ErrorChecker, Transcript};
+use zebra_test::transcript::{TransError, Transcript};
 
 use zebra_state::*;
 
-static ADD_BLOCK_TRANSCRIPT: Lazy<Vec<(Request, Result<Response, ErrorChecker>)>> =
-    Lazy::new(|| {
-        let block: Arc<_> =
-            Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])
-                .unwrap()
-                .into();
-        let hash = block.as_ref().into();
-        vec![
-            (
-                Request::AddBlock {
-                    block: block.clone(),
-                },
-                Ok(Response::Added { hash }),
-            ),
-            (Request::GetBlock { hash }, Ok(Response::Block { block })),
-        ]
-    });
+static ADD_BLOCK_TRANSCRIPT: Lazy<Vec<(Request, Result<Response, TransError>)>> = Lazy::new(|| {
+    let block: Arc<_> =
+        Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])
+            .unwrap()
+            .into();
+    let hash = block.as_ref().into();
+    vec![
+        (
+            Request::AddBlock {
+                block: block.clone(),
+            },
+            Ok(Response::Added { hash }),
+        ),
+        (Request::GetBlock { hash }, Ok(Response::Block { block })),
+    ]
+});
 
-static GET_TIP_TRANSCRIPT: Lazy<Vec<(Request, Result<Response, ErrorChecker>)>> = Lazy::new(|| {
+static GET_TIP_TRANSCRIPT: Lazy<Vec<(Request, Result<Response, TransError>)>> = Lazy::new(|| {
     let block0: Arc<_> =
         Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
             .unwrap()

@@ -1,10 +1,10 @@
 #![allow(clippy::try_err)]
 
 use tower::{Service, ServiceExt};
-use zebra_test::transcript::ErrorChecker;
+use zebra_test::transcript::TransError;
 use zebra_test::transcript::Transcript;
 
-const TRANSCRIPT_DATA: [(&str, Result<&str, ErrorChecker>); 4] = [
+const TRANSCRIPT_DATA: [(&str, Result<&str, TransError>); 4] = [
     ("req1", Ok("rsp1")),
     ("req2", Ok("rsp2")),
     ("req3", Ok("rsp3")),
@@ -20,7 +20,7 @@ async fn transcript_returns_responses_and_ends() {
     for (req, rsp) in TRANSCRIPT_DATA.iter() {
         assert_eq!(
             svc.ready_and().await.unwrap().call(req).await.unwrap(),
-            rsp.unwrap()
+            *rsp.as_ref().unwrap()
         );
     }
     assert!(svc.ready_and().await.unwrap().call("end").await.is_err());
@@ -52,18 +52,11 @@ async fn self_check() {
 #[error("Error")]
 struct Error;
 
-const TRANSCRIPT_DATA2: [(&str, Result<&str, ErrorChecker>); 4] = [
+const TRANSCRIPT_DATA2: [(&str, Result<&str, TransError>); 4] = [
     ("req1", Ok("rsp1")),
     ("req2", Ok("rsp2")),
     ("req3", Ok("rsp3")),
-    (
-        "req4",
-        Err(|e| {
-            let e = e.ok_or(Error)?;
-
-            e.downcast::<Error>().map(drop)
-        }),
-    ),
+    ("req4", Err(TransError::Any)),
 ];
 
 #[tokio::test]
