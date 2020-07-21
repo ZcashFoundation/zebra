@@ -184,16 +184,20 @@ where
             // we would disconnect here if it received a second one. Is it even possible
             // for that to happen to us here?
 
-            if remote_version < constants::MIN_VERSION {
-                // Disconnect if peer is using an obsolete version.
-                return Err(HandshakeError::ObsoleteVersion(remote_version));
-            }
-
             // TODO: Reject incoming connections from nodes that don't know about the current epoch.
             // zcashd does this:
             //  const Consensus::Params& consensusParams = chainparams.GetConsensus();
             //  auto currentEpoch = CurrentEpoch(GetHeight(), consensusParams);
             //  if (pfrom->nVersion < consensusParams.vUpgrades[currentEpoch].nProtocolVersion)
+            //
+            // For approximately 1.5 days before a network upgrade, we also need to:
+            //  - prefer evicting pre-upgrade peers from the peer set, and
+            //  - prefer choosing post-upgrade ready peers for queries
+
+            if remote_version < Version::min_version(network, constants::MIN_NETWORK_UPGRADE) {
+                // Disconnect if peer is using an obsolete version.
+                return Err(HandshakeError::ObsoleteVersion(remote_version));
+            }
 
             // Set the connection's version to the minimum of the received version or our own.
             let negotiated_version = std::cmp::min(remote_version, constants::CURRENT_VERSION);
