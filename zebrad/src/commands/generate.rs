@@ -19,30 +19,28 @@ impl Runnable for GenerateCmd {
             network: Default::default(),
             metrics: Default::default(),
         };
-        let mut output = r"# Default configuration values for zebrad.
+        let mut output = r"# Default configuration for zebrad.
 #
-# This file is intended as a skeleton for custom configs.
+# This file can be used as a skeleton for custom configs.
 #
-# Because this contains default values, and the default
-# values may change, you should delete all entries except
-# for the ones you wish to change.
+# This file is generated using zebrad's current defaults. If you want zebrad
+# to automatically use any newer defaults, set the config options you want to
+# keep, and delete the rest.
 #
-# Documentation on the meanings of each config field
-# can be found in Rustdoc here:
+# The config format is documented here:
 # https://doc.zebra.zfnd.org/zebrad/config/struct.ZebradConfig.html
 
 # Usage:
-# One option is to locate this file in the same directory the zebrad binary is
-# called from, if the default name zebrad.toml is used the app will load the new
-# configuration automatically. For example if you generate with:
-# zebrad generate -o zebrad.toml
-# Edit the file as needed then execute the following to connect using
-# the new configuration, default values will be overwritten:
-# zebrad connect
-# If you generated with a different name or location then -c flag is required
-# to load the new configuration:
-# zebrad generate -o myzebrad.toml
-# zebrad -c myzebrad.toml connect
+#     zebrad generate -o myzebrad.toml
+#     zebrad -c myzebrad.toml start
+#
+#     zebrad generate -o zebrad.toml
+#     zebrad start
+#
+# If there is no -c flag on the command line, zebrad looks for zebrad.toml in
+# the current directory. If that file does not exist, zebrad uses the default
+# config.
+
 "
         .to_owned();
 
