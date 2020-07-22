@@ -38,6 +38,7 @@ impl Service<Request> for InMemoryState {
     }
 
     fn call(&mut self, req: Request) -> Self::Future {
+        tracing::debug!(?req);
         match req {
             Request::AddBlock { block } => {
                 let result = self
