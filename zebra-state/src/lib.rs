@@ -56,13 +56,13 @@ impl Config {
     ///   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ SPANTRACE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     ///
     ///    0: <font color="#F15D22">zebra_state::sled_config::comment</font> with <font color="#34E2E2">text=TODO(jlusby): Replace this unwrap with a nice user-facing</font>
-    /// <font color="#34E2E2">   explaining error that the cache dir must be specified</font>
+    /// <font color="#34E2E2">   error explaining that the cache dir must be specified</font>
     ///       at <font color="#75507B">zebra-state/src/lib.rs</font>:<font color="#75507B">36</font></pre>
     #[spandoc::spandoc]
     pub(crate) fn sled_config(&self) -> sled::Config {
         /**
          * SPANDOC: TODO(jlusby): Replace this unwrap with a nice user-facing
-         * explaining error that the cache dir must be specified
+         * error explaining that the cache dir must be specified
          */
         let path = self.path.as_ref().unwrap().join("state");
 
