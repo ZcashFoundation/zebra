@@ -25,12 +25,15 @@ const TESTNET_CHECKPOINTS: &str = include_str!("test-checkpoints.txt");
 // TODO(jlusby): Error = Report ?
 type Error = Box<dyn error::Error + Send + Sync + 'static>;
 
-/// Checkpoint lists are implemented using a BTreeMap.
+/// A list of block height and hash checkpoints.
 ///
 /// Checkpoints should be chosen to avoid forks or chain reorganizations,
 /// which only happen in the last few hundred blocks in the chain.
 /// (zcashd allows chain reorganizations up to 99 blocks, and prunes
 /// orphaned side-chains after 288 blocks.)
+///
+/// This is actually a bijective map, but since it is read-only, we use a
+/// BTreeMap, and do the value uniqueness check on initialisation.
 #[derive(Debug)]
 pub(crate) struct CheckpointList(BTreeMap<BlockHeight, BlockHeaderHash>);
 
