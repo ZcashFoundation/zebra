@@ -2,7 +2,7 @@
 
 use NetworkUpgrade::*;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::ops::Bound::*;
 
 use zebra_chain::types::BlockHeight;
@@ -58,6 +58,32 @@ pub(crate) const TESTNET_ACTIVATION_HEIGHTS: &[(BlockHeight, NetworkUpgrade)] = 
     // See ZIP 251 for updates.
 ];
 
+/// The Consensus Branch Id, used to bind transactions and blocks to a
+/// particular network upgrade.
+#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
+pub struct ConsensusBranchId(u32);
+
+/// Network Upgrade Consensus Branch Ids.
+///
+/// Branch ids are the same for mainnet and testnet. If there is a testnet
+/// rollback after a bug, the branch id changes.
+///
+/// Branch ids were introduced in the Overwinter upgrade, so there is no
+/// BeforeOverwinter branch id.
+///
+/// This is actually a bijective map, but it is const, so we use a vector, and
+/// do the uniqueness check in the unit tests.
+pub(crate) const CONSENSUS_BRANCH_IDS: &[(NetworkUpgrade, ConsensusBranchId)] = &[
+    // TODO(teor): byte order?
+    (Overwinter, ConsensusBranchId(0x5ba81b19)),
+    (Sapling, ConsensusBranchId(0x76b809bb)),
+    (Blossom, ConsensusBranchId(0x2bb40e60)),
+    (Heartwood, ConsensusBranchId(0xf5b9230b)),
+    // As of 21 July 2020. Could change before mainnet activation.
+    // See ZIP 251 for updates.
+    (Canopy, ConsensusBranchId(0xe9ff75a6)),
+];
+
 impl NetworkUpgrade {
     /// Returns a BTreeMap of activation heights and network upgrades for
     /// `network`.
@@ -105,5 +131,33 @@ impl NetworkUpgrade {
             .filter(|(_, nu)| nu == &self)
             .map(|(height, _)| *height)
             .next()
+    }
+
+    /// Returns a BTreeMap of NetworkUpgrades and their ConsensusBranchIds.
+    ///
+    /// Branch ids are the same for mainnet and testnet.
+    ///
+    /// If network upgrade does not have a branch id, that network upgrade does
+    /// not appear in the list.
+    ///
+    /// This is actually a bijective map.
+    pub(crate) fn branch_id_list() -> HashMap<NetworkUpgrade, ConsensusBranchId> {
+        CONSENSUS_BRANCH_IDS.iter().cloned().collect()
+    }
+
+    /// Returns the consensus branch id for this network upgrade.
+    ///
+    /// Returns None if this network upgrade has no consensus branch id.
+    pub fn branch_id(&self) -> Option<ConsensusBranchId> {
+        NetworkUpgrade::branch_id_list().get(&self).cloned()
+    }
+}
+
+impl ConsensusBranchId {
+    /// Returns the current consensus branch id for `network` and `height`.
+    ///
+    /// Returns None if the network has no branch id at this height.
+    pub fn current(network: Network, height: BlockHeight) -> Option<ConsensusBranchId> {
+        NetworkUpgrade::current(network, height).branch_id()
     }
 }
