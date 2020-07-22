@@ -1,4 +1,4 @@
-use std::{collections::HashSet, iter, sync::Arc, time::Duration};
+use std::{collections::HashSet, sync::Arc, time::Duration};
 
 use color_eyre::eyre::{eyre, Report};
 use futures::stream::{FuturesUnordered, StreamExt};
@@ -6,10 +6,7 @@ use tokio::time::delay_for;
 use tower::{retry::Retry, Service, ServiceExt};
 use tracing_futures::Instrument;
 
-use zebra_chain::{
-    block::{Block, BlockHeaderHash},
-    types::BlockHeight,
-};
+use zebra_chain::block::{Block, BlockHeaderHash};
 use zebra_consensus::checkpoint;
 use zebra_network::{self as zn, RetryLimit};
 use zebra_state::{self as zs};
@@ -83,7 +80,20 @@ where
         // the caller
         //
         // TODO(jlusby): get the block_locator from the state
-        let block_locator = vec![super::GENESIS];
+        let block_locator = self
+            .state
+            .ready_and()
+            .await
+            .map_err(|e| eyre!(e))?
+            .call(zebra_state::Request::GetBlockLocator)
+            .await
+            .map(|response| match response {
+                zebra_state::Response::BlockLocator { block_locator } => block_locator,
+                _ => unreachable!(
+                    "GetBlockLocator request can only result in Response::BlockLocator"
+                ),
+            })
+            .map_err(|e| eyre!(e))?;
         let mut tip_futs = FuturesUnordered::new();
         tracing::info!(?block_locator, "trying to obtain new chain tips");
 
@@ -333,15 +343,6 @@ where
 
         Ok(())
     }
-}
-
-/// Get the heights of the blocks for constructing a block_locator list
-#[allow(dead_code)]
-pub fn block_locator_heights(tip_height: BlockHeight) -> impl Iterator<Item = BlockHeight> {
-    iter::successors(Some(1u32), |h| h.checked_mul(2))
-        .flat_map(move |step| tip_height.0.checked_sub(step))
-        .map(BlockHeight)
-        .chain(iter::once(BlockHeight(0)))
 }
 
 type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
