@@ -64,26 +64,20 @@ fn generate_no_args() -> Result<()> {
 fn generate_args() -> Result<()> {
     zebra_test::init();
 
-    // Invalid free argument
+    // unexpected free argument `argument`
     let (child, _guard) = get_child_multi_args(&["generate", "argument"])?;
     let output = child.wait_with_output()?;
-    let output = output.assert_failure()?;
+    output.assert_failure()?;
 
-    output.stdout_contains(r"unexpected free argument `argument`")?;
-
-    // Invalid flag
+    // unrecognized option `-f`
     let (child, _guard) = get_child_multi_args(&["generate", "-f"])?;
     let output = child.wait_with_output()?;
-    let output = output.assert_failure()?;
+    output.assert_failure()?;
 
-    output.stdout_contains(r"unrecognized option `-f`")?;
-
-    // Valid flag but missing argument
+    // missing argument to option `-o`
     let (child, _guard) = get_child_multi_args(&["generate", "-o"])?;
     let output = child.wait_with_output()?;
-    let output = output.assert_failure()?;
-
-    output.stdout_contains(r"missing argument to option `-o`")?;
+    output.assert_failure()?;
 
     // Valid
     let (child, _guard) = get_child_multi_args(&["generate", "-o", "file.yaml"])?;
@@ -112,19 +106,15 @@ fn help_no_args() -> Result<()> {
 fn help_args() -> Result<()> {
     zebra_test::init();
 
-    // Invalid argument
+    // The subcommand "argument" wasn't recognized.
     let (child, _guard) = get_child_multi_args(&["help", "argument"])?;
     let output = child.wait_with_output()?;
-    let output = output.assert_failure()?;
+    output.assert_failure()?;
 
-    output.stdout_contains(r"wasn't recognized.")?;
-
-    // Invalid flag
+    // option `-f` does not accept an argument
     let (child, _guard) = get_child_multi_args(&["help", "-f"])?;
     let output = child.wait_with_output()?;
-    let output = output.assert_failure()?;
-
-    output.stdout_contains(r"option `-f` does not accept an argument")?;
+    output.assert_failure()?;
 
     Ok(())
 }
@@ -181,23 +171,20 @@ fn seed_no_args() -> Result<()> {
 fn seed_args() -> Result<()> {
     zebra_test::init();
 
+    // unexpected free argument `argument`
     let (child, _guard) = get_child_multi_args(&["seed", "argument"])?;
     let output = child.wait_with_output()?;
-    let output = output.assert_failure()?;
+    output.assert_failure()?;
 
-    output.stdout_contains(r"unexpected free argument `argument`")?;
-
+    // unrecognized option `-f`
     let (child, _guard) = get_child_multi_args(&["seed", "-f"])?;
     let output = child.wait_with_output()?;
-    let output = output.assert_failure()?;
+    output.assert_failure()?;
 
-    output.stdout_contains(r"unrecognized option `-f`")?;
-
+    // unexpected free argument `start`
     let (child, _guard) = get_child_multi_args(&["seed", "start"])?;
     let output = child.wait_with_output()?;
-    let output = output.assert_failure()?;
-
-    output.stdout_contains(r"unexpected free argument `start`")?;
+    output.assert_failure()?;
 
     Ok(())
 }
@@ -233,12 +220,10 @@ fn start_args() -> Result<()> {
     let output = output.assert_failure()?;
     output.stdout_contains(r"Initializing tracing endpoint")?;
 
-    // Invalid flag
+    // unrecognized option `-f`
     let (child, _guard) = get_child_multi_args(&["start", "-f"])?;
     let output = child.wait_with_output()?;
-    let output = output.assert_failure()?;
-
-    output.stdout_contains(r"unrecognized option `-f`")?;
+    output.assert_failure()?;
 
     Ok(())
 }
@@ -273,19 +258,15 @@ fn version_no_args() -> Result<()> {
 fn version_args() -> Result<()> {
     zebra_test::init();
 
-    // Invalid free argument
+    // unexpected free argument `argument`
     let (child, _guard) = get_child_multi_args(&["version", "argument"])?;
     let output = child.wait_with_output()?;
-    let output = output.assert_failure()?;
+    output.assert_failure()?;
 
-    output.stdout_contains(r"unexpected free argument `argument`")?;
-
-    // Invalid flag
+    // unrecognized option `-f`
     let (child, _guard) = get_child_multi_args(&["version", "-f"])?;
     let output = child.wait_with_output()?;
-    let output = output.assert_failure()?;
-
-    output.stdout_contains(r"unrecognized option `-f`")?;
+    output.assert_failure()?;
 
     Ok(())
 }
