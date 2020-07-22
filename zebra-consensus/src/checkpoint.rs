@@ -651,6 +651,8 @@ impl Service<Arc<Block>> for CheckpointVerifier {
         // TODO(teor): retry on failure (low priority, failures should be rare)
         self.process_checkpoint_range();
 
+        metrics::gauge!("checkpoint.queued_slots", self.queued.len() as i64);
+
         async move {
             // Remove the Result<..., RecvError> wrapper from the channel future
             rx.await

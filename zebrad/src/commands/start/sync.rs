@@ -67,13 +67,25 @@ where
     pub async fn sync(&mut self) -> Result<(), Report> {
         loop {
             self.obtain_tips().await?;
+            metrics::gauge!(
+                "sync.prospective_tips.len",
+                self.prospective_tips.len() as i64
+            );
+            metrics::gauge!("sync.pending_blocks.len", self.pending_blocks.len() as i64);
 
             // ObtainTips Step 6
             //
             // If there are any prospective tips, call ExtendTips. Continue this step until there are no more prospective tips.
             while !self.prospective_tips.is_empty() {
                 tracing::debug!("extending prospective tips");
+
                 self.extend_tips().await?;
+
+                metrics::gauge!(
+                    "sync.prospective_tips.len",
+                    self.prospective_tips.len() as i64
+                );
+                metrics::gauge!("sync.pending_blocks.len", self.pending_blocks.len() as i64);
                 tracing::debug!(
                     pending.len = self.pending_blocks.len(),
                     limit = LOOKAHEAD_LIMIT
@@ -338,6 +350,7 @@ where
                     Ok(_) => unreachable!("wrong response to block request"),
                     Err(e) => return Err(e),
                 };
+                metrics::counter!("sync.downloaded_blocks", 1);
 
                 verifier.ready_and().await?.call(block).await
             })
