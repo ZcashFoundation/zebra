@@ -20,7 +20,7 @@ spandoc = "0.2"
 tracing = "0.1.16"
 
 [dev-dependencies]
-tokio = { version = "0.2.21", features = ["full"] }
+tokio = { version = "0.2.22", features = ["full"] }
 zebra-test = { path = "../zebra-test/" }
 tracing-futures = "0.2.4"
 tempdir = "0.3.7"

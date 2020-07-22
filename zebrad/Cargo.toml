@@ -21,7 +21,7 @@ rand = "0.7"
 
 hyper = "0.13.7"
 futures = "0.3"
-tokio = { version = "0.2", features = ["time", "rt-threaded", "stream", "macros"] }
+tokio = { version = "0.2.22", features = ["time", "rt-threaded", "stream", "macros", "tracing"] }
 tower = "0.3"
 
 color-eyre = "0.5"

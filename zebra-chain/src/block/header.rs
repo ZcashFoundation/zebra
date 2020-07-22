@@ -74,7 +74,9 @@ impl BlockHeader {
         let solution = &self.solution.0;
         let mut input = Vec::new();
 
-        self.zcash_serialize(&mut input)?;
+        self.zcash_serialize(&mut input)
+            .expect("serialization into a vec can't fail");
+
         let input = &input[0..EquihashSolution::INPUT_LENGTH];
 
         equihash::is_valid_solution(n, k, input, nonce, solution)?;
@@ -110,9 +112,5 @@ impl BlockHeader {
 
 #[non_exhaustive]
 #[derive(Debug, thiserror::Error)]
-pub enum EquihashError {
-    #[error("invalid equihash solution for BlockHeader")]
-    EquihashInvalid(#[from] equihash::Error),
-    #[error("cannot reserialize header for equihash verification")]
-    Serialize(#[from] std::io::Error),
-}
+#[error("invalid equihash solution for BlockHeader")]
+pub struct EquihashError(#[from] equihash::Error);

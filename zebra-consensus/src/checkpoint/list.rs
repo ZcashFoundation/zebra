@@ -32,7 +32,7 @@ type Error = Box<dyn error::Error + Send + Sync + 'static>;
 /// (zcashd allows chain reorganizations up to 99 blocks, and prunes
 /// orphaned side-chains after 288 blocks.)
 #[derive(Debug)]
-pub struct CheckpointList(BTreeMap<BlockHeight, BlockHeaderHash>);
+pub(crate) struct CheckpointList(BTreeMap<BlockHeight, BlockHeaderHash>);
 
 impl FromStr for CheckpointList {
     type Err = Error;
@@ -61,16 +61,22 @@ impl FromStr for CheckpointList {
 
 impl CheckpointList {
     /// Returns the hard-coded checkpoint list for `network`.
-    pub fn new(network: Network) -> Result<Self, Error> {
+    pub fn new(network: Network) -> Self {
         // parse calls CheckpointList::from_list
         let checkpoint_list: CheckpointList = match network {
-            Mainnet => MAINNET_CHECKPOINTS.parse()?,
-            Testnet => TESTNET_CHECKPOINTS.parse()?,
+            Mainnet => MAINNET_CHECKPOINTS
+                .parse()
+                .expect("Hard-coded Mainnet checkpoint list parses and validates"),
+            Testnet => TESTNET_CHECKPOINTS
+                .parse()
+                .expect("Hard-coded Testnet checkpoint list parses and validates"),
         };
 
         match checkpoint_list.hash(BlockHeight(0)) {
-            Some(hash) if hash == parameters::genesis_hash(network) => Ok(checkpoint_list),
-            Some(_) => Err("the genesis checkpoint does not match the network genesis hash")?,
+            Some(hash) if hash == parameters::genesis_hash(network) => checkpoint_list,
+            Some(_) => {
+                panic!("The hard-coded genesis checkpoint does not match the network genesis hash")
+            }
             None => unreachable!("Parser should have checked for a missing genesis checkpoint"),
         }
     }
