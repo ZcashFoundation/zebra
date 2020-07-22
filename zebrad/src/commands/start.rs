@@ -57,7 +57,7 @@ impl StartCmd {
             1,
         );
         let config = app_config();
-        let state = zebra_state::on_disk::init(config.state.clone());
+        let state = zebra_state::on_disk::init(config.state.clone(), config.network.network);
         let (peer_set, _address_book) = zebra_network::init(config.network.clone(), node).await;
         let verifier = zebra_consensus::chain::init(config.network.network, state.clone());
 

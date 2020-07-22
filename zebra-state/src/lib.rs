@@ -12,27 +12,40 @@
 #![doc(html_favicon_url = "https://www.zfnd.org/images/zebra-favicon-128.png")]
 #![doc(html_logo_url = "https://www.zfnd.org/images/zebra-icon.png")]
 #![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_state")]
+
 #![warn(missing_docs)]
 #![allow(clippy::try_err)]
+
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
+
 use zebra_chain::block::{Block, BlockHeaderHash};
+use zebra_chain::Network::{self, *};
 
 pub mod in_memory;
 pub mod on_disk;
 
-/// Configuration for networking code.
+/// Configuration for the state service.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
-    /// The root directory for the state storage
+    /// The directory used to store cached state.
+    ///
+    /// Each network has a separate state, which is stored in "mainnet" and
+    /// "testnet" sub-directories.
     pub path: PathBuf,
 }
 
 impl Config {
-    pub(crate) fn sled_config(&self) -> sled::Config {
-        sled::Config::default().path(&self.path)
+    pub(crate) fn sled_config(&self, network: Network) -> sled::Config {
+        let path_suffix = match network {
+            Mainnet => "mainnet",
+            Testnet => "testnet",
+        };
+        let mut network_path = self.path.clone();
+        network_path.push(path_suffix);
+        sled::Config::default().path(&network_path)
     }
 }
 
