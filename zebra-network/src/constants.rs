@@ -46,7 +46,7 @@ pub const CURRENT_VERSION: Version = Version(170_011);
 ///
 /// Used to select the minimum supported version for peer connections.
 //
-// TODO: dynamically choose the minimum network upgrade based on block height.
+// TODO: replace with NetworkUpgrade::current(network, height).
 //       See the detailed comment in handshake.rs, where this constant is used.
 pub const MIN_NETWORK_UPGRADE: NetworkUpgrade = Heartwood;
 
