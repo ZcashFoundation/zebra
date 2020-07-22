@@ -11,8 +11,9 @@ use zebra_chain::{
     Network,
 };
 use zebra_consensus::checkpoint;
+use zebra_consensus::parameters;
 use zebra_network::{self as zn, RetryLimit};
-use zebra_state::{self as zs};
+use zebra_state as zs;
 
 // XXX in the future, we may not be able to access the checkpoint module.
 const FANOUT: usize = checkpoint::MAX_QUEUED_BLOCKS_PER_HEIGHT;
@@ -40,6 +41,7 @@ where
     prospective_tips: HashSet<BlockHeaderHash>,
     pending_blocks:
         Pin<Box<FuturesUnordered<Instrumented<JoinHandle<Result<BlockHeaderHash, Error>>>>>>,
+    genesis_hash: BlockHeaderHash,
 }
 
 impl<ZN, ZS, ZV> Syncer<ZN, ZS, ZV>
@@ -51,15 +53,21 @@ where
     ZV: Service<Arc<Block>, Response = BlockHeaderHash, Error = Error> + Send + Clone + 'static,
     ZV::Future: Send,
 {
-    pub fn new(network: ZN, state: ZS, verifier: ZV) -> Self {
-        let retry_network = Retry::new(RetryLimit::new(3), network.clone());
+    /// Returns a new syncer instance, using:
+    ///  - chain: the zebra-chain `Network` to download (Mainnet or Testnet)
+    ///  - peers: the zebra-network peers to contact for downloads
+    ///  - state: the zebra-state that stores the chain
+    ///  - verifier: the zebra-consensus verifier that checks the chain
+    pub fn new(chain: Network, peers: ZN, state: ZS, verifier: ZV) -> Self {
+        let retry_peers = Retry::new(RetryLimit::new(3), peers.clone());
         Self {
-            tip_network: network,
-            block_network: retry_network,
+            tip_network: peers,
+            block_network: retry_peers,
             state,
             verifier,
             prospective_tips: HashSet::new(),
             pending_blocks: Box::pin(FuturesUnordered::new()),
+            genesis_hash: parameters::genesis_hash(chain),
         }
     }
 
@@ -133,16 +141,13 @@ where
         //
         // Query the current state to construct the sequence of hashes: handled by
         // the caller
-        //
-        // TODO(teor): get the real network
-        let network = Network::Mainnet;
         let block_locator = self
             .state
             .ready_and()
             .await
             .map_err(|e| eyre!(e))?
             .call(zebra_state::Request::GetBlockLocator {
-                genesis: zebra_consensus::parameters::genesis_hash(network),
+                genesis: self.genesis_hash,
             })
             .await
             .map(|response| match response {
@@ -303,7 +308,7 @@ where
                                 tracing::debug!("skipping length-1 response, in case it's an unsolicited inv message");
                                 continue;
                             }
-                            (Some(&super::GENESIS), _) => {
+                            (Some(hash), _) if (hash == &self.genesis_hash) => {
                                 tracing::debug!("skipping response, peer could not extend the tip");
                                 continue;
                             }
