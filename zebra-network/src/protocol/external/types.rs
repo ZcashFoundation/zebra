@@ -39,7 +39,8 @@ impl Version {
     /// Returns the minimum network protocol version for `network` and
     /// `network_upgrade`.
     pub fn min_version(network: Network, network_upgrade: NetworkUpgrade) -> Self {
-        // We might not ever use these older versions.
+        // TODO: Should we reject earlier protocol versions during our initial
+        //       sync? zcashd accepts 170_002 or later during its initial sync.
         Version(match (network, network_upgrade) {
             (_, BeforeOverwinter) => 170_002,
             (Testnet, Overwinter) => 170_003,
