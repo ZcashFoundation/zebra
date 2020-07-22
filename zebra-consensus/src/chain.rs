@@ -25,6 +25,7 @@ use std::{
     task::{Context, Poll},
 };
 use tower::{buffer::Buffer, Service, ServiceExt};
+use tracing_futures::Instrument;
 
 use zebra_chain::block::{Block, BlockHeaderHash};
 use zebra_chain::types::BlockHeight;
@@ -90,15 +91,12 @@ where
         let mut state_service = self.state_service.clone();
         let max_checkpoint_height = self.max_checkpoint_height;
 
+        let span = tracing::debug_span!(
+            "block_verify",
+            height = ?block.coinbase_height(),
+            hash = ?BlockHeaderHash::from(block.as_ref())
+        );
         let height = block.coinbase_height();
-        // Report each 1000th block at info level
-        let info_log = matches!(height, Some(BlockHeight(height)) if (height % 1000 == 0));
-
-        if info_log {
-            tracing::info!(?height, "ChainVerifier received block");
-        } else {
-            tracing::debug!(?height, "ChainVerifier received block");
-        }
 
         // Log a warning on unexpected high blocks
         let is_unexpected_high_block = match height {
@@ -122,11 +120,6 @@ where
             // Call a verifier based on the block height and checkpoints.
             let hash = match height {
                 Some(height) if (height <= max_checkpoint_height) => {
-                    if info_log {
-                        tracing::info!(?height, "sending block to CheckpointVerifier");
-                    } else {
-                        tracing::debug!(?height, "sending block to CheckpointVerifier");
-                    }
                     checkpoint_verifier
                         .ready_and()
                         .await?
@@ -140,11 +133,6 @@ where
                         tracing::warn!(?height, "unexpected high block");
                     }
 
-                    if info_log {
-                        tracing::info!(?height, "sending block to BlockVerifier");
-                    } else {
-                        tracing::debug!(?height, "sending block to BlockVerifier");
-                    }
                     block_verifier
                         .ready_and()
                         .await?
@@ -161,14 +149,6 @@ where
             //   - handle chain reorgs
             //   - adjust state_service "unique block height" conditions
 
-            if info_log {
-                tracing::info!(?height, ?hash, "ChainVerifier sent block to state");
-            } else {
-                tracing::debug!(?height, ?hash, "ChainVerifier sent block to state");
-            }
-            // `Tower::Buffer` requires a 1:1 relationship between `poll()`s
-            // and `call()`s, because it reserves a buffer slot in each
-            // `call()`.
             let add_block = state_service
                 .ready_and()
                 .await?
@@ -179,6 +159,7 @@ where
                 _ => Err("adding block to zebra-state failed".into()),
             }
         }
+        .instrument(span)
         .boxed()
     }
 }

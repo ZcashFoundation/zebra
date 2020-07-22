@@ -72,8 +72,12 @@ where
             //
             // If there are any prospective tips, call ExtendTips. Continue this step until there are no more prospective tips.
             while !self.prospective_tips.is_empty() {
-                info!("extending prospective tips");
+                tracing::debug!("extending prospective tips");
                 self.extend_tips().await?;
+                tracing::debug!(
+                    pending.len = self.pending_blocks.len(),
+                    limit = LOOKAHEAD_LIMIT
+                );
 
                 // Check whether we need to wait for existing block download tasks to finish
                 while self.pending_blocks.len() > LOOKAHEAD_LIMIT {
