@@ -172,9 +172,7 @@ fn seed_no_args() -> Result<()> {
     let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
 
-    // Todo: maybe add special info!() to seed command
-    // Todo: improve the regex
-    output.stdout_contains(r"^(.*?)Initializing tracing endpoint")?;
+    output.stdout_contains(r"Starting zebrad in seed mode")?;
 
     Ok(())
 }
@@ -217,9 +215,7 @@ fn start_no_args() -> Result<()> {
     let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
 
-    // Todo: maybe add special info!() to seed command
-    // Todo: improve the regex
-    output.stdout_contains(r"^(.*?)Initializing tracing endpoint")?;
+    output.stdout_contains(r"Starting zebrad")?;
 
     Ok(())
 }
@@ -228,10 +224,14 @@ fn start_no_args() -> Result<()> {
 fn start_args() -> Result<()> {
     zebra_test::init();
 
-    // Bug? This should fail but not happening
-    //let child = get_child_multi_args(&["start", "argument"]);
-    //let output = child.unwrap().wait_with_output()?;
-    //let output = output.assert_failure()?;
+    // Any free argument is valid
+    let (mut child, _guard) = get_child_multi_args(&["start", "argument"])?;
+    // Run the program and kill it at 1 second
+    std::thread::sleep(Duration::from_secs(1));
+    child.kill()?;
+    let output = child.wait_with_output()?;
+    let output = output.assert_failure()?;
+    output.stdout_contains(r"Initializing tracing endpoint")?;
 
     // Invalid flag
     let (child, _guard) = get_child_multi_args(&["start", "-f"])?;
@@ -239,20 +239,6 @@ fn start_args() -> Result<()> {
     let output = output.assert_failure()?;
 
     output.stdout_contains(r"unrecognized option `-f`")?;
-
-    // Start + seed should be the only combination possible
-    let (mut child, _guard) = get_child_multi_args(&["start", "seed"])?;
-
-    // Run the program and kill it at 1 second
-    std::thread::sleep(Duration::from_secs(1));
-    child.kill()?;
-
-    let output = child.wait_with_output()?;
-    let output = output.assert_failure()?;
-
-    // Todo: maybe add special info!() to seed command
-    // Todo: improve the regex
-    output.stdout_contains(r"^(.*?)Initializing tracing endpoint")?;
 
     Ok(())
 }
