@@ -27,22 +27,58 @@ pub mod on_disk;
 #[serde(deny_unknown_fields)]
 pub struct Config {
     /// The root directory for the state storage
-    pub path: PathBuf,
+    pub path: Option<PathBuf>,
 }
 
 impl Config {
+    /// Generate the appropriate `sled::Config` based on the provided
+    /// `zebra_state::Config`.
+    ///
+    /// # Details
+    ///
+    /// This function should panic if the user of `zebra-state` doesn't configure
+    /// a directory to store the state.
+    ///
+    /// Currently this is only partially implemented by leveraging a `SpanTrace`
+    /// to print a TODO to the user which isn't as nice as what we'd eventually
+    /// want but it definitely gets the point across.
+    ///
+    /// # Current Format
+    ///
+    /// <pre><font color="#CC0000">The application panicked (crashed).</font>
+    /// Message:  <font color="#06989A">called `Option::unwrap()` on a `None` value</font>
+    /// Location: <font color="#75507B">zebra-state/src/lib.rs</font>:<font color="#75507B">40</font>
+    ///
+    /// Backtrace omitted.
+    ///
+    /// Run with RUST_BACKTRACE=1 environment variable to display it.
+    /// Run with RUST_BACKTRACE=full to include source snippets.
+    ///   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ SPANTRACE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    ///
+    ///    0: <font color="#F15D22">zebra_state::sled_config::comment</font> with <font color="#34E2E2">text=TODO(jlusby): Replace this unwrap with a nice user-facing</font>
+    /// <font color="#34E2E2">   explaining error that the cache dir must be specified</font>
+    ///       at <font color="#75507B">zebra-state/src/lib.rs</font>:<font color="#75507B">36</font></pre>
+    #[spandoc::spandoc]
     pub(crate) fn sled_config(&self) -> sled::Config {
-        sled::Config::default().path(&self.path)
+        /**
+         * SPANDOC: TODO(jlusby): Replace this unwrap with a nice user-facing
+         * explaining error that the cache dir must be specified
+         */
+        let path = self.path.as_ref().unwrap().join("state");
+
+        sled::Config::default().path(path)
     }
 }
 
 impl Default for Config {
     fn default() -> Self {
-        Self {
-            path: dirs::cache_dir()
-                .map(|dir| dir.join(".zebra").join("state"))
-                .unwrap_or_else(|| PathBuf::from(".zebra-state/")),
-        }
+        let path = std::env::var("ZEBRAD_CACHE_DIR")
+            .map(PathBuf::from)
+            .ok()
+            .or_else(dirs::cache_dir)
+            .map(|dir| dir.join("zebra"));
+
+        Self { path }
     }
 }
 
@@ -94,4 +130,18 @@ pub enum Response {
         /// The number of blocks above the given block in the current best chain
         Option<u32>,
     ),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[should_panic]
+    fn test_no_path() {
+        zebra_test::init();
+
+        let bad_config = Config { path: None };
+        let _unreachable = bad_config.sled_config();
+    }
 }
