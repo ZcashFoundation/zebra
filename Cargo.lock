@@ -2592,6 +2592,7 @@ dependencies = [
  "color-eyre",
  "futures",
  "futures-util",
+ "metrics",
  "rand 0.7.3",
  "redjubjub",
  "spandoc",
