@@ -82,7 +82,7 @@ where
         // Query the current state to construct the sequence of hashes: handled by
         // the caller
         //
-        // TODO(jlusby): get the real network
+        // TODO(teor): get the real network
         let network = Network::Mainnet;
         let block_locator = self
             .state
