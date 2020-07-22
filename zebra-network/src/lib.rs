@@ -12,6 +12,10 @@
 //! [`tower::Service`] representing "the network" which load-balances
 //! outbound [`Request`]s over available peers.
 //!
+//! Unlike the underlying legacy network protocol the provided
+//! [`tower::Service`] guaruntees that each `Request` future will resolve to
+//! the correct `Response`, not a potentially random unrelated `Response`.
+//!
 //! Each peer connection is a distinct task, which interprets incoming
 //! Bitcoin/Zcash messages either as [`Response`]s to pending
 //! [`Request`]s, or as an inbound [`Request`]s to an internal
