@@ -39,7 +39,9 @@ impl Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            path: PathBuf::from("./.zebra-state"),
+            path: dirs::cache_dir()
+                .map(|dir| dir.join(".zebra").join("state"))
+                .unwrap_or_else(|| PathBuf::from(".zebra-state/")),
         }
     }
 }
