@@ -76,34 +76,34 @@ impl Service<Request> for InMemoryState {
                 }
                 .boxed()
             }
-            Request::GetBlockLocator => {
-                let result = self
-                    .index
-                    .get_tip()
-                    .ok_or("zebra-state contains no blocks")
-                    .map(|block| {
-                        block
-                            .coinbase_height()
-                            .expect("tip block will have a coinbase height")
-                    })
-                    .map(crate::block_locator_heights)
-                    .map(|heights| {
-                        heights
-                            .map(|height| {
-                                self.index
-                                    .get(height)
-                                    .expect("there should be no holes in the chain")
-                                    .hash()
+            Request::GetBlockLocator { genesis } => {
+                let tip = self.index.get_tip();
+                let tip = match tip {
+                    Some(tip) => tip,
+                    None => {
+                        return async move {
+                            Ok(Response::BlockLocator {
+                                block_locator: vec![genesis],
                             })
-                            .collect()
-                    });
+                        }
+                        .boxed()
+                    }
+                };
 
-                async move {
-                    let block_locator = result?;
+                let tip_height = tip
+                    .coinbase_height()
+                    .expect("tip block will have a coinbase height");
 
-                    Ok(Response::BlockLocator { block_locator })
-                }
-                .boxed()
+                let block_locator = crate::block_locator_heights(tip_height)
+                    .map(|height| {
+                        self.index
+                            .get(height)
+                            .expect("there should be no holes in the chain")
+                            .hash()
+                    })
+                    .collect();
+
+                async move { Ok(Response::BlockLocator { block_locator }) }.boxed()
             }
         }
     }

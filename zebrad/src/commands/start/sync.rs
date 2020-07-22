@@ -6,7 +6,10 @@ use tokio::time::delay_for;
 use tower::{retry::Retry, Service, ServiceExt};
 use tracing_futures::Instrument;
 
-use zebra_chain::block::{Block, BlockHeaderHash};
+use zebra_chain::{
+    block::{Block, BlockHeaderHash},
+    Network,
+};
 use zebra_consensus::checkpoint;
 use zebra_network::{self as zn, RetryLimit};
 use zebra_state::{self as zs};
@@ -79,13 +82,16 @@ where
         // Query the current state to construct the sequence of hashes: handled by
         // the caller
         //
-        // TODO(jlusby): get the block_locator from the state
+        // TODO(jlusby): get the real network
+        let network = Network::Mainnet;
         let block_locator = self
             .state
             .ready_and()
             .await
             .map_err(|e| eyre!(e))?
-            .call(zebra_state::Request::GetBlockLocator)
+            .call(zebra_state::Request::GetBlockLocator {
+                genesis: zebra_consensus::parameters::genesis_hash(network),
+            })
             .await
             .map(|response| match response {
                 zebra_state::Response::BlockLocator { block_locator } => block_locator,

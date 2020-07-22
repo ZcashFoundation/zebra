@@ -161,7 +161,7 @@ impl Service<Request> for SledState {
                 }
                 .boxed()
             }
-            Request::GetBlockLocator => {
+            Request::GetBlockLocator { genesis } => {
                 let storage = self.clone();
 
                 async move {
@@ -169,7 +169,7 @@ impl Service<Request> for SledState {
                         Some(tip) => tip,
                         None => {
                             return Ok(Response::BlockLocator {
-                                block_locator: vec![crate::GENESIS],
+                                block_locator: vec![genesis],
                             })
                         }
                     };

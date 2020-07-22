@@ -25,11 +25,6 @@ use zebra_chain::{
 pub mod in_memory;
 pub mod on_disk;
 
-const GENESIS: BlockHeaderHash = BlockHeaderHash([
-    8, 206, 61, 151, 49, 176, 0, 192, 131, 56, 69, 92, 138, 74, 107, 208, 93, 161, 110, 38, 177,
-    29, 170, 27, 145, 113, 132, 236, 232, 15, 4, 0,
-]);
-
 /// Configuration for networking code.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -67,7 +62,10 @@ pub enum Request {
         hash: BlockHeaderHash,
     },
     /// Get a block locator list for the current best chain
-    GetBlockLocator,
+    GetBlockLocator {
+        /// The genesis block of the current best chain
+        genesis: BlockHeaderHash,
+    },
     /// Get the block that is the tip of the current chain
     GetTip,
     /// Ask the state if the given hash is part of the current best chain
