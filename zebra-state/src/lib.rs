@@ -12,10 +12,10 @@
 #![doc(html_favicon_url = "https://www.zfnd.org/images/zebra-favicon-128.png")]
 #![doc(html_logo_url = "https://www.zfnd.org/images/zebra-icon.png")]
 #![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_state")]
-
 #![warn(missing_docs)]
 #![allow(clippy::try_err)]
 
+use dirs::cache_dir;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -32,6 +32,10 @@ pub mod on_disk;
 pub struct Config {
     /// The directory used to store cached state.
     ///
+    /// Relative path: the state is stored in a subdirectory of the user's
+    ///                cache directory.
+    /// Absolute path: the state is stored at that path.
+    ///
     /// Each network has a separate state, which is stored in "mainnet" and
     /// "testnet" sub-directories.
     pub path: PathBuf,
@@ -43,8 +47,20 @@ impl Config {
             Mainnet => "mainnet",
             Testnet => "testnet",
         };
-        let mut network_path = self.path.clone();
+
+        let mut network_path;
+        if self.path.is_absolute() {
+            network_path = self.path.clone();
+        } else {
+            // We could try the home dir or current dir, but that could
+            // surprise the user. Let them configure it instead.
+            network_path = cache_dir().expect("state path error: cache directory not found. Configure an absolute state path in zebrad.toml.");
+            network_path.push(&self.path);
+        }
+
+        // Append the suffix
         network_path.push(path_suffix);
+
         sled::Config::default().path(&network_path)
     }
 }
@@ -52,7 +68,7 @@ impl Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            path: PathBuf::from("./.zebra-state"),
+            path: PathBuf::from("zebra-state"),
         }
     }
 }
