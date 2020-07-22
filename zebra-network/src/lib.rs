@@ -13,7 +13,7 @@
 //! outbound [`Request`]s over available peers.
 //!
 //! Unlike the underlying legacy network protocol the provided
-//! [`tower::Service`] guaruntees that each `Request` future will resolve to
+//! [`tower::Service`] guarantees that each `Request` future will resolve to
 //! the correct `Response`, not a potentially random unrelated `Response`.
 //!
 //! Each peer connection is a distinct task, which interprets incoming
