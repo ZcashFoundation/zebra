@@ -1,4 +1,4 @@
-//! Utility functions to be used in several crates.
+//! Utility functions for chain data.
 
 /// Returns the hexadecimal-encoded string `s` in byte-reversed order.
 pub fn byte_reverse_hex(s: &str) -> String {
