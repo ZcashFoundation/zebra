@@ -2696,6 +2696,7 @@ dependencies = [
  "dirs",
  "futures",
  "hex",
+ "im",
  "lazy_static",
  "once_cell",
  "serde",
