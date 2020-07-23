@@ -3,9 +3,9 @@
 //! Get all the blocks up to network current tip and print the ones that are
 //! checkpoints according to rules.
 //!
-//! Usage: zebra-checkpoints [network] --cli <cli-path>
-//! Where network can be `--regtest`, `mainnet` or `--testnet`.
+//! Usage: zebra-checkpoints --cli <cli-path> [--network <network>]
 //! `--cli` is the path of the zcash-cli binary as a string.
+//! `--network` can be "mainnet", "regtest" or "testnet".
 //! If no network is specified program will use the mainnet.
 //!
 //! zebra-consensus accepts an ordered list of checkpoints, starting with the
@@ -35,9 +35,9 @@ const BLOCK_REORG_LIMIT: i64 = 100;
 
 // Add network argument if needed
 fn network(mut cmd: std::process::Command, args: &args::Args) -> std::process::Command {
-    if args.testnet {
+    if args.network == args::Network::Testnet {
         cmd.arg("-testnet");
-    } else if args.regtest {
+    } else if args.network == args::Network::Regtest {
         cmd.arg("-regtest");
     }
     cmd
