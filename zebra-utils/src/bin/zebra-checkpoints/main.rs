@@ -3,8 +3,8 @@
 //! Get all the blocks up to network current tip and print the ones that are
 //! checkpoints according to rules.
 //!
-//! Usage: zebra-checkpoints --cli <cli-path> [-- <zcli-args>...]
-//! `--cli` is the path of the zcash-cli binary as a string.
+//! Usage: zebra-checkpoints [--cli <cli-path>] [-- <zcli-args>...]
+//! `--cli` is the path of the zcash-cli binary as a string, default: zcash-cli.
 //! `<zcli-args>` are optional arguments for the zcash-cli program.
 //!
 //! zebra-consensus accepts an ordered list of checkpoints, starting with the
