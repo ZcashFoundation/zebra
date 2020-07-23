@@ -93,7 +93,7 @@ impl Service<Request> for InMemoryState {
                 let block_locator = crate::block_locator_heights(tip_height)
                     .map(|height| {
                         self.index
-                            .get_at(height)
+                            .get_main_chain_at(height)
                             .expect("there should be no holes in the chain")
                     })
                     .collect();
