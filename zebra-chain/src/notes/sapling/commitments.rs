@@ -1,5 +1,6 @@
 use std::{fmt, io};
 
+use bitvec::prelude::*;
 use rand_core::{CryptoRng, RngCore};
 
 use crate::{
@@ -12,6 +13,37 @@ use crate::{
 // TODO: replace with reference to redjubjub or jubjub when merged and
 // exported.
 type Scalar = jubjub::Fr;
+
+pub fn pedersen_hash_to_point(D: [u8; 8], M: BitVec<Lsb0, u8>) -> jubjub::ExtendedPoint {
+    // Expects i to be 0-indexed
+    fn I_i(D: [u8; 8], i: u32) -> jubjub::ExtendedPoint {
+        find_group_hash(D, &i.to_le_bytes())
+    }
+
+    jubjub::ExtendedPoint::identity()
+}
+
+/// Construct a “windowed” Pedersen commitment by reusing a Perderson
+/// hash constructon, and adding a randomized point on the Jubjub
+/// curve.
+///
+/// WindowedPedersenCommit_r (s) := \
+///   PedersenHashToPoint(“Zcash_PH”, s) + [r]FindGroupHash^J^(r)(“Zcash_PH”, “r”)
+///
+/// https://zips.z.cash/protocol/protocol.pdf#concretewindowedcommit
+pub fn windowed_pedersen_commitment_r<T>(
+    csprng: &mut T,
+    s: BitVec<Lsb0, u8>,
+) -> jubjub::ExtendedPoint
+where
+    T: RngCore + CryptoRng,
+{
+    let mut r_bytes = [0u8; 32];
+    csprng.fill_bytes(&mut r_bytes);
+    let r = Scalar::from_bytes(&r_bytes).unwrap();
+
+    pedersen_hash_to_point(*b"Zcash_PH", s) + find_group_hash(*b"Zcash_PH", b"r") * r
+}
 
 /// The randomness used in the Pedersen Hash for note commitment.
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -34,6 +66,12 @@ impl fmt::Debug for NoteCommitment {
 impl From<[u8; 32]> for NoteCommitment {
     fn from(bytes: [u8; 32]) -> Self {
         Self(jubjub::AffinePoint::from_bytes(bytes).unwrap())
+    }
+}
+
+impl From<jubjub::ExtendedPoint> for NoteCommitment {
+    fn from(extended_point: jubjub::ExtendedPoint) -> Self {
+        Self(jubjub::AffinePoint::from(extended_point))
     }
 }
 
@@ -63,6 +101,9 @@ impl ZcashDeserialize for NoteCommitment {
 impl NoteCommitment {
     /// Generate a new _NoteCommitment_.
     ///
+    /// NoteCommit^Sapling_rcm (g*_d , pk*_d , v) := \
+    ///   WindowedPedersenCommit_rcm([1; 6] || I2LEBSP_64(v) || g*_d || pk*_d)
+    ///
     /// https://zips.z.cash/protocol/protocol.pdf#concretewindowedcommit
     #[allow(non_snake_case)]
     pub fn new<T>(
@@ -74,35 +115,23 @@ impl NoteCommitment {
     where
         T: RngCore + CryptoRng,
     {
-        // use bitvec::prelude::*;
-        // // s as in the argument name for WindowedPedersenCommit_r(s)
-        // let mut s = BitVec::new();
+        // s as in the argument name for WindowedPedersenCommit_r(s)
+        let mut s: BitVec<Lsb0, u8> = BitVec::new();
 
-        // // Prefix
-        // s.extend([1, 1, 1, 1, 1, 1].iter());
+        // Prefix
+        s.append(&mut bitvec![1; 6]);
 
-        // // Jubjub repr_J canonical byte encoding
-        // // https://zips.z.cash/protocol/protocol.pdf#jubjub
-        // let g_d_bytes = jubjub::AffinePoint::from(diversifier).to_bytes();
-        // let pk_d_bytes = transmission_key.into();
-        // let v_bytes = value.to_bytes();
+        // Jubjub repr_J canonical byte encoding
+        // https://zips.z.cash/protocol/protocol.pdf#jubjub
+        let g_d_bytes = jubjub::AffinePoint::from(diversifier).to_bytes();
+        let pk_d_bytes = <[u8; 32]>::from(transmission_key);
+        let v_bytes = value.to_bytes();
 
-        // // Expects i to be 0-indexed
-        // fn I_i(D: [u8; 8], i: u32) -> jubjub::ExtendedPoint {
-        //     find_group_hash(D, i.to_le_bytes())
-        // }
-        // // let v = Scalar::from_bytes(&value_bytes).unwrap();
+        s.append(&mut BitVec::<Lsb0, u8>::from_slice(&g_d_bytes[..]));
+        s.append(&mut BitVec::<Lsb0, u8>::from_slice(&pk_d_bytes[..]));
+        s.append(&mut BitVec::<Lsb0, u8>::from_slice(&v_bytes[..]));
 
-        // // let mut rcv_bytes = [0u8; 32];
-        // // csprng.fill_bytes(&mut rcv_bytes);
-        // // let rcv = Scalar::from_bytes(&rcv_bytes).unwrap();
-
-        // // let V = find_group_hash(*b"Zcash_cv", b"v");
-        // // let R = find_group_hash(*b"Zcash_cv", b"r");
-
-        // // Self::from(V * v + R * rcv)
-
-        unimplemented!()
+        Self::from(windowed_pedersen_commitment_r(csprng, s))
     }
 
     /// Hash Extractor for Jubjub (?)
