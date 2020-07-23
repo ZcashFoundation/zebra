@@ -96,14 +96,14 @@ impl ZebradCmd {
 impl Configurable<ZebradConfig> for ZebradCmd {
     /// Location of the configuration file
     fn config_path(&self) -> Option<PathBuf> {
-        let filename = std::env::current_dir().ok().map(|mut dir_path| {
-            dir_path.push(CONFIG_FILE);
-            dir_path
-        });
-
         let if_exists = |f: PathBuf| if f.exists() { Some(f) } else { None };
 
-        filename.and_then(if_exists)
+        dirs::preference_dir()
+            .map(|path| path.join(CONFIG_FILE))
+            .and_then(if_exists)
+            .or_else(|| std::env::current_dir().ok())
+            .map(|path| path.join(CONFIG_FILE))
+            .and_then(if_exists)
 
         // Note: Changes in how configuration is loaded may need usage
         // edits in generate.rs

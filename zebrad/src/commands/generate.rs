@@ -15,9 +15,10 @@ impl Runnable for GenerateCmd {
     /// Start the application.
     fn run(&self) {
         let default_config = ZebradConfig {
-            tracing: crate::config::TracingSection::populated(),
-            network: Default::default(),
             metrics: Default::default(),
+            network: Default::default(),
+            state: Default::default(),
+            tracing: crate::config::TracingSection::populated(),
         };
         let mut output = r"# Default configuration for zebrad.
 #

@@ -117,25 +117,22 @@ impl CheckpointVerifier {
     /// than constructing multiple verification services for the same network. To
     /// Clone a CheckpointVerifier, you might need to wrap it in a
     /// `tower::Buffer` service.
-    //
-    // Avoid some dead code lints.
-    // Until we implement the overall verifier in #516, this function, and some of the
-    // functions and enum variants it uses, are only used in the tests.
-    #[allow(dead_code)]
     pub fn new(network: Network) -> Self {
-        Self::from_checkpoint_list(CheckpointList::new(network))
+        let checkpoint_list = CheckpointList::new(network);
+        let max_height = checkpoint_list.max_height();
+        tracing::info!(?max_height, ?network, "initialising CheckpointVerifier");
+        Self::from_checkpoint_list(checkpoint_list)
     }
 
     /// Return a checkpoint verification service using `list`.
     ///
     /// Assumes that the provided genesis checkpoint is correct.
     ///
-    /// See `CheckpointVerifier::new` and `CheckpointList::from_list` for more
-    /// details.
+    /// Callers should prefer `CheckpointVerifier::new`, which uses the
+    /// hard-coded checkpoint lists. See `CheckpointVerifier::new` and
+    /// `CheckpointList::from_list` for more details.
     //
-    // Avoid some dead code lints.
-    // Until we implement the overall verifier in #516, this function, and some of the
-    // functions and enum variants it uses, are only used in the tests.
+    // This function is designed for use in tests.
     #[allow(dead_code)]
     pub(crate) fn from_list(
         list: impl IntoIterator<Item = (BlockHeight, BlockHeaderHash)>,
@@ -145,8 +142,9 @@ impl CheckpointVerifier {
 
     /// Return a checkpoint verification service using `checkpoint_list`.
     ///
-    /// See `CheckpointVerifier::new` and `CheckpointList::from_list` for more
-    /// details.
+    /// Callers should prefer `CheckpointVerifier::new`, which uses the
+    /// hard-coded checkpoint lists. See `CheckpointVerifier::new` and
+    /// `CheckpointList::from_list` for more details.
     pub(crate) fn from_checkpoint_list(checkpoint_list: CheckpointList) -> Self {
         // All the initialisers should call this function, so we only have to
         // change fields or default values in one place.
@@ -200,7 +198,11 @@ impl CheckpointVerifier {
         // Find the height we want to start searching at
         let mut pending_height = match self.previous_checkpoint_height() {
             // Check if we have the genesis block as a special case, to simplify the loop
-            BeforeGenesis if !self.queued.contains_key(&BlockHeight(0)) => return WaitingForBlocks,
+            BeforeGenesis if !self.queued.contains_key(&BlockHeight(0)) => {
+                // XXX scratch tracing line for debugging, delete this
+                tracing::debug!("beforegenesis if !self.queued.contains_key(&BlockHeight(0))");
+                return WaitingForBlocks;
+            }
             BeforeGenesis => BlockHeight(0),
             PreviousCheckpoint(height) => height,
             FinalCheckpoint => return FinishedVerifying,
@@ -236,6 +238,12 @@ impl CheckpointVerifier {
         let target_checkpoint = self
             .checkpoint_list
             .max_height_in_range((start, Included(pending_height)));
+
+        tracing::debug!(
+            checkpoint_start = ?start,
+            highest_contiguous_block = ?pending_height,
+            ?target_checkpoint
+        );
 
         target_checkpoint
             .map(Checkpoint)
@@ -337,6 +345,7 @@ impl CheckpointVerifier {
         let height = match self.check_block(&block) {
             Ok(height) => height,
             Err(error) => {
+                tracing::warn!(?error);
                 // Sending might fail, depending on what the caller does with rx,
                 // but there's nothing we can do about it.
                 let _ = tx.send(Err(error));
@@ -354,7 +363,9 @@ impl CheckpointVerifier {
 
         // Memory DoS resistance: limit the queued blocks at each height
         if qblocks.len() >= MAX_QUEUED_BLOCKS_PER_HEIGHT {
-            let _ = tx.send(Err("too many queued blocks at this height".into()));
+            let e = "too many queued blocks at this height".into();
+            tracing::warn!(?e);
+            let _ = tx.send(Err(e));
             return rx;
         }
 
@@ -364,6 +375,17 @@ impl CheckpointVerifier {
         // This is a no-op for the first block in each QueuedBlockList.
         qblocks.reserve_exact(1);
         qblocks.push(new_qblock);
+
+        let is_checkpoint = self.checkpoint_list.contains(height);
+        tracing::debug!(?height, ?hash, ?is_checkpoint, "Queued block");
+
+        // TODO(teor):
+        //   - Remove this log once the CheckpointVerifier is working?
+        //   - Modify the default filter or add another log, so users see
+        //     regular download progress info (vs verification info)
+        if is_checkpoint {
+            tracing::info!(?height, ?hash, ?is_checkpoint, "Queued checkpoint block");
+        }
 
         rx
     }
@@ -409,12 +431,16 @@ impl CheckpointVerifier {
                     // The first valid block at the current height
                     valid_qblock = Some(qblock);
                 } else {
+                    tracing::info!(?height, ?qblock.hash, ?expected_hash,
+                                   "Duplicate block at height in CheckpointVerifier");
                     // Reject duplicate blocks at the same height
                     let _ = qblock.tx.send(Err(
                         "duplicate valid blocks at this height, only one was chosen".into(),
                     ));
                 }
             } else {
+                tracing::info!(?height, ?qblock.hash, ?expected_hash,
+                               "Bad block hash at height in CheckpointVerifier");
                 // A bad block, that isn't part of the chain.
                 let _ = qblock.tx.send(Err(
                     "the block hash does not match the chained checkpoint hash".into(),
@@ -458,6 +484,11 @@ impl CheckpointVerifier {
                     .hash(height)
                     .expect("every checkpoint height must have a hash"),
             ),
+            WaitingForBlocks => {
+                tracing::debug!("waiting for blocks to complete checkpoint range");
+                return;
+            }
+            // XXX(hdevalence) should this be unreachable!("called after finished") ?
             _ => return,
         };
 
@@ -492,8 +523,11 @@ impl CheckpointVerifier {
             } else {
                 // The last block height we processed did not have any blocks
                 // with a matching hash, so chain verification has failed.
-                //
-                // TODO(teor||jlusby): log an error here?
+                tracing::warn!(
+                    ?current_height,
+                    ?current_range,
+                    "No valid blocks at height in CheckpointVerifier"
+                );
 
                 // We kept all the matching blocks down to this height, in
                 // anticipation of the chain verifying. But the chain is
@@ -536,6 +570,8 @@ impl CheckpointVerifier {
             expected_hash, previous_checkpoint_hash,
             "the previous checkpoint should match: bad checkpoint list, zebra bug, or bad chain"
         );
+
+        tracing::info!(?current_range, "Verified checkpoint range");
 
         // All the blocks we've kept are valid, so let's verify them
         // in height order.
@@ -633,6 +669,8 @@ impl Service<Arc<Block>> for CheckpointVerifier {
         //
         // TODO(teor): retry on failure (low priority, failures should be rare)
         self.process_checkpoint_range();
+
+        metrics::gauge!("checkpoint.queued_slots", self.queued.len() as i64);
 
         async move {
             // Remove the Result<..., RecvError> wrapper from the channel future

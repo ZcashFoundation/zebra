@@ -8,11 +8,12 @@ use tracing_futures::{Instrument, Instrumented};
 
 use zebra_chain::{
     block::{Block, BlockHeaderHash},
-    types::BlockHeight,
+    Network,
 };
 use zebra_consensus::checkpoint;
+use zebra_consensus::parameters;
 use zebra_network::{self as zn, RetryLimit};
-use zebra_state::{self as zs};
+use zebra_state as zs;
 
 // XXX in the future, we may not be able to access the checkpoint module.
 const FANOUT: usize = checkpoint::MAX_QUEUED_BLOCKS_PER_HEIGHT;
@@ -36,6 +37,7 @@ where
     prospective_tips: HashSet<BlockHeaderHash>,
     pending_blocks:
         Pin<Box<FuturesUnordered<Instrumented<JoinHandle<Result<BlockHeaderHash, Error>>>>>>,
+    genesis_hash: BlockHeaderHash,
 }
 
 impl<ZN, ZS, ZV> Syncer<ZN, ZS, ZV>
@@ -47,29 +49,55 @@ where
     ZV: Service<Arc<Block>, Response = BlockHeaderHash, Error = Error> + Send + Clone + 'static,
     ZV::Future: Send,
 {
-    pub fn new(network: ZN, state: ZS, verifier: ZV) -> Self {
-        let retry_network = Retry::new(RetryLimit::new(3), network.clone());
+    /// Returns a new syncer instance, using:
+    ///  - chain: the zebra-chain `Network` to download (Mainnet or Testnet)
+    ///  - peers: the zebra-network peers to contact for downloads
+    ///  - state: the zebra-state that stores the chain
+    ///  - verifier: the zebra-consensus verifier that checks the chain
+    pub fn new(chain: Network, peers: ZN, state: ZS, verifier: ZV) -> Self {
+        let retry_peers = Retry::new(RetryLimit::new(3), peers.clone());
         Self {
-            tip_network: network,
-            block_network: retry_network,
+            tip_network: peers,
+            block_network: retry_peers,
             state,
             verifier,
             prospective_tips: HashSet::new(),
             pending_blocks: Box::pin(FuturesUnordered::new()),
+            genesis_hash: parameters::genesis_hash(chain),
         }
     }
 
     #[instrument(skip(self))]
     pub async fn sync(&mut self) -> Result<(), Report> {
+        // We can't download the genesis block using our normal algorithm,
+        // due to protocol limitations
+        self.request_genesis().await?;
+
         loop {
             self.obtain_tips().await?;
+            metrics::gauge!(
+                "sync.prospective_tips.len",
+                self.prospective_tips.len() as i64
+            );
+            metrics::gauge!("sync.pending_blocks.len", self.pending_blocks.len() as i64);
 
             // ObtainTips Step 6
             //
             // If there are any prospective tips, call ExtendTips. Continue this step until there are no more prospective tips.
             while !self.prospective_tips.is_empty() {
-                info!("extending prospective tips");
+                tracing::debug!("extending prospective tips");
+
                 self.extend_tips().await?;
+
+                metrics::gauge!(
+                    "sync.prospective_tips.len",
+                    self.prospective_tips.len() as i64
+                );
+                metrics::gauge!("sync.pending_blocks.len", self.pending_blocks.len() as i64);
+                tracing::debug!(
+                    pending.len = self.pending_blocks.len(),
+                    limit = LOOKAHEAD_LIMIT
+                );
 
                 // Check whether we need to wait for existing block download tasks to finish
                 while self.pending_blocks.len() > crate::commands::LOOKAHEAD_LIMIT {
@@ -113,9 +141,23 @@ where
         //
         // Query the current state to construct the sequence of hashes: handled by
         // the caller
-        //
-        // TODO(jlusby): get the block_locator from the state
-        let block_locator = vec![super::GENESIS];
+        let block_locator = self
+            .state
+            .ready_and()
+            .await
+            .map_err(|e| eyre!(e))?
+            .call(zebra_state::Request::GetBlockLocator {
+                genesis: self.genesis_hash,
+            })
+            .await
+            .map(|response| match response {
+                zebra_state::Response::BlockLocator { block_locator } => block_locator,
+                _ => unreachable!(
+                    "GetBlockLocator request can only result in Response::BlockLocator"
+                ),
+            })
+            .map_err(|e| eyre!(e))?;
+
         tracing::info!(?block_locator, "trying to obtain new chain tips");
 
         // ObtainTips Step 2
@@ -173,8 +215,7 @@ where
                         "found index of first unknown hash in response"
                     );
                     if first_unknown == hashes.len() {
-                        // XXX until we fix the TODO above to construct the locator correctly,
-                        // we might hit this case, but it will be unexpected afterwards.
+                        // We should only stop getting hashes once we've finished the initial sync
                         tracing::debug!("no new hashes, even though we gave our tip?");
                         continue;
                     }
@@ -256,17 +297,20 @@ where
                         // response is the genesis block; if so, discard the response.
                         // It indicates that the remote peer does not have any blocks
                         // following the prospective tip.
-                        // TODO(jlusby): reject both main and test net genesis blocks
-                        match hashes.first() {
-                            Some(&super::GENESIS) => {
-                                tracing::debug!("skipping response, peer could not extend the tip");
-                                continue;
-                            }
-                            None => {
+                        match (hashes.first(), hashes.len()) {
+                            (_, 0) => {
                                 tracing::debug!("skipping empty response");
                                 continue;
                             }
-                            Some(_) => {}
+                            (_, 1) => {
+                                tracing::debug!("skipping length-1 response, in case it's an unsolicited inv message");
+                                continue;
+                            }
+                            (Some(hash), _) if (hash == &self.genesis_hash) => {
+                                tracing::debug!("skipping response, peer could not extend the tip");
+                                continue;
+                            }
+                            _ => {}
                         }
 
                         let new_tip = hashes.pop().expect("expected: hashes must have len > 0");
@@ -309,6 +353,35 @@ where
         Ok(())
     }
 
+    /// Queue a download for the genesis block, if it isn't currently known to
+    /// our node.
+    async fn request_genesis(&mut self) -> Result<(), Report> {
+        // Due to Bitcoin protocol limitations, we can't request the genesis
+        // block using our standard tip-following algorithm:
+        //  - getblocks requires at least one hash
+        //  - responses start with the block *after* the requested block, and
+        //  - the genesis hash is used as a placeholder for "no matches".
+        //
+        // So we just queue the genesis block here.
+
+        let state_has_genesis = self
+            .state
+            .ready_and()
+            .await
+            .map_err(|e| eyre!(e))?
+            .call(zebra_state::Request::GetBlock {
+                hash: self.genesis_hash,
+            })
+            .await
+            .is_ok();
+
+        if !state_has_genesis {
+            self.request_blocks(vec![self.genesis_hash]).await?;
+        }
+
+        Ok(())
+    }
+
     /// Queue downloads for each block that isn't currently known to our node
     async fn request_blocks(&mut self, hashes: Vec<BlockHeaderHash>) -> Result<(), Report> {
         tracing::debug!(hashes.len = hashes.len(), "requesting blocks");
@@ -330,6 +403,7 @@ where
                     Ok(_) => unreachable!("wrong response to block request"),
                     Err(e) => return Err(e),
                 };
+                metrics::counter!("sync.downloaded_blocks", 1);
 
                 verifier.ready_and().await?.call(block).await
             })
@@ -339,15 +413,6 @@ where
 
         Ok(())
     }
-}
-
-/// Get the heights of the blocks for constructing a block_locator list
-#[allow(dead_code)]
-pub fn block_locator_heights(tip_height: BlockHeight) -> impl Iterator<Item = BlockHeight> {
-    iter::successors(Some(1u32), |h| h.checked_mul(2))
-        .flat_map(move |step| tip_height.0.checked_sub(step))
-        .map(BlockHeight)
-        .chain(iter::once(BlockHeight(0)))
 }
 
 type Error = Box<dyn std::error::Error + Send + Sync + 'static>;

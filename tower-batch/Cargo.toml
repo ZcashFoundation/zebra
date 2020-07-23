@@ -6,11 +6,11 @@ license = "MIT"
 edition = "2018"
 
 [dependencies]
-tokio = { version = "0.2", features = ["time", "sync", "stream"] }
+tokio = { version = "0.2.22", features = ["time", "sync", "stream", "tracing"] }
 tower = "0.3"
 futures-core = "0.3.5"
 pin-project = "0.4.20"
-tracing = "0.1.16"
+tracing = "0.1.17"
 tracing-futures = "0.2.4"
 futures = "0.3.5"
 
@@ -18,6 +18,5 @@ futures = "0.3.5"
 ed25519-zebra = "1.0"
 rand = "0.7"
 tokio = { version = "0.2", features = ["full"]}
-tracing = "0.1.16"
-color-eyre = "0.5"
+tracing = "0.1.17"
 zebra-test = { path = "../zebra-test/" }

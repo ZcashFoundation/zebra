@@ -6,7 +6,6 @@ use std::{
     time::Duration,
 };
 
-use color_eyre::eyre::Result;
 use ed25519_zebra::*;
 use futures::stream::{FuturesUnordered, StreamExt};
 use rand::thread_rng;
@@ -109,23 +108,31 @@ where
 }
 
 #[tokio::test]
-async fn batch_flushes_on_max_items() -> Result<()> {
+async fn batch_flushes_on_max_items() {
     use tokio::time::timeout;
     zebra_test::init();
 
     // Use a very long max_latency and a short timeout to check that
     // flushing is happening based on hitting max_items.
     let verifier = Batch::new(Ed25519Verifier::new(), 10, Duration::from_secs(1000));
-    timeout(Duration::from_secs(1), sign_and_verify(verifier, 100)).await?
+    assert!(
+        timeout(Duration::from_secs(1), sign_and_verify(verifier, 100))
+            .await
+            .is_ok()
+    );
 }
 
 #[tokio::test]
-async fn batch_flushes_on_max_latency() -> Result<()> {
+async fn batch_flushes_on_max_latency() {
     use tokio::time::timeout;
     zebra_test::init();
 
     // Use a very high max_items and a short timeout to check that
     // flushing is happening based on hitting max_latency.
     let verifier = Batch::new(Ed25519Verifier::new(), 100, Duration::from_millis(500));
-    timeout(Duration::from_secs(1), sign_and_verify(verifier, 10)).await?
+    assert!(
+        timeout(Duration::from_secs(1), sign_and_verify(verifier, 10))
+            .await
+            .is_ok()
+    );
 }

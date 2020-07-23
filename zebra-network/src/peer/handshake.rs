@@ -194,10 +194,17 @@ where
             //  if (pfrom->nVersion < consensusParams.vUpgrades[currentEpoch].nProtocolVersion)
             //
             // For approximately 1.5 days before a network upgrade, we also need to:
-            //  - prefer evicting pre-upgrade peers from the peer set, and
-            //  - prefer choosing post-upgrade ready peers for queries
+            //  - avoid old peers, and
+            //  - prefer updated peers.
+            // For example, we could reject old peers with probability 0.5.
+            //
+            // At the network upgrade, we also need to disconnect from old peers.
+            // TODO: replace min_for_upgrade(network, MIN_NETWORK_UPGRADE) with
+            //       current_min(network, height) where network is the
+            //       configured network, and height is the best tip's block
+            //       height.
 
-            if remote_version < Version::min_version(network, constants::MIN_NETWORK_UPGRADE) {
+            if remote_version < Version::min_for_upgrade(network, constants::MIN_NETWORK_UPGRADE) {
                 // Disconnect if peer is using an obsolete version.
                 return Err(HandshakeError::ObsoleteVersion(remote_version));
             }
