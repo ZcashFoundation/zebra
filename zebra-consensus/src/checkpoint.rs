@@ -198,7 +198,11 @@ impl CheckpointVerifier {
         // Find the height we want to start searching at
         let mut pending_height = match self.previous_checkpoint_height() {
             // Check if we have the genesis block as a special case, to simplify the loop
-            BeforeGenesis if !self.queued.contains_key(&BlockHeight(0)) => return WaitingForBlocks,
+            BeforeGenesis if !self.queued.contains_key(&BlockHeight(0)) => {
+                // XXX scratch tracing line for debugging, delete this
+                tracing::debug!("beforegenesis if !self.queued.contains_key(&BlockHeight(0))");
+                return WaitingForBlocks;
+            }
             BeforeGenesis => BlockHeight(0),
             PreviousCheckpoint(height) => height,
             FinalCheckpoint => return FinishedVerifying,
@@ -234,6 +238,12 @@ impl CheckpointVerifier {
         let target_checkpoint = self
             .checkpoint_list
             .max_height_in_range((start, Included(pending_height)));
+
+        tracing::debug!(
+            checkpoint_start = ?start,
+            highest_contiguous_block = ?pending_height,
+            ?target_checkpoint
+        );
 
         target_checkpoint
             .map(Checkpoint)
@@ -331,24 +341,11 @@ impl CheckpointVerifier {
         // Set up a oneshot channel to send results
         let (tx, rx) = oneshot::channel();
 
-        let height = block.coinbase_height();
-        // Report each 1000th block at info level
-        let info_log = matches!(height, Some(BlockHeight(height)) if (height % 1000 == 0));
-        if info_log {
-            tracing::info!(?height, "queue_block received block");
-        } else {
-            tracing::debug!(?height, "queue_block received block");
-        }
-
         // Check for a valid height
         let height = match self.check_block(&block) {
             Ok(height) => height,
             Err(error) => {
-                tracing::warn!(
-                    ?height,
-                    ?error,
-                    "queue_block rejected block with block height error"
-                );
+                tracing::warn!(?error);
                 // Sending might fail, depending on what the caller does with rx,
                 // but there's nothing we can do about it.
                 let _ = tx.send(Err(error));
@@ -366,11 +363,9 @@ impl CheckpointVerifier {
 
         // Memory DoS resistance: limit the queued blocks at each height
         if qblocks.len() >= MAX_QUEUED_BLOCKS_PER_HEIGHT {
-            tracing::warn!(
-                ?height,
-                "queue_block rejected block with too many blocks at height error"
-            );
-            let _ = tx.send(Err("too many queued blocks at this height".into()));
+            let e = "too many queued blocks at this height".into();
+            tracing::warn!(?e);
+            let _ = tx.send(Err(e));
             return rx;
         }
 
@@ -381,12 +376,7 @@ impl CheckpointVerifier {
         qblocks.reserve_exact(1);
         qblocks.push(new_qblock);
 
-        if info_log {
-            tracing::info!(?height, "queue_block added block to queue");
-        } else {
-            tracing::debug!(?height, "queue_block added block to queue");
-        }
-
+        tracing::debug!("queued block");
         rx
     }
 
@@ -480,6 +470,11 @@ impl CheckpointVerifier {
                     .hash(height)
                     .expect("every checkpoint height must have a hash"),
             ),
+            WaitingForBlocks => {
+                tracing::debug!("waiting for blocks to complete checkpoint range");
+                return;
+            }
+            // XXX(hdevalence) should this be unreachable!("called after finished") ?
             _ => return,
         };
 
@@ -642,25 +637,9 @@ impl Service<Arc<Block>> for CheckpointVerifier {
     fn call(&mut self, block: Arc<Block>) -> Self::Future {
         // TODO(jlusby): Error = Report
 
-        let height = block.coinbase_height();
-        // Report each 1000th block at info level
-        let info_log = matches!(height, Some(BlockHeight(height)) if (height % 1000 == 0));
-
-        if info_log {
-            tracing::info!(?height, "CheckpointVerifier received block");
-        } else {
-            tracing::debug!(?height, "CheckpointVerifier received block");
-        }
-
         // Queue the block for verification, until we receive all the blocks for
         // the current checkpoint range.
         let rx = self.queue_block(block);
-
-        if info_log {
-            tracing::info!(?height, "CheckpointVerifier added block to queue");
-        } else {
-            tracing::debug!(?height, "CheckpointVerifier added block to queue");
-        }
 
         // Try to verify from the previous checkpoint to a target checkpoint.
         //
@@ -672,11 +651,7 @@ impl Service<Arc<Block>> for CheckpointVerifier {
         // TODO(teor): retry on failure (low priority, failures should be rare)
         self.process_checkpoint_range();
 
-        if info_log {
-            tracing::info!(?height, "CheckpointVerifier processed checkpoint range");
-        } else {
-            tracing::debug!(?height, "CheckpointVerifier processed checkpoint range");
-        }
+        metrics::gauge!("checkpoint.queued_slots", self.queued.len() as i64);
 
         async move {
             // Remove the Result<..., RecvError> wrapper from the channel future
