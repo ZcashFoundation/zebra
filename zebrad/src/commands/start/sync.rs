@@ -96,7 +96,7 @@ where
                 metrics::gauge!("sync.pending_blocks.len", self.pending_blocks.len() as i64);
                 tracing::debug!(
                     pending.len = self.pending_blocks.len(),
-                    limit = LOOKAHEAD_LIMIT
+                    limit = crate::commands::LOOKAHEAD_LIMIT
                 );
 
                 // Check whether we need to wait for existing block download tasks to finish
