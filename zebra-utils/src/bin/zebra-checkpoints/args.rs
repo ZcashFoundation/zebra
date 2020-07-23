@@ -1,14 +1,4 @@
 use structopt::StructOpt;
-use structopt::clap::arg_enum;
-
-arg_enum!{
-    #[derive(PartialEq, Debug)]
-    pub enum Network {
-        Mainnet,
-        Testnet,
-        Regtest,
-    }
-}
 
 #[derive(Debug, StructOpt)]
 pub struct Args {
@@ -16,7 +6,7 @@ pub struct Args {
     #[structopt(short, long)]
     pub cli: String,
 
-    /// Network to use
-    #[structopt(default_value = "mainnet", short, long)]
-    pub network: Network,
+    /// Passthrough args for `zcash-cli`
+    #[structopt(last = true)]
+    pub zcli_args: Vec<String>,
 }

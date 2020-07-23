@@ -3,10 +3,9 @@
 //! Get all the blocks up to network current tip and print the ones that are
 //! checkpoints according to rules.
 //!
-//! Usage: zebra-checkpoints --cli <cli-path> [--network <network>]
+//! Usage: zebra-checkpoints --cli <cli-path> [-- <zcli-args>...]
 //! `--cli` is the path of the zcash-cli binary as a string.
-//! `--network` can be "mainnet", "regtest" or "testnet".
-//! If no network is specified program will use the mainnet.
+//! `<zcli-args>` are optional arguments for the zcash-cli program.
 //!
 //! zebra-consensus accepts an ordered list of checkpoints, starting with the
 //! genesis block. Checkpoint heights can be chosen arbitrarily.
@@ -33,12 +32,10 @@ const MAX_CHECKPOINT_BYTE_COUNT: i64 = 256 * 1024 * 1024;
 /// zcashd reorg limit.
 const BLOCK_REORG_LIMIT: i64 = 100;
 
-// Add network argument if needed
-fn network(mut cmd: std::process::Command, args: &args::Args) -> std::process::Command {
-    if args.network == args::Network::Testnet {
-        cmd.arg("-testnet");
-    } else if args.network == args::Network::Regtest {
-        cmd.arg("-regtest");
+// Passthrough arguments if needed
+fn passthrough(mut cmd: std::process::Command, args: &args::Args) -> std::process::Command {
+    if args.zcli_args.len() > 0 {
+        cmd.args(&args.zcli_args);
     }
     cmd
 }
@@ -51,7 +48,7 @@ fn main() -> Result<()> {
     // create process
     let args = args::Args::from_args();
     let mut cmd = std::process::Command::new(&args.cli);
-    cmd = network(cmd, &args);
+    cmd = passthrough(cmd, &args);
 
     // set up counters
     let mut cumulative_bytes: i64 = 0;
@@ -71,7 +68,7 @@ fn main() -> Result<()> {
     for x in 0..block_count {
         // unfortunatly we need to create a process for each block
         let mut cmd = std::process::Command::new(&args.cli);
-        cmd = network(cmd, &args);
+        cmd = passthrough(cmd, &args);
 
         // get block data
         cmd.args(&["getblock", &x.to_string()]);
