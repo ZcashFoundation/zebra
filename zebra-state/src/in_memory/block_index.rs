@@ -36,7 +36,7 @@ impl BlockIndex {
         self.by_hash.get(&hash).cloned()
     }
 
-    pub(super) fn get_at(&self, height: BlockHeight) -> Option<BlockHeaderHash> {
+    pub(super) fn get_main_chain_at(&self, height: BlockHeight) -> Option<BlockHeaderHash> {
         self.height_map.get(&height).cloned()
     }
 
