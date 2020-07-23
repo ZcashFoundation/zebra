@@ -38,33 +38,23 @@ impl SledState {
         let hash: BlockHeaderHash = block.as_ref().into();
         let height = block.coinbase_height().unwrap();
 
-        let by_height = self.storage.open_tree(b"by_height")?;
+        let heigh_map = self.storage.open_tree(b"heigh_map")?;
         let by_hash = self.storage.open_tree(b"by_hash")?;
 
         let mut bytes = Vec::new();
         block.zcash_serialize(&mut bytes)?;
 
         // TODO(jlusby): make this transactional
-        by_height.insert(&height.0.to_be_bytes(), bytes.as_slice())?;
+        heigh_map.insert(&height.0.to_be_bytes(), &hash.0)?;
         by_hash.insert(&hash.0, bytes)?;
 
         Ok(hash)
     }
 
-    pub(super) fn get(&self, query: impl Into<BlockQuery>) -> Result<Option<Arc<Block>>, Error> {
-        let query = query.into();
-        let value = match query {
-            BlockQuery::ByHash(hash) => {
-                let by_hash = self.storage.open_tree(b"by_hash")?;
-                let key = &hash.0;
-                by_hash.get(key)?
-            }
-            BlockQuery::ByHeight(height) => {
-                let by_height = self.storage.open_tree(b"by_height")?;
-                let key = height.0.to_be_bytes();
-                by_height.get(key)?
-            }
-        };
+    pub(super) fn get(&self, hash: BlockHeaderHash) -> Result<Option<Arc<Block>>, Error> {
+        let by_hash = self.storage.open_tree(b"by_hash")?;
+        let key = &hash.0;
+        let value = by_hash.get(key)?;
 
         if let Some(bytes) = value {
             let bytes = bytes.as_ref();
@@ -75,8 +65,22 @@ impl SledState {
         }
     }
 
+    pub(super) fn get_at(&self, height: BlockHeight) -> Result<Option<BlockHeaderHash>, Error> {
+        let heigh_map = self.storage.open_tree(b"heigh_map")?;
+        let key = height.0.to_be_bytes();
+        let value = heigh_map.get(key)?;
+
+        if let Some(bytes) = value {
+            let bytes = bytes.as_ref();
+            let hash = ZcashDeserialize::zcash_deserialize(bytes)?;
+            Ok(Some(hash))
+        } else {
+            Ok(None)
+        }
+    }
+
     pub(super) fn get_tip(&self) -> Result<Option<Arc<Block>>, Error> {
-        let tree = self.storage.open_tree(b"by_height")?;
+        let tree = self.storage.open_tree(b"heigh_map")?;
         let last_entry = tree.iter().values().next_back();
 
         match last_entry {
@@ -182,10 +186,8 @@ impl Service<Request> for SledState {
 
                     let block_locator = heights
                         .map(|height| {
-                            storage.get(height).map(|block| {
-                                block
-                                    .expect("there should be no holes in the current chain")
-                                    .hash()
+                            storage.get_at(height).map(|hash| {
+                                hash.expect("there should be no holes in the current chain")
                             })
                         })
                         .collect::<Result<_, _>>()?;
@@ -212,23 +214,6 @@ impl From<BlockHeight> for BytesHeight {
 impl AsRef<[u8]> for BytesHeight {
     fn as_ref(&self) -> &[u8] {
         &self.1[..]
-    }
-}
-
-pub(super) enum BlockQuery {
-    ByHash(BlockHeaderHash),
-    ByHeight(BlockHeight),
-}
-
-impl From<BlockHeaderHash> for BlockQuery {
-    fn from(hash: BlockHeaderHash) -> Self {
-        Self::ByHash(hash)
-    }
-}
-
-impl From<BlockHeight> for BlockQuery {
-    fn from(height: BlockHeight) -> Self {
-        Self::ByHeight(height)
     }
 }
 
