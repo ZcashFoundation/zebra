@@ -18,11 +18,14 @@
 //!  * Sync Task
 //!    * This task runs in the background and continuously queries the network for
 //!    new blocks to be verified and added to the local state
+
 use crate::config::ZebradConfig;
 use crate::{components::tokio::TokioComponent, prelude::*};
+
 use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
 use color_eyre::eyre::Report;
 use tower::{buffer::Buffer, service_fn};
+
 use zebra_chain::block::BlockHeaderHash;
 
 mod sync;
@@ -43,7 +46,7 @@ pub struct StartCmd {
 
 impl StartCmd {
     async fn start(&self) -> Result<(), Report> {
-        info!(?self, "begin tower-based peer handling test stub");
+        info!(?self, "starting to connect to the network");
 
         // The service that our node uses to respond to requests by peers
         let node = Buffer::new(
@@ -53,10 +56,10 @@ impl StartCmd {
             }),
             1,
         );
-        let config = app_config().network.clone();
-        let state = zebra_state::on_disk::init(zebra_state::Config::default());
-        let (peer_set, _address_book) = zebra_network::init(config, node).await;
-        let verifier = zebra_consensus::block::init(state.clone());
+        let config = app_config();
+        let state = zebra_state::on_disk::init(config.state.clone());
+        let (peer_set, _address_book) = zebra_network::init(config.network.clone(), node).await;
+        let verifier = zebra_consensus::chain::init(config.network.network, state.clone());
 
         let mut syncer = sync::Syncer::new(peer_set, state, verifier);
 

@@ -161,6 +161,39 @@ impl Service<Request> for SledState {
                 }
                 .boxed()
             }
+            Request::GetBlockLocator { genesis } => {
+                let storage = self.clone();
+
+                async move {
+                    let tip = match storage.get_tip()? {
+                        Some(tip) => tip,
+                        None => {
+                            return Ok(Response::BlockLocator {
+                                block_locator: vec![genesis],
+                            })
+                        }
+                    };
+
+                    let tip_height = tip
+                        .coinbase_height()
+                        .expect("tip of the current chain will have a coinbase height");
+
+                    let heights = crate::block_locator_heights(tip_height);
+
+                    let block_locator = heights
+                        .map(|height| {
+                            storage.get(height).map(|block| {
+                                block
+                                    .expect("there should be no holes in the current chain")
+                                    .hash()
+                            })
+                        })
+                        .collect::<Result<_, _>>()?;
+
+                    Ok(Response::BlockLocator { block_locator })
+                }
+                .boxed()
+            }
         }
     }
 }

@@ -16,8 +16,11 @@
 #![allow(clippy::try_err)]
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::sync::Arc;
-use zebra_chain::block::{Block, BlockHeaderHash};
+use std::{iter, sync::Arc};
+use zebra_chain::{
+    block::{Block, BlockHeaderHash},
+    types::BlockHeight,
+};
 
 pub mod in_memory;
 pub mod on_disk;
@@ -96,6 +99,11 @@ pub enum Request {
         /// The hash used to identify the block
         hash: BlockHeaderHash,
     },
+    /// Get a block locator list for the current best chain
+    GetBlockLocator {
+        /// The genesis block of the current best chain
+        genesis: BlockHeaderHash,
+    },
     /// Get the block that is the tip of the current chain
     GetTip,
     /// Ask the state if the given hash is part of the current best chain
@@ -119,6 +127,11 @@ pub enum Response {
         /// The block that was requested
         block: Arc<Block>,
     },
+    /// The response to a `GetBlockLocator` request
+    BlockLocator {
+        /// The set of blocks that make up the block locator
+        block_locator: Vec<BlockHeaderHash>,
+    },
     /// The response to a `GetTip` request
     Tip {
         /// The hash of the block at the tip of the current chain
@@ -130,6 +143,14 @@ pub enum Response {
         /// The number of blocks above the given block in the current best chain
         Option<u32>,
     ),
+}
+
+/// Get the heights of the blocks for constructing a block_locator list
+fn block_locator_heights(tip_height: BlockHeight) -> impl Iterator<Item = BlockHeight> {
+    iter::successors(Some(1u32), |h| h.checked_mul(2))
+        .flat_map(move |step| tip_height.0.checked_sub(step))
+        .map(BlockHeight)
+        .chain(iter::once(BlockHeight(0)))
 }
 
 #[cfg(test)]
