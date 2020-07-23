@@ -34,7 +34,7 @@ const BLOCK_REORG_LIMIT: i64 = 100;
 
 // Passthrough arguments if needed
 fn passthrough(mut cmd: std::process::Command, args: &args::Args) -> std::process::Command {
-    if args.zcli_args.len() > 0 {
+    if !args.zcli_args.is_empty() {
         cmd.args(&args.zcli_args);
     }
     cmd
