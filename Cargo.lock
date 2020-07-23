@@ -204,12 +204,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf1de2fe8c75bc145a2f577add951f8134889b4795d47466a54a5c846d691693"
 
 [[package]]
-name = "bitmaps"
-version = "2.1.0"
+name = "bitvec"
+version = "0.17.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "031043d04099746d8db04daf1fa424b2bc8bd69d92b25962dcde24da39ab64a2"
+checksum = "41262f11d771fd4a61aa3ce019fca363b4b6c282fca9da2a31186d3965a47a5c"
 dependencies = [
- "typenum",
+ "either",
+ "radium",
 ]
 
 [[package]]
@@ -667,6 +668,12 @@ dependencies = [
  "sha2",
  "thiserror",
 ]
+
+[[package]]
+name = "either"
+version = "1.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bb1f6b1ce1c140482ea30ddd3335fc0024ac7ee112895426e0a629a6c20adfe3"
 
 [[package]]
 name = "either"
@@ -2866,6 +2873,7 @@ version = "3.0.0-alpha.0"
 dependencies = [
  "bech32",
  "bincode",
+ "bitvec",
  "blake2b_simd",
  "blake2s_simd",
  "bs58",

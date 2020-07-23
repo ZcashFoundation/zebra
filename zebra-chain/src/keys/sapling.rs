@@ -155,7 +155,7 @@ fn zcash_h() -> jubjub::ExtendedPoint {
 /// Used to derive a diversified base point from a diversifier value.
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#concretediversifyhash
-fn diversify_hash(d: [u8; 11]) -> Option<jubjub::ExtendedPoint> {
+pub fn diversify_hash(d: [u8; 11]) -> Option<jubjub::ExtendedPoint> {
     jubjub_group_hash(*b"Zcash_gd", &d)
 }
 
@@ -620,6 +620,22 @@ impl From<[u8; 11]> for Diversifier {
 impl From<Diversifier> for [u8; 11] {
     fn from(d: Diversifier) -> [u8; 11] {
         d.0
+    }
+}
+
+impl From<Diversifier> for jubjub::AffinePoint {
+    /// Get a diversified base point from a diversifier value in
+    /// affine representation
+    fn from(d: Diversifier) -> jubjub::AffinePoint {
+        jubjub::ExtendedPoint::from(d).into()
+    }
+}
+
+impl From<Diversifier> for jubjub::ExtendedPoint {
+    /// Get a diversified base point from a diversifier value in
+    /// extended representation
+    fn from(d: Diversifier) -> jubjub::ExtendedPoint {
+        diversify_hash(d.0).unwrap()
     }
 }
 
