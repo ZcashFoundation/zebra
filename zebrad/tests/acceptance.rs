@@ -8,8 +8,12 @@ use color_eyre::eyre::Result;
 use std::time::Duration;
 use zebra_test::prelude::*;
 
+mod seed_no_args;
+mod start_args;
+mod start_no_args;
+
 // Todo: The following 3 helper functions can probably be abstracted into one
-fn get_child_single_arg(arg: &str) -> Result<(zebra_test::command::TestChild, impl Drop)> {
+pub fn get_child_single_arg(arg: &str) -> Result<(zebra_test::command::TestChild, impl Drop)> {
     let (mut cmd, guard) = test_cmd(env!("CARGO_BIN_EXE_zebrad"))?;
 
     Ok((
@@ -22,7 +26,7 @@ fn get_child_single_arg(arg: &str) -> Result<(zebra_test::command::TestChild, im
     ))
 }
 
-fn get_child_multi_args(args: &[&str]) -> Result<(zebra_test::command::TestChild, impl Drop)> {
+pub fn get_child_multi_args(args: &[&str]) -> Result<(zebra_test::command::TestChild, impl Drop)> {
     let (mut cmd, guard) = test_cmd(env!("CARGO_BIN_EXE_zebrad"))?;
 
     Ok((
@@ -35,7 +39,7 @@ fn get_child_multi_args(args: &[&str]) -> Result<(zebra_test::command::TestChild
     ))
 }
 
-fn get_child_no_args() -> Result<(zebra_test::command::TestChild, impl Drop)> {
+pub fn get_child_no_args() -> Result<(zebra_test::command::TestChild, impl Drop)> {
     let (mut cmd, guard) = test_cmd(env!("CARGO_BIN_EXE_zebrad"))?;
 
     Ok((
@@ -149,6 +153,7 @@ fn revhex_args() -> Result<()> {
     Ok(())
 }
 
+/*
 #[test]
 fn seed_no_args() -> Result<()> {
     zebra_test::init();
@@ -166,6 +171,7 @@ fn seed_no_args() -> Result<()> {
 
     Ok(())
 }
+*/
 
 #[test]
 fn seed_args() -> Result<()> {
@@ -189,6 +195,7 @@ fn seed_args() -> Result<()> {
     Ok(())
 }
 
+/*
 #[test]
 fn start_no_args() -> Result<()> {
     zebra_test::init();
@@ -227,6 +234,7 @@ fn start_args() -> Result<()> {
 
     Ok(())
 }
+*/
 
 #[test]
 fn app_no_args() -> Result<()> {
