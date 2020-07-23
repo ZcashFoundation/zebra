@@ -65,7 +65,10 @@ impl SledState {
         }
     }
 
-    pub(super) fn get_at(&self, height: BlockHeight) -> Result<Option<BlockHeaderHash>, Error> {
+    pub(super) fn get_main_chain_at(
+        &self,
+        height: BlockHeight,
+    ) -> Result<Option<BlockHeaderHash>, Error> {
         let height_map = self.storage.open_tree(b"height_map")?;
         let key = height.0.to_be_bytes();
         let value = height_map.get(key)?;
@@ -186,7 +189,7 @@ impl Service<Request> for SledState {
 
                     let block_locator = heights
                         .map(|height| {
-                            storage.get_at(height).map(|hash| {
+                            storage.get_main_chain_at(height).map(|hash| {
                                 hash.expect("there should be no holes in the current chain")
                             })
                         })
