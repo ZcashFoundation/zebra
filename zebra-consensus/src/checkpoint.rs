@@ -376,7 +376,17 @@ impl CheckpointVerifier {
         qblocks.reserve_exact(1);
         qblocks.push(new_qblock);
 
-        tracing::debug!("queued block");
+        let is_checkpoint = self.checkpoint_list.contains(height);
+        tracing::debug!(?height, ?hash, ?is_checkpoint, "Queued block");
+
+        // TODO(teor):
+        //   - Remove this log once the CheckpointVerifier is working?
+        //   - Modify the default filter or add another log, so users see
+        //     regular download progress info (vs verification info)
+        if is_checkpoint {
+            tracing::info!(?height, ?hash, ?is_checkpoint, "Queued checkpoint block");
+        }
+
         rx
     }
 
@@ -421,12 +431,16 @@ impl CheckpointVerifier {
                     // The first valid block at the current height
                     valid_qblock = Some(qblock);
                 } else {
+                    tracing::info!(?height, ?qblock.hash, ?expected_hash,
+                                   "Duplicate block at height in CheckpointVerifier");
                     // Reject duplicate blocks at the same height
                     let _ = qblock.tx.send(Err(
                         "duplicate valid blocks at this height, only one was chosen".into(),
                     ));
                 }
             } else {
+                tracing::info!(?height, ?qblock.hash, ?expected_hash,
+                               "Bad block hash at height in CheckpointVerifier");
                 // A bad block, that isn't part of the chain.
                 let _ = qblock.tx.send(Err(
                     "the block hash does not match the chained checkpoint hash".into(),
@@ -509,8 +523,11 @@ impl CheckpointVerifier {
             } else {
                 // The last block height we processed did not have any blocks
                 // with a matching hash, so chain verification has failed.
-                //
-                // TODO(teor||jlusby): log an error here?
+                tracing::warn!(
+                    ?current_height,
+                    ?current_range,
+                    "No valid blocks at height in CheckpointVerifier"
+                );
 
                 // We kept all the matching blocks down to this height, in
                 // anticipation of the chain verifying. But the chain is
@@ -553,6 +570,8 @@ impl CheckpointVerifier {
             expected_hash, previous_checkpoint_hash,
             "the previous checkpoint should match: bad checkpoint list, zebra bug, or bad chain"
         );
+
+        tracing::info!(?current_range, "Verified checkpoint range");
 
         // All the blocks we've kept are valid, so let's verify them
         // in height order.
