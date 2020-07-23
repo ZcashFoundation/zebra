@@ -8,3 +8,7 @@ edition = "2018"
 [dependencies]
 structopt = "0.3.15"
 color-eyre = "0.5.0"
+serde_json = "1.0"
+
+zebra-chain = { path = "../zebra-chain" }
+zebrad = { path = "../zebrad" }

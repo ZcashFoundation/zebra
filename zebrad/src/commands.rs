@@ -23,6 +23,11 @@ use std::path::PathBuf;
 /// Zebrad Configuration Filename
 pub const CONFIG_FILE: &str = "zebrad.toml";
 
+/// Controls how far ahead of the chain tip the syncer tries to download before
+/// waiting for queued verifications to complete. Set to twice the maximum
+/// checkpoint distance.
+pub const LOOKAHEAD_LIMIT: usize = 2 * 2_000;
+
 /// Zebrad Subcommands
 #[derive(Command, Debug, Options, Runnable)]
 pub enum ZebradCmd {

@@ -2,11 +2,19 @@ use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
 pub struct Args {
+    /// Path to zcash-cli command
+    #[structopt(short, long)]
+    pub cli: String,
+
+    /// Use the mainnet network
+    #[structopt(short, long)]
+    pub mainnet: bool,
+
+    /// Use the regtest network
+    #[structopt(short, long)]
+    pub regtest: bool,
+
     /// Use the test network
     #[structopt(short, long)]
     pub testnet: bool,
-
-    /// Passthrough args for `zcash-cli`
-    #[structopt(last = true)]
-    pub zcli_args: Vec<String>,
 }
