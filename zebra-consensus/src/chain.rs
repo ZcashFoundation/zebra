@@ -118,7 +118,7 @@ where
             //             to use BlockVerifier, CheckpointVerifier, or both.
 
             // Call a verifier based on the block height and checkpoints.
-            let _hash = match height {
+            match height {
                 Some(height) if (height <= max_checkpoint_height) => {
                     checkpoint_verifier
                         .ready_and()
@@ -126,7 +126,7 @@ where
                         .call(block.clone())
                         .await?
                 }
-                Some(height) => {
+                _ => {
                     // Temporary trace, for identifying early high blocks.
                     // We think the downloader or sync service should reject these blocks
                     if is_unexpected_high_block {
@@ -138,10 +138,6 @@ where
                         .await?
                         .call(block.clone())
                         .await?
-                }
-                None => {
-                    tracing::debug!("rejecting block with no coinbase height");
-                    return Err("Invalid block: must have a coinbase height".into());
                 }
             };
 
