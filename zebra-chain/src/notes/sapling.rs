@@ -8,7 +8,7 @@ mod commitments;
 mod nullifiers;
 
 use crate::{
-    keys::sapling::{diversify_hash, find_group_hash, Diversifier, TransmissionKey},
+    keys::sapling::{Diversifier, TransmissionKey},
     notes::memo::Memo,
     types::amount::{Amount, NonNegative},
 };
@@ -45,9 +45,14 @@ impl Note {
     ///
     /// https://zips.z.cash/protocol/protocol.pdf#concretewindowedcommit
     pub fn commit(&self) -> NoteCommitment {
-        let g_d = diversify_hash(self.diversifier.0).unwrap();
+        use rand_core::OsRng;
 
-        NoteCommitment::new(g_d, self.transmission_key, self.value)
+        NoteCommitment::new(
+            &mut OsRng,
+            self.diversifier,
+            self.transmission_key,
+            self.value,
+        )
     }
 }
 

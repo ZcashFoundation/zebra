@@ -3,9 +3,10 @@ use std::{fmt, io};
 use rand_core::{CryptoRng, RngCore};
 
 use crate::{
-    keys::sapling::find_group_hash,
+    keys::sapling::{find_group_hash, Diversifier, TransmissionKey},
     serde_helpers,
     serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize},
+    types::amount::{Amount, NonNegative},
 };
 
 // TODO: replace with reference to redjubjub or jubjub when merged and
@@ -64,20 +65,44 @@ impl NoteCommitment {
     ///
     /// https://zips.z.cash/protocol/protocol.pdf#concretewindowedcommit
     #[allow(non_snake_case)]
-    pub fn new<T>(csprng: &mut T, value_bytes: [u8; 32]) -> Self
+    pub fn new<T>(
+        csprng: &mut T,
+        diversifier: Diversifier,
+        transmission_key: TransmissionKey,
+        value: Amount<NonNegative>,
+    ) -> Self
     where
         T: RngCore + CryptoRng,
     {
-        let v = Scalar::from_bytes(&value_bytes).unwrap();
+        // use bitvec::prelude::*;
+        // // s as in the argument name for WindowedPedersenCommit_r(s)
+        // let mut s = BitVec::new();
 
-        let mut rcv_bytes = [0u8; 32];
-        csprng.fill_bytes(&mut rcv_bytes);
-        let rcv = Scalar::from_bytes(&rcv_bytes).unwrap();
+        // // Prefix
+        // s.extend([1, 1, 1, 1, 1, 1].iter());
 
-        let V = find_group_hash(*b"Zcash_cv", b"v");
-        let R = find_group_hash(*b"Zcash_cv", b"r");
+        // // Jubjub repr_J canonical byte encoding
+        // // https://zips.z.cash/protocol/protocol.pdf#jubjub
+        // let g_d_bytes = jubjub::AffinePoint::from(diversifier).to_bytes();
+        // let pk_d_bytes = transmission_key.into();
+        // let v_bytes = value.to_bytes();
 
-        Self::from(V * v + R * rcv)
+        // // Expects i to be 0-indexed
+        // fn I_i(D: [u8; 8], i: u32) -> jubjub::ExtendedPoint {
+        //     find_group_hash(D, i.to_le_bytes())
+        // }
+        // // let v = Scalar::from_bytes(&value_bytes).unwrap();
+
+        // // let mut rcv_bytes = [0u8; 32];
+        // // csprng.fill_bytes(&mut rcv_bytes);
+        // // let rcv = Scalar::from_bytes(&rcv_bytes).unwrap();
+
+        // // let V = find_group_hash(*b"Zcash_cv", b"v");
+        // // let R = find_group_hash(*b"Zcash_cv", b"r");
+
+        // // Self::from(V * v + R * rcv)
+
+        unimplemented!()
     }
 
     /// Hash Extractor for Jubjub (?)
