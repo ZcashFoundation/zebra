@@ -84,6 +84,11 @@ impl Block {
             Err("no coinbase transaction in block")?
         }
     }
+
+    /// Get the hash for the current block
+    pub fn hash(&self) -> BlockHeaderHash {
+        BlockHeaderHash::from(self)
+    }
 }
 
 impl<'a> From<&'a Block> for BlockHeaderHash {

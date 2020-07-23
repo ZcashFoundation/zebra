@@ -8,7 +8,7 @@ use tracing_futures::{Instrument, Instrumented};
 
 use zebra_chain::{
     block::{Block, BlockHeaderHash},
-    types::BlockHeight,
+    Network,
 };
 use zebra_consensus::checkpoint;
 use zebra_network::{self as zn, RetryLimit};
@@ -118,8 +118,25 @@ where
         // Query the current state to construct the sequence of hashes: handled by
         // the caller
         //
-        // TODO(jlusby): get the block_locator from the state
-        let block_locator = vec![super::GENESIS];
+        // TODO(teor): get the real network
+        let network = Network::Mainnet;
+        let block_locator = self
+            .state
+            .ready_and()
+            .await
+            .map_err(|e| eyre!(e))?
+            .call(zebra_state::Request::GetBlockLocator {
+                genesis: zebra_consensus::parameters::genesis_hash(network),
+            })
+            .await
+            .map(|response| match response {
+                zebra_state::Response::BlockLocator { block_locator } => block_locator,
+                _ => unreachable!(
+                    "GetBlockLocator request can only result in Response::BlockLocator"
+                ),
+            })
+            .map_err(|e| eyre!(e))?;
+
         tracing::info!(?block_locator, "trying to obtain new chain tips");
 
         // ObtainTips Step 2
@@ -347,15 +364,6 @@ where
 
         Ok(())
     }
-}
-
-/// Get the heights of the blocks for constructing a block_locator list
-#[allow(dead_code)]
-pub fn block_locator_heights(tip_height: BlockHeight) -> impl Iterator<Item = BlockHeight> {
-    iter::successors(Some(1u32), |h| h.checked_mul(2))
-        .flat_map(move |step| tip_height.0.checked_sub(step))
-        .map(BlockHeight)
-        .chain(iter::once(BlockHeight(0)))
 }
 
 type Error = Box<dyn std::error::Error + Send + Sync + 'static>;

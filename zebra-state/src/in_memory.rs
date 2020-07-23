@@ -60,6 +60,7 @@ impl Service<Request> for InMemoryState {
                 let result = self
                     .index
                     .get_tip()
+                    .map(|block| block.hash())
                     .map(|hash| Response::Tip { hash })
                     .ok_or_else(|| "zebra-state contains no blocks".into());
 
@@ -74,6 +75,35 @@ impl Service<Request> for InMemoryState {
                     Ok(Response::Depth(depth))
                 }
                 .boxed()
+            }
+            Request::GetBlockLocator { genesis } => {
+                let tip = self.index.get_tip();
+                let tip = match tip {
+                    Some(tip) => tip,
+                    None => {
+                        return async move {
+                            Ok(Response::BlockLocator {
+                                block_locator: vec![genesis],
+                            })
+                        }
+                        .boxed()
+                    }
+                };
+
+                let tip_height = tip
+                    .coinbase_height()
+                    .expect("tip block will have a coinbase height");
+
+                let block_locator = crate::block_locator_heights(tip_height)
+                    .map(|height| {
+                        self.index
+                            .get(height)
+                            .expect("there should be no holes in the chain")
+                            .hash()
+                    })
+                    .collect();
+
+                async move { Ok(Response::BlockLocator { block_locator }) }.boxed()
             }
         }
     }
