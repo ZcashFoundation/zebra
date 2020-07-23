@@ -10,7 +10,7 @@ use zebra_chain::{
 #[derive(Default)]
 pub(super) struct BlockIndex {
     by_hash: HashMap<BlockHeaderHash, Arc<Block>>,
-    by_height: BTreeMap<BlockHeight, BlockHeaderHash>,
+    height_map: BTreeMap<BlockHeight, BlockHeaderHash>,
 }
 
 impl BlockIndex {
@@ -22,7 +22,7 @@ impl BlockIndex {
         let hash = block.as_ref().into();
         let height = block.coinbase_height().unwrap();
 
-        match self.by_height.entry(height) {
+        match self.height_map.entry(height) {
             Entry::Vacant(entry) => {
                 let _ = entry.insert(hash);
                 let _ = self.by_hash.insert(hash, block);
@@ -37,11 +37,11 @@ impl BlockIndex {
     }
 
     pub(super) fn get_at(&self, height: BlockHeight) -> Option<BlockHeaderHash> {
-        self.by_height.get(&height).cloned()
+        self.height_map.get(&height).cloned()
     }
 
     pub(super) fn get_tip(&self) -> Option<Arc<Block>> {
-        self.by_height.iter().next_back().map(|(_height, &hash)| {
+        self.height_map.iter().next_back().map(|(_height, &hash)| {
             self.get(hash)
                 .expect("block must be in pool to be in the height map")
         })

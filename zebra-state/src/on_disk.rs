@@ -38,14 +38,14 @@ impl SledState {
         let hash: BlockHeaderHash = block.as_ref().into();
         let height = block.coinbase_height().unwrap();
 
-        let heigh_map = self.storage.open_tree(b"heigh_map")?;
+        let height_map = self.storage.open_tree(b"height_map")?;
         let by_hash = self.storage.open_tree(b"by_hash")?;
 
         let mut bytes = Vec::new();
         block.zcash_serialize(&mut bytes)?;
 
         // TODO(jlusby): make this transactional
-        heigh_map.insert(&height.0.to_be_bytes(), &hash.0)?;
+        height_map.insert(&height.0.to_be_bytes(), &hash.0)?;
         by_hash.insert(&hash.0, bytes)?;
 
         Ok(hash)
@@ -66,9 +66,9 @@ impl SledState {
     }
 
     pub(super) fn get_at(&self, height: BlockHeight) -> Result<Option<BlockHeaderHash>, Error> {
-        let heigh_map = self.storage.open_tree(b"heigh_map")?;
+        let height_map = self.storage.open_tree(b"height_map")?;
         let key = height.0.to_be_bytes();
-        let value = heigh_map.get(key)?;
+        let value = height_map.get(key)?;
 
         if let Some(bytes) = value {
             let bytes = bytes.as_ref();
@@ -80,7 +80,7 @@ impl SledState {
     }
 
     pub(super) fn get_tip(&self) -> Result<Option<Arc<Block>>, Error> {
-        let tree = self.storage.open_tree(b"heigh_map")?;
+        let tree = self.storage.open_tree(b"height_map")?;
         let last_entry = tree.iter().values().next_back();
 
         match last_entry {
