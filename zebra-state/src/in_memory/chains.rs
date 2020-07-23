@@ -6,7 +6,7 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-use tower::Service;
+use tower::{Service, ServiceExt};
 use zebra_chain::{
     block::{Block, BlockHeaderHash},
     types::BlockHeight,
@@ -81,9 +81,19 @@ impl<S> ChainsState<S> {
 
         Err("parent hash not found in chain state")?
     }
+
+    /// Remove blocks from chains that should be persisted to the storage layer.
+    fn pop_finalized_block(&mut self) -> Option<Arc<Block>> {
+        todo!()
+    }
 }
 
-impl<S> Service<Request> for ChainsState<S> {
+impl<S> Service<Request> for ChainsState<S>
+where
+    S: Service<Request, Response = Response, Error = Error>,
+    S: Clone + Send + 'static,
+    S::Future: Send + 'static,
+{
     type Response = Response;
     type Error = Error;
     type Future =
@@ -96,7 +106,31 @@ impl<S> Service<Request> for ChainsState<S> {
     fn call(&mut self, req: Request) -> Self::Future {
         tracing::debug!(?req);
         match req {
-            Request::AddBlock { block } => todo!(),
+            Request::AddBlock { block } => {
+                let result = self.insert(block).map(|hash| {
+                    let finalized = self.pop_finalized_block();
+                    (hash, finalized)
+                });
+                let mut storage = self.inner.clone();
+
+                async move {
+                    let (hash, finalized_block) = result?;
+
+                    if let Some(block) = finalized_block {
+                        storage
+                            .ready_and()
+                            .await?
+                            .call(Request::AddBlock { block })
+                            .await
+                            .expect(
+                                "block has already been validated and should insert without errors",
+                            );
+                    }
+
+                    Ok(Response::Added { hash })
+                }
+                .boxed()
+            }
             Request::GetBlock { hash } => todo!(),
             Request::GetTip => todo!(),
             Request::GetDepth { hash } => todo!(),
