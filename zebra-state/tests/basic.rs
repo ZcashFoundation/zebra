@@ -65,7 +65,7 @@ async fn check_transcripts() -> Result<(), Report> {
 
         let storage_guard = TempDir::new("")?;
         let service = on_disk::init(Config {
-            path: Some(storage_guard.path().to_owned()),
+            cache_dir: Some(storage_guard.path().to_owned()),
         });
         let transcript = Transcript::from(transcript_data.iter().cloned());
         /// SPANDOC: check the on disk service against the transcript
