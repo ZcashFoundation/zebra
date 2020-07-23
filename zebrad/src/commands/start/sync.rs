@@ -136,7 +136,7 @@ where
                 ),
             })
             .map_err(|e| eyre!(e))?;
-        let mut tip_futs = FuturesUnordered::new();
+
         tracing::info!(?block_locator, "trying to obtain new chain tips");
 
         // ObtainTips Step 2
