@@ -45,7 +45,7 @@ async fn single_item_checkpoint_list() -> Result<(), Report> {
             .collect();
 
     let mut checkpoint_verifier =
-        CheckpointVerifier::from_list(genesis_checkpoint_list).map_err(|e| eyre!(e))?;
+        CheckpointVerifier::from_list(genesis_checkpoint_list, None).map_err(|e| eyre!(e))?;
 
     assert_eq!(
         checkpoint_verifier.previous_checkpoint_height(),
@@ -125,7 +125,7 @@ async fn multi_item_checkpoint_list() -> Result<(), Report> {
         .collect();
 
     let mut checkpoint_verifier =
-        CheckpointVerifier::from_list(checkpoint_list).map_err(|e| eyre!(e))?;
+        CheckpointVerifier::from_list(checkpoint_list, None).map_err(|e| eyre!(e))?;
 
     assert_eq!(
         checkpoint_verifier.previous_checkpoint_height(),
@@ -252,7 +252,7 @@ async fn continuous_blockchain() -> Result<(), Report> {
         .collect();
 
     let mut checkpoint_verifier =
-        CheckpointVerifier::from_list(checkpoint_list).map_err(|e| eyre!(e))?;
+        CheckpointVerifier::from_list(checkpoint_list, None).map_err(|e| eyre!(e))?;
 
     // Setup checks
     assert_eq!(
@@ -349,7 +349,7 @@ async fn block_higher_than_max_checkpoint_fail() -> Result<(), Report> {
             .collect();
 
     let mut checkpoint_verifier =
-        CheckpointVerifier::from_list(genesis_checkpoint_list).map_err(|e| eyre!(e))?;
+        CheckpointVerifier::from_list(genesis_checkpoint_list, None).map_err(|e| eyre!(e))?;
 
     assert_eq!(
         checkpoint_verifier.previous_checkpoint_height(),
@@ -424,7 +424,7 @@ async fn wrong_checkpoint_hash_fail() -> Result<(), Report> {
             .collect();
 
     let mut checkpoint_verifier =
-        CheckpointVerifier::from_list(genesis_checkpoint_list).map_err(|e| eyre!(e))?;
+        CheckpointVerifier::from_list(genesis_checkpoint_list, None).map_err(|e| eyre!(e))?;
 
     assert_eq!(
         checkpoint_verifier.previous_checkpoint_height(),
@@ -604,7 +604,7 @@ async fn checkpoint_drop_cancel() -> Result<(), Report> {
         .collect();
 
     let mut checkpoint_verifier =
-        CheckpointVerifier::from_list(checkpoint_list).map_err(|e| eyre!(e))?;
+        CheckpointVerifier::from_list(checkpoint_list, None).map_err(|e| eyre!(e))?;
 
     assert_eq!(
         checkpoint_verifier.previous_checkpoint_height(),
@@ -688,7 +688,7 @@ async fn hard_coded_mainnet() -> Result<(), Report> {
     let hash0: BlockHeaderHash = block0.as_ref().into();
 
     // Use the hard-coded checkpoint list
-    let mut checkpoint_verifier = CheckpointVerifier::new(Network::Mainnet);
+    let mut checkpoint_verifier = CheckpointVerifier::new(Network::Mainnet, None);
 
     assert_eq!(
         checkpoint_verifier.previous_checkpoint_height(),

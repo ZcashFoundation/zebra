@@ -192,7 +192,7 @@ where
     tracing::debug!(?network, "initialising ChainVerifier from network");
 
     let block_verifier = crate::block::init(state_service.clone());
-    let checkpoint_verifier = CheckpointVerifier::new(network);
+    let checkpoint_verifier = CheckpointVerifier::new(network, None);
 
     init_from_verifiers(block_verifier, checkpoint_verifier, state_service)
 }
@@ -214,7 +214,6 @@ where
 /// bugs.
 pub fn init_from_verifiers<BV, S>(
     block_verifier: BV,
-    // We use an explcit type, so callers can't accidentally swap the verifiers
     checkpoint_verifier: CheckpointVerifier,
     state_service: S,
 ) -> impl Service<

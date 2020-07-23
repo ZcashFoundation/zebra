@@ -111,20 +111,28 @@ pub struct CheckpointVerifier {
 /// Contains non-service utility functions for CheckpointVerifiers.
 impl CheckpointVerifier {
     /// Return a checkpoint verification service for `network`, using the
+    /// hard-coded checkpoint list. If `initial_tip` is Some(_), the
+    /// verifier starts at that initial tip, which does not have to be in the
     /// hard-coded checkpoint list.
     ///
     /// This function should be called only once for a particular network, rather
     /// than constructing multiple verification services for the same network. To
-    /// Clone a CheckpointVerifier, you might need to wrap it in a
+    /// clone a CheckpointVerifier, you might need to wrap it in a
     /// `tower::Buffer` service.
-    pub fn new(network: Network) -> Self {
+    pub fn new(network: Network, initial_tip: Option<Arc<Block>>) -> Self {
         let checkpoint_list = CheckpointList::new(network);
         let max_height = checkpoint_list.max_height();
-        tracing::info!(?max_height, ?network, "initialising CheckpointVerifier");
-        Self::from_checkpoint_list(checkpoint_list)
+        let initial_height = initial_tip.clone().map(|b| b.coinbase_height()).flatten();
+        tracing::info!(
+            ?max_height,
+            ?network,
+            ?initial_height,
+            "initialising CheckpointVerifier"
+        );
+        Self::from_checkpoint_list(checkpoint_list, initial_tip)
     }
 
-    /// Return a checkpoint verification service using `list`.
+    /// Return a checkpoint verification service using `list` and `initial_tip`.
     ///
     /// Assumes that the provided genesis checkpoint is correct.
     ///
@@ -136,23 +144,35 @@ impl CheckpointVerifier {
     #[allow(dead_code)]
     pub(crate) fn from_list(
         list: impl IntoIterator<Item = (BlockHeight, BlockHeaderHash)>,
+        initial_tip: Option<Arc<Block>>,
     ) -> Result<Self, Error> {
-        Ok(Self::from_checkpoint_list(CheckpointList::from_list(list)?))
+        Ok(Self::from_checkpoint_list(
+            CheckpointList::from_list(list)?,
+            initial_tip,
+        ))
     }
 
-    /// Return a checkpoint verification service using `checkpoint_list`.
+    /// Return a checkpoint verification service using `checkpoint_list` and
+    /// `initial_tip`.
     ///
     /// Callers should prefer `CheckpointVerifier::new`, which uses the
     /// hard-coded checkpoint lists. See `CheckpointVerifier::new` and
     /// `CheckpointList::from_list` for more details.
-    pub(crate) fn from_checkpoint_list(checkpoint_list: CheckpointList) -> Self {
+    pub(crate) fn from_checkpoint_list(
+        checkpoint_list: CheckpointList,
+        initial_tip: Option<Arc<Block>>,
+    ) -> Self {
         // All the initialisers should call this function, so we only have to
         // change fields or default values in one place.
+        let verifier_progress = match initial_tip {
+            Some(_) => unimplemented!(),
+            // We start by verifying the genesis block, by itself
+            None => Progress::BeforeGenesis,
+        };
         CheckpointVerifier {
             checkpoint_list,
             queued: BTreeMap::new(),
-            // We start by verifying the genesis block, by itself
-            verifier_progress: Progress::BeforeGenesis,
+            verifier_progress,
         }
     }
 
