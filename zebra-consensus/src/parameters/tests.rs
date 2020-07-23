@@ -80,8 +80,8 @@ fn activation_consistent_testnet() {
     activation_consistent(Testnet)
 }
 
-/// Check that the activation_height, current, and next functions are
-/// consistent for `network`.
+/// Check that the activation_height, current, and next functions are consistent
+/// for `network`.
 fn activation_consistent(network: Network) {
     let activation_list = NetworkUpgrade::activation_list(network);
     let network_upgrades: HashSet<&NetworkUpgrade> = activation_list.values().collect();
