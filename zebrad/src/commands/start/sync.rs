@@ -261,16 +261,20 @@ where
                         // It indicates that the remote peer does not have any blocks
                         // following the prospective tip.
                         // TODO(jlusby): reject both main and test net genesis blocks
-                        match hashes.first() {
-                            Some(&super::GENESIS) => {
-                                tracing::debug!("skipping response, peer could not extend the tip");
-                                continue;
-                            }
-                            None => {
+                        match (hashes.first(), hashes.len()) {
+                            (_, 0) => {
                                 tracing::debug!("skipping empty response");
                                 continue;
                             }
-                            Some(_) => {}
+                            (_, 1) => {
+                                tracing::debug!("skipping length-1 response, in case it's an unsolicited inv message");
+                                continue;
+                            }
+                            (Some(&super::GENESIS), _) => {
+                                tracing::debug!("skipping response, peer could not extend the tip");
+                                continue;
+                            }
+                            _ => {}
                         }
 
                         let new_tip = hashes.pop().expect("expected: hashes must have len > 0");
