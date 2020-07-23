@@ -30,20 +30,38 @@ pub mod on_disk;
 #[serde(deny_unknown_fields)]
 pub struct Config {
     /// The root directory for the state storage
-    pub path: PathBuf,
+    pub cache_dir: Option<PathBuf>,
 }
 
 impl Config {
+    /// Generate the appropriate `sled::Config` based on the provided
+    /// `zebra_state::Config`.
+    ///
+    /// # Details
+    ///
+    /// This function should panic if the user of `zebra-state` doesn't configure
+    /// a directory to store the state.
     pub(crate) fn sled_config(&self) -> sled::Config {
-        sled::Config::default().path(&self.path)
+        let path = self
+            .cache_dir
+            .as_ref()
+            .unwrap_or_else(|| {
+                todo!("create a nice user facing error explaining how to set the cache directory")
+            })
+            .join("state");
+
+        sled::Config::default().path(path)
     }
 }
 
 impl Default for Config {
     fn default() -> Self {
-        Self {
-            path: PathBuf::from("./.zebra-state"),
-        }
+        let cache_dir = std::env::var("ZEBRAD_CACHE_DIR")
+            .map(PathBuf::from)
+            .ok()
+            .or_else(|| dirs::cache_dir().map(|dir| dir.join("zebra")));
+
+        Self { cache_dir }
     }
 }
 
@@ -113,4 +131,18 @@ fn block_locator_heights(tip_height: BlockHeight) -> impl Iterator<Item = BlockH
         .flat_map(move |step| tip_height.0.checked_sub(step))
         .map(BlockHeight)
         .chain(iter::once(BlockHeight(0)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[should_panic]
+    fn test_no_path() {
+        zebra_test::init();
+
+        let bad_config = Config { cache_dir: None };
+        let _unreachable = bad_config.sled_config();
+    }
 }

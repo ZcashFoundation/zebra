@@ -49,6 +49,10 @@ static GET_TIP_TRANSCRIPT: Lazy<Vec<(Request, Response)>> = Lazy::new(|| {
 });
 
 #[tokio::test]
+async fn check_transcripts_test() -> Result<(), Report> {
+    check_transcripts().await
+}
+
 #[spandoc::spandoc]
 async fn check_transcripts() -> Result<(), Report> {
     zebra_test::init();
@@ -61,7 +65,7 @@ async fn check_transcripts() -> Result<(), Report> {
 
         let storage_guard = TempDir::new("")?;
         let service = on_disk::init(Config {
-            path: storage_guard.path().to_owned(),
+            cache_dir: Some(storage_guard.path().to_owned()),
         });
         let transcript = Transcript::from(transcript_data.iter().cloned());
         /// SPANDOC: check the on disk service against the transcript
