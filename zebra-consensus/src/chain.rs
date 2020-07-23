@@ -160,9 +160,9 @@ where
     }
 }
 
-/// Return a chain verification service, using `network` and the provided state
-/// service. The network is used to create a block verifier and checkpoint
-/// verifier.
+/// Return a chain verification service, using `network`, `state_service`, and
+/// `initial_tip`. These arguments are used to create a block verifier and
+/// checkpoint verifier.
 ///
 /// This function should only be called once for a particular state service. If
 /// you need shared block or checkpoint verfiers, create them yourself, and pass
@@ -174,6 +174,7 @@ where
 pub fn init<S>(
     network: Network,
     state_service: S,
+    initial_tip: Option<Arc<Block>>,
 ) -> impl Service<
     Arc<Block>,
     Response = BlockHeaderHash,
@@ -192,7 +193,7 @@ where
     tracing::debug!(?network, "initialising ChainVerifier from network");
 
     let block_verifier = crate::block::init(state_service.clone());
-    let checkpoint_verifier = CheckpointVerifier::new(network, None);
+    let checkpoint_verifier = CheckpointVerifier::new(network, initial_tip);
 
     init_from_verifiers(block_verifier, checkpoint_verifier, state_service)
 }
