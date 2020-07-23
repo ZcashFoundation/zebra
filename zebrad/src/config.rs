@@ -9,6 +9,7 @@ use std::net::SocketAddr;
 use serde::{Deserialize, Serialize};
 
 use zebra_network::Config as NetworkSection;
+use zebra_state::Config as StateSection;
 
 /// Configuration for `zebrad`.
 ///
@@ -18,12 +19,17 @@ use zebra_network::Config as NetworkSection;
 #[derive(Clone, Default, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct ZebradConfig {
-    /// Tracing configuration
-    pub tracing: TracingSection,
-    /// Networking configuration
-    pub network: NetworkSection,
     /// Metrics configuration
     pub metrics: MetricsSection,
+
+    /// Networking configuration
+    pub network: NetworkSection,
+
+    /// State configuration
+    pub state: StateSection,
+
+    /// Tracing configuration
+    pub tracing: TracingSection,
 }
 
 /// Tracing configuration section.

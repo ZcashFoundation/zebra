@@ -1,4 +1,4 @@
-//! Block verification and chain state updates for Zebra.
+//! Block verification for Zebra.
 //!
 //! Verification occurs in multiple stages:
 //!   - getting blocks (disk- or network-bound)
@@ -20,12 +20,14 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-use tower::{buffer::Buffer, Service, ServiceExt};
+use tower::{buffer::Buffer, Service};
 
 use zebra_chain::block::{Block, BlockHeaderHash};
 
 struct BlockVerifier<S> {
     /// The underlying `ZebraState`, possibly wrapped in other services.
+    // TODO: contextual verification
+    #[allow(dead_code)]
     state_service: S,
 }
 
@@ -35,7 +37,8 @@ type Error = Box<dyn error::Error + Send + Sync + 'static>;
 
 /// The BlockVerifier service implementation.
 ///
-/// After verification, blocks are added to the underlying state service.
+/// The state service is only used for contextual verification.
+/// (The `ChainVerifier` updates the state.)
 impl<S> Service<Arc<Block>> for BlockVerifier<S>
 where
     S: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>
@@ -50,17 +53,14 @@ where
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        // We don't expect the state to exert backpressure on verifier users,
-        // so we don't need to call `state_service.poll_ready()` here.
+        // We use the state for contextual verification, and we expect those
+        // queries to be fast. So we don't need to call
+        // `state_service.poll_ready()` here.
         Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, block: Arc<Block>) -> Self::Future {
         // TODO(jlusby): Error = Report, handle errors from state_service.
-        // TODO(teor):
-        //   - handle chain reorgs
-        //   - adjust state_service "unique block height" conditions
-        let mut state_service = self.state_service.clone();
 
         async move {
             // Since errors cause an early exit, try to do the
@@ -71,18 +71,11 @@ where
             block.header.is_equihash_solution_valid()?;
             block.is_coinbase_first()?;
 
-            // `Tower::Buffer` requires a 1:1 relationship between `poll()`s
-            // and `call()`s, because it reserves a buffer slot in each
-            // `call()`.
-            let add_block = state_service
-                .ready_and()
-                .await?
-                .call(zebra_state::Request::AddBlock { block });
+            // TODO:
+            //   - header verification
+            //   - contextual verification
 
-            match add_block.await? {
-                zebra_state::Response::Added { hash } => Ok(hash),
-                _ => Err("adding block to zebra-state failed".into()),
-            }
+            Ok(block.as_ref().into())
         }
         .boxed()
     }
@@ -91,19 +84,16 @@ where
 /// Return a block verification service, using the provided state service.
 ///
 /// The block verifier holds a state service of type `S`, used as context for
-/// block validation and to which newly verified blocks will be committed. This
-/// state is pluggable to allow for testing or instrumentation.
+/// block validation. This state is pluggable to allow for testing or
+/// instrumentation.
 ///
 /// The returned type is opaque to allow instrumentation or other wrappers, but
 /// can be boxed for storage. It is also `Clone` to allow sharing of a
 /// verification service.
 ///
 /// This function should be called only once for a particular state service (and
-/// the result be shared) rather than constructing multiple verification services
-/// backed by the same state layer.
-//
-// Only used by tests and other modules
-#[allow(dead_code)]
+/// the result be shared, cloning if needed). Constructing multiple services
+/// from the same underlying state might cause synchronisation bugs.
 pub fn init<S>(
     state_service: S,
 ) -> impl Service<

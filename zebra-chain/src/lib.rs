@@ -24,6 +24,7 @@ pub mod proofs;
 pub mod serialization;
 pub mod transaction;
 pub mod types;
+pub mod utils;
 
 pub use ed25519_zebra;
 pub use redjubjub;
