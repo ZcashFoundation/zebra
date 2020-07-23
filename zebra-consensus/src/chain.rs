@@ -118,7 +118,7 @@ where
             //             to use BlockVerifier, CheckpointVerifier, or both.
 
             // Call a verifier based on the block height and checkpoints.
-            let hash = match height {
+            let _hash = match height {
                 Some(height) if (height <= max_checkpoint_height) => {
                     checkpoint_verifier
                         .ready_and()
