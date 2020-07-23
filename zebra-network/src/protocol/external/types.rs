@@ -1,12 +1,15 @@
 #![allow(clippy::unit_arg)]
+
+use crate::constants::magics;
+
 use std::fmt;
+
+use zebra_chain::types::BlockHeight;
+use zebra_chain::Network::{self, *};
+use zebra_consensus::parameters::NetworkUpgrade::{self, *};
 
 #[cfg(test)]
 use proptest_derive::Arbitrary;
-
-use zebra_chain::Network;
-
-use crate::constants::magics;
 
 /// A magic number identifying the network.
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -32,6 +35,35 @@ impl From<Network> for Magic {
 /// A protocol version number.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Version(pub u32);
+
+impl Version {
+    /// Returns the minimum network protocol version for `network` and
+    /// `network_upgrade`.
+    pub fn min_for_upgrade(network: Network, network_upgrade: NetworkUpgrade) -> Self {
+        // TODO: Should we reject earlier protocol versions during our initial
+        //       sync? zcashd accepts 170_002 or later during its initial sync.
+        Version(match (network, network_upgrade) {
+            (_, BeforeOverwinter) => 170_002,
+            (Testnet, Overwinter) => 170_003,
+            (Mainnet, Overwinter) => 170_005,
+            (_, Sapling) => 170_007,
+            (Testnet, Blossom) => 170_008,
+            (Mainnet, Blossom) => 170_009,
+            (Testnet, Heartwood) => 170_010,
+            (Mainnet, Heartwood) => 170_011,
+            (Testnet, Canopy) => 170_012,
+            (Mainnet, Canopy) => 170_013,
+        })
+    }
+
+    /// Returns the current minimum protocol version for `network` and `height`.
+    ///
+    /// Returns None if the network has no branch id at this height.
+    pub fn current_min(network: Network, height: BlockHeight) -> Version {
+        let network_upgrade = NetworkUpgrade::current(network, height);
+        Version::min_for_upgrade(network, network_upgrade)
+    }
+}
 
 bitflags! {
     /// A bitflag describing services advertised by a node in the network.
@@ -94,6 +126,72 @@ mod proptest {
         #[test]
         fn proptest_magic_from_array(data in any::<[u8; 4]>()) {
             assert_eq!(format!("{:?}", Magic(data)), format!("Magic({:x?})", hex::encode(data)));
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn version_extremes_mainnet() {
+        version_extremes(Mainnet)
+    }
+
+    #[test]
+    fn version_extremes_testnet() {
+        version_extremes(Testnet)
+    }
+
+    /// Test the min_for_upgrade and current_min functions for `network` with
+    /// extreme values.
+    fn version_extremes(network: Network) {
+        assert_eq!(
+            Version::current_min(network, BlockHeight(0)),
+            Version::min_for_upgrade(network, BeforeOverwinter),
+        );
+
+        // We assume that the last version we know about continues forever
+        // (even if we suspect that won't be true)
+        assert_ne!(
+            Version::current_min(network, BlockHeight::MAX),
+            Version::min_for_upgrade(network, BeforeOverwinter),
+        );
+    }
+
+    #[test]
+    fn version_consistent_mainnet() {
+        version_consistent(Mainnet)
+    }
+
+    #[test]
+    fn version_consistent_testnet() {
+        version_consistent(Testnet)
+    }
+
+    /// Check that the min_for_upgrade and current_min functions
+    /// are consistent for `network`.
+    fn version_consistent(network: Network) {
+        let highest_network_upgrade = NetworkUpgrade::current(network, BlockHeight::MAX);
+        assert!(highest_network_upgrade == Canopy || highest_network_upgrade == Heartwood,
+                "expected coverage of all network upgrades: add the new network upgrade to the list in this test");
+
+        for &network_upgrade in &[
+            BeforeOverwinter,
+            Overwinter,
+            Sapling,
+            Blossom,
+            Heartwood,
+            Canopy,
+        ] {
+            let height = network_upgrade.activation_height(network);
+            if let Some(height) = height {
+                assert_eq!(
+                    Version::min_for_upgrade(network, network_upgrade),
+                    Version::current_min(network, height)
+                );
+            }
         }
     }
 }

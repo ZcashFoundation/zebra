@@ -16,6 +16,9 @@ use super::{ErrorSlot, SharedPeerError};
 
 /// The "client" duplex half of a peer connection.
 pub struct Client {
+    // Used to shut down the corresponding heartbeat.
+    // This is always Some except when we take it on drop.
+    pub(super) shutdown_tx: Option<oneshot::Sender<()>>,
     pub(super) server_tx: mpsc::Sender<ClientRequest>,
     pub(super) error_slot: ErrorSlot,
 }
@@ -83,5 +86,15 @@ impl Service<Request> for Client {
                 .boxed()
             }
         }
+    }
+}
+
+impl Drop for Client {
+    fn drop(&mut self) {
+        let _ = self
+            .shutdown_tx
+            .take()
+            .expect("must not drop twice")
+            .send(());
     }
 }

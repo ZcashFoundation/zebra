@@ -5,6 +5,8 @@ use std::time::Duration;
 // XXX should these constants be split into protocol also?
 use crate::protocol::external::types::*;
 
+use zebra_consensus::parameters::NetworkUpgrade::{self, *};
+
 /// The timeout for requests made to a remote peer.
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -34,11 +36,19 @@ pub const TIMESTAMP_TRUNCATION_SECONDS: i64 = 30 * 60;
 /// The User-Agent string provided by the node.
 pub const USER_AGENT: &str = "🦓Zebra v2.0.0-alpha.0🦓";
 
-/// The Zcash network protocol version used on mainnet.
-pub const CURRENT_VERSION: Version = Version(170_009);
+/// The Zcash network protocol version implemented by this crate.
+///
+/// This protocol version might be the current version on Mainnet or Testnet,
+/// based on where we are in the network upgrade cycle.
+pub const CURRENT_VERSION: Version = Version(170_011);
 
-/// The minimum version supported for peer connections.
-pub const MIN_VERSION: Version = Version(170_009);
+/// The most recent bilateral consensus upgrade implemented by this crate.
+///
+/// Used to select the minimum supported version for peer connections.
+//
+// TODO: replace with NetworkUpgrade::current(network, height).
+//       See the detailed comment in handshake.rs, where this constant is used.
+pub const MIN_NETWORK_UPGRADE: NetworkUpgrade = Heartwood;
 
 /// Magic numbers used to identify different Zcash networks.
 pub mod magics {
