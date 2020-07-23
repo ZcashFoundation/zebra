@@ -73,6 +73,10 @@ where
 
     #[instrument(skip(self))]
     pub async fn sync(&mut self) -> Result<(), Report> {
+        // We can't download the genesis block using our normal algorithm,
+        // due to protocol limitations
+        self.request_genesis().await?;
+
         loop {
             self.obtain_tips().await?;
             metrics::gauge!(
@@ -215,8 +219,7 @@ where
                         "found index of first unknown hash in response"
                     );
                     if first_unknown == hashes.len() {
-                        // XXX until we fix the TODO above to construct the locator correctly,
-                        // we might hit this case, but it will be unexpected afterwards.
+                        // We should only stop getting hashes once we've finished the initial sync
                         tracing::debug!("no new hashes, even though we gave our tip?");
                         continue;
                     }
@@ -298,7 +301,6 @@ where
                         // response is the genesis block; if so, discard the response.
                         // It indicates that the remote peer does not have any blocks
                         // following the prospective tip.
-                        // TODO(jlusby): reject both main and test net genesis blocks
                         match (hashes.first(), hashes.len()) {
                             (_, 0) => {
                                 tracing::debug!("skipping empty response");
@@ -351,6 +353,35 @@ where
                 .collect(),
         )
         .await?;
+
+        Ok(())
+    }
+
+    /// Queue a download for the genesis block, if it isn't currently known to
+    /// our node.
+    async fn request_genesis(&mut self) -> Result<(), Report> {
+        // Due to Bitcoin protocol limitations, we can't request the genesis
+        // block using our standard tip-following algorithm:
+        //  - getblocks requires at least one hash
+        //  - responses start with the block *after* the requested block, and
+        //  - the genesis hash is used as a placeholder for "no matches".
+        //
+        // So we just queue the genesis block here.
+
+        let state_has_genesis = self
+            .state
+            .ready_and()
+            .await
+            .map_err(|e| eyre!(e))?
+            .call(zebra_state::Request::GetBlock {
+                hash: self.genesis_hash,
+            })
+            .await
+            .is_ok();
+
+        if !state_has_genesis {
+            self.request_blocks(vec![self.genesis_hash]).await?;
+        }
 
         Ok(())
     }
