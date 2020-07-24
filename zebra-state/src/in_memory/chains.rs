@@ -16,6 +16,7 @@ use zebra_chain::{
 #[derive(Clone, Debug)]
 struct ChainState {
     block: Arc<Block>,
+    // TODO: add more state here
 }
 
 /// A persistent data structure representing the end of a chain
