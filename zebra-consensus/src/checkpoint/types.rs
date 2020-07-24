@@ -12,8 +12,18 @@ use Target::*;
 pub enum Progress<HeightOrHash> {
     /// We have not verified any blocks yet.
     BeforeGenesis,
+
+    /// We have verified up to and including this initial tip.
+    ///
+    /// Initial tips might not be one of our hard-coded checkpoints, because we
+    /// might have:
+    ///   - changed the checkpoint spacing, or
+    ///   - added new checkpoints above the initial tip.
+    InitialTip(HeightOrHash),
+
     /// We have verified up to and including this checkpoint.
     PreviousCheckpoint(HeightOrHash),
+
     /// We have finished verifying.
     ///
     /// The final checkpoint is not included in this variant. The verifier has
@@ -33,7 +43,10 @@ impl Ord for Progress<BlockHeight> {
             (_, BeforeGenesis) => Ordering::Greater,
             (FinalCheckpoint, _) => Ordering::Greater,
             (_, FinalCheckpoint) => Ordering::Less,
-            (PreviousCheckpoint(self_height), PreviousCheckpoint(other_height)) => {
+            (InitialTip(self_height), InitialTip(other_height))
+            | (InitialTip(self_height), PreviousCheckpoint(other_height))
+            | (PreviousCheckpoint(self_height), InitialTip(other_height))
+            | (PreviousCheckpoint(self_height), PreviousCheckpoint(other_height)) => {
                 self_height.cmp(other_height)
             }
         }
