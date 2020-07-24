@@ -11,10 +11,11 @@ edition = "2018"
 zebra-chain = { path = "../zebra-chain" }
 
 color-eyre = "0.5"
+dirs = "3.0.1"
 hex = "0.4.2"
 lazy_static = "1.4.0"
 serde = { version = "1", features = ["serde_derive"] }
-sled = "0.33.0"
+sled = "0.34.0"
 
 futures = "0.3.5"
 tower = "0.3.1"
