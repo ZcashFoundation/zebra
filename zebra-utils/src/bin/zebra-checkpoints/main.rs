@@ -19,10 +19,6 @@ use zebra_chain::types::BlockHeight;
 
 mod args;
 
-/// We limit the maximum number of blocks in each checkpoint. Each block uses a
-/// constant amount of memory for the supporting data structures and futures.
-const MAX_CHECKPOINT_HEIGHT_GAP: usize = zebrad::commands::LOOKAHEAD_LIMIT / 2;
-
 /// We limit the memory usage for each checkpoint, based on the cumulative size of
 /// the serialized blocks in the chain. Deserialized blocks are larger, because
 /// they contain pointers and non-compact integers. But they should be within a
@@ -100,7 +96,7 @@ fn main() -> Result<()> {
         // check if checkpoint
         if height == BlockHeight(0)
             || cumulative_bytes >= MAX_CHECKPOINT_BYTE_COUNT
-            || height_gap.0 >= MAX_CHECKPOINT_HEIGHT_GAP as u32
+            || height_gap.0 >= zebra_consensus::checkpoint::MAX_CHECKPOINT_HEIGHT_GAP as u32
         {
             // print to output
             println!(

@@ -77,6 +77,10 @@ type QueuedBlockList = Vec<QueuedBlock>;
 /// usage by committing blocks to the disk state. (Or dropping invalid blocks.)
 pub const MAX_QUEUED_BLOCKS_PER_HEIGHT: usize = 4;
 
+/// We limit the maximum number of blocks in each checkpoint. Each block uses a
+/// constant amount of memory for the supporting data structures and futures.
+pub const MAX_CHECKPOINT_HEIGHT_GAP: usize = 2_000;
+
 /// A checkpointing block verifier.
 ///
 /// Verifies blocks using a supplied list of checkpoints. There must be at

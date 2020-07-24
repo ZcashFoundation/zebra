@@ -17,6 +17,10 @@ use zebra_state as zs;
 
 // XXX in the future, we may not be able to access the checkpoint module.
 const FANOUT: usize = checkpoint::MAX_QUEUED_BLOCKS_PER_HEIGHT;
+/// Controls how far ahead of the chain tip the syncer tries to download before
+/// waiting for queued verifications to complete. Set to twice the maximum
+/// checkpoint distance.
+pub const LOOKAHEAD_LIMIT: usize = checkpoint::MAX_CHECKPOINT_HEIGHT_GAP * 2;
 
 #[derive(Debug)]
 pub struct Syncer<ZN, ZS, ZV>
@@ -96,11 +100,11 @@ where
                 metrics::gauge!("sync.pending_blocks.len", self.pending_blocks.len() as i64);
                 tracing::debug!(
                     pending.len = self.pending_blocks.len(),
-                    limit = crate::commands::LOOKAHEAD_LIMIT
+                    limit = LOOKAHEAD_LIMIT
                 );
 
                 // Check whether we need to wait for existing block download tasks to finish
-                while self.pending_blocks.len() > crate::commands::LOOKAHEAD_LIMIT {
+                while self.pending_blocks.len() > LOOKAHEAD_LIMIT {
                     match self
                         .pending_blocks
                         .next()
