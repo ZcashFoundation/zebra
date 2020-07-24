@@ -40,7 +40,7 @@ fn passthrough(mut cmd: std::process::Command, args: &args::Args) -> std::proces
 }
 
 fn main() -> Result<()> {
-    init_tracing_backup();
+    init_tracing();
 
     color_eyre::install()?;
 
@@ -104,7 +104,7 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn init_tracing_backup() {
+fn init_tracing() {
     tracing_subscriber::Registry::default()
         .with(tracing_error::ErrorLayer::default())
         .init();
