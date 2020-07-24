@@ -305,7 +305,7 @@ async fn continuous_blockchain(restart_height: Option<BlockHeight>) -> Result<()
                 break;
             }
 
-            /// SPANDOC: Make sure the verifier service is ready
+            /// SPANDOC: Make sure the verifier service is ready for block {?height}
             let ready_verifier_service = checkpoint_verifier
                 .ready_and()
                 .map_err(|e| eyre!(e))
@@ -317,7 +317,7 @@ async fn continuous_blockchain(restart_height: Option<BlockHeight>) -> Result<()
                 ready_verifier_service.call(block.clone()),
             );
 
-            /// SPANDOC: spawn verification future in the background
+            /// SPANDOC: spawn verification future in the background for block {?height}
             let handle = tokio::spawn(verify_future.in_current_span());
             handles.push(handle);
 
