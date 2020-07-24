@@ -53,8 +53,9 @@ fn main() -> Result<()> {
 
     // get the current block count
     cmd.arg("getblockcount");
-    cmd.stdout(Stdio::piped()).spawn().unwrap();
+    let mut subprocess = cmd.stdout(Stdio::piped()).spawn().unwrap();
     let output = cmd.output().unwrap();
+    subprocess.kill()?;
     let mut requested_height: BlockHeight = String::from_utf8_lossy(&output.stdout)
         .trim()
         .parse()
@@ -74,7 +75,7 @@ fn main() -> Result<()> {
 
         // get block data
         cmd.args(&["getblock", &x.to_string()]);
-        cmd.stdout(Stdio::piped()).spawn().unwrap();
+        let mut subprocess = cmd.stdout(Stdio::piped()).spawn().unwrap();
         let output = cmd.output().unwrap();
         let block_raw = String::from_utf8_lossy(&output.stdout);
 
@@ -88,6 +89,9 @@ fn main() -> Result<()> {
         assert_eq!(x, height.0);
         let size = v["size"].as_u64().unwrap();
         assert!(size <= zebra_chain::block::MAX_BLOCK_BYTES);
+
+        // kill spawned
+        subprocess.wait()?;
 
         // compute
         cumulative_bytes += size;
