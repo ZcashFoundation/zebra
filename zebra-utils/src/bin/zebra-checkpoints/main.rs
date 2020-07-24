@@ -83,7 +83,10 @@ fn main() -> Result<()> {
         let v: Value = serde_json::from_str(block_raw.trim())?;
 
         // get the values we are interested in
-        let hash = &v["hash"].as_str().unwrap();
+        let hash = v["hash"]
+            .as_str()
+            .map(zebra_chain::utils::byte_reverse_hex)
+            .unwrap();
         let height = BlockHeight(v["height"].as_u64().unwrap() as u32);
         assert!(height <= BlockHeight::MAX);
         assert_eq!(x, height.0);
@@ -103,11 +106,7 @@ fn main() -> Result<()> {
             || height_gap.0 >= zebra_consensus::checkpoint::MAX_CHECKPOINT_HEIGHT_GAP as u32
         {
             // print to output
-            println!(
-                "{} {}",
-                height.0,
-                zebra_chain::utils::byte_reverse_hex(hash)
-            );
+            println!("{} {}", height.0, hash,);
 
             // reset counters
             cumulative_bytes = 0;
