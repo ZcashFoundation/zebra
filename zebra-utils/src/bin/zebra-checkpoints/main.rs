@@ -13,6 +13,7 @@ use color_eyre::eyre::Result;
 use serde_json::Value;
 use std::process::Stdio;
 use structopt::StructOpt;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod args;
 
@@ -39,7 +40,7 @@ fn passthrough(mut cmd: std::process::Command, args: &args::Args) -> std::proces
 }
 
 fn main() -> Result<()> {
-    // todo add tracing setup
+    init_tracing_backup();
 
     color_eyre::install()?;
 
@@ -101,4 +102,10 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn init_tracing_backup() {
+    tracing_subscriber::Registry::default()
+        .with(tracing_error::ErrorLayer::default())
+        .init();
 }
