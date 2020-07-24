@@ -67,6 +67,7 @@ jobs:
           args: --all -- --check
 
   coverage:
+    name: Coverage
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -80,4 +81,4 @@ jobs:
           version: 'latest'
           timeout: 600
       - name: Upload coverage report to Codecov
-        uses: codecov/codecov-action@v1.0.10
+        uses: codecov/codecov-action@v1.0.12
