@@ -15,6 +15,7 @@ use std::process::Stdio;
 use structopt::StructOpt;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
+use zebra_chain::block::BlockHeaderHash;
 use zebra_chain::types::BlockHeight;
 
 mod args;
@@ -83,9 +84,11 @@ fn main() -> Result<()> {
         let v: Value = serde_json::from_str(block_raw.trim())?;
 
         // get the values we are interested in
-        let hash = v["hash"]
+        let hash: BlockHeaderHash = v["hash"]
             .as_str()
             .map(zebra_chain::utils::byte_reverse_hex)
+            .unwrap()
+            .parse()
             .unwrap();
         let height = BlockHeight(v["height"].as_u64().unwrap() as u32);
         assert!(height <= BlockHeight::MAX);
@@ -106,7 +109,7 @@ fn main() -> Result<()> {
             || height_gap.0 >= zebra_consensus::checkpoint::MAX_CHECKPOINT_HEIGHT_GAP as u32
         {
             // print to output
-            println!("{} {}", height.0, hash,);
+            println!("{} {}", height.0, &hex::encode(hash.0),);
 
             // reset counters
             cumulative_bytes = 0;
