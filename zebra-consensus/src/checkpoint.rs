@@ -88,6 +88,9 @@ pub struct CheckpointVerifier {
     /// The checkpoint list for this verifier.
     checkpoint_list: CheckpointList,
 
+    /// The hash of the initial tip, if any.
+    initial_tip_hash: Option<BlockHeaderHash>,
+
     // Queued Blocks
     //
     /// A queue of unverified blocks.
@@ -111,20 +114,28 @@ pub struct CheckpointVerifier {
 /// Contains non-service utility functions for CheckpointVerifiers.
 impl CheckpointVerifier {
     /// Return a checkpoint verification service for `network`, using the
+    /// hard-coded checkpoint list. If `initial_tip` is Some(_), the
+    /// verifier starts at that initial tip, which does not have to be in the
     /// hard-coded checkpoint list.
     ///
     /// This function should be called only once for a particular network, rather
     /// than constructing multiple verification services for the same network. To
-    /// Clone a CheckpointVerifier, you might need to wrap it in a
+    /// clone a CheckpointVerifier, you might need to wrap it in a
     /// `tower::Buffer` service.
-    pub fn new(network: Network) -> Self {
+    pub fn new(network: Network, initial_tip: Option<Arc<Block>>) -> Self {
         let checkpoint_list = CheckpointList::new(network);
         let max_height = checkpoint_list.max_height();
-        tracing::info!(?max_height, ?network, "initialising CheckpointVerifier");
-        Self::from_checkpoint_list(checkpoint_list)
+        let initial_height = initial_tip.clone().map(|b| b.coinbase_height()).flatten();
+        tracing::info!(
+            ?max_height,
+            ?network,
+            ?initial_height,
+            "initialising CheckpointVerifier"
+        );
+        Self::from_checkpoint_list(checkpoint_list, initial_tip)
     }
 
-    /// Return a checkpoint verification service using `list`.
+    /// Return a checkpoint verification service using `list` and `initial_tip`.
     ///
     /// Assumes that the provided genesis checkpoint is correct.
     ///
@@ -136,23 +147,48 @@ impl CheckpointVerifier {
     #[allow(dead_code)]
     pub(crate) fn from_list(
         list: impl IntoIterator<Item = (BlockHeight, BlockHeaderHash)>,
+        initial_tip: Option<Arc<Block>>,
     ) -> Result<Self, Error> {
-        Ok(Self::from_checkpoint_list(CheckpointList::from_list(list)?))
+        Ok(Self::from_checkpoint_list(
+            CheckpointList::from_list(list)?,
+            initial_tip,
+        ))
     }
 
-    /// Return a checkpoint verification service using `checkpoint_list`.
+    /// Return a checkpoint verification service using `checkpoint_list` and
+    /// `initial_tip`.
     ///
     /// Callers should prefer `CheckpointVerifier::new`, which uses the
     /// hard-coded checkpoint lists. See `CheckpointVerifier::new` and
     /// `CheckpointList::from_list` for more details.
-    pub(crate) fn from_checkpoint_list(checkpoint_list: CheckpointList) -> Self {
+    pub(crate) fn from_checkpoint_list(
+        checkpoint_list: CheckpointList,
+        initial_tip: Option<Arc<Block>>,
+    ) -> Self {
         // All the initialisers should call this function, so we only have to
         // change fields or default values in one place.
+        let (initial_tip_hash, verifier_progress) = match initial_tip {
+            Some(initial_tip) => {
+                let initial_height = initial_tip
+                    .coinbase_height()
+                    .expect("Bad initial tip: must have coinbase height");
+                if initial_height >= checkpoint_list.max_height() {
+                    (None, Progress::FinalCheckpoint)
+                } else {
+                    (
+                        Some(initial_tip.hash()),
+                        Progress::InitialTip(initial_height),
+                    )
+                }
+            }
+            // We start by verifying the genesis block, by itself
+            None => (None, Progress::BeforeGenesis),
+        };
         CheckpointVerifier {
             checkpoint_list,
+            initial_tip_hash,
             queued: BTreeMap::new(),
-            // We start by verifying the genesis block, by itself
-            verifier_progress: Progress::BeforeGenesis,
+            verifier_progress,
         }
     }
 
@@ -162,7 +198,8 @@ impl CheckpointVerifier {
 
     /// Return the current verifier's progress.
     ///
-    /// If verification has not started yet, returns `BeforeGenesis`.
+    /// If verification has not started yet, returns `BeforeGenesis`,
+    /// or `InitialTip(height)` if there were cached verified blocks.
     ///
     /// If verification is ongoing, returns `PreviousCheckpoint(height)`.
     /// `height` increases as checkpoints are verified.
@@ -178,7 +215,7 @@ impl CheckpointVerifier {
     fn current_start_bound(&self) -> Option<Bound<BlockHeight>> {
         match self.previous_checkpoint_height() {
             BeforeGenesis => Some(Unbounded),
-            PreviousCheckpoint(height) => Some(Excluded(height)),
+            InitialTip(height) | PreviousCheckpoint(height) => Some(Excluded(height)),
             FinalCheckpoint => None,
         }
     }
@@ -204,7 +241,7 @@ impl CheckpointVerifier {
                 return WaitingForBlocks;
             }
             BeforeGenesis => BlockHeight(0),
-            PreviousCheckpoint(height) => height,
+            InitialTip(height) | PreviousCheckpoint(height) => height,
             FinalCheckpoint => return FinishedVerifying,
         };
 
@@ -256,6 +293,10 @@ impl CheckpointVerifier {
     fn previous_checkpoint_hash(&self) -> Progress<BlockHeaderHash> {
         match self.previous_checkpoint_height() {
             BeforeGenesis => BeforeGenesis,
+            InitialTip(_) => self
+                .initial_tip_hash
+                .map(InitialTip)
+                .expect("initial tip height must have an initial tip hash"),
             PreviousCheckpoint(height) => self
                 .checkpoint_list
                 .hash(height)
@@ -282,10 +323,12 @@ impl CheckpointVerifier {
             // Any height is valid
             BeforeGenesis => {}
             // Greater heights are valid
-            PreviousCheckpoint(previous_height) if (height <= previous_height) => {
+            InitialTip(previous_height) | PreviousCheckpoint(previous_height)
+                if (height <= previous_height) =>
+            {
                 Err("block height has already been verified")?
             }
-            PreviousCheckpoint(_) => {}
+            InitialTip(_) | PreviousCheckpoint(_) => {}
             // We're finished, so no checkpoint height is valid
             FinalCheckpoint => Err("verification has finished")?,
         };
@@ -311,6 +354,8 @@ impl CheckpointVerifier {
             self.verifier_progress = FinalCheckpoint;
         } else if self.checkpoint_list.contains(verified_height) {
             self.verifier_progress = PreviousCheckpoint(verified_height);
+            // We're done with the initial tip hash now
+            self.initial_tip_hash = None;
         }
     }
 
@@ -473,7 +518,7 @@ impl CheckpointVerifier {
             // like other blocks, the genesis parent hash is set by the
             // consensus parameters.
             BeforeGenesis => parameters::GENESIS_PREVIOUS_BLOCK_HASH,
-            PreviousCheckpoint(hash) => hash,
+            InitialTip(hash) | PreviousCheckpoint(hash) => hash,
             FinalCheckpoint => return,
         };
         // Return early if we're still waiting for more blocks
