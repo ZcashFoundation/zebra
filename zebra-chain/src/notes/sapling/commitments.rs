@@ -14,13 +14,54 @@ use crate::{
 // exported.
 type Scalar = jubjub::Fr;
 
-pub fn pedersen_hash_to_point(D: [u8; 8], M: BitVec<Lsb0, u8>) -> jubjub::ExtendedPoint {
+pub fn pedersen_hash_to_point(domain: [u8; 8], M: BitVec<Lsb0, u8>) -> jubjub::ExtendedPoint {
     // Expects i to be 0-indexed
-    fn I_i(D: [u8; 8], i: u32) -> jubjub::ExtendedPoint {
-        find_group_hash(D, &i.to_le_bytes())
+    fn I_i(domain: [u8; 8], i: usize) -> jubjub::ExtendedPoint {
+        find_group_hash(domain, &i.to_le_bytes())
     }
 
-    jubjub::ExtendedPoint::identity()
+    // ⟨Mᵢ⟩
+    // fn m_i<O, T>(segment: BitSlice<O, T>) -> Scalar
+    // where
+    //     O: BitOrder,
+    //     T: BitStore,
+    // {
+    //     let value = segment
+    //         .chunks(3)
+    //         .enumerate()
+    //         .try_fold(0, |acc, (j, chunk)| {
+    //             let mut bits = bits![Lsb0; 0; 3];
+    //             bits.copy_from_slice(chunk);
+
+    //             acc += (1 - 2 * bits[2] as u8) * (1 + bits[0] as u8 + 2 * bits[1] as u8)
+    //         });
+
+    //     Scalar::from_bytes(*value.into()).unwrap()
+    // }
+
+    let mut result = jubjub::ExtendedPoint::identity();
+
+    // Split M into n segments of 3 * c bits, where c = 63, padding
+    // the last segment with zeros.
+    //
+    // https://zips.z.cash/protocol/protocol.pdf#concretepedersenhash
+    for (i, segment) in M.chunks(189).enumerate() {
+        let mut m_i = [0u8; 32];
+
+        // ⟨Mᵢ⟩
+        for (j, chunk) in segment.chunks(3).enumerate() {
+            let bits: &BitSlice<_, _> = [0u8; 3].bits::<Lsb0>();
+            bits.copy_from_slice(chunk);
+
+            let enc_m_j = (1 - (2 * bits[2] as u8)) * (1 + (bits[0] as u8) + (2 * bits[1] as u8));
+
+            m_i[0] += enc_m_j * (1 << (4 * j))
+        }
+
+        result += I_i(domain, i) * Scalar::from_bytes(&m_i).unwrap()
+    }
+
+    result
 }
 
 /// Construct a “windowed” Pedersen commitment by reusing a Perderson
@@ -38,11 +79,13 @@ pub fn windowed_pedersen_commitment_r<T>(
 where
     T: RngCore + CryptoRng,
 {
+    const D: [u8; 8] = *b"Zcash_PH";
+
     let mut r_bytes = [0u8; 32];
     csprng.fill_bytes(&mut r_bytes);
     let r = Scalar::from_bytes(&r_bytes).unwrap();
 
-    pedersen_hash_to_point(*b"Zcash_PH", s) + find_group_hash(*b"Zcash_PH", b"r") * r
+    pedersen_hash_to_point(D, s) + find_group_hash(D, b"r") * r
 }
 
 /// The randomness used in the Pedersen Hash for note commitment.
