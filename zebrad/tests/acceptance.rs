@@ -8,10 +8,6 @@ use color_eyre::eyre::Result;
 use std::time::Duration;
 use zebra_test::prelude::*;
 
-mod seed_no_args;
-mod start_args;
-mod start_no_args;
-
 // Todo: The following 3 helper functions can probably be abstracted into one
 pub fn get_child_single_arg(arg: &str) -> Result<(zebra_test::command::TestChild, impl Drop)> {
     let (mut cmd, guard) = test_cmd(env!("CARGO_BIN_EXE_zebrad"))?;
@@ -153,8 +149,6 @@ fn revhex_args() -> Result<()> {
     Ok(())
 }
 
-/*
-#[test]
 fn seed_no_args() -> Result<()> {
     zebra_test::init();
 
@@ -171,7 +165,6 @@ fn seed_no_args() -> Result<()> {
 
     Ok(())
 }
-*/
 
 #[test]
 fn seed_args() -> Result<()> {
@@ -195,8 +188,6 @@ fn seed_args() -> Result<()> {
     Ok(())
 }
 
-/*
-#[test]
 fn start_no_args() -> Result<()> {
     zebra_test::init();
 
@@ -214,7 +205,6 @@ fn start_no_args() -> Result<()> {
     Ok(())
 }
 
-#[test]
 fn start_args() -> Result<()> {
     zebra_test::init();
 
@@ -234,7 +224,6 @@ fn start_args() -> Result<()> {
 
     Ok(())
 }
-*/
 
 #[test]
 fn app_no_args() -> Result<()> {
@@ -275,6 +264,15 @@ fn version_args() -> Result<()> {
     let (child, _guard) = get_child_multi_args(&["version", "-f"])?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
+
+    Ok(())
+}
+
+#[test]
+fn serialized_tests() -> Result<()> {
+    start_no_args()?;
+    start_args()?;
+    seed_no_args()?;
 
     Ok(())
 }
