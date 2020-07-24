@@ -14,9 +14,12 @@
 #![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_state")]
 #![warn(missing_docs)]
 #![allow(clippy::try_err)]
+use color_eyre::eyre::{eyre, Report};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::{iter, sync::Arc};
+use std::{error, iter, sync::Arc};
+use tower::{Service, ServiceExt};
+
 use zebra_chain::{
     block::{Block, BlockHeaderHash},
     types::BlockHeight,
@@ -113,4 +116,49 @@ fn block_locator_heights(tip_height: BlockHeight) -> impl Iterator<Item = BlockH
         .flat_map(move |step| tip_height.0.checked_sub(step))
         .map(BlockHeight)
         .chain(iter::once(BlockHeight(0)))
+}
+
+/// The error type for the State Service.
+// TODO(jlusby): Error = Report ?
+type Error = Box<dyn error::Error + Send + Sync + 'static>;
+
+/// Get the initial tip block, using `state`.
+///
+/// If there is no tip, returns `Ok(None)`.
+/// Returns an error if `state.poll_ready` errors.
+pub async fn initial_tip<S>(state: S) -> Result<Option<Arc<Block>>, Report>
+where
+    S: Service<Request, Response = Response, Error = Error> + Send + Clone + 'static,
+    S::Future: Send + 'static,
+{
+    let initial_tip_hash = state
+        .clone()
+        .ready_and()
+        .await
+        .map_err(|e| eyre!(e))?
+        .call(Request::GetTip)
+        .await
+        .map(|response| match response {
+            Response::Tip { hash } => hash,
+            _ => unreachable!("GetTip request can only result in Response::Tip"),
+        })
+        .ok();
+
+    let initial_tip_block = match initial_tip_hash {
+        Some(hash) => state
+            .clone()
+            .ready_and()
+            .await
+            .map_err(|e| eyre!(e))?
+            .call(Request::GetBlock { hash })
+            .await
+            .map(|response| match response {
+                Response::Block { block } => block,
+                _ => unreachable!("GetBlock request can only result in Response::Block"),
+            })
+            .ok(),
+        None => None,
+    };
+
+    Ok(initial_tip_block)
 }

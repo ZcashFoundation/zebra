@@ -23,11 +23,8 @@ use crate::config::ZebradConfig;
 use crate::{components::tokio::TokioComponent, prelude::*};
 
 use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
-use color_eyre::eyre::{eyre, Report};
-use std::{error, sync::Arc};
-use tower::{buffer::Buffer, service_fn, Service, ServiceExt};
-
-use zebra_chain::block::Block;
+use color_eyre::eyre::Report;
+use tower::{buffer::Buffer, service_fn};
 
 mod sync;
 
@@ -39,20 +36,13 @@ pub struct StartCmd {
     filters: Vec<String>,
 }
 
-/// The error type for the State Service.
-// TODO(jlusby): Error = Report ?
-type Error = Box<dyn error::Error + Send + Sync + 'static>;
-
 impl StartCmd {
     async fn start(&self) -> Result<(), Report> {
         info!(?self, "starting to connect to the network");
 
         let config = app_config();
         let state = zebra_state::on_disk::init(config.state.clone());
-        let initial_tip = self.initial_tip(state.clone()).await?;
-
-        let verifier =
-            zebra_consensus::chain::init(config.network.network, state.clone(), initial_tip);
+        let verifier = zebra_consensus::chain::init(config.network.network, state.clone()).await;
 
         // The service that our node uses to respond to requests by peers
         let node = Buffer::new(
@@ -67,49 +57,6 @@ impl StartCmd {
         let mut syncer = sync::Syncer::new(config.network.network, peer_set, state, verifier);
 
         syncer.sync().await
-    }
-
-    /// Get the initial tip block, using `state`.
-    ///
-    /// If there is no tip, returns `Ok(None)`.
-    async fn initial_tip<S>(&self, state: S) -> Result<Option<Arc<Block>>, Report>
-    where
-        S: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>
-            + Send
-            + Clone
-            + 'static,
-        S::Future: Send + 'static,
-    {
-        let initial_tip_hash = state
-            .clone()
-            .ready_and()
-            .await
-            .map_err(|e| eyre!(e))?
-            .call(zebra_state::Request::GetTip)
-            .await
-            .map(|response| match response {
-                zebra_state::Response::Tip { hash } => hash,
-                _ => unreachable!("GetTip request can only result in Response::Tip"),
-            })
-            .ok();
-
-        let initial_tip_block = match initial_tip_hash {
-            Some(hash) => state
-                .clone()
-                .ready_and()
-                .await
-                .map_err(|e| eyre!(e))?
-                .call(zebra_state::Request::GetBlock { hash })
-                .await
-                .map(|response| match response {
-                    zebra_state::Response::Block { block } => block,
-                    _ => unreachable!("GetBlock request can only result in Response::Block"),
-                })
-                .ok(),
-            None => None,
-        };
-
-        Ok(initial_tip_block)
     }
 }
 

@@ -160,9 +160,10 @@ where
     }
 }
 
-/// Return a chain verification service, using `network`, `state_service`, and
-/// `initial_tip`. These arguments are used to create a block verifier and
-/// checkpoint verifier.
+/// Return a chain verification service, using `network` and `state_service`.
+///
+/// Gets the initial tip from the state service, and uses it to create a block
+/// verifier and checkpoint verifier.
 ///
 /// This function should only be called once for a particular state service. If
 /// you need shared block or checkpoint verfiers, create them yourself, and pass
@@ -171,10 +172,9 @@ where
 // TODO: revise this interface when we generate our own blocks, or validate
 //       mempool transactions. We might want to share the BlockVerifier, and we
 //       might not want to add generated blocks to the state.
-pub fn init<S>(
+pub async fn init<S>(
     network: Network,
     state_service: S,
-    initial_tip: Option<Arc<Block>>,
 ) -> impl Service<
     Arc<Block>,
     Response = BlockHeaderHash,
@@ -190,7 +190,17 @@ where
         + 'static,
     S::Future: Send + 'static,
 {
-    tracing::debug!(?network, "initialising ChainVerifier from network");
+    let initial_tip = zebra_state::initial_tip(state_service.clone())
+        .await
+        .expect("State service poll_ready is Ok");
+    let height = initial_tip.clone().map(|b| b.coinbase_height()).flatten();
+    let hash = initial_tip.clone().map(|b| b.hash());
+    tracing::debug!(
+        ?network,
+        ?height,
+        ?hash,
+        "initialising ChainVerifier with network and initial tip"
+    );
 
     let block_verifier = crate::block::init(state_service.clone());
     let checkpoint_verifier = CheckpointVerifier::new(network, initial_tip);
