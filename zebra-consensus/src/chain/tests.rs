@@ -6,11 +6,11 @@ use crate::checkpoint::CheckpointList;
 
 use color_eyre::eyre::Report;
 use color_eyre::eyre::{bail, eyre};
-use futures::future::TryFutureExt;
-use std::mem::drop;
-use std::{collections::BTreeMap, sync::Arc, time::Duration};
-use tokio::time::timeout;
-use tower::{util::ServiceExt, Service};
+use futures::{future::TryFutureExt, stream::FuturesUnordered};
+use std::{collections::BTreeMap, mem::drop, sync::Arc, time::Duration};
+use tokio::{stream::StreamExt, time::timeout};
+use tower::{Service, ServiceExt};
+use tracing_futures::Instrument;
 
 use zebra_chain::block::{Block, BlockHeader};
 use zebra_chain::serialization::ZcashDeserialize;
@@ -21,6 +21,9 @@ use zebra_chain::Network::{self, *};
 /// The checkpoint verifier uses `tokio::sync::oneshot` channels as futures.
 /// If the verifier doesn't send a message on the channel, any tests that
 /// await the channel future will hang.
+///
+/// The block verifier waits for the previous block to reach the state service.
+/// If that never happens, the test can hang.
 ///
 /// This value is set to a large value, to avoid spurious failures due to
 /// high system load.
@@ -126,17 +129,34 @@ async fn verify_block() -> Result<(), Report> {
 
     let (mut chain_verifier, _) = verifiers_from_checkpoint_list(checkpoint_list);
 
+    /// SPANDOC: Make sure the verifier service is ready for block 0
+    let ready_verifier_service = chain_verifier.ready_and().await.map_err(|e| eyre!(e))?;
+    /// SPANDOC: Set up the future for block 0
+    let verify_future = timeout(
+        Duration::from_secs(VERIFY_TIMEOUT_SECONDS),
+        ready_verifier_service.call(block0.clone()),
+    );
+    /// SPANDOC: Verify block 0
+    // TODO(teor || jlusby): check error kind
+    let verify_response = verify_future
+        .map_err(|e| eyre!(e))
+        .await
+        .expect("timeout should not happen")
+        .expect("block should verify");
+
+    assert_eq!(verify_response, hash0);
+
     let block1 = Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..])?;
     let hash1: BlockHeaderHash = block1.as_ref().into();
 
-    /// SPANDOC: Make sure the verifier service is ready
+    /// SPANDOC: Make sure the verifier service is ready for block 1
     let ready_verifier_service = chain_verifier.ready_and().await.map_err(|e| eyre!(e))?;
-    /// SPANDOC: Set up the future
+    /// SPANDOC: Set up the future for block 1
     let verify_future = timeout(
         Duration::from_secs(VERIFY_TIMEOUT_SECONDS),
         ready_verifier_service.call(block1.clone()),
     );
-    /// SPANDOC: Verify the block
+    /// SPANDOC: Verify block 1
     // TODO(teor || jlusby): check error kind
     let verify_response = verify_future
         .map_err(|e| eyre!(e))
@@ -367,6 +387,71 @@ async fn verify_fail_add_block_checkpoint() -> Result<(), Report> {
         assert_eq!(block, returned_block);
     } else {
         bail!("unexpected response kind: {:?}", state_response);
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn continuous_blockchain_test() -> Result<(), Report> {
+    continuous_blockchain().await
+}
+
+/// Test a continuous blockchain in the BlockVerifier
+#[spandoc::spandoc]
+async fn continuous_blockchain() -> Result<(), Report> {
+    zebra_test::init();
+
+    // A continuous blockchain
+    let mut blockchain = Vec::new();
+    for b in &[
+        &zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..],
+        &zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..],
+        &zebra_test::vectors::BLOCK_MAINNET_2_BYTES[..],
+        &zebra_test::vectors::BLOCK_MAINNET_3_BYTES[..],
+        &zebra_test::vectors::BLOCK_MAINNET_4_BYTES[..],
+        &zebra_test::vectors::BLOCK_MAINNET_5_BYTES[..],
+        &zebra_test::vectors::BLOCK_MAINNET_6_BYTES[..],
+        &zebra_test::vectors::BLOCK_MAINNET_7_BYTES[..],
+        &zebra_test::vectors::BLOCK_MAINNET_8_BYTES[..],
+        &zebra_test::vectors::BLOCK_MAINNET_9_BYTES[..],
+        &zebra_test::vectors::BLOCK_MAINNET_10_BYTES[..],
+    ] {
+        let block = Arc::<Block>::zcash_deserialize(*b)?;
+        let hash: BlockHeaderHash = block.as_ref().into();
+        blockchain.push((block.clone(), block.coinbase_height().unwrap(), hash));
+    }
+
+    // Make a checkpoint list containing the genesis block
+    let checkpoint_list: BTreeMap<BlockHeight, BlockHeaderHash> = blockchain
+        .iter()
+        .map(|(_, height, hash)| (*height, *hash))
+        .take(1)
+        .collect();
+    let checkpoint_list = CheckpointList::from_list(checkpoint_list).map_err(|e| eyre!(e))?;
+
+    let (mut chain_verifier, _) = verifiers_from_checkpoint_list(checkpoint_list);
+
+    let mut handles = FuturesUnordered::new();
+
+    // Now verify each block
+    for (block, height, _hash) in blockchain {
+        /// SPANDOC: Make sure the verifier service is ready for block {?height}
+        let ready_verifier_service = chain_verifier.ready_and().map_err(|e| eyre!(e)).await?;
+
+        /// SPANDOC: Set up the future for block {?height}
+        let verify_future = timeout(
+            std::time::Duration::from_secs(VERIFY_TIMEOUT_SECONDS),
+            ready_verifier_service.call(block.clone()),
+        );
+
+        /// SPANDOC: spawn verification future in the background for block {?height}
+        let handle = tokio::spawn(verify_future.in_current_span());
+        handles.push(handle);
+    }
+
+    while let Some(result) = handles.next().await {
+        result??.map_err(|e| eyre!(e))?;
     }
 
     Ok(())
