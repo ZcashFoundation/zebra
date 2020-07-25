@@ -260,35 +260,27 @@ type BoxError = Box<dyn error::Error + Send + Sync + 'static>;
 #[error(transparent)]
 struct BoxRealError(BoxError);
 
+/// The TracedError wrapper on a type that implements Error
 #[derive(Debug)]
 struct Error(tracing_error::TracedError<BoxRealError>);
 
-impl From<sled::Error> for Error {
-    fn from(source: sled::Error) -> Self {
-        let source = BoxRealError(source.into());
-        Self(source.into())
+macro_rules! impl_from {
+    ($($src:ty,)*) => {$(
+        impl From<$src> for Error {
+            fn from(source: $src) -> Self {
+                let source = BoxRealError(source.into());
+                Self(source.into())
+            }
+        }
+    )*
     }
 }
 
-impl From<&str> for Error {
-    fn from(source: &str) -> Self {
-        let source = BoxRealError(source.into());
-        Self(source.into())
-    }
-}
-
-impl From<SerializationError> for Error {
-    fn from(source: SerializationError) -> Self {
-        let source = BoxRealError(source.into());
-        Self(source.into())
-    }
-}
-
-impl From<std::io::Error> for Error {
-    fn from(source: std::io::Error) -> Self {
-        let source = BoxRealError(source.into());
-        Self(source.into())
-    }
+// The hoops we have to jump through to keep using this like a BoxError
+impl_from! {
+    &str,
+    SerializationError,
+    std::io::Error,
 }
 
 impl Into<BoxError> for Error {
