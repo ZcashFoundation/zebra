@@ -24,7 +24,14 @@ use tower::{buffer::Buffer, Service};
 
 use zebra_chain::block::{Block, BlockHeaderHash};
 
-struct BlockVerifier<S> {
+struct BlockVerifier<S>
+where
+    S: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>
+        + Send
+        + Clone
+        + 'static,
+    S::Future: Send + 'static,
+{
     /// The underlying `ZebraState`, possibly wrapped in other services.
     // TODO: contextual verification
     #[allow(dead_code)]

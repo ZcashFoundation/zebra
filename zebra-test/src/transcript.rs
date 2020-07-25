@@ -8,6 +8,8 @@ use std::{
 };
 use tower::{Service, ServiceExt};
 
+type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
+
 pub struct Transcript<R, S, I>
 where
     I: Iterator<Item = (R, S)>,
@@ -33,12 +35,20 @@ where
     pub async fn check<C>(mut self, mut to_check: C) -> Result<(), Report>
     where
         C: Service<R, Response = S>,
-        C::Error: Debug,
+        C::Error: Into<BoxError>,
     {
         while let Some((req, expected_rsp)) = self.messages.next() {
             // These unwraps could propagate errors with the correct
             // bound on C::Error
-            let rsp = to_check.ready_and().await.unwrap().call(req).await.unwrap();
+            let rsp = to_check
+                .ready_and()
+                .await
+                .map_err(Into::into)
+                .map_err(|e| eyre!(e))?
+                .call(req)
+                .await
+                .map_err(Into::into)
+                .map_err(|e| eyre!(e))?;
             ensure!(
                 rsp == expected_rsp,
                 "Expected {:?}, got {:?}",
