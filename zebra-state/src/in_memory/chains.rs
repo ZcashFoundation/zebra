@@ -21,9 +21,9 @@ struct ChainState {
 }
 
 /// A persistent data structure representing the end of a chain
-struct VolatileChain(im::OrdMap<BlockHeight, ChainState>);
+struct Chain(im::OrdMap<BlockHeight, ChainState>);
 
-impl VolatileChain {
+impl Chain {
     fn contains(&self, height: BlockHeight) -> bool {
         todo!()
     }
@@ -37,7 +37,7 @@ pub(crate) struct ChainsState<S> {
     /// The set of chains
     //
     // might need to use a map type and pop / reinsert with cummulative work as the index
-    chains: Vec<VolatileChain>,
+    chains: Vec<Chain>,
 }
 
 impl<S> ChainsState<S> {
@@ -68,7 +68,7 @@ impl<S> ChainsState<S> {
                 let (mut shared, _forked) = chain.0.split(&height);
                 let was_present = shared.insert(height, ChainState { block });
 
-                self.chains.push(VolatileChain(shared));
+                self.chains.push(Chain(shared));
 
                 was_present
             }
