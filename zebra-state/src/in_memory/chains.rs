@@ -36,7 +36,7 @@ pub(crate) struct ChainsState<S> {
     inner: S,
     /// The set of chains
     //
-    // might need to use a map type and pop / reinsert with cummulative work as the index
+    // might need to use a map type and pop / reinsert with (TODO based on the final design)
     chains: Vec<Chain>,
 }
 
