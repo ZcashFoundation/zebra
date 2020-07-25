@@ -281,6 +281,7 @@ impl_from! {
     &str,
     SerializationError,
     std::io::Error,
+    sled::Error,
 }
 
 impl Into<BoxError> for Error {
