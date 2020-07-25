@@ -47,15 +47,13 @@ impl<S> ChainsState<S> {
         let height = block.coinbase_height().unwrap();
         let parent_height = BlockHeight(height.0 - 1);
 
-        for chain in self
-            .chains
-            .iter_mut()
-            .filter(|chain| chain.contains(parent_height))
-        {
-            let parent_state = chain
+        for (chain, parent_state) in self.chains.iter_mut().flat_map(|chain| {
+            chain
                 .0
                 .get(&parent_height)
-                .expect("block with one less height must exist");
+                .cloned()
+                .map(|state| (chain, state))
+        }) {
             let parent_hash = parent_state.block.hash();
 
             if parent_hash != block.header.previous_block_hash {
