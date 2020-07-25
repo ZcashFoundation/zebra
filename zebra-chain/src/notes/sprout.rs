@@ -1,3 +1,5 @@
+//! Sprout notes
+
 #![allow(clippy::unit_arg)]
 #![allow(dead_code)]
 
@@ -39,6 +41,9 @@ pub struct Note {
 }
 
 impl Note {
+    /// NoteCommit_rcm^Sprout(a_pk, v, rho)
+    ///
+    /// https://zips.z.cash/protocol/protocol.pdf#concretesproutnotecommit
     pub fn commit(&self) -> NoteCommitment {
         let leading_byte: u8 = 0xB0;
         let mut hasher = Sha256::default();

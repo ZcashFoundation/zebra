@@ -1,3 +1,5 @@
+//! Sapling note and value commitments
+
 use std::{fmt, io};
 
 use bitvec::prelude::*;
@@ -14,30 +16,29 @@ use crate::{
 // exported.
 type Scalar = jubjub::Fr;
 
-pub fn pedersen_hash_to_point(domain: [u8; 8], M: BitVec<Lsb0, u8>) -> jubjub::ExtendedPoint {
+#[allow(non_snake_case)]
+pub fn pedersen_hash_to_point(domain: [u8; 8], M: &BitVec<Lsb0, u8>) -> jubjub::ExtendedPoint {
     // Expects i to be 0-indexed
     fn I_i(domain: [u8; 8], i: usize) -> jubjub::ExtendedPoint {
         find_group_hash(domain, &i.to_le_bytes())
     }
 
     // ⟨Mᵢ⟩
-    // fn m_i<O, T>(segment: BitSlice<O, T>) -> Scalar
-    // where
-    //     O: BitOrder,
-    //     T: BitStore,
-    // {
-    //     let value = segment
-    //         .chunks(3)
-    //         .enumerate()
-    //         .try_fold(0, |acc, (j, chunk)| {
-    //             let mut bits = bits![Lsb0; 0; 3];
-    //             bits.copy_from_slice(chunk);
+    fn M_i(segment: &BitSlice<Lsb0, u8>) -> Scalar {
+        let mut m_i = [0u8; 32];
 
-    //             acc += (1 - 2 * bits[2] as u8) * (1 + bits[0] as u8 + 2 * bits[1] as u8)
-    //         });
+        for (j, chunk) in segment.chunks(3).enumerate() {
+            let mut data = [0u8; 3];
+            let bits = data.bits_mut::<Lsb0>();
+            bits.copy_from_slice(chunk);
 
-    //     Scalar::from_bytes(*value.into()).unwrap()
-    // }
+            let enc_m_j = (1 - (2 * bits[2] as u8)) * (1 + (bits[0] as u8) + (2 * bits[1] as u8));
+
+            m_i[0] += enc_m_j * (1 << (4 * j))
+        }
+
+        Scalar::from_bytes(&m_i).unwrap()
+    }
 
     let mut result = jubjub::ExtendedPoint::identity();
 
@@ -46,19 +47,7 @@ pub fn pedersen_hash_to_point(domain: [u8; 8], M: BitVec<Lsb0, u8>) -> jubjub::E
     //
     // https://zips.z.cash/protocol/protocol.pdf#concretepedersenhash
     for (i, segment) in M.chunks(189).enumerate() {
-        let mut m_i = [0u8; 32];
-
-        // ⟨Mᵢ⟩
-        for (j, chunk) in segment.chunks(3).enumerate() {
-            let bits: &BitSlice<_, _> = [0u8; 3].bits::<Lsb0>();
-            bits.copy_from_slice(chunk);
-
-            let enc_m_j = (1 - (2 * bits[2] as u8)) * (1 + (bits[0] as u8) + (2 * bits[1] as u8));
-
-            m_i[0] += enc_m_j * (1 << (4 * j))
-        }
-
-        result += I_i(domain, i) * Scalar::from_bytes(&m_i).unwrap()
+        result += I_i(domain, i) * M_i(&segment)
     }
 
     result
@@ -74,7 +63,7 @@ pub fn pedersen_hash_to_point(domain: [u8; 8], M: BitVec<Lsb0, u8>) -> jubjub::E
 /// https://zips.z.cash/protocol/protocol.pdf#concretewindowedcommit
 pub fn windowed_pedersen_commitment_r<T>(
     csprng: &mut T,
-    s: BitVec<Lsb0, u8>,
+    s: &BitVec<Lsb0, u8>,
 ) -> jubjub::ExtendedPoint
 where
     T: RngCore + CryptoRng,
@@ -85,7 +74,7 @@ where
     csprng.fill_bytes(&mut r_bytes);
     let r = Scalar::from_bytes(&r_bytes).unwrap();
 
-    pedersen_hash_to_point(D, s) + find_group_hash(D, b"r") * r
+    pedersen_hash_to_point(D, &s) + find_group_hash(D, b"r") * r
 }
 
 /// The randomness used in the Pedersen Hash for note commitment.
@@ -174,7 +163,7 @@ impl NoteCommitment {
         s.append(&mut BitVec::<Lsb0, u8>::from_slice(&pk_d_bytes[..]));
         s.append(&mut BitVec::<Lsb0, u8>::from_slice(&v_bytes[..]));
 
-        Self::from(windowed_pedersen_commitment_r(csprng, s))
+        Self::from(windowed_pedersen_commitment_r(csprng, &s))
     }
 
     /// Hash Extractor for Jubjub (?)
