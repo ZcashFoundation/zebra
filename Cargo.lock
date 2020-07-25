@@ -2729,8 +2729,15 @@ dependencies = [
 name = "zebra-utils"
 version = "0.1.0"
 dependencies = [
+ "abscissa_core",
  "color-eyre",
+ "hex",
+ "serde_json",
  "structopt",
+ "tracing-error",
+ "tracing-subscriber",
+ "zebra-chain",
+ "zebra-consensus",
 ]
 
 [[package]]
