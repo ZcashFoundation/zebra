@@ -2,9 +2,9 @@ use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
 pub struct Args {
-    /// Use the test network
-    #[structopt(short, long)]
-    pub testnet: bool,
+    /// Path to zcash-cli command
+    #[structopt(default_value = "zcash-cli", short, long)]
+    pub cli: String,
 
     /// Passthrough args for `zcash-cli`
     #[structopt(last = true)]
