@@ -22,6 +22,7 @@ impl<C> Amount<C> {
         self.0.try_into()
     }
 
+    /// To little endian byte array
     pub fn to_bytes(&self) -> [u8; 8] {
         self.0.to_le_bytes()
     }

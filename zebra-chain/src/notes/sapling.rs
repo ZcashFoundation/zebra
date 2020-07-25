@@ -1,3 +1,5 @@
+//! Sprout notes
+
 #![allow(clippy::unit_arg)]
 #![allow(dead_code)]
 
@@ -16,11 +18,6 @@ use crate::{
 pub use ciphertexts::{EncryptedCiphertext, OutCiphertext};
 pub use commitments::{CommitmentRandomness, NoteCommitment, ValueCommitment};
 pub use nullifiers::Nullifier;
-
-///
-///
-/// https://zips.z.cash/protocol/protocol.pdf#concretepedersenhash
-pub fn pedersen_hash_to_point() {}
 
 /// A Note represents that a value is spendable by the recipient who
 /// holds the spending key corresponding to a given shielded payment

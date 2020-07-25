@@ -1,4 +1,5 @@
 //! Note encryption types.
+
 mod memo;
 
 pub mod sapling;
