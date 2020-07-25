@@ -16,8 +16,8 @@ use thiserror::Error;
 // XXX refine error types -- better to use boxed errors?
 #[derive(Error, Debug)]
 pub enum SerializationError {
-    /// An underlying IO error.
-    #[error("io error")]
+    /// An io error that prevented deserialization
+    #[error("unable to deserialize type")]
     Io(#[from] io::Error),
     /// The data to be deserialized was malformed.
     // XXX refine errors
