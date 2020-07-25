@@ -10,7 +10,8 @@ use std::{
     task::{Context, Poll},
 };
 use tower::{buffer::Buffer, Service};
-use zebra_chain::serialization::{ZcashDeserialize, ZcashSerialize};
+use tracing::instrument;
+use zebra_chain::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 use zebra_chain::{
     block::{Block, BlockHeaderHash},
     types::BlockHeight,
@@ -22,6 +23,7 @@ struct SledState {
 }
 
 impl SledState {
+    #[instrument]
     pub(crate) fn new(config: &Config) -> Self {
         let config = config.sled_config();
 
@@ -30,9 +32,10 @@ impl SledState {
         }
     }
 
+    #[instrument(skip(self))]
     pub(super) fn insert(
         &mut self,
-        block: impl Into<Arc<Block>>,
+        block: impl Into<Arc<Block>> + std::fmt::Debug,
     ) -> Result<BlockHeaderHash, Error> {
         let block = block.into();
         let hash: BlockHeaderHash = block.as_ref().into();
@@ -51,6 +54,7 @@ impl SledState {
         Ok(hash)
     }
 
+    #[instrument(skip(self))]
     pub(super) fn get(&self, hash: BlockHeaderHash) -> Result<Option<Arc<Block>>, Error> {
         let by_hash = self.storage.open_tree(b"by_hash")?;
         let key = &hash.0;
@@ -65,6 +69,7 @@ impl SledState {
         }
     }
 
+    #[instrument(skip(self))]
     pub(super) fn get_main_chain_at(
         &self,
         height: BlockHeight,
@@ -82,7 +87,8 @@ impl SledState {
         }
     }
 
-    pub(super) fn get_tip(&self) -> Result<Option<Arc<Block>>, Error> {
+    #[instrument(skip(self))]
+    pub(super) fn get_tip(&self) -> Result<Option<BlockHeaderHash>, Error> {
         let tree = self.storage.open_tree(b"height_map")?;
         let last_entry = tree.iter().values().next_back();
 
@@ -93,6 +99,7 @@ impl SledState {
         }
     }
 
+    #[instrument(skip(self))]
     fn contains(&self, hash: &BlockHeaderHash) -> Result<bool, Error> {
         let by_hash = self.storage.open_tree(b"by_hash")?;
         let key = &hash.0;
@@ -140,7 +147,6 @@ impl Service<Request> for SledState {
                 async move {
                     storage
                         .get_tip()?
-                        .map(|block| block.as_ref().into())
                         .map(|hash| Response::Tip { hash })
                         .ok_or_else(|| "zebra-state contains no blocks".into())
                 }
@@ -157,9 +163,12 @@ impl Service<Request> for SledState {
                     let block = storage
                         .get(hash)?
                         .expect("block must be present if contains returned true");
-                    let tip = storage
+                    let tip_hash = storage
                         .get_tip()?
                         .expect("storage must have a tip if it contains the previous block");
+                    let tip = storage
+                        .get(tip_hash)?
+                        .expect("block must be present if contains returned true");
 
                     let depth =
                         tip.coinbase_height().unwrap().0 - block.coinbase_height().unwrap().0;
@@ -172,7 +181,7 @@ impl Service<Request> for SledState {
                 let storage = self.clone();
 
                 async move {
-                    let tip = match storage.get_tip()? {
+                    let tip_hash = match storage.get_tip()? {
                         Some(tip) => tip,
                         None => {
                             return Ok(Response::BlockLocator {
@@ -180,6 +189,10 @@ impl Service<Request> for SledState {
                             })
                         }
                     };
+
+                    let tip = storage
+                        .get(tip_hash)?
+                        .expect("block must be present if contains returned true");
 
                     let tip_height = tip
                         .coinbase_height()
@@ -226,12 +239,60 @@ pub fn init(
 ) -> impl Service<
     Request,
     Response = Response,
-    Error = Error,
-    Future = impl Future<Output = Result<Response, Error>>,
+    Error = BoxError,
+    Future = impl Future<Output = Result<Response, BoxError>>,
 > + Send
        + Clone
        + 'static {
     Buffer::new(SledState::new(&config), 1)
 }
 
-type Error = Box<dyn error::Error + Send + Sync + 'static>;
+type BoxError = Box<dyn error::Error + Send + Sync + 'static>;
+
+// these hacks are necessary to capture spantraces that can be extracted again
+// while still having a nice From impl.
+//
+// Please forgive me.
+
+/// a type that can store any error and implements the Error trait at the cost of
+/// not implemnting From<E: Error>
+#[derive(Debug, thiserror::Error)]
+#[error(transparent)]
+struct BoxRealError(BoxError);
+
+#[derive(Debug)]
+struct Error(tracing_error::TracedError<BoxRealError>);
+
+impl From<sled::Error> for Error {
+    fn from(source: sled::Error) -> Self {
+        let source = BoxRealError(source.into());
+        Self(source.into())
+    }
+}
+
+impl From<&str> for Error {
+    fn from(source: &str) -> Self {
+        let source = BoxRealError(source.into());
+        Self(source.into())
+    }
+}
+
+impl From<SerializationError> for Error {
+    fn from(source: SerializationError) -> Self {
+        let source = BoxRealError(source.into());
+        Self(source.into())
+    }
+}
+
+impl From<std::io::Error> for Error {
+    fn from(source: std::io::Error) -> Self {
+        let source = BoxRealError(source.into());
+        Self(source.into())
+    }
+}
+
+impl Into<BoxError> for Error {
+    fn into(self) -> BoxError {
+        BoxError::from(self.0)
+    }
+}
