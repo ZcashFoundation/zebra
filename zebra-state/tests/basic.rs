@@ -2,7 +2,8 @@ use color_eyre::eyre::Report;
 use once_cell::sync::Lazy;
 use std::sync::Arc;
 use tempdir::TempDir;
-use zebra_chain::{block::Block, serialization::ZcashDeserialize};
+
+use zebra_chain::{block::Block, serialization::ZcashDeserialize, Network, Network::*};
 use zebra_test::transcript::Transcript;
 
 use zebra_state::*;
@@ -49,12 +50,17 @@ static GET_TIP_TRANSCRIPT: Lazy<Vec<(Request, Response)>> = Lazy::new(|| {
 });
 
 #[tokio::test]
-async fn check_transcripts_test() -> Result<(), Report> {
-    check_transcripts().await
+async fn check_transcripts_mainnet() -> Result<(), Report> {
+    check_transcripts(Mainnet).await
+}
+
+#[tokio::test]
+async fn check_transcripts_testnet() -> Result<(), Report> {
+    check_transcripts(Testnet).await
 }
 
 #[spandoc::spandoc]
-async fn check_transcripts() -> Result<(), Report> {
+async fn check_transcripts(network: Network) -> Result<(), Report> {
     zebra_test::init();
 
     for transcript_data in &[&ADD_BLOCK_TRANSCRIPT, &GET_TIP_TRANSCRIPT] {
@@ -64,9 +70,12 @@ async fn check_transcripts() -> Result<(), Report> {
         transcript.check(service).await?;
 
         let storage_guard = TempDir::new("")?;
-        let service = on_disk::init(Config {
-            cache_dir: Some(storage_guard.path().to_owned()),
-        });
+        let service = on_disk::init(
+            Config {
+                cache_dir: Some(storage_guard.path().to_owned()),
+            },
+            network,
+        );
         let transcript = Transcript::from(transcript_data.iter().cloned());
         /// SPANDOC: check the on disk service against the transcript
         transcript.check(service).await?;

@@ -41,7 +41,7 @@ impl StartCmd {
         info!(?self, "starting to connect to the network");
 
         let config = app_config();
-        let state = zebra_state::on_disk::init(config.state.clone());
+        let state = zebra_state::on_disk::init(config.state.clone(), config.network.network);
         let verifier = zebra_consensus::chain::init(config.network.network, state.clone()).await;
 
         // The service that our node uses to respond to requests by peers
