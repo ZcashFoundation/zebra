@@ -1,4 +1,4 @@
-//! Note encryption types.
+//! Notes, note and value commitments, note encryption, and nullifier types.
 
 mod memo;
 

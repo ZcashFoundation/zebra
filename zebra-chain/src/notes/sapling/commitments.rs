@@ -16,6 +16,16 @@ use crate::{
 // exported.
 type Scalar = jubjub::Fr;
 
+/// "...an algebraic hash function with collision resistance (for
+/// fixed input length) derived from assumed hardness of the Discrete
+/// Logarithm Problem on the Jubjub curve."
+///
+/// PedersenHash is used in the definitions of Pedersen commitments (§
+/// 5.4.7.2‘Windowed Pedersen commitments’), and of the Pedersen hash
+/// for the Sapling incremental Merkle tree (§
+/// 5.4.1.3 ‘MerkleCRH^Sapling Hash Function’).
+///
+/// https://zips.z.cash/protocol/protocol.pdf#concretepedersenhash
 #[allow(non_snake_case)]
 pub fn pedersen_hash_to_point(domain: [u8; 8], M: &BitVec<Lsb0, u8>) -> jubjub::ExtendedPoint {
     // Expects i to be 0-indexed
