@@ -220,13 +220,79 @@ Here is how the `CheckpointVerifier` implements each verification stage:
     non-checkpoint block is verified. (Since there is only one checkpoint
     chain, there are no side-chains to prune.)
 
-**TODO:**
-  - Describe network upgrades, and the ChainContext edge case for the
-    activation block
-  - Describe the genesis block RecentChainUpdater and MainChainUpdater edge
-    cases
-  - Describe deltas and large on-disk state
-  - Describe how atomic chain tip updates work
+## Chain Context
+[chain-context]: #chain-context
+
+The `ChainContext` for a block contains the contextual information needed to
+verify the next block in the chain.
+
+There are a few exceptions to this general principle:
+* If the context is a field in recent block headers, it may be retrieved via
+  the list of recent blocks in the chain context.
+* Large state, such as unspent transaction outputs (UTXOs), is stored on disk.
+  The chain context stores deltas from recent blocks, which can be used to
+  avoid some disk state queries.
+
+In the event of a chain fork, there may be multiple next blocks based on the
+current block, and multiple descendant chains. The chain contexts in forks are
+different, based on the different blocks in each fork. But they are based on
+the same pre-fork chain context.
+
+### Chain Context and Network Upgrades
+[chain-context-network-upgrades]: #chain-context-network-upgrades
+
+Each Network Upgrade includes some bilateral consensus rule changes. These
+consensus rule changes may affect the `ChainContext` required to verify
+post-activation blocks.
+
+For most blocks, the chain updaters create a context with the same fields as
+the previous context. Network ugrade activation blocks are an exception, so
+they require special handling.
+
+Here are the context changes required for each network upgrade:
+* **Genesis:**
+  * There is no `previous_context`, and the `DiskState` is empty.
+  * The Genesis RecentChainUpdater creates a new, empty context, using the
+    specified initial values for each field.
+  * Do not include the UTXO from the genesis coinbase transaction in the UTXO
+    set. (zcashd inheritied this rule from Bitcoin.)
+  * Note: the Founders Reward is not required in genesis blocks.
+  * *TODO: check for other differences*
+* **Before Overwinter:**
+  * Add UTXOs, note commitments, and nullifiers from each block to the
+    `ChainContext` as deltas.
+  * Store the full sets in the `DiskState`, and apply deltas to update them.
+* **Overwinter:**
+  * Additional context required to verify Overwinter (v3) transactions, if any.
+* **Sapling:**
+  * Additional context required to verify Sapling (v4) transactions, if any.
+* **Blossom:**
+  * If the context contains pre-calculated fields that depend on
+    `AveragingWindowTimespan`, re-calculate those fields. See
+    [ZIP-208](https://zips.z.cash/zip-0208#effect-on-difficulty-adjustment)
+    for details.
+  * Note: Zebra can avoid this issue by always verifying the `bits`
+    (difficulty) and `time` fields based on recent block headers, without
+    storing any intermediate values in the context.
+* **Heartwood:**
+  * Heartwood changes the meaning of the `history_root_hash` field in the block
+    header. For Sapling and Blossom, it is the final sapling treestate hash.
+    For Heartwood, it is the root hash of a Merkle Mountain Range (MMR) which
+    commits to various features of the chain history. See
+    [ZIP-221](https://zips.z.cash/zip-0221) for details.
+  * Each new block adds a leaf node, then merges subtree roots, if possible.
+    It generates some new "extra nodes" to bag the subtrees, then calculates
+    the root hash.
+  * To efficiently verify this field, Zebra can store the list of MMR previous
+    subtree roots in the `ChainContext` as an `im::Vector`. The number of
+    subtree roots is at most `log(height - activation_height)`.
+  * As an optimisation, we could also store a list of recent "extra nodes"
+    generated during the bagging process.
+  * Store the full list of previous subtree roots in the `DiskState`. Update by
+    replacing the old `DiskState` list with the new `ChainContext` set.
+  * The Heartwood activation block has an all-zeroes `history_root_hash` field,
+    and an empty list of previous subtree roots.
+
 
 # Drawbacks
 [drawbacks]: #drawbacks
