@@ -38,15 +38,12 @@ pub struct BlockHeader {
     /// [Sapling and Blossom] The root LEBS2OSP256(rt) of the Sapling note
     /// commitment tree corresponding to the final Sapling treestate of
     /// this block.
-    /// [Heartwood onward] The root of a Merkle Mountain Range tree, which
-    /// commits to various features of the chain's history, including the
-    /// Sapling commitment tree. This commitment supports the FlyClient
-    /// protocol. See ZIP-221 for details.
-    // TODO:
-    //   - replace with an unspecified HistoryRootHash type?
-    // Note that the NetworkUpgrade list is in zebra-consensus, so we can't
-    // parse this field into a HistoryRootHash enum in zebra-chain.
-    pub history_root_hash: [u8; 32],
+    /// [Heartwood activation block] All zeroes. See ZIP-221 for details.
+    /// [After Heartwood activation block] The root of a Merkle Mountain
+    /// Range tree, which commits to various features of the chain's
+    /// history, including the Sapling commitment tree. This commitment
+    /// supports the FlyClient protocol. See ZIP-221 for details.
+    pub light_client_root_hash: [u8; 32],
 
     /// The block timestamp is a Unix epoch time (UTC) when the miner
     /// started hashing the header (according to the miner).
