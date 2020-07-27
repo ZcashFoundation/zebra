@@ -72,6 +72,8 @@ In Zebra, verification happens in the following stages:
   also verified at this stage.
 * **In-Memory Chain Updates:** An updated chain context is created for each
   block, based on the parent block's chain context.
+* **Chain Tip Updates:** The set of chain tips is updated as each block is
+  verified. The main chain tip is updated based on the consensus rules.
 * **Main Chain Disk Updates:** When a main chain block is behind the main
   chain's tip by more than the reorganisation limit (100 blocks), it is stored
   to disk. The on-disk state is updated based on that block's chain context.
@@ -121,22 +123,40 @@ Verifcation is implemented by the following traits and services:
     updated chain context, dropping references to any ancestor blocks that are
     no longer required to verify subsequent blocks. The service responds with
     an updated `ChainContext`, which contains a reference to the block itself.
+* **Chain Tip Updates:**
+  * `zebra_consensus::ChainTipUpdater`: Provides an updater service that
+    accepts a `ChainContext, Arc<Mutex<ChainTips>>>` request, updates
+    the set of chain tips, and updates the main chain tip, if required.
+    (New blocks on side-chains might not lead to a main chain tip update.)
+    The `ChainContext` becomes one of the new tips in the list.
+    The service responds with the updated `Arc<Mutex<ChainTips>>`.
+  * Note: The service requires exclusive write access to the chain tips, so it
+    can atomically update the main tip and the set of chain tips.
 * **Main Chain Disk Updates:**
-  * `zebra_consensus::MainChainUpdater`: Provides an updater service that
-    accepts a `ChainContext, DiskState` request, and updates the disk state
-    based on the chain context and its included block.
+  * `zebra_consensus::MainChainDiskUpdater`: Provides an updater service that
+    accepts an `Arc<Mutex<ChainTips>>, Transaction<DiskState>` request. This
+    service updates the disk state based on the earliest chain contexts in the
+    main chain, and their associated blocks.
+  * Note: If there is a chain reorganisation, there may be zero or many
+    contexts that are past the reorg limit.
+  * Note: The service requires exclusive write access to the disk state, and
+    shared read access to the chain tips, so that:
+    * it has a consistent view of the chain tips and main tip, and
+    * other parts of the application have a consistent view of the disk state
+      and chain contexts. For example, the set of in-memory deltas needs to be
+      consistent with the disk state.
 * **Chain Pruning:**
-  * `zebra_state::ChainPruner`: Provides a pruning service that accepts a
-    `ChainContext` request, removes any side-chains from the set of tips, and
-    drops the context.
+  * `zebra_state::ChainPruner`: Provides a pruning service that accepts an
+    `Arc<Mutex<ChainTips>>` request, removes any orphaned side-chains from the
+    set of tips, and drops the earliest chain contexts in all chains.
+  * Note: If there is a chain reorganisation, there may be zero or many
+    contexts that are past the reorg limit.
   * Note: To reclaim resources, the chain pruner needs sole ownership of the
-    context. If it does not have sole ownership, this indicates a bug in
-    Zebra. If it encounters this bug, the service should warn about a potential
-    memory leak.
-  * Note: The chain pruner can't have sole ownership of all the blocks in the
-    context, because they are still part of the contexts of its subsequent
-    blocks. In most cases, it will only have sole ownership of the earliest
-    block in its context.
+    contexts that are past the reorg limit. If it does not have sole
+    ownership, this might indicate a bug in Zebra. If the service encounters
+    this bug, it should warn about potential memory leaks.
+  * Note: The service requires exclusive write access to the chain tips, so it
+    can atomically update the main tip and the set of chain tips.
 
 ### Checkpoint Verification
 [checkpoint-verification]: #checkpoint-verification
@@ -174,7 +194,7 @@ Here is how the `CheckpointVerifier` implements each verification stage:
     confirms that the network considers those blocks valid. (Strictly, that the
     network considered those blocks valid, up to and including the time when
     those checkpoints were created.)
-* **In-Memory Chain Updates Verification:**
+* **In-Memory Chain Updates:**
   * The checkpoint verifier uses an internal queue of blocks to store the
     simple height and hash context it requires for verification.
   * *As Above*: Although the checkpoint verifier does not require any external
@@ -186,6 +206,10 @@ Here is how the `CheckpointVerifier` implements each verification stage:
   * Note: If any context fields are only used to verify blocks within the
     checkpoint range, then Zebra does not need to keep that context. (For
     example, sprout-only context.)
+* **Chain Tip Updates:**
+  * *Not Required:* Since there is only a single chain, the main chain tip is
+    the unique tip. As each checkpoint is verified, it implicitly becomes the
+    main tip.
 * **Main Chain Disk Updates:**
   * *As Above*: Any large context that is required to verify the first
     non-checkpoint block needs to be stored to disk.
