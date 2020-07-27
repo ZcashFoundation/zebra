@@ -10,10 +10,14 @@ static INIT: Once = Once::new();
 pub fn init() {
     INIT.call_once(|| {
         let fmt_layer = fmt::layer().with_target(false);
-        // Use the RUST_LOG env var, or 'warn' by default
-        let filter_layer = EnvFilter::try_from_default_env()
-            .or_else(|_| EnvFilter::try_new("warn"))
-            .unwrap();
+        // Use the RUST_LOG env var, or by default:
+        //  - warn for most tests, and
+        //  - for some modules, hide expected warn logs
+        let filter_layer = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+            EnvFilter::try_new("warn")
+                .unwrap()
+                .add_directive("zebra_consensus=error".parse().unwrap())
+        });
 
         tracing_subscriber::registry()
             .with(filter_layer)
