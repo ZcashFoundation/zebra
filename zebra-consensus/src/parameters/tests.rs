@@ -39,21 +39,32 @@ fn activation_extremes_testnet() {
 /// Test the activation_list, activation_height, current, and next functions
 /// for `network` with extreme values.
 fn activation_extremes(network: Network) {
-    // The first two upgrades are BeforeOverwinter and Overwinter
+    // The first three upgrades are Genesis, BeforeOverwinter, and Overwinter
     assert_eq!(
         NetworkUpgrade::activation_list(network).get(&BlockHeight(0)),
+        Some(&Genesis)
+    );
+    assert_eq!(Genesis.activation_height(network), Some(BlockHeight(0)));
+    assert_eq!(NetworkUpgrade::current(network, BlockHeight(0)), Genesis);
+    assert_eq!(
+        NetworkUpgrade::next(network, BlockHeight(0)),
+        Some(BeforeOverwinter)
+    );
+
+    assert_eq!(
+        NetworkUpgrade::activation_list(network).get(&BlockHeight(1)),
         Some(&BeforeOverwinter)
     );
     assert_eq!(
         BeforeOverwinter.activation_height(network),
-        Some(BlockHeight(0))
+        Some(BlockHeight(1))
     );
     assert_eq!(
-        NetworkUpgrade::current(network, BlockHeight(0)),
+        NetworkUpgrade::current(network, BlockHeight(1)),
         BeforeOverwinter
     );
     assert_eq!(
-        NetworkUpgrade::next(network, BlockHeight(0)),
+        NetworkUpgrade::next(network, BlockHeight(1)),
         Some(Overwinter)
     );
 
@@ -61,12 +72,9 @@ fn activation_extremes(network: Network) {
     // (even if we suspect that won't be true)
     assert_ne!(
         NetworkUpgrade::activation_list(network).get(&BlockHeight::MAX),
-        Some(&BeforeOverwinter)
+        Some(&Genesis)
     );
-    assert_ne!(
-        NetworkUpgrade::current(network, BlockHeight::MAX),
-        BeforeOverwinter
-    );
+    assert_ne!(NetworkUpgrade::current(network, BlockHeight::MAX), Genesis);
     assert_eq!(NetworkUpgrade::next(network, BlockHeight::MAX), None);
 }
 
