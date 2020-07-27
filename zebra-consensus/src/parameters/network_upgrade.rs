@@ -8,12 +8,18 @@ use std::ops::Bound::*;
 use zebra_chain::types::BlockHeight;
 use zebra_chain::{Network, Network::*};
 
-/// A Zcash network protocol upgrade.
-//
-// TODO: are new network upgrades a breaking change, or should we make this
-//       enum non-exhaustive?
+/// A Zcash network upgrade.
+///
+/// Network upgrades can change the Zcash network protocol or consensus rules in
+/// incompatible ways.
 #[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
 pub enum NetworkUpgrade {
+    /// The Zcash protocol for a Genesis block.
+    ///
+    /// Zcash genesis blocks use a different set of consensus rules from
+    /// other BeforeOverwinter blocks, so we treat them like a separate network
+    /// upgrade.
+    Genesis,
     /// The Zcash protocol before the Overwinter upgrade.
     ///
     /// We avoid using `Sprout`, because the specification says that Sprout
@@ -36,7 +42,8 @@ pub enum NetworkUpgrade {
 /// This is actually a bijective map, but it is const, so we use a vector, and
 /// do the uniqueness check in the unit tests.
 pub(crate) const MAINNET_ACTIVATION_HEIGHTS: &[(BlockHeight, NetworkUpgrade)] = &[
-    (BlockHeight(0), BeforeOverwinter),
+    (BlockHeight(0), Genesis),
+    (BlockHeight(1), BeforeOverwinter),
     (BlockHeight(347_500), Overwinter),
     (BlockHeight(419_200), Sapling),
     (BlockHeight(653_600), Blossom),
@@ -49,7 +56,8 @@ pub(crate) const MAINNET_ACTIVATION_HEIGHTS: &[(BlockHeight, NetworkUpgrade)] = 
 /// This is actually a bijective map, but it is const, so we use a vector, and
 /// do the uniqueness check in the unit tests.
 pub(crate) const TESTNET_ACTIVATION_HEIGHTS: &[(BlockHeight, NetworkUpgrade)] = &[
-    (BlockHeight(0), BeforeOverwinter),
+    (BlockHeight(0), Genesis),
+    (BlockHeight(1), BeforeOverwinter),
     (BlockHeight(207_500), Overwinter),
     (BlockHeight(280_000), Sapling),
     (BlockHeight(584_000), Blossom),
@@ -68,8 +76,8 @@ pub struct ConsensusBranchId(u32);
 /// Branch ids are the same for mainnet and testnet. If there is a testnet
 /// rollback after a bug, the branch id changes.
 ///
-/// Branch ids were introduced in the Overwinter upgrade, so there is no
-/// BeforeOverwinter branch id.
+/// Branch ids were introduced in the Overwinter upgrade, so there are no
+/// Genesis or BeforeOverwinter branch ids.
 ///
 /// This is actually a bijective map, but it is const, so we use a vector, and
 /// do the uniqueness check in the unit tests.
