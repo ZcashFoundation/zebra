@@ -1815,9 +1815,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.56"
+version = "1.0.57"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3433e879a558dde8b5e8feb2a04899cf34fdde1fafb894687e52105fc1162ac3"
+checksum = "164eacbdb13512ec2745fb09d51fd5b22b0d65ed294a1dcf7285a360c80a675c"
 dependencies = [
  "itoa",
  "ryu",
@@ -2592,7 +2592,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-chain"
-version = "0.1.0"
+version = "3.0.0-alpha.0"
 dependencies = [
  "bech32",
  "blake2b_simd",
@@ -2624,11 +2624,11 @@ dependencies = [
 
 [[package]]
 name = "zebra-client"
-version = "0.1.0"
+version = "3.0.0-alpha.0"
 
 [[package]]
 name = "zebra-consensus"
-version = "0.1.0"
+version = "3.0.0-alpha.0"
 dependencies = [
  "chrono",
  "color-eyre",
@@ -2652,7 +2652,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-network"
-version = "0.1.0"
+version = "3.0.0-alpha.0"
 dependencies = [
  "bitflags",
  "byteorder",
@@ -2682,15 +2682,15 @@ dependencies = [
 
 [[package]]
 name = "zebra-rpc"
-version = "0.1.0"
+version = "3.0.0-alpha.0"
 
 [[package]]
 name = "zebra-script"
-version = "0.1.0"
+version = "3.0.0-alpha.0"
 
 [[package]]
 name = "zebra-state"
-version = "0.1.0"
+version = "3.0.0-alpha.0"
 dependencies = [
  "color-eyre",
  "dirs",
@@ -2712,7 +2712,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-test"
-version = "0.1.0"
+version = "3.0.0-alpha.0"
 dependencies = [
  "color-eyre",
  "futures",
@@ -2727,7 +2727,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-utils"
-version = "0.1.0"
+version = "3.0.0-alpha.0"
 dependencies = [
  "abscissa_core",
  "color-eyre",
@@ -2742,7 +2742,7 @@ dependencies = [
 
 [[package]]
 name = "zebrad"
-version = "0.1.0"
+version = "3.0.0-alpha.0"
 dependencies = [
  "abscissa_core",
  "chrono",
