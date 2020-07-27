@@ -1,6 +1,6 @@
 use crate::notes::memo::Memo;
 
-use proptest::{arbitrary::any, array, collection::vec, prelude::*};
+use proptest::{arbitrary::any, collection::vec, prelude::*};
 
 impl Arbitrary for Memo {
     type Parameters = ();

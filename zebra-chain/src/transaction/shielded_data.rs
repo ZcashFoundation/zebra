@@ -1,5 +1,5 @@
 use crate::{
-    notes,
+    commitments, notes,
     proofs::Groth16Proof,
     redjubjub::{self, Binding, SpendAuth},
     serde_helpers,
@@ -13,7 +13,7 @@ use futures::future::Either;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Spend {
     /// A value commitment to the value of the input note.
-    pub cv: notes::sapling::ValueCommitment,
+    pub cv: commitments::sapling::ValueCommitment,
     /// A root of the Sapling note commitment tree at some block height in the past.
     pub anchor: SaplingNoteTreeRootHash,
     /// The nullifier of the input note.
@@ -32,7 +32,7 @@ pub struct Spend {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Output {
     /// A value commitment to the value of the input note.
-    pub cv: notes::sapling::ValueCommitment,
+    pub cv: commitments::sapling::ValueCommitment,
     /// The u-coordinate of the note commitment for the output note.
     #[serde(with = "serde_helpers::Fq")]
     pub cm_u: jubjub::Fq,

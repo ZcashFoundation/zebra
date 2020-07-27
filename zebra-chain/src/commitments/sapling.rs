@@ -1,4 +1,9 @@
-//! Sapling note and value commitments
+//! Sapling note and value commitments and types.
+
+#![allow(clippy::unit_arg)]
+
+#[cfg(test)]
+mod arbitrary;
 
 use std::{fmt, io};
 
@@ -7,6 +12,7 @@ use rand_core::{CryptoRng, RngCore};
 
 use crate::{
     keys::sapling::{find_group_hash, Diversifier, TransmissionKey},
+    notes::sapling::Note,
     serde_helpers,
     serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize},
     types::amount::{Amount, NonNegative},
@@ -125,13 +131,37 @@ impl From<jubjub::ExtendedPoint> for NoteCommitment {
     }
 }
 
-impl Eq for NoteCommitment {}
-
 impl From<NoteCommitment> for [u8; 32] {
     fn from(cm: NoteCommitment) -> [u8; 32] {
         cm.0.to_bytes()
     }
 }
+
+impl From<Note> for NoteCommitment {
+    /// Construct a “windowed” Pedersen commitment by reusing a
+    /// Perderson hash constructon, and adding a randomized point on
+    /// the Jubjub curve.
+    ///
+    /// WindowedPedersenCommit_r (s) := \
+    ///   PedersenHashToPoint(“Zcash_PH”, s) + [r]FindGroupHash^J^(r)∗(“Zcash_PH”, “r”)
+    ///
+    /// NoteCommit^Sapling_rcm (g*_d , pk*_d , v) := \
+    ///   WindowedPedersenCommit_rcm([1; 6] || I2LEBSP_64(v) || g*_d || pk*_d)
+    ///
+    /// https://zips.z.cash/protocol/protocol.pdf#concretewindowedcommit
+    fn from(note: Note) -> NoteCommitment {
+        use rand_core::OsRng;
+
+        NoteCommitment::new(
+            &mut OsRng,
+            note.diversifier,
+            note.transmission_key,
+            note.value,
+        )
+    }
+}
+
+impl Eq for NoteCommitment {}
 
 impl ZcashSerialize for NoteCommitment {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {

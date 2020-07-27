@@ -6,51 +6,33 @@
 #[cfg(test)]
 mod arbitrary;
 mod ciphertexts;
-mod commitments;
 mod nullifiers;
 
 use crate::{
+    commitments::sapling::CommitmentRandomness,
     keys::sapling::{Diversifier, TransmissionKey},
     notes::memo::Memo,
     types::amount::{Amount, NonNegative},
 };
 
 pub use ciphertexts::{EncryptedCiphertext, OutCiphertext};
-pub use commitments::{CommitmentRandomness, NoteCommitment, ValueCommitment};
+
 pub use nullifiers::Nullifier;
 
 /// A Note represents that a value is spendable by the recipient who
 /// holds the spending key corresponding to a given shielded payment
 /// address.
 pub struct Note {
-    diversifier: Diversifier,
-    transmission_key: TransmissionKey,
-    value: Amount<NonNegative>,
-    rcm: CommitmentRandomness,
-}
-
-impl Note {
-    /// Construct a “windowed” Pedersen commitment by reusing a
-    /// Perderson hash constructon, and adding a randomized point on
-    /// the Jubjub curve.
-    ///
-    /// WindowedPedersenCommit_r (s) := \
-    ///   PedersenHashToPoint(“Zcash_PH”, s) + [r]FindGroupHash^J^(r)∗(“Zcash_PH”, “r”)
-    ///
-    /// NoteCommit^Sapling_rcm (g*_d , pk*_d , v) := \
-    ///   WindowedPedersenCommit_rcm([1; 6] || I2LEBSP_64(v) || g*_d || pk*_d)
-    ///
-    /// https://zips.z.cash/protocol/protocol.pdf#concretewindowedcommit
-    pub fn commit(&self) -> NoteCommitment {
-        use rand_core::OsRng;
-
-        NoteCommitment::new(
-            &mut OsRng,
-            self.diversifier,
-            self.transmission_key,
-            self.value,
-        )
-    }
+    /// The diversier of the recipient’s shielded payment address.
+    pub diversifier: Diversifier,
+    /// The diversied transmission key of the recipient’s shielded
+    /// payment address.
+    pub transmission_key: TransmissionKey,
+    /// An integer representing the value of the note in zatoshi.
+    pub value: Amount<NonNegative>,
+    /// A random commitment trapdoor used to produce the associated
+    /// note commitment.
+    pub rcm: CommitmentRandomness,
 }
 
 /// The decrypted form of encrypted Sapling notes on the blockchain.
