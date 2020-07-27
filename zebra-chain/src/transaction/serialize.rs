@@ -9,7 +9,7 @@ use std::{
 };
 
 use crate::{
-    notes,
+    commitments, notes,
     proofs::ZkSnarkProof,
     serialization::{
         ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
@@ -335,7 +335,7 @@ impl ZcashDeserialize for Spend {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         use crate::treestate::note_commitment_tree::SaplingNoteTreeRootHash;
         Ok(Spend {
-            cv: notes::sapling::ValueCommitment::zcash_deserialize(&mut reader)?,
+            cv: commitments::sapling::ValueCommitment::zcash_deserialize(&mut reader)?,
             anchor: SaplingNoteTreeRootHash(reader.read_32_bytes()?),
             nullifier: notes::sapling::Nullifier::zcash_deserialize(&mut reader)?,
             rk: reader.read_32_bytes()?.into(),
@@ -360,7 +360,7 @@ impl ZcashSerialize for Output {
 impl ZcashDeserialize for Output {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         Ok(Output {
-            cv: notes::sapling::ValueCommitment::zcash_deserialize(&mut reader)?,
+            cv: commitments::sapling::ValueCommitment::zcash_deserialize(&mut reader)?,
             cm_u: jubjub::Fq::from_bytes(&reader.read_32_bytes()?).unwrap(),
             ephemeral_key: jubjub::AffinePoint::from_bytes(reader.read_32_bytes()?).unwrap(),
             enc_ciphertext: notes::sapling::EncryptedCiphertext::zcash_deserialize(&mut reader)?,

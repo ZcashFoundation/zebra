@@ -1,5 +1,7 @@
-//! Notes, note and value commitments, note encryption, and nullifier types.
+//! Notes, note encryption, and nullifier types.
 
+#[cfg(test)]
+mod arbitrary;
 mod memo;
 
 pub mod sapling;

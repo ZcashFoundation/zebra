@@ -1,4 +1,5 @@
 use crate::{
+    commitments,
     notes::{sapling, sprout},
     proofs::{Groth16Proof, ZkSnarkProof},
     transaction::{
@@ -94,8 +95,8 @@ impl Arbitrary for Output {
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         (
-            any::<sapling::ValueCommitment>(),
-            any::<sapling::NoteCommitment>(),
+            any::<commitments::sapling::ValueCommitment>(),
+            any::<commitments::sapling::NoteCommitment>(),
             array::uniform32(any::<u8>()).prop_filter("Valid jubjub::AffinePoint", |b| {
                 jubjub::AffinePoint::from_bytes(*b).is_some().unwrap_u8() == 1
             }),
@@ -154,7 +155,7 @@ impl Arbitrary for Spend {
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         (
             any::<SaplingNoteTreeRootHash>(),
-            any::<sapling::ValueCommitment>(),
+            any::<commitments::sapling::ValueCommitment>(),
             any::<sapling::Nullifier>(),
             array::uniform32(any::<u8>()),
             any::<Groth16Proof>(),
