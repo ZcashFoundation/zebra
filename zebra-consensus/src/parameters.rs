@@ -10,9 +10,11 @@
 //! `Network` and `BlockHeight`.
 
 pub mod genesis;
+pub mod minimum_difficulty;
 pub mod network_upgrade;
 
 pub use genesis::*;
+pub use minimum_difficulty::*;
 pub use network_upgrade::*;
 
 #[cfg(test)]
