@@ -35,9 +35,18 @@ pub struct BlockHeader {
     /// header.
     pub merkle_root_hash: MerkleTreeRootHash,
 
-    /// [Sapling onward] The root LEBS2OSP256(rt) of the Sapling note
+    /// [Pre-Sapling] Reserved. All zeroes.
+    /// [Sapling and Blossom] The root LEBS2OSP256(rt) of the Sapling note
     /// commitment tree corresponding to the final Sapling treestate of
     /// this block.
+    /// [Heartwood onward] The root of a Merkle Mountain Range tree, which
+    /// commits to various features of the chain's history, including the
+    /// Sapling commitment tree. This commitment supports the FlyClient
+    /// protocol. See ZIP-221 for details.
+    // TODO:
+    //   - replace with an unspecified HistoryRootHash type?
+    // Note that the NetworkUpgrade list is in zebra-consensus, so we can't
+    // parse this field into a HistoryRootHash enum in zebra-chain.
     pub final_sapling_root_hash: SaplingNoteTreeRootHash,
 
     /// The block timestamp is a Unix epoch time (UTC) when the miner
@@ -52,8 +61,7 @@ pub struct BlockHeader {
     /// `ThresholdBits(height)`.
     ///
     /// [Bitcoin-nBits](https://bitcoin.org/en/developer-reference#target-nbits)
-    // parity-zcash has their own wrapper around u32 for this field, see #572 and:
-    // https://github.com/paritytech/parity-zcash/blob/master/primitives/src/compact.rs
+    // See #572 for details.
     pub bits: u32,
 
     /// An arbitrary field that miners can change to modify the header
