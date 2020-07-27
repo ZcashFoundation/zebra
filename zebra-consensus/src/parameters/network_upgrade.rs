@@ -62,8 +62,9 @@ pub(crate) const TESTNET_ACTIVATION_HEIGHTS: &[(BlockHeight, NetworkUpgrade)] = 
     (BlockHeight(280_000), Sapling),
     (BlockHeight(584_000), Blossom),
     (BlockHeight(903_800), Heartwood),
-    // As of 21 July 2020, the Canopy testnet height has not been decided.
-    // See ZIP 251 for updates.
+    // As of 27 July 2020, the Canopy testnet height is under final review.
+    // See ZIP 251 for any updates.
+    (BlockHeight(1_028_500), Canopy),
 ];
 
 /// The Consensus Branch Id, used to bind transactions and blocks to a
