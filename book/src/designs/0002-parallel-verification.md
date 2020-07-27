@@ -138,11 +138,65 @@ Verifcation is implemented by the following traits and services:
     blocks. In most cases, it will only have sole ownership of the earliest
     block in its context.
 
+### Checkpoint Verification
+[checkpoint-verification]: #checkpoint-verification
+
+The `CheckpointVerifier` performs rapid verification of blocks, based on
+a set of hard-coded checkpoints. Each checkpoint hash can be used to verify
+all the previous blocks, back to the genesis block. So Zebra can skip almost
+all context-free and contextual verification for blocks in the checkpoint
+range.
+
+The `CheckpointVerifier` uses an internal queue to implement its own chain
+context. Checkpoint verification is cheap, so it is implemented using
+non-async functions within the CheckpointVerifier service.
+
+Here is how the `CheckpointVerifier` implements each verification stage:
+
+* **Structural Verification:**
+  * *As Above:* the `CheckpointVerifier` accepts parsed `Block` structs.
+* **Context-Free Verification:**
+  * `check_height`: makes sure the block height is within the unverified
+    checkpoint range, and adds the block to its internal queue.
+* **Prospective Verification:**
+  * `target_checkpoint_height`: Checks for a continuous range of blocks from
+    the previous checkpoint to a subsequent checkpoint. If the chain is
+    incomplete, returns a future, and waits for more blocks. If the chain is
+    complete, assumes that the `previous_block_hash` fields of these blocks
+    form an unbroken chain from checkpoint to checkpoint, and starts
+    processing the checkpoint range. (This constraint is an implicit part of
+    the `CheckpointVerifier` design.)
+* **Constraint Verification:**
+  * `process_checkpoint_range`: makes sure that the blocks in the checkpoint
+    range have an unbroken chain of previous block hashes.
+* **Contextual Verification:**
+  * *Not Required:* Verifying a chain of blocks against its checkpoints
+    confirms that the network considers those blocks valid. (Strictly, that the
+    network considered those blocks valid, up to and including the time when
+    those checkpoints were created.)
+* **In-Memory Chain Updates Verification:**
+  * The checkpoint verifier uses an internal queue of blocks to store the
+    simple height and hash context it requires for verification.
+  * *As Above*: Although the checkpoint verifier does not require any external
+    context, Zebra needs to maintain enough context to verify the first
+    non-checkpoint block.
+  * Since there is only ever a single checkpoint chain, Zebra does not need to
+    keep any previous contexts, until it is processing the last 100
+    checkpoint blocks.
+  * Note: If any context fields are only used to verify blocks within the
+    checkpoint range, then Zebra does not need to keep that context. (For
+    example, sprout-only context.)
+* **Main Chain Disk Updates:**
+  * *As Above*: Any large context that is required to verify the first
+    non-checkpoint block needs to be stored to disk.
+* **Chain Pruning:**
+  * *Not Required:* Since Zebra does not keep previous chain contexts until
+    the last 100 checkpoint blocks, it will never need to prune any old
+    contexts. The earliest checkpoint context will be pruned after the first
+    non-checkpoint block is verified. (Since there is only one checkpoint
+    chain, there are no side-chains to prune.)
+
 **TODO:**
-  - Describe the differences when using the CheckpointVerifier
-    - checkpoint verifier uses checkpoints to verify a chain of blocks
-    - skips semantic and contextual verification
-    - still needs the chain state updaters
   - Describe network upgrades, and the ChainContext edge case for the
     activation block
   - Describe the genesis block RecentChainUpdater and MainChainUpdater edge
