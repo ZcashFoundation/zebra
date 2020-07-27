@@ -85,20 +85,13 @@ pub fn pedersen_hash(domain: [u8; 8], M: &BitVec<Lsb0, u8>) -> jubjub::Fq {
 ///   PedersenHashToPoint(“Zcash_PH”, s) + [r]FindGroupHash^J^(r)(“Zcash_PH”, “r”)
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#concretewindowedcommit
-pub fn windowed_pedersen_commitment_r<T>(
-    csprng: &mut T,
+pub fn windowed_pedersen_commitment_r(
+    rcm: CommitmentRandomness,
     s: &BitVec<Lsb0, u8>,
-) -> jubjub::ExtendedPoint
-where
-    T: RngCore + CryptoRng,
-{
+) -> jubjub::ExtendedPoint {
     const D: [u8; 8] = *b"Zcash_PH";
 
-    let mut r_bytes = [0u8; 32];
-    csprng.fill_bytes(&mut r_bytes);
-    let r = Scalar::from_bytes(&r_bytes).unwrap();
-
-    pedersen_hash_to_point(D, &s) + find_group_hash(D, b"r") * r
+    pedersen_hash_to_point(D, &s) + find_group_hash(D, b"r") * rcm.0
 }
 
 /// The randomness used in the Pedersen Hash for note commitment.
@@ -150,10 +143,8 @@ impl From<Note> for NoteCommitment {
     ///
     /// https://zips.z.cash/protocol/protocol.pdf#concretewindowedcommit
     fn from(note: Note) -> NoteCommitment {
-        use rand_core::OsRng;
-
         NoteCommitment::new(
-            &mut OsRng,
+            note.rcm,
             note.diversifier,
             note.transmission_key,
             note.value,
@@ -186,15 +177,12 @@ impl NoteCommitment {
     ///
     /// https://zips.z.cash/protocol/protocol.pdf#concretewindowedcommit
     #[allow(non_snake_case)]
-    pub fn new<T>(
-        csprng: &mut T,
+    pub fn new(
+        rcm: CommitmentRandomness,
         diversifier: Diversifier,
         transmission_key: TransmissionKey,
         value: Amount<NonNegative>,
-    ) -> Self
-    where
-        T: RngCore + CryptoRng,
-    {
+    ) -> Self {
         // s as in the argument name for WindowedPedersenCommit_r(s)
         let mut s: BitVec<Lsb0, u8> = BitVec::new();
 
@@ -211,7 +199,7 @@ impl NoteCommitment {
         s.append(&mut BitVec::<Lsb0, u8>::from_slice(&pk_d_bytes[..]));
         s.append(&mut BitVec::<Lsb0, u8>::from_slice(&v_bytes[..]));
 
-        Self::from(windowed_pedersen_commitment_r(csprng, &s))
+        Self::from(windowed_pedersen_commitment_r(rcm, &s))
     }
 
     /// Hash Extractor for Jubjub (?)
