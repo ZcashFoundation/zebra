@@ -293,6 +293,36 @@ Here are the context changes required for each network upgrade:
   * The Heartwood activation block has an all-zeroes `history_root_hash` field,
     and an empty list of previous subtree roots.
 
+## Main Chain Tip
+[main-chain-tip]: #main-chain-tip
+
+The main chain tip determines the set of valid, historical Zcash transactions.
+The main chain tip is updated whenever a new block is received:
+
+First, the set of chain tips is updated:
+* if the new block uniquely extends an existing chain tip, that existing chain
+  tip is replaced by the new block.
+* if the new block forks from the ancestor of an existing tip, the new block
+  is added to the set of chain tips.
+
+Then, the new main tip is selected, according to these rules:
+* the main tip is the chain tip with the greatest cumulative proof of work,
+  calculated according to the Zcash Specification. (This is a consensus rule.)
+* as a tie-breaker, if multiple chain tips have equal cumulative work, and one
+  of those tips is the current main tip, the main tip does not change. (This is
+  *not* a consensus rule, because it depends on download and verification
+  order on each local node.)
+  * Note: zcashd chooses the first block that was downloaded on the local
+    node. But in Zebra, we want to avoid tracking an associated download time
+    for each block (in memory and on disk).
+* as a tie-breaker, if the main tip is not one of the chain tips with the
+  greatest cumulative work, the chain tip with the lowest BlockHeaderHash
+  becomes the main chain tip. (This is *not* a consensus rule. But just in
+  case we want to turn it into a consensus rule in future, we specify that
+  the comparison should happen in little-endian byte order.)
+  * Note: Since the `ChainTipUpdater` has exclusive access to the chain tips,
+    this should be impossible, unless a network upgrade changes the proof of
+    work rules.
 
 # Drawbacks
 [drawbacks]: #drawbacks
@@ -319,8 +349,9 @@ Here are the context changes required for each network upgrade:
 [prior-art]: #prior-art
 
 **TODO:**
-  - zcashd
-    - the shorter pruning limit
+  - zcashd divergence
+    - verification time as a main chain tip tie-breaker
+    - a shorter pruning limit
     - keeping reorgs in memory
   - tower
 
