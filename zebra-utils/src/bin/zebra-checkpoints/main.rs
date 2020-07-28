@@ -8,7 +8,9 @@
 //! zebra-consensus accepts an ordered list of checkpoints, starting with the
 //! genesis block. Checkpoint heights can be chosen arbitrarily.
 
+#![deny(missing_docs)]
 #![allow(clippy::try_err)]
+
 use color_eyre::eyre::Result;
 use serde_json::Value;
 use std::process::Stdio;
@@ -30,7 +32,14 @@ const MAX_CHECKPOINT_BYTE_COUNT: u64 = 256 * 1024 * 1024;
 /// zcashd reorg limit.
 const BLOCK_REORG_LIMIT: BlockHeight = BlockHeight(100);
 
-// Passthrough arguments if needed
+/// Initialise tracing using its defaults.
+fn init_tracing() {
+    tracing_subscriber::Registry::default()
+        .with(tracing_error::ErrorLayer::default())
+        .init();
+}
+
+/// Add passthrough arguments to `cmd`, if present in `args`.
 fn passthrough(mut cmd: std::process::Command, args: &args::Args) -> std::process::Command {
     if !args.zcli_args.is_empty() {
         cmd.args(&args.zcli_args);
@@ -118,10 +127,4 @@ fn main() -> Result<()> {
     }
 
     Ok(())
-}
-
-fn init_tracing() {
-    tracing_subscriber::Registry::default()
-        .with(tracing_error::ErrorLayer::default())
-        .init();
 }
