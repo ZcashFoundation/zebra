@@ -8,7 +8,7 @@ edition = "2018"
 [dependencies]
 tower = "0.3"
 futures-core = "0.3.5"
-pin-project = "0.4.20"
+pin-project = "0.4.23"
 tracing = "0.1"
 
 [dev-dependencies]
