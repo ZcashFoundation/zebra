@@ -9,14 +9,47 @@
 //! append-only.
 //!
 //! A root of a note commitment tree is associated with each treestate.
+
 #![allow(clippy::unit_arg)]
+#![allow(dead_code)]
 
 use std::{fmt, io};
 
+use bitvec::prelude::*;
 #[cfg(test)]
 use proptest_derive::Arbitrary;
 
-use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
+use crate::{
+    commitments::sapling::pedersen_hash_to_point,
+    serialization::{SerializationError, ZcashDeserialize, ZcashSerialize},
+};
+
+/// Pedersen Hash Function
+///
+/// https://zips.z.cash/protocol/protocol.pdf#concretepedersenhash
+#[allow(non_snake_case)]
+fn pedersen_hash(domain: [u8; 8], M: &BitVec<Lsb0, u8>) -> jubjub::Fq {
+    jubjub::AffinePoint::from(pedersen_hash_to_point(domain, M)).get_u()
+}
+
+/// MerkleCRH^Sapling Hash Function
+///
+/// MerkleCRH^Sapling(layer, left,right) := PedersenHash(“Zcash_PH”, l || left ||right)
+/// where l = I2LEBSP_6(MerkleDepth^Sapling − 1 − layer)
+///
+/// https://zips.z.cash/protocol/protocol.pdf#merklecrh
+// TODO: refine layer as a wrapper type around a bitvec/bitslice?
+// TODO: refine output type as *NodeHash, combine with RootHash
+fn merkle_crh_sapling(layer: u8, left: [u8; 32], right: [u8; 32]) -> jubjub::Fq {
+    let mut s: BitVec<Lsb0, u8> = BitVec::new();
+
+    // Prefix: l = I2LEBSP_6(MerkleDepth^Sapling − 1 − layer)
+    s.append(&mut bitvec![31 - layer; 1]);
+    s.append(&mut BitVec::<Lsb0, u8>::from_slice(&left[..]));
+    s.append(&mut BitVec::<Lsb0, u8>::from_slice(&right[..]));
+
+    pedersen_hash(*b"Zcash_PH", &s)
+}
 
 /// The index of a note’s commitment at the leafmost layer of its Note
 /// Commitment Tree.
