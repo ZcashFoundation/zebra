@@ -33,17 +33,27 @@ pub struct ZebradConfig {
 }
 
 /// Tracing configuration section.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct TracingSection {
     /// The filter used for tracing events.
     pub filter: Option<String>,
+
+    /// The endpoint address used for tracing.
+    pub endpoint_addr: SocketAddr,
+}
+
+impl Default for TracingSection {
+    fn default() -> Self {
+        Self::populated()
+    }
 }
 
 impl TracingSection {
     pub fn populated() -> Self {
         Self {
             filter: Some("info".to_owned()),
+            endpoint_addr: "0.0.0.0:3000".parse().unwrap(),
         }
     }
 }
@@ -52,6 +62,7 @@ impl TracingSection {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct MetricsSection {
+    /// The endpoint address used for metrics.
     pub endpoint_addr: SocketAddr,
 }
 

@@ -1,10 +1,10 @@
 //! An HTTP endpoint for metrics collection.
 
-use metrics_runtime::{exporters::HttpExporter, observers::PrometheusBuilder, Receiver};
+use crate::{components::tokio::TokioComponent, prelude::*};
 
 use abscissa_core::{Component, FrameworkError};
 
-use crate::components::tokio::TokioComponent;
+use metrics_runtime::{exporters::HttpExporter, observers::PrometheusBuilder, Receiver};
 
 /// Abscissa component which runs a metrics endpoint.
 #[derive(Debug, Component)]
@@ -21,10 +21,7 @@ impl MetricsEndpoint {
     pub fn init_tokio(&mut self, tokio_component: &TokioComponent) -> Result<(), FrameworkError> {
         info!("Initializing metrics endpoint");
 
-        // XXX load metrics addr from config
-        let addr = "0.0.0.0:9999"
-            .parse()
-            .expect("Hardcoded address should be parseable");
+        let addr = app_config().metrics.endpoint_addr;
 
         // XXX do we need to hold on to the receiver?
         let receiver = Receiver::builder()
