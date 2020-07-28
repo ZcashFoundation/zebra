@@ -18,6 +18,12 @@ use proptest_derive::Arbitrary;
 
 use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 
+/// The index of a note’s commitment at the leafmost layer of its Note
+/// Commitment Tree.
+///
+/// https://zips.z.cash/protocol/protocol.pdf#merkletree
+pub struct Position(pub(crate) u64);
+
 // XXX: Depending on if we implement SproutNoteCommitmentTree or
 // similar, it may be worth it to define a NoteCommitmentTree trait.
 
