@@ -82,14 +82,6 @@ pub fn pedersen_hash_to_point(domain: [u8; 8], M: &BitVec<Lsb0, u8>) -> jubjub::
     result
 }
 
-/// Pedersen Hash Function
-///
-/// https://zips.z.cash/protocol/protocol.pdf#concretepedersenhash
-#[allow(non_snake_case)]
-pub fn pedersen_hash(domain: [u8; 8], M: &BitVec<Lsb0, u8>) -> jubjub::Fq {
-    jubjub::AffinePoint::from(pedersen_hash_to_point(domain, M)).get_u()
-}
-
 /// Mixing Pedersen Hash Function
 ///
 /// Used to compute ρ from a note commitment and its position in the
