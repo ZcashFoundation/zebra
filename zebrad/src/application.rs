@@ -172,6 +172,7 @@ impl ZebradApp {
             tracing:
                 crate::config::TracingSection {
                     filter: Some(filter),
+                    endpoint_addr: _,
                 },
             ..
         }) = &self.config
