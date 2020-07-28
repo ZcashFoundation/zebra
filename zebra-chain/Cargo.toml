@@ -37,3 +37,4 @@ proptest = "0.10"
 proptest-derive = "0.2.0"
 zebra-test = { path = "../zebra-test/" }
 color-eyre = "0.5"
+bincode = "1"
