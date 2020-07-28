@@ -69,7 +69,6 @@ pub use crate::{
     config::Config,
     peer_set::init,
     policies::{RetryErrors, RetryLimit},
-    protocol::external::codec::Builder,
     protocol::internal::{Request, Response},
 };
 
