@@ -240,8 +240,6 @@ impl CheckpointVerifier {
         let mut pending_height = match self.previous_checkpoint_height() {
             // Check if we have the genesis block as a special case, to simplify the loop
             BeforeGenesis if !self.queued.contains_key(&BlockHeight(0)) => {
-                // XXX scratch tracing line for debugging, delete this
-                tracing::debug!("beforegenesis if !self.queued.contains_key(&BlockHeight(0))");
                 return WaitingForBlocks;
             }
             BeforeGenesis => BlockHeight(0),
@@ -537,8 +535,9 @@ impl CheckpointVerifier {
                 tracing::debug!("waiting for blocks to complete checkpoint range");
                 return;
             }
-            // XXX(hdevalence) should this be unreachable!("called after finished") ?
-            _ => return,
+            FinishedVerifying => {
+                unreachable!("the FinalCheckpoint case should have returned earlier")
+            }
         };
 
         // Keep the old previous checkpoint height, to make sure we're making

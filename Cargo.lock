@@ -577,6 +577,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "ed25519-zebra"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a045d3ca7d15222d578515dc6b54fea6c3591763b8fe2f67a45bbd56d5f1989b"
+dependencies = [
+ "curve25519-dalek",
+ "hex",
+ "rand_core 0.5.1",
+ "serde",
+ "sha2",
+ "thiserror",
+]
+
+[[package]]
 name = "equihash"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1815,9 +1829,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.56"
+version = "1.0.57"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3433e879a558dde8b5e8feb2a04899cf34fdde1fafb894687e52105fc1162ac3"
+checksum = "164eacbdb13512ec2745fb09d51fd5b22b0d65ed294a1dcf7285a360c80a675c"
 dependencies = [
  "itoa",
  "ryu",
@@ -2212,13 +2226,15 @@ dependencies = [
 name = "tower-batch"
 version = "0.1.0"
 dependencies = [
- "ed25519-zebra",
+ "color-eyre",
+ "ed25519-zebra 2.1.0",
  "futures",
  "futures-core",
  "pin-project",
  "rand 0.7.3",
  "tokio",
  "tower",
+ "tower-fallback",
  "tracing",
  "tracing-futures",
  "zebra-test",
@@ -2592,7 +2608,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-chain"
-version = "0.1.0"
+version = "3.0.0-alpha.0"
 dependencies = [
  "bech32",
  "blake2b_simd",
@@ -2602,7 +2618,7 @@ dependencies = [
  "chrono",
  "color-eyre",
  "displaydoc",
- "ed25519-zebra",
+ "ed25519-zebra 1.0.0",
  "equihash",
  "futures",
  "hex",
@@ -2624,11 +2640,11 @@ dependencies = [
 
 [[package]]
 name = "zebra-client"
-version = "0.1.0"
+version = "3.0.0-alpha.0"
 
 [[package]]
 name = "zebra-consensus"
-version = "0.1.0"
+version = "3.0.0-alpha.0"
 dependencies = [
  "chrono",
  "color-eyre",
@@ -2652,7 +2668,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-network"
-version = "0.1.0"
+version = "3.0.0-alpha.0"
 dependencies = [
  "bitflags",
  "byteorder",
@@ -2682,15 +2698,15 @@ dependencies = [
 
 [[package]]
 name = "zebra-rpc"
-version = "0.1.0"
+version = "3.0.0-alpha.0"
 
 [[package]]
 name = "zebra-script"
-version = "0.1.0"
+version = "3.0.0-alpha.0"
 
 [[package]]
 name = "zebra-state"
-version = "0.1.0"
+version = "3.0.0-alpha.0"
 dependencies = [
  "color-eyre",
  "dirs",
@@ -2712,7 +2728,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-test"
-version = "0.1.0"
+version = "3.0.0-alpha.0"
 dependencies = [
  "color-eyre",
  "futures",
@@ -2727,7 +2743,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-utils"
-version = "0.1.0"
+version = "3.0.0-alpha.0"
 dependencies = [
  "abscissa_core",
  "color-eyre",
@@ -2742,7 +2758,7 @@ dependencies = [
 
 [[package]]
 name = "zebrad"
-version = "0.1.0"
+version = "3.0.0-alpha.0"
 dependencies = [
  "abscissa_core",
  "chrono",

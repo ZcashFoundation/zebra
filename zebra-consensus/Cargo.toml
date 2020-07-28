@@ -7,22 +7,23 @@ edition = "2018"
 
 [dependencies]
 chrono = "0.4.13"
-futures = "0.3.5"
-futures-util = "0.3.5"
+color-eyre = "0.5"
 rand = "0.7"
 redjubjub = "0.2"
+
+metrics = "0.12"
+futures = "0.3.5"
+futures-util = "0.3.5"
 tokio = { version = "0.2.22", features = ["time", "sync", "stream", "tracing"] }
 tower = "0.3"
 tracing = "0.1.17"
 tracing-futures = "0.2.4"
-metrics = "0.12"
 
 tower-batch = { path = "../tower-batch/" }
 zebra-chain = { path = "../zebra-chain" }
 zebra-state = { path = "../zebra-state" }
 
 [dev-dependencies]
-color-eyre = "0.5"
 rand = "0.7"
 spandoc = "0.2"
 tokio = { version = "0.2", features = ["full"] }
