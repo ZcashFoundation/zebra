@@ -30,9 +30,10 @@ pub fn generate_trapdoor<T>(csprng: &mut T) -> jubjub::Fr
 where
     T: RngCore + CryptoRng,
 {
-    let mut bytes = [0u8; 32];
+    let mut bytes = [0u8; 64];
     csprng.fill_bytes(&mut bytes);
-    jubjub::Fr::from_bytes(&bytes).unwrap()
+    // Fr::from_bytes_wide() reduces the input modulo r via Fr::from_u512()
+    jubjub::Fr::from_bytes_wide(&bytes)
 }
 
 /// "...an algebraic hash function with collision resistance (for
