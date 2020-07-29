@@ -98,7 +98,7 @@ where
         );
         let height = block.coinbase_height();
 
-        // Log a warning on unexpected high blocks
+        // Log an info-level message on unexpected high blocks
         let is_unexpected_high_block = match height {
             Some(BlockHeight(height))
                 if (height > self.last_block_height.0 + MAX_EXPECTED_BLOCK_GAP) =>
@@ -114,7 +114,7 @@ where
         };
 
         async move {
-            // TODO(teor): for post-sapling checkpoint blocks, allow callers
+            // TODO(teor): in the post-sapling checkpoint range, allow callers
             //             to use BlockVerifier, CheckpointVerifier, or both.
 
             // Call a verifier based on the block height and checkpoints.
@@ -127,10 +127,11 @@ where
                         .await?
                 }
                 _ => {
-                    // Temporary trace, for identifying early high blocks.
-                    // We think the downloader or sync service should reject these blocks
+                    // Log an info-level message on early high blocks.
+                    // The sync service rejects most of these blocks, but we
+                    // still want to know if a large number get through.
                     if is_unexpected_high_block {
-                        tracing::warn!(?height, "unexpected high block");
+                        tracing::info!(?height, "unexpected high block");
                     }
 
                     block_verifier
@@ -205,11 +206,11 @@ where
     let block_verifier = crate::block::init(state_service.clone());
     let checkpoint_verifier = CheckpointVerifier::new(network, initial_tip);
 
-    init_from_verifiers(block_verifier, checkpoint_verifier, state_service)
+    init_from_verifiers(block_verifier, checkpoint_verifier, state_service, height)
 }
 
-/// Return a chain verification service, using the provided verifier and state
-/// services.
+/// Return a chain verification service, using the provided verifier, state
+/// services, and initial tip height.
 ///
 /// The chain verifier holds a state service of type `S`, used as context for
 /// block validation and to which newly verified blocks will be committed. This
@@ -227,6 +228,7 @@ pub fn init_from_verifiers<BV, S>(
     block_verifier: BV,
     checkpoint_verifier: CheckpointVerifier,
     state_service: S,
+    initial_tip_height: Option<BlockHeight>,
 ) -> impl Service<
     Arc<Block>,
     Response = BlockHeaderHash,
@@ -259,10 +261,10 @@ where
             checkpoint_verifier,
             max_checkpoint_height,
             state_service,
-            // We haven't actually got the genesis block yet, but that's ok,
+            // We might not have the genesis block yet, but that's ok,
             // because this field is only used for debugging unexpected high
             // blocks.
-            last_block_height: BlockHeight(0),
+            last_block_height: initial_tip_height.unwrap_or(BlockHeight(0)),
         },
         1,
     )

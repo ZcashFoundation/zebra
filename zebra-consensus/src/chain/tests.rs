@@ -67,8 +67,12 @@ fn verifiers_from_checkpoint_list(
     let block_verifier = crate::block::init(state_service.clone());
     let checkpoint_verifier =
         crate::checkpoint::CheckpointVerifier::from_checkpoint_list(checkpoint_list, None);
-    let chain_verifier =
-        super::init_from_verifiers(block_verifier, checkpoint_verifier, state_service.clone());
+    let chain_verifier = super::init_from_verifiers(
+        block_verifier,
+        checkpoint_verifier,
+        state_service.clone(),
+        None,
+    );
 
     (chain_verifier, state_service)
 }
