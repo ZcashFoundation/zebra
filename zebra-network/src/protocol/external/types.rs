@@ -59,6 +59,7 @@ impl Version {
     /// Returns the current minimum protocol version for `network` and `height`.
     ///
     /// Returns None if the network has no branch id at this height.
+    #[allow(dead_code)]
     pub fn current_min(network: Network, height: BlockHeight) -> Version {
         let network_upgrade = NetworkUpgrade::current(network, height);
         Version::min_for_upgrade(network, network_upgrade)
