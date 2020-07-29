@@ -251,19 +251,24 @@ they require special handling.
 
 Here are the context changes required for each network upgrade:
 * **Genesis:**
+  * "the genesis block is the first block to be committed to the state" is the
+    only constraint in `VerificationConstraints`
+
   * There is no `previous_context`, and the `DiskState` is empty.
   * The Genesis RecentChainUpdater creates a new, empty context, using the
     specified initial values for each field.
   * Then the context is updated using the values from the Genesis block,
     modified by any special Genesis rules.
   * The `DiskState` needs to be initialised with the specified initial values.
+  * there are no `ChainTips` in memory or on disk - the genesis block
+    automatically becomes the first tip
   * Note:
     * the UTXO from the genesis coinbase transaction is not included in the
       UTXO set. (zcashd inheritied this bug from Bitcoin.)
     * the Founders Reward is not required in genesis blocks.
     * the `hashPrevBlock`, difficulty adjustment, and median-time-past rules
       are special-cased.
-  * *TODO: check for other differences*
+  * *TODO: check for other differences*  
 * **Before Overwinter:**
   * Add UTXOs, note commitments, and nullifiers from each block to the
     `ChainContext` as deltas.
