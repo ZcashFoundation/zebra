@@ -254,9 +254,15 @@ Here are the context changes required for each network upgrade:
   * There is no `previous_context`, and the `DiskState` is empty.
   * The Genesis RecentChainUpdater creates a new, empty context, using the
     specified initial values for each field.
-  * Do not include the UTXO from the genesis coinbase transaction in the UTXO
-    set. (zcashd inheritied this rule from Bitcoin.)
-  * Note: the Founders Reward is not required in genesis blocks.
+  * Then the context is updated using the values from the Genesis block,
+    modified by any special Genesis rules.
+  * The `DiskState` needs to be initialised with the specified initial values.
+  * Note:
+    * the UTXO from the genesis coinbase transaction is not included in the
+      UTXO set. (zcashd inheritied this bug from Bitcoin.)
+    * the Founders Reward is not required in genesis blocks.
+    * the `hashPrevBlock`, difficulty adjustment, and median-time-past rules
+      are special-cased.
   * *TODO: check for other differences*
 * **Before Overwinter:**
   * Add UTXOs, note commitments, and nullifiers from each block to the
