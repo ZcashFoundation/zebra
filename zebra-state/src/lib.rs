@@ -155,12 +155,12 @@ type Error = Box<dyn error::Error + Send + Sync + 'static>;
 ///
 /// If there is no tip, returns `Ok(None)`.
 /// Returns an error if `state.poll_ready` errors.
-pub async fn initial_tip<S>(state: S) -> Result<Option<Arc<Block>>, Report>
+pub async fn current_tip<S>(state: S) -> Result<Option<Arc<Block>>, Report>
 where
     S: Service<Request, Response = Response, Error = Error> + Send + Clone + 'static,
     S::Future: Send + 'static,
 {
-    let initial_tip_hash = state
+    let current_tip_hash = state
         .clone()
         .ready_and()
         .await
@@ -173,7 +173,7 @@ where
         })
         .ok();
 
-    let initial_tip_block = match initial_tip_hash {
+    let current_tip_block = match current_tip_hash {
         Some(hash) => state
             .clone()
             .ready_and()
@@ -189,7 +189,7 @@ where
         None => None,
     };
 
-    Ok(initial_tip_block)
+    Ok(current_tip_block)
 }
 
 #[cfg(test)]
