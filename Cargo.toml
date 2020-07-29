@@ -22,3 +22,6 @@ panic = "abort"
 
 [patch.crates-io]
 abscissa_core = { git = "https://github.com/yaahc/abscissa.git", rev = "41d342a9344e38442b2211b07f28a89505892a21" }
+# Resolve a cc dependency conflict with sled's compression feature (on sled 0.3.0 and later)
+# Remove when secp256k1 is on 0.17.3 or later
+secp256k1 = { git = "https://github.com/rust-bitcoin/rust-secp256k1.git", rev = "fd8b3ff572354ecb30cf1c783d393fbb404a5a9c" }

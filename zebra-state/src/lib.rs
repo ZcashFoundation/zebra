@@ -64,7 +64,18 @@ impl Config {
             .join(net_dir)
             .join("state");
 
-        sled::Config::default().path(path)
+        // Use fast Zstd compression for the on-disk cache.
+        //
+        // We expect that long runs of zero bytes in blocks will compress well.
+        // But blocks are mainly distinct hashes, so they won't compress much
+        // more. Since Zebra is CPU-bound, we don't want to use much CPU for the
+        // block cache, so we choose the lowest compression level. (Zstd has
+        // negative compression levels, but they only give a minor increase in
+        // speed, in exchange for a major loss of compression ratio.)
+        sled::Config::default()
+            .path(path)
+            .use_compression(true)
+            .compression_factor(1)
     }
 }
 
