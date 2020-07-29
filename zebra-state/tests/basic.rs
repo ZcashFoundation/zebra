@@ -1,6 +1,7 @@
 use color_eyre::eyre::Report;
+use lazy_static::lazy_static;
 use once_cell::sync::Lazy;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tempdir::TempDir;
 
 use zebra_chain::{block::Block, serialization::ZcashDeserialize, Network, Network::*};
@@ -8,11 +9,25 @@ use zebra_test::transcript::Transcript;
 
 use zebra_state::*;
 
+lazy_static! {
+    pub static ref MODE: Mutex<Network> = Mutex::new(Network::Mainnet);
+}
+
+pub fn read_mode() -> Network {
+    *MODE.lock().unwrap()
+}
+
+pub fn write_mode(network: Network) {
+    *MODE.lock().unwrap() = network;
+}
+
 static ADD_BLOCK_TRANSCRIPT: Lazy<Vec<(Request, Response)>> = Lazy::new(|| {
-    let block: Arc<_> =
-        Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])
-            .unwrap()
-            .into();
+    let block: Arc<_> = Block::zcash_deserialize(match read_mode() {
+        Network::Testnet => &zebra_test::vectors::BLOCK_TESTNET_10_BYTES[..],
+        _ => &zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..],
+    })
+    .unwrap()
+    .into();
     let hash = block.as_ref().into();
     vec![
         (
@@ -26,13 +41,18 @@ static ADD_BLOCK_TRANSCRIPT: Lazy<Vec<(Request, Response)>> = Lazy::new(|| {
 });
 
 static GET_TIP_TRANSCRIPT: Lazy<Vec<(Request, Response)>> = Lazy::new(|| {
-    let block0: Arc<_> =
-        Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
-            .unwrap()
-            .into();
-    let block1: Arc<_> = Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..])
-        .unwrap()
-        .into();
+    let block0: Arc<_> = Block::zcash_deserialize(match read_mode() {
+        Network::Testnet => &zebra_test::vectors::BLOCK_TESTNET_GENESIS_BYTES[..],
+        _ => &zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..],
+    })
+    .unwrap()
+    .into();
+    let block1: Arc<_> = Block::zcash_deserialize(match read_mode() {
+        Network::Testnet => &zebra_test::vectors::BLOCK_TESTNET_1_BYTES[..],
+        _ => &zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..],
+    })
+    .unwrap()
+    .into();
     let hash0 = block0.as_ref().into();
     let hash1 = block1.as_ref().into();
     vec![
@@ -56,6 +76,7 @@ async fn check_transcripts_mainnet() -> Result<(), Report> {
 
 #[tokio::test]
 async fn check_transcripts_testnet() -> Result<(), Report> {
+    write_mode(Network::Testnet);
     check_transcripts(Testnet).await
 }
 
