@@ -19,11 +19,10 @@ use crate::{
 
 /// Generates a random scalar from the scalar field \mathbb{F}_r_𝕁.
 ///
-/// The prime order subgroup 𝕁^(r) is the order-r_𝕁 subgroup of 𝕁
-/// after the Edwards cofactor h_𝕁 = 8 is factored out. This function
-/// is useful when generating the uniform distribution on
-/// \mathbb{F}_r_𝕁 needed for Sapling commitment schemes' trapdoor
-/// generators.
+/// The prime order subgroup 𝕁^(r) is the order-r_𝕁 subgroup of 𝕁 after the
+/// Edwards cofactor h_𝕁 = 8 is factored out. This function is useful when
+/// generating the uniform distribution on \mathbb{F}_r_𝕁 needed for Sapling
+/// commitment schemes' trapdoor generators.
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#jubjub
 pub fn generate_trapdoor<T>(csprng: &mut T) -> jubjub::Fr
@@ -36,14 +35,14 @@ where
     jubjub::Fr::from_bytes_wide(&bytes)
 }
 
-/// "...an algebraic hash function with collision resistance (for
-/// fixed input length) derived from assumed hardness of the Discrete
-/// Logarithm Problem on the Jubjub curve."
+/// "...an algebraic hash function with collision resistance (for fixed input
+/// length) derived from assumed hardness of the Discrete Logarithm Problem on
+/// the Jubjub curve."
 ///
 /// PedersenHash is used in the definitions of Pedersen commitments (§
-/// 5.4.7.2‘Windowed Pedersen commitments’), and of the Pedersen hash
-/// for the Sapling incremental Merkle tree (§
-/// 5.4.1.3 ‘MerkleCRH^Sapling Hash Function’).
+/// 5.4.7.2‘Windowed Pedersen commitments’), and of the Pedersen hash for the
+/// Sapling incremental Merkle tree (§ 5.4.1.3 ‘MerkleCRH^Sapling Hash
+/// Function’).
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#concretepedersenhash
 #[allow(non_snake_case)]
@@ -72,8 +71,8 @@ pub fn pedersen_hash_to_point(domain: [u8; 8], M: &BitVec<Lsb0, u8>) -> jubjub::
 
     let mut result = jubjub::ExtendedPoint::identity();
 
-    // Split M into n segments of 3 * c bits, where c = 63, padding
-    // the last segment with zeros.
+    // Split M into n segments of 3 * c bits, where c = 63, padding the last
+    // segment with zeros.
     //
     // https://zips.z.cash/protocol/protocol.pdf#concretepedersenhash
     for (i, segment) in M.chunks(189).enumerate() {
@@ -85,9 +84,9 @@ pub fn pedersen_hash_to_point(domain: [u8; 8], M: &BitVec<Lsb0, u8>) -> jubjub::
 
 /// Mixing Pedersen Hash Function
 ///
-/// Used to compute ρ from a note commitment and its position in the
-/// note commitment tree.  It takes as input a Pedersen commitment P,
-/// and hashes it with another input x.
+/// Used to compute ρ from a note commitment and its position in the note
+/// commitment tree.  It takes as input a Pedersen commitment P, and hashes it
+/// with another input x.
 ///
 /// MixingPedersenHash(P, x) := P + [x]FindGroupHash^J^(r)(“Zcash_J_”, “”)
 ///
@@ -99,9 +98,8 @@ pub fn mixing_pedersen_hash(P: jubjub::ExtendedPoint, x: jubjub::Fr) -> jubjub::
     P + find_group_hash(J, b"") * x
 }
 
-/// Construct a 'windowed' Pedersen commitment by reusing a Perderson
-/// hash constructon, and adding a randomized point on the Jubjub
-/// curve.
+/// Construct a 'windowed' Pedersen commitment by reusing a Perderson hash
+/// constructon, and adding a randomized point on the Jubjub curve.
 ///
 /// WindowedPedersenCommit_r (s) := \
 ///   PedersenHashToPoint(“Zcash_PH”, s) + [r]FindGroupHash^J^(r)(“Zcash_PH”, “r”)
@@ -166,14 +164,12 @@ impl ZcashDeserialize for NoteCommitment {
 }
 
 impl NoteCommitment {
-    /// Generate a new _NoteCommitment_ and the randomness used to
-    /// create it.
+    /// Generate a new _NoteCommitment_ and the randomness used to create it.
     ///
-    /// We return the randomness because it is needed to construct a
-    /// _Note_, before it is encrypted as part of an _Output
-    /// Description_.
+    /// We return the randomness because it is needed to construct a _Note_,
+    /// before it is encrypted as part of an _Output Description_.
     ///
-    /// NoteCommit^Sapling_rcm (g*_d , pk*_d , v) := \
+    /// NoteCommit^Sapling_rcm (g*_d , pk*_d , v) :=
     ///   WindowedPedersenCommit_rcm([1; 6] || I2LEBSP_64(v) || g*_d || pk*_d)
     ///
     /// https://zips.z.cash/protocol/protocol.pdf#concretewindowedcommit
@@ -219,8 +215,8 @@ impl NoteCommitment {
     }
 }
 
-/// A Homomorphic Pedersen commitment to the value of a note, used in
-/// Spend and Output Descriptions.
+/// A Homomorphic Pedersen commitment to the value of a note, used in Spend and
+/// Output Descriptions.
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#concretehomomorphiccommit
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
