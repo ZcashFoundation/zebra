@@ -43,6 +43,7 @@ where
     BV::Future: Send + 'static,
     S: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>
         + Send
+        + Sync
         + Clone
         + 'static,
     S::Future: Send + 'static,
@@ -85,6 +86,7 @@ where
     BV::Future: Send + 'static,
     S: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>
         + Send
+        + Sync
         + Clone
         + 'static,
     S::Future: Send + 'static,
@@ -109,6 +111,16 @@ where
             hash = ?block.hash()
         );
         let block_height = block.coinbase_height();
+
+        // Drop the checkpoint verifier, if we have finished verifying the
+        // checkpoint range.
+        //
+        // TODO(teor): work out how to get the latest verified block height, and
+        //             then drop the checkpoint verifier.
+        if self.is_checkpoint_verifier_finished(block_height).await {
+            self.checkpoint_verifier = None;
+            self.max_checkpoint_height = None;
+        }
 
         let mut block_verifier = self.block_verifier.clone();
         let mut state_service = self.state_service.clone();
@@ -188,6 +200,44 @@ fn is_higher_than_max_checkpoint(
     }
 }
 
+impl<BV, S> ChainVerifier<BV, S>
+where
+    BV: Service<Arc<Block>, Response = BlockHeaderHash, Error = Error> + Send + Clone + 'static,
+    BV::Future: Send + 'static,
+    S: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>
+        + Send
+        + Sync
+        + Clone
+        + 'static,
+    S::Future: Send + 'static,
+{
+    /// Returns true if the checkpoint verifier has finished verifying all the
+    /// checkpoints.
+    #[allow(dead_code)]
+    async fn is_checkpoint_verifier_finished(
+        &self,
+        unverified_block_height: Option<BlockHeight>,
+    ) -> bool {
+        // First, check the height of the block that was just passed in.
+        // This is an optimisation, to avoid repeatedly checking the state.
+        if is_higher_than_max_checkpoint(unverified_block_height, self.max_checkpoint_height) {
+            // If the unverified height is high enough, check the actual tip
+            let s = self.state_service.clone();
+            let tip_height = async move {
+                zebra_state::current_tip(s)
+                    .await
+                    .expect("State service poll_ready is Ok")
+                    .map(|b| b.coinbase_height())
+                    .flatten()
+            };
+
+            return is_higher_than_max_checkpoint(tip_height.await, self.max_checkpoint_height);
+        }
+
+        false
+    }
+}
+
 /// Return a chain verification service, using `network` and `state_service`.
 ///
 /// Gets the initial tip from the state service, and uses it to create a block
@@ -214,6 +264,7 @@ pub async fn init<S>(
 where
     S: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>
         + Send
+        + Sync
         + Clone
         + 'static,
     S::Future: Send + 'static,
@@ -275,6 +326,7 @@ where
     BV::Future: Send + 'static,
     S: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>
         + Send
+        + Sync
         + Clone
         + 'static,
     S::Future: Send + 'static,
