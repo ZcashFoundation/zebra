@@ -14,6 +14,10 @@ pub struct Args {
     #[structopt(default_value = "zcash-cli", short, long)]
     pub cli: String,
 
+    /// Start looking for checkpoints after this height
+    #[structopt(default_value = "0", short, long)]
+    pub last_checkpoint: u32,
+
     /// Passthrough args for `zcash-cli`
     #[structopt(last = true)]
     pub zcli_args: Vec<String>,

@@ -95,12 +95,18 @@ fn main() -> Result<()> {
         .map(BlockHeight)
         .expect("zcashd has some mature blocks: wait for zcashd to sync more blocks");
 
+    let mut starting_height = BlockHeight(args::Args::from_args().last_checkpoint);
+    if starting_height.0 > 0 {
+        starting_height.0 += 1;
+    }
+    assert!(starting_height < height_limit);
+
     // set up counters
     let mut cumulative_bytes: u64 = 0;
     let mut height_gap: BlockHeight = BlockHeight(0);
 
     // loop through all blocks
-    for x in 0..height_limit.0 {
+    for x in starting_height.0..height_limit.0 {
         // unfortunatly we need to create a process for each block
         let mut cmd = passthrough_cmd();
 
