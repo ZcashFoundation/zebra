@@ -44,6 +44,7 @@ pub fn block_no_transactions() -> Block {
 /// Also creates a new block verfier and checkpoint verifier, so it can
 /// initialise the chain verifier.
 fn verifiers_from_checkpoint_list(
+    network: Network,
     checkpoint_list: CheckpointList,
 ) -> (
     impl Service<
@@ -65,11 +66,10 @@ fn verifiers_from_checkpoint_list(
 ) {
     let state_service = zebra_state::in_memory::init();
     let block_verifier = crate::block::init(state_service.clone());
-    let checkpoint_verifier =
-        crate::checkpoint::CheckpointVerifier::from_checkpoint_list(checkpoint_list, None);
     let chain_verifier = super::init_from_verifiers(
+        network,
         block_verifier,
-        checkpoint_verifier,
+        Some(checkpoint_list),
         state_service.clone(),
         None,
     );
@@ -99,7 +99,7 @@ fn verifiers_from_network(
         + Clone
         + 'static,
 ) {
-    verifiers_from_checkpoint_list(CheckpointList::new(network))
+    verifiers_from_checkpoint_list(network, CheckpointList::new(network))
 }
 
 #[tokio::test]
@@ -131,7 +131,7 @@ async fn verify_block() -> Result<(), Report> {
         checkpoint_data.iter().cloned().collect();
     let checkpoint_list = CheckpointList::from_list(checkpoint_list).map_err(|e| eyre!(e))?;
 
-    let (mut chain_verifier, _) = verifiers_from_checkpoint_list(checkpoint_list);
+    let (mut chain_verifier, _) = verifiers_from_checkpoint_list(Mainnet, checkpoint_list);
 
     /// SPANDOC: Make sure the verifier service is ready for block 0
     let ready_verifier_service = chain_verifier.ready_and().await.map_err(|e| eyre!(e))?;
@@ -434,7 +434,7 @@ async fn continuous_blockchain() -> Result<(), Report> {
         .collect();
     let checkpoint_list = CheckpointList::from_list(checkpoint_list).map_err(|e| eyre!(e))?;
 
-    let (mut chain_verifier, _) = verifiers_from_checkpoint_list(checkpoint_list);
+    let (mut chain_verifier, _) = verifiers_from_checkpoint_list(Mainnet, checkpoint_list);
 
     let mut handles = FuturesUnordered::new();
 
