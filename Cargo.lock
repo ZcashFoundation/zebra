@@ -2644,7 +2644,9 @@ dependencies = [
  "serde",
  "serde-big-array",
  "sha2",
+ "spandoc",
  "thiserror",
+ "tracing",
  "x25519-dalek",
  "zebra-test",
 ]
