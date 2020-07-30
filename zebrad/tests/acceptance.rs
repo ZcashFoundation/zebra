@@ -214,8 +214,7 @@ fn start_args() -> Result<()> {
     std::thread::sleep(Duration::from_secs(1));
     child.kill()?;
     let output = child.wait_with_output()?;
-    let output = output.assert_failure()?;
-    output.stdout_contains(r"Initializing tracing endpoint")?;
+    output.assert_failure()?;
 
     // unrecognized option `-f`
     let (child, _guard) = get_child_multi_args(&["start", "-f"])?;
