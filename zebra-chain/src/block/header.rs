@@ -46,7 +46,7 @@ pub struct BlockHeader {
     //   - replace with an unspecified HistoryRootHash type?
     // Note that the NetworkUpgrade list is in zebra-consensus, so we can't
     // parse this field into a HistoryRootHash enum in zebra-chain.
-    pub history_root_hash: [u8; 32],
+    pub light_client_root_hash: [u8; 32],
 
     /// The block timestamp is a Unix epoch time (UTC) when the miner
     /// started hashing the header (according to the miner).
