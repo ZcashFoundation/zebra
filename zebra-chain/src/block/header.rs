@@ -1,4 +1,4 @@
-use super::{BlockHeaderHash, Error};
+use super::{difficulty::CompactDifficulty, BlockHeaderHash, Error};
 use crate::equihash_solution::EquihashSolution;
 use crate::merkle_tree::MerkleTreeRootHash;
 use crate::note_commitment_tree::SaplingNoteTreeRootHash;
@@ -61,8 +61,7 @@ pub struct BlockHeader {
     /// `ThresholdBits(height)`.
     ///
     /// [Bitcoin-nBits](https://bitcoin.org/en/developer-reference#target-nbits)
-    // See #572 for details.
-    pub bits: u32,
+    pub difficulty_threshold: CompactDifficulty,
 
     /// An arbitrary field that miners can change to modify the header
     /// hash in order to produce a hash less than or equal to the

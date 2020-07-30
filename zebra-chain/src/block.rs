@@ -1,6 +1,7 @@
 //! Definitions of block datastructures.
 #![allow(clippy::unit_arg)]
 
+mod difficulty;
 mod hash;
 mod header;
 mod serialize;
