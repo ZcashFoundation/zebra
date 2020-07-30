@@ -25,7 +25,7 @@ fn prf_nf(a_sk: [u8; 32], rho: [u8; 32]) -> [u8; 32] {
     block[0..32].copy_from_slice(&a_sk[..]);
     // The first four bits –i.e. the most signicant four bits of the
     // first byte– are used to separate distinct uses
-    // ofSHA256Compress, ensuring that the functions are independent.
+    // of SHA256Compress, ensuring that the functions are independent.
     block[0] |= 0b1110_0000;
 
     block[32..].copy_from_slice(&rho[..]);
