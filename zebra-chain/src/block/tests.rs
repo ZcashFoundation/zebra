@@ -1,5 +1,6 @@
 use super::*;
 
+use crate::block::difficulty::CompactDifficulty;
 use crate::equihash_solution::EquihashSolution;
 use crate::merkle_tree::MerkleTreeRootHash;
 use crate::note_commitment_tree::SaplingNoteTreeRootHash;
@@ -28,7 +29,7 @@ impl Arbitrary for BlockHeader {
             any::<SaplingNoteTreeRootHash>(),
             // time is interpreted as u32 in the spec, but rust timestamps are i64
             (0i64..(u32::MAX as i64)),
-            any::<u32>(),
+            any::<CompactDifficulty>(),
             any::<[u8; 32]>(),
             any::<EquihashSolution>(),
         )
@@ -39,7 +40,7 @@ impl Arbitrary for BlockHeader {
                     merkle_root_hash,
                     final_sapling_root_hash,
                     timestamp,
-                    bits,
+                    difficulty_threshold,
                     nonce,
                     solution,
                 )| BlockHeader {
@@ -48,7 +49,7 @@ impl Arbitrary for BlockHeader {
                     merkle_root_hash,
                     final_sapling_root_hash,
                     time: Utc.timestamp(timestamp, 0),
-                    bits,
+                    difficulty_threshold,
                     nonce,
                     solution,
                 },
