@@ -10,7 +10,7 @@ use zebra_chain::{
 #[derive(Default)]
 pub(super) struct BlockIndex {
     by_hash: HashMap<BlockHeaderHash, Arc<Block>>,
-    by_height: BTreeMap<BlockHeight, Arc<Block>>,
+    height_map: BTreeMap<BlockHeight, BlockHeaderHash>,
 }
 
 impl BlockIndex {
@@ -22,9 +22,9 @@ impl BlockIndex {
         let hash = block.as_ref().into();
         let height = block.coinbase_height().unwrap();
 
-        match self.by_height.entry(height) {
+        match self.height_map.entry(height) {
             Entry::Vacant(entry) => {
-                let _ = entry.insert(block.clone());
+                let _ = entry.insert(hash);
                 let _ = self.by_hash.insert(hash, block);
                 Ok(hash)
             }
@@ -32,35 +32,18 @@ impl BlockIndex {
         }
     }
 
-    pub(super) fn get(&mut self, query: impl Into<BlockQuery>) -> Option<Arc<Block>> {
-        match query.into() {
-            BlockQuery::ByHash(hash) => self.by_hash.get(&hash),
-            BlockQuery::ByHeight(height) => self.by_height.get(&height),
-        }
-        .cloned()
+    pub(super) fn get(&self, hash: BlockHeaderHash) -> Option<Arc<Block>> {
+        self.by_hash.get(&hash).cloned()
+    }
+
+    pub(super) fn get_main_chain_at(&self, height: BlockHeight) -> Option<BlockHeaderHash> {
+        self.height_map.get(&height).cloned()
     }
 
     pub(super) fn get_tip(&self) -> Option<Arc<Block>> {
-        self.by_height
-            .iter()
-            .next_back()
-            .map(|(_key, value)| value.clone())
-    }
-}
-
-pub(super) enum BlockQuery {
-    ByHash(BlockHeaderHash),
-    ByHeight(BlockHeight),
-}
-
-impl From<BlockHeaderHash> for BlockQuery {
-    fn from(hash: BlockHeaderHash) -> Self {
-        Self::ByHash(hash)
-    }
-}
-
-impl From<BlockHeight> for BlockQuery {
-    fn from(height: BlockHeight) -> Self {
-        Self::ByHeight(height)
+        self.height_map.iter().next_back().map(|(_height, &hash)| {
+            self.get(hash)
+                .expect("block must be in pool to be in the height map")
+        })
     }
 }
