@@ -20,6 +20,10 @@ use super::*;
 const OVERWINTER_VERSION_GROUP_ID: u32 = 0x03C4_8270;
 const SAPLING_VERSION_GROUP_ID: u32 = 0x892F_2085;
 
+/// The coinbase data for a genesis block.
+///
+/// Zcash uses the same coinbase data for the Mainnet, Testnet, and Regtest
+/// genesis blocks.
 const GENESIS_COINBASE_DATA: [u8; 77] = [
     4, 255, 255, 7, 31, 1, 4, 69, 90, 99, 97, 115, 104, 48, 98, 57, 99, 52, 101, 101, 102, 56, 98,
     55, 99, 99, 52, 49, 55, 101, 101, 53, 48, 48, 49, 101, 51, 53, 48, 48, 57, 56, 52, 98, 54, 102,

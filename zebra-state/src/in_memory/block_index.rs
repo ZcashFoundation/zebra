@@ -40,12 +40,11 @@ impl BlockIndex {
         .cloned()
     }
 
-    pub(super) fn get_tip(&self) -> Option<BlockHeaderHash> {
+    pub(super) fn get_tip(&self) -> Option<Arc<Block>> {
         self.by_height
             .iter()
             .next_back()
-            .map(|(_key, value)| value)
-            .map(|block| block.as_ref().into())
+            .map(|(_key, value)| value.clone())
     }
 }
 

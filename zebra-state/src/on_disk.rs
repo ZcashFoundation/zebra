@@ -14,6 +14,7 @@ use zebra_chain::serialization::{ZcashDeserialize, ZcashSerialize};
 use zebra_chain::{
     block::{Block, BlockHeaderHash},
     types::BlockHeight,
+    Network,
 };
 
 #[derive(Clone)]
@@ -22,8 +23,8 @@ struct SledState {
 }
 
 impl SledState {
-    pub(crate) fn new(config: &Config) -> Self {
-        let config = config.sled_config();
+    pub(crate) fn new(config: &Config, network: Network) -> Self {
+        let config = config.sled_config(network);
 
         Self {
             storage: config.open().unwrap(),
@@ -94,13 +95,6 @@ impl SledState {
     }
 }
 
-impl Default for SledState {
-    fn default() -> Self {
-        let config = crate::Config::default();
-        Self::new(&config)
-    }
-}
-
 impl Service<Request> for SledState {
     type Response = Response;
     type Error = Error;
@@ -161,6 +155,39 @@ impl Service<Request> for SledState {
                 }
                 .boxed()
             }
+            Request::GetBlockLocator { genesis } => {
+                let storage = self.clone();
+
+                async move {
+                    let tip = match storage.get_tip()? {
+                        Some(tip) => tip,
+                        None => {
+                            return Ok(Response::BlockLocator {
+                                block_locator: vec![genesis],
+                            })
+                        }
+                    };
+
+                    let tip_height = tip
+                        .coinbase_height()
+                        .expect("tip of the current chain will have a coinbase height");
+
+                    let heights = crate::block_locator_heights(tip_height);
+
+                    let block_locator = heights
+                        .map(|height| {
+                            storage.get(height).map(|block| {
+                                block
+                                    .expect("there should be no holes in the current chain")
+                                    .hash()
+                            })
+                        })
+                        .collect::<Result<_, _>>()?;
+
+                    Ok(Response::BlockLocator { block_locator })
+                }
+                .boxed()
+            }
         }
     }
 }
@@ -199,9 +226,12 @@ impl From<BlockHeight> for BlockQuery {
     }
 }
 
-/// Return's a type that implement's the `zebra_state::Service` using `sled`
+/// Returns a type that implements the `zebra_state::Service` using `sled`.
+///
+/// Each `network` has its own separate sled database.
 pub fn init(
     config: Config,
+    network: Network,
 ) -> impl Service<
     Request,
     Response = Response,
@@ -210,7 +240,7 @@ pub fn init(
 > + Send
        + Clone
        + 'static {
-    Buffer::new(SledState::new(&config), 1)
+    Buffer::new(SledState::new(&config, network), 1)
 }
 
 type Error = Box<dyn error::Error + Send + Sync + 'static>;

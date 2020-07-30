@@ -1,5 +1,5 @@
 Zebra Design Document
-=====================
+---------------------
 
 This document sketches the future design for Zebra.
 

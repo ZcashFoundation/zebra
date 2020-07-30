@@ -2,11 +2,8 @@
 
 use super::*;
 
-use chrono::{Duration, Utc};
-use color_eyre::eyre::Report;
-use color_eyre::eyre::{bail, eyre};
-use std::sync::Arc;
-use tower::{util::ServiceExt, Service};
+use chrono::Utc;
+use color_eyre::eyre::{eyre, Report};
 
 use zebra_chain::block::Block;
 use zebra_chain::block::BlockHeader;
@@ -23,7 +20,7 @@ async fn verify() -> Result<(), Report> {
     zebra_test::init();
 
     let block =
-        Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])?;
+        Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
     let hash: BlockHeaderHash = block.as_ref().into();
 
     let state_service = Box::new(zebra_state::in_memory::init());
@@ -43,125 +40,6 @@ async fn verify() -> Result<(), Report> {
 }
 
 #[tokio::test]
-async fn round_trip_test() -> Result<(), Report> {
-    round_trip().await
-}
-
-#[spandoc::spandoc]
-async fn round_trip() -> Result<(), Report> {
-    zebra_test::init();
-
-    let block =
-        Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])?;
-    let hash: BlockHeaderHash = block.as_ref().into();
-
-    let mut state_service = zebra_state::in_memory::init();
-    let mut block_verifier = super::init(state_service.clone());
-
-    /// SPANDOC: Make sure the verifier service is ready
-    let ready_verifier_service = block_verifier.ready_and().await.map_err(|e| eyre!(e))?;
-    /// SPANDOC: Verify the block
-    let verify_response = ready_verifier_service
-        .call(block.clone())
-        .await
-        .map_err(|e| eyre!(e))?;
-
-    assert_eq!(verify_response, hash);
-
-    /// SPANDOC: Make sure the state service is ready
-    let ready_state_service = state_service.ready_and().await.map_err(|e| eyre!(e))?;
-    /// SPANDOC: Make sure the block was added to the state
-    let state_response = ready_state_service
-        .call(zebra_state::Request::GetBlock { hash })
-        .await
-        .map_err(|e| eyre!(e))?;
-
-    if let zebra_state::Response::Block {
-        block: returned_block,
-    } = state_response
-    {
-        assert_eq!(block, returned_block);
-    } else {
-        bail!("unexpected response kind: {:?}", state_response);
-    }
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn verify_fail_add_block_test() -> Result<(), Report> {
-    verify_fail_add_block().await
-}
-
-#[spandoc::spandoc]
-async fn verify_fail_add_block() -> Result<(), Report> {
-    zebra_test::init();
-
-    let block =
-        Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])?;
-    let hash: BlockHeaderHash = block.as_ref().into();
-
-    let mut state_service = zebra_state::in_memory::init();
-    let mut block_verifier = super::init(state_service.clone());
-
-    /// SPANDOC: Make sure the verifier service is ready (1/2)
-    let ready_verifier_service = block_verifier.ready_and().await.map_err(|e| eyre!(e))?;
-    /// SPANDOC: Verify the block for the first time
-    let verify_response = ready_verifier_service
-        .call(block.clone())
-        .await
-        .map_err(|e| eyre!(e))?;
-
-    assert_eq!(verify_response, hash);
-
-    /// SPANDOC: Make sure the state service is ready (1/2)
-    let ready_state_service = state_service.ready_and().await.map_err(|e| eyre!(e))?;
-    /// SPANDOC: Make sure the block was added to the state
-    let state_response = ready_state_service
-        .call(zebra_state::Request::GetBlock { hash })
-        .await
-        .map_err(|e| eyre!(e))?;
-
-    if let zebra_state::Response::Block {
-        block: returned_block,
-    } = state_response
-    {
-        assert_eq!(block, returned_block);
-    } else {
-        bail!("unexpected response kind: {:?}", state_response);
-    }
-
-    /// SPANDOC: Make sure the verifier service is ready (2/2)
-    let ready_verifier_service = block_verifier.ready_and().await.map_err(|e| eyre!(e))?;
-    /// SPANDOC: Now try to add the block again, verify should fail
-    // TODO(teor): ignore duplicate block verifies?
-    // TODO(teor || jlusby): check error kind
-    ready_verifier_service
-        .call(block.clone())
-        .await
-        .unwrap_err();
-
-    /// SPANDOC: Make sure the state service is ready (2/2)
-    let ready_state_service = state_service.ready_and().await.map_err(|e| eyre!(e))?;
-    /// SPANDOC: But the state should still return the original block we added
-    let state_response = ready_state_service
-        .call(zebra_state::Request::GetBlock { hash })
-        .await
-        .map_err(|e| eyre!(e))?;
-
-    if let zebra_state::Response::Block {
-        block: returned_block,
-    } = state_response
-    {
-        assert_eq!(block, returned_block);
-    } else {
-        bail!("unexpected response kind: {:?}", state_response);
-    }
-
-    Ok(())
-}
-
-#[tokio::test]
 async fn verify_fail_future_time_test() -> Result<(), Report> {
     verify_fail_future_time().await
 }
@@ -171,9 +49,9 @@ async fn verify_fail_future_time() -> Result<(), Report> {
     zebra_test::init();
 
     let mut block =
-        <Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])?;
+        <Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
 
-    let mut state_service = zebra_state::in_memory::init();
+    let state_service = zebra_state::in_memory::init();
     let mut block_verifier = super::init(state_service.clone());
 
     // Modify the block's time
@@ -181,7 +59,7 @@ async fn verify_fail_future_time() -> Result<(), Report> {
     // those checks should be performed later in validation, because they
     // are more expensive.
     let three_hours_in_the_future = Utc::now()
-        .checked_add_signed(Duration::hours(3))
+        .checked_add_signed(chrono::Duration::hours(3))
         .ok_or("overflow when calculating 3 hours in the future")
         .map_err(|e| eyre!(e))?;
     block.header.time = three_hours_in_the_future;
@@ -194,17 +72,6 @@ async fn verify_fail_future_time() -> Result<(), Report> {
     // TODO(teor || jlusby): check error kind
     ready_verifier_service
         .call(arc_block.clone())
-        .await
-        .unwrap_err();
-
-    /// SPANDOC: Make sure the state service is ready (2/2)
-    let ready_state_service = state_service.ready_and().await.map_err(|e| eyre!(e))?;
-    /// SPANDOC: Now make sure the block isn't in the state
-    // TODO(teor || jlusby): check error kind
-    ready_state_service
-        .call(zebra_state::Request::GetBlock {
-            hash: arc_block.as_ref().into(),
-        })
         .await
         .unwrap_err();
 
@@ -227,7 +94,7 @@ async fn header_solution() -> Result<(), Report> {
     let ready_verifier_service = block_verifier.ready_and().await.map_err(|e| eyre!(e))?;
 
     // Get a valid block
-    let mut block = Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])
+    let mut block = Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
         .expect("block test vector should deserialize");
 
     // This should be ok
@@ -296,7 +163,8 @@ async fn coinbase() -> Result<(), Report> {
     let ready_verifier_service = block_verifier.ready_and().await.map_err(|e| eyre!(e))?;
 
     // Test 3: Invalid coinbase position
-    let mut block = Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])?;
+    let mut block =
+        Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
     assert_eq!(block.transactions.len(), 1);
 
     // Extract the coinbase transaction from the block

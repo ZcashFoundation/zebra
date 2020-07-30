@@ -723,7 +723,7 @@ impl From<TransmissionKey> for [u8; 32] {
 
 impl From<(IncomingViewingKey, Diversifier)> for TransmissionKey {
     /// This includes _KA^Sapling.DerivePublic(ivk, G_d)_, which is just a
-    /// scalar mult _[ivk]G_d_.
+    /// scalar mult _\[ivk\]G_d_.
     ///
     /// https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
     /// https://zips.z.cash/protocol/protocol.pdf#concretesaplingkeyagreement

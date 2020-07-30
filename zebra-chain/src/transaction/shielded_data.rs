@@ -63,7 +63,7 @@ pub struct ShieldedData {
     ///
     /// However, it's not necessary to access or process `first` and `rest`
     /// separately, as the [`ShieldedData::spends`] and [`ShieldedData::outputs`]
-    /// methods provide iterators over all of the [`SpendDescription`]s and
+    /// methods provide iterators over all of the [`Spend`]s and
     /// [`Output`]s.
     #[serde(with = "serde_helpers::Either")]
     pub first: Either<Spend, Output>,

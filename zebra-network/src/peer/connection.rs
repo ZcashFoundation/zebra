@@ -190,7 +190,8 @@ where
                             self.handle_message_as_request(msg).await
                         }
                         Either::Right((None, _)) => {
-                            self.fail_with(PeerError::DeadClient);
+                            trace!("client_rx closed, ending connection");
+                            return;
                         }
                         Either::Right((Some(req), _)) => {
                             let span = req.span.clone();
