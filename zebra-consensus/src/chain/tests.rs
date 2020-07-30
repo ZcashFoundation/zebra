@@ -450,7 +450,7 @@ async fn continuous_blockchain(restart_height: Option<BlockHeight>) -> Result<()
     let checkpoint_list = CheckpointList::from_list(checkpoint_list).map_err(|e| eyre!(e))?;
 
     let mut state_service = zebra_state::in_memory::init();
-    /// SPANDOC: Add blocks from 0..={?restart_height} to the state
+    /// SPANDOC: Add blocks to the state from 0..={?restart_height}
     if restart_height.is_some() {
         for block in blockchain
             .iter()
