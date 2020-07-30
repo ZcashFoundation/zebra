@@ -1,10 +1,10 @@
 //! An HTTP endpoint for metrics collection.
 
-use metrics_runtime::{exporters::HttpExporter, observers::PrometheusBuilder, Receiver};
+use crate::{components::tokio::TokioComponent, config::MetricsSection};
 
 use abscissa_core::{Component, FrameworkError};
 
-use crate::components::tokio::TokioComponent;
+use metrics_runtime::{exporters::HttpExporter, observers::PrometheusBuilder, Receiver};
 
 /// Abscissa component which runs a metrics endpoint.
 #[derive(Debug, Component)]
@@ -17,14 +17,22 @@ impl MetricsEndpoint {
         Ok(Self {})
     }
 
-    /// Do setup after receiving a tokio runtime.
-    pub fn init_tokio(&mut self, tokio_component: &TokioComponent) -> Result<(), FrameworkError> {
+    /// Tokio endpoint dependency stub.
+    ///
+    /// We can't open the endpoint here, because the config has not been loaded.
+    pub fn init_tokio(&mut self, _tokio_component: &TokioComponent) -> Result<(), FrameworkError> {
+        Ok(())
+    }
+
+    /// Open the metrics endpoint.
+    ///
+    /// We can't implement `after_config`, because we use `derive(Component)`.
+    /// And the ownership rules might make it hard to access the TokioComponent
+    /// from `after_config`.
+    pub fn open_endpoint(&self, metrics_config: &MetricsSection, tokio_component: &TokioComponent) {
         info!("Initializing metrics endpoint");
 
-        // XXX load metrics addr from config
-        let addr = "0.0.0.0:9999"
-            .parse()
-            .expect("Hardcoded address should be parseable");
+        let addr = metrics_config.endpoint_addr;
 
         // XXX do we need to hold on to the receiver?
         let receiver = Receiver::builder()
@@ -42,7 +50,5 @@ impl MetricsEndpoint {
             .spawn(endpoint.async_run());
 
         metrics::set_boxed_recorder(Box::new(receiver)).expect("XXX FIXME ERROR CONVERSION");
-
-        Ok(())
     }
 }

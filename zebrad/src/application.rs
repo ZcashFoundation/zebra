@@ -131,6 +131,10 @@ impl Application for ZebradApp {
         config: Self::Cfg,
         command: &Self::Cmd,
     ) -> Result<(), FrameworkError> {
+        use crate::components::{
+            metrics::MetricsEndpoint, tokio::TokioComponent, tracing::TracingEndpoint,
+        };
+
         // Configure components
         self.state.components.after_config(&config)?;
         self.config = Some(config);
@@ -142,6 +146,30 @@ impl Application for ZebradApp {
                 .get_downcast_mut::<Tracing>()
                 .expect("Tracing component should be available")
                 .reload_filter(level);
+
+            // Work around some issues with dependency injection and configs
+            let config = self
+                .config
+                .clone()
+                .expect("config was set to Some earlier in this function");
+
+            let tokio_component = self
+                .state
+                .components
+                .get_downcast_ref::<TokioComponent>()
+                .expect("Tokio component should be available");
+
+            self.state
+                .components
+                .get_downcast_ref::<TracingEndpoint>()
+                .expect("Tracing endpoint should be available")
+                .open_endpoint(&config.tracing, tokio_component);
+
+            self.state
+                .components
+                .get_downcast_ref::<MetricsEndpoint>()
+                .expect("Metrics endpoint should be available")
+                .open_endpoint(&config.metrics, tokio_component);
         }
 
         Ok(())
@@ -177,6 +205,7 @@ impl ZebradApp {
             tracing:
                 crate::config::TracingSection {
                     filter: Some(filter),
+                    endpoint_addr: _,
                 },
             ..
         }) = &self.config

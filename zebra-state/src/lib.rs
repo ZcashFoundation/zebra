@@ -14,40 +14,54 @@
 #![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_state")]
 #![warn(missing_docs)]
 #![allow(clippy::try_err)]
+
+use color_eyre::eyre::{eyre, Report};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::{iter, sync::Arc};
+use std::{error, iter, sync::Arc};
+use tower::{Service, ServiceExt};
+
 use zebra_chain::{
     block::{Block, BlockHeaderHash},
     types::BlockHeight,
+    Network,
+    Network::*,
 };
 
 pub mod in_memory;
 pub mod on_disk;
 
-/// Configuration for networking code.
+/// Configuration for the state service.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
-    /// The root directory for the state storage
+    /// The root directory for storing cached data.
+    ///
+    /// Each network has a separate state, which is stored in "mainnet/state"
+    /// and "testnet/state" subdirectories.
     pub cache_dir: Option<PathBuf>,
 }
 
 impl Config {
-    /// Generate the appropriate `sled::Config` based on the provided
-    /// `zebra_state::Config`.
+    /// Generate the appropriate `sled::Config` for `network`, based on the
+    /// provided `zebra_state::Config`.
     ///
     /// # Details
     ///
     /// This function should panic if the user of `zebra-state` doesn't configure
     /// a directory to store the state.
-    pub(crate) fn sled_config(&self) -> sled::Config {
+    pub(crate) fn sled_config(&self, network: Network) -> sled::Config {
+        let net_dir = match network {
+            Mainnet => "mainnet",
+            Testnet => "testnet",
+        };
         let path = self
             .cache_dir
             .as_ref()
             .unwrap_or_else(|| {
-                todo!("create a nice user facing error explaining how to set the cache directory")
+                todo!("create a nice user facing error explaining how to set the cache directory in zebrad.toml:\n[state]\ncache_dir = '/path/to/cache-or-tmp'")
             })
+            .join(net_dir)
             .join("state");
 
         sled::Config::default().path(path)
@@ -133,16 +147,94 @@ fn block_locator_heights(tip_height: BlockHeight) -> impl Iterator<Item = BlockH
         .chain(iter::once(BlockHeight(0)))
 }
 
+/// The error type for the State Service.
+// TODO(jlusby): Error = Report ?
+type Error = Box<dyn error::Error + Send + Sync + 'static>;
+
+/// Get the tip block, using `state`.
+///
+/// If there is no tip, returns `Ok(None)`.
+/// Returns an error if `state.poll_ready` errors.
+pub async fn current_tip<S>(state: S) -> Result<Option<Arc<Block>>, Report>
+where
+    S: Service<Request, Response = Response, Error = Error> + Send + Clone + 'static,
+    S::Future: Send + 'static,
+{
+    let current_tip_hash = state
+        .clone()
+        .ready_and()
+        .await
+        .map_err(|e| eyre!(e))?
+        .call(Request::GetTip)
+        .await
+        .map(|response| match response {
+            Response::Tip { hash } => hash,
+            _ => unreachable!("GetTip request can only result in Response::Tip"),
+        })
+        .ok();
+
+    let current_tip_block = match current_tip_hash {
+        Some(hash) => state
+            .clone()
+            .ready_and()
+            .await
+            .map_err(|e| eyre!(e))?
+            .call(Request::GetBlock { hash })
+            .await
+            .map(|response| match response {
+                Response::Block { block } => block,
+                _ => unreachable!("GetBlock request can only result in Response::Block"),
+            })
+            .ok(),
+        None => None,
+    };
+
+    Ok(current_tip_block)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    use std::ffi::OsStr;
+
+    #[test]
+    fn test_path_mainnet() {
+        test_path(Mainnet);
+    }
+
+    #[test]
+    fn test_path_testnet() {
+        test_path(Testnet);
+    }
+
+    /// Check the sled path for `network`.
+    fn test_path(network: Network) {
+        zebra_test::init();
+
+        let config = Config::default();
+        // we can't do many useful tests on this value, because it depends on the
+        // local environment and OS.
+        let sled_config = config.sled_config(network);
+        let mut path = sled_config.get_path();
+        assert_eq!(path.file_name(), Some(OsStr::new("state")));
+        assert!(path.pop());
+        match network {
+            Mainnet => assert_eq!(path.file_name(), Some(OsStr::new("mainnet"))),
+            Testnet => assert_eq!(path.file_name(), Some(OsStr::new("testnet"))),
+        }
+    }
+
+    /// Check what happens when the config is invalid.
     #[test]
     #[should_panic]
     fn test_no_path() {
-        zebra_test::init();
-
+        // We don't call `zebra_test::init` here, to silence the expected panic log
+        // TODO:
+        //  - implement test log levels in #760
+        //  - call `zebra_test::init`
+        //  - disable all log output from this test
         let bad_config = Config { cache_dir: None };
-        let _unreachable = bad_config.sled_config();
+        let _unreachable = bad_config.sled_config(Mainnet);
     }
 }

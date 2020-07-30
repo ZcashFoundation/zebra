@@ -34,7 +34,7 @@ type Error = Box<dyn error::Error + Send + Sync + 'static>;
 ///
 /// This is actually a bijective map, but since it is read-only, we use a
 /// BTreeMap, and do the value uniqueness check on initialisation.
-#[derive(Debug)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct CheckpointList(BTreeMap<BlockHeight, BlockHeaderHash>);
 
 impl FromStr for CheckpointList {
@@ -175,6 +175,8 @@ impl CheckpointList {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::parameters::NetworkUpgrade::Sapling;
 
     use std::sync::Arc;
 
@@ -394,9 +396,9 @@ mod tests {
         Ok(())
     }
 
-    /// Parse the hard-coded Mainnet and Testnet lists
+    /// Parse and check the hard-coded Mainnet and Testnet lists
     #[test]
-    fn checkpoint_list_hard_coded() -> Result<(), Error> {
+    fn checkpoint_list_load_hard_coded() -> Result<(), Error> {
         zebra_test::init();
 
         let _: CheckpointList = MAINNET_CHECKPOINTS
@@ -408,6 +410,34 @@ mod tests {
 
         let _ = CheckpointList::new(Mainnet);
         let _ = CheckpointList::new(Testnet);
+
+        Ok(())
+    }
+
+    #[test]
+    fn checkpoint_list_hard_coded_sapling_mainnet() -> Result<(), Error> {
+        checkpoint_list_hard_coded_sapling(Mainnet)
+    }
+
+    #[test]
+    fn checkpoint_list_hard_coded_sapling_testnet() -> Result<(), Error> {
+        checkpoint_list_hard_coded_sapling(Testnet)
+    }
+
+    /// Check that the hard-coded lists cover the Sapling network upgrade
+    fn checkpoint_list_hard_coded_sapling(network: Network) -> Result<(), Error> {
+        zebra_test::init();
+
+        let sapling_activation = Sapling
+            .activation_height(network)
+            .expect("Unexpected network upgrade info: Sapling must have an activation height");
+
+        let list = CheckpointList::new(network);
+
+        assert!(
+            list.max_height() >= sapling_activation,
+            "Pre-Sapling blocks must be verified by checkpoints"
+        );
 
         Ok(())
     }

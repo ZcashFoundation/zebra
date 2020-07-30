@@ -40,6 +40,10 @@ impl StartCmd {
     async fn start(&self) -> Result<(), Report> {
         info!(?self, "starting to connect to the network");
 
+        let config = app_config();
+        let state = zebra_state::on_disk::init(config.state.clone(), config.network.network);
+        let verifier = zebra_consensus::chain::init(config.network.network, state.clone()).await;
+
         // The service that our node uses to respond to requests by peers
         let node = Buffer::new(
             service_fn(|req| async move {
@@ -48,10 +52,7 @@ impl StartCmd {
             }),
             1,
         );
-        let config = app_config();
-        let state = zebra_state::on_disk::init(config.state.clone());
         let (peer_set, _address_book) = zebra_network::init(config.network.clone(), node).await;
-        let verifier = zebra_consensus::chain::init(config.network.network, state.clone());
 
         let mut syncer = sync::Syncer::new(config.network.network, peer_set, state, verifier);
 

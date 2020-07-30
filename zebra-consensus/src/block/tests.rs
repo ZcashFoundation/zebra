@@ -2,11 +2,8 @@
 
 use super::*;
 
-use chrono::{Duration, Utc};
-use color_eyre::eyre::eyre;
-use color_eyre::eyre::Report;
-use std::sync::Arc;
-use tower::{util::ServiceExt, Service};
+use chrono::Utc;
+use color_eyre::eyre::{eyre, Report};
 
 use zebra_chain::block::Block;
 use zebra_chain::block::BlockHeader;
@@ -23,7 +20,7 @@ async fn verify() -> Result<(), Report> {
     zebra_test::init();
 
     let block =
-        Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])?;
+        Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
     let hash: BlockHeaderHash = block.as_ref().into();
 
     let state_service = Box::new(zebra_state::in_memory::init());
@@ -52,7 +49,7 @@ async fn verify_fail_future_time() -> Result<(), Report> {
     zebra_test::init();
 
     let mut block =
-        <Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])?;
+        <Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
 
     let state_service = zebra_state::in_memory::init();
     let mut block_verifier = super::init(state_service.clone());
@@ -62,7 +59,7 @@ async fn verify_fail_future_time() -> Result<(), Report> {
     // those checks should be performed later in validation, because they
     // are more expensive.
     let three_hours_in_the_future = Utc::now()
-        .checked_add_signed(Duration::hours(3))
+        .checked_add_signed(chrono::Duration::hours(3))
         .ok_or("overflow when calculating 3 hours in the future")
         .map_err(|e| eyre!(e))?;
     block.header.time = three_hours_in_the_future;
@@ -97,7 +94,7 @@ async fn header_solution() -> Result<(), Report> {
     let ready_verifier_service = block_verifier.ready_and().await.map_err(|e| eyre!(e))?;
 
     // Get a valid block
-    let mut block = Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])
+    let mut block = Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
         .expect("block test vector should deserialize");
 
     // This should be ok
@@ -166,7 +163,8 @@ async fn coinbase() -> Result<(), Report> {
     let ready_verifier_service = block_verifier.ready_and().await.map_err(|e| eyre!(e))?;
 
     // Test 3: Invalid coinbase position
-    let mut block = Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])?;
+    let mut block =
+        Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
     assert_eq!(block.transactions.len(), 1);
 
     // Extract the coinbase transaction from the block

@@ -1,6 +1,6 @@
 [package]
 name = "zebra-chain"
-version = "0.1.0"
+version = "3.0.0-alpha.0"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 edition = "2018"
@@ -37,3 +37,4 @@ proptest = "0.10"
 proptest-derive = "0.2.0"
 zebra-test = { path = "../zebra-test/" }
 color-eyre = "0.5"
+bincode = "1"

@@ -43,7 +43,7 @@ impl Version {
         // TODO: Should we reject earlier protocol versions during our initial
         //       sync? zcashd accepts 170_002 or later during its initial sync.
         Version(match (network, network_upgrade) {
-            (_, BeforeOverwinter) => 170_002,
+            (_, Genesis) | (_, BeforeOverwinter) => 170_002,
             (Testnet, Overwinter) => 170_003,
             (Mainnet, Overwinter) => 170_005,
             (_, Sapling) => 170_007,
@@ -59,6 +59,7 @@ impl Version {
     /// Returns the current minimum protocol version for `network` and `height`.
     ///
     /// Returns None if the network has no branch id at this height.
+    #[allow(dead_code)]
     pub fn current_min(network: Network, height: BlockHeight) -> Version {
         let network_upgrade = NetworkUpgrade::current(network, height);
         Version::min_for_upgrade(network, network_upgrade)
