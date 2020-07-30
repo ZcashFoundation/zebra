@@ -16,7 +16,7 @@ pub struct Args {
 
     /// Start looking for checkpoints after this height.
     /// If there is no last checkpoint, we start looking at the Genesis block (height 0).
-    #[structopt(default_value = "None", short, long)]
+    #[structopt(short, long)]
     pub last_checkpoint: Option<u32>,
 
     /// Passthrough args for `zcash-cli`

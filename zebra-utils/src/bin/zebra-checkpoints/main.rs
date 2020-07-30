@@ -95,22 +95,26 @@ fn main() -> Result<()> {
         .map(BlockHeight)
         .expect("zcashd has some mature blocks: wait for zcashd to sync more blocks");
 
-    let mut starting_height = args::Args::from_args().last_checkpoint.map(BlockHeight);
+    let starting_height = args::Args::from_args().last_checkpoint.map(BlockHeight);
     if starting_height.is_some() {
         // Since we're about to add 1, height needs to be strictly less than the maximum
         assert!(starting_height.unwrap() < BlockHeight::MAX);
     }
     // Start at the next block after the last checkpoint.
     // If there is no last checkpoint, start at genesis (height 0).
-    let starting_height = starting_height.map_or(0, |BlockHeight(h)| h+1).map(BlockHeight);
-    assert!(starting_height < height_limit, "No mature blocks after the last checkpoint: wait for zcashd to sync more blocks");
+    let starting_height = starting_height.map_or(0, |BlockHeight(h)| h + 1);
+
+    assert!(
+        starting_height < height_limit.0,
+        "No mature blocks after the last checkpoint: wait for zcashd to sync more blocks"
+    );
 
     // set up counters
     let mut cumulative_bytes: u64 = 0;
     let mut height_gap: BlockHeight = BlockHeight(0);
 
     // loop through all blocks
-    for x in starting_height.0..height_limit.0 {
+    for x in starting_height..height_limit.0 {
         // unfortunately we need to create a process for each block
         let mut cmd = passthrough_cmd();
 
