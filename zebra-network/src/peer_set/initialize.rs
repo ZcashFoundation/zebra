@@ -28,6 +28,8 @@ use crate::{
     Response,
 };
 
+use zebra_chain::Network::*;
+
 use super::CandidateSet;
 use super::PeerSet;
 
@@ -101,6 +103,23 @@ where
     ));
 
     // 2. Incoming peer connections, via a listener.
+
+    // Warn if we're configured using the wrong network port.
+    // TODO: use the right port if the port is unspecified
+    //       split the address and port configs?
+    let (wrong_net, wrong_net_port) = match config.network {
+        Mainnet => (Testnet, 18233),
+        Testnet => (Mainnet, 8233),
+    };
+    if config.listen_addr.port() == wrong_net_port {
+        warn!(
+            "We are configured with port {} for {:?}, but that port is the default port for {:?}",
+            config.listen_addr.port(),
+            config.network,
+            wrong_net
+        );
+    }
+
     let listen_guard = tokio::spawn(listen(config.listen_addr, listener, peerset_tx.clone()));
 
     // 3. Outgoing peers we connect to in response to load.

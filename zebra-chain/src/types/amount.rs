@@ -9,6 +9,8 @@ type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// A runtime validated type for representing amounts of zatoshis
 #[derive(Debug, Eq, PartialEq, Clone, Copy, Serialize, Deserialize)]
+#[serde(try_from = "i64")]
+#[serde(bound = "C: AmountConstraint")]
 pub struct Amount<C = NegativeAllowed>(i64, PhantomData<C>);
 
 impl<C> Amount<C> {
@@ -381,6 +383,29 @@ mod test {
 
         (zero - one.constrain()).expect("should allow negative");
         (zero.constrain() - one).expect_err("shouldn't allow negative");
+
+        Ok(())
+    }
+
+    #[test]
+    fn deserialize_checks_bounds() -> Result<()> {
+        let big = MAX_MONEY * 2;
+        let neg = -10;
+
+        let big_bytes = bincode::serialize(&big)?;
+        let neg_bytes = bincode::serialize(&neg)?;
+
+        bincode::deserialize::<Amount<NonNegative>>(&big_bytes)
+            .expect_err("deserialization should reject too large values");
+        bincode::deserialize::<Amount<NegativeAllowed>>(&big_bytes)
+            .expect_err("deserialization should reject too large values");
+
+        bincode::deserialize::<Amount<NonNegative>>(&neg_bytes)
+            .expect_err("NonNegative deserialization should reject negative values");
+        let amount = bincode::deserialize::<Amount<NegativeAllowed>>(&neg_bytes)
+            .expect("NegativeAllowed deserialization should allow negative values");
+
+        assert_eq!(amount.0, neg);
 
         Ok(())
     }

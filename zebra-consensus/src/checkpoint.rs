@@ -77,6 +77,10 @@ type QueuedBlockList = Vec<QueuedBlock>;
 /// usage by committing blocks to the disk state. (Or dropping invalid blocks.)
 pub const MAX_QUEUED_BLOCKS_PER_HEIGHT: usize = 4;
 
+/// We limit the maximum number of blocks in each checkpoint. Each block uses a
+/// constant amount of memory for the supporting data structures and futures.
+pub const MAX_CHECKPOINT_HEIGHT_GAP: usize = 2_000;
+
 /// A checkpointing block verifier.
 ///
 /// Verifies blocks using a supplied list of checkpoints. There must be at
@@ -192,6 +196,8 @@ impl CheckpointVerifier {
         }
     }
 
+    /// Return the checkpoint list for this verifier.
+    #[allow(dead_code)]
     pub(crate) fn list(&self) -> &CheckpointList {
         &self.checkpoint_list
     }
@@ -236,8 +242,6 @@ impl CheckpointVerifier {
         let mut pending_height = match self.previous_checkpoint_height() {
             // Check if we have the genesis block as a special case, to simplify the loop
             BeforeGenesis if !self.queued.contains_key(&BlockHeight(0)) => {
-                // XXX scratch tracing line for debugging, delete this
-                tracing::debug!("beforegenesis if !self.queued.contains_key(&BlockHeight(0))");
                 return WaitingForBlocks;
             }
             BeforeGenesis => BlockHeight(0),
@@ -533,8 +537,9 @@ impl CheckpointVerifier {
                 tracing::debug!("waiting for blocks to complete checkpoint range");
                 return;
             }
-            // XXX(hdevalence) should this be unreachable!("called after finished") ?
-            _ => return,
+            FinishedVerifying => {
+                unreachable!("the FinalCheckpoint case should have returned earlier")
+            }
         };
 
         // Keep the old previous checkpoint height, to make sure we're making

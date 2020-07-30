@@ -79,12 +79,14 @@ impl Builder {
     }
 
     /// Configure the codec for the given [`Version`].
+    #[allow(dead_code)]
     pub fn for_version(mut self, version: Version) -> Self {
         self.version = version;
         self
     }
 
     /// Configure the codec's maximum accepted payload size, in bytes.
+    #[allow(dead_code)]
     pub fn with_max_body_len(mut self, len: usize) -> Self {
         self.max_len = len;
         self

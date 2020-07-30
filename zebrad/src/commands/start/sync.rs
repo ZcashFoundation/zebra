@@ -20,7 +20,7 @@ const FANOUT: usize = checkpoint::MAX_QUEUED_BLOCKS_PER_HEIGHT;
 /// Controls how far ahead of the chain tip the syncer tries to download before
 /// waiting for queued verifications to complete. Set to twice the maximum
 /// checkpoint distance.
-const LOOKAHEAD_LIMIT: usize = 2 * 2_000;
+pub const LOOKAHEAD_LIMIT: usize = checkpoint::MAX_CHECKPOINT_HEIGHT_GAP * 2;
 
 #[derive(Debug)]
 pub struct Syncer<ZN, ZS, ZV>
