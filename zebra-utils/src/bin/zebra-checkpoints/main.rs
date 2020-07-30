@@ -89,6 +89,7 @@ fn main() -> Result<()> {
     cmd.arg("getblockcount");
     // calculate the maximum height
     let height_limit: BlockHeight = cmd_output(&mut cmd)?.trim().parse()?;
+    assert!(height_limit <= BlockHeight::MAX);
     let height_limit = height_limit
         .0
         .checked_sub(BLOCK_REORG_LIMIT.0)
