@@ -450,7 +450,7 @@ async fn continuous_blockchain(restart_height: Option<BlockHeight>) -> Result<()
     let checkpoint_list = CheckpointList::from_list(checkpoint_list).map_err(|e| eyre!(e))?;
 
     let mut state_service = zebra_state::in_memory::init();
-    /// SPANDOC: Add blocks to the state from 0..={?restart_height}
+    /// SPANDOC: Add blocks to the state from 0..=restart_height {?restart_height}
     if restart_height.is_some() {
         for block in blockchain
             .iter()
@@ -483,12 +483,12 @@ async fn continuous_blockchain(restart_height: Option<BlockHeight>) -> Result<()
 
     let mut handles = FuturesUnordered::new();
 
-    /// SPANDOC: Verify blocks, restarting at {?restart_height}
+    /// SPANDOC: Verify blocks, restarting at restart_height {?restart_height}
     for (block, height, _hash) in blockchain
         .iter()
         .filter(|(_, height, _)| restart_height.map_or(true, |rh| *height > rh))
     {
-        /// SPANDOC: Make sure the verifier service is ready for block {?height}
+        /// SPANDOC: Make sure the verifier service is ready for the block at height {?height}
         let ready_verifier_service = chain_verifier.ready_and().map_err(|e| eyre!(e)).await?;
 
         /// SPANDOC: Set up the future for block {?height}
