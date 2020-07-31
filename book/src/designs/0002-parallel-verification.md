@@ -320,20 +320,28 @@ Then, the new main tip is selected, according to these rules:
 * the main tip is the chain tip with the greatest cumulative proof of work,
   calculated according to the Zcash Specification. (This is a consensus rule.)
 * as a tie-breaker, if multiple chain tips have equal cumulative work, and one
-  of those tips is the current main tip, the main tip does not change. (This is
-  *not* a consensus rule, because it depends on download and verification
-  order on each local node.)
+  of those tips is the current main tip, the main tip does not change. This
+  check can be implemented using a strictly greater than comparison. (This
+  is *not* a consensus rule, because it depends on download and
+  verification order on each local node. But it is an important feature of node
+  implementations, because it helps the network converge on a single
+  chain.)
   * Note: zcashd chooses the first block that was downloaded on the local
     node. But in Zebra, we want to avoid tracking an associated download time
     for each block (in memory and on disk).
 * as a tie-breaker, if the main tip is not one of the chain tips with the
-  greatest cumulative work, the chain tip with the lowest BlockHeaderHash
-  becomes the main chain tip. (This is *not* a consensus rule. But just in
-  case we want to turn it into a consensus rule in future, we specify that
-  the comparison should happen in little-endian byte order.)
-  * Note: Since the `ChainTipUpdater` has exclusive access to the chain tips,
-    this should be impossible, unless a network upgrade changes the proof of
-    work rules, or we store blocks without associating them with a chain.
+  greatest cumulative work, the service chooses an arbitrary chain tip.
+  (This is *not* a consensus rule, and it should not affect network
+  convergence, because that is handled by the previous two rules.)
+   * Note: we can avoid this edge case by making sure that all verified
+     blocks are associated with a chain. This ensures they are an
+     ancestor of at least one tip. (Or the tip itself.)
+  * Note: Since the service has exclusive access to the chain tips, and
+    it only adds one block at a time, this edge case should be
+    impossible.
+  * Note: if a network upgrade changes the proof of work rules, it
+     could cause a tie. We should review this design if the proof of
+     work rules change.
 
 # Drawbacks
 [drawbacks]: #drawbacks
