@@ -14,6 +14,8 @@ use futures::{
     stream::FuturesUnordered,
 };
 use indexmap::IndexMap;
+use tokio::sync::oneshot::error::TryRecvError;
+use tokio::task::JoinHandle;
 use tower::{
     discover::{Change, Discover},
     Service,
@@ -77,6 +79,15 @@ where
     unready_services: FuturesUnordered<UnreadyService<D::Key, D::Service, Request>>,
     next_idx: Option<usize>,
     demand_signal: mpsc::Sender<()>,
+    /// Channel for passing ownership of tokio JoinHandles from PeerSet's background tasks
+    ///
+    /// The join handles passed into the PeerSet are used populate the `guards` member
+    handle_rx: tokio::sync::oneshot::Receiver<Vec<JoinHandle<Result<(), BoxedStdError>>>>,
+    /// Unordered set of handles to background tasks associated with the `PeerSet`
+    ///
+    /// These guards are checked for errors as part of `poll_ready` which lets
+    /// the `PeerSet` propagate errors from background tasks back to the user
+    guards: futures::stream::FuturesUnordered<JoinHandle<Result<(), BoxedStdError>>>,
 }
 
 impl<D> PeerSet<D>
@@ -90,7 +101,11 @@ where
     <D::Service as Load>::Metric: Debug,
 {
     /// Construct a peerset which uses `discover` internally.
-    pub fn new(discover: D, demand_signal: mpsc::Sender<()>) -> Self {
+    pub fn new(
+        discover: D,
+        demand_signal: mpsc::Sender<()>,
+        handle_rx: tokio::sync::oneshot::Receiver<Vec<JoinHandle<Result<(), BoxedStdError>>>>,
+    ) -> Self {
         Self {
             discover,
             ready_services: IndexMap::new(),
@@ -98,6 +113,8 @@ where
             unready_services: FuturesUnordered::new(),
             next_idx: None,
             demand_signal,
+            guards: futures::stream::FuturesUnordered::new(),
+            handle_rx,
         }
     }
 
@@ -135,7 +152,7 @@ where
                 Some(j) => Some(j),             // We swapped an unrelated service.
             };
             // No Heisenservices: they must be ready or unready.
-            debug_assert!(!self.cancel_handles.contains_key(key));
+            assert!(!self.cancel_handles.contains_key(key));
         } else if let Some(handle) = self.cancel_handles.remove(key) {
             let _ = handle.send(());
         }
@@ -152,6 +169,30 @@ where
         });
     }
 
+    fn check_for_background_errors(&mut self, cx: &mut Context) -> Result<(), BoxedStdError> {
+        if self.guards.is_empty() {
+            match self.handle_rx.try_recv() {
+                Ok(handles) => {
+                    for handle in handles {
+                        self.guards.push(handle);
+                    }
+                }
+                Err(TryRecvError::Closed) => unreachable!(
+                    "try_recv will never be called if the futures have already been received"
+                ),
+                Err(TryRecvError::Empty) => return Ok(()),
+            }
+        }
+
+        match Pin::new(&mut self.guards).poll_next(cx) {
+            Poll::Pending => {}
+            Poll::Ready(Some(res)) => res??,
+            Poll::Ready(None) => Err("all background tasks have exited")?,
+        }
+
+        Ok(())
+    }
+
     fn poll_unready(&mut self, cx: &mut Context<'_>) {
         loop {
             match Pin::new(&mut self.unready_services).poll_next(cx) {
@@ -159,18 +200,22 @@ where
                 Poll::Ready(Some(Ok((key, svc)))) => {
                     trace!(?key, "service became ready");
                     let _cancel = self.cancel_handles.remove(&key);
-                    debug_assert!(_cancel.is_some(), "missing cancel handle");
+                    assert!(_cancel.is_some(), "missing cancel handle");
                     self.ready_services.insert(key, svc);
                 }
                 Poll::Ready(Some(Err((key, UnreadyError::Canceled)))) => {
                     trace!(?key, "service was canceled");
-                    debug_assert!(!self.cancel_handles.contains_key(&key))
+                    // This debug assert is invalid because we can have a
+                    // service be canceled due us connecting to the same service
+                    // twice.
+                    //
+                    // assert!(!self.cancel_handles.contains_key(&key))
                 }
                 Poll::Ready(Some(Err((key, UnreadyError::Inner(e))))) => {
                     let error = e.into();
                     debug!(%error, "service failed while unready, dropped");
                     let _cancel = self.cancel_handles.remove(&key);
-                    debug_assert!(_cancel.is_some(), "missing cancel handle");
+                    assert!(_cancel.is_some(), "missing cancel handle");
                 }
             }
         }
@@ -223,6 +268,7 @@ where
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.check_for_background_errors(cx)?;
         // Process peer discovery updates.
         let _ = self.poll_discover(cx)?;
 

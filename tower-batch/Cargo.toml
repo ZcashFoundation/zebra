@@ -1,0 +1,24 @@
+[package]
+name = "tower-batch"
+version = "0.1.0"
+authors = ["Zcash Foundation <zebra@zfnd.org>"]
+license = "MIT"
+edition = "2018"
+
+[dependencies]
+tokio = { version = "0.2.22", features = ["time", "sync", "stream", "tracing"] }
+tower = "0.3"
+futures-core = "0.3.5"
+pin-project = "0.4.23"
+tracing = "0.1.17"
+tracing-futures = "0.2.4"
+futures = "0.3.5"
+
+[dev-dependencies]
+ed25519-zebra = "2.1.0"
+rand = "0.7"
+tokio = { version = "0.2", features = ["full"]}
+tracing = "0.1.17"
+zebra-test = { path = "../zebra-test/" }
+tower-fallback = { path = "../tower-fallback/" }
+color-eyre = "0.5"

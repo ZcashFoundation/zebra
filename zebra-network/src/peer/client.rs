@@ -16,21 +16,25 @@ use super::{ErrorSlot, SharedPeerError};
 
 /// The "client" duplex half of a peer connection.
 pub struct Client {
-    pub(super) span: tracing::Span,
+    // Used to shut down the corresponding heartbeat.
+    // This is always Some except when we take it on drop.
+    pub(super) shutdown_tx: Option<oneshot::Sender<()>>,
     pub(super) server_tx: mpsc::Sender<ClientRequest>,
     pub(super) error_slot: ErrorSlot,
 }
 
-/// A message from the `peer::Client` to the `peer::Server`, containing both a
-/// request and a return message channel. The reason the return channel is
-/// included is because `peer::Client::call` returns a future that may be moved
-/// around before it resolves, so the future must have ownership of the channel
-/// on which it receives the response.
+/// A message from the `peer::Client` to the `peer::Server`.
 #[derive(Debug)]
-pub(super) struct ClientRequest(
-    pub(super) Request,
-    pub(super) oneshot::Sender<Result<Response, SharedPeerError>>,
-);
+pub(super) struct ClientRequest {
+    /// The actual request.
+    pub request: Request,
+    /// The return message channel, included because `peer::Client::call` returns a
+    /// future that may be moved around before it resolves.
+    pub tx: oneshot::Sender<Result<Response, SharedPeerError>>,
+    /// The tracing context for the request, so that work the connection task does
+    /// processing messages in the context of this request will have correct context.
+    pub span: tracing::Span,
+}
 
 impl Service<Request> for Client {
     type Response = Response;
@@ -49,19 +53,23 @@ impl Service<Request> for Client {
         }
     }
 
-    fn call(&mut self, req: Request) -> Self::Future {
+    fn call(&mut self, request: Request) -> Self::Future {
         use futures::future::FutureExt;
-        use tracing_futures::Instrument;
 
         let (tx, rx) = oneshot::channel();
-        match self.server_tx.try_send(ClientRequest(req, tx)) {
+        // get the current Span to propagate it to the peer connection task.
+        // this allows the peer connection to enter the correct tracing context
+        // when it's handling messages in the context of processing this
+        // request.
+        let span = tracing::Span::current();
+
+        match self.server_tx.try_send(ClientRequest { request, span, tx }) {
             Err(e) => {
                 if e.is_disconnected() {
                     future::ready(Err(self
                         .error_slot
                         .try_get_error()
                         .expect("failed servers must set their error slot")))
-                    .instrument(self.span.clone())
                     .boxed()
                 } else {
                     // sending fails when there's not enough
@@ -75,9 +83,18 @@ impl Service<Request> for Client {
                     oneshot_recv_result
                         .expect("ClientRequest oneshot sender must not be dropped before send")
                 })
-                .instrument(self.span.clone())
                 .boxed()
             }
         }
+    }
+}
+
+impl Drop for Client {
+    fn drop(&mut self) {
+        let _ = self
+            .shutdown_tx
+            .take()
+            .expect("must not drop twice")
+            .send(());
     }
 }

@@ -4,3 +4,8 @@
 .firebase/
 # Emacs detritus
 *~
+\#*
+*\#
+# Vscode detrius
+.vscode/
+.zebra-state/

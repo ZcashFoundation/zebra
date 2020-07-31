@@ -236,7 +236,7 @@ pub enum Message {
     /// A `tx` message.
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#tx)
-    Tx(Box<Transaction>),
+    Tx(Arc<Transaction>),
 
     /// A `mempool` message.
     ///
@@ -308,7 +308,7 @@ where
 
             reason: e.source().unwrap().to_string(),
 
-            // Allow this to be overriden but not populated by default, methinks.
+            // Allow this to be overridden but not populated by default, methinks.
             data: None,
         }
     }

@@ -1,5 +1,6 @@
 [workspace]
 members = [
+        "zebrad",
         "zebra-chain",
         "zebra-network",
         "zebra-state",
@@ -7,8 +8,10 @@ members = [
         "zebra-consensus",
         "zebra-rpc",
         "zebra-client",
-        "zebra-test-vectors",
-        "zebrad",
+        "zebra-test",
+        "zebra-utils",
+        "tower-batch",
+        "tower-fallback",
 ]
 
 [profile.dev]
@@ -19,8 +22,4 @@ panic = "abort"
 debug = true
 
 [patch.crates-io]
-abscissa_core = { git = "https://github.com/yaahc/abscissa.git", branch = "develop" }
-tracing-subscriber = { path = "/home/jlusby/git/tokio/tracing/tracing-subscriber" }
-tracing = { path = "/home/jlusby/git/tokio/tracing/tracing" }
-tracing-core = { path = "/home/jlusby/git/tokio/tracing/tracing-core" }
-tracing-log = { path = "/home/jlusby/git/tokio/tracing/tracing-log" }
+abscissa_core = { git = "https://github.com/yaahc/abscissa.git", rev = "41d342a9344e38442b2211b07f28a89505892a21" }

@@ -32,7 +32,7 @@ pub struct SaplingNoteCommitmentTree;
 /// commitment tree corresponding to the final Sapling treestate of
 /// this block. A root of a note commitment tree is associated with
 /// each treestate.
-#[derive(Clone, Copy, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct SaplingNoteTreeRootHash(pub [u8; 32]);
 
@@ -52,7 +52,7 @@ impl From<SaplingNoteCommitmentTree> for SaplingNoteTreeRootHash {
         // let mut hash_writer = Sha256dWriter::default();
         // sapling_note_commitment_tree
         //     .zcash_serialize(&mut hash_writer)
-        //     .expect("A Sapling note committment tree must serialize.");
+        //     .expect("A Sapling note commitment tree must serialize.");
         // Self(hash_writer.finish())
 
         unimplemented!();

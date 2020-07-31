@@ -1,6 +1,7 @@
 //!
 #![allow(dead_code)]
 
+use serde::{Deserialize, Serialize};
 use std::{
     fmt,
     io::{self},
@@ -9,6 +10,7 @@ use std::{
 #[cfg(test)]
 use proptest::{collection::vec, prelude::*};
 
+use crate::serde_helpers;
 use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 
 use super::{memo::Memo, *};
@@ -34,7 +36,8 @@ pub struct NotePlaintext {
 }
 
 /// A ciphertext component for encrypted output notes.
-pub struct EncryptedCiphertext(pub [u8; 601]);
+#[derive(Serialize, Deserialize)]
+pub struct EncryptedCiphertext(#[serde(with = "serde_helpers::BigArray")] pub [u8; 601]);
 
 impl fmt::Debug for EncryptedCiphertext {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

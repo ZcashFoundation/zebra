@@ -1,6 +1,6 @@
 [package]
 name = "zebra-network"
-version = "0.1.0"
+version = "3.0.0-alpha.0"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 edition = "2018"
@@ -15,24 +15,28 @@ chrono = "0.4"
 hex = "0.4"
 # indexmap has rayon support for parallel iteration,
 # which we don't use, so disable it to drop the dependencies.
-indexmap = { version = "1.4", default-features = false }
+indexmap = { version = "1.5", default-features = false }
 pin-project = "0.4"
-proptest = "0.10"
-proptest-derive = "0.2.0"
 rand = "0.7"
 serde = { version = "1", features = ["serde_derive"] }
 thiserror = "1"
 
-tokio = { version = "0.2", features = ["net", "time", "stream"] }
-tokio-util = { version = "0.2", features = ["codec"] }
 futures = "0.3"
-
-tracing = "0.1"
-tracing-futures = "0.2"
-
+tokio = { version = "0.2.22", features = ["net", "time", "stream", "tracing"] }
+tokio-util = { version = "0.2", features = ["codec"] }
 tower = "0.3"
 tower-load = "0.3"
 
 metrics = "0.12"
+tracing = "0.1"
+tracing-futures = "0.2"
+tracing-error = { version = "0.1.2", features = ["traced-error"] }
 
 zebra-chain = { path = "../zebra-chain" }
+zebra-consensus = { path = "../zebra-consensus" }
+
+[dev-dependencies]
+proptest = "0.10"
+proptest-derive = "0.2.0"
+
+zebra-test = { path = "../zebra-test/" }

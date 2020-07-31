@@ -8,7 +8,10 @@ use std::{
 };
 
 use chrono::Utc;
-use futures::{channel::mpsc, prelude::*};
+use futures::{
+    channel::{mpsc, oneshot},
+    prelude::*,
+};
 use tokio::net::TcpStream;
 use tokio_util::codec::Framed;
 use tower::Service;
@@ -121,10 +124,9 @@ where
                 services: PeerServices::NODE_NETWORK,
                 timestamp: Utc::now(),
                 address_recv: (PeerServices::NODE_NETWORK, addr),
-                address_from: (
-                    PeerServices::NODE_NETWORK,
-                    "127.0.0.1:9000".parse().unwrap(),
-                ),
+                // TODO: when we've implemented block and transaction relaying,
+                //       send our configured address to the peer
+                address_from: (PeerServices::NODE_NETWORK, "0.0.0.0:8233".parse().unwrap()),
                 nonce: local_nonce,
                 user_agent,
                 // XXX eventually the `PeerConnector` will need to have a handle
@@ -185,16 +187,27 @@ where
             // we would disconnect here if it received a second one. Is it even possible
             // for that to happen to us here?
 
-            if remote_version < constants::MIN_VERSION {
-                // Disconnect if peer is using an obsolete version.
-                return Err(HandshakeError::ObsoleteVersion(remote_version));
-            }
-
             // TODO: Reject incoming connections from nodes that don't know about the current epoch.
             // zcashd does this:
             //  const Consensus::Params& consensusParams = chainparams.GetConsensus();
             //  auto currentEpoch = CurrentEpoch(GetHeight(), consensusParams);
             //  if (pfrom->nVersion < consensusParams.vUpgrades[currentEpoch].nProtocolVersion)
+            //
+            // For approximately 1.5 days before a network upgrade, we also need to:
+            //  - avoid old peers, and
+            //  - prefer updated peers.
+            // For example, we could reject old peers with probability 0.5.
+            //
+            // At the network upgrade, we also need to disconnect from old peers.
+            // TODO: replace min_for_upgrade(network, MIN_NETWORK_UPGRADE) with
+            //       current_min(network, height) where network is the
+            //       configured network, and height is the best tip's block
+            //       height.
+
+            if remote_version < Version::min_for_upgrade(network, constants::MIN_NETWORK_UPGRADE) {
+                // Disconnect if peer is using an obsolete version.
+                return Err(HandshakeError::ObsoleteVersion(remote_version));
+            }
 
             // Set the connection's version to the minimum of the received version or our own.
             let negotiated_version = std::cmp::min(remote_version, constants::CURRENT_VERSION);
@@ -212,10 +225,11 @@ where
             // These channels should not be cloned more than they are
             // in this block, see constants.rs for more.
             let (server_tx, server_rx) = mpsc::channel(0);
+            let (shutdown_tx, shutdown_rx) = oneshot::channel();
             let slot = ErrorSlot::default();
 
             let client = Client {
-                span: connection_span.clone(),
+                shutdown_tx: Some(shutdown_tx),
                 server_tx: server_tx.clone(),
                 error_slot: slot.clone(),
             };
@@ -271,31 +285,49 @@ where
                 request_timer: None,
             };
 
-            tokio::spawn(server.run(peer_rx).instrument(connection_span).boxed());
+            tokio::spawn(
+                server
+                    .run(peer_rx)
+                    .instrument(connection_span.clone())
+                    .boxed(),
+            );
 
-            tokio::spawn(async move {
-                use futures::channel::oneshot;
+            let heartbeat_span = tracing::debug_span!(parent: connection_span, "heartbeat");
+            tokio::spawn(
+                async move {
+                    use super::client::ClientRequest;
+                    use futures::future::Either;
 
-                use super::client::ClientRequest;
-
-                let mut server_tx = server_tx;
-
-                let mut interval_stream = tokio::time::interval(constants::HEARTBEAT_INTERVAL);
-
-                loop {
-                    interval_stream.tick().await;
-
-                    // We discard the server handle because our
-                    // heartbeat `Ping`s are a special case, and we
-                    // don't actually care about the response here.
-                    let (request_tx, _) = oneshot::channel();
-                    let msg = ClientRequest(Request::Ping(Nonce::default()), request_tx);
-
-                    if server_tx.send(msg).await.is_err() {
-                        return;
+                    let mut shutdown_rx = shutdown_rx;
+                    let mut server_tx = server_tx;
+                    let mut interval_stream = tokio::time::interval(constants::HEARTBEAT_INTERVAL);
+                    loop {
+                        let shutdown_rx_ref = Pin::new(&mut shutdown_rx);
+                        match future::select(interval_stream.next(), shutdown_rx_ref).await {
+                            Either::Left(_) => {
+                                // We don't wait on a response because heartbeats are checked
+                                // internally to the connection logic, we just need a separate
+                                // task (this one) to generate them.
+                                let (request_tx, _) = oneshot::channel();
+                                if server_tx
+                                    .send(ClientRequest {
+                                        request: Request::Ping(Nonce::default()),
+                                        tx: request_tx,
+                                        span: tracing::Span::current(),
+                                    })
+                                    .await
+                                    .is_err()
+                                {
+                                    return;
+                                }
+                            }
+                            Either::Right(_) => return, // got shutdown signal
+                        }
                     }
                 }
-            });
+                .instrument(heartbeat_span)
+                .boxed(),
+            );
 
             Ok(client)
         };

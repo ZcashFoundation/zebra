@@ -1,11 +1,10 @@
 steps:
-- name: 'gcr.io/kaniko-project/executor:v0.15.0'
-  args:
-  - --destination=gcr.io/$PROJECT_ID/$BRANCH_NAME
-  - --cache=true
-  - --cache-ttl=24h
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['build', '-t', 'gcr.io/$PROJECT_ID/zcashfoundation/zebra/$BRANCH_NAME:$SHORT_SHA', '.']
+
+images: ['gcr.io/$PROJECT_ID/zcashfoundation/zebra/$BRANCH_NAME:$SHORT_SHA']
 
 options:
     machineType: 'N1_HIGHCPU_32'
 
-timeout: 3600s # One hour for all steps.
+timeout: 1800s # 30 mins

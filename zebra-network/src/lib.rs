@@ -12,6 +12,10 @@
 //! [`tower::Service`] representing "the network" which load-balances
 //! outbound [`Request`]s over available peers.
 //!
+//! Unlike the underlying legacy network protocol the provided
+//! [`tower::Service`] guarantees that each `Request` future will resolve to
+//! the correct `Response`, not a potentially random unrelated `Response`.
+//!
 //! Each peer connection is a distinct task, which interprets incoming
 //! Bitcoin/Zcash messages either as [`Response`]s to pending
 //! [`Request`]s, or as an inbound [`Request`]s to an internal
@@ -26,12 +30,13 @@
 //! to close, and the outbound service can connect to additional peers
 //! when it is overloaded.
 
+#![doc(html_favicon_url = "https://www.zfnd.org/images/zebra-favicon-128.png")]
 #![doc(html_logo_url = "https://www.zfnd.org/images/zebra-icon.png")]
 #![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_network")]
 #![deny(missing_docs)]
 // Tracing causes false positives on this lint:
 // https://github.com/tokio-rs/tracing/issues/553
-#![allow(clippy::cognitive_complexity)]
+#![allow(clippy::cognitive_complexity, clippy::try_err)]
 
 #[macro_use]
 extern crate pin_project;
@@ -64,7 +69,6 @@ pub use crate::{
     config::Config,
     peer_set::init,
     policies::{RetryErrors, RetryLimit},
-    protocol::external::codec::Builder,
     protocol::internal::{Request, Response},
 };
 

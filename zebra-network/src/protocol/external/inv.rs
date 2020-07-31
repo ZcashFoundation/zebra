@@ -19,7 +19,7 @@ use zebra_chain::transaction::TransactionHash;
 /// Bitcoin calls this an "inventory vector" but it is just a typed hash, not a
 /// container, so we do not use that term to avoid confusion with `Vec<T>`.
 ///
-/// [Bitcoin·reference](https://en.bitcoin.it/wiki/Protocol_documentation#Inventory_Vectors)
+/// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#Inventory_Vectors)
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum InventoryHash {
     /// An error.

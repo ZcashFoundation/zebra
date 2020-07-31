@@ -14,8 +14,7 @@ use tower::{buffer::Buffer, Service, ServiceExt};
 use zebra_network::{AddressBook, BoxedStdError, Request, Response};
 
 use crate::prelude::*;
-use color_eyre::Report;
-use eyre::eyre;
+use color_eyre::eyre::{eyre, Report};
 
 /// Whether our `SeedService` is poll_ready or not.
 #[derive(Debug)]
@@ -134,11 +133,11 @@ impl SeedCmd {
         let seed_service = SeedService {
             state: SeederState::AwaitingAddressBook(addressbook_rx),
         };
-        let node = Buffer::new(seed_service, 1);
+        let buffered_svc = Buffer::new(seed_service, 1);
 
         let config = app_config().network.clone();
 
-        let (mut peer_set, address_book) = zebra_network::init(config, node).await;
+        let (mut peer_set, address_book) = zebra_network::init(config, buffered_svc).await;
 
         let _ = addressbook_tx.send(address_book);
 
@@ -146,21 +145,6 @@ impl SeedCmd {
         peer_set.ready_and().await.map_err(|e| eyre!(e))?;
 
         info!("peer_set became ready");
-
-        #[cfg(dos)]
-        use std::time::Duration;
-
-        #[cfg(dos)]
-        // Fire GetPeers requests at ourselves, for testing.
-        tokio::spawn(async move {
-            let mut interval_stream = tokio::time::interval(Duration::from_secs(1));
-
-            loop {
-                interval_stream.next().await;
-
-                let _ = seed_service.call(Request::GetPeers);
-            }
-        });
 
         let eternity = future::pending::<()>();
         eternity.await;

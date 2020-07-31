@@ -1,18 +1,14 @@
-use proptest::{
-    arbitrary::{any, Arbitrary},
-    collection::vec,
-    option,
-    prelude::*,
-};
+use proptest::{arbitrary::any, collection::vec, option, prelude::*};
 
 use crate::{
-    serialization::{ZcashDeserialize, ZcashSerialize},
-    types::{LockTime, Script},
+    serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
+    types::LockTime,
 };
 
 use super::*;
 
-#[cfg(test)]
+mod arbitrary;
+
 impl Transaction {
     pub fn v1_strategy() -> impl Strategy<Value = Self> {
         (
@@ -72,7 +68,7 @@ impl Transaction {
             vec(any::<TransparentOutput>(), 0..10),
             any::<LockTime>(),
             any::<BlockHeight>(),
-            any::<i64>(),
+            any::<Amount>(),
             option::of(any::<ShieldedData>()),
             option::of(any::<JoinSplitData<Groth16Proof>>()),
         )
@@ -99,77 +95,75 @@ impl Transaction {
     }
 }
 
-#[cfg(test)]
-impl Arbitrary for Transaction {
-    type Parameters = ();
-
-    fn arbitrary_with(_args: ()) -> Self::Strategy {
-        prop_oneof![
-            Self::v1_strategy(),
-            Self::v2_strategy(),
-            Self::v3_strategy(),
-            Self::v4_strategy()
-        ]
-        .boxed()
-    }
-
-    type Strategy = BoxedStrategy<Self>;
-}
-
-#[cfg(test)]
-impl Arbitrary for TransparentInput {
-    type Parameters = ();
-
-    fn arbitrary_with(_args: ()) -> Self::Strategy {
-        prop_oneof![
-            (any::<OutPoint>(), any::<Script>(), any::<u32>())
-                .prop_map(|(outpoint, script, sequence)| {
-                    TransparentInput::PrevOut {
-                        outpoint,
-                        script,
-                        sequence,
-                    }
-                })
-                .boxed(),
-            (any::<BlockHeight>(), vec(any::<u8>(), 0..95), any::<u32>())
-                .prop_map(|(height, data, sequence)| {
-                    TransparentInput::Coinbase {
-                        height,
-                        data: CoinbaseData(data),
-                        sequence,
-                    }
-                })
-                .boxed(),
-        ]
-        .boxed()
-    }
-
-    type Strategy = BoxedStrategy<Self>;
-}
-
 #[test]
 fn librustzcash_tx_deserialize_and_round_trip() {
-    let tx = Transaction::zcash_deserialize(&test_vectors::GENERIC_TESTNET_TX[..])
+    let tx = Transaction::zcash_deserialize(&zebra_test::vectors::GENERIC_TESTNET_TX[..])
         .expect("transaction test vector from librustzcash should deserialize");
 
     let mut data2 = Vec::new();
     tx.zcash_serialize(&mut data2).expect("tx should serialize");
 
-    assert_eq!(&test_vectors::GENERIC_TESTNET_TX[..], &data2[..]);
+    assert_eq!(&zebra_test::vectors::GENERIC_TESTNET_TX[..], &data2[..]);
 }
 
-#[cfg(test)]
 proptest! {
 
     #[test]
     fn transaction_roundtrip(tx in any::<Transaction>()) {
-
-        let mut data = Vec::new();
-
-        tx.zcash_serialize(&mut data).expect("tx should serialize");
-
-        let tx2 = Transaction::zcash_deserialize(&data[..]).expect("randomized tx should deserialize");
+        let data = tx.zcash_serialize_to_vec().expect("tx should serialize");
+        let tx2 = data.zcash_deserialize_into().expect("randomized tx should deserialize");
 
         prop_assert_eq![tx, tx2];
     }
+}
+
+#[test]
+fn zip143_deserialize_and_round_trip() {
+    let tx1 = Transaction::zcash_deserialize(&zebra_test::vectors::ZIP143_1[..])
+        .expect("transaction test vector from ZIP143 should deserialize");
+
+    let mut data1 = Vec::new();
+    tx1.zcash_serialize(&mut data1)
+        .expect("tx should serialize");
+
+    assert_eq!(&zebra_test::vectors::ZIP143_1[..], &data1[..]);
+
+    let tx2 = Transaction::zcash_deserialize(&zebra_test::vectors::ZIP143_2[..])
+        .expect("transaction test vector from ZIP143 should deserialize");
+
+    let mut data2 = Vec::new();
+    tx2.zcash_serialize(&mut data2)
+        .expect("tx should serialize");
+
+    assert_eq!(&zebra_test::vectors::ZIP143_2[..], &data2[..]);
+}
+
+#[test]
+fn zip243_deserialize_and_round_trip() {
+    let tx1 = Transaction::zcash_deserialize(&zebra_test::vectors::ZIP243_1[..])
+        .expect("transaction test vector from ZIP243 should deserialize");
+
+    let mut data1 = Vec::new();
+    tx1.zcash_serialize(&mut data1)
+        .expect("tx should serialize");
+
+    assert_eq!(&zebra_test::vectors::ZIP243_1[..], &data1[..]);
+
+    let tx2 = Transaction::zcash_deserialize(&zebra_test::vectors::ZIP243_2[..])
+        .expect("transaction test vector from ZIP243 should deserialize");
+
+    let mut data2 = Vec::new();
+    tx2.zcash_serialize(&mut data2)
+        .expect("tx should serialize");
+
+    assert_eq!(&zebra_test::vectors::ZIP243_2[..], &data2[..]);
+
+    let tx3 = Transaction::zcash_deserialize(&zebra_test::vectors::ZIP243_3[..])
+        .expect("transaction test vector from ZIP243 should deserialize");
+
+    let mut data3 = Vec::new();
+    tx3.zcash_serialize(&mut data3)
+        .expect("tx should serialize");
+
+    assert_eq!(&zebra_test::vectors::ZIP243_3[..], &data3[..]);
 }

@@ -16,3 +16,12 @@ parsers:
       loop: yes
       method: yes
       macro: yes
+
+# comment:
+#   layout: "diff"
+#   # if true: only post the comment if coverage changes
+#   require_changes: true
+
+# This turns off the extra comment; the coverage %'s are still
+# reported on the main PR page as check results
+comment: false

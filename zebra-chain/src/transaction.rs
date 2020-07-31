@@ -1,13 +1,13 @@
 //! Transaction types.
 
+use serde::{Deserialize, Serialize};
+
 mod hash;
 mod joinsplit;
 mod serialize;
 mod shielded_data;
 mod transparent;
 
-#[cfg(test)]
-mod test_vectors;
 #[cfg(test)]
 mod tests;
 
@@ -17,7 +17,7 @@ pub use shielded_data::{Output, ShieldedData, Spend};
 pub use transparent::{CoinbaseData, OutPoint, TransparentInput, TransparentOutput};
 
 use crate::proofs::{Bctv14Proof, Groth16Proof};
-use crate::types::{BlockHeight, LockTime};
+use crate::types::{amount::Amount, BlockHeight, LockTime};
 
 /// A Zcash transaction.
 ///
@@ -30,7 +30,7 @@ use crate::types::{BlockHeight, LockTime};
 /// Zcash has a number of different transaction formats. They are represented
 /// internally by different enum variants. Because we checkpoint on Sapling
 /// activation, we do not parse any pre-Sapling transaction types.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 // XXX consider boxing the Optional fields of V4 txs
 #[allow(clippy::large_enum_variant)]
 pub enum Transaction {
@@ -82,8 +82,7 @@ pub enum Transaction {
         /// The latest block height that this transaction can be added to the chain.
         expiry_height: BlockHeight,
         /// The net value of Sapling spend transfers minus output transfers.
-        // XXX refine this to an Amount type.
-        value_balance: i64,
+        value_balance: Amount,
         /// The shielded data for this transaction, if any.
         shielded_data: Option<ShieldedData>,
         /// The JoinSplit data for this transaction, if any.
@@ -130,5 +129,11 @@ impl Transaction {
             Transaction::V3 { expiry_height, .. } => Some(*expiry_height),
             Transaction::V4 { expiry_height, .. } => Some(*expiry_height),
         }
+    }
+
+    /// Returns `true` if transaction contains any coinbase inputs.
+    pub fn contains_coinbase_input(&self) -> bool {
+        self.inputs()
+            .any(|input| matches!(input, TransparentInput::Coinbase { .. }))
     }
 }

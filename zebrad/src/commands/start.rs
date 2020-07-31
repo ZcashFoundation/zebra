@@ -1,22 +1,34 @@
-//! `start` subcommand - example of how to write a subcommand
-
-/// App-local prelude includes `app_reader()`/`app_writer()`/`app_config()`
-/// accessors along with logging macros. Customize as you see fit.
-use crate::prelude::*;
+//! `start` subcommand - entry point for starting a zebra node
+//!
+//!  ## Application Structure
+//!
+//!  A zebra node consists of the following services and tasks:
+//!
+//!  * Network Service
+//!    * primary interface to the node
+//!    * handles all external network requests for the Zcash protocol
+//!      * via zebra_network::Message and zebra_network::Response
+//!    * provides an interface to the rest of the network for other services and
+//!    tasks running within this node
+//!      * via zebra_network::Request
+//!  * Consensus Service
+//!    * handles all validation logic for the node
+//!    * verifies blocks using zebra-chain and zebra-script, then stores verified
+//!    blocks in zebra-state
+//!  * Sync Task
+//!    * This task runs in the background and continuously queries the network for
+//!    new blocks to be verified and added to the local state
 
 use crate::config::ZebradConfig;
+use crate::{components::tokio::TokioComponent, prelude::*};
 
 use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
+use color_eyre::eyre::Report;
+use tower::{buffer::Buffer, service_fn};
 
-use futures::prelude::*;
+mod sync;
 
 /// `start` subcommand
-///
-/// The `Options` proc macro generates an option parser based on the struct
-/// definition, and is defined in the `gumdrop` crate. See their documentation
-/// for a more comprehensive example:
-///
-/// <https://docs.rs/gumdrop/>
 #[derive(Command, Debug, Options)]
 pub struct StartCmd {
     /// Filter strings
@@ -24,24 +36,33 @@ pub struct StartCmd {
     filters: Vec<String>,
 }
 
+impl StartCmd {
+    async fn start(&self) -> Result<(), Report> {
+        info!(?self, "starting to connect to the network");
+
+        let config = app_config();
+        let state = zebra_state::on_disk::init(config.state.clone(), config.network.network);
+        let verifier = zebra_consensus::chain::init(config.network.network, state.clone()).await;
+
+        // The service that our node uses to respond to requests by peers
+        let node = Buffer::new(
+            service_fn(|req| async move {
+                info!(?req);
+                Ok::<zebra_network::Response, Report>(zebra_network::Response::Nil)
+            }),
+            1,
+        );
+        let (peer_set, _address_book) = zebra_network::init(config.network.clone(), node).await;
+
+        let mut syncer = sync::Syncer::new(config.network.network, peer_set, state, verifier);
+
+        syncer.sync().await
+    }
+}
+
 impl Runnable for StartCmd {
     /// Start the application.
     fn run(&self) {
-        warn!("starting application");
-        let config = app_config();
-        if let Some(filter) = &config.tracing.filter {
-            println!("filter: {}!", filter);
-        }
-
-        let default_config = ZebradConfig::default();
-        println!("Default config: {:?}", default_config);
-
-        println!("Toml:\n{}", toml::to_string(&default_config).unwrap());
-
-        info!("Starting placeholder loop");
-
-        use crate::components::tokio::TokioComponent;
-
         let rt = app_writer()
             .state_mut()
             .components
@@ -50,8 +71,17 @@ impl Runnable for StartCmd {
             .rt
             .take();
 
-        rt.expect("runtime should not already be taken")
-            .block_on(future::pending::<()>());
+        let result = rt
+            .expect("runtime should not already be taken")
+            .block_on(self.start());
+
+        match result {
+            Ok(()) => {}
+            Err(e) => {
+                eprintln!("Error: {:?}", e);
+                std::process::exit(1);
+            }
+        }
     }
 }
 

@@ -16,13 +16,20 @@ use thiserror::Error;
 // XXX refine error types -- better to use boxed errors?
 #[derive(Error, Debug)]
 pub enum SerializationError {
-    /// An underlying IO error.
-    #[error("io error")]
+    /// An io error that prevented deserialization
+    #[error("unable to deserialize type")]
     Io(#[from] io::Error),
     /// The data to be deserialized was malformed.
     // XXX refine errors
     #[error("parse error: {0}")]
     Parse(&'static str),
+    /// An error caused when validating a zatoshi `Amount`
+    #[error("input couldn't be parsed as a zatoshi `Amount`")]
+    Amount {
+        /// The source error indicating how the num failed to validate
+        #[from]
+        source: crate::types::amount::Error,
+    },
 }
 
 /// Consensus-critical serialization for Zcash.
@@ -43,6 +50,13 @@ pub trait ZcashSerialize: Sized {
     /// In other words, any type implementing `ZcashSerialize` must make illegal
     /// states unrepresentable.
     fn zcash_serialize<W: io::Write>(&self, writer: W) -> Result<(), io::Error>;
+
+    /// Helper function to construct a vec to serialize the current struct into
+    fn zcash_serialize_to_vec(&self) -> Result<Vec<u8>, io::Error> {
+        let mut data = Vec::new();
+        self.zcash_serialize(&mut data)?;
+        Ok(data)
+    }
 }
 
 /// Consensus-critical serialization for Zcash.
@@ -76,7 +90,8 @@ impl<T: ZcashDeserialize> ZcashDeserialize for Vec<T> {
         // We're given len, so we could preallocate. But blindly preallocating
         // without a size bound can allow DOS attacks, and there's no way to
         // pass a size bound in a ZcashDeserialize impl, so instead we allocate
-        // as we read from the reader.
+        // as we read from the reader. (The maximum block and transaction sizes
+        // limit the eventual size of these allocations.)
         let mut vec = Vec::new();
         for _ in 0..len {
             vec.push(T::zcash_deserialize(&mut reader)?);
@@ -290,6 +305,23 @@ pub trait ReadZcashExt: io::Read {
 
 /// Mark all types implementing `Read` as implementing the extension.
 impl<R: io::Read + ?Sized> ReadZcashExt for R {}
+
+/// Helper for deserializing more succinctly via type inference
+pub trait ZcashDeserializeInto {
+    /// Deserialize based on type inference
+    fn zcash_deserialize_into<T>(self) -> Result<T, SerializationError>
+    where
+        T: ZcashDeserialize;
+}
+
+impl<R: io::Read> ZcashDeserializeInto for R {
+    fn zcash_deserialize_into<T>(self) -> Result<T, SerializationError>
+    where
+        T: ZcashDeserialize,
+    {
+        T::zcash_deserialize(self)
+    }
+}
 
 #[cfg(test)]
 #[allow(clippy::unnecessary_operation)]

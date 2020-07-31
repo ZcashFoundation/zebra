@@ -101,15 +101,23 @@ impl Application for ZebradApp {
         &mut self.state
     }
 
+    /// Returns the framework components used by this application.
     fn framework_components(
         &mut self,
         command: &Self::Cmd,
     ) -> Result<Vec<Box<dyn Component<Self>>>, FrameworkError> {
         let terminal = Terminal::new(self.term_colors(command));
-        let (tracing, guard) = self.tracing_component(command);
-        self.flame_guard = Some(Box::new(guard));
 
-        Ok(vec![Box::new(terminal), Box::new(tracing)])
+        color_eyre::install().unwrap();
+
+        if ZebradApp::command_is_server(&command) {
+            let (tracing, guard) = self.tracing_component(command);
+
+            self.flame_guard = Some(Box::new(guard));
+            Ok(vec![Box::new(terminal), Box::new(tracing)])
+        } else {
+            Ok(vec![Box::new(terminal)])
+        }
     }
 
     /// Register all components used by this application.
@@ -123,9 +131,12 @@ impl Application for ZebradApp {
         };
 
         let mut components = self.framework_components(command)?;
-        components.push(Box::new(TokioComponent::new()?));
-        components.push(Box::new(TracingEndpoint::new()?));
-        components.push(Box::new(MetricsEndpoint::new()?));
+        // Launch network endpoints for long-running commands
+        if ZebradApp::command_is_server(&command) {
+            components.push(Box::new(TokioComponent::new()?));
+            components.push(Box::new(TracingEndpoint::new()?));
+            components.push(Box::new(MetricsEndpoint::new()?));
+        }
 
         self.state.components.register(components)
     }
@@ -140,16 +151,46 @@ impl Application for ZebradApp {
         config: Self::Cfg,
         command: &Self::Cmd,
     ) -> Result<(), FrameworkError> {
+        use crate::components::{
+            metrics::MetricsEndpoint, tokio::TokioComponent, tracing::TracingEndpoint,
+        };
+
         // Configure components
         self.state.components.after_config(&config)?;
         self.config = Some(config);
 
-        let level = self.level(command);
-        self.state
-            .components
-            .get_downcast_mut::<Tracing>()
-            .expect("Tracing component should be available")
-            .reload_filter(level);
+        if ZebradApp::command_is_server(&command) {
+            let level = self.level(command);
+            self.state
+                .components
+                .get_downcast_mut::<Tracing>()
+                .expect("Tracing component should be available")
+                .reload_filter(level);
+
+            // Work around some issues with dependency injection and configs
+            let config = self
+                .config
+                .clone()
+                .expect("config was set to Some earlier in this function");
+
+            let tokio_component = self
+                .state
+                .components
+                .get_downcast_ref::<TokioComponent>()
+                .expect("Tokio component should be available");
+
+            self.state
+                .components
+                .get_downcast_ref::<TracingEndpoint>()
+                .expect("Tracing endpoint should be available")
+                .open_endpoint(&config.tracing, tokio_component);
+
+            self.state
+                .components
+                .get_downcast_ref::<MetricsEndpoint>()
+                .expect("Metrics endpoint should be available")
+                .open_endpoint(&config.metrics, tokio_component);
+        }
 
         Ok(())
     }
@@ -157,14 +198,34 @@ impl Application for ZebradApp {
 
 impl ZebradApp {
     fn level(&self, command: &EntryPoint<ZebradCmd>) -> String {
-        if let Ok(level) = std::env::var("ZEBRAD_LOG") {
-            level
-        } else if command.verbose {
+        // `None` outputs zebrad usage information to stdout
+        let command_uses_stdout = match &command.command {
+            None => true,
+            Some(c) => c.uses_stdout(),
+        };
+
+        // Allow users to:
+        //  - override all other configs and defaults using the command line
+        //  - see command outputs without spurious log messages, by default
+        //  - override the config file using an environmental variable
+        if command.verbose {
             "debug".to_string()
+        } else if command_uses_stdout {
+            // Tracing sends output to stdout, so we disable info-level logs for
+            // some commands.
+            //
+            // TODO: send tracing output to stderr. This change requires an abscissa
+            //       update, because `abscissa_core::component::Tracing` uses
+            //       `tracing_subscriber::fmt::Formatter`, which has `Stdout` as a
+            //       type parameter. We need `MakeWriter` or a similar type.
+            "warn".to_string()
+        } else if let Ok(level) = std::env::var("ZEBRAD_LOG") {
+            level
         } else if let Some(ZebradConfig {
             tracing:
                 crate::config::TracingSection {
                     filter: Some(filter),
+                    endpoint_addr: _,
                 },
             ..
         }) = &self.config
@@ -185,7 +246,9 @@ impl ZebradApp {
         let filter_handle = builder.reload_handle();
         let (flame_layer, guard) =
             tracing_flame::FlameLayer::with_file("./tracing.folded").unwrap();
-        let flame_layer = flame_layer.filter_empty().collapse_threads();
+        let flame_layer = flame_layer
+            .with_empty_samples(false)
+            .with_threads_collapsed(true);
 
         builder
             .finish()
@@ -194,5 +257,17 @@ impl ZebradApp {
             .init();
 
         (filter_handle.into(), guard)
+    }
+
+    /// Returns true if command is a server command.
+    ///
+    /// Server commands use long-running components such as tracing, metrics,
+    /// and the tokio runtime.
+    fn command_is_server(command: &EntryPoint<ZebradCmd>) -> bool {
+        // `None` outputs zebrad usage information and exits
+        match &command.command {
+            None => false,
+            Some(c) => c.is_server(),
+        }
     }
 }

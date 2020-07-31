@@ -2,12 +2,22 @@ use std::sync::{Arc, Mutex};
 
 use thiserror::Error;
 
+use tracing_error::TracedError;
 use zebra_chain::serialization::SerializationError;
 
 /// A wrapper around `Arc<PeerError>` that implements `Error`.
 #[derive(Error, Debug, Clone)]
-#[error("{0}")]
-pub struct SharedPeerError(#[from] Arc<PeerError>);
+#[error(transparent)]
+pub struct SharedPeerError(Arc<TracedError<PeerError>>);
+
+impl<E> From<E> for SharedPeerError
+where
+    PeerError: From<E>,
+{
+    fn from(source: E) -> Self {
+        Self(Arc::new(TracedError::from(PeerError::from(source))))
+    }
+}
 
 /// An error related to peer connection handling.
 #[derive(Error, Debug)]
@@ -16,10 +26,6 @@ pub enum PeerError {
     /// The remote peer closed the connection.
     #[error("Peer closed connection")]
     ConnectionClosed,
-    /// The [`peer::Client`] half of the [`peer::Client`]/[`peer::Server`] pair died before
-    /// the [`Server`] half did.
-    #[error("peer::Client instance died")]
-    DeadClient,
     /// The remote peer did not respond to a [`peer::Client`] request in time.
     #[error("Client request timed out")]
     ClientRequestTimeout,

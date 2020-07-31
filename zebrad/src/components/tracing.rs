@@ -1,6 +1,6 @@
 //! An HTTP endpoint for dynamically setting tracing filters.
 
-use crate::{components::tokio::TokioComponent, prelude::*};
+use crate::{components::tokio::TokioComponent, config::TracingSection, prelude::*};
 
 use abscissa_core::{Component, FrameworkError};
 
@@ -28,17 +28,25 @@ impl TracingEndpoint {
         Ok(Self {})
     }
 
-    /// Do setup after receiving a tokio runtime.
-    pub fn init_tokio(&mut self, tokio_component: &TokioComponent) -> Result<(), FrameworkError> {
+    /// Tokio endpoint dependency stub.
+    ///
+    /// We can't open the endpoint here, because the config has not been loaded.
+    pub fn init_tokio(&mut self, _tokio_component: &TokioComponent) -> Result<(), FrameworkError> {
+        Ok(())
+    }
+
+    /// Open the tracing endpoint.
+    ///
+    /// We can't implement `after_config`, because we use `derive(Component)`.
+    /// And the ownership rules might make it hard to access the TokioComponent
+    /// from `after_config`.
+    pub fn open_endpoint(&self, tracing_config: &TracingSection, tokio_component: &TokioComponent) {
         info!("Initializing tracing endpoint");
 
         let service =
             make_service_fn(|_| async { Ok::<_, hyper::Error>(service_fn(request_handler)) });
 
-        // XXX load tracing addr from config
-        let addr = "127.0.0.1:3000"
-            .parse()
-            .expect("Hardcoded address should be parseable");
+        let addr = tracing_config.endpoint_addr;
 
         tokio_component
             .rt
@@ -61,8 +69,6 @@ impl TracingEndpoint {
                     error!("Server error: {}", e);
                 }
             });
-
-        Ok(())
     }
 }
 

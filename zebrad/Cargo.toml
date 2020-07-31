@@ -2,40 +2,40 @@
 name = "zebrad"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
-version = "0.1.0"
+version = "3.0.0-alpha.0"
 edition = "2018"
 
 [dependencies]
-rand = "0.7"
-chrono = "0.4"
+zebra-chain = { path = "../zebra-chain" }
+zebra-consensus = { path = "../zebra-consensus/" }
+zebra-network = { path = "../zebra-network" }
+zebra-state = { path = "../zebra-state" }
+
 abscissa_core = "0.5"
 gumdrop = "0.7"
 serde = { version = "1", features = ["serde_derive"] }
 toml = "0.5"
-thiserror = "1"
 
-tokio = { version = "0.2", features = ["time", "rt-threaded", "stream"] }
+chrono = "0.4"
+rand = "0.7"
+
+hyper = "0.13.7"
 futures = "0.3"
+tokio = { version = "0.2.22", features = ["time", "rt-threaded", "stream", "macros", "tracing"] }
+tower = "0.3"
 
+color-eyre = "0.5"
+thiserror = "1"
 tracing = "0.1"
 tracing-futures = "0.2"
 tracing-log = "0.1"
-
-hyper = "0.13.6"
-
-tower = "0.3"
+tracing-subscriber = { version = "0.2.9", features = ["tracing-log"] }
+tracing-error = "0.1.2"
 
 metrics-runtime = "0.13"
 metrics = "0.12"
-
-zebra-chain = { path = "../zebra-chain" }
-zebra-network = { path = "../zebra-network" }
-eyre = "0.4.3"
-color-eyre = "0.3.4"
-zebra-state = { path = "../zebra-state" }
-tracing-subscriber = { version = "0.2.5", features = ["tracing-log"] }
-tracing-error = "0.1.2"
-tracing-flame = { path = "/home/jlusby/git/tokio/tracing/tracing-flame" }
+dirs = "3.0.1"
+tracing-flame = "0.1.0"
 
 [dev-dependencies]
 abscissa_core = { version = "0.5", features = ["testing"] }

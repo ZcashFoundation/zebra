@@ -4,12 +4,15 @@
 #[cfg(test)]
 use proptest_derive::Arbitrary;
 
-use crate::types::{BlockHeight, Script};
+use crate::types::{
+    amount::{Amount, NonNegative},
+    BlockHeight, Script,
+};
 
 use super::TransactionHash;
 
 /// Arbitrary data inserted by miners into a coinbase transaction.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct CoinbaseData(
     /// Invariant: this vec, together with the coinbase height, must be less than
     /// 100 bytes. We enforce this by only constructing CoinbaseData fields by
@@ -29,7 +32,7 @@ impl AsRef<[u8]> for CoinbaseData {
 /// OutPoint
 ///
 /// A particular transaction output reference.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct OutPoint {
     /// References the transaction that contains the UTXO being spent.
@@ -41,7 +44,7 @@ pub struct OutPoint {
 }
 
 /// A transparent input to a transaction.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum TransparentInput {
     /// A reference to an output of a previous transaction.
     PrevOut {
@@ -75,13 +78,12 @@ pub enum TransparentInput {
 /// I only own one UTXO worth 2 ZEC, I would construct a transaction
 /// that spends my UTXO and sends 1 ZEC to you and 1 ZEC back to me
 /// (just like receiving change).
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct TransparentOutput {
     /// Transaction value.
     // At https://en.bitcoin.it/wiki/Protocol_documentation#tx, this is an i64.
-    // XXX refine to Amount ?
-    pub value: u64,
+    pub value: Amount<NonNegative>,
 
     /// Usually contains the public key as a Bitcoin script setting up
     /// conditions to claim this output.
