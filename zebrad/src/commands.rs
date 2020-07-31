@@ -18,7 +18,7 @@ use crate::config::ZebradConfig;
 use abscissa_core::{
     config::Override, Command, Configurable, FrameworkError, Help, Options, Runnable,
 };
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Zebrad Configuration Filename
 pub const CONFIG_FILE: &str = "zebrad.toml";
@@ -83,6 +83,13 @@ impl ZebradCmd {
             // List all the commands, so new commands have to make a choice here
             Connect(_) | Seed(_) | Start(_) => true,
             Generate(_) | Help(_) | Revhex(_) | Version(_) => false,
+        }
+    }
+
+    pub(crate) fn flamegraph(&self) -> Option<&Path> {
+        match self {
+            Start(StartCmd { flamegraph, .. }) => flamegraph.as_deref(),
+            _ => None,
         }
     }
 }

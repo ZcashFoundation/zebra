@@ -24,6 +24,7 @@ use crate::{components::tokio::TokioComponent, prelude::*};
 
 use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
 use color_eyre::eyre::Report;
+use std::path::PathBuf;
 use tower::{buffer::Buffer, service_fn};
 
 mod sync;
@@ -34,6 +35,10 @@ pub struct StartCmd {
     /// Filter strings
     #[options(free)]
     filters: Vec<String>,
+
+    /// Flamegraph output file
+    #[options()]
+    pub(crate) flamegraph: Option<PathBuf>,
 }
 
 impl StartCmd {

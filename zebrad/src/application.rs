@@ -244,17 +244,20 @@ impl ZebradApp {
             .with_env_filter(self.level(command))
             .with_filter_reloading();
         let filter_handle = builder.reload_handle();
-        let (flame_layer, guard) =
-            tracing_flame::FlameLayer::with_file("./tracing.folded").unwrap();
-        let flame_layer = flame_layer
-            .with_empty_samples(false)
-            .with_threads_collapsed(true);
-
-        builder
-            .finish()
-            .with(tracing_error::ErrorLayer::default())
-            .with(flame_layer)
-            .init();
+        let subscriber = builder.finish().with(tracing_error::ErrorLayer::default());
+        let guard =
+            if let Some(flamegraph_path) = command.command.as_ref().and_then(|c| c.flamegraph()) {
+                let (flame_layer, guard) =
+                    tracing_flame::FlameLayer::with_file(flamegraph_path).unwrap();
+                let flame_layer = flame_layer
+                    .with_empty_samples(false)
+                    .with_threads_collapsed(true);
+                subscriber.with(flame_layer).init();
+                Droption::Some(guard)
+            } else {
+                subscriber.init();
+                Droption::None
+            };
 
         (filter_handle.into(), guard)
     }
@@ -270,4 +273,13 @@ impl ZebradApp {
             Some(c) => c.is_server(),
         }
     }
+}
+
+enum Droption<T> {
+    Some(T),
+    None,
+}
+
+impl<T> Drop for Droption<T> {
+    fn drop(&mut self) {}
 }
