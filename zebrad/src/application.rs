@@ -40,8 +40,10 @@ pub fn app_config() -> config::Reader<ZebradApp> {
     config::Reader::new(&APPLICATION)
 }
 
-/// drop handle for tracing-flame layer to ensure it flushes its buffer when
-/// the application exits
+/// Global handle to flame guard for signal handler termination
+///
+/// This needs to be independent of the owned flame_guard below to avoid
+/// contention on the AppCell's lock
 pub(crate) static FLAME_GUARD: Lazy<Mutex<Option<Box<dyn Drop + Send + Sync + 'static>>>> =
     Lazy::new(|| Mutex::new(None));
 
@@ -50,7 +52,8 @@ pub struct ZebradApp {
     /// Application configuration.
     config: Option<ZebradConfig>,
 
-    /// drop guard to create a flamegraph on exit
+    /// drop handle for tracing-flame layer to ensure it flushes its buffer when
+    /// the application exits
     flame_guard: Droption<FlameGrapher>,
 
     /// Application state.
