@@ -28,6 +28,8 @@ use tower::{buffer::Buffer, Service, ServiceExt};
 use zebra_chain::block::{Block, BlockHeaderHash};
 use zebra_chain::types::BlockHeight;
 
+/// A service that verifies blocks.
+#[derive(Debug)]
 struct BlockVerifier<S>
 where
     S: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>

@@ -37,6 +37,20 @@ use zebra_chain::Network;
 /// Used to identify unexpected high blocks.
 const MAX_EXPECTED_BLOCK_GAP: u32 = 100_000;
 
+/// A wrapper type that holds the `ChainVerifier`'s `CheckpointVerifier`, and
+/// its associated state.
+#[derive(Clone)]
+struct ChainCheckpointVerifier {
+    /// The underlying `CheckpointVerifier`, wrapped in a buffer, so we can
+    /// clone and share it with futures.
+    verifier: Buffer<CheckpointVerifier, Arc<Block>>,
+
+    /// The maximum checkpoint height for `checkpoint_verifier`.
+    max_height: BlockHeight,
+}
+
+/// A service that verifies the chain, using its associated `CheckpointVerifier`
+/// and `BlockVerifier`.
 struct ChainVerifier<BV, S>
 where
     BV: Service<Arc<Block>, Response = BlockHeaderHash, Error = Error> + Send + Clone + 'static,
@@ -50,15 +64,11 @@ where
     /// The underlying `BlockVerifier`, possibly wrapped in other services.
     block_verifier: BV,
 
-    /// The underlying `CheckpointVerifier`, wrapped in a buffer, so we can
-    /// clone and share it with futures.
+    /// The `ChainVerifier`'s underlying `CheckpointVerifier`, and its
+    /// associated state.
     ///
     /// None if all the checkpoints have been verified.
-    checkpoint_verifier: Option<Buffer<CheckpointVerifier, Arc<Block>>>,
-    /// The maximum checkpoint height for `checkpoint_verifier`.
-    ///
-    /// None if all the checkpoints have been verified.
-    max_checkpoint_height: Option<BlockHeight>,
+    checkpoint: Option<ChainCheckpointVerifier>,
 
     /// The underlying `ZebraState`, possibly wrapped in other services.
     state_service: S,
@@ -112,8 +122,8 @@ where
 
         let mut block_verifier = self.block_verifier.clone();
         let mut state_service = self.state_service.clone();
-        let checkpoint_verifier = self.checkpoint_verifier.clone();
-        let max_checkpoint_height = self.max_checkpoint_height;
+        let checkpoint_verifier = self.checkpoint.clone().map(|c| c.verifier);
+        let max_checkpoint_height = self.checkpoint.clone().map(|c| c.max_height);
 
         // Log an info-level message on unexpected high blocks
         let is_unexpected_high_block = match (block_height, self.last_block_height) {
@@ -295,26 +305,29 @@ where
         .activation_height(network)
         .expect("Unexpected network upgrade info: Sapling must have an activation height");
 
-    let (checkpoint_verifier, max_checkpoint_height) = match (initial_height, checkpoint_list, max_checkpoint_height) {
+    let checkpoint = match (initial_height, checkpoint_list, max_checkpoint_height) {
         // If we need to verify pre-Sapling blocks, make sure we have checkpoints for them.
         (None, None, _) => panic!("We have no checkpoints, and we have no cached blocks: Pre-Sapling blocks must be verified by checkpoints"),
         (Some(initial_height), None, _) if (initial_height < sapling_activation) => panic!("We have no checkpoints, and we don't have a cached Sapling activation block: Pre-Sapling blocks must be verified by checkpoints"),
 
         // If we're past the checkpoint range, don't create a checkpoint verifier.
-        (Some(initial_height), _, Some(max_checkpoint_height)) if (initial_height > max_checkpoint_height) => (None, None),
+        (Some(initial_height), _, Some(max_checkpoint_height)) if (initial_height > max_checkpoint_height) => None,
         // No list, no checkpoint verifier
-        (_, None, _) => (None, None),
+        (_, None, _) => None,
 
         (_, Some(_), None) => panic!("Missing max checkpoint height: height must be Some if verifier is Some"),
         // We've done all the checks we need to create a checkpoint verifier
-        (_, Some(list), Some(_)) => (Some(Buffer::new(CheckpointVerifier::from_checkpoint_list(list, initial_tip), 1)), max_checkpoint_height),
+        (_, Some(list), Some(max_height)) => Some(
+            ChainCheckpointVerifier {
+                verifier: Buffer::new(CheckpointVerifier::from_checkpoint_list(list, initial_tip), 1),
+                max_height,
+            }),
     };
 
     Buffer::new(
         ChainVerifier {
             block_verifier,
-            checkpoint_verifier,
-            max_checkpoint_height,
+            checkpoint,
             state_service,
             last_block_height: initial_height,
         },
