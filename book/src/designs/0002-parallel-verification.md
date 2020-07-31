@@ -333,7 +333,7 @@ Then, the new main tip is selected, according to these rules:
   the comparison should happen in little-endian byte order.)
   * Note: Since the `ChainTipUpdater` has exclusive access to the chain tips,
     this should be impossible, unless a network upgrade changes the proof of
-    work rules.
+    work rules, or we store blocks without associating them with a chain.
 
 # Drawbacks
 [drawbacks]: #drawbacks
