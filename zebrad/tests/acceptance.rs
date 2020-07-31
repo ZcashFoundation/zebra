@@ -120,19 +120,6 @@ fn help_args() -> Result<()> {
 }
 
 #[test]
-fn revhex_no_args() -> Result<()> {
-    zebra_test::init();
-
-    let (mut child, _guard) = get_child_single_arg("revhex")?;
-
-    //Program is waiting for input, we just exit after 1 second
-    std::thread::sleep(Duration::from_secs(1));
-    child.kill()?;
-
-    Ok(())
-}
-
-#[test]
 fn revhex_args() -> Result<()> {
     zebra_test::init();
 
