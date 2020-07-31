@@ -2750,6 +2750,7 @@ dependencies = [
  "regex",
  "spandoc",
  "tempdir",
+ "thiserror",
  "tokio",
  "tower",
  "tracing",
