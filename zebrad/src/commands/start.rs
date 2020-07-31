@@ -24,7 +24,6 @@ use crate::{components::tokio::TokioComponent, prelude::*};
 
 use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
 use color_eyre::eyre::Report;
-use std::path::PathBuf;
 use tower::{buffer::Buffer, service_fn};
 
 mod sync;
@@ -35,15 +34,12 @@ pub struct StartCmd {
     /// Filter strings
     #[options(free)]
     filters: Vec<String>,
-
-    /// Flamegraph output file
-    #[options()]
-    pub(crate) flamegraph: Option<PathBuf>,
 }
 
 impl StartCmd {
     async fn start(&self) -> Result<(), Report> {
         info!(?self, "starting to connect to the network");
+        tokio::spawn(on_ctrl_c());
 
         let config = app_config();
         let state = zebra_state::on_disk::init(config.state.clone(), config.network.network);
@@ -63,6 +59,12 @@ impl StartCmd {
 
         syncer.sync().await
     }
+}
+
+async fn on_ctrl_c() {
+    tokio::signal::ctrl_c().await.unwrap();
+    let _ = crate::application::FLAME_GUARD.lock().unwrap().take();
+    std::process::exit(1);
 }
 
 impl Runnable for StartCmd {
