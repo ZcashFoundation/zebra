@@ -196,6 +196,8 @@ impl CheckpointVerifier {
         }
     }
 
+    /// Return the checkpoint list for this verifier.
+    #[allow(dead_code)]
     pub(crate) fn list(&self) -> &CheckpointList {
         &self.checkpoint_list
     }
