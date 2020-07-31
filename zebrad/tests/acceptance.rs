@@ -129,9 +129,6 @@ fn revhex_no_args() -> Result<()> {
     std::thread::sleep(Duration::from_secs(1));
     child.kill()?;
 
-    let output = child.wait_with_output()?;
-    output.assert_failure()?;
-
     Ok(())
 }
 
