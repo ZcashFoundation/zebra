@@ -4,6 +4,8 @@
 
 #[cfg(test)]
 mod arbitrary;
+#[cfg(test)]
+mod test_vectors;
 
 use std::{fmt, io};
 
@@ -52,21 +54,48 @@ pub fn pedersen_hash_to_point(domain: [u8; 8], M: &BitVec<Lsb0, u8>) -> jubjub::
         find_group_hash(domain, &i.to_le_bytes())
     }
 
-    // ⟨Mᵢ⟩
+    /// ⟨Mᵢ⟩
+    ///
+    /// Σ j={0,k-1}: (1 - 2x₂)⋅(1 + x₀ + 2x₁)⋅2^(4⋅j)
+    // XXX: Are internal functions doc'd?
+    //
+    // This is less efficient than it could be so that it can match the math
+    // closely.
     fn M_i(segment: &BitSlice<Lsb0, u8>) -> jubjub::Fr {
-        let mut m_i = [0u8; 32];
+        let mut m_i = jubjub::Fr::zero();
 
         for (j, chunk) in segment.chunks(3).enumerate() {
-            let mut data = [0u8; 3];
-            let bits = data.bits_mut::<Lsb0>();
-            bits.copy_from_slice(chunk);
+            // Pad each chunk with zeros.
+            let mut store = 0u8;
+            let bits = store.bits_mut::<Lsb0>();
+            chunk
+                .iter()
+                .enumerate()
+                .for_each(|(i, bit)| bits.set(i, *bit));
 
-            let enc_m_j = (1 - (2 * bits[2] as u8)) * (1 + (bits[0] as u8) + (2 * bits[1] as u8));
+            let mut tmp = jubjub::Fr::one();
 
-            m_i[0] += enc_m_j * (1 << (4 * j))
+            if bits[0] {
+                tmp += &jubjub::Fr::one();
+            }
+
+            if bits[1] {
+                tmp += &jubjub::Fr::one().double();
+            }
+
+            if bits[2] {
+                tmp -= tmp.double();
+            }
+
+            // tmp * 2^(4*j)
+            if j > 0 {
+                tmp *= (1..(4 * j)).fold(jubjub::Fr::one(), |acc, _| acc.double());
+            }
+
+            m_i += tmp;
         }
 
-        jubjub::Fr::from_bytes(&m_i).unwrap()
+        m_i
     }
 
     let mut result = jubjub::ExtendedPoint::identity();
@@ -98,8 +127,8 @@ pub fn mixing_pedersen_hash(P: jubjub::ExtendedPoint, x: jubjub::Fr) -> jubjub::
     P + find_group_hash(J, b"") * x
 }
 
-/// Construct a 'windowed' Pedersen commitment by reusing a Perderson hash
-/// constructon, and adding a randomized point on the Jubjub curve.
+/// Construct a 'windowed' Pedersen commitment by reusing a Pederson hash
+/// construction, and adding a randomized point on the Jubjub curve.
 ///
 /// WindowedPedersenCommit_r (s) := \
 ///   PedersenHashToPoint(“Zcash_PH”, s) + [r]FindGroupHash^J^(r)(“Zcash_PH”, “r”)
@@ -287,5 +316,35 @@ impl ValueCommitment {
         let R = find_group_hash(*b"Zcash_cv", b"r");
 
         Self::from(V * v + R * rcv)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+    // use crate::commitments::sapling::test_vectors::TEST_VECTORS;
+
+    #[test]
+    fn pedersen_hash_to_point_test_vectors() {
+        const D: [u8; 8] = *b"Zcash_PH";
+
+        let result =
+            pedersen_hash_to_point(D, &BitVec::<Lsb0, u8>::from_vec(vec![1, 1, 1, 1, 1, 1]));
+
+        let point = jubjub::AffinePoint::from(result);
+
+        println!("{:?}", point);
+
+        //println!("u: ");
+
+        // for test_vector in TEST_VECTORS.iter() {
+        //     let result = pedersen_hash_to_point(
+        //         D,
+        //         &BitVec::<Lsb0, u8>::from_vec(test_vector.input_bits.clone()),
+        //     );
+
+        //     assert_eq!(jubjub::AffinePoint::from(result), test_vector.hash_point);
+        // }
     }
 }
