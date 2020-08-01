@@ -59,7 +59,7 @@ impl CommandExt for Command {
         })
     }
 
-    /// wrapper for `output` fn on `Command` that constructs informative error
+    /// wrapper for `spawn` fn on `Command` that constructs informative error
     /// reports
     fn spawn2(&mut self) -> Result<TestChild, Report> {
         let cmd = format!("{:?}", self);
