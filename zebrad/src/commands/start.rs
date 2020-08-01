@@ -63,6 +63,7 @@ impl StartCmd {
 impl Runnable for StartCmd {
     /// Start the application.
     fn run(&self) {
+        info!("Starting zebrad");
         let rt = app_writer()
             .state_mut()
             .components

@@ -45,8 +45,7 @@ impl SledState {
         let height_map = self.storage.open_tree(b"height_map")?;
         let by_hash = self.storage.open_tree(b"by_hash")?;
 
-        let mut bytes = Vec::new();
-        block.zcash_serialize(&mut bytes)?;
+        let bytes = block.zcash_serialize_to_vec()?;
 
         // TODO(jlusby): make this transactional
         height_map.insert(&height.0.to_be_bytes(), &hash.0)?;
