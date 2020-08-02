@@ -10,6 +10,7 @@ use zebra_test::prelude::*;
 
 // Todo: The following 3 helper functions can probably be abstracted into one
 pub fn get_child_single_arg(arg: &str) -> Result<(zebra_test::command::TestChild, impl Drop)> {
+    change_default_path()?;
     let (mut cmd, guard) = test_cmd(env!("CARGO_BIN_EXE_zebrad"))?;
 
     Ok((
@@ -23,6 +24,7 @@ pub fn get_child_single_arg(arg: &str) -> Result<(zebra_test::command::TestChild
 }
 
 pub fn get_child_multi_args(args: &[&str]) -> Result<(zebra_test::command::TestChild, impl Drop)> {
+    change_default_path()?;
     let (mut cmd, guard) = test_cmd(env!("CARGO_BIN_EXE_zebrad"))?;
 
     Ok((
@@ -36,6 +38,7 @@ pub fn get_child_multi_args(args: &[&str]) -> Result<(zebra_test::command::TestC
 }
 
 pub fn get_child_no_args() -> Result<(zebra_test::command::TestChild, impl Drop)> {
+    change_default_path()?;
     let (mut cmd, guard) = test_cmd(env!("CARGO_BIN_EXE_zebrad"))?;
 
     Ok((
@@ -45,6 +48,13 @@ pub fn get_child_no_args() -> Result<(zebra_test::command::TestChild, impl Drop)
             .unwrap(),
         guard,
     ))
+}
+
+pub fn change_default_path() -> Result<()> {
+    let tmp = TempDir::new("zebrad_tests")?;
+    std::env::set_var("ZEBRAD_CACHE_DIR", tmp.path());
+
+    Ok(())
 }
 
 #[test]
