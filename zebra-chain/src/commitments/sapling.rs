@@ -65,6 +65,8 @@ pub fn pedersen_hash_to_point(domain: [u8; 8], M: &BitVec<Lsb0, u8>) -> jubjub::
         let mut m_i = jubjub::Fr::zero();
 
         for (j, chunk) in segment.chunks(3).enumerate() {
+            println!("{:?}", m_i);
+
             // Pad each chunk with zeros.
             let mut store = 0u8;
             let bits = store.bits_mut::<Lsb0>();
@@ -72,6 +74,8 @@ pub fn pedersen_hash_to_point(domain: [u8; 8], M: &BitVec<Lsb0, u8>) -> jubjub::
                 .iter()
                 .enumerate()
                 .for_each(|(i, bit)| bits.set(i, *bit));
+
+            println!("{:?}", chunk);
 
             let mut tmp = jubjub::Fr::one();
 
@@ -323,28 +327,21 @@ impl ValueCommitment {
 mod tests {
 
     use super::*;
-    // use crate::commitments::sapling::test_vectors::TEST_VECTORS;
+    use crate::commitments::sapling::test_vectors::TEST_VECTORS;
 
     #[test]
     fn pedersen_hash_to_point_test_vectors() {
         const D: [u8; 8] = *b"Zcash_PH";
 
-        let result =
-            pedersen_hash_to_point(D, &BitVec::<Lsb0, u8>::from_vec(vec![1, 1, 1, 1, 1, 1]));
+        for test_vector in TEST_VECTORS.iter() {
+            let result = jubjub::AffinePoint::from(pedersen_hash_to_point(
+                D,
+                &test_vector.input_bits.clone(),
+            ));
 
-        let point = jubjub::AffinePoint::from(result);
+            println!("{:?}", result);
 
-        println!("{:?}", point);
-
-        //println!("u: ");
-
-        // for test_vector in TEST_VECTORS.iter() {
-        //     let result = pedersen_hash_to_point(
-        //         D,
-        //         &BitVec::<Lsb0, u8>::from_vec(test_vector.input_bits.clone()),
-        //     );
-
-        //     assert_eq!(jubjub::AffinePoint::from(result), test_vector.hash_point);
-        // }
+            //assert_eq!(jubjub::AffinePoint::from(result), test_vector.hash_point);
+        }
     }
 }
