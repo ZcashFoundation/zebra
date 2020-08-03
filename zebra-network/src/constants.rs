@@ -44,7 +44,7 @@ pub const USER_AGENT: &str = "/🦓Zebra🦓:3.0.0-alpha.0/";
 ///
 /// This protocol version might be the current version on Mainnet or Testnet,
 /// based on where we are in the network upgrade cycle.
-pub const CURRENT_VERSION: Version = Version(170_011);
+pub const CURRENT_VERSION: Version = Version(170_012);
 
 /// The most recent bilateral consensus upgrade implemented by this crate.
 ///
