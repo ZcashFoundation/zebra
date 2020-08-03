@@ -10,6 +10,10 @@
 //! block's work value depends on the fixed threshold in the block header, not
 //! the actual work represented by the block header hash.
 
+use primitive_types::U256;
+
+#[cfg(test)]
+use proptest::prelude::*;
 #[cfg(test)]
 use proptest_derive::Arbitrary;
 
@@ -41,9 +45,18 @@ use proptest_derive::Arbitrary;
 /// Without these consensus rules, some `ExpandedDifficulty` values would have
 /// multiple equivalent `CompactDifficulty` values, due to redundancy in the
 /// floating-point format.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct CompactDifficulty(pub u32);
+
+impl fmt::Debug for CompactDifficulty {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple("CompactDifficulty")
+            // Use hex, because it's a float
+            .field(&format_args!("{:#010x}", self.0))
+            .finish()
+    }
+}
 
 /// A 256-bit unsigned "expanded difficulty" value.
 ///
@@ -61,11 +74,27 @@ pub struct CompactDifficulty(pub u32);
 /// Therefore, consensus-critical code must perform the specified
 /// conversions to `CompactDifficulty`, even if the original
 /// `ExpandedDifficulty` values are known.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(test, derive(Arbitrary))]
-pub struct ExpandedDifficulty([u8; 32]);
+#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
+pub struct ExpandedDifficulty(U256);
+
+impl fmt::Debug for ExpandedDifficulty {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut buf = [0; 32];
+        // Use the same byte order as BlockHeaderHash
+        self.0.to_little_endian(&mut buf);
+        f.debug_tuple("ExpandedDifficulty")
+            .field(&hex::encode(&buf))
+            .finish()
+    }
+}
 
 impl CompactDifficulty {
+    /// CompactDifficulty exponent base.
+    const BASE: u32 = 256;
+
+    /// CompactDifficulty exponent offset.
+    const OFFSET: i32 = 3;
+
     /// CompactDifficulty floating-point precision.
     const PRECISION: u32 = 24;
 
@@ -75,10 +104,7 @@ impl CompactDifficulty {
     /// CompactDifficulty unsigned mantissa mask.
     ///
     /// Also the maximum unsigned mantissa value.
-    const U_MANT_MASK: u32 = CompactDifficulty::SIGN_BIT - 1;
-
-    /// CompactDifficulty exponent offset.
-    const OFFSET: i32 = 3;
+    const UNSIGNED_MANTISSA_MASK: u32 = CompactDifficulty::SIGN_BIT - 1;
 
     /// Calculate the ExpandedDifficulty for a compact representation.
     ///
@@ -90,10 +116,11 @@ impl CompactDifficulty {
     pub fn to_expanded(&self) -> Option<ExpandedDifficulty> {
         // The constants for this floating-point representation.
         // Alias the struct constants here, so the code is easier to read.
+        const BASE: u32 = CompactDifficulty::BASE;
+        const OFFSET: i32 = CompactDifficulty::OFFSET;
         const PRECISION: u32 = CompactDifficulty::PRECISION;
         const SIGN_BIT: u32 = CompactDifficulty::SIGN_BIT;
-        const U_MANT_MASK: u32 = CompactDifficulty::U_MANT_MASK;
-        const OFFSET: i32 = CompactDifficulty::OFFSET;
+        const UNSIGNED_MANTISSA_MASK: u32 = CompactDifficulty::UNSIGNED_MANTISSA_MASK;
 
         // Negative values in this floating-point representation.
         // 0 if (x & 2^23 == 2^23)
@@ -103,41 +130,65 @@ impl CompactDifficulty {
         }
 
         // The components of the result
-        // The fractional part of the number
+        // The fractional part of the floating-point number
         // x & (2^23 - 1)
-        let mantissa = self.0 & U_MANT_MASK;
+        let mantissa = self.0 & UNSIGNED_MANTISSA_MASK;
 
-        // The position of the number in the result, in bytes (rather than bits)
+        // The exponent for the multiplier in the floating-point number
         // 256^(floor(x/(2^24)) - 3)
         // The i32 conversion is safe, because we've just divided self by 2^24.
         let exponent = ((self.0 >> PRECISION) as i32) - OFFSET;
 
-        // Now put the mantissa in the right place in the result, based on
-        // the exponent.
-        let mut result = [0; 32];
-        for (i, b) in mantissa.to_le_bytes().iter().enumerate() {
-            // These conversions are safe, due to the size of the array, and the
-            // range checks before array access.
-            let position = exponent + i as i32;
-            if position >= 32 {
-                if *b != 0 {
-                    // zcashd rejects overflow values, without comparing the
-                    // hash
-                    return None;
-                }
-            } else if position >= 0 {
-                // zcashd truncates fractional values
-                result[position as usize] = *b;
-            }
-        }
+        // Normalise the mantissa and exponent before multiplying.
+        //
+        // zcashd rejects non-zero overflow values, but accepts overflows where
+        // all the overflowing bits are zero. It also allows underflows.
+        let (mantissa, exponent) = match (mantissa, exponent) {
+            // Overflow: check for non-zero overflow bits
+            //
+            // If m is non-zero, overflow. If m is zero, invalid.
+            (_, e) if (e >= 32) => return None,
+            // If m is larger than the remaining bytes, overflow.
+            // Otherwise, avoid overflows in base^exponent.
+            (m, e) if (e == 31 && m > u8::MAX.into()) => return None,
+            (m, e) if (e == 31 && m <= u8::MAX.into()) => (m << 16, e - 2),
+            (m, e) if (e == 30 && m > u16::MAX.into()) => return None,
+            (m, e) if (e == 30 && m <= u16::MAX.into()) => (m << 8, e - 1),
 
-        if result == [0; 32] {
+            // Underflow: perform the right shift.
+            // The abs is safe, because we've just divided by 2^24, and offset
+            // is small.
+            (m, e) if (e < 0) => (m >> ((e.abs() * 8) as u32), 0),
+            (m, e) => (m, e),
+        };
+
+        // Now calculate the result: mantissa*base^exponent
+        // Earlier code should make sure all these values are in range.
+        let mantissa: U256 = mantissa.into();
+        let base: U256 = BASE.into();
+        let exponent: U256 = exponent.into();
+        let result = mantissa * base.pow(exponent);
+
+        if result == U256::zero() {
             // zcashd rejects zero values, without comparing the hash
             None
         } else {
             Some(ExpandedDifficulty(result))
         }
     }
+}
+
+#[cfg(test)]
+impl Arbitrary for ExpandedDifficulty {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: ()) -> Self::Strategy {
+        (any::<[u8; 32]>())
+            .prop_map(|v| ExpandedDifficulty(U256::from_little_endian(&v)))
+            .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
 }
 
 #[cfg(test)]
@@ -153,8 +204,31 @@ mod tests {
     // Alias the struct constants here, so the code is easier to read.
     const PRECISION: u32 = CompactDifficulty::PRECISION;
     const SIGN_BIT: u32 = CompactDifficulty::SIGN_BIT;
-    const U_MANT_MASK: u32 = CompactDifficulty::U_MANT_MASK;
+    const UNSIGNED_MANTISSA_MASK: u32 = CompactDifficulty::UNSIGNED_MANTISSA_MASK;
     const OFFSET: i32 = CompactDifficulty::OFFSET;
+
+    /// Test debug formatting.
+    #[test]
+    fn debug_format() {
+        zebra_test::init();
+
+        assert_eq!(
+            format!("{:?}", CompactDifficulty(0)),
+            "CompactDifficulty(0x00000000)"
+        );
+        assert_eq!(
+            format!("{:?}", CompactDifficulty(1)),
+            "CompactDifficulty(0x00000001)"
+        );
+        assert_eq!(
+            format!("{:?}", CompactDifficulty(u32::MAX)),
+            "CompactDifficulty(0xffffffff)"
+        );
+
+        assert_eq!(format!("{:?}", ExpandedDifficulty(U256::zero())), "ExpandedDifficulty(\"0000000000000000000000000000000000000000000000000000000000000000\")");
+        assert_eq!(format!("{:?}", ExpandedDifficulty(U256::one())), "ExpandedDifficulty(\"0100000000000000000000000000000000000000000000000000000000000000\")");
+        assert_eq!(format!("{:?}", ExpandedDifficulty(U256::MAX)), "ExpandedDifficulty(\"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\")");
+    }
 
     /// Test zero values for CompactDifficulty.
     #[test]
@@ -167,7 +241,7 @@ mod tests {
         // Small value zeroes
         let small_zero_1 = CompactDifficulty(1);
         assert_eq!(small_zero_1.to_expanded(), None);
-        let small_zero_max = CompactDifficulty(U_MANT_MASK);
+        let small_zero_max = CompactDifficulty(UNSIGNED_MANTISSA_MASK);
         assert_eq!(small_zero_max.to_expanded(), None);
 
         // Special-cased zeroes, negative in the floating-point representation
@@ -187,9 +261,7 @@ mod tests {
         zebra_test::init();
 
         // Values equal to one
-        let mut expanded_one = [0; 32];
-        expanded_one[0] = 1;
-        let expanded_one = Some(ExpandedDifficulty(expanded_one));
+        let expanded_one = Some(ExpandedDifficulty(U256::one()));
 
         let one = CompactDifficulty(OFFSET as u32 * (1 << PRECISION) + 1);
         assert_eq!(one.to_expanded(), expanded_one);
@@ -197,31 +269,24 @@ mod tests {
         assert_eq!(another_one.to_expanded(), expanded_one);
 
         // Maximum mantissa
-        let mut expanded_mant = [0; 32];
-        expanded_mant[0] = 0xff;
-        expanded_mant[1] = 0xff;
-        expanded_mant[2] = 0x7f;
-        let expanded_mant = Some(ExpandedDifficulty(expanded_mant));
+        let expanded_mant = Some(ExpandedDifficulty(UNSIGNED_MANTISSA_MASK.into()));
 
-        let mant = CompactDifficulty(OFFSET as u32 * (1 << PRECISION) + U_MANT_MASK);
+        let mant = CompactDifficulty(OFFSET as u32 * (1 << PRECISION) + UNSIGNED_MANTISSA_MASK);
         assert_eq!(mant.to_expanded(), expanded_mant);
 
         // Maximum valid exponent
-        let mut expanded_exp = [0; 32];
-        expanded_exp[31] = 1;
-        let expanded_exp = Some(ExpandedDifficulty(expanded_exp));
+        let exponent: U256 = (31 * 8).into();
+        let expanded_exp = Some(ExpandedDifficulty(U256::from(2).pow(exponent)));
 
         let exp = CompactDifficulty((31 + OFFSET as u32) * (1 << PRECISION) + 1);
         assert_eq!(exp.to_expanded(), expanded_exp);
 
         // Maximum valid mantissa and exponent
-        let mut expanded_me = [0; 32];
-        expanded_me[29] = 0xff;
-        expanded_me[30] = 0xff;
-        expanded_me[31] = 0x7f;
+        let exponent: U256 = (29 * 8).into();
+        let expanded_me = U256::from(UNSIGNED_MANTISSA_MASK) * U256::from(2).pow(exponent);
         let expanded_me = Some(ExpandedDifficulty(expanded_me));
 
-        let me = CompactDifficulty((31 + 1) * (1 << PRECISION) + U_MANT_MASK);
+        let me = CompactDifficulty((31 + 1) * (1 << PRECISION) + UNSIGNED_MANTISSA_MASK);
         assert_eq!(me.to_expanded(), expanded_me);
 
         // Maximum value, at least according to the spec
