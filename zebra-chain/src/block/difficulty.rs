@@ -1,11 +1,11 @@
 //! Block difficulty data structures and calculations
 //!
 //! The block difficulty "target threshold" is stored in the block header as a
-//! 32-bit "compact bits" value. The `BlockHeaderHash` must be less than or equal
-//! to the expanded target threshold, when represented as a 256-bit integer in
-//! little-endian order.
+//! 32-bit `CompactDifficulty`. The `BlockHeaderHash` must be less than or equal
+//! to the `ExpandedDifficulty` threshold, when represented as a 256-bit integer
+//! in little-endian order.
 //!
-//! The target threshold is also used to calculate the "work" for each block.
+//! The target threshold is also used to calculate the `Work` for each block.
 //! The block work is used to find the chain with the greatest total work. Each
 //! block's work value depends on the fixed threshold in the block header, not
 //! the actual work represented by the block header hash.
@@ -28,13 +28,39 @@ use proptest_derive::Arbitrary;
 /// an 8-bit exponent, an offset of 3, and a radix of 256.
 /// (IEEE 754 32-bit floating-point values use a separate sign bit, an implicit
 /// leading mantissa bit, an offset of 127, and a radix of 2.)
+///
+/// The precise bit pattern of a `CompactDifficulty` value is
+/// consensus-critical, because it is used for the `difficulty_threshold` field,
+/// which is:
+///   - part of the `BlockHeader`, which is used to create the
+///     `BlockHeaderHash`, and
+///   - bitwise equal to the median `ExpandedDifficulty` value of recent blocks,
+///     when encoded to `CompactDifficulty` using the specified conversion
+///     function.
+///
+/// Without these consensus rules, some `ExpandedDifficulty` values would have
+/// multiple equivalent `CompactDifficulty` values, due to redundancy in the
+/// floating-point format.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct CompactDifficulty(pub u32);
 
-/// A 256-bit expanded difficulty value.
+/// A 256-bit unsigned "expanded difficulty" value.
 ///
 /// Used as a target threshold for the difficulty of a `BlockHeaderHash`.
+///
+/// Details:
+///
+/// The precise bit pattern of an `ExpandedDifficulty` value is
+/// consensus-critical, because it is compared with the `BlockHeaderHash`.
+///
+/// Note that each `CompactDifficulty` value represents a range of
+/// `ExpandedDifficulty` values, because the precision of the
+/// floating-point format requires rounding on conversion.
+///
+/// Therefore, consensus-critical code must perform the specified
+/// conversions to `CompactDifficulty`, even if the original
+/// `ExpandedDifficulty` values are known.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct ExpandedDifficulty([u8; 32]);
