@@ -77,22 +77,35 @@ where
 
         // TODO(jlusby): Error = Report, handle errors from state_service.
         async move {
+            // Do the difficulty checks first, to raise the threshold for
+            // attacks that use any other fields.
+            let hash = block.hash();
+            let difficulty_threshold = block.header.difficulty_threshold.to_expanded().ok_or("Invalid difficulty threshold in block header.")?;
+            if hash > difficulty_threshold {
+                Err("Block failed the difficulty filter: hash must be less than or equal to the difficulty threshold.")?;
+            }
+            block.header.is_equihash_solution_valid()?;
+
             // Since errors cause an early exit, try to do the
             // quick checks first.
 
+            // Field validity and structure checks
             let now = Utc::now();
             block.header.is_time_valid_at(now)?;
-            block.header.is_equihash_solution_valid()?;
             block.is_coinbase_first()?;
 
             // These checks only apply to generated blocks. We check the block
             // height for parsed blocks when we deserialize them.
             let height = block
                 .coinbase_height()
-                .ok_or("Invalid block: missing block height")?;
+                .ok_or("Invalid block: missing block height.")?;
             if height > BlockHeight::MAX {
                 Err("Invalid block height: greater than the maximum height.")?;
             }
+
+            // TODO:
+            //   - context-free header verification: merkle root
+            //   - contextual verification
 
             // As a temporary solution for chain gaps, wait for the previous block,
             // and check its height.
@@ -117,11 +130,7 @@ where
                 }
             }
 
-            // TODO:
-            //   - header verification
-            //   - contextual verification
-
-            Ok(block.as_ref().into())
+            Ok(hash)
         }
         .boxed()
     }
