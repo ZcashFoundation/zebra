@@ -2,8 +2,8 @@ use color_eyre::{
     eyre::{eyre, Context, Report, Result},
     Help, SectionExt,
 };
-use std::{env, fs};
 use std::process::{Child, Command, ExitStatus, Output};
+use std::{env, fs};
 use tempdir::TempDir;
 
 /// Runs a command in a TempDir
