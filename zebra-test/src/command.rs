@@ -2,6 +2,7 @@ use color_eyre::{
     eyre::{eyre, Context, Report, Result},
     Help, SectionExt,
 };
+use std::{env, fs};
 use std::process::{Child, Command, ExitStatus, Output};
 use tempdir::TempDir;
 
@@ -10,6 +11,10 @@ pub fn test_cmd(path: &str) -> Result<(Command, impl Drop)> {
     let dir = TempDir::new(path)?;
     let mut cmd = Command::new(path);
     cmd.current_dir(dir.path());
+
+    let state_dir = dir.path().join("state");
+    fs::create_dir(&state_dir)?;
+    env::set_var("ZEBRAD_CACHE_DIR", state_dir);
 
     Ok((cmd, dir))
 }
