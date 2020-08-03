@@ -198,7 +198,7 @@ proptest! {
     #[test]
     fn blockheaderhash_roundtrip(hash in any::<BlockHeaderHash>()) {
         let bytes = hash.zcash_serialize_to_vec()?;
-        let other_hash = bytes.zcash_deserialize_into()?;
+        let other_hash: BlockHeaderHash = bytes.zcash_deserialize_into()?;
 
         prop_assert_eq![hash, other_hash];
     }
