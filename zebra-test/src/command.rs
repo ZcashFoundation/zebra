@@ -5,6 +5,9 @@ use color_eyre::{
 use std::process::{Child, Command, ExitStatus, Output};
 use tempdir::TempDir;
 
+#[cfg(unix)]
+use std::os::unix::process::ExitStatusExt;
+
 /// Runs a command in a TempDir
 pub fn test_cmd(path: &str) -> Result<(Command, impl Drop)> {
     let dir = TempDir::new(path)?;
@@ -220,5 +223,13 @@ impl TestOutput {
         ))
         .with_section(command)
         .with_section(stdout)
+    }
+
+    pub fn exit_code(&self) -> Option<i32> {
+        #[cfg(unix)]
+        return self.output.status.signal();
+
+        #[cfg(not(unix))]
+        return self.output.status.code();
     }
 }
