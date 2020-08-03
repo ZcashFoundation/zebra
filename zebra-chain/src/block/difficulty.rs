@@ -10,6 +10,11 @@
 //! block's work value depends on the fixed threshold in the block header, not
 //! the actual work represented by the block header hash.
 
+use crate::block::BlockHeaderHash;
+
+use std::cmp::{Ordering, PartialEq, PartialOrd};
+use std::fmt;
+
 use primitive_types::U256;
 
 #[cfg(test)]
@@ -178,6 +183,67 @@ impl CompactDifficulty {
     }
 }
 
+impl ExpandedDifficulty {
+    /// Returns the difficulty of the hash.
+    ///
+    /// Used to implement comparisons between difficulties and hashes.
+    ///
+    /// Usage:
+    ///
+    /// Compare the hash with the calculated difficulty value, using Rust's
+    /// standard comparison operators.
+    ///
+    /// Hashes are not used to calculate the difficulties of future blocks, so
+    /// users of this module should avoid converting hashes into difficulties.
+    fn from_hash(hash: &BlockHeaderHash) -> ExpandedDifficulty {
+        ExpandedDifficulty(U256::from_little_endian(&hash.0))
+    }
+}
+
+impl PartialEq<BlockHeaderHash> for ExpandedDifficulty {
+    /// Is `self` equal to `other`?
+    ///
+    /// See `partial_cmp` for details.
+    fn eq(&self, other: &BlockHeaderHash) -> bool {
+        self.partial_cmp(other) == Some(Ordering::Equal)
+    }
+}
+
+impl PartialOrd<BlockHeaderHash> for ExpandedDifficulty {
+    /// `BlockHeaderHash`es are compared with `ExpandedDifficulty` thresholds by
+    /// converting the hash to a 256-bit integer in little-endian order.
+    fn partial_cmp(&self, other: &BlockHeaderHash) -> Option<Ordering> {
+        self.partial_cmp(&ExpandedDifficulty::from_hash(other))
+    }
+}
+
+impl PartialEq<ExpandedDifficulty> for BlockHeaderHash {
+    /// Is `self` equal to `other`?
+    ///
+    /// See `partial_cmp` for details.
+    fn eq(&self, other: &ExpandedDifficulty) -> bool {
+        other.eq(self)
+    }
+}
+
+impl PartialOrd<ExpandedDifficulty> for BlockHeaderHash {
+    /// `BlockHeaderHash`es are compared with `ExpandedDifficulty` thresholds by
+    /// converting the hash to a 256-bit integer in little-endian order.
+    fn partial_cmp(&self, other: &ExpandedDifficulty) -> Option<Ordering> {
+        use Ordering::*;
+
+        // Use the base implementation, but reverse the order.
+        match other.partial_cmp(self) {
+            Some(Less) => Some(Greater),
+            Some(Greater) => Some(Less),
+            Some(Equal) => Some(Equal),
+            None => unreachable!(
+                "Unexpected incomparable values: difficulties and hashes have a total order."
+            ),
+        }
+    }
+}
+
 #[cfg(test)]
 impl Arbitrary for ExpandedDifficulty {
     type Parameters = ();
@@ -198,7 +264,7 @@ mod tests {
     use color_eyre::eyre::Report;
     use std::sync::Arc;
 
-    use crate::block::{Block, BlockHeaderHash};
+    use crate::block::Block;
     use crate::serialization::ZcashDeserialize;
 
     // Alias the struct constants here, so the code is easier to read.
@@ -303,7 +369,7 @@ mod tests {
     /// Test blocks using CompactDifficulty.
     #[test]
     #[spandoc::spandoc]
-    fn compact_blocks() -> Result<(), Report> {
+    fn block_difficulty() -> Result<(), Report> {
         zebra_test::init();
 
         let mut blockchain = Vec::new();
@@ -325,23 +391,129 @@ mod tests {
             blockchain.push((block.clone(), block.coinbase_height().unwrap(), hash));
         }
 
-        // Now verify each block
+        let zero = ExpandedDifficulty(U256::zero());
+        let one = ExpandedDifficulty(U256::one());
+        let max_value = ExpandedDifficulty(U256::MAX);
         for (block, height, hash) in blockchain {
-            /// SPANDOC: Check the difficulty of a mainnet block {?height, ?hash}
+            /// SPANDOC: Calculate the threshold for mainnet block {?height}
             let threshold = block
                 .header
                 .difficulty_threshold
                 .to_expanded()
                 .expect("Chain blocks have valid difficulty thresholds.");
 
-            // Check the difficulty of the block.
-            //
-            // Invert the "less than or equal" comparison, because we interpret
-            // these values in little-endian order.
-            // TODO: replace with PartialOrd implementation
-            assert!(hash.0 >= threshold.0);
+            /// SPANDOC: Check the difficulty for mainnet block {?height, ?threshold, ?hash}
+            {
+                assert!(hash <= threshold);
+                // also check the comparison operators work
+                assert!(hash > zero);
+                assert!(hash > one);
+                assert!(hash < max_value);
+            }
         }
 
         Ok(())
+    }
+
+    /// Test ExpandedDifficulty ordering
+    #[test]
+    #[spandoc::spandoc]
+    #[allow(clippy::eq_op)]
+    fn expanded_order() -> Result<(), Report> {
+        zebra_test::init();
+
+        let zero = ExpandedDifficulty(U256::zero());
+        let one = ExpandedDifficulty(U256::one());
+        let max_value = ExpandedDifficulty(U256::MAX);
+
+        assert!(zero < one);
+        assert!(zero < max_value);
+        assert!(one < max_value);
+
+        assert_eq!(zero, zero);
+        assert!(zero <= one);
+        assert!(one >= zero);
+        assert!(one > zero);
+
+        Ok(())
+    }
+
+    /// Test ExpandedDifficulty and BlockHeaderHash ordering
+    #[test]
+    #[spandoc::spandoc]
+    fn expanded_hash_order() -> Result<(), Report> {
+        zebra_test::init();
+
+        let ex_zero = ExpandedDifficulty(U256::zero());
+        let ex_one = ExpandedDifficulty(U256::one());
+        let ex_max = ExpandedDifficulty(U256::MAX);
+        let hash_zero = BlockHeaderHash([0; 32]);
+        let hash_max = BlockHeaderHash([0xff; 32]);
+
+        assert_eq!(hash_zero, ex_zero);
+        assert!(hash_zero < ex_one);
+        assert!(hash_zero < ex_max);
+
+        assert!(hash_max > ex_zero);
+        assert!(hash_max > ex_one);
+        assert_eq!(hash_max, ex_max);
+
+        assert!(ex_one > hash_zero);
+        assert!(ex_one < hash_max);
+
+        assert!(hash_zero >= ex_zero);
+        assert!(ex_zero >= hash_zero);
+        assert!(hash_zero <= ex_zero);
+        assert!(ex_zero <= hash_zero);
+
+        Ok(())
+    }
+
+    proptest! {
+        /// Check that CompactDifficulty expands without panicking, and compares
+        /// correctly.
+        #[test]
+        fn prop_compact_expand(compact in any::<CompactDifficulty>()) {
+            // TODO: round-trip test, once we have ExpandedDifficulty::to_compact()
+            let expanded = compact.to_expanded();
+
+            let hash_zero = BlockHeaderHash([0; 32]);
+            let hash_max = BlockHeaderHash([0xff; 32]);
+
+            if let Some(expanded) = expanded {
+                prop_assert!(expanded >= hash_zero);
+                prop_assert!(expanded <= hash_max);
+            }
+        }
+
+        /// Check that a random ExpandedDifficulty compares correctly with fixed BlockHeaderHashes.
+        #[test]
+        fn prop_expanded_order(expanded in any::<ExpandedDifficulty>()) {
+            // TODO: round-trip test, once we have ExpandedDifficulty::to_compact()
+            let hash_zero = BlockHeaderHash([0; 32]);
+            let hash_max = BlockHeaderHash([0xff; 32]);
+
+            prop_assert!(expanded >= hash_zero);
+            prop_assert!(expanded <= hash_max);
+        }
+
+        /// Check that ExpandedDifficulty compares correctly with a random BlockHeaderHash.
+        #[test]
+        fn prop_hash_order(hash in any::<BlockHeaderHash>()) {
+            let ex_zero = ExpandedDifficulty(U256::zero());
+            let ex_one = ExpandedDifficulty(U256::one());
+            let ex_max = ExpandedDifficulty(U256::MAX);
+
+            prop_assert!(hash >= ex_zero);
+            prop_assert!(hash <= ex_max);
+            prop_assert!(hash >= ex_one || hash == ex_zero);
+        }
+
+        /// Check that a random ExpandedDifficulty and BlockHeaderHash compare correctly.
+        #[test]
+        #[allow(clippy::double_comparisons)]
+        fn prop_expanded_hash_order(expanded in any::<ExpandedDifficulty>(), hash in any::<BlockHeaderHash>()) {
+            prop_assert!(expanded < hash || expanded > hash || expanded == hash);
+        }
     }
 }
