@@ -13,6 +13,7 @@ use chrono::{DateTime, Duration, LocalResult, TimeZone, Utc};
 use proptest::{
     arbitrary::{any, Arbitrary},
     prelude::*,
+    test_runner::Config,
 };
 use std::io::{Cursor, ErrorKind, Write};
 
@@ -210,6 +211,11 @@ proptest! {
 
         prop_assert_eq![header, other_header];
     }
+}
+
+proptest! {
+    // The block roundtrip test can be really slow
+    #![proptest_config(Config::with_cases(16))]
 
     #[test]
     fn block_roundtrip(block in any::<Block>()) {
