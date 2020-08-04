@@ -8,6 +8,7 @@ use abscissa_core::{
     trace::Tracing,
     Application, Component, EntryPoint, FrameworkError, StandardPaths,
 };
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 /// Application state
 pub static APPLICATION: AppCell<ZebradApp> = AppCell::new();
@@ -84,13 +85,17 @@ impl Application for ZebradApp {
         &mut self,
         command: &Self::Cmd,
     ) -> Result<Vec<Box<dyn Component<Self>>>, FrameworkError> {
+        let terminal = Terminal::new(self.term_colors(command));
+
+        // This MUST happen after `Terminal::new` to ensure our preferred panic
+        // handler is the last one installed
         color_eyre::install().unwrap();
 
-        let terminal = Terminal::new(self.term_colors(command));
         if ZebradApp::command_is_server(&command) {
             let tracing = self.tracing_component(command);
             Ok(vec![Box::new(terminal), Box::new(tracing)])
         } else {
+            init_tracing_backup();
             Ok(vec![Box::new(terminal)])
         }
     }
@@ -126,6 +131,10 @@ impl Application for ZebradApp {
         config: Self::Cfg,
         command: &Self::Cmd,
     ) -> Result<(), FrameworkError> {
+        use crate::components::{
+            metrics::MetricsEndpoint, tokio::TokioComponent, tracing::TracingEndpoint,
+        };
+
         // Configure components
         self.state.components.after_config(&config)?;
         self.config = Some(config);
@@ -137,6 +146,30 @@ impl Application for ZebradApp {
                 .get_downcast_mut::<Tracing>()
                 .expect("Tracing component should be available")
                 .reload_filter(level);
+
+            // Work around some issues with dependency injection and configs
+            let config = self
+                .config
+                .clone()
+                .expect("config was set to Some earlier in this function");
+
+            let tokio_component = self
+                .state
+                .components
+                .get_downcast_ref::<TokioComponent>()
+                .expect("Tokio component should be available");
+
+            self.state
+                .components
+                .get_downcast_ref::<TracingEndpoint>()
+                .expect("Tracing endpoint should be available")
+                .open_endpoint(&config.tracing, tokio_component);
+
+            self.state
+                .components
+                .get_downcast_ref::<MetricsEndpoint>()
+                .expect("Metrics endpoint should be available")
+                .open_endpoint(&config.metrics, tokio_component);
         }
 
         Ok(())
@@ -172,6 +205,7 @@ impl ZebradApp {
             tracing:
                 crate::config::TracingSection {
                     filter: Some(filter),
+                    endpoint_addr: _,
                 },
             ..
         }) = &self.config
@@ -183,8 +217,6 @@ impl ZebradApp {
     }
 
     fn tracing_component(&self, command: &EntryPoint<ZebradCmd>) -> Tracing {
-        use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-
         // Construct a tracing subscriber with the supplied filter and enable reloading.
         let builder = tracing_subscriber::FmtSubscriber::builder()
             .with_env_filter(self.level(command))
@@ -210,4 +242,10 @@ impl ZebradApp {
             Some(c) => c.is_server(),
         }
     }
+}
+
+fn init_tracing_backup() {
+    tracing_subscriber::Registry::default()
+        .with(tracing_error::ErrorLayer::default())
+        .init();
 }

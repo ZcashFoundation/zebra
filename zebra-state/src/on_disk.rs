@@ -15,6 +15,7 @@ use zebra_chain::serialization::{SerializationError, ZcashDeserialize, ZcashSeri
 use zebra_chain::{
     block::{Block, BlockHeaderHash},
     types::BlockHeight,
+    Network,
 };
 
 #[derive(Clone)]
@@ -24,8 +25,8 @@ struct SledState {
 
 impl SledState {
     #[instrument]
-    pub(crate) fn new(config: &Config) -> Self {
-        let config = config.sled_config();
+    pub(crate) fn new(config: &Config, network: Network) -> Self {
+        let config = config.sled_config(network);
 
         Self {
             storage: config.open().unwrap(),
@@ -44,8 +45,7 @@ impl SledState {
         let height_map = self.storage.open_tree(b"height_map")?;
         let by_hash = self.storage.open_tree(b"by_hash")?;
 
-        let mut bytes = Vec::new();
-        block.zcash_serialize(&mut bytes)?;
+        let bytes = block.zcash_serialize_to_vec()?;
 
         // TODO(jlusby): make this transactional
         height_map.insert(&height.0.to_be_bytes(), &hash.0)?;
@@ -105,13 +105,6 @@ impl SledState {
         let key = &hash.0;
 
         Ok(by_hash.contains_key(key)?)
-    }
-}
-
-impl Default for SledState {
-    fn default() -> Self {
-        let config = crate::Config::default();
-        Self::new(&config)
     }
 }
 
@@ -233,9 +226,12 @@ impl AsRef<[u8]> for BytesHeight {
     }
 }
 
-/// Return's a type that implement's the `zebra_state::Service` using `sled`
+/// Returns a type that implements the `zebra_state::Service` using `sled`.
+///
+/// Each `network` has its own separate sled database.
 pub fn init(
     config: Config,
+    network: Network,
 ) -> impl Service<
     Request,
     Response = Response,
@@ -244,7 +240,7 @@ pub fn init(
 > + Send
        + Clone
        + 'static {
-    Buffer::new(SledState::new(&config), 1)
+    Buffer::new(SledState::new(&config, network), 1)
 }
 
 type BoxError = Box<dyn error::Error + Send + Sync + 'static>;

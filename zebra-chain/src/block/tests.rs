@@ -1,8 +1,8 @@
 use super::*;
 
+use crate::block::difficulty::CompactDifficulty;
 use crate::equihash_solution::EquihashSolution;
 use crate::merkle_tree::MerkleTreeRootHash;
-use crate::note_commitment_tree::SaplingNoteTreeRootHash;
 use crate::serialization::{
     SerializationError, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
 };
@@ -25,10 +25,10 @@ impl Arbitrary for BlockHeader {
             (4u32..(i32::MAX as u32)),
             any::<BlockHeaderHash>(),
             any::<MerkleTreeRootHash>(),
-            any::<SaplingNoteTreeRootHash>(),
+            any::<[u8; 32]>(),
             // time is interpreted as u32 in the spec, but rust timestamps are i64
             (0i64..(u32::MAX as i64)),
-            any::<u32>(),
+            any::<CompactDifficulty>(),
             any::<[u8; 32]>(),
             any::<EquihashSolution>(),
         )
@@ -37,18 +37,18 @@ impl Arbitrary for BlockHeader {
                     version,
                     previous_block_hash,
                     merkle_root_hash,
-                    final_sapling_root_hash,
+                    history_root_hash,
                     timestamp,
-                    bits,
+                    difficulty_threshold,
                     nonce,
                     solution,
                 )| BlockHeader {
                     version,
                     previous_block_hash,
                     merkle_root_hash,
-                    final_sapling_root_hash,
+                    history_root_hash,
                     time: Utc.timestamp(timestamp, 0),
-                    bits,
+                    difficulty_threshold,
                     nonce,
                     solution,
                 },
@@ -198,7 +198,7 @@ proptest! {
     #[test]
     fn blockheaderhash_roundtrip(hash in any::<BlockHeaderHash>()) {
         let bytes = hash.zcash_serialize_to_vec()?;
-        let other_hash = bytes.zcash_deserialize_into()?;
+        let other_hash: BlockHeaderHash = bytes.zcash_deserialize_into()?;
 
         prop_assert_eq![hash, other_hash];
     }
