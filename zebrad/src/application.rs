@@ -10,6 +10,7 @@ use abscissa_core::{
 };
 use std::fmt;
 use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 /// Application state
 pub static APPLICATION: AppCell<ZebradApp> = AppCell::new();
