@@ -3,6 +3,7 @@ use super::Error;
 use crate::{Request, Response};
 use futures::prelude::*;
 use std::{
+    collections::BTreeSet,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -23,9 +24,49 @@ struct ChainState {
 /// A persistent data structure representing the end of a chain
 struct Chain(im::OrdMap<BlockHeight, ChainState>);
 
+impl PartialEq for Chain {
+    fn eq(&self, other: &Self) -> bool {
+        todo!()
+    }
+}
+
+impl Eq for Chain {}
+
+impl PartialOrd for Chain {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        todo!()
+    }
+}
+
+impl Ord for Chain {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        todo!()
+    }
+}
+
 impl Chain {
     fn contains(&self, height: BlockHeight) -> bool {
         todo!()
+    }
+
+    fn parent(&self) -> Chain {
+        todo!()
+    }
+}
+
+struct ChainSet(BTreeSet<Chain>);
+
+impl ChainSet {
+    fn insert(&mut self, chain: Chain) -> Result<(), Error> {
+        let parent = chain.parent();
+
+        if self.0.contains(&parent) {
+            self.0.remove(&parent);
+        }
+
+        self.0.insert(chain);
+
+        Ok(())
     }
 }
 
@@ -37,49 +78,50 @@ pub(crate) struct ChainsState<S> {
     /// The set of chains
     //
     // might need to use a map type and pop / reinsert with (TODO based on the final design)
-    chains: Vec<Chain>,
+    chains: ChainSet,
 }
 
 impl<S> ChainsState<S> {
     fn insert(&mut self, block: impl Into<Arc<Block>>) -> Result<BlockHeaderHash, Error> {
-        let block = block.into();
-        let hash = block.hash();
-        let height = block.coinbase_height().unwrap();
-        let parent_height = BlockHeight(height.0 - 1);
+        todo!()
+        // let block = block.into();
+        // let hash = block.hash();
+        // let height = block.coinbase_height().unwrap();
+        // let parent_height = BlockHeight(height.0 - 1);
 
-        for (chain, parent_state) in self.chains.iter_mut().flat_map(|chain| {
-            chain
-                .0
-                .get(&parent_height)
-                .cloned()
-                .map(|state| (chain, state))
-        }) {
-            let parent_hash = parent_state.block.hash();
+        // for (chain, parent_state) in self.chains.iter_mut().flat_map(|chain| {
+        //     chain
+        //         .0
+        //         .get(&parent_height)
+        //         .cloned()
+        //         .map(|state| (chain, state))
+        // }) {
+        //     let parent_hash = parent_state.block.hash();
 
-            if parent_hash != block.header.previous_block_hash {
-                continue;
-            }
+        //     if parent_hash != block.header.previous_block_hash {
+        //         continue;
+        //     }
 
-            let was_present = if chain.contains(height) {
-                chain.0.insert(height, ChainState { block })
-            } else {
-                let (mut shared, _forked) = chain.0.split(&height);
-                let was_present = shared.insert(height, ChainState { block });
+        //     let was_present = if chain.contains(height) {
+        //         chain.0.insert(height, ChainState { block })
+        //     } else {
+        //         let (mut shared, _forked) = chain.0.split(&height);
+        //         let was_present = shared.insert(height, ChainState { block });
 
-                self.chains.push(Chain(shared));
+        //         self.chains.push(Chain(shared));
 
-                was_present
-            }
-            .is_some();
+        //         was_present
+        //     }
+        //     .is_some();
 
-            if was_present {
-                unreachable!("chain state should not already exist in this map");
-            }
+        //     if was_present {
+        //         unreachable!("chain state should not already exist in this map");
+        //     }
 
-            return Ok(hash);
-        }
+        //     return Ok(hash);
+        // }
 
-        Err("parent hash not found in chain state")?
+        // Err("parent hash not found in chain state")?
     }
 
     /// Remove blocks from chains that should be persisted to the storage layer.
