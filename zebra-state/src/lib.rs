@@ -142,9 +142,12 @@ pub enum Response {
 
 /// Get the heights of the blocks for constructing a block_locator list
 fn block_locator_heights(tip_height: BlockHeight) -> impl Iterator<Item = BlockHeight> {
-    iter::successors(Some(1u32), |h| h.checked_mul(2))
+    let locators = iter::successors(Some(1u32), |h| h.checked_mul(2))
         .flat_map(move |step| tip_height.0.checked_sub(step))
-        .map(BlockHeight)
+        .filter(|&height| height != 0)
+        .map(BlockHeight);
+    iter::once(tip_height)
+        .chain(locators)
         .chain(iter::once(BlockHeight(0)))
 }
 
