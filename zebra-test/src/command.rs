@@ -3,7 +3,11 @@ use color_eyre::{
     Help, SectionExt,
 };
 use std::process::{Child, Command, ExitStatus, Output};
+use std::{env, fs};
 use tempdir::TempDir;
+
+#[cfg(unix)]
+use std::os::unix::process::ExitStatusExt;
 
 /// Config file to change default addresses and ports
 static TEST_CONFIG: &str = "[metrics]
@@ -26,6 +30,11 @@ pub fn test_cmd(path: &str) -> Result<(Command, impl Drop)> {
         .expect("must be able to open config file")
         .write_all(TEST_CONFIG.as_bytes())
         .expect("must be able to write config data");
+
+    // Create and set a state dir
+    let state_dir = dir.path().join("state");
+    fs::create_dir(&state_dir)?;
+    env::set_var("ZEBRAD_CACHE_DIR", state_dir);
 
     Ok((cmd, dir))
 }
@@ -236,5 +245,14 @@ impl TestOutput {
         ))
         .with_section(command)
         .with_section(stdout)
+    }
+
+    /// Returns true if the program was killed, false if exit was by another reason.
+    pub fn was_killed(&self) -> bool {
+        #[cfg(unix)]
+        return self.output.status.signal() == Some(9);
+
+        #[cfg(not(unix))]
+        return self.output.status.code() == Some(1);
     }
 }

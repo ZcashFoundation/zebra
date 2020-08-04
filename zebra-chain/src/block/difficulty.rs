@@ -1,17 +1,26 @@
 //! Block difficulty data structures and calculations
 //!
 //! The block difficulty "target threshold" is stored in the block header as a
-//! 32-bit "compact bits" value. The `BlockHeaderHash` must be less than or equal
-//! to the expanded target threshold, when represented as a 256-bit integer in
-//! little-endian order.
+//! 32-bit `CompactDifficulty`. The `BlockHeaderHash` must be less than or equal
+//! to the `ExpandedDifficulty` threshold, when represented as a 256-bit integer
+//! in little-endian order.
 //!
-//! The target threshold is also used to calculate the "work" for each block.
+//! The target threshold is also used to calculate the `Work` for each block.
 //! The block work is used to find the chain with the greatest total work. Each
 //! block's work value depends on the fixed threshold in the block header, not
 //! the actual work represented by the block header hash.
 
+use crate::block::BlockHeaderHash;
+
+use std::cmp::{Ordering, PartialEq, PartialOrd};
+use std::fmt;
+
+use primitive_types::U256;
+
 #[cfg(test)]
 use proptest_derive::Arbitrary;
+#[cfg(test)]
+mod tests;
 
 /// A 32-bit "compact bits" value, which represents the difficulty threshold for
 /// a block header.
@@ -28,18 +37,69 @@ use proptest_derive::Arbitrary;
 /// an 8-bit exponent, an offset of 3, and a radix of 256.
 /// (IEEE 754 32-bit floating-point values use a separate sign bit, an implicit
 /// leading mantissa bit, an offset of 127, and a radix of 2.)
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+///
+/// The precise bit pattern of a `CompactDifficulty` value is
+/// consensus-critical, because it is used for the `difficulty_threshold` field,
+/// which is:
+///   - part of the `BlockHeader`, which is used to create the
+///     `BlockHeaderHash`, and
+///   - bitwise equal to the median `ExpandedDifficulty` value of recent blocks,
+///     when encoded to `CompactDifficulty` using the specified conversion
+///     function.
+///
+/// Without these consensus rules, some `ExpandedDifficulty` values would have
+/// multiple equivalent `CompactDifficulty` values, due to redundancy in the
+/// floating-point format.
+#[derive(Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct CompactDifficulty(pub u32);
 
-/// A 256-bit expanded difficulty value.
+impl fmt::Debug for CompactDifficulty {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple("CompactDifficulty")
+            // Use hex, because it's a float
+            .field(&format_args!("{:#010x}", self.0))
+            .finish()
+    }
+}
+
+/// A 256-bit unsigned "expanded difficulty" value.
 ///
 /// Used as a target threshold for the difficulty of a `BlockHeaderHash`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(test, derive(Arbitrary))]
-pub struct ExpandedDifficulty([u8; 32]);
+///
+/// Details:
+///
+/// The precise bit pattern of an `ExpandedDifficulty` value is
+/// consensus-critical, because it is compared with the `BlockHeaderHash`.
+///
+/// Note that each `CompactDifficulty` value represents a range of
+/// `ExpandedDifficulty` values, because the precision of the
+/// floating-point format requires rounding on conversion.
+///
+/// Therefore, consensus-critical code must perform the specified
+/// conversions to `CompactDifficulty`, even if the original
+/// `ExpandedDifficulty` values are known.
+#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
+pub struct ExpandedDifficulty(U256);
+
+impl fmt::Debug for ExpandedDifficulty {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut buf = [0; 32];
+        // Use the same byte order as BlockHeaderHash
+        self.0.to_little_endian(&mut buf);
+        f.debug_tuple("ExpandedDifficulty")
+            .field(&hex::encode(&buf))
+            .finish()
+    }
+}
 
 impl CompactDifficulty {
+    /// CompactDifficulty exponent base.
+    const BASE: u32 = 256;
+
+    /// CompactDifficulty exponent offset.
+    const OFFSET: i32 = 3;
+
     /// CompactDifficulty floating-point precision.
     const PRECISION: u32 = 24;
 
@@ -49,10 +109,7 @@ impl CompactDifficulty {
     /// CompactDifficulty unsigned mantissa mask.
     ///
     /// Also the maximum unsigned mantissa value.
-    const U_MANT_MASK: u32 = CompactDifficulty::SIGN_BIT - 1;
-
-    /// CompactDifficulty exponent offset.
-    const OFFSET: i32 = 3;
+    const UNSIGNED_MANTISSA_MASK: u32 = CompactDifficulty::SIGN_BIT - 1;
 
     /// Calculate the ExpandedDifficulty for a compact representation.
     ///
@@ -64,10 +121,11 @@ impl CompactDifficulty {
     pub fn to_expanded(&self) -> Option<ExpandedDifficulty> {
         // The constants for this floating-point representation.
         // Alias the struct constants here, so the code is easier to read.
+        const BASE: u32 = CompactDifficulty::BASE;
+        const OFFSET: i32 = CompactDifficulty::OFFSET;
         const PRECISION: u32 = CompactDifficulty::PRECISION;
         const SIGN_BIT: u32 = CompactDifficulty::SIGN_BIT;
-        const U_MANT_MASK: u32 = CompactDifficulty::U_MANT_MASK;
-        const OFFSET: i32 = CompactDifficulty::OFFSET;
+        const UNSIGNED_MANTISSA_MASK: u32 = CompactDifficulty::UNSIGNED_MANTISSA_MASK;
 
         // Negative values in this floating-point representation.
         // 0 if (x & 2^23 == 2^23)
@@ -77,35 +135,46 @@ impl CompactDifficulty {
         }
 
         // The components of the result
-        // The fractional part of the number
+        // The fractional part of the floating-point number
         // x & (2^23 - 1)
-        let mantissa = self.0 & U_MANT_MASK;
+        let mantissa = self.0 & UNSIGNED_MANTISSA_MASK;
 
-        // The position of the number in the result, in bytes (rather than bits)
+        // The exponent for the multiplier in the floating-point number
         // 256^(floor(x/(2^24)) - 3)
         // The i32 conversion is safe, because we've just divided self by 2^24.
         let exponent = ((self.0 >> PRECISION) as i32) - OFFSET;
 
-        // Now put the mantissa in the right place in the result, based on
-        // the exponent.
-        let mut result = [0; 32];
-        for (i, b) in mantissa.to_le_bytes().iter().enumerate() {
-            // These conversions are safe, due to the size of the array, and the
-            // range checks before array access.
-            let position = exponent + i as i32;
-            if position >= 32 {
-                if *b != 0 {
-                    // zcashd rejects overflow values, without comparing the
-                    // hash
-                    return None;
-                }
-            } else if position >= 0 {
-                // zcashd truncates fractional values
-                result[position as usize] = *b;
-            }
-        }
+        // Normalise the mantissa and exponent before multiplying.
+        //
+        // zcashd rejects non-zero overflow values, but accepts overflows where
+        // all the overflowing bits are zero. It also allows underflows.
+        let (mantissa, exponent) = match (mantissa, exponent) {
+            // Overflow: check for non-zero overflow bits
+            //
+            // If m is non-zero, overflow. If m is zero, invalid.
+            (_, e) if (e >= 32) => return None,
+            // If m is larger than the remaining bytes, overflow.
+            // Otherwise, avoid overflows in base^exponent.
+            (m, e) if (e == 31 && m > u8::MAX.into()) => return None,
+            (m, e) if (e == 31 && m <= u8::MAX.into()) => (m << 16, e - 2),
+            (m, e) if (e == 30 && m > u16::MAX.into()) => return None,
+            (m, e) if (e == 30 && m <= u16::MAX.into()) => (m << 8, e - 1),
 
-        if result == [0; 32] {
+            // Underflow: perform the right shift.
+            // The abs is safe, because we've just divided by 2^24, and offset
+            // is small.
+            (m, e) if (e < 0) => (m >> ((e.abs() * 8) as u32), 0),
+            (m, e) => (m, e),
+        };
+
+        // Now calculate the result: mantissa*base^exponent
+        // Earlier code should make sure all these values are in range.
+        let mantissa: U256 = mantissa.into();
+        let base: U256 = BASE.into();
+        let exponent: U256 = exponent.into();
+        let result = mantissa * base.pow(exponent);
+
+        if result == U256::zero() {
             // zcashd rejects zero values, without comparing the hash
             None
         } else {
@@ -114,143 +183,63 @@ impl CompactDifficulty {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    use color_eyre::eyre::Report;
-    use std::sync::Arc;
-
-    use crate::block::{Block, BlockHeaderHash};
-    use crate::serialization::ZcashDeserialize;
-
-    // Alias the struct constants here, so the code is easier to read.
-    const PRECISION: u32 = CompactDifficulty::PRECISION;
-    const SIGN_BIT: u32 = CompactDifficulty::SIGN_BIT;
-    const U_MANT_MASK: u32 = CompactDifficulty::U_MANT_MASK;
-    const OFFSET: i32 = CompactDifficulty::OFFSET;
-
-    /// Test zero values for CompactDifficulty.
-    #[test]
-    fn compact_zero() {
-        zebra_test::init();
-
-        let natural_zero = CompactDifficulty(0);
-        assert_eq!(natural_zero.to_expanded(), None);
-
-        // Small value zeroes
-        let small_zero_1 = CompactDifficulty(1);
-        assert_eq!(small_zero_1.to_expanded(), None);
-        let small_zero_max = CompactDifficulty(U_MANT_MASK);
-        assert_eq!(small_zero_max.to_expanded(), None);
-
-        // Special-cased zeroes, negative in the floating-point representation
-        let sc_zero = CompactDifficulty(SIGN_BIT);
-        assert_eq!(sc_zero.to_expanded(), None);
-        let sc_zero_next = CompactDifficulty(SIGN_BIT + 1);
-        assert_eq!(sc_zero_next.to_expanded(), None);
-        let sc_zero_high = CompactDifficulty((1 << PRECISION) - 1);
-        assert_eq!(sc_zero_high.to_expanded(), None);
-        let sc_zero_max = CompactDifficulty(u32::MAX);
-        assert_eq!(sc_zero_max.to_expanded(), None);
+impl ExpandedDifficulty {
+    /// Returns the difficulty of the hash.
+    ///
+    /// Used to implement comparisons between difficulties and hashes.
+    ///
+    /// Usage:
+    ///
+    /// Compare the hash with the calculated difficulty value, using Rust's
+    /// standard comparison operators.
+    ///
+    /// Hashes are not used to calculate the difficulties of future blocks, so
+    /// users of this module should avoid converting hashes into difficulties.
+    fn from_hash(hash: &BlockHeaderHash) -> ExpandedDifficulty {
+        ExpandedDifficulty(U256::from_little_endian(&hash.0))
     }
+}
 
-    /// Test extreme values for CompactDifficulty.
-    #[test]
-    fn compact_extremes() {
-        zebra_test::init();
-
-        // Values equal to one
-        let mut expanded_one = [0; 32];
-        expanded_one[0] = 1;
-        let expanded_one = Some(ExpandedDifficulty(expanded_one));
-
-        let one = CompactDifficulty(OFFSET as u32 * (1 << PRECISION) + 1);
-        assert_eq!(one.to_expanded(), expanded_one);
-        let another_one = CompactDifficulty((1 << PRECISION) + (1 << 16));
-        assert_eq!(another_one.to_expanded(), expanded_one);
-
-        // Maximum mantissa
-        let mut expanded_mant = [0; 32];
-        expanded_mant[0] = 0xff;
-        expanded_mant[1] = 0xff;
-        expanded_mant[2] = 0x7f;
-        let expanded_mant = Some(ExpandedDifficulty(expanded_mant));
-
-        let mant = CompactDifficulty(OFFSET as u32 * (1 << PRECISION) + U_MANT_MASK);
-        assert_eq!(mant.to_expanded(), expanded_mant);
-
-        // Maximum valid exponent
-        let mut expanded_exp = [0; 32];
-        expanded_exp[31] = 1;
-        let expanded_exp = Some(ExpandedDifficulty(expanded_exp));
-
-        let exp = CompactDifficulty((31 + OFFSET as u32) * (1 << PRECISION) + 1);
-        assert_eq!(exp.to_expanded(), expanded_exp);
-
-        // Maximum valid mantissa and exponent
-        let mut expanded_me = [0; 32];
-        expanded_me[29] = 0xff;
-        expanded_me[30] = 0xff;
-        expanded_me[31] = 0x7f;
-        let expanded_me = Some(ExpandedDifficulty(expanded_me));
-
-        let me = CompactDifficulty((31 + 1) * (1 << PRECISION) + U_MANT_MASK);
-        assert_eq!(me.to_expanded(), expanded_me);
-
-        // Maximum value, at least according to the spec
-        //
-        // According to ToTarget() in the spec, this value is
-        // `(2^23 - 1) * 256^253`, which is larger than the maximum expanded
-        // value. Therefore, a block can never pass with this threshold.
-        //
-        // zcashd rejects these blocks without comparing the hash.
-        let difficulty_max = CompactDifficulty(u32::MAX & !SIGN_BIT);
-        assert_eq!(difficulty_max.to_expanded(), None);
+impl PartialEq<BlockHeaderHash> for ExpandedDifficulty {
+    /// Is `self` equal to `other`?
+    ///
+    /// See `partial_cmp` for details.
+    fn eq(&self, other: &BlockHeaderHash) -> bool {
+        self.partial_cmp(other) == Some(Ordering::Equal)
     }
+}
 
-    /// Test blocks using CompactDifficulty.
-    #[test]
-    #[spandoc::spandoc]
-    fn compact_blocks() -> Result<(), Report> {
-        zebra_test::init();
+impl PartialOrd<BlockHeaderHash> for ExpandedDifficulty {
+    /// `BlockHeaderHash`es are compared with `ExpandedDifficulty` thresholds by
+    /// converting the hash to a 256-bit integer in little-endian order.
+    fn partial_cmp(&self, other: &BlockHeaderHash) -> Option<Ordering> {
+        self.partial_cmp(&ExpandedDifficulty::from_hash(other))
+    }
+}
 
-        let mut blockchain = Vec::new();
-        for b in &[
-            &zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..],
-            &zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..],
-            &zebra_test::vectors::BLOCK_MAINNET_2_BYTES[..],
-            &zebra_test::vectors::BLOCK_MAINNET_3_BYTES[..],
-            &zebra_test::vectors::BLOCK_MAINNET_4_BYTES[..],
-            &zebra_test::vectors::BLOCK_MAINNET_5_BYTES[..],
-            &zebra_test::vectors::BLOCK_MAINNET_6_BYTES[..],
-            &zebra_test::vectors::BLOCK_MAINNET_7_BYTES[..],
-            &zebra_test::vectors::BLOCK_MAINNET_8_BYTES[..],
-            &zebra_test::vectors::BLOCK_MAINNET_9_BYTES[..],
-            &zebra_test::vectors::BLOCK_MAINNET_10_BYTES[..],
-        ] {
-            let block = Arc::<Block>::zcash_deserialize(*b)?;
-            let hash: BlockHeaderHash = block.as_ref().into();
-            blockchain.push((block.clone(), block.coinbase_height().unwrap(), hash));
+impl PartialEq<ExpandedDifficulty> for BlockHeaderHash {
+    /// Is `self` equal to `other`?
+    ///
+    /// See `partial_cmp` for details.
+    fn eq(&self, other: &ExpandedDifficulty) -> bool {
+        other.eq(self)
+    }
+}
+
+impl PartialOrd<ExpandedDifficulty> for BlockHeaderHash {
+    /// `BlockHeaderHash`es are compared with `ExpandedDifficulty` thresholds by
+    /// converting the hash to a 256-bit integer in little-endian order.
+    fn partial_cmp(&self, other: &ExpandedDifficulty) -> Option<Ordering> {
+        use Ordering::*;
+
+        // Use the base implementation, but reverse the order.
+        match other.partial_cmp(self) {
+            Some(Less) => Some(Greater),
+            Some(Greater) => Some(Less),
+            Some(Equal) => Some(Equal),
+            None => unreachable!(
+                "Unexpected incomparable values: difficulties and hashes have a total order."
+            ),
         }
-
-        // Now verify each block
-        for (block, height, hash) in blockchain {
-            /// SPANDOC: Check the difficulty of a mainnet block {?height, ?hash}
-            let threshold = block
-                .header
-                .difficulty_threshold
-                .to_expanded()
-                .expect("Chain blocks have valid difficulty thresholds.");
-
-            // Check the difficulty of the block.
-            //
-            // Invert the "less than or equal" comparison, because we interpret
-            // these values in little-endian order.
-            // TODO: replace with PartialOrd implementation
-            assert!(hash.0 >= threshold.0);
-        }
-
-        Ok(())
     }
 }
