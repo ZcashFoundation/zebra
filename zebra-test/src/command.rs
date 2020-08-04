@@ -225,7 +225,8 @@ impl TestOutput {
         .with_section(stdout)
     }
 
-    pub fn exit_code(&self) -> Option<i32> {
+    /// Returns the exit signal on unix platforms, and the exit code otherwise.
+    pub fn exit_status(&self) -> Option<i32> {
         #[cfg(unix)]
         return self.output.status.signal();
 
