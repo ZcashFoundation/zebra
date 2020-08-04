@@ -251,7 +251,7 @@ type BoxError = Box<dyn error::Error + Send + Sync + 'static>;
 // Please forgive me.
 
 /// a type that can store any error and implements the Error trait at the cost of
-/// not implemnting From<E: Error>
+not implementing From<E: Error>
 #[derive(Debug, thiserror::Error)]
 #[error(transparent)]
 struct BoxRealError(BoxError);
