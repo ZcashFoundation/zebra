@@ -26,10 +26,10 @@ impl TokioComponent {
     }
 }
 
-/// Zebrad's handler for various signals
-async fn shutdown() -> Result<(), Report> {
-    tokio::signal::ctrl_c().await?;
-    Ok(())
+/// Zebrad's graceful shutdown function, blocks until one of the supported
+/// shutdown signals is received.
+async fn shutdown() {
+    imp::shutdown().await;
 }
 
 /// Extension trait to centralize entry point for runnable subcommands that
@@ -43,7 +43,7 @@ impl RuntimeRun for Runtime {
         let result = self.block_on(async move {
             tokio::select! {
                 result = fut => result,
-                result = shutdown() => result,
+                _ = shutdown() => Ok(()),
             }
         });
 
@@ -54,5 +54,54 @@ impl RuntimeRun for Runtime {
                 std::process::exit(1);
             }
         }
+    }
+}
+
+#[cfg(unix)]
+mod imp {
+    use tokio::signal::unix::{signal, SignalKind};
+    use tracing::info;
+
+    pub(super) async fn shutdown() {
+        tokio::select! {
+            // SIGINT  - To allow Ctrl-c to emulate SIGTERM while developing.
+            () = sig(SignalKind::interrupt(), "SIGINT") => {}
+            // SIGTERM - Kubernetes sends this to start a graceful shutdown.
+            () = sig(SignalKind::terminate(), "SIGTERM") => {}
+        };
+    }
+
+    async fn sig(kind: SignalKind, name: &'static str) {
+        // Create a Future that completes the first
+        // time the process receives 'sig'.
+        signal(kind)
+            .expect("Failed to register signal handler")
+            .recv()
+            .await;
+        info!(
+            // use target to remove 'imp' from output
+            target: "zebrad::signal",
+            "received {}, starting shutdown",
+            name,
+        );
+    }
+}
+
+#[cfg(not(unix))]
+mod imp {
+    use futures::prelude::*;
+    use tracing::info;
+
+    pub(super) async fn shutdown() {
+        // On Windows, we don't have all the signals, but Windows also
+        // isn't our expected deployment target. This implementation allows
+        // developers on Windows to simulate proxy graceful shutdown
+        // by pressing Ctrl-C.
+        tokio::signal::ctrl_c().recv().await;
+        info!(
+            // use target to remove 'imp' from output
+            target: "zebrad::signal",
+            "received Ctrl-C, starting shutdown",
+        );
     }
 }
