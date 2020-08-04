@@ -18,7 +18,7 @@ impl ZcashSerialize for PublicKey {
 
 impl ZcashDeserialize for PublicKey {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let mut bytes = [0; 33];
+        let mut bytes = [0u8; 33];
         reader.read_exact(&mut bytes[..])?;
         Self::from_slice(&bytes[..])
             .map_err(|_| SerializationError::Parse("invalid secp256k1 compressed public key"))

@@ -84,7 +84,7 @@ pub struct ExpandedDifficulty(U256);
 
 impl fmt::Debug for ExpandedDifficulty {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut buf = [0; 32];
+        let mut buf = [0u8; 32];
         // Use the same byte order as BlockHeaderHash
         self.0.to_little_endian(&mut buf);
         f.debug_tuple("ExpandedDifficulty")
@@ -447,7 +447,7 @@ mod tests {
         let ex_zero = ExpandedDifficulty(U256::zero());
         let ex_one = ExpandedDifficulty(U256::one());
         let ex_max = ExpandedDifficulty(U256::MAX);
-        let hash_zero = BlockHeaderHash([0; 32]);
+        let hash_zero = BlockHeaderHash([0u8; 32]);
         let hash_max = BlockHeaderHash([0xff; 32]);
 
         assert_eq!(hash_zero, ex_zero);
@@ -477,7 +477,7 @@ mod tests {
             // TODO: round-trip test, once we have ExpandedDifficulty::to_compact()
             let expanded = compact.to_expanded();
 
-            let hash_zero = BlockHeaderHash([0; 32]);
+            let hash_zero = BlockHeaderHash([0u8; 32]);
             let hash_max = BlockHeaderHash([0xff; 32]);
 
             if let Some(expanded) = expanded {
@@ -490,7 +490,7 @@ mod tests {
         #[test]
         fn prop_expanded_order(expanded in any::<ExpandedDifficulty>()) {
             // TODO: round-trip test, once we have ExpandedDifficulty::to_compact()
-            let hash_zero = BlockHeaderHash([0; 32]);
+            let hash_zero = BlockHeaderHash([0u8; 32]);
             let hash_max = BlockHeaderHash([0xff; 32]);
 
             prop_assert!(expanded >= hash_zero);

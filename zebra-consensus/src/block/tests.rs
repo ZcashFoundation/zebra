@@ -104,7 +104,7 @@ async fn header_solution() -> Result<(), Report> {
         .map_err(|e| eyre!(e))?;
 
     // Change nonce to something invalid
-    block.header.nonce = [0; 32];
+    block.header.nonce = [0u8; 32];
 
     let ready_verifier_service = block_verifier.ready_and().await.map_err(|e| eyre!(e))?;
 

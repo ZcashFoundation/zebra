@@ -385,7 +385,7 @@ where
                 .peer_tx
                 .send(Message::GetBlocks {
                     block_locator_hashes: known_blocks,
-                    hash_stop: stop.unwrap_or(BlockHeaderHash([0; 32])),
+                    hash_stop: stop.unwrap_or(BlockHeaderHash([0u8; 32])),
                 })
                 .await
                 .map_err(|e| e.into())

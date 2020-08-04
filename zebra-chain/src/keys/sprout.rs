@@ -79,7 +79,7 @@ impl ZcashSerialize for SpendingKey {
 
 impl ZcashDeserialize for SpendingKey {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let mut version_bytes = [0; 2];
+        let mut version_bytes = [0u8; 2];
         reader.read_exact(&mut version_bytes)?;
 
         let network = match version_bytes {
@@ -245,7 +245,7 @@ impl ZcashSerialize for IncomingViewingKey {
 
 impl ZcashDeserialize for IncomingViewingKey {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let mut version_bytes = [0; 3];
+        let mut version_bytes = [0u8; 3];
         reader.read_exact(&mut version_bytes)?;
 
         let network = match version_bytes {

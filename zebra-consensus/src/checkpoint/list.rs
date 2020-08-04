@@ -128,9 +128,9 @@ impl CheckpointList {
             Err("checkpoint hashes must be unique")?;
         }
 
-        // Make sure all the hashes are valid. In Bitcoin, [0; 32] is the null
+        // Make sure all the hashes are valid. In Bitcoin, [0u8; 32] is the null
         // hash. It is also used as the parent hash of genesis blocks.
-        if block_hashes.contains(&BlockHeaderHash([0; 32])) {
+        if block_hashes.contains(&BlockHeaderHash([0u8; 32])) {
             Err("checkpoint list contains invalid checkpoint hash: found null hash")?;
         }
 

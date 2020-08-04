@@ -53,7 +53,7 @@ impl Copy for EncryptedCiphertext {}
 
 impl Clone for EncryptedCiphertext {
     fn clone(&self) -> Self {
-        let mut bytes = [0; 601];
+        let mut bytes = [0u8; 601];
         bytes[..].copy_from_slice(&self.0[..]);
         Self(bytes)
     }
@@ -76,7 +76,7 @@ impl ZcashSerialize for EncryptedCiphertext {
 
 impl ZcashDeserialize for EncryptedCiphertext {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let mut bytes = [0; 601];
+        let mut bytes = [0u8; 601];
         reader.read_exact(&mut bytes[..])?;
         Ok(Self(bytes))
     }
@@ -89,7 +89,7 @@ impl Arbitrary for EncryptedCiphertext {
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         (vec(any::<u8>(), 601))
             .prop_map(|v| {
-                let mut bytes = [0; 601];
+                let mut bytes = [0u8; 601];
                 bytes.copy_from_slice(v.as_slice());
                 Self(bytes)
             })

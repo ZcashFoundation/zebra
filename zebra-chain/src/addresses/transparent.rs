@@ -157,10 +157,10 @@ impl ZcashSerialize for TransparentAddress {
 
 impl ZcashDeserialize for TransparentAddress {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let mut version_bytes = [0; 2];
+        let mut version_bytes = [0u8; 2];
         reader.read_exact(&mut version_bytes)?;
 
-        let mut hash_bytes = [0; 20];
+        let mut hash_bytes = [0u8; 20];
         reader.read_exact(&mut hash_bytes)?;
 
         match version_bytes {
@@ -207,7 +207,7 @@ impl TransparentAddress {
     fn p2pkh_strategy() -> impl Strategy<Value = Self> {
         (any::<Network>(), vec(any::<u8>(), 20))
             .prop_map(|(network, payload_bytes)| {
-                let mut bytes = [0; 20];
+                let mut bytes = [0u8; 20];
                 bytes.copy_from_slice(payload_bytes.as_slice());
                 Self::PayToPublicKeyHash {
                     network,
@@ -220,7 +220,7 @@ impl TransparentAddress {
     fn p2sh_strategy() -> impl Strategy<Value = Self> {
         (any::<Network>(), vec(any::<u8>(), 20))
             .prop_map(|(network, payload_bytes)| {
-                let mut bytes = [0; 20];
+                let mut bytes = [0u8; 20];
                 bytes.copy_from_slice(payload_bytes.as_slice());
                 Self::PayToScriptHash {
                     network,
@@ -266,7 +266,7 @@ mod tests {
 
     #[test]
     fn empty_script() {
-        let script = Script(vec![0; 20]);
+        let script = Script(vec![0u8; 20]);
 
         let t_addr = TransparentAddress::from(script);
 

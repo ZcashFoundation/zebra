@@ -265,7 +265,7 @@ pub trait ReadZcashExt: io::Read {
     #[inline]
     fn read_string(&mut self) -> Result<String, SerializationError> {
         let len = self.read_compactsize()?;
-        let mut buf = vec![0; len as usize];
+        let mut buf = vec![0u8; len as usize];
         self.read_exact(&mut buf)?;
         String::from_utf8(buf).map_err(|_| SerializationError::Parse("invalid utf-8"))
     }
@@ -273,7 +273,7 @@ pub trait ReadZcashExt: io::Read {
     /// Convenience method to read a `[u8; 4]`.
     #[inline]
     fn read_4_bytes(&mut self) -> io::Result<[u8; 4]> {
-        let mut bytes = [0; 4];
+        let mut bytes = [0u8; 4];
         self.read_exact(&mut bytes)?;
         Ok(bytes)
     }
@@ -281,7 +281,7 @@ pub trait ReadZcashExt: io::Read {
     /// Convenience method to read a `[u8; 12]`.
     #[inline]
     fn read_12_bytes(&mut self) -> io::Result<[u8; 12]> {
-        let mut bytes = [0; 12];
+        let mut bytes = [0u8; 12];
         self.read_exact(&mut bytes)?;
         Ok(bytes)
     }
@@ -289,7 +289,7 @@ pub trait ReadZcashExt: io::Read {
     /// Convenience method to read a `[u8; 32]`.
     #[inline]
     fn read_32_bytes(&mut self) -> io::Result<[u8; 32]> {
-        let mut bytes = [0; 32];
+        let mut bytes = [0u8; 32];
         self.read_exact(&mut bytes)?;
         Ok(bytes)
     }
@@ -297,7 +297,7 @@ pub trait ReadZcashExt: io::Read {
     /// Convenience method to read a `[u8; 64]`.
     #[inline]
     fn read_64_bytes(&mut self) -> io::Result<[u8; 64]> {
-        let mut bytes = [0; 64];
+        let mut bytes = [0u8; 64];
         self.read_exact(&mut bytes)?;
         Ok(bytes)
     }

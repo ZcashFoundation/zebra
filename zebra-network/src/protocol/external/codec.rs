@@ -527,7 +527,7 @@ impl Codec {
 
         let filter_length: usize = body_len - FILTERLOAD_REMAINDER_LENGTH;
 
-        let mut filter_bytes = vec![0; filter_length];
+        let mut filter_bytes = vec![0u8; filter_length];
         reader.read_exact(&mut filter_bytes)?;
 
         Ok(Message::FilterLoad {
@@ -613,7 +613,7 @@ mod tests {
         let mut rt = Runtime::new().unwrap();
 
         let v = Message::FilterLoad {
-            filter: Filter(vec![0; 35999]),
+            filter: Filter(vec![0u8; 35999]),
             hash_functions_count: 0,
             tweak: Tweak(0),
             flags: 0,
@@ -647,7 +647,7 @@ mod tests {
         let mut rt = Runtime::new().unwrap();
 
         let v = Message::FilterLoad {
-            filter: Filter(vec![0; 40000]),
+            filter: Filter(vec![0u8; 40000]),
             hash_functions_count: 0,
             tweak: Tweak(0),
             flags: 0,

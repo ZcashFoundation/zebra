@@ -98,7 +98,7 @@ fn checkpoint_list_no_genesis_fail() -> Result<(), Error> {
 fn checkpoint_list_null_hash_fail() -> Result<(), Error> {
     zebra_test::init();
 
-    let checkpoint_data = vec![(BlockHeight(0), BlockHeaderHash([0; 32]))];
+    let checkpoint_data = vec![(BlockHeight(0), BlockHeaderHash([0u8; 32]))];
 
     // Make a checkpoint list containing the non-genesis block
     let checkpoint_list: BTreeMap<BlockHeight, BlockHeaderHash> =

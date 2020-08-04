@@ -69,7 +69,7 @@ impl std::str::FromStr for SaplingShieldedAddress {
             Ok((hrp, bytes)) => {
                 let mut decoded_bytes = io::Cursor::new(Vec::<u8>::from_base32(&bytes).unwrap());
 
-                let mut diversifier_bytes = [0; 11];
+                let mut diversifier_bytes = [0u8; 11];
                 decoded_bytes.read_exact(&mut diversifier_bytes)?;
 
                 let transmission_key_bytes = decoded_bytes.read_32_bytes()?;

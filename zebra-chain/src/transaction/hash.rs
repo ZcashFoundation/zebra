@@ -42,7 +42,7 @@ impl std::str::FromStr for TransactionHash {
     type Err = SerializationError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut bytes = [0; 32];
+        let mut bytes = [0u8; 32];
         if hex::decode_to_slice(s, &mut bytes[..]).is_err() {
             Err(SerializationError::Parse("hex decoding error"))
         } else {

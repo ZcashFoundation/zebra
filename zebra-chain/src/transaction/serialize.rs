@@ -169,7 +169,7 @@ impl ZcashSerialize for TransparentInput {
                 data,
                 sequence,
             } => {
-                writer.write_all(&[0; 32][..])?;
+                writer.write_all(&[0u8; 32][..])?;
                 writer.write_u32::<LittleEndian>(0xffff_ffff)?;
                 let height_len = coinbase_height_len(*height);
                 let total_len = height_len + data.as_ref().len();
@@ -188,7 +188,7 @@ impl ZcashDeserialize for TransparentInput {
         // This inlines the OutPoint deserialization to peek at the hash value
         // and detect whether we have a coinbase input.
         let bytes = reader.read_32_bytes()?;
-        if bytes == [0; 32] {
+        if bytes == [0u8; 32] {
             if reader.read_u32::<LittleEndian>()? != 0xffff_ffff {
                 return Err(SerializationError::Parse("wrong index in coinbase"));
             }

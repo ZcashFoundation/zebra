@@ -16,7 +16,7 @@ impl<'a> TryFrom<&'a [u8]> for Memo {
     type Error = &'static str;
 
     fn try_from(input: &'a [u8]) -> Result<Self, Self::Error> {
-        let mut full_bytes = [0; 512];
+        let mut full_bytes = [0u8; 512];
 
         match input.len().cmp(&512) {
             cmp::Ordering::Less => {
@@ -76,7 +76,7 @@ fn memo_fmt() {
 fn memo_from_string() {
     let memo = Memo::try_from("foo bar baz".as_ref()).unwrap();
 
-    let mut bytes = [0; 512];
+    let mut bytes = [0u8; 512];
     bytes[0..11].copy_from_slice(&[102, 111, 111, 32, 98, 97, 114, 32, 98, 97, 122]);
 
     assert!(memo.0.iter().eq(bytes.iter()));

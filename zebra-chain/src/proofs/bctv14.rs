@@ -23,7 +23,7 @@ impl Copy for Bctv14Proof {}
 
 impl Clone for Bctv14Proof {
     fn clone(&self) -> Self {
-        let mut bytes = [0; 296];
+        let mut bytes = [0u8; 296];
         bytes[..].copy_from_slice(&self.0[..]);
         Self(bytes)
     }
@@ -46,7 +46,7 @@ impl ZcashSerialize for Bctv14Proof {
 
 impl ZcashDeserialize for Bctv14Proof {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let mut bytes = [0; 296];
+        let mut bytes = [0u8; 296];
         reader.read_exact(&mut bytes[..])?;
         Ok(Self(bytes))
     }
@@ -62,7 +62,7 @@ impl Arbitrary for Bctv14Proof {
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         (vec(any::<u8>(), 296))
             .prop_map(|v| {
-                let mut bytes = [0; 296];
+                let mut bytes = [0u8; 296];
                 bytes.copy_from_slice(v.as_slice());
                 Self(bytes)
             })

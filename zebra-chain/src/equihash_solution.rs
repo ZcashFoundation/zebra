@@ -50,7 +50,7 @@ impl Copy for EquihashSolution {}
 
 impl Clone for EquihashSolution {
     fn clone(&self) -> Self {
-        let mut bytes = [0; EQUIHASH_SOLUTION_SIZE];
+        let mut bytes = [0u8; EQUIHASH_SOLUTION_SIZE];
         bytes[..].copy_from_slice(&self.0[..]);
         Self(bytes)
     }
@@ -74,7 +74,7 @@ impl ZcashDeserialize for EquihashSolution {
                 "incorrect equihash solution size",
             ));
         }
-        let mut bytes = [0; EQUIHASH_SOLUTION_SIZE];
+        let mut bytes = [0u8; EQUIHASH_SOLUTION_SIZE];
         reader.read_exact(&mut bytes[..])?;
         Ok(Self(bytes))
     }
@@ -93,7 +93,7 @@ mod tests {
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
             (vec(any::<u8>(), EQUIHASH_SOLUTION_SIZE))
                 .prop_map(|v| {
-                    let mut bytes = [0; EQUIHASH_SOLUTION_SIZE];
+                    let mut bytes = [0u8; EQUIHASH_SOLUTION_SIZE];
                     bytes.copy_from_slice(v.as_slice());
                     Self(bytes)
                 })

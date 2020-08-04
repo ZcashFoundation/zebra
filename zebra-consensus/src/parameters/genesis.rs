@@ -6,8 +6,8 @@ use zebra_chain::{Network, Network::*};
 /// The previous block hash for the genesis block.
 ///
 /// All known networks use the Bitcoin `null` value for the parent of the
-/// genesis block. (In Bitcoin, `null` is `[0; 32]`.)
-pub const GENESIS_PREVIOUS_BLOCK_HASH: BlockHeaderHash = BlockHeaderHash([0; 32]);
+/// genesis block. (In Bitcoin, `null` is `[0u8; 32]`.)
+pub const GENESIS_PREVIOUS_BLOCK_HASH: BlockHeaderHash = BlockHeaderHash([0u8; 32]);
 
 /// Returns the hash for the genesis block in `network`.
 pub fn genesis_hash(network: Network) -> BlockHeaderHash {
