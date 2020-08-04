@@ -208,17 +208,3 @@ pub(crate) fn init(level: EnvFilter) -> (Tracing, Option<FlameGrapher>) {
     *FLAME_GUARD.lock().unwrap() = guard.clone();
     (filter_handle.into(), guard)
 }
-
-pub(crate) fn cleanup_tracing() {
-    if let Some(flamegrapher) = FLAME_GUARD.lock().unwrap().as_ref() {
-        match flamegrapher.make_flamegraph() {
-            Ok(()) => {}
-            Err(report) => {
-                warn!(
-                    "Error while constructing flamegraph during shutdown: {:?}",
-                    report
-                );
-            }
-        }
-    }
-}

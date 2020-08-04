@@ -2,7 +2,6 @@
 
 use abscissa_core::{Component, FrameworkError};
 
-use super::tracing::cleanup_tracing;
 use color_eyre::Report;
 use std::future::Future;
 use tokio::runtime::Runtime;
@@ -30,8 +29,6 @@ impl TokioComponent {
 /// Zebrad's handler for various signals
 async fn signal_handler() -> Result<(), Report> {
     tokio::signal::ctrl_c().await?;
-    cleanup_tracing();
-
     Ok(())
 }
 
