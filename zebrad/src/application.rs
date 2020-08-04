@@ -9,7 +9,6 @@ use abscissa_core::{
     Application, Component, EntryPoint, FrameworkError, StandardPaths,
 };
 use std::fmt;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 /// Application state
 pub static APPLICATION: AppCell<ZebradApp> = AppCell::new();
@@ -109,7 +108,7 @@ impl Application for ZebradApp {
             let tracing = self.tracing_component(command);
             Ok(vec![Box::new(terminal), Box::new(tracing)])
         } else {
-            init_tracing_backup();
+            crate::components::tracing::init_backup();
             Ok(vec![Box::new(terminal)])
         }
     }
@@ -247,10 +246,4 @@ impl ZebradApp {
             Some(c) => c.is_server(),
         }
     }
-}
-
-fn init_tracing_backup() {
-    tracing_subscriber::Registry::default()
-        .with(tracing_error::ErrorLayer::default())
-        .init();
 }

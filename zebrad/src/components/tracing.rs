@@ -12,6 +12,7 @@ use std::{
     sync::Arc,
 };
 use tracing_subscriber::EnvFilter;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 static FLAMEGRAPH_ENV: &str = "ZEBRAD_FLAMEGRAPH";
 
@@ -173,8 +174,6 @@ impl Drop for FlameGrapher {
 }
 
 pub(crate) fn init(level: EnvFilter) -> (Tracing, Option<FlameGrapher>) {
-    use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-
     // Construct a tracing subscriber with the supplied filter and enable reloading.
     let builder = tracing_subscriber::FmtSubscriber::builder()
         .with_env_filter(level)
@@ -199,4 +198,10 @@ pub(crate) fn init(level: EnvFilter) -> (Tracing, Option<FlameGrapher>) {
     };
 
     (filter_handle.into(), guard)
+}
+
+pub(crate) fn init_backup() {
+    tracing_subscriber::Registry::default()
+        .with(tracing_error::ErrorLayer::default())
+        .init();
 }
