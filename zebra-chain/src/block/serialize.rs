@@ -5,7 +5,6 @@ use std::io;
 use crate::block::difficulty::CompactDifficulty;
 use crate::equihash_solution::EquihashSolution;
 use crate::merkle_tree::MerkleTreeRootHash;
-use crate::note_commitment_tree::SaplingNoteTreeRootHash;
 use crate::serialization::ZcashDeserializeInto;
 use crate::serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize};
 
@@ -19,7 +18,7 @@ impl ZcashSerialize for BlockHeader {
         writer.write_u32::<LittleEndian>(self.version)?;
         self.previous_block_hash.zcash_serialize(&mut writer)?;
         writer.write_all(&self.merkle_root_hash.0[..])?;
-        writer.write_all(&self.final_sapling_root_hash.0[..])?;
+        writer.write_all(&self.history_root_hash[..])?;
         // this is a truncating cast, rather than a saturating cast
         // but u32 times are valid until 2106, and our block verification time
         // checks should detect any truncation.
@@ -67,7 +66,7 @@ impl ZcashDeserialize for BlockHeader {
             version,
             previous_block_hash: BlockHeaderHash::zcash_deserialize(&mut reader)?,
             merkle_root_hash: MerkleTreeRootHash(reader.read_32_bytes()?),
-            final_sapling_root_hash: SaplingNoteTreeRootHash(reader.read_32_bytes()?),
+            history_root_hash: reader.read_32_bytes()?,
             // This can't panic, because all u32 values are valid `Utc.timestamp`s
             time: Utc.timestamp(reader.read_u32::<LittleEndian>()? as i64, 0),
             difficulty_threshold: CompactDifficulty(reader.read_u32::<LittleEndian>()?),
