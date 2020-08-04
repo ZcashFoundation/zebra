@@ -1,11 +1,20 @@
 //! An HTTP endpoint for dynamically setting tracing filters.
 
 use crate::{components::tokio::TokioComponent, config::TracingSection, prelude::*};
-
-use abscissa_core::{Component, FrameworkError};
-
+use abscissa_core::{trace::Tracing, Component, FrameworkError};
+use color_eyre::eyre::Report;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Request, Response, Server};
+use once_cell::sync::Lazy;
+use std::{
+    fs::File,
+    io::{BufReader, BufWriter},
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex},
+};
+use tracing_subscriber::EnvFilter;
+
+static FLAMEGRAPH_ENV: &str = "ZEBRAD_FLAMEGRAPH";
 
 /// Abscissa component which runs a tracing filter endpoint.
 #[derive(Debug, Component)]
@@ -124,4 +133,92 @@ To set the filter, POST the new filter string to /filter:
             .expect("response with known status cannot fail"),
     };
     Ok(rsp)
+}
+
+/// Global handle to flame guard for signal handler termination
+///
+/// This needs to be independent of the owned flame_guard below to avoid
+/// contention on the AppCell's lock
+pub(crate) static FLAME_GUARD: Lazy<Mutex<Option<FlameGrapher>>> = Lazy::new(|| Mutex::new(None));
+
+#[derive(Clone)]
+pub(crate) struct FlameGrapher {
+    guard: Arc<tracing_flame::FlushGuard<BufWriter<File>>>,
+    path: PathBuf,
+}
+
+impl FlameGrapher {
+    fn make_flamegraph(&self) -> Result<(), Report> {
+        self.guard.flush()?;
+        let out_path = self.path.with_extension("svg");
+        let inf = File::open(&self.path)?;
+        let reader = BufReader::new(inf);
+
+        let out = File::create(out_path)?;
+        let writer = BufWriter::new(out);
+
+        let mut opts = inferno::flamegraph::Options::default();
+        info!("writing flamegraph to disk...");
+        inferno::flamegraph::from_reader(&mut opts, reader, writer)?;
+
+        Ok(())
+    }
+}
+
+impl Drop for FlameGrapher {
+    fn drop(&mut self) {
+        match self.make_flamegraph() {
+            Ok(()) => {}
+            Err(report) => {
+                warn!(
+                    "Error while constructing flamegraph during shutdown: {:?}",
+                    report
+                );
+            }
+        }
+    }
+}
+
+pub(crate) fn init(level: EnvFilter) -> (Tracing, Option<FlameGrapher>) {
+    use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+    // Construct a tracing subscriber with the supplied filter and enable reloading.
+    let builder = tracing_subscriber::FmtSubscriber::builder()
+        .with_env_filter(level)
+        .with_filter_reloading();
+    let filter_handle = builder.reload_handle();
+    let subscriber = builder.finish().with(tracing_error::ErrorLayer::default());
+
+    let guard = if let Ok(flamegraph_path) = std::env::var(FLAMEGRAPH_ENV) {
+        let flamegraph_path = Path::new(&flamegraph_path).with_extension("folded");
+        let (flame_layer, guard) = tracing_flame::FlameLayer::with_file(&flamegraph_path).unwrap();
+        let flame_layer = flame_layer
+            .with_empty_samples(false)
+            .with_threads_collapsed(true);
+        subscriber.with(flame_layer).init();
+        Some(FlameGrapher {
+            guard: Arc::new(guard),
+            path: flamegraph_path,
+        })
+    } else {
+        subscriber.init();
+        None
+    };
+
+    *FLAME_GUARD.lock().unwrap() = guard.clone();
+    (filter_handle.into(), guard)
+}
+
+pub(crate) fn cleanup_tracing() {
+    if let Some(flamegrapher) = FLAME_GUARD.lock().unwrap().as_ref() {
+        match flamegrapher.make_flamegraph() {
+            Ok(()) => {}
+            Err(report) => {
+                warn!(
+                    "Error while constructing flamegraph during shutdown: {:?}",
+                    report
+                );
+            }
+        }
+    }
 }

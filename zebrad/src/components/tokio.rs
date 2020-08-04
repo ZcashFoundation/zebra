@@ -2,6 +2,7 @@
 
 use abscissa_core::{Component, FrameworkError};
 
+use super::tracing::cleanup_tracing;
 use tokio::runtime::Runtime;
 
 /// An Abscissa component which owns a Tokio runtime.
@@ -22,4 +23,18 @@ impl TokioComponent {
             rt: Some(Runtime::new().unwrap()),
         })
     }
+
+    pub fn start_signal_handler(&self) {
+        self.rt
+            .as_ref()
+            .expect("this option is only to work around locks, runtime should be here")
+            .spawn(signal_handler());
+    }
+}
+
+/// Zebrad's handler for various signals
+async fn signal_handler() {
+    tokio::signal::ctrl_c().await.unwrap();
+    cleanup_tracing();
+    std::process::exit(1);
 }

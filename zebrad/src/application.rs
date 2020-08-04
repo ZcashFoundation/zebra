@@ -1,6 +1,6 @@
 //! Zebrad Abscissa Application
 
-use crate::{commands::ZebradCmd, config::ZebradConfig};
+use crate::{commands::ZebradCmd, components::tracing::FlameGrapher, config::ZebradConfig};
 use abscissa_core::{
     application::{self, AppCell},
     config,
@@ -8,15 +8,7 @@ use abscissa_core::{
     trace::Tracing,
     Application, Component, EntryPoint, FrameworkError, StandardPaths,
 };
-use color_eyre::eyre::Report;
-use once_cell::sync::Lazy;
-use std::{
-    fmt,
-    fs::File,
-    io::{BufReader, BufWriter},
-    path::{Path, PathBuf},
-    sync::{Arc, Mutex},
-};
+use std::fmt;
 
 /// Application state
 pub static APPLICATION: AppCell<ZebradApp> = AppCell::new();
@@ -40,13 +32,6 @@ pub fn app_config() -> config::Reader<ZebradApp> {
     config::Reader::new(&APPLICATION)
 }
 
-/// Global handle to flame guard for signal handler termination
-///
-/// This needs to be independent of the owned flame_guard below to avoid
-/// contention on the AppCell's lock
-pub(crate) static FLAME_GUARD: Lazy<Mutex<Option<Box<dyn Drop + Send + Sync + 'static>>>> =
-    Lazy::new(|| Mutex::new(None));
-
 /// Zebrad Application
 pub struct ZebradApp {
     /// Application configuration.
@@ -54,7 +39,7 @@ pub struct ZebradApp {
 
     /// drop handle for tracing-flame layer to ensure it flushes its buffer when
     /// the application exits
-    flame_guard: Droption<FlameGrapher>,
+    flame_guard: Option<FlameGrapher>,
 
     /// Application state.
     state: application::State<Self>,
@@ -68,7 +53,7 @@ impl Default for ZebradApp {
     fn default() -> Self {
         Self {
             config: None,
-            flame_guard: Droption::None,
+            flame_guard: None,
             state: application::State::default(),
         }
     }
@@ -118,10 +103,7 @@ impl Application for ZebradApp {
         color_eyre::install().unwrap();
 
         if ZebradApp::command_is_server(&command) {
-            let (tracing, guard) = self.tracing_component(command);
-
-            self.flame_guard = guard.clone();
-            *FLAME_GUARD.lock().unwrap() = Some(Box::new(guard));
+            let tracing = self.tracing_component(command);
 
             Ok(vec![Box::new(terminal), Box::new(tracing)])
         } else {
@@ -188,6 +170,8 @@ impl Application for ZebradApp {
                 .get_downcast_ref::<TokioComponent>()
                 .expect("Tokio component should be available");
 
+            tokio_component.start_signal_handler();
+
             self.state
                 .components
                 .get_downcast_ref::<TracingEndpoint>()
@@ -245,36 +229,10 @@ impl ZebradApp {
         }
     }
 
-    fn tracing_component(
-        &self,
-        command: &EntryPoint<ZebradCmd>,
-    ) -> (Tracing, Droption<FlameGrapher>) {
-        use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-
-        // Construct a tracing subscriber with the supplied filter and enable reloading.
-        let builder = tracing_subscriber::FmtSubscriber::builder()
-            .with_env_filter(self.level(command))
-            .with_filter_reloading();
-        let filter_handle = builder.reload_handle();
-        let subscriber = builder.finish().with(tracing_error::ErrorLayer::default());
-        let guard = if let Ok(flamegraph_path) = std::env::var("ZEBRAD_FLAMEGRAPH") {
-            let flamegraph_path = Path::new(&flamegraph_path).with_extension("folded");
-            let (flame_layer, guard) =
-                tracing_flame::FlameLayer::with_file(&flamegraph_path).unwrap();
-            let flame_layer = flame_layer
-                .with_empty_samples(false)
-                .with_threads_collapsed(true);
-            subscriber.with(flame_layer).init();
-            Droption::Some(FlameGrapher {
-                guard: Arc::new(guard),
-                path: flamegraph_path,
-            })
-        } else {
-            subscriber.init();
-            Droption::None
-        };
-
-        (filter_handle.into(), guard)
+    fn tracing_component(&mut self, command: &EntryPoint<ZebradCmd>) -> Tracing {
+        let (component, guard) = crate::components::tracing::init(self.level(command).into());
+        self.flame_guard = guard;
+        component
     }
 
     /// Returns true if command is a server command.
@@ -286,54 +244,6 @@ impl ZebradApp {
         match &command.command {
             None => false,
             Some(c) => c.is_server(),
-        }
-    }
-}
-
-#[derive(Clone)]
-enum Droption<T> {
-    Some(T),
-    None,
-}
-
-impl<T> Drop for Droption<T> {
-    fn drop(&mut self) {}
-}
-
-#[derive(Clone)]
-struct FlameGrapher {
-    guard: Arc<tracing_flame::FlushGuard<BufWriter<File>>>,
-    path: PathBuf,
-}
-
-impl FlameGrapher {
-    fn make_flamegraph(&self) -> Result<(), Report> {
-        self.guard.flush()?;
-        let out_path = self.path.with_extension("svg");
-        let inf = File::open(&self.path)?;
-        let reader = BufReader::new(inf);
-
-        let out = File::create(out_path)?;
-        let writer = BufWriter::new(out);
-
-        let mut opts = inferno::flamegraph::Options::default();
-        info!("writing flamegraph to disk...");
-        inferno::flamegraph::from_reader(&mut opts, reader, writer)?;
-
-        Ok(())
-    }
-}
-
-impl Drop for FlameGrapher {
-    fn drop(&mut self) {
-        match self.make_flamegraph() {
-            Ok(()) => {}
-            Err(report) => {
-                warn!(
-                    "Error while constructing flamegraph during shutdown: {:?}",
-                    report
-                );
-            }
         }
     }
 }
