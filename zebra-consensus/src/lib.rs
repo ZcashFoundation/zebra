@@ -20,6 +20,6 @@ pub mod chain;
 pub mod checkpoint;
 pub mod mempool;
 pub mod parameters;
-pub mod redjubjub;
+mod primitives;
 mod script;
 mod transaction;
