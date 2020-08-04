@@ -8,13 +8,6 @@ use color_eyre::eyre::Result;
 use std::time::Duration;
 use zebra_test::prelude::*;
 
-/// The kill signal exit status on unix platforms.
-#[cfg(unix)]
-const KILL_STATUS: i32 = 9;
-/// The kill exit code on non-unix platforms.
-#[cfg(not(unix))]
-const KILL_STATUS: i32 = 1;
-
 // Todo: The following 3 helper functions can probably be abstracted into one
 pub fn get_child_single_arg(arg: &str) -> Result<(zebra_test::command::TestChild, impl Drop)> {
     let (mut cmd, guard) = test_cmd(env!("CARGO_BIN_EXE_zebrad"))?;
@@ -155,7 +148,7 @@ fn seed_no_args() -> Result<()> {
     output.stdout_contains(r"Starting zebrad in seed mode")?;
 
     // Make sure the command was killed
-    assert_eq!(output.exit_status(), Some(KILL_STATUS));
+    assert_eq!(output.was_killed(), true);
 
     Ok(())
 }
@@ -197,7 +190,7 @@ fn start_no_args() -> Result<()> {
     output.stdout_contains(r"Starting zebrad")?;
 
     // Make sure the command was killed
-    assert_eq!(output.exit_status(), Some(KILL_STATUS));
+    assert_eq!(output.was_killed(), true);
 
     Ok(())
 }
@@ -213,7 +206,7 @@ fn start_args() -> Result<()> {
     let output = child.wait_with_output()?;
 
     // Make sure the command was killed
-    assert_eq!(output.exit_status(), Some(KILL_STATUS));
+    assert_eq!(output.was_killed(), true);
 
     output.assert_failure()?;
 

@@ -225,12 +225,12 @@ impl TestOutput {
         .with_section(stdout)
     }
 
-    /// Returns the exit signal on unix platforms, and the exit code otherwise.
-    pub fn exit_status(&self) -> Option<i32> {
+    /// Returns true if the program was killed, false if exit was by another reason.
+    pub fn was_killed(&self) -> bool {
         #[cfg(unix)]
-        return self.output.status.signal();
+        return self.output.status.signal() == Some(9);
 
         #[cfg(not(unix))]
-        return self.output.status.code();
+        return self.output.status.code() == Some(1);
     }
 }
