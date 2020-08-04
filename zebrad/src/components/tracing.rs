@@ -5,12 +5,11 @@ use abscissa_core::{trace::Tracing, Component, FrameworkError};
 use color_eyre::eyre::Report;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Request, Response, Server};
-use once_cell::sync::Lazy;
 use std::{
     fs::File,
     io::{BufReader, BufWriter},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::Arc,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -135,12 +134,6 @@ To set the filter, POST the new filter string to /filter:
     Ok(rsp)
 }
 
-/// Global handle to flame guard for signal handler termination
-///
-/// This needs to be independent of the owned flame_guard below to avoid
-/// contention on the AppCell's lock
-pub(crate) static FLAME_GUARD: Lazy<Mutex<Option<FlameGrapher>>> = Lazy::new(|| Mutex::new(None));
-
 #[derive(Clone)]
 pub(crate) struct FlameGrapher {
     guard: Arc<tracing_flame::FlushGuard<BufWriter<File>>>,
@@ -205,6 +198,5 @@ pub(crate) fn init(level: EnvFilter) -> (Tracing, Option<FlameGrapher>) {
         None
     };
 
-    *FLAME_GUARD.lock().unwrap() = guard.clone();
     (filter_handle.into(), guard)
 }
