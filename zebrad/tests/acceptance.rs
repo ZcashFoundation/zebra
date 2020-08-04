@@ -148,7 +148,7 @@ fn seed_no_args() -> Result<()> {
     output.stdout_contains(r"Starting zebrad in seed mode")?;
 
     // Make sure the command was killed
-    assert_eq!(output.was_killed(), true);
+    assert!(output.was_killed());
 
     Ok(())
 }
@@ -190,7 +190,7 @@ fn start_no_args() -> Result<()> {
     output.stdout_contains(r"Starting zebrad")?;
 
     // Make sure the command was killed
-    assert_eq!(output.was_killed(), true);
+    assert!(output.was_killed());
 
     Ok(())
 }
@@ -206,7 +206,7 @@ fn start_args() -> Result<()> {
     let output = child.wait_with_output()?;
 
     // Make sure the command was killed
-    assert_eq!(output.was_killed(), true);
+    assert!(output.was_killed());
 
     output.assert_failure()?;
 
