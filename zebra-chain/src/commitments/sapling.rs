@@ -91,9 +91,9 @@ pub fn pedersen_hash_to_point(domain: [u8; 8], M: &BitVec<Lsb0, u8>) -> jubjub::
                 tmp -= tmp.double();
             }
 
-            // tmp * 2^(4*j)
             if j > 0 {
-                tmp *= (1..(4 * j)).fold(jubjub::Fr::one(), |acc, _| acc.double());
+                // Inclusive range!
+                tmp *= (1..=(4 * j)).fold(jubjub::Fr::one(), |acc, _| acc.double());
             }
 
             m_i += tmp;
@@ -108,8 +108,13 @@ pub fn pedersen_hash_to_point(domain: [u8; 8], M: &BitVec<Lsb0, u8>) -> jubjub::
     // segment with zeros.
     //
     // https://zips.z.cash/protocol/protocol.pdf#concretepedersenhash
-    for (i, segment) in M.chunks(189).enumerate() {
-        result += I_i(domain, i) * M_i(&segment)
+    for (i, segment) in M.chunks(189).enumerate().map(|(j, seg)| (j + 1, seg)) {
+        println!(
+            "I_i: {:?}",
+            jubjub::AffinePoint::from(I_i(domain, i)).to_bytes()
+        );
+        result += I_i(domain, i) * M_i(&segment);
+        println!("result: {:?}", jubjub::AffinePoint::from(result).to_bytes())
     }
 
     result
@@ -338,8 +343,6 @@ mod tests {
                 D,
                 &test_vector.input_bits.clone(),
             ));
-
-            println!("{:?}", result);
 
             //assert_eq!(jubjub::AffinePoint::from(result), test_vector.hash_point);
         }
