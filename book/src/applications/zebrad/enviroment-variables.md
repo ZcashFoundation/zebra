@@ -3,6 +3,9 @@
 All zebrad subcommands support the following enviroment variables:
 - `ZEBRAD_CACHE_DIR`: The directory to store zebra data just as state, blocks, wallet, etc.
 - `ZEBRAD_LOG`: Manipulate the log level. Regex is supported.
+- `ZEBRAD_FLAMEGRAPH`: File basename for generated flamegraph. Setting this
+  variable enables flamegraph generation from internal instrumentation. This
+  is most useful for performance debugging.
 
 ## Examples:
 
