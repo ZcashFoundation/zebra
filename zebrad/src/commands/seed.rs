@@ -108,6 +108,8 @@ pub struct SeedCmd {}
 impl Runnable for SeedCmd {
     /// Start the application.
     fn run(&self) {
+        info!("Starting zebrad in seed mode");
+
         use crate::components::tokio::TokioComponent;
 
         let rt = app_writer()

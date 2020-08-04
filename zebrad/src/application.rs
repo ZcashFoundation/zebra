@@ -9,6 +9,7 @@ use abscissa_core::{
     Application, Component, EntryPoint, FrameworkError, StandardPaths,
 };
 use std::fmt;
+use tracing_subscriber::layer::SubscriberExt;
 
 /// Application state
 pub static APPLICATION: AppCell<ZebradApp> = AppCell::new();
@@ -100,6 +101,8 @@ impl Application for ZebradApp {
     ) -> Result<Vec<Box<dyn Component<Self>>>, FrameworkError> {
         let terminal = Terminal::new(self.term_colors(command));
 
+        // This MUST happen after `Terminal::new` to ensure our preferred panic
+        // handler is the last one installed
         color_eyre::install().unwrap();
 
         if ZebradApp::command_is_server(&command) {
@@ -107,6 +110,7 @@ impl Application for ZebradApp {
 
             Ok(vec![Box::new(terminal), Box::new(tracing)])
         } else {
+            init_tracing_backup();
             Ok(vec![Box::new(terminal)])
         }
     }
@@ -246,4 +250,10 @@ impl ZebradApp {
             Some(c) => c.is_server(),
         }
     }
+}
+
+fn init_tracing_backup() {
+    tracing_subscriber::Registry::default()
+        .with(tracing_error::ErrorLayer::default())
+        .init();
 }

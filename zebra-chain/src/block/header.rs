@@ -1,7 +1,6 @@
-use super::{BlockHeaderHash, Error};
+use super::{difficulty::CompactDifficulty, BlockHeaderHash, Error};
 use crate::equihash_solution::EquihashSolution;
 use crate::merkle_tree::MerkleTreeRootHash;
-use crate::note_commitment_tree::SaplingNoteTreeRootHash;
 use crate::serialization::ZcashSerialize;
 use chrono::{DateTime, Duration, Utc};
 
@@ -47,7 +46,7 @@ pub struct BlockHeader {
     //   - replace with an unspecified HistoryRootHash type?
     // Note that the NetworkUpgrade list is in zebra-consensus, so we can't
     // parse this field into a HistoryRootHash enum in zebra-chain.
-    pub final_sapling_root_hash: SaplingNoteTreeRootHash,
+    pub history_root_hash: [u8; 32],
 
     /// The block timestamp is a Unix epoch time (UTC) when the miner
     /// started hashing the header (according to the miner).
@@ -61,8 +60,7 @@ pub struct BlockHeader {
     /// `ThresholdBits(height)`.
     ///
     /// [Bitcoin-nBits](https://bitcoin.org/en/developer-reference#target-nbits)
-    // See #572 for details.
-    pub bits: u32,
+    pub difficulty_threshold: CompactDifficulty,
 
     /// An arbitrary field that miners can change to modify the header
     /// hash in order to produce a hash less than or equal to the
