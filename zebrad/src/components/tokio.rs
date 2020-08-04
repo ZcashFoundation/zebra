@@ -27,7 +27,7 @@ impl TokioComponent {
 }
 
 /// Zebrad's handler for various signals
-async fn signal_handler() -> Result<(), Report> {
+async fn shutdown() -> Result<(), Report> {
     tokio::signal::ctrl_c().await?;
     Ok(())
 }
@@ -43,7 +43,7 @@ impl RuntimeRun for Runtime {
         let result = self.block_on(async move {
             tokio::select! {
                 result = fut => result,
-                result = signal_handler() => result,
+                result = shutdown() => result,
             }
         });
 
