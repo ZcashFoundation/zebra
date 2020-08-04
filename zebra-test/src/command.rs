@@ -5,11 +5,27 @@ use color_eyre::{
 use std::process::{Child, Command, ExitStatus, Output};
 use tempdir::TempDir;
 
+/// Config file to change default addresses and ports
+static TEST_CONFIG: &str = "[metrics]
+endpoint_addr = '127.0.0.1:0'
+[network]
+listen_addr = '127.0.0.1:0'
+[tracing]
+endpoint_addr = '127.0.0.1:0'
+";
+
 /// Runs a command in a TempDir
 pub fn test_cmd(path: &str) -> Result<(Command, impl Drop)> {
     let dir = TempDir::new(path)?;
     let mut cmd = Command::new(path);
     cmd.current_dir(dir.path());
+
+    // Write our config file to the temp dir
+    use std::{fs::File, io::Write};
+    File::create(dir.path().join("zebrad.toml"))
+        .expect("must be able to open config file")
+        .write_all(TEST_CONFIG.as_bytes())
+        .expect("must be able to write config data");
 
     Ok((cmd, dir))
 }
