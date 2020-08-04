@@ -175,8 +175,6 @@ impl Application for ZebradApp {
                 .get_downcast_ref::<TokioComponent>()
                 .expect("Tokio component should be available");
 
-            tokio_component.start_signal_handler();
-
             self.state
                 .components
                 .get_downcast_ref::<TracingEndpoint>()

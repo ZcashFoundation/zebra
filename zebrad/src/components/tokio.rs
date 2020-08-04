@@ -3,6 +3,8 @@
 use abscissa_core::{Component, FrameworkError};
 
 use super::tracing::cleanup_tracing;
+use color_eyre::Report;
+use std::future::Future;
 use tokio::runtime::Runtime;
 
 /// An Abscissa component which owns a Tokio runtime.
@@ -23,18 +25,37 @@ impl TokioComponent {
             rt: Some(Runtime::new().unwrap()),
         })
     }
-
-    pub fn start_signal_handler(&self) {
-        self.rt
-            .as_ref()
-            .expect("this option is only to work around locks, runtime should be here")
-            .spawn(signal_handler());
-    }
 }
 
 /// Zebrad's handler for various signals
-async fn signal_handler() {
-    tokio::signal::ctrl_c().await.unwrap();
+async fn signal_handler() -> Result<(), Report> {
+    tokio::signal::ctrl_c().await?;
     cleanup_tracing();
-    std::process::exit(1);
+
+    Ok(())
+}
+
+/// Extension trait to centralize entry point for runnable subcommands that
+/// depend on tokio
+pub(crate) trait RuntimeRun {
+    fn run(&mut self, fut: impl Future<Output = Result<(), Report>>);
+}
+
+impl RuntimeRun for Runtime {
+    fn run(&mut self, fut: impl Future<Output = Result<(), Report>>) {
+        let result = self.block_on(async move {
+            tokio::select! {
+                result = fut => result,
+                result = signal_handler() => result,
+            }
+        });
+
+        match result {
+            Ok(()) => {}
+            Err(e) => {
+                eprintln!("Error: {:?}", e);
+                std::process::exit(1);
+            }
+        }
+    }
 }

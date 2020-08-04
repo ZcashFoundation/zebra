@@ -2,6 +2,7 @@
 
 use crate::{components::tokio::TokioComponent, prelude::*};
 
+use crate::components::tokio::RuntimeRun;
 use abscissa_core::{Command, Options, Runnable};
 use color_eyre::eyre::{eyre, Report, WrapErr};
 use futures::{
@@ -41,17 +42,8 @@ impl Runnable for ConnectCmd {
             .rt
             .take();
 
-        let result = rt
-            .expect("runtime should not already be taken")
-            .block_on(self.connect(genesis_hash));
-
-        match result {
-            Ok(()) => {}
-            Err(e) => {
-                eprintln!("Error: {:?}", e);
-                std::process::exit(1);
-            }
-        }
+        rt.expect("runtime should not already be taken")
+            .run(self.connect(genesis_hash));
     }
 }
 

@@ -19,6 +19,7 @@
 //!    * This task runs in the background and continuously queries the network for
 //!    new blocks to be verified and added to the local state
 
+use crate::components::tokio::RuntimeRun;
 use crate::config::ZebradConfig;
 use crate::{components::tokio::TokioComponent, prelude::*};
 
@@ -72,17 +73,8 @@ impl Runnable for StartCmd {
             .rt
             .take();
 
-        let result = rt
-            .expect("runtime should not already be taken")
-            .block_on(self.start());
-
-        match result {
-            Ok(()) => {}
-            Err(e) => {
-                eprintln!("Error: {:?}", e);
-                std::process::exit(1);
-            }
-        }
+        rt.expect("runtime should not already be taken")
+            .run(self.start());
     }
 }
 
