@@ -31,6 +31,19 @@ use zebra_chain::{
 pub mod in_memory;
 pub mod on_disk;
 
+/// The maturity threshold for transparent coinbase outputs.
+///
+/// A transaction MUST NOT spend a transparent output of a coinbase transaction
+/// from a block less than 100 blocks prior to the spend. Note that transparent
+/// outputs of coinbase transactions include Founders' Reward outputs.
+const MIN_TRASPARENT_COINBASE_MATURITY: BlockHeight = BlockHeight(100);
+
+/// The maximum chain reorganisation height.
+///
+/// Allowing reorganisations past this height could allow double-spends of
+/// coinbase transactions.
+const MAX_BLOCK_REORG_HEIGHT: BlockHeight = BlockHeight(MIN_TRASPARENT_COINBASE_MATURITY.0 - 1);
+
 /// Configuration for the state service.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -141,13 +154,27 @@ pub enum Response {
 
 /// Get the heights of the blocks for constructing a block_locator list
 fn block_locator_heights(tip_height: BlockHeight) -> impl Iterator<Item = BlockHeight> {
+    // Stop at the reorg limit, or the genesis block.
+    let min_locator_height = tip_height
+        .0
+        .checked_sub(MAX_BLOCK_REORG_HEIGHT.0)
+        .map(BlockHeight)
+        .unwrap_or(BlockHeight(0));
     let locators = iter::successors(Some(1u32), |h| h.checked_mul(2))
         .flat_map(move |step| tip_height.0.checked_sub(step))
-        .filter(|&height| height != 0)
+        .filter(move |&height| height > min_locator_height.0)
         .map(BlockHeight);
-    iter::once(tip_height)
+    let locators = iter::once(tip_height)
         .chain(locators)
-        .chain(iter::once(BlockHeight(0)))
+        .chain(iter::once(min_locator_height));
+    let locators: Vec<_> = locators.collect();
+    tracing::info!(
+        ?tip_height,
+        ?min_locator_height,
+        ?locators,
+        "created block locator"
+    );
+    locators.into_iter()
 }
 
 /// The error type for the State Service.
