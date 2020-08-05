@@ -94,10 +94,8 @@ mod imp {
     use tracing::info;
 
     pub(super) async fn shutdown() {
-        // On Windows, we don't have all the signals, but Windows also
-        // isn't our expected deployment target. This implementation allows
-        // developers on Windows to simulate proxy graceful shutdown
-        // by pressing Ctrl-C.
+        //  Wait for Ctrl-C in Windows terminals.
+        // (Zebra doesn't support NT Service control messages. Use a service wrapper for long-running instances.)
         tokio::signal::ctrl_c()
             .await
             .expect("listening for ctrl-c signal should never fail");
