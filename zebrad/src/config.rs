@@ -93,6 +93,12 @@ impl TracingSection {
         }
     }
 
+    /// Constructs an EnvFilter for use in our tracing subscriber.
+    ///
+    /// The env filter exclusively controls filtering of spans and events, but
+    /// not how they're emitted. Creating an env filter alone doesn't enable
+    /// logging, it needs to be used in conjunction with other layers like a fmt
+    /// subscriber, for logs, or an error layer, for SpanTraces.
     pub fn env_filter(&self) -> EnvFilter {
         self.filter.as_deref().unwrap_or("info").into()
     }
