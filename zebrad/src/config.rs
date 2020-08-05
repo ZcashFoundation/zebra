@@ -8,6 +8,7 @@ use std::{net::SocketAddr, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use tracing_subscriber::EnvFilter;
 use zebra_network::Config as NetworkSection;
 use zebra_state::Config as StateSection;
 
@@ -83,12 +84,6 @@ pub struct TracingSection {
     pub flamegraph: Option<PathBuf>,
 }
 
-impl Default for TracingSection {
-    fn default() -> Self {
-        Self::populated()
-    }
-}
-
 impl TracingSection {
     pub fn populated() -> Self {
         Self {
@@ -96,6 +91,16 @@ impl TracingSection {
             endpoint_addr: "0.0.0.0:3000".parse().unwrap(),
             flamegraph: None,
         }
+    }
+
+    pub fn env_filter(&self) -> EnvFilter {
+        self.filter.as_deref().unwrap_or("info").into()
+    }
+}
+
+impl Default for TracingSection {
+    fn default() -> Self {
+        Self::populated()
     }
 }
 

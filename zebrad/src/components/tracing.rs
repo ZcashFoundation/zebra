@@ -173,7 +173,7 @@ impl Drop for FlameGrapher {
 pub(crate) fn init(config: &TracingSection) -> (Tracing, Option<FlameGrapher>) {
     // Construct a tracing subscriber with the supplied filter and enable reloading.
     let builder = tracing_subscriber::FmtSubscriber::builder()
-        .with_env_filter(config.filter.as_deref().unwrap_or("info"))
+        .with_env_filter(config.env_filter())
         .with_filter_reloading();
     let filter_handle = builder.reload_handle();
     let subscriber = builder.finish().with(tracing_error::ErrorLayer::default());
@@ -197,8 +197,9 @@ pub(crate) fn init(config: &TracingSection) -> (Tracing, Option<FlameGrapher>) {
     (filter_handle.into(), guard)
 }
 
-pub(crate) fn init_backup() {
+pub(crate) fn init_backup(config: &TracingSection) {
     tracing_subscriber::Registry::default()
+        .with(config.env_filter())
         .with(tracing_error::ErrorLayer::default())
         .init();
 }

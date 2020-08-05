@@ -110,7 +110,7 @@ impl Application for ZebradApp {
             let tracing = self.tracing_component();
             Ok(vec![Box::new(terminal), Box::new(tracing)])
         } else {
-            crate::components::tracing::init_backup();
+            crate::components::tracing::init_backup(&self.config().tracing);
             Ok(vec![Box::new(terminal)])
         }
     }
@@ -235,7 +235,7 @@ impl Application for ZebradApp {
 
 impl ZebradApp {
     fn tracing_component(&mut self) -> Tracing {
-        let config = &self.config.as_ref().unwrap().tracing;
+        let config = &self.config().tracing;
         let (component, guard) = crate::components::tracing::init(config);
         self.flame_guard = guard;
         component
