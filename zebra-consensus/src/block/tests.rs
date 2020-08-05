@@ -8,8 +8,7 @@ use once_cell::sync::Lazy;
 
 use zebra_chain::block::Block;
 use zebra_chain::block::BlockHeader;
-use zebra_chain::serialization::ZcashDeserialize;
-use zebra_chain::transaction::Transaction;
+use zebra_chain::serialization::{ZcashDeserialize, ZcashDeserializeInto};
 use zebra_test::transcript::{TransError, Transcript};
 
 static VALID_BLOCK_TRANSCRIPT: Lazy<Vec<(Arc<Block>, Result<BlockHeaderHash, TransError>)>> =
@@ -34,8 +33,7 @@ static INVALID_TIME_BLOCK_TRANSCRIPT: Lazy<Vec<(Arc<Block>, Result<BlockHeaderHa
         // are more expensive.
         let three_hours_in_the_future = Utc::now()
             .checked_add_signed(chrono::Duration::hours(3))
-            .ok_or("overflow when calculating 3 hours in the future")
-            .map_err(|e| eyre!(e))
+            .ok_or_else(|| eyre!("overflow when calculating 3 hours in the future"))
             .unwrap();
         block.header.time = three_hours_in_the_future;
 
@@ -67,8 +65,10 @@ static INVALID_COINBASE_TRANSCRIPT: Lazy<Vec<(Arc<Block>, Result<BlockHeaderHash
 
         // Test 2: Transaction at first position is not coinbase
         let mut transactions = Vec::new();
-        let tx = Transaction::zcash_deserialize(&zebra_test::vectors::DUMMY_TX1[..]).unwrap();
-        transactions.push(Arc::new(tx));
+        let tx = zebra_test::vectors::DUMMY_TX1
+            .zcash_deserialize_into()
+            .unwrap();
+        transactions.push(tx);
         let block2 = Block {
             header,
             transactions,
