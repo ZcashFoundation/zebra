@@ -50,7 +50,7 @@ where
 #[allow(non_snake_case)]
 pub fn pedersen_hash_to_point(domain: [u8; 8], M: &BitVec<Lsb0, u8>) -> jubjub::ExtendedPoint {
     // Expects i to be 0-indexed
-    fn I_i(domain: [u8; 8], i: usize) -> jubjub::ExtendedPoint {
+    fn I_i(domain: [u8; 8], i: u32) -> jubjub::ExtendedPoint {
         find_group_hash(domain, &i.to_le_bytes())
     }
 
@@ -65,8 +65,6 @@ pub fn pedersen_hash_to_point(domain: [u8; 8], M: &BitVec<Lsb0, u8>) -> jubjub::
         let mut m_i = jubjub::Fr::zero();
 
         for (j, chunk) in segment.chunks(3).enumerate() {
-            println!("{:?}", m_i);
-
             // Pad each chunk with zeros.
             let mut store = 0u8;
             let bits = store.bits_mut::<Lsb0>();
@@ -74,8 +72,6 @@ pub fn pedersen_hash_to_point(domain: [u8; 8], M: &BitVec<Lsb0, u8>) -> jubjub::
                 .iter()
                 .enumerate()
                 .for_each(|(i, bit)| bits.set(i, *bit));
-
-            println!("{:?}", chunk);
 
             let mut tmp = jubjub::Fr::one();
 
@@ -108,13 +104,8 @@ pub fn pedersen_hash_to_point(domain: [u8; 8], M: &BitVec<Lsb0, u8>) -> jubjub::
     // segment with zeros.
     //
     // https://zips.z.cash/protocol/protocol.pdf#concretepedersenhash
-    for (i, segment) in M.chunks(189).enumerate().map(|(j, seg)| (j + 1, seg)) {
-        println!(
-            "I_i: {:?}",
-            jubjub::AffinePoint::from(I_i(domain, i)).to_bytes()
-        );
-        result += I_i(domain, i) * M_i(&segment);
-        println!("result: {:?}", jubjub::AffinePoint::from(result).to_bytes())
+    for (i, segment) in M.chunks(189).enumerate() {
+        result += I_i(domain, i as u32) * M_i(&segment);
     }
 
     result
@@ -344,7 +335,7 @@ mod tests {
                 &test_vector.input_bits.clone(),
             ));
 
-            //assert_eq!(jubjub::AffinePoint::from(result), test_vector.hash_point);
+            assert_eq!(result, test_vector.output_point);
         }
     }
 }
