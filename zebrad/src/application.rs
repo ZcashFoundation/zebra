@@ -1,10 +1,6 @@
 //! Zebrad Abscissa Application
 
-use crate::{
-    commands::ZebradCmd,
-    components::tracing::FlameGrapher,
-    config::{TracingSection, ZebradConfig},
-};
+use crate::{commands::ZebradCmd, components::tracing::FlameGrapher, config::ZebradConfig};
 use abscissa_core::{
     application::{self, AppCell},
     config,
@@ -111,8 +107,7 @@ impl Application for ZebradApp {
         color_eyre::install().unwrap();
 
         if ZebradApp::command_is_server(&command) {
-            let (tracing, guard) = self.tracing_component(&self.config.as_ref().unwrap().tracing);
-            self.flame_guard = guard;
+            let tracing = self.tracing_component();
             Ok(vec![Box::new(terminal), Box::new(tracing)])
         } else {
             crate::components::tracing::init_backup();
@@ -241,8 +236,11 @@ impl Application for ZebradApp {
 }
 
 impl ZebradApp {
-    fn tracing_component(&self, config: &TracingSection) -> (Tracing, Option<FlameGrapher>) {
-        crate::components::tracing::init(config)
+    fn tracing_component(&mut self) -> Tracing {
+        let config = &self.config.as_ref().unwrap().tracing;
+        let (component, guard) = crate::components::tracing::init(config);
+        self.flame_guard = guard;
+        component
     }
 
     /// Returns true if command is a server command.
