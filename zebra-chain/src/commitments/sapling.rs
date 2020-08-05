@@ -1,6 +1,5 @@
 //! Sapling note and value commitments and types.
 
-#![allow(clippy::unit_arg)]
 
 #[cfg(test)]
 mod arbitrary;
