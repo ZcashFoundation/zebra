@@ -43,7 +43,7 @@ fn prf_nf(a_sk: [u8; 32], rho: [u8; 32]) -> [u8; 32] {
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#sproutkeycomponents
 #[derive(Clone, Copy, Debug)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
-pub struct NullifierSeed([u8; 32]);
+pub struct NullifierSeed(pub(crate) [u8; 32]);
 
 impl AsRef<[u8]> for NullifierSeed {
     fn as_ref(&self) -> &[u8] {
@@ -57,20 +57,32 @@ impl From<[u8; 32]> for NullifierSeed {
     }
 }
 
-/// A Nullifier for Sprout transactions
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
-pub struct Nullifier([u8; 32]);
-
 impl From<NullifierSeed> for [u8; 32] {
     fn from(rho: NullifierSeed) -> Self {
         rho.0
     }
 }
 
+/// A Nullifier for Sprout transactions
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
+pub struct Nullifier(pub(crate) [u8; 32]);
+
+impl From<[u8; 32]> for Nullifier {
+    fn from(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+}
+
 impl From<(SpendingKey, NullifierSeed)> for Nullifier {
     fn from((a_sk, rho): (SpendingKey, NullifierSeed)) -> Self {
         Self(prf_nf(a_sk.into(), rho.into()))
+    }
+}
+
+impl From<Nullifier> for [u8; 32] {
+    fn from(n: Nullifier) -> Self {
+        n.0
     }
 }
 
