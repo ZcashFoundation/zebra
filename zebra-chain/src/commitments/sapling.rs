@@ -21,10 +21,10 @@ use crate::{
 
 /// Generates a random scalar from the scalar field 𝔽_{r_𝕁}.
 ///
-/// The prime order subgroup 𝕁^(r) is the order-r_𝕁 subgroup of 𝕁 after the
-/// Edwards cofactor h_𝕁 = 8 is factored out. This function is useful when
-/// generating the uniform distribution on 𝔽_{r_𝕁} needed for Sapling
-/// commitment schemes' trapdoor generators.
+/// The prime order subgroup 𝕁^(r) is the order-r_𝕁 subgroup of 𝕁 that consists
+/// of the points whose order divides r. This function is useful when generating
+/// the uniform distribution on 𝔽_{r_𝕁} needed for Sapling commitment schemes'
+/// trapdoor generators.
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#jubjub
 pub fn generate_trapdoor<T>(csprng: &mut T) -> jubjub::Fr
