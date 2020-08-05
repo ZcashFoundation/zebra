@@ -25,7 +25,7 @@ pub use nullifiers::Nullifier;
 pub struct Note {
     /// The diversier of the recipient’s shielded payment address.
     pub diversifier: Diversifier,
-    /// The diversied transmission key of the recipient’s shielded
+    /// The diversified transmission key of the recipient’s shielded
     /// payment address.
     pub transmission_key: TransmissionKey,
     /// An integer representing the value of the note in zatoshi.
