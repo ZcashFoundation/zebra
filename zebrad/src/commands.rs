@@ -1,6 +1,5 @@
 //! Zebrad Subcommands
 
-mod connect;
 mod generate;
 mod revhex;
 mod seed;
@@ -9,8 +8,7 @@ mod version;
 
 use self::ZebradCmd::*;
 use self::{
-    connect::ConnectCmd, generate::GenerateCmd, revhex::RevhexCmd, seed::SeedCmd, start::StartCmd,
-    version::VersionCmd,
+    generate::GenerateCmd, revhex::RevhexCmd, seed::SeedCmd, start::StartCmd, version::VersionCmd,
 };
 
 use crate::config::ZebradConfig;
@@ -29,10 +27,6 @@ pub enum ZebradCmd {
     /// The `generate` subcommand
     #[options(help = "generate a skeleton configuration")]
     Generate(GenerateCmd),
-
-    /// The `connect` subcommand
-    #[options(help = "testing stub for dumping network messages")]
-    Connect(ConnectCmd),
 
     /// The `help` subcommand
     #[options(help = "get usage information")]
@@ -67,7 +61,7 @@ impl ZebradCmd {
         match self {
             // List all the commands, so new commands have to make a choice here
             Generate(_) | Help(_) | Revhex(_) | Version(_) => true,
-            Connect(_) | Seed(_) | Start(_) => false,
+            Seed(_) | Start(_) => false,
         }
     }
 
@@ -81,7 +75,7 @@ impl ZebradCmd {
     pub(crate) fn is_server(&self) -> bool {
         match self {
             // List all the commands, so new commands have to make a choice here
-            Connect(_) | Seed(_) | Start(_) => true,
+            Seed(_) | Start(_) => true,
             Generate(_) | Help(_) | Revhex(_) | Version(_) => false,
         }
     }
