@@ -1,7 +1,7 @@
 //! A component owning the Tokio runtime.
 
-use abscissa_core::{Component, FrameworkError};
-
+use crate::prelude::*;
+use abscissa_core::{Application, Component, FrameworkError, Shutdown};
 use color_eyre::Report;
 use std::future::Future;
 use tokio::runtime::Runtime;
@@ -51,7 +51,7 @@ impl RuntimeRun for Runtime {
             Ok(()) => {}
             Err(e) => {
                 eprintln!("Error: {:?}", e);
-                std::process::exit(1);
+                app_writer().shutdown(Shutdown::Forced);
             }
         }
     }
@@ -78,6 +78,7 @@ mod imp {
             .expect("Failed to register signal handler")
             .recv()
             .await;
+
         info!(
             // use target to remove 'imp' from output
             target: "zebrad::signal",
@@ -97,7 +98,10 @@ mod imp {
         // isn't our expected deployment target. This implementation allows
         // developers on Windows to simulate proxy graceful shutdown
         // by pressing Ctrl-C.
-        tokio::signal::ctrl_c().recv().await;
+        tokio::signal::ctrl_c()
+            .await
+            .expect("listening for ctrl-c signal should never fail");
+
         info!(
             // use target to remove 'imp' from output
             target: "zebrad::signal",

@@ -6,9 +6,10 @@ use abscissa_core::{
     config,
     terminal::component::Terminal,
     trace::Tracing,
-    Application, Component, EntryPoint, FrameworkError, StandardPaths,
+    Application, Component, EntryPoint, FrameworkError, Shutdown, StandardPaths,
 };
-use std::fmt;
+use application::fatal_error;
+use std::{fmt, process};
 
 /// Application state
 pub static APPLICATION: AppCell<ZebradApp> = AppCell::new();
@@ -186,6 +187,23 @@ impl Application for ZebradApp {
         }
 
         Ok(())
+    }
+
+    fn shutdown(&mut self, shutdown: Shutdown) -> ! {
+        if let Err(e) = self.state().components.shutdown(self, shutdown) {
+            fatal_error(self, &e)
+        }
+
+        // Swap out a fake app so we can trigger the destructor on the original
+        let mut fake_app = Self::default();
+        std::mem::swap(self, &mut fake_app);
+        drop(fake_app);
+
+        match shutdown {
+            Shutdown::Graceful => process::exit(0),
+            Shutdown::Forced => process::exit(1),
+            Shutdown::Crash => process::exit(2),
+        }
     }
 }
 
