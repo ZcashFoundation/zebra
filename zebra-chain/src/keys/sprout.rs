@@ -42,7 +42,7 @@ fn prf_addr(x: [u8; 32], t: u8) -> [u8; 32] {
     block[0..32].copy_from_slice(&x[..]);
     // The first four bits –i.e. the most signicant four bits of the
     // first byte– are used to separate distinct uses
-    // ofSHA256Compress, ensuring that the functions are independent.
+    // of SHA256Compress, ensuring that the functions are independent.
     block[0] |= 0b1100_0000;
 
     block[32] = t;
