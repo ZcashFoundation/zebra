@@ -37,6 +37,24 @@ pub struct ZebradConfig {
 #[serde(deny_unknown_fields, default)]
 pub struct TracingSection {
     /// The filter used for tracing events.
+    ///
+    /// The filter is used to create a `tracing-subscriber`
+    /// [`EnvFilter`](https://docs.rs/tracing-subscriber/0.2.10/tracing_subscriber/filter/struct.EnvFilter.html#directives),
+    /// and more details on the syntax can be found there or in the examples
+    /// below.
+    ///
+    /// # Examples
+    ///
+    /// `warn,zebrad=info,zebra_network=debug` sets a global `warn` level, an
+    /// `info` level for the `zebrad` crate, and a `debug` level for the
+    /// `zebra_network` crate.
+    ///
+    /// ```ascii,no_run
+    /// [block_verify{height=Some\(BlockHeight\(.*000\)\)}]=trace
+    /// ```
+    /// sets `trace` level for all events occurring in the context of a
+    /// `block_verify` span whose `height` field ends in `000`, i.e., traces the
+    /// verification of every 1000th block.
     pub filter: Option<String>,
 
     /// The endpoint address used for tracing.
