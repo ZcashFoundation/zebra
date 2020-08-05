@@ -42,7 +42,7 @@ where
 /// the Jubjub curve."
 ///
 /// PedersenHash is used in the definitions of Pedersen commitments (§
-/// 5.4.7.2‘Windowed Pedersen commitments’), and of the Pedersen hash for the
+/// 5.4.7.2 ‘Windowed Pedersen commitments’), and of the Pedersen hash for the
 /// Sapling incremental Merkle tree (§ 5.4.1.3 ‘MerkleCRH^Sapling Hash
 /// Function’).
 ///
