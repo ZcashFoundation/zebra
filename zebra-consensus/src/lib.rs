@@ -20,6 +20,7 @@ pub mod chain;
 pub mod checkpoint;
 pub mod mempool;
 pub mod parameters;
+#[allow(dead_code)] // Remove this once transaction verification is implemented
 mod primitives;
 mod script;
 mod transaction;
