@@ -1,9 +1,14 @@
 //! Zebrad Abscissa Application
 
-use crate::{commands::ZebradCmd, components::tracing::FlameGrapher, config::ZebradConfig};
+use crate::{
+    commands::ZebradCmd,
+    components::tracing::FlameGrapher,
+    config::{TracingSection, ZebradConfig},
+};
 use abscissa_core::{
     application::{self, AppCell},
     config,
+    config::Configurable,
     terminal::component::Terminal,
     trace::Tracing,
     Application, Component, EntryPoint, FrameworkError, Shutdown, StandardPaths,
@@ -106,7 +111,8 @@ impl Application for ZebradApp {
         color_eyre::install().unwrap();
 
         if ZebradApp::command_is_server(&command) {
-            let tracing = self.tracing_component(command);
+            let (tracing, guard) = self.tracing_component(&self.config.as_ref().unwrap().tracing);
+            self.flame_guard = guard;
             Ok(vec![Box::new(terminal), Box::new(tracing)])
         } else {
             crate::components::tracing::init_backup();
@@ -135,6 +141,32 @@ impl Application for ZebradApp {
         self.state.components.register(components)
     }
 
+    /// Load this application's configuration and initialize its components.
+    fn init(&mut self, command: &Self::Cmd) -> Result<(), FrameworkError> {
+        // Load configuration
+        let config = command
+            .config_path()
+            .map(|path| self.load_config(&path))
+            .transpose()?
+            .unwrap_or_default();
+
+        let config = command.process_config(config)?;
+        self.config = Some(config);
+
+        // Create and register components with the application.
+        // We do this first to calculate a proper dependency ordering before
+        // application configuration is processed
+        self.register_components(command)?;
+
+        let config = self.config.take().unwrap();
+
+        // Fire callback regardless of whether any config was loaded to
+        // in order to signal state in the application lifecycle
+        self.after_config(config, command)?;
+
+        Ok(())
+    }
+
     /// Post-configuration lifecycle callback.
     ///
     /// Called regardless of whether config is loaded to indicate this is the
@@ -154,12 +186,13 @@ impl Application for ZebradApp {
         self.config = Some(config);
 
         if ZebradApp::command_is_server(&command) {
-            let level = self.level(command);
-            self.state
-                .components
-                .get_downcast_mut::<Tracing>()
-                .expect("Tracing component should be available")
-                .reload_filter(level);
+            if let Some(filter) = self.config.as_ref().unwrap().tracing.filter.as_ref() {
+                self.state
+                    .components
+                    .get_downcast_mut::<Tracing>()
+                    .expect("Tracing component should be available")
+                    .reload_filter(filter);
+            }
 
             // Work around some issues with dependency injection and configs
             let config = self
@@ -208,49 +241,8 @@ impl Application for ZebradApp {
 }
 
 impl ZebradApp {
-    fn level(&self, command: &EntryPoint<ZebradCmd>) -> String {
-        // `None` outputs zebrad usage information to stdout
-        let command_uses_stdout = match &command.command {
-            None => true,
-            Some(c) => c.uses_stdout(),
-        };
-
-        // Allow users to:
-        //  - override all other configs and defaults using the command line
-        //  - see command outputs without spurious log messages, by default
-        //  - override the config file using an environmental variable
-        if command.verbose {
-            "debug".to_string()
-        } else if command_uses_stdout {
-            // Tracing sends output to stdout, so we disable info-level logs for
-            // some commands.
-            //
-            // TODO: send tracing output to stderr. This change requires an abscissa
-            //       update, because `abscissa_core::component::Tracing` uses
-            //       `tracing_subscriber::fmt::Formatter`, which has `Stdout` as a
-            //       type parameter. We need `MakeWriter` or a similar type.
-            "warn".to_string()
-        } else if let Ok(level) = std::env::var("ZEBRAD_LOG") {
-            level
-        } else if let Some(ZebradConfig {
-            tracing:
-                crate::config::TracingSection {
-                    filter: Some(filter),
-                    endpoint_addr: _,
-                },
-            ..
-        }) = &self.config
-        {
-            filter.clone()
-        } else {
-            "info".to_string()
-        }
-    }
-
-    fn tracing_component(&mut self, command: &EntryPoint<ZebradCmd>) -> Tracing {
-        let (component, guard) = crate::components::tracing::init(self.level(command).into());
-        self.flame_guard = guard;
-        component
+    fn tracing_component(&self, config: &TracingSection) -> (Tracing, Option<FlameGrapher>) {
+        crate::components::tracing::init(config)
     }
 
     /// Returns true if command is a server command.

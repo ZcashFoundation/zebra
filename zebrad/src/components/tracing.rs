@@ -8,13 +8,10 @@ use hyper::{Body, Request, Response, Server};
 use std::{
     fs::File,
     io::{BufReader, BufWriter},
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::Arc,
 };
-use tracing_subscriber::EnvFilter;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-
-static FLAMEGRAPH_ENV: &str = "ZEBRAD_FLAMEGRAPH";
 
 /// Abscissa component which runs a tracing filter endpoint.
 #[derive(Debug, Component)]
@@ -173,16 +170,16 @@ impl Drop for FlameGrapher {
     }
 }
 
-pub(crate) fn init(level: EnvFilter) -> (Tracing, Option<FlameGrapher>) {
+pub(crate) fn init(config: &TracingSection) -> (Tracing, Option<FlameGrapher>) {
     // Construct a tracing subscriber with the supplied filter and enable reloading.
     let builder = tracing_subscriber::FmtSubscriber::builder()
-        .with_env_filter(level)
+        .with_env_filter(config.filter.as_deref().unwrap_or("info"))
         .with_filter_reloading();
     let filter_handle = builder.reload_handle();
     let subscriber = builder.finish().with(tracing_error::ErrorLayer::default());
 
-    let guard = if let Ok(flamegraph_path) = std::env::var(FLAMEGRAPH_ENV) {
-        let flamegraph_path = Path::new(&flamegraph_path).with_extension("folded");
+    let guard = if let Some(flamegraph_path) = config.flamegraph.as_deref() {
+        let flamegraph_path = flamegraph_path.with_extension("folded");
         let (flame_layer, guard) = tracing_flame::FlameLayer::with_file(&flamegraph_path).unwrap();
         let flame_layer = flame_layer
             .with_empty_samples(false)

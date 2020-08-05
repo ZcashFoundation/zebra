@@ -37,32 +37,35 @@ pub mod on_disk;
 pub struct Config {
     /// The root directory for storing cached data.
     ///
+    /// Cached data includes any state that can be replicated from the network
+    /// (e.g., the chain state, the blocks, the UTXO set, etc.). It does *not*
+    /// include private data that cannot be replicated from the network, such as
+    /// wallet data.  That data is not handled by `zebra-state`.
+    ///
     /// Each network has a separate state, which is stored in "mainnet/state"
     /// and "testnet/state" subdirectories.
-    pub cache_dir: Option<PathBuf>,
+    ///
+    /// The default directory is platform dependent, based on
+    /// [`dirs::cache_dir()`](https://docs.rs/dirs/3.0.1/dirs/fn.cache_dir.html):
+    ///
+    /// |Platform | Value                                           | Example                            |
+    /// | ------- | ----------------------------------------------- | ---------------------------------- |
+    /// | Linux   | `$XDG_CACHE_HOME/zebra` or `$HOME/.cache/zebra` | /home/alice/.cache/zebra           |
+    /// | macOS   | `$HOME/Library/Caches/zebra`                    | /Users/Alice/Library/Caches/zebra  |
+    /// | Windows | `{FOLDERID_LocalAppData}\zebra`                 | C:\Users\Alice\AppData\Local\zebra |
+    /// | Other   | `std::env::current_dir()/cache`                 |                                    |
+    pub cache_dir: PathBuf,
 }
 
 impl Config {
     /// Generate the appropriate `sled::Config` for `network`, based on the
     /// provided `zebra_state::Config`.
-    ///
-    /// # Details
-    ///
-    /// This function should panic if the user of `zebra-state` doesn't configure
-    /// a directory to store the state.
     pub(crate) fn sled_config(&self, network: Network) -> sled::Config {
         let net_dir = match network {
             Mainnet => "mainnet",
             Testnet => "testnet",
         };
-        let path = self
-            .cache_dir
-            .as_ref()
-            .unwrap_or_else(|| {
-                todo!("create a nice user facing error explaining how to set the cache directory in zebrad.toml:\n[state]\ncache_dir = '/path/to/cache-or-tmp'")
-            })
-            .join(net_dir)
-            .join("state");
+        let path = self.cache_dir.join(net_dir).join("state");
 
         sled::Config::default().path(path)
     }
@@ -70,11 +73,9 @@ impl Config {
 
 impl Default for Config {
     fn default() -> Self {
-        let cache_dir = std::env::var("ZEBRAD_CACHE_DIR")
-            .map(PathBuf::from)
-            .ok()
-            .or_else(|| dirs::cache_dir().map(|dir| dir.join("zebra")));
-
+        let cache_dir = dirs::cache_dir()
+            .unwrap_or_else(|| std::env::current_dir().unwrap().join("cache"))
+            .join("zebra");
         Self { cache_dir }
     }
 }
@@ -223,18 +224,5 @@ mod tests {
             Mainnet => assert_eq!(path.file_name(), Some(OsStr::new("mainnet"))),
             Testnet => assert_eq!(path.file_name(), Some(OsStr::new("testnet"))),
         }
-    }
-
-    /// Check what happens when the config is invalid.
-    #[test]
-    #[should_panic]
-    fn test_no_path() {
-        // We don't call `zebra_test::init` here, to silence the expected panic log
-        // TODO:
-        //  - implement test log levels in #760
-        //  - call `zebra_test::init`
-        //  - disable all log output from this test
-        let bad_config = Config { cache_dir: None };
-        let _unreachable = bad_config.sled_config(Mainnet);
     }
 }

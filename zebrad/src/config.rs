@@ -4,7 +4,7 @@
 //! application's configuration file and/or command-line options
 //! for specifying it.
 
-use std::net::SocketAddr;
+use std::{net::SocketAddr, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -37,10 +37,50 @@ pub struct ZebradConfig {
 #[serde(deny_unknown_fields, default)]
 pub struct TracingSection {
     /// The filter used for tracing events.
+    ///
+    /// The filter is used to create a `tracing-subscriber`
+    /// [`EnvFilter`](https://docs.rs/tracing-subscriber/0.2.10/tracing_subscriber/filter/struct.EnvFilter.html#directives),
+    /// and more details on the syntax can be found there or in the examples
+    /// below.
+    ///
+    /// # Examples
+    ///
+    /// `warn,zebrad=info,zebra_network=debug` sets a global `warn` level, an
+    /// `info` level for the `zebrad` crate, and a `debug` level for the
+    /// `zebra_network` crate.
+    ///
+    /// ```ascii,no_run
+    /// [block_verify{height=Some\(BlockHeight\(.*000\)\)}]=trace
+    /// ```
+    /// sets `trace` level for all events occurring in the context of a
+    /// `block_verify` span whose `height` field ends in `000`, i.e., traces the
+    /// verification of every 1000th block.
     pub filter: Option<String>,
 
     /// The endpoint address used for tracing.
     pub endpoint_addr: SocketAddr,
+
+    /// The path to write a flamegraph of tracing spans too.
+    ///
+    /// This path is not used verbatim when writing out the flamegraph. This is
+    /// because the flamegraph is written out as two parts. First the flamegraph
+    /// is constantly persisted to the disk in a "folded" representation that
+    /// records collapsed stack traces of the tracing spans that are active.
+    /// Then, when the application is finished running the destructor will flush
+    /// the flamegraph output to the folded file and then read that file and
+    /// generate the final flamegraph from it as an SVG.
+    ///
+    /// The need to create two files means that we will slightly manipulate the
+    /// path given to us to create the two representations.
+    ///
+    /// # Example
+    ///
+    /// Given `flamegraph = "flamegraph"` we will generate a `flamegraph.svg`
+    /// and a `flamegraph.folded` file in the current directory.
+    ///
+    /// If you provide a path with an extension the extension will be ignored and
+    /// replaced with `.folded` and `.svg` for the respective files.
+    pub flamegraph: Option<PathBuf>,
 }
 
 impl Default for TracingSection {
@@ -54,6 +94,7 @@ impl TracingSection {
         Self {
             filter: Some("info".to_owned()),
             endpoint_addr: "0.0.0.0:3000".parse().unwrap(),
+            flamegraph: None,
         }
     }
 }
