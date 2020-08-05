@@ -166,15 +166,16 @@ impl TestChild {
 
     #[spandoc::spandoc]
     pub fn wait_with_output(self) -> Result<TestOutput> {
-        let cmd = format!("{:?}", self);
-
         /// SPANDOC: waiting for command to exit
         let output = self.child.wait_with_output().with_section({
-            let cmd = cmd.clone();
+            let cmd = self.cmd.clone();
             || cmd.header("Command:")
         })?;
 
-        Ok(TestOutput { output, cmd })
+        Ok(TestOutput {
+            output,
+            cmd: self.cmd,
+        })
     }
 }
 

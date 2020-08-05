@@ -13,6 +13,7 @@ use tower::{buffer::Buffer, Service, ServiceExt};
 
 use zebra_network::{AddressBook, BoxedStdError, Request, Response};
 
+use crate::components::tokio::RuntimeRun;
 use crate::prelude::*;
 use color_eyre::eyre::{eyre, Report};
 
@@ -121,9 +122,7 @@ impl Runnable for SeedCmd {
             .take();
 
         rt.expect("runtime should not already be taken")
-            .block_on(self.seed())
-            // Surface any error that occurred executing the future.
-            .unwrap();
+            .run(self.seed());
     }
 }
 

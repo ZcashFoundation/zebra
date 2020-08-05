@@ -4,10 +4,11 @@
 //! application's configuration file and/or command-line options
 //! for specifying it.
 
-use std::net::SocketAddr;
+use std::{net::SocketAddr, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use tracing_subscriber::EnvFilter;
 use zebra_network::Config as NetworkSection;
 use zebra_state::Config as StateSection;
 
@@ -59,12 +60,28 @@ pub struct TracingSection {
 
     /// The endpoint address used for tracing.
     pub endpoint_addr: SocketAddr,
-}
 
-impl Default for TracingSection {
-    fn default() -> Self {
-        Self::populated()
-    }
+    /// The path to write a flamegraph of tracing spans too.
+    ///
+    /// This path is not used verbatim when writing out the flamegraph. This is
+    /// because the flamegraph is written out as two parts. First the flamegraph
+    /// is constantly persisted to the disk in a "folded" representation that
+    /// records collapsed stack traces of the tracing spans that are active.
+    /// Then, when the application is finished running the destructor will flush
+    /// the flamegraph output to the folded file and then read that file and
+    /// generate the final flamegraph from it as an SVG.
+    ///
+    /// The need to create two files means that we will slightly manipulate the
+    /// path given to us to create the two representations.
+    ///
+    /// # Example
+    ///
+    /// Given `flamegraph = "flamegraph"` we will generate a `flamegraph.svg`
+    /// and a `flamegraph.folded` file in the current directory.
+    ///
+    /// If you provide a path with an extension the extension will be ignored and
+    /// replaced with `.folded` and `.svg` for the respective files.
+    pub flamegraph: Option<PathBuf>,
 }
 
 impl TracingSection {
@@ -72,7 +89,24 @@ impl TracingSection {
         Self {
             filter: Some("info".to_owned()),
             endpoint_addr: "0.0.0.0:3000".parse().unwrap(),
+            flamegraph: None,
         }
+    }
+
+    /// Constructs an EnvFilter for use in our tracing subscriber.
+    ///
+    /// The env filter controls filtering of spans and events, but not how
+    /// they're emitted. Creating an env filter alone doesn't enable logging, it
+    /// needs to be used in conjunction with other layers like a fmt subscriber,
+    /// for logs, or an error layer, for SpanTraces.
+    pub fn env_filter(&self) -> EnvFilter {
+        self.filter.as_deref().unwrap_or("info").into()
+    }
+}
+
+impl Default for TracingSection {
+    fn default() -> Self {
+        Self::populated()
     }
 }
 

@@ -1,14 +1,16 @@
 //! Zebrad Abscissa Application
 
-use crate::{commands::ZebradCmd, config::ZebradConfig};
+use crate::{commands::ZebradCmd, components::tracing::FlameGrapher, config::ZebradConfig};
 use abscissa_core::{
     application::{self, AppCell},
     config,
+    config::Configurable,
     terminal::component::Terminal,
     trace::Tracing,
-    Application, Component, EntryPoint, FrameworkError, StandardPaths,
+    Application, Component, EntryPoint, FrameworkError, Shutdown, StandardPaths,
 };
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use application::fatal_error;
+use std::{fmt, process};
 
 /// Application state
 pub static APPLICATION: AppCell<ZebradApp> = AppCell::new();
@@ -33,10 +35,13 @@ pub fn app_config() -> config::Reader<ZebradApp> {
 }
 
 /// Zebrad Application
-#[derive(Debug)]
 pub struct ZebradApp {
     /// Application configuration.
     config: Option<ZebradConfig>,
+
+    /// drop handle for tracing-flame layer to ensure it flushes its buffer when
+    /// the application exits
+    flame_guard: Option<FlameGrapher>,
 
     /// Application state.
     state: application::State<Self>,
@@ -50,8 +55,18 @@ impl Default for ZebradApp {
     fn default() -> Self {
         Self {
             config: None,
+            flame_guard: None,
             state: application::State::default(),
         }
+    }
+}
+
+impl fmt::Debug for ZebradApp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ZebraApp")
+            .field("config", &self.config)
+            .field("state", &self.state)
+            .finish()
     }
 }
 
@@ -95,7 +110,7 @@ impl Application for ZebradApp {
             let tracing = self.tracing_component();
             Ok(vec![Box::new(terminal), Box::new(tracing)])
         } else {
-            init_tracing_backup();
+            crate::components::tracing::init_backup(&self.config().tracing);
             Ok(vec![Box::new(terminal)])
         }
     }
@@ -119,6 +134,32 @@ impl Application for ZebradApp {
         }
 
         self.state.components.register(components)
+    }
+
+    /// Load this application's configuration and initialize its components.
+    fn init(&mut self, command: &Self::Cmd) -> Result<(), FrameworkError> {
+        // Load configuration
+        let config = command
+            .config_path()
+            .map(|path| self.load_config(&path))
+            .transpose()?
+            .unwrap_or_default();
+
+        let config = command.process_config(config)?;
+        self.config = Some(config);
+
+        // Create and register components with the application.
+        // We do this first to calculate a proper dependency ordering before
+        // application configuration is processed
+        self.register_components(command)?;
+
+        let config = self.config.take().unwrap();
+
+        // Fire callback regardless of whether any config was loaded to
+        // in order to signal state in the application lifecycle
+        self.after_config(config, command)?;
+
+        Ok(())
     }
 
     /// Post-configuration lifecycle callback.
@@ -175,23 +216,29 @@ impl Application for ZebradApp {
 
         Ok(())
     }
+
+    fn shutdown(&mut self, shutdown: Shutdown) -> ! {
+        if let Err(e) = self.state().components.shutdown(self, shutdown) {
+            fatal_error(self, &e)
+        }
+
+        // Swap out a fake app so we can trigger the destructor on the original
+        let _ = std::mem::take(self);
+
+        match shutdown {
+            Shutdown::Graceful => process::exit(0),
+            Shutdown::Forced => process::exit(1),
+            Shutdown::Crash => process::exit(2),
+        }
+    }
 }
 
 impl ZebradApp {
-    fn tracing_component(&self) -> Tracing {
-        // Construct a tracing subscriber with the supplied filter and enable reloading.
-        let builder = tracing_subscriber::FmtSubscriber::builder()
-            // Set the filter to warn initially, then reset it in after_config.
-            .with_env_filter("warn")
-            .with_filter_reloading();
-        let filter_handle = builder.reload_handle();
-
-        builder
-            .finish()
-            .with(tracing_error::ErrorLayer::default())
-            .init();
-
-        filter_handle.into()
+    fn tracing_component(&mut self) -> Tracing {
+        let config = &self.config().tracing;
+        let (component, guard) = crate::components::tracing::init(config);
+        self.flame_guard = guard;
+        component
     }
 
     /// Returns true if command is a server command.
@@ -205,10 +252,4 @@ impl ZebradApp {
             Some(c) => c.is_server(),
         }
     }
-}
-
-fn init_tracing_backup() {
-    tracing_subscriber::Registry::default()
-        .with(tracing_error::ErrorLayer::default())
-        .init();
 }
