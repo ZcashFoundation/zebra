@@ -23,7 +23,7 @@ pub use nullifiers::Nullifier;
 /// holds the spending key corresponding to a given shielded payment
 /// address.
 pub struct Note {
-    /// The diversier of the recipient’s shielded payment address.
+    /// The diversifer of the recipient’s shielded payment address.
     pub diversifier: Diversifier,
     /// The diversified transmission key of the recipient’s shielded
     /// payment address.
