@@ -92,7 +92,7 @@ impl Application for ZebradApp {
         color_eyre::install().unwrap();
 
         if ZebradApp::command_is_server(&command) {
-            let tracing = self.tracing_component(command);
+            let tracing = self.tracing_component();
             Ok(vec![Box::new(terminal), Box::new(tracing)])
         } else {
             init_tracing_backup();
@@ -140,12 +140,13 @@ impl Application for ZebradApp {
         self.config = Some(config);
 
         if ZebradApp::command_is_server(&command) {
-            let level = self.level(command);
-            self.state
-                .components
-                .get_downcast_mut::<Tracing>()
-                .expect("Tracing component should be available")
-                .reload_filter(level);
+            if let Some(filter) = self.config.as_ref().unwrap().tracing.filter.as_ref() {
+                self.state
+                    .components
+                    .get_downcast_mut::<Tracing>()
+                    .expect("Tracing component should be available")
+                    .reload_filter(filter);
+            }
 
             // Work around some issues with dependency injection and configs
             let config = self
@@ -177,49 +178,11 @@ impl Application for ZebradApp {
 }
 
 impl ZebradApp {
-    fn level(&self, command: &EntryPoint<ZebradCmd>) -> String {
-        // `None` outputs zebrad usage information to stdout
-        let command_uses_stdout = match &command.command {
-            None => true,
-            Some(c) => c.uses_stdout(),
-        };
-
-        // Allow users to:
-        //  - override all other configs and defaults using the command line
-        //  - see command outputs without spurious log messages, by default
-        //  - override the config file using an environmental variable
-        if command.verbose {
-            "debug".to_string()
-        } else if command_uses_stdout {
-            // Tracing sends output to stdout, so we disable info-level logs for
-            // some commands.
-            //
-            // TODO: send tracing output to stderr. This change requires an abscissa
-            //       update, because `abscissa_core::component::Tracing` uses
-            //       `tracing_subscriber::fmt::Formatter`, which has `Stdout` as a
-            //       type parameter. We need `MakeWriter` or a similar type.
-            "warn".to_string()
-        } else if let Ok(level) = std::env::var("ZEBRAD_LOG") {
-            level
-        } else if let Some(ZebradConfig {
-            tracing:
-                crate::config::TracingSection {
-                    filter: Some(filter),
-                    endpoint_addr: _,
-                },
-            ..
-        }) = &self.config
-        {
-            filter.clone()
-        } else {
-            "info".to_string()
-        }
-    }
-
-    fn tracing_component(&self, command: &EntryPoint<ZebradCmd>) -> Tracing {
+    fn tracing_component(&self) -> Tracing {
         // Construct a tracing subscriber with the supplied filter and enable reloading.
         let builder = tracing_subscriber::FmtSubscriber::builder()
-            .with_env_filter(self.level(command))
+            // Set the filter to warn initially, then reset it in after_config.
+            .with_env_filter("warn")
             .with_filter_reloading();
         let filter_handle = builder.reload_handle();
 

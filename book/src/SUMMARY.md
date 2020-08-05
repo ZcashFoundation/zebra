@@ -17,6 +17,5 @@
 # Applications
 - [Applications](applications.md)
     - [zebrad](./applications/zebrad.md)
-        - [Enviroment variables](./applications/zebrad/enviroment-variables.md)
     - [utils](./applications/utils.md)
         - [zebra-checkpoints](./applications/utils/zebra-checkpoints.md)
