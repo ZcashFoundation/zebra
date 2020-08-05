@@ -2767,6 +2767,7 @@ dependencies = [
  "futures",
  "futures-util",
  "metrics",
+ "once_cell",
  "rand 0.7.3",
  "redjubjub",
  "spandoc",
