@@ -223,9 +223,7 @@ impl Application for ZebradApp {
         }
 
         // Swap out a fake app so we can trigger the destructor on the original
-        let mut app = Self::default();
-        std::mem::swap(self, &mut app);
-        drop(app);
+        let _ = std::mem::take(self);
 
         match shutdown {
             Shutdown::Graceful => process::exit(0),
