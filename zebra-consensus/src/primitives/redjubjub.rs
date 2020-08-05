@@ -10,11 +10,44 @@ use std::{
     task::{Context, Poll},
 };
 
+use futures::future::{ready, Ready};
+use once_cell::sync::Lazy;
 use rand::thread_rng;
 use redjubjub::{batch, *};
 use tokio::sync::broadcast::{channel, RecvError, Sender};
 use tower::Service;
-use tower_batch::BatchControl;
+use tower_batch::{Batch, BatchControl};
+use tower_fallback::Fallback;
+use tower_util::ServiceFn;
+
+/// Global batch verification context for RedJubjub signatures.
+///
+/// This service transparently batches contemporaneous signature verifications,
+/// handling batch failures by falling back to individual verification.
+///
+/// Note that making a `Service` call requires mutable access to the service, so
+/// you should call `.clone()` on the global handle to create a local, mutable
+/// handle.
+pub static VERIFIER: Lazy<
+    Fallback<Batch<Verifier, Item>, ServiceFn<fn(Item) -> Ready<Result<(), Error>>>>,
+> = Lazy::new(|| {
+    Fallback::new(
+        Batch::new(
+            Verifier::default(),
+            super::MAX_BATCH_SIZE,
+            super::MAX_BATCH_LATENCY,
+        ),
+        // We want to fallback to individual verification if batch verification
+        // fails, so we need a Service to use. The obvious way to do this would
+        // be to write a closure that returns an async block. But because we
+        // have to specify the type of a static, we need to be able to write the
+        // type of the closure and its return value, and both closures and async
+        // blocks have eldritch types whose names cannot be written. So instead,
+        // we use a Ready to avoid an async block and cast the closure to a
+        // function (which is possible because it doesn't capture any state).
+        tower::service_fn((|item: Item| ready(item.verify_single())) as fn(_) -> _),
+    )
+});
 
 /// RedJubjub signature verifier service
 pub struct Verifier {
@@ -26,10 +59,8 @@ pub struct Verifier {
     tx: Sender<Result<(), Error>>,
 }
 
-#[allow(clippy::new_without_default)]
-impl Verifier {
-    /// Create a new RedJubjubVerifier instance
-    pub fn new() -> Self {
+impl Default for Verifier {
+    fn default() -> Self {
         let batch = batch::Verifier::default();
         // XXX(hdevalence) what's a reasonable choice here?
         let (tx, _) = channel(10);

@@ -2872,6 +2872,8 @@ dependencies = [
  "tokio",
  "tower",
  "tower-batch",
+ "tower-fallback",
+ "tower-util",
  "tracing",
  "tracing-error",
  "tracing-futures",
