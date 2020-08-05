@@ -3,7 +3,7 @@ use color_eyre::{
     Help, SectionExt,
 };
 use std::process::{Child, Command, ExitStatus, Output};
-use std::{env, fs};
+use std::{fs, io::Write};
 use tempdir::TempDir;
 
 #[cfg(unix)]
@@ -15,9 +15,19 @@ pub fn test_cmd(path: &str) -> Result<(Command, impl Drop)> {
     let mut cmd = Command::new(path);
     cmd.current_dir(dir.path());
 
-    let state_dir = dir.path().join("state");
-    fs::create_dir(&state_dir)?;
-    env::set_var("ZEBRAD_CACHE_DIR", state_dir);
+    let cache_dir = dir.path().join("state");
+    fs::create_dir(&cache_dir)?;
+
+    fs::File::create(dir.path().join("zebrad.toml"))?.write_all(
+        format!(
+            "[state]\ncache_dir = '{}'",
+            cache_dir
+                .into_os_string()
+                .into_string()
+                .map_err(|_| eyre!("tmp dir path cannot be encoded as UTF8"))?
+        )
+        .as_bytes(),
+    )?;
 
     Ok((cmd, dir))
 }
