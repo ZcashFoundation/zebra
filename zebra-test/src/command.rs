@@ -6,6 +6,9 @@ use std::process::{Child, Command, ExitStatus, Output};
 use std::{env, fs};
 use tempdir::TempDir;
 
+#[cfg(unix)]
+use std::os::unix::process::ExitStatusExt;
+
 /// Runs a command in a TempDir
 pub fn test_cmd(path: &str) -> Result<(Command, impl Drop)> {
     let dir = TempDir::new(path)?;
@@ -225,5 +228,14 @@ impl TestOutput {
         ))
         .with_section(command)
         .with_section(stdout)
+    }
+
+    /// Returns true if the program was killed, false if exit was by another reason.
+    pub fn was_killed(&self) -> bool {
+        #[cfg(unix)]
+        return self.output.status.signal() == Some(9);
+
+        #[cfg(not(unix))]
+        return self.output.status.code() == Some(1);
     }
 }

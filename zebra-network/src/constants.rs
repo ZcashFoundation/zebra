@@ -40,15 +40,20 @@ pub const TIMESTAMP_TRUNCATION_SECONDS: i64 = 30 * 60;
 /// [BIP 14]: https://github.com/bitcoin/bips/blob/master/bip-0014.mediawiki
 pub const USER_AGENT: &str = "/🦓Zebra🦓:3.0.0-alpha.0/";
 
-/// The Zcash network protocol version implemented by this crate.
+/// The Zcash network protocol version implemented by this crate, and advertised
+/// during connection setup.
 ///
-/// This protocol version might be the current version on Mainnet or Testnet,
-/// based on where we are in the network upgrade cycle.
+/// The current protocol version is checked by our peers. If it is too old,
+/// newer peers will refuse to connect to us.
+///
+/// The current protocol version typically changes before Mainnet and Testnet
+/// network upgrades.
 pub const CURRENT_VERSION: Version = Version(170_012);
 
 /// The most recent bilateral consensus upgrade implemented by this crate.
 ///
-/// Used to select the minimum supported version for peer connections.
+/// The minimum network upgrade is used to check the protocol versions of our
+/// peers. If their versions are too old, we will disconnect from them.
 //
 // TODO: replace with NetworkUpgrade::current(network, height).
 //       See the detailed comment in handshake.rs, where this constant is used.
