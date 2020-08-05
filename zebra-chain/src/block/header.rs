@@ -3,7 +3,6 @@ use chrono::{DateTime, Duration, Utc};
 use crate::equihash_solution::EquihashSolution;
 use crate::merkle_tree::MerkleTreeRootHash;
 use crate::serialization::ZcashSerialize;
-use crate::treestate::note_commitment_tree::SaplingNoteTreeRootHash;
 
 use super::{difficulty::CompactDifficulty, BlockHeaderHash, Error};
 
