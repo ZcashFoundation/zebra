@@ -1,6 +1,5 @@
 //! Sapling note and value commitments and types.
 
-
 #[cfg(test)]
 mod arbitrary;
 #[cfg(test)]
