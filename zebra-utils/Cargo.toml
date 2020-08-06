@@ -7,7 +7,7 @@ edition = "2018"
 
 [dependencies]
 abscissa_core = "0.5"
-structopt = "0.3.15"
+structopt = "0.3.16"
 color-eyre = "0.5.0"
 hex = "0.4"
 serde_json = "1.0"
