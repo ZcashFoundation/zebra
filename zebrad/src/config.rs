@@ -44,6 +44,9 @@ pub struct TracingSection {
     /// and more details on the syntax can be found there or in the examples
     /// below.
     ///
+    /// If no filter is specified (`None`), the filter is set to `info` if the
+    /// `-v` flag is given and `warn` if it is not given.
+    ///
     /// # Examples
     ///
     /// `warn,zebrad=info,zebra_network=debug` sets a global `warn` level, an
@@ -123,20 +126,5 @@ impl Default for MetricsSection {
         Self {
             endpoint_addr: "0.0.0.0:9999".parse().unwrap(),
         }
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use color_eyre::eyre::Result;
-
-    #[test]
-    fn test_toml_ser() -> Result<()> {
-        let default_config = super::ZebradConfig::default();
-        println!("Default config: {:?}", default_config);
-
-        println!("Toml:\n{}", toml::Value::try_from(&default_config)?);
-
-        Ok(())
     }
 }
