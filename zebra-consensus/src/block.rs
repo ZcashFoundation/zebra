@@ -185,7 +185,7 @@ where
                 //   - Replace with AddBlock constraints
                 None => {
                     tracing::debug!(?height, ?hash, "Waiting for state to have block");
-                    time::delay_for(Duration::from_secs(2)).await
+                    time::delay_for(Duration::from_millis(50)).await
                 }
             };
         }
