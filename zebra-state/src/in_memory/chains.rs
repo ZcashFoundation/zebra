@@ -9,10 +9,7 @@ use std::{
     task::{Context, Poll},
 };
 use tower::{Service, ServiceExt};
-use zebra_chain::{
-    block::{Block, BlockHeaderHash},
-    types::BlockHeight,
-};
+use zebra_chain::{block::Block, types::BlockHeight};
 
 /// A representation of the chain state at a given height
 #[derive(Clone, Debug)]
@@ -22,7 +19,22 @@ struct ChainState {
 }
 
 /// A persistent data structure representing the end of a chain
+#[derive(Debug, Clone)]
 struct Chain(im::OrdMap<BlockHeight, ChainState>);
+
+/// Representation of the full chain context at a certain block
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChainContext {
+    recent: Option<Chain>,
+    // TODO include a reference to the inner service so we can query the disk
+    // for context that we don't have in the recent chain.
+}
+
+impl ChainContext {
+    fn append(self, block: Arc<Block>) -> Chain {
+        todo!()
+    }
+}
 
 impl PartialEq for Chain {
     fn eq(&self, other: &Self) -> bool {
@@ -48,21 +60,19 @@ impl Chain {
     fn contains(&self, height: BlockHeight) -> bool {
         todo!()
     }
-
-    fn parent(&self) -> Chain {
-        todo!()
-    }
 }
 
 struct ChainSet(BTreeSet<Chain>);
 
 impl ChainSet {
-    fn insert(&mut self, chain: Chain) -> Result<(), Error> {
-        let parent = chain.parent();
-
-        if self.0.contains(&parent) {
-            self.0.remove(&parent);
+    fn insert(&mut self, parent: ChainContext, block: Arc<Block>) -> Result<(), Error> {
+        if let Some(chain) = parent.recent.as_ref() {
+            if self.0.contains(chain) {
+                self.0.remove(chain);
+            }
         }
+
+        let chain = parent.append(block);
 
         self.0.insert(chain);
 
@@ -82,48 +92,6 @@ pub(crate) struct ChainsState<S> {
 }
 
 impl<S> ChainsState<S> {
-    fn insert(&mut self, block: impl Into<Arc<Block>>) -> Result<BlockHeaderHash, Error> {
-        todo!()
-        // let block = block.into();
-        // let hash = block.hash();
-        // let height = block.coinbase_height().unwrap();
-        // let parent_height = BlockHeight(height.0 - 1);
-
-        // for (chain, parent_state) in self.chains.iter_mut().flat_map(|chain| {
-        //     chain
-        //         .0
-        //         .get(&parent_height)
-        //         .cloned()
-        //         .map(|state| (chain, state))
-        // }) {
-        //     let parent_hash = parent_state.block.hash();
-
-        //     if parent_hash != block.header.previous_block_hash {
-        //         continue;
-        //     }
-
-        //     let was_present = if chain.contains(height) {
-        //         chain.0.insert(height, ChainState { block })
-        //     } else {
-        //         let (mut shared, _forked) = chain.0.split(&height);
-        //         let was_present = shared.insert(height, ChainState { block });
-
-        //         self.chains.push(Chain(shared));
-
-        //         was_present
-        //     }
-        //     .is_some();
-
-        //     if was_present {
-        //         unreachable!("chain state should not already exist in this map");
-        //     }
-
-        //     return Ok(hash);
-        // }
-
-        // Err("parent hash not found in chain state")?
-    }
-
     /// Remove blocks from chains that should be persisted to the storage layer.
     fn pop_finalized_block(&mut self) -> Option<Arc<Block>> {
         todo!()
@@ -148,8 +116,15 @@ where
     fn call(&mut self, req: Request) -> Self::Future {
         tracing::debug!(?req);
         match req {
-            Request::AddBlock { block } => {
-                let result = self.insert(block).map(|hash| {
+            Request::AddBlock { block } => todo!(),
+            Request::GetBlock { hash } => todo!(),
+            Request::GetTip => todo!(),
+            Request::GetDepth { hash } => todo!(),
+            Request::GetBlockLocator { genesis } => todo!(),
+            Request::CommitBlock { block, context } => {
+                let hash = block.hash();
+                let result = self.chains.insert(context, block);
+                let result = result.map(|()| {
                     let finalized = self.pop_finalized_block();
                     (hash, finalized)
                 });
@@ -173,10 +148,7 @@ where
                 }
                 .boxed()
             }
-            Request::GetBlock { hash } => todo!(),
-            Request::GetTip => todo!(),
-            Request::GetDepth { hash } => todo!(),
-            Request::GetBlockLocator { genesis } => todo!(),
+            Request::GetChainContext { hash } => todo!(),
         }
     }
 }

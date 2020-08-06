@@ -205,6 +205,8 @@ impl Service<Request> for SledState {
                 }
                 .boxed()
             }
+            Request::CommitBlock { block, context } => todo!(),
+            Request::GetChainContext { hash } => todo!(),
         }
     }
 }

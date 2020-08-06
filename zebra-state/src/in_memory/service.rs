@@ -100,6 +100,8 @@ impl Service<Request> for InMemoryState {
 
                 async move { Ok(Response::BlockLocator { block_locator }) }.boxed()
             }
+            Request::CommitBlock { block, context } => todo!(),
+            Request::GetChainContext { hash } => todo!(),
         }
     }
 }

@@ -21,6 +21,7 @@ use std::path::PathBuf;
 use std::{error, iter, sync::Arc};
 use tower::{Service, ServiceExt};
 
+use in_memory::chains::ChainContext;
 use zebra_chain::{
     block::{Block, BlockHeaderHash},
     types::BlockHeight,
@@ -88,9 +89,22 @@ pub enum Request {
         /// The block to be added to the state
         block: Arc<Block>,
     },
+    /// Commit a block to the chain state given contextual verification
+    /// constraints
+    CommitBlock {
+        /// The block to be added to the state
+        block: Arc<Block>,
+        /// The previous state of the chain prior to adding this block
+        context: ChainContext,
+    },
     /// Get a block from the zebra-state
     GetBlock {
         /// The hash used to identify the block
+        hash: BlockHeaderHash,
+    },
+    /// Get the chain context for a given block
+    GetChainContext {
+        /// The hash used to identify the block to lookup context for
         hash: BlockHeaderHash,
     },
     /// Get a block locator list for the current best chain

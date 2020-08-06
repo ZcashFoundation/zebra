@@ -7,7 +7,7 @@ use super::{Request, Response};
 use std::{error, future::Future};
 use tower::{buffer::Buffer, Service};
 
-mod chains;
+pub(crate) mod chains;
 mod service;
 
 /// Return's a type that implement's the `zebra_state::Service` entirely in
