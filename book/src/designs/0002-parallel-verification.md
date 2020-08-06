@@ -130,7 +130,7 @@ There are a few exceptions to this general principle:
   the list of recent blocks in the chain context.
 * Large state, such as unspent transaction outputs (UTXOs), is stored on disk.
   The chain context stores recent blocks and a reference to the state service
-  for querying the state that isn't availble in recent blocks.
+  for querying the state that isn't available in recent blocks.
 
 In the event of a chain fork, there may be multiple next blocks based on the
 current block, and multiple descendant chains. The chain contexts in forks are
