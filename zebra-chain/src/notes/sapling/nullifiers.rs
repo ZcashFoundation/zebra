@@ -39,8 +39,8 @@ impl From<[u8; 32]> for Nullifier {
     }
 }
 
-impl From<(NoteCommitment, Position, NullifierDerivingKey)> for Nullifier {
-    fn from((cm, pos, nk): (NoteCommitment, Position, NullifierDerivingKey)) -> Self {
+impl<'a> From<&'a (NoteCommitment, Position, NullifierDerivingKey)> for Nullifier {
+    fn from((cm, pos, nk): &'a (NoteCommitment, Position, NullifierDerivingKey)) -> Self {
         let rho = jubjub::AffinePoint::from(mixing_pedersen_hash(cm.0.into(), pos.0.into()));
 
         Nullifier(prf_nf(nk.into(), rho.to_bytes()))
