@@ -16,7 +16,7 @@ Why are we doing this? What use cases does it support? What is the expected outc
 # Definitions
 [definitions]: #definitions
 
-Lay out explicit definitions of any terms that are newly introduced, contested, or which cause confusion during the RFC design process.
+Lay out explicit definitions of any terms that are newly introduced or which cause confusion during the RFC design process.
 
 # Guide-level explanation
 [guide-level-explanation]: #guide-level-explanation
