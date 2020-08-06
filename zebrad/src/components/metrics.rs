@@ -11,7 +11,7 @@ use crate::{components::tokio::TokioComponent, config::ZebradConfig};
 #[derive(Debug, Component)]
 #[component(inject = "init_tokio(zebrad::components::tokio::TokioComponent)")]
 pub struct MetricsEndpoint {
-    addr: SocketAddr,
+    addr: Option<SocketAddr>,
 }
 
 impl MetricsEndpoint {
@@ -24,6 +24,12 @@ impl MetricsEndpoint {
 
     /// Tokio endpoint dependency stub.
     pub fn init_tokio(&mut self, tokio_component: &TokioComponent) -> Result<(), FrameworkError> {
+        let addr = if let Some(addr) = self.addr {
+            addr
+        } else {
+            return Ok(());
+        };
+
         info!("Initializing metrics endpoint");
 
         // XXX do we need to hold on to the receiver?
@@ -33,8 +39,7 @@ impl MetricsEndpoint {
         // XXX ???? connect this ???
         let _sink = receiver.sink();
 
-        let endpoint =
-            HttpExporter::new(receiver.controller(), PrometheusBuilder::new(), self.addr);
+        let endpoint = HttpExporter::new(receiver.controller(), PrometheusBuilder::new(), addr);
 
         tokio_component
             .rt

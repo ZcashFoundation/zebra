@@ -14,12 +14,7 @@ pub struct GenerateCmd {
 impl Runnable for GenerateCmd {
     /// Start the application.
     fn run(&self) {
-        let default_config = ZebradConfig {
-            metrics: Default::default(),
-            network: Default::default(),
-            state: Default::default(),
-            tracing: crate::config::TracingSection::populated(),
-        };
+        let default_config = ZebradConfig::default();
         let mut output = r"# Default configuration for zebrad.
 #
 # This file can be used as a skeleton for custom configs.

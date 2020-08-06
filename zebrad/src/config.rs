@@ -61,10 +61,15 @@ pub struct TracingSection {
     /// verification of every 1000th block.
     pub filter: Option<String>,
 
-    /// The endpoint address used for tracing.
-    pub endpoint_addr: SocketAddr,
+    /// The address used for an ad-hoc RPC endpoint allowing dynamic control of the tracing filter.
+    ///
+    /// If this is set to None, the endpoint is disabled.
+    pub endpoint_addr: Option<SocketAddr>,
 
-    /// The path to write a flamegraph of tracing spans too.
+    /// Controls whether to write a flamegraph of tracing spans.
+    ///
+    /// If this is set to None, flamegraphs are disabled. Otherwise, it specifies
+    /// an output file path, as described below.
     ///
     /// This path is not used verbatim when writing out the flamegraph. This is
     /// because the flamegraph is written out as two parts. First the flamegraph
@@ -79,8 +84,8 @@ pub struct TracingSection {
     ///
     /// # Example
     ///
-    /// Given `flamegraph = "flamegraph"` we will generate a `flamegraph.svg`
-    /// and a `flamegraph.folded` file in the current directory.
+    /// Given `flamegraph = "flamegraph"` we will generate a `flamegraph.svg` and
+    /// a `flamegraph.folded` file in the current directory.
     ///
     /// If you provide a path with an extension the extension will be ignored and
     /// replaced with `.folded` and `.svg` for the respective files.
@@ -88,14 +93,6 @@ pub struct TracingSection {
 }
 
 impl TracingSection {
-    pub fn populated() -> Self {
-        Self {
-            filter: Some("info".to_owned()),
-            endpoint_addr: "0.0.0.0:3000".parse().unwrap(),
-            flamegraph: None,
-        }
-    }
-
     /// Constructs an EnvFilter for use in our tracing subscriber.
     ///
     /// The env filter controls filtering of spans and events, but not how
@@ -109,7 +106,11 @@ impl TracingSection {
 
 impl Default for TracingSection {
     fn default() -> Self {
-        Self::populated()
+        Self {
+            filter: None,
+            endpoint_addr: None,
+            flamegraph: None,
+        }
     }
 }
 
@@ -117,14 +118,16 @@ impl Default for TracingSection {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct MetricsSection {
-    /// The endpoint address used for metrics.
-    pub endpoint_addr: SocketAddr,
+    /// The address used for the Prometheus metrics endpoint.
+    ///
+    /// The endpoint is disabled if this is set to `None`.
+    pub endpoint_addr: Option<SocketAddr>,
 }
 
 impl Default for MetricsSection {
     fn default() -> Self {
         Self {
-            endpoint_addr: "0.0.0.0:9999".parse().unwrap(),
+            endpoint_addr: None,
         }
     }
 }

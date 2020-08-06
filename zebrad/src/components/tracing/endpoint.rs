@@ -14,7 +14,7 @@ use super::Tracing;
 #[derive(Debug, Component)]
 #[component(inject = "init_tokio(zebrad::components::tokio::TokioComponent)")]
 pub struct TracingEndpoint {
-    addr: SocketAddr,
+    addr: Option<SocketAddr>,
 }
 
 async fn read_filter(req: Request<Body>) -> Result<String, String> {
@@ -31,17 +31,21 @@ impl TracingEndpoint {
     /// Create the component.
     pub fn new(config: &ZebradConfig) -> Result<Self, FrameworkError> {
         Ok(Self {
-            addr: config.tracing.endpoint_addr.clone(),
+            addr: config.tracing.endpoint_addr,
         })
     }
 
     pub fn init_tokio(&mut self, tokio_component: &TokioComponent) -> Result<(), FrameworkError> {
+        let addr = if let Some(addr) = self.addr {
+            addr
+        } else {
+            return Ok(());
+        };
         info!("Initializing tracing endpoint");
 
         let service =
             make_service_fn(|_| async { Ok::<_, hyper::Error>(service_fn(request_handler)) });
 
-        let addr = self.addr;
         tokio_component
             .rt
             .as_ref()
