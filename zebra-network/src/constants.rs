@@ -7,8 +7,14 @@ use crate::protocol::external::types::*;
 
 use zebra_consensus::parameters::NetworkUpgrade::{self, *};
 
+/// The buffer size for the peer set.
+pub const PEERSET_BUFFER_SIZE: usize = 10;
+
 /// The timeout for requests made to a remote peer.
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// The timeout for handshakes when connecting to new peers.
+pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(4);
 
 /// We expect to receive a message from a live peer at least once in this time duration.
 ///
@@ -58,6 +64,12 @@ pub const CURRENT_VERSION: Version = Version(170_012);
 // TODO: replace with NetworkUpgrade::current(network, height).
 //       See the detailed comment in handshake.rs, where this constant is used.
 pub const MIN_NETWORK_UPGRADE: NetworkUpgrade = Heartwood;
+
+/// The default RTT estimate for peer responses.
+pub const EWMA_DEFAULT_RTT: Duration = Duration::from_secs(1);
+
+/// The decay time for the EWMA response time metric used for load balancing.
+pub const EWMA_DECAY_TIME: Duration = Duration::from_secs(60);
 
 /// Magic numbers used to identify different Zcash networks.
 pub mod magics {
