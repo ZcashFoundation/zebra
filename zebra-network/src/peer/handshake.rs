@@ -104,7 +104,6 @@ where
         let nonces = self.nonces.clone();
         let internal_service = self.internal_service.clone();
         let timestamp_collector = self.timestamp_collector.clone();
-        let user_agent = self.config.user_agent.clone();
         let network = self.config.network;
 
         let fut = async move {
@@ -128,7 +127,7 @@ where
                 //       send our configured address to the peer
                 address_from: (PeerServices::NODE_NETWORK, "0.0.0.0:8233".parse().unwrap()),
                 nonce: local_nonce,
-                user_agent,
+                user_agent: constants::USER_AGENT.to_string(),
                 // XXX eventually the `PeerConnector` will need to have a handle
                 // for a service that gets the current block height. Among other
                 // things we need it to reject peers who don't know about the
