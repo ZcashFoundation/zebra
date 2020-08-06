@@ -11,7 +11,7 @@ pub struct Tracing {
 
 impl Tracing {
     /// Try to create a new [`Tracing`] component with the given `filter`.
-    pub fn new(filter: String) -> Result<Self, FrameworkError> {
+    pub fn new(filter: &str) -> Result<Self, FrameworkError> {
         // Configure log/tracing interoperability by setting a `LogTracer` as
         // the global logger for the log crate, which converts all log events
         // into tracing events.
