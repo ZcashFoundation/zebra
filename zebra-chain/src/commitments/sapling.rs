@@ -55,8 +55,6 @@ pub fn pedersen_hash_to_point(domain: [u8; 8], M: &BitVec<Lsb0, u8>) -> jubjub::
     /// ⟨Mᵢ⟩
     ///
     /// Σ j={0,k-1}: (1 - 2x₂)⋅(1 + x₀ + 2x₁)⋅2^(4⋅j)
-    // XXX: Are internal functions doc'd?
-    //
     // This is less efficient than it could be so that it can match the math
     // closely.
     fn M_i(segment: &BitSlice<Lsb0, u8>) -> jubjub::Fr {
@@ -113,6 +111,14 @@ pub fn pedersen_hash_to_point(domain: [u8; 8], M: &BitVec<Lsb0, u8>) -> jubjub::
     }
 
     result
+}
+
+/// Pedersen Hash Function
+///
+/// https://zips.z.cash/protocol/protocol.pdf#concretepedersenhash
+#[allow(non_snake_case)]
+pub fn pedersen_hash(domain: [u8; 8], M: &BitVec<Lsb0, u8>) -> jubjub::Fq {
+    jubjub::AffinePoint::from(pedersen_hash_to_point(domain, M)).get_u()
 }
 
 /// Mixing Pedersen Hash Function

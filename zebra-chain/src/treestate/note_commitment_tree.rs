@@ -20,17 +20,9 @@ use bitvec::prelude::*;
 use proptest_derive::Arbitrary;
 
 use crate::{
-    commitments::sapling::pedersen_hash_to_point,
+    commitments::sapling::pedersen_hash,
     serialization::{SerializationError, ZcashDeserialize, ZcashSerialize},
 };
-
-/// Pedersen Hash Function
-///
-/// https://zips.z.cash/protocol/protocol.pdf#concretepedersenhash
-#[allow(non_snake_case)]
-fn pedersen_hash(domain: [u8; 8], M: &BitVec<Lsb0, u8>) -> jubjub::Fq {
-    jubjub::AffinePoint::from(pedersen_hash_to_point(domain, M)).get_u()
-}
 
 /// MerkleCRH^Sapling Hash Function
 ///
