@@ -1,4 +1,5 @@
-use std::{collections::HashSet, iter, pin::Pin, sync::Arc, time::Duration};
+use std::time::{Duration, Instant};
+use std::{collections::HashSet, iter, pin::Pin, sync::Arc};
 
 use color_eyre::eyre::{eyre, Report};
 use futures::stream::{FuturesUnordered, StreamExt};
@@ -15,6 +16,8 @@ use zebra_consensus::parameters;
 use zebra_network::{self as zn, RetryLimit};
 use zebra_state as zs;
 
+use SyncError::*;
+
 /// The number of different peers we use to obtain and extend tips.
 const FANOUT: usize = checkpoint::MAX_QUEUED_BLOCKS_PER_HEIGHT;
 /// The maximum number of times we will retry a block download.
@@ -26,6 +29,11 @@ const RETRY_LIMIT: usize = 10;
 /// waiting for queued verifications to complete. Set to twice the maximum
 /// checkpoint distance.
 pub const LOOKAHEAD_LIMIT: usize = checkpoint::MAX_CHECKPOINT_HEIGHT_GAP * 2;
+
+/// We reset our failed download list each time this interval elapses.
+const DOWNLOAD_FAILURE_RESET_INTERVAL: Duration = Duration::from_secs(75);
+/// We reset our failed verification list each time this interval elapses.
+const VERIFICATION_FAILURE_RESET_INTERVAL: Duration = Duration::from_secs(3600);
 
 #[derive(Debug)]
 pub struct Syncer<ZN, ZS, ZV>
@@ -59,6 +67,22 @@ where
         Pin<Box<FuturesUnordered<Instrumented<JoinHandle<Result<BlockHeaderHash, SyncError>>>>>>,
     /// The hashes for each future in pending_blocks.
     pending_hashes: HashSet<BlockHeaderHash>,
+
+    /// The hashes that have failed multiple download retries.
+    ///
+    /// Download issues can be transient, for example, a block that has not
+    /// propagated yet.
+    failed_downloads: HashSet<BlockHeaderHash>,
+    /// The next time to reset the failed download list.
+    next_download_fail_reset: Instant,
+
+    /// The hashes that have failed verification.
+    ///
+    /// Verification failures can be transient, for example, a block that has a
+    /// time in the future, according to our local clock.
+    failed_verifications: HashSet<BlockHeaderHash>,
+    /// The next time to reset the failed verifications list.
+    next_verification_fail_reset: Instant,
 }
 
 impl<ZN, ZS, ZV> Syncer<ZN, ZS, ZV>
@@ -86,6 +110,10 @@ where
             prospective_tips: HashSet::new(),
             pending_blocks: Box::pin(FuturesUnordered::new()),
             pending_hashes: HashSet::new(),
+            failed_downloads: HashSet::new(),
+            next_download_fail_reset: Instant::now(),
+            failed_verifications: HashSet::new(),
+            next_verification_fail_reset: Instant::now(),
         }
     }
 
@@ -96,6 +124,8 @@ where
         self.request_genesis().await?;
 
         loop {
+            self.handle_failures();
+
             self.obtain_tips().await?;
             self.update_metrics();
 
@@ -104,6 +134,8 @@ where
             // If there are any prospective tips, call ExtendTips. Continue this step until there are no more prospective tips.
             while !self.prospective_tips.is_empty() {
                 tracing::debug!("extending prospective tips");
+                self.handle_failures();
+
                 self.extend_tips().await?;
                 self.update_metrics();
 
@@ -149,10 +181,19 @@ where
             // making progress (probably using a timeout), then
             // continue the loop with a new invocation of
             // obtain_tips(), which will restart block downloads.
-            Err((hash, ref e)) => {
+            Err(ref e) => {
                 // Errors happen frequently on mainnet, due to bad peers.
                 tracing::debug!(?e, "potentially transient error");
-                hash
+                match e {
+                    Download(hash, _) => {
+                        self.failed_downloads.insert(*hash);
+                        *hash
+                    }
+                    VerifyService(hash, _) | VerifyBlock(hash, _) => {
+                        self.failed_verifications.insert(*hash);
+                        *hash
+                    }
+                }
             }
         };
         if !self.pending_hashes.remove(&hash) {
@@ -486,17 +527,17 @@ where
                         .next()
                         .expect("successful response has the block in it"),
                     Ok(_) => unreachable!("wrong response to block request"),
-                    Err(e) => Err((hash, e))?,
+                    Err(e) => Err(Download(hash, e))?,
                 };
                 metrics::counter!("sync.downloaded_blocks", 1);
 
                 let response = verifier
                     .ready_and()
                     .await
-                    .map_err(|e| (hash, e))?
+                    .map_err(|e| VerifyService(hash, e))?
                     .call(block)
                     .await
-                    .map_err(|e| (hash, e));
+                    .map_err(|e| VerifyBlock(hash, e));
                 metrics::counter!("sync.verified_blocks", 1);
                 response
             })
@@ -537,8 +578,12 @@ where
         latest_hashes: &mut Vec<BlockHeaderHash>,
         recent_hashes: &HashSet<BlockHeaderHash>,
     ) {
-        latest_hashes
-            .retain(|hash| !recent_hashes.contains(hash) && !self.pending_hashes.contains(hash));
+        latest_hashes.retain(|hash| {
+            !recent_hashes.contains(hash)
+                && !self.pending_hashes.contains(hash)
+                && !self.failed_downloads.contains(hash)
+                && !self.failed_verifications.contains(hash)
+        });
     }
 
     /// Update metrics gauges, and create a trace containing metrics.
@@ -548,13 +593,67 @@ where
             self.prospective_tips.len() as i64
         );
         metrics::gauge!("sync.pending_blocks.len", self.pending_blocks.len() as i64);
+        metrics::gauge!(
+            "sync.failed_downloads.len",
+            self.failed_downloads.len() as i64
+        );
+        metrics::gauge!(
+            "sync.failed_verifications.len",
+            self.failed_verifications.len() as i64
+        );
         tracing::info!(
             tips.len = self.prospective_tips.len(),
             pending.len = self.pending_blocks.len(),
             pending.limit = LOOKAHEAD_LIMIT,
+            failed_downloads.len = self.failed_downloads.len(),
+            failed_verifications.len = self.failed_verifications.len(),
         );
+    }
+
+    /// Check and reset the failure lists, if needed.
+    fn handle_failures(&mut self) {
+        if Instant::now() > self.next_download_fail_reset {
+            if !self.failed_downloads.is_empty() {
+                let failed_download_count = self.failed_downloads.len();
+                tracing::info!(?failed_download_count, "Resetting failed downloads");
+                self.failed_downloads.clear();
+            }
+            // Reset downloads for each newly mined block
+            self.next_download_fail_reset = Instant::now() + DOWNLOAD_FAILURE_RESET_INTERVAL;
+        }
+        if Instant::now() > self.next_verification_fail_reset {
+            if !self.failed_verifications.is_empty() {
+                let failed_verification_count = self.failed_verifications.len();
+                tracing::info!(
+                    ?failed_verification_count,
+                    "Resetting failed block verifies"
+                );
+                self.failed_verifications.clear();
+            }
+            // Reset verifies after an hour.
+            //
+            // Block verification can non-deterministically fail if the local
+            // node's clock is out by multiple hours. Assume that it's incorrect
+            // by at least another hour.
+            //
+            // TODO: distinguish between permanent and transient failures.
+            self.next_verification_fail_reset =
+                Instant::now() + VERIFICATION_FAILURE_RESET_INTERVAL;
+        }
     }
 }
 
 type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
-type SyncError = (BlockHeaderHash, Error);
+
+/// Errors returned by the download and verify task, and the associated block
+/// hash.
+#[derive(Debug)]
+enum SyncError {
+    /// Failed while downloading.
+    Download(BlockHeaderHash, Error),
+
+    /// Verification service failed.
+    VerifyService(BlockHeaderHash, Error),
+    /// Verify request failed.
+    VerifyBlock(BlockHeaderHash, Error),
+}
