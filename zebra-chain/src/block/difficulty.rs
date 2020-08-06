@@ -116,7 +116,7 @@ impl fmt::Debug for Work {
         // There isn't a standard way to represent alternate formats for the
         // same value.
         f.debug_tuple("Work")
-        // Use hex, because expanded difficulty is in hex.
+            // Use hex, because expanded difficulty is in hex.
             .field(&format_args!("{:#x}", self.0))
             // Use decimal, to compare with zcashd
             .field(&format_args!("{}", self.0))
