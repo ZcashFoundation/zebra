@@ -455,6 +455,12 @@ impl From<NullifierDerivingKey> for [u8; 32] {
     }
 }
 
+impl From<&NullifierDerivingKey> for [u8; 32] {
+    fn from(nk: &NullifierDerivingKey) -> [u8; 32] {
+        nk.0.to_bytes()
+    }
+}
+
 impl From<ProofAuthorizingKey> for NullifierDerivingKey {
     /// Requires JubJub's _FindGroupHash^J("Zcash_H_", "")_, then uses
     /// the resulting generator point to scalar multiply the
