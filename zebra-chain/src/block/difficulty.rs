@@ -13,7 +13,7 @@
 use crate::block::BlockHeaderHash;
 
 use std::cmp::{Ordering, PartialEq, PartialOrd};
-use std::{fmt, str::FromStr};
+use std::fmt;
 
 use primitive_types::U256;
 
@@ -121,7 +121,7 @@ impl fmt::Debug for Work {
             // Use decimal, to compare with zcashd
             .field(&format_args!("{}", self.0))
             // Use log2, to compare with zcashd
-            .field(&format_args!("{:.5}", log2_work))
+            .field(&format_args!("{:.5}", (self.0 as f64).log2()))
             .finish()
     }
 }
