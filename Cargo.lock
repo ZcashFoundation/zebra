@@ -640,20 +640,6 @@ checksum = "134951f4028bdadb9b84baf4232681efbf277da25144b9b0ad65df75946c422b"
 
 [[package]]
 name = "ed25519-zebra"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b16644be292b6dbd3d5a4ab1382b22a9f0dc5a2055f9141f3e4bc47ee640e12e"
-dependencies = [
- "curve25519-dalek",
- "hex",
- "rand_core 0.5.1",
- "serde",
- "sha2",
- "thiserror",
-]
-
-[[package]]
-name = "ed25519-zebra"
 version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "833d5de20d6c876d03b23d13d9caa75fb682d8939d7d418938699a35ee556491"
@@ -2414,7 +2400,7 @@ name = "tower-batch"
 version = "0.1.0"
 dependencies = [
  "color-eyre",
- "ed25519-zebra 2.1.1",
+ "ed25519-zebra",
  "futures",
  "futures-core",
  "pin-project",
@@ -2829,7 +2815,7 @@ dependencies = [
  "chrono",
  "color-eyre",
  "displaydoc",
- "ed25519-zebra 1.0.0",
+ "ed25519-zebra",
  "equihash",
  "futures",
  "hex",
