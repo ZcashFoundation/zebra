@@ -22,6 +22,7 @@
 // Tracing causes false positives on this lint:
 // https://github.com/tokio-rs/tracing/issues/553
 #![allow(clippy::cognitive_complexity)]
+#![allow(clippy::try_err)]
 
 #[macro_use]
 extern crate tracing;

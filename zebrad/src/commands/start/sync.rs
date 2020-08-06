@@ -15,8 +15,13 @@ use zebra_consensus::parameters;
 use zebra_network::{self as zn, RetryLimit};
 use zebra_state as zs;
 
-// XXX in the future, we may not be able to access the checkpoint module.
+/// The number of different peers we use to obtain and extend tips.
 const FANOUT: usize = checkpoint::MAX_QUEUED_BLOCKS_PER_HEIGHT;
+/// The maximum number of times we will retry a block download.
+// TODO: Resolve the backpressure/checkpoint deadlock, and reduce the number of
+// retries
+const RETRY_LIMIT: usize = 10;
+
 /// Controls how far ahead of the chain tip the syncer tries to download before
 /// waiting for queued verifications to complete. Set to twice the maximum
 /// checkpoint distance.
@@ -32,16 +37,28 @@ where
     ZV: Service<Arc<Block>, Response = BlockHeaderHash, Error = Error> + Send + Clone + 'static,
     ZV::Future: Send,
 {
-    /// Used to perform extendtips requests, with no retry logic (failover is handled using fanout).
+    /// Used to perform ObtainTips and ExtendTips requests, with no retry logic.
+    ///
+    /// Failover is handled using fanout.
     tip_network: ZN,
     /// Used to download blocks, with retry logic.
     block_network: Retry<RetryLimit, ZN>,
+
+    /// Used to check the currently verified blocks.
     state: ZS,
+    /// Used to verify blocks.
     verifier: ZV,
-    prospective_tips: HashSet<BlockHeaderHash>,
-    pending_blocks:
-        Pin<Box<FuturesUnordered<Instrumented<JoinHandle<Result<BlockHeaderHash, Error>>>>>>,
+    /// The hash of the genesis block for the configured `Network`.
     genesis_hash: BlockHeaderHash,
+
+    /// The current set of tips that we're chasing.
+    prospective_tips: HashSet<BlockHeaderHash>,
+
+    /// A future for each block that is awaiting download and verification.
+    pending_blocks:
+        Pin<Box<FuturesUnordered<Instrumented<JoinHandle<Result<BlockHeaderHash, SyncError>>>>>>,
+    /// The hashes for each future in pending_blocks.
+    pending_hashes: HashSet<BlockHeaderHash>,
 }
 
 impl<ZN, ZS, ZV> Syncer<ZN, ZS, ZV>
@@ -59,15 +76,16 @@ where
     ///  - state: the zebra-state that stores the chain
     ///  - verifier: the zebra-consensus verifier that checks the chain
     pub fn new(chain: Network, peers: ZN, state: ZS, verifier: ZV) -> Self {
-        let retry_peers = Retry::new(RetryLimit::new(3), peers.clone());
+        let retry_peers = Retry::new(RetryLimit::new(RETRY_LIMIT), peers.clone());
         Self {
             tip_network: peers,
             block_network: retry_peers,
             state,
             verifier,
+            genesis_hash: parameters::genesis_hash(chain),
             prospective_tips: HashSet::new(),
             pending_blocks: Box::pin(FuturesUnordered::new()),
-            genesis_hash: parameters::genesis_hash(chain),
+            pending_hashes: HashSet::new(),
         }
     }
 
@@ -79,62 +97,69 @@ where
 
         loop {
             self.obtain_tips().await?;
-            metrics::gauge!(
-                "sync.prospective_tips.len",
-                self.prospective_tips.len() as i64
-            );
-            metrics::gauge!("sync.pending_blocks.len", self.pending_blocks.len() as i64);
+            self.update_metrics();
 
             // ObtainTips Step 6
             //
             // If there are any prospective tips, call ExtendTips. Continue this step until there are no more prospective tips.
             while !self.prospective_tips.is_empty() {
                 tracing::debug!("extending prospective tips");
-
                 self.extend_tips().await?;
-
-                metrics::gauge!(
-                    "sync.prospective_tips.len",
-                    self.prospective_tips.len() as i64
-                );
-                metrics::gauge!("sync.pending_blocks.len", self.pending_blocks.len() as i64);
-                tracing::debug!(
-                    pending.len = self.pending_blocks.len(),
-                    limit = LOOKAHEAD_LIMIT
-                );
+                self.update_metrics();
 
                 // Check whether we need to wait for existing block download tasks to finish
                 while self.pending_blocks.len() > LOOKAHEAD_LIMIT {
-                    match self
-                        .pending_blocks
-                        .next()
-                        .await
-                        .expect("already checked there's at least one pending block task")
-                        .expect("block download tasks should not panic")
-                    {
-                        Ok(hash) => tracing::debug!(?hash, "verified and committed block to state"),
-                        // This is a non-transient error indicating either that
-                        // we've repeatedly missed a block we need or that we've
-                        // repeatedly missed a bad block suggested by a peer
-                        // feeding us bad hashes.
-                        //
-                        // TODO(hdevalence): handle interruptions in the chain
-                        // sync process. this should detect when we've stopped
-                        // making progress (probably using a timeout), then
-                        // continue the loop with a new invocation of
-                        // obtain_tips(), which will restart block downloads.
-                        // this requires correctly constructing a block locator
-                        // (TODO below) and ensuring that the verifier handles
-                        // multiple requests for verification of the same block
-                        // hash by handling both requests or by discarding the
-                        // earlier request in favor of the later one.
-                        Err(e) => tracing::error!(?e, "potentially transient error"),
-                    };
+                    // TODO: handle backpressure/checkpoint deadlocks here
+                    let _ = self.process_next_block().await;
                 }
+
+                // We just added a bunch of failures, update the metrics now,
+                // because we might be about to reset or delay.
+                self.update_metrics();
             }
 
             delay_for(Duration::from_secs(15)).await;
         }
+    }
+
+    /// Process the next block result.
+    ///
+    /// Handles download and verify failures by adding the block hash to the
+    /// relevant list.
+    #[instrument(skip(self))]
+    async fn process_next_block(&mut self) -> Result<BlockHeaderHash, SyncError> {
+        let result = self
+            .pending_blocks
+            .next()
+            .await
+            .expect("already checked there's at least one pending block task")
+            .expect("block download and verify tasks should not panic");
+        let hash = match result {
+            Ok(hash) => {
+                tracing::debug!(?hash, "verified and committed block to state");
+                hash
+            }
+            // This is a non-transient error indicating either that
+            // we've repeatedly missed a block we need or that we've
+            // repeatedly missed a bad block suggested by a peer
+            // feeding us bad hashes.
+            //
+            // TODO(hdevalence): handle interruptions in the chain
+            // sync process. this should detect when we've stopped
+            // making progress (probably using a timeout), then
+            // continue the loop with a new invocation of
+            // obtain_tips(), which will restart block downloads.
+            Err((hash, ref e)) => {
+                // Errors happen frequently on mainnet, due to bad peers.
+                tracing::debug!(?e, "potentially transient error");
+                hash
+            }
+        };
+        if !self.pending_hashes.remove(&hash) {
+            tracing::error!("Response for hash that wasn't pending: {:?}", hash);
+        };
+
+        result
     }
 
     /// Given a block_locator list fan out request for subsequent hashes to
@@ -162,7 +187,7 @@ where
             })
             .map_err(|e| eyre!(e))?;
 
-        tracing::info!(?block_locator, "trying to obtain new chain tips");
+        tracing::debug!(?block_locator, "trying to obtain new chain tips");
 
         // ObtainTips Step 2
         //
@@ -185,7 +210,7 @@ where
         let mut download_set = HashSet::new();
         while let Some(res) = requests.next().await {
             match res.map_err::<Report, _>(|e| eyre!(e)) {
-                Ok(zn::Response::BlockHeaderHashes(hashes)) => {
+                Ok(zn::Response::BlockHeaderHashes(mut hashes)) => {
                     if hashes.is_empty() {
                         tracing::debug!("skipping empty response");
                         continue;
@@ -199,46 +224,58 @@ where
                     // list, prune any block hashes already included in the
                     // state, stopping at the first unknown hash to get resp1',
                     // ..., respF'. (These lists may be empty).
-                    let mut first_unknown = 0;
+
+                    // Also prune any hashes that we're currently downloading,
+                    // any that are already in our list for the next download,
+                    // and any that have failed recently.
+                    self.remove_duplicates(&mut hashes, &download_set);
+
+                    let mut first_unknown = None;
                     for (i, &hash) in hashes.iter().enumerate() {
-                        let depth = self
-                            .state
-                            .ready_and()
-                            .await
-                            .map_err(|e| eyre!(e))?
-                            .call(zebra_state::Request::GetDepth { hash })
-                            .await
-                            .map_err(|e| eyre!(e))?;
-                        if let zs::Response::Depth(None) = depth {
-                            first_unknown = i;
+                        if self.get_depth(hash).await?.is_none() {
+                            first_unknown = Some(i);
                             break;
                         }
                     }
+
+                    // Hashes will be empty if peers give identical responses,
+                    // or we know about all the blocks in their response.
+                    if first_unknown.is_none() {
+                        tracing::debug!("ObtainTips: all hashes are known");
+                        continue;
+                    }
+                    let first_unknown = first_unknown.expect("already checked for None");
                     tracing::debug!(
                         first_unknown,
                         "found index of first unknown hash in response"
                     );
-                    if first_unknown == hashes.len() {
-                        // We should only stop getting hashes once we've finished the initial sync
-                        tracing::debug!("no new hashes, even though we gave our tip?");
-                        continue;
-                    }
 
                     let unknown_hashes = &hashes[first_unknown..];
                     let new_tip = *unknown_hashes
                         .last()
-                        .expect("already checked first_unknown < hashes.len()");
+                        .expect("enumerate returns a valid index");
+
+                    // Check for tips we've already seen
+                    // TODO: remove this check once the sync service is more reliable
+                    let depth = self.get_depth(new_tip).await?;
+                    if let Some(depth) = depth {
+                        tracing::warn!(
+                            ?depth,
+                            ?new_tip,
+                            "ObtainTips: Unexpected duplicate tip from peer: already in state"
+                        );
+                        continue;
+                    }
 
                     // ObtainTips Step 4:
                     // Combine the last elements of each list into a set; this is the
                     // set of prospective tips.
-                    if !download_set.contains(&new_tip) {
-                        tracing::debug!(?new_tip, "adding new prospective tip");
-                        self.prospective_tips.insert(new_tip);
-                    } else {
-                        tracing::debug!(?new_tip, "discarding tip already queued for download");
-                    }
+                    tracing::debug!(hashes.len = ?hashes.len(), ?new_tip, "ObtainTips: adding new prospective tip");
+                    self.prospective_tips.insert(new_tip);
 
+                    // ObtainTips Step 5.1
+                    //
+                    // Combine all elements of each list into a set
                     let prev_download_len = download_set.len();
                     download_set.extend(unknown_hashes);
                     let new_download_len = download_set.len();
@@ -246,7 +283,7 @@ where
                         prev_download_len,
                         new_download_len,
                         new_hashes = new_download_len - prev_download_len,
-                        "added hashes to download set"
+                        "ObtainTips: added hashes to download set"
                     );
                 }
                 Ok(_) => unreachable!("network returned wrong response"),
@@ -255,10 +292,11 @@ where
             }
         }
 
-        // ObtainTips Step 5
+        tracing::debug!(?self.prospective_tips, "ObtainTips: downloading blocks for tips");
+
+        // ObtainTips Step 5.2
         //
-        // Combine all elements of each list into a set, and queue
-        // download and verification of those blocks.
+        // queue download and verification of those blocks.
         self.request_blocks(download_set.into_iter().collect())
             .await?;
 
@@ -302,31 +340,70 @@ where
                         // It indicates that the remote peer does not have any blocks
                         // following the prospective tip.
                         match (hashes.first(), hashes.len()) {
-                            (_, 0) => {
-                                tracing::debug!("skipping empty response");
+                            (None, _) => {
+                                tracing::debug!("ExtendTips: skipping empty response");
                                 continue;
                             }
                             (_, 1) => {
-                                tracing::debug!("skipping length-1 response, in case it's an unsolicited inv message");
+                                tracing::debug!("ExtendTips: skipping length-1 response, in case it's an unsolicited inv message");
                                 continue;
                             }
                             (Some(hash), _) if (hash == &self.genesis_hash) => {
-                                tracing::debug!("skipping response, peer could not extend the tip");
+                                tracing::debug!(
+                                    "ExtendTips: skipping response, peer could not extend the tip"
+                                );
                                 continue;
                             }
-                            _ => {}
+                            (Some(&hash), _) => {
+                                // Check for hashes we've already seen.
+                                // This happens a lot near the end of the chain.
+                                let depth = self.get_depth(hash).await?;
+                                if let Some(depth) = depth {
+                                    tracing::debug!(
+                                        ?depth,
+                                        ?hash,
+                                        "ExtendTips: skipping response, peer returned a duplicate hash: already in state"
+                                    );
+                                    continue;
+                                }
+                            }
                         }
 
-                        let new_tip = hashes.pop().expect("expected: hashes must have len > 0");
+                        self.remove_duplicates(&mut hashes, &download_set);
+
+                        let new_tip = match hashes.pop() {
+                            Some(tip) => tip,
+                            None => continue,
+                        };
+
+                        // Check for tips we've already seen
+                        // TODO: remove this check once the sync service is more reliable
+                        let depth = self.get_depth(new_tip).await?;
+                        if let Some(depth) = depth {
+                            tracing::warn!(
+                                ?depth,
+                                ?new_tip,
+                                "ExtendTips: Unexpected duplicate tip from peer: already in state"
+                            );
+                            continue;
+                        }
 
                         // ExtendTips Step 4
                         //
                         // Combine the last elements of the remaining responses into
                         // a set, and add this set to the set of prospective tips.
-                        tracing::debug!(?new_tip, hashes.len = ?hashes.len());
+                        tracing::debug!(hashes.len = ?hashes.len(), ?new_tip, "ExtendTips: extending to new tip");
                         let _ = self.prospective_tips.insert(new_tip);
 
+                        let prev_download_len = download_set.len();
                         download_set.extend(hashes);
+                        let new_download_len = download_set.len();
+                        tracing::debug!(
+                            prev_download_len,
+                            new_download_len,
+                            new_hashes = new_download_len - prev_download_len,
+                            "ExtendTips: added hashes to download set"
+                        );
                     }
                     Ok(_) => unreachable!("network returned wrong response"),
                     // We ignore this error because we made multiple fanout requests.
@@ -335,12 +412,7 @@ where
             }
         }
 
-        // ExtendTips Step ??
-        //
-        // Remove tips that are already included behind one of the other
-        // returned tips
-        self.prospective_tips
-            .retain(|tip| !download_set.contains(tip));
+        tracing::debug!(?self.prospective_tips, "ExtendTips: downloading blocks for tips");
 
         // ExtendTips Step 5
         //
@@ -359,6 +431,7 @@ where
 
     /// Queue a download for the genesis block, if it isn't currently known to
     /// our node.
+    #[instrument(skip(self))]
     async fn request_genesis(&mut self) -> Result<(), Report> {
         // Due to Bitcoin protocol limitations, we can't request the genesis
         // block using our standard tip-following algorithm:
@@ -368,17 +441,7 @@ where
         //
         // So we just queue the genesis block here.
 
-        let state_has_genesis = self
-            .state
-            .ready_and()
-            .await
-            .map_err(|e| eyre!(e))?
-            .call(zebra_state::Request::GetBlock {
-                hash: self.genesis_hash,
-            })
-            .await
-            .is_ok();
-
+        let state_has_genesis = self.get_depth(self.genesis_hash).await?.is_some();
         if !state_has_genesis {
             self.request_blocks(vec![self.genesis_hash]).await?;
         }
@@ -390,6 +453,16 @@ where
     async fn request_blocks(&mut self, hashes: Vec<BlockHeaderHash>) -> Result<(), Report> {
         tracing::debug!(hashes.len = hashes.len(), "requesting blocks");
         for hash in hashes.into_iter() {
+            // TODO: remove this check once the sync service is more reliable
+            let depth = self.get_depth(hash).await?;
+            if let Some(depth) = depth {
+                tracing::warn!(
+                    ?depth,
+                    ?hash,
+                    "request_blocks: Unexpected duplicate hash: already in state"
+                );
+                continue;
+            }
             // We construct the block download requests sequentially, waiting
             // for the peer set to be ready to process each request. This
             // ensures that we start block downloads in the order we want them
@@ -413,18 +486,75 @@ where
                         .next()
                         .expect("successful response has the block in it"),
                     Ok(_) => unreachable!("wrong response to block request"),
-                    Err(e) => return Err(e),
+                    Err(e) => Err((hash, e))?,
                 };
                 metrics::counter!("sync.downloaded_blocks", 1);
 
-                verifier.ready_and().await?.call(block).await
+                let response = verifier
+                    .ready_and()
+                    .await
+                    .map_err(|e| (hash, e))?
+                    .call(block)
+                    .await
+                    .map_err(|e| (hash, e));
+                metrics::counter!("sync.verified_blocks", 1);
+                response
             })
             .instrument(span);
             self.pending_blocks.push(task);
+            if !self.pending_hashes.insert(hash) {
+                unreachable!("Callers should filter out pending hashes before requesting blocks.");
+            }
         }
 
         Ok(())
     }
+
+    /// Get the depth of hash in the current chain.
+    ///
+    /// Returns None if the hash is not present in the chain.
+    /// TODO: handle multiple tips in the state.
+    #[instrument(skip(self))]
+    async fn get_depth(&mut self, hash: BlockHeaderHash) -> Result<Option<u32>, Report> {
+        match self
+            .state
+            .ready_and()
+            .await
+            .map_err(|e| eyre!(e))?
+            .call(zebra_state::Request::GetDepth { hash })
+            .await
+            .map_err(|e| eyre!(e))?
+        {
+            zs::Response::Depth(d) => Ok(d),
+            _ => unreachable!("wrong response to depth request"),
+        }
+    }
+
+    /// Filter duplicates out of `latest_hashes`, using the recently processed
+    /// hashes `recent_hashes`, and the pending and failed hashes.
+    fn remove_duplicates(
+        &self,
+        latest_hashes: &mut Vec<BlockHeaderHash>,
+        recent_hashes: &HashSet<BlockHeaderHash>,
+    ) {
+        latest_hashes
+            .retain(|hash| !recent_hashes.contains(hash) && !self.pending_hashes.contains(hash));
+    }
+
+    /// Update metrics gauges, and create a trace containing metrics.
+    fn update_metrics(&self) {
+        metrics::gauge!(
+            "sync.prospective_tips.len",
+            self.prospective_tips.len() as i64
+        );
+        metrics::gauge!("sync.pending_blocks.len", self.pending_blocks.len() as i64);
+        tracing::info!(
+            tips.len = self.prospective_tips.len(),
+            pending.len = self.pending_blocks.len(),
+            pending.limit = LOOKAHEAD_LIMIT,
+        );
+    }
 }
 
 type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
+type SyncError = (BlockHeaderHash, Error);
