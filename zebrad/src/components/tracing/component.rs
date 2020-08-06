@@ -22,7 +22,7 @@ impl Tracing {
         // Construct a tracing subscriber with the supplied filter and enable reloading.
         let builder = FmtSubscriber::builder()
             .with_ansi(true)
-            .with_env_filter(dbg!(filter))
+            .with_env_filter(filter)
             .with_filter_reloading();
         let filter_handle = builder.reload_handle();
 
