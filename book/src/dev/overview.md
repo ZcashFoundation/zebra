@@ -1,4 +1,4 @@
-Zebra Design Document
+Design Overview
 ---------------------
 
 This document sketches the future design for Zebra.
