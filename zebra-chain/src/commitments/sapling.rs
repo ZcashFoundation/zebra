@@ -47,9 +47,9 @@ where
 /// https://zips.z.cash/protocol/protocol.pdf#concretepedersenhash
 #[allow(non_snake_case)]
 pub fn pedersen_hash_to_point(domain: [u8; 8], M: &BitVec<Lsb0, u8>) -> jubjub::ExtendedPoint {
-    // Expects i to be 0-indexed
+    // Expects i to be 1-indexed from the loop it's called in.
     fn I_i(domain: [u8; 8], i: u32) -> jubjub::ExtendedPoint {
-        find_group_hash(domain, &i.to_le_bytes())
+        find_group_hash(domain, &(i - 1).to_le_bytes())
     }
 
     /// ⟨Mᵢ⟩
@@ -101,8 +101,14 @@ pub fn pedersen_hash_to_point(domain: [u8; 8], M: &BitVec<Lsb0, u8>) -> jubjub::
     // Split M into n segments of 3 * c bits, where c = 63, padding the last
     // segment with zeros.
     //
+    // This loop is 1-indexed per the math definitions in the spec.
+    //
     // https://zips.z.cash/protocol/protocol.pdf#concretepedersenhash
-    for (i, segment) in M.chunks(189).enumerate() {
+    for (i, segment) in M
+        .chunks(189)
+        .enumerate()
+        .map(|(i, segment)| (i + 1, segment))
+    {
         result += I_i(domain, i as u32) * M_i(&segment);
     }
 
