@@ -1,4 +1,3 @@
-//!
 #![allow(clippy::unit_arg)]
 #![allow(dead_code)]
 
