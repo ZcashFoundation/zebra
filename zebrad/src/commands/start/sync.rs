@@ -3,7 +3,7 @@ use std::{collections::HashSet, iter, pin::Pin, sync::Arc};
 
 use color_eyre::eyre::{eyre, Report};
 use futures::stream::{FuturesUnordered, StreamExt};
-use tokio::{task::JoinHandle, time::delay_for};
+use tokio::{task::JoinHandle, time::delay_for, time::timeout};
 use tower::{retry::Retry, Service, ServiceExt};
 use tracing_futures::{Instrument, Instrumented};
 
@@ -21,9 +21,7 @@ use SyncError::*;
 /// The number of different peers we use to obtain and extend tips.
 const FANOUT: usize = checkpoint::MAX_QUEUED_BLOCKS_PER_HEIGHT;
 /// The maximum number of times we will retry a block download.
-// TODO: Resolve the backpressure/checkpoint deadlock, and reduce the number of
-// retries
-const RETRY_LIMIT: usize = 10;
+const RETRY_LIMIT: usize = 0;
 
 /// Controls how far ahead of the chain tip the syncer tries to download before
 /// waiting for queued verifications to complete. Set to twice the maximum
@@ -34,6 +32,9 @@ pub const LOOKAHEAD_LIMIT: usize = checkpoint::MAX_CHECKPOINT_HEIGHT_GAP * 2;
 const DOWNLOAD_FAILURE_RESET_INTERVAL: Duration = Duration::from_secs(75);
 /// We reset our failed verification list each time this interval elapses.
 const VERIFICATION_FAILURE_RESET_INTERVAL: Duration = Duration::from_secs(3600);
+
+/// Spawned download and verify tasks timeout after this interval.
+const TASK_TIMEOUT_INTERVAL: Duration = VERIFICATION_FAILURE_RESET_INTERVAL;
 
 #[derive(Debug)]
 pub struct Syncer<ZN, ZS, ZV>
@@ -141,8 +142,12 @@ where
 
                 // Check whether we need to wait for existing block download tasks to finish
                 while self.pending_blocks.len() > LOOKAHEAD_LIMIT {
-                    // TODO: handle backpressure/checkpoint deadlocks here
-                    let _ = self.process_next_block().await;
+                    // TODO: even though we're using a timeout, there is still a
+                    //       backpressure/checkpoint deadlock here
+                    if let Err(Timeout(_, _)) = self.process_next_block().await {
+                        // We timed out, start again from ObtainTips
+                        break;
+                    }
                 }
 
                 // We just added a bunch of failures, update the metrics now,
@@ -158,6 +163,9 @@ where
     ///
     /// Handles download and verify failures by adding the block hash to the
     /// relevant list.
+    ///
+    /// Returns an error on download or verify timeout. Timeouts are usually
+    /// caused by missing ancestor blocks.
     #[instrument(skip(self))]
     async fn process_next_block(&mut self) -> Result<BlockHeaderHash, SyncError> {
         let result = self
@@ -181,6 +189,11 @@ where
             // making progress (probably using a timeout), then
             // continue the loop with a new invocation of
             // obtain_tips(), which will restart block downloads.
+            // this requires correctly constructing a block locator
+            // (TODO below) and ensuring that the verifier handles
+            // multiple requests for verification of the same block
+            // hash by handling both requests or by discarding the
+            // earlier request in favor of the later one.
             Err(ref e) => {
                 // Errors happen frequently on mainnet, due to bad peers.
                 tracing::debug!(?e, "potentially transient error");
@@ -191,6 +204,17 @@ where
                     }
                     VerifyService(hash, _) | VerifyBlock(hash, _) => {
                         self.failed_verifications.insert(*hash);
+                        *hash
+                    }
+                    Timeout(hash, _) => {
+                        tracing::warn!("Timed out waiting for blocks, retrying downloads from the current tip.");
+                        // Drop pending downloads and verifies.
+                        // handle_failures() will reset the failure lists if required.
+                        self.prospective_tips.clear();
+                        let mut pending_blocks = Box::pin(FuturesUnordered::new());
+                        std::mem::swap(&mut self.pending_blocks, &mut pending_blocks);
+                        std::mem::drop(pending_blocks);
+                        self.pending_hashes.clear();
                         *hash
                     }
                 }
@@ -494,7 +518,6 @@ where
     async fn request_blocks(&mut self, hashes: Vec<BlockHeaderHash>) -> Result<(), Report> {
         tracing::debug!(hashes.len = hashes.len(), "requesting blocks");
         for hash in hashes.into_iter() {
-            // TODO: remove this check once the sync service is more reliable
             let depth = self.get_depth(hash).await?;
             if let Some(depth) = depth {
                 tracing::warn!(
@@ -521,25 +544,32 @@ where
             let span = tracing::info_span!("block_fetch_verify", ?hash);
             let mut verifier = self.verifier.clone();
             let task = tokio::spawn(async move {
-                let block = match block_req.await {
-                    Ok(zn::Response::Blocks(blocks)) => blocks
-                        .into_iter()
-                        .next()
-                        .expect("successful response has the block in it"),
-                    Ok(_) => unreachable!("wrong response to block request"),
-                    Err(e) => Err(Download(hash, e))?,
-                };
-                metrics::counter!("sync.downloaded_blocks", 1);
+                match timeout(TASK_TIMEOUT_INTERVAL, async {
+                    let block = match block_req.await {
+                        Ok(zn::Response::Blocks(blocks)) => blocks
+                            .into_iter()
+                            .next()
+                            .expect("successful response has the block in it"),
+                        Ok(_) => unreachable!("wrong response to block request"),
+                        Err(e) => Err(Download(hash, e))?,
+                    };
+                    metrics::counter!("sync.downloaded_blocks", 1);
 
-                let response = verifier
-                    .ready_and()
-                    .await
-                    .map_err(|e| VerifyService(hash, e))?
-                    .call(block)
-                    .await
-                    .map_err(|e| VerifyBlock(hash, e));
-                metrics::counter!("sync.verified_blocks", 1);
-                response
+                    let response = verifier
+                        .ready_and()
+                        .await
+                        .map_err(|e| VerifyService(hash, e))?
+                        .call(block)
+                        .await
+                        .map_err(|e| VerifyBlock(hash, e));
+                    metrics::counter!("sync.verified_blocks", 1);
+                    response
+                })
+                .await
+                {
+                    Ok(result) => result,
+                    Err(e) => Err(Timeout(hash, Box::new(e))),
+                }
             })
             .instrument(span);
             self.pending_blocks.push(task);
@@ -651,6 +681,9 @@ type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 enum SyncError {
     /// Failed while downloading.
     Download(BlockHeaderHash, Error),
+
+    /// Timed out during download or verification.
+    Timeout(BlockHeaderHash, Error),
 
     /// Verification service failed.
     VerifyService(BlockHeaderHash, Error),
