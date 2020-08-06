@@ -34,7 +34,7 @@ fn pedersen_hash(domain: [u8; 8], M: &BitVec<Lsb0, u8>) -> jubjub::Fq {
 
 /// MerkleCRH^Sapling Hash Function
 ///
-/// MerkleCRH^Sapling(layer, left,right) := PedersenHash(“Zcash_PH”, l || left ||right)
+/// MerkleCRH^Sapling(layer, left, right) := PedersenHash(“Zcash_PH”, l || left ||right)
 /// where l = I2LEBSP_6(MerkleDepth^Sapling − 1 − layer)
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#merklecrh
