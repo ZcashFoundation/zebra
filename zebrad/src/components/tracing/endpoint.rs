@@ -1,14 +1,21 @@
 //! An HTTP endpoint for dynamically setting tracing filters.
 
-use crate::{components::tokio::TokioComponent, config::TracingSection, prelude::*};
+use std::net::SocketAddr;
+
 use abscissa_core::{Component, FrameworkError};
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Request, Response, Server};
 
+use crate::{components::tokio::TokioComponent, config::ZebradConfig, prelude::*};
+
+use super::Tracing;
+
 /// Abscissa component which runs a tracing filter endpoint.
 #[derive(Debug, Component)]
 #[component(inject = "init_tokio(zebrad::components::tokio::TokioComponent)")]
-pub struct TracingEndpoint {}
+pub struct TracingEndpoint {
+    addr: SocketAddr,
+}
 
 async fn read_filter(req: Request<Body>) -> Result<String, String> {
     std::str::from_utf8(
@@ -22,30 +29,22 @@ async fn read_filter(req: Request<Body>) -> Result<String, String> {
 
 impl TracingEndpoint {
     /// Create the component.
-    pub fn new() -> Result<Self, FrameworkError> {
-        Ok(Self {})
+    pub fn new(config: &ZebradConfig) -> Result<Self, FrameworkError> {
+        Ok(Self {
+            addr: config.tracing.endpoint_addr.clone(),
+        })
     }
 
     /// Tokio endpoint dependency stub.
     ///
     /// We can't open the endpoint here, because the config has not been loaded.
-    pub fn init_tokio(&mut self, _tokio_component: &TokioComponent) -> Result<(), FrameworkError> {
-        Ok(())
-    }
-
-    /// Open the tracing endpoint.
-    ///
-    /// We can't implement `after_config`, because we use `derive(Component)`.
-    /// And the ownership rules might make it hard to access the TokioComponent
-    /// from `after_config`.
-    pub fn open_endpoint(&self, tracing_config: &TracingSection, tokio_component: &TokioComponent) {
+    pub fn init_tokio(&mut self, tokio_component: &TokioComponent) -> Result<(), FrameworkError> {
         info!("Initializing tracing endpoint");
 
         let service =
             make_service_fn(|_| async { Ok::<_, hyper::Error>(service_fn(request_handler)) });
 
-        let addr = tracing_config.endpoint_addr;
-
+        let addr = self.addr;
         tokio_component
             .rt
             .as_ref()
@@ -67,6 +66,8 @@ impl TracingEndpoint {
                     error!("Server error: {}", e);
                 }
             });
+
+        Ok(())
     }
 }
 
@@ -95,7 +96,7 @@ To set the filter, POST the new filter string to /filter:
                 app_reader()
                     .state()
                     .components
-                    .get_downcast_ref::<abscissa_core::trace::Tracing>()
+                    .get_downcast_ref::<Tracing>()
                     .expect("Tracing component should be available")
                     .filter(),
             ))
@@ -105,7 +106,7 @@ To set the filter, POST the new filter string to /filter:
                 app_writer()
                     .state_mut()
                     .components
-                    .get_downcast_mut::<abscissa_core::trace::Tracing>()
+                    .get_downcast_mut::<Tracing>()
                     .expect("Tracing component should be available")
                     .reload_filter(filter);
 

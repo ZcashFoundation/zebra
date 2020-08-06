@@ -1,12 +1,15 @@
 //! Zebrad Abscissa Application
 
-use crate::{commands::ZebradCmd, components::tracing::FlameGrapher, config::ZebradConfig};
+use crate::{
+    commands::ZebradCmd,
+    components::tracing::{FlameGrapher, Tracing},
+    config::ZebradConfig,
+};
 use abscissa_core::{
     application::{self, AppCell},
     config,
     config::Configurable,
     terminal::component::Terminal,
-    trace::Tracing,
     Application, Component, EntryPoint, FrameworkError, Shutdown, StandardPaths,
 };
 use application::fatal_error;
@@ -106,13 +109,10 @@ impl Application for ZebradApp {
         // handler is the last one installed
         color_eyre::install().unwrap();
 
-        if ZebradApp::command_is_server(&command) {
-            let tracing = self.tracing_component();
-            Ok(vec![Box::new(terminal), Box::new(tracing)])
-        } else {
-            crate::components::tracing::init_backup(&self.config().tracing);
-            Ok(vec![Box::new(terminal)])
-        }
+        // Set the initial filter based on the command-line argument.
+        // If the config sets a filter, we'll reload it in after_config.
+        let filter = if command.verbose { "info" } else { "warn" }.to_owned();
+        Ok(vec![Box::new(terminal), Box::new(Tracing::new(filter)?)])
     }
 
     /// Register all components used by this application.
@@ -126,11 +126,16 @@ impl Application for ZebradApp {
         };
 
         let mut components = self.framework_components(command)?;
+
+        let cfg_ref = self
+            .config
+            .as_ref()
+            .expect("config is loaded before register_components");
         // Launch network endpoints for long-running commands
         if ZebradApp::command_is_server(&command) {
             components.push(Box::new(TokioComponent::new()?));
-            components.push(Box::new(TracingEndpoint::new()?));
-            components.push(Box::new(MetricsEndpoint::new()?));
+            components.push(Box::new(TracingEndpoint::new(cfg_ref)?));
+            components.push(Box::new(MetricsEndpoint::new(cfg_ref)?));
         }
 
         self.state.components.register(components)
@@ -172,46 +177,20 @@ impl Application for ZebradApp {
         config: Self::Cfg,
         command: &Self::Cmd,
     ) -> Result<(), FrameworkError> {
-        use crate::components::{
-            metrics::MetricsEndpoint, tokio::TokioComponent, tracing::TracingEndpoint,
-        };
-
         // Configure components
         self.state.components.after_config(&config)?;
         self.config = Some(config);
 
+        // Reload the filter only if we're running a long-lived server.
+        let cfg_ref = self.config.as_ref().unwrap();
         if ZebradApp::command_is_server(&command) {
-            if let Some(filter) = self.config.as_ref().unwrap().tracing.filter.as_ref() {
+            if let Some(ref filter) = cfg_ref.tracing.filter {
                 self.state
                     .components
                     .get_downcast_mut::<Tracing>()
                     .expect("Tracing component should be available")
                     .reload_filter(filter);
             }
-
-            // Work around some issues with dependency injection and configs
-            let config = self
-                .config
-                .clone()
-                .expect("config was set to Some earlier in this function");
-
-            let tokio_component = self
-                .state
-                .components
-                .get_downcast_ref::<TokioComponent>()
-                .expect("Tokio component should be available");
-
-            self.state
-                .components
-                .get_downcast_ref::<TracingEndpoint>()
-                .expect("Tracing endpoint should be available")
-                .open_endpoint(&config.tracing, tokio_component);
-
-            self.state
-                .components
-                .get_downcast_ref::<MetricsEndpoint>()
-                .expect("Metrics endpoint should be available")
-                .open_endpoint(&config.metrics, tokio_component);
         }
 
         Ok(())
@@ -234,13 +213,6 @@ impl Application for ZebradApp {
 }
 
 impl ZebradApp {
-    fn tracing_component(&mut self) -> Tracing {
-        let config = &self.config().tracing;
-        let (component, guard) = crate::components::tracing::init(config);
-        self.flame_guard = guard;
-        component
-    }
-
     /// Returns true if command is a server command.
     ///
     /// Server commands use long-running components such as tracing, metrics,
