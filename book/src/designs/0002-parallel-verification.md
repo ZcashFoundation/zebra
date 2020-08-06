@@ -60,27 +60,10 @@ In Zebra, verification happens in the following stages:
 * **Structural Verification:** Raw block data is parsed into a block header and
   transactions. Invalid data is not representable in these structures:
   deserialization (parsing) can fail, but serialization always succeeds.
-* **Context-Free Verification:** Fields that don't depend on any context from
-  previous blocks are verified.
-* **Prospective Verification:** Some fields depend on context which can be
-  derived, without access to data from previous blocks. These fields are
-  verified, assuming that their context is correct. These assumptions are
-  passed to the next verification stage as a set of constraints.
-* **Contextual Verification:** Constraints from the previous stage are checked
-  against the context associated with the previous block and its ancestors (the
-  "chain context"). The remaining fields that depend on the chain context are
-  also verified at this stage.
-* **In-Memory Chain Updates:** An updated chain context is created for each
-  block, based on the parent block's chain context.
-* **Chain Tip Updates:** The set of chain tips is updated as each block is
-  verified. The main chain tip is updated based on the consensus rules.
-* **Main Chain Disk Updates:** When a main chain block is behind the main
-  chain's tip by more than the reorganisation limit (100 blocks), it is stored
-  to disk. The on-disk state is updated based on that block's chain context.
-  The in-memory block and chain context are dropped to reclaim resources.
-* **Chain Pruning:** When a chain is behind the main chain's tip by more than
-  the pruning limit (100 blocks in Zebra, 288 blocks in zcashd), its in-memory
-  blocks and chain contexts are dropped to reclaim resources.
+* **Semantic Verification:** Validation of all consensus rules applying to an
+  item, given certain contextual constraints
+* **Contextual Verification:** Consists only of applying the constraints
+  assumed to be true during Semantic Validation.
 
 This RFC focuses on the verification stages that use chain context, and the
 design patterns that enable them to be excuted in parallel.
@@ -95,86 +78,32 @@ Verifcation is implemented by the following traits and services:
   * `zebra_network::init`: Provides a downloader service that accepts a
     `BlockHeaderHash` request, and parses the peer response into a `Block`
     struct.
-* **Context-Free Verification:**
-  * `zebra_consensus::ContextFreeVerifier`: Provides a verifier service that
-    accepts a `Block` request, performs context-free verification on the block,
-    and responds with an identifier for the block.
+* **Semantic Verification**
+  * `zebra_consensus::BlockVerifier`: Provides a verifier service that
+    accepts a `Block` request, performs semantic verification on the block.
+    In the process the block verifier will query the state layer for chain
+    state necessary for semantic verification. Once it has finished it will
+    commit an updated copy of the chain state for the state service to apply
+    contextual validation constraints too.
   * Note: as of 27 July 2020, context-free verification is partly implemented
     by `BlockVerifier`, which responds with `BlockHeaderHash`.
-* **Prospective Verification:**
-  * `zebra_consensus::ProspectiveVerifier`: Provides a verifier service that
-    accepts a `Block` request, performs prospective verification on the block,
-    and responds with the block's `VerificationConstraints`, which include a
-    reference to the `Block` itself.
-* **Constraint Verification:**
-  * `zebra_consensus::ConstraintVerifier`: Provides a verifier service that
-    accepts a `VerificationConstraints, previous_context: ChainContext`
-    request, performs constraint checks on the `Block` and `ChainContext`, and
-    responds with an idenfier for the block.
-  * Note: blocks can be identified by their BlockHeaderHash, or by reference.
 * **Contextual Verification:**
-  * `zebra_consensus::ContextualVerifier`: Provides a verifier service that
-    accepts a `Block, previous_context: ChainContext` request, performs any
-    remaining contextual verification on the block, and responds with an
-    identifier for the block.
-* **In-Memory Chain Updates:**
-  * `zebra_consensus::RecentChainUpdater`: Provides an updater service that
-    accepts a `Block, previous_context: ChainContext` request, generates an
-    updated chain context, dropping references to any ancestor blocks that are
-    no longer required to verify subsequent blocks. The service responds with
-    an updated `ChainContext`, which contains a reference to the block itself.
-* **Chain Tip Updates:**
-  * `zebra_consensus::ChainTipUpdater`: Provides an updater service that
-    accepts a `ChainContext, Arc<Mutex<ChainTips>>>` request, updates
-    the set of chain tips, and updates the main chain tip, if required.
-    (New blocks on side-chains might not lead to a main chain tip update.)
-    The `ChainContext` becomes one of the new tips in the list.
-    The service responds with the updated `Arc<Mutex<ChainTips>>`.
-  * Note: The service requires exclusive write access to the chain tips, so it
-    can atomically update the main tip and the set of chain tips.
-* **Main Chain Disk Updates:**
-  * `zebra_consensus::MainChainDiskUpdater`: Provides an updater service that
-    accepts an `Arc<Mutex<ChainTips>>, Transaction<DiskState>` request. This
-    service updates the disk state based on the earliest chain contexts in the
-    main chain, and their associated blocks.
-  * Note: If there is a chain reorganisation, there may be zero or many
-    contexts that are past the reorg limit.
-  * Note: The service requires exclusive write access to the disk state, and
-    shared read access to the chain tips, so that:
-    * it has a consistent view of the chain tips and main tip, and
-    * other parts of the application have a consistent view of the disk state
-      and chain contexts. For example, the set of in-memory deltas needs to be
-      consistent with the disk state.
-* **Chain Pruning:**
-  * `zebra_state::ChainPruner`: Provides a pruning service that accepts an
-    `Arc<Mutex<ChainTips>>` request, removes any orphaned side-chains from the
-    set of tips, and drops the earliest chain contexts in all chains.
-  * Note: If there is a chain reorganisation, there may be zero or many
-    contexts that are past the reorg limit.
-  * Note: To reclaim resources, the chain pruner needs sole ownership of the
-    contexts that are past the reorg limit. If it does not have sole
-    ownership, this might indicate a bug in Zebra. If the service encounters
-    this bug, it should warn about potential memory leaks.
-  * Note: The service requires exclusive write access to the chain tips, so it
-    can atomically update the main tip and the set of chain tips.
+  * `zebra_state::Service`: Provides a verification and caching service for
+    chain context that accepts a `Block, previous_context: ChainContext`
+    request, performs any remaining contextual verification on the block,
+    commits the updated context to the state, and responds with an identifier
+    for the block.
 
-### Checkpoint Verification
-[checkpoint-verification]: #checkpoint-verification
+### Checkpoint Semantic Verification
+[checkpoint-semantic-verification]: #checkpoint-semantic-verification
 
-The `CheckpointVerifier` performs rapid verification of blocks, based on
-a set of hard-coded checkpoints. Each checkpoint hash can be used to verify
-all the previous blocks, back to the genesis block. So Zebra can skip almost
-all context-free and contextual verification for blocks in the checkpoint
-range.
-
-The `CheckpointVerifier` uses an internal queue to implement its own chain
-context. Checkpoint verification is cheap, so it is implemented using
-non-async functions within the CheckpointVerifier service.
+The `CheckpointVerifier` performs rapid verification of blocks, based on a
+set of hard-coded checkpoints. Each checkpoint hash can be used to verify all
+the previous blocks, back to the genesis block. So Zebra can skip almost all
+semantic verification for blocks in the checkpoint range.
 
 Here is how the `CheckpointVerifier` implements each verification stage:
 
-* **Structural Verification:**
-  * *As Above:* the `CheckpointVerifier` accepts parsed `Block` structs.
 * **Context-Free Verification:**
   * `check_height`: makes sure the block height is within the unverified
     checkpoint range, and adds the block to its internal queue.
@@ -189,36 +118,6 @@ Here is how the `CheckpointVerifier` implements each verification stage:
 * **Constraint Verification:**
   * `process_checkpoint_range`: makes sure that the blocks in the checkpoint
     range have an unbroken chain of previous block hashes.
-* **Contextual Verification:**
-  * *Not Required:* Verifying a chain of blocks against its checkpoints
-    confirms that the network considers those blocks valid. (Strictly, that the
-    network considered those blocks valid, up to and including the time when
-    those checkpoints were created.)
-* **In-Memory Chain Updates:**
-  * The checkpoint verifier uses an internal queue of blocks to store the
-    simple height and hash context it requires for verification.
-  * *As Above*: Although the checkpoint verifier does not require any external
-    context, Zebra needs to maintain enough context to verify the first
-    non-checkpoint block.
-  * Since there is only ever a single checkpoint chain, Zebra does not need to
-    keep any previous contexts, until it is processing the last 100
-    checkpoint blocks.
-  * Note: If any context fields are only used to verify blocks within the
-    checkpoint range, then Zebra does not need to keep that context. (For
-    example, sprout-only context.)
-* **Chain Tip Updates:**
-  * *Not Required:* Since there is only a single chain, the main chain tip is
-    the unique tip. As each checkpoint is verified, it implicitly becomes the
-    main tip.
-* **Main Chain Disk Updates:**
-  * *As Above*: Any large context that is required to verify the first
-    non-checkpoint block needs to be stored to disk.
-* **Chain Pruning:**
-  * *Not Required:* Since Zebra does not keep previous chain contexts until
-    the last 100 checkpoint blocks, it will never need to prune any old
-    contexts. The earliest checkpoint context will be pruned after the first
-    non-checkpoint block is verified. (Since there is only one checkpoint
-    chain, there are no side-chains to prune.)
 
 ## Chain Context
 [chain-context]: #chain-context
@@ -230,8 +129,8 @@ There are a few exceptions to this general principle:
 * If the context is a field in recent block headers, it may be retrieved via
   the list of recent blocks in the chain context.
 * Large state, such as unspent transaction outputs (UTXOs), is stored on disk.
-  The chain context stores deltas from recent blocks, which can be used to
-  avoid some disk state queries.
+  The chain context stores recent blocks and a reference to the state service
+  for querying the state that isn't availble in recent blocks.
 
 In the event of a chain fork, there may be multiple next blocks based on the
 current block, and multiple descendant chains. The chain contexts in forks are
@@ -268,7 +167,7 @@ Here are the context changes required for each network upgrade:
     * the Founders Reward is not required in genesis blocks.
     * the `hashPrevBlock`, difficulty adjustment, and median-time-past rules
       are special-cased.
-  * *TODO: check for other differences*  
+  * *TODO: check for other differences*
 * **Before Overwinter:**
   * Add UTXOs, note commitments, and nullifiers from each block to the
     `ChainContext` as deltas.
