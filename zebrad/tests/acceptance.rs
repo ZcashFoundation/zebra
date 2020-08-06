@@ -136,7 +136,7 @@ fn revhex_args() -> Result<()> {
 fn seed_no_args() -> Result<()> {
     zebra_test::init();
 
-    let (mut child, _guard) = get_child_single_arg("seed")?;
+    let (mut child, _guard) = get_child_multi_args(&["-v", "seed"])?;
 
     // Run the program and kill it at 1 second
     std::thread::sleep(Duration::from_secs(1));
@@ -178,7 +178,7 @@ fn seed_args() -> Result<()> {
 fn start_no_args() -> Result<()> {
     zebra_test::init();
 
-    let (mut child, _guard) = get_child_single_arg("start")?;
+    let (mut child, _guard) = get_child_multi_args(&["-v", "start"])?;
 
     // Run the program and kill it at 1 second
     std::thread::sleep(Duration::from_secs(1));
