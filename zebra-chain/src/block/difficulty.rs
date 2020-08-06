@@ -113,22 +113,16 @@ pub struct Work(u128);
 
 impl fmt::Debug for Work {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let log2_work = f64::from_str(&self.0.to_string()).ok().map(f64::log2);
-
         // There isn't a standard way to represent alternate formats for the
         // same value.
-        let mut f = f.debug_tuple("Work");
+        f.debug_tuple("Work")
         // Use hex, because expanded difficulty is in hex.
-        f.field(&format_args!("{:#x}", self.0))
+            .field(&format_args!("{:#x}", self.0))
             // Use decimal, to compare with zcashd
-            .field(&format_args!("{}", self.0));
-
-        if let Some(log2_work) = log2_work {
+            .field(&format_args!("{}", self.0))
             // Use log2, to compare with zcashd
-            f.field(&format_args!("{:.5}", log2_work));
-        }
-
-        f.finish()
+            .field(&format_args!("{:.5}", log2_work))
+            .finish()
     }
 }
 
