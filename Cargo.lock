@@ -3045,7 +3045,6 @@ dependencies = [
  "tracing-error",
  "tracing-flame",
  "tracing-futures",
- "tracing-log",
  "tracing-subscriber 0.2.10",
  "zebra-chain",
  "zebra-consensus",

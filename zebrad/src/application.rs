@@ -1,10 +1,6 @@
 //! Zebrad Abscissa Application
 
-use crate::{
-    commands::ZebradCmd,
-    components::tracing::{FlameGrapher, Tracing},
-    config::ZebradConfig,
-};
+use crate::{commands::ZebradCmd, components::tracing::Tracing, config::ZebradConfig};
 use abscissa_core::{
     application::{self, AppCell},
     config,
@@ -13,7 +9,7 @@ use abscissa_core::{
     Application, Component, EntryPoint, FrameworkError, Shutdown, StandardPaths,
 };
 use application::fatal_error;
-use std::{fmt, process};
+use std::process;
 
 /// Application state
 pub static APPLICATION: AppCell<ZebradApp> = AppCell::new();
@@ -38,13 +34,10 @@ pub fn app_config() -> config::Reader<ZebradApp> {
 }
 
 /// Zebrad Application
+#[derive(Debug)]
 pub struct ZebradApp {
     /// Application configuration.
     config: Option<ZebradConfig>,
-
-    /// drop handle for tracing-flame layer to ensure it flushes its buffer when
-    /// the application exits
-    flame_guard: Option<FlameGrapher>,
 
     /// Application state.
     state: application::State<Self>,
@@ -58,18 +51,8 @@ impl Default for ZebradApp {
     fn default() -> Self {
         Self {
             config: None,
-            flame_guard: None,
             state: application::State::default(),
         }
-    }
-}
-
-impl fmt::Debug for ZebradApp {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ZebraApp")
-            .field("config", &self.config)
-            .field("state", &self.state)
-            .finish()
     }
 }
 
@@ -138,12 +121,13 @@ impl Application for ZebradApp {
         // Launch network endpoints for long-running commands
         if is_server {
             let filter = cfg_ref.tracing.filter.as_deref().unwrap_or(default_filter);
-            components.push(Box::new(Tracing::new(filter)?));
+            let flame_root = cfg_ref.tracing.flamegraph.as_deref();
+            components.push(Box::new(Tracing::new(filter, flame_root)?));
             components.push(Box::new(TokioComponent::new()?));
             components.push(Box::new(TracingEndpoint::new(cfg_ref)?));
             components.push(Box::new(MetricsEndpoint::new(cfg_ref)?));
         } else {
-            components.push(Box::new(Tracing::new(default_filter)?));
+            components.push(Box::new(Tracing::new(default_filter, None)?));
         }
 
         self.state.components.register(components)

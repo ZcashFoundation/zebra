@@ -8,7 +8,6 @@ use std::{net::SocketAddr, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use tracing_subscriber::EnvFilter;
 use zebra_network::Config as NetworkSection;
 use zebra_state::Config as StateSection;
 
@@ -90,18 +89,6 @@ pub struct TracingSection {
     /// If you provide a path with an extension the extension will be ignored and
     /// replaced with `.folded` and `.svg` for the respective files.
     pub flamegraph: Option<PathBuf>,
-}
-
-impl TracingSection {
-    /// Constructs an EnvFilter for use in our tracing subscriber.
-    ///
-    /// The env filter controls filtering of spans and events, but not how
-    /// they're emitted. Creating an env filter alone doesn't enable logging, it
-    /// needs to be used in conjunction with other layers like a fmt subscriber,
-    /// for logs, or an error layer, for SpanTraces.
-    pub fn env_filter(&self) -> EnvFilter {
-        self.filter.as_deref().unwrap_or("info").into()
-    }
 }
 
 impl Default for TracingSection {

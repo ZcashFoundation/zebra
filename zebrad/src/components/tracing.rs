@@ -4,4 +4,4 @@ mod flame;
 
 pub use component::Tracing;
 pub use endpoint::TracingEndpoint;
-pub use flame::{init, init_backup, FlameGrapher};
+pub use flame::{layer, Grapher};
