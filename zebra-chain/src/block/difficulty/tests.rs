@@ -27,6 +27,16 @@ impl Arbitrary for ExpandedDifficulty {
     type Strategy = BoxedStrategy<Self>;
 }
 
+impl Arbitrary for Work {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: ()) -> Self::Strategy {
+        (any::<u128>()).prop_map(Work).boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
+
 /// Test debug formatting.
 #[test]
 fn debug_format() {
@@ -57,6 +67,20 @@ fn debug_format() {
         format!("{:?}", ExpandedDifficulty(U256::MAX)),
         "ExpandedDifficulty(\"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\")"
     );
+
+    assert_eq!(format!("{:?}", Work(0)), "Work(0x0, 0, -inf)");
+    assert_eq!(
+        format!("{:?}", Work(u8::MAX as u128)),
+        "Work(0xff, 255, 7.99435)"
+    );
+    assert_eq!(
+        format!("{:?}", Work(u64::MAX as u128)),
+        "Work(0xffffffffffffffff, 18446744073709551615, 64.00000)"
+    );
+    assert_eq!(
+        format!("{:?}", Work(u128::MAX)),
+        "Work(0xffffffffffffffffffffffffffffffff, 340282366920938463463374607431768211455, 128.00000)"
+    );
 }
 
 /// Test zero values for CompactDifficulty.
@@ -66,6 +90,7 @@ fn compact_zero() {
 
     let natural_zero = CompactDifficulty(0);
     assert_eq!(natural_zero.to_expanded(), None);
+    assert_eq!(natural_zero.to_work(), None);
 
     // Small value zeroes
     let small_zero_1 = CompactDifficulty(1);
@@ -91,32 +116,43 @@ fn compact_extremes() {
 
     // Values equal to one
     let expanded_one = Some(ExpandedDifficulty(U256::one()));
+    let work_one = None;
 
     let one = CompactDifficulty(OFFSET as u32 * (1 << PRECISION) + 1);
     assert_eq!(one.to_expanded(), expanded_one);
+    assert_eq!(one.to_work(), work_one);
     let another_one = CompactDifficulty((1 << PRECISION) + (1 << 16));
     assert_eq!(another_one.to_expanded(), expanded_one);
 
     // Maximum mantissa
     let expanded_mant = Some(ExpandedDifficulty(UNSIGNED_MANTISSA_MASK.into()));
+    let work_mant = None;
 
     let mant = CompactDifficulty(OFFSET as u32 * (1 << PRECISION) + UNSIGNED_MANTISSA_MASK);
     assert_eq!(mant.to_expanded(), expanded_mant);
+    assert_eq!(mant.to_work(), work_mant);
 
     // Maximum valid exponent
     let exponent: U256 = (31 * 8).into();
-    let expanded_exp = Some(ExpandedDifficulty(U256::from(2).pow(exponent)));
+    let u256_exp = U256::from(2).pow(exponent);
+    let expanded_exp = Some(ExpandedDifficulty(u256_exp));
+    let work_exp = Some(Work(
+        ((U256::MAX - u256_exp) / (u256_exp + 1) + 1).as_u128(),
+    ));
 
     let exp = CompactDifficulty((31 + OFFSET as u32) * (1 << PRECISION) + 1);
     assert_eq!(exp.to_expanded(), expanded_exp);
+    assert_eq!(exp.to_work(), work_exp);
 
     // Maximum valid mantissa and exponent
     let exponent: U256 = (29 * 8).into();
-    let expanded_me = U256::from(UNSIGNED_MANTISSA_MASK) * U256::from(2).pow(exponent);
-    let expanded_me = Some(ExpandedDifficulty(expanded_me));
+    let u256_me = U256::from(UNSIGNED_MANTISSA_MASK) * U256::from(2).pow(exponent);
+    let expanded_me = Some(ExpandedDifficulty(u256_me));
+    let work_me = Some(Work((!u256_me / (u256_me + 1) + 1).as_u128()));
 
     let me = CompactDifficulty((31 + 1) * (1 << PRECISION) + UNSIGNED_MANTISSA_MASK);
     assert_eq!(me.to_expanded(), expanded_me);
+    assert_eq!(me.to_work(), work_me);
 
     // Maximum value, at least according to the spec
     //
@@ -127,6 +163,7 @@ fn compact_extremes() {
     // zcashd rejects these blocks without comparing the hash.
     let difficulty_max = CompactDifficulty(u32::MAX & !SIGN_BIT);
     assert_eq!(difficulty_max.to_expanded(), None);
+    assert_eq!(difficulty_max.to_work(), None);
 }
 
 /// Test blocks using CompactDifficulty.
@@ -173,6 +210,15 @@ fn block_difficulty() -> Result<(), Report> {
             assert!(hash > one);
             assert!(hash < max_value);
         }
+
+        /// SPANDOC: Calculate the work for mainnet block {?height}
+        let _work = block
+            .header
+            .difficulty_threshold
+            .to_work()
+            .expect("Chain blocks have valid work.");
+
+        // TODO: check work comparison operators and cumulative work addition
     }
 
     Ok(())
@@ -233,8 +279,8 @@ fn expanded_hash_order() -> Result<(), Report> {
 }
 
 proptest! {
-   /// Check that CompactDifficulty expands without panicking, and compares
-   /// correctly.
+    /// Check that CompactDifficulty expands without panicking, and compares
+    /// correctly. Also check that the work conversion does not panic.
    #[test]
    fn prop_compact_expand(compact in any::<CompactDifficulty>()) {
        // TODO: round-trip test, once we have ExpandedDifficulty::to_compact()
@@ -247,6 +293,9 @@ proptest! {
            prop_assert!(expanded >= hash_zero);
            prop_assert!(expanded <= hash_max);
        }
+
+       let _work = compact.to_work();
+       // TODO: work comparison and addition
    }
 
    /// Check that a random ExpandedDifficulty compares correctly with fixed BlockHeaderHashes.
