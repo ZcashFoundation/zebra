@@ -111,12 +111,17 @@ impl Application for ZebradApp {
             .as_ref()
             .expect("config is loaded before register_components");
 
-        let default_filter = if command.verbose { "info" } else { "warn" };
         let is_server = command
             .command
             .as_ref()
             .map(ZebradCmd::is_server)
             .unwrap_or(false);
+
+        let default_filter = if is_server || command.verbose {
+            "info"
+        } else {
+            "warn"
+        };
 
         // Launch network endpoints for long-running commands
         if is_server {
