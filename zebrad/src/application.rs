@@ -104,15 +104,11 @@ impl Application for ZebradApp {
         command: &Self::Cmd,
     ) -> Result<Vec<Box<dyn Component<Self>>>, FrameworkError> {
         let terminal = Terminal::new(self.term_colors(command));
-
         // This MUST happen after `Terminal::new` to ensure our preferred panic
         // handler is the last one installed
         color_eyre::install().unwrap();
 
-        // Set the initial filter based on the command-line argument.
-        // If the config sets a filter, we'll reload it in after_config.
-        let filter = if command.verbose { "info" } else { "warn" }.to_owned();
-        Ok(vec![Box::new(terminal), Box::new(Tracing::new(filter)?)])
+        Ok(vec![Box::new(terminal)])
     }
 
     /// Register all components used by this application.
@@ -131,11 +127,23 @@ impl Application for ZebradApp {
             .config
             .as_ref()
             .expect("config is loaded before register_components");
+
+        let default_filter = if command.verbose { "info" } else { "warn" };
+        let is_server = command
+            .command
+            .as_ref()
+            .map(ZebradCmd::is_server)
+            .unwrap_or(false);
+
         // Launch network endpoints for long-running commands
-        if ZebradApp::command_is_server(&command) {
+        if is_server {
+            let filter = cfg_ref.tracing.filter.as_deref().unwrap_or(default_filter);
+            components.push(Box::new(Tracing::new(filter)?));
             components.push(Box::new(TokioComponent::new()?));
             components.push(Box::new(TracingEndpoint::new(cfg_ref)?));
             components.push(Box::new(MetricsEndpoint::new(cfg_ref)?));
+        } else {
+            components.push(Box::new(Tracing::new(default_filter)?));
         }
 
         self.state.components.register(components)
@@ -162,7 +170,7 @@ impl Application for ZebradApp {
 
         // Fire callback regardless of whether any config was loaded to
         // in order to signal state in the application lifecycle
-        self.after_config(config, command)?;
+        self.after_config(config)?;
 
         Ok(())
     }
@@ -172,26 +180,10 @@ impl Application for ZebradApp {
     /// Called regardless of whether config is loaded to indicate this is the
     /// time in app lifecycle when configuration would be loaded if
     /// possible.
-    fn after_config(
-        &mut self,
-        config: Self::Cfg,
-        command: &Self::Cmd,
-    ) -> Result<(), FrameworkError> {
+    fn after_config(&mut self, config: Self::Cfg) -> Result<(), FrameworkError> {
         // Configure components
         self.state.components.after_config(&config)?;
         self.config = Some(config);
-
-        // Reload the filter only if we're running a long-lived server.
-        let cfg_ref = self.config.as_ref().unwrap();
-        if ZebradApp::command_is_server(&command) {
-            if let Some(ref filter) = cfg_ref.tracing.filter {
-                self.state
-                    .components
-                    .get_downcast_mut::<Tracing>()
-                    .expect("Tracing component should be available")
-                    .reload_filter(filter);
-            }
-        }
 
         Ok(())
     }
@@ -208,20 +200,6 @@ impl Application for ZebradApp {
             Shutdown::Graceful => process::exit(0),
             Shutdown::Forced => process::exit(1),
             Shutdown::Crash => process::exit(2),
-        }
-    }
-}
-
-impl ZebradApp {
-    /// Returns true if command is a server command.
-    ///
-    /// Server commands use long-running components such as tracing, metrics,
-    /// and the tokio runtime.
-    fn command_is_server(command: &EntryPoint<ZebradCmd>) -> bool {
-        // `None` outputs zebrad usage information and exits
-        match &command.command {
-            None => false,
-            Some(c) => c.is_server(),
         }
     }
 }

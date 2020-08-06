@@ -19,6 +19,3 @@ panic = "abort"
 
 [profile.release]
 panic = "abort"
-
-[patch.crates-io]
-abscissa_core = { git = "https://github.com/yaahc/abscissa.git", rev = "41d342a9344e38442b2211b07f28a89505892a21" }

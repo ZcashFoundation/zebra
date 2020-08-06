@@ -73,7 +73,8 @@ pub fn init(config: &TracingSection) -> (Tracing, Option<FlameGrapher>) {
         None
     };
 
-    (filter_handle.into(), guard)
+    //(filter_handle.into(), guard)
+    unimplemented!()
 }
 
 pub fn init_backup(config: &TracingSection) {
