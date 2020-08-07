@@ -316,13 +316,12 @@ impl ValueCommitment {
     /// Generate a new _ValueCommitment_.
     ///
     /// https://zips.z.cash/protocol/protocol.pdf#concretehomomorphiccommit
-    // TODO: accept an Amount instead?
     #[allow(non_snake_case)]
-    pub fn new<T>(csprng: &mut T, value_bytes: [u8; 32]) -> Self
+    pub fn new<T>(csprng: &mut T, value: Amount<NonNegative>) -> Self
     where
         T: RngCore + CryptoRng,
     {
-        let v = jubjub::Fr::from_bytes(&value_bytes).unwrap();
+        let v = jubjub::Fr::from(value);
         let rcv = generate_trapdoor(csprng);
 
         let V = find_group_hash(*b"Zcash_cv", b"v");

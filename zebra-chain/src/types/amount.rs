@@ -132,6 +132,16 @@ impl From<Amount<NonNegative>> for u64 {
     }
 }
 
+impl<C> From<Amount<C>> for jubjub::Fr {
+    fn from(a: Amount<C>) -> jubjub::Fr {
+        if a.0 < 0 {
+            jubjub::Fr::from(a.0.abs() as u64).neg()
+        } else {
+            jubjub::Fr::from(a.0 as u64)
+        }
+    }
+}
+
 impl<C> TryFrom<i64> for Amount<C>
 where
     C: AmountConstraint,
