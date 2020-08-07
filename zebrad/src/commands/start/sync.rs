@@ -59,7 +59,7 @@ where
     ///  - state: the zebra-state that stores the chain
     ///  - verifier: the zebra-consensus verifier that checks the chain
     pub fn new(chain: Network, peers: ZN, state: ZS, verifier: ZV) -> Self {
-        let retry_peers = Retry::new(RetryLimit::new(3), peers.clone());
+        let retry_peers = Retry::new(RetryLimit::new(10), peers.clone());
         Self {
             tip_network: peers,
             block_network: retry_peers,
