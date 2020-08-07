@@ -73,8 +73,8 @@ impl From<[u8; 32]> for Nullifier {
     }
 }
 
-impl From<(SpendingKey, NullifierSeed)> for Nullifier {
-    fn from((a_sk, rho): (SpendingKey, NullifierSeed)) -> Self {
+impl<'a> From<(&'a SpendingKey, NullifierSeed)> for Nullifier {
+    fn from((a_sk, rho): (&'a SpendingKey, NullifierSeed)) -> Self {
         Self(prf_nf(a_sk.into(), rho.into()))
     }
 }
