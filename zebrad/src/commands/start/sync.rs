@@ -199,7 +199,7 @@ where
                     // list, prune any block hashes already included in the
                     // state, stopping at the first unknown hash to get resp1',
                     // ..., respF'. (These lists may be empty).
-                    let mut first_unknown = 0;
+                    let mut first_unknown = None;
                     for (i, &hash) in hashes.iter().enumerate() {
                         let depth = self
                             .state
@@ -210,24 +210,26 @@ where
                             .await
                             .map_err(|e| eyre!(e))?;
                         if let zs::Response::Depth(None) = depth {
-                            first_unknown = i;
+                            first_unknown = Some(i);
                             break;
                         }
                     }
+
+                    // Hashes will be empty if we know about all the blocks in the response.
+                    if first_unknown.is_none() {
+                        tracing::debug!("ObtainTips: all hashes are known");
+                        continue;
+                    }
+                    let first_unknown = first_unknown.expect("already checked for None");
                     tracing::debug!(
                         first_unknown,
                         "found index of first unknown hash in response"
                     );
-                    if first_unknown == hashes.len() {
-                        // We should only stop getting hashes once we've finished the initial sync
-                        tracing::debug!("no new hashes, even though we gave our tip?");
-                        continue;
-                    }
 
                     let unknown_hashes = &hashes[first_unknown..];
                     let new_tip = *unknown_hashes
                         .last()
-                        .expect("already checked first_unknown < hashes.len()");
+                        .expect("enumerate returns a valid index");
 
                     // ObtainTips Step 4:
                     // Combine the last elements of each list into a set; this is the
