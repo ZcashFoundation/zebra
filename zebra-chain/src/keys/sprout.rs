@@ -130,6 +130,12 @@ impl From<SpendingKey> for [u8; 32] {
     }
 }
 
+impl<'a> From<&'a SpendingKey> for [u8; 32] {
+    fn from(spending_key: &'a SpendingKey) -> [u8; 32] {
+        spending_key.bytes
+    }
+}
+
 impl std::str::FromStr for SpendingKey {
     type Err = SerializationError;
 
