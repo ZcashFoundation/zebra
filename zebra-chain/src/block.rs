@@ -4,6 +4,7 @@
 mod difficulty;
 mod hash;
 mod header;
+mod light_client;
 mod serialize;
 
 #[cfg(test)]

@@ -1,12 +1,14 @@
 use super::*;
 
-use crate::block::difficulty::CompactDifficulty;
+use crate::block::{difficulty::CompactDifficulty, light_client::LightClientRootHash};
 use crate::equihash_solution::EquihashSolution;
 use crate::merkle_tree::MerkleTreeRootHash;
 use crate::serialization::{
     SerializationError, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
 };
+use crate::types::BlockHeight;
 use crate::types::LockTime;
+use crate::Network;
 use crate::{sha256d_writer::Sha256dWriter, test::generate};
 
 use chrono::{DateTime, Duration, LocalResult, TimeZone, Utc};
@@ -17,6 +19,20 @@ use proptest::{
 };
 use std::env;
 use std::io::{Cursor, ErrorKind, Write};
+
+impl Arbitrary for LightClientRootHash {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: ()) -> Self::Strategy {
+        (any::<[u8; 32]>(), any::<Network>(), any::<BlockHeight>())
+            .prop_map(|(light_client_root_hash, network, block_height)| {
+                LightClientRootHash::from_bytes(light_client_root_hash, network, block_height)
+            })
+            .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
 
 impl Arbitrary for BlockHeader {
     type Parameters = ();
