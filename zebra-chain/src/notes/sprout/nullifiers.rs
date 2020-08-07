@@ -1,4 +1,3 @@
-#![allow(clippy::unit_arg)]
 #![allow(dead_code)]
 
 use std::io;
@@ -40,6 +39,7 @@ fn prf_nf(a_sk: [u8; 32], rho: [u8; 32]) -> [u8; 32] {
 /// Nullifier seed, named rho in the [spec][ps].
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#sproutkeycomponents
+
 #[derive(Clone, Copy, Debug)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub struct NullifierSeed(pub(crate) [u8; 32]);

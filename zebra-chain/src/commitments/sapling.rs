@@ -7,7 +7,7 @@ mod test_vectors;
 
 pub mod pedersen_hashes;
 
-use std::{fmt, io};
+use std::fmt;
 
 use bitvec::prelude::*;
 use rand_core::{CryptoRng, RngCore};
@@ -15,7 +15,6 @@ use rand_core::{CryptoRng, RngCore};
 use crate::{
     keys::sapling::{find_group_hash, Diversifier, TransmissionKey},
     serde_helpers,
-    serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize},
     types::amount::{Amount, NonNegative},
 };
 
@@ -57,21 +56,6 @@ impl From<NoteCommitment> for [u8; 32] {
 }
 
 impl Eq for NoteCommitment {}
-
-impl ZcashSerialize for NoteCommitment {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        writer.write_all(&self.0.to_bytes())?;
-        Ok(())
-    }
-}
-
-impl ZcashDeserialize for NoteCommitment {
-    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        Ok(Self(
-            jubjub::AffinePoint::from_bytes(reader.read_32_bytes()?).unwrap(),
-        ))
-    }
-}
 
 impl NoteCommitment {
     /// Generate a new _NoteCommitment_ and the randomness used to create it.
@@ -132,7 +116,7 @@ impl NoteCommitment {
 /// Output Descriptions.
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#concretehomomorphiccommit
-#[derive(Clone, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Copy, Deserialize, PartialEq, Serialize)]
 pub struct ValueCommitment(#[serde(with = "serde_helpers::AffinePoint")] pub jubjub::AffinePoint);
 
 impl fmt::Debug for ValueCommitment {
@@ -144,6 +128,10 @@ impl fmt::Debug for ValueCommitment {
     }
 }
 
+/// LEBS2OSP256(repr_J(cv))
+///
+/// https://zips.z.cash/protocol/protocol.pdf#spendencoding
+/// https://zips.z.cash/protocol/protocol.pdf#jubjub
 impl From<[u8; 32]> for ValueCommitment {
     fn from(bytes: [u8; 32]) -> Self {
         Self(jubjub::AffinePoint::from_bytes(bytes).unwrap())
@@ -158,28 +146,13 @@ impl From<jubjub::ExtendedPoint> for ValueCommitment {
 
 impl Eq for ValueCommitment {}
 
-impl From<ValueCommitment> for [u8; 32] {
-    fn from(cm: ValueCommitment) -> [u8; 32] {
-        cm.0.to_bytes()
-    }
-}
-
 /// LEBS2OSP256(repr_J(cv))
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#spendencoding
 /// https://zips.z.cash/protocol/protocol.pdf#jubjub
-impl ZcashSerialize for ValueCommitment {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        writer.write_all(&self.0.to_bytes())?;
-        Ok(())
-    }
-}
-
-impl ZcashDeserialize for ValueCommitment {
-    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        Ok(Self(
-            jubjub::AffinePoint::from_bytes(reader.read_32_bytes()?).unwrap(),
-        ))
+impl From<ValueCommitment> for [u8; 32] {
+    fn from(cm: ValueCommitment) -> [u8; 32] {
+        cm.0.to_bytes()
     }
 }
 
