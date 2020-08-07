@@ -43,6 +43,12 @@ pub struct OutPoint {
     pub index: u32,
 }
 
+impl AsRef<[u8]> for OutPoint {
+    fn as_ref(&self) -> &[u8] {
+        todo!()
+    }
+}
+
 /// A transparent input to a transaction.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum TransparentInput {
@@ -88,4 +94,10 @@ pub struct TransparentOutput {
     /// Usually contains the public key as a Bitcoin script setting up
     /// conditions to claim this output.
     pub pk_script: Script,
+}
+
+impl AsRef<[u8]> for TransparentOutput {
+    fn as_ref(&self) -> &[u8] {
+        todo!()
+    }
 }

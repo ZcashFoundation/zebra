@@ -14,6 +14,7 @@ use tracing::instrument;
 use zebra_chain::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 use zebra_chain::{
     block::{Block, BlockHeaderHash},
+    transaction::OutPoint,
     types::BlockHeight,
     Network,
 };
@@ -43,12 +44,26 @@ impl SledState {
         let height = block.coinbase_height().unwrap();
 
         let height_map = self.storage.open_tree(b"height_map")?;
+        let by_outpoint = self.storage.open_tree(b"by_outpoint")?;
         let by_hash = self.storage.open_tree(b"by_hash")?;
 
         let bytes = block.zcash_serialize_to_vec()?;
 
-        // TODO(jlusby): make this transactional
         height_map.insert(&height.0.to_be_bytes(), &hash.0)?;
+
+        for transaction in &block.transactions {
+            let hash = transaction.hash();
+            for (index, output) in transaction.outputs().enumerate() {
+                let index = index as _;
+                let outpoint = OutPoint { hash, index };
+                let output = Some(output);
+                let output: &[u8] = todo!("serialize the output in a way that encodes Some(unspent_output) or None to imply spent output");
+                by_outpoint.insert(outpoint, output)?;
+            }
+
+            // TODO iterate over inputs and invalidate them
+        }
+
         by_hash.insert(&hash.0, bytes)?;
 
         Ok(hash)

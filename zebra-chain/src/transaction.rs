@@ -17,7 +17,11 @@ pub use shielded_data::{Output, ShieldedData, Spend};
 pub use transparent::{CoinbaseData, OutPoint, TransparentInput, TransparentOutput};
 
 use crate::proofs::{Bctv14Proof, Groth16Proof};
-use crate::types::{amount::Amount, BlockHeight, LockTime};
+use crate::{
+    serialization::ZcashSerialize,
+    sha256d_writer::Sha256dWriter,
+    types::{amount::Amount, BlockHeight, LockTime},
+};
 
 /// A Zcash transaction.
 ///
@@ -135,5 +139,13 @@ impl Transaction {
     pub fn contains_coinbase_input(&self) -> bool {
         self.inputs()
             .any(|input| matches!(input, TransparentInput::Coinbase { .. }))
+    }
+
+    /// Returns the hash for the current transaction
+    pub fn hash(&self) -> TransactionHash {
+        let mut hash_writer = Sha256dWriter::default();
+        self.zcash_serialize(&mut hash_writer)
+            .expect("Transactions must serialize into the hash.");
+        TransactionHash(hash_writer.finish())
     }
 }
