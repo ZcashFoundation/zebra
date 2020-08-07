@@ -4,7 +4,7 @@
 use std::io;
 
 use crate::{
-    commitments::sapling::{mixing_pedersen_hash, NoteCommitment},
+    commitments::sapling::{pedersen_hashes::mixing_pedersen_hash, NoteCommitment},
     keys::sapling::NullifierDerivingKey,
     serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize},
     treestate::note_commitment_tree::Position,

@@ -20,7 +20,7 @@ use bitvec::prelude::*;
 use proptest_derive::Arbitrary;
 
 use crate::{
-    commitments::sapling::pedersen_hash,
+    commitments::sapling::pedersen_hashes::pedersen_hash,
     serialization::{SerializationError, ZcashDeserialize, ZcashSerialize},
 };
 
