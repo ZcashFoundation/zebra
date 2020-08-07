@@ -87,25 +87,14 @@ pub fn verify_script(
         Err(Error::from(err))
     }
 }
-pub fn script_is_valid(block: &Block) -> bool {
-    for trans in &block.transactions {
-        let inputs = trans.inputs();
-        let outputs = trans.outputs();
+pub fn script_is_valid(things: &[(zebra_chain::types::Script, TransparentOutput)]) -> bool {
+    for (script, to_spend) in things {
+        let n_in = 0;
+        let flags = 1;
+        let branch_id = 0x2bb40e61;
+        let TransparentOutput { value, pk_script } = to_spend;
 
-        for input in inputs {
-            let script = if let TransparentInput::PrevOut { script, .. } = input {
-                script
-            } else {
-                continue;
-            };
-
-            let n_in = 0;
-            let flags = 1;
-            let branch_id = 0x2bb40e61;
-            let (value, pk_script) = todo!();
-
-            verify_script(pk_script, (*value).into(), script, n_in, flags, branch_id).unwrap();
-        }
+        verify_script(pk_script, (*value).into(), script, n_in, flags, branch_id).unwrap();
     }
 
     true
