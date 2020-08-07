@@ -3,18 +3,22 @@ use super::{Request, Response};
 use crate::Config;
 use future::Either;
 use futures::prelude::*;
+use sled::Tree;
 use std::sync::Arc;
 use std::{
     collections::HashMap,
     error,
     future::Future,
+    hash::Hash,
     pin::Pin,
     task::{Context, Poll},
 };
 use tokio::sync::broadcast;
 use tower::buffer::Buffer;
 use tracing::instrument;
-use zebra_chain::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
+use zebra_chain::serialization::{
+    SerializationError, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
+};
 use zebra_chain::{
     block::{Block, BlockHeaderHash},
     transaction::{OutPoint, TransparentOutput},
@@ -22,16 +26,19 @@ use zebra_chain::{
     Network,
 };
 
+#[allow(dead_code)]
 struct Service {
     storage: SledState,
-    pending_utxo: HashMap<OutPoint, broadcast::Sender<TransparentOutput>>,
+    pending_utxo: SledMap<OutPoint, TransparentOutput>,
 }
 
 impl Service {
     fn new(config: &Config, network: Network) -> Self {
+        let storage = SledState::new(config, network);
+
         Self {
-            storage: SledState::new(config, network),
-            pending_utxo: Default::default(),
+            pending_utxo: storage.new_map("by_outpoint").unwrap(),
+            storage,
         }
     }
 }
@@ -49,6 +56,15 @@ impl SledState {
         Self {
             storage: config.open().unwrap(),
         }
+    }
+
+    fn new_map<K, V>(&self, name: impl AsRef<[u8]>) -> Result<SledMap<K, V>, Error>
+    where
+        K: AsRef<[u8]> + Eq + Hash,
+        V: ZcashDeserialize + ZcashSerialize + Clone,
+    {
+        let tree = self.storage.open_tree(name)?;
+        Ok(SledMap::new(tree, Default::default()))
     }
 
     #[instrument(skip(self))]
@@ -134,7 +150,7 @@ impl SledState {
     ///
     fn get_utxo(
         &self,
-        outpoint: OutPoint,
+        _outpoint: OutPoint,
     ) -> Result<Either<TransparentOutput, broadcast::Receiver<TransparentOutput>>, Error> {
         // if contains outpoint, return outpoint, if not, check if we have a
         // channel for it, if so subscribe and return the receiver, if not,
@@ -345,5 +361,60 @@ impl_from! {
 impl Into<BoxError> for Error {
     fn into(self) -> BoxError {
         BoxError::from(self.0)
+    }
+}
+
+/// A map like interface ontop of sled with a future based interface for
+/// retrieving values that aren't available yet.
+#[allow(dead_code)]
+struct SledMap<K, V> {
+    tree: Tree,
+    pending: HashMap<K, broadcast::Sender<V>>,
+}
+
+#[allow(clippy::manual_async_fn)]
+#[allow(dead_code, unused_variables)]
+impl<K, V> SledMap<K, V>
+where
+    K: AsRef<[u8]> + Eq + Hash,
+    V: ZcashDeserialize + ZcashSerialize + Clone,
+{
+    fn new(tree: Tree, pending: HashMap<K, broadcast::Sender<V>>) -> Self {
+        Self { tree, pending }
+    }
+
+    fn insert(&mut self, key: K, value: V) -> impl Future<Output = Option<V>> {
+        async { todo!() }
+    }
+
+    fn get(&mut self, k: K) -> impl Future<Output = Option<V>> {
+        // if contains outpoint, return outpoint, if not, check if we have a
+        // channel for it, if so subscribe and return the receiver, if not,
+        // create a channel, insert, and return the receiver
+        let val = self
+            .tree
+            .get(&k)
+            .unwrap()
+            .map(|bytes| bytes.zcash_deserialize_into().unwrap())
+            .map(Either::Left)
+            .unwrap_or_else(|| {
+                Either::Right(
+                    self.pending
+                        .get(&k)
+                        .map(|sender| sender.subscribe())
+                        .unwrap_or_else(|| {
+                            let (tx, rx) = broadcast::channel(1);
+                            self.pending.insert(k, tx);
+                            rx
+                        }),
+                )
+            });
+
+        async {
+            match val {
+                Either::Left(val) => Some(val),
+                Either::Right(mut rx) => Some(rx.recv().await.unwrap()),
+            }
+        }
     }
 }

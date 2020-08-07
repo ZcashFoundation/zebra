@@ -16,7 +16,7 @@ use super::Transaction;
 ///
 /// TODO: I'm pretty sure this is also a SHA256d hash but I haven't
 /// confirmed it yet.
-#[derive(Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Copy, Clone, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct TransactionHash(pub [u8; 32]);
 
