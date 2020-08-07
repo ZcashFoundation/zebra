@@ -1,16 +1,18 @@
 //! The primary implementation of the `zebra_state::Service` built upon sled
 use super::{Request, Response};
 use crate::Config;
+use future::Either;
 use futures::prelude::*;
 use std::sync::Arc;
 use std::{
+    collections::HashMap,
     error,
     future::Future,
     pin::Pin,
     task::{Context, Poll},
 };
-use tokio::sync::{oneshot, Mutex};
-use tower::{buffer::Buffer, Service};
+use tokio::sync::broadcast;
+use tower::buffer::Buffer;
 use tracing::instrument;
 use zebra_chain::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 use zebra_chain::{
@@ -20,10 +22,23 @@ use zebra_chain::{
     Network,
 };
 
+struct Service {
+    storage: SledState,
+    pending_utxo: HashMap<OutPoint, broadcast::Sender<TransparentOutput>>,
+}
+
+impl Service {
+    fn new(config: &Config, network: Network) -> Self {
+        Self {
+            storage: SledState::new(config, network),
+            pending_utxo: Default::default(),
+        }
+    }
+}
+
 #[derive(Clone)]
 struct SledState {
     storage: sled::Db,
-    pending_utxo: Arc<Mutex<Vec<oneshot::Sender<TransparentOutput>>>>,
 }
 
 impl SledState {
@@ -33,7 +48,6 @@ impl SledState {
 
         Self {
             storage: config.open().unwrap(),
-            pending_utxo: Default::default(),
         }
     }
 
@@ -118,12 +132,18 @@ impl SledState {
     /// Returns an error if the UTXO has been spent and returns `Ok(None)` if the
     /// UTXO is unknown.
     ///
-    fn get_utxo(&self, outpoint: OutPoint) -> Result<Option<TransparentOutput>, Error> {
+    fn get_utxo(
+        &self,
+        outpoint: OutPoint,
+    ) -> Result<Either<TransparentOutput, broadcast::Receiver<TransparentOutput>>, Error> {
+        // if contains outpoint, return outpoint, if not, check if we have a
+        // channel for it, if so subscribe and return the receiver, if not,
+        // create a channel, insert, and return the receiver
         todo!()
     }
 }
 
-impl Service<Request> for SledState {
+impl tower::Service<Request> for Service {
     type Response = Response;
     type Error = Error;
     type Future =
@@ -136,12 +156,12 @@ impl Service<Request> for SledState {
     fn call(&mut self, req: Request) -> Self::Future {
         match req {
             Request::AddBlock { block } => {
-                let mut storage = self.clone();
+                let mut storage = self.storage.clone();
 
                 async move { storage.insert(block).map(|hash| Response::Added { hash }) }.boxed()
             }
             Request::GetBlock { hash } => {
-                let storage = self.clone();
+                let storage = self.storage.clone();
                 async move {
                     storage
                         .get(hash)?
@@ -151,7 +171,7 @@ impl Service<Request> for SledState {
                 .boxed()
             }
             Request::GetTip => {
-                let storage = self.clone();
+                let storage = self.storage.clone();
                 async move {
                     storage
                         .get_tip()?
@@ -161,7 +181,7 @@ impl Service<Request> for SledState {
                 .boxed()
             }
             Request::GetDepth { hash } => {
-                let storage = self.clone();
+                let storage = self.storage.clone();
 
                 async move {
                     if !storage.contains(&hash)? {
@@ -186,7 +206,7 @@ impl Service<Request> for SledState {
                 .boxed()
             }
             Request::GetBlockLocator { genesis } => {
-                let storage = self.clone();
+                let storage = self.storage.clone();
 
                 async move {
                     let tip_hash = match storage.get_tip()? {
@@ -220,21 +240,15 @@ impl Service<Request> for SledState {
                 }
                 .boxed()
             }
-            Request::GetUTXO { outpoint } => {
-                let storage = self.clone();
-
-                async move {
-                    if let Some(output) = storage.get_utxo(outpoint)? {
-                        Ok(Response::UTXO { output })
-                    } else {
-                        let (tx, rx) = oneshot::channel();
-                        storage.pending_utxo.lock().await.push(tx);
-                        let output = rx.await?;
-                        Ok(Response::UTXO { output })
-                    }
+            Request::GetUTXO { outpoint } => match self.storage.get_utxo(outpoint) {
+                Ok(Either::Left(output)) => async move { Ok(Response::UTXO { output }) }.boxed(),
+                Ok(Either::Right(mut rx)) => async move {
+                    let output = rx.recv().await?;
+                    Ok(Response::UTXO { output })
                 }
-                .boxed()
-            }
+                .boxed(),
+                Err(e) => async move { Err(e) }.boxed(),
+            },
         }
     }
 }
@@ -279,7 +293,7 @@ impl From<BlockHeight> for BlockQuery {
 pub fn init(
     config: Config,
     network: Network,
-) -> impl Service<
+) -> impl tower::Service<
     Request,
     Response = Response,
     Error = BoxError,
@@ -287,7 +301,7 @@ pub fn init(
 > + Send
        + Clone
        + 'static {
-    Buffer::new(SledState::new(&config, network), 1)
+    Buffer::new(Service::new(&config, network), 1)
 }
 
 type BoxError = Box<dyn error::Error + Send + Sync + 'static>;
@@ -325,7 +339,7 @@ impl_from! {
     SerializationError,
     std::io::Error,
     sled::Error,
-    oneshot::error::RecvError,
+    broadcast::RecvError,
 }
 
 impl Into<BoxError> for Error {
