@@ -201,15 +201,7 @@ where
                     // ..., respF'. (These lists may be empty).
                     let mut first_unknown = None;
                     for (i, &hash) in hashes.iter().enumerate() {
-                        let depth = self
-                            .state
-                            .ready_and()
-                            .await
-                            .map_err(|e| eyre!(e))?
-                            .call(zebra_state::Request::GetDepth { hash })
-                            .await
-                            .map_err(|e| eyre!(e))?;
-                        if let zs::Response::Depth(None) = depth {
+                        if self.get_depth(hash).await?.is_none() {
                             first_unknown = Some(i);
                             break;
                         }
@@ -304,22 +296,48 @@ where
                         // It indicates that the remote peer does not have any blocks
                         // following the prospective tip.
                         match (hashes.first(), hashes.len()) {
-                            (_, 0) => {
-                                tracing::debug!("skipping empty response");
+                            (None, _) => {
+                                tracing::debug!("ExtendTips: skipping empty response");
                                 continue;
                             }
                             (_, 1) => {
-                                tracing::debug!("skipping length-1 response, in case it's an unsolicited inv message");
+                                tracing::debug!("ExtendTips: skipping length-1 response, in case it's an unsolicited inv message");
                                 continue;
                             }
                             (Some(hash), _) if (hash == &self.genesis_hash) => {
-                                tracing::debug!("skipping response, peer could not extend the tip");
+                                tracing::debug!(
+                                    "ExtendTips: skipping response, peer could not extend the tip"
+                                );
                                 continue;
                             }
-                            _ => {}
+                            (Some(&hash), _) => {
+                                // Check for hashes we've already seen.
+                                // This happens a lot near the end of the chain.
+                                let depth = self.get_depth(hash).await?;
+                                if let Some(depth) = depth {
+                                    tracing::debug!(
+                                        ?depth,
+                                        ?hash,
+                                        "ExtendTips: skipping response, peer returned a duplicate hash: already in state"
+                                    );
+                                    continue;
+                                }
+                            }
                         }
 
                         let new_tip = hashes.pop().expect("expected: hashes must have len > 0");
+
+                        // Check for tips we've already seen
+                        // TODO: remove this check once the sync service is more reliable
+                        let depth = self.get_depth(new_tip).await?;
+                        if let Some(depth) = depth {
+                            tracing::info!(
+                                ?depth,
+                                ?new_tip,
+                                "ExtendTips: Unexpected duplicate tip from peer: already in state"
+                            );
+                            continue;
+                        }
 
                         // ExtendTips Step 4
                         //
@@ -370,17 +388,7 @@ where
         //
         // So we just queue the genesis block here.
 
-        let state_has_genesis = self
-            .state
-            .ready_and()
-            .await
-            .map_err(|e| eyre!(e))?
-            .call(zebra_state::Request::GetBlock {
-                hash: self.genesis_hash,
-            })
-            .await
-            .is_ok();
-
+        let state_has_genesis = self.get_depth(self.genesis_hash).await?.is_some();
         if !state_has_genesis {
             self.request_blocks(vec![self.genesis_hash]).await?;
         }
@@ -426,6 +434,26 @@ where
         }
 
         Ok(())
+    }
+
+    /// Get the depth of hash in the current chain.
+    ///
+    /// Returns None if the hash is not present in the chain.
+    /// TODO: handle multiple tips in the state.
+    #[instrument(skip(self))]
+    async fn get_depth(&mut self, hash: BlockHeaderHash) -> Result<Option<u32>, Report> {
+        match self
+            .state
+            .ready_and()
+            .await
+            .map_err(|e| eyre!(e))?
+            .call(zebra_state::Request::GetDepth { hash })
+            .await
+            .map_err(|e| eyre!(e))?
+        {
+            zs::Response::Depth(d) => Ok(d),
+            _ => unreachable!("wrong response to depth request"),
+        }
     }
 }
 
