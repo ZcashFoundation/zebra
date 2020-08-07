@@ -23,6 +23,7 @@ use tower::{Service, ServiceExt};
 
 use zebra_chain::{
     block::{Block, BlockHeaderHash},
+    transaction::{OutPoint, TransparentOutput},
     types::BlockHeight,
     Network,
     Network::*,
@@ -106,6 +107,11 @@ pub enum Request {
         /// The hash to check against the current chain
         hash: BlockHeaderHash,
     },
+    /// Looks up unspent transaction output given an outpoint
+    GetUTXO {
+        /// The outpoint identifying the UTXO
+        outpoint: OutPoint,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -138,6 +144,11 @@ pub enum Response {
         /// The number of blocks above the given block in the current best chain
         Option<u32>,
     ),
+    /// The response to a `GetUTXO` request
+    UTXO {
+        /// The transaction output from the UTXO
+        output: TransparentOutput,
+    },
 }
 
 /// Get the heights of the blocks for constructing a block_locator list

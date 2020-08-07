@@ -9,11 +9,13 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
+use tokio::sync::{oneshot, Mutex};
 use tower::{buffer::Buffer, Service};
 use tracing::instrument;
 use zebra_chain::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 use zebra_chain::{
     block::{Block, BlockHeaderHash},
+    transaction::{OutPoint, TransparentOutput},
     types::BlockHeight,
     Network,
 };
@@ -21,6 +23,7 @@ use zebra_chain::{
 #[derive(Clone)]
 struct SledState {
     storage: sled::Db,
+    pending_utxo: Arc<Mutex<Vec<oneshot::Sender<TransparentOutput>>>>,
 }
 
 impl SledState {
@@ -30,6 +33,7 @@ impl SledState {
 
         Self {
             storage: config.open().unwrap(),
+            pending_utxo: Default::default(),
         }
     }
 
@@ -105,6 +109,17 @@ impl SledState {
         let key = &hash.0;
 
         Ok(by_hash.contains_key(key)?)
+    }
+
+    /// Return a utxo if it exists.
+    ///
+    /// # Details
+    ///
+    /// Returns an error if the UTXO has been spent and returns `Ok(None)` if the
+    /// UTXO is unknown.
+    ///
+    fn get_utxo(&self, outpoint: OutPoint) -> Result<Option<TransparentOutput>, Error> {
+        todo!()
     }
 }
 
@@ -205,6 +220,21 @@ impl Service<Request> for SledState {
                 }
                 .boxed()
             }
+            Request::GetUTXO { outpoint } => {
+                let storage = self.clone();
+
+                async move {
+                    if let Some(output) = storage.get_utxo(outpoint)? {
+                        Ok(Response::UTXO { output })
+                    } else {
+                        let (tx, rx) = oneshot::channel();
+                        storage.pending_utxo.lock().await.push(tx);
+                        let output = rx.await?;
+                        Ok(Response::UTXO { output })
+                    }
+                }
+                .boxed()
+            }
         }
     }
 }
@@ -295,6 +325,7 @@ impl_from! {
     SerializationError,
     std::io::Error,
     sled::Error,
+    oneshot::error::RecvError,
 }
 
 impl Into<BoxError> for Error {
