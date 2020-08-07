@@ -1,4 +1,6 @@
 //! Blockchain-related datastructures for Zebra. 🦓
+//!
+//! $$a^2 + b^2 = c^2$$
 
 #![doc(html_favicon_url = "https://www.zfnd.org/images/zebra-favicon-128.png")]
 #![doc(html_logo_url = "https://www.zfnd.org/images/zebra-icon.png")]
@@ -24,6 +26,7 @@ pub mod proofs;
 pub mod serialization;
 pub mod transaction;
 pub mod types;
+pub mod utils;
 
 pub use ed25519_zebra;
 pub use redjubjub;

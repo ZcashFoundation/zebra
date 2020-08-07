@@ -3,6 +3,11 @@ use std::sync::Once;
 use tracing_error::ErrorLayer;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
+pub mod command;
+pub mod prelude;
+pub mod transcript;
+pub mod vectors;
+
 static INIT: Once = Once::new();
 
 /// Initialize globals for tests such as the tracing subscriber and panic / error
@@ -10,9 +15,14 @@ static INIT: Once = Once::new();
 pub fn init() {
     INIT.call_once(|| {
         let fmt_layer = fmt::layer().with_target(false);
-        let filter_layer = EnvFilter::try_from_default_env()
-            .or_else(|_| EnvFilter::try_new("info"))
-            .unwrap();
+        // Use the RUST_LOG env var, or by default:
+        //  - warn for most tests, and
+        //  - for some modules, hide expected warn logs
+        let filter_layer = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+            EnvFilter::try_new("warn")
+                .unwrap()
+                .add_directive("zebra_consensus=error".parse().unwrap())
+        });
 
         tracing_subscriber::registry()
             .with(filter_layer)
@@ -63,6 +73,3 @@ pub fn init() {
             .unwrap();
     })
 }
-
-pub mod transcript;
-pub mod vectors;

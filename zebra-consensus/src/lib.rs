@@ -16,9 +16,11 @@
 #![allow(clippy::try_err)]
 
 pub mod block;
+pub mod chain;
 pub mod checkpoint;
 pub mod mempool;
 pub mod parameters;
-pub mod redjubjub;
+#[allow(dead_code)] // Remove this once transaction verification is implemented
+mod primitives;
 mod script;
 mod transaction;

@@ -14,33 +14,69 @@
 #![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_state")]
 #![warn(missing_docs)]
 #![allow(clippy::try_err)]
+
+use color_eyre::eyre::{eyre, Report};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::sync::Arc;
-use zebra_chain::block::{Block, BlockHeaderHash};
+use std::{error, iter, sync::Arc};
+use tower::{Service, ServiceExt};
+
+use zebra_chain::{
+    block::{Block, BlockHeaderHash},
+    types::BlockHeight,
+    Network,
+    Network::*,
+};
 
 pub mod in_memory;
 pub mod on_disk;
 
-/// Configuration for networking code.
+/// Configuration for the state service.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
-    /// The root directory for the state storage
-    pub path: PathBuf,
+    /// The root directory for storing cached data.
+    ///
+    /// Cached data includes any state that can be replicated from the network
+    /// (e.g., the chain state, the blocks, the UTXO set, etc.). It does *not*
+    /// include private data that cannot be replicated from the network, such as
+    /// wallet data.  That data is not handled by `zebra-state`.
+    ///
+    /// Each network has a separate state, which is stored in "mainnet/state"
+    /// and "testnet/state" subdirectories.
+    ///
+    /// The default directory is platform dependent, based on
+    /// [`dirs::cache_dir()`](https://docs.rs/dirs/3.0.1/dirs/fn.cache_dir.html):
+    ///
+    /// |Platform | Value                                           | Example                            |
+    /// | ------- | ----------------------------------------------- | ---------------------------------- |
+    /// | Linux   | `$XDG_CACHE_HOME/zebra` or `$HOME/.cache/zebra` | /home/alice/.cache/zebra           |
+    /// | macOS   | `$HOME/Library/Caches/zebra`                    | /Users/Alice/Library/Caches/zebra  |
+    /// | Windows | `{FOLDERID_LocalAppData}\zebra`                 | C:\Users\Alice\AppData\Local\zebra |
+    /// | Other   | `std::env::current_dir()/cache`                 |                                    |
+    pub cache_dir: PathBuf,
 }
 
 impl Config {
-    pub(crate) fn sled_config(&self) -> sled::Config {
-        sled::Config::default().path(&self.path)
+    /// Generate the appropriate `sled::Config` for `network`, based on the
+    /// provided `zebra_state::Config`.
+    pub(crate) fn sled_config(&self, network: Network) -> sled::Config {
+        let net_dir = match network {
+            Mainnet => "mainnet",
+            Testnet => "testnet",
+        };
+        let path = self.cache_dir.join(net_dir).join("state");
+
+        sled::Config::default().path(path)
     }
 }
 
 impl Default for Config {
     fn default() -> Self {
-        Self {
-            path: PathBuf::from("./.zebra-state"),
-        }
+        let cache_dir = dirs::cache_dir()
+            .unwrap_or_else(|| std::env::current_dir().unwrap().join("cache"))
+            .join("zebra");
+        Self { cache_dir }
     }
 }
 
@@ -57,6 +93,11 @@ pub enum Request {
     GetBlock {
         /// The hash used to identify the block
         hash: BlockHeaderHash,
+    },
+    /// Get a block locator list for the current best chain
+    GetBlockLocator {
+        /// The genesis block of the current best chain
+        genesis: BlockHeaderHash,
     },
     /// Get the block that is the tip of the current chain
     GetTip,
@@ -81,6 +122,11 @@ pub enum Response {
         /// The block that was requested
         block: Arc<Block>,
     },
+    /// The response to a `GetBlockLocator` request
+    BlockLocator {
+        /// The set of blocks that make up the block locator
+        block_locator: Vec<BlockHeaderHash>,
+    },
     /// The response to a `GetTip` request
     Tip {
         /// The hash of the block at the tip of the current chain
@@ -92,4 +138,91 @@ pub enum Response {
         /// The number of blocks above the given block in the current best chain
         Option<u32>,
     ),
+}
+
+/// Get the heights of the blocks for constructing a block_locator list
+fn block_locator_heights(tip_height: BlockHeight) -> impl Iterator<Item = BlockHeight> {
+    iter::successors(Some(1u32), |h| h.checked_mul(2))
+        .flat_map(move |step| tip_height.0.checked_sub(step))
+        .map(BlockHeight)
+        .chain(iter::once(BlockHeight(0)))
+}
+
+/// The error type for the State Service.
+// TODO(jlusby): Error = Report ?
+type Error = Box<dyn error::Error + Send + Sync + 'static>;
+
+/// Get the tip block, using `state`.
+///
+/// If there is no tip, returns `Ok(None)`.
+/// Returns an error if `state.poll_ready` errors.
+pub async fn current_tip<S>(state: S) -> Result<Option<Arc<Block>>, Report>
+where
+    S: Service<Request, Response = Response, Error = Error> + Send + Clone + 'static,
+    S::Future: Send + 'static,
+{
+    let current_tip_hash = state
+        .clone()
+        .ready_and()
+        .await
+        .map_err(|e| eyre!(e))?
+        .call(Request::GetTip)
+        .await
+        .map(|response| match response {
+            Response::Tip { hash } => hash,
+            _ => unreachable!("GetTip request can only result in Response::Tip"),
+        })
+        .ok();
+
+    let current_tip_block = match current_tip_hash {
+        Some(hash) => state
+            .clone()
+            .ready_and()
+            .await
+            .map_err(|e| eyre!(e))?
+            .call(Request::GetBlock { hash })
+            .await
+            .map(|response| match response {
+                Response::Block { block } => block,
+                _ => unreachable!("GetBlock request can only result in Response::Block"),
+            })
+            .ok(),
+        None => None,
+    };
+
+    Ok(current_tip_block)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::ffi::OsStr;
+
+    #[test]
+    fn test_path_mainnet() {
+        test_path(Mainnet);
+    }
+
+    #[test]
+    fn test_path_testnet() {
+        test_path(Testnet);
+    }
+
+    /// Check the sled path for `network`.
+    fn test_path(network: Network) {
+        zebra_test::init();
+
+        let config = Config::default();
+        // we can't do many useful tests on this value, because it depends on the
+        // local environment and OS.
+        let sled_config = config.sled_config(network);
+        let mut path = sled_config.get_path();
+        assert_eq!(path.file_name(), Some(OsStr::new("state")));
+        assert!(path.pop());
+        match network {
+            Mainnet => assert_eq!(path.file_name(), Some(OsStr::new("mainnet"))),
+            Testnet => assert_eq!(path.file_name(), Some(OsStr::new("testnet"))),
+        }
+    }
 }

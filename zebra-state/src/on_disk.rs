@@ -10,10 +10,12 @@ use std::{
     task::{Context, Poll},
 };
 use tower::{buffer::Buffer, Service};
-use zebra_chain::serialization::{ZcashDeserialize, ZcashSerialize};
+use tracing::instrument;
+use zebra_chain::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 use zebra_chain::{
     block::{Block, BlockHeaderHash},
     types::BlockHeight,
+    Network,
 };
 
 #[derive(Clone)]
@@ -22,49 +24,41 @@ struct SledState {
 }
 
 impl SledState {
-    pub(crate) fn new(config: &Config) -> Self {
-        let config = config.sled_config();
+    #[instrument]
+    pub(crate) fn new(config: &Config, network: Network) -> Self {
+        let config = config.sled_config(network);
 
         Self {
             storage: config.open().unwrap(),
         }
     }
 
+    #[instrument(skip(self))]
     pub(super) fn insert(
         &mut self,
-        block: impl Into<Arc<Block>>,
+        block: impl Into<Arc<Block>> + std::fmt::Debug,
     ) -> Result<BlockHeaderHash, Error> {
         let block = block.into();
         let hash: BlockHeaderHash = block.as_ref().into();
         let height = block.coinbase_height().unwrap();
 
-        let by_height = self.storage.open_tree(b"by_height")?;
+        let height_map = self.storage.open_tree(b"height_map")?;
         let by_hash = self.storage.open_tree(b"by_hash")?;
 
-        let mut bytes = Vec::new();
-        block.zcash_serialize(&mut bytes)?;
+        let bytes = block.zcash_serialize_to_vec()?;
 
         // TODO(jlusby): make this transactional
-        by_height.insert(&height.0.to_be_bytes(), bytes.as_slice())?;
+        height_map.insert(&height.0.to_be_bytes(), &hash.0)?;
         by_hash.insert(&hash.0, bytes)?;
 
         Ok(hash)
     }
 
-    pub(super) fn get(&self, query: impl Into<BlockQuery>) -> Result<Option<Arc<Block>>, Error> {
-        let query = query.into();
-        let value = match query {
-            BlockQuery::ByHash(hash) => {
-                let by_hash = self.storage.open_tree(b"by_hash")?;
-                let key = &hash.0;
-                by_hash.get(key)?
-            }
-            BlockQuery::ByHeight(height) => {
-                let by_height = self.storage.open_tree(b"by_height")?;
-                let key = height.0.to_be_bytes();
-                by_height.get(key)?
-            }
-        };
+    #[instrument(skip(self))]
+    pub(super) fn get(&self, hash: BlockHeaderHash) -> Result<Option<Arc<Block>>, Error> {
+        let by_hash = self.storage.open_tree(b"by_hash")?;
+        let key = &hash.0;
+        let value = by_hash.get(key)?;
 
         if let Some(bytes) = value {
             let bytes = bytes.as_ref();
@@ -75,8 +69,27 @@ impl SledState {
         }
     }
 
-    pub(super) fn get_tip(&self) -> Result<Option<Arc<Block>>, Error> {
-        let tree = self.storage.open_tree(b"by_height")?;
+    #[instrument(skip(self))]
+    pub(super) fn get_main_chain_at(
+        &self,
+        height: BlockHeight,
+    ) -> Result<Option<BlockHeaderHash>, Error> {
+        let height_map = self.storage.open_tree(b"height_map")?;
+        let key = height.0.to_be_bytes();
+        let value = height_map.get(key)?;
+
+        if let Some(bytes) = value {
+            let bytes = bytes.as_ref();
+            let hash = ZcashDeserialize::zcash_deserialize(bytes)?;
+            Ok(Some(hash))
+        } else {
+            Ok(None)
+        }
+    }
+
+    #[instrument(skip(self))]
+    pub(super) fn get_tip(&self) -> Result<Option<BlockHeaderHash>, Error> {
+        let tree = self.storage.open_tree(b"height_map")?;
         let last_entry = tree.iter().values().next_back();
 
         match last_entry {
@@ -86,18 +99,12 @@ impl SledState {
         }
     }
 
+    #[instrument(skip(self))]
     fn contains(&self, hash: &BlockHeaderHash) -> Result<bool, Error> {
         let by_hash = self.storage.open_tree(b"by_hash")?;
         let key = &hash.0;
 
         Ok(by_hash.contains_key(key)?)
-    }
-}
-
-impl Default for SledState {
-    fn default() -> Self {
-        let config = crate::Config::default();
-        Self::new(&config)
     }
 }
 
@@ -133,7 +140,6 @@ impl Service<Request> for SledState {
                 async move {
                     storage
                         .get_tip()?
-                        .map(|block| block.as_ref().into())
                         .map(|hash| Response::Tip { hash })
                         .ok_or_else(|| "zebra-state contains no blocks".into())
                 }
@@ -150,14 +156,52 @@ impl Service<Request> for SledState {
                     let block = storage
                         .get(hash)?
                         .expect("block must be present if contains returned true");
-                    let tip = storage
+                    let tip_hash = storage
                         .get_tip()?
                         .expect("storage must have a tip if it contains the previous block");
+                    let tip = storage
+                        .get(tip_hash)?
+                        .expect("block must be present if contains returned true");
 
                     let depth =
                         tip.coinbase_height().unwrap().0 - block.coinbase_height().unwrap().0;
 
                     Ok(Response::Depth(Some(depth)))
+                }
+                .boxed()
+            }
+            Request::GetBlockLocator { genesis } => {
+                let storage = self.clone();
+
+                async move {
+                    let tip_hash = match storage.get_tip()? {
+                        Some(tip) => tip,
+                        None => {
+                            return Ok(Response::BlockLocator {
+                                block_locator: vec![genesis],
+                            })
+                        }
+                    };
+
+                    let tip = storage
+                        .get(tip_hash)?
+                        .expect("block must be present if contains returned true");
+
+                    let tip_height = tip
+                        .coinbase_height()
+                        .expect("tip of the current chain will have a coinbase height");
+
+                    let heights = crate::block_locator_heights(tip_height);
+
+                    let block_locator = heights
+                        .map(|height| {
+                            storage.get_main_chain_at(height).map(|hash| {
+                                hash.expect("there should be no holes in the current chain")
+                            })
+                        })
+                        .collect::<Result<_, _>>()?;
+
+                    Ok(Response::BlockLocator { block_locator })
                 }
                 .boxed()
             }
@@ -199,18 +243,62 @@ impl From<BlockHeight> for BlockQuery {
     }
 }
 
-/// Return's a type that implement's the `zebra_state::Service` using `sled`
+/// Returns a type that implements the `zebra_state::Service` using `sled`.
+///
+/// Each `network` has its own separate sled database.
 pub fn init(
     config: Config,
+    network: Network,
 ) -> impl Service<
     Request,
     Response = Response,
-    Error = Error,
-    Future = impl Future<Output = Result<Response, Error>>,
+    Error = BoxError,
+    Future = impl Future<Output = Result<Response, BoxError>>,
 > + Send
        + Clone
        + 'static {
-    Buffer::new(SledState::new(&config), 1)
+    Buffer::new(SledState::new(&config, network), 1)
 }
 
-type Error = Box<dyn error::Error + Send + Sync + 'static>;
+type BoxError = Box<dyn error::Error + Send + Sync + 'static>;
+
+// these hacks are necessary to capture spantraces that can be extracted again
+// while still having a nice From impl.
+//
+// Please forgive me.
+
+/// a type that can store any error and implements the Error trait at the cost of
+/// not implementing From<E: Error>
+#[derive(Debug, thiserror::Error)]
+#[error(transparent)]
+struct BoxRealError(BoxError);
+
+/// The TracedError wrapper on a type that implements Error
+#[derive(Debug)]
+struct Error(tracing_error::TracedError<BoxRealError>);
+
+macro_rules! impl_from {
+    ($($src:ty,)*) => {$(
+        impl From<$src> for Error {
+            fn from(source: $src) -> Self {
+                let source = BoxRealError(source.into());
+                Self(source.into())
+            }
+        }
+    )*
+    }
+}
+
+// The hoops we have to jump through to keep using this like a BoxError
+impl_from! {
+    &str,
+    SerializationError,
+    std::io::Error,
+    sled::Error,
+}
+
+impl Into<BoxError> for Error {
+    fn into(self) -> BoxError {
+        BoxError::from(self.0)
+    }
+}

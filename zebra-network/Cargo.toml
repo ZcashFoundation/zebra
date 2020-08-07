@@ -1,6 +1,6 @@
 [package]
 name = "zebra-network"
-version = "0.1.0"
+version = "3.0.0-alpha.0"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 edition = "2018"
@@ -22,7 +22,7 @@ serde = { version = "1", features = ["serde_derive"] }
 thiserror = "1"
 
 futures = "0.3"
-tokio = { version = "0.2", features = ["net", "time", "stream"] }
+tokio = { version = "0.2.22", features = ["net", "time", "stream", "tracing"] }
 tokio-util = { version = "0.2", features = ["codec"] }
 tower = "0.3"
 tower-load = "0.3"

@@ -1,6 +1,7 @@
 //! Definitions of block datastructures.
 #![allow(clippy::unit_arg)]
 
+mod difficulty;
 mod hash;
 mod header;
 mod serialize;
@@ -83,6 +84,11 @@ impl Block {
         } else {
             Err("no coinbase transaction in block")?
         }
+    }
+
+    /// Get the hash for the current block
+    pub fn hash(&self) -> BlockHeaderHash {
+        BlockHeaderHash::from(self)
     }
 }
 
