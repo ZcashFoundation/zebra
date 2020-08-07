@@ -400,6 +400,16 @@ where
     async fn request_blocks(&mut self, hashes: Vec<BlockHeaderHash>) -> Result<(), Report> {
         tracing::debug!(hashes.len = hashes.len(), "requesting blocks");
         for hash in hashes.into_iter() {
+            // TODO: remove this check once the sync service is more reliable
+            let depth = self.get_depth(hash).await?;
+            if let Some(depth) = depth {
+                tracing::debug!(
+                    ?depth,
+                    ?hash,
+                    "request_blocks: Unexpected duplicate hash: already in state"
+                );
+                continue;
+            }
             // We construct the block download requests sequentially, waiting
             // for the peer set to be ready to process each request. This
             // ensures that we start block downloads in the order we want them
