@@ -422,7 +422,9 @@ where
                 };
                 metrics::counter!("sync.downloaded_blocks", 1);
 
-                verifier.ready_and().await?.call(block).await
+                let result = verifier.ready_and().await?.call(block).await;
+                metrics::counter!("sync.verified_blocks", 1);
+                result
             })
             .instrument(span);
             self.pending_blocks.push(task);
