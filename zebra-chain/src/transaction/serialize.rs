@@ -9,7 +9,7 @@ use std::{
 };
 
 use crate::{
-    commitments, notes,
+    notes,
     proofs::ZkSnarkProof,
     serialization::{
         ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
@@ -321,7 +321,7 @@ impl<P: ZkSnarkProof> ZcashDeserialize for Option<JoinSplitData<P>> {
 
 impl ZcashSerialize for Spend {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        self.cv.zcash_serialize(&mut writer)?;
+        writer.write_all(&<[u8; 32]>::from(self.cv)[..])?;
         writer.write_all(&self.anchor.0[..])?;
         self.nullifier.zcash_serialize(&mut writer)?;
         writer.write_all(&<[u8; 32]>::from(self.rk)[..])?;
@@ -335,7 +335,7 @@ impl ZcashDeserialize for Spend {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         use crate::treestate::note_commitment_tree::SaplingNoteTreeRootHash;
         Ok(Spend {
-            cv: commitments::sapling::ValueCommitment::zcash_deserialize(&mut reader)?,
+            cv: reader.read_32_bytes()?.into(),
             anchor: SaplingNoteTreeRootHash(reader.read_32_bytes()?),
             nullifier: notes::sapling::Nullifier::zcash_deserialize(&mut reader)?,
             rk: reader.read_32_bytes()?.into(),
@@ -347,7 +347,7 @@ impl ZcashDeserialize for Spend {
 
 impl ZcashSerialize for Output {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        self.cv.zcash_serialize(&mut writer)?;
+        writer.write_all(&<[u8; 32]>::from(self.cv)[..])?;
         writer.write_all(&self.cm_u.to_bytes())?;
         writer.write_all(&self.ephemeral_key.to_bytes())?;
         self.enc_ciphertext.zcash_serialize(&mut writer)?;
@@ -360,7 +360,7 @@ impl ZcashSerialize for Output {
 impl ZcashDeserialize for Output {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         Ok(Output {
-            cv: commitments::sapling::ValueCommitment::zcash_deserialize(&mut reader)?,
+            cv: reader.read_32_bytes()?.into(),
             cm_u: jubjub::Fq::from_bytes(&reader.read_32_bytes()?).unwrap(),
             ephemeral_key: jubjub::AffinePoint::from_bytes(reader.read_32_bytes()?).unwrap(),
             enc_ciphertext: notes::sapling::EncryptedCiphertext::zcash_deserialize(&mut reader)?,
