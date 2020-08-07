@@ -106,6 +106,17 @@ impl Application for ZebradApp {
 
         let mut components = self.framework_components(command)?;
 
+        // Load config *after* framework components so that we can
+        // report an error to the terminal if it occurs.
+        let config = command
+            .config_path()
+            .map(|path| self.load_config(&path))
+            .transpose()?
+            .unwrap_or_default();
+
+        let config = command.process_config(config)?;
+        self.config = Some(config);
+
         let cfg_ref = self
             .config
             .as_ref()
@@ -135,16 +146,6 @@ impl Application for ZebradApp {
 
     /// Load this application's configuration and initialize its components.
     fn init(&mut self, command: &Self::Cmd) -> Result<(), FrameworkError> {
-        // Load configuration
-        let config = command
-            .config_path()
-            .map(|path| self.load_config(&path))
-            .transpose()?
-            .unwrap_or_default();
-
-        let config = command.process_config(config)?;
-        self.config = Some(config);
-
         // Create and register components with the application.
         // We do this first to calculate a proper dependency ordering before
         // application configuration is processed
