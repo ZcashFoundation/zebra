@@ -1,3 +1,5 @@
+use std::convert::TryFrom;
+
 use proptest::{arbitrary::any, array, prelude::*};
 
 use crate::commitments::sapling;
@@ -7,10 +9,7 @@ impl Arbitrary for sapling::NoteCommitment {
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         array::uniform32(any::<u8>())
-            .prop_filter("Valid jubjub::AffinePoint", |b| {
-                jubjub::AffinePoint::from_bytes(*b).is_some().unwrap_u8() == 1
-            })
-            .prop_map(Self::from)
+            .prop_filter_map("Valid jubjub::AffinePoint", |b| Self::try_from(b).ok())
             .boxed()
     }
 
@@ -22,10 +21,7 @@ impl Arbitrary for sapling::ValueCommitment {
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         array::uniform32(any::<u8>())
-            .prop_filter("Valid jubjub::AffinePoint", |b| {
-                jubjub::AffinePoint::from_bytes(*b).is_some().unwrap_u8() == 1
-            })
-            .prop_map(Self::from)
+            .prop_filter_map("Valid jubjub::AffinePoint", |b| Self::try_from(b).ok())
             .boxed()
     }
 
