@@ -5,6 +5,7 @@
 #![forbid(unsafe_code)]
 
 use color_eyre::eyre::Result;
+use std::path::Path;
 use std::time::Duration;
 use zebra_test::prelude::*;
 
@@ -53,12 +54,21 @@ fn generate_args() -> Result<()> {
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
+    // create config file path in the same location as binary
+    let binary_path = Path::new(env!("CARGO_BIN_EXE_zebrad"));
+    let path = format!(
+        "{}/{}",
+        binary_path.parent().unwrap().to_str().unwrap(),
+        "zebrad.toml"
+    );
+
     // Valid
-    let (child, _guard) = get_child(&["generate", "-o", "file.yaml"])?;
+    let (child, _guard) = get_child(&["generate", "-o", &path])?;
     let output = child.wait_with_output()?;
     output.assert_success()?;
 
-    // Todo: Check if the file was created
+    // Check if the file was created
+    assert_eq!(Path::new(&path).exists(), true);
 
     Ok(())
 }
@@ -240,6 +250,56 @@ fn serialized_tests() -> Result<()> {
     start_no_args()?;
     start_args()?;
     seed_no_args()?;
+    valid_generated_config()?;
+
+    Ok(())
+}
+
+fn valid_generated_config() -> Result<()> {
+    zebra_test::init();
+
+    // Generate configuration in binary parent path
+    let binary_path = Path::new(env!("CARGO_BIN_EXE_zebrad"));
+    let path = format!(
+        "{}/{}",
+        binary_path.parent().unwrap().to_str().unwrap(),
+        "zebrad.toml"
+    );
+    let (child, _guard) = get_child(&["generate", "-o", &path])?;
+    let output = child.wait_with_output()?;
+    output.assert_success()?;
+
+    // Check if the file was created
+    assert_eq!(Path::new(&path).exists(), true);
+
+    // Check if it was created in the same path as binary
+    assert_eq!(Path::new(&path).parent(), binary_path.parent());
+
+    // Run start and kill it at 1 second
+    let (mut child, _guard) = get_child(&["start"])?;
+    std::thread::sleep(Duration::from_secs(1));
+    child.kill()?;
+
+    let output = child.wait_with_output()?;
+    let output = output.assert_failure()?;
+
+    output.stdout_contains(r"Starting zebrad")?;
+
+    // Make sure the command was killed
+    assert!(output.was_killed());
+
+    // Run seed program and kill it at 1 second
+    let (mut child, _guard) = get_child(&["seed"])?;
+    std::thread::sleep(Duration::from_secs(1));
+    child.kill()?;
+
+    let output = child.wait_with_output()?;
+    let output = output.assert_failure()?;
+
+    output.stdout_contains(r"Starting zebrad in seed mode")?;
+
+    // Make sure the command was killed
+    assert!(output.was_killed());
 
     Ok(())
 }
