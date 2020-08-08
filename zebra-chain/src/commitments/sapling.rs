@@ -7,7 +7,7 @@ mod test_vectors;
 
 pub mod pedersen_hashes;
 
-use std::fmt;
+use std::{convert::TryFrom, fmt, io};
 
 use bitvec::prelude::*;
 use rand_core::{CryptoRng, RngCore};
@@ -15,6 +15,7 @@ use rand_core::{CryptoRng, RngCore};
 use crate::{
     keys::sapling::{find_group_hash, Diversifier, TransmissionKey},
     serde_helpers,
+    serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize},
     types::amount::{Amount, NonNegative},
 };
 
@@ -37,12 +38,6 @@ impl fmt::Debug for NoteCommitment {
     }
 }
 
-impl From<[u8; 32]> for NoteCommitment {
-    fn from(bytes: [u8; 32]) -> Self {
-        Self(jubjub::AffinePoint::from_bytes(bytes).unwrap())
-    }
-}
-
 impl From<jubjub::ExtendedPoint> for NoteCommitment {
     fn from(extended_point: jubjub::ExtendedPoint) -> Self {
         Self(jubjub::AffinePoint::from(extended_point))
@@ -56,6 +51,33 @@ impl From<NoteCommitment> for [u8; 32] {
 }
 
 impl Eq for NoteCommitment {}
+
+impl TryFrom<[u8; 32]> for NoteCommitment {
+    type Error = &'static str;
+
+    fn try_from(bytes: [u8; 32]) -> Result<Self, Self::Error> {
+        let possible_point = jubjub::AffinePoint::from_bytes(bytes);
+
+        if possible_point.is_some().into() {
+            Ok(Self(possible_point.unwrap()))
+        } else {
+            Err("Invalid jubjub::AffinePoint value")
+        }
+    }
+}
+
+impl ZcashSerialize for NoteCommitment {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        writer.write_all(&<[u8; 32]>::from(*self)[..])?;
+        Ok(())
+    }
+}
+
+impl ZcashDeserialize for NoteCommitment {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        Self::try_from(reader.read_32_bytes()?).map_err(|e| SerializationError::Parse(e))
+    }
+}
 
 impl NoteCommitment {
     /// Generate a new _NoteCommitment_ and the randomness used to create it.
@@ -128,16 +150,6 @@ impl fmt::Debug for ValueCommitment {
     }
 }
 
-/// LEBS2OSP256(repr_J(cv))
-///
-/// https://zips.z.cash/protocol/protocol.pdf#spendencoding
-/// https://zips.z.cash/protocol/protocol.pdf#jubjub
-impl From<[u8; 32]> for ValueCommitment {
-    fn from(bytes: [u8; 32]) -> Self {
-        Self(jubjub::AffinePoint::from_bytes(bytes).unwrap())
-    }
-}
-
 impl From<jubjub::ExtendedPoint> for ValueCommitment {
     fn from(extended_point: jubjub::ExtendedPoint) -> Self {
         Self(jubjub::AffinePoint::from(extended_point))
@@ -153,6 +165,37 @@ impl Eq for ValueCommitment {}
 impl From<ValueCommitment> for [u8; 32] {
     fn from(cm: ValueCommitment) -> [u8; 32] {
         cm.0.to_bytes()
+    }
+}
+
+/// LEBS2OSP256(repr_J(cv))
+///
+/// https://zips.z.cash/protocol/protocol.pdf#spendencoding
+/// https://zips.z.cash/protocol/protocol.pdf#jubjub
+impl TryFrom<[u8; 32]> for ValueCommitment {
+    type Error = &'static str;
+
+    fn try_from(bytes: [u8; 32]) -> Result<Self, Self::Error> {
+        let possible_point = jubjub::AffinePoint::from_bytes(bytes);
+
+        if possible_point.is_some().into() {
+            Ok(Self(possible_point.unwrap()))
+        } else {
+            Err("Invalid jubjub::AffinePoint value")
+        }
+    }
+}
+
+impl ZcashSerialize for ValueCommitment {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        writer.write_all(&<[u8; 32]>::from(*self)[..])?;
+        Ok(())
+    }
+}
+
+impl ZcashDeserialize for ValueCommitment {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        Self::try_from(reader.read_32_bytes()?).map_err(|e| SerializationError::Parse(e))
     }
 }
 
