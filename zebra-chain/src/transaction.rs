@@ -142,7 +142,7 @@ impl Transaction {
     }
 
     /// Returns the hash for the current transaction
-    pub fn hash(&self) -> TransactionHash {
+    pub fn to_hash(&self) -> TransactionHash {
         let mut hash_writer = Sha256dWriter::default();
         self.zcash_serialize(&mut hash_writer)
             .expect("Transactions must serialize into the hash.");
