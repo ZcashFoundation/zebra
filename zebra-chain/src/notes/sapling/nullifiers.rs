@@ -1,12 +1,9 @@
 #![allow(clippy::unit_arg)]
 #![allow(dead_code)]
 
-use std::io;
-
 use crate::{
     commitments::sapling::{pedersen_hashes::mixing_pedersen_hash, NoteCommitment},
     keys::sapling::NullifierDerivingKey,
-    serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize},
     treestate::note_commitment_tree::Position,
 };
 
@@ -29,7 +26,7 @@ fn prf_nf(nk: [u8; 32], rho: [u8; 32]) -> [u8; 32] {
 }
 
 /// A Nullifier for Sapling transactions
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub struct Nullifier([u8; 32]);
 
@@ -47,16 +44,8 @@ impl<'a> From<(NoteCommitment, Position, &'a NullifierDerivingKey)> for Nullifie
     }
 }
 
-impl ZcashDeserialize for Nullifier {
-    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let bytes = reader.read_32_bytes()?;
-
-        Ok(Self(bytes))
-    }
-}
-
-impl ZcashSerialize for Nullifier {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        writer.write_all(&self.0[..])
+impl From<Nullifier> for [u8; 32] {
+    fn from(n: Nullifier) -> Self {
+        n.0
     }
 }
