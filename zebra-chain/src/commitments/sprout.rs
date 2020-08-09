@@ -2,14 +2,9 @@
 
 #![allow(clippy::unit_arg)]
 
-use std::io;
-
 use sha2::{Digest, Sha256};
 
-use crate::{
-    notes::sprout::Note,
-    serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize},
-};
+use crate::notes::sprout::Note;
 
 /// The randomness used in the Pedersen Hash for note commitment.
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -23,9 +18,17 @@ impl AsRef<[u8]> for CommitmentRandomness {
 }
 
 /// Note commitments for the output notes.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub struct NoteCommitment(pub(crate) [u8; 32]);
+
+impl Eq for NoteCommitment {}
+
+impl From<[u8; 32]> for NoteCommitment {
+    fn from(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+}
 
 impl From<Note> for NoteCommitment {
     /// NoteCommit_rcm^Sprout(a_pk, v, rho)
@@ -43,15 +46,8 @@ impl From<Note> for NoteCommitment {
     }
 }
 
-impl ZcashSerialize for NoteCommitment {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        writer.write_all(&self.0[..])?;
-        Ok(())
-    }
-}
-
-impl ZcashDeserialize for NoteCommitment {
-    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        Ok(Self(reader.read_32_bytes()?))
+impl From<NoteCommitment> for [u8; 32] {
+    fn from(cm: NoteCommitment) -> [u8; 32] {
+        cm.0
     }
 }
