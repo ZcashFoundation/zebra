@@ -5,7 +5,7 @@ use std::time::Duration;
 // XXX should these constants be split into protocol also?
 use crate::protocol::external::types::*;
 
-use zebra_consensus::parameters::NetworkUpgrade::{self, *};
+use zebra_chain::NetworkUpgrade::{self, *};
 
 /// The buffer size for the peer set.
 pub const PEERSET_BUFFER_SIZE: usize = 10;
