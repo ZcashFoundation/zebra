@@ -1,14 +1,9 @@
 #![allow(dead_code)]
 
-use std::io;
-
 use byteorder::{ByteOrder, LittleEndian};
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    keys::sprout::SpendingKey,
-    serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize},
-};
+use crate::keys::sprout::SpendingKey;
 
 /// PRF^nf is used to derive a Sprout nullifer from the receiver's
 /// spending key a_sk and a nullifier seed ρ, instantiated using the
@@ -63,7 +58,7 @@ impl From<NullifierSeed> for [u8; 32] {
 }
 
 /// A Nullifier for Sprout transactions
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub struct Nullifier(pub(crate) [u8; 32]);
 
@@ -82,19 +77,5 @@ impl<'a> From<(&'a SpendingKey, NullifierSeed)> for Nullifier {
 impl From<Nullifier> for [u8; 32] {
     fn from(n: Nullifier) -> Self {
         n.0
-    }
-}
-
-impl ZcashDeserialize for Nullifier {
-    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let bytes = reader.read_32_bytes()?;
-
-        Ok(Self(bytes))
-    }
-}
-
-impl ZcashSerialize for Nullifier {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        writer.write_all(&self.0[..])
     }
 }
