@@ -38,6 +38,8 @@ impl fmt::Debug for NoteCommitment {
     }
 }
 
+impl Eq for NoteCommitment {}
+
 impl From<jubjub::ExtendedPoint> for NoteCommitment {
     fn from(extended_point: jubjub::ExtendedPoint) -> Self {
         Self(jubjub::AffinePoint::from(extended_point))
@@ -50,8 +52,6 @@ impl From<NoteCommitment> for [u8; 32] {
     }
 }
 
-impl Eq for NoteCommitment {}
-
 impl TryFrom<[u8; 32]> for NoteCommitment {
     type Error = &'static str;
 
@@ -63,19 +63,6 @@ impl TryFrom<[u8; 32]> for NoteCommitment {
         } else {
             Err("Invalid jubjub::AffinePoint value")
         }
-    }
-}
-
-impl ZcashSerialize for NoteCommitment {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        writer.write_all(&<[u8; 32]>::from(*self)[..])?;
-        Ok(())
-    }
-}
-
-impl ZcashDeserialize for NoteCommitment {
-    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        Self::try_from(reader.read_32_bytes()?).map_err(|e| SerializationError::Parse(e))
     }
 }
 
