@@ -15,7 +15,6 @@
 mod tests;
 
 use crate::checkpoint::{CheckpointList, CheckpointVerifier};
-use crate::parameters::NetworkUpgrade::Sapling;
 
 use futures_util::FutureExt;
 use std::{
@@ -30,7 +29,7 @@ use tracing_futures::Instrument;
 
 use zebra_chain::block::{Block, BlockHeaderHash};
 use zebra_chain::types::BlockHeight;
-use zebra_chain::Network;
+use zebra_chain::{Network, NetworkUpgrade::Sapling};
 
 /// The maximum expected gap between blocks.
 ///
