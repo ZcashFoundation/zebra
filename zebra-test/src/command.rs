@@ -241,6 +241,37 @@ impl TestOutput {
         .with_section(stdout)
     }
 
+    pub fn stdout_equals(&self, s: &str) -> Result<&Self> {
+        let stdout = String::from_utf8_lossy(self.output.stdout.as_slice());
+
+        if stdout.eq(s) {
+            return Ok(self);
+        }
+
+        let command = || self.cmd.clone().header("Command:");
+        let stdout = || stdout.into_owned().header("Stdout:");
+
+        Err(eyre!("stdout of command is not equal the given string"))
+            .with_section(command)
+            .with_section(stdout)
+    }
+
+    pub fn stdout_matches(&self, regex: &str) -> Result<&Self> {
+        let re = regex::Regex::new(regex)?;
+        let stdout = String::from_utf8_lossy(self.output.stdout.as_slice());
+
+        if re.is_match(&stdout) {
+            return Ok(self);
+        }
+
+        let command = || self.cmd.clone().header("Command:");
+        let stdout = || stdout.into_owned().header("Stdout:");
+
+        Err(eyre!("stdout of command is not equal to the given regex"))
+            .with_section(command)
+            .with_section(stdout)
+    }
+
     /// Returns true if the program was killed, false if exit was by another reason.
     pub fn was_killed(&self) -> bool {
         #[cfg(unix)]

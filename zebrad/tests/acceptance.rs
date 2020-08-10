@@ -32,10 +32,6 @@ fn generate_no_args() -> Result<()> {
     // First line
     output.stdout_contains(r"# Default configuration for zebrad.")?;
 
-    // Make sure we have no info message in output
-    let notfound = output.stdout_contains(r"INFO");
-    assert!(notfound.is_err());
-
     Ok(())
 }
 
@@ -82,10 +78,6 @@ fn help_no_args() -> Result<()> {
     // Make sure we are in help by looking usage string
     output.stdout_contains(r"USAGE:")?;
 
-    // Make sure we have no info message in output
-    let notfound = output.stdout_contains(r"INFO");
-    assert!(notfound.is_err());
-
     Ok(())
 }
 
@@ -115,11 +107,7 @@ fn revhex_args() -> Result<()> {
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
-    output.stdout_contains(r"55ffee33")?;
-
-    // Make sure we have no info message in output
-    let notfound = output.stdout_contains(r"INFO");
-    assert!(notfound.is_err());
+    output.stdout_equals("55ffee33\n")?;
 
     Ok(())
 }
@@ -219,10 +207,6 @@ fn app_no_args() -> Result<()> {
 
     output.stdout_contains(r"USAGE:")?;
 
-    // Make sure we have no info message in output
-    let notfound = output.stdout_contains(r"INFO");
-    assert!(notfound.is_err());
-
     Ok(())
 }
 
@@ -234,11 +218,7 @@ fn version_no_args() -> Result<()> {
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
-    output.stdout_contains(r"zebrad [0-9].[0-9].[0-9]")?;
-
-    // Make sure we have no info message in output
-    let notfound = output.stdout_contains(r"INFO");
-    assert!(notfound.is_err());
+    output.stdout_matches(r"^zebrad [0-9].[0-9].[0-9]-[A-Za-z]*.[0-9]\n")?;
 
     Ok(())
 }
