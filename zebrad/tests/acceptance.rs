@@ -218,7 +218,7 @@ fn version_no_args() -> Result<()> {
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
-    output.stdout_matches(r"^zebrad [0-9].[0-9].[0-9]-[A-Za-z]*.[0-9]\n")?;
+    output.stdout_matches(r"^zebrad [0-9].[0-9].[0-9]-[A-Za-z]*.[0-9]\n$")?;
 
     Ok(())
 }
