@@ -223,7 +223,7 @@ impl TestOutput {
 
     pub fn stdout_contains(&self, regex: &str) -> Result<&Self> {
         let re = regex::Regex::new(regex)?;
-        let stdout = String::from_utf8_lossy(self.output.stdout.as_slice());
+        let stdout = String::from_utf8_lossy(&self.output.stdout);
 
         for line in stdout.lines() {
             if re.is_match(line) {
@@ -242,9 +242,9 @@ impl TestOutput {
     }
 
     pub fn stdout_equals(&self, s: &str) -> Result<&Self> {
-        let stdout = String::from_utf8_lossy(self.output.stdout.as_slice());
+        let stdout = String::from_utf8_lossy(&self.output.stdout);
 
-        if stdout.eq(s) {
+        if stdout == s {
             return Ok(self);
         }
 
@@ -258,7 +258,7 @@ impl TestOutput {
 
     pub fn stdout_matches(&self, regex: &str) -> Result<&Self> {
         let re = regex::Regex::new(regex)?;
-        let stdout = String::from_utf8_lossy(self.output.stdout.as_slice());
+        let stdout = String::from_utf8_lossy(&self.output.stdout);
 
         if re.is_match(&stdout) {
             return Ok(self);
