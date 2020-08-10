@@ -315,25 +315,25 @@ async fn verify_fail_add_block_checkpoint() -> Result<(), Report> {
 
     let (mut chain_verifier, mut state_service) = verifiers_from_network(Mainnet);
 
-    /// SPANDOC: Make sure the block verifier service is ready (1/2)
+    /// SPANDOC: Make sure the verifier service is ready (1/2)
     let ready_verifier_service = chain_verifier.ready_and().await.map_err(|e| eyre!(e))?;
 
     let transcript = Transcript::from(BLOCK_VERIFY_TRANSCRIPT_GENESIS.iter().cloned());
     transcript.check(ready_verifier_service).await.unwrap();
 
-    /// SPANDOC: Make sure the state verifier service is ready (1/2)
+    /// SPANDOC: Make sure the state service is ready (1/2)
     let ready_state_service = state_service.ready_and().await.map_err(|e| eyre!(e))?;
 
     let transcript = Transcript::from(STATE_VERIFY_TRANSCRIPT_GENESIS.iter().cloned());
     transcript.check(ready_state_service).await.unwrap();
 
-    /// SPANDOC: Make sure the block verifier service is ready (2/2)
+    /// SPANDOC: Make sure the verifier service is ready (2/2)
     let ready_verifier_service = chain_verifier.ready_and().await.map_err(|e| eyre!(e))?;
 
     let transcript = Transcript::from(BLOCK_VERIFY_TRANSCRIPT_GENESIS_FAIL.iter().cloned());
     transcript.check(ready_verifier_service).await.unwrap();
 
-    /// SPANDOC: Make sure the state verifier service is ready (2/2)
+    /// SPANDOC: Make sure the state service is ready (2/2)
     let ready_state_service = state_service.ready_and().await.map_err(|e| eyre!(e))?;
 
     let transcript = Transcript::from(STATE_VERIFY_TRANSCRIPT_GENESIS.iter().cloned());
