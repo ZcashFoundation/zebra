@@ -465,6 +465,7 @@ where
             zs::Response::Depth(None) => Ok(false),
             _ => unreachable!("wrong response to depth request"),
         }
+    }
 
     /// Update metrics gauges, and create a trace containing metrics.
     fn update_metrics(&self) {
