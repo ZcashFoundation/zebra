@@ -79,11 +79,7 @@ where
 
         loop {
             self.obtain_tips().await?;
-            metrics::gauge!(
-                "sync.prospective_tips.len",
-                self.prospective_tips.len() as i64
-            );
-            metrics::gauge!("sync.pending_blocks.len", self.pending_blocks.len() as i64);
+            self.update_metrics();
 
             // ObtainTips Step 6
             //
@@ -93,16 +89,7 @@ where
                 tracing::debug!("extending prospective tips");
 
                 self.extend_tips().await?;
-
-                metrics::gauge!(
-                    "sync.prospective_tips.len",
-                    self.prospective_tips.len() as i64
-                );
-                metrics::gauge!("sync.pending_blocks.len", self.pending_blocks.len() as i64);
-                tracing::debug!(
-                    pending.len = self.pending_blocks.len(),
-                    limit = LOOKAHEAD_LIMIT
-                );
+                self.update_metrics();
 
                 // Check whether we need to wait for existing block download tasks to finish
                 while self.pending_blocks.len() > LOOKAHEAD_LIMIT {
@@ -127,6 +114,10 @@ where
                         Err(e) => tracing::error!(?e, "potentially transient error"),
                     };
                 }
+
+                // We just added a bunch of failures, update the metrics now,
+                // because we might be about to reset or delay.
+                self.update_metrics();
             }
 
             delay_for(Duration::from_secs(15)).await;
@@ -158,7 +149,7 @@ where
             })
             .map_err(|e| eyre!(e))?;
 
-        tracing::info!(?block_locator, "trying to obtain new chain tips");
+        tracing::debug!(?block_locator, "trying to obtain new chain tips");
 
         // ObtainTips Step 2
         //
@@ -223,12 +214,15 @@ where
                     // Combine the last elements of each list into a set; this is the
                     // set of prospective tips.
                     if !download_set.contains(&new_tip) {
-                        tracing::debug!(?new_tip, "adding new prospective tip");
+                        tracing::debug!(hashes.len = ?hashes.len(), ?new_tip, "adding new prospective tip");
                         self.prospective_tips.insert(new_tip);
                     } else {
                         tracing::debug!(?new_tip, "discarding tip already queued for download");
                     }
 
+                    // ObtainTips Step 5.1
+                    //
+                    // Combine all elements of each list into a set
                     let prev_download_len = download_set.len();
                     download_set.extend(unknown_hashes);
                     let new_download_len = download_set.len();
@@ -245,10 +239,11 @@ where
             }
         }
 
-        // ObtainTips Step 5
+        tracing::debug!(?self.prospective_tips, "ObtainTips: downloading blocks for tips");
+
+        // ObtainTips Step 5.2
         //
-        // Combine all elements of each list into a set, and queue
-        // download and verification of those blocks.
+        // queue download and verification of those blocks.
         self.request_blocks(download_set.into_iter().collect())
             .await?;
 
@@ -338,10 +333,18 @@ where
                         //
                         // Combine the last elements of the remaining responses into
                         // a set, and add this set to the set of prospective tips.
-                        tracing::debug!(?new_tip, hashes.len = ?hashes.len());
+                        tracing::debug!(hashes.len = ?hashes.len(), ?new_tip, "ExtendTips: extending to new tip");
                         let _ = self.prospective_tips.insert(new_tip);
 
+                        let prev_download_len = download_set.len();
                         download_set.extend(hashes);
+                        let new_download_len = download_set.len();
+                        tracing::debug!(
+                            prev_download_len,
+                            new_download_len,
+                            new_hashes = new_download_len - prev_download_len,
+                            "ExtendTips: added hashes to download set"
+                        );
                     }
                     Ok(_) => unreachable!("network returned wrong response"),
                     // We ignore this error because we made multiple fanout requests.
@@ -356,6 +359,7 @@ where
         // returned tips
         self.prospective_tips
             .retain(|tip| !download_set.contains(tip));
+        tracing::debug!(?self.prospective_tips, "ExtendTips: downloading blocks for tips");
 
         // ExtendTips Step 5
         //
@@ -374,6 +378,7 @@ where
 
     /// Queue a download for the genesis block, if it isn't currently known to
     /// our node.
+    #[instrument(skip(self))]
     async fn request_genesis(&mut self) -> Result<(), Report> {
         // Due to Bitcoin protocol limitations, we can't request the genesis
         // block using our standard tip-following algorithm:
@@ -428,7 +433,9 @@ where
                 };
                 metrics::counter!("sync.downloaded_blocks", 1);
 
-                verifier.ready_and().await?.call(block).await
+                let result = verifier.ready_and().await?.call(block).await;
+                metrics::counter!("sync.verified_blocks", 1);
+                result
             })
             .instrument(span);
             self.pending_blocks.push(task);
@@ -458,6 +465,19 @@ where
             zs::Response::Depth(None) => Ok(false),
             _ => unreachable!("wrong response to depth request"),
         }
+
+    /// Update metrics gauges, and create a trace containing metrics.
+    fn update_metrics(&self) {
+        metrics::gauge!(
+            "sync.prospective_tips.len",
+            self.prospective_tips.len() as i64
+        );
+        metrics::gauge!("sync.pending_blocks.len", self.pending_blocks.len() as i64);
+        tracing::info!(
+            tips.len = self.prospective_tips.len(),
+            pending.len = self.pending_blocks.len(),
+            pending.limit = LOOKAHEAD_LIMIT,
+        );
     }
 }
 

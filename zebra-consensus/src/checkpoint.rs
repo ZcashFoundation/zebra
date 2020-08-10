@@ -330,7 +330,7 @@ impl CheckpointVerifier {
             InitialTip(previous_height) | PreviousCheckpoint(previous_height)
                 if (height <= previous_height) =>
             {
-                Err("block height has already been verified")?
+                Err(format!("Block has already been verified. {:?}", height))?
             }
             InitialTip(_) | PreviousCheckpoint(_) => {}
             // We're finished, so no checkpoint height is valid
@@ -394,7 +394,9 @@ impl CheckpointVerifier {
         let height = match self.check_block(&block) {
             Ok(height) => height,
             Err(error) => {
-                tracing::warn!(?error);
+                // Block errors happen frequently on mainnet, due to bad peers.
+                tracing::debug!(?error);
+
                 // Sending might fail, depending on what the caller does with rx,
                 // but there's nothing we can do about it.
                 let _ = tx.send(Err(error));
@@ -573,7 +575,7 @@ impl CheckpointVerifier {
             } else {
                 // The last block height we processed did not have any blocks
                 // with a matching hash, so chain verification has failed.
-                tracing::warn!(
+                tracing::info!(
                     ?current_height,
                     ?current_range,
                     "No valid blocks at height in CheckpointVerifier"
