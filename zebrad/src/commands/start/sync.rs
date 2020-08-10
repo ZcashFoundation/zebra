@@ -197,7 +197,7 @@ where
                     // ..., respF'. (These lists may be empty).
                     let mut first_unknown = None;
                     for (i, &hash) in hashes.iter().enumerate() {
-                        if self.get_depth(hash).await?.is_none() {
+                        if !self.state_contains(hash).await? {
                             first_unknown = Some(i);
                             break;
                         }
@@ -312,10 +312,8 @@ where
                                 // This check reduces the number of duplicate
                                 // blocks, but it is not required for
                                 // correctness.
-                                let depth = self.get_depth(hash).await?;
-                                if let Some(depth) = depth {
+                                if self.state_contains(hash).await? {
                                     tracing::debug!(
-                                        ?depth,
                                         ?hash,
                                         "ExtendTips: skipping response, peer returned a duplicate hash: already in state"
                                     );
@@ -328,10 +326,8 @@ where
 
                         // Check for tips we've already seen
                         // TODO: remove this check once the sync service is more reliable
-                        let depth = self.get_depth(new_tip).await?;
-                        if let Some(depth) = depth {
-                            tracing::info!(
-                                ?depth,
+                        if self.state_contains(new_tip).await? {
+                            tracing::debug!(
                                 ?new_tip,
                                 "ExtendTips: Unexpected duplicate tip from peer: already in state"
                             );
@@ -386,9 +382,7 @@ where
         //  - the genesis hash is used as a placeholder for "no matches".
         //
         // So we just queue the genesis block here.
-
-        let state_has_genesis = self.get_depth(self.genesis_hash).await?.is_some();
-        if !state_has_genesis {
+        if !self.state_contains(self.genesis_hash).await? {
             self.request_blocks(vec![self.genesis_hash]).await?;
         }
 
@@ -400,10 +394,8 @@ where
         tracing::debug!(hashes.len = hashes.len(), "requesting blocks");
         for hash in hashes.into_iter() {
             // TODO: remove this check once the sync service is more reliable
-            let depth = self.get_depth(hash).await?;
-            if let Some(depth) = depth {
+            if self.state_contains(hash).await? {
                 tracing::debug!(
-                    ?depth,
                     ?hash,
                     "request_blocks: Unexpected duplicate hash: already in state"
                 );
@@ -445,12 +437,14 @@ where
         Ok(())
     }
 
-    /// Get the depth of hash in the current chain.
+    /// Returns `Ok(true)` if the hash is present in the state, and `Ok(false)`
+    /// if the hash is not present in the state.
     ///
-    /// Returns None if the hash is not present in the chain.
+    /// Returns `Err(_)` if an error occurs.
+    ///
     /// TODO: handle multiple tips in the state.
     #[instrument(skip(self))]
-    async fn get_depth(&mut self, hash: BlockHeaderHash) -> Result<Option<u32>, Report> {
+    async fn state_contains(&mut self, hash: BlockHeaderHash) -> Result<bool, Report> {
         match self
             .state
             .ready_and()
@@ -460,7 +454,8 @@ where
             .await
             .map_err(|e| eyre!(e))?
         {
-            zs::Response::Depth(d) => Ok(d),
+            zs::Response::Depth(Some(_)) => Ok(true),
+            zs::Response::Depth(None) => Ok(false),
             _ => unreachable!("wrong response to depth request"),
         }
     }
