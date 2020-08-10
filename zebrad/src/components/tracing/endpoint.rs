@@ -41,7 +41,7 @@ impl TracingEndpoint {
         } else {
             return Ok(());
         };
-        info!("Initializing tracing endpoint");
+        info!("Initializing tracing endpoint at {}", addr);
 
         let service =
             make_service_fn(|_| async { Ok::<_, hyper::Error>(service_fn(request_handler)) });
