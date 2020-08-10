@@ -134,6 +134,7 @@ impl From<Amount<NonNegative>> for u64 {
 
 impl<C> From<Amount<C>> for jubjub::Fr {
     fn from(a: Amount<C>) -> jubjub::Fr {
+        // TODO: this isn't constant time -- does that matter?
         if a.0 < 0 {
             jubjub::Fr::from(a.0.abs() as u64).neg()
         } else {
