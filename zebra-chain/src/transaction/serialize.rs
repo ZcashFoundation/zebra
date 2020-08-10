@@ -157,11 +157,11 @@ impl ZcashSerialize for TransparentInput {
         match self {
             TransparentInput::PrevOut {
                 outpoint,
-                script,
+                unlock_script,
                 sequence,
             } => {
                 outpoint.zcash_serialize(&mut writer)?;
-                script.zcash_serialize(&mut writer)?;
+                unlock_script.zcash_serialize(&mut writer)?;
                 writer.write_u32::<LittleEndian>(*sequence)?;
             }
             TransparentInput::Coinbase {
@@ -211,7 +211,7 @@ impl ZcashDeserialize for TransparentInput {
                     hash: TransactionHash(bytes),
                     index: reader.read_u32::<LittleEndian>()?,
                 },
-                script: Script::zcash_deserialize(&mut reader)?,
+                unlock_script: Script::zcash_deserialize(&mut reader)?,
                 sequence: reader.read_u32::<LittleEndian>()?,
             })
         }
@@ -221,7 +221,7 @@ impl ZcashDeserialize for TransparentInput {
 impl ZcashSerialize for TransparentOutput {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_u64::<LittleEndian>(self.value.into())?;
-        self.pk_script.zcash_serialize(&mut writer)?;
+        self.lock_script.zcash_serialize(&mut writer)?;
         Ok(())
     }
 }
@@ -230,7 +230,7 @@ impl ZcashDeserialize for TransparentOutput {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         Ok(TransparentOutput {
             value: reader.read_u64::<LittleEndian>()?.try_into()?,
-            pk_script: Script::zcash_deserialize(&mut reader)?,
+            lock_script: Script::zcash_deserialize(&mut reader)?,
         })
     }
 }
