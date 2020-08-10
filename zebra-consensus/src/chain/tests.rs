@@ -104,43 +104,45 @@ fn verifiers_from_network(
     verifiers_from_checkpoint_list(network, CheckpointList::new(network))
 }
 
-static BLOCK_VERIFY_TRANSCRIPT1: Lazy<Vec<(Arc<Block>, Result<BlockHeaderHash, TransError>)>> =
-    Lazy::new(|| {
-        let block: Arc<_> =
-            Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
-                .unwrap()
-                .into();
-        let hash = Ok(block.as_ref().into());
+static BLOCK_VERIFY_TRANSCRIPT_GENESIS: Lazy<
+    Vec<(Arc<Block>, Result<BlockHeaderHash, TransError>)>,
+> = Lazy::new(|| {
+    let block: Arc<_> =
+        Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
+            .unwrap()
+            .into();
+    let hash = Ok(block.as_ref().into());
 
-        vec![(block, hash)]
-    });
+    vec![(block, hash)]
+});
 
-static BLOCK_VERIFY_FAIL_TRANSCRIPT1: Lazy<Vec<(Arc<Block>, Result<BlockHeaderHash, TransError>)>> =
-    Lazy::new(|| {
-        let block: Arc<_> =
-            Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
-                .unwrap()
-                .into();
+static BLOCK_VERIFY_TRANSCRIPT_GENESIS_FAIL: Lazy<
+    Vec<(Arc<Block>, Result<BlockHeaderHash, TransError>)>,
+> = Lazy::new(|| {
+    let block: Arc<_> =
+        Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
+            .unwrap()
+            .into();
 
-        vec![(block, Err(TransError::Any))]
-    });
+    vec![(block, Err(TransError::Any))]
+});
 
-static BLOCK_VERIFY_TRANSCRIPT2: Lazy<Vec<(Arc<Block>, Result<BlockHeaderHash, TransError>)>> =
-    Lazy::new(|| {
-        let block0: Arc<_> =
-            Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
-                .unwrap()
-                .into();
-        let hash0 = Ok(block0.as_ref().into());
+static BLOCK_VERIFY_TRANSCRIPT_GENESIS_TO_BLOCK_1: Lazy<
+    Vec<(Arc<Block>, Result<BlockHeaderHash, TransError>)>,
+> = Lazy::new(|| {
+    let block0: Arc<_> =
+        Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
+            .unwrap()
+            .into();
+    let hash0 = Ok(block0.as_ref().into());
 
-        let block1: Arc<_> =
-            Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..])
-                .unwrap()
-                .into();
-        let hash1 = Ok(block1.as_ref().into());
+    let block1: Arc<_> = Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..])
+        .unwrap()
+        .into();
+    let hash1 = Ok(block1.as_ref().into());
 
-        vec![(block0, hash0), (block1, hash1)]
-    });
+    vec![(block0, hash0), (block1, hash1)]
+});
 
 static NO_COINBASE_TRANSCRIPT: Lazy<Vec<(Arc<Block>, Result<BlockHeaderHash, TransError>)>> =
     Lazy::new(|| {
@@ -216,7 +218,7 @@ async fn verify_block() -> Result<(), Report> {
     /// SPANDOC: Make sure the verifier service is ready
     let ready_verifier_service = chain_verifier.ready_and().await.map_err(|e| eyre!(e))?;
 
-    let transcript = Transcript::from(BLOCK_VERIFY_TRANSCRIPT2.iter().cloned());
+    let transcript = Transcript::from(BLOCK_VERIFY_TRANSCRIPT_GENESIS_TO_BLOCK_1.iter().cloned());
     transcript.check(ready_verifier_service).await.unwrap();
 
     Ok(())
@@ -241,7 +243,7 @@ async fn verify_checkpoint() -> Result<(), Report> {
     /// SPANDOC: Make sure the verifier service is ready
     let ready_verifier_service = chain_verifier.ready_and().await.map_err(|e| eyre!(e))?;
 
-    let transcript = Transcript::from(BLOCK_VERIFY_TRANSCRIPT1.iter().cloned());
+    let transcript = Transcript::from(BLOCK_VERIFY_TRANSCRIPT_GENESIS.iter().cloned());
     transcript.check(ready_verifier_service).await.unwrap();
 
     Ok(())
@@ -292,7 +294,7 @@ async fn round_trip_checkpoint() -> Result<(), Report> {
     /// SPANDOC: Make sure the verifier service is ready
     let ready_verifier_service = chain_verifier.ready_and().await.map_err(|e| eyre!(e))?;
 
-    let transcript = Transcript::from(BLOCK_VERIFY_TRANSCRIPT1.iter().cloned());
+    let transcript = Transcript::from(BLOCK_VERIFY_TRANSCRIPT_GENESIS.iter().cloned());
     transcript.check(ready_verifier_service).await.unwrap();
 
     let transcript = Transcript::from(STATE_VERIFY_TRANSCRIPT.iter().cloned());
@@ -316,7 +318,7 @@ async fn verify_fail_add_block_checkpoint() -> Result<(), Report> {
     /// SPANDOC: Make sure the block verifier service is ready (1/2)
     let ready_verifier_service = chain_verifier.ready_and().await.map_err(|e| eyre!(e))?;
 
-    let transcript = Transcript::from(BLOCK_VERIFY_TRANSCRIPT1.iter().cloned());
+    let transcript = Transcript::from(BLOCK_VERIFY_TRANSCRIPT_GENESIS.iter().cloned());
     transcript.check(ready_verifier_service).await.unwrap();
 
     /// SPANDOC: Make sure the state verifier service is ready (1/2)
@@ -328,7 +330,7 @@ async fn verify_fail_add_block_checkpoint() -> Result<(), Report> {
     /// SPANDOC: Make sure the block verifier service is ready (2/2)
     let ready_verifier_service = chain_verifier.ready_and().await.map_err(|e| eyre!(e))?;
 
-    let transcript = Transcript::from(BLOCK_VERIFY_FAIL_TRANSCRIPT1.iter().cloned());
+    let transcript = Transcript::from(BLOCK_VERIFY_TRANSCRIPT_GENESIS_FAIL.iter().cloned());
     transcript.check(ready_verifier_service).await.unwrap();
 
     /// SPANDOC: Make sure the state verifier service is ready (2/2)
