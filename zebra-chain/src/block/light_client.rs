@@ -2,7 +2,7 @@
 
 use crate::note_commitment_tree::SaplingNoteTreeRootHash;
 use crate::types::BlockHeight;
-use crate::Network;
+use crate::{Network, NetworkUpgrade, NetworkUpgrade::*};
 
 /// Light client root hashes.
 ///
@@ -50,12 +50,20 @@ impl LightClientRootHash {
         network: Network,
         height: BlockHeight,
     ) -> LightClientRootHash {
-        // TODO(teor): use the correct network upgrade here, after moving the
-        //             network upgrades from zebra-consensus to zebra-chain.
-        LightClientRootHash::PreSaplingReserved(bytes)
+        use LightClientRootHash::*;
+
+        match NetworkUpgrade::current(network, height) {
+            Genesis | BeforeOverwinter | Overwinter => PreSaplingReserved(bytes),
+            Sapling | Blossom => FinalSaplingRoot(SaplingNoteTreeRootHash(bytes)),
+            Heartwood if Some(height) == Heartwood.activation_height(network) => {
+                ChainHistoryActivationReserved(bytes)
+            }
+            Heartwood | Canopy => ChainHistoryRoot(ChainHistoryMmrRootHash(bytes)),
+        }
     }
 
     /// Returns the serialized bytes for this LightClientRootHash.
+    #[allow(dead_code)]
     pub fn to_bytes(self) -> [u8; 32] {
         use LightClientRootHash::*;
 
