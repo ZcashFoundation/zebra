@@ -8,9 +8,9 @@ use color_eyre::eyre::eyre;
 use color_eyre::eyre::Report;
 use futures::{future::TryFutureExt, stream::FuturesUnordered};
 use once_cell::sync::Lazy;
-use std::{collections::BTreeMap, mem::drop, sync::Arc};
+use std::{collections::BTreeMap, mem::drop, sync::Arc, time::Duration};
 use tokio::{stream::StreamExt, time::timeout};
-use tower::{Service, ServiceExt};
+use tower::{layer::Layer, timeout::TimeoutLayer, Service, ServiceExt};
 use tracing_futures::Instrument;
 
 use zebra_chain::block::{Block, BlockHeader};
@@ -243,6 +243,10 @@ async fn verify_checkpoint() -> Result<(), Report> {
     /// SPANDOC: Make sure the verifier service is ready
     let ready_verifier_service = chain_verifier.ready_and().await.map_err(|e| eyre!(e))?;
 
+    // Add a timeout layer
+    let verifier_timeout = TimeoutLayer::new(Duration::from_secs(VERIFY_TIMEOUT_SECONDS));
+    verifier_timeout.layer(&ready_verifier_service);
+
     let transcript = Transcript::from(BLOCK_VERIFY_TRANSCRIPT_GENESIS.iter().cloned());
     transcript.check(ready_verifier_service).await.unwrap();
 
@@ -266,6 +270,10 @@ async fn verify_fail_no_coinbase() -> Result<(), Report> {
 
     /// SPANDOC: Make sure the verifier service is ready
     let ready_verifier_service = chain_verifier.ready_and().await.map_err(|e| eyre!(e))?;
+
+    // Add a timeout layer
+    let verifier_timeout = TimeoutLayer::new(Duration::from_secs(VERIFY_TIMEOUT_SECONDS));
+    verifier_timeout.layer(&ready_verifier_service);
 
     let transcript = Transcript::from(NO_COINBASE_TRANSCRIPT.iter().cloned());
     transcript.check(ready_verifier_service).await.unwrap();
@@ -294,6 +302,10 @@ async fn round_trip_checkpoint() -> Result<(), Report> {
     /// SPANDOC: Make sure the verifier service is ready
     let ready_verifier_service = chain_verifier.ready_and().await.map_err(|e| eyre!(e))?;
 
+    // Add a timeout layer
+    let verifier_timeout = TimeoutLayer::new(Duration::from_secs(VERIFY_TIMEOUT_SECONDS));
+    verifier_timeout.layer(&ready_verifier_service);
+
     let transcript = Transcript::from(BLOCK_VERIFY_TRANSCRIPT_GENESIS.iter().cloned());
     transcript.check(ready_verifier_service).await.unwrap();
 
@@ -318,6 +330,10 @@ async fn verify_fail_add_block_checkpoint() -> Result<(), Report> {
     /// SPANDOC: Make sure the verifier service is ready (1/2)
     let ready_verifier_service = chain_verifier.ready_and().await.map_err(|e| eyre!(e))?;
 
+    // Add a timeout layer
+    let verifier_timeout = TimeoutLayer::new(Duration::from_secs(VERIFY_TIMEOUT_SECONDS));
+    verifier_timeout.layer(&ready_verifier_service);
+
     let transcript = Transcript::from(BLOCK_VERIFY_TRANSCRIPT_GENESIS.iter().cloned());
     transcript.check(ready_verifier_service).await.unwrap();
 
@@ -329,6 +345,10 @@ async fn verify_fail_add_block_checkpoint() -> Result<(), Report> {
 
     /// SPANDOC: Make sure the verifier service is ready (2/2)
     let ready_verifier_service = chain_verifier.ready_and().await.map_err(|e| eyre!(e))?;
+
+    // Add a timeout layer
+    let verifier_timeout = TimeoutLayer::new(Duration::from_secs(VERIFY_TIMEOUT_SECONDS));
+    verifier_timeout.layer(&ready_verifier_service);
 
     let transcript = Transcript::from(BLOCK_VERIFY_TRANSCRIPT_GENESIS_FAIL.iter().cloned());
     transcript.check(ready_verifier_service).await.unwrap();
