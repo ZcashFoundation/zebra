@@ -30,7 +30,7 @@ impl MetricsEndpoint {
             return Ok(());
         };
 
-        info!("Initializing metrics endpoint");
+        info!("Initializing metrics endpoint at {}", addr);
 
         // XXX do we need to hold on to the receiver?
         let receiver = Receiver::builder()
