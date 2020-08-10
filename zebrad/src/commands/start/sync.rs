@@ -87,7 +87,8 @@ where
 
             // ObtainTips Step 6
             //
-            // If there are any prospective tips, call ExtendTips. Continue this step until there are no more prospective tips.
+            // If there are any prospective tips, call ExtendTips.
+            // Continue this step until there are no more prospective tips.
             while !self.prospective_tips.is_empty() {
                 tracing::debug!("extending prospective tips");
 
@@ -123,11 +124,6 @@ where
                         // making progress (probably using a timeout), then
                         // continue the loop with a new invocation of
                         // obtain_tips(), which will restart block downloads.
-                        // this requires correctly constructing a block locator
-                        // (TODO below) and ensuring that the verifier handles
-                        // multiple requests for verification of the same block
-                        // hash by handling both requests or by discarding the
-                        // earlier request in favor of the later one.
                         Err(e) => tracing::error!(?e, "potentially transient error"),
                     };
                 }
@@ -221,7 +217,7 @@ where
                     let unknown_hashes = &hashes[first_unknown..];
                     let new_tip = *unknown_hashes
                         .last()
-                        .expect("enumerate returns a valid index");
+                        .expect("already checked that unknown hashes isn't empty");
 
                     // ObtainTips Step 4:
                     // Combine the last elements of each list into a set; this is the
@@ -313,6 +309,9 @@ where
                             (Some(&hash), _) => {
                                 // Check for hashes we've already seen.
                                 // This happens a lot near the end of the chain.
+                                // This check reduces the number of duplicate
+                                // blocks, but it is not required for
+                                // correctness.
                                 let depth = self.get_depth(hash).await?;
                                 if let Some(depth) = depth {
                                     tracing::debug!(
