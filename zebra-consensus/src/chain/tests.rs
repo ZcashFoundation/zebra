@@ -166,7 +166,7 @@ static NO_COINBASE_STATE_TRANSCRIPT: Lazy<
     )]
 });
 
-static STATE_VERIFY_TRANSCRIPT: Lazy<
+static STATE_VERIFY_TRANSCRIPT_GENESIS: Lazy<
     Vec<(
         zebra_state::Request,
         Result<zebra_state::Response, TransError>,
@@ -297,7 +297,7 @@ async fn round_trip_checkpoint() -> Result<(), Report> {
     let transcript = Transcript::from(BLOCK_VERIFY_TRANSCRIPT_GENESIS.iter().cloned());
     transcript.check(ready_verifier_service).await.unwrap();
 
-    let transcript = Transcript::from(STATE_VERIFY_TRANSCRIPT.iter().cloned());
+    let transcript = Transcript::from(STATE_VERIFY_TRANSCRIPT_GENESIS.iter().cloned());
     transcript.check(state_service).await.unwrap();
 
     Ok(())
@@ -324,7 +324,7 @@ async fn verify_fail_add_block_checkpoint() -> Result<(), Report> {
     /// SPANDOC: Make sure the state verifier service is ready (1/2)
     let ready_state_service = state_service.ready_and().await.map_err(|e| eyre!(e))?;
 
-    let transcript = Transcript::from(STATE_VERIFY_TRANSCRIPT.iter().cloned());
+    let transcript = Transcript::from(STATE_VERIFY_TRANSCRIPT_GENESIS.iter().cloned());
     transcript.check(ready_state_service).await.unwrap();
 
     /// SPANDOC: Make sure the block verifier service is ready (2/2)
@@ -336,7 +336,7 @@ async fn verify_fail_add_block_checkpoint() -> Result<(), Report> {
     /// SPANDOC: Make sure the state verifier service is ready (2/2)
     let ready_state_service = state_service.ready_and().await.map_err(|e| eyre!(e))?;
 
-    let transcript = Transcript::from(STATE_VERIFY_TRANSCRIPT.iter().cloned());
+    let transcript = Transcript::from(STATE_VERIFY_TRANSCRIPT_GENESIS.iter().cloned());
     transcript.check(ready_state_service).await.unwrap();
 
     Ok(())
