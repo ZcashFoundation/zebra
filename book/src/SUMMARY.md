@@ -12,6 +12,7 @@
   - [Zebra RFCs](dev/rfcs.md)
     - [RFC Template](dev/rfcs/0000-template.md)
     - [Pipelinable Block Lookup](dev/rfcs/0001-pipelinable-block-lookup.md)
+    - [Asynchronous Script Verification](dev/rfcs/XXXX-asynchronous-script-verification.md)
   - [Diagrams](dev/diagrams.md)
     - [Network Architecture](dev/diagrams/zebra-network.md)
   - [zebra-checkpoints](dev/zebra-checkpoints.md)
