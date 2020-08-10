@@ -5,7 +5,7 @@
 #![forbid(unsafe_code)]
 
 use color_eyre::eyre::Result;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 use zebra_test::prelude::*;
 
@@ -55,20 +55,18 @@ fn generate_args() -> Result<()> {
     output.assert_failure()?;
 
     // create config file path in the same location as binary
-    let binary_path = Path::new(env!("CARGO_BIN_EXE_zebrad"));
-    let path = format!(
-        "{}/{}",
-        binary_path.parent().unwrap().to_str().unwrap(),
-        "zebrad.toml"
-    );
+    let binary_path = Path::new(env!("CARGO_BIN_EXE_zebrad")).parent().unwrap();
+    let mut path = PathBuf::from(binary_path);
+    path.push("zebrad.toml");
 
     // Valid
-    let (child, _guard) = get_child(&["generate", "-o", &path])?;
+    let (child, _guard) = get_child(&["generate", "-o", path.to_str().unwrap()])?;
+
     let output = child.wait_with_output()?;
     output.assert_success()?;
 
     // Check if the file was created
-    assert_eq!(Path::new(&path).exists(), true);
+    assert_eq!(path.exists(), true);
 
     Ok(())
 }
@@ -259,21 +257,18 @@ fn valid_generated_config() -> Result<()> {
     zebra_test::init();
 
     // Generate configuration in binary parent path
-    let binary_path = Path::new(env!("CARGO_BIN_EXE_zebrad"));
-    let path = format!(
-        "{}/{}",
-        binary_path.parent().unwrap().to_str().unwrap(),
-        "zebrad.toml"
-    );
-    let (child, _guard) = get_child(&["generate", "-o", &path])?;
+    let binary_path = Path::new(env!("CARGO_BIN_EXE_zebrad")).parent().unwrap();
+    let mut path = PathBuf::from(binary_path);
+    path.push("zebrad.toml");
+    let (child, _guard) = get_child(&["generate", "-o", path.to_str().unwrap()])?;
     let output = child.wait_with_output()?;
     output.assert_success()?;
 
     // Check if the file was created
-    assert_eq!(Path::new(&path).exists(), true);
+    assert_eq!(path.exists(), true);
 
     // Check if it was created in the same path as binary
-    assert_eq!(Path::new(&path).parent(), binary_path.parent());
+    assert_eq!(path.parent(), Some(binary_path));
 
     // Run start and kill it at 1 second
     let (mut child, _guard) = get_child(&["start"])?;
