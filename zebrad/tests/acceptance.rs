@@ -271,7 +271,7 @@ fn valid_generated_config() -> Result<()> {
     assert_eq!(path.parent(), Some(binary_path));
 
     // Run start and kill it at 1 second
-    let (mut child, _guard) = get_child(&["start"])?;
+    let (mut child, _guard) = get_child(&["-c", path.to_str().unwrap(), "start"])?;
     std::thread::sleep(Duration::from_secs(1));
     child.kill()?;
 
@@ -284,7 +284,7 @@ fn valid_generated_config() -> Result<()> {
     assert!(output.was_killed());
 
     // Run seed program and kill it at 1 second
-    let (mut child, _guard) = get_child(&["seed"])?;
+    let (mut child, _guard) = get_child(&["-c", path.to_str().unwrap(), "seed"])?;
     std::thread::sleep(Duration::from_secs(1));
     child.kill()?;
 
