@@ -629,19 +629,31 @@ impl From<Diversifier> for [u8; 11] {
     }
 }
 
-impl From<Diversifier> for jubjub::AffinePoint {
-    /// Get a diversified base point from a diversifier value in
-    /// affine representation
-    fn from(d: Diversifier) -> jubjub::AffinePoint {
-        jubjub::ExtendedPoint::from(d).into()
+impl TryFrom<Diversifier> for jubjub::AffinePoint {
+    type Error = &'static str;
+
+    /// Get a diversified base point from a diversifier value in affine
+    /// representation.
+    fn try_from(d: Diversifier) -> Result<Self, Self::Error> {
+        if let Ok(extended_point) = jubjub::ExtendedPoint::try_from(d) {
+            Ok(extended_point.into())
+        } else {
+            Err("Invalid Diversifier -> jubjub::AffinePoint")
+        }
     }
 }
 
-impl From<Diversifier> for jubjub::ExtendedPoint {
-    /// Get a diversified base point from a diversifier value in
-    /// extended representation
-    fn from(d: Diversifier) -> jubjub::ExtendedPoint {
-        diversify_hash(d.0).unwrap()
+impl TryFrom<Diversifier> for jubjub::ExtendedPoint {
+    type Error = &'static str;
+
+    fn try_from(d: Diversifier) -> Result<Self, Self::Error> {
+        let possible_point = diversify_hash(d.0);
+
+        if let Some(point) = possible_point {
+            Ok(point)
+        } else {
+            Err("Invalid Diversifier -> jubjub::ExtendedPoint")
+        }
     }
 }
 

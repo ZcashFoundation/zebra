@@ -82,7 +82,7 @@ impl NoteCommitment {
         diversifier: Diversifier,
         transmission_key: TransmissionKey,
         value: Amount<NonNegative>,
-    ) -> (CommitmentRandomness, Self)
+    ) -> Option<(CommitmentRandomness, Self)>
     where
         T: RngCore + CryptoRng,
     {
@@ -95,9 +95,15 @@ impl NoteCommitment {
         // Jubjub repr_J canonical byte encoding
         // https://zips.z.cash/protocol/protocol.pdf#jubjub
         //
-        // The `From<Diversifier>` impls for the `jubjub::*Point`s handles
+        // The `TryFrom<Diversifier>` impls for the `jubjub::*Point`s handles
         // calling `DiversifyHash` implicitly.
-        let g_d_bytes = jubjub::AffinePoint::from(diversifier).to_bytes();
+        let g_d_bytes: [u8; 32];
+        if let Ok(g_d) = jubjub::AffinePoint::try_from(diversifier) {
+            g_d_bytes = g_d.to_bytes();
+        } else {
+            return None;
+        }
+
         let pk_d_bytes = <[u8; 32]>::from(transmission_key);
         let v_bytes = value.to_bytes();
 
@@ -107,10 +113,10 @@ impl NoteCommitment {
 
         let rcm = CommitmentRandomness(generate_trapdoor(csprng));
 
-        (
+        Some((
             rcm,
             NoteCommitment::from(windowed_pedersen_commitment(rcm.0, &s)),
-        )
+        ))
     }
 
     /// Hash Extractor for Jubjub (?)
