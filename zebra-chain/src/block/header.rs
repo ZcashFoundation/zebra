@@ -37,8 +37,9 @@ pub struct BlockHeader {
     /// The light client root hash.
     ///
     /// This field is interpreted differently, based on the current
-    /// block height. See LightClientRootHash for details.
-    pub light_client_root_hash: [u8; 32],
+    /// block height. Use `block.light_client_root_hash(network)` to get the
+    /// parsed `LightClientRootHash` for this block.
+    pub(super) light_client_root_hash: [u8; 32],
 
     /// The block timestamp is a Unix epoch time (UTC) when the miner
     /// started hashing the header (according to the miner).

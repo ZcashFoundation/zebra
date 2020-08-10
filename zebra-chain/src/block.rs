@@ -18,9 +18,11 @@ use proptest_derive::Arbitrary;
 
 use crate::transaction::Transaction;
 use crate::types::BlockHeight;
+use crate::Network;
 
 pub use hash::BlockHeaderHash;
 pub use header::BlockHeader;
+pub use light_client::LightClientRootHash;
 
 /// A block in your blockchain.
 ///
@@ -90,6 +92,23 @@ impl Block {
     /// Get the hash for the current block
     pub fn hash(&self) -> BlockHeaderHash {
         BlockHeaderHash::from(self)
+    }
+
+    /// Get the parsed light client root hash for this block.
+    ///
+    /// The interpretation of the light client root hash depends on the
+    /// configured `network`, and this block's height.
+    ///
+    /// Returns None if this block does not have a block height.
+    pub fn light_client_root_hash(&self, network: Network) -> Option<LightClientRootHash> {
+        match self.coinbase_height() {
+            Some(height) => Some(LightClientRootHash::from_bytes(
+                self.header.light_client_root_hash,
+                network,
+                height,
+            )),
+            None => None,
+        }
     }
 }
 
