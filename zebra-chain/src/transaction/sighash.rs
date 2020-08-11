@@ -61,14 +61,12 @@ impl<'a> SigHasher<'a> {
             .personal(&personal)
             .to_state();
 
-        hash.update(&self.trans.header().to_le_bytes());
-        hash.update(
-            &self
-                .trans
-                .group_id()
-                .expect("fOverwintered is always set")
-                .to_le_bytes(),
-        );
+        hash.write_u32::<LittleEndian>(self.trans.header())
+            .expect("write to hasher will never fail");
+
+        hash.write_u32::<LittleEndian>(self.trans.group_id().expect("fOverwintered is always set"))
+            .expect("write to hasher will never fail");
+
         hash.update(
             self.hash_prevouts()
                 .as_ref()
@@ -76,11 +74,56 @@ impl<'a> SigHasher<'a> {
                 .unwrap_or(&[0; 32]),
         );
         hash.update(
-            self.sequence_hash()
+            self.hash_sequence()
                 .as_ref()
                 .map(|h| h.as_ref())
                 .unwrap_or(&[0; 32]),
         );
+        hash.update(
+            self.hash_outputs()
+                .as_ref()
+                .map(|h| h.as_ref())
+                .unwrap_or(&[0; 32]),
+        );
+
+        // update_hash!(h, !tx.joinsplits.is_empty(), joinsplits_hash(tx));
+        // if sigversion == SigHashVersion::Sapling {
+        //     update_hash!(h, !tx.shielded_spends.is_empty(), shielded_spends_hash(tx));
+        //     update_hash!(
+        //         h,
+        //         !tx.shielded_outputs.is_empty(),
+        //         shielded_outputs_hash(tx)
+        //     );
+        // }
+
+        self.trans
+            .lock_time()
+            .zcash_serialize(&mut hash)
+            .expect("write to hasher will never fail");
+
+        hash.write_u32::<LittleEndian>(
+            self.trans
+                .expiry_height()
+                .expect("fOverwintered is always set")
+                .0,
+        )
+        .expect("write to hasher will never fail");
+
+        // if sigversion == SigHashVersion::Sapling {
+        //     h.update(&tx.value_balance.to_i64_le_bytes());
+        // }
+        // update_u32!(h, hash_type, tmp);
+
+        // if let Some((n, script_code, amount)) = transparent_input {
+        //     let mut data = vec![];
+        //     tx.vin[n].prevout.write(&mut data).unwrap();
+        //     script_code.write(&mut data).unwrap();
+        //     data.extend_from_slice(&amount.to_i64_le_bytes());
+        //     (&mut data)
+        //         .write_u32::<LittleEndian>(tx.vin[n].sequence)
+        //         .unwrap();
+        //     h.update(&data);
+        // }
 
         hash.finalize()
     }
@@ -111,7 +154,7 @@ impl<'a> SigHasher<'a> {
         Some(hash.finalize())
     }
 
-    fn sequence_hash(&self) -> Option<Hash> {
+    fn hash_sequence(&self) -> Option<Hash> {
         if self.hash_type & SIGHASH_ANYONECANPAY == 0
             && (self.hash_type & SIGHASH_MASK) != SIGHASH_SINGLE
             && (self.hash_type & SIGHASH_MASK) != SIGHASH_NONE
@@ -138,5 +181,28 @@ impl<'a> SigHasher<'a> {
         hash.update(&buf);
 
         Some(hash.finalize())
+    }
+
+    fn hash_outputs(&self) -> Option<Hash> {
+        if (self.hash_type & SIGHASH_MASK) != SIGHASH_SINGLE
+            && (self.hash_type & SIGHASH_MASK) != SIGHASH_NONE
+        {
+            Some(self.outputs_hash())
+        } else if (self.hash_type & SIGHASH_MASK) == SIGHASH_SINGLE
+            && transparent_input.is_some()
+            && transparent_input.as_ref().unwrap().0 < tx.vout.len()
+        {
+            Some(self.single_output_hash())
+        } else {
+            None
+        }
+    }
+
+    fn outputs_hash(&self) -> Hash {
+        todo!()
+    }
+
+    fn single_output_hash(&self) -> Hash {
+        todo!()
     }
 }
