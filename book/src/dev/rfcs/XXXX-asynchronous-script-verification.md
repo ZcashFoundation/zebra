@@ -106,7 +106,7 @@ In the first category, our state is presented to the rest of the application
 as a `Buffer`ed `tower::Service`. The `Buffer` wrapper allows shared access
 to a service using an actor model, moving the service to be shared into a
 worker task and passing messages to it over an multi-producer single-consumer
-(mpsc) channel. The worker task recieves messages and makes `Service::call`s.
+(mpsc) channel. The worker task receives messages and makes `Service::call`s.
 The `Service::call` method returns a `Future`, and the service is allowed to
 decide how much work it wants to do synchronously (in `call`) and how much
 work it wants to do asynchronously (in the `Future` it returns).
