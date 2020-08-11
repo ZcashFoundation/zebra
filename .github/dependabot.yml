@@ -26,3 +26,5 @@ updates:
   - dconnolly
   labels:
   - "A-infrastructure"
+  - "A-dependencies"
+  - "A-rust"
