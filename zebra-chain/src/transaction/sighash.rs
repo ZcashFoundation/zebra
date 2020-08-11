@@ -112,7 +112,9 @@ impl<'a> SigHasher<'a> {
         // if sigversion == SigHashVersion::Sapling {
         //     h.update(&tx.value_balance.to_i64_le_bytes());
         // }
-        // update_u32!(h, hash_type, tmp);
+
+        hash.write_u32::<LittleEndian>(self.hash_type)
+            .expect("write to hasher will never fail");
 
         // if let Some((n, script_code, amount)) = transparent_input {
         //     let mut data = vec![];
