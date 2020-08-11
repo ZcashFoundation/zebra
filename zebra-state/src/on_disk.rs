@@ -18,6 +18,9 @@ use zebra_chain::{
     Network,
 };
 
+/// Type alias of our wrapped service
+pub type StateService = Buffer<BoxService<Request, Response, Error>, Request>;
+
 #[derive(Clone)]
 struct SledState {
     storage: sled::Db,
@@ -243,16 +246,6 @@ impl From<BlockHeight> for BlockQuery {
     }
 }
 
-/// Returns a type that implements the `zebra_state::Service` using `sled`.
-///
-/// Each `network` has its own separate sled database.
-pub fn init(config: Config, network: Network) -> StateService {
-    Buffer::new(BoxService::new(SledState::new(&config, network)), 1)
-}
-
-/// Type alias of our wrapped service
-pub type StateService = Buffer<BoxService<Request, Response, Error>, Request>;
-
 type BoxError = Box<dyn error::Error + Send + Sync + 'static>;
 
 // these hacks are necessary to capture spantraces that can be extracted again
@@ -294,4 +287,11 @@ impl Into<BoxError> for Error {
     fn into(self) -> BoxError {
         BoxError::from(self.0)
     }
+}
+
+/// Returns a type that implements the `zebra_state::Service` using `sled`.
+///
+/// Each `network` has its own separate sled database.
+pub fn init(config: Config, network: Network) -> StateService {
+    Buffer::new(BoxService::new(SledState::new(&config, network)), 1)
 }
