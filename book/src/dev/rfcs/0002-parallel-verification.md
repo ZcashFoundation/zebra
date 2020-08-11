@@ -70,14 +70,17 @@ Here's how Zebra can verify the different `BlockHeight` consensus rules in
 parallel:
 
 **Parsing:**
+
 1. Parse the Block into a BlockHeader and a list of transactions.
 
 **Verification - No Data Dependencies:**
+
 2. Check that all BlockHeights are within the range of valid heights.^
 3. Check that the block has exactly one BlockHeight.
 4. Check that the BlockHeight is in the first transaction in the Block.
 
 **Verification - Deferring A Data Dependency:**
+
 5. Verify other consensus rules that depend on BlockHeight, assuming that the
    BlockHeight is correct. For example, many consensus rules depend on the
    current Network Upgrade, which is determined by the BlockHeight. We verify
@@ -85,6 +88,7 @@ parallel:
    correct.
 
 **Verification - Checking A Data Dependency:**
+
 6. Await the previous block. When it arrives, check that the BlockHeight of this
    Block is one more than the BlockHeight of the previous block. If the check
    passes, commit the block to the state. Otherwise, reject the block as invalid.
