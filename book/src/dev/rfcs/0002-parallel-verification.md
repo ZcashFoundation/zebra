@@ -15,8 +15,8 @@ We use several different design patterns to enable this parallelism:
 * We download blocks and start verifying them in parallel,
 * We batch signature and proof verification using verification services, and
 * We defer data dependencies until just before the block is committed to the
-  state (for details, see the
-  [Deferred Verification Using Constraints RFC](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/rfcs/0003-constraint-verification.md)).
+  state (for details, see the state RFCs, and the RFCs that cover parallel
+  verification of particular fields - *TODO: links*).
 
 # Motivation
 [motivation]: #motivation
@@ -45,6 +45,8 @@ Blockchain:
            be identified using its tip.
 
 Data:
+* **context-free:** verification steps which do not have a data dependency on
+                    previous blocks.
 * **data dependency:** Information contained in the previous block and its
                        chain fork, which is required to verify the current block.
 * **state:** The set of verified blocks. The state may also cache some dependent
@@ -53,17 +55,74 @@ Data:
 # Guide-level explanation
 [guide-level-explanation]: #guide-level-explanation
 
-**TODO:** write guide after details have stabilised
+In Zebra, we want to verify blocks in parallel. Some fields can be verified
+straight away, because they don't depend on the output of previous blocks.
+But other fields have **data dependencies**, which means that we need previous
+blocks before we can fully validate them.
 
-> Explain the proposal as if it was already included in the project and you were teaching it to another Zebra programmer. That generally means:
->
+If we delay checking some of these data dependencies, then we can do more of
+the verification in parallel.
 
-> - Introducing new named concepts.
-> - Explaining the feature largely in terms of examples.
-> - Explaining how Zebra programmers should *think* about the feature, and how it should impact the way they use Zebra. It should explain the impact as concretely as possible.
-> - If applicable, describe the differences between teaching this to existing Zebra programmers and new Zebra programmers.
->
-> For implementation-oriented RFCs (e.g. for compiler internals), this section should focus on how compiler contributors should think about the change, and give examples of its concrete impact.
+## Example: BlockHeight
+[block-height]: #block-height
+
+Here's how Zebra can verify the different `BlockHeight` consensus rules in
+parallel:
+
+**Parsing:**
+1. Parse the Block into a BlockHeader and a list of transactions.
+
+**Verification - No Data Dependencies:**
+2. Check that all BlockHeights are within the range of valid heights.^
+3. Check that the block has exactly one BlockHeight.
+4. Check that the BlockHeight is in the first transaction in the Block.
+
+**Verification - Deferring A Data Dependency:**
+5. Verify other consensus rules that depend on BlockHeight, assuming that the
+   BlockHeight is correct. For example, many consensus rules depend on the
+   current Network Upgrade, which is determined by the BlockHeight. We verify
+   these consensus rules, assuming the BlockHeight and Network Upgrade are
+   correct.
+
+**Verification - Checking A Data Dependency:**
+6. Await the previous block. When it arrives, check that the BlockHeight of this
+   Block is one more than the BlockHeight of the previous block. If the check
+   passes, commit the block to the state. Otherwise, reject the block as invalid.
+
+^ Note that Zebra actually checks the BlockHeight range during parsing. The
+  BlockHeight is stored as a compact integer, so out-of-range BlockHeights take
+  up additional raw bytes during parsing.
+
+## Zebra Design
+[zebra-design]: #zebra-design
+
+### Design Patterns
+[design-patterns]: #design-patterns
+
+When designing changes to Zebra verification, use these design patterns:
+* perform context-free verification as soon as possible,
+  (that is, verification which has no data dependencies on previous blocks),
+* defer data dependencies as long as possible, then
+* check the data dependencies.
+
+### Minimise Deferred Data
+[minimise-deferred-data]: #minimise-deferred-data
+
+Keep the data dependencies and checks as simple as possible.
+
+For example, Zebra could defer checking both the BlockHeight and Network Upgrade.
+
+But since the Network Upgrade depends on the BlockHeight, we only need to defer
+the BlockHeight check. Then we can use all the fields that depend on the
+BlockHeight, as if it is correct. If the final BlockHeight check fails, we will
+reject the entire block, including all the verification we perfomed using the
+assumed Network Upgrade.
+
+### Implementation Strategy
+[implementation-strategy]: #implementation-strategy
+
+When implementing these designs, perform as much verification as possible, await
+any dependencies, then perform the necessary checks.
 
 # Reference-level explanation
 [reference-level-explanation]: #reference-level-explanation
@@ -159,7 +218,8 @@ Here is how the `BlockVerifier` implements each verification stage:
   * *As Above:* the `BlockVerifier` accepts parsed `Block` structs.
 * **Semantic Verification:**
   * *As Above:* verifies each field in the block. Defers any data dependencies as
-    long as possible, then awaits those data dependencies.
+    long as possible, awaits those data dependencies, then performs data
+    dependent checks.
   * Note: The context-free, deferred, and dependent verification stages can be
     implemented as separate async functions.
 * **State Updates:**
@@ -167,6 +227,30 @@ Here is how the `BlockVerifier` implements each verification stage:
     which sends verified `Block`s to the state service.
   * The state service implements the chain order consensus rule, which makes sure
     each block is added to state after its previous block.
+
+## Zcash Protocol Design
+[zcash-protocol]: #zcash-protocol
+
+When designing a change to the Zcash protocol, minimise the data dependencies
+between blocks.
+
+Try to create designs that:
+* Eliminate data dependencies,
+* Make the changes depend on a version field in the block header or transaction,
+* Make the changes depend on the current Network Upgrade,
+* Make the changes depend on a field in the current block, with an additional
+  consensus rule to check that field against previous blocks, or
+* Prefer dependencies on older blocks, rather than newer blocks
+  (older blocks are more likely to verify earlier).
+
+Older dependencies have a design tradeoff:
+* depending on multiple blocks is complex,
+* depending on the previous block makes parallel verification harder.
+
+When making decisions about this dependency tradeoff, consider:
+* how the data dependency could be deferred, and
+* the CPU cost of the verification - if it is trivial, then it does not matter if
+  the verification is parallelised.
 
 # Drawbacks
 [drawbacks]: #drawbacks
