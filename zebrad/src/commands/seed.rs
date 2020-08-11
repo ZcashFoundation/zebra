@@ -74,6 +74,7 @@ impl Service<Request> for SeedService {
             Request::Peers => {
                 debug!("selecting peers to gossip");
                 let mut peers = address_book.lock().unwrap().sanitized();
+                // truncate the list so that we do not trivially reveal our entire peer set.
                 peers.truncate(50);
                 Ok(Response::Peers(peers))
             }
