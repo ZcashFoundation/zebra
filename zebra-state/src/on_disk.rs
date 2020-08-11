@@ -9,7 +9,7 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
-use tower::{buffer::Buffer, Service};
+use tower::{buffer::Buffer, util::BoxService, Service};
 use tracing::instrument;
 use zebra_chain::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 use zebra_chain::{
@@ -246,19 +246,12 @@ impl From<BlockHeight> for BlockQuery {
 /// Returns a type that implements the `zebra_state::Service` using `sled`.
 ///
 /// Each `network` has its own separate sled database.
-pub fn init(
-    config: Config,
-    network: Network,
-) -> impl Service<
-    Request,
-    Response = Response,
-    Error = BoxError,
-    Future = impl Future<Output = Result<Response, BoxError>>,
-> + Send
-       + Clone
-       + 'static {
-    Buffer::new(SledState::new(&config, network), 1)
+pub fn init(config: Config, network: Network) -> StateService {
+    Buffer::new(BoxService::new(SledState::new(&config, network)), 1)
 }
+
+/// Type alias of our wrapped service
+pub type StateService = Buffer<BoxService<Request, Response, Error>, Request>;
 
 type BoxError = Box<dyn error::Error + Send + Sync + 'static>;
 
@@ -275,7 +268,7 @@ struct BoxRealError(BoxError);
 
 /// The TracedError wrapper on a type that implements Error
 #[derive(Debug)]
-struct Error(tracing_error::TracedError<BoxRealError>);
+pub struct Error(tracing_error::TracedError<BoxRealError>);
 
 macro_rules! impl_from {
     ($($src:ty,)*) => {$(
