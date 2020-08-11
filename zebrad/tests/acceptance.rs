@@ -5,12 +5,12 @@
 #![forbid(unsafe_code)]
 
 use color_eyre::eyre::Result;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Duration;
 use zebra_test::prelude::*;
 
-pub fn get_child(args: &[&str]) -> Result<(zebra_test::command::TestChild, impl Drop)> {
-    let (mut cmd, guard) = test_cmd(env!("CARGO_BIN_EXE_zebrad"))?;
+pub fn get_child(args: &[&str], tempdir_path: Option<&str>) -> Result<(TestChild, ZebraTestDir)> {
+    let (mut cmd, tempdir) = test_cmd(env!("CARGO_BIN_EXE_zebrad"), tempdir_path)?;
 
     Ok((
         cmd.args(args)
@@ -18,7 +18,7 @@ pub fn get_child(args: &[&str]) -> Result<(zebra_test::command::TestChild, impl 
             .stderr(Stdio::piped())
             .spawn2()
             .unwrap(),
-        guard,
+        tempdir,
     ))
 }
 
@@ -26,7 +26,7 @@ pub fn get_child(args: &[&str]) -> Result<(zebra_test::command::TestChild, impl 
 fn generate_no_args() -> Result<()> {
     zebra_test::init();
 
-    let (child, _guard) = get_child(&["generate"])?;
+    let (child, _tempdir) = get_child(&["generate"], None)?;
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
@@ -40,33 +40,32 @@ fn generate_args() -> Result<()> {
     zebra_test::init();
 
     // unexpected free argument `argument`
-    let (child, _guard) = get_child(&["generate", "argument"])?;
+    let (child, _tempdir) = get_child(&["generate", "argument"], None)?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
     // unrecognized option `-f`
-    let (child, _guard) = get_child(&["generate", "-f"])?;
+    let (child, _tempdir) = get_child(&["generate", "-f"], None)?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
     // missing argument to option `-o`
-    let (child, _guard) = get_child(&["generate", "-o"])?;
+    let (child, tempdir) = get_child(&["generate", "-o"], None)?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
-    // create config file path in the same location as binary
-    let binary_path = Path::new(env!("CARGO_BIN_EXE_zebrad")).parent().unwrap();
-    let mut path = PathBuf::from(binary_path);
-    path.push("zebrad.toml");
+    // create config file in tempdir
+    let mut tempdir = PathBuf::from(&tempdir.path());
+    tempdir.push("zebrad.toml");
 
     // Valid
-    let (child, _guard) = get_child(&["generate", "-o", path.to_str().unwrap()])?;
+    let (child, _tempdir) = get_child(&["generate", "-o", tempdir.to_str().unwrap()], None)?;
 
     let output = child.wait_with_output()?;
     output.assert_success()?;
 
     // Check if the file was created
-    assert_eq!(path.exists(), true);
+    assert_eq!(tempdir.exists(), true);
 
     Ok(())
 }
@@ -75,7 +74,7 @@ fn generate_args() -> Result<()> {
 fn help_no_args() -> Result<()> {
     zebra_test::init();
 
-    let (child, _guard) = get_child(&["help"])?;
+    let (child, _tempdir) = get_child(&["help"], None)?;
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
@@ -89,12 +88,12 @@ fn help_args() -> Result<()> {
     zebra_test::init();
 
     // The subcommand "argument" wasn't recognized.
-    let (child, _guard) = get_child(&["help", "argument"])?;
+    let (child, _tempdir) = get_child(&["help", "argument"], None)?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
     // option `-f` does not accept an argument
-    let (child, _guard) = get_child(&["help", "-f"])?;
+    let (child, _tempdir) = get_child(&["help", "-f"], None)?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
@@ -106,7 +105,7 @@ fn revhex_args() -> Result<()> {
     zebra_test::init();
 
     // Valid
-    let (child, _guard) = get_child(&["revhex", "33eeff55"])?;
+    let (child, _tempdir) = get_child(&["revhex", "33eeff55"], None)?;
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
@@ -118,7 +117,7 @@ fn revhex_args() -> Result<()> {
 fn seed_no_args() -> Result<()> {
     zebra_test::init();
 
-    let (mut child, _guard) = get_child(&["-v", "seed"])?;
+    let (mut child, _tempdir) = get_child(&["-v", "seed"], None)?;
 
     // Run the program and kill it at 1 second
     std::thread::sleep(Duration::from_secs(1));
@@ -140,17 +139,17 @@ fn seed_args() -> Result<()> {
     zebra_test::init();
 
     // unexpected free argument `argument`
-    let (child, _guard) = get_child(&["seed", "argument"])?;
+    let (child, _tempdir) = get_child(&["seed", "argument"], None)?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
     // unrecognized option `-f`
-    let (child, _guard) = get_child(&["seed", "-f"])?;
+    let (child, _tempdir) = get_child(&["seed", "-f"], None)?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
     // unexpected free argument `start`
-    let (child, _guard) = get_child(&["seed", "start"])?;
+    let (child, _tempdir) = get_child(&["seed", "start"], None)?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
@@ -160,7 +159,7 @@ fn seed_args() -> Result<()> {
 fn start_no_args() -> Result<()> {
     zebra_test::init();
 
-    let (mut child, _guard) = get_child(&["-v", "start"])?;
+    let (mut child, _tempdir) = get_child(&["-v", "start"], None)?;
 
     // Run the program and kill it at 1 second
     std::thread::sleep(Duration::from_secs(1));
@@ -181,7 +180,7 @@ fn start_args() -> Result<()> {
     zebra_test::init();
 
     // Any free argument is valid
-    let (mut child, _guard) = get_child(&["start", "argument"])?;
+    let (mut child, _tempdir) = get_child(&["start", "argument"], None)?;
     // Run the program and kill it at 1 second
     std::thread::sleep(Duration::from_secs(1));
     child.kill()?;
@@ -193,7 +192,7 @@ fn start_args() -> Result<()> {
     output.assert_failure()?;
 
     // unrecognized option `-f`
-    let (child, _guard) = get_child(&["start", "-f"])?;
+    let (child, _tempdir) = get_child(&["start", "-f"], None)?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
@@ -204,7 +203,7 @@ fn start_args() -> Result<()> {
 fn app_no_args() -> Result<()> {
     zebra_test::init();
 
-    let (child, _guard) = get_child(&[])?;
+    let (child, _tempdir) = get_child(&[], None)?;
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
@@ -217,7 +216,7 @@ fn app_no_args() -> Result<()> {
 fn version_no_args() -> Result<()> {
     zebra_test::init();
 
-    let (child, _guard) = get_child(&["version"])?;
+    let (child, _tempdir) = get_child(&["version"], None)?;
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
@@ -231,12 +230,12 @@ fn version_args() -> Result<()> {
     zebra_test::init();
 
     // unexpected free argument `argument`
-    let (child, _guard) = get_child(&["version", "argument"])?;
+    let (child, _tempdir) = get_child(&["version", "argument"], None)?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
     // unrecognized option `-f`
-    let (child, _guard) = get_child(&["version", "-f"])?;
+    let (child, _tempdir) = get_child(&["version", "-f"], None)?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
@@ -256,22 +255,27 @@ fn serialized_tests() -> Result<()> {
 fn valid_generated_config() -> Result<()> {
     zebra_test::init();
 
-    // Generate configuration in binary parent path
-    let binary_path = Path::new(env!("CARGO_BIN_EXE_zebrad")).parent().unwrap();
-    let mut path = PathBuf::from(binary_path);
-    path.push("zebrad.toml");
-    let (child, _guard) = get_child(&["generate", "-o", path.to_str().unwrap()])?;
+    // Get a temp dir
+    let tempdir = ZebraTestDir::new("zebrad_tests");
+    let mut path_config = PathBuf::from(tempdir.path());
+    path_config.push("zebrad.toml");
+
+    // Generate configuration in temp dir path
+    let tempdir_string = path_config.parent().unwrap().to_str().unwrap();
+    let config_string = path_config.to_str().unwrap();
+    let (child, tempdir) = get_child(&["generate", "-o", config_string], None)?;
+
     let output = child.wait_with_output()?;
     output.assert_success()?;
 
     // Check if the file was created
-    assert_eq!(path.exists(), true);
+    assert_eq!(path_config.exists(), true);
 
-    // Check if it was created in the same path as binary
-    assert_eq!(path.parent(), Some(binary_path));
+    // Check if it was created in the tempdir
+    assert_eq!(PathBuf::from(path_config.parent().unwrap()), tempdir.path());
 
-    // Run start and kill it at 1 second
-    let (mut child, _guard) = get_child(&["-c", path.to_str().unwrap(), "start"])?;
+    // Run start using temp dir and kill it at 1 second
+    let (mut child, _tempdir) = get_child(&["-c", config_string, "start"], Some(tempdir_string))?;
     std::thread::sleep(Duration::from_secs(1));
     child.kill()?;
 
@@ -283,8 +287,8 @@ fn valid_generated_config() -> Result<()> {
     // Make sure the command was killed
     assert!(output.was_killed());
 
-    // Run seed program and kill it at 1 second
-    let (mut child, _guard) = get_child(&["-c", path.to_str().unwrap(), "seed"])?;
+    // Run seed using temp dir and kill it at 1 second
+    let (mut child, _tempdir) = get_child(&["-c", config_string, "seed"], Some(tempdir_string))?;
     std::thread::sleep(Duration::from_secs(1));
     child.kill()?;
 

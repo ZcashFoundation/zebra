@@ -3,31 +3,38 @@ use color_eyre::{
     Help, SectionExt,
 };
 use std::process::{Child, Command, ExitStatus, Output};
-use std::{fs, io::Write};
+use std::{fs, io::Write, path::PathBuf};
 use tempdir::TempDir;
 
 #[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
 
-/// Runs a command in a TempDir
-pub fn test_cmd(path: &str) -> Result<(Command, impl Drop)> {
-    let dir = TempDir::new(path)?;
-    let mut cmd = Command::new(path);
+/// Runs a command in already existing temp dir or create new if `tempdir_path` is `None`
+pub fn test_cmd(command_path: &str, tempdir_path: Option<&str>) -> Result<(Command, ZebraTestDir)> {
+    let dir = match tempdir_path {
+        Some(t) => ZebraTestDir::new_in(t, command_path),
+        None => {
+            let dir = ZebraTestDir::new(command_path);
+
+            // Make temp dir to be cache_dir
+            let cache_dir = dir.path().join("state");
+            fs::create_dir(&cache_dir)?;
+            fs::File::create(dir.path().join("zebrad.toml"))?.write_all(
+                format!(
+                    "[state]\ncache_dir = '{}'",
+                    cache_dir
+                        .into_os_string()
+                        .into_string()
+                        .map_err(|_| eyre!("tmp dir path cannot be encoded as UTF8"))?
+                )
+                .as_bytes(),
+            )?;
+            dir
+        }
+    };
+
+    let mut cmd = Command::new(command_path);
     cmd.current_dir(dir.path());
-
-    let cache_dir = dir.path().join("state");
-    fs::create_dir(&cache_dir)?;
-
-    fs::File::create(dir.path().join("zebrad.toml"))?.write_all(
-        format!(
-            "[state]\ncache_dir = '{}'",
-            cache_dir
-                .into_os_string()
-                .into_string()
-                .map_err(|_| eyre!("tmp dir path cannot be encoded as UTF8"))?
-        )
-        .as_bytes(),
-    )?;
 
     Ok((cmd, dir))
 }
@@ -248,5 +255,26 @@ impl TestOutput {
 
         #[cfg(not(unix))]
         return self.output.status.code() == Some(1);
+    }
+}
+
+/// Provide functions to manage a TempDir
+pub struct ZebraTestDir {
+    pub tempdir: Option<TempDir>,
+}
+
+impl ZebraTestDir {
+    pub fn new(prefix: &str) -> Self {
+        Self {
+            tempdir: Some(TempDir::new(prefix).unwrap()),
+        }
+    }
+    pub fn new_in(dir: &str, prefix: &str) -> Self {
+        Self {
+            tempdir: Some(TempDir::new_in(dir, prefix).unwrap()),
+        }
+    }
+    pub fn path(&self) -> PathBuf {
+        PathBuf::from(self.tempdir.as_ref().unwrap().path())
     }
 }
