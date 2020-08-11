@@ -101,7 +101,8 @@ impl Application for ZebradApp {
     /// to do so.
     fn register_components(&mut self, command: &Self::Cmd) -> Result<(), FrameworkError> {
         use crate::components::{
-            metrics::MetricsEndpoint, tokio::TokioComponent, tracing::TracingEndpoint,
+            inbound::Inbound, metrics::MetricsEndpoint, tokio::TokioComponent,
+            tracing::TracingEndpoint,
         };
 
         let mut components = self.framework_components(command)?;
@@ -137,6 +138,7 @@ impl Application for ZebradApp {
             components.push(Box::new(TokioComponent::new()?));
             components.push(Box::new(TracingEndpoint::new(cfg_ref)?));
             components.push(Box::new(MetricsEndpoint::new(cfg_ref)?));
+            components.push(Box::new(Inbound::default()));
         } else {
             components.push(Box::new(Tracing::new(default_filter, None)?));
         }

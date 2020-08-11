@@ -49,19 +49,6 @@ pub enum ZebradCmd {
     Version(VersionCmd),
 }
 
-impl ZebradCmd {
-    /// Returns true if this command is a server command.
-    ///
-    /// For example, `Start` acts as a Zcash node.
-    pub(crate) fn is_server(&self) -> bool {
-        match self {
-            // List all the commands, so new commands have to make a choice here
-            Seed(_) | Start(_) => true,
-            Generate(_) | Help(_) | Revhex(_) | Version(_) => false,
-        }
-    }
-}
-
 /// This trait allows you to define how application configuration is loaded.
 impl Configurable<ZebradConfig> for ZebradCmd {
     /// Location of the configuration file
@@ -88,6 +75,19 @@ impl Configurable<ZebradConfig> for ZebradCmd {
         match self {
             ZebradCmd::Start(cmd) => cmd.override_config(config),
             _ => Ok(config),
+        }
+    }
+}
+
+impl ZebradCmd {
+    /// Returns true if this command is a server command.
+    ///
+    /// For example, `Start` acts as a Zcash node.
+    pub(crate) fn is_server(&self) -> bool {
+        match self {
+            // List all the commands, so new commands have to make a choice here
+            Seed(_) | Start(_) => true,
+            Generate(_) | Help(_) | Revhex(_) | Version(_) => false,
         }
     }
 }
