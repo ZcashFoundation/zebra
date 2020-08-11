@@ -40,6 +40,6 @@ color-eyre = "0.5"
 proptest = "0.10"
 proptest-derive = "0.2.0"
 spandoc = "0.2"
-tracing = "0.1.18"
+tracing = "0.1.19"
 
 zebra-test = { path = "../zebra-test/" }
