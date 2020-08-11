@@ -103,7 +103,7 @@ impl Block {
     pub fn light_client_root_hash(&self, network: Network) -> Option<LightClientRootHash> {
         match self.coinbase_height() {
             Some(height) => Some(LightClientRootHash::from_bytes(
-                self.header.light_client_root_hash,
+                self.header.light_client_root_bytes,
                 network,
                 height,
             )),
