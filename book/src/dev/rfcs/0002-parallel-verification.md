@@ -224,8 +224,14 @@ Here is how the `BlockVerifier` implements each verification stage:
   * *As Above:* verifies each field in the block. Defers any data dependencies as
     long as possible, awaits those data dependencies, then performs data
     dependent checks.
-  * Note: The context-free, deferred, and dependent verification stages can be
-    implemented as separate async functions.
+  * Note: Since futures are executed concurrently, we can use the same function
+    to:
+    * perform context-free verification,
+    * perform verification with deferred data dependencies,
+    * await data dependencies, and
+    * check data dependencies.
+    To maximise concurrency, we should write verification functions in this
+    specific order, so the awaits are as late as possible.
 * **State Updates:**
   * *As Above:* the `BlockVerifier` returns success to the `ChainVerifier`,
     which sends verified `Block`s to the state service.
@@ -290,9 +296,11 @@ When making decisions about this dependency tradeoff, consider:
 
 - [ ] Is this design good enough to use as a framework for future RFCs?
 - [ ] Does this design require any changes to the current implementation?
-  - Implement chain order consensus rule in state (previous block hash only)
-  - Split `BlockVerifier.call` into context-free, deferred, and dependent async
-    functions?
+  - [ ] Implement chain order consensus rule in state (previous block hash only)
+  - [ ] Check that the `BlockVerifier` performs checks in the following order:
+    - verification, deferring dependencies as needed,
+    - await dependencies,
+    - check deferred data dependencies
 
 Out of Scope:
 - What is the most efficient design for parallel verification?
@@ -304,6 +312,8 @@ Out of Scope:
 
 - How do multiple chains work, in detail?
 - How do state updates work, in detail?
+
+- Moving the verifiers into the state service
 
 # Future possibilities
 [future-possibilities]: #future-possibilities
