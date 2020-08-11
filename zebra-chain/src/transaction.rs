@@ -146,7 +146,6 @@ impl Transaction {
     }
 
     // TODO(jlusby): refine type
-    #[allow(unused_variables)]
     pub fn sighash(&self, network: Network, height: BlockHeight, hash_type: u32) -> Hash {
         sighash::SigHasher {
             trans: self,
