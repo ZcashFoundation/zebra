@@ -173,9 +173,6 @@ impl PendingUtxos {
     // if outpoint is a hashmap key, remove the entry and send output on the channel
     pub fn respond(&mut self, outpoint: OutPoint, output: TransparentOutput);
 
-    // extracts a list of new outputs from the block and checks them against the
-    // hashmap keys
-    pub fn check_block(&mut self, block: &Block);
 
     // scans the hashmap and removes any entries with closed senders
     pub fn prune(&mut self);
