@@ -1,30 +1,36 @@
 //! An HTTP endpoint for metrics collection.
 
-use metrics_runtime::{exporters::HttpExporter, observers::PrometheusBuilder, Receiver};
+use std::net::SocketAddr;
 
 use abscissa_core::{Component, FrameworkError};
+use metrics_runtime::{exporters::HttpExporter, observers::PrometheusBuilder, Receiver};
 
-use crate::components::tokio::TokioComponent;
+use crate::{components::tokio::TokioComponent, config::ZebradConfig};
 
 /// Abscissa component which runs a metrics endpoint.
 #[derive(Debug, Component)]
 #[component(inject = "init_tokio(zebrad::components::tokio::TokioComponent)")]
-pub struct MetricsEndpoint {}
+pub struct MetricsEndpoint {
+    addr: Option<SocketAddr>,
+}
 
 impl MetricsEndpoint {
     /// Create the component.
-    pub fn new() -> Result<Self, FrameworkError> {
-        Ok(Self {})
+    pub fn new(config: &ZebradConfig) -> Result<Self, FrameworkError> {
+        Ok(Self {
+            addr: config.metrics.endpoint_addr,
+        })
     }
 
-    /// Do setup after receiving a tokio runtime.
+    /// Tokio endpoint dependency stub.
     pub fn init_tokio(&mut self, tokio_component: &TokioComponent) -> Result<(), FrameworkError> {
-        info!("Initializing metrics endpoint");
+        let addr = if let Some(addr) = self.addr {
+            addr
+        } else {
+            return Ok(());
+        };
 
-        // XXX load metrics addr from config
-        let addr = "0.0.0.0:9999"
-            .parse()
-            .expect("Hardcoded address should be parseable");
+        info!("Initializing metrics endpoint at {}", addr);
 
         // XXX do we need to hold on to the receiver?
         let receiver = Receiver::builder()

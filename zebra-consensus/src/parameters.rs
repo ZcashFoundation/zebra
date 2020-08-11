@@ -1,5 +1,8 @@
 //! The consensus parameters for each Zcash network.
 //!
+//! This module contains the consensus parameters which are required for
+//! verification.
+//!
 //! Some consensus parameters change based on network upgrades. Each network
 //! upgrade happens at a particular block height. Some parameters have a value
 //! (or function) before the upgrade height, at the upgrade height, and after
@@ -10,10 +13,10 @@
 //! `Network` and `BlockHeight`.
 
 pub mod genesis;
-pub mod network_upgrade;
+pub mod minimum_difficulty;
 
 pub use genesis::*;
-pub use network_upgrade::*;
+pub use minimum_difficulty::*;
 
 #[cfg(test)]
 mod tests;

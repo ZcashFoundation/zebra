@@ -13,6 +13,11 @@ One paragraph explanation of the feature.
 
 Why are we doing this? What use cases does it support? What is the expected outcome?
 
+# Definitions
+[definitions]: #definitions
+
+Lay out explicit definitions of any terms that are newly introduced or which cause confusion during the RFC design process.
+
 # Guide-level explanation
 [guide-level-explanation]: #guide-level-explanation
 
@@ -24,7 +29,7 @@ Explain the proposal as if it was already included in the project and you were t
 - If applicable, provide sample error messages, deprecation warnings, or migration guidance.
 - If applicable, describe the differences between teaching this to existing Zebra programmers and new Zebra programmers.
 
-For implementation-oriented RFCs (e.g. for compiler internals), this section should focus on how compiler contributors should think about the change, and give examples of its concrete impact. For policy RFCs, this section should provide an example-driven introduction to the policy, and explain its impact in concrete terms.
+For implementation-oriented RFCs (e.g. for Zebra internals), this section should focus on how Zebra contributors should think about the change, and give examples of its concrete impact. For policy RFCs, this section should provide an example-driven introduction to the policy, and explain its impact in concrete terms.
 
 # Reference-level explanation
 [reference-level-explanation]: #reference-level-explanation
@@ -59,11 +64,11 @@ A few examples of what this can include are:
 - For other teams: What lessons can we learn from what other communities have done here?
 - Papers: Are there any published papers or great posts that discuss this? If you have some relevant papers to refer to, this can serve as a more detailed theoretical background.
 
-This section is intended to encourage you as an author to think about the lessons from other languages, provide readers of your RFC with a fuller picture.
-If there is no prior art, that is fine - your ideas are interesting to us whether they are brand new or if it is an adaptation from other languages.
+This section is intended to encourage you as an author to think about the lessons from other projects, to provide readers of your RFC with a fuller picture.
+If there is no prior art, that is fine - your ideas are interesting to us whether they are brand new or if they are an adaptation from other projects.
 
-Note that while precedent set by other languages is some motivation, it does not on its own motivate an RFC.
-Please also take into consideration that Zebra sometimes intentionally diverges from common Zcash features.
+Note that while precedent set by other projects is some motivation, it does not on its own motivate an RFC.
+Please also take into consideration that Zebra sometimes intentionally diverges from common Zcash features and designs.
 
 # Unresolved questions
 [unresolved-questions]: #unresolved-questions
@@ -76,9 +81,9 @@ Please also take into consideration that Zebra sometimes intentionally diverges 
 [future-possibilities]: #future-possibilities
 
 Think about what the natural extension and evolution of your proposal would
-be and how it would affect the language and project as a whole in a holistic
-way. Try to use this section as a tool to more fully consider all possible
-interactions with the project and language in your proposal.
+be and how it would affect Zebra and Zcash as a whole. Try to use this
+section as a tool to more fully consider all possible
+interactions with the project and cryptocurrency ecosystem in your proposal.
 Also consider how the this all fits into the roadmap for the project
 and of the relevant sub-team.
 

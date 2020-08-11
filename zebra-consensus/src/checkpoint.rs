@@ -196,6 +196,8 @@ impl CheckpointVerifier {
         }
     }
 
+    /// Return the checkpoint list for this verifier.
+    #[allow(dead_code)]
     pub(crate) fn list(&self) -> &CheckpointList {
         &self.checkpoint_list
     }
@@ -240,8 +242,6 @@ impl CheckpointVerifier {
         let mut pending_height = match self.previous_checkpoint_height() {
             // Check if we have the genesis block as a special case, to simplify the loop
             BeforeGenesis if !self.queued.contains_key(&BlockHeight(0)) => {
-                // XXX scratch tracing line for debugging, delete this
-                tracing::debug!("beforegenesis if !self.queued.contains_key(&BlockHeight(0))");
                 return WaitingForBlocks;
             }
             BeforeGenesis => BlockHeight(0),
@@ -330,7 +330,7 @@ impl CheckpointVerifier {
             InitialTip(previous_height) | PreviousCheckpoint(previous_height)
                 if (height <= previous_height) =>
             {
-                Err("block height has already been verified")?
+                Err(format!("Block has already been verified. {:?}", height))?
             }
             InitialTip(_) | PreviousCheckpoint(_) => {}
             // We're finished, so no checkpoint height is valid
@@ -394,7 +394,9 @@ impl CheckpointVerifier {
         let height = match self.check_block(&block) {
             Ok(height) => height,
             Err(error) => {
-                tracing::warn!(?error);
+                // Block errors happen frequently on mainnet, due to bad peers.
+                tracing::debug!(?error);
+
                 // Sending might fail, depending on what the caller does with rx,
                 // but there's nothing we can do about it.
                 let _ = tx.send(Err(error));
@@ -537,8 +539,9 @@ impl CheckpointVerifier {
                 tracing::debug!("waiting for blocks to complete checkpoint range");
                 return;
             }
-            // XXX(hdevalence) should this be unreachable!("called after finished") ?
-            _ => return,
+            FinishedVerifying => {
+                unreachable!("the FinalCheckpoint case should have returned earlier")
+            }
         };
 
         // Keep the old previous checkpoint height, to make sure we're making
@@ -572,7 +575,7 @@ impl CheckpointVerifier {
             } else {
                 // The last block height we processed did not have any blocks
                 // with a matching hash, so chain verification has failed.
-                tracing::warn!(
+                tracing::info!(
                     ?current_height,
                     ?current_range,
                     "No valid blocks at height in CheckpointVerifier"

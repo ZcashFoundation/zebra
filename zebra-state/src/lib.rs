@@ -14,6 +14,7 @@
 #![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_state")]
 #![warn(missing_docs)]
 #![allow(clippy::try_err)]
+
 use color_eyre::eyre::{eyre, Report};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -23,35 +24,61 @@ use tower::{Service, ServiceExt};
 use zebra_chain::{
     block::{Block, BlockHeaderHash},
     types::BlockHeight,
+    Network,
+    Network::*,
 };
 
 pub mod in_memory;
 pub mod on_disk;
 
-/// Configuration for networking code.
+/// The maturity threshold for transparent coinbase outputs.
+///
+/// A transaction MUST NOT spend a transparent output of a coinbase transaction
+/// from a block less than 100 blocks prior to the spend. Note that transparent
+/// outputs of coinbase transactions include Founders' Reward outputs.
+const MIN_TRASPARENT_COINBASE_MATURITY: BlockHeight = BlockHeight(100);
+
+/// The maximum chain reorganisation height.
+///
+/// Allowing reorganisations past this height could allow double-spends of
+/// coinbase transactions.
+const MAX_BLOCK_REORG_HEIGHT: BlockHeight = BlockHeight(MIN_TRASPARENT_COINBASE_MATURITY.0 - 1);
+
+/// Configuration for the state service.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
-    /// The root directory for the state storage
-    pub cache_dir: Option<PathBuf>,
+    /// The root directory for storing cached data.
+    ///
+    /// Cached data includes any state that can be replicated from the network
+    /// (e.g., the chain state, the blocks, the UTXO set, etc.). It does *not*
+    /// include private data that cannot be replicated from the network, such as
+    /// wallet data.  That data is not handled by `zebra-state`.
+    ///
+    /// Each network has a separate state, which is stored in "mainnet/state"
+    /// and "testnet/state" subdirectories.
+    ///
+    /// The default directory is platform dependent, based on
+    /// [`dirs::cache_dir()`](https://docs.rs/dirs/3.0.1/dirs/fn.cache_dir.html):
+    ///
+    /// |Platform | Value                                           | Example                            |
+    /// | ------- | ----------------------------------------------- | ---------------------------------- |
+    /// | Linux   | `$XDG_CACHE_HOME/zebra` or `$HOME/.cache/zebra` | /home/alice/.cache/zebra           |
+    /// | macOS   | `$HOME/Library/Caches/zebra`                    | /Users/Alice/Library/Caches/zebra  |
+    /// | Windows | `{FOLDERID_LocalAppData}\zebra`                 | C:\Users\Alice\AppData\Local\zebra |
+    /// | Other   | `std::env::current_dir()/cache`                 |                                    |
+    pub cache_dir: PathBuf,
 }
 
 impl Config {
-    /// Generate the appropriate `sled::Config` based on the provided
-    /// `zebra_state::Config`.
-    ///
-    /// # Details
-    ///
-    /// This function should panic if the user of `zebra-state` doesn't configure
-    /// a directory to store the state.
-    pub(crate) fn sled_config(&self) -> sled::Config {
-        let path = self
-            .cache_dir
-            .as_ref()
-            .unwrap_or_else(|| {
-                todo!("create a nice user facing error explaining how to set the cache directory")
-            })
-            .join("state");
+    /// Generate the appropriate `sled::Config` for `network`, based on the
+    /// provided `zebra_state::Config`.
+    pub(crate) fn sled_config(&self, network: Network) -> sled::Config {
+        let net_dir = match network {
+            Mainnet => "mainnet",
+            Testnet => "testnet",
+        };
+        let path = self.cache_dir.join(net_dir).join("state");
 
         sled::Config::default().path(path)
     }
@@ -59,11 +86,9 @@ impl Config {
 
 impl Default for Config {
     fn default() -> Self {
-        let cache_dir = std::env::var("ZEBRAD_CACHE_DIR")
-            .map(PathBuf::from)
-            .ok()
-            .or_else(|| dirs::cache_dir().map(|dir| dir.join("zebra")));
-
+        let cache_dir = dirs::cache_dir()
+            .unwrap_or_else(|| std::env::current_dir().unwrap().join("cache"))
+            .join("zebra");
         Self { cache_dir }
     }
 }
@@ -130,10 +155,25 @@ pub enum Response {
 
 /// Get the heights of the blocks for constructing a block_locator list
 fn block_locator_heights(tip_height: BlockHeight) -> impl Iterator<Item = BlockHeight> {
-    iter::successors(Some(1u32), |h| h.checked_mul(2))
-        .flat_map(move |step| tip_height.0.checked_sub(step))
-        .map(BlockHeight)
-        .chain(iter::once(BlockHeight(0)))
+    // Stop at the reorg limit, or the genesis block.
+    let min_locator_height = tip_height.0.saturating_sub(MAX_BLOCK_REORG_HEIGHT.0);
+    let locators = iter::successors(Some(1u32), |h| h.checked_mul(2))
+        .flat_map(move |step| tip_height.0.checked_sub(step));
+    let locators = iter::once(tip_height.0)
+        .chain(locators)
+        .take_while(move |&height| height > min_locator_height)
+        .chain(iter::once(min_locator_height))
+        .map(BlockHeight);
+
+    let locators: Vec<_> = locators.collect();
+    tracing::info!(
+        ?tip_height,
+        ?min_locator_height,
+        ?locators,
+        "created block locator"
+    );
+
+    locators.into_iter()
 }
 
 /// The error type for the State Service.
@@ -144,12 +184,12 @@ type Error = Box<dyn error::Error + Send + Sync + 'static>;
 ///
 /// If there is no tip, returns `Ok(None)`.
 /// Returns an error if `state.poll_ready` errors.
-pub async fn initial_tip<S>(state: S) -> Result<Option<Arc<Block>>, Report>
+pub async fn current_tip<S>(state: S) -> Result<Option<Arc<Block>>, Report>
 where
     S: Service<Request, Response = Response, Error = Error> + Send + Clone + 'static,
     S::Future: Send + 'static,
 {
-    let initial_tip_hash = state
+    let current_tip_hash = state
         .clone()
         .ready_and()
         .await
@@ -162,7 +202,7 @@ where
         })
         .ok();
 
-    let initial_tip_block = match initial_tip_hash {
+    let current_tip_block = match current_tip_hash {
         Some(hash) => state
             .clone()
             .ready_and()
@@ -178,19 +218,94 @@ where
         None => None,
     };
 
-    Ok(initial_tip_block)
+    Ok(current_tip_block)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    use std::ffi::OsStr;
+
     #[test]
-    #[should_panic]
-    fn test_no_path() {
+    fn test_path_mainnet() {
+        test_path(Mainnet);
+    }
+
+    #[test]
+    fn test_path_testnet() {
+        test_path(Testnet);
+    }
+
+    /// Check the sled path for `network`.
+    fn test_path(network: Network) {
         zebra_test::init();
 
-        let bad_config = Config { cache_dir: None };
-        let _unreachable = bad_config.sled_config();
+        let config = Config::default();
+        // we can't do many useful tests on this value, because it depends on the
+        // local environment and OS.
+        let sled_config = config.sled_config(network);
+        let mut path = sled_config.get_path();
+        assert_eq!(path.file_name(), Some(OsStr::new("state")));
+        assert!(path.pop());
+        match network {
+            Mainnet => assert_eq!(path.file_name(), Some(OsStr::new("mainnet"))),
+            Testnet => assert_eq!(path.file_name(), Some(OsStr::new("testnet"))),
+        }
+    }
+
+    /// Block heights, and the expected minimum block locator height
+    static BLOCK_LOCATOR_CASES: &[(u32, u32)] = &[
+        (0, 0),
+        (1, 0),
+        (10, 0),
+        (98, 0),
+        (99, 0),
+        (100, 1),
+        (101, 2),
+        (1000, 901),
+        (10000, 9901),
+    ];
+
+    /// Check that the block locator heights are sensible.
+    #[test]
+    fn test_block_locator_heights() {
+        for (height, min_height) in BLOCK_LOCATOR_CASES.iter().cloned() {
+            let locator = block_locator_heights(BlockHeight(height)).collect::<Vec<_>>();
+
+            assert!(!locator.is_empty(), "locators must not be empty");
+            if (height - min_height) > 1 {
+                assert!(
+                    locator.len() > 2,
+                    "non-trivial locators must have some intermediate heights"
+                );
+            }
+
+            assert_eq!(
+                locator[0],
+                BlockHeight(height),
+                "locators must start with the tip height"
+            );
+
+            // Check that the locator is sorted, and that it has no duplicates
+            // TODO: replace with dedup() and is_sorted_by() when sorting stabilises.
+            assert!(locator.windows(2).all(|v| match v {
+                [a, b] => a.0 > b.0,
+                _ => unreachable!("windows returns exact sized slices"),
+            }));
+
+            let final_height = locator[locator.len() - 1];
+            assert_eq!(
+                final_height,
+                BlockHeight(min_height),
+                "locators must end with the specified final height"
+            );
+            assert!(height - final_height.0 <= MAX_BLOCK_REORG_HEIGHT.0,
+                    format!("locator for {} must not be more than the maximum reorg height {} below the tip, but {} is {} blocks below the tip",
+                         height,
+                         MAX_BLOCK_REORG_HEIGHT.0,
+                         final_height.0,
+                         height - final_height.0));
+        }
     }
 }

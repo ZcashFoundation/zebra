@@ -8,8 +8,10 @@
 //! zebra-consensus accepts an ordered list of checkpoints, starting with the
 //! genesis block. Checkpoint heights can be chosen arbitrarily.
 
+#![deny(missing_docs)]
 #![allow(clippy::try_err)]
-use color_eyre::eyre::Result;
+
+use color_eyre::eyre::{ensure, Result};
 use serde_json::Value;
 use std::process::Stdio;
 use structopt::StructOpt;
@@ -17,6 +19,9 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use zebra_chain::block::BlockHeaderHash;
 use zebra_chain::types::BlockHeight;
+
+#[cfg(unix)]
+use std::os::unix::process::ExitStatusExt;
 
 mod args;
 
@@ -30,12 +35,48 @@ const MAX_CHECKPOINT_BYTE_COUNT: u64 = 256 * 1024 * 1024;
 /// zcashd reorg limit.
 const BLOCK_REORG_LIMIT: BlockHeight = BlockHeight(100);
 
-// Passthrough arguments if needed
-fn passthrough(mut cmd: std::process::Command, args: &args::Args) -> std::process::Command {
+/// Initialise tracing using its defaults.
+fn init_tracing() {
+    tracing_subscriber::Registry::default()
+        .with(tracing_error::ErrorLayer::default())
+        .init();
+}
+
+/// Return a new `zcash-cli` command, including the `zebra-checkpoints`
+/// passthrough arguments.
+fn passthrough_cmd() -> std::process::Command {
+    let args = args::Args::from_args();
+    let mut cmd = std::process::Command::new(&args.cli);
+
     if !args.zcli_args.is_empty() {
         cmd.args(&args.zcli_args);
     }
     cmd
+}
+
+/// Run `cmd` and return its output as a string.
+fn cmd_output(cmd: &mut std::process::Command) -> Result<String> {
+    // Capture stdout, but send stderr to the user
+    let output = cmd.stderr(Stdio::inherit()).output()?;
+
+    // Make sure the command was successful
+    #[cfg(unix)]
+    ensure!(
+        output.status.success(),
+        "Process failed: exit status {:?}, signal: {:?}",
+        output.status.code(),
+        output.status.signal()
+    );
+    #[cfg(not(unix))]
+    ensure!(
+        output.status.success(),
+        "Process failed: exit status {:?}",
+        output.status.code()
+    );
+
+    // Make sure the output is valid UTF-8
+    let s = String::from_utf8(output.stdout)?;
+    Ok(s)
 }
 
 fn main() -> Result<()> {
@@ -43,61 +84,58 @@ fn main() -> Result<()> {
 
     color_eyre::install()?;
 
-    // create process
-    let args = args::Args::from_args();
-    let mut cmd = std::process::Command::new(&args.cli);
-    cmd = passthrough(cmd, &args);
+    // get the current block count
+    let mut cmd = passthrough_cmd();
+    cmd.arg("getblockcount");
+    // calculate the maximum height
+    let height_limit: BlockHeight = cmd_output(&mut cmd)?.trim().parse()?;
+    assert!(height_limit <= BlockHeight::MAX);
+    let height_limit = height_limit
+        .0
+        .checked_sub(BLOCK_REORG_LIMIT.0)
+        .map(BlockHeight)
+        .expect("zcashd has some mature blocks: wait for zcashd to sync more blocks");
+
+    let starting_height = args::Args::from_args().last_checkpoint.map(BlockHeight);
+    if starting_height.is_some() {
+        // Since we're about to add 1, height needs to be strictly less than the maximum
+        assert!(starting_height.unwrap() < BlockHeight::MAX);
+    }
+    // Start at the next block after the last checkpoint.
+    // If there is no last checkpoint, start at genesis (height 0).
+    let starting_height = starting_height.map_or(0, |BlockHeight(h)| h + 1);
+
+    assert!(
+        starting_height < height_limit.0,
+        "No mature blocks after the last checkpoint: wait for zcashd to sync more blocks"
+    );
 
     // set up counters
     let mut cumulative_bytes: u64 = 0;
     let mut height_gap: BlockHeight = BlockHeight(0);
 
-    // get the current block count
-    cmd.arg("getblockcount");
-    let mut subprocess = cmd.stdout(Stdio::piped()).spawn().unwrap();
-    let output = cmd.output().unwrap();
-    subprocess.kill()?;
-    let mut requested_height: BlockHeight = String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .parse()
-        .unwrap();
-    requested_height = BlockHeight(
-        requested_height
-            .0
-            .checked_sub(BLOCK_REORG_LIMIT.0)
-            .expect("zcashd has some mature blocks: wait for zcashd to sync more blocks"),
-    );
-
     // loop through all blocks
-    for x in 0..requested_height.0 {
-        // unfortunatly we need to create a process for each block
-        let mut cmd = std::process::Command::new(&args.cli);
-        cmd = passthrough(cmd, &args);
+    for x in starting_height..height_limit.0 {
+        // unfortunately we need to create a process for each block
+        let mut cmd = passthrough_cmd();
 
         // get block data
         cmd.args(&["getblock", &x.to_string()]);
-        let mut subprocess = cmd.stdout(Stdio::piped()).spawn().unwrap();
-        let output = cmd.output().unwrap();
-        let block_raw = String::from_utf8_lossy(&output.stdout);
-
-        // convert raw block to json
-        let v: Value = serde_json::from_str(block_raw.trim())?;
+        let output = cmd_output(&mut cmd)?;
+        // parse json
+        let v: Value = serde_json::from_str(&output)?;
 
         // get the values we are interested in
         let hash: BlockHeaderHash = v["hash"]
             .as_str()
             .map(zebra_chain::utils::byte_reverse_hex)
             .unwrap()
-            .parse()
-            .unwrap();
+            .parse()?;
         let height = BlockHeight(v["height"].as_u64().unwrap() as u32);
         assert!(height <= BlockHeight::MAX);
         assert_eq!(x, height.0);
         let size = v["size"].as_u64().unwrap();
         assert!(size <= zebra_chain::block::MAX_BLOCK_BYTES);
-
-        // kill spawned
-        subprocess.wait()?;
 
         // compute
         cumulative_bytes += size;
@@ -118,10 +156,4 @@ fn main() -> Result<()> {
     }
 
     Ok(())
-}
-
-fn init_tracing() {
-    tracing_subscriber::Registry::default()
-        .with(tracing_error::ErrorLayer::default())
-        .init();
 }

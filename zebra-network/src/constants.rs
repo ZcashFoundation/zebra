@@ -5,10 +5,16 @@ use std::time::Duration;
 // XXX should these constants be split into protocol also?
 use crate::protocol::external::types::*;
 
-use zebra_consensus::parameters::NetworkUpgrade::{self, *};
+use zebra_chain::NetworkUpgrade::{self, *};
+
+/// The buffer size for the peer set.
+pub const PEERSET_BUFFER_SIZE: usize = 10;
 
 /// The timeout for requests made to a remote peer.
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// The timeout for handshakes when connecting to new peers.
+pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(4);
 
 /// We expect to receive a message from a live peer at least once in this time duration.
 ///
@@ -34,21 +40,36 @@ pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(60);
 pub const TIMESTAMP_TRUNCATION_SECONDS: i64 = 30 * 60;
 
 /// The User-Agent string provided by the node.
-pub const USER_AGENT: &str = "🦓 Zebra 3.0.0-alpha.0 🦓";
-
-/// The Zcash network protocol version implemented by this crate.
 ///
-/// This protocol version might be the current version on Mainnet or Testnet,
-/// based on where we are in the network upgrade cycle.
-pub const CURRENT_VERSION: Version = Version(170_011);
+/// This must be a valid [BIP 14] user agent.
+///
+/// [BIP 14]: https://github.com/bitcoin/bips/blob/master/bip-0014.mediawiki
+pub const USER_AGENT: &str = "/🦓Zebra🦓:3.0.0-alpha.0/";
+
+/// The Zcash network protocol version implemented by this crate, and advertised
+/// during connection setup.
+///
+/// The current protocol version is checked by our peers. If it is too old,
+/// newer peers will refuse to connect to us.
+///
+/// The current protocol version typically changes before Mainnet and Testnet
+/// network upgrades.
+pub const CURRENT_VERSION: Version = Version(170_012);
 
 /// The most recent bilateral consensus upgrade implemented by this crate.
 ///
-/// Used to select the minimum supported version for peer connections.
+/// The minimum network upgrade is used to check the protocol versions of our
+/// peers. If their versions are too old, we will disconnect from them.
 //
 // TODO: replace with NetworkUpgrade::current(network, height).
 //       See the detailed comment in handshake.rs, where this constant is used.
 pub const MIN_NETWORK_UPGRADE: NetworkUpgrade = Heartwood;
+
+/// The default RTT estimate for peer responses.
+pub const EWMA_DEFAULT_RTT: Duration = Duration::from_secs(1);
+
+/// The decay time for the EWMA response time metric used for load balancing.
+pub const EWMA_DECAY_TIME: Duration = Duration::from_secs(60);
 
 /// Magic numbers used to identify different Zcash networks.
 pub mod magics {

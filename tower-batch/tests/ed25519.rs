@@ -6,12 +6,14 @@ use std::{
     time::Duration,
 };
 
+use color_eyre::{eyre::eyre, Report};
 use ed25519_zebra::*;
 use futures::stream::{FuturesUnordered, StreamExt};
 use rand::thread_rng;
 use tokio::sync::broadcast::{channel, RecvError, Sender};
 use tower::{Service, ServiceExt};
 use tower_batch::{Batch, BatchControl};
+use tower_fallback::Fallback;
 
 // ============ service impl ============
 
@@ -84,24 +86,37 @@ impl Drop for Ed25519Verifier {
 
 // =============== testing code ========
 
-async fn sign_and_verify<V>(mut verifier: V, n: usize) -> Result<(), V::Error>
+async fn sign_and_verify<V>(
+    mut verifier: V,
+    n: usize,
+    bad_index: Option<usize>,
+) -> Result<(), V::Error>
 where
     V: Service<Ed25519Item, Response = ()>,
 {
-    let mut results = FuturesUnordered::new();
+    let results = FuturesUnordered::new();
     for i in 0..n {
         let span = tracing::trace_span!("sig", i);
         let sk = SigningKey::new(thread_rng());
         let vk_bytes = VerificationKeyBytes::from(&sk);
         let msg = b"BatchVerifyTest";
-        let sig = sk.sign(&msg[..]);
+        let sig = if Some(i) == bad_index {
+            sk.sign(b"badmsg")
+        } else {
+            sk.sign(&msg[..])
+        };
 
         verifier.ready_and().await?;
         results.push(span.in_scope(|| verifier.call((vk_bytes, sig, msg).into())))
     }
 
-    while let Some(result) = results.next().await {
-        result?;
+    let mut numbered_results = results.enumerate();
+    while let Some((i, result)) = numbered_results.next().await {
+        if Some(i) == bad_index {
+            assert!(result.is_err());
+        } else {
+            result?;
+        }
     }
 
     Ok(())
@@ -116,7 +131,7 @@ async fn batch_flushes_on_max_items() {
     // flushing is happening based on hitting max_items.
     let verifier = Batch::new(Ed25519Verifier::new(), 10, Duration::from_secs(1000));
     assert!(
-        timeout(Duration::from_secs(1), sign_and_verify(verifier, 100))
+        timeout(Duration::from_secs(1), sign_and_verify(verifier, 100, None))
             .await
             .is_ok()
     );
@@ -131,8 +146,24 @@ async fn batch_flushes_on_max_latency() {
     // flushing is happening based on hitting max_latency.
     let verifier = Batch::new(Ed25519Verifier::new(), 100, Duration::from_millis(500));
     assert!(
-        timeout(Duration::from_secs(1), sign_and_verify(verifier, 10))
+        timeout(Duration::from_secs(1), sign_and_verify(verifier, 10, None))
             .await
             .is_ok()
     );
+}
+
+#[tokio::test]
+async fn fallback_verification() -> Result<(), Report> {
+    zebra_test::init();
+
+    let verifier = Fallback::new(
+        Batch::new(Ed25519Verifier::new(), 10, Duration::from_millis(100)),
+        tower::service_fn(|item: Ed25519Item| async move { item.verify_single() }),
+    );
+
+    sign_and_verify(verifier, 100, Some(39))
+        .await
+        .map_err(|e| eyre!(e))?;
+
+    Ok(())
 }

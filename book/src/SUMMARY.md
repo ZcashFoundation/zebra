@@ -1,15 +1,18 @@
 # Summary
 
-[Introduction](./introduction.md)
-[Contribution Guide](./CONTRIBUTING.md)
-[Design Overview](./overview.md)
-
-# Diagrams
-
-- [Diagrams](./diagrams.md)
-    - [Zebra Network](./diagrams/zebra-network.md)
-
-# Designs
-
-- [Design Documents](design_docs.md)
-    - [Pipelinable Block Lookup](./designs/0001-pipelinable-block-lookup.md)
+[Zebra](README.md)
+- [User Documentation](user.md)
+  - [Installing Zebra](user/install.md)
+  - [Running Zebra](user/run.md)
+  - [Tracing Zebra](user/tracing.md)
+  - [Zebra Metrics](user/metrics.md)
+- [Developer Documentation](dev.md)
+  - [Contribution Guide](CONTRIBUTING.md)
+  - [Design Overview](dev/overview.md)
+  - [Zebra RFCs](dev/rfcs.md)
+    - [RFC Template](dev/rfcs/0000-template.md)
+    - [Pipelinable Block Lookup](dev/rfcs/0001-pipelinable-block-lookup.md)
+  - [Diagrams](dev/diagrams.md)
+    - [Network Architecture](dev/diagrams/zebra-network.md)
+  - [zebra-checkpoints](dev/zebra-checkpoints.md)
+- [API Reference](api.md)

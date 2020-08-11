@@ -1,7 +1,6 @@
-use super::{BlockHeaderHash, Error};
+use super::{difficulty::CompactDifficulty, BlockHeaderHash, Error};
 use crate::equihash_solution::EquihashSolution;
 use crate::merkle_tree::MerkleTreeRootHash;
-use crate::note_commitment_tree::SaplingNoteTreeRootHash;
 use crate::serialization::ZcashSerialize;
 use chrono::{DateTime, Duration, Utc};
 
@@ -35,10 +34,12 @@ pub struct BlockHeader {
     /// header.
     pub merkle_root_hash: MerkleTreeRootHash,
 
-    /// [Sapling onward] The root LEBS2OSP256(rt) of the Sapling note
-    /// commitment tree corresponding to the final Sapling treestate of
-    /// this block.
-    pub final_sapling_root_hash: SaplingNoteTreeRootHash,
+    /// The light client root hash.
+    ///
+    /// This field is interpreted differently, based on the current
+    /// block height. Use `block.light_client_root_hash(network)` to get the
+    /// parsed `LightClientRootHash` for this block.
+    pub(super) light_client_root_hash: [u8; 32],
 
     /// The block timestamp is a Unix epoch time (UTC) when the miner
     /// started hashing the header (according to the miner).
@@ -52,9 +53,7 @@ pub struct BlockHeader {
     /// `ThresholdBits(height)`.
     ///
     /// [Bitcoin-nBits](https://bitcoin.org/en/developer-reference#target-nbits)
-    // parity-zcash has their own wrapper around u32 for this field, see #572 and:
-    // https://github.com/paritytech/parity-zcash/blob/master/primitives/src/compact.rs
-    pub bits: u32,
+    pub difficulty_threshold: CompactDifficulty,
 
     /// An arbitrary field that miners can change to modify the header
     /// hash in order to produce a hash less than or equal to the
