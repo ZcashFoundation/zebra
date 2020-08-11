@@ -26,7 +26,7 @@ Explain the proposal as if it was already included in the project and you were t
 - Introducing new named concepts.
 - Explaining the feature largely in terms of examples.
 - Explaining how Zebra programmers should *think* about the feature, and how it should impact the way they use Zebra. It should explain the impact as concretely as possible.
-- If applicable, provide sample error messages, deprecation warnings, or migration guidance.
+- If applicable, provide sample error messages, deprecation warnings, migration guidance, or test strategies.
 - If applicable, describe the differences between teaching this to existing Zebra programmers and new Zebra programmers.
 
 For implementation-oriented RFCs (e.g. for Zebra internals), this section should focus on how Zebra contributors should think about the change, and give examples of its concrete impact. For policy RFCs, this section should provide an example-driven introduction to the policy, and explain its impact in concrete terms.
@@ -37,7 +37,7 @@ For implementation-oriented RFCs (e.g. for Zebra internals), this section should
 This is the technical portion of the RFC. Explain the design in sufficient detail that:
 
 - Its interaction with other features is clear.
-- It is reasonably clear how the feature would be implemented.
+- It is reasonably clear how the feature would be implemented, tested, monitored, and maintained.
 - Corner cases are dissected by example.
 
 The section should return to the examples given in the previous section, and explain more fully how the detailed proposal makes those examples work.
@@ -50,9 +50,11 @@ Why should we *not* do this?
 # Rationale and alternatives
 [rationale-and-alternatives]: #rationale-and-alternatives
 
-- Why is this design the best in the space of possible designs?
+- What makes this design a good design?
+- Is this design a good basis for later designs or implementations?
 - What other designs have been considered and what is the rationale for not choosing them?
 - What is the impact of not doing this?
+
 
 # Prior art
 [prior-art]: #prior-art
