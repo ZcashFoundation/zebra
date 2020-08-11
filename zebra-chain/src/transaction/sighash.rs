@@ -1,4 +1,4 @@
-#![allow(dead_code)]
+#![allow(dead_code, unused_variables)]
 use super::{Transaction, TransparentInput};
 use crate::{
     parameters::ConsensusBranchId, serialization::ZcashSerialize, types::BlockHeight, Network,
@@ -6,6 +6,7 @@ use crate::{
 };
 use blake2b_simd::Hash;
 use byteorder::{LittleEndian, WriteBytesExt};
+use std::io;
 
 const ZCASH_SIGHASH_PERSONALIZATION_PREFIX: &[u8; 12] = b"ZcashSigHash";
 const ZCASH_PREVOUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashPrevoutHash";
@@ -30,13 +31,14 @@ pub struct SigHasher<'a> {
 
 impl<'a> SigHasher<'a> {
     pub fn sighash(self) -> Hash {
+        use NetworkUpgrade::*;
         match self.network_upgrade() {
-            NetworkUpgrade::Genesis => unimplemented!(),
-            NetworkUpgrade::BeforeOverwinter => unimplemented!(),
-            NetworkUpgrade::Overwinter | NetworkUpgrade::Sapling => self.sighash_zip143(),
-            NetworkUpgrade::Blossom => unimplemented!(),
-            NetworkUpgrade::Heartwood => unimplemented!(),
-            NetworkUpgrade::Canopy => unimplemented!(),
+            Genesis => unimplemented!(),
+            BeforeOverwinter => unimplemented!(),
+            Overwinter | Sapling => self.sighash_zip143(),
+            Blossom => unimplemented!(),
+            Heartwood => unimplemented!(),
+            Canopy => unimplemented!(),
         }
     }
 
@@ -67,34 +69,14 @@ impl<'a> SigHasher<'a> {
         hash.write_u32::<LittleEndian>(self.trans.group_id().expect("fOverwintered is always set"))
             .expect("write to hasher will never fail");
 
-        hash.update(
-            self.hash_prevouts()
-                .as_ref()
-                .map(|h| h.as_ref())
-                .unwrap_or(&[0; 32]),
-        );
-        hash.update(
-            self.hash_sequence()
-                .as_ref()
-                .map(|h| h.as_ref())
-                .unwrap_or(&[0; 32]),
-        );
-        hash.update(
-            self.hash_outputs()
-                .as_ref()
-                .map(|h| h.as_ref())
-                .unwrap_or(&[0; 32]),
-        );
-
-        // update_hash!(h, !tx.joinsplits.is_empty(), joinsplits_hash(tx));
-        // if sigversion == SigHashVersion::Sapling {
-        //     update_hash!(h, !tx.shielded_spends.is_empty(), shielded_spends_hash(tx));
-        //     update_hash!(
-        //         h,
-        //         !tx.shielded_outputs.is_empty(),
-        //         shielded_outputs_hash(tx)
-        //     );
-        // }
+        self.hash_prevouts(&mut hash)
+            .expect("write to hasher will never fail");
+        self.hash_sequence(&mut hash)
+            .expect("write to hasher will never fail");
+        self.hash_outputs(&mut hash)
+            .expect("write to hasher will never fail");
+        self.hash_joinsplits(&mut hash)
+            .expect("write to hasher will never fail");
 
         self.trans
             .lock_time()
@@ -108,10 +90,6 @@ impl<'a> SigHasher<'a> {
                 .0,
         )
         .expect("write to hasher will never fail");
-
-        // if sigversion == SigHashVersion::Sapling {
-        //     h.update(&tx.value_balance.to_i64_le_bytes());
-        // }
 
         hash.write_u32::<LittleEndian>(self.hash_type)
             .expect("write to hasher will never fail");
@@ -130,9 +108,9 @@ impl<'a> SigHasher<'a> {
         hash.finalize()
     }
 
-    fn hash_prevouts(&self) -> Option<Hash> {
+    fn hash_prevouts<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         if self.hash_type & SIGHASH_ANYONECANPAY == 0 {
-            return None;
+            return writer.write_all(&[0; 32]);
         }
 
         let mut hash = blake2b_simd::Params::new()
@@ -148,20 +126,19 @@ impl<'a> SigHasher<'a> {
                 TransparentInput::PrevOut { outpoint, .. } => Some(outpoint),
                 TransparentInput::Coinbase { .. } => None,
             })
-            .try_for_each(|outpoint| outpoint.zcash_serialize(&mut buf))
-            .expect("serialization into vec is infallible");
+            .try_for_each(|outpoint| outpoint.zcash_serialize(&mut buf))?;
 
         hash.update(&buf);
 
-        Some(hash.finalize())
+        writer.write_all(hash.finalize().as_ref())
     }
 
-    fn hash_sequence(&self) -> Option<Hash> {
+    fn hash_sequence<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         if self.hash_type & SIGHASH_ANYONECANPAY == 0
             && (self.hash_type & SIGHASH_MASK) != SIGHASH_SINGLE
             && (self.hash_type & SIGHASH_MASK) != SIGHASH_NONE
         {
-            return None;
+            return writer.write_all(&[0; 32]);
         }
 
         let mut hash = blake2b_simd::Params::new()
@@ -177,34 +154,89 @@ impl<'a> SigHasher<'a> {
                 TransparentInput::PrevOut { sequence, .. } => sequence,
                 TransparentInput::Coinbase { sequence, .. } => sequence,
             })
-            .try_for_each(|sequence| (&mut buf).write_u32::<LittleEndian>(*sequence))
-            .expect("serialization into vec is infallible");
+            .try_for_each(|sequence| (&mut buf).write_u32::<LittleEndian>(*sequence))?;
 
         hash.update(&buf);
 
-        Some(hash.finalize())
+        writer.write_all(hash.finalize().as_ref())
     }
 
-    fn hash_outputs(&self) -> Option<Hash> {
+    /// Writes the u256 hash of the transactions outputs to the provided Writer
+    fn hash_outputs<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         if (self.hash_type & SIGHASH_MASK) != SIGHASH_SINGLE
             && (self.hash_type & SIGHASH_MASK) != SIGHASH_NONE
         {
-            Some(self.outputs_hash())
-        } else if (self.hash_type & SIGHASH_MASK) == SIGHASH_SINGLE
-            && transparent_input.is_some()
-            && transparent_input.as_ref().unwrap().0 < tx.vout.len()
-        {
-            Some(self.single_output_hash())
+            self.outputs_hash(writer)
+        // } else if (self.hash_type & SIGHASH_MASK) == SIGHASH_SINGLE
+        //     && transparent_input.is_some()
+        //     && transparent_input.as_ref().unwrap().0 < tx.vout.len()
+        // {
+        //     self.single_output_hash(writer);
         } else {
-            None
+            writer.write_all(&[0; 32])
         }
     }
 
-    fn outputs_hash(&self) -> Hash {
+    fn outputs_hash<W: io::Write>(&self, writer: W) -> Result<(), io::Error> {
         todo!()
     }
 
-    fn single_output_hash(&self) -> Hash {
+    fn single_output_hash<W: io::Write>(&self, writer: W) -> Result<(), io::Error> {
         todo!()
+    }
+
+    fn hash_joinsplits<W: io::Write>(&self, writer: W) -> Result<(), io::Error> {
+        todo!()
+
+        // if !tx.joinsplits.is_empty() {
+        //     writer
+        //         .write_all(&[0; 32])
+        //         .expect("write to hasher will never fail");
+        // }
+
+        // todo!()
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::SigHasher;
+    use crate::{
+        serialization::ZcashDeserializeInto, transaction::Transaction, types::BlockHeight, Network,
+    };
+    use color_eyre::eyre;
+    use eyre::Result;
+    use zebra_test::vectors::ZIP143_1;
+
+    macro_rules! assert_hash_eq {
+        ($expected:literal, $hasher:expr, $f:ident) => {
+            let mut buf = vec![];
+            $hasher
+                .$f(&mut buf)
+                .expect("hashing into a vec never fails");
+            assert_eq!($expected.as_ref(), buf.as_slice());
+        };
+    }
+
+    #[test]
+    fn test_vec1() -> Result<()> {
+        zebra_test::init();
+
+        let transaction = ZIP143_1.zcash_deserialize_into::<Transaction>()?;
+
+        let hasher = SigHasher {
+            trans: &transaction,
+            hash_type: 1,
+            network: Network::Mainnet,
+            height: BlockHeight(1),
+        };
+
+        assert_hash_eq!(
+            b"d53a633bbecf82fe9e9484d8a0e727c73bb9e68c96e72dec30144f6a84afa136",
+            hasher,
+            hash_prevouts
+        );
+
+        Ok(())
     }
 }
