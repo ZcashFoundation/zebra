@@ -25,8 +25,8 @@ impl Arbitrary for LightClientRootHash {
 
     fn arbitrary_with(_args: ()) -> Self::Strategy {
         (any::<[u8; 32]>(), any::<Network>(), any::<BlockHeight>())
-            .prop_map(|(light_client_root_hash, network, block_height)| {
-                LightClientRootHash::from_bytes(light_client_root_hash, network, block_height)
+            .prop_map(|(light_client_root_bytes, network, block_height)| {
+                LightClientRootHash::from_bytes(light_client_root_bytes, network, block_height)
             })
             .boxed()
     }
@@ -55,7 +55,7 @@ impl Arbitrary for BlockHeader {
                     version,
                     previous_block_hash,
                     merkle_root_hash,
-                    light_client_root_hash,
+                    light_client_root_bytes,
                     timestamp,
                     difficulty_threshold,
                     nonce,
@@ -64,7 +64,7 @@ impl Arbitrary for BlockHeader {
                     version,
                     previous_block_hash,
                     merkle_root_hash,
-                    light_client_root_hash,
+                    light_client_root_bytes,
                     time: Utc.timestamp(timestamp, 0),
                     difficulty_threshold,
                     nonce,
@@ -255,7 +255,7 @@ proptest! {
         let light_hash = block.light_client_root_hash(network);
         if let Some(light_hash) = light_hash {
             let light_hash_bytes = light_hash.to_bytes();
-            prop_assert_eq![block.header.light_client_root_hash, light_hash_bytes];
+            prop_assert_eq![block.header.light_client_root_bytes, light_hash_bytes];
         } else {
             prop_assert_eq![block.coinbase_height(), None];
         }
