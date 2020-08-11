@@ -36,6 +36,13 @@ operation. By using an immutable main chain context to update the disk state,
 we correctly update the disk state, even if the main chain tip changes during
 the update.
 
+# Definitions
+[definitions]: #definitions
+
+> Lay out explicit definitions of any terms that are newly introduced or which cause confusion during the RFC design process.
+
+**TODO:** define new terms in this RFC
+
 # Guide-level explanation
 [guide-level-explanation]: #guide-level-explanation
 
