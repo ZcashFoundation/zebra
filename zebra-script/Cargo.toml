@@ -10,10 +10,10 @@ edition = "2018"
 [dependencies]
 zcashconsensus = { git = "https://github.com/ZcashFoundation/zcashconsensus.git", branch = "zcashconsensus" }
 zebra-chain = { path = "../zebra-chain" }
-zebra-test = { path = "../zebra-test" }
 thiserror = "1.0.20"
 displaydoc = "0.1.7"
 
 [dev-dependencies]
 hex = "0.4.2"
 lazy_static = "1.4.0"
+zebra-test = { path = "../zebra-test" }
