@@ -1,7 +1,7 @@
+//! Zebra script verification wrapping zcashd's zcashconsensus library
 #![doc(html_favicon_url = "https://www.zfnd.org/images/zebra-favicon-128.png")]
 #![doc(html_logo_url = "https://www.zfnd.org/images/zebra-icon.png")]
 #![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_script")]
-
 use displaydoc::Display;
 use std::sync::Arc;
 use thiserror::Error;
@@ -18,6 +18,7 @@ use zebra_chain::{
 
 #[derive(Debug, Display, Error)]
 #[non_exhaustive]
+/// An Error type representing the error codes returned from zcashconsensus.
 pub enum Error {
     /// script failed to verify
     #[non_exhaustive]
@@ -55,7 +56,6 @@ fn verify_script(
     amount: i64,
     tx_to: impl AsRef<[u8]>,
     n_in: u32,
-    flags: u32,
     consensus_branch_id: u32,
 ) -> Result<(), Error> {
     let script_pub_key = script_pub_key.as_ref();
@@ -66,6 +66,9 @@ fn verify_script(
     let tx_to_ptr = tx_to.as_ptr();
     let tx_to_len = tx_to.len();
     let mut err = 0;
+
+    let flags = zcashconsensus::zcashconsensus_SCRIPT_FLAGS_VERIFY_P2SH
+        | zcashconsensus::zcashconsensus_SCRIPT_FLAGS_VERIFY_CHECKLOCKTIMEVERIFY;
 
     let ret = unsafe {
         zcashconsensus::zcashconsensus_verify_script(
@@ -88,14 +91,15 @@ fn verify_script(
     }
 }
 
-pub fn script_is_valid(
+/// Verify the scripts from the transparent inputs of a transaction.
+pub fn scripts_are_valid(
     transaction: Arc<Transaction>,
-    flags: u32,
     // TODO(jlusby): this should come from the utxo set
     previous_outputs: &[TransparentOutput],
 ) -> Result<(), Error> {
     assert!(previous_outputs.len() == transaction.inputs().count());
 
+    // todo(jlusby): This should be derived from the transaction's height
     let branch_id = 0x2bb40e60;
     let tx_to = transaction
         .zcash_serialize_to_vec()
@@ -109,7 +113,6 @@ pub fn script_is_valid(
             (*value).into(),
             &tx_to,
             n_in as _,
-            flags,
             branch_id,
         )?;
     }
@@ -131,19 +134,6 @@ mod tests {
     }
 
     #[test]
-    fn verify_valid_script() {
-        let coin = i64::pow(10, 8);
-        let script_pub_key = &*SCRIPT_PUBKEY;
-        let amount = 212 * coin;
-        let tx_to = &*SCRIPT_TX;
-        let n_in = 0;
-        let flags = 1;
-        let branch_id = 0x2bb40e60;
-
-        verify_script(script_pub_key, amount, tx_to, n_in, flags, branch_id).unwrap();
-    }
-
-    #[test]
     fn verify_valid_script_parsed() {
         let transaction = SCRIPT_TX
             .zcash_deserialize_into::<Arc<zebra_chain::transaction::Transaction>>()
@@ -154,22 +144,31 @@ mod tests {
             value: amount.try_into().unwrap(),
             lock_script: Script(SCRIPT_PUBKEY.clone()),
         };
-        let flags = 1;
 
-        script_is_valid(transaction, flags, &[output]).unwrap();
+        scripts_are_valid(transaction, &[output]).unwrap();
     }
 
     #[test]
-    #[ignore]
+    fn verify_valid_script() {
+        let coin = i64::pow(10, 8);
+        let script_pub_key = &*SCRIPT_PUBKEY;
+        let amount = 212 * coin;
+        let tx_to = &*SCRIPT_TX;
+        let n_in = 0;
+        let branch_id = 0x2bb40e60;
+
+        verify_script(script_pub_key, amount, tx_to, n_in, branch_id).unwrap();
+    }
+
+    #[test]
     fn dont_verify_invalid_script() {
         let coin = i64::pow(10, 8);
         let script_pub_key = &*SCRIPT_PUBKEY;
         let amount = 212 * coin;
         let tx_to = &*SCRIPT_TX;
         let n_in = 0;
-        let flags = 1;
         let branch_id = 0x2bb40e61;
 
-        verify_script(script_pub_key, amount, tx_to, n_in, flags, branch_id).unwrap_err();
+        verify_script(script_pub_key, amount, tx_to, n_in, branch_id).unwrap_err();
     }
 }
