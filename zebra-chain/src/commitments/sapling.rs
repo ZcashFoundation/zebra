@@ -70,7 +70,8 @@ impl NoteCommitment {
     /// Generate a new _NoteCommitment_ and the randomness used to create it.
     ///
     /// We return the randomness because it is needed to construct a _Note_,
-    /// before it is encrypted as part of an _Output Description_.
+    /// before it is encrypted as part of an _Output Description_. This is a
+    /// higher level function that calls `NoteCommit^Sapling_rcm` internally.
     ///
     /// NoteCommit^Sapling_rcm (g*_d , pk*_d , v) :=
     ///   WindowedPedersenCommit_rcm([1; 6] || I2LEBSP_64(v) || g*_d || pk*_d)
