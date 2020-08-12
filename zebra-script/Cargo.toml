@@ -13,7 +13,6 @@ zebra-chain = { path = "../zebra-chain" }
 zebra-test = { path = "../zebra-test" }
 thiserror = "1.0.20"
 displaydoc = "0.1.7"
-zebra-consensus = { path = "../zebra-consensus/" }
 
 [dev-dependencies]
 color-eyre = "0.5"

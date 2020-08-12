@@ -190,12 +190,6 @@ impl ZcashSerialize for MAC {
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub struct Script(pub Vec<u8>);
 
-impl AsRef<[u8]> for Script {
-    fn as_ref(&self) -> &[u8] {
-        self.0.as_ref()
-    }
-}
-
 impl fmt::Debug for Script {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_tuple("Script")
