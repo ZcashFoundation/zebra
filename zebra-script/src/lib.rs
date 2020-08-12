@@ -19,10 +19,10 @@ use zebra_chain::{
 #[derive(Debug, Display, Error)]
 #[non_exhaustive]
 pub enum Error {
-    /// Verification failed but tx was valid
+    /// script failed to verify
     #[non_exhaustive]
-    ErrOk,
-    /// Could not to deserialize tx
+    ScriptInvalid,
+    /// could not to deserialize tx
     #[non_exhaustive]
     TxDeserialize,
     /// n_in is invalid for tx
@@ -31,7 +31,7 @@ pub enum Error {
     /// tx is an invalid size for it's protocol
     #[non_exhaustive]
     TxSizeMismatch,
-    /// Encountered unknown error kind from zcashconsensus: {0}
+    /// encountered unknown error kind from zcashconsensus: {0}
     #[non_exhaustive]
     Unknown(zcashconsensus_error_t),
 }
@@ -91,13 +91,17 @@ fn verify_script(
 pub fn script_is_valid(
     transaction: Arc<Transaction>,
     flags: u32,
+    // TODO(jlusby): this should come from the utxo set
     previous_outputs: &[TransparentOutput],
-) -> bool {
-    let tx_to = transaction.zcash_serialize_to_vec().unwrap();
-    let n_in = transaction.inputs().count() - 1;
-    let branch_id = 0x2bb40e60;
+) -> Result<(), Error> {
+    assert!(previous_outputs.len() == transaction.inputs().count());
 
-    for to_spend in previous_outputs {
+    let branch_id = 0x2bb40e60;
+    let tx_to = transaction
+        .zcash_serialize_to_vec()
+        .expect("serialization into a vec is infallible");
+
+    for (n_in, to_spend) in previous_outputs.iter().enumerate() {
         let TransparentOutput { value, pk_script } = to_spend;
 
         verify_script(
@@ -107,11 +111,10 @@ pub fn script_is_valid(
             n_in as _,
             flags,
             branch_id,
-        )
-        .unwrap();
+        )?;
     }
 
-    true
+    Ok(())
 }
 
 #[cfg(test)]
@@ -153,7 +156,7 @@ mod tests {
         };
         let flags = 1;
 
-        script_is_valid(transaction, flags, &[output]);
+        script_is_valid(transaction, flags, &[output]).unwrap();
     }
 
     #[test]
