@@ -108,6 +108,11 @@ where
 
                 // Check whether we need to wait for existing block download tasks to finish
                 while self.pending_blocks.len() > LOOKAHEAD_LIMIT {
+                    tracing::debug!(
+                        tips.len = self.prospective_tips.len(),
+                        pending.len = self.pending_blocks.len(),
+                        pending.limit = LOOKAHEAD_LIMIT,
+                    );
                     match self
                         .pending_blocks
                         .next()
@@ -440,6 +445,7 @@ where
                 .await
                 .map_err(|e| eyre!(e))?
                 .call(zn::Request::BlocksByHash(iter::once(hash).collect()));
+            tracing::debug!(?hash, "requested block");
             let span = tracing::info_span!("block_fetch_verify", ?hash);
             let mut verifier = self.verifier.clone();
             let task = tokio::spawn(async move {
