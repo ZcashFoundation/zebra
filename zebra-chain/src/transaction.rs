@@ -17,9 +17,7 @@ pub use shielded_data::{Output, ShieldedData, Spend};
 pub use transparent::{CoinbaseData, OutPoint, TransparentInput, TransparentOutput};
 
 use crate::proofs::{Bctv14Proof, Groth16Proof};
-use crate::{
-    parameters::ConsensusBranchId,
-    types::{amount::Amount, BlockHeight, LockTime},
+use crate::types::{amount::Amount, BlockHeight, LockTime};
 };
 
 /// A Zcash transaction.
