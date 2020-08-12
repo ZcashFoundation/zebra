@@ -158,7 +158,7 @@ blocks to be verified in parallel.
 ## Verification Interfaces
 [verification-interfaces]: #verification-interfaces
 
-Verifcation is implemented by the following traits and services:
+Verification is implemented by the following traits and services:
 * **Structural Verification:**
   * `zebra_network::init`: Provides a downloader service that accepts a
     `BlockHeaderHash` request, and parses the peer response into a `Block`
