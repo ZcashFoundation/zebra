@@ -82,7 +82,12 @@ where
         // due to protocol limitations
         self.request_genesis().await?;
 
-        loop {
+        'sync: loop {
+            // Wipe state from prevous iterations.
+            self.prospective_tips = HashSet::new();
+            self.pending_blocks = Box::pin(FuturesUnordered::new());
+
+            tracing::info!("starting sync, obtaining new tips");
             self.obtain_tips().await?;
             self.update_metrics();
 
@@ -95,6 +100,11 @@ where
 
                 self.extend_tips().await?;
                 self.update_metrics();
+                tracing::info!(
+                    tips.len = self.prospective_tips.len(),
+                    pending.len = self.pending_blocks.len(),
+                    pending.limit = LOOKAHEAD_LIMIT,
+                );
 
                 // Check whether we need to wait for existing block download tasks to finish
                 while self.pending_blocks.len() > LOOKAHEAD_LIMIT {
@@ -110,21 +120,16 @@ where
                         // we've repeatedly missed a block we need or that we've
                         // repeatedly missed a bad block suggested by a peer
                         // feeding us bad hashes.
-                        //
-                        // TODO(hdevalence): handle interruptions in the chain
-                        // sync process. this should detect when we've stopped
-                        // making progress (probably using a timeout), then
-                        // continue the loop with a new invocation of
-                        // obtain_tips(), which will restart block downloads.
-                        Err(e) => tracing::error!(?e, "potentially transient error"),
+                        Err(e) => {
+                            tracing::info!(?e, "restarting sync");
+                            continue 'sync;
+                        }
                     };
+                    self.update_metrics();
                 }
-
-                // We just added a bunch of failures, update the metrics now,
-                // because we might be about to reset or delay.
-                self.update_metrics();
             }
 
+            tracing::info!("exhausted tips, waiting to restart sync");
             delay_for(Duration::from_secs(15)).await;
         }
     }
@@ -392,8 +397,18 @@ where
         //  - the genesis hash is used as a placeholder for "no matches".
         //
         // So we just queue the genesis block here.
-        if !self.state_contains(self.genesis_hash).await? {
+        while !self.state_contains(self.genesis_hash).await? {
             self.request_blocks(vec![self.genesis_hash]).await?;
+            match self
+                .pending_blocks
+                .next()
+                .await
+                .expect("inserted a download request")
+                .expect("block download tasks should not panic")
+            {
+                Ok(hash) => tracing::debug!(?hash, "verified and committed block to state"),
+                Err(e) => tracing::warn!(?e, "could not download genesis block, retrying"),
+            }
         }
 
         Ok(())
@@ -479,11 +494,6 @@ where
             self.prospective_tips.len() as i64
         );
         metrics::gauge!("sync.pending_blocks.len", self.pending_blocks.len() as i64);
-        tracing::info!(
-            tips.len = self.prospective_tips.len(),
-            pending.len = self.pending_blocks.len(),
-            pending.limit = LOOKAHEAD_LIMIT,
-        );
     }
 }
 
