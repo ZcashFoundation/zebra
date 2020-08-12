@@ -18,7 +18,6 @@ pub use transparent::{CoinbaseData, OutPoint, TransparentInput, TransparentOutpu
 
 use crate::proofs::{Bctv14Proof, Groth16Proof};
 use crate::types::{amount::Amount, BlockHeight, LockTime};
-};
 
 /// A Zcash transaction.
 ///
