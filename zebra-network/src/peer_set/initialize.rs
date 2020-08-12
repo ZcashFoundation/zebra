@@ -186,7 +186,7 @@ where
 {
     let mut listener = TcpListener::bind(addr).await?;
     let local_addr = listener.local_addr()?;
-    info!("Network listening at {}", local_addr);
+    info!("Opened Zcash protocol endpoint at {}", local_addr);
     loop {
         if let Ok((tcp_stream, addr)) = listener.accept().await {
             debug!(?addr, "got incoming connection");
