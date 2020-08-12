@@ -198,13 +198,6 @@ where
         while let Some(res) = requests.next().await {
             match res.map_err::<Report, _>(|e| eyre!(e)) {
                 Ok(zn::Response::BlockHeaderHashes(hashes)) => {
-                    if hashes.is_empty() {
-                        tracing::debug!("skipping empty response");
-                        continue;
-                    } else {
-                        tracing::debug!(hashes.len = hashes.len(), "processing response");
-                    }
-
                     // ObtainTips Step 3
                     //
                     // For each response, starting from the beginning of the
@@ -219,27 +212,24 @@ where
                         }
                     }
 
-                    // Hashes will be empty if we know about all the blocks in the response.
-                    if first_unknown.is_none() {
-                        tracing::debug!("ObtainTips: all hashes are known");
-                        continue;
-                    }
-                    let first_unknown = first_unknown.expect("already checked for None");
-                    tracing::debug!(
-                        first_unknown,
-                        "found index of first unknown hash in response"
-                    );
+                    tracing::debug!(hashes.len = ?hashes.len(), ?first_unknown);
 
-                    let unknown_hashes = &hashes[first_unknown..];
+                    let unknown_hashes = if let Some(index) = first_unknown {
+                        &hashes[index..]
+                    } else {
+                        continue;
+                    };
                     let new_tip = *unknown_hashes
                         .last()
-                        .expect("already checked that unknown hashes isn't empty");
+                        .expect("first unknown index < hashes.len() so slice is nonempty");
+
+                    tracing::trace!(?new_tip, ?unknown_hashes);
 
                     // ObtainTips Step 4:
                     // Combine the last elements of each list into a set; this is the
                     // set of prospective tips.
                     if !download_set.contains(&new_tip) {
-                        tracing::debug!(hashes.len = ?hashes.len(), ?new_tip, "adding new prospective tip");
+                        tracing::debug!(?new_tip, "adding new prospective tip");
                         self.prospective_tips.insert(new_tip);
                     } else {
                         tracing::debug!(?new_tip, "discarding tip already queued for download");
@@ -252,8 +242,6 @@ where
                     download_set.extend(unknown_hashes);
                     let new_download_len = download_set.len();
                     tracing::debug!(
-                        prev_download_len,
-                        new_download_len,
                         new_hashes = new_download_len - prev_download_len,
                         "added hashes to download set"
                     );
@@ -264,7 +252,7 @@ where
             }
         }
 
-        tracing::debug!(?self.prospective_tips, "ObtainTips: downloading blocks for tips");
+        tracing::debug!(?self.prospective_tips);
 
         // ObtainTips Step 5.2
         //
@@ -304,26 +292,22 @@ where
             }
             while let Some(res) = responses.next().await {
                 match res.map_err::<Report, _>(|e| eyre!(e)) {
-                    Ok(zn::Response::BlockHeaderHashes(mut hashes)) => {
+                    Ok(zn::Response::BlockHeaderHashes(hashes)) => {
                         // ExtendTips Step 3
                         //
                         // For each response, check whether the first hash in the
                         // response is the genesis block; if so, discard the response.
                         // It indicates that the remote peer does not have any blocks
                         // following the prospective tip.
+                        tracing::debug!(first = ?hashes.first(), len = ?hashes.len());
                         match (hashes.first(), hashes.len()) {
-                            (None, _) => {
-                                tracing::debug!("ExtendTips: skipping empty response");
-                                continue;
-                            }
+                            (None, _) => continue,
                             (_, 1) => {
-                                tracing::debug!("ExtendTips: skipping length-1 response, in case it's an unsolicited inv message");
+                                tracing::debug!("skipping length-1 response, in case it's an unsolicited inv message");
                                 continue;
                             }
                             (Some(hash), _) if (hash == &self.genesis_hash) => {
-                                tracing::debug!(
-                                    "ExtendTips: skipping response, peer could not extend the tip"
-                                );
+                                tracing::debug!("got genesis hash in response");
                                 continue;
                             }
                             (Some(&hash), _) => {
@@ -333,42 +317,40 @@ where
                                 // blocks, but it is not required for
                                 // correctness.
                                 if self.state_contains(hash).await? {
-                                    tracing::debug!(
-                                        ?hash,
-                                        "ExtendTips: skipping response, peer returned a duplicate hash: already in state"
-                                    );
+                                    tracing::debug!(?hash, "first hash is already in state");
                                     continue;
                                 }
                             }
                         }
 
-                        let new_tip = hashes.pop().expect("expected: hashes must have len > 0");
+                        let new_tip = *hashes.last().expect("expected: hashes must have len > 0");
 
                         // Check for tips we've already seen
                         // TODO: remove this check once the sync service is more reliable
                         if self.state_contains(new_tip).await? {
-                            tracing::debug!(
-                                ?new_tip,
-                                "ExtendTips: Unexpected duplicate tip from peer: already in state"
-                            );
+                            tracing::debug!(?new_tip, "new_tip already in state");
                             continue;
                         }
+
+                        tracing::trace!(?hashes);
 
                         // ExtendTips Step 4
                         //
                         // Combine the last elements of the remaining responses into
                         // a set, and add this set to the set of prospective tips.
-                        tracing::debug!(hashes.len = ?hashes.len(), ?new_tip, "ExtendTips: extending to new tip");
-                        let _ = self.prospective_tips.insert(new_tip);
+                        if !download_set.contains(&new_tip) {
+                            tracing::debug!(?new_tip, "adding new prospective tip");
+                            self.prospective_tips.insert(new_tip);
+                        } else {
+                            tracing::debug!(?new_tip, "discarding tip already queued for download");
+                        }
 
                         let prev_download_len = download_set.len();
                         download_set.extend(hashes);
                         let new_download_len = download_set.len();
                         tracing::debug!(
-                            prev_download_len,
-                            new_download_len,
                             new_hashes = new_download_len - prev_download_len,
-                            "ExtendTips: added hashes to download set"
+                            "added hashes to download set"
                         );
                     }
                     Ok(_) => unreachable!("network returned wrong response"),
@@ -378,25 +360,8 @@ where
             }
         }
 
-        // ExtendTips Step ??
-        //
-        // Remove tips that are already included behind one of the other
-        // returned tips
-        self.prospective_tips
-            .retain(|tip| !download_set.contains(tip));
-        tracing::debug!(?self.prospective_tips, "ExtendTips: downloading blocks for tips");
-
-        // ExtendTips Step 5
-        //
-        // Combine all elements of the remaining responses into a
-        // set, and queue download and verification of those blocks
-        self.request_blocks(
-            download_set
-                .into_iter()
-                .chain(self.prospective_tips.iter().cloned())
-                .collect(),
-        )
-        .await?;
+        self.request_blocks(download_set.into_iter().collect())
+            .await?;
 
         Ok(())
     }
