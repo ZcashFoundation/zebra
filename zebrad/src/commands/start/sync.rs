@@ -269,10 +269,10 @@ where
         //
         // remove all prospective tips and iterate over them individually
         let tips = std::mem::take(&mut self.prospective_tips);
-        tracing::debug!(?tips, "extending tip set");
 
         let mut download_set = HashSet::new();
         for tip in tips {
+            tracing::debug!(?tip, "extending tip");
             // ExtendTips Step 2
             //
             // Create a FindBlocksByHash request consisting of just the
