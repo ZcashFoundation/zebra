@@ -21,9 +21,9 @@ const FANOUT: usize = checkpoint::MAX_QUEUED_BLOCKS_PER_HEIGHT;
 /// Controls how far ahead of the chain tip the syncer tries to download before
 /// waiting for queued verifications to complete. Set to twice the maximum
 /// checkpoint distance.
-pub const LOOKAHEAD_LIMIT: usize = checkpoint::MAX_CHECKPOINT_HEIGHT_GAP * 2;
+const LOOKAHEAD_LIMIT: usize = checkpoint::MAX_CHECKPOINT_HEIGHT_GAP * 2;
 /// Controls how long we wait for a block download request to complete.
-pub const BLOCK_TIMEOUT: Duration = Duration::from_secs(6);
+const BLOCK_TIMEOUT: Duration = Duration::from_secs(6);
 /// Controls how long we wait to restart syncing after finishing a sync run.
 const SYNC_RESTART_TIMEOUT: Duration = Duration::from_secs(20);
 
