@@ -1,6 +1,7 @@
 use std::{collections::HashSet, iter, pin::Pin, sync::Arc, time::Duration};
 
 use color_eyre::eyre::{eyre, Report};
+use futures::future::FutureExt;
 use futures::stream::{FuturesUnordered, StreamExt};
 use tokio::{task::JoinHandle, time::delay_for};
 use tower::{builder::ServiceBuilder, retry::Retry, timeout::Timeout, Service, ServiceExt};
@@ -88,7 +89,11 @@ where
             self.pending_blocks = Box::pin(FuturesUnordered::new());
 
             tracing::info!("starting sync, obtaining new tips");
-            self.obtain_tips().await?;
+            if self.obtain_tips().await.is_err() {
+                tracing::warn!("failed to obtain tips, waiting to restart sync");
+                delay_for(Duration::from_secs(15)).await;
+                continue 'sync;
+            };
             self.update_metrics();
 
             // ObtainTips Step 6
@@ -96,42 +101,48 @@ where
             // If there are any prospective tips, call ExtendTips.
             // Continue this step until there are no more prospective tips.
             while !self.prospective_tips.is_empty() {
-                tracing::debug!("extending prospective tips");
+                // Check whether any block tasks are currently ready:
+                while let Some(Some(rsp)) = self.pending_blocks.next().now_or_never() {
+                    match rsp.expect("block download tasks should not panic") {
+                        Ok(hash) => tracing::debug!(?hash, "verified and committed block to state"),
+                        Err(e) => {
+                            tracing::info!(?e, "restarting sync");
+                            continue 'sync;
+                        }
+                    }
+                    self.update_metrics();
+                }
 
-                self.extend_tips().await?;
-                self.update_metrics();
-                tracing::info!(
-                    tips.len = self.prospective_tips.len(),
-                    pending.len = self.pending_blocks.len(),
-                    pending.limit = LOOKAHEAD_LIMIT,
-                );
-
-                // Check whether we need to wait for existing block download tasks to finish
-                while self.pending_blocks.len() > LOOKAHEAD_LIMIT {
+                if self.pending_blocks.len() > LOOKAHEAD_LIMIT {
                     tracing::debug!(
                         tips.len = self.prospective_tips.len(),
                         pending.len = self.pending_blocks.len(),
                         pending.limit = LOOKAHEAD_LIMIT,
+                        "waiting for pending blocks",
                     );
                     match self
                         .pending_blocks
                         .next()
                         .await
-                        .expect("already checked there's at least one pending block task")
+                        .expect("pending_blocks is nonempty")
                         .expect("block download tasks should not panic")
                     {
                         Ok(hash) => tracing::debug!(?hash, "verified and committed block to state"),
-                        // This is a non-transient error indicating either that
-                        // we've repeatedly missed a block we need or that we've
-                        // repeatedly missed a bad block suggested by a peer
-                        // feeding us bad hashes.
                         Err(e) => {
                             tracing::info!(?e, "restarting sync");
                             continue 'sync;
                         }
-                    };
-                    self.update_metrics();
+                    }
+                } else {
+                    tracing::info!(
+                        tips.len = self.prospective_tips.len(),
+                        pending.len = self.pending_blocks.len(),
+                        pending.limit = LOOKAHEAD_LIMIT,
+                        "extending tips",
+                    );
+                    let _ = self.extend_tips().await;
                 }
+                self.update_metrics();
             }
 
             tracing::info!("exhausted tips, waiting to restart sync");
