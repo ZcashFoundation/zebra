@@ -102,10 +102,10 @@ pub fn script_is_valid(
         .expect("serialization into a vec is infallible");
 
     for (n_in, to_spend) in previous_outputs.iter().enumerate() {
-        let TransparentOutput { value, pk_script } = to_spend;
+        let TransparentOutput { value, lock_script } = to_spend;
 
         verify_script(
-            &pk_script.0,
+            &lock_script.0,
             (*value).into(),
             &tx_to,
             n_in as _,
@@ -152,7 +152,7 @@ mod tests {
         let amount = 212 * coin;
         let output = TransparentOutput {
             value: amount.try_into().unwrap(),
-            pk_script: Script(SCRIPT_PUBKEY.clone()),
+            lock_script: Script(SCRIPT_PUBKEY.clone()),
         };
         let flags = 1;
 
