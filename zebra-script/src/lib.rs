@@ -12,6 +12,7 @@ use zcashconsensus::{
     zcashconsensus_error_t_zcashconsensus_ERR_TX_SIZE_MISMATCH,
 };
 use zebra_chain::{
+    parameters::ConsensusBranchId,
     serialization::ZcashSerialize,
     transaction::{Transaction, TransparentOutput},
 };
@@ -91,31 +92,35 @@ fn verify_script(
     }
 }
 
-/// Verify the scripts from the transparent inputs of a transaction.
-pub fn scripts_are_valid(
+/// Verify a script within a transaction given the corresponding
+/// `TransparentOutput` it is spending and the `ConsensusBranchId` of the block
+/// containing the transaction.
+///
+/// # Details
+///
+/// input index corresponds to the index of the `TransparentInput` which in
+/// `transaction` used to identify the `previous_output`
+pub fn is_valid(
     transaction: Arc<Transaction>,
-    // TODO(jlusby): this should come from the utxo set
-    previous_outputs: &[TransparentOutput],
+    branch_id: ConsensusBranchId,
+    input_index: u32,
+    previous_output: TransparentOutput,
 ) -> Result<(), Error> {
-    assert!(previous_outputs.len() == transaction.inputs().count());
+    assert!((input_index as usize) < transaction.inputs().count());
 
-    // todo(jlusby): This should be derived from the transaction's height
-    let branch_id = 0x2bb40e60;
     let tx_to = transaction
         .zcash_serialize_to_vec()
         .expect("serialization into a vec is infallible");
 
-    for (n_in, to_spend) in previous_outputs.iter().enumerate() {
-        let TransparentOutput { value, lock_script } = to_spend;
+    let TransparentOutput { value, lock_script } = previous_output;
 
-        verify_script(
-            &lock_script.0,
-            (*value).into(),
-            &tx_to,
-            n_in as _,
-            branch_id,
-        )?;
-    }
+    verify_script(
+        &lock_script.0,
+        value.into(),
+        &tx_to,
+        input_index as _,
+        branch_id.into(),
+    )?;
 
     Ok(())
 }
@@ -144,8 +149,10 @@ mod tests {
             value: amount.try_into().unwrap(),
             lock_script: Script(SCRIPT_PUBKEY.clone()),
         };
+        let input_index = 0;
+        let branch_id = ConsensusBranchId::BLOSSOM;
 
-        scripts_are_valid(transaction, &[output]).unwrap();
+        is_valid(transaction, branch_id, input_index, output).unwrap();
     }
 
     #[test]

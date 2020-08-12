@@ -17,7 +17,10 @@ pub use shielded_data::{Output, ShieldedData, Spend};
 pub use transparent::{CoinbaseData, OutPoint, TransparentInput, TransparentOutput};
 
 use crate::proofs::{Bctv14Proof, Groth16Proof};
-use crate::types::{amount::Amount, BlockHeight, LockTime};
+use crate::{
+    parameters::ConsensusBranchId,
+    types::{amount::Amount, BlockHeight, LockTime},
+};
 
 /// A Zcash transaction.
 ///
@@ -135,5 +138,10 @@ impl Transaction {
     pub fn contains_coinbase_input(&self) -> bool {
         self.inputs()
             .any(|input| matches!(input, TransparentInput::Coinbase { .. }))
+    }
+
+    /// Returns the consensus branch Id associated with this transaction
+    pub fn consensus_branch_id(&self) -> Option<ConsensusBranchId> {
+        todo!()
     }
 }
