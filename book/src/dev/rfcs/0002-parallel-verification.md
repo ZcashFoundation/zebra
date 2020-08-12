@@ -15,8 +15,7 @@ We use several different design patterns to enable this parallelism:
 * We download blocks and start verifying them in parallel,
 * We batch signature and proof verification using verification services, and
 * We defer data dependencies until just before the block is committed to the
-  state (for details, see the state RFCs, and the RFCs that cover parallel
-  verification of particular fields - *TODO: links*).
+  state (see the detaled design RFCs).
 
 # Motivation
 [motivation]: #motivation
@@ -271,8 +270,8 @@ When making decisions about this dependency tradeoff, consider:
 # Drawbacks
 [drawbacks]: #drawbacks
 
-**TODO:** this design is a bit complicated, but we think it's necessary to
-          achieve our goals.
+This design is a bit complicated, but we think it's necessary to achieve our
+goals.
 
 # Rationale and alternatives
 [rationale-and-alternatives]: #rationale-and-alternatives
@@ -291,7 +290,7 @@ When making decisions about this dependency tradeoff, consider:
 # Prior art
 [prior-art]: #prior-art
 
-**TODO:**
+**TODO: expand this section**
   - zcashd
     - serial block verification
     - Zebra implements the same consensus rules, but a different design
@@ -324,7 +323,8 @@ Out of Scope:
 # Future possibilities
 [future-possibilities]: #future-possibilities
 
-**TODO:**
-  - Constraint Verification RFC - state and data dependency details
-  - Separate RFCs for complex data dependencies
+  - Separate RFCs for other data dependencies
+    - Recent blocks
+    - Overall chain summaries (for example, total work)
+    - Reorganisation limit: multiple chains to single chain transition
   - Optimisations for parallel verification
