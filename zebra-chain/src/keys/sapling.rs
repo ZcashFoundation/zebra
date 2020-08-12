@@ -10,6 +10,8 @@
 #![allow(clippy::unit_arg)]
 
 #[cfg(test)]
+mod arbitrary;
+#[cfg(test)]
 mod test_vectors;
 #[cfg(test)]
 mod tests;
@@ -29,7 +31,8 @@ use proptest_derive::Arbitrary;
 
 use crate::{
     redjubjub::{self, SpendAuth},
-    serialization::{ReadZcashExt, SerializationError},
+    serde_helpers,
+    serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize},
     Network,
 };
 
@@ -858,5 +861,61 @@ impl FromStr for FullViewingKey {
             }
             Err(_) => Err(SerializationError::Parse("bech32 decoding error")),
         }
+    }
+}
+
+/// An ephemeral public key for Sapling key agreement.
+///
+/// https://zips.z.cash/protocol/canopy.pdf#concretesaplingkeyagreement
+#[derive(Copy, Clone, Deserialize, PartialEq, Serialize)]
+pub struct EphemeralPublicKey(#[serde(with = "serde_helpers::AffinePoint")] jubjub::AffinePoint);
+
+impl fmt::Debug for EphemeralPublicKey {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("EphemeralPublicKey")
+            .field("u", &hex::encode(self.0.get_u().to_bytes()))
+            .field("v", &hex::encode(self.0.get_v().to_bytes()))
+            .finish()
+    }
+}
+
+impl Eq for EphemeralPublicKey {}
+
+impl From<&EphemeralPublicKey> for [u8; 32] {
+    fn from(nk: &EphemeralPublicKey) -> [u8; 32] {
+        nk.0.to_bytes()
+    }
+}
+
+impl PartialEq<[u8; 32]> for EphemeralPublicKey {
+    fn eq(&self, other: &[u8; 32]) -> bool {
+        <[u8; 32]>::from(self) == *other
+    }
+}
+
+impl TryFrom<[u8; 32]> for EphemeralPublicKey {
+    type Error = &'static str;
+
+    fn try_from(bytes: [u8; 32]) -> Result<Self, Self::Error> {
+        let possible_point = jubjub::AffinePoint::from_bytes(bytes);
+
+        if possible_point.is_some().into() {
+            Ok(Self(possible_point.unwrap()))
+        } else {
+            Err("Invalid jubjub::AffinePoint value")
+        }
+    }
+}
+
+impl ZcashSerialize for EphemeralPublicKey {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        writer.write_all(&<[u8; 32]>::from(self)[..])?;
+        Ok(())
+    }
+}
+
+impl ZcashDeserialize for EphemeralPublicKey {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        Self::try_from(reader.read_32_bytes()?).map_err(|e| SerializationError::Parse(e))
     }
 }
