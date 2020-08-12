@@ -264,8 +264,8 @@ impl<P: ZkSnarkProof> ZcashDeserialize for JoinSplit<P> {
             vpub_new: reader.read_u64::<LittleEndian>()?.try_into()?,
             anchor: reader.read_32_bytes()?,
             nullifiers: [
-                notes::sprout::Nullifier::from(reader.read_32_bytes()?),
-                notes::sprout::Nullifier::from(reader.read_32_bytes()?),
+                reader.read_32_bytes()?.into(),
+                reader.read_32_bytes()?.into(),
             ],
             commitments: [
                 commitments::sprout::NoteCommitment::from(reader.read_32_bytes()?),
