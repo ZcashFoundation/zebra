@@ -26,7 +26,7 @@ pub fn tempdir(create_config: bool) -> Result<(PathBuf, impl Drop)> {
         fs::create_dir(&cache_dir)?;
         fs::File::create(dir.path().join("zebrad.toml"))?.write_all(
             format!(
-                "[state]\ncache_dir = '{}'",
+                "[state]\ncache_dir = '{}'\nmemory_cache_bytes = 256000000",
                 cache_dir
                     .into_os_string()
                     .into_string()
@@ -230,7 +230,7 @@ impl TestOutput {
 
     pub fn stdout_contains(&self, regex: &str) -> Result<&Self> {
         let re = regex::Regex::new(regex)?;
-        let stdout = String::from_utf8_lossy(self.output.stdout.as_slice());
+        let stdout = String::from_utf8_lossy(&self.output.stdout);
 
         for line in stdout.lines() {
             if re.is_match(line) {
@@ -246,6 +246,37 @@ impl TestOutput {
         ))
         .with_section(command)
         .with_section(stdout)
+    }
+
+    pub fn stdout_equals(&self, s: &str) -> Result<&Self> {
+        let stdout = String::from_utf8_lossy(&self.output.stdout);
+
+        if stdout == s {
+            return Ok(self);
+        }
+
+        let command = || self.cmd.clone().header("Command:");
+        let stdout = || stdout.into_owned().header("Stdout:");
+
+        Err(eyre!("stdout of command is not equal the given string"))
+            .with_section(command)
+            .with_section(stdout)
+    }
+
+    pub fn stdout_matches(&self, regex: &str) -> Result<&Self> {
+        let re = regex::Regex::new(regex)?;
+        let stdout = String::from_utf8_lossy(&self.output.stdout);
+
+        if re.is_match(&stdout) {
+            return Ok(self);
+        }
+
+        let command = || self.cmd.clone().header("Command:");
+        let stdout = || stdout.into_owned().header("Stdout:");
+
+        Err(eyre!("stdout of command is not equal to the given regex"))
+            .with_section(command)
+            .with_section(stdout)
     }
 
     /// Returns true if the program was killed, false if exit was by another reason.

@@ -2,11 +2,10 @@
 
 use super::*;
 
-use crate::parameters::NetworkUpgrade::Sapling;
-
 use std::sync::Arc;
 
 use zebra_chain::{block::Block, serialization::ZcashDeserialize};
+use zebra_chain::{Network, NetworkUpgrade::Sapling};
 
 /// Make a checkpoint list containing only the genesis block
 #[test]

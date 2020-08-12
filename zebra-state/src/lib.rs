@@ -31,6 +31,19 @@ use zebra_chain::{
 pub mod in_memory;
 pub mod on_disk;
 
+/// The maturity threshold for transparent coinbase outputs.
+///
+/// A transaction MUST NOT spend a transparent output of a coinbase transaction
+/// from a block less than 100 blocks prior to the spend. Note that transparent
+/// outputs of coinbase transactions include Founders' Reward outputs.
+const MIN_TRASPARENT_COINBASE_MATURITY: BlockHeight = BlockHeight(100);
+
+/// The maximum chain reorganisation height.
+///
+/// Allowing reorganisations past this height could allow double-spends of
+/// coinbase transactions.
+const MAX_BLOCK_REORG_HEIGHT: BlockHeight = BlockHeight(MIN_TRASPARENT_COINBASE_MATURITY.0 - 1);
+
 /// Configuration for the state service.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -55,6 +68,9 @@ pub struct Config {
     /// | Windows | `{FOLDERID_LocalAppData}\zebra`                 | C:\Users\Alice\AppData\Local\zebra |
     /// | Other   | `std::env::current_dir()/cache`                 |                                    |
     pub cache_dir: PathBuf,
+
+    /// The maximum number of bytes to use caching data in memory.
+    pub memory_cache_bytes: u64,
 }
 
 impl Config {
@@ -67,7 +83,10 @@ impl Config {
         };
         let path = self.cache_dir.join(net_dir).join("state");
 
-        sled::Config::default().path(path)
+        sled::Config::default()
+            .path(path)
+            .cache_capacity(self.memory_cache_bytes)
+            .mode(sled::Mode::LowSpace)
     }
 }
 
@@ -76,7 +95,10 @@ impl Default for Config {
         let cache_dir = dirs::cache_dir()
             .unwrap_or_else(|| std::env::current_dir().unwrap().join("cache"))
             .join("zebra");
-        Self { cache_dir }
+        Self {
+            cache_dir,
+            memory_cache_bytes: 512 * 1024 * 1024,
+        }
     }
 }
 
@@ -142,10 +164,25 @@ pub enum Response {
 
 /// Get the heights of the blocks for constructing a block_locator list
 fn block_locator_heights(tip_height: BlockHeight) -> impl Iterator<Item = BlockHeight> {
-    iter::successors(Some(1u32), |h| h.checked_mul(2))
-        .flat_map(move |step| tip_height.0.checked_sub(step))
-        .map(BlockHeight)
-        .chain(iter::once(BlockHeight(0)))
+    // Stop at the reorg limit, or the genesis block.
+    let min_locator_height = tip_height.0.saturating_sub(MAX_BLOCK_REORG_HEIGHT.0);
+    let locators = iter::successors(Some(1u32), |h| h.checked_mul(2))
+        .flat_map(move |step| tip_height.0.checked_sub(step));
+    let locators = iter::once(tip_height.0)
+        .chain(locators)
+        .take_while(move |&height| height > min_locator_height)
+        .chain(iter::once(min_locator_height))
+        .map(BlockHeight);
+
+    let locators: Vec<_> = locators.collect();
+    tracing::info!(
+        ?tip_height,
+        ?min_locator_height,
+        ?locators,
+        "created block locator"
+    );
+
+    locators.into_iter()
 }
 
 /// The error type for the State Service.
@@ -223,6 +260,61 @@ mod tests {
         match network {
             Mainnet => assert_eq!(path.file_name(), Some(OsStr::new("mainnet"))),
             Testnet => assert_eq!(path.file_name(), Some(OsStr::new("testnet"))),
+        }
+    }
+
+    /// Block heights, and the expected minimum block locator height
+    static BLOCK_LOCATOR_CASES: &[(u32, u32)] = &[
+        (0, 0),
+        (1, 0),
+        (10, 0),
+        (98, 0),
+        (99, 0),
+        (100, 1),
+        (101, 2),
+        (1000, 901),
+        (10000, 9901),
+    ];
+
+    /// Check that the block locator heights are sensible.
+    #[test]
+    fn test_block_locator_heights() {
+        for (height, min_height) in BLOCK_LOCATOR_CASES.iter().cloned() {
+            let locator = block_locator_heights(BlockHeight(height)).collect::<Vec<_>>();
+
+            assert!(!locator.is_empty(), "locators must not be empty");
+            if (height - min_height) > 1 {
+                assert!(
+                    locator.len() > 2,
+                    "non-trivial locators must have some intermediate heights"
+                );
+            }
+
+            assert_eq!(
+                locator[0],
+                BlockHeight(height),
+                "locators must start with the tip height"
+            );
+
+            // Check that the locator is sorted, and that it has no duplicates
+            // TODO: replace with dedup() and is_sorted_by() when sorting stabilises.
+            assert!(locator.windows(2).all(|v| match v {
+                [a, b] => a.0 > b.0,
+                _ => unreachable!("windows returns exact sized slices"),
+            }));
+
+            let final_height = locator[locator.len() - 1];
+            assert_eq!(
+                final_height,
+                BlockHeight(min_height),
+                "locators must end with the specified final height"
+            );
+            assert!(height - final_height.0 <= MAX_BLOCK_REORG_HEIGHT.0,
+                    format!("locator for {} must not be more than the maximum reorg height {} below the tip, but {} is {} blocks below the tip",
+                         height,
+                         MAX_BLOCK_REORG_HEIGHT.0,
+                         final_height.0,
+                         height - final_height.0));
         }
     }
 }

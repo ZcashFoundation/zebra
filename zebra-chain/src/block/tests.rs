@@ -1,12 +1,14 @@
 use super::*;
 
-use crate::block::difficulty::CompactDifficulty;
+use crate::block::{difficulty::CompactDifficulty, light_client::LightClientRootHash};
 use crate::equihash_solution::EquihashSolution;
 use crate::merkle_tree::MerkleTreeRootHash;
 use crate::serialization::{
     SerializationError, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
 };
+use crate::types::BlockHeight;
 use crate::types::LockTime;
+use crate::Network;
 use crate::{sha256d_writer::Sha256dWriter, test::generate};
 
 use chrono::{DateTime, Duration, LocalResult, TimeZone, Utc};
@@ -17,6 +19,20 @@ use proptest::{
 };
 use std::env;
 use std::io::{Cursor, ErrorKind, Write};
+
+impl Arbitrary for LightClientRootHash {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: ()) -> Self::Strategy {
+        (any::<[u8; 32]>(), any::<Network>(), any::<BlockHeight>())
+            .prop_map(|(light_client_root_bytes, network, block_height)| {
+                LightClientRootHash::from_bytes(light_client_root_bytes, network, block_height)
+            })
+            .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
 
 impl Arbitrary for BlockHeader {
     type Parameters = ();
@@ -39,7 +55,7 @@ impl Arbitrary for BlockHeader {
                     version,
                     previous_block_hash,
                     merkle_root_hash,
-                    history_root_hash,
+                    light_client_root_bytes,
                     timestamp,
                     difficulty_threshold,
                     nonce,
@@ -48,7 +64,7 @@ impl Arbitrary for BlockHeader {
                     version,
                     previous_block_hash,
                     merkle_root_hash,
-                    history_root_hash,
+                    light_client_root_bytes,
                     time: Utc.timestamp(timestamp, 0),
                     difficulty_threshold,
                     nonce,
@@ -212,6 +228,14 @@ proptest! {
 
         prop_assert_eq![header, other_header];
     }
+
+    #[test]
+    fn light_client_roundtrip(bytes in any::<[u8; 32]>(), network in any::<Network>(), block_height in any::<BlockHeight>()) {
+        let light_hash = LightClientRootHash::from_bytes(bytes, network, block_height);
+        let other_bytes = light_hash.to_bytes();
+
+        prop_assert_eq![bytes, other_bytes];
+    }
 }
 
 proptest! {
@@ -223,12 +247,22 @@ proptest! {
                                           .unwrap_or(16)))]
 
     #[test]
-    fn block_roundtrip(block in any::<Block>()) {
+    fn block_roundtrip(block in any::<Block>(), network in any::<Network>()) {
         let bytes = block.zcash_serialize_to_vec()?;
         let bytes = &mut bytes.as_slice();
 
+        // Check the light client root hash
+        let light_hash = block.light_client_root_hash(network);
+        if let Some(light_hash) = light_hash {
+            let light_hash_bytes = light_hash.to_bytes();
+            prop_assert_eq![block.header.light_client_root_bytes, light_hash_bytes];
+        } else {
+            prop_assert_eq![block.coinbase_height(), None];
+        }
+
         // Check the block size limit
         if bytes.len() <= MAX_BLOCK_BYTES as _ {
+            // Check deserialization
             let other_block = bytes.zcash_deserialize_into()?;
 
             prop_assert_eq![block, other_block];

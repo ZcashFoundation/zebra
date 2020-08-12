@@ -51,7 +51,7 @@ pub enum TransparentInput {
         /// The previous output transaction reference.
         outpoint: OutPoint,
         /// The script that authorizes spending `outpoint`.
-        script: Script,
+        unlock_script: Script,
         /// The sequence number for the output.
         sequence: u32,
     },
@@ -85,7 +85,6 @@ pub struct TransparentOutput {
     // At https://en.bitcoin.it/wiki/Protocol_documentation#tx, this is an i64.
     pub value: Amount<NonNegative>,
 
-    /// Usually contains the public key as a Bitcoin script setting up
-    /// conditions to claim this output.
-    pub pk_script: Script,
+    /// The lock script defines the conditions under which this output can be spent.
+    pub lock_script: Script,
 }

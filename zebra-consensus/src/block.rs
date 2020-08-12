@@ -77,9 +77,24 @@ where
 
         // TODO(jlusby): Error = Report, handle errors from state_service.
         async move {
+            let hash = block.hash();
+
+            // These checks only apply to generated blocks. We check the block
+            // height for parsed blocks when we deserialize them.
+            let height = block
+                .coinbase_height()
+                .ok_or("Invalid block: missing block height.")?;
+            if height > BlockHeight::MAX {
+                Err("Invalid block height: greater than the maximum height.")?;
+            }
+
+            // Check that this block is actually a new block
+            if BlockVerifier::get_block(&mut state, hash).await?.is_some() {
+                Err(format!("Block has already been verified. {:?} {:?}", height, hash))?;
+            }
+
             // Do the difficulty checks first, to raise the threshold for
             // attacks that use any other fields.
-            let hash = block.hash();
             let difficulty_threshold = block.header.difficulty_threshold.to_expanded().ok_or("Invalid difficulty threshold in block header.")?;
             if hash > difficulty_threshold {
                 Err("Block failed the difficulty filter: hash must be less than or equal to the difficulty threshold.")?;
@@ -93,15 +108,6 @@ where
             let now = Utc::now();
             block.header.is_time_valid_at(now)?;
             block.is_coinbase_first()?;
-
-            // These checks only apply to generated blocks. We check the block
-            // height for parsed blocks when we deserialize them.
-            let height = block
-                .coinbase_height()
-                .ok_or("Invalid block: missing block height.")?;
-            if height > BlockHeight::MAX {
-                Err("Invalid block height: greater than the maximum height.")?;
-            }
 
             // TODO:
             //   - context-free header verification: merkle root

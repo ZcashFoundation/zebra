@@ -18,11 +18,12 @@ impl RetryLimit {
     }
 }
 
-impl<Req: Clone, Res, E> Policy<Req, Res, E> for RetryLimit {
+impl<Req: Clone + std::fmt::Debug, Res, E: std::fmt::Debug> Policy<Req, Res, E> for RetryLimit {
     type Future = future::Ready<Self>;
-    fn retry(&self, _: &Req, result: Result<&Res, &E>) -> Option<Self::Future> {
-        if result.is_err() {
+    fn retry(&self, req: &Req, result: Result<&Res, &E>) -> Option<Self::Future> {
+        if let Err(e) = result {
             if self.remaining_tries > 0 {
+                tracing::debug!(?req, ?e, remaining_tries = self.remaining_tries, "retrying");
                 Some(future::ready(RetryLimit {
                     remaining_tries: self.remaining_tries - 1,
                 }))

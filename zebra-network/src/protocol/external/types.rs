@@ -6,7 +6,7 @@ use std::fmt;
 
 use zebra_chain::types::BlockHeight;
 use zebra_chain::Network::{self, *};
-use zebra_consensus::parameters::NetworkUpgrade::{self, *};
+use zebra_chain::NetworkUpgrade::{self, *};
 
 #[cfg(test)]
 use proptest_derive::Arbitrary;
