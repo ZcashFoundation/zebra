@@ -23,7 +23,7 @@ const FANOUT: usize = checkpoint::MAX_QUEUED_BLOCKS_PER_HEIGHT;
 /// checkpoint distance.
 pub const LOOKAHEAD_LIMIT: usize = checkpoint::MAX_CHECKPOINT_HEIGHT_GAP * 2;
 /// Controls how long we wait for a block download request to complete.
-pub const BLOCK_TIMEOUT: Duration = Duration::from_secs(9);
+pub const BLOCK_TIMEOUT: Duration = Duration::from_secs(6);
 
 /// Helps work around defects in the bitcoin protocol by checking whether
 /// the returned hashes actually extend a chain tip.
