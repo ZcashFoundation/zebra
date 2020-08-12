@@ -14,7 +14,7 @@ use crate::{
     serialization::{
         ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
     },
-    types,
+    treestate, types,
 };
 
 use super::*;
@@ -241,7 +241,7 @@ impl<P: ZkSnarkProof> ZcashSerialize for JoinSplit<P> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_u64::<LittleEndian>(self.vpub_old.into())?;
         writer.write_u64::<LittleEndian>(self.vpub_new.into())?;
-        writer.write_all(&self.anchor[..])?;
+        writer.write_32_bytes(&self.anchor.into())?;
         writer.write_32_bytes(&self.nullifiers[0].into())?;
         writer.write_32_bytes(&self.nullifiers[1].into())?;
         writer.write_32_bytes(&self.commitments[0].into())?;
@@ -262,7 +262,7 @@ impl<P: ZkSnarkProof> ZcashDeserialize for JoinSplit<P> {
         Ok(JoinSplit::<P> {
             vpub_old: reader.read_u64::<LittleEndian>()?.try_into()?,
             vpub_new: reader.read_u64::<LittleEndian>()?.try_into()?,
-            anchor: reader.read_32_bytes()?,
+            anchor: treestate::sprout::NoteTreeRootHash::from(reader.read_32_bytes()?),
             nullifiers: [
                 reader.read_32_bytes()?.into(),
                 reader.read_32_bytes()?.into(),

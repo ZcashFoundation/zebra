@@ -4,6 +4,7 @@ use crate::{
     ed25519_zebra,
     notes::sprout,
     proofs::ZkSnarkProof,
+    treestate,
     types::amount::{Amount, NonNegative},
 };
 
@@ -22,9 +23,7 @@ pub struct JoinSplit<P: ZkSnarkProof> {
     /// A root of the Sprout note commitment tree at some block height in the
     /// past, or the root produced by a previous JoinSplit transfer in this
     /// transaction.
-    ///
-    /// XXX refine type
-    pub anchor: [u8; 32],
+    pub anchor: treestate::sprout::NoteTreeRootHash,
     /// A nullifier for the input notes.
     pub nullifiers: [crate::notes::sprout::Nullifier; 2],
     /// A note commitment for this output note.
