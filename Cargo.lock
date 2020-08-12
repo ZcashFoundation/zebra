@@ -3108,6 +3108,7 @@ dependencies = [
  "thiserror",
  "zcashconsensus",
  "zebra-chain",
+ "zebra-consensus",
  "zebra-test",
 ]
 

@@ -72,6 +72,12 @@ pub(crate) const TESTNET_ACTIVATION_HEIGHTS: &[(BlockHeight, NetworkUpgrade)] = 
 #[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
 pub struct ConsensusBranchId(u32);
 
+impl From<ConsensusBranchId> for u32 {
+    fn from(branch: ConsensusBranchId) -> u32 {
+        branch.0
+    }
+}
+
 /// Network Upgrade Consensus Branch Ids.
 ///
 /// Branch ids are the same for mainnet and testnet. If there is a testnet
