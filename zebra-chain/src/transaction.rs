@@ -139,9 +139,4 @@ impl Transaction {
         self.inputs()
             .any(|input| matches!(input, TransparentInput::Coinbase { .. }))
     }
-
-    /// Returns the consensus branch Id associated with this transaction
-    pub fn consensus_branch_id(&self) -> Option<ConsensusBranchId> {
-        todo!()
-    }
 }
