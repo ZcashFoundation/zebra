@@ -202,10 +202,10 @@ impl Arbitrary for TransparentInput {
     fn arbitrary_with(_args: ()) -> Self::Strategy {
         prop_oneof![
             (any::<OutPoint>(), any::<Script>(), any::<u32>())
-                .prop_map(|(outpoint, script, sequence)| {
+                .prop_map(|(outpoint, unlock_script, sequence)| {
                     TransparentInput::PrevOut {
                         outpoint,
-                        script,
+                        unlock_script,
                         sequence,
                     }
                 })

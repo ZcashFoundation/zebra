@@ -29,6 +29,7 @@ fn generate_no_args() -> Result<()> {
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
+    // First line
     output.stdout_contains(r"# Default configuration for zebrad.")?;
 
     Ok(())
@@ -71,6 +72,10 @@ fn help_no_args() -> Result<()> {
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
+    // First line haves the version
+    output.stdout_contains(r"zebrad [0-9].[0-9].[0-9]")?;
+
+    // Make sure we are in help by looking usage string
     output.stdout_contains(r"USAGE:")?;
 
     Ok(())
@@ -102,7 +107,7 @@ fn revhex_args() -> Result<()> {
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
-    output.stdout_contains(r"55ffee33")?;
+    output.stdout_equals("55ffee33\n")?;
 
     Ok(())
 }
@@ -213,7 +218,7 @@ fn version_no_args() -> Result<()> {
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
-    output.stdout_contains(r"zebrad [0-9].[0-9].[0-9]")?;
+    output.stdout_matches(r"^zebrad [0-9].[0-9].[0-9]-[A-Za-z]*.[0-9]\n$")?;
 
     Ok(())
 }

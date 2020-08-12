@@ -10,7 +10,7 @@ use std::{
 
 use futures::{
     channel::mpsc,
-    future::{self, Future, FutureExt},
+    future::{self, FutureExt},
     sink::SinkExt,
     stream::{FuturesUnordered, StreamExt},
 };
@@ -19,6 +19,7 @@ use tower::{
     buffer::Buffer,
     discover::{Change, ServiceStream},
     layer::Layer,
+    util::BoxService,
     Service, ServiceExt,
 };
 use tower_load::{peak_ewma::PeakEwmaDiscover, NoInstrument};
@@ -40,14 +41,7 @@ pub async fn init<S>(
     config: Config,
     inbound_service: S,
 ) -> (
-    impl Service<
-            Request,
-            Response = Response,
-            Error = BoxedStdError,
-            Future = impl Future<Output = Result<Response, BoxedStdError>> + Send,
-        > + Send
-        + Clone
-        + 'static,
+    Buffer<BoxService<Request, Response, BoxedStdError>, Request>,
     Arc<Mutex<AddressBook>>,
 )
 where
@@ -91,7 +85,7 @@ where
         demand_tx.clone(),
         handle_rx,
     );
-    let peer_set = Buffer::new(peer_set, constants::PEERSET_BUFFER_SIZE);
+    let peer_set = Buffer::new(BoxService::new(peer_set), constants::PEERSET_BUFFER_SIZE);
 
     // Connect the tx end to the 3 peer sources:
 
@@ -191,6 +185,8 @@ where
     S::Future: Send + 'static,
 {
     let mut listener = TcpListener::bind(addr).await?;
+    let local_addr = listener.local_addr()?;
+    info!("Network listening at {}", local_addr);
     loop {
         if let Ok((tcp_stream, addr)) = listener.accept().await {
             debug!(?addr, "got incoming connection");

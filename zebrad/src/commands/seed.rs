@@ -72,21 +72,10 @@ impl Service<Request> for SeedService {
 
         let response = match req {
             Request::Peers => {
-                // Collect a list of known peers from the address book
-                // and sanitize their timestamps.
-                let mut peers = address_book
-                    .lock()
-                    .unwrap()
-                    .peers()
-                    .map(|addr| addr.sanitize())
-                    .collect::<Vec<_>>();
-                // The peers are still ordered by recency, so shuffle them.
-                use rand::seq::SliceRandom;
-                peers.shuffle(&mut rand::thread_rng());
-                // Finally, truncate the list so that we do not trivially
-                // reveal our entire peer set.
+                debug!("selecting peers to gossip");
+                let mut peers = address_book.lock().unwrap().sanitized();
+                // truncate the list so that we do not trivially reveal our entire peer set.
                 peers.truncate(50);
-                debug!(peers.len = peers.len());
                 Ok(Response::Peers(peers))
             }
             _ => {
