@@ -171,6 +171,67 @@ fn compact_extremes() {
     let difficulty_max = CompactDifficulty(u32::MAX & !SIGN_BIT);
     assert_eq!(difficulty_max.to_expanded(), None);
     assert_eq!(difficulty_max.to_work(), None);
+
+    // Bitcoin test vectors for CompactDifficulty
+    // See https://developer.bitcoin.org/reference/block_chain.html#target-nbits
+    // These values are not in the table below, because they do not fit in u128
+    //
+    // The minimum difficulty on the bitcoin mainnet and testnet
+    let difficulty_btc_main = CompactDifficulty(0x1d00ffff);
+    let u256_btc_main = U256::from(0xffff) << 208;
+    let expanded_btc_main = Some(ExpandedDifficulty(u256_btc_main));
+    let work_btc_main = Some(Work(0x100010001));
+    assert_eq!(difficulty_btc_main.to_expanded(), expanded_btc_main);
+    assert_eq!(difficulty_btc_main.to_work(), work_btc_main);
+
+    // The minimum difficulty in bitcoin regtest
+    // This is also the easiest respesentable difficulty
+    let difficulty_btc_reg = CompactDifficulty(0x207fffff);
+    let u256_btc_reg = U256::from(0x7fffff) << 232;
+    let expanded_btc_reg = Some(ExpandedDifficulty(u256_btc_reg));
+    let work_btc_reg = Some(Work(0x2));
+    assert_eq!(difficulty_btc_reg.to_expanded(), expanded_btc_reg);
+    assert_eq!(difficulty_btc_reg.to_work(), work_btc_reg);
+}
+
+/// Bitcoin test vectors for CompactDifficulty, and their corresponding
+/// ExpandedDifficulty and Work values.
+/// See https://developer.bitcoin.org/reference/block_chain.html#target-nbits
+static COMPACT_DIFFICULTY_CASES: &[(u32, Option<u128>, Option<u128>)] = &[
+    // These Work values will never happen in practice, because the corresponding
+    // difficulties are extremely high. So it is ok for us to reject them.
+    (0x01003456, None /* 0x00 */, None),
+    (0x01123456, Some(0x12), None),
+    (0x02008000, Some(0x80), None),
+    (0x05009234, Some(0x92340000), None),
+    (0x04923456, None /* -0x12345600 */, None),
+    (0x04123456, Some(0x12345600), None),
+];
+
+/// Test Bitcoin test vectors for CompactDifficulty.
+#[test]
+#[spandoc::spandoc]
+fn compact_bitcoin_test_vectors() {
+    zebra_test::init();
+
+    // We use two spans, so we can diagnose conversion panics, and mismatching results
+    for (compact, expected_expanded, expected_work) in COMPACT_DIFFICULTY_CASES.iter().cloned() {
+        /// SPANDOC: Convert compact to expanded and work {?compact, ?expected_expanded, ?expected_work}
+        {
+            let expected_expanded = expected_expanded.map(U256::from).map(ExpandedDifficulty);
+            let expected_work = expected_work.map(Work);
+
+            let compact = CompactDifficulty(compact);
+            let actual_expanded = compact.to_expanded();
+            let actual_work = compact.to_work();
+
+            /// SPANDOC: Test that compact produces the expected expanded and work {?compact, ?expected_expanded, ?actual_expanded, ?expected_work, ?actual_work}
+            {
+                assert_eq!(actual_expanded, expected_expanded);
+                assert_eq!(actual_work, expected_work);
+            }
+        }
+    }
 }
 
 /// Test blocks using CompactDifficulty.
