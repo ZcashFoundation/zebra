@@ -5,6 +5,8 @@ use std::{
     ops::RangeInclusive,
 };
 
+use byteorder::{ByteOrder, LittleEndian};
+
 type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// A runtime validated type for representing amounts of zatoshis
@@ -24,7 +26,9 @@ impl<C> Amount<C> {
 
     /// To little endian byte array
     pub fn to_bytes(&self) -> [u8; 8] {
-        self.0.to_le_bytes()
+        let mut buf: [u8; 8] = [0; 8];
+        LittleEndian::write_i64(&mut buf, self.0);
+        buf
     }
 }
 
