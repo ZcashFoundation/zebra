@@ -20,7 +20,7 @@ pub fn test_cmd(path: &str) -> Result<(Command, impl Drop)> {
 
     fs::File::create(dir.path().join("zebrad.toml"))?.write_all(
         format!(
-            "[state]\ncache_dir = '{}'",
+            "[state]\ncache_dir = '{}'\nmemory_cache_bytes = 256000000",
             cache_dir
                 .into_os_string()
                 .into_string()
