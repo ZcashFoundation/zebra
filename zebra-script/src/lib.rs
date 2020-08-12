@@ -2,6 +2,7 @@
 #![doc(html_favicon_url = "https://www.zfnd.org/images/zebra-favicon-128.png")]
 #![doc(html_logo_url = "https://www.zfnd.org/images/zebra-icon.png")]
 #![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_script")]
+
 use displaydoc::Display;
 use std::sync::Arc;
 use thiserror::Error;
@@ -132,6 +133,7 @@ mod tests {
     use std::convert::TryInto;
     use std::sync::Arc;
     use zebra_chain::{serialization::ZcashDeserializeInto, types::Script};
+    use zebra_test::prelude::*;
 
     lazy_static::lazy_static! {
         pub static ref SCRIPT_PUBKEY: Vec<u8> = <Vec<u8>>::from_hex("76a914f47cac1e6fec195c055994e8064ffccce0044dd788ac").unwrap();
@@ -139,24 +141,29 @@ mod tests {
     }
 
     #[test]
-    fn verify_valid_script_parsed() {
-        let transaction = SCRIPT_TX
-            .zcash_deserialize_into::<Arc<zebra_chain::transaction::Transaction>>()
-            .unwrap();
+    fn verify_valid_script_parsed() -> Result<()> {
+        zebra_test::init();
+
+        let transaction =
+            SCRIPT_TX.zcash_deserialize_into::<Arc<zebra_chain::transaction::Transaction>>()?;
         let coin = u64::pow(10, 8);
         let amount = 212 * coin;
         let output = TransparentOutput {
-            value: amount.try_into().unwrap(),
+            value: amount.try_into()?,
             lock_script: Script(SCRIPT_PUBKEY.clone()),
         };
         let input_index = 0;
         let branch_id = ConsensusBranchId::BLOSSOM;
 
-        is_valid(transaction, branch_id, input_index, output).unwrap();
+        is_valid(transaction, branch_id, input_index, output)?;
+
+        Ok(())
     }
 
     #[test]
-    fn verify_valid_script() {
+    fn verify_valid_script() -> Result<()> {
+        zebra_test::init();
+
         let coin = i64::pow(10, 8);
         let script_pub_key = &*SCRIPT_PUBKEY;
         let amount = 212 * coin;
@@ -164,11 +171,15 @@ mod tests {
         let n_in = 0;
         let branch_id = 0x2bb40e60;
 
-        verify_script(script_pub_key, amount, tx_to, n_in, branch_id).unwrap();
+        verify_script(script_pub_key, amount, tx_to, n_in, branch_id)?;
+
+        Ok(())
     }
 
     #[test]
-    fn dont_verify_invalid_script() {
+    fn dont_verify_invalid_script() -> Result<()> {
+        zebra_test::init();
+
         let coin = i64::pow(10, 8);
         let script_pub_key = &*SCRIPT_PUBKEY;
         let amount = 212 * coin;
@@ -177,5 +188,7 @@ mod tests {
         let branch_id = 0x2bb40e61;
 
         verify_script(script_pub_key, amount, tx_to, n_in, branch_id).unwrap_err();
+
+        Ok(())
     }
 }

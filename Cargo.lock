@@ -3102,7 +3102,6 @@ version = "3.0.0-alpha.0"
 name = "zebra-script"
 version = "3.0.0-alpha.0"
 dependencies = [
- "color-eyre",
  "displaydoc",
  "hex",
  "lazy_static",
