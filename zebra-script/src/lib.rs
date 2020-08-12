@@ -104,8 +104,7 @@ fn verify_script(
 pub fn is_valid(
     transaction: Arc<Transaction>,
     branch_id: ConsensusBranchId,
-    input_index: u32,
-    previous_output: TransparentOutput,
+    (input_index, previous_output): (u32, TransparentOutput),
 ) -> Result<(), Error> {
     assert!((input_index as usize) < transaction.inputs().count());
 
@@ -155,7 +154,7 @@ mod tests {
         let input_index = 0;
         let branch_id = ConsensusBranchId::BLOSSOM;
 
-        is_valid(transaction, branch_id, input_index, output)?;
+        is_valid(transaction, branch_id, (input_index, output))?;
 
         Ok(())
     }
