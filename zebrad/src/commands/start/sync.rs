@@ -303,7 +303,16 @@ where
                         match (hashes.first(), hashes.len()) {
                             (None, _) => continue,
                             (_, 1) => {
+                                // zcashd might respond with a length-1 inv message if a broadcast of new inventory
+                                // is sent while we're sending our request.
                                 tracing::debug!("skipping length-1 response, in case it's an unsolicited inv message");
+                                continue;
+                            }
+                            (_, 501) => {
+                                // zcashd has an ad-hoc buffering mechanism for inv items that can result in a broadcast
+                                // of new inventory getting mixed in to the *body* of a response to a getblocks message,
+                                // but only at the front or rear.
+                                tracing::debug!("skipping length-501 response, in case it's an unsolicited inv message");
                                 continue;
                             }
                             (Some(hash), _) if (hash == &self.genesis_hash) => {
