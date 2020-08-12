@@ -3,7 +3,7 @@ use std::{collections::HashSet, iter, pin::Pin, sync::Arc, time::Duration};
 use color_eyre::eyre::{eyre, Report};
 use futures::stream::{FuturesUnordered, StreamExt};
 use tokio::{task::JoinHandle, time::delay_for};
-use tower::{retry::Retry, Service, ServiceExt};
+use tower::{builder::ServiceBuilder, retry::Retry, timeout::Timeout, Service, ServiceExt};
 use tracing_futures::{Instrument, Instrumented};
 
 use zebra_chain::{
@@ -21,6 +21,8 @@ const FANOUT: usize = checkpoint::MAX_QUEUED_BLOCKS_PER_HEIGHT;
 /// waiting for queued verifications to complete. Set to twice the maximum
 /// checkpoint distance.
 pub const LOOKAHEAD_LIMIT: usize = checkpoint::MAX_CHECKPOINT_HEIGHT_GAP * 2;
+/// Controls how long we wait for a block download request to complete.
+pub const BLOCK_TIMEOUT: Duration = Duration::from_secs(9);
 
 #[derive(Debug)]
 pub struct Syncer<ZN, ZS, ZV>
@@ -35,7 +37,7 @@ where
     /// Used to perform extendtips requests, with no retry logic (failover is handled using fanout).
     tip_network: ZN,
     /// Used to download blocks, with retry logic.
-    block_network: Retry<RetryLimit, ZN>,
+    block_network: Retry<RetryLimit, Timeout<ZN>>,
     state: ZS,
     verifier: ZV,
     prospective_tips: HashSet<BlockHeaderHash>,
@@ -59,10 +61,13 @@ where
     ///  - state: the zebra-state that stores the chain
     ///  - verifier: the zebra-consensus verifier that checks the chain
     pub fn new(chain: Network, peers: ZN, state: ZS, verifier: ZV) -> Self {
-        let retry_peers = Retry::new(RetryLimit::new(10), peers.clone());
+        let block_network = ServiceBuilder::new()
+            .retry(RetryLimit::new(3))
+            .timeout(BLOCK_TIMEOUT)
+            .service(peers.clone());
         Self {
             tip_network: peers,
-            block_network: retry_peers,
+            block_network,
             state,
             verifier,
             prospective_tips: HashSet::new(),
