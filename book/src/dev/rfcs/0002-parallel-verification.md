@@ -45,12 +45,18 @@ Blockchain:
            be identified using its tip.
 
 Data:
-* **context-free:** verification steps which do not have a data dependency on
+* **consensus rule:** A protocol rule which all nodes must apply consistently,
+                      so they can converge on the same chain fork.
+* **context-free:** Consensus rules which do not have a data dependency on
                     previous blocks.
 * **data dependency:** Information contained in the previous block and its
                        chain fork, which is required to verify the current block.
+* **semantic verification:** Verifying the consensus rules on the data structures
+                             defined by the protocol.
 * **state:** The set of verified blocks. The state may also cache some dependent
              data, so that we can efficienty verify subsequent blocks.
+* **structural verification:** Parsing raw bytes into the data structures defined
+                               by the protocol.
 
 # Guide-level explanation
 [guide-level-explanation]: #guide-level-explanation
