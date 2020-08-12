@@ -412,6 +412,18 @@ impl CheckpointVerifier {
             .entry(height)
             .or_insert_with(|| QueuedBlockList::with_capacity(1));
 
+        let hash = block.hash();
+
+        for qb in qblocks.iter_mut() {
+            if qb.hash == hash {
+                let old_tx = std::mem::replace(&mut qb.tx, tx);
+                let e = "rejected older of duplicate verification requests".into();
+                tracing::debug!(?e);
+                let _ = old_tx.send(Err(e));
+                return rx;
+            }
+        }
+
         // Memory DoS resistance: limit the queued blocks at each height
         if qblocks.len() >= MAX_QUEUED_BLOCKS_PER_HEIGHT {
             let e = "too many queued blocks at this height".into();
@@ -421,7 +433,6 @@ impl CheckpointVerifier {
         }
 
         // Add the block to the list of queued blocks at this height
-        let hash = block.as_ref().into();
         let new_qblock = QueuedBlock { block, hash, tx };
         // This is a no-op for the first block in each QueuedBlockList.
         qblocks.reserve_exact(1);
