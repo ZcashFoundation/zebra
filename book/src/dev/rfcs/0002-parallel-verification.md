@@ -208,7 +208,7 @@ Here is how the `CheckpointVerifier` implements each verification stage:
 * **State Updates:**
   * *As Above:* the `CheckpointVerifier` returns success to the `ChainVerifier`,
     which sends verified `Block`s to the state service.
-  * The state service implements the chain order consensus rule, which makes sure
+  * Zebra implements the chain order consensus rule, which makes sure
     each block is added to state after its previous block.
 
 ### Block Verification
@@ -296,7 +296,7 @@ When making decisions about this dependency tradeoff, consider:
 
 - [ ] Is this design good enough to use as a framework for future RFCs?
 - [ ] Does this design require any changes to the current implementation?
-  - [ ] Implement chain order consensus rule in state (previous block hash only)
+  - [ ] Implement chain order consensus rule (check previous block hash and height)
   - [ ] Check that the `BlockVerifier` performs checks in the following order:
     - verification, deferring dependencies as needed,
     - await dependencies,
