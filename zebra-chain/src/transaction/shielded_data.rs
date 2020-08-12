@@ -1,5 +1,5 @@
 use crate::{
-    commitments, notes,
+    commitments, keys, notes,
     proofs::Groth16Proof,
     redjubjub::{self, Binding, SpendAuth},
     serde_helpers,
@@ -37,8 +37,7 @@ pub struct Output {
     #[serde(with = "serde_helpers::Fq")]
     pub cm_u: jubjub::Fq,
     /// An encoding of an ephemeral Jubjub public key.
-    #[serde(with = "serde_helpers::AffinePoint")]
-    pub ephemeral_key: jubjub::AffinePoint,
+    pub ephemeral_key: keys::sapling::EphemeralPublicKey,
     /// A ciphertext component for the encrypted output note.
     pub enc_ciphertext: notes::sapling::EncryptedCiphertext,
     /// A ciphertext component for the encrypted output note.

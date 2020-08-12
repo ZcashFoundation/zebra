@@ -9,7 +9,7 @@ use std::{
 };
 
 use crate::{
-    commitments, notes,
+    commitments, keys, notes,
     proofs::ZkSnarkProof,
     serialization::{
         ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
@@ -352,7 +352,7 @@ impl ZcashSerialize for Output {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         self.cv.zcash_serialize(&mut writer)?;
         writer.write_all(&self.cm_u.to_bytes())?;
-        writer.write_all(&self.ephemeral_key.to_bytes())?;
+        self.ephemeral_key.zcash_serialize(&mut writer)?;
         self.enc_ciphertext.zcash_serialize(&mut writer)?;
         self.out_ciphertext.zcash_serialize(&mut writer)?;
         self.zkproof.zcash_serialize(&mut writer)?;
@@ -365,7 +365,7 @@ impl ZcashDeserialize for Output {
         Ok(Output {
             cv: commitments::sapling::ValueCommitment::zcash_deserialize(&mut reader)?,
             cm_u: jubjub::Fq::from_bytes(&reader.read_32_bytes()?).unwrap(),
-            ephemeral_key: jubjub::AffinePoint::from_bytes(reader.read_32_bytes()?).unwrap(),
+            ephemeral_key: keys::sapling::EphemeralPublicKey::zcash_deserialize(&mut reader)?,
             enc_ciphertext: notes::sapling::EncryptedCiphertext::zcash_deserialize(&mut reader)?,
             out_ciphertext: notes::sapling::OutCiphertext::zcash_deserialize(&mut reader)?,
             zkproof: Groth16Proof::zcash_deserialize(&mut reader)?,

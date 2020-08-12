@@ -1,5 +1,5 @@
 use crate::{
-    commitments,
+    commitments, keys,
     notes::{sapling, sprout},
     proofs::{Groth16Proof, ZkSnarkProof},
     transaction::{
@@ -97,18 +97,16 @@ impl Arbitrary for Output {
         (
             any::<commitments::sapling::ValueCommitment>(),
             any::<commitments::sapling::NoteCommitment>(),
-            array::uniform32(any::<u8>()).prop_filter("Valid jubjub::AffinePoint", |b| {
-                jubjub::AffinePoint::from_bytes(*b).is_some().unwrap_u8() == 1
-            }),
+            any::<keys::sapling::EphemeralPublicKey>(),
             any::<sapling::EncryptedCiphertext>(),
             any::<sapling::OutCiphertext>(),
             any::<Groth16Proof>(),
         )
             .prop_map(
-                |(cv, cm, ephemeral_key_bytes, enc_ciphertext, out_ciphertext, zkproof)| Self {
+                |(cv, cm, ephemeral_key, enc_ciphertext, out_ciphertext, zkproof)| Self {
                     cv,
                     cm_u: cm.extract_u(),
-                    ephemeral_key: jubjub::AffinePoint::from_bytes(ephemeral_key_bytes).unwrap(),
+                    ephemeral_key,
                     enc_ciphertext,
                     out_ciphertext,
                     zkproof,
