@@ -205,6 +205,8 @@ impl ValueCommitment {
         let v = jubjub::Fr::from(value);
         let rcv = generate_trapdoor(csprng);
 
+        // TODO: These generator points can be generated once somewhere else to
+        // avoid having to recompute them on every new commitment.
         let V = find_group_hash(*b"Zcash_cv", b"v");
         let R = find_group_hash(*b"Zcash_cv", b"r");
 
