@@ -10,9 +10,9 @@ use tempdir::TempDir;
 use std::os::unix::process::ExitStatusExt;
 
 /// Runs a command
-pub fn test_cmd(command_path: &str) -> Result<Command> {
+pub fn test_cmd(command_path: &str, tempdir: &PathBuf) -> Result<Command> {
     let mut cmd = Command::new(command_path);
-    cmd.current_dir(PathBuf::from(command_path).parent().unwrap().to_path_buf());
+    cmd.current_dir(tempdir);
 
     Ok(cmd)
 }
