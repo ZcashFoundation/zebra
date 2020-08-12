@@ -95,18 +95,24 @@ fn compact_zero() {
     // Small value zeroes
     let small_zero_1 = CompactDifficulty(1);
     assert_eq!(small_zero_1.to_expanded(), None);
+    assert_eq!(small_zero_1.to_work(), None);
     let small_zero_max = CompactDifficulty(UNSIGNED_MANTISSA_MASK);
     assert_eq!(small_zero_max.to_expanded(), None);
+    assert_eq!(small_zero_max.to_work(), None);
 
     // Special-cased zeroes, negative in the floating-point representation
     let sc_zero = CompactDifficulty(SIGN_BIT);
     assert_eq!(sc_zero.to_expanded(), None);
+    assert_eq!(sc_zero.to_work(), None);
     let sc_zero_next = CompactDifficulty(SIGN_BIT + 1);
     assert_eq!(sc_zero_next.to_expanded(), None);
+    assert_eq!(sc_zero_next.to_work(), None);
     let sc_zero_high = CompactDifficulty((1 << PRECISION) - 1);
     assert_eq!(sc_zero_high.to_expanded(), None);
+    assert_eq!(sc_zero_high.to_work(), None);
     let sc_zero_max = CompactDifficulty(u32::MAX);
     assert_eq!(sc_zero_max.to_expanded(), None);
+    assert_eq!(sc_zero_max.to_work(), None);
 }
 
 /// Test extreme values for CompactDifficulty.
@@ -123,6 +129,7 @@ fn compact_extremes() {
     assert_eq!(one.to_work(), work_one);
     let another_one = CompactDifficulty((1 << PRECISION) + (1 << 16));
     assert_eq!(another_one.to_expanded(), expanded_one);
+    assert_eq!(another_one.to_work(), work_one);
 
     // Maximum mantissa
     let expanded_mant = Some(ExpandedDifficulty(UNSIGNED_MANTISSA_MASK.into()));
