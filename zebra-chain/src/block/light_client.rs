@@ -1,6 +1,6 @@
 //! The LightClientRootHash enum, used for the corresponding block header field.
 
-use crate::note_commitment_tree::SaplingNoteTreeRootHash;
+use crate::treestate::note_commitment_tree::SaplingNoteTreeRootHash;
 use crate::types::BlockHeight;
 use crate::{Network, NetworkUpgrade, NetworkUpgrade::*};
 
