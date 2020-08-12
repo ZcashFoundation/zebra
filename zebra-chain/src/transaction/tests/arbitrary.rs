@@ -6,7 +6,7 @@ use crate::{
         CoinbaseData, JoinSplit, JoinSplitData, OutPoint, Output, ShieldedData, Spend, Transaction,
         TransparentInput,
     },
-    treestate::note_commitment_tree::SaplingNoteTreeRootHash,
+    treestate::{self, note_commitment_tree::SaplingNoteTreeRootHash},
     types::{
         amount::{Amount, NonNegative},
         BlockHeight, Script,
@@ -22,7 +22,7 @@ impl<P: ZkSnarkProof + Arbitrary + 'static> Arbitrary for JoinSplit<P> {
         (
             any::<Amount<NonNegative>>(),
             any::<Amount<NonNegative>>(),
-            array::uniform32(any::<u8>()),
+            any::<treestate::sprout::NoteTreeRootHash>(),
             array::uniform2(any::<sprout::Nullifier>()),
             array::uniform2(any::<commitments::sprout::NoteCommitment>()),
             array::uniform32(any::<u8>()),
