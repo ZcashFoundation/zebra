@@ -5,7 +5,7 @@ use futures::future::FutureExt;
 use futures::stream::{FuturesUnordered, StreamExt};
 use tokio::{task::JoinHandle, time::delay_for};
 use tower::{builder::ServiceBuilder, retry::Retry, timeout::Timeout, Service, ServiceExt};
-use tracing_futures::{Instrument, Instrumented};
+use tracing_futures::Instrument;
 
 use zebra_chain::{
     block::{Block, BlockHeaderHash},
@@ -42,8 +42,7 @@ where
     state: ZS,
     verifier: ZV,
     prospective_tips: HashSet<BlockHeaderHash>,
-    pending_blocks:
-        Pin<Box<FuturesUnordered<Instrumented<JoinHandle<Result<BlockHeaderHash, Error>>>>>>,
+    pending_blocks: Pin<Box<FuturesUnordered<JoinHandle<Result<BlockHeaderHash, Error>>>>>,
     genesis_hash: BlockHeaderHash,
 }
 
@@ -456,25 +455,29 @@ where
                 .await
                 .map_err(|e| eyre!(e))?
                 .call(zn::Request::BlocksByHash(iter::once(hash).collect()));
+
             tracing::debug!(?hash, "requested block");
+
             let span = tracing::info_span!("block_fetch_verify", ?hash);
             let mut verifier = self.verifier.clone();
-            let task = tokio::spawn(async move {
-                let block = match block_req.await {
-                    Ok(zn::Response::Blocks(blocks)) => blocks
-                        .into_iter()
-                        .next()
-                        .expect("successful response has the block in it"),
-                    Ok(_) => unreachable!("wrong response to block request"),
-                    Err(e) => return Err(e),
-                };
-                metrics::counter!("sync.downloaded_blocks", 1);
+            let task = tokio::spawn(
+                async move {
+                    let block = match block_req.await {
+                        Ok(zn::Response::Blocks(blocks)) => blocks
+                            .into_iter()
+                            .next()
+                            .expect("successful response has the block in it"),
+                        Ok(_) => unreachable!("wrong response to block request"),
+                        Err(e) => return Err(e),
+                    };
+                    metrics::counter!("sync.downloaded_blocks", 1);
 
-                let result = verifier.ready_and().await?.call(block).await;
-                metrics::counter!("sync.verified_blocks", 1);
-                result
-            })
-            .instrument(span);
+                    let result = verifier.ready_and().await?.call(block).await;
+                    metrics::counter!("sync.verified_blocks", 1);
+                    result
+                }
+                .instrument(span),
+            );
             self.pending_blocks.push(task);
         }
 
