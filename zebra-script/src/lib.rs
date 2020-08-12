@@ -25,7 +25,7 @@ pub enum Error {
     /// could not to deserialize tx
     #[non_exhaustive]
     TxDeserialize,
-    /// n_in is invalid for tx
+    /// input index out of bounds for transaction's inputs
     #[non_exhaustive]
     TxIndex,
     /// tx is an invalid size for it's protocol
@@ -40,7 +40,7 @@ impl From<zcashconsensus_error_t> for Error {
     #[allow(non_upper_case_globals)]
     fn from(err_code: zcashconsensus_error_t) -> Error {
         match err_code {
-            zcashconsensus_error_t_zcashconsensus_ERR_OK => Error::ErrOk,
+            zcashconsensus_error_t_zcashconsensus_ERR_OK => Error::ScriptInvalid,
             zcashconsensus_error_t_zcashconsensus_ERR_TX_DESERIALIZE => Error::TxDeserialize,
             zcashconsensus_error_t_zcashconsensus_ERR_TX_INDEX => Error::TxIndex,
             zcashconsensus_error_t_zcashconsensus_ERR_TX_SIZE_MISMATCH => Error::TxSizeMismatch,
