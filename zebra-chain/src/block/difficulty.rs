@@ -233,7 +233,6 @@ impl CompactDifficulty {
         if result <= u128::MAX.into() {
             return Some(Work(result.as_u128()));
         }
-        
         None
     }
 }
