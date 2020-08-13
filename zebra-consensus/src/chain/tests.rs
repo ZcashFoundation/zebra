@@ -238,11 +238,11 @@ async fn verify_checkpoint() -> Result<(), Report> {
     let chain_verifier = super::init(Mainnet, zebra_state::in_memory::init()).await;
 
     // Add a timeout layer
-    let ready_verifier_service =
+    let chain_verifier =
         TimeoutLayer::new(Duration::from_secs(VERIFY_TIMEOUT_SECONDS)).layer(chain_verifier);
 
     let transcript = Transcript::from(BLOCK_VERIFY_TRANSCRIPT_GENESIS.iter().cloned());
-    transcript.check(ready_verifier_service).await.unwrap();
+    transcript.check(chain_verifier).await.unwrap();
 
     Ok(())
 }
@@ -263,11 +263,11 @@ async fn verify_fail_no_coinbase() -> Result<(), Report> {
     let (chain_verifier, state_service) = verifiers_from_network(Mainnet);
 
     // Add a timeout layer
-    let ready_verifier_service =
+    let chain_verifier =
         TimeoutLayer::new(Duration::from_secs(VERIFY_TIMEOUT_SECONDS)).layer(chain_verifier);
 
     let transcript = Transcript::from(NO_COINBASE_TRANSCRIPT.iter().cloned());
-    transcript.check(ready_verifier_service).await.unwrap();
+    transcript.check(chain_verifier).await.unwrap();
 
     let transcript = Transcript::from(NO_COINBASE_STATE_TRANSCRIPT.iter().cloned());
     transcript.check(state_service).await.unwrap();
@@ -288,11 +288,11 @@ async fn round_trip_checkpoint() -> Result<(), Report> {
     let (chain_verifier, state_service) = verifiers_from_network(Mainnet);
 
     // Add a timeout layer
-    let ready_verifier_service =
+    let chain_verifier =
         TimeoutLayer::new(Duration::from_secs(VERIFY_TIMEOUT_SECONDS)).layer(chain_verifier);
 
     let transcript = Transcript::from(BLOCK_VERIFY_TRANSCRIPT_GENESIS.iter().cloned());
-    transcript.check(ready_verifier_service).await.unwrap();
+    transcript.check(chain_verifier).await.unwrap();
 
     let transcript = Transcript::from(STATE_VERIFY_TRANSCRIPT_GENESIS.iter().cloned());
     transcript.check(state_service).await.unwrap();
@@ -313,23 +313,17 @@ async fn verify_fail_add_block_checkpoint() -> Result<(), Report> {
     let (chain_verifier, state_service) = verifiers_from_network(Mainnet);
 
     // Add a timeout layer
-    let ready_verifier_service =
+    let chain_verifier =
         TimeoutLayer::new(Duration::from_secs(VERIFY_TIMEOUT_SECONDS)).layer(chain_verifier);
 
     let transcript = Transcript::from(BLOCK_VERIFY_TRANSCRIPT_GENESIS.iter().cloned());
-    transcript
-        .check(ready_verifier_service.clone())
-        .await
-        .unwrap();
+    transcript.check(chain_verifier.clone()).await.unwrap();
 
     let transcript = Transcript::from(STATE_VERIFY_TRANSCRIPT_GENESIS.iter().cloned());
     transcript.check(state_service.clone()).await.unwrap();
 
     let transcript = Transcript::from(BLOCK_VERIFY_TRANSCRIPT_GENESIS_FAIL.iter().cloned());
-    transcript
-        .check(ready_verifier_service.clone())
-        .await
-        .unwrap();
+    transcript.check(chain_verifier.clone()).await.unwrap();
 
     let transcript = Transcript::from(STATE_VERIFY_TRANSCRIPT_GENESIS.iter().cloned());
     transcript.check(state_service.clone()).await.unwrap();
