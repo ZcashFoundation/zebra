@@ -369,10 +369,10 @@ proptest! {
     /// Make sure the conversions don't panic, and that they compare correctly.
    #[test]
    fn prop_compact_expand_work(compact in any::<CompactDifficulty>()) {
-        // TODO: use random ExpandedDifficulties, once we have ExpandedDifficulty::to_compact()
-        //
-        // This change will increase the number of valid random work values.
-     let expanded = compact.to_expanded();
+       // TODO: use random ExpandedDifficulties, once we have ExpandedDifficulty::to_compact()
+       //
+       // This change will increase the number of valid random work values.
+       let expanded = compact.to_expanded();
        let work = compact.to_work();
 
        let hash_zero = BlockHeaderHash([0; 32]);
