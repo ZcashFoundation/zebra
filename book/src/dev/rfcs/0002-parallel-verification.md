@@ -276,13 +276,24 @@ goals.
 # Rationale and alternatives
 [rationale-and-alternatives]: #rationale-and-alternatives
 
-**TODO:** expand on notes below
-
-- Why is this design the best in the space of possible designs?
-  - It's a good enough design to build upon
+- What makes this design a good design?
+  - It enables a significant amount of parallelism
+  - It is simpler than some other alternatives
+  - It uses existing Rust language facilities, mainly Futures and await/async
+- Is this design a good basis for later designs or implementations?
+  - We have built a UTXO design on this design
+  - We believe we can build "recent blocks" and "chain summary" designs on this
+    design
+  - Each specific detailed design will need to consider how the relevant data
+    dependencies are persisted
 - What other designs have been considered and what is the rationale for not choosing them?
   - Serial verification
-  - Effectively single-threaded
+    - Effectively single-threaded
+  - Awaiting data dependencies as soon as they are needed
+    - Less parallelism
+  - Providing direct access to the state
+    - Might cause data races, might be prevented by Rust's ownership rules
+    - Higher risk of bugs
 - What is the impact of not doing this?
   - Verification is slow, we can't batch or parallelise some parts of the
     verification
