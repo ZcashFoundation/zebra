@@ -113,22 +113,16 @@ pub struct Work(u128);
 
 impl fmt::Debug for Work {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let log2_work = f64::from_str(&self.0.to_string()).ok().map(f64::log2);
-
         // There isn't a standard way to represent alternate formats for the
         // same value.
-        let mut f = f.debug_tuple("Work");
-        // Use hex, because expanded difficulty is in hex.
-        f.field(&format_args!("{:#x}", self.0))
+        f.debug_tuple("Work")
+            // Use hex, because expanded difficulty is in hex.
+            .field(&format_args!("{:#x}", self.0))
             // Use decimal, to compare with zcashd
-            .field(&format_args!("{}", self.0));
-
-        if let Some(log2_work) = log2_work {
+            .field(&format_args!("{}", self.0))
             // Use log2, to compare with zcashd
-            f.field(&format_args!("{:.5}", log2_work));
-        }
-
-        f.finish()
+            .field(&format_args!("{:.5}", (self.0 as f64).log2()))
+            .finish()
     }
 }
 
@@ -232,17 +226,15 @@ impl CompactDifficulty {
     ///
     /// [Zcash Specification]: https://zips.z.cash/protocol/canopy.pdf#workdef
     pub fn to_work(&self) -> Option<Work> {
-        let expanded = self.to_expanded();
+        let expanded = self.to_expanded()?;
 
-        if let Some(expanded) = expanded {
-            // We need to compute `2^256 / (expanded + 1)`, but we can't represent
-            // 2^256, as it's too large for a u256. However, as 2^256 is at least as
-            // large as `expanded + 1`, it is equal to
-            // `((2^256 - expanded - 1) / (expanded + 1)) + 1`, or
-            let result = (!expanded.0 / (expanded.0 + 1)) + 1;
-            if result <= u128::MAX.into() {
-                return Some(Work(result.as_u128()));
-            }
+        // We need to compute `2^256 / (expanded + 1)`, but we can't represent
+        // 2^256, as it's too large for a u256. However, as 2^256 is at least as
+        // large as `expanded + 1`, it is equal to
+        // `((2^256 - expanded - 1) / (expanded + 1)) + 1`, or
+        let result = (!expanded.0 / (expanded.0 + 1)) + 1;
+        if result <= u128::MAX.into() {
+            return Some(Work(result.as_u128()));
         }
 
         None

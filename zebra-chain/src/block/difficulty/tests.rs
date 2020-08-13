@@ -304,6 +304,15 @@ fn block_difficulty() -> Result<(), Report> {
 
             previous_cumulative_work = cumulative_work;
         }
+
+        /// SPANDOC: Calculate the work for mainnet block {?height}
+        let _work = block
+            .header
+            .difficulty_threshold
+            .to_work()
+            .expect("Chain blocks have valid work.");
+
+        // TODO: check work comparison operators and cumulative work addition
     }
 
     Ok(())
