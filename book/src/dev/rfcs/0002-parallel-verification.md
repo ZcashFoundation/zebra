@@ -50,12 +50,20 @@ Data:
                     previous blocks.
 * **data dependency:** Information contained in the previous block and its
                        chain fork, which is required to verify the current block.
-* **semantic verification:** Verifying the consensus rules on the data structures
-                             defined by the protocol.
-* **state:** The set of verified blocks. The state may also cache some dependent
-             data, so that we can efficienty verify subsequent blocks.
+* **state:** The set of verified blocks. The state might also cache some
+             dependent data, so that we can efficienty verify subsequent blocks.
+
+Verification Stages:
+<!-- The verification stages are listed in chronological order -->
 * **structural verification:** Parsing raw bytes into the data structures defined
                                by the protocol.
+* **semantic verification:** Verifying the consensus rules on the data structures
+                             defined by the protocol.
+* **contextual verification:** Verifying the current block, once its data
+                               dependencies have been satisfied by a verified
+                               previous block. This verification might also use
+                               the cached state corresponding to the previous
+                               block.
 
 # Guide-level explanation
 [guide-level-explanation]: #guide-level-explanation
@@ -74,16 +82,16 @@ the verification in parallel.
 Here's how Zebra can verify the different `BlockHeight` consensus rules in
 parallel:
 
-**Parsing:**
+**Structural Verification:**
 
 1. Parse the Block into a BlockHeader and a list of transactions.
 
-**Verification - No Data Dependencies:**
+**Semantic Verification: No Data Dependencies:**
 
 2. Check that the first input of the first transaction in the block is a coinbase
    input with a valid block height in its data field.
 
-**Verification - Deferring A Data Dependency:**
+**Semantic Verification: Deferring a Data Dependency:**
 
 3. Verify other consensus rules that depend on BlockHeight, assuming that the
    BlockHeight is correct. For example, many consensus rules depend on the
@@ -91,12 +99,14 @@ parallel:
    these consensus rules, assuming the BlockHeight and Network Upgrade are
    correct.
 
-**Verification - Checking A Data Dependency:**
+**Contextual Verification:**
 
-4. Await the previous block. When it arrives, check that the BlockHeight of this
-   Block is one more than the BlockHeight of the previous block. If the check
-   passes, commit the block to the state. Otherwise, reject the block as invalid.
-
+4. Submit the block to the state for contextual verification. When it is ready to
+   be committed (it may arrive before the previous block), check all deferred
+   constraints, including the constraint that the block height of this block is
+   one more than the block height of its parent block. If all constraints are
+   satisfied, commit the block to the state. Otherwise, reject the block as
+   invalid.
 
 ## Zebra Design
 [zebra-design]: #zebra-design
@@ -149,7 +159,7 @@ In Zebra, verification occurs in the following stages:
     older blocks in its chain fork.)
   * Fields with complex data dependencies require their own parallel verification
     designs. These designs are out of scope for this RFC.
-* **State Updates:** After a block is verified, it is added to the state. The
+* **Contextual Verification:** After a block is verified, it is added to the state. The
   details of state updates, and their interaction with semantic verification,
   are out of scope for this RFC.
 
@@ -173,7 +183,7 @@ Verification is implemented by the following traits and services:
   * Internally, the `ChainVerifier` selects between a `CheckpointVerifier` for
     blocks that are within the checkpoint range, and a `BlockVerifier` for
     recent blocks.
-* **State Updates:**
+* **Contextual Verification:**
   * `zebra_state::init`: Provides the state update service, which accepts
     requests to add blocks to the state.
 
@@ -206,7 +216,7 @@ Here is how the `CheckpointVerifier` implements each verification stage:
     the `CheckpointVerifier` design.)
   * `process_checkpoint_range`: makes sure that the blocks in the checkpoint
     range have an unbroken chain of previous block hashes.
-* **State Updates:**
+* **Contextual Verification:**
   * *As Above:* the `CheckpointVerifier` returns success to the `ChainVerifier`,
     which sends verified `Block`s to the state service.
 
@@ -231,7 +241,7 @@ Here is how the `BlockVerifier` implements each verification stage:
     * check data dependencies.
     To maximise concurrency, we should write verification functions in this
     specific order, so the awaits are as late as possible.
-* **State Updates:**
+* **Contextual Verification:**
   * *As Above:* the `BlockVerifier` returns success to the `ChainVerifier`,
     which sends verified `Block`s to the state service.
 
