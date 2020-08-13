@@ -92,7 +92,9 @@ pub enum Transaction {
 
 impl Transaction {
     /// Iterate over the transparent inputs of this transaction, if any.
-    pub fn inputs(&self) -> impl Iterator<Item = &TransparentInput> {
+    pub fn inputs(
+        &self,
+    ) -> impl Iterator<Item = &TransparentInput> + DoubleEndedIterator + ExactSizeIterator {
         match self {
             Transaction::V1 { ref inputs, .. } => inputs.iter(),
             Transaction::V2 { ref inputs, .. } => inputs.iter(),
@@ -102,7 +104,9 @@ impl Transaction {
     }
 
     /// Iterate over the transparent outputs of this transaction, if any.
-    pub fn outputs(&self) -> impl Iterator<Item = &TransparentOutput> {
+    pub fn outputs(
+        &self,
+    ) -> impl Iterator<Item = &TransparentOutput> + DoubleEndedIterator + ExactSizeIterator {
         match self {
             Transaction::V1 { ref outputs, .. } => outputs.iter(),
             Transaction::V2 { ref outputs, .. } => outputs.iter(),
@@ -135,5 +139,14 @@ impl Transaction {
     pub fn contains_coinbase_input(&self) -> bool {
         self.inputs()
             .any(|input| matches!(input, TransparentInput::Coinbase { .. }))
+    }
+
+    /// Returns `true` if this transaction is a coinbase transaction.
+    pub fn is_coinbase(&self) -> bool {
+        self.inputs().len() == 1
+            && matches!(
+                self.inputs().next(),
+                Some(TransparentInput::Coinbase { .. })
+            )
     }
 }
