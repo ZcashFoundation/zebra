@@ -13,7 +13,7 @@
 use crate::block::BlockHeaderHash;
 
 use std::cmp::{Ordering, PartialEq, PartialOrd};
-use std::{fmt, ops::Add, ops::AddAssign, str::FromStr};
+use std::{fmt, ops::Add, ops::AddAssign};
 
 use primitive_types::U256;
 
