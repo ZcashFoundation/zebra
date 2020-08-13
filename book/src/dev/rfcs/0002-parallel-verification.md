@@ -80,13 +80,12 @@ parallel:
 
 **Verification - No Data Dependencies:**
 
-2. Check that all BlockHeights are within the range of valid heights.^
-3. Check that the block has exactly one BlockHeight.
-4. Check that the BlockHeight is in the first transaction in the Block.
+2. Check that the first input of the first transaction in the block is a coinbase
+   input with a valid block height in its data field.
 
 **Verification - Deferring A Data Dependency:**
 
-5. Verify other consensus rules that depend on BlockHeight, assuming that the
+3. Verify other consensus rules that depend on BlockHeight, assuming that the
    BlockHeight is correct. For example, many consensus rules depend on the
    current Network Upgrade, which is determined by the BlockHeight. We verify
    these consensus rules, assuming the BlockHeight and Network Upgrade are
@@ -94,13 +93,10 @@ parallel:
 
 **Verification - Checking A Data Dependency:**
 
-6. Await the previous block. When it arrives, check that the BlockHeight of this
+4. Await the previous block. When it arrives, check that the BlockHeight of this
    Block is one more than the BlockHeight of the previous block. If the check
    passes, commit the block to the state. Otherwise, reject the block as invalid.
 
-^ Note that Zebra actually checks the BlockHeight range during parsing. The
-  BlockHeight is stored as a compact integer, so out-of-range BlockHeights take
-  up additional raw bytes during parsing.
 
 ## Zebra Design
 [zebra-design]: #zebra-design
@@ -213,8 +209,6 @@ Here is how the `CheckpointVerifier` implements each verification stage:
 * **State Updates:**
   * *As Above:* the `CheckpointVerifier` returns success to the `ChainVerifier`,
     which sends verified `Block`s to the state service.
-  * Zebra implements the block height consensus rule, which makes sure
-    each block is added to state after its previous block.
 
 ### Block Verification
 [block-verification]: #block-verification
@@ -240,8 +234,6 @@ Here is how the `BlockVerifier` implements each verification stage:
 * **State Updates:**
   * *As Above:* the `BlockVerifier` returns success to the `ChainVerifier`,
     which sends verified `Block`s to the state service.
-  * Zebra implements the block height consensus rule, which makes sure
-    each block is added to state after its previous block.
 
 ## Zcash Protocol Design
 [zcash-protocol]: #zcash-protocol
