@@ -57,7 +57,7 @@ impl Block {
         use crate::transaction::TransparentInput;
         self.transactions
             .get(0)
-            .and_then(|tx| tx.inputs().next())
+            .and_then(|tx| tx.inputs().get(0))
             .and_then(|input| match input {
                 TransparentInput::Coinbase { ref height, .. } => Some(*height),
                 _ => None,

@@ -91,27 +91,23 @@ pub enum Transaction {
 }
 
 impl Transaction {
-    /// Iterate over the transparent inputs of this transaction, if any.
-    pub fn inputs(
-        &self,
-    ) -> impl Iterator<Item = &TransparentInput> + DoubleEndedIterator + ExactSizeIterator {
+    /// Access the transparent inputs of this transaction, regardless of version.
+    pub fn inputs(&self) -> &[TransparentInput] {
         match self {
-            Transaction::V1 { ref inputs, .. } => inputs.iter(),
-            Transaction::V2 { ref inputs, .. } => inputs.iter(),
-            Transaction::V3 { ref inputs, .. } => inputs.iter(),
-            Transaction::V4 { ref inputs, .. } => inputs.iter(),
+            Transaction::V1 { ref inputs, .. } => inputs,
+            Transaction::V2 { ref inputs, .. } => inputs,
+            Transaction::V3 { ref inputs, .. } => inputs,
+            Transaction::V4 { ref inputs, .. } => inputs,
         }
     }
 
-    /// Iterate over the transparent outputs of this transaction, if any.
-    pub fn outputs(
-        &self,
-    ) -> impl Iterator<Item = &TransparentOutput> + DoubleEndedIterator + ExactSizeIterator {
+    /// Access the transparent outputs of this transaction, regardless of version.
+    pub fn outputs(&self) -> &[TransparentOutput] {
         match self {
-            Transaction::V1 { ref outputs, .. } => outputs.iter(),
-            Transaction::V2 { ref outputs, .. } => outputs.iter(),
-            Transaction::V3 { ref outputs, .. } => outputs.iter(),
-            Transaction::V4 { ref outputs, .. } => outputs.iter(),
+            Transaction::V1 { ref outputs, .. } => outputs,
+            Transaction::V2 { ref outputs, .. } => outputs,
+            Transaction::V3 { ref outputs, .. } => outputs,
+            Transaction::V4 { ref outputs, .. } => outputs,
         }
     }
 
@@ -138,6 +134,7 @@ impl Transaction {
     /// Returns `true` if transaction contains any coinbase inputs.
     pub fn contains_coinbase_input(&self) -> bool {
         self.inputs()
+            .iter()
             .any(|input| matches!(input, TransparentInput::Coinbase { .. }))
     }
 
@@ -145,7 +142,7 @@ impl Transaction {
     pub fn is_coinbase(&self) -> bool {
         self.inputs().len() == 1
             && matches!(
-                self.inputs().next(),
+                self.inputs().get(0),
                 Some(TransparentInput::Coinbase { .. })
             )
     }
