@@ -15,7 +15,6 @@
 mod tests;
 
 use crate::checkpoint::{CheckpointList, CheckpointVerifier};
-use crate::parameters::NetworkUpgrade::Sapling;
 
 use futures_util::FutureExt;
 use std::{
@@ -30,7 +29,7 @@ use tracing_futures::Instrument;
 
 use zebra_chain::block::{Block, BlockHeaderHash};
 use zebra_chain::types::BlockHeight;
-use zebra_chain::Network;
+use zebra_chain::{Network, NetworkUpgrade::Sapling};
 
 /// The maximum expected gap between blocks.
 ///
@@ -78,7 +77,6 @@ where
     /// Used for debugging.
     ///
     /// Updated before verification: the block at this height might not be valid.
-    /// Not updated for unexpected high blocks.
     last_block_height: Option<BlockHeight>,
 }
 
@@ -130,10 +128,10 @@ where
             (Some(BlockHeight(block_height)), Some(BlockHeight(last_block_height)))
                 if (block_height > last_block_height + MAX_EXPECTED_BLOCK_GAP) =>
             {
+                self.last_block_height = Some(BlockHeight(block_height));
                 true
             }
             (Some(block_height), _) => {
-                // Update the last height if the block height was expected
                 self.last_block_height = Some(block_height);
                 false
             }
@@ -147,11 +145,15 @@ where
 
             // Call a verifier based on the block height and checkpoints.
             if is_higher_than_max_checkpoint(block_height, max_checkpoint_height) {
-                // Log an info-level message on early high blocks.
+                // Log a message on early high blocks.
                 // The sync service rejects most of these blocks, but we
                 // still want to know if a large number get through.
+                //
+                // This message can also happen if we keep getting unexpected
+                // low blocks. (We can't distinguish between these cases, until
+                // we've verified the blocks.)
                 if is_unexpected_high_block {
-                    tracing::info!(?block_height, "unexpected high block");
+                    tracing::debug!(?block_height, "unexpected high block, or recent unexpected low blocks");
                 }
 
                 block_verifier

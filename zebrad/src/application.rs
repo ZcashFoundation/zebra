@@ -1,14 +1,15 @@
 //! Zebrad Abscissa Application
 
-use crate::{commands::ZebradCmd, config::ZebradConfig};
+use crate::{commands::ZebradCmd, components::tracing::Tracing, config::ZebradConfig};
 use abscissa_core::{
     application::{self, AppCell},
     config,
+    config::Configurable,
     terminal::component::Terminal,
-    trace::Tracing,
-    Application, Component, EntryPoint, FrameworkError, StandardPaths,
+    Application, Component, EntryPoint, FrameworkError, Shutdown, StandardPaths,
 };
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use application::fatal_error;
+use std::process;
 
 /// Application state
 pub static APPLICATION: AppCell<ZebradApp> = AppCell::new();
@@ -86,18 +87,11 @@ impl Application for ZebradApp {
         command: &Self::Cmd,
     ) -> Result<Vec<Box<dyn Component<Self>>>, FrameworkError> {
         let terminal = Terminal::new(self.term_colors(command));
-
         // This MUST happen after `Terminal::new` to ensure our preferred panic
         // handler is the last one installed
         color_eyre::install().unwrap();
 
-        if ZebradApp::command_is_server(&command) {
-            let tracing = self.tracing_component(command);
-            Ok(vec![Box::new(terminal), Box::new(tracing)])
-        } else {
-            init_tracing_backup();
-            Ok(vec![Box::new(terminal)])
-        }
+        Ok(vec![Box::new(terminal)])
     }
 
     /// Register all components used by this application.
@@ -111,14 +105,59 @@ impl Application for ZebradApp {
         };
 
         let mut components = self.framework_components(command)?;
+
+        // Load config *after* framework components so that we can
+        // report an error to the terminal if it occurs.
+        let config = command
+            .config_path()
+            .map(|path| self.load_config(&path))
+            .transpose()?
+            .unwrap_or_default();
+
+        let config = command.process_config(config)?;
+        self.config = Some(config);
+
+        let cfg_ref = self
+            .config
+            .as_ref()
+            .expect("config is loaded before register_components");
+
+        let default_filter = if command.verbose { "debug" } else { "info" };
+        let is_server = command
+            .command
+            .as_ref()
+            .map(ZebradCmd::is_server)
+            .unwrap_or(false);
+
         // Launch network endpoints for long-running commands
-        if ZebradApp::command_is_server(&command) {
+        if is_server {
+            let filter = cfg_ref.tracing.filter.as_deref().unwrap_or(default_filter);
+            let flame_root = cfg_ref.tracing.flamegraph.as_deref();
+            components.push(Box::new(Tracing::new(filter, flame_root)?));
             components.push(Box::new(TokioComponent::new()?));
-            components.push(Box::new(TracingEndpoint::new()?));
-            components.push(Box::new(MetricsEndpoint::new()?));
+            components.push(Box::new(TracingEndpoint::new(cfg_ref)?));
+            components.push(Box::new(MetricsEndpoint::new(cfg_ref)?));
+        } else {
+            components.push(Box::new(Tracing::new(default_filter, None)?));
         }
 
         self.state.components.register(components)
+    }
+
+    /// Load this application's configuration and initialize its components.
+    fn init(&mut self, command: &Self::Cmd) -> Result<(), FrameworkError> {
+        // Create and register components with the application.
+        // We do this first to calculate a proper dependency ordering before
+        // application configuration is processed
+        self.register_components(command)?;
+
+        let config = self.config.take().unwrap();
+
+        // Fire callback regardless of whether any config was loaded to
+        // in order to signal state in the application lifecycle
+        self.after_config(config)?;
+
+        Ok(())
     }
 
     /// Post-configuration lifecycle callback.
@@ -126,126 +165,26 @@ impl Application for ZebradApp {
     /// Called regardless of whether config is loaded to indicate this is the
     /// time in app lifecycle when configuration would be loaded if
     /// possible.
-    fn after_config(
-        &mut self,
-        config: Self::Cfg,
-        command: &Self::Cmd,
-    ) -> Result<(), FrameworkError> {
-        use crate::components::{
-            metrics::MetricsEndpoint, tokio::TokioComponent, tracing::TracingEndpoint,
-        };
-
+    fn after_config(&mut self, config: Self::Cfg) -> Result<(), FrameworkError> {
         // Configure components
         self.state.components.after_config(&config)?;
         self.config = Some(config);
 
-        if ZebradApp::command_is_server(&command) {
-            let level = self.level(command);
-            self.state
-                .components
-                .get_downcast_mut::<Tracing>()
-                .expect("Tracing component should be available")
-                .reload_filter(level);
-
-            // Work around some issues with dependency injection and configs
-            let config = self
-                .config
-                .clone()
-                .expect("config was set to Some earlier in this function");
-
-            let tokio_component = self
-                .state
-                .components
-                .get_downcast_ref::<TokioComponent>()
-                .expect("Tokio component should be available");
-
-            self.state
-                .components
-                .get_downcast_ref::<TracingEndpoint>()
-                .expect("Tracing endpoint should be available")
-                .open_endpoint(&config.tracing, tokio_component);
-
-            self.state
-                .components
-                .get_downcast_ref::<MetricsEndpoint>()
-                .expect("Metrics endpoint should be available")
-                .open_endpoint(&config.metrics, tokio_component);
-        }
-
         Ok(())
     }
-}
 
-impl ZebradApp {
-    fn level(&self, command: &EntryPoint<ZebradCmd>) -> String {
-        // `None` outputs zebrad usage information to stdout
-        let command_uses_stdout = match &command.command {
-            None => true,
-            Some(c) => c.uses_stdout(),
-        };
+    fn shutdown(&mut self, shutdown: Shutdown) -> ! {
+        if let Err(e) = self.state().components.shutdown(self, shutdown) {
+            fatal_error(self, &e)
+        }
 
-        // Allow users to:
-        //  - override all other configs and defaults using the command line
-        //  - see command outputs without spurious log messages, by default
-        //  - override the config file using an environmental variable
-        if command.verbose {
-            "debug".to_string()
-        } else if command_uses_stdout {
-            // Tracing sends output to stdout, so we disable info-level logs for
-            // some commands.
-            //
-            // TODO: send tracing output to stderr. This change requires an abscissa
-            //       update, because `abscissa_core::component::Tracing` uses
-            //       `tracing_subscriber::fmt::Formatter`, which has `Stdout` as a
-            //       type parameter. We need `MakeWriter` or a similar type.
-            "warn".to_string()
-        } else if let Ok(level) = std::env::var("ZEBRAD_LOG") {
-            level
-        } else if let Some(ZebradConfig {
-            tracing:
-                crate::config::TracingSection {
-                    filter: Some(filter),
-                    endpoint_addr: _,
-                },
-            ..
-        }) = &self.config
-        {
-            filter.clone()
-        } else {
-            "info".to_string()
+        // Swap out a fake app so we can trigger the destructor on the original
+        let _ = std::mem::take(self);
+
+        match shutdown {
+            Shutdown::Graceful => process::exit(0),
+            Shutdown::Forced => process::exit(1),
+            Shutdown::Crash => process::exit(2),
         }
     }
-
-    fn tracing_component(&self, command: &EntryPoint<ZebradCmd>) -> Tracing {
-        // Construct a tracing subscriber with the supplied filter and enable reloading.
-        let builder = tracing_subscriber::FmtSubscriber::builder()
-            .with_env_filter(self.level(command))
-            .with_filter_reloading();
-        let filter_handle = builder.reload_handle();
-
-        builder
-            .finish()
-            .with(tracing_error::ErrorLayer::default())
-            .init();
-
-        filter_handle.into()
-    }
-
-    /// Returns true if command is a server command.
-    ///
-    /// Server commands use long-running components such as tracing, metrics,
-    /// and the tokio runtime.
-    fn command_is_server(command: &EntryPoint<ZebradCmd>) -> bool {
-        // `None` outputs zebrad usage information and exits
-        match &command.command {
-            None => false,
-            Some(c) => c.is_server(),
-        }
-    }
-}
-
-fn init_tracing_backup() {
-    tracing_subscriber::Registry::default()
-        .with(tracing_error::ErrorLayer::default())
-        .init();
 }

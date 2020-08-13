@@ -17,9 +17,6 @@ pub struct Config {
     /// The network to connect to.
     pub network: Network,
 
-    /// The user-agent to advertise.
-    pub user_agent: String,
-
     /// A list of initial peers for the peerset when operating on
     /// mainnet.
     pub initial_mainnet_peers: HashSet<String>,
@@ -28,22 +25,8 @@ pub struct Config {
     /// testnet.
     pub initial_testnet_peers: HashSet<String>,
 
-    /// The outgoing request buffer size for the peer set.
-    pub peerset_request_buffer_size: usize,
-
     /// The initial target size for the peer set.
     pub peerset_initial_target_size: usize,
-
-    // Note: due to the way this is rendered by the toml
-    // serializer, the Duration fields should come last.
-    /// The default RTT estimate for peer responses, used in load-balancing.
-    pub ewma_default_rtt: Duration,
-
-    /// The decay time for the exponentially-weighted moving average response time.
-    pub ewma_decay_time: Duration,
-
-    /// The timeout for peer handshakes.
-    pub handshake_timeout: Duration,
 
     /// How frequently we attempt to connect to a new peer.
     pub new_peer_interval: Duration,
@@ -92,14 +75,9 @@ impl Default for Config {
             listen_addr: "0.0.0.0:8233"
                 .parse()
                 .expect("Hardcoded address should be parseable"),
-            user_agent: crate::constants::USER_AGENT.to_owned(),
             network: Network::Mainnet,
             initial_mainnet_peers: mainnet_peers,
             initial_testnet_peers: testnet_peers,
-            ewma_default_rtt: Duration::from_secs(1),
-            ewma_decay_time: Duration::from_secs(60),
-            peerset_request_buffer_size: 10,
-            handshake_timeout: Duration::from_secs(4),
             new_peer_interval: Duration::from_secs(60),
             peerset_initial_target_size: 50,
         }

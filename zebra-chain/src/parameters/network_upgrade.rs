@@ -2,11 +2,11 @@
 
 use NetworkUpgrade::*;
 
+use crate::types::BlockHeight;
+use crate::{Network, Network::*};
+
 use std::collections::{BTreeMap, HashMap};
 use std::ops::Bound::*;
-
-use zebra_chain::types::BlockHeight;
-use zebra_chain::{Network, Network::*};
 
 /// A Zcash network upgrade.
 ///

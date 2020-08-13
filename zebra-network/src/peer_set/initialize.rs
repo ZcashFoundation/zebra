@@ -10,7 +10,7 @@ use std::{
 
 use futures::{
     channel::mpsc,
-    future::{self, Future, FutureExt},
+    future::{self, FutureExt},
     sink::SinkExt,
     stream::{FuturesUnordered, StreamExt},
 };
@@ -19,13 +19,14 @@ use tower::{
     buffer::Buffer,
     discover::{Change, ServiceStream},
     layer::Layer,
+    util::BoxService,
     Service, ServiceExt,
 };
 use tower_load::{peak_ewma::PeakEwmaDiscover, NoInstrument};
 
 use crate::{
-    peer, timestamp_collector::TimestampCollector, AddressBook, BoxedStdError, Config, Request,
-    Response,
+    constants, peer, timestamp_collector::TimestampCollector, AddressBook, BoxedStdError, Config,
+    Request, Response,
 };
 
 use zebra_chain::Network::*;
@@ -40,14 +41,7 @@ pub async fn init<S>(
     config: Config,
     inbound_service: S,
 ) -> (
-    impl Service<
-            Request,
-            Response = Response,
-            Error = BoxedStdError,
-            Future = impl Future<Output = Result<Response, BoxedStdError>> + Send,
-        > + Send
-        + Clone
-        + 'static,
+    Buffer<BoxService<Request, Response, BoxedStdError>, Request>,
     Arc<Mutex<AddressBook>>,
 )
 where
@@ -62,7 +56,7 @@ where
     // enforce timeouts as specified in the Config.
     let (listener, connector) = {
         use tower::timeout::TimeoutLayer;
-        let hs_timeout = TimeoutLayer::new(config.handshake_timeout);
+        let hs_timeout = TimeoutLayer::new(constants::HANDSHAKE_TIMEOUT);
         let hs = peer::Handshake::new(config.clone(), inbound_service, timestamp_collector);
         (
             hs_timeout.layer(hs.clone()),
@@ -84,14 +78,14 @@ where
                 // so discard any errored connections...
                 peerset_rx.filter(|result| future::ready(result.is_ok())),
             ),
-            config.ewma_default_rtt,
-            config.ewma_decay_time,
+            constants::EWMA_DEFAULT_RTT,
+            constants::EWMA_DECAY_TIME,
             NoInstrument,
         ),
         demand_tx.clone(),
         handle_rx,
     );
-    let peer_set = Buffer::new(peer_set, config.peerset_request_buffer_size);
+    let peer_set = Buffer::new(BoxService::new(peer_set), constants::PEERSET_BUFFER_SIZE);
 
     // Connect the tx end to the 3 peer sources:
 
@@ -191,6 +185,8 @@ where
     S::Future: Send + 'static,
 {
     let mut listener = TcpListener::bind(addr).await?;
+    let local_addr = listener.local_addr()?;
+    info!("Opened Zcash protocol endpoint at {}", local_addr);
     loop {
         if let Ok((tcp_stream, addr)) = listener.accept().await {
             debug!(?addr, "got incoming connection");

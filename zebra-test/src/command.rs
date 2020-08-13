@@ -3,7 +3,7 @@ use color_eyre::{
     Help, SectionExt,
 };
 use std::process::{Child, Command, ExitStatus, Output};
-use std::{env, fs};
+use std::{fs, io::Write};
 use tempdir::TempDir;
 
 #[cfg(unix)]
@@ -15,9 +15,19 @@ pub fn test_cmd(path: &str) -> Result<(Command, impl Drop)> {
     let mut cmd = Command::new(path);
     cmd.current_dir(dir.path());
 
-    let state_dir = dir.path().join("state");
-    fs::create_dir(&state_dir)?;
-    env::set_var("ZEBRAD_CACHE_DIR", state_dir);
+    let cache_dir = dir.path().join("state");
+    fs::create_dir(&cache_dir)?;
+
+    fs::File::create(dir.path().join("zebrad.toml"))?.write_all(
+        format!(
+            "[state]\ncache_dir = '{}'\nmemory_cache_bytes = 256000000",
+            cache_dir
+                .into_os_string()
+                .into_string()
+                .map_err(|_| eyre!("tmp dir path cannot be encoded as UTF8"))?
+        )
+        .as_bytes(),
+    )?;
 
     Ok((cmd, dir))
 }
@@ -156,15 +166,16 @@ impl TestChild {
 
     #[spandoc::spandoc]
     pub fn wait_with_output(self) -> Result<TestOutput> {
-        let cmd = format!("{:?}", self);
-
         /// SPANDOC: waiting for command to exit
         let output = self.child.wait_with_output().with_section({
-            let cmd = cmd.clone();
+            let cmd = self.cmd.clone();
             || cmd.header("Command:")
         })?;
 
-        Ok(TestOutput { output, cmd })
+        Ok(TestOutput {
+            output,
+            cmd: self.cmd,
+        })
     }
 }
 
@@ -212,7 +223,7 @@ impl TestOutput {
 
     pub fn stdout_contains(&self, regex: &str) -> Result<&Self> {
         let re = regex::Regex::new(regex)?;
-        let stdout = String::from_utf8_lossy(self.output.stdout.as_slice());
+        let stdout = String::from_utf8_lossy(&self.output.stdout);
 
         for line in stdout.lines() {
             if re.is_match(line) {
@@ -228,6 +239,37 @@ impl TestOutput {
         ))
         .with_section(command)
         .with_section(stdout)
+    }
+
+    pub fn stdout_equals(&self, s: &str) -> Result<&Self> {
+        let stdout = String::from_utf8_lossy(&self.output.stdout);
+
+        if stdout == s {
+            return Ok(self);
+        }
+
+        let command = || self.cmd.clone().header("Command:");
+        let stdout = || stdout.into_owned().header("Stdout:");
+
+        Err(eyre!("stdout of command is not equal the given string"))
+            .with_section(command)
+            .with_section(stdout)
+    }
+
+    pub fn stdout_matches(&self, regex: &str) -> Result<&Self> {
+        let re = regex::Regex::new(regex)?;
+        let stdout = String::from_utf8_lossy(&self.output.stdout);
+
+        if re.is_match(&stdout) {
+            return Ok(self);
+        }
+
+        let command = || self.cmd.clone().header("Command:");
+        let stdout = || stdout.into_owned().header("Stdout:");
+
+        Err(eyre!("stdout of command is not equal to the given regex"))
+            .with_section(command)
+            .with_section(stdout)
     }
 
     /// Returns true if the program was killed, false if exit was by another reason.

@@ -330,7 +330,7 @@ impl CheckpointVerifier {
             InitialTip(previous_height) | PreviousCheckpoint(previous_height)
                 if (height <= previous_height) =>
             {
-                Err("block height has already been verified")?
+                Err(format!("Block has already been verified. {:?}", height))?
             }
             InitialTip(_) | PreviousCheckpoint(_) => {}
             // We're finished, so no checkpoint height is valid
@@ -394,7 +394,9 @@ impl CheckpointVerifier {
         let height = match self.check_block(&block) {
             Ok(height) => height,
             Err(error) => {
-                tracing::warn!(?error);
+                // Block errors happen frequently on mainnet, due to bad peers.
+                tracing::debug!(?error);
+
                 // Sending might fail, depending on what the caller does with rx,
                 // but there's nothing we can do about it.
                 let _ = tx.send(Err(error));
@@ -410,6 +412,18 @@ impl CheckpointVerifier {
             .entry(height)
             .or_insert_with(|| QueuedBlockList::with_capacity(1));
 
+        let hash = block.hash();
+
+        for qb in qblocks.iter_mut() {
+            if qb.hash == hash {
+                let old_tx = std::mem::replace(&mut qb.tx, tx);
+                let e = "rejected older of duplicate verification requests".into();
+                tracing::debug!(?e);
+                let _ = old_tx.send(Err(e));
+                return rx;
+            }
+        }
+
         // Memory DoS resistance: limit the queued blocks at each height
         if qblocks.len() >= MAX_QUEUED_BLOCKS_PER_HEIGHT {
             let e = "too many queued blocks at this height".into();
@@ -419,7 +433,6 @@ impl CheckpointVerifier {
         }
 
         // Add the block to the list of queued blocks at this height
-        let hash = block.as_ref().into();
         let new_qblock = QueuedBlock { block, hash, tx };
         // This is a no-op for the first block in each QueuedBlockList.
         qblocks.reserve_exact(1);
@@ -573,7 +586,7 @@ impl CheckpointVerifier {
             } else {
                 // The last block height we processed did not have any blocks
                 // with a matching hash, so chain verification has failed.
-                tracing::warn!(
+                tracing::info!(
                     ?current_height,
                     ?current_range,
                     "No valid blocks at height in CheckpointVerifier"
