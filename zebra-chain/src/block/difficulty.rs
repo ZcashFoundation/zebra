@@ -224,19 +224,16 @@ impl CompactDifficulty {
     /// Also returns None on Work overflow, which should be impossible on a
     /// valid chain.
     pub fn to_work(&self) -> Option<Work> {
-        let expanded = self.to_expanded();
-
-        if let Some(expanded) = expanded {
-            // We need to compute `2^256 / (expanded + 1)`, but we can't represent
-            // 2^256, as it's too large for a u256. However, as 2^256 is at least as
-            // large as `expanded + 1`, it is equal to
-            // `((2^256 - expanded - 1) / (expanded + 1)) + 1`, or
-            let result = (!expanded.0 / (expanded.0 + 1)) + 1;
-            if result <= u128::MAX.into() {
-                return Some(Work(result.as_u128()));
-            }
+        let expanded = self.to_expanded()?;
+        // We need to compute `2^256 / (expanded + 1)`, but we can't represent
+        // 2^256, as it's too large for a u256. However, as 2^256 is at least as
+        // large as `expanded + 1`, it is equal to
+        // `((2^256 - expanded - 1) / (expanded + 1)) + 1`, or
+        let result = (!expanded.0 / (expanded.0 + 1)) + 1;
+        if result <= u128::MAX.into() {
+            return Some(Work(result.as_u128()));
         }
-
+        
         None
     }
 }
