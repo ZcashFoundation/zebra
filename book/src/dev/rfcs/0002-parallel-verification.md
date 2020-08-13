@@ -252,17 +252,11 @@ between blocks.
 Try to create designs that:
 * Eliminate data dependencies,
 * Make the changes depend on a version field in the block header or transaction,
-* Make the changes depend on the current Network Upgrade,
+* Make the changes depend on the current Network Upgrade, or
 * Make the changes depend on a field in the current block, with an additional
-  consensus rule to check that field against previous blocks, or
-* Prefer dependencies on older blocks, rather than newer blocks
-  (older blocks are more likely to verify earlier).
+  consensus rule to check that field against previous blocks.
 
-Older dependencies have a design tradeoff:
-* depending on multiple blocks is complex,
-* depending on the previous block makes parallel verification harder.
-
-When making decisions about this dependency tradeoff, consider:
+When making decisions about these design tradeoffs, consider:
 * how the data dependency could be deferred, and
 * the CPU cost of the verification - if it is trivial, then it does not matter if
   the verification is parallelised.
