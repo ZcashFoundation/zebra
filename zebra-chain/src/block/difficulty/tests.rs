@@ -387,7 +387,7 @@ proptest! {
        }
 
        if let Some(work) = work {
-            prop_assert!(work > work_zero);
+           prop_assert!(work > work_zero);
            prop_assert!(work < work_max);
        }
    }

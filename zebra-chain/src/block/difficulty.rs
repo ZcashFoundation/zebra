@@ -223,12 +223,14 @@ impl CompactDifficulty {
 
     /// Calculate the Work for a compact representation.
     ///
-    /// See `Definition of Work` in the Zcash Specification, and
+    /// See `Definition of Work` in the [Zcash Specification][0], and
     /// `GetBlockProof()` in zcashd.
     ///
     /// Returns None if the corresponding ExpandedDifficulty is None.
     /// Also returns None on Work overflow, which should be impossible on a
     /// valid chain.
+    ///
+    /// [0]: https://zips.z.cash/protocol/canopy.pdf#workdef
     pub fn to_work(&self) -> Option<Work> {
         let expanded = self.to_expanded();
 
