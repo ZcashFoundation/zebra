@@ -37,7 +37,7 @@ fn generate_no_args() -> Result<()> {
 #[test]
 fn generate_args() -> Result<()> {
     zebra_test::init();
-    let (mut tempdir, _guard) = tempdir(false)?;
+    let (tempdir, _guard) = tempdir(false)?;
 
     // unexpected free argument `argument`
     let child = get_child(&["generate", "argument"], &tempdir)?;
@@ -54,20 +54,24 @@ fn generate_args() -> Result<()> {
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
-    // add a config file to path
-    tempdir.push("zebrad.toml");
+    // Add a config file name to tempdir path
+    let mut generated_config_path = tempdir.clone();
+    generated_config_path.push("zebrad.toml");
 
     // Valid
     let child = get_child(
-        &["generate", "-o", tempdir.to_str().unwrap()],
-        &tempdir.parent().unwrap().to_path_buf(),
+        &["generate", "-o", generated_config_path.to_str().unwrap()],
+        &tempdir.to_path_buf(),
     )?;
 
     let output = child.wait_with_output()?;
     output.assert_success()?;
 
-    // Check if the file was created
+    // Check if the temp dir still exist
     assert!(tempdir.exists());
+
+    // Check if the file was created
+    assert!(generated_config_path.exists());
 
     Ok(())
 }
@@ -270,27 +274,28 @@ fn serialized_tests() -> Result<()> {
 
 fn valid_generated_config() -> Result<()> {
     zebra_test::init();
-    let (mut tempdir, _guard) = tempdir(false)?;
+    let (tempdir, _guard) = tempdir(false)?;
 
-    // Push configuration file to path
-    tempdir.push("zebrad.toml");
+    // Add a config file name to tempdir path
+    let mut generated_config_path = tempdir.clone();
+    generated_config_path.push("zebrad.toml");
 
     // Generate configuration in temp dir path
     let child = get_child(
-        &["generate", "-o", tempdir.to_str().unwrap()],
-        &tempdir.parent().unwrap().to_path_buf(),
+        &["generate", "-o", generated_config_path.to_str().unwrap()],
+        &tempdir.to_path_buf(),
     )?;
 
     let output = child.wait_with_output()?;
     output.assert_success()?;
 
     // Check if the file was created
-    assert_eq!(tempdir.exists(), true);
+    assert!(generated_config_path.exists());
 
     // Run start using temp dir and kill it at 1 second
     let mut child = get_child(
-        &["-c", tempdir.to_str().unwrap(), "start"],
-        &tempdir.parent().unwrap().to_path_buf(),
+        &["-c", generated_config_path.to_str().unwrap(), "start"],
+        &tempdir.to_path_buf(),
     )?;
     std::thread::sleep(Duration::from_secs(1));
     child.kill()?;
@@ -305,8 +310,8 @@ fn valid_generated_config() -> Result<()> {
 
     // Run seed using temp dir and kill it at 1 second
     let mut child = get_child(
-        &["-c", tempdir.to_str().unwrap(), "seed"],
-        &tempdir.parent().unwrap().to_path_buf(),
+        &["-c", generated_config_path.to_str().unwrap(), "seed"],
+        &tempdir.to_path_buf(),
     )?;
     std::thread::sleep(Duration::from_secs(1));
     child.kill()?;
@@ -318,6 +323,12 @@ fn valid_generated_config() -> Result<()> {
 
     // Make sure the command was killed
     assert!(output.was_killed());
+
+    // Check if the temp dir still exist
+    assert!(tempdir.exists());
+
+    // Check if the created config file still exist
+    assert!(generated_config_path.exists());
 
     Ok(())
 }
