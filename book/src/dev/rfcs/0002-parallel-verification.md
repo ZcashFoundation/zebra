@@ -171,9 +171,6 @@ blocks to be verified in parallel.
 
 Verification is implemented by the following traits and services:
 * **Structural Verification:**
-  * `zebra_network::init`: Provides a downloader service that accepts a
-    `BlockHeaderHash` request, and parses the peer response into a `Block`
-    struct.
   * `zebra_chain::ZcashDeserialize`: A trait for parsing consensus-critical
     data structures from a byte buffer.
 * **Semantic Verification:**
