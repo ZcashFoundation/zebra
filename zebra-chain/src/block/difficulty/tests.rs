@@ -259,9 +259,15 @@ fn block_difficulty() -> Result<(), Report> {
         blockchain.push((block.clone(), block.coinbase_height().unwrap(), hash));
     }
 
-    let zero = ExpandedDifficulty(U256::zero());
-    let one = ExpandedDifficulty(U256::one());
-    let max_value = ExpandedDifficulty(U256::MAX);
+    let diff_zero = ExpandedDifficulty(U256::zero());
+    let diff_one = ExpandedDifficulty(U256::one());
+    let diff_max = ExpandedDifficulty(U256::MAX);
+
+    let work_zero = Work(0);
+    let work_max = Work(u128::MAX);
+
+    let mut cumulative_work = Work::default();
+    let mut previous_cumulative_work = Work::default();
     for (block, height, hash) in blockchain {
         /// SPANDOC: Calculate the threshold for mainnet block {?height}
         let threshold = block
@@ -274,19 +280,30 @@ fn block_difficulty() -> Result<(), Report> {
         {
             assert!(hash <= threshold);
             // also check the comparison operators work
-            assert!(hash > zero);
-            assert!(hash > one);
-            assert!(hash < max_value);
+            assert!(hash > diff_zero);
+            assert!(hash > diff_one);
+            assert!(hash < diff_max);
         }
 
-        /// SPANDOC: Calculate the work for mainnet block {?height}
-        let _work = block
-            .header
-            .difficulty_threshold
-            .to_work()
-            .expect("Chain blocks have valid work.");
+        /// SPANDOC: Check the work for mainnet block {?height}
+        {
+            let work = block
+                .header
+                .difficulty_threshold
+                .to_work()
+                .expect("Chain blocks have valid work.");
+            // also check the comparison operators work
+            assert!(work > work_zero);
+            assert!(work < work_max);
 
-        // TODO: check work comparison operators and cumulative work addition
+            cumulative_work += work;
+            assert!(cumulative_work > work_zero);
+            assert!(cumulative_work < work_max);
+
+            assert!(cumulative_work > previous_cumulative_work);
+
+            previous_cumulative_work = cumulative_work;
+        }
     }
 
     Ok(())
@@ -347,23 +364,32 @@ fn expanded_hash_order() -> Result<(), Report> {
 }
 
 proptest! {
-    /// Check that CompactDifficulty expands without panicking, and compares
-    /// correctly. Also check that the work conversion does not panic.
+    /// Check that CompactDifficulty expands, and converts to work.
+    ///
+    /// Make sure the conversions don't panic, and that they compare correctly.
    #[test]
-   fn prop_compact_expand(compact in any::<CompactDifficulty>()) {
-       // TODO: round-trip test, once we have ExpandedDifficulty::to_compact()
-       let expanded = compact.to_expanded();
+   fn prop_compact_expand_work(compact in any::<CompactDifficulty>()) {
+        // TODO: use random ExpandedDifficulties, once we have ExpandedDifficulty::to_compact()
+        //
+        // This change will increase the number of valid random work values.
+     let expanded = compact.to_expanded();
+       let work = compact.to_work();
 
        let hash_zero = BlockHeaderHash([0; 32]);
        let hash_max = BlockHeaderHash([0xff; 32]);
+
+       let work_zero = Work(0);
+       let work_max = Work(u128::MAX);
 
        if let Some(expanded) = expanded {
            prop_assert!(expanded >= hash_zero);
            prop_assert!(expanded <= hash_max);
        }
 
-       let _work = compact.to_work();
-       // TODO: work comparison and addition
+       if let Some(work) = work {
+            prop_assert!(work > work_zero);
+           prop_assert!(work < work_max);
+       }
    }
 
    /// Check that a random ExpandedDifficulty compares correctly with fixed BlockHeaderHashes.
@@ -395,4 +421,31 @@ proptest! {
    fn prop_expanded_hash_order(expanded in any::<ExpandedDifficulty>(), hash in any::<BlockHeaderHash>()) {
        prop_assert!(expanded < hash || expanded > hash || expanded == hash);
    }
+
+    /// Check that the work values for two random ExpandedDifficulties add
+    /// correctly.
+   #[test]
+    fn prop_work(compact1 in any::<CompactDifficulty>(), compact2 in any::<CompactDifficulty>()) {
+        // TODO: use random ExpandedDifficulties, once we have ExpandedDifficulty::to_compact()
+        //
+        // This change will increase the number of valid random work values.
+        let work1 = compact1.to_work();
+        let work2 = compact2.to_work();
+
+        if let (Some(work1), Some(work2)) = (work1, work2) {
+            let work_limit = Work(u128::MAX/2);
+            if work1 < work_limit && work2 < work_limit {
+                let work_total = work1 + work2;
+                prop_assert!(work_total >= work1);
+                prop_assert!(work_total >= work2);
+            } else if work1 < work_limit {
+                let work_total = work1 + work1;
+                prop_assert!(work_total >= work1);
+            } else if work2 < work_limit {
+                let work_total = work2 + work2;
+                prop_assert!(work_total >= work2);
+            }
+        }
+   }
+
 }

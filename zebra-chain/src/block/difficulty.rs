@@ -13,7 +13,7 @@
 use crate::block::BlockHeaderHash;
 
 use std::cmp::{Ordering, PartialEq, PartialOrd};
-use std::{fmt, str::FromStr};
+use std::{fmt, ops::Add, ops::AddAssign, str::FromStr};
 
 use primitive_types::U256;
 
@@ -108,7 +108,7 @@ impl fmt::Debug for ExpandedDifficulty {
 /// work to ever exceed 2^128. The current total chain work for Zcash is 2^58,
 /// and Bitcoin adds around 2^91 work per year. (Each extra bit represents twice
 /// as much work.)
-#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Clone, Copy, Default, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Work(u128);
 
 impl fmt::Debug for Work {
@@ -305,5 +305,23 @@ impl PartialOrd<ExpandedDifficulty> for BlockHeaderHash {
                 "Unexpected incomparable values: difficulties and hashes have a total order."
             ),
         }
+    }
+}
+
+impl Add for Work {
+    type Output = Self;
+
+    fn add(self, rhs: Work) -> Self {
+        let result = self
+            .0
+            .checked_add(rhs.0)
+            .expect("Work values do not overflow");
+        Work(result)
+    }
+}
+
+impl AddAssign for Work {
+    fn add_assign(&mut self, rhs: Work) {
+        *self = *self + rhs;
     }
 }
