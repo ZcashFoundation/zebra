@@ -378,7 +378,6 @@ impl Decoder for Codec {
                 }
 
                 let body_reader = Cursor::new(&body);
-
                 match &command {
                     b"version\0\0\0\0\0" => self.read_version(body_reader),
                     b"verack\0\0\0\0\0\0" => self.read_verack(body_reader),
