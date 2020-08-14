@@ -113,7 +113,7 @@ where
                 tcp_stream,
                 Codec::builder()
                     .for_network(network)
-                    .for_address(addr.ip().to_string())
+                    .with_metrics_label(addr.ip().to_string())
                     .finish(),
             );
 

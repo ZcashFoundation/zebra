@@ -45,8 +45,8 @@ pub struct Builder {
     version: Version,
     /// The maximum allowable message length.
     max_len: usize,
-    /// The address of the peer this codec is going to be used with.
-    addr: Option<String>,
+    /// An optional label to use for reporting metrics.
+    metrics_label: Option<String>,
 }
 
 impl Codec {
@@ -56,7 +56,7 @@ impl Codec {
             network: Network::Mainnet,
             version: constants::CURRENT_VERSION,
             max_len: MAX_PROTOCOL_MESSAGE_LEN,
-            addr: None,
+            metrics_label: None,
         }
     }
 
@@ -73,13 +73,6 @@ impl Builder {
             builder: self,
             state: DecodeState::Head,
         }
-    }
-
-    /// Configure the codec for the given peer address.
-    #[allow(dead_code)]
-    pub fn for_address(mut self, addr: impl Into<Option<String>>) -> Self {
-        self.addr = addr.into();
-        self
     }
 
     /// Configure the codec for the given [`Network`].
@@ -99,6 +92,12 @@ impl Builder {
     #[allow(dead_code)]
     pub fn with_max_body_len(mut self, len: usize) -> Self {
         self.max_len = len;
+        self
+    }
+
+    /// Configure the codec for the given peer address.
+    pub fn with_metrics_label(mut self, metrics_label: String) -> Self {
+        self.metrics_label = Some(metrics_label);
         self
     }
 }
@@ -123,7 +122,7 @@ impl Encoder for Codec {
             return Err(Parse("body length exceeded maximum size"));
         }
 
-        if let Some(addr) = self.builder.addr.clone() {
+        if let Some(addr) = self.builder.metrics_label.clone() {
             metrics::counter!("bytes.written", (body.len() + HEADER_LEN) as u64, "addr" =>  addr);
         }
 
@@ -339,7 +338,7 @@ impl Decoder for Codec {
                     return Err(Parse("body length exceeded maximum size"));
                 }
 
-                if let Some(addr) = self.builder.addr.clone() {
+                if let Some(addr) = self.builder.metrics_label.clone() {
                     metrics::counter!("bytes.read", (body_len + HEADER_LEN) as u64, "addr" =>  addr);
                 }
 
