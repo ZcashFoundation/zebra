@@ -61,7 +61,7 @@ fn generate_args() -> Result<()> {
     // Valid
     let child = get_child(
         &["generate", "-o", generated_config_path.to_str().unwrap()],
-        &tempdir.to_path_buf(),
+        &tempdir,
     )?;
 
     let output = child.wait_with_output()?;
@@ -283,7 +283,7 @@ fn valid_generated_config() -> Result<()> {
     // Generate configuration in temp dir path
     let child = get_child(
         &["generate", "-o", generated_config_path.to_str().unwrap()],
-        &tempdir.to_path_buf(),
+        &tempdir,
     )?;
 
     let output = child.wait_with_output()?;
@@ -295,7 +295,7 @@ fn valid_generated_config() -> Result<()> {
     // Run start using temp dir and kill it at 1 second
     let mut child = get_child(
         &["-c", generated_config_path.to_str().unwrap(), "start"],
-        &tempdir.to_path_buf(),
+        &tempdir,
     )?;
     std::thread::sleep(Duration::from_secs(1));
     child.kill()?;
@@ -311,7 +311,7 @@ fn valid_generated_config() -> Result<()> {
     // Run seed using temp dir and kill it at 1 second
     let mut child = get_child(
         &["-c", generated_config_path.to_str().unwrap(), "seed"],
-        &tempdir.to_path_buf(),
+        &tempdir,
     )?;
     std::thread::sleep(Duration::from_secs(1));
     child.kill()?;
