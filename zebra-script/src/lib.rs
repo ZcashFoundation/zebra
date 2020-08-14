@@ -1,4 +1,4 @@
-//! Zebra script verification wrapping zcashd's zcashconsensus library
+//! Zebra script verification wrapping zcashd's zcash_script library
 #![doc(html_favicon_url = "https://www.zfnd.org/images/zebra-favicon-128.png")]
 #![doc(html_logo_url = "https://www.zfnd.org/images/zebra-icon.png")]
 #![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_script")]
@@ -6,11 +6,11 @@
 use displaydoc::Display;
 use std::sync::Arc;
 use thiserror::Error;
-use zcashconsensus::{
-    zcashconsensus_error_t, zcashconsensus_error_t_zcashconsensus_ERR_OK,
-    zcashconsensus_error_t_zcashconsensus_ERR_TX_DESERIALIZE,
-    zcashconsensus_error_t_zcashconsensus_ERR_TX_INDEX,
-    zcashconsensus_error_t_zcashconsensus_ERR_TX_SIZE_MISMATCH,
+use zcash_script::{
+    zcash_script_error_t, zcash_script_error_t_zcash_script_ERR_OK,
+    zcash_script_error_t_zcash_script_ERR_TX_DESERIALIZE,
+    zcash_script_error_t_zcash_script_ERR_TX_INDEX,
+    zcash_script_error_t_zcash_script_ERR_TX_SIZE_MISMATCH,
 };
 use zebra_chain::{
     parameters::ConsensusBranchId,
@@ -20,7 +20,7 @@ use zebra_chain::{
 
 #[derive(Debug, Display, Error)]
 #[non_exhaustive]
-/// An Error type representing the error codes returned from zcashconsensus.
+/// An Error type representing the error codes returned from zcash_script.
 pub enum Error {
     /// script failed to verify
     #[non_exhaustive]
@@ -34,19 +34,19 @@ pub enum Error {
     /// tx is an invalid size for it's protocol
     #[non_exhaustive]
     TxSizeMismatch,
-    /// encountered unknown error kind from zcashconsensus: {0}
+    /// encountered unknown error kind from zcash_script: {0}
     #[non_exhaustive]
-    Unknown(zcashconsensus_error_t),
+    Unknown(zcash_script_error_t),
 }
 
-impl From<zcashconsensus_error_t> for Error {
+impl From<zcash_script_error_t> for Error {
     #[allow(non_upper_case_globals)]
-    fn from(err_code: zcashconsensus_error_t) -> Error {
+    fn from(err_code: zcash_script_error_t) -> Error {
         match err_code {
-            zcashconsensus_error_t_zcashconsensus_ERR_OK => Error::ScriptInvalid,
-            zcashconsensus_error_t_zcashconsensus_ERR_TX_DESERIALIZE => Error::TxDeserialize,
-            zcashconsensus_error_t_zcashconsensus_ERR_TX_INDEX => Error::TxIndex,
-            zcashconsensus_error_t_zcashconsensus_ERR_TX_SIZE_MISMATCH => Error::TxSizeMismatch,
+            zcash_script_error_t_zcash_script_ERR_OK => Error::ScriptInvalid,
+            zcash_script_error_t_zcash_script_ERR_TX_DESERIALIZE => Error::TxDeserialize,
+            zcash_script_error_t_zcash_script_ERR_TX_INDEX => Error::TxIndex,
+            zcash_script_error_t_zcash_script_ERR_TX_SIZE_MISMATCH => Error::TxSizeMismatch,
             unknown => Error::Unknown(unknown),
         }
     }
@@ -69,11 +69,11 @@ fn verify_script(
     let tx_to_len = tx_to.len();
     let mut err = 0;
 
-    let flags = zcashconsensus::zcashconsensus_SCRIPT_FLAGS_VERIFY_P2SH
-        | zcashconsensus::zcashconsensus_SCRIPT_FLAGS_VERIFY_CHECKLOCKTIMEVERIFY;
+    let flags = zcash_script::zcash_script_SCRIPT_FLAGS_VERIFY_P2SH
+        | zcash_script::zcash_script_SCRIPT_FLAGS_VERIFY_CHECKLOCKTIMEVERIFY;
 
     let ret = unsafe {
-        zcashconsensus::zcashconsensus_verify_script(
+        zcash_script::zcash_script_verify(
             script_ptr,
             script_len as u32,
             amount,

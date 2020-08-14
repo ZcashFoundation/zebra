@@ -2986,9 +2986,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "zcashconsensus"
+name = "zcash_script"
 version = "0.1.0"
-source = "git+https://github.com/ZcashFoundation/zcashconsensus.git?branch=zcashconsensus#1ef73e1f88610adf45a9b9f1cf7e4d2636c8307c"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "536376d3d5181455cb7df832cf1c7f519b3d2fe0a097091f891ffef96b9b4f09"
 dependencies = [
  "bindgen",
  "blake2b_simd",
@@ -3106,7 +3107,7 @@ dependencies = [
  "hex",
  "lazy_static",
  "thiserror",
- "zcashconsensus",
+ "zcash_script",
  "zebra-chain",
  "zebra-test",
 ]
