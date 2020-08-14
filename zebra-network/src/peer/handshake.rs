@@ -109,8 +109,13 @@ where
         let fut = async move {
             debug!("connecting to remote peer");
 
-            let mut stream =
-                Framed::new(tcp_stream, Codec::builder().for_network(network).finish());
+            let mut stream = Framed::new(
+                tcp_stream,
+                Codec::builder()
+                    .for_network(network)
+                    .for_address(addr)
+                    .finish(),
+            );
 
             let local_nonce = Nonce::default();
             nonces

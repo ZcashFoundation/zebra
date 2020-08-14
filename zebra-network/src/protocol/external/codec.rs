@@ -2,6 +2,7 @@
 
 use std::fmt;
 use std::io::{Cursor, Read, Write};
+use std::net::SocketAddr;
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use bytes::BytesMut;
@@ -45,6 +46,8 @@ pub struct Builder {
     version: Version,
     /// The maximum allowable message length.
     max_len: usize,
+    /// The address of the peer this codec is going to be used with.
+    addr: Option<SocketAddr>,
 }
 
 impl Codec {
@@ -54,6 +57,7 @@ impl Codec {
             network: Network::Mainnet,
             version: constants::CURRENT_VERSION,
             max_len: MAX_PROTOCOL_MESSAGE_LEN,
+            addr: None,
         }
     }
 
@@ -70,6 +74,13 @@ impl Builder {
             builder: self,
             state: DecodeState::Head,
         }
+    }
+
+    /// Configure the codec for the given peer address.
+    #[allow(dead_code)]
+    pub fn for_address(mut self, addr: SocketAddr) -> Self {
+        self.addr = Some(addr);
+        self
     }
 
     /// Configure the codec for the given [`Network`].
@@ -111,6 +122,10 @@ impl Encoder for Codec {
 
         if body.len() > self.builder.max_len {
             return Err(Parse("body length exceeded maximum size"));
+        }
+
+        if self.builder.addr.is_some() {
+            metrics::counter!("bytes.written", (body.len() + HEADER_LEN) as u64, "addr" =>  self.builder.addr.unwrap().ip().to_string());
         }
 
         use Message::*;
@@ -325,6 +340,10 @@ impl Decoder for Codec {
                     return Err(Parse("body length exceeded maximum size"));
                 }
 
+                if self.builder.addr.is_some() {
+                    metrics::counter!("bytes.read", (body_len + HEADER_LEN) as u64, "addr" =>  self.builder.addr.unwrap().ip().to_string());
+                }
+
                 // Reserve buffer space for the expected body and the following header.
                 src.reserve(body_len + HEADER_LEN);
 
@@ -361,6 +380,7 @@ impl Decoder for Codec {
                 }
 
                 let body_reader = Cursor::new(&body);
+
                 match &command {
                     b"version\0\0\0\0\0" => self.read_version(body_reader),
                     b"verack\0\0\0\0\0\0" => self.read_verack(body_reader),
@@ -561,7 +581,7 @@ mod tests {
 
     #[test]
     fn version_message_round_trip() {
-        use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+        use std::net::{IpAddr, Ipv4Addr};
         let services = PeerServices::NODE_NETWORK;
         let timestamp = Utc.timestamp(1_568_000_000, 0);
 
