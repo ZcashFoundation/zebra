@@ -2,7 +2,6 @@
 
 use std::fmt;
 use std::io::{Cursor, Read, Write};
-use std::net::SocketAddr;
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use bytes::BytesMut;
@@ -47,7 +46,7 @@ pub struct Builder {
     /// The maximum allowable message length.
     max_len: usize,
     /// The address of the peer this codec is going to be used with.
-    addr: Option<SocketAddr>,
+    addr: Option<String>,
 }
 
 impl Codec {
@@ -78,7 +77,7 @@ impl Builder {
 
     /// Configure the codec for the given peer address.
     #[allow(dead_code)]
-    pub fn for_address(mut self, addr: impl Into<Option<SocketAddr>>) -> Self {
+    pub fn for_address(mut self, addr: impl Into<Option<String>>) -> Self {
         self.addr = addr.into();
         self
     }
@@ -124,8 +123,8 @@ impl Encoder for Codec {
             return Err(Parse("body length exceeded maximum size"));
         }
 
-        if let Some(addr) = self.builder.addr.as_ref() {
-            metrics::counter!("bytes.written", (body.len() + HEADER_LEN) as u64, "addr" =>  addr.ip().to_string());
+        if let Some(addr) = self.builder.addr.clone() {
+            metrics::counter!("bytes.written", (body.len() + HEADER_LEN) as u64, "addr" =>  addr);
         }
 
         use Message::*;
@@ -340,8 +339,8 @@ impl Decoder for Codec {
                     return Err(Parse("body length exceeded maximum size"));
                 }
 
-                if let Some(addr) = self.builder.addr.as_ref() {
-                    metrics::counter!("bytes.read", (body_len + HEADER_LEN) as u64, "addr" =>  addr.ip().to_string());
+                if let Some(addr) = self.builder.addr.clone() {
+                    metrics::counter!("bytes.read", (body_len + HEADER_LEN) as u64, "addr" =>  addr);
                 }
 
                 // Reserve buffer space for the expected body and the following header.
@@ -581,7 +580,7 @@ mod tests {
 
     #[test]
     fn version_message_round_trip() {
-        use std::net::{IpAddr, Ipv4Addr};
+        use std::net::{IpAddr, Ipv4Addr, SocketAddr};
         let services = PeerServices::NODE_NETWORK;
         let timestamp = Utc.timestamp(1_568_000_000, 0);
 
