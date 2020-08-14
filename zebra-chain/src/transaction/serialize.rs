@@ -33,6 +33,20 @@ const GENESIS_COINBASE_DATA: [u8; 77] = [
     54, 52, 56, 51, 53, 100, 51, 52,
 ];
 
+impl ZcashDeserialize for jubjub::Fq {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        let possible_scalar = jubjub::Fq::from_bytes(&reader.read_32_bytes()?);
+
+        if possible_scalar.is_some().into() {
+            Ok(possible_scalar.unwrap())
+        } else {
+            Err(SerializationError::Parse(
+                "Invalid jubjub::Fq, input not canonical",
+            ))
+        }
+    }
+}
+
 impl ZcashSerialize for OutPoint {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_all(&self.hash.0[..])?;
@@ -364,7 +378,7 @@ impl ZcashDeserialize for Output {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         Ok(Output {
             cv: commitments::sapling::ValueCommitment::zcash_deserialize(&mut reader)?,
-            cm_u: jubjub::Fq::from_bytes(&reader.read_32_bytes()?).unwrap(),
+            cm_u: jubjub::Fq::zcash_deserialize(&mut reader)?,
             ephemeral_key: keys::sapling::EphemeralPublicKey::zcash_deserialize(&mut reader)?,
             enc_ciphertext: notes::sapling::EncryptedCiphertext::zcash_deserialize(&mut reader)?,
             out_ciphertext: notes::sapling::OutCiphertext::zcash_deserialize(&mut reader)?,
