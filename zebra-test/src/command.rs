@@ -3,33 +3,40 @@ use color_eyre::{
     Help, SectionExt,
 };
 use std::process::{Child, Command, ExitStatus, Output};
-use std::{fs, io::Write};
+use std::{fs, io::Write, path::PathBuf};
 use tempdir::TempDir;
 
 #[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
 
-/// Runs a command in a TempDir
-pub fn test_cmd(path: &str) -> Result<(Command, impl Drop)> {
-    let dir = TempDir::new(path)?;
-    let mut cmd = Command::new(path);
-    cmd.current_dir(dir.path());
+/// Runs a command
+pub fn test_cmd(command_path: &str, tempdir: &PathBuf) -> Result<Command> {
+    let mut cmd = Command::new(command_path);
+    cmd.current_dir(tempdir);
 
-    let cache_dir = dir.path().join("state");
-    fs::create_dir(&cache_dir)?;
+    Ok(cmd)
+}
 
-    fs::File::create(dir.path().join("zebrad.toml"))?.write_all(
-        format!(
-            "[state]\ncache_dir = '{}'",
-            cache_dir
-                .into_os_string()
-                .into_string()
-                .map_err(|_| eyre!("tmp dir path cannot be encoded as UTF8"))?
-        )
-        .as_bytes(),
-    )?;
+/// Create a temp directory and optional config file
+pub fn tempdir(create_config: bool) -> Result<(PathBuf, impl Drop)> {
+    let dir = TempDir::new("zebrad_tests")?;
 
-    Ok((cmd, dir))
+    if create_config {
+        let cache_dir = dir.path().join("state");
+        fs::create_dir(&cache_dir)?;
+        fs::File::create(dir.path().join("zebrad.toml"))?.write_all(
+            format!(
+                "[state]\ncache_dir = '{}'\nmemory_cache_bytes = 256000000",
+                cache_dir
+                    .into_os_string()
+                    .into_string()
+                    .map_err(|_| eyre!("tmp dir path cannot be encoded as UTF8"))?
+            )
+            .as_bytes(),
+        )?;
+    }
+
+    Ok((dir.path().to_path_buf(), dir))
 }
 
 pub trait CommandExt {

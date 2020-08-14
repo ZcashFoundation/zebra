@@ -48,7 +48,7 @@ jobs:
       run: |
         gcloud compute instance-templates create-with-container "zebrad-$BRANCH_NAME-$SHORT_SHA" \
           --container-image "gcr.io/$PROJECT_ID/$REPOSITORY/$BRANCH_NAME:$SHORT_SHA" \
-          --machine-type n1-highmem-8 \
+          --machine-type n1-highcpu-2 \
           --service-account cos-vm@zealous-zebra.iam.gserviceaccount.com \
           --scopes cloud-platform \
           --tags zebrad \

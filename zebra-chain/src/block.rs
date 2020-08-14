@@ -57,7 +57,7 @@ impl Block {
         use crate::transaction::TransparentInput;
         self.transactions
             .get(0)
-            .and_then(|tx| tx.inputs().next())
+            .and_then(|tx| tx.inputs().get(0))
             .and_then(|input| match input {
                 TransparentInput::Coinbase { ref height, .. } => Some(*height),
                 _ => None,
@@ -69,24 +69,22 @@ impl Block {
     ///
     /// "The first (and only the first) transaction in a block is a coinbase
     /// transaction, which collects and spends any miner subsidy and transaction
-    /// fees paid by transactions included in this block."[S 3.10][3.10]
+    /// fees paid by transactions included in this block." [§3.10][3.10]
     ///
     /// [3.10]: https://zips.z.cash/protocol/protocol.pdf#coinbasetransactions
     pub fn is_coinbase_first(&self) -> Result<(), Error> {
-        if self.coinbase_height().is_some() {
-            // No coinbase inputs in additional transactions allowed
-            if self
-                .transactions
-                .iter()
-                .skip(1)
-                .any(|tx| tx.contains_coinbase_input())
-            {
-                Err("coinbase input found in additional transaction")?
-            }
-            Ok(())
-        } else {
-            Err("no coinbase transaction in block")?
+        let first = self
+            .transactions
+            .get(0)
+            .ok_or_else(|| "block has no transactions")?;
+        let mut rest = self.transactions.iter().skip(1);
+        if !first.is_coinbase() {
+            Err("first transaction must be coinbase")?;
         }
+        if rest.any(|tx| tx.contains_coinbase_input()) {
+            Err("coinbase input found in non-coinbase transaction")?;
+        }
+        Ok(())
     }
 
     /// Get the hash for the current block
