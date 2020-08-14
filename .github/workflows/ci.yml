@@ -24,6 +24,14 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: fetch
+      - name: install LLVM on Windows
+        if: matrix.os == 'windows-latest'
+        run: choco install llvm -y
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
       - name: Run tests
         uses: actions-rs/cargo@v1
         with:
