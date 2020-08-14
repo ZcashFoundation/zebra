@@ -61,7 +61,7 @@ fn generate_args() -> Result<()> {
     // Valid
     let child = get_child(
         &["generate", "-o", generated_config_path.to_str().unwrap()],
-        &tempdir.to_path_buf(),
+        &tempdir,
     )?;
 
     let output = child.wait_with_output()?;

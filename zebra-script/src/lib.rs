@@ -106,7 +106,7 @@ pub fn is_valid(
     branch_id: ConsensusBranchId,
     (input_index, previous_output): (u32, TransparentOutput),
 ) -> Result<(), Error> {
-    assert!((input_index as usize) < transaction.inputs().count());
+    assert!((input_index as usize) < transaction.inputs().len());
 
     let tx_to = transaction
         .zcash_serialize_to_vec()
