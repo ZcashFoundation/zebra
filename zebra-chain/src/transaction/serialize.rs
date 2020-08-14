@@ -246,7 +246,7 @@ impl ZcashDeserialize for TransparentOutput {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         Ok(TransparentOutput {
             value: reader.read_u64::<LittleEndian>()?.try_into()?,
-            lock_script: tyoes::Script::zcash_deserialize(&mut reader)?,
+            lock_script: types::Script::zcash_deserialize(&mut reader)?,
         })
     }
 }
