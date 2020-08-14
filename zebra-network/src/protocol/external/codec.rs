@@ -122,8 +122,8 @@ impl Encoder for Codec {
             return Err(Parse("body length exceeded maximum size"));
         }
 
-        if let Some(addr) = self.builder.metrics_label.clone() {
-            metrics::counter!("bytes.written", (body.len() + HEADER_LEN) as u64, "addr" =>  addr);
+        if let Some(label) = self.builder.metrics_label.clone() {
+            metrics::counter!("bytes.written", (body.len() + HEADER_LEN) as u64, "addr" =>  label);
         }
 
         use Message::*;
@@ -338,8 +338,8 @@ impl Decoder for Codec {
                     return Err(Parse("body length exceeded maximum size"));
                 }
 
-                if let Some(addr) = self.builder.metrics_label.clone() {
-                    metrics::counter!("bytes.read", (body_len + HEADER_LEN) as u64, "addr" =>  addr);
+                if let Some(label) = self.builder.metrics_label.clone() {
+                    metrics::counter!("bytes.read", (body_len + HEADER_LEN) as u64, "addr" =>  label);
                 }
 
                 // Reserve buffer space for the expected body and the following header.
