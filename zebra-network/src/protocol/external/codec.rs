@@ -78,8 +78,8 @@ impl Builder {
 
     /// Configure the codec for the given peer address.
     #[allow(dead_code)]
-    pub fn for_address(mut self, addr: SocketAddr) -> Self {
-        self.addr = Some(addr);
+    pub fn for_address(mut self, addr: impl Into<Option<SocketAddr>>) -> Self {
+        self.addr = addr.into();
         self
     }
 
@@ -124,8 +124,8 @@ impl Encoder for Codec {
             return Err(Parse("body length exceeded maximum size"));
         }
 
-        if self.builder.addr.is_some() {
-            metrics::counter!("bytes.written", (body.len() + HEADER_LEN) as u64, "addr" =>  self.builder.addr.unwrap().ip().to_string());
+        if let Some(addr) = self.builder.addr.as_ref() {
+            metrics::counter!("bytes.written", (body.len() + HEADER_LEN) as u64, "addr" =>  addr.ip().to_string());
         }
 
         use Message::*;
@@ -340,8 +340,8 @@ impl Decoder for Codec {
                     return Err(Parse("body length exceeded maximum size"));
                 }
 
-                if self.builder.addr.is_some() {
-                    metrics::counter!("bytes.read", (body_len + HEADER_LEN) as u64, "addr" =>  self.builder.addr.unwrap().ip().to_string());
+                if let Some(addr) = self.builder.addr.as_ref() {
+                    metrics::counter!("bytes.read", (body_len + HEADER_LEN) as u64, "addr" =>  addr.ip().to_string());
                 }
 
                 // Reserve buffer space for the expected body and the following header.
