@@ -80,7 +80,10 @@ fn verify_script(
             tx_to_ptr,
             tx_to_len as u32,
             n_in,
+            #[cfg(not(windows))]
             flags,
+            #[cfg(windows)]
+            flags.try_into().expect("why bindgen whyyy"),
             consensus_branch_id,
             &mut err,
         )
