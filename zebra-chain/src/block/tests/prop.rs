@@ -26,9 +26,9 @@ proptest! {
     }
 
     #[test]
-    fn light_client_roundtrip(bytes in any::<[u8; 32]>(), network in any::<Network>(), block_height in any::<BlockHeight>()) {
-        let light_hash = LightClientRootHash::from_bytes(bytes, network, block_height);
-        let other_bytes = light_hash.to_bytes();
+    fn root_hash_roundtrip(bytes in any::<[u8; 32]>(), network in any::<Network>(), block_height in any::<BlockHeight>()) {
+        let root_hash = RootHash::from_bytes(bytes, network, block_height);
+        let other_bytes = root_hash.to_bytes();
 
         prop_assert_eq![bytes, other_bytes];
     }
@@ -47,11 +47,11 @@ proptest! {
         let bytes = block.zcash_serialize_to_vec()?;
         let bytes = &mut bytes.as_slice();
 
-        // Check the light client root hash
-        let light_hash = block.light_client_root_hash(network);
-        if let Some(light_hash) = light_hash {
-            let light_hash_bytes = light_hash.to_bytes();
-            prop_assert_eq![block.header.light_client_root_bytes, light_hash_bytes];
+        // Check the root hash
+        let root_hash = block.root_hash(network);
+        if let Some(root_hash) = root_hash {
+            let root_hash_bytes = root_hash.to_bytes();
+            prop_assert_eq![block.header.root_bytes, root_hash_bytes];
         } else {
             prop_assert_eq![block.coinbase_height(), None];
         }
