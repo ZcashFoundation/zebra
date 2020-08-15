@@ -56,7 +56,9 @@ impl<'a> SigHasher<'a> {
     }
 
     fn consensus_branch_id(&self) -> ConsensusBranchId {
-        self.network_upgrade().branch_id().expect("Pre-Overwinter blocks with V3 or later transactions have already been rejected")
+        self.network_upgrade().branch_id().expect(
+            "Pre-Overwinter blocks with V3 or later transactions have already been rejected",
+        )
     }
 
     /// Sighash implementation for the overwinter and sapling consensus branches
@@ -99,8 +101,7 @@ impl<'a> SigHasher<'a> {
     }
 
     fn hash_groupid<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        writer
-            .write_u32::<LittleEndian>(self.trans.group_id().expect("Transaction is V3 or later"))
+        writer.write_u32::<LittleEndian>(self.trans.group_id().expect("Transaction is V3 or later"))
     }
 
     fn hash_prevouts<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
