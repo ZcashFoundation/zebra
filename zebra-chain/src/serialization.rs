@@ -12,6 +12,8 @@ mod write_zcash;
 mod zcash_deserialize;
 mod zcash_serialize;
 
+pub mod sha256d;
+
 pub use error::SerializationError;
 pub use read_zcash::ReadZcashExt;
 pub use write_zcash::WriteZcashExt;

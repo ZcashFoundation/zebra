@@ -13,7 +13,6 @@ extern crate serde;
 
 mod merkle_tree;
 mod serde_helpers;
-mod sha256d_writer;
 
 pub mod addresses;
 pub mod block;

@@ -11,10 +11,11 @@ use tokio_util::codec::{Decoder, Encoder};
 use zebra_chain::{
     block::{Block, BlockHeaderHash},
     serialization::{
-        ReadZcashExt, SerializationError as Error, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
+        sha256d, ReadZcashExt, SerializationError as Error, WriteZcashExt, ZcashDeserialize,
+        ZcashSerialize,
     },
     transaction::Transaction,
-    types::{BlockHeight, Sha256dChecksum},
+    types::BlockHeight,
     Network,
 };
 
@@ -162,7 +163,7 @@ impl Encoder for Codec {
         header_writer.write_all(&Magic::from(self.builder.network).0[..])?;
         header_writer.write_all(command)?;
         header_writer.write_u32::<LittleEndian>(body.len() as u32)?;
-        header_writer.write_all(&Sha256dChecksum::from(&body[..]).0)?;
+        header_writer.write_all(&sha256d::Checksum::from(&body[..]).0)?;
 
         dst.reserve(HEADER_LEN + body.len());
         dst.extend_from_slice(&header);
@@ -276,7 +277,7 @@ enum DecodeState {
     Body {
         body_len: usize,
         command: [u8; 12],
-        checksum: Sha256dChecksum,
+        checksum: sha256d::Checksum,
     },
 }
 
@@ -321,7 +322,7 @@ impl Decoder for Codec {
                 let magic = Magic(header_reader.read_4_bytes()?);
                 let command = header_reader.read_12_bytes()?;
                 let body_len = header_reader.read_u32::<LittleEndian>()? as usize;
-                let checksum = Sha256dChecksum(header_reader.read_4_bytes()?);
+                let checksum = sha256d::Checksum(header_reader.read_4_bytes()?);
                 trace!(
                     ?self.state,
                     ?magic,
@@ -371,7 +372,7 @@ impl Decoder for Codec {
                 let body = src.split_to(body_len);
                 self.state = DecodeState::Head;
 
-                if checksum != Sha256dChecksum::from(&body[..]) {
+                if checksum != sha256d::Checksum::from(&body[..]) {
                     return Err(Parse(
                         "supplied message checksum does not match computed checksum",
                     ));
@@ -689,29 +690,6 @@ mod tests {
                 .expect("a next message should be available")
                 .expect_err("that message should not deserialize")
         });
-    }
-
-    #[test]
-    fn decode_state_debug() {
-        assert_eq!(format!("{:?}", DecodeState::Head), "DecodeState::Head");
-
-        let decode_state = DecodeState::Body {
-            body_len: 43,
-            command: [118, 101, 114, 115, 105, 111, 110, 0, 0, 0, 0, 0],
-            checksum: Sha256dChecksum([186, 250, 162, 227]),
-        };
-
-        assert_eq!(format!("{:?}", decode_state),
-                   "DecodeState::Body { body_len: 43, command: \"version\\u{0}\\u{0}\\u{0}\\u{0}\\u{0}\", checksum: Sha256dChecksum(\"bafaa2e3\") }");
-
-        let decode_state = DecodeState::Body {
-            body_len: 43,
-            command: [118, 240, 144, 128, 105, 111, 110, 0, 0, 0, 0, 0],
-            checksum: Sha256dChecksum([186, 250, 162, 227]),
-        };
-
-        assert_eq!(format!("{:?}", decode_state),
-                   "DecodeState::Body { body_len: 43, command: \"v�ion\\u{0}\\u{0}\\u{0}\\u{0}\\u{0}\", checksum: Sha256dChecksum(\"bafaa2e3\") }");
     }
 
     #[test]
