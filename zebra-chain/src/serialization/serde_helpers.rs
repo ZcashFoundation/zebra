@@ -1,18 +1,18 @@
-use super::equihash_solution::EQUIHASH_SOLUTION_SIZE;
 use serde_big_array::big_array;
 
 big_array! {
     BigArray;
-    +EQUIHASH_SOLUTION_SIZE,
-    80, // `sapling::OutCiphertext`
-    580, // `sapling::EncryptedCiphertext`
-    601, // `sprout::EncryptedCiphertext`
-    296, // `bctv14::Bctv14Proof`
+    + 1344, // `EquihashSolution`
+    80,   // `sapling::OutCiphertext`
+    580,  // `sapling::EncryptedCiphertext`
+    601,  // `sprout::EncryptedCiphertext`
+    296,  // `Bctv14Proof`
+    196,  // `Groth16Proof`
 }
 
 #[derive(Deserialize, Serialize)]
 #[serde(remote = "jubjub::AffinePoint")]
-pub(crate) struct AffinePoint {
+pub struct AffinePoint {
     #[serde(getter = "jubjub::AffinePoint::to_bytes")]
     bytes: [u8; 32],
 }
@@ -25,7 +25,7 @@ impl From<AffinePoint> for jubjub::AffinePoint {
 
 #[derive(Deserialize, Serialize)]
 #[serde(remote = "jubjub::Fq")]
-pub(crate) struct Fq {
+pub struct Fq {
     #[serde(getter = "jubjub::Fq::to_bytes")]
     bytes: [u8; 32],
 }
@@ -38,7 +38,7 @@ impl From<Fq> for jubjub::Fq {
 
 #[derive(Deserialize, Serialize)]
 #[serde(remote = "futures::future::Either")]
-pub(crate) enum Either<A, B> {
+pub enum Either<A, B> {
     Left(A),
     Right(B),
 }

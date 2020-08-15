@@ -1,10 +1,8 @@
 //! Equihash Solution and related items.
 
-use crate::{
-    serde_helpers,
-    serialization::{
-        ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
-    },
+use crate::serialization::{
+    serde_helpers, ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize,
+    ZcashSerialize,
 };
 use std::{fmt, io};
 

@@ -31,8 +31,9 @@ use proptest_derive::Arbitrary;
 
 use crate::{
     redjubjub::{self, SpendAuth},
-    serde_helpers,
-    serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize},
+    serialization::{
+        serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
+    },
     Network,
 };
 

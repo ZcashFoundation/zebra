@@ -2,7 +2,7 @@ use crate::{
     commitments, keys, notes,
     proofs::Groth16Proof,
     redjubjub::{self, Binding, SpendAuth},
-    serde_helpers,
+    serialization::serde_helpers,
     treestate::note_commitment_tree::SaplingNoteTreeRootHash,
 };
 use futures::future::Either;

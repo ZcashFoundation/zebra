@@ -14,8 +14,9 @@ use rand_core::{CryptoRng, RngCore};
 
 use crate::{
     keys::sapling::{find_group_hash, Diversifier, TransmissionKey},
-    serde_helpers,
-    serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize},
+    serialization::{
+        serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
+    },
     types::amount::{Amount, NonNegative},
 };
 
