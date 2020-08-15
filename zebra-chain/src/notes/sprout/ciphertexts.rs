@@ -5,10 +5,7 @@ use proptest::{arbitrary::any, prelude::*};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    serde_helpers,
-    serialization::{SerializationError, ZcashDeserialize, ZcashSerialize},
-};
+use crate::serialization::{serde_helpers, SerializationError, ZcashDeserialize, ZcashSerialize};
 
 /// A ciphertext component for encrypted output notes.
 #[derive(Serialize, Deserialize)]

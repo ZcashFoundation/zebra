@@ -3,10 +3,7 @@ use std::{fmt, io};
 #[cfg(test)]
 use proptest::{arbitrary::any, prelude::*};
 
-use crate::{
-    serde_helpers,
-    serialization::{SerializationError, ZcashDeserialize, ZcashSerialize},
-};
+use crate::serialization::{serde_helpers, SerializationError, ZcashDeserialize, ZcashSerialize};
 
 /// A ciphertext component for encrypted output notes.
 #[derive(Deserialize, Serialize)]

@@ -12,6 +12,8 @@ mod write_zcash;
 mod zcash_deserialize;
 mod zcash_serialize;
 
+pub(crate) mod serde_helpers;
+
 pub mod sha256d;
 
 pub use error::SerializationError;
