@@ -36,14 +36,13 @@ pub struct BlockHeader {
     /// header.
     pub merkle_root_hash: MerkleTreeRootHash,
 
-    /// The light client root hash.
+    /// Some kind of root hash.
     ///
     /// Unfortunately, the interpretation of this field was changed without
     /// incrementing the version, so it cannot be parsed without the block height
-    /// and network. Use
-    /// [`Block::light_client_root_hash`](super::Block::light_client_root_hash)
-    /// to get the parsed [`LightClientRootHash`](super::LightClientRootHash).
-    pub light_client_root_bytes: [u8; 32],
+    /// and network. Use [`Block::root_hash`](super::Block::root_hash) to get the
+    /// parsed [`RootHash`](super::RootHash).
+    pub root_bytes: [u8; 32],
 
     /// The block timestamp is a Unix epoch time (UTC) when the miner
     /// started hashing the header (according to the miner).

@@ -10,13 +10,13 @@ use proptest::{
     prelude::*,
 };
 
-impl Arbitrary for LightClientRootHash {
+impl Arbitrary for RootHash {
     type Parameters = ();
 
     fn arbitrary_with(_args: ()) -> Self::Strategy {
         (any::<[u8; 32]>(), any::<Network>(), any::<BlockHeight>())
-            .prop_map(|(light_client_root_bytes, network, block_height)| {
-                LightClientRootHash::from_bytes(light_client_root_bytes, network, block_height)
+            .prop_map(|(root_bytes, network, block_height)| {
+                RootHash::from_bytes(root_bytes, network, block_height)
             })
             .boxed()
     }
@@ -45,7 +45,7 @@ impl Arbitrary for BlockHeader {
                     version,
                     previous_block_hash,
                     merkle_root_hash,
-                    light_client_root_bytes,
+                    root_bytes,
                     timestamp,
                     difficulty_threshold,
                     nonce,
@@ -54,7 +54,7 @@ impl Arbitrary for BlockHeader {
                     version,
                     previous_block_hash,
                     merkle_root_hash,
-                    light_client_root_bytes,
+                    root_bytes,
                     time: Utc.timestamp(timestamp, 0),
                     difficulty_threshold,
                     nonce,

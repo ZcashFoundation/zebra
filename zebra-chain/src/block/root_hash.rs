@@ -5,13 +5,13 @@ use crate::treestate::note_commitment_tree::SaplingNoteTreeRootHash;
 
 use super::BlockHeight;
 
-/// Light client root hashes.
+/// Zcash blocks contain different kinds of root hashes, depending on the network upgrade.
 ///
-/// The `BlockHeader.light_client_root_bytes` field is interpreted differently,
+/// The `BlockHeader.root_bytes` field is interpreted differently,
 /// based on the current block height. The interpretation changes at or after
 /// network upgrades.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub enum LightClientRootHash {
+pub enum RootHash {
     /// [Pre-Sapling] Reserved field.
     ///
     /// All zeroes.
@@ -43,15 +43,11 @@ pub enum LightClientRootHash {
     ChainHistoryRoot(ChainHistoryMmrRootHash),
 }
 
-impl LightClientRootHash {
+impl RootHash {
     /// Returns `bytes` as the LightClientRootHash variant for `network` and
     /// `height`.
-    pub(super) fn from_bytes(
-        bytes: [u8; 32],
-        network: Network,
-        height: BlockHeight,
-    ) -> LightClientRootHash {
-        use LightClientRootHash::*;
+    pub(super) fn from_bytes(bytes: [u8; 32], network: Network, height: BlockHeight) -> RootHash {
+        use RootHash::*;
 
         match NetworkUpgrade::current(network, height) {
             Genesis | BeforeOverwinter | Overwinter => PreSaplingReserved(bytes),
@@ -66,7 +62,7 @@ impl LightClientRootHash {
     /// Returns the serialized bytes for this LightClientRootHash.
     #[allow(dead_code)]
     pub(super) fn to_bytes(self) -> [u8; 32] {
-        use LightClientRootHash::*;
+        use RootHash::*;
 
         match self {
             PreSaplingReserved(b) => b,

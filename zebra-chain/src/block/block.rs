@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::parameters::Network;
 use crate::transaction::Transaction;
 
-use super::{BlockHeader, BlockHeaderHash, BlockHeight, Error, LightClientRootHash};
+use super::{BlockHeader, BlockHeaderHash, BlockHeight, Error, RootHash};
 
 #[cfg(test)]
 use proptest_derive::Arbitrary;
@@ -66,16 +66,16 @@ impl Block {
         BlockHeaderHash::from(self)
     }
 
-    /// Get the parsed light client root hash for this block.
+    /// Get the parsed root hash for this block.
     ///
-    /// The interpretation of the light client root hash depends on the
+    /// The interpretation of the root hash depends on the
     /// configured `network`, and this block's height.
     ///
     /// Returns None if this block does not have a block height.
-    pub fn light_client_root_hash(&self, network: Network) -> Option<LightClientRootHash> {
+    pub fn root_hash(&self, network: Network) -> Option<RootHash> {
         match self.coinbase_height() {
-            Some(height) => Some(LightClientRootHash::from_bytes(
-                self.header.light_client_root_bytes,
+            Some(height) => Some(RootHash::from_bytes(
+                self.header.root_bytes,
                 network,
                 height,
             )),
