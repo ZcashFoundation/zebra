@@ -45,6 +45,8 @@ pub struct Builder {
     version: Version,
     /// The maximum allowable message length.
     max_len: usize,
+    /// An optional label to use for reporting metrics.
+    metrics_label: Option<String>,
 }
 
 impl Codec {
@@ -54,6 +56,7 @@ impl Codec {
             network: Network::Mainnet,
             version: constants::CURRENT_VERSION,
             max_len: MAX_PROTOCOL_MESSAGE_LEN,
+            metrics_label: None,
         }
     }
 
@@ -91,6 +94,12 @@ impl Builder {
         self.max_len = len;
         self
     }
+
+    /// Configure the codec for the given peer address.
+    pub fn with_metrics_label(mut self, metrics_label: String) -> Self {
+        self.metrics_label = Some(metrics_label);
+        self
+    }
 }
 
 // ======== Encoding =========
@@ -111,6 +120,10 @@ impl Encoder for Codec {
 
         if body.len() > self.builder.max_len {
             return Err(Parse("body length exceeded maximum size"));
+        }
+
+        if let Some(label) = self.builder.metrics_label.clone() {
+            metrics::counter!("bytes.written", (body.len() + HEADER_LEN) as u64, "addr" =>  label);
         }
 
         use Message::*;
@@ -323,6 +336,10 @@ impl Decoder for Codec {
                 }
                 if body_len > self.builder.max_len {
                     return Err(Parse("body length exceeded maximum size"));
+                }
+
+                if let Some(label) = self.builder.metrics_label.clone() {
+                    metrics::counter!("bytes.read", (body_len + HEADER_LEN) as u64, "addr" =>  label);
                 }
 
                 // Reserve buffer space for the expected body and the following header.

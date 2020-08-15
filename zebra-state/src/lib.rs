@@ -68,6 +68,9 @@ pub struct Config {
     /// | Windows | `{FOLDERID_LocalAppData}\zebra`                 | C:\Users\Alice\AppData\Local\zebra |
     /// | Other   | `std::env::current_dir()/cache`                 |                                    |
     pub cache_dir: PathBuf,
+
+    /// The maximum number of bytes to use caching data in memory.
+    pub memory_cache_bytes: u64,
 }
 
 impl Config {
@@ -80,7 +83,10 @@ impl Config {
         };
         let path = self.cache_dir.join(net_dir).join("state");
 
-        sled::Config::default().path(path)
+        sled::Config::default()
+            .path(path)
+            .cache_capacity(self.memory_cache_bytes)
+            .mode(sled::Mode::LowSpace)
     }
 }
 
@@ -89,7 +95,10 @@ impl Default for Config {
         let cache_dir = dirs::cache_dir()
             .unwrap_or_else(|| std::env::current_dir().unwrap().join("cache"))
             .join("zebra");
-        Self { cache_dir }
+        Self {
+            cache_dir,
+            memory_cache_bytes: 512 * 1024 * 1024,
+        }
     }
 }
 

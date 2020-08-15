@@ -5,6 +5,8 @@ use std::{
     ops::RangeInclusive,
 };
 
+use byteorder::{ByteOrder, LittleEndian};
+
 type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// A runtime validated type for representing amounts of zatoshis
@@ -20,6 +22,13 @@ impl<C> Amount<C> {
         C2: AmountConstraint,
     {
         self.0.try_into()
+    }
+
+    /// To little endian byte array
+    pub fn to_bytes(&self) -> [u8; 8] {
+        let mut buf: [u8; 8] = [0; 8];
+        LittleEndian::write_i64(&mut buf, self.0);
+        buf
     }
 }
 
@@ -124,6 +133,17 @@ impl<C> From<Amount<C>> for i64 {
 impl From<Amount<NonNegative>> for u64 {
     fn from(amount: Amount<NonNegative>) -> Self {
         amount.0 as _
+    }
+}
+
+impl<C> From<Amount<C>> for jubjub::Fr {
+    fn from(a: Amount<C>) -> jubjub::Fr {
+        // TODO: this isn't constant time -- does that matter?
+        if a.0 < 0 {
+            jubjub::Fr::from(a.0.abs() as u64).neg()
+        } else {
+            jubjub::Fr::from(a.0 as u64)
+        }
     }
 }
 

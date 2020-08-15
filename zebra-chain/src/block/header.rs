@@ -1,8 +1,10 @@
-use super::{difficulty::CompactDifficulty, BlockHeaderHash, Error};
+use chrono::{DateTime, Duration, Utc};
+
 use crate::equihash_solution::EquihashSolution;
 use crate::merkle_tree::MerkleTreeRootHash;
 use crate::serialization::ZcashSerialize;
-use chrono::{DateTime, Duration, Utc};
+
+use super::{difficulty::CompactDifficulty, BlockHeaderHash, Error};
 
 /// Block header.
 ///
@@ -36,10 +38,12 @@ pub struct BlockHeader {
 
     /// The light client root hash.
     ///
-    /// This field is interpreted differently, based on the current
-    /// block height. Use `block.light_client_root_hash(network)` to get the
-    /// parsed `LightClientRootHash` for this block.
-    pub(super) light_client_root_hash: [u8; 32],
+    /// Unfortunately, the interpretation of this field was changed without
+    /// incrementing the version, so it cannot be parsed without the block height
+    /// and network. Use
+    /// [`Block::light_client_root_hash`](super::Block::light_client_root_hash)
+    /// to get the parsed [`LightClientRootHash`](super::LightClientRootHash).
+    pub light_client_root_bytes: [u8; 32],
 
     /// The block timestamp is a Unix epoch time (UTC) when the miner
     /// started hashing the header (according to the miner).

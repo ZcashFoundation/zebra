@@ -10,7 +10,7 @@ use std::{cmp, convert::TryFrom, fmt};
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#notept
 #[derive(Clone)]
-pub struct Memo(Box<[u8; 512]>);
+pub struct Memo(pub(crate) Box<[u8; 512]>);
 
 impl<'a> TryFrom<&'a [u8]> for Memo {
     type Error = &'static str;

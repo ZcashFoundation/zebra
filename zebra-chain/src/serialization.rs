@@ -174,6 +174,18 @@ pub trait WriteZcashExt: io::Write {
         self.write_compactsize(string.len() as u64)?;
         self.write_all(string.as_bytes())
     }
+
+    /// Convenience method to write exactly 32 u8's.
+    #[inline]
+    fn write_32_bytes(&mut self, bytes: &[u8; 32]) -> io::Result<()> {
+        self.write_all(bytes)
+    }
+
+    /// Convenience method to write exactly 64 u8's.
+    #[inline]
+    fn write_64_bytes(&mut self, bytes: &[u8; 64]) -> io::Result<()> {
+        self.write_all(bytes)
+    }
 }
 
 /// Mark all types implementing `Write` as implementing the extension.

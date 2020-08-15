@@ -1,6 +1,12 @@
-use crate::types::amount::{Amount, NonNegative};
-use crate::{ed25519_zebra, notes::sprout, proofs::ZkSnarkProof};
 use serde::{Deserialize, Serialize};
+
+use crate::{
+    ed25519_zebra,
+    notes::sprout,
+    proofs::ZkSnarkProof,
+    treestate,
+    types::amount::{Amount, NonNegative},
+};
 
 /// A _JoinSplit Description_, as described in [protocol specification §7.2][ps].
 ///
@@ -17,17 +23,11 @@ pub struct JoinSplit<P: ZkSnarkProof> {
     /// A root of the Sprout note commitment tree at some block height in the
     /// past, or the root produced by a previous JoinSplit transfer in this
     /// transaction.
-    ///
-    /// XXX refine type
-    pub anchor: [u8; 32],
+    pub anchor: treestate::sprout::NoteTreeRootHash,
     /// A nullifier for the input notes.
-    ///
-    /// XXX refine type to [T; 2] -- there are two nullifiers
-    pub nullifiers: [crate::nullifier::sprout::Nullifier; 2],
+    pub nullifiers: [crate::notes::sprout::Nullifier; 2],
     /// A note commitment for this output note.
-    ///
-    /// XXX refine type to [T; 2] -- there are two commitments
-    pub commitments: [[u8; 32]; 2],
+    pub commitments: [crate::commitments::sprout::NoteCommitment; 2],
     /// An X25519 public key.
     pub ephemeral_key: x25519_dalek::PublicKey,
     /// A 256-bit seed that must be chosen independently at random for each

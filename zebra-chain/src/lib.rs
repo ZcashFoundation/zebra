@@ -16,15 +16,15 @@ mod sha256d_writer;
 
 pub mod addresses;
 pub mod block;
+pub mod commitments;
 pub mod equihash_solution;
 pub mod keys;
-pub mod note_commitment_tree;
 pub mod notes;
-pub mod nullifier;
 pub mod parameters;
 pub mod proofs;
 pub mod serialization;
 pub mod transaction;
+pub mod treestate;
 pub mod types;
 pub mod utils;
 

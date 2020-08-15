@@ -669,6 +669,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "ed25519-zebra"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a045d3ca7d15222d578515dc6b54fea6c3591763b8fe2f67a45bbd56d5f1989b"
+dependencies = [
+ "curve25519-dalek",
+ "hex",
+ "rand_core 0.5.1",
+ "serde",
+ "sha2",
+ "thiserror",
+]
+
+[[package]]
 name = "either"
 version = "1.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1996,9 +2010,9 @@ checksum = "388a1df253eca08550bef6c72392cfe7c30914bf41df5269b68cbd6ff8f570a3"
 
 [[package]]
 name = "serde"
-version = "1.0.114"
+version = "1.0.115"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5317f7588f0a5078ee60ef675ef96735a1442132dc645eb1d12c018620ed8cd3"
+checksum = "e54c9a88f2da7238af84b5101443f0c0d0a3bbdc455e34a5c9497b1903ed55d5"
 dependencies = [
  "serde_derive",
 ]
@@ -2015,9 +2029,9 @@ dependencies = [
 
 [[package]]
 name = "serde_derive"
-version = "1.0.114"
+version = "1.0.115"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a0be94b04690fbaed37cddffc5c134bf537c8e3329d53e982fe04c374978f8e"
+checksum = "609feed1d0a73cc36a0182a840a9b37b4a82f0b1150369f0536a9e3f2a31dc48"
 dependencies = [
  "proc-macro2 1.0.19",
  "quote 1.0.7",
@@ -2581,9 +2595,9 @@ dependencies = [
 
 [[package]]
 name = "tracing"
-version = "0.1.18"
+version = "0.1.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f0aae59226cf195d8e74d4b34beae1859257efb4e5fed3f147d2dc2c7d372178"
+checksum = "6d79ca061b032d6ce30c660fded31189ca0b9922bf483cd70759f13a2d86786c"
 dependencies = [
  "cfg-if",
  "log",
@@ -2593,9 +2607,9 @@ dependencies = [
 
 [[package]]
 name = "tracing-attributes"
-version = "0.1.9"
+version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f0693bf8d6f2bf22c690fc61a9d21ac69efdbb894a17ed596b9af0f01e64b84b"
+checksum = "1fe233f4227389ab7df5b32649239da7ebe0b281824b4e84b342d04d3fd8c25e"
 dependencies = [
  "proc-macro2 1.0.19",
  "quote 1.0.7",
@@ -2604,9 +2618,9 @@ dependencies = [
 
 [[package]]
 name = "tracing-core"
-version = "0.1.13"
+version = "0.1.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d593f98af59ebc017c0648f0117525db358745a8894a8d684e185ba3f45954f9"
+checksum = "db63662723c316b43ca36d833707cc93dff82a02ba3d7e354f342682cc8b3545"
 dependencies = [
  "lazy_static",
 ]
@@ -2618,7 +2632,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4d7c0b83d4a500748fa5879461652b361edf5c9d51ede2a2ac03875ca185e24"
 dependencies = [
  "tracing",
- "tracing-subscriber 0.2.10",
+ "tracing-subscriber 0.2.11",
 ]
 
 [[package]]
@@ -2629,7 +2643,7 @@ checksum = "bd520fe41c667b437952383f3a1ec14f1fa45d653f719a77eedd6e6a02d8fa54"
 dependencies = [
  "lazy_static",
  "tracing",
- "tracing-subscriber 0.2.10",
+ "tracing-subscriber 0.2.11",
 ]
 
 [[package]]
@@ -2682,9 +2696,9 @@ dependencies = [
 
 [[package]]
 name = "tracing-subscriber"
-version = "0.2.10"
+version = "0.2.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f7b33f8b2ef2ab0c3778c12646d9c42a24f7772bee4cdafc72199644a9f58fdc"
+checksum = "abd165311cc4d7a555ad11cc77a37756df836182db0d81aac908c8184c584f40"
 dependencies = [
  "ansi_term 0.12.1",
  "chrono",
@@ -2695,6 +2709,7 @@ dependencies = [
  "serde_json",
  "sharded-slab",
  "smallvec 1.4.1",
+ "thread_local",
  "tracing-core",
  "tracing-log",
  "tracing-serde",
@@ -2865,6 +2880,7 @@ version = "3.0.0-alpha.0"
 dependencies = [
  "bech32",
  "bincode",
+ "bitvec",
  "blake2b_simd",
  "blake2s_simd",
  "bs58",
@@ -2920,7 +2936,7 @@ dependencies = [
  "tracing",
  "tracing-error",
  "tracing-futures",
- "tracing-subscriber 0.2.10",
+ "tracing-subscriber 0.2.11",
  "zebra-chain",
  "zebra-state",
  "zebra-test",
@@ -3004,7 +3020,7 @@ dependencies = [
  "tower",
  "tracing",
  "tracing-error",
- "tracing-subscriber 0.2.10",
+ "tracing-subscriber 0.2.11",
 ]
 
 [[package]]
@@ -3017,7 +3033,7 @@ dependencies = [
  "serde_json",
  "structopt",
  "tracing-error",
- "tracing-subscriber 0.2.10",
+ "tracing-subscriber 0.2.11",
  "zebra-chain",
  "zebra-consensus",
 ]
@@ -3047,7 +3063,7 @@ dependencies = [
  "tracing-error",
  "tracing-flame",
  "tracing-futures",
- "tracing-subscriber 0.2.10",
+ "tracing-subscriber 0.2.11",
  "zebra-chain",
  "zebra-consensus",
  "zebra-network",

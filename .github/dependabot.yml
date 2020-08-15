@@ -10,6 +10,10 @@ updates:
   - dconnolly
   assignees:
   - dconnolly
+  labels:
+  - "A-infrastructure"
+  - "A-dependencies"
+  - "A-rust"
   ignore:
   - dependency-name: tokio-util
     versions:
@@ -25,4 +29,5 @@ updates:
   assignees:
   - dconnolly
   labels:
-  - "infrastructure"
+  - "A-infrastructure"
+  - "A-dependencies"

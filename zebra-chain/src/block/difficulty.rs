@@ -13,7 +13,7 @@
 use crate::block::BlockHeaderHash;
 
 use std::cmp::{Ordering, PartialEq, PartialOrd};
-use std::fmt;
+use std::{fmt, ops::Add, ops::AddAssign};
 
 use primitive_types::U256;
 
@@ -89,6 +89,39 @@ impl fmt::Debug for ExpandedDifficulty {
         self.0.to_little_endian(&mut buf);
         f.debug_tuple("ExpandedDifficulty")
             .field(&hex::encode(&buf))
+            .finish()
+    }
+}
+
+/// A 128-bit unsigned "Work" value.
+///
+/// Used to calculate the total work for each chain of blocks.
+///
+/// Details:
+///
+/// The relative value of `Work` is consensus-critical, because it is used to
+/// choose the best chain. But its precise value and bit pattern are not
+/// consensus-critical.
+///
+/// We calculate work values according to the Zcash specification, but store
+/// them as u128, rather than the implied u256. We don't expect the total chain
+/// work to ever exceed 2^128. The current total chain work for Zcash is 2^58,
+/// and Bitcoin adds around 2^91 work per year. (Each extra bit represents twice
+/// as much work.)
+#[derive(Clone, Copy, Default, Eq, PartialEq, Ord, PartialOrd)]
+pub struct Work(u128);
+
+impl fmt::Debug for Work {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // There isn't a standard way to represent alternate formats for the
+        // same value.
+        f.debug_tuple("Work")
+            // Use hex, because expanded difficulty is in hex.
+            .field(&format_args!("{:#x}", self.0))
+            // Use decimal, to compare with zcashd
+            .field(&format_args!("{}", self.0))
+            // Use log2, to compare with zcashd
+            .field(&format_args!("{:.5}", (self.0 as f64).log2()))
             .finish()
     }
 }
@@ -181,6 +214,31 @@ impl CompactDifficulty {
             Some(ExpandedDifficulty(result))
         }
     }
+
+    /// Calculate the Work for a compact representation.
+    ///
+    /// See `Definition of Work` in the [Zcash Specification], and
+    /// `GetBlockProof()` in zcashd.
+    ///
+    /// Returns None if the corresponding ExpandedDifficulty is None.
+    /// Also returns None on Work overflow, which should be impossible on a
+    /// valid chain.
+    ///
+    /// [Zcash Specification]: https://zips.z.cash/protocol/canopy.pdf#workdef
+    pub fn to_work(&self) -> Option<Work> {
+        let expanded = self.to_expanded()?;
+
+        // We need to compute `2^256 / (expanded + 1)`, but we can't represent
+        // 2^256, as it's too large for a u256. However, as 2^256 is at least as
+        // large as `expanded + 1`, it is equal to
+        // `((2^256 - expanded - 1) / (expanded + 1)) + 1`, or
+        let result = (!expanded.0 / (expanded.0 + 1)) + 1;
+        if result <= u128::MAX.into() {
+            return Some(Work(result.as_u128()));
+        }
+
+        None
+    }
 }
 
 impl ExpandedDifficulty {
@@ -241,5 +299,23 @@ impl PartialOrd<ExpandedDifficulty> for BlockHeaderHash {
                 "Unexpected incomparable values: difficulties and hashes have a total order."
             ),
         }
+    }
+}
+
+impl Add for Work {
+    type Output = Self;
+
+    fn add(self, rhs: Work) -> Self {
+        let result = self
+            .0
+            .checked_add(rhs.0)
+            .expect("Work values do not overflow");
+        Work(result)
+    }
+}
+
+impl AddAssign for Work {
+    fn add_assign(&mut self, rhs: Work) {
+        *self = *self + rhs;
     }
 }

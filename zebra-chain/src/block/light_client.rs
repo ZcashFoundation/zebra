@@ -1,12 +1,12 @@
 //! The LightClientRootHash enum, used for the corresponding block header field.
 
-use crate::note_commitment_tree::SaplingNoteTreeRootHash;
+use crate::treestate::note_commitment_tree::SaplingNoteTreeRootHash;
 use crate::types::BlockHeight;
 use crate::{Network, NetworkUpgrade, NetworkUpgrade::*};
 
 /// Light client root hashes.
 ///
-/// The `BlockHeader.light_client_root_hash` field is interpreted differently,
+/// The `BlockHeader.light_client_root_bytes` field is interpreted differently,
 /// based on the current block height. The interpretation changes at or after
 /// network upgrades.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -45,7 +45,7 @@ pub enum LightClientRootHash {
 impl LightClientRootHash {
     /// Returns `bytes` as the LightClientRootHash variant for `network` and
     /// `height`.
-    pub fn from_bytes(
+    pub(super) fn from_bytes(
         bytes: [u8; 32],
         network: Network,
         height: BlockHeight,
@@ -64,7 +64,7 @@ impl LightClientRootHash {
 
     /// Returns the serialized bytes for this LightClientRootHash.
     #[allow(dead_code)]
-    pub fn to_bytes(self) -> [u8; 32] {
+    pub(super) fn to_bytes(self) -> [u8; 32] {
         use LightClientRootHash::*;
 
         match self {

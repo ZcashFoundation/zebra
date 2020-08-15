@@ -4,17 +4,19 @@ use super::*;
 
 use crate::checkpoint::CheckpointList;
 
+use color_eyre::eyre::eyre;
 use color_eyre::eyre::Report;
-use color_eyre::eyre::{bail, eyre};
 use futures::{future::TryFutureExt, stream::FuturesUnordered};
+use once_cell::sync::Lazy;
 use std::{collections::BTreeMap, mem::drop, sync::Arc, time::Duration};
 use tokio::{stream::StreamExt, time::timeout};
-use tower::{Service, ServiceExt};
+use tower::{layer::Layer, timeout::TimeoutLayer, Service, ServiceExt};
 use tracing_futures::Instrument;
 
 use zebra_chain::block::{Block, BlockHeader};
 use zebra_chain::serialization::ZcashDeserialize;
 use zebra_chain::Network::{self, *};
+use zebra_test::transcript::{TransError, Transcript};
 
 /// The timeout we apply to each verify future during testing.
 ///
@@ -102,6 +104,86 @@ fn verifiers_from_network(
     verifiers_from_checkpoint_list(network, CheckpointList::new(network))
 }
 
+static BLOCK_VERIFY_TRANSCRIPT_GENESIS: Lazy<
+    Vec<(Arc<Block>, Result<BlockHeaderHash, TransError>)>,
+> = Lazy::new(|| {
+    let block: Arc<_> =
+        Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
+            .unwrap()
+            .into();
+    let hash = Ok(block.as_ref().into());
+
+    vec![(block, hash)]
+});
+
+static BLOCK_VERIFY_TRANSCRIPT_GENESIS_FAIL: Lazy<
+    Vec<(Arc<Block>, Result<BlockHeaderHash, TransError>)>,
+> = Lazy::new(|| {
+    let block: Arc<_> =
+        Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
+            .unwrap()
+            .into();
+
+    vec![(block, Err(TransError::Any))]
+});
+
+static BLOCK_VERIFY_TRANSCRIPT_GENESIS_TO_BLOCK_1: Lazy<
+    Vec<(Arc<Block>, Result<BlockHeaderHash, TransError>)>,
+> = Lazy::new(|| {
+    let block0: Arc<_> =
+        Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
+            .unwrap()
+            .into();
+    let hash0 = Ok(block0.as_ref().into());
+
+    let block1: Arc<_> = Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..])
+        .unwrap()
+        .into();
+    let hash1 = Ok(block1.as_ref().into());
+
+    vec![(block0, hash0), (block1, hash1)]
+});
+
+static NO_COINBASE_TRANSCRIPT: Lazy<Vec<(Arc<Block>, Result<BlockHeaderHash, TransError>)>> =
+    Lazy::new(|| {
+        let block = block_no_transactions();
+
+        vec![(Arc::new(block), Err(TransError::Any))]
+    });
+
+static NO_COINBASE_STATE_TRANSCRIPT: Lazy<
+    Vec<(
+        zebra_state::Request,
+        Result<zebra_state::Response, TransError>,
+    )>,
+> = Lazy::new(|| {
+    let block = block_no_transactions();
+    let hash: BlockHeaderHash = (&block).into();
+
+    vec![(
+        zebra_state::Request::GetBlock { hash },
+        Err(TransError::Any),
+    )]
+});
+
+static STATE_VERIFY_TRANSCRIPT_GENESIS: Lazy<
+    Vec<(
+        zebra_state::Request,
+        Result<zebra_state::Response, TransError>,
+    )>,
+> = Lazy::new(|| {
+    let block: Arc<_> =
+        Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
+            .unwrap()
+            .into();
+    let hash: BlockHeaderHash = block.as_ref().into();
+
+    vec![(
+        zebra_state::Request::GetBlock { hash },
+        Ok(zebra_state::Response::Block { block }),
+    )]
+});
+
 #[tokio::test]
 async fn verify_block_test() -> Result<(), Report> {
     verify_block().await
@@ -131,44 +213,10 @@ async fn verify_block() -> Result<(), Report> {
         checkpoint_data.iter().cloned().collect();
     let checkpoint_list = CheckpointList::from_list(checkpoint_list).map_err(|e| eyre!(e))?;
 
-    let (mut chain_verifier, _) = verifiers_from_checkpoint_list(Mainnet, checkpoint_list);
+    let (chain_verifier, _) = verifiers_from_checkpoint_list(Mainnet, checkpoint_list);
 
-    /// SPANDOC: Make sure the verifier service is ready for block 0
-    let ready_verifier_service = chain_verifier.ready_and().await.map_err(|e| eyre!(e))?;
-    /// SPANDOC: Set up the future for block 0
-    let verify_future = timeout(
-        Duration::from_secs(VERIFY_TIMEOUT_SECONDS),
-        ready_verifier_service.call(block0.clone()),
-    );
-    /// SPANDOC: Verify block 0
-    // TODO(teor || jlusby): check error kind
-    let verify_response = verify_future
-        .map_err(|e| eyre!(e))
-        .await
-        .expect("timeout should not happen")
-        .expect("block should verify");
-
-    assert_eq!(verify_response, hash0);
-
-    let block1 = Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..])?;
-    let hash1: BlockHeaderHash = block1.as_ref().into();
-
-    /// SPANDOC: Make sure the verifier service is ready for block 1
-    let ready_verifier_service = chain_verifier.ready_and().await.map_err(|e| eyre!(e))?;
-    /// SPANDOC: Set up the future for block 1
-    let verify_future = timeout(
-        Duration::from_secs(VERIFY_TIMEOUT_SECONDS),
-        ready_verifier_service.call(block1.clone()),
-    );
-    /// SPANDOC: Verify block 1
-    // TODO(teor || jlusby): check error kind
-    let verify_response = verify_future
-        .map_err(|e| eyre!(e))
-        .await
-        .expect("timeout should not happen")
-        .expect("block should verify");
-
-    assert_eq!(verify_response, hash1);
+    let transcript = Transcript::from(BLOCK_VERIFY_TRANSCRIPT_GENESIS_TO_BLOCK_1.iter().cloned());
+    transcript.check(chain_verifier).await.unwrap();
 
     Ok(())
 }
@@ -185,30 +233,16 @@ async fn verify_checkpoint_test() -> Result<(), Report> {
 async fn verify_checkpoint() -> Result<(), Report> {
     zebra_test::init();
 
-    let block =
-        Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
-    let hash: BlockHeaderHash = block.as_ref().into();
-
     // Test that the chain::init function works. Most of the other tests use
     // init_from_verifiers.
-    let mut chain_verifier = super::init(Mainnet, zebra_state::in_memory::init()).await;
+    let chain_verifier = super::init(Mainnet, zebra_state::in_memory::init()).await;
 
-    /// SPANDOC: Make sure the verifier service is ready
-    let ready_verifier_service = chain_verifier.ready_and().await.map_err(|e| eyre!(e))?;
-    /// SPANDOC: Set up the future
-    let verify_future = timeout(
-        Duration::from_secs(VERIFY_TIMEOUT_SECONDS),
-        ready_verifier_service.call(block.clone()),
-    );
-    /// SPANDOC: Verify the block
-    // TODO(teor || jlusby): check error kind
-    let verify_response = verify_future
-        .map_err(|e| eyre!(e))
-        .await
-        .expect("timeout should not happen")
-        .expect("block should verify");
+    // Add a timeout layer
+    let chain_verifier =
+        TimeoutLayer::new(Duration::from_secs(VERIFY_TIMEOUT_SECONDS)).layer(chain_verifier);
 
-    assert_eq!(verify_response, hash);
+    let transcript = Transcript::from(BLOCK_VERIFY_TRANSCRIPT_GENESIS.iter().cloned());
+    transcript.check(chain_verifier).await.unwrap();
 
     Ok(())
 }
@@ -226,33 +260,17 @@ async fn verify_fail_no_coinbase_test() -> Result<(), Report> {
 async fn verify_fail_no_coinbase() -> Result<(), Report> {
     zebra_test::init();
 
-    let block = block_no_transactions();
-    let hash: BlockHeaderHash = (&block).into();
+    let (chain_verifier, state_service) = verifiers_from_network(Mainnet);
 
-    let (mut chain_verifier, mut state_service) = verifiers_from_network(Mainnet);
+    // Add a timeout layer
+    let chain_verifier =
+        TimeoutLayer::new(Duration::from_secs(VERIFY_TIMEOUT_SECONDS)).layer(chain_verifier);
 
-    /// SPANDOC: Make sure the verifier service is ready
-    let ready_verifier_service = chain_verifier.ready_and().await.map_err(|e| eyre!(e))?;
-    /// SPANDOC: Set up the future to verify the block
-    let verify_future = timeout(
-        Duration::from_secs(VERIFY_TIMEOUT_SECONDS),
-        ready_verifier_service.call(block.into()),
-    );
-    /// SPANDOC: Verify the block
-    // TODO(teor || jlusby): check error kind
-    let _ = verify_future
-        .map_err(|e| eyre!(e))
-        .await
-        .expect("timeout should not happen")
-        .unwrap_err();
+    let transcript = Transcript::from(NO_COINBASE_TRANSCRIPT.iter().cloned());
+    transcript.check(chain_verifier).await.unwrap();
 
-    /// SPANDOC: Make sure the state service is ready
-    let ready_state_service = state_service.ready_and().await.map_err(|e| eyre!(e))?;
-    /// SPANDOC: The state should not contain failed blocks
-    let _ = ready_state_service
-        .call(zebra_state::Request::GetBlock { hash })
-        .await
-        .expect_err("failed block should not be in state");
+    let transcript = Transcript::from(NO_COINBASE_STATE_TRANSCRIPT.iter().cloned());
+    transcript.check(state_service).await.unwrap();
 
     Ok(())
 }
@@ -267,45 +285,17 @@ async fn round_trip_checkpoint_test() -> Result<(), Report> {
 async fn round_trip_checkpoint() -> Result<(), Report> {
     zebra_test::init();
 
-    let block =
-        Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
-    let hash: BlockHeaderHash = block.as_ref().into();
+    let (chain_verifier, state_service) = verifiers_from_network(Mainnet);
 
-    let (mut chain_verifier, mut state_service) = verifiers_from_network(Mainnet);
+    // Add a timeout layer
+    let chain_verifier =
+        TimeoutLayer::new(Duration::from_secs(VERIFY_TIMEOUT_SECONDS)).layer(chain_verifier);
 
-    /// SPANDOC: Make sure the verifier service is ready
-    let ready_verifier_service = chain_verifier.ready_and().await.map_err(|e| eyre!(e))?;
-    /// SPANDOC: Set up the future
-    let verify_future = timeout(
-        Duration::from_secs(VERIFY_TIMEOUT_SECONDS),
-        ready_verifier_service.call(block.clone()),
-    );
-    /// SPANDOC: Verify the block
-    // TODO(teor || jlusby): check error kind
-    let verify_response = verify_future
-        .map_err(|e| eyre!(e))
-        .await
-        .expect("timeout should not happen")
-        .expect("block should verify");
+    let transcript = Transcript::from(BLOCK_VERIFY_TRANSCRIPT_GENESIS.iter().cloned());
+    transcript.check(chain_verifier).await.unwrap();
 
-    assert_eq!(verify_response, hash);
-
-    /// SPANDOC: Make sure the state service is ready
-    let ready_state_service = state_service.ready_and().await.map_err(|e| eyre!(e))?;
-    /// SPANDOC: Make sure the block was added to the state
-    let state_response = ready_state_service
-        .call(zebra_state::Request::GetBlock { hash })
-        .await
-        .map_err(|e| eyre!(e))?;
-
-    if let zebra_state::Response::Block {
-        block: returned_block,
-    } = state_response
-    {
-        assert_eq!(block, returned_block);
-    } else {
-        bail!("unexpected response kind: {:?}", state_response);
-    }
+    let transcript = Transcript::from(STATE_VERIFY_TRANSCRIPT_GENESIS.iter().cloned());
+    transcript.check(state_service).await.unwrap();
 
     Ok(())
 }
@@ -320,78 +310,23 @@ async fn verify_fail_add_block_checkpoint_test() -> Result<(), Report> {
 async fn verify_fail_add_block_checkpoint() -> Result<(), Report> {
     zebra_test::init();
 
-    let block =
-        Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
-    let hash: BlockHeaderHash = block.as_ref().into();
+    let (chain_verifier, state_service) = verifiers_from_network(Mainnet);
 
-    let (mut chain_verifier, mut state_service) = verifiers_from_network(Mainnet);
+    // Add a timeout layer
+    let chain_verifier =
+        TimeoutLayer::new(Duration::from_secs(VERIFY_TIMEOUT_SECONDS)).layer(chain_verifier);
 
-    /// SPANDOC: Make sure the verifier service is ready (1/2)
-    let ready_verifier_service = chain_verifier.ready_and().await.map_err(|e| eyre!(e))?;
-    /// SPANDOC: Set up the future to verify the block for the first time
-    let verify_future = timeout(
-        Duration::from_secs(VERIFY_TIMEOUT_SECONDS),
-        ready_verifier_service.call(block.clone()),
-    );
-    /// SPANDOC: Verify the block for the first time
-    // TODO(teor || jlusby): check error kind
-    let verify_response = verify_future
-        .map_err(|e| eyre!(e))
-        .await
-        .expect("timeout should not happen")
-        .expect("block should verify");
+    let transcript = Transcript::from(BLOCK_VERIFY_TRANSCRIPT_GENESIS.iter().cloned());
+    transcript.check(chain_verifier.clone()).await.unwrap();
 
-    assert_eq!(verify_response, hash);
+    let transcript = Transcript::from(STATE_VERIFY_TRANSCRIPT_GENESIS.iter().cloned());
+    transcript.check(state_service.clone()).await.unwrap();
 
-    /// SPANDOC: Make sure the state service is ready (1/2)
-    let ready_state_service = state_service.ready_and().await.map_err(|e| eyre!(e))?;
-    /// SPANDOC: Make sure the block was added to the state
-    let state_response = ready_state_service
-        .call(zebra_state::Request::GetBlock { hash })
-        .await
-        .map_err(|e| eyre!(e))?;
+    let transcript = Transcript::from(BLOCK_VERIFY_TRANSCRIPT_GENESIS_FAIL.iter().cloned());
+    transcript.check(chain_verifier.clone()).await.unwrap();
 
-    if let zebra_state::Response::Block {
-        block: returned_block,
-    } = state_response
-    {
-        assert_eq!(block, returned_block);
-    } else {
-        bail!("unexpected response kind: {:?}", state_response);
-    }
-
-    /// SPANDOC: Make sure the verifier service is ready (2/2)
-    let ready_verifier_service = chain_verifier.ready_and().await.map_err(|e| eyre!(e))?;
-    /// SPANDOC: Set up the future to verify the block for the first time
-    let verify_future = timeout(
-        Duration::from_secs(VERIFY_TIMEOUT_SECONDS),
-        ready_verifier_service.call(block.clone()),
-    );
-    /// SPANDOC: Verify the block for the first time
-    // TODO(teor): ignore duplicate block verifies?
-    // TODO(teor || jlusby): check error kind
-    let _ = verify_future
-        .map_err(|e| eyre!(e))
-        .await
-        .expect("timeout should not happen")
-        .unwrap_err();
-
-    /// SPANDOC: Make sure the state service is ready (2/2)
-    let ready_state_service = state_service.ready_and().await.map_err(|e| eyre!(e))?;
-    /// SPANDOC: But the state should still return the original block we added
-    let state_response = ready_state_service
-        .call(zebra_state::Request::GetBlock { hash })
-        .await
-        .map_err(|e| eyre!(e))?;
-
-    if let zebra_state::Response::Block {
-        block: returned_block,
-    } = state_response
-    {
-        assert_eq!(block, returned_block);
-    } else {
-        bail!("unexpected response kind: {:?}", state_response);
-    }
+    let transcript = Transcript::from(STATE_VERIFY_TRANSCRIPT_GENESIS.iter().cloned());
+    transcript.check(state_service.clone()).await.unwrap();
 
     Ok(())
 }

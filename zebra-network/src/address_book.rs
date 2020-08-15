@@ -35,6 +35,14 @@ impl AddressBook {
         }
     }
 
+    /// Get the contents of `self` in random order with sanitized timestamps.
+    pub fn sanitized(&self) -> Vec<MetaAddr> {
+        use rand::seq::SliceRandom;
+        let mut peers = self.peers().map(MetaAddr::sanitize).collect::<Vec<_>>();
+        peers.shuffle(&mut rand::thread_rng());
+        peers
+    }
+
     /// Check consistency of the address book invariants or panic, doing work
     /// quadratic in the address book size.
     #[cfg(test)]
