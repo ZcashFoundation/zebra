@@ -29,7 +29,7 @@ use tracing_futures::Instrument;
 
 use zebra_chain::block::BlockHeight;
 use zebra_chain::block::{Block, BlockHeaderHash};
-use zebra_chain::{Network, NetworkUpgrade::Sapling};
+use zebra_chain::parameters::{Network, NetworkUpgrade::Sapling};
 
 /// The maximum expected gap between blocks.
 ///

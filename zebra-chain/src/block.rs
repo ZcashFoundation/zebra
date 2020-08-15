@@ -16,8 +16,8 @@ use std::{error, sync::Arc};
 #[cfg(test)]
 use proptest_derive::Arbitrary;
 
+use crate::parameters::Network;
 use crate::transaction::Transaction;
-use crate::Network;
 
 pub use hash::BlockHeaderHash;
 pub use header::BlockHeader;

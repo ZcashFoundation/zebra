@@ -11,12 +11,12 @@ use tokio_util::codec::{Decoder, Encoder};
 use zebra_chain::{
     block::BlockHeight,
     block::{Block, BlockHeaderHash},
+    parameters::Network,
     serialization::{
         sha256d, ReadZcashExt, SerializationError as Error, WriteZcashExt, ZcashDeserialize,
         ZcashSerialize,
     },
     transaction::Transaction,
-    Network,
 };
 
 use crate::constants;

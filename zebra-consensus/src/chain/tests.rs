@@ -1,22 +1,25 @@
 //! Tests for chain verification
 
-use super::*;
-
-use crate::checkpoint::CheckpointList;
+use std::{collections::BTreeMap, mem::drop, sync::Arc, time::Duration};
 
 use color_eyre::eyre::eyre;
 use color_eyre::eyre::Report;
 use futures::{future::TryFutureExt, stream::FuturesUnordered};
 use once_cell::sync::Lazy;
-use std::{collections::BTreeMap, mem::drop, sync::Arc, time::Duration};
 use tokio::{stream::StreamExt, time::timeout};
 use tower::{layer::Layer, timeout::TimeoutLayer, Service, ServiceExt};
 use tracing_futures::Instrument;
 
-use zebra_chain::block::{Block, BlockHeader};
-use zebra_chain::serialization::ZcashDeserialize;
-use zebra_chain::Network::{self, *};
+use zebra_chain::{
+    block::{Block, BlockHeader},
+    parameters::Network,
+    serialization::ZcashDeserialize,
+};
 use zebra_test::transcript::{TransError, Transcript};
+
+use crate::checkpoint::CheckpointList;
+
+use super::*;
 
 /// The timeout we apply to each verify future during testing.
 ///
@@ -213,7 +216,7 @@ async fn verify_block() -> Result<(), Report> {
         checkpoint_data.iter().cloned().collect();
     let checkpoint_list = CheckpointList::from_list(checkpoint_list).map_err(|e| eyre!(e))?;
 
-    let (chain_verifier, _) = verifiers_from_checkpoint_list(Mainnet, checkpoint_list);
+    let (chain_verifier, _) = verifiers_from_checkpoint_list(Network::Mainnet, checkpoint_list);
 
     let transcript = Transcript::from(BLOCK_VERIFY_TRANSCRIPT_GENESIS_TO_BLOCK_1.iter().cloned());
     transcript.check(chain_verifier).await.unwrap();
@@ -235,7 +238,7 @@ async fn verify_checkpoint() -> Result<(), Report> {
 
     // Test that the chain::init function works. Most of the other tests use
     // init_from_verifiers.
-    let chain_verifier = super::init(Mainnet, zebra_state::in_memory::init()).await;
+    let chain_verifier = super::init(Network::Mainnet, zebra_state::in_memory::init()).await;
 
     // Add a timeout layer
     let chain_verifier =
@@ -260,7 +263,7 @@ async fn verify_fail_no_coinbase_test() -> Result<(), Report> {
 async fn verify_fail_no_coinbase() -> Result<(), Report> {
     zebra_test::init();
 
-    let (chain_verifier, state_service) = verifiers_from_network(Mainnet);
+    let (chain_verifier, state_service) = verifiers_from_network(Network::Mainnet);
 
     // Add a timeout layer
     let chain_verifier =
@@ -285,7 +288,7 @@ async fn round_trip_checkpoint_test() -> Result<(), Report> {
 async fn round_trip_checkpoint() -> Result<(), Report> {
     zebra_test::init();
 
-    let (chain_verifier, state_service) = verifiers_from_network(Mainnet);
+    let (chain_verifier, state_service) = verifiers_from_network(Network::Mainnet);
 
     // Add a timeout layer
     let chain_verifier =
@@ -310,7 +313,7 @@ async fn verify_fail_add_block_checkpoint_test() -> Result<(), Report> {
 async fn verify_fail_add_block_checkpoint() -> Result<(), Report> {
     zebra_test::init();
 
-    let (chain_verifier, state_service) = verifiers_from_network(Mainnet);
+    let (chain_verifier, state_service) = verifiers_from_network(Network::Mainnet);
 
     // Add a timeout layer
     let chain_verifier =
@@ -409,7 +412,7 @@ async fn continuous_blockchain(restart_height: Option<BlockHeight>) -> Result<()
 
     let block_verifier = crate::block::init(state_service.clone());
     let mut chain_verifier = super::init_from_verifiers(
-        Mainnet,
+        Network::Mainnet,
         block_verifier,
         Some(checkpoint_list),
         state_service.clone(),

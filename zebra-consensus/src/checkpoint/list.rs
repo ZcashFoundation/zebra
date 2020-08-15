@@ -19,7 +19,7 @@ use std::{
 
 use zebra_chain::block::BlockHeaderHash;
 use zebra_chain::block::BlockHeight;
-use zebra_chain::Network::{self, *};
+use zebra_chain::parameters::Network;
 
 const MAINNET_CHECKPOINTS: &str = include_str!("main-checkpoints.txt");
 const TESTNET_CHECKPOINTS: &str = include_str!("test-checkpoints.txt");
@@ -70,10 +70,10 @@ impl CheckpointList {
     pub fn new(network: Network) -> Self {
         // parse calls CheckpointList::from_list
         let checkpoint_list: CheckpointList = match network {
-            Mainnet => MAINNET_CHECKPOINTS
+            Network::Mainnet => MAINNET_CHECKPOINTS
                 .parse()
                 .expect("Hard-coded Mainnet checkpoint list parses and validates"),
-            Testnet => TESTNET_CHECKPOINTS
+            Network::Testnet => TESTNET_CHECKPOINTS
                 .parse()
                 .expect("Hard-coded Testnet checkpoint list parses and validates"),
         };
@@ -108,8 +108,8 @@ impl CheckpointList {
         // Check that the list starts with the correct genesis block
         match checkpoints.iter().next() {
             Some((BlockHeight(0), hash))
-                if (hash == &parameters::genesis_hash(Mainnet)
-                    || hash == &parameters::genesis_hash(Testnet)) => {}
+                if (hash == &parameters::genesis_hash(Network::Mainnet)
+                    || hash == &parameters::genesis_hash(Network::Testnet)) => {}
             Some((BlockHeight(0), _)) => {
                 Err("the genesis checkpoint does not match the Mainnet or Testnet genesis hash")?
             }

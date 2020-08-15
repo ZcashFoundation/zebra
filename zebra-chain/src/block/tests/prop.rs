@@ -3,8 +3,8 @@ use std::io::ErrorKind;
 
 use proptest::{arbitrary::any, prelude::*, test_runner::Config};
 
+use crate::parameters::Network;
 use crate::serialization::{SerializationError, ZcashDeserializeInto, ZcashSerialize};
-use crate::Network;
 
 use super::super::*;
 

@@ -7,8 +7,8 @@ use proptest::{arbitrary::Arbitrary, array, prelude::*};
 
 use crate::{
     keys::sprout,
+    parameters::Network,
     serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize},
-    Network,
 };
 
 /// Magic numbers used to identify what networks Sprout Shielded

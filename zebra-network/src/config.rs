@@ -5,7 +5,7 @@ use std::{
     time::Duration,
 };
 
-use zebra_chain::Network;
+use zebra_chain::parameters::Network;
 
 /// Configuration for networking code.
 #[derive(Clone, Debug, Deserialize, Serialize)]

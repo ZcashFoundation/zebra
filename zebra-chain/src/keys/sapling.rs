@@ -30,11 +30,11 @@ use rand_core::{CryptoRng, RngCore};
 use proptest_derive::Arbitrary;
 
 use crate::{
+    parameters::Network,
     redjubjub::{self, SpendAuth},
     serialization::{
         serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
     },
-    Network,
 };
 
 /// The [Randomness Beacon][1] ("URS").

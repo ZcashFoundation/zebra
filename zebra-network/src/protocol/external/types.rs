@@ -4,9 +4,13 @@ use crate::constants::magics;
 
 use std::fmt;
 
-use zebra_chain::block::BlockHeight;
-use zebra_chain::Network::{self, *};
-use zebra_chain::NetworkUpgrade::{self, *};
+use zebra_chain::{
+    block::BlockHeight,
+    parameters::{
+        Network::{self, *},
+        NetworkUpgrade::{self, *},
+    },
+};
 
 #[cfg(test)]
 use proptest_derive::Arbitrary;

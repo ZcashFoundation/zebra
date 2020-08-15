@@ -1,6 +1,6 @@
 use crate::merkle_tree::MerkleTreeRootHash;
+use crate::parameters::Network;
 use crate::work::{difficulty::CompactDifficulty, equihash};
-use crate::Network;
 
 use super::super::*;
 

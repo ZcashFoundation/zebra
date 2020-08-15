@@ -15,7 +15,7 @@ use zebra_chain::serialization::{SerializationError, ZcashDeserialize, ZcashSeri
 use zebra_chain::{
     block::BlockHeight,
     block::{Block, BlockHeaderHash},
-    Network,
+    parameters::Network,
 };
 
 /// Type alias of our wrapped service

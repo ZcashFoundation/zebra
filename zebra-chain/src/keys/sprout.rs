@@ -18,8 +18,8 @@ use proptest::{array, prelude::*};
 use proptest_derive::Arbitrary;
 
 use crate::{
+    parameters::Network,
     serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize},
-    Network,
 };
 
 /// Magic numbers used to identify with what networks Sprout Spending

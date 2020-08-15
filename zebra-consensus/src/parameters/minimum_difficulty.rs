@@ -1,7 +1,6 @@
 //! The minimum difficulty block rule for Zcash.
 
-use zebra_chain::block::BlockHeight;
-use zebra_chain::{Network, Network::*};
+use zebra_chain::{block::BlockHeight, parameters::Network};
 
 /// The testnet block height when minimum difficulty blocks start being
 /// accepted.
@@ -29,6 +28,7 @@ impl MinimumDifficulty {
     /// Returns the current minimum difficulty rule for `network` and `height`.
     pub fn current(network: Network, height: BlockHeight) -> MinimumDifficulty {
         use MinimumDifficulty::*;
+        use Network::*;
 
         match network {
             Mainnet => Rejected,

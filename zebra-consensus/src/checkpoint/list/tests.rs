@@ -4,8 +4,8 @@ use super::*;
 
 use std::sync::Arc;
 
+use zebra_chain::parameters::{Network, NetworkUpgrade::Sapling};
 use zebra_chain::{block::Block, serialization::ZcashDeserialize};
-use zebra_chain::{Network, NetworkUpgrade::Sapling};
 
 /// Make a checkpoint list containing only the genesis block
 #[test]
@@ -231,20 +231,20 @@ fn checkpoint_list_load_hard_coded() -> Result<(), Error> {
         .parse()
         .expect("hard-coded Testnet checkpoint list should parse");
 
-    let _ = CheckpointList::new(Mainnet);
-    let _ = CheckpointList::new(Testnet);
+    let _ = CheckpointList::new(Network::Mainnet);
+    let _ = CheckpointList::new(Network::Testnet);
 
     Ok(())
 }
 
 #[test]
 fn checkpoint_list_hard_coded_sapling_mainnet() -> Result<(), Error> {
-    checkpoint_list_hard_coded_sapling(Mainnet)
+    checkpoint_list_hard_coded_sapling(Network::Mainnet)
 }
 
 #[test]
 fn checkpoint_list_hard_coded_sapling_testnet() -> Result<(), Error> {
-    checkpoint_list_hard_coded_sapling(Testnet)
+    checkpoint_list_hard_coded_sapling(Network::Testnet)
 }
 
 /// Check that the hard-coded lists cover the Sapling network upgrade
