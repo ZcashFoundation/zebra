@@ -14,6 +14,7 @@ extern crate serde;
 mod merkle_tree;
 
 pub mod addresses;
+pub mod amount;
 pub mod block;
 pub mod commitments;
 pub mod equihash_solution;

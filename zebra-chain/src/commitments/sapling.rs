@@ -13,11 +13,11 @@ use bitvec::prelude::*;
 use rand_core::{CryptoRng, RngCore};
 
 use crate::{
+    amount::{Amount, NonNegative},
     keys::sapling::{find_group_hash, Diversifier, TransmissionKey},
     serialization::{
         serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
     },
-    types::amount::{Amount, NonNegative},
 };
 
 use pedersen_hashes::*;

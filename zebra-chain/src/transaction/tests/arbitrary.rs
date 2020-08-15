@@ -1,4 +1,5 @@
 use crate::{
+    amount::{Amount, NonNegative},
     commitments, keys,
     notes::{sapling, sprout},
     proofs::{Groth16Proof, ZkSnarkProof},
@@ -7,10 +8,7 @@ use crate::{
         TransparentInput,
     },
     treestate::{self, note_commitment_tree::SaplingNoteTreeRootHash},
-    types::{
-        amount::{Amount, NonNegative},
-        BlockHeight, Script,
-    },
+    types::{BlockHeight, Script},
 };
 use futures::future::Either;
 use proptest::{array, collection::vec, prelude::*};

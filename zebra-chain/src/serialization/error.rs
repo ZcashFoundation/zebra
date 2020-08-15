@@ -18,6 +18,6 @@ pub enum SerializationError {
     Amount {
         /// The source error indicating how the num failed to validate
         #[from]
-        source: crate::types::amount::Error,
+        source: crate::amount::Error,
     },
 }

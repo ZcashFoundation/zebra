@@ -16,8 +16,9 @@ pub use joinsplit::{JoinSplit, JoinSplitData};
 pub use shielded_data::{Output, ShieldedData, Spend};
 pub use transparent::{CoinbaseData, OutPoint, TransparentInput, TransparentOutput};
 
+use crate::amount::Amount;
 use crate::proofs::{Bctv14Proof, Groth16Proof};
-use crate::types::{amount::Amount, BlockHeight, LockTime};
+use crate::types::{BlockHeight, LockTime};
 
 /// A Zcash transaction.
 ///

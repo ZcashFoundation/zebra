@@ -9,10 +9,10 @@ mod ciphertexts;
 mod nullifiers;
 
 use crate::{
+    amount::{Amount, NonNegative},
     commitments::sprout::CommitmentRandomness,
     keys::sprout::PayingKey,
     notes::memo::Memo,
-    types::amount::{Amount, NonNegative},
 };
 
 pub use ciphertexts::EncryptedCiphertext;

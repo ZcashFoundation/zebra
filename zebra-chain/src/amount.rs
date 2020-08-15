@@ -1,4 +1,5 @@
-//! Module of types for working with validated zatoshi Amounts
+//! Strongly-typed zatoshi amounts that prevent under/overflows.
+
 use std::{
     convert::{TryFrom, TryInto},
     marker::PhantomData,
