@@ -7,8 +7,7 @@ use std::{fmt, io};
 #[cfg(test)]
 use proptest_derive::Arbitrary;
 
-use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
-use crate::sha256d_writer::Sha256dWriter;
+use crate::serialization::{sha256d, SerializationError, ZcashDeserialize, ZcashSerialize};
 use crate::transaction::Transaction;
 
 /// A binary hash tree of SHA256d (two rounds of SHA256) hashes for
@@ -38,7 +37,7 @@ pub struct MerkleTreeRootHash(pub [u8; 32]);
 
 impl From<MerkleTree<Transaction>> for MerkleTreeRootHash {
     fn from(merkle_tree: MerkleTree<Transaction>) -> Self {
-        let mut hash_writer = Sha256dWriter::default();
+        let mut hash_writer = sha256d::Writer::default();
         merkle_tree
             .zcash_serialize(&mut hash_writer)
             .expect("Sha256dWriter is infallible");

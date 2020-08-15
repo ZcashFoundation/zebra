@@ -4,11 +4,12 @@ use crate::block::{difficulty::CompactDifficulty, light_client::LightClientRootH
 use crate::equihash_solution::EquihashSolution;
 use crate::merkle_tree::MerkleTreeRootHash;
 use crate::serialization::{
-    SerializationError, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
+    sha256d, SerializationError, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
 };
 use crate::types::LockTime;
 use crate::Network;
-use crate::{sha256d_writer::Sha256dWriter, test::generate};
+
+use crate::test::generate;
 
 use chrono::{DateTime, Duration, LocalResult, TimeZone, Utc};
 use proptest::{
@@ -79,7 +80,7 @@ impl Arbitrary for BlockHeader {
 #[test]
 fn blockheaderhash_debug() {
     let preimage = b"foo bar baz";
-    let mut sha_writer = Sha256dWriter::default();
+    let mut sha_writer = sha256d::Writer::default();
     let _ = sha_writer.write_all(preimage);
 
     let hash = BlockHeaderHash(sha_writer.finish());

@@ -4,9 +4,8 @@ use std::{fmt, io};
 use proptest_derive::Arbitrary;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize},
-    sha256d_writer::Sha256dWriter,
+use crate::serialization::{
+    sha256d, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
 };
 
 use super::BlockHeader;
@@ -37,7 +36,7 @@ impl fmt::Debug for BlockHeaderHash {
 
 impl<'a> From<&'a BlockHeader> for BlockHeaderHash {
     fn from(block_header: &'a BlockHeader) -> Self {
-        let mut hash_writer = Sha256dWriter::default();
+        let mut hash_writer = sha256d::Writer::default();
         block_header
             .zcash_serialize(&mut hash_writer)
             .expect("Sha256dWriter is infallible");
