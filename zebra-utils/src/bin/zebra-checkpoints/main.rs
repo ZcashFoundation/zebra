@@ -25,6 +25,20 @@ use std::os::unix::process::ExitStatusExt;
 
 mod args;
 
+/// Returns the hexadecimal-encoded string `s` in byte-reversed order.
+pub fn byte_reverse_hex(s: &str) -> String {
+    String::from_utf8(
+        s.as_bytes()
+            .chunks(2)
+            .rev()
+            .map(|c| c.iter())
+            .flatten()
+            .cloned()
+            .collect::<Vec<u8>>(),
+    )
+    .expect("input should be ascii")
+}
+
 /// We limit the memory usage for each checkpoint, based on the cumulative size of
 /// the serialized blocks in the chain. Deserialized blocks are larger, because
 /// they contain pointers and non-compact integers. But they should be within a
@@ -126,11 +140,7 @@ fn main() -> Result<()> {
         let v: Value = serde_json::from_str(&output)?;
 
         // get the values we are interested in
-        let hash: BlockHeaderHash = v["hash"]
-            .as_str()
-            .map(zebra_chain::utils::byte_reverse_hex)
-            .unwrap()
-            .parse()?;
+        let hash: BlockHeaderHash = v["hash"].as_str().map(byte_reverse_hex).unwrap().parse()?;
         let height = BlockHeight(v["height"].as_u64().unwrap() as u32);
         assert!(height <= BlockHeight::MAX);
         assert_eq!(x, height.0);

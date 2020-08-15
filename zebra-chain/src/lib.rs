@@ -27,7 +27,6 @@ pub mod serialization;
 pub mod transaction;
 pub mod treestate;
 pub mod types;
-pub mod utils;
 
 pub use ed25519_zebra;
 pub use redjubjub;
