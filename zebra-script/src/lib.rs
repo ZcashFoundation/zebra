@@ -4,6 +4,8 @@
 #![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_script")]
 
 use displaydoc::Display;
+#[cfg(windows)]
+use std::convert::TryInto;
 use std::sync::Arc;
 use thiserror::Error;
 use zcash_script::{
