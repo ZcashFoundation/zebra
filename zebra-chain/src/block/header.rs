@@ -1,10 +1,10 @@
 use chrono::{DateTime, Duration, Utc};
 
-use crate::equihash_solution::EquihashSolution;
 use crate::merkle_tree::MerkleTreeRootHash;
 use crate::serialization::ZcashSerialize;
+use crate::work::{difficulty::CompactDifficulty, equihash::Solution};
 
-use super::{difficulty::CompactDifficulty, BlockHeaderHash, Error};
+use super::{BlockHeaderHash, Error};
 
 /// Block header.
 ///
@@ -65,7 +65,7 @@ pub struct BlockHeader {
     pub nonce: [u8; 32],
 
     /// The Equihash solution.
-    pub solution: EquihashSolution,
+    pub solution: Solution,
 }
 
 impl BlockHeader {
@@ -80,7 +80,7 @@ impl BlockHeader {
         self.zcash_serialize(&mut input)
             .expect("serialization into a vec can't fail");
 
-        let input = &input[0..EquihashSolution::INPUT_LENGTH];
+        let input = &input[0..Solution::INPUT_LENGTH];
 
         equihash::is_valid_solution(n, k, input, nonce, solution)?;
 
