@@ -13,7 +13,7 @@
 use crate::block::BlockHeaderHash;
 
 use std::cmp::{Ordering, PartialEq, PartialOrd};
-use std::fmt;
+use std::{fmt, ops::Add, ops::AddAssign};
 
 use primitive_types::U256;
 
@@ -108,7 +108,7 @@ impl fmt::Debug for ExpandedDifficulty {
 /// work to ever exceed 2^128. The current total chain work for Zcash is 2^58,
 /// and Bitcoin adds around 2^91 work per year. (Each extra bit represents twice
 /// as much work.)
-#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Clone, Copy, Default, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Work(u128);
 
 impl fmt::Debug for Work {
@@ -217,14 +217,17 @@ impl CompactDifficulty {
 
     /// Calculate the Work for a compact representation.
     ///
-    /// See `Definition of Work` in the Zcash Specification, and
+    /// See `Definition of Work` in the [Zcash Specification], and
     /// `GetBlockProof()` in zcashd.
     ///
     /// Returns None if the corresponding ExpandedDifficulty is None.
     /// Also returns None on Work overflow, which should be impossible on a
     /// valid chain.
+    ///
+    /// [Zcash Specification]: https://zips.z.cash/protocol/canopy.pdf#workdef
     pub fn to_work(&self) -> Option<Work> {
         let expanded = self.to_expanded()?;
+
         // We need to compute `2^256 / (expanded + 1)`, but we can't represent
         // 2^256, as it's too large for a u256. However, as 2^256 is at least as
         // large as `expanded + 1`, it is equal to
@@ -296,5 +299,23 @@ impl PartialOrd<ExpandedDifficulty> for BlockHeaderHash {
                 "Unexpected incomparable values: difficulties and hashes have a total order."
             ),
         }
+    }
+}
+
+impl Add for Work {
+    type Output = Self;
+
+    fn add(self, rhs: Work) -> Self {
+        let result = self
+            .0
+            .checked_add(rhs.0)
+            .expect("Work values do not overflow");
+        Work(result)
+    }
+}
+
+impl AddAssign for Work {
+    fn add_assign(&mut self, rhs: Work) {
+        *self = *self + rhs;
     }
 }
