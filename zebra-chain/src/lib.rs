@@ -17,7 +17,6 @@ pub mod addresses;
 pub mod amount;
 pub mod block;
 pub mod commitments;
-pub mod equihash_solution;
 pub mod keys;
 pub mod notes;
 pub mod parameters;
@@ -26,6 +25,7 @@ pub mod serialization;
 pub mod transaction;
 pub mod treestate;
 pub mod types;
+pub mod work;
 
 pub use ed25519_zebra;
 pub use redjubjub;

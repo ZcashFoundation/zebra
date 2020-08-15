@@ -1,12 +1,12 @@
 use super::*;
 
-use crate::block::{difficulty::CompactDifficulty, light_client::LightClientRootHash};
-use crate::equihash_solution::EquihashSolution;
+use crate::block::light_client::LightClientRootHash;
 use crate::merkle_tree::MerkleTreeRootHash;
 use crate::serialization::{
     sha256d, SerializationError, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
 };
 use crate::transaction::LockTime;
+use crate::work::{difficulty::CompactDifficulty, equihash};
 use crate::Network;
 
 use crate::test::generate;
@@ -48,7 +48,7 @@ impl Arbitrary for BlockHeader {
             (0i64..(u32::MAX as i64)),
             any::<CompactDifficulty>(),
             any::<[u8; 32]>(),
-            any::<EquihashSolution>(),
+            any::<equihash::Solution>(),
         )
             .prop_map(
                 |(

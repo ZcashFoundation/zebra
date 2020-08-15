@@ -2,11 +2,10 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{TimeZone, Utc};
 use std::io;
 
-use crate::block::difficulty::CompactDifficulty;
-use crate::equihash_solution::EquihashSolution;
 use crate::merkle_tree::MerkleTreeRootHash;
 use crate::serialization::ZcashDeserializeInto;
 use crate::serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize};
+use crate::work::{difficulty::CompactDifficulty, equihash};
 
 use super::Block;
 use super::BlockHeader;
@@ -71,7 +70,7 @@ impl ZcashDeserialize for BlockHeader {
             time: Utc.timestamp(reader.read_u32::<LittleEndian>()? as i64, 0),
             difficulty_threshold: CompactDifficulty(reader.read_u32::<LittleEndian>()?),
             nonce: reader.read_32_bytes()?,
-            solution: EquihashSolution::zcash_deserialize(reader)?,
+            solution: equihash::Solution::zcash_deserialize(reader)?,
         })
     }
 }

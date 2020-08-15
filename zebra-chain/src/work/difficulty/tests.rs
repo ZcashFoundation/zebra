@@ -1,5 +1,3 @@
-//! Tests for difficulty and work
-
 use super::*;
 
 use crate::block::Block;
