@@ -20,7 +20,7 @@ pub use transparent::{CoinbaseData, OutPoint, TransparentInput, TransparentOutpu
 
 use crate::amount::Amount;
 use crate::block::BlockHeight;
-use crate::proofs::{Bctv14Proof, Groth16Proof};
+use crate::primitives::{Bctv14Proof, Groth16Proof};
 
 /// A Zcash transaction.
 ///

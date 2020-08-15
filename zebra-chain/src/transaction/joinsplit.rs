@@ -2,9 +2,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     amount::{Amount, NonNegative},
-    ed25519_zebra,
     notes::sprout,
-    proofs::ZkSnarkProof,
+    primitives::{ed25519, x25519, ZkSnarkProof},
     treestate,
 };
 
@@ -29,15 +28,15 @@ pub struct JoinSplit<P: ZkSnarkProof> {
     /// A note commitment for this output note.
     pub commitments: [crate::commitments::sprout::NoteCommitment; 2],
     /// An X25519 public key.
-    pub ephemeral_key: x25519_dalek::PublicKey,
+    pub ephemeral_key: x25519::PublicKey,
     /// A 256-bit seed that must be chosen independently at random for each
     /// JoinSplit description.
     pub random_seed: [u8; 32],
     /// A message authentication tag.
     pub vmacs: [crate::types::MAC; 2],
     /// A ZK JoinSplit proof, either a
-    /// [`Groth16Proof`](crate::proofs::Groth16Proof) or a
-    /// [`Bctv14Proof`](crate::proofs::Bctv14Proof).
+    /// [`Groth16Proof`](crate::primitives::Groth16Proof) or a
+    /// [`Bctv14Proof`](crate::primitives::Bctv14Proof).
     #[serde(bound(serialize = "P: ZkSnarkProof", deserialize = "P: ZkSnarkProof"))]
     pub zkproof: P,
     /// A ciphertext component for this output note.
@@ -89,9 +88,9 @@ pub struct JoinSplitData<P: ZkSnarkProof> {
     ))]
     pub rest: Vec<JoinSplit<P>>,
     /// The public key for the JoinSplit signature.
-    pub pub_key: ed25519_zebra::VerificationKeyBytes,
+    pub pub_key: ed25519::VerificationKeyBytes,
     /// The JoinSplit signature.
-    pub sig: ed25519_zebra::Signature,
+    pub sig: ed25519::Signature,
 }
 
 impl<P: ZkSnarkProof> JoinSplitData<P> {

@@ -1,7 +1,9 @@
 use crate::{
     commitments, keys, notes,
-    proofs::Groth16Proof,
-    redjubjub::{self, Binding, SpendAuth},
+    primitives::{
+        redjubjub::{self, Binding, SpendAuth},
+        Groth16Proof,
+    },
     serialization::serde_helpers,
     treestate::note_commitment_tree::SaplingNoteTreeRootHash,
 };

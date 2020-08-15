@@ -20,12 +20,9 @@ pub mod commitments;
 pub mod keys;
 pub mod notes;
 pub mod parameters;
-pub mod proofs;
+pub mod primitives;
 pub mod serialization;
 pub mod transaction;
 pub mod treestate;
 pub mod types;
 pub mod work;
-
-pub use ed25519_zebra;
-pub use redjubjub;

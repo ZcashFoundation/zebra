@@ -7,7 +7,7 @@ use proptest_derive::Arbitrary;
 use crate::{
     amount::{Amount, NonNegative},
     block::BlockHeight,
-    types::Script,
+    primitives::Script,
 };
 
 use super::TransactionHash;
