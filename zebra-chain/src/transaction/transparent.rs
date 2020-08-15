@@ -4,9 +4,9 @@
 #[cfg(test)]
 use proptest_derive::Arbitrary;
 
-use crate::types::{
+use crate::{
     amount::{Amount, NonNegative},
-    BlockHeight, Script,
+    types::{BlockHeight, Script},
 };
 
 use super::TransactionHash;

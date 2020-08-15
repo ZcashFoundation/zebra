@@ -10,8 +10,6 @@ use std::{
     io::{self, Read},
 };
 
-pub mod amount;
-
 /// A u32 which represents a block height value.
 ///
 /// # Invariants

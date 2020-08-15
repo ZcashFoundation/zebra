@@ -9,10 +9,10 @@ mod ciphertexts;
 mod nullifiers;
 
 use crate::{
+    amount::{Amount, NonNegative},
     commitments::sapling::CommitmentRandomness,
     keys::sapling::{Diversifier, TransmissionKey},
     notes::memo::Memo,
-    types::amount::{Amount, NonNegative},
 };
 
 pub use ciphertexts::{EncryptedCiphertext, OutCiphertext};

@@ -1,11 +1,11 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    amount::{Amount, NonNegative},
     ed25519_zebra,
     notes::sprout,
     proofs::ZkSnarkProof,
     treestate,
-    types::amount::{Amount, NonNegative},
 };
 
 /// A _JoinSplit Description_, as described in [protocol specification §7.2][ps].
