@@ -1,11 +1,14 @@
-use std::io::{Cursor, Write};
+use std::{
+    io::{Cursor, Write},
+    sync::Arc,
+};
 
 use chrono::{DateTime, Duration, LocalResult, TimeZone, Utc};
 
 use crate::serialization::{sha256d, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize};
 use crate::transaction::LockTime;
 
-use super::super::*;
+use super::super::{serialize::MAX_BLOCK_BYTES, *};
 use super::generate; // XXX this should be rewritten as strategies
 
 #[test]

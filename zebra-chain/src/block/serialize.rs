@@ -10,7 +10,14 @@ use crate::work::{difficulty::CompactDifficulty, equihash};
 use super::Block;
 use super::BlockHeader;
 use super::BlockHeaderHash;
-use super::MAX_BLOCK_BYTES;
+
+/// The maximum size of a Zcash block, in bytes.
+///
+/// Post-Sapling, this is also the maximum size of a transaction
+/// in the Zcash specification. (But since blocks also contain a
+/// block header and transaction count, the maximum size of a
+/// transaction in the chain is approximately 1.5 kB smaller.)
+pub const MAX_BLOCK_BYTES: u64 = 2_000_000;
 
 impl ZcashSerialize for BlockHeader {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
