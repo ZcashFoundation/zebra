@@ -9,7 +9,7 @@ use tracing_futures::Instrument;
 
 use zebra_chain::{
     block::{Block, BlockHeaderHash},
-    Network,
+    parameters::Network,
 };
 use zebra_consensus::checkpoint;
 use zebra_consensus::parameters;

@@ -1,12 +1,13 @@
 //! Consensus parameter tests for Zebra.
 
-use super::*;
-use NetworkUpgrade::*;
+use std::collections::HashSet;
 
 use crate::block::BlockHeight;
-use crate::{Network, Network::*};
 
-use std::collections::HashSet;
+use super::*;
+
+use Network::*;
+use NetworkUpgrade::*;
 
 /// Check that the activation heights and network upgrades are unique.
 #[test]

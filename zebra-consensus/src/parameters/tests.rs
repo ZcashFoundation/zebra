@@ -2,8 +2,10 @@
 
 use super::*;
 
-use zebra_chain::block::BlockHeight;
-use zebra_chain::{Network, Network::*};
+use zebra_chain::{
+    block::BlockHeight,
+    parameters::Network::{self, *},
+};
 
 #[test]
 fn minimum_difficulty_mainnet() {

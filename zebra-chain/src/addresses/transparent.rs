@@ -10,9 +10,9 @@ use sha2::Sha256;
 use proptest::{arbitrary::Arbitrary, collection::vec, prelude::*};
 
 use crate::{
+    parameters::Network,
     serialization::{SerializationError, ZcashDeserialize, ZcashSerialize},
     types::Script,
-    Network,
 };
 
 /// Magic numbers used to identify what networks Transparent Addresses

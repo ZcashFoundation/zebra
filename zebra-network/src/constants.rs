@@ -5,7 +5,7 @@ use std::time::Duration;
 // XXX should these constants be split into protocol also?
 use crate::protocol::external::types::*;
 
-use zebra_chain::NetworkUpgrade::{self, *};
+use zebra_chain::parameters::NetworkUpgrade;
 
 /// The buffer size for the peer set.
 pub const PEERSET_BUFFER_SIZE: usize = 10;
@@ -63,7 +63,7 @@ pub const CURRENT_VERSION: Version = Version(170_012);
 //
 // TODO: replace with NetworkUpgrade::current(network, height).
 //       See the detailed comment in handshake.rs, where this constant is used.
-pub const MIN_NETWORK_UPGRADE: NetworkUpgrade = Heartwood;
+pub const MIN_NETWORK_UPGRADE: NetworkUpgrade = NetworkUpgrade::Heartwood;
 
 /// The default RTT estimate for peer responses.
 pub const EWMA_DEFAULT_RTT: Duration = Duration::from_secs(1);

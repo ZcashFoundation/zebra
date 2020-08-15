@@ -12,8 +12,8 @@ use proptest::prelude::*;
 
 use crate::{
     keys::sapling,
+    parameters::Network,
     serialization::{ReadZcashExt, SerializationError},
-    Network,
 };
 
 /// Human-Readable Parts for input to bech32 encoding.

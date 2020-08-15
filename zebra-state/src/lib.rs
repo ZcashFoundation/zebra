@@ -24,8 +24,7 @@ use tower::{Service, ServiceExt};
 use zebra_chain::{
     block::BlockHeight,
     block::{Block, BlockHeaderHash},
-    Network,
-    Network::*,
+    parameters::Network,
 };
 
 pub mod in_memory;
@@ -78,8 +77,8 @@ impl Config {
     /// provided `zebra_state::Config`.
     pub(crate) fn sled_config(&self, network: Network) -> sled::Config {
         let net_dir = match network {
-            Mainnet => "mainnet",
-            Testnet => "testnet",
+            Network::Mainnet => "mainnet",
+            Network::Testnet => "testnet",
         };
         let path = self.cache_dir.join(net_dir).join("state");
 
@@ -238,12 +237,12 @@ mod tests {
 
     #[test]
     fn test_path_mainnet() {
-        test_path(Mainnet);
+        test_path(Network::Mainnet);
     }
 
     #[test]
     fn test_path_testnet() {
-        test_path(Testnet);
+        test_path(Network::Testnet);
     }
 
     /// Check the sled path for `network`.
@@ -258,8 +257,8 @@ mod tests {
         assert_eq!(path.file_name(), Some(OsStr::new("state")));
         assert!(path.pop());
         match network {
-            Mainnet => assert_eq!(path.file_name(), Some(OsStr::new("mainnet"))),
-            Testnet => assert_eq!(path.file_name(), Some(OsStr::new("testnet"))),
+            Network::Mainnet => assert_eq!(path.file_name(), Some(OsStr::new("mainnet"))),
+            Network::Testnet => assert_eq!(path.file_name(), Some(OsStr::new("testnet"))),
         }
     }
 
