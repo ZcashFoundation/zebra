@@ -22,8 +22,8 @@ use std::{error, iter, sync::Arc};
 use tower::{Service, ServiceExt};
 
 use zebra_chain::{
+    block::BlockHeight,
     block::{Block, BlockHeaderHash},
-    types::BlockHeight,
     Network,
     Network::*,
 };

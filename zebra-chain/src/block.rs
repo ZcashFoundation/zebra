@@ -4,6 +4,7 @@
 mod difficulty;
 mod hash;
 mod header;
+mod height;
 mod light_client;
 mod serialize;
 
@@ -17,11 +18,11 @@ use std::{error, sync::Arc};
 use proptest_derive::Arbitrary;
 
 use crate::transaction::Transaction;
-use crate::types::BlockHeight;
 use crate::Network;
 
 pub use hash::BlockHeaderHash;
 pub use header::BlockHeader;
+pub use height::BlockHeight;
 pub use light_client::LightClientRootHash;
 
 /// A block in your blockchain.

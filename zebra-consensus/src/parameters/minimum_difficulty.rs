@@ -1,6 +1,6 @@
 //! The minimum difficulty block rule for Zcash.
 
-use zebra_chain::types::BlockHeight;
+use zebra_chain::block::BlockHeight;
 use zebra_chain::{Network, Network::*};
 
 /// The testnet block height when minimum difficulty blocks start being

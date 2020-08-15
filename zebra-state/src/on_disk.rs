@@ -13,8 +13,8 @@ use tower::{buffer::Buffer, util::BoxService, Service};
 use tracing::instrument;
 use zebra_chain::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 use zebra_chain::{
+    block::BlockHeight,
     block::{Block, BlockHeaderHash},
-    types::BlockHeight,
     Network,
 };
 

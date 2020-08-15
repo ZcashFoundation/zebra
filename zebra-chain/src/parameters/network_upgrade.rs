@@ -2,7 +2,7 @@
 
 use NetworkUpgrade::*;
 
-use crate::types::BlockHeight;
+use crate::block::BlockHeight;
 use crate::{Network, Network::*};
 
 use std::collections::{BTreeMap, HashMap};

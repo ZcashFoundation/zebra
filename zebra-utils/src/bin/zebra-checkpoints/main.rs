@@ -18,7 +18,7 @@ use structopt::StructOpt;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use zebra_chain::block::BlockHeaderHash;
-use zebra_chain::types::BlockHeight;
+use zebra_chain::block::BlockHeight;
 
 #[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;

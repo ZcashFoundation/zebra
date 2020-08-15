@@ -3,8 +3,8 @@ use std::io;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{DateTime, TimeZone, Utc};
 
+use crate::block::BlockHeight;
 use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
-use crate::types::BlockHeight;
 
 /// A Bitcoin-style `locktime`, representing either a block height or an epoch
 /// time.
