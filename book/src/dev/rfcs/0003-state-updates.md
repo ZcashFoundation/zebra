@@ -167,12 +167,14 @@ order on byte strings is the numeric ordering).
 
 We use the following Sled trees:
 
-| Tree                |                  Keys |                              Values |
-|---------------------|-----------------------|-------------------------------------|
-| `blocks_by_hash`    | `BlockHeaderHash`     | `Block`                             |
-| `hash_by_height`    | `BE32(height)`        | `BlockHeaderHash`                   |
-| `tx_by_hash`        | `TransactionHash`     | `BlockHeaderHash || BE32(tx_index)` |
-| `utxo_by_outpoint`  | `OutPoint`            | `TransparentOutput`                 |
+| Tree                 |                  Keys |                              Values |
+|----------------------|-----------------------|-------------------------------------|
+| `blocks_by_hash`     | `BlockHeaderHash`     | `Block`                             |
+| `hash_by_height`     | `BE32(height)`        | `BlockHeaderHash`                   |
+| `tx_by_hash`         | `TransactionHash`     | `BlockHeaderHash || BE32(tx_index)` |
+| `utxo_by_outpoint`   | `OutPoint`            | `TransparentOutput`                 |
+| `sprout_nullifiers`  | `sprout::Nullifier`   | `()`                                |
+| `sapling_nullifiers` | `sapling::Nullifier`  | `()`                                |
 
 Zcash structures are encoded using `ZcashSerialize`/`ZcashDeserialize`.
 
@@ -200,17 +202,17 @@ the newly committed block or an error.
 If the parent block is not committed, add the block to an internal queue for
 future processing.
 
-Otherwise, attempt to perform contextual validation checks and the commit
-the given block to the state. The exact list of contextual validation checks
-will be specified in a later RFC. If contextual validation checks succeed,
-the new block is added to one of the in-memory chains. If the resulting chain
-is longer than 100 blocks, the oldest block is now past the reorg limit, so
-it is removed from the in-memory chain and committed to sled as described
-below.
+Otherwise, attempt to perform contextual validation checks and the commit the
+given block to the state. The exact list of contextual validation checks will
+be specified in a later RFC. If contextual validation checks succeed, the new
+block is added to one of the in-memory chains. If the resulting chain is
+longer than 100 blocks, the oldest block is now past the reorg limit, so we
+remove it from all in-memory chains and commit it to sled as described below
+in `CommitFinalizedBlock`.
 
 Finally, process any queued children of the newly committed block the same way.
 
-### `Request::CommitFinalizedBlock`
+### `Request::CommitFinalizedBlock(Arc<Block>)`
 [request-commit-finalized-block]: #request-finalized-block
 
 Commits a finalized block to the sled state, skipping contextual validation.
@@ -224,7 +226,7 @@ This should be implemented as a wrapper around a function also called by
 
 1. Obtain the highest entry of `hash_by_height` as `(old_height, old_tip)`.
 Check that `block`'s parent hash is `old_tip` and its height is
-`old_height+1`, or error.  This check is performed as defense-in-depth
+`old_height+1`, or panic.  This check is performed as defense-in-depth
 to prevent database corruption, but it is the caller's responsibility to
 commit finalized blocks in order.
 
@@ -232,12 +234,31 @@ commit finalized blocks in order.
    `(BE32(height), block_hash)` into `hash_by_height`.
 
 3. Iterate over the enumerated transactions in the block. For each transaction:
-   1. Insert `(transaction_hash, block_hash || BE32(tx_index))` to `tx_by_hash`;
+
+   1. Insert `(transaction_hash, block_hash || BE32(tx_index))` to
+   `tx_by_hash`;
+
    2. For each `TransparentInput::PrevOut { outpoint, .. }` in the
-      transaction's `inputs()`, remove `outpoint` from `utxo_by_output`.
+   transaction's `inputs()`, remove `outpoint` from `utxo_by_output`.
+
    3. For each `output` in the transaction's `outputs()`, construct the
-      `outpoint` that identifies it, and insert `(outpoint, output)` into `utxo_by_output`.
-   These updates can be performed using a sled `Batch`.
+   `outpoint` that identifies it, and insert `(outpoint, output)` into
+   `utxo_by_output`.
+
+   4. For each [`JoinSplit`] description in the transaction,
+   insert `(nullifiers[0],())` and `(nullifiers[1],())` into
+   `sprout_nullifiers`.
+
+   5. For each [`Spend`] description in the transaction, insert
+   `(nullifier,())` into `sapling_nullifiers`.
+
+[`JoinSplit`]: https://doc.zebra.zfnd.org/zebra_chain/transaction/struct.JoinSplit.html
+[`Spend`]: https://doc.zebra.zfnd.org/zebra_chain/transaction/struct.Spend.html
+
+    
+These updates can be performed in a batch or without necessarily iterating
+over all transactions, if the data is available by other means; they're
+specified this way for clarity.
 
 ### `Request::Depth(BlockHeaderHash)`
 [request-depth]: #request-depth
