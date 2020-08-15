@@ -1,17 +1,104 @@
+use futures::future::Either;
+use proptest::{arbitrary::any, array, collection::vec, option, prelude::*};
+
 use crate::{
     amount::{Amount, NonNegative},
     commitments, keys,
     notes::{sapling, sprout},
-    proofs::{Groth16Proof, ZkSnarkProof},
+    proofs::{Bctv14Proof, Groth16Proof, ZkSnarkProof},
     transaction::{
         CoinbaseData, JoinSplit, JoinSplitData, OutPoint, Output, ShieldedData, Spend, Transaction,
-        TransparentInput,
+        TransparentInput, TransparentOutput,
     },
     treestate::{self, note_commitment_tree::SaplingNoteTreeRootHash},
-    types::{BlockHeight, Script},
+    types::{BlockHeight, LockTime, Script},
 };
-use futures::future::Either;
-use proptest::{array, collection::vec, prelude::*};
+
+impl Transaction {
+    pub fn v1_strategy() -> impl Strategy<Value = Self> {
+        (
+            vec(any::<TransparentInput>(), 0..10),
+            vec(any::<TransparentOutput>(), 0..10),
+            any::<LockTime>(),
+        )
+            .prop_map(|(inputs, outputs, lock_time)| Transaction::V1 {
+                inputs,
+                outputs,
+                lock_time,
+            })
+            .boxed()
+    }
+
+    pub fn v2_strategy() -> impl Strategy<Value = Self> {
+        (
+            vec(any::<TransparentInput>(), 0..10),
+            vec(any::<TransparentOutput>(), 0..10),
+            any::<LockTime>(),
+            option::of(any::<JoinSplitData<Bctv14Proof>>()),
+        )
+            .prop_map(
+                |(inputs, outputs, lock_time, joinsplit_data)| Transaction::V2 {
+                    inputs,
+                    outputs,
+                    lock_time,
+                    joinsplit_data,
+                },
+            )
+            .boxed()
+    }
+
+    pub fn v3_strategy() -> impl Strategy<Value = Self> {
+        (
+            vec(any::<TransparentInput>(), 0..10),
+            vec(any::<TransparentOutput>(), 0..10),
+            any::<LockTime>(),
+            any::<BlockHeight>(),
+            option::of(any::<JoinSplitData<Bctv14Proof>>()),
+        )
+            .prop_map(
+                |(inputs, outputs, lock_time, expiry_height, joinsplit_data)| Transaction::V3 {
+                    inputs,
+                    outputs,
+                    lock_time,
+                    expiry_height,
+                    joinsplit_data,
+                },
+            )
+            .boxed()
+    }
+
+    pub fn v4_strategy() -> impl Strategy<Value = Self> {
+        (
+            vec(any::<TransparentInput>(), 0..10),
+            vec(any::<TransparentOutput>(), 0..10),
+            any::<LockTime>(),
+            any::<BlockHeight>(),
+            any::<Amount>(),
+            option::of(any::<ShieldedData>()),
+            option::of(any::<JoinSplitData<Groth16Proof>>()),
+        )
+            .prop_map(
+                |(
+                    inputs,
+                    outputs,
+                    lock_time,
+                    expiry_height,
+                    value_balance,
+                    shielded_data,
+                    joinsplit_data,
+                )| Transaction::V4 {
+                    inputs,
+                    outputs,
+                    lock_time,
+                    expiry_height,
+                    value_balance,
+                    shielded_data,
+                    joinsplit_data,
+                },
+            )
+            .boxed()
+    }
+}
 
 impl<P: ZkSnarkProof + Arbitrary + 'static> Arbitrary for JoinSplit<P> {
     type Parameters = ();
