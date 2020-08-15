@@ -3,8 +3,6 @@
 use crate::serialization::{
     ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
 };
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use chrono::{DateTime, TimeZone, Utc};
 use std::{
     fmt,
     io::{self, Read},
@@ -46,25 +44,6 @@ impl Arbitrary for BlockHeight {
     type Strategy = BoxedStrategy<Self>;
 }
 
-/// A Bitcoin-style `locktime`, representing either a block height or an epoch
-/// time.
-///
-/// # Invariants
-///
-/// Users should not construct a `LockTime` with:
-///   - a `BlockHeight` greater than MAX_BLOCK_HEIGHT,
-///   - a timestamp before 6 November 1985
-///     (Unix timestamp less than MIN_LOCK_TIMESTAMP), or
-///   - a timestamp after 5 February 2106
-///     (Unix timestamp greater than MAX_LOCK_TIMESTAMP).
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub enum LockTime {
-    /// Unlock at a particular block height.
-    Height(BlockHeight),
-    /// Unlock at a particular time.
-    Time(DateTime<Utc>),
-}
-
 impl BlockHeight {
     /// The minimum BlockHeight.
     ///
@@ -85,81 +64,6 @@ impl BlockHeight {
     /// `BlockHeight::MAX.0` can't be used in match range patterns, use this
     /// alias instead.
     pub const MAX_AS_U32: u32 = Self::MAX.0;
-}
-
-impl LockTime {
-    /// The minimum LockTime::Time, as a timestamp in seconds.
-    ///
-    /// Users should not construct lock times less than `MIN_TIMESTAMP`.
-    pub const MIN_TIMESTAMP: i64 = 500_000_000;
-
-    /// The maximum LockTime::Time, as a timestamp in seconds.
-    ///
-    /// Users should not construct lock times greater than `MAX_TIMESTAMP`.
-    /// LockTime is u32 in the spec, so times are limited to u32::MAX.
-    pub const MAX_TIMESTAMP: i64 = u32::MAX as i64;
-
-    /// Returns the minimum LockTime::Time, as a LockTime.
-    ///
-    /// Users should not construct lock times less than `min_lock_timestamp`.
-    //
-    // When `Utc.timestamp` stabilises as a const function, we can make this a
-    // const function.
-    pub fn min_lock_time() -> LockTime {
-        LockTime::Time(Utc.timestamp(Self::MIN_TIMESTAMP, 0))
-    }
-
-    /// Returns the maximum LockTime::Time, as a LockTime.
-    ///
-    /// Users should not construct lock times greater than `max_lock_timestamp`.
-    //
-    // When `Utc.timestamp` stabilises as a const function, we can make this a
-    // const function.
-    pub fn max_lock_time() -> LockTime {
-        LockTime::Time(Utc.timestamp(Self::MAX_TIMESTAMP, 0))
-    }
-}
-
-impl ZcashSerialize for LockTime {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        // This implementation does not check the invariants on `LockTime` so that the
-        // serialization is fallible only if the underlying writer is. This ensures that
-        // we can always compute a hash of a transaction object.
-        use LockTime::*;
-        match self {
-            Height(BlockHeight(n)) => writer.write_u32::<LittleEndian>(*n)?,
-            Time(t) => writer.write_u32::<LittleEndian>(t.timestamp() as u32)?,
-        }
-        Ok(())
-    }
-}
-
-impl ZcashDeserialize for LockTime {
-    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let n = reader.read_u32::<LittleEndian>()?;
-        if n <= BlockHeight::MAX.0 {
-            Ok(LockTime::Height(BlockHeight(n)))
-        } else {
-            Ok(LockTime::Time(Utc.timestamp(n as i64, 0)))
-        }
-    }
-}
-
-#[cfg(test)]
-impl Arbitrary for LockTime {
-    type Parameters = ();
-
-    fn arbitrary_with(_args: ()) -> Self::Strategy {
-        prop_oneof![
-            (BlockHeight::MIN.0..=BlockHeight::MAX.0)
-                .prop_map(|n| LockTime::Height(BlockHeight(n))),
-            (LockTime::MIN_TIMESTAMP..=LockTime::MAX_TIMESTAMP)
-                .prop_map(|n| { LockTime::Time(Utc.timestamp(n as i64, 0)) })
-        ]
-        .boxed()
-    }
-
-    type Strategy = BoxedStrategy<Self>;
 }
 
 /// A sequence of message authentication tags ...
@@ -223,21 +127,10 @@ mod proptests {
 
     use proptest::prelude::*;
 
-    use super::{LockTime, Script};
+    use super::*;
     use crate::serialization::{ZcashDeserialize, ZcashSerialize};
 
     proptest! {
-        #[test]
-        fn locktime_roundtrip(locktime in any::<LockTime>()) {
-            let mut bytes = Cursor::new(Vec::new());
-            locktime.zcash_serialize(&mut bytes)?;
-
-            bytes.set_position(0);
-            let other_locktime = LockTime::zcash_deserialize(&mut bytes)?;
-
-            prop_assert_eq![locktime, other_locktime];
-        }
-
         #[test]
         fn script_roundtrip(script in any::<Script>()) {
             let mut bytes = Cursor::new(Vec::new());

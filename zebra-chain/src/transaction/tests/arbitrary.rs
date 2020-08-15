@@ -1,3 +1,4 @@
+use chrono::{TimeZone, Utc};
 use futures::future::Either;
 use proptest::{arbitrary::any, array, collection::vec, option, prelude::*};
 
@@ -7,11 +8,11 @@ use crate::{
     notes::{sapling, sprout},
     proofs::{Bctv14Proof, Groth16Proof, ZkSnarkProof},
     transaction::{
-        CoinbaseData, JoinSplit, JoinSplitData, OutPoint, Output, ShieldedData, Spend, Transaction,
-        TransparentInput, TransparentOutput,
+        CoinbaseData, JoinSplit, JoinSplitData, LockTime, OutPoint, Output, ShieldedData, Spend,
+        Transaction, TransparentInput, TransparentOutput,
     },
     treestate::{self, note_commitment_tree::SaplingNoteTreeRootHash},
-    types::{BlockHeight, LockTime, Script},
+    types::{BlockHeight, Script},
 };
 
 impl Transaction {
@@ -98,6 +99,22 @@ impl Transaction {
             )
             .boxed()
     }
+}
+
+impl Arbitrary for LockTime {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: ()) -> Self::Strategy {
+        prop_oneof![
+            (BlockHeight::MIN.0..=BlockHeight::MAX.0)
+                .prop_map(|n| LockTime::Height(BlockHeight(n))),
+            (LockTime::MIN_TIMESTAMP..=LockTime::MAX_TIMESTAMP)
+                .prop_map(|n| { LockTime::Time(Utc.timestamp(n as i64, 0)) })
+        ]
+        .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
 }
 
 impl<P: ZkSnarkProof + Arbitrary + 'static> Arbitrary for JoinSplit<P> {

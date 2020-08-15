@@ -5,8 +5,7 @@ use std::sync::Arc;
 use crate::{
     block::{Block, BlockHeader, MAX_BLOCK_BYTES},
     serialization::{ZcashDeserialize, ZcashSerialize},
-    transaction::{Transaction, TransparentInput, TransparentOutput},
-    types::LockTime,
+    transaction::{LockTime, Transaction, TransparentInput, TransparentOutput},
 };
 
 /// Generate a block header
