@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 mod hash;
 mod joinsplit;
+mod lock_time;
 mod serialize;
 mod shielded_data;
 mod transparent;
@@ -13,12 +14,13 @@ mod tests;
 
 pub use hash::TransactionHash;
 pub use joinsplit::{JoinSplit, JoinSplitData};
+pub use lock_time::LockTime;
 pub use shielded_data::{Output, ShieldedData, Spend};
 pub use transparent::{CoinbaseData, OutPoint, TransparentInput, TransparentOutput};
 
 use crate::amount::Amount;
 use crate::proofs::{Bctv14Proof, Groth16Proof};
-use crate::types::{BlockHeight, LockTime};
+use crate::types::BlockHeight;
 
 /// A Zcash transaction.
 ///
