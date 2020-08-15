@@ -145,7 +145,6 @@ fn main() -> Result<()> {
         assert!(height <= BlockHeight::MAX);
         assert_eq!(x, height.0);
         let size = v["size"].as_u64().unwrap();
-        assert!(size <= zebra_chain::block::MAX_BLOCK_BYTES);
 
         // compute
         cumulative_bytes += size;

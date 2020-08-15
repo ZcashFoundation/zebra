@@ -3,10 +3,11 @@ use chrono::{DateTime, NaiveDateTime, Utc};
 use std::sync::Arc;
 
 use crate::{
-    block::{Block, BlockHeader, MAX_BLOCK_BYTES},
     serialization::{ZcashDeserialize, ZcashSerialize},
     transaction::{LockTime, Transaction, TransparentInput, TransparentOutput},
 };
+
+use super::super::{serialize::MAX_BLOCK_BYTES, Block, BlockHeader};
 
 /// Generate a block header
 pub fn block_header() -> BlockHeader {

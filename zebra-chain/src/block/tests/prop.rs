@@ -6,7 +6,7 @@ use proptest::{arbitrary::any, prelude::*, test_runner::Config};
 use crate::parameters::Network;
 use crate::serialization::{SerializationError, ZcashDeserializeInto, ZcashSerialize};
 
-use super::super::*;
+use super::super::{serialize::MAX_BLOCK_BYTES, *};
 
 proptest! {
     #[test]
