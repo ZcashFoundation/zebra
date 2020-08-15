@@ -2,7 +2,7 @@
 
 use super::*;
 
-use zebra_chain::types::BlockHeight;
+use zebra_chain::block::BlockHeight;
 use zebra_chain::{Network, Network::*};
 
 #[test]

@@ -4,6 +4,7 @@ use proptest::{arbitrary::any, array, collection::vec, option, prelude::*};
 
 use crate::{
     amount::{Amount, NonNegative},
+    block::BlockHeight,
     commitments, keys,
     notes::{sapling, sprout},
     proofs::{Bctv14Proof, Groth16Proof, ZkSnarkProof},
@@ -12,7 +13,7 @@ use crate::{
         Transaction, TransparentInput, TransparentOutput,
     },
     treestate::{self, note_commitment_tree::SaplingNoteTreeRootHash},
-    types::{BlockHeight, Script},
+    types::Script,
 };
 
 impl Transaction {

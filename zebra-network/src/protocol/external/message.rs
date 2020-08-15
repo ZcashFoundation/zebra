@@ -6,7 +6,7 @@ use std::{net, sync::Arc};
 use chrono::{DateTime, Utc};
 
 use zebra_chain::block::{Block, BlockHeader, BlockHeaderHash};
-use zebra_chain::{transaction::Transaction, types::BlockHeight};
+use zebra_chain::{block::BlockHeight, transaction::Transaction};
 
 use super::inv::InventoryHash;
 use super::types::*;

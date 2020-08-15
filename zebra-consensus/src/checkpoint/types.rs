@@ -2,7 +2,7 @@
 
 use std::cmp::Ordering;
 
-use zebra_chain::types::BlockHeight;
+use zebra_chain::block::BlockHeight;
 
 use Progress::*;
 use Target::*;

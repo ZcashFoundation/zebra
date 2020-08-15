@@ -9,13 +9,13 @@ use chrono::{TimeZone, Utc};
 use tokio_util::codec::{Decoder, Encoder};
 
 use zebra_chain::{
+    block::BlockHeight,
     block::{Block, BlockHeaderHash},
     serialization::{
         sha256d, ReadZcashExt, SerializationError as Error, WriteZcashExt, ZcashDeserialize,
         ZcashSerialize,
     },
     transaction::Transaction,
-    types::BlockHeight,
     Network,
 };
 

@@ -25,8 +25,8 @@ use std::{
 use tokio::time;
 use tower::{buffer::Buffer, Service, ServiceExt};
 
+use zebra_chain::block::BlockHeight;
 use zebra_chain::block::{Block, BlockHeaderHash};
-use zebra_chain::types::BlockHeight;
 
 /// A service that verifies blocks.
 #[derive(Debug)]

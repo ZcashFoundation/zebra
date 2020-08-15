@@ -4,8 +4,8 @@ use std::{
     sync::Arc,
 };
 use zebra_chain::{
+    block::BlockHeight,
     block::{Block, BlockHeaderHash},
-    types::BlockHeight,
 };
 #[derive(Default)]
 pub(super) struct BlockIndex {

@@ -38,8 +38,8 @@ use std::{
 use tokio::sync::oneshot;
 use tower::Service;
 
+use zebra_chain::block::BlockHeight;
 use zebra_chain::block::{Block, BlockHeaderHash};
-use zebra_chain::types::BlockHeight;
 use zebra_chain::Network;
 
 /// The inner error type for CheckpointVerifier.

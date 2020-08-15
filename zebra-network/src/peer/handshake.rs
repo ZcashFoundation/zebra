@@ -18,7 +18,7 @@ use tower::Service;
 use tracing::{span, Level};
 use tracing_futures::Instrument;
 
-use zebra_chain::types::BlockHeight;
+use zebra_chain::block::BlockHeight;
 
 use crate::{
     constants,

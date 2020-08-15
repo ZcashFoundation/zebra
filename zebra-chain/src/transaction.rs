@@ -19,8 +19,8 @@ pub use shielded_data::{Output, ShieldedData, Spend};
 pub use transparent::{CoinbaseData, OutPoint, TransparentInput, TransparentOutput};
 
 use crate::amount::Amount;
+use crate::block::BlockHeight;
 use crate::proofs::{Bctv14Proof, Groth16Proof};
-use crate::types::BlockHeight;
 
 /// A Zcash transaction.
 ///

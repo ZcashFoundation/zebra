@@ -18,7 +18,7 @@ use std::{
 };
 
 use zebra_chain::block::BlockHeaderHash;
-use zebra_chain::types::BlockHeight;
+use zebra_chain::block::BlockHeight;
 use zebra_chain::Network::{self, *};
 
 const MAINNET_CHECKPOINTS: &str = include_str!("main-checkpoints.txt");

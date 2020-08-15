@@ -4,7 +4,7 @@ use crate::constants::magics;
 
 use std::fmt;
 
-use zebra_chain::types::BlockHeight;
+use zebra_chain::block::BlockHeight;
 use zebra_chain::Network::{self, *};
 use zebra_chain::NetworkUpgrade::{self, *};
 
