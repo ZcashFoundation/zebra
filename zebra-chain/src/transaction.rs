@@ -145,7 +145,7 @@ impl Transaction {
             .iter()
             .any(|input| matches!(input, TransparentInput::Coinbase { .. }))
     }
-    
+
     /// Returns `true` if this transaction is a coinbase transaction.
     pub fn is_coinbase(&self) -> bool {
         self.inputs().len() == 1
@@ -153,7 +153,7 @@ impl Transaction {
                 self.inputs().get(0),
                 Some(TransparentInput::Coinbase { .. })
             )
-    }  
+    }
 
     // TODO(jlusby): refine type
     pub fn sighash(&self, network: Network, height: BlockHeight, hash_type: u32) -> Hash {

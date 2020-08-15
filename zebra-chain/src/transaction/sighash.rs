@@ -118,6 +118,7 @@ impl<'a> SigHasher<'a> {
 
         self.trans
             .inputs()
+            .iter()
             .filter_map(|input| match input {
                 TransparentInput::PrevOut { outpoint, .. } => Some(outpoint),
                 TransparentInput::Coinbase { .. } => None,
@@ -146,6 +147,7 @@ impl<'a> SigHasher<'a> {
 
         self.trans
             .inputs()
+            .iter()
             .map(|input| match input {
                 TransparentInput::PrevOut { sequence, .. } => sequence,
                 TransparentInput::Coinbase { sequence, .. } => sequence,
