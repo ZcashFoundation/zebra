@@ -7,13 +7,12 @@ use crate::{
     block::BlockHeight,
     commitments, keys,
     notes::{sapling, sprout},
-    proofs::{Bctv14Proof, Groth16Proof, ZkSnarkProof},
+    primitives::{Bctv14Proof, Groth16Proof, Script, ZkSnarkProof},
     transaction::{
         CoinbaseData, JoinSplit, JoinSplitData, LockTime, OutPoint, Output, ShieldedData, Spend,
         Transaction, TransparentInput, TransparentOutput,
     },
     treestate::{self, note_commitment_tree::SaplingNoteTreeRootHash},
-    types::Script,
 };
 
 impl Transaction {

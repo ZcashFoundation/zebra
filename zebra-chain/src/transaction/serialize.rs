@@ -10,7 +10,7 @@ use std::{
 
 use crate::{
     commitments, keys, notes,
-    proofs::ZkSnarkProof,
+    primitives::{Script, ZkSnarkProof},
     serialization::{
         ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
     },
@@ -227,7 +227,7 @@ impl ZcashDeserialize for TransparentInput {
                     hash: TransactionHash(bytes),
                     index: reader.read_u32::<LittleEndian>()?,
                 },
-                unlock_script: types::Script::zcash_deserialize(&mut reader)?,
+                unlock_script: Script::zcash_deserialize(&mut reader)?,
                 sequence: reader.read_u32::<LittleEndian>()?,
             })
         }
@@ -246,7 +246,7 @@ impl ZcashDeserialize for TransparentOutput {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         Ok(TransparentOutput {
             value: reader.read_u64::<LittleEndian>()?.try_into()?,
-            lock_script: types::Script::zcash_deserialize(&mut reader)?,
+            lock_script: Script::zcash_deserialize(&mut reader)?,
         })
     }
 }

@@ -11,8 +11,8 @@ use proptest::{arbitrary::Arbitrary, collection::vec, prelude::*};
 
 use crate::{
     parameters::Network,
+    primitives::Script,
     serialization::{SerializationError, ZcashDeserialize, ZcashSerialize},
-    types::Script,
 };
 
 /// Magic numbers used to identify what networks Transparent Addresses
@@ -246,8 +246,6 @@ impl Arbitrary for TransparentAddress {
 mod tests {
 
     use secp256k1::PublicKey;
-
-    use crate::types::Script;
 
     use super::*;
 

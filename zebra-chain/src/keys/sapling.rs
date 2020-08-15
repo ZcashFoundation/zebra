@@ -31,7 +31,7 @@ use proptest_derive::Arbitrary;
 
 use crate::{
     parameters::Network,
-    redjubjub::{self, SpendAuth},
+    primitives::redjubjub::{self, SpendAuth},
     serialization::{
         serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
     },
