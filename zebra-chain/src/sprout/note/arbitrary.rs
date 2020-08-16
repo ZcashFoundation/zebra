@@ -1,8 +1,7 @@
 use proptest::{arbitrary::any, collection::vec, prelude::*};
 
-use crate::notes::sprout;
 
-impl Arbitrary for sprout::EncryptedCiphertext {
+impl Arbitrary for super::EncryptedCiphertext {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {

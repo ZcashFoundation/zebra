@@ -4,7 +4,7 @@
 
 use sha2::{Digest, Sha256};
 
-use crate::notes::sprout::Note;
+use super::note::Note;
 
 /// The randomness used in the Pedersen Hash for note commitment.
 #[derive(Copy, Clone, Debug, PartialEq)]

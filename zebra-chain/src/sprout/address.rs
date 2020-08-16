@@ -6,10 +6,11 @@ use std::{fmt, io};
 use proptest::{arbitrary::Arbitrary, array, prelude::*};
 
 use crate::{
-    keys::sprout,
     parameters::Network,
     serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize},
 };
+
+use super::keys;
 
 /// Magic numbers used to identify what networks Sprout Shielded
 /// Addresses are associated with.
@@ -24,8 +25,8 @@ mod magics {
 #[derive(Copy, Clone)]
 pub struct SproutShieldedAddress {
     network: Network,
-    paying_key: sprout::PayingKey,
-    transmission_key: sprout::TransmissionKey,
+    paying_key: keys::PayingKey,
+    transmission_key: keys::TransmissionKey,
 }
 
 impl fmt::Debug for SproutShieldedAddress {
@@ -80,8 +81,8 @@ impl ZcashDeserialize for SproutShieldedAddress {
 
         Ok(SproutShieldedAddress {
             network,
-            paying_key: sprout::PayingKey(reader.read_32_bytes()?),
-            transmission_key: sprout::TransmissionKey::from(reader.read_32_bytes()?),
+            paying_key: keys::PayingKey(reader.read_32_bytes()?),
+            transmission_key: keys::TransmissionKey::from(reader.read_32_bytes()?),
         })
     }
 }
@@ -121,8 +122,8 @@ impl Arbitrary for SproutShieldedAddress {
         )
             .prop_map(|(network, paying_key_bytes, transmission_key_bytes)| Self {
                 network,
-                paying_key: sprout::PayingKey(paying_key_bytes),
-                transmission_key: sprout::TransmissionKey::from(transmission_key_bytes),
+                paying_key: keys::PayingKey(paying_key_bytes),
+                transmission_key: keys::TransmissionKey::from(transmission_key_bytes),
             })
             .boxed()
     }

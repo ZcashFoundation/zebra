@@ -1,5 +1,3 @@
-//! Newtype wrappers for primitive data types with semantic meaning.
-#![allow(clippy::unit_arg)]
 use crate::serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize};
 use std::io::{self, Read};
 

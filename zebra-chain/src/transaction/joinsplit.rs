@@ -2,9 +2,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     amount::{Amount, NonNegative},
-    notes::sprout,
+    sprout,
     primitives::{ed25519, x25519, ZkSnarkProof},
-    treestate,
 };
 
 /// A _JoinSplit Description_, as described in [protocol specification §7.2][ps].
@@ -22,25 +21,25 @@ pub struct JoinSplit<P: ZkSnarkProof> {
     /// A root of the Sprout note commitment tree at some block height in the
     /// past, or the root produced by a previous JoinSplit transfer in this
     /// transaction.
-    pub anchor: treestate::sprout::NoteTreeRootHash,
+    pub anchor: sprout::tree::NoteTreeRootHash,
     /// A nullifier for the input notes.
-    pub nullifiers: [crate::notes::sprout::Nullifier; 2],
+    pub nullifiers: [sprout::note::Nullifier; 2],
     /// A note commitment for this output note.
-    pub commitments: [crate::commitments::sprout::NoteCommitment; 2],
+    pub commitments: [sprout::commitment::NoteCommitment; 2],
     /// An X25519 public key.
     pub ephemeral_key: x25519::PublicKey,
     /// A 256-bit seed that must be chosen independently at random for each
     /// JoinSplit description.
     pub random_seed: [u8; 32],
     /// A message authentication tag.
-    pub vmacs: [crate::types::MAC; 2],
+    pub vmacs: [sprout::note::MAC; 2],
     /// A ZK JoinSplit proof, either a
     /// [`Groth16Proof`](crate::primitives::Groth16Proof) or a
     /// [`Bctv14Proof`](crate::primitives::Bctv14Proof).
     #[serde(bound(serialize = "P: ZkSnarkProof", deserialize = "P: ZkSnarkProof"))]
     pub zkproof: P,
     /// A ciphertext component for this output note.
-    pub enc_ciphertexts: [sprout::EncryptedCiphertext; 2],
+    pub enc_ciphertexts: [sprout::note::EncryptedCiphertext; 2],
 }
 
 // Because x25519_dalek::PublicKey does not impl PartialEq

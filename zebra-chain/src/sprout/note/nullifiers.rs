@@ -3,7 +3,7 @@
 use byteorder::{ByteOrder, LittleEndian};
 use serde::{Deserialize, Serialize};
 
-use crate::keys::sprout::SpendingKey;
+use super::super::keys::SpendingKey;
 
 /// PRF^nf is used to derive a Sprout nullifer from the receiver's
 /// spending key a_sk and a nullifier seed ρ, instantiated using the

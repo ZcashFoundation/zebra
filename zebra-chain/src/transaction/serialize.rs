@@ -9,12 +9,11 @@ use std::{
 };
 
 use crate::{
-    commitments, notes,
     primitives::{Script, ZkSnarkProof},
     serialization::{
         ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
     },
-    treestate, types,
+    sprout,
 };
 
 use super::*;
@@ -276,25 +275,25 @@ impl<P: ZkSnarkProof> ZcashDeserialize for JoinSplit<P> {
         Ok(JoinSplit::<P> {
             vpub_old: reader.read_u64::<LittleEndian>()?.try_into()?,
             vpub_new: reader.read_u64::<LittleEndian>()?.try_into()?,
-            anchor: treestate::sprout::NoteTreeRootHash::from(reader.read_32_bytes()?),
+            anchor: sprout::tree::NoteTreeRootHash::from(reader.read_32_bytes()?),
             nullifiers: [
                 reader.read_32_bytes()?.into(),
                 reader.read_32_bytes()?.into(),
             ],
             commitments: [
-                commitments::sprout::NoteCommitment::from(reader.read_32_bytes()?),
-                commitments::sprout::NoteCommitment::from(reader.read_32_bytes()?),
+                sprout::commitment::NoteCommitment::from(reader.read_32_bytes()?),
+                sprout::commitment::NoteCommitment::from(reader.read_32_bytes()?),
             ],
             ephemeral_key: x25519_dalek::PublicKey::from(reader.read_32_bytes()?),
             random_seed: reader.read_32_bytes()?,
             vmacs: [
-                types::MAC::zcash_deserialize(&mut reader)?,
-                types::MAC::zcash_deserialize(&mut reader)?,
+                sprout::note::MAC::zcash_deserialize(&mut reader)?,
+                sprout::note::MAC::zcash_deserialize(&mut reader)?,
             ],
             zkproof: P::zcash_deserialize(&mut reader)?,
             enc_ciphertexts: [
-                notes::sprout::EncryptedCiphertext::zcash_deserialize(&mut reader)?,
-                notes::sprout::EncryptedCiphertext::zcash_deserialize(&mut reader)?,
+                sprout::note::EncryptedCiphertext::zcash_deserialize(&mut reader)?,
+                sprout::note::EncryptedCiphertext::zcash_deserialize(&mut reader)?,
             ],
         })
     }
