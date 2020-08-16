@@ -53,10 +53,10 @@ impl Block {
             .ok_or_else(|| "block has no transactions")?;
         let mut rest = self.transactions.iter().skip(1);
         if !first.is_coinbase() {
-            Err("first transaction must be coinbase")?;
+            return Err("first transaction must be coinbase".into());
         }
         if rest.any(|tx| tx.contains_coinbase_input()) {
-            Err("coinbase input found in non-coinbase transaction")?;
+            return Err("coinbase input found in non-coinbase transaction".into());
         }
         Ok(())
     }

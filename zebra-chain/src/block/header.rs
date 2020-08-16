@@ -106,7 +106,7 @@ impl BlockHeader {
         if self.time <= two_hours_in_the_future {
             Ok(())
         } else {
-            Err("block header time is more than 2 hours in the future")?
+            Err("block header time is more than 2 hours in the future".into())
         }
     }
 }
