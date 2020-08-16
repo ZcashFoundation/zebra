@@ -1,10 +1,9 @@
 use chrono::{DateTime, Duration, Utc};
 
-use crate::merkle_tree::MerkleTreeRootHash;
 use crate::serialization::ZcashSerialize;
 use crate::work::{difficulty::CompactDifficulty, equihash::Solution};
 
-use super::{BlockHeaderHash, Error};
+use super::{merkle::MerkleTreeRootHash, BlockHeaderHash, Error};
 
 /// Block header.
 ///
