@@ -5,15 +5,13 @@ use proptest::{arbitrary::any, array, collection::vec, option, prelude::*};
 use crate::{
     amount::{Amount, NonNegative},
     block::BlockHeight,
-    commitments,
-    notes::sprout,
     primitives::{Bctv14Proof, Groth16Proof, Script, ZkSnarkProof},
     sapling,
+    sprout,
     transaction::{
         CoinbaseData, JoinSplit, JoinSplitData, LockTime, OutPoint, Output, ShieldedData, Spend,
         Transaction, TransparentInput, TransparentOutput,
     },
-    treestate,
 };
 
 impl Transaction {
@@ -125,14 +123,14 @@ impl<P: ZkSnarkProof + Arbitrary + 'static> Arbitrary for JoinSplit<P> {
         (
             any::<Amount<NonNegative>>(),
             any::<Amount<NonNegative>>(),
-            any::<treestate::sprout::NoteTreeRootHash>(),
-            array::uniform2(any::<sprout::Nullifier>()),
-            array::uniform2(any::<commitments::sprout::NoteCommitment>()),
+            any::<sprout::tree::NoteTreeRootHash>(),
+            array::uniform2(any::<sprout::note::Nullifier>()),
+            array::uniform2(any::<sprout::commitment::NoteCommitment>()),
             array::uniform32(any::<u8>()),
             array::uniform32(any::<u8>()),
-            array::uniform2(any::<crate::types::MAC>()),
+            array::uniform2(any::<sprout::note::MAC>()),
             any::<P>(),
-            array::uniform2(any::<sprout::EncryptedCiphertext>()),
+            array::uniform2(any::<sprout::note::EncryptedCiphertext>()),
         )
             .prop_map(
                 |(

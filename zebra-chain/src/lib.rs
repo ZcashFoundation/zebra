@@ -14,11 +14,8 @@ extern crate serde;
 mod merkle_tree;
 
 pub mod addresses;
-pub mod commitments;
 pub mod keys;
 pub mod notes;
-pub mod treestate;
-pub mod types;
 
 pub mod amount;
 pub mod block;

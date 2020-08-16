@@ -3,5 +3,3 @@
 #[cfg(test)]
 mod arbitrary;
 pub mod memo;
-
-pub mod sprout;

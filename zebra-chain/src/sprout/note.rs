@@ -6,14 +6,17 @@
 #[cfg(test)]
 mod arbitrary;
 mod ciphertexts;
+mod mac;
 mod nullifiers;
 
 use crate::{
     amount::{Amount, NonNegative},
-    commitments::sprout::CommitmentRandomness,
-    keys::sprout::PayingKey,
     notes::memo::Memo,
 };
+
+use super::{commitment::CommitmentRandomness, keys::PayingKey};
+
+pub use mac::MAC;
 
 pub use ciphertexts::EncryptedCiphertext;
 
