@@ -23,7 +23,7 @@ impl Arbitrary for RootHash {
     type Strategy = BoxedStrategy<Self>;
 }
 
-impl Arbitrary for BlockHeader {
+impl Arbitrary for Header {
     type Parameters = ();
 
     fn arbitrary_with(_args: ()) -> Self::Strategy {
@@ -49,7 +49,7 @@ impl Arbitrary for BlockHeader {
                     difficulty_threshold,
                     nonce,
                     solution,
-                )| BlockHeader {
+                )| Header {
                     version,
                     previous_block_hash,
                     merkle_root_hash,

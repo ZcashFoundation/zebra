@@ -18,7 +18,7 @@ proptest! {
     }
 
     #[test]
-    fn blockheader_roundtrip(header in any::<BlockHeader>()) {
+    fn blockheader_roundtrip(header in any::<Header>()) {
         let bytes = header.zcash_serialize_to_vec()?;
         let other_header = bytes.zcash_deserialize_into()?;
 

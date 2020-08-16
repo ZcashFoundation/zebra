@@ -8,7 +8,7 @@ use crate::serialization::{
     sha256d, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
 };
 
-use super::BlockHeader;
+use super::Header;
 
 /// A SHA-256d hash of a BlockHeader.
 ///
@@ -34,8 +34,8 @@ impl fmt::Debug for Hash {
     }
 }
 
-impl<'a> From<&'a BlockHeader> for Hash {
-    fn from(block_header: &'a BlockHeader) -> Self {
+impl<'a> From<&'a Header> for Hash {
+    fn from(block_header: &'a Header) -> Self {
         let mut hash_writer = sha256d::Writer::default();
         block_header
             .zcash_serialize(&mut hash_writer)

@@ -7,11 +7,11 @@ use crate::{
     transaction::{LockTime, Transaction, TransparentInput, TransparentOutput},
 };
 
-use super::super::{serialize::MAX_BLOCK_BYTES, Block, BlockHeader};
+use super::super::{serialize::MAX_BLOCK_BYTES, Block, Header};
 
 /// Generate a block header
-pub fn block_header() -> BlockHeader {
-    BlockHeader::zcash_deserialize(&zebra_test::vectors::DUMMY_HEADER[..]).unwrap()
+pub fn block_header() -> Header {
+    Header::zcash_deserialize(&zebra_test::vectors::DUMMY_HEADER[..]).unwrap()
 }
 
 /// Generate a block with multiple transactions just below limit

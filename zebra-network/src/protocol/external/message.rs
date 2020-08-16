@@ -5,8 +5,10 @@ use std::{net, sync::Arc};
 
 use chrono::{DateTime, Utc};
 
-use zebra_chain::block::{self, Block};
-use zebra_chain::{block::BlockHeader, transaction::Transaction};
+use zebra_chain::{
+    block::{self, Block},
+    transaction::Transaction,
+};
 
 use super::inv::InventoryHash;
 use super::types::*;
@@ -178,7 +180,7 @@ pub enum Message {
     // transaction count (a var_int, so there can be more than 81
     // bytes per header) as opposed to the block headers that are
     // hashed by miners.
-    Headers(Vec<BlockHeader>),
+    Headers(Vec<block::Header>),
 
     /// A `getheaders` message.
     ///

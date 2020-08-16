@@ -11,7 +11,7 @@ use tower::{layer::Layer, timeout::TimeoutLayer, Service, ServiceExt};
 use tracing_futures::Instrument;
 
 use zebra_chain::{
-    block::{self, Block, BlockHeader},
+    block::{self, Block},
     parameters::Network,
     serialization::ZcashDeserialize,
 };
@@ -39,7 +39,7 @@ const VERIFY_TIMEOUT_SECONDS: u64 = 10;
 /// The generated block should fail validation.
 pub fn block_no_transactions() -> Block {
     Block {
-        header: BlockHeader::zcash_deserialize(&zebra_test::vectors::DUMMY_HEADER[..]).unwrap(),
+        header: block::Header::zcash_deserialize(&zebra_test::vectors::DUMMY_HEADER[..]).unwrap(),
         transactions: Vec::new(),
     }
 }
