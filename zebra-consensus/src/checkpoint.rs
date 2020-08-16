@@ -39,8 +39,7 @@ use tokio::sync::oneshot;
 use tower::Service;
 
 use zebra_chain::{
-    block::BlockHeight,
-    block::{Block, self},
+    block::{self, Block},
     parameters::Network,
 };
 
@@ -109,10 +108,10 @@ pub struct CheckpointVerifier {
     ///
     /// The first checkpoint does not have any ancestors, so it only verifies the
     /// genesis block.
-    queued: BTreeMap<BlockHeight, QueuedBlockList>,
+    queued: BTreeMap<block::Height, QueuedBlockList>,
 
     /// The current progress of this verifier.
-    verifier_progress: Progress<BlockHeight>,
+    verifier_progress: Progress<block::Height>,
 }
 
 /// The CheckpointVerifier implementation.
@@ -152,7 +151,7 @@ impl CheckpointVerifier {
     // This function is designed for use in tests.
     #[allow(dead_code)]
     pub(crate) fn from_list(
-        list: impl IntoIterator<Item = (BlockHeight, block::Hash)>,
+        list: impl IntoIterator<Item = (block::Height, block::Hash)>,
         initial_tip: Option<Arc<Block>>,
     ) -> Result<Self, Error> {
         Ok(Self::from_checkpoint_list(
@@ -213,14 +212,14 @@ impl CheckpointVerifier {
     /// `height` increases as checkpoints are verified.
     ///
     /// If verification has finished, returns `FinalCheckpoint`.
-    fn previous_checkpoint_height(&self) -> Progress<BlockHeight> {
+    fn previous_checkpoint_height(&self) -> Progress<block::Height> {
         self.verifier_progress
     }
 
     /// Return the start of the current checkpoint range.
     ///
     /// Returns None if verification has finished.
-    fn current_start_bound(&self) -> Option<Bound<BlockHeight>> {
+    fn current_start_bound(&self) -> Option<Bound<block::Height>> {
         match self.previous_checkpoint_height() {
             BeforeGenesis => Some(Unbounded),
             InitialTip(height) | PreviousCheckpoint(height) => Some(Excluded(height)),
@@ -239,14 +238,14 @@ impl CheckpointVerifier {
     /// `height` increases as checkpoints are verified.
     ///
     /// If verification has finished, returns `FinishedVerifying`.
-    fn target_checkpoint_height(&self) -> Target<BlockHeight> {
+    fn target_checkpoint_height(&self) -> Target<block::Height> {
         // Find the height we want to start searching at
         let mut pending_height = match self.previous_checkpoint_height() {
             // Check if we have the genesis block as a special case, to simplify the loop
-            BeforeGenesis if !self.queued.contains_key(&BlockHeight(0)) => {
+            BeforeGenesis if !self.queued.contains_key(&block::Height(0)) => {
                 return WaitingForBlocks;
             }
-            BeforeGenesis => BlockHeight(0),
+            BeforeGenesis => block::Height(0),
             InitialTip(height) | PreviousCheckpoint(height) => height,
             FinalCheckpoint => return FinishedVerifying,
         };
@@ -265,7 +264,7 @@ impl CheckpointVerifier {
         // it stops after the first gap.
         for (&height, _) in self.queued.range((Excluded(pending_height), Unbounded)) {
             // If the queued blocks are continuous.
-            if height == BlockHeight(pending_height.0 + 1) {
+            if height == block::Height(pending_height.0 + 1) {
                 pending_height = height;
             } else {
                 break;
@@ -320,7 +319,7 @@ impl CheckpointVerifier {
     ///  - the block's height is less than or equal to the previously verified
     ///    checkpoint
     ///  - verification has finished
-    fn check_height(&self, height: BlockHeight) -> Result<(), Error> {
+    fn check_height(&self, height: block::Height) -> Result<(), Error> {
         if height > self.checkpoint_list.max_height() {
             Err("block is higher than the maximum checkpoint")?;
         }
@@ -343,7 +342,7 @@ impl CheckpointVerifier {
     }
 
     /// Increase the current checkpoint height to `verified_height`,
-    fn update_progress(&mut self, verified_height: BlockHeight) {
+    fn update_progress(&mut self, verified_height: block::Height) {
         // Ignore blocks that are below the previous checkpoint, or otherwise
         // have invalid heights.
         //
@@ -369,7 +368,7 @@ impl CheckpointVerifier {
     ///
     /// Returns an error if the block's height is invalid, see `check_height()`
     /// for details.
-    fn check_block(&self, block: &Block) -> Result<BlockHeight, Error> {
+    fn check_block(&self, block: &Block) -> Result<block::Height, Error> {
         let block_height = block
             .coinbase_height()
             .ok_or("the block does not have a coinbase height")?;
@@ -385,10 +384,7 @@ impl CheckpointVerifier {
     ///
     /// If the block does not have a coinbase height, sends an error on `tx`,
     /// and does not queue the block.
-    fn queue_block(
-        &mut self,
-        block: Arc<Block>,
-    ) -> oneshot::Receiver<Result<block::Hash, Error>> {
+    fn queue_block(&mut self, block: Arc<Block>) -> oneshot::Receiver<Result<block::Hash, Error>> {
         // Set up a oneshot channel to send results
         let (tx, rx) = oneshot::channel();
 
@@ -459,7 +455,7 @@ impl CheckpointVerifier {
     /// Returns the first valid block. If there is no valid block, returns None.
     fn process_height(
         &mut self,
-        height: BlockHeight,
+        height: block::Height,
         expected_hash: block::Hash,
     ) -> Option<QueuedBlock> {
         let mut qblocks = self
@@ -567,7 +563,7 @@ impl CheckpointVerifier {
                 .expect("earlier code checks if verification has finished"),
             Included(target_checkpoint_height),
         );
-        let range_heights: Vec<BlockHeight> = self
+        let range_heights: Vec<block::Height> = self
             .queued
             .range_mut(current_range)
             .rev()

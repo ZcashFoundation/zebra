@@ -25,8 +25,7 @@ use std::{
 use tokio::time;
 use tower::{buffer::Buffer, Service, ServiceExt};
 
-use zebra_chain::block::BlockHeight;
-use zebra_chain::block::{Block, self};
+use zebra_chain::block::{self, Block};
 
 /// A service that verifies blocks.
 #[derive(Debug)]
@@ -84,7 +83,7 @@ where
             let height = block
                 .coinbase_height()
                 .ok_or("Invalid block: missing block height.")?;
-            if height > BlockHeight::MAX {
+            if height > block::Height::MAX {
                 Err("Invalid block height: greater than the maximum height.")?;
             }
 
@@ -126,7 +125,7 @@ where
                 let previous_block = BlockVerifier::await_block(
                     &mut state,
                     previous_block_hash,
-                    BlockHeight(height.0 - 1),
+                    block::Height(height.0 - 1),
                 )
                 .await?;
 
@@ -180,7 +179,7 @@ where
     async fn await_block(
         state: &mut S,
         hash: block::Hash,
-        height: BlockHeight,
+        height: block::Height,
     ) -> Result<Arc<Block>, Report> {
         loop {
             match BlockVerifier::get_block(state, hash).await? {

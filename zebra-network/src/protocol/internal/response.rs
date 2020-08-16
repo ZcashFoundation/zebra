@@ -1,4 +1,4 @@
-use zebra_chain::block::{Block, self};
+use zebra_chain::block::{self, Block};
 
 use crate::meta_addr::MetaAddr;
 use std::sync::Arc;

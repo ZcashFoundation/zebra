@@ -26,7 +26,7 @@ fn checkpoint_list_genesis() -> Result<(), Error> {
     ));
 
     // Make a checkpoint list containing the genesis block
-    let checkpoint_list: BTreeMap<BlockHeight, block::Hash> =
+    let checkpoint_list: BTreeMap<block::Height, block::Hash> =
         checkpoint_data.iter().cloned().collect();
     let _ = CheckpointList::from_list(checkpoint_list)?;
 
@@ -55,7 +55,8 @@ fn checkpoint_list_multiple() -> Result<(), Error> {
     }
 
     // Make a checkpoint list containing all the blocks
-    let checkpoint_list: BTreeMap<BlockHeight, block::Hash> = checkpoint_data.iter().cloned().collect();
+    let checkpoint_list: BTreeMap<block::Height, block::Hash> =
+        checkpoint_data.iter().cloned().collect();
     let _ = CheckpointList::from_list(checkpoint_list)?;
 
     Ok(())
@@ -86,7 +87,8 @@ fn checkpoint_list_no_genesis_fail() -> Result<(), Error> {
     ));
 
     // Make a checkpoint list containing the non-genesis block
-    let checkpoint_list: BTreeMap<BlockHeight, block::Hash> = checkpoint_data.iter().cloned().collect();
+    let checkpoint_list: BTreeMap<block::Height, block::Hash> =
+        checkpoint_data.iter().cloned().collect();
     let _ = CheckpointList::from_list(checkpoint_list)
         .expect_err("a checkpoint list with no genesis block should fail");
 
@@ -98,10 +100,11 @@ fn checkpoint_list_no_genesis_fail() -> Result<(), Error> {
 fn checkpoint_list_null_hash_fail() -> Result<(), Error> {
     zebra_test::init();
 
-    let checkpoint_data = vec![(BlockHeight(0), block::Hash([0; 32]))];
+    let checkpoint_data = vec![(block::Height(0), block::Hash([0; 32]))];
 
     // Make a checkpoint list containing the non-genesis block
-    let checkpoint_list: BTreeMap<BlockHeight, block::Hash> = checkpoint_data.iter().cloned().collect();
+    let checkpoint_list: BTreeMap<block::Height, block::Hash> =
+        checkpoint_data.iter().cloned().collect();
     let _ = CheckpointList::from_list(checkpoint_list)
         .expect_err("a checkpoint list with a null block hash should fail");
 
@@ -113,18 +116,23 @@ fn checkpoint_list_null_hash_fail() -> Result<(), Error> {
 fn checkpoint_list_bad_height_fail() -> Result<(), Error> {
     zebra_test::init();
 
-    let checkpoint_data = vec![(BlockHeight(BlockHeight::MAX.0 + 1), block::Hash([1; 32]))];
+    let checkpoint_data = vec![(
+        block::Height(block::Height::MAX.0 + 1),
+        block::Hash([1; 32]),
+    )];
 
     // Make a checkpoint list containing the non-genesis block
-    let checkpoint_list: BTreeMap<BlockHeight, block::Hash> = checkpoint_data.iter().cloned().collect();
+    let checkpoint_list: BTreeMap<block::Height, block::Hash> =
+        checkpoint_data.iter().cloned().collect();
     let _ = CheckpointList::from_list(checkpoint_list).expect_err(
-        "a checkpoint list with an invalid block height (BlockHeight::MAX + 1) should fail",
+        "a checkpoint list with an invalid block height (block::Height::MAX + 1) should fail",
     );
 
-    let checkpoint_data = vec![(BlockHeight(u32::MAX), block::Hash([1; 32]))];
+    let checkpoint_data = vec![(block::Height(u32::MAX), block::Hash([1; 32]))];
 
     // Make a checkpoint list containing the non-genesis block
-    let checkpoint_list: BTreeMap<BlockHeight, block::Hash> = checkpoint_data.iter().cloned().collect();
+    let checkpoint_list: BTreeMap<block::Height, block::Hash> =
+        checkpoint_data.iter().cloned().collect();
     let _ = CheckpointList::from_list(checkpoint_list)
         .expect_err("a checkpoint list with an invalid block height (u32::MAX) should fail");
 
@@ -176,8 +184,8 @@ fn checkpoint_list_duplicate_heights_fail() -> Result<(), Error> {
     }
 
     // Then add some fake entries with duplicate heights
-    checkpoint_data.push((BlockHeight(1), block::Hash([0xaa; 32])));
-    checkpoint_data.push((BlockHeight(1), block::Hash([0xbb; 32])));
+    checkpoint_data.push((block::Height(1), block::Hash([0xaa; 32])));
+    checkpoint_data.push((block::Height(1), block::Hash([0xbb; 32])));
 
     // Make a checkpoint list containing some duplicate blocks
     let _ = CheckpointList::from_list(checkpoint_data)
@@ -204,8 +212,8 @@ fn checkpoint_list_duplicate_hashes_fail() -> Result<(), Error> {
     }
 
     // Then add some fake entries with duplicate hashes
-    checkpoint_data.push((BlockHeight(1), block::Hash([0xcc; 32])));
-    checkpoint_data.push((BlockHeight(2), block::Hash([0xcc; 32])));
+    checkpoint_data.push((block::Height(1), block::Hash([0xcc; 32])));
+    checkpoint_data.push((block::Height(2), block::Hash([0xcc; 32])));
 
     // Make a checkpoint list containing some duplicate blocks
     let _ = CheckpointList::from_list(checkpoint_data)

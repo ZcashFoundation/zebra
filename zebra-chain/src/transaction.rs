@@ -21,7 +21,7 @@ pub use shielded_data::{Output, ShieldedData, Spend};
 pub use transparent::{CoinbaseData, OutPoint, TransparentInput, TransparentOutput};
 
 use crate::amount::Amount;
-use crate::block::BlockHeight;
+use crate::block;
 use crate::primitives::{Bctv14Proof, Groth16Proof};
 
 /// A Zcash transaction.
@@ -71,7 +71,7 @@ pub enum Transaction {
         /// chain.
         lock_time: LockTime,
         /// The latest block height that this transaction can be added to the chain.
-        expiry_height: BlockHeight,
+        expiry_height: block::Height,
         /// The JoinSplit data for this transaction, if any.
         joinsplit_data: Option<JoinSplitData<Bctv14Proof>>,
     },
@@ -85,7 +85,7 @@ pub enum Transaction {
         /// chain.
         lock_time: LockTime,
         /// The latest block height that this transaction can be added to the chain.
-        expiry_height: BlockHeight,
+        expiry_height: block::Height,
         /// The net value of Sapling spend transfers minus output transfers.
         value_balance: Amount,
         /// The shielded data for this transaction, if any.
@@ -127,7 +127,7 @@ impl Transaction {
     }
 
     /// Get this transaction's expiry height, if any.
-    pub fn expiry_height(&self) -> Option<BlockHeight> {
+    pub fn expiry_height(&self) -> Option<block::Height> {
         match self {
             Transaction::V1 { .. } => None,
             Transaction::V2 { .. } => None,

@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use crate::block::BlockHeight;
+use crate::block;
 
 use super::*;
 
@@ -13,14 +13,14 @@ use NetworkUpgrade::*;
 #[test]
 fn activation_bijective() {
     let mainnet_activations = NetworkUpgrade::activation_list(Mainnet);
-    let mainnet_heights: HashSet<&BlockHeight> = mainnet_activations.keys().collect();
+    let mainnet_heights: HashSet<&block::Height> = mainnet_activations.keys().collect();
     assert_eq!(MAINNET_ACTIVATION_HEIGHTS.len(), mainnet_heights.len());
 
     let mainnet_nus: HashSet<&NetworkUpgrade> = mainnet_activations.values().collect();
     assert_eq!(MAINNET_ACTIVATION_HEIGHTS.len(), mainnet_nus.len());
 
     let testnet_activations = NetworkUpgrade::activation_list(Testnet);
-    let testnet_heights: HashSet<&BlockHeight> = testnet_activations.keys().collect();
+    let testnet_heights: HashSet<&block::Height> = testnet_activations.keys().collect();
     assert_eq!(TESTNET_ACTIVATION_HEIGHTS.len(), testnet_heights.len());
 
     let testnet_nus: HashSet<&NetworkUpgrade> = testnet_activations.values().collect();
@@ -42,41 +42,44 @@ fn activation_extremes_testnet() {
 fn activation_extremes(network: Network) {
     // The first three upgrades are Genesis, BeforeOverwinter, and Overwinter
     assert_eq!(
-        NetworkUpgrade::activation_list(network).get(&BlockHeight(0)),
+        NetworkUpgrade::activation_list(network).get(&block::Height(0)),
         Some(&Genesis)
     );
-    assert_eq!(Genesis.activation_height(network), Some(BlockHeight(0)));
-    assert_eq!(NetworkUpgrade::current(network, BlockHeight(0)), Genesis);
+    assert_eq!(Genesis.activation_height(network), Some(block::Height(0)));
+    assert_eq!(NetworkUpgrade::current(network, block::Height(0)), Genesis);
     assert_eq!(
-        NetworkUpgrade::next(network, BlockHeight(0)),
+        NetworkUpgrade::next(network, block::Height(0)),
         Some(BeforeOverwinter)
     );
 
     assert_eq!(
-        NetworkUpgrade::activation_list(network).get(&BlockHeight(1)),
+        NetworkUpgrade::activation_list(network).get(&block::Height(1)),
         Some(&BeforeOverwinter)
     );
     assert_eq!(
         BeforeOverwinter.activation_height(network),
-        Some(BlockHeight(1))
+        Some(block::Height(1))
     );
     assert_eq!(
-        NetworkUpgrade::current(network, BlockHeight(1)),
+        NetworkUpgrade::current(network, block::Height(1)),
         BeforeOverwinter
     );
     assert_eq!(
-        NetworkUpgrade::next(network, BlockHeight(1)),
+        NetworkUpgrade::next(network, block::Height(1)),
         Some(Overwinter)
     );
 
     // We assume that the last upgrade we know about continues forever
     // (even if we suspect that won't be true)
     assert_ne!(
-        NetworkUpgrade::activation_list(network).get(&BlockHeight::MAX),
+        NetworkUpgrade::activation_list(network).get(&block::Height::MAX),
         Some(&Genesis)
     );
-    assert_ne!(NetworkUpgrade::current(network, BlockHeight::MAX), Genesis);
-    assert_eq!(NetworkUpgrade::next(network, BlockHeight::MAX), None);
+    assert_ne!(
+        NetworkUpgrade::current(network, block::Height::MAX),
+        Genesis
+    );
+    assert_eq!(NetworkUpgrade::next(network, block::Height::MAX), None);
 }
 
 #[test]
@@ -103,11 +106,11 @@ fn activation_consistent(network: Network) {
         // Network upgrades don't repeat
         assert_ne!(NetworkUpgrade::next(network, height), Some(network_upgrade));
         assert_ne!(
-            NetworkUpgrade::next(network, BlockHeight(height.0 + 1)),
+            NetworkUpgrade::next(network, block::Height(height.0 + 1)),
             Some(network_upgrade)
         );
         assert_ne!(
-            NetworkUpgrade::next(network, BlockHeight::MAX),
+            NetworkUpgrade::next(network, block::Height::MAX),
             Some(network_upgrade)
         );
     }
@@ -142,7 +145,7 @@ fn branch_id_extremes(network: Network) {
         NetworkUpgrade::branch_id_list().get(&BeforeOverwinter),
         None
     );
-    assert_eq!(ConsensusBranchId::current(network, BlockHeight(0)), None);
+    assert_eq!(ConsensusBranchId::current(network, block::Height(0)), None);
     assert_eq!(
         NetworkUpgrade::branch_id_list().get(&Overwinter).cloned(),
         Overwinter.branch_id()
@@ -151,10 +154,13 @@ fn branch_id_extremes(network: Network) {
     // We assume that the last upgrade we know about continues forever
     // (even if we suspect that won't be true)
     assert_ne!(
-        NetworkUpgrade::branch_id_list().get(&NetworkUpgrade::current(network, BlockHeight::MAX)),
+        NetworkUpgrade::branch_id_list().get(&NetworkUpgrade::current(network, block::Height::MAX)),
         None
     );
-    assert_ne!(ConsensusBranchId::current(network, BlockHeight::MAX), None);
+    assert_ne!(
+        ConsensusBranchId::current(network, block::Height::MAX),
+        None
+    );
 }
 
 #[test]

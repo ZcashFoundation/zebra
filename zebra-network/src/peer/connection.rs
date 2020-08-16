@@ -28,7 +28,7 @@ use tower::Service;
 use tracing_futures::Instrument;
 
 use zebra_chain::{
-    block::{Block, self},
+    block::{self, Block},
     serialization::SerializationError,
 };
 

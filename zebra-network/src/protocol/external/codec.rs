@@ -9,8 +9,7 @@ use chrono::{TimeZone, Utc};
 use tokio_util::codec::{Decoder, Encoder};
 
 use zebra_chain::{
-    block::BlockHeight,
-    block::{Block, self},
+    block::{self, Block},
     parameters::Network,
     serialization::{
         sha256d, ReadZcashExt, SerializationError as Error, WriteZcashExt, ZcashDeserialize,
@@ -429,7 +428,7 @@ impl Codec {
             ),
             nonce: Nonce(reader.read_u64::<LittleEndian>()?),
             user_agent: reader.read_string()?,
-            start_height: BlockHeight(reader.read_u32::<LittleEndian>()?),
+            start_height: block::Height(reader.read_u32::<LittleEndian>()?),
             relay: match reader.read_u8()? {
                 0 => false,
                 1 => true,
@@ -599,7 +598,7 @@ mod tests {
             ),
             nonce: Nonce(0x9082_4908_8927_9238),
             user_agent: "Zebra".to_owned(),
-            start_height: BlockHeight(540_000),
+            start_height: block::Height(540_000),
             relay: true,
         };
 

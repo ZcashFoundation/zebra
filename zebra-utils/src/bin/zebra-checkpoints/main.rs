@@ -18,7 +18,6 @@ use structopt::StructOpt;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use zebra_chain::block;
-use zebra_chain::block::BlockHeight;
 
 #[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
@@ -47,7 +46,7 @@ const MAX_CHECKPOINT_BYTE_COUNT: u64 = 256 * 1024 * 1024;
 
 /// Checkpoints must be on the main chain, so we skip blocks that are within the
 /// zcashd reorg limit.
-const BLOCK_REORG_LIMIT: BlockHeight = BlockHeight(100);
+const BLOCK_REORG_LIMIT: block::Height = block::Height(100);
 
 /// Initialise tracing using its defaults.
 fn init_tracing() {
@@ -102,22 +101,22 @@ fn main() -> Result<()> {
     let mut cmd = passthrough_cmd();
     cmd.arg("getblockcount");
     // calculate the maximum height
-    let height_limit: BlockHeight = cmd_output(&mut cmd)?.trim().parse()?;
-    assert!(height_limit <= BlockHeight::MAX);
+    let height_limit: block::Height = cmd_output(&mut cmd)?.trim().parse()?;
+    assert!(height_limit <= block::Height::MAX);
     let height_limit = height_limit
         .0
         .checked_sub(BLOCK_REORG_LIMIT.0)
-        .map(BlockHeight)
+        .map(block::Height)
         .expect("zcashd has some mature blocks: wait for zcashd to sync more blocks");
 
-    let starting_height = args::Args::from_args().last_checkpoint.map(BlockHeight);
+    let starting_height = args::Args::from_args().last_checkpoint.map(block::Height);
     if starting_height.is_some() {
         // Since we're about to add 1, height needs to be strictly less than the maximum
-        assert!(starting_height.unwrap() < BlockHeight::MAX);
+        assert!(starting_height.unwrap() < block::Height::MAX);
     }
     // Start at the next block after the last checkpoint.
     // If there is no last checkpoint, start at genesis (height 0).
-    let starting_height = starting_height.map_or(0, |BlockHeight(h)| h + 1);
+    let starting_height = starting_height.map_or(0, |block::Height(h)| h + 1);
 
     assert!(
         starting_height < height_limit.0,
@@ -126,7 +125,7 @@ fn main() -> Result<()> {
 
     // set up counters
     let mut cumulative_bytes: u64 = 0;
-    let mut height_gap: BlockHeight = BlockHeight(0);
+    let mut height_gap: block::Height = block::Height(0);
 
     // loop through all blocks
     for x in starting_height..height_limit.0 {
@@ -141,17 +140,17 @@ fn main() -> Result<()> {
 
         // get the values we are interested in
         let hash: block::Hash = v["hash"].as_str().map(byte_reverse_hex).unwrap().parse()?;
-        let height = BlockHeight(v["height"].as_u64().unwrap() as u32);
-        assert!(height <= BlockHeight::MAX);
+        let height = block::Height(v["height"].as_u64().unwrap() as u32);
+        assert!(height <= block::Height::MAX);
         assert_eq!(x, height.0);
         let size = v["size"].as_u64().unwrap();
 
         // compute
         cumulative_bytes += size;
-        height_gap = BlockHeight(height_gap.0 + 1);
+        height_gap = block::Height(height_gap.0 + 1);
 
         // check if checkpoint
-        if height == BlockHeight(0)
+        if height == block::Height(0)
             || cumulative_bytes >= MAX_CHECKPOINT_BYTE_COUNT
             || height_gap.0 >= zebra_consensus::checkpoint::MAX_CHECKPOINT_HEIGHT_GAP as u32
         {
@@ -160,7 +159,7 @@ fn main() -> Result<()> {
 
             // reset counters
             cumulative_bytes = 0;
-            height_gap = BlockHeight(0);
+            height_gap = block::Height(0);
         }
     }
 

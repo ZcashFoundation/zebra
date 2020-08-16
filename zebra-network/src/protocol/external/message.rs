@@ -5,8 +5,8 @@ use std::{net, sync::Arc};
 
 use chrono::{DateTime, Utc};
 
-use zebra_chain::block::{Block, self};
-use zebra_chain::{block::BlockHeight, block::BlockHeader, transaction::Transaction};
+use zebra_chain::block::{self, Block};
+use zebra_chain::{block::BlockHeader, transaction::Transaction};
 
 use super::inv::InventoryHash;
 use super::types::*;
@@ -66,7 +66,7 @@ pub enum Message {
         user_agent: String,
 
         /// The last block received by the emitting node.
-        start_height: BlockHeight,
+        start_height: block::Height,
 
         /// Whether the remote peer should announce relayed
         /// transactions or not, see [BIP 0037](https://github.com/bitcoin/bips/blob/master/bip-0037.mediawiki)

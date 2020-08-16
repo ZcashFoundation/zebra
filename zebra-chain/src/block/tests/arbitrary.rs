@@ -13,7 +13,7 @@ impl Arbitrary for RootHash {
     type Parameters = ();
 
     fn arbitrary_with(_args: ()) -> Self::Strategy {
-        (any::<[u8; 32]>(), any::<Network>(), any::<BlockHeight>())
+        (any::<[u8; 32]>(), any::<Network>(), any::<Height>())
             .prop_map(|(root_bytes, network, block_height)| {
                 RootHash::from_bytes(root_bytes, network, block_height)
             })

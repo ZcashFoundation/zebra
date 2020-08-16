@@ -3,14 +3,11 @@ use std::{
     error::Error,
     sync::Arc,
 };
-use zebra_chain::{
-    block::BlockHeight,
-    block::{Block, self},
-};
+use zebra_chain::block::{self, Block};
 #[derive(Default)]
 pub(super) struct BlockIndex {
     by_hash: HashMap<block::Hash, Arc<Block>>,
-    height_map: BTreeMap<BlockHeight, block::Hash>,
+    height_map: BTreeMap<block::Height, block::Hash>,
 }
 
 impl BlockIndex {
@@ -36,7 +33,7 @@ impl BlockIndex {
         self.by_hash.get(&hash).cloned()
     }
 
-    pub(super) fn get_main_chain_at(&self, height: BlockHeight) -> Option<block::Hash> {
+    pub(super) fn get_main_chain_at(&self, height: block::Height) -> Option<block::Hash> {
         self.height_map.get(&height).cloned()
     }
 

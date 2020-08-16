@@ -72,35 +72,36 @@ impl ZcashDeserialize for OutPoint {
 
 fn parse_coinbase_height(
     mut data: Vec<u8>,
-) -> Result<(BlockHeight, CoinbaseData), SerializationError> {
+) -> Result<(block::Height, CoinbaseData), SerializationError> {
+    use block::Height;
     match (data.get(0), data.len()) {
         // Blocks 1 through 16 inclusive encode block height with OP_N opcodes.
         (Some(op_n @ 0x51..=0x60), len) if len >= 1 => Ok((
-            BlockHeight((op_n - 0x50) as u32),
+            Height((op_n - 0x50) as u32),
             CoinbaseData(data.split_off(1)),
         )),
         // Blocks 17 through 256 exclusive encode block height with the `0x01` opcode.
         (Some(0x01), len) if len >= 2 => {
-            Ok((BlockHeight(data[1] as u32), CoinbaseData(data.split_off(2))))
+            Ok((Height(data[1] as u32), CoinbaseData(data.split_off(2))))
         }
         // Blocks 256 through 65536 exclusive encode block height with the `0x02` opcode.
         (Some(0x02), len) if len >= 3 => Ok((
-            BlockHeight(data[1] as u32 + ((data[2] as u32) << 8)),
+            Height(data[1] as u32 + ((data[2] as u32) << 8)),
             CoinbaseData(data.split_off(3)),
         )),
         // Blocks 65536 through 2**24 exclusive encode block height with the `0x03` opcode.
         (Some(0x03), len) if len >= 4 => Ok((
-            BlockHeight(data[1] as u32 + ((data[2] as u32) << 8) + ((data[3] as u32) << 16)),
+            Height(data[1] as u32 + ((data[2] as u32) << 8) + ((data[3] as u32) << 16)),
             CoinbaseData(data.split_off(4)),
         )),
         // The genesis block does not encode the block height by mistake; special case it.
         // The first five bytes are [4, 255, 255, 7, 31], the little-endian encoding of
         // 520_617_983.  This is lucky because it means we can special-case the genesis block
-        // while remaining below the maximum `BlockHeight` of 500_000_000 forced by `LockTime`.
+        // while remaining below the maximum `block::Height` of 500_000_000 forced by `LockTime`.
         // While it's unlikely this code will ever process a block height that high, this means
-        // we don't need to maintain a cascade of different invariants for allowable `BlockHeight`s.
+        // we don't need to maintain a cascade of different invariants for allowable heights.
         (Some(0x04), _) if data[..] == GENESIS_COINBASE_DATA[..] => {
-            Ok((BlockHeight(0), CoinbaseData(data)))
+            Ok((Height(0), CoinbaseData(data)))
         }
         // As noted above, this is included for completeness.
         (Some(0x04), len) if len >= 5 => {
@@ -108,8 +109,8 @@ fn parse_coinbase_height(
                 + ((data[2] as u32) << 8)
                 + ((data[3] as u32) << 16)
                 + ((data[4] as u32) << 24);
-            if h <= BlockHeight::MAX.0 {
-                Ok((BlockHeight(h), CoinbaseData(data.split_off(5))))
+            if h <= Height::MAX.0 {
+                Ok((Height(h), CoinbaseData(data.split_off(5))))
             } else {
                 Err(SerializationError::Parse("Invalid block height"))
             }
@@ -120,7 +121,7 @@ fn parse_coinbase_height(
     }
 }
 
-fn coinbase_height_len(height: BlockHeight) -> usize {
+fn coinbase_height_len(height: block::Height) -> usize {
     // We can't write this as a match statement on stable until exclusive range
     // guards are stabilized.
     if let 0 = height.0 {
@@ -133,14 +134,14 @@ fn coinbase_height_len(height: BlockHeight) -> usize {
         3
     } else if let _h @ 65536..=16_777_215 = height.0 {
         4
-    } else if let _h @ 16_777_216..=BlockHeight::MAX_AS_U32 = height.0 {
+    } else if let _h @ 16_777_216..=block::Height::MAX_AS_U32 = height.0 {
         5
     } else {
         panic!("Invalid coinbase height");
     }
 }
 
-fn write_coinbase_height<W: io::Write>(height: BlockHeight, mut w: W) -> Result<(), io::Error> {
+fn write_coinbase_height<W: io::Write>(height: block::Height, mut w: W) -> Result<(), io::Error> {
     // We can't write this as a match statement on stable until exclusive range
     // guards are stabilized.
     if let 0 = height.0 {
@@ -158,7 +159,7 @@ fn write_coinbase_height<W: io::Write>(height: BlockHeight, mut w: W) -> Result<
         w.write_u8(h as u8)?;
         w.write_u8((h >> 8) as u8)?;
         w.write_u8((h >> 16) as u8)?;
-    } else if let h @ 16_777_216..=BlockHeight::MAX_AS_U32 = height.0 {
+    } else if let h @ 16_777_216..=block::Height::MAX_AS_U32 = height.0 {
         w.write_u8(0x04)?;
         w.write_u32::<LittleEndian>(h)?;
     } else {
@@ -549,7 +550,7 @@ impl ZcashDeserialize for Transaction {
                     inputs: Vec::zcash_deserialize(&mut reader)?,
                     outputs: Vec::zcash_deserialize(&mut reader)?,
                     lock_time: LockTime::zcash_deserialize(&mut reader)?,
-                    expiry_height: BlockHeight(reader.read_u32::<LittleEndian>()?),
+                    expiry_height: block::Height(reader.read_u32::<LittleEndian>()?),
                     joinsplit_data: OptV3JSD::zcash_deserialize(&mut reader)?,
                 })
             }
@@ -574,7 +575,7 @@ impl ZcashDeserialize for Transaction {
                 let inputs = Vec::zcash_deserialize(&mut reader)?;
                 let outputs = Vec::zcash_deserialize(&mut reader)?;
                 let lock_time = LockTime::zcash_deserialize(&mut reader)?;
-                let expiry_height = BlockHeight(reader.read_u32::<LittleEndian>()?);
+                let expiry_height = block::Height(reader.read_u32::<LittleEndian>()?);
                 let value_balance = reader.read_i64::<LittleEndian>()?.try_into()?;
                 let mut shielded_spends = Vec::zcash_deserialize(&mut reader)?;
                 let mut shielded_outputs = Vec::zcash_deserialize(&mut reader)?;

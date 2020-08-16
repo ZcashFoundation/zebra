@@ -8,7 +8,7 @@ use tower::{builder::ServiceBuilder, retry::Retry, timeout::Timeout, Service, Se
 use tracing_futures::Instrument;
 
 use zebra_chain::{
-    block::{Block, self},
+    block::{self, Block},
     parameters::Network,
 };
 use zebra_consensus::checkpoint;
