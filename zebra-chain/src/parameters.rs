@@ -1,4 +1,4 @@
-//! The consensus parameters for each Zcash network.
+//! Consensus parameters for each Zcash network.
 //!
 //! This module contains the consensus parameters which are required for
 //! parsing.

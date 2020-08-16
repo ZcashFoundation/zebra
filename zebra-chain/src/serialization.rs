@@ -1,4 +1,4 @@
-//! Serialization for Zcash.
+//! Consensus-critical serialization.
 //!
 //! This module contains four traits: `ZcashSerialize` and `ZcashDeserialize`,
 //! analogs of the Serde `Serialize` and `Deserialize` traits but intended for

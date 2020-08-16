@@ -1,4 +1,4 @@
-//! Primitives used in Zcash structures.
+//! External primitives used in Zcash structures.
 //!
 //! This contains re-exports of libraries used in the public API, as well as stub
 //! definitions of primitive types which must be represented in this library but
