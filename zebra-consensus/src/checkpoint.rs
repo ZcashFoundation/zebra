@@ -39,7 +39,8 @@ use tokio::sync::oneshot;
 use tower::Service;
 
 use zebra_chain::{
-    block::{Block, BlockHeaderHash, BlockHeight},
+    block::BlockHeight,
+    block::{Block, self},
     parameters::Network,
 };
 
@@ -53,9 +54,9 @@ struct QueuedBlock {
     /// The block data.
     block: Arc<Block>,
     /// `block`'s cached header hash.
-    hash: BlockHeaderHash,
+    hash: block::Hash,
     /// The transmitting end of the oneshot channel for this block's result.
-    tx: oneshot::Sender<Result<BlockHeaderHash, Error>>,
+    tx: oneshot::Sender<Result<block::Hash, Error>>,
 }
 
 /// A list of unverified blocks at a particular height.
@@ -94,7 +95,7 @@ pub struct CheckpointVerifier {
     checkpoint_list: CheckpointList,
 
     /// The hash of the initial tip, if any.
-    initial_tip_hash: Option<BlockHeaderHash>,
+    initial_tip_hash: Option<block::Hash>,
 
     // Queued Blocks
     //
@@ -151,7 +152,7 @@ impl CheckpointVerifier {
     // This function is designed for use in tests.
     #[allow(dead_code)]
     pub(crate) fn from_list(
-        list: impl IntoIterator<Item = (BlockHeight, BlockHeaderHash)>,
+        list: impl IntoIterator<Item = (BlockHeight, block::Hash)>,
         initial_tip: Option<Arc<Block>>,
     ) -> Result<Self, Error> {
         Ok(Self::from_checkpoint_list(
@@ -295,7 +296,7 @@ impl CheckpointVerifier {
     /// Return the most recently verified checkpoint's hash.
     ///
     /// See `previous_checkpoint_height()` for details.
-    fn previous_checkpoint_hash(&self) -> Progress<BlockHeaderHash> {
+    fn previous_checkpoint_hash(&self) -> Progress<block::Hash> {
         match self.previous_checkpoint_height() {
             BeforeGenesis => BeforeGenesis,
             InitialTip(_) => self
@@ -387,7 +388,7 @@ impl CheckpointVerifier {
     fn queue_block(
         &mut self,
         block: Arc<Block>,
-    ) -> oneshot::Receiver<Result<BlockHeaderHash, Error>> {
+    ) -> oneshot::Receiver<Result<block::Hash, Error>> {
         // Set up a oneshot channel to send results
         let (tx, rx) = oneshot::channel();
 
@@ -459,7 +460,7 @@ impl CheckpointVerifier {
     fn process_height(
         &mut self,
         height: BlockHeight,
-        expected_hash: BlockHeaderHash,
+        expected_hash: block::Hash,
     ) -> Option<QueuedBlock> {
         let mut qblocks = self
             .queued
@@ -705,7 +706,7 @@ impl Drop for CheckpointVerifier {
 ///
 /// After verification, the block futures resolve to their hashes.
 impl Service<Arc<Block>> for CheckpointVerifier {
-    type Response = BlockHeaderHash;
+    type Response = block::Hash;
     type Error = Error;
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;

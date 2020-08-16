@@ -24,9 +24,9 @@ use super::BlockHeader;
 /// more explicit.
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[cfg_attr(test, derive(Arbitrary))]
-pub struct BlockHeaderHash(pub [u8; 32]);
+pub struct Hash(pub [u8; 32]);
 
-impl fmt::Debug for BlockHeaderHash {
+impl fmt::Debug for Hash {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_tuple("BlockHeaderHash")
             .field(&hex::encode(&self.0))
@@ -34,7 +34,7 @@ impl fmt::Debug for BlockHeaderHash {
     }
 }
 
-impl<'a> From<&'a BlockHeader> for BlockHeaderHash {
+impl<'a> From<&'a BlockHeader> for Hash {
     fn from(block_header: &'a BlockHeader) -> Self {
         let mut hash_writer = sha256d::Writer::default();
         block_header
@@ -44,27 +44,27 @@ impl<'a> From<&'a BlockHeader> for BlockHeaderHash {
     }
 }
 
-impl ZcashSerialize for BlockHeaderHash {
+impl ZcashSerialize for Hash {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_all(&self.0)?;
         Ok(())
     }
 }
 
-impl ZcashDeserialize for BlockHeaderHash {
+impl ZcashDeserialize for Hash {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        Ok(BlockHeaderHash(reader.read_32_bytes()?))
+        Ok(Hash(reader.read_32_bytes()?))
     }
 }
 
-impl std::str::FromStr for BlockHeaderHash {
+impl std::str::FromStr for Hash {
     type Err = SerializationError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut bytes = [0; 32];
         if hex::decode_to_slice(s, &mut bytes[..]).is_err() {
             Err(SerializationError::Parse("hex decoding error"))
         } else {
-            Ok(BlockHeaderHash(bytes))
+            Ok(Hash(bytes))
         }
     }
 }

@@ -11,7 +11,7 @@ pub mod merkle;
 #[cfg(test)]
 mod tests;
 
-pub use hash::BlockHeaderHash;
+pub use hash::Hash;
 pub use header::BlockHeader;
 pub use height::BlockHeight;
 pub use root_hash::RootHash;
@@ -80,8 +80,8 @@ impl Block {
     }
 
     /// Get the hash for the current block
-    pub fn hash(&self) -> BlockHeaderHash {
-        BlockHeaderHash::from(self)
+    pub fn hash(&self) -> Hash {
+        Hash::from(self)
     }
 
     /// Get the parsed root hash for this block.
@@ -102,8 +102,8 @@ impl Block {
     }
 }
 
-impl<'a> From<&'a Block> for BlockHeaderHash {
-    fn from(block: &'a Block) -> BlockHeaderHash {
+impl<'a> From<&'a Block> for Hash {
+    fn from(block: &'a Block) -> Hash {
         (&block.header).into()
     }
 }

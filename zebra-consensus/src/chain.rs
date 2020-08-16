@@ -28,7 +28,7 @@ use tower::{buffer::Buffer, Service, ServiceExt};
 use tracing_futures::Instrument;
 
 use zebra_chain::block::BlockHeight;
-use zebra_chain::block::{Block, BlockHeaderHash};
+use zebra_chain::block::{Block, self};
 use zebra_chain::parameters::{Network, NetworkUpgrade::Sapling};
 
 /// The maximum expected gap between blocks.
@@ -52,7 +52,7 @@ struct ChainCheckpointVerifier {
 /// and `BlockVerifier`.
 struct ChainVerifier<BV, S>
 where
-    BV: Service<Arc<Block>, Response = BlockHeaderHash, Error = Error> + Send + Clone + 'static,
+    BV: Service<Arc<Block>, Response = block::Hash, Error = Error> + Send + Clone + 'static,
     BV::Future: Send + 'static,
     S: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>
         + Send
@@ -89,7 +89,7 @@ type Error = Box<dyn error::Error + Send + Sync + 'static>;
 /// After verification, blocks are added to the underlying state service.
 impl<BV, S> Service<Arc<Block>> for ChainVerifier<BV, S>
 where
-    BV: Service<Arc<Block>, Response = BlockHeaderHash, Error = Error> + Send + Clone + 'static,
+    BV: Service<Arc<Block>, Response = block::Hash, Error = Error> + Send + Clone + 'static,
     BV::Future: Send + 'static,
     S: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>
         + Send
@@ -97,7 +97,7 @@ where
         + 'static,
     S::Future: Send + 'static,
 {
-    type Response = BlockHeaderHash;
+    type Response = block::Hash;
     type Error = Error;
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
@@ -217,9 +217,9 @@ pub async fn init<S>(
     state_service: S,
 ) -> impl Service<
     Arc<Block>,
-    Response = BlockHeaderHash,
+    Response = block::Hash,
     Error = Error,
-    Future = impl Future<Output = Result<BlockHeaderHash, Error>>,
+    Future = impl Future<Output = Result<block::Hash, Error>>,
 > + Send
        + Clone
        + 'static
@@ -276,14 +276,14 @@ pub(crate) fn init_from_verifiers<BV, S>(
     initial_tip: Option<Arc<Block>>,
 ) -> impl Service<
     Arc<Block>,
-    Response = BlockHeaderHash,
+    Response = block::Hash,
     Error = Error,
-    Future = impl Future<Output = Result<BlockHeaderHash, Error>>,
+    Future = impl Future<Output = Result<block::Hash, Error>>,
 > + Send
        + Clone
        + 'static
 where
-    BV: Service<Arc<Block>, Response = BlockHeaderHash, Error = Error> + Send + Clone + 'static,
+    BV: Service<Arc<Block>, Response = block::Hash, Error = Error> + Send + Clone + 'static,
     BV::Future: Send + 'static,
     S: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>
         + Send

@@ -5,8 +5,8 @@ use std::{net, sync::Arc};
 
 use chrono::{DateTime, Utc};
 
-use zebra_chain::block::{Block, BlockHeader, BlockHeaderHash};
-use zebra_chain::{block::BlockHeight, transaction::Transaction};
+use zebra_chain::block::{Block, self};
+use zebra_chain::{block::BlockHeight, block::BlockHeader, transaction::Transaction};
 
 use super::inv::InventoryHash;
 use super::types::*;
@@ -161,12 +161,12 @@ pub enum Message {
     // many results.
     GetBlocks {
         /// Block locators, from newest back to genesis block.
-        block_locator_hashes: Vec<BlockHeaderHash>,
+        block_locator_hashes: Vec<block::Hash>,
 
         /// `BlockHeaderHash` of the last desired block.
         ///
         /// Set to zero to get as many blocks as possible (500).
-        hash_stop: BlockHeaderHash,
+        hash_stop: block::Hash,
     },
 
     /// A `headers` message.
@@ -201,12 +201,12 @@ pub enum Message {
     // many results.
     GetHeaders {
         /// Block locators, from newest back to genesis block.
-        block_locator_hashes: Vec<BlockHeaderHash>,
+        block_locator_hashes: Vec<block::Hash>,
 
-        /// `BlockHeaderHash` of the last desired block header.
+        /// `block::Hash` of the last desired block header.
         ///
         /// Set to zero to get as many block headers as possible (2000).
-        hash_stop: BlockHeaderHash,
+        hash_stop: block::Hash,
     },
 
     /// An `inv` message.

@@ -1,7 +1,7 @@
 //! Block difficulty data structures and calculations
 //!
 //! The block difficulty "target threshold" is stored in the block header as a
-//! 32-bit `CompactDifficulty`. The `BlockHeaderHash` must be less than or equal
+//! 32-bit `CompactDifficulty`. The `block::Hash` must be less than or equal
 //! to the `ExpandedDifficulty` threshold, when represented as a 256-bit integer
 //! in little-endian order.
 //!
@@ -10,7 +10,7 @@
 //! block's work value depends on the fixed threshold in the block header, not
 //! the actual work represented by the block header hash.
 
-use crate::block::BlockHeaderHash;
+use crate::block;
 
 use std::cmp::{Ordering, PartialEq, PartialOrd};
 use std::{fmt, ops::Add, ops::AddAssign};
@@ -42,7 +42,7 @@ mod tests;
 /// consensus-critical, because it is used for the `difficulty_threshold` field,
 /// which is:
 ///   - part of the `BlockHeader`, which is used to create the
-///     `BlockHeaderHash`, and
+///     `block::Hash`, and
 ///   - bitwise equal to the median `ExpandedDifficulty` value of recent blocks,
 ///     when encoded to `CompactDifficulty` using the specified conversion
 ///     function.
@@ -65,12 +65,12 @@ impl fmt::Debug for CompactDifficulty {
 
 /// A 256-bit unsigned "expanded difficulty" value.
 ///
-/// Used as a target threshold for the difficulty of a `BlockHeaderHash`.
+/// Used as a target threshold for the difficulty of a `block::Hash`.
 ///
 /// Details:
 ///
 /// The precise bit pattern of an `ExpandedDifficulty` value is
-/// consensus-critical, because it is compared with the `BlockHeaderHash`.
+/// consensus-critical, because it is compared with the `block::Hash`.
 ///
 /// Note that each `CompactDifficulty` value represents a range of
 /// `ExpandedDifficulty` values, because the precision of the
@@ -85,7 +85,7 @@ pub struct ExpandedDifficulty(U256);
 impl fmt::Debug for ExpandedDifficulty {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut buf = [0; 32];
-        // Use the same byte order as BlockHeaderHash
+        // Use the same byte order as block::Hash
         self.0.to_little_endian(&mut buf);
         f.debug_tuple("ExpandedDifficulty")
             .field(&hex::encode(&buf))
@@ -253,29 +253,29 @@ impl ExpandedDifficulty {
     ///
     /// Hashes are not used to calculate the difficulties of future blocks, so
     /// users of this module should avoid converting hashes into difficulties.
-    fn from_hash(hash: &BlockHeaderHash) -> ExpandedDifficulty {
+    fn from_hash(hash: &block::Hash) -> ExpandedDifficulty {
         ExpandedDifficulty(U256::from_little_endian(&hash.0))
     }
 }
 
-impl PartialEq<BlockHeaderHash> for ExpandedDifficulty {
+impl PartialEq<block::Hash> for ExpandedDifficulty {
     /// Is `self` equal to `other`?
     ///
     /// See `partial_cmp` for details.
-    fn eq(&self, other: &BlockHeaderHash) -> bool {
+    fn eq(&self, other: &block::Hash) -> bool {
         self.partial_cmp(other) == Some(Ordering::Equal)
     }
 }
 
-impl PartialOrd<BlockHeaderHash> for ExpandedDifficulty {
-    /// `BlockHeaderHash`es are compared with `ExpandedDifficulty` thresholds by
+impl PartialOrd<block::Hash> for ExpandedDifficulty {
+    /// `block::Hash`es are compared with `ExpandedDifficulty` thresholds by
     /// converting the hash to a 256-bit integer in little-endian order.
-    fn partial_cmp(&self, other: &BlockHeaderHash) -> Option<Ordering> {
+    fn partial_cmp(&self, other: &block::Hash) -> Option<Ordering> {
         self.partial_cmp(&ExpandedDifficulty::from_hash(other))
     }
 }
 
-impl PartialEq<ExpandedDifficulty> for BlockHeaderHash {
+impl PartialEq<ExpandedDifficulty> for block::Hash {
     /// Is `self` equal to `other`?
     ///
     /// See `partial_cmp` for details.
@@ -284,8 +284,8 @@ impl PartialEq<ExpandedDifficulty> for BlockHeaderHash {
     }
 }
 
-impl PartialOrd<ExpandedDifficulty> for BlockHeaderHash {
-    /// `BlockHeaderHash`es are compared with `ExpandedDifficulty` thresholds by
+impl PartialOrd<ExpandedDifficulty> for block::Hash {
+    /// `block::Hash`es are compared with `ExpandedDifficulty` thresholds by
     /// converting the hash to a 256-bit integer in little-endian order.
     fn partial_cmp(&self, other: &ExpandedDifficulty) -> Option<Ordering> {
         use Ordering::*;

@@ -10,7 +10,7 @@ use tokio_util::codec::{Decoder, Encoder};
 
 use zebra_chain::{
     block::BlockHeight,
-    block::{Block, BlockHeaderHash},
+    block::{Block, self},
     parameters::Network,
     serialization::{
         sha256d, ReadZcashExt, SerializationError as Error, WriteZcashExt, ZcashDeserialize,
@@ -486,7 +486,7 @@ impl Codec {
         if self.builder.version == Version(reader.read_u32::<LittleEndian>()?) {
             Ok(Message::GetBlocks {
                 block_locator_hashes: Vec::zcash_deserialize(&mut reader)?,
-                hash_stop: BlockHeaderHash::zcash_deserialize(&mut reader)?,
+                hash_stop: block::Hash::zcash_deserialize(&mut reader)?,
             })
         } else {
             Err(Error::Parse("getblocks version did not match negotiation"))
@@ -506,7 +506,7 @@ impl Codec {
         if self.builder.version == Version(reader.read_u32::<LittleEndian>()?) {
             Ok(Message::GetHeaders {
                 block_locator_hashes: Vec::zcash_deserialize(&mut reader)?,
-                hash_stop: BlockHeaderHash::zcash_deserialize(&mut reader)?,
+                hash_stop: block::Hash::zcash_deserialize(&mut reader)?,
             })
         } else {
             Err(Error::Parse("getblocks version did not match negotiation"))

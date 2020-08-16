@@ -9,7 +9,7 @@ use crate::work::{difficulty::CompactDifficulty, equihash};
 use super::merkle::MerkleTreeRootHash;
 use super::Block;
 use super::BlockHeader;
-use super::BlockHeaderHash;
+use super::Hash;
 
 /// The maximum size of a Zcash block, in bytes.
 ///
@@ -70,7 +70,7 @@ impl ZcashDeserialize for BlockHeader {
 
         Ok(BlockHeader {
             version,
-            previous_block_hash: BlockHeaderHash::zcash_deserialize(&mut reader)?,
+            previous_block_hash: Hash::zcash_deserialize(&mut reader)?,
             merkle_root_hash: MerkleTreeRootHash(reader.read_32_bytes()?),
             root_bytes: reader.read_32_bytes()?,
             // This can't panic, because all u32 values are valid `Utc.timestamp`s

@@ -17,7 +17,7 @@ fn blockheaderhash_debug() {
     let mut sha_writer = sha256d::Writer::default();
     let _ = sha_writer.write_all(preimage);
 
-    let hash = BlockHeaderHash(sha_writer.finish());
+    let hash = Hash(sha_writer.finish());
 
     assert_eq!(
         format!("{:?}", hash),
@@ -29,7 +29,7 @@ fn blockheaderhash_debug() {
 fn blockheaderhash_from_blockheader() {
     let blockheader = generate::block_header();
 
-    let hash = BlockHeaderHash::from(&blockheader);
+    let hash = Hash::from(&blockheader);
 
     assert_eq!(
         format!("{:?}", hash),

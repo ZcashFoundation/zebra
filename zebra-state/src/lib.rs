@@ -23,7 +23,7 @@ use tower::{Service, ServiceExt};
 
 use zebra_chain::{
     block::BlockHeight,
-    block::{Block, BlockHeaderHash},
+    block::{Block, self},
     parameters::Network,
 };
 
@@ -113,19 +113,19 @@ pub enum Request {
     /// Get a block from the zebra-state
     GetBlock {
         /// The hash used to identify the block
-        hash: BlockHeaderHash,
+        hash: block::Hash,
     },
     /// Get a block locator list for the current best chain
     GetBlockLocator {
         /// The genesis block of the current best chain
-        genesis: BlockHeaderHash,
+        genesis: block::Hash,
     },
     /// Get the block that is the tip of the current chain
     GetTip,
     /// Ask the state if the given hash is part of the current best chain
     GetDepth {
         /// The hash to check against the current chain
-        hash: BlockHeaderHash,
+        hash: block::Hash,
     },
 }
 
@@ -136,7 +136,7 @@ pub enum Response {
     /// added to the state
     Added {
         /// The hash of the block that was added
-        hash: BlockHeaderHash,
+        hash: block::Hash,
     },
     /// The response to a `GetBlock` request by hash
     Block {
@@ -146,12 +146,12 @@ pub enum Response {
     /// The response to a `GetBlockLocator` request
     BlockLocator {
         /// The set of blocks that make up the block locator
-        block_locator: Vec<BlockHeaderHash>,
+        block_locator: Vec<block::Hash>,
     },
     /// The response to a `GetTip` request
     Tip {
         /// The hash of the block at the tip of the current chain
-        hash: BlockHeaderHash,
+        hash: block::Hash,
     },
     /// The response to a `Contains` request indicating that the given has is in
     /// the current best chain

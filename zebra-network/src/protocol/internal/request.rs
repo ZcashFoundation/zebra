@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use zebra_chain::block::BlockHeaderHash;
+use zebra_chain::block;
 
 use super::super::types::Nonce;
 
@@ -42,7 +42,7 @@ pub enum Request {
     /// # Returns
     ///
     /// Returns [`Response::Blocks`](super::Response::Blocks).
-    BlocksByHash(HashSet<BlockHeaderHash>),
+    BlocksByHash(HashSet<block::Hash>),
 
     /// Request block hashes of subsequent blocks in the chain, giving hashes of
     /// known blocks.
@@ -50,7 +50,7 @@ pub enum Request {
     /// # Returns
     ///
     /// Returns
-    /// [`Response::BlockHeaderHashes`](super::Response::BlockHeaderHashes).
+    /// [`Response::BlockHashes`](super::Response::BlockHashes).
     ///
     /// # Warning
     ///
@@ -65,8 +65,8 @@ pub enum Request {
     /// `inv` messages will always have exactly one block hash.
     FindBlocks {
         /// Hashes of known blocks, ordered from highest height to lowest height.
-        known_blocks: Vec<BlockHeaderHash>,
+        known_blocks: Vec<block::Hash>,
         /// Optionally, the last header to request.
-        stop: Option<BlockHeaderHash>,
+        stop: Option<block::Hash>,
     },
 }
