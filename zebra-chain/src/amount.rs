@@ -13,14 +13,14 @@ type Result<T, E = Error> = std::result::Result<T, E>;
 /// A runtime validated type for representing amounts of zatoshis
 #[derive(Debug, Eq, PartialEq, Clone, Copy, Serialize, Deserialize)]
 #[serde(try_from = "i64")]
-#[serde(bound = "C: AmountConstraint")]
+#[serde(bound = "C: Constraint")]
 pub struct Amount<C = NegativeAllowed>(i64, PhantomData<C>);
 
 impl<C> Amount<C> {
     /// Convert this amount to a different Amount type if it satisfies the new constraint
     pub fn constrain<C2>(self) -> Result<Amount<C2>>
     where
-        C2: AmountConstraint,
+        C2: Constraint,
     {
         self.0.try_into()
     }
@@ -35,7 +35,7 @@ impl<C> Amount<C> {
 
 impl<C> std::ops::Add<Amount<C>> for Amount<C>
 where
-    C: AmountConstraint,
+    C: Constraint,
 {
     type Output = Result<Amount<C>>;
 
@@ -47,7 +47,7 @@ where
 
 impl<C> std::ops::Add<Amount<C>> for Result<Amount<C>>
 where
-    C: AmountConstraint,
+    C: Constraint,
 {
     type Output = Result<Amount<C>>;
 
@@ -58,7 +58,7 @@ where
 
 impl<C> std::ops::Add<Result<Amount<C>>> for Amount<C>
 where
-    C: AmountConstraint,
+    C: Constraint,
 {
     type Output = Result<Amount<C>>;
 
@@ -70,7 +70,7 @@ where
 impl<C> std::ops::AddAssign<Amount<C>> for Result<Amount<C>>
 where
     Amount<C>: Copy,
-    C: AmountConstraint,
+    C: Constraint,
 {
     fn add_assign(&mut self, rhs: Amount<C>) {
         if let Ok(lhs) = *self {
@@ -81,7 +81,7 @@ where
 
 impl<C> std::ops::Sub<Amount<C>> for Amount<C>
 where
-    C: AmountConstraint,
+    C: Constraint,
 {
     type Output = Result<Amount<C>>;
 
@@ -93,7 +93,7 @@ where
 
 impl<C> std::ops::Sub<Amount<C>> for Result<Amount<C>>
 where
-    C: AmountConstraint,
+    C: Constraint,
 {
     type Output = Result<Amount<C>>;
 
@@ -104,7 +104,7 @@ where
 
 impl<C> std::ops::Sub<Result<Amount<C>>> for Amount<C>
 where
-    C: AmountConstraint,
+    C: Constraint,
 {
     type Output = Result<Amount<C>>;
 
@@ -116,7 +116,7 @@ where
 impl<C> std::ops::SubAssign<Amount<C>> for Result<Amount<C>>
 where
     Amount<C>: Copy,
-    C: AmountConstraint,
+    C: Constraint,
 {
     fn sub_assign(&mut self, rhs: Amount<C>) {
         if let Ok(lhs) = *self {
@@ -150,7 +150,7 @@ impl<C> From<Amount<C>> for jubjub::Fr {
 
 impl<C> TryFrom<i64> for Amount<C>
 where
-    C: AmountConstraint,
+    C: Constraint,
 {
     type Error = Error;
 
@@ -161,7 +161,7 @@ where
 
 impl<C> TryFrom<i32> for Amount<C>
 where
-    C: AmountConstraint,
+    C: Constraint,
 {
     type Error = Error;
 
@@ -172,7 +172,7 @@ where
 
 impl<C> TryFrom<u64> for Amount<C>
 where
-    C: AmountConstraint,
+    C: Constraint,
 {
     type Error = Error;
 
@@ -205,7 +205,7 @@ pub enum Error {
 /// Marker type for `Amount` that restricts the values to `-MAX_MONEY..=MAX_MONEY`
 pub enum NegativeAllowed {}
 
-impl AmountConstraint for NegativeAllowed {
+impl Constraint for NegativeAllowed {
     fn valid_range() -> RangeInclusive<i64> {
         -MAX_MONEY..=MAX_MONEY
     }
@@ -215,7 +215,7 @@ impl AmountConstraint for NegativeAllowed {
 /// Marker type for `Amount` that restricts the value to positive numbers `0..=MAX_MONEY`
 pub enum NonNegative {}
 
-impl AmountConstraint for NonNegative {
+impl Constraint for NonNegative {
     fn valid_range() -> RangeInclusive<i64> {
         0..=MAX_MONEY
     }
@@ -225,7 +225,7 @@ impl AmountConstraint for NonNegative {
 pub const MAX_MONEY: i64 = 21_000_000 * 100_000_000;
 
 /// A trait for defining constraints on `Amount`
-pub trait AmountConstraint {
+pub trait Constraint {
     /// Returns the range of values that are valid under this constraint
     fn valid_range() -> RangeInclusive<i64>;
 
@@ -250,7 +250,7 @@ mod test {
 
     impl<C> Arbitrary for Amount<C>
     where
-        C: AmountConstraint + fmt::Debug,
+        C: Constraint + fmt::Debug,
     {
         type Parameters = ();
 
