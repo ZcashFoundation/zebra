@@ -1,6 +1,6 @@
 use crate::serialization::SerializationError;
 
-/// A u32 which represents a block height value.
+/// The height of a block is the length of the chain back to the genesis block.
 ///
 /// # Invariants
 ///

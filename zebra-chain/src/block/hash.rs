@@ -10,18 +10,11 @@ use crate::serialization::{
 
 use super::Header;
 
-/// A SHA-256d hash of a BlockHeader.
+/// A hash of a block, used to identify blocks and link blocks into a chain. ⛓️
 ///
-/// This is useful when one block header is pointing to its parent
-/// block header in the block chain. ⛓️
-///
-/// This is usually called a 'block hash', as it is frequently used
-/// to identify the entire block, since the hash preimage includes
-/// the merkle root of the transactions in this block. But
-/// _technically_, this is just a hash of the block _header_, not
-/// the direct bytes of the transactions as well as the header. So
-/// for now I want to call it a `BlockHeaderHash` because that's
-/// more explicit.
+/// Technically, this is the (SHA256d) hash of a block *header*, but since the
+/// block header includes the Merkle root of the transaction Merkle tree, it
+/// binds the entire contents of the block and is used to identify entire blocks.
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct Hash(pub [u8; 32]);

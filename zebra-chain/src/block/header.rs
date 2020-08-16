@@ -5,7 +5,7 @@ use crate::work::{difficulty::CompactDifficulty, equihash::Solution};
 
 use super::{merkle, Error, Hash};
 
-/// Block header.
+/// A block header, containing metadata about a block.
 ///
 /// How are blocks chained together? They are chained together via the
 /// backwards reference (previous header hash) present in the block
@@ -23,16 +23,18 @@ pub struct Header {
     /// interpreted as an `i32`.
     pub version: u32,
 
-    /// A SHA-256d hash in internal byte order of the previous block’s
-    /// header. This ensures no previous block can be changed without
-    /// also changing this block’s header.
+    /// The hash of the previous block, used to create a chain of blocks back to
+    /// the genesis block.
+    ///
+    /// This ensures no previous block can be changed without also changing this
+    /// block’s header.
     pub previous_block_hash: Hash,
 
-    /// A SHA-256d hash in internal byte order. The merkle root is
-    /// derived from the SHA256d hashes of all transactions included
-    /// in this block as assembled in a binary tree, ensuring that
-    /// none of those transactions can be modied without modifying the
-    /// header.
+    /// The root of the transaction Merkle tree.
+    ///
+    /// The Merkle root is derived from the SHA256d hashes of all transactions
+    /// included in this block as assembled in a binary tree, ensuring that none
+    /// of those transactions can be modied without modifying the header.
     pub merkle_root: merkle::Root,
 
     /// Some kind of root hash.
