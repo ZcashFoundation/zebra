@@ -13,9 +13,6 @@ extern crate serde;
 
 mod merkle_tree;
 
-pub mod addresses;
-pub mod keys;
-
 pub mod amount;
 pub mod block;
 pub mod parameters;
