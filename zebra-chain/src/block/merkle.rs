@@ -13,17 +13,17 @@ use crate::transaction::Transaction;
 /// A binary hash tree of SHA256d (two rounds of SHA256) hashes for
 /// node values.
 #[derive(Default)]
-pub struct MerkleTree<T> {
+pub struct Tree<T> {
     _leaves: Vec<T>,
 }
 
-impl<Transaction> ZcashSerialize for MerkleTree<Transaction> {
+impl<Transaction> ZcashSerialize for Tree<Transaction> {
     fn zcash_serialize<W: io::Write>(&self, _writer: W) -> Result<(), io::Error> {
         unimplemented!();
     }
 }
 
-impl<Transaction> ZcashDeserialize for MerkleTree<Transaction> {
+impl<Transaction> ZcashDeserialize for Tree<Transaction> {
     fn zcash_deserialize<R: io::Read>(_reader: R) -> Result<Self, SerializationError> {
         unimplemented!();
     }
@@ -33,10 +33,10 @@ impl<Transaction> ZcashDeserialize for MerkleTree<Transaction> {
 /// hashed transactions in a block.
 #[derive(Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(Arbitrary))]
-pub struct MerkleTreeRootHash(pub [u8; 32]);
+pub struct Root(pub [u8; 32]);
 
-impl From<MerkleTree<Transaction>> for MerkleTreeRootHash {
-    fn from(merkle_tree: MerkleTree<Transaction>) -> Self {
+impl From<Tree<Transaction>> for Root {
+    fn from(merkle_tree: Tree<Transaction>) -> Self {
         let mut hash_writer = sha256d::Writer::default();
         merkle_tree
             .zcash_serialize(&mut hash_writer)
@@ -45,10 +45,8 @@ impl From<MerkleTree<Transaction>> for MerkleTreeRootHash {
     }
 }
 
-impl fmt::Debug for MerkleTreeRootHash {
+impl fmt::Debug for Root {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple("MerkleTreeRootHash")
-            .field(&hex::encode(&self.0))
-            .finish()
+        f.debug_tuple("Root").field(&hex::encode(&self.0)).finish()
     }
 }

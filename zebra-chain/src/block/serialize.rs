@@ -6,10 +6,7 @@ use crate::serialization::ZcashDeserializeInto;
 use crate::serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize};
 use crate::work::{difficulty::CompactDifficulty, equihash};
 
-use super::merkle::MerkleTreeRootHash;
-use super::Block;
-use super::Hash;
-use super::Header;
+use super::{merkle, Block, Hash, Header};
 
 /// The maximum size of a Zcash block, in bytes.
 ///
@@ -23,7 +20,7 @@ impl ZcashSerialize for Header {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_u32::<LittleEndian>(self.version)?;
         self.previous_block_hash.zcash_serialize(&mut writer)?;
-        writer.write_all(&self.merkle_root_hash.0[..])?;
+        writer.write_all(&self.merkle_root.0[..])?;
         writer.write_all(&self.root_bytes[..])?;
         // this is a truncating cast, rather than a saturating cast
         // but u32 times are valid until 2106, and our block verification time
@@ -71,7 +68,7 @@ impl ZcashDeserialize for Header {
         Ok(Header {
             version,
             previous_block_hash: Hash::zcash_deserialize(&mut reader)?,
-            merkle_root_hash: MerkleTreeRootHash(reader.read_32_bytes()?),
+            merkle_root: merkle::Root(reader.read_32_bytes()?),
             root_bytes: reader.read_32_bytes()?,
             // This can't panic, because all u32 values are valid `Utc.timestamp`s
             time: Utc.timestamp(reader.read_u32::<LittleEndian>()? as i64, 0),
