@@ -54,7 +54,7 @@ fn blockheaderhash_from_blockheader() {
 fn deserialize_blockheader() {
     // https://explorer.zcha.in/blocks/415000
     let _header = zebra_test::vectors::HEADER_MAINNET_415000_BYTES
-        .zcash_deserialize_into::<BlockHeader>()
+        .zcash_deserialize_into::<Header>()
         .expect("blockheader test vector should deserialize");
 }
 

@@ -12,7 +12,7 @@ pub mod merkle;
 mod tests;
 
 pub use hash::Hash;
-pub use header::BlockHeader;
+pub use header::Header;
 pub use height::Height;
 pub use root_hash::RootHash;
 
@@ -38,7 +38,7 @@ use proptest_derive::Arbitrary;
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct Block {
     /// The block header, containing block metadata.
-    pub header: BlockHeader,
+    pub header: Header,
     /// The block transactions.
     pub transactions: Vec<std::sync::Arc<Transaction>>,
 }

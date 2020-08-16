@@ -6,7 +6,6 @@ use chrono::Utc;
 use color_eyre::eyre::{eyre, Report};
 use once_cell::sync::Lazy;
 
-use zebra_chain::block::BlockHeader;
 use zebra_chain::block::{self, Block};
 use zebra_chain::serialization::{ZcashDeserialize, ZcashDeserializeInto};
 use zebra_test::transcript::{TransError, Transcript};
@@ -55,7 +54,7 @@ static INVALID_HEADER_SOLUTION_TRANSCRIPT: Lazy<
 static INVALID_COINBASE_TRANSCRIPT: Lazy<Vec<(Arc<Block>, Result<block::Hash, TransError>)>> =
     Lazy::new(|| {
         let header =
-            BlockHeader::zcash_deserialize(&zebra_test::vectors::DUMMY_HEADER[..]).unwrap();
+            block::Header::zcash_deserialize(&zebra_test::vectors::DUMMY_HEADER[..]).unwrap();
 
         // Test 1: Empty transaction
         let block1 = Block {

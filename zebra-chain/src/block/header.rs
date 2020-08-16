@@ -12,7 +12,7 @@ use super::{merkle::MerkleTreeRootHash, Error, Hash};
 /// header. Each block points backwards to its parent, all the way
 /// back to the genesis block (the first block in the blockchain).
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct BlockHeader {
+pub struct Header {
     /// The block's version field. This is supposed to be `4`:
     ///
     /// > The current and only defined block version number for Zcash is 4.
@@ -66,7 +66,7 @@ pub struct BlockHeader {
     pub solution: Solution,
 }
 
-impl BlockHeader {
+impl Header {
     /// Returns true if the header is valid based on its `EquihashSolution`
     pub fn is_equihash_solution_valid(&self) -> Result<(), EquihashError> {
         let n = 200;
