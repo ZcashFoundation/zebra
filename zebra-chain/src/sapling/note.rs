@@ -3,16 +3,20 @@
 #![allow(clippy::unit_arg)]
 #![allow(dead_code)]
 
-#[cfg(test)]
-mod arbitrary;
 mod ciphertexts;
 mod nullifiers;
 
+#[cfg(test)]
+mod arbitrary;
+
 use crate::{
     amount::{Amount, NonNegative},
-    commitments::sapling::CommitmentRandomness,
-    keys::sapling::{Diversifier, TransmissionKey},
     notes::memo::Memo,
+};
+
+use super::{
+    commitment::CommitmentRandomness,
+    keys::{Diversifier, TransmissionKey},
 };
 
 pub use ciphertexts::{EncryptedCiphertext, OutCiphertext};

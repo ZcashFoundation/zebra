@@ -1,10 +1,10 @@
 #![allow(clippy::unit_arg)]
 #![allow(dead_code)]
 
-use crate::{
-    commitments::sapling::{pedersen_hashes::mixing_pedersen_hash, NoteCommitment},
-    keys::sapling::NullifierDerivingKey,
-    treestate::note_commitment_tree::Position,
+use super::super::{
+    commitment::{pedersen_hashes::mixing_pedersen_hash, NoteCommitment},
+    keys::NullifierDerivingKey,
+    tree::Position,
 };
 
 /// Invokes Blake2s-256 as PRF^nfSapling to derive the nullifier for a

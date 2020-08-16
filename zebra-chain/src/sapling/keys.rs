@@ -1,4 +1,4 @@
-//! Sapling key types
+//! Key types.
 //!
 //! "The spend authorizing key ask, proof authorizing key (ak, nsk),
 //! full viewing key (ak, nk, ovk), incoming viewing key ivk, and each

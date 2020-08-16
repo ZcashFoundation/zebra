@@ -2,7 +2,6 @@
 
 #[cfg(test)]
 mod arbitrary;
-mod memo;
+pub mod memo;
 
-pub mod sapling;
 pub mod sprout;

@@ -3,7 +3,7 @@
 use bitvec::prelude::*;
 use rand_core::{CryptoRng, RngCore};
 
-use crate::keys::sapling::find_group_hash;
+use super::super::keys::find_group_hash;
 
 /// I_i
 ///

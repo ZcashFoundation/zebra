@@ -5,7 +5,7 @@
 #![doc(html_favicon_url = "https://www.zfnd.org/images/zebra-favicon-128.png")]
 #![doc(html_logo_url = "https://www.zfnd.org/images/zebra-icon.png")]
 #![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_chain")]
-#![deny(missing_docs)]
+//#![deny(missing_docs)]
 #![allow(clippy::try_err)]
 
 #[macro_use]
@@ -14,15 +14,19 @@ extern crate serde;
 mod merkle_tree;
 
 pub mod addresses;
-pub mod amount;
-pub mod block;
 pub mod commitments;
 pub mod keys;
 pub mod notes;
-pub mod parameters;
-pub mod primitives;
-pub mod serialization;
-pub mod transaction;
 pub mod treestate;
 pub mod types;
+
+pub mod amount;
+pub mod block;
+pub mod parameters;
+pub mod primitives;
+pub mod sapling;
+pub mod serialization;
+pub mod sprout;
+pub mod transaction;
+pub mod transparent;
 pub mod work;
