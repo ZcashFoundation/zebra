@@ -28,12 +28,7 @@ use crate::transaction::Transaction;
 #[cfg(test)]
 use proptest_derive::Arbitrary;
 
-/// A block in your blockchain.
-///
-/// A block is a data structure with two fields:
-///
-/// Block header: a data structure containing the block's metadata
-/// Transactions: an array (vector in Rust) of transactions
+/// A Zcash block, containing a header and a list of transactions.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct Block {

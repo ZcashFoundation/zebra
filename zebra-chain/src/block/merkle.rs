@@ -1,5 +1,4 @@
-//! A binary hash tree of SHA256d (two rounds of SHA256) hashes for
-//! node values.
+//! The Bitcoin-inherited Merkle tree of transactions.
 #![allow(clippy::unit_arg)]
 
 use std::{fmt, io};

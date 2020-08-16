@@ -3,7 +3,7 @@
 //! The [`Amount`] type is parameterized by a [`Constraint`] implementation that
 //! declares the range of allowed values. In contrast to regular arithmetic
 //! operations, which return values, arithmetic on [`Amount`]s returns
-//! [`Result`]s.
+//! [`Result`](std::result::Result)s.
 
 use std::{
     convert::{TryFrom, TryInto},
