@@ -19,10 +19,9 @@ use bitvec::prelude::*;
 #[cfg(test)]
 use proptest_derive::Arbitrary;
 
-use crate::{
-    commitments::sapling::pedersen_hashes::pedersen_hash,
-    serialization::{SerializationError, ZcashDeserialize, ZcashSerialize},
-};
+use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
+
+use super::commitment::pedersen_hashes::pedersen_hash;
 
 /// MerkleCRH^Sapling Hash Function
 ///

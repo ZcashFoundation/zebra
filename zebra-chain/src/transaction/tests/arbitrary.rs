@@ -5,14 +5,15 @@ use proptest::{arbitrary::any, array, collection::vec, option, prelude::*};
 use crate::{
     amount::{Amount, NonNegative},
     block::BlockHeight,
-    commitments, keys,
-    notes::{sapling, sprout},
+    commitments,
+    notes::sprout,
     primitives::{Bctv14Proof, Groth16Proof, Script, ZkSnarkProof},
+    sapling,
     transaction::{
         CoinbaseData, JoinSplit, JoinSplitData, LockTime, OutPoint, Output, ShieldedData, Spend,
         Transaction, TransparentInput, TransparentOutput,
     },
-    treestate::{self, note_commitment_tree::SaplingNoteTreeRootHash},
+    treestate,
 };
 
 impl Transaction {
@@ -197,11 +198,11 @@ impl Arbitrary for Output {
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         (
-            any::<commitments::sapling::ValueCommitment>(),
-            any::<commitments::sapling::NoteCommitment>(),
-            any::<keys::sapling::EphemeralPublicKey>(),
-            any::<sapling::EncryptedCiphertext>(),
-            any::<sapling::OutCiphertext>(),
+            any::<sapling::commitment::ValueCommitment>(),
+            any::<sapling::commitment::NoteCommitment>(),
+            any::<sapling::keys::EphemeralPublicKey>(),
+            any::<sapling::note::EncryptedCiphertext>(),
+            any::<sapling::note::OutCiphertext>(),
             any::<Groth16Proof>(),
         )
             .prop_map(
@@ -254,9 +255,9 @@ impl Arbitrary for Spend {
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         (
-            any::<SaplingNoteTreeRootHash>(),
-            any::<commitments::sapling::ValueCommitment>(),
-            any::<sapling::Nullifier>(),
+            any::<sapling::tree::SaplingNoteTreeRootHash>(),
+            any::<sapling::commitment::ValueCommitment>(),
+            any::<sapling::note::Nullifier>(),
             array::uniform32(any::<u8>()),
             any::<Groth16Proof>(),
             vec(any::<u8>(), 64),

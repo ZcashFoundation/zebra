@@ -1,4 +1,4 @@
-//! Sapling note and value commitments and types.
+//! Note and value commitments.
 
 #[cfg(test)]
 mod arbitrary;
@@ -14,11 +14,12 @@ use rand_core::{CryptoRng, RngCore};
 
 use crate::{
     amount::{Amount, NonNegative},
-    keys::sapling::{find_group_hash, Diversifier, TransmissionKey},
     serialization::{
         serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
     },
 };
+
+use super::keys::{find_group_hash, Diversifier, TransmissionKey};
 
 use pedersen_hashes::*;
 
@@ -219,13 +220,12 @@ impl ValueCommitment {
 mod tests {
 
     use super::*;
-    use crate::commitments::sapling::test_vectors::TEST_VECTORS;
 
     #[test]
     fn pedersen_hash_to_point_test_vectors() {
         const D: [u8; 8] = *b"Zcash_PH";
 
-        for test_vector in TEST_VECTORS.iter() {
+        for test_vector in test_vectors::TEST_VECTORS.iter() {
             let result = jubjub::AffinePoint::from(pedersen_hash_to_point(
                 D,
                 &test_vector.input_bits.clone(),

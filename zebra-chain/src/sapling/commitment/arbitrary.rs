@@ -2,9 +2,9 @@ use std::convert::TryFrom;
 
 use proptest::{arbitrary::any, array, prelude::*};
 
-use crate::commitments::sapling;
+use super::super::commitment;
 
-impl Arbitrary for sapling::NoteCommitment {
+impl Arbitrary for commitment::NoteCommitment {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
@@ -16,7 +16,7 @@ impl Arbitrary for sapling::NoteCommitment {
     type Strategy = BoxedStrategy<Self>;
 }
 
-impl Arbitrary for sapling::ValueCommitment {
+impl Arbitrary for commitment::ValueCommitment {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {

@@ -2,9 +2,9 @@ use std::convert::TryFrom;
 
 use proptest::{arbitrary::any, array, prelude::*};
 
-use crate::keys::sapling;
+use super::*;
 
-impl Arbitrary for sapling::EphemeralPublicKey {
+impl Arbitrary for EphemeralPublicKey {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {

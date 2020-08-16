@@ -1,4 +1,4 @@
-//! Sapling Shielded Payment Address types.
+//! Shielded addresses.
 
 use std::{
     fmt,
@@ -11,10 +11,11 @@ use bech32::{self, FromBase32, ToBase32};
 use proptest::prelude::*;
 
 use crate::{
-    keys::sapling,
     parameters::Network,
     serialization::{ReadZcashExt, SerializationError},
 };
+
+use super::keys;
 
 /// Human-Readable Parts for input to bech32 encoding.
 mod human_readable_parts {
@@ -31,8 +32,8 @@ mod human_readable_parts {
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub struct SaplingShieldedAddress {
     network: Network,
-    diversifier: sapling::Diversifier,
-    transmission_key: sapling::TransmissionKey,
+    diversifier: keys::Diversifier,
+    transmission_key: keys::TransmissionKey,
 }
 
 impl fmt::Debug for SaplingShieldedAddress {
@@ -79,8 +80,8 @@ impl std::str::FromStr for SaplingShieldedAddress {
                         human_readable_parts::MAINNET => Network::Mainnet,
                         _ => Network::Testnet,
                     },
-                    diversifier: sapling::Diversifier::from(diversifier_bytes),
-                    transmission_key: sapling::TransmissionKey::from(transmission_key_bytes),
+                    diversifier: keys::Diversifier::from(diversifier_bytes),
+                    transmission_key: keys::TransmissionKey::from(transmission_key_bytes),
                 })
             }
             Err(_) => Err(SerializationError::Parse("bech32 decoding error")),
@@ -95,8 +96,8 @@ impl Arbitrary for SaplingShieldedAddress {
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         (
             any::<Network>(),
-            any::<sapling::Diversifier>(),
-            any::<sapling::TransmissionKey>(),
+            any::<keys::Diversifier>(),
+            any::<keys::TransmissionKey>(),
         )
             .prop_map(|(network, diversifier, transmission_key)| Self {
                 network,
@@ -131,18 +132,18 @@ mod tests {
 
     #[test]
     fn derive_keys_and_addresses() {
-        let spending_key = sapling::SpendingKey::new(&mut OsRng);
+        let spending_key = keys::SpendingKey::new(&mut OsRng);
 
-        let spend_authorizing_key = sapling::SpendAuthorizingKey::from(spending_key);
-        let proof_authorizing_key = sapling::ProofAuthorizingKey::from(spending_key);
+        let spend_authorizing_key = keys::SpendAuthorizingKey::from(spending_key);
+        let proof_authorizing_key = keys::ProofAuthorizingKey::from(spending_key);
 
-        let authorizing_key = sapling::AuthorizingKey::from(spend_authorizing_key);
-        let nullifier_deriving_key = sapling::NullifierDerivingKey::from(proof_authorizing_key);
+        let authorizing_key = keys::AuthorizingKey::from(spend_authorizing_key);
+        let nullifier_deriving_key = keys::NullifierDerivingKey::from(proof_authorizing_key);
         let incoming_viewing_key =
-            sapling::IncomingViewingKey::from((authorizing_key, nullifier_deriving_key));
+            keys::IncomingViewingKey::from((authorizing_key, nullifier_deriving_key));
 
-        let diversifier = sapling::Diversifier::new(&mut OsRng);
-        let transmission_key = sapling::TransmissionKey::from((incoming_viewing_key, diversifier));
+        let diversifier = keys::Diversifier::new(&mut OsRng);
+        let transmission_key = keys::TransmissionKey::from((incoming_viewing_key, diversifier));
 
         let _sapling_shielded_address = SaplingShieldedAddress {
             network: Network::Mainnet,

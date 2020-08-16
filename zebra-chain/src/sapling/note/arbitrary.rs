@@ -1,8 +1,8 @@
 use proptest::{arbitrary::any, collection::vec, prelude::*};
 
-use crate::notes::sapling;
+use super::*;
 
-impl Arbitrary for sapling::EncryptedCiphertext {
+impl Arbitrary for EncryptedCiphertext {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
@@ -18,7 +18,7 @@ impl Arbitrary for sapling::EncryptedCiphertext {
     type Strategy = BoxedStrategy<Self>;
 }
 
-impl Arbitrary for sapling::OutCiphertext {
+impl Arbitrary for OutCiphertext {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {

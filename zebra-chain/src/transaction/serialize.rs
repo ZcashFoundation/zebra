@@ -9,7 +9,7 @@ use std::{
 };
 
 use crate::{
-    commitments, keys, notes,
+    commitments, notes,
     primitives::{Script, ZkSnarkProof},
     serialization::{
         ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
@@ -350,11 +350,13 @@ impl ZcashSerialize for Spend {
 
 impl ZcashDeserialize for Spend {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        use crate::treestate::note_commitment_tree::SaplingNoteTreeRootHash;
+        use crate::sapling::{
+            commitment::ValueCommitment, note::Nullifier, tree::SaplingNoteTreeRootHash,
+        };
         Ok(Spend {
-            cv: commitments::sapling::ValueCommitment::zcash_deserialize(&mut reader)?,
+            cv: ValueCommitment::zcash_deserialize(&mut reader)?,
             anchor: SaplingNoteTreeRootHash(reader.read_32_bytes()?),
-            nullifier: notes::sapling::Nullifier::from(reader.read_32_bytes()?),
+            nullifier: Nullifier::from(reader.read_32_bytes()?),
             rk: reader.read_32_bytes()?.into(),
             zkproof: Groth16Proof::zcash_deserialize(&mut reader)?,
             spend_auth_sig: reader.read_64_bytes()?.into(),
@@ -376,12 +378,16 @@ impl ZcashSerialize for Output {
 
 impl ZcashDeserialize for Output {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        use crate::sapling::{
+            commitment::ValueCommitment, keys::EphemeralPublicKey, note::EncryptedCiphertext,
+            note::OutCiphertext,
+        };
         Ok(Output {
-            cv: commitments::sapling::ValueCommitment::zcash_deserialize(&mut reader)?,
+            cv: ValueCommitment::zcash_deserialize(&mut reader)?,
             cm_u: jubjub::Fq::zcash_deserialize(&mut reader)?,
-            ephemeral_key: keys::sapling::EphemeralPublicKey::zcash_deserialize(&mut reader)?,
-            enc_ciphertext: notes::sapling::EncryptedCiphertext::zcash_deserialize(&mut reader)?,
-            out_ciphertext: notes::sapling::OutCiphertext::zcash_deserialize(&mut reader)?,
+            ephemeral_key: EphemeralPublicKey::zcash_deserialize(&mut reader)?,
+            enc_ciphertext: EncryptedCiphertext::zcash_deserialize(&mut reader)?,
+            out_ciphertext: OutCiphertext::zcash_deserialize(&mut reader)?,
             zkproof: Groth16Proof::zcash_deserialize(&mut reader)?,
         })
     }
