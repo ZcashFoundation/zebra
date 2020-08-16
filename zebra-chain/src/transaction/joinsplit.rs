@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     amount::{Amount, NonNegative},
-    sprout,
     primitives::{ed25519, x25519, ZkSnarkProof},
+    sprout,
 };
 
 /// A _JoinSplit Description_, as described in [protocol specification §7.2][ps].

@@ -15,7 +15,6 @@ mod merkle_tree;
 
 pub mod addresses;
 pub mod keys;
-pub mod notes;
 
 pub mod amount;
 pub mod block;

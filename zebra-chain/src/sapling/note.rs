@@ -11,7 +11,7 @@ mod arbitrary;
 
 use crate::{
     amount::{Amount, NonNegative},
-    notes::memo::Memo,
+    transaction::Memo,
 };
 
 use super::{

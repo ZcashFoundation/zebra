@@ -11,7 +11,7 @@ mod nullifiers;
 
 use crate::{
     amount::{Amount, NonNegative},
-    notes::memo::Memo,
+    transaction::Memo,
 };
 
 use super::{commitment::CommitmentRandomness, keys::PayingKey};
