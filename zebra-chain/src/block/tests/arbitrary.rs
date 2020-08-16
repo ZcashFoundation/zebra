@@ -31,7 +31,7 @@ impl Arbitrary for Header {
             // version is interpreted as i32 in the spec, so we are limited to i32::MAX here
             (4u32..(i32::MAX as u32)),
             any::<Hash>(),
-            any::<merkle::MerkleTreeRootHash>(),
+            any::<merkle::Root>(),
             any::<[u8; 32]>(),
             // time is interpreted as u32 in the spec, but rust timestamps are i64
             (0i64..(u32::MAX as i64)),
@@ -52,7 +52,7 @@ impl Arbitrary for Header {
                 )| Header {
                     version,
                     previous_block_hash,
-                    merkle_root_hash,
+                    merkle_root: merkle_root_hash,
                     root_bytes,
                     time: Utc.timestamp(timestamp, 0),
                     difficulty_threshold,

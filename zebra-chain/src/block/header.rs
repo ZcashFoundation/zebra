@@ -3,7 +3,7 @@ use chrono::{DateTime, Duration, Utc};
 use crate::serialization::ZcashSerialize;
 use crate::work::{difficulty::CompactDifficulty, equihash::Solution};
 
-use super::{merkle::MerkleTreeRootHash, Error, Hash};
+use super::{merkle, Error, Hash};
 
 /// Block header.
 ///
@@ -33,7 +33,7 @@ pub struct Header {
     /// in this block as assembled in a binary tree, ensuring that
     /// none of those transactions can be modied without modifying the
     /// header.
-    pub merkle_root_hash: MerkleTreeRootHash,
+    pub merkle_root: merkle::Root,
 
     /// Some kind of root hash.
     ///
