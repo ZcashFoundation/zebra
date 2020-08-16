@@ -1,4 +1,4 @@
-//! Transparent (Bitcoin-inherited) functionality.
+//! Transparent-related (Bitcoin-inherited) functionality.
 
 mod address;
 mod keys;

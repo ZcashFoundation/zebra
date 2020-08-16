@@ -1,12 +1,13 @@
-//! Blockchain-related datastructures for Zebra. 🦓
+//! Core Zcash data structures. 🦓
 //!
-//! $$a^2 + b^2 = c^2$$
+//! This crate provides definitions of core datastructures for Zcash, such as
+//! blocks, transactions, addresses, etc.
 
 #![doc(html_favicon_url = "https://www.zfnd.org/images/zebra-favicon-128.png")]
 #![doc(html_logo_url = "https://www.zfnd.org/images/zebra-icon.png")]
 #![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_chain")]
-//#![deny(missing_docs)]
 #![allow(clippy::try_err)]
+#![deny(missing_docs)]
 
 #[macro_use]
 extern crate serde;

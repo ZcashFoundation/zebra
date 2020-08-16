@@ -1,4 +1,4 @@
-//! Transaction types.
+//! Transactions and transaction-related structures.
 
 use serde::{Deserialize, Serialize};
 
