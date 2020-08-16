@@ -26,7 +26,7 @@ use tokio::time;
 use tower::{buffer::Buffer, Service, ServiceExt};
 
 use zebra_chain::block::BlockHeight;
-use zebra_chain::block::{Block, BlockHeaderHash};
+use zebra_chain::block::{Block, self};
 
 /// A service that verifies blocks.
 #[derive(Debug)]
@@ -60,7 +60,7 @@ where
         + 'static,
     S::Future: Send + 'static,
 {
-    type Response = BlockHeaderHash;
+    type Response = block::Hash;
     type Error = Error;
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
@@ -158,7 +158,7 @@ where
     ///
     /// If there is no block for that hash, returns `Ok(None)`.
     /// Returns an error if `state.poll_ready` errors.
-    async fn get_block(state: &mut S, hash: BlockHeaderHash) -> Result<Option<Arc<Block>>, Report> {
+    async fn get_block(state: &mut S, hash: block::Hash) -> Result<Option<Arc<Block>>, Report> {
         let block = state
             .ready_and()
             .await
@@ -179,7 +179,7 @@ where
     /// Returns an error if `state.poll_ready` errors.
     async fn await_block(
         state: &mut S,
-        hash: BlockHeaderHash,
+        hash: block::Hash,
         height: BlockHeight,
     ) -> Result<Arc<Block>, Report> {
         loop {
@@ -215,9 +215,9 @@ pub fn init<S>(
     state_service: S,
 ) -> impl Service<
     Arc<Block>,
-    Response = BlockHeaderHash,
+    Response = block::Hash,
     Error = Error,
-    Future = impl Future<Output = Result<BlockHeaderHash, Error>>,
+    Future = impl Future<Output = Result<block::Hash, Error>>,
 > + Send
        + Clone
        + 'static

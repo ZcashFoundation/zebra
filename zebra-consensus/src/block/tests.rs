@@ -6,12 +6,12 @@ use chrono::Utc;
 use color_eyre::eyre::{eyre, Report};
 use once_cell::sync::Lazy;
 
-use zebra_chain::block::Block;
+use zebra_chain::block::{Block, self};
 use zebra_chain::block::BlockHeader;
 use zebra_chain::serialization::{ZcashDeserialize, ZcashDeserializeInto};
 use zebra_test::transcript::{TransError, Transcript};
 
-static VALID_BLOCK_TRANSCRIPT: Lazy<Vec<(Arc<Block>, Result<BlockHeaderHash, TransError>)>> =
+static VALID_BLOCK_TRANSCRIPT: Lazy<Vec<(Arc<Block>, Result<block::Hash, TransError>)>> =
     Lazy::new(|| {
         let block: Arc<_> =
             Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
@@ -21,7 +21,7 @@ static VALID_BLOCK_TRANSCRIPT: Lazy<Vec<(Arc<Block>, Result<BlockHeaderHash, Tra
         vec![(block, hash)]
     });
 
-static INVALID_TIME_BLOCK_TRANSCRIPT: Lazy<Vec<(Arc<Block>, Result<BlockHeaderHash, TransError>)>> =
+static INVALID_TIME_BLOCK_TRANSCRIPT: Lazy<Vec<(Arc<Block>, Result<block::Hash, TransError>)>> =
     Lazy::new(|| {
         let mut block: Block =
             Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
@@ -41,7 +41,7 @@ static INVALID_TIME_BLOCK_TRANSCRIPT: Lazy<Vec<(Arc<Block>, Result<BlockHeaderHa
     });
 
 static INVALID_HEADER_SOLUTION_TRANSCRIPT: Lazy<
-    Vec<(Arc<Block>, Result<BlockHeaderHash, TransError>)>,
+    Vec<(Arc<Block>, Result<block::Hash, TransError>)>,
 > = Lazy::new(|| {
     let mut block: Block =
         Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..]).unwrap();
@@ -52,7 +52,7 @@ static INVALID_HEADER_SOLUTION_TRANSCRIPT: Lazy<
     vec![(Arc::new(block), Err(TransError::Any))]
 });
 
-static INVALID_COINBASE_TRANSCRIPT: Lazy<Vec<(Arc<Block>, Result<BlockHeaderHash, TransError>)>> =
+static INVALID_COINBASE_TRANSCRIPT: Lazy<Vec<(Arc<Block>, Result<block::Hash, TransError>)>> =
     Lazy::new(|| {
         let header =
             BlockHeader::zcash_deserialize(&zebra_test::vectors::DUMMY_HEADER[..]).unwrap();

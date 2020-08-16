@@ -8,7 +8,7 @@ use std::io::{Read, Write};
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
-use zebra_chain::block::BlockHeaderHash;
+use zebra_chain::block;
 use zebra_chain::serialization::{
     ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
 };
@@ -30,14 +30,14 @@ pub enum InventoryHash {
     /// A hash of a transaction.
     Tx(TransactionHash),
     /// A hash of a block.
-    Block(BlockHeaderHash),
+    Block(block::Hash),
     /// A hash of a filtered block.
     ///
     /// The Bitcoin wiki says: Hash of a block header, but only to be used in
     /// getdata message. Indicates the reply should be a merkleblock message
     /// rather than a block message; this only works if a bloom filter has been
     /// set.
-    FilteredBlock(BlockHeaderHash),
+    FilteredBlock(block::Hash),
 }
 
 impl From<TransactionHash> for InventoryHash {
@@ -46,11 +46,11 @@ impl From<TransactionHash> for InventoryHash {
     }
 }
 
-impl From<BlockHeaderHash> for InventoryHash {
-    fn from(block: BlockHeaderHash) -> InventoryHash {
+impl From<block::Hash> for InventoryHash {
+    fn from(hash: block::Hash) -> InventoryHash {
         // Auto-convert to Block rather than FilteredBlock because filtered
         // blocks aren't useful for Zcash.
-        InventoryHash::Block(block)
+        InventoryHash::Block(hash)
     }
 }
 
@@ -75,8 +75,8 @@ impl ZcashDeserialize for InventoryHash {
         match code {
             0 => Ok(InventoryHash::Error),
             1 => Ok(InventoryHash::Tx(TransactionHash(bytes))),
-            2 => Ok(InventoryHash::Block(BlockHeaderHash(bytes))),
-            3 => Ok(InventoryHash::FilteredBlock(BlockHeaderHash(bytes))),
+            2 => Ok(InventoryHash::Block(block::Hash(bytes))),
+            3 => Ok(InventoryHash::FilteredBlock(block::Hash(bytes))),
             _ => Err(SerializationError::Parse("invalid inventory code")),
         }
     }

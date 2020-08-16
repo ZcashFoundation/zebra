@@ -14,7 +14,7 @@ use tracing::instrument;
 use zebra_chain::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 use zebra_chain::{
     block::BlockHeight,
-    block::{Block, BlockHeaderHash},
+    block::{Block, self},
     parameters::Network,
 };
 
@@ -40,9 +40,9 @@ impl SledState {
     pub(super) fn insert(
         &mut self,
         block: impl Into<Arc<Block>> + std::fmt::Debug,
-    ) -> Result<BlockHeaderHash, Error> {
+    ) -> Result<block::Hash, Error> {
         let block = block.into();
-        let hash: BlockHeaderHash = block.as_ref().into();
+        let hash = block.hash();
         let height = block.coinbase_height().unwrap();
 
         let height_map = self.storage.open_tree(b"height_map")?;
@@ -58,7 +58,7 @@ impl SledState {
     }
 
     #[instrument(skip(self))]
-    pub(super) fn get(&self, hash: BlockHeaderHash) -> Result<Option<Arc<Block>>, Error> {
+    pub(super) fn get(&self, hash: block::Hash) -> Result<Option<Arc<Block>>, Error> {
         let by_hash = self.storage.open_tree(b"by_hash")?;
         let key = &hash.0;
         let value = by_hash.get(key)?;
@@ -76,7 +76,7 @@ impl SledState {
     pub(super) fn get_main_chain_at(
         &self,
         height: BlockHeight,
-    ) -> Result<Option<BlockHeaderHash>, Error> {
+    ) -> Result<Option<block::Hash>, Error> {
         let height_map = self.storage.open_tree(b"height_map")?;
         let key = height.0.to_be_bytes();
         let value = height_map.get(key)?;
@@ -91,7 +91,7 @@ impl SledState {
     }
 
     #[instrument(skip(self))]
-    pub(super) fn get_tip(&self) -> Result<Option<BlockHeaderHash>, Error> {
+    pub(super) fn get_tip(&self) -> Result<Option<block::Hash>, Error> {
         let tree = self.storage.open_tree(b"height_map")?;
         let last_entry = tree.iter().values().next_back();
 
@@ -103,7 +103,7 @@ impl SledState {
     }
 
     #[instrument(skip(self))]
-    fn contains(&self, hash: &BlockHeaderHash) -> Result<bool, Error> {
+    fn contains(&self, hash: &block::Hash) -> Result<bool, Error> {
         let by_hash = self.storage.open_tree(b"by_hash")?;
         let key = &hash.0;
 
@@ -230,12 +230,12 @@ impl AsRef<[u8]> for BytesHeight {
 }
 
 pub(super) enum BlockQuery {
-    ByHash(BlockHeaderHash),
+    ByHash(block::Hash),
     ByHeight(BlockHeight),
 }
 
-impl From<BlockHeaderHash> for BlockQuery {
-    fn from(hash: BlockHeaderHash) -> Self {
+impl From<block::Hash> for BlockQuery {
+    fn from(hash: block::Hash) -> Self {
         Self::ByHash(hash)
     }
 }

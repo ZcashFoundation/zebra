@@ -253,7 +253,7 @@ fn block_difficulty() -> Result<(), Report> {
         &zebra_test::vectors::BLOCK_MAINNET_10_BYTES[..],
     ] {
         let block = Arc::<Block>::zcash_deserialize(*b)?;
-        let hash: BlockHeaderHash = block.as_ref().into();
+        let hash = block.hash();
         blockchain.push((block.clone(), block.coinbase_height().unwrap(), hash));
     }
 
@@ -339,7 +339,7 @@ fn expanded_order() -> Result<(), Report> {
     Ok(())
 }
 
-/// Test ExpandedDifficulty and BlockHeaderHash ordering
+/// Test ExpandedDifficulty and block::Hash ordering
 #[test]
 #[spandoc::spandoc]
 fn expanded_hash_order() -> Result<(), Report> {
@@ -348,8 +348,8 @@ fn expanded_hash_order() -> Result<(), Report> {
     let ex_zero = ExpandedDifficulty(U256::zero());
     let ex_one = ExpandedDifficulty(U256::one());
     let ex_max = ExpandedDifficulty(U256::MAX);
-    let hash_zero = BlockHeaderHash([0; 32]);
-    let hash_max = BlockHeaderHash([0xff; 32]);
+    let hash_zero = block::Hash([0; 32]);
+    let hash_max = block::Hash([0xff; 32]);
 
     assert_eq!(hash_zero, ex_zero);
     assert!(hash_zero < ex_one);
@@ -382,8 +382,8 @@ proptest! {
        let expanded = compact.to_expanded();
        let work = compact.to_work();
 
-       let hash_zero = BlockHeaderHash([0; 32]);
-       let hash_max = BlockHeaderHash([0xff; 32]);
+       let hash_zero = block::Hash([0; 32]);
+       let hash_max = block::Hash([0xff; 32]);
 
        let work_zero = Work(0);
        let work_max = Work(u128::MAX);
@@ -399,20 +399,20 @@ proptest! {
        }
    }
 
-   /// Check that a random ExpandedDifficulty compares correctly with fixed BlockHeaderHashes.
+   /// Check that a random ExpandedDifficulty compares correctly with fixed block::Hash
    #[test]
    fn prop_expanded_order(expanded in any::<ExpandedDifficulty>()) {
        // TODO: round-trip test, once we have ExpandedDifficulty::to_compact()
-       let hash_zero = BlockHeaderHash([0; 32]);
-       let hash_max = BlockHeaderHash([0xff; 32]);
+       let hash_zero = block::Hash([0; 32]);
+       let hash_max = block::Hash([0xff; 32]);
 
        prop_assert!(expanded >= hash_zero);
        prop_assert!(expanded <= hash_max);
    }
 
-   /// Check that ExpandedDifficulty compares correctly with a random BlockHeaderHash.
+   /// Check that ExpandedDifficulty compares correctly with a random block::Hash.
    #[test]
-   fn prop_hash_order(hash in any::<BlockHeaderHash>()) {
+   fn prop_hash_order(hash in any::<block::Hash>()) {
        let ex_zero = ExpandedDifficulty(U256::zero());
        let ex_one = ExpandedDifficulty(U256::one());
        let ex_max = ExpandedDifficulty(U256::MAX);
@@ -422,10 +422,10 @@ proptest! {
        prop_assert!(hash >= ex_one || hash == ex_zero);
    }
 
-   /// Check that a random ExpandedDifficulty and BlockHeaderHash compare correctly.
+   /// Check that a random ExpandedDifficulty and block::Hash compare correctly.
    #[test]
    #[allow(clippy::double_comparisons)]
-   fn prop_expanded_hash_order(expanded in any::<ExpandedDifficulty>(), hash in any::<BlockHeaderHash>()) {
+   fn prop_expanded_hash_order(expanded in any::<ExpandedDifficulty>(), hash in any::<block::Hash>()) {
        prop_assert!(expanded < hash || expanded > hash || expanded == hash);
    }
 

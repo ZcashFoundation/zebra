@@ -54,9 +54,9 @@ fn verifiers_from_checkpoint_list(
 ) -> (
     impl Service<
             Arc<Block>,
-            Response = BlockHeaderHash,
+            Response = block::Hash,
             Error = Error,
-            Future = impl Future<Output = Result<BlockHeaderHash, Error>>,
+            Future = impl Future<Output = Result<block::Hash, Error>>,
         > + Send
         + Clone
         + 'static,
@@ -89,9 +89,9 @@ fn verifiers_from_network(
 ) -> (
     impl Service<
             Arc<Block>,
-            Response = BlockHeaderHash,
+            Response = block::Hash,
             Error = Error,
-            Future = impl Future<Output = Result<BlockHeaderHash, Error>>,
+            Future = impl Future<Output = Result<block::Hash, Error>>,
         > + Send
         + Clone
         + 'static,
@@ -108,19 +108,19 @@ fn verifiers_from_network(
 }
 
 static BLOCK_VERIFY_TRANSCRIPT_GENESIS: Lazy<
-    Vec<(Arc<Block>, Result<BlockHeaderHash, TransError>)>,
+    Vec<(Arc<Block>, Result<block::Hash, TransError>)>,
 > = Lazy::new(|| {
     let block: Arc<_> =
         Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
             .unwrap()
             .into();
-    let hash = Ok(block.as_ref().into());
+    let hash = Ok(block.hash());
 
     vec![(block, hash)]
 });
 
 static BLOCK_VERIFY_TRANSCRIPT_GENESIS_FAIL: Lazy<
-    Vec<(Arc<Block>, Result<BlockHeaderHash, TransError>)>,
+    Vec<(Arc<Block>, Result<block::Hash, TransError>)>,
 > = Lazy::new(|| {
     let block: Arc<_> =
         Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
@@ -131,23 +131,23 @@ static BLOCK_VERIFY_TRANSCRIPT_GENESIS_FAIL: Lazy<
 });
 
 static BLOCK_VERIFY_TRANSCRIPT_GENESIS_TO_BLOCK_1: Lazy<
-    Vec<(Arc<Block>, Result<BlockHeaderHash, TransError>)>,
+    Vec<(Arc<Block>, Result<block::Hash, TransError>)>,
 > = Lazy::new(|| {
     let block0: Arc<_> =
         Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
             .unwrap()
             .into();
-    let hash0 = Ok(block0.as_ref().into());
+    let hash0 = Ok(block0.hash());
 
     let block1: Arc<_> = Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..])
         .unwrap()
         .into();
-    let hash1 = Ok(block1.as_ref().into());
+    let hash1 = Ok(block1.hash());
 
     vec![(block0, hash0), (block1, hash1)]
 });
 
-static NO_COINBASE_TRANSCRIPT: Lazy<Vec<(Arc<Block>, Result<BlockHeaderHash, TransError>)>> =
+static NO_COINBASE_TRANSCRIPT: Lazy<Vec<(Arc<Block>, Result<block::Hash, TransError>)>> =
     Lazy::new(|| {
         let block = block_no_transactions();
 
@@ -161,7 +161,7 @@ static NO_COINBASE_STATE_TRANSCRIPT: Lazy<
     )>,
 > = Lazy::new(|| {
     let block = block_no_transactions();
-    let hash: BlockHeaderHash = (&block).into();
+    let hash = block.hash();
 
     vec![(
         zebra_state::Request::GetBlock { hash },
@@ -179,7 +179,7 @@ static STATE_VERIFY_TRANSCRIPT_GENESIS: Lazy<
         Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
             .unwrap()
             .into();
-    let hash: BlockHeaderHash = block.as_ref().into();
+    let hash = block.hash();
 
     vec![(
         zebra_state::Request::GetBlock { hash },
@@ -205,14 +205,14 @@ async fn verify_block() -> Result<(), Report> {
     let mut checkpoint_data = Vec::new();
     let block0 =
         Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
-    let hash0: BlockHeaderHash = block0.as_ref().into();
+    let hash0 = block0.hash();
     checkpoint_data.push((
         block0.coinbase_height().expect("test block has height"),
         hash0,
     ));
 
     // Make a checkpoint list containing the genesis block
-    let checkpoint_list: BTreeMap<BlockHeight, BlockHeaderHash> =
+    let checkpoint_list: BTreeMap<BlockHeight, block::Hash> =
         checkpoint_data.iter().cloned().collect();
     let checkpoint_list = CheckpointList::from_list(checkpoint_list).map_err(|e| eyre!(e))?;
 
@@ -365,7 +365,7 @@ async fn continuous_blockchain(restart_height: Option<BlockHeight>) -> Result<()
         &zebra_test::vectors::BLOCK_MAINNET_10_BYTES[..],
     ] {
         let block = Arc::<Block>::zcash_deserialize(*b)?;
-        let hash: BlockHeaderHash = block.as_ref().into();
+        let hash = block.hash();
         blockchain.push((block.clone(), block.coinbase_height().unwrap(), hash));
     }
 
@@ -376,12 +376,12 @@ async fn continuous_blockchain(restart_height: Option<BlockHeight>) -> Result<()
         &zebra_test::vectors::BLOCK_MAINNET_4_BYTES[..],
     ] {
         let block = Arc::<Block>::zcash_deserialize(*b)?;
-        let hash: BlockHeaderHash = block.as_ref().into();
+        let hash = block.hash();
         checkpoints.push((block.clone(), block.coinbase_height().unwrap(), hash));
     }
 
     // The checkpoint list will contain only blocks 0 and 4
-    let checkpoint_list: BTreeMap<BlockHeight, BlockHeaderHash> = checkpoints
+    let checkpoint_list: BTreeMap<BlockHeight, block::Hash> = checkpoints
         .iter()
         .map(|(_block, height, hash)| (*height, *hash))
         .collect();

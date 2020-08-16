@@ -30,7 +30,7 @@ impl Arbitrary for BlockHeader {
         (
             // version is interpreted as i32 in the spec, so we are limited to i32::MAX here
             (4u32..(i32::MAX as u32)),
-            any::<BlockHeaderHash>(),
+            any::<Hash>(),
             any::<merkle::MerkleTreeRootHash>(),
             any::<[u8; 32]>(),
             // time is interpreted as u32 in the spec, but rust timestamps are i64

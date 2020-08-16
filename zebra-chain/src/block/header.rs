@@ -3,7 +3,7 @@ use chrono::{DateTime, Duration, Utc};
 use crate::serialization::ZcashSerialize;
 use crate::work::{difficulty::CompactDifficulty, equihash::Solution};
 
-use super::{merkle::MerkleTreeRootHash, BlockHeaderHash, Error};
+use super::{merkle::MerkleTreeRootHash, Error, Hash};
 
 /// Block header.
 ///
@@ -26,7 +26,7 @@ pub struct BlockHeader {
     /// A SHA-256d hash in internal byte order of the previous block’s
     /// header. This ensures no previous block can be changed without
     /// also changing this block’s header.
-    pub previous_block_hash: BlockHeaderHash,
+    pub previous_block_hash: Hash,
 
     /// A SHA-256d hash in internal byte order. The merkle root is
     /// derived from the SHA256d hashes of all transactions included

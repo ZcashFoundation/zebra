@@ -17,7 +17,7 @@ use std::{
     str::FromStr,
 };
 
-use zebra_chain::block::BlockHeaderHash;
+use zebra_chain::block;
 use zebra_chain::block::BlockHeight;
 use zebra_chain::parameters::Network;
 
@@ -38,7 +38,7 @@ type Error = Box<dyn error::Error + Send + Sync + 'static>;
 /// This is actually a bijective map, but since it is read-only, we use a
 /// BTreeMap, and do the value uniqueness check on initialisation.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub(crate) struct CheckpointList(BTreeMap<BlockHeight, BlockHeaderHash>);
+pub(crate) struct CheckpointList(BTreeMap<BlockHeight, block::Hash>);
 
 impl FromStr for CheckpointList {
     type Err = Error;
@@ -46,11 +46,11 @@ impl FromStr for CheckpointList {
     /// Parse a string into a CheckpointList.
     ///
     /// Each line has one checkpoint, consisting of a `BlockHeight` and
-    /// `BlockHeaderHash`, separated by a single space.
+    /// `block::Hash`, separated by a single space.
     ///
     /// Assumes that the provided genesis checkpoint is correct.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut checkpoint_list: Vec<(BlockHeight, BlockHeaderHash)> = Vec::new();
+        let mut checkpoint_list: Vec<(BlockHeight, block::Hash)> = Vec::new();
 
         for checkpoint in s.lines() {
             let fields = checkpoint.split(' ').collect::<Vec<_>>();
@@ -95,14 +95,14 @@ impl CheckpointList {
     /// There must be a checkpoint for a genesis block at BlockHeight 0.
     /// (All other checkpoints are optional.)
     pub(crate) fn from_list(
-        list: impl IntoIterator<Item = (BlockHeight, BlockHeaderHash)>,
+        list: impl IntoIterator<Item = (BlockHeight, block::Hash)>,
     ) -> Result<Self, Error> {
         // BTreeMap silently ignores duplicates, so we count the checkpoints
         // before adding them to the map
-        let original_checkpoints: Vec<(BlockHeight, BlockHeaderHash)> = list.into_iter().collect();
+        let original_checkpoints: Vec<(BlockHeight, block::Hash)> = list.into_iter().collect();
         let original_len = original_checkpoints.len();
 
-        let checkpoints: BTreeMap<BlockHeight, BlockHeaderHash> =
+        let checkpoints: BTreeMap<BlockHeight, block::Hash> =
             original_checkpoints.into_iter().collect();
 
         // Check that the list starts with the correct genesis block
@@ -123,14 +123,14 @@ impl CheckpointList {
             Err("checkpoint heights must be unique")?;
         }
 
-        let block_hashes: HashSet<&BlockHeaderHash> = checkpoints.values().collect();
+        let block_hashes: HashSet<&block::Hash> = checkpoints.values().collect();
         if block_hashes.len() != original_len {
             Err("checkpoint hashes must be unique")?;
         }
 
         // Make sure all the hashes are valid. In Bitcoin, [0; 32] is the null
         // hash. It is also used as the parent hash of genesis blocks.
-        if block_hashes.contains(&BlockHeaderHash([0; 32])) {
+        if block_hashes.contains(&block::Hash([0; 32])) {
             Err("checkpoint list contains invalid checkpoint hash: found null hash")?;
         }
 
@@ -153,7 +153,7 @@ impl CheckpointList {
     /// or None if there is no checkpoint at that height.
     ///
     /// See `BTreeMap::get()` for details.
-    pub fn hash(&self, height: BlockHeight) -> Option<BlockHeaderHash> {
+    pub fn hash(&self, height: BlockHeight) -> Option<block::Hash> {
         self.0.get(&height).cloned()
     }
 

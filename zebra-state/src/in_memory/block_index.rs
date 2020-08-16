@@ -5,19 +5,19 @@ use std::{
 };
 use zebra_chain::{
     block::BlockHeight,
-    block::{Block, BlockHeaderHash},
+    block::{Block, self},
 };
 #[derive(Default)]
 pub(super) struct BlockIndex {
-    by_hash: HashMap<BlockHeaderHash, Arc<Block>>,
-    height_map: BTreeMap<BlockHeight, BlockHeaderHash>,
+    by_hash: HashMap<block::Hash, Arc<Block>>,
+    height_map: BTreeMap<BlockHeight, block::Hash>,
 }
 
 impl BlockIndex {
     pub(super) fn insert(
         &mut self,
         block: impl Into<Arc<Block>>,
-    ) -> Result<BlockHeaderHash, Box<dyn Error + Send + Sync + 'static>> {
+    ) -> Result<block::Hash, Box<dyn Error + Send + Sync + 'static>> {
         let block = block.into();
         let hash = block.as_ref().into();
         let height = block.coinbase_height().unwrap();
@@ -32,11 +32,11 @@ impl BlockIndex {
         }
     }
 
-    pub(super) fn get(&self, hash: BlockHeaderHash) -> Option<Arc<Block>> {
+    pub(super) fn get(&self, hash: block::Hash) -> Option<Arc<Block>> {
         self.by_hash.get(&hash).cloned()
     }
 
-    pub(super) fn get_main_chain_at(&self, height: BlockHeight) -> Option<BlockHeaderHash> {
+    pub(super) fn get_main_chain_at(&self, height: BlockHeight) -> Option<block::Hash> {
         self.height_map.get(&height).cloned()
     }
 

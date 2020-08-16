@@ -35,10 +35,10 @@ async fn single_item_checkpoint_list() -> Result<(), Report> {
 
     let block0 =
         Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
-    let hash0: BlockHeaderHash = block0.as_ref().into();
+    let hash0 = block0.hash();
 
     // Make a checkpoint list containing only the genesis block
-    let genesis_checkpoint_list: BTreeMap<BlockHeight, BlockHeaderHash> =
+    let genesis_checkpoint_list: BTreeMap<BlockHeight, block::Hash> =
         [(block0.coinbase_height().unwrap(), hash0)]
             .iter()
             .cloned()
@@ -114,12 +114,12 @@ async fn multi_item_checkpoint_list() -> Result<(), Report> {
         &zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..],
     ] {
         let block = Arc::<Block>::zcash_deserialize(*b)?;
-        let hash: BlockHeaderHash = block.as_ref().into();
+        let hash = block.hash();
         checkpoint_data.push((block.clone(), block.coinbase_height().unwrap(), hash));
     }
 
     // Make a checkpoint list containing all the blocks
-    let checkpoint_list: BTreeMap<BlockHeight, BlockHeaderHash> = checkpoint_data
+    let checkpoint_list: BTreeMap<BlockHeight, block::Hash> = checkpoint_data
         .iter()
         .map(|(_block, height, hash)| (*height, *hash))
         .collect();
@@ -234,7 +234,7 @@ async fn continuous_blockchain(restart_height: Option<BlockHeight>) -> Result<()
         &zebra_test::vectors::BLOCK_MAINNET_10_BYTES[..],
     ] {
         let block = Arc::<Block>::zcash_deserialize(*b)?;
-        let hash: BlockHeaderHash = block.as_ref().into();
+        let hash = block.hash();
         blockchain.push((block.clone(), block.coinbase_height().unwrap(), hash));
     }
 
@@ -246,12 +246,12 @@ async fn continuous_blockchain(restart_height: Option<BlockHeight>) -> Result<()
         &zebra_test::vectors::BLOCK_MAINNET_9_BYTES[..],
     ] {
         let block = Arc::<Block>::zcash_deserialize(*b)?;
-        let hash: BlockHeaderHash = block.as_ref().into();
+        let hash = block.hash();
         checkpoints.push((block.clone(), block.coinbase_height().unwrap(), hash));
     }
 
     // The checkpoint list will contain only block 0, 5 and 9
-    let checkpoint_list: BTreeMap<BlockHeight, BlockHeaderHash> = checkpoints
+    let checkpoint_list: BTreeMap<BlockHeight, block::Hash> = checkpoints
         .iter()
         .map(|(_block, height, hash)| (*height, *hash))
         .collect();
@@ -376,7 +376,7 @@ async fn block_higher_than_max_checkpoint_fail() -> Result<(), Report> {
         Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])?;
 
     // Make a checkpoint list containing only the genesis block
-    let genesis_checkpoint_list: BTreeMap<BlockHeight, BlockHeaderHash> =
+    let genesis_checkpoint_list: BTreeMap<BlockHeight, block::Hash> =
         [(block0.coinbase_height().unwrap(), block0.as_ref().into())]
             .iter()
             .cloned()
@@ -443,7 +443,7 @@ async fn wrong_checkpoint_hash_fail() -> Result<(), Report> {
 
     let good_block0 =
         Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
-    let good_block0_hash: BlockHeaderHash = good_block0.as_ref().into();
+    let good_block0_hash = good_block0.hash();
     // Change the header hash
     let mut bad_block0 = good_block0.clone();
     let mut bad_block0 = Arc::make_mut(&mut bad_block0);
@@ -451,7 +451,7 @@ async fn wrong_checkpoint_hash_fail() -> Result<(), Report> {
     let bad_block0: Arc<Block> = bad_block0.clone().into();
 
     // Make a checkpoint list containing the genesis block checkpoint
-    let genesis_checkpoint_list: BTreeMap<BlockHeight, BlockHeaderHash> =
+    let genesis_checkpoint_list: BTreeMap<BlockHeight, block::Hash> =
         [(good_block0.coinbase_height().unwrap(), good_block0_hash)]
             .iter()
             .cloned()
@@ -627,12 +627,12 @@ async fn checkpoint_drop_cancel() -> Result<(), Report> {
         &zebra_test::vectors::BLOCK_MAINNET_434873_BYTES[..],
     ] {
         let block = Arc::<Block>::zcash_deserialize(*b)?;
-        let hash: BlockHeaderHash = block.as_ref().into();
+        let hash = block.hash();
         checkpoint_data.push((block.clone(), block.coinbase_height().unwrap(), hash));
     }
 
     // Make a checkpoint list containing all the blocks
-    let checkpoint_list: BTreeMap<BlockHeight, BlockHeaderHash> = checkpoint_data
+    let checkpoint_list: BTreeMap<BlockHeight, block::Hash> = checkpoint_data
         .iter()
         .map(|(_block, height, hash)| (*height, *hash))
         .collect();
@@ -719,7 +719,7 @@ async fn hard_coded_mainnet() -> Result<(), Report> {
 
     let block0 =
         Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
-    let hash0: BlockHeaderHash = block0.as_ref().into();
+    let hash0 = block0.hash();
 
     // Use the hard-coded checkpoint list
     let mut checkpoint_verifier = CheckpointVerifier::new(Network::Mainnet, None);

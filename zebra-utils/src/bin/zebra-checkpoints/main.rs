@@ -17,7 +17,7 @@ use std::process::Stdio;
 use structopt::StructOpt;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use zebra_chain::block::BlockHeaderHash;
+use zebra_chain::block;
 use zebra_chain::block::BlockHeight;
 
 #[cfg(unix)]
@@ -140,7 +140,7 @@ fn main() -> Result<()> {
         let v: Value = serde_json::from_str(&output)?;
 
         // get the values we are interested in
-        let hash: BlockHeaderHash = v["hash"].as_str().map(byte_reverse_hex).unwrap().parse()?;
+        let hash: block::Hash = v["hash"].as_str().map(byte_reverse_hex).unwrap().parse()?;
         let height = BlockHeight(v["height"].as_u64().unwrap() as u32);
         assert!(height <= BlockHeight::MAX);
         assert_eq!(x, height.0);
