@@ -1,4 +1,9 @@
 //! Strongly-typed zatoshi amounts that prevent under/overflows.
+//!
+//! The [`Amount`] type is parameterized by a [`Constraint`] implementation that
+//! declares the range of allowed values. In contrast to regular arithmetic
+//! operations, which return values, arithmetic on [`Amount`]s returns
+//! [`Result`]s.
 
 use std::{
     convert::{TryFrom, TryInto},
@@ -201,9 +206,17 @@ pub enum Error {
     },
 }
 
+/// Marker type for `Amount` that allows negative values.
+///
+/// ```
+/// # use zebra_chain::amount::{Constraint, MAX_MONEY, NegativeAllowed};
+/// assert_eq!(
+///     NegativeAllowed::valid_range(),
+///     -MAX_MONEY..=MAX_MONEY,
+/// );
+/// ```
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-/// Marker type for `Amount` that restricts the values to `-MAX_MONEY..=MAX_MONEY`
-pub enum NegativeAllowed {}
+pub struct NegativeAllowed {}
 
 impl Constraint for NegativeAllowed {
     fn valid_range() -> RangeInclusive<i64> {
@@ -211,9 +224,17 @@ impl Constraint for NegativeAllowed {
     }
 }
 
+/// Marker type for `Amount` that requires nonnegative values.
+///
+/// ```
+/// # use zebra_chain::amount::{Constraint, MAX_MONEY, NonNegative};
+/// assert_eq!(
+///     NonNegative::valid_range(),
+///     0..=MAX_MONEY,
+/// );
+/// ```
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-/// Marker type for `Amount` that restricts the value to positive numbers `0..=MAX_MONEY`
-pub enum NonNegative {}
+pub struct NonNegative {}
 
 impl Constraint for NonNegative {
     fn valid_range() -> RangeInclusive<i64> {
@@ -221,7 +242,7 @@ impl Constraint for NonNegative {
     }
 }
 
-/// The max amount of money that can be obtained in zatoshis
+/// The maximum zatoshi amount.
 pub const MAX_MONEY: i64 = 21_000_000 * 100_000_000;
 
 /// A trait for defining constraints on `Amount`
