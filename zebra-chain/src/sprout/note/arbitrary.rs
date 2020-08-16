@@ -1,6 +1,5 @@
 use proptest::{arbitrary::any, collection::vec, prelude::*};
 
-
 impl Arbitrary for super::EncryptedCiphertext {
     type Parameters = ();
 

@@ -6,12 +6,12 @@ use crate::{
     amount::{Amount, NonNegative},
     block::BlockHeight,
     primitives::{Bctv14Proof, Groth16Proof, Script, ZkSnarkProof},
-    sapling,
-    sprout,
-    transaction::{
-        CoinbaseData, JoinSplit, JoinSplitData, LockTime, OutPoint, Output, ShieldedData, Spend,
-        Transaction, TransparentInput, TransparentOutput,
-    },
+    sapling, sprout,
+};
+
+use super::super::{
+    CoinbaseData, JoinSplit, JoinSplitData, LockTime, Memo, OutPoint, Output, ShieldedData, Spend,
+    Transaction, TransparentInput, TransparentOutput,
 };
 
 impl Transaction {
@@ -98,6 +98,22 @@ impl Transaction {
             )
             .boxed()
     }
+}
+
+impl Arbitrary for Memo {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        (vec(any::<u8>(), 512))
+            .prop_map(|v| {
+                let mut bytes = [0; 512];
+                bytes.copy_from_slice(v.as_slice());
+                Memo(Box::new(bytes))
+            })
+            .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
 }
 
 impl Arbitrary for LockTime {

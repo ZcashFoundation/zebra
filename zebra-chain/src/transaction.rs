@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 mod hash;
 mod joinsplit;
 mod lock_time;
+mod memo;
 mod serialize;
 mod shielded_data;
 mod transparent;
@@ -15,6 +16,7 @@ mod tests;
 pub use hash::TransactionHash;
 pub use joinsplit::{JoinSplit, JoinSplitData};
 pub use lock_time::LockTime;
+pub use memo::Memo;
 pub use shielded_data::{Output, ShieldedData, Spend};
 pub use transparent::{CoinbaseData, OutPoint, TransparentInput, TransparentOutput};
 

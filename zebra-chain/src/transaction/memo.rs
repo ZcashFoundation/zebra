@@ -1,6 +1,6 @@
 use std::{cmp, convert::TryFrom, fmt};
 
-/// A 512-byte _Memo_ field associated with a note, as described in
+/// A 512-byte (plaintext) memo associated with a note, as described in
 /// [protocol specification §5.5][ps].
 ///
 /// The _Memo_ field of a note is a plaintext type; the parent note is
