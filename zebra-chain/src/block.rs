@@ -10,6 +10,8 @@ mod height;
 mod root_hash;
 mod serialize;
 
+pub mod merkle;
+
 #[cfg(test)]
 mod tests;
 

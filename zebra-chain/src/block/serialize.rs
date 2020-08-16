@@ -2,11 +2,11 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{TimeZone, Utc};
 use std::io;
 
-use crate::merkle_tree::MerkleTreeRootHash;
 use crate::serialization::ZcashDeserializeInto;
 use crate::serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize};
 use crate::work::{difficulty::CompactDifficulty, equihash};
 
+use super::merkle::MerkleTreeRootHash;
 use super::Block;
 use super::BlockHeader;
 use super::BlockHeaderHash;

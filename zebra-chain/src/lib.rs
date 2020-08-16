@@ -11,8 +11,6 @@
 #[macro_use]
 extern crate serde;
 
-mod merkle_tree;
-
 pub mod amount;
 pub mod block;
 pub mod parameters;
