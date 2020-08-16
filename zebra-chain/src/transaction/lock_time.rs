@@ -3,7 +3,7 @@ use std::io;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{DateTime, TimeZone, Utc};
 
-use crate::block::BlockHeight;
+use crate::block;
 use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 
 /// A Bitcoin-style `locktime`, representing either a block height or an epoch
@@ -20,7 +20,7 @@ use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize}
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum LockTime {
     /// Unlock at a particular block height.
-    Height(BlockHeight),
+    Height(block::Height),
     /// Unlock at a particular time.
     Time(DateTime<Utc>),
 }
@@ -63,10 +63,9 @@ impl ZcashSerialize for LockTime {
         // This implementation does not check the invariants on `LockTime` so that the
         // serialization is fallible only if the underlying writer is. This ensures that
         // we can always compute a hash of a transaction object.
-        use LockTime::*;
         match self {
-            Height(BlockHeight(n)) => writer.write_u32::<LittleEndian>(*n)?,
-            Time(t) => writer.write_u32::<LittleEndian>(t.timestamp() as u32)?,
+            LockTime::Height(block::Height(n)) => writer.write_u32::<LittleEndian>(*n)?,
+            LockTime::Time(t) => writer.write_u32::<LittleEndian>(t.timestamp() as u32)?,
         }
         Ok(())
     }
@@ -75,8 +74,8 @@ impl ZcashSerialize for LockTime {
 impl ZcashDeserialize for LockTime {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         let n = reader.read_u32::<LittleEndian>()?;
-        if n <= BlockHeight::MAX.0 {
-            Ok(LockTime::Height(BlockHeight(n)))
+        if n <= block::Height::MAX.0 {
+            Ok(LockTime::Height(block::Height(n)))
         } else {
             Ok(LockTime::Time(Utc.timestamp(n as i64, 0)))
         }

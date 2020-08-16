@@ -11,7 +11,7 @@ use tower::{layer::Layer, timeout::TimeoutLayer, Service, ServiceExt};
 use tracing_futures::Instrument;
 
 use zebra_chain::{
-    block::{Block, BlockHeader},
+    block::{self, Block, BlockHeader},
     parameters::Network,
     serialization::ZcashDeserialize,
 };
@@ -107,17 +107,16 @@ fn verifiers_from_network(
     verifiers_from_checkpoint_list(network, CheckpointList::new(network))
 }
 
-static BLOCK_VERIFY_TRANSCRIPT_GENESIS: Lazy<
-    Vec<(Arc<Block>, Result<block::Hash, TransError>)>,
-> = Lazy::new(|| {
-    let block: Arc<_> =
-        Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
-            .unwrap()
-            .into();
-    let hash = Ok(block.hash());
+static BLOCK_VERIFY_TRANSCRIPT_GENESIS: Lazy<Vec<(Arc<Block>, Result<block::Hash, TransError>)>> =
+    Lazy::new(|| {
+        let block: Arc<_> =
+            Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
+                .unwrap()
+                .into();
+        let hash = Ok(block.hash());
 
-    vec![(block, hash)]
-});
+        vec![(block, hash)]
+    });
 
 static BLOCK_VERIFY_TRANSCRIPT_GENESIS_FAIL: Lazy<
     Vec<(Arc<Block>, Result<block::Hash, TransError>)>,
@@ -212,7 +211,7 @@ async fn verify_block() -> Result<(), Report> {
     ));
 
     // Make a checkpoint list containing the genesis block
-    let checkpoint_list: BTreeMap<BlockHeight, block::Hash> =
+    let checkpoint_list: BTreeMap<block::Height, block::Hash> =
         checkpoint_data.iter().cloned().collect();
     let checkpoint_list = CheckpointList::from_list(checkpoint_list).map_err(|e| eyre!(e))?;
 
@@ -338,7 +337,7 @@ async fn verify_fail_add_block_checkpoint() -> Result<(), Report> {
 async fn continuous_blockchain_test() -> Result<(), Report> {
     continuous_blockchain(None).await?;
     for height in 0..=10 {
-        continuous_blockchain(Some(BlockHeight(height))).await?;
+        continuous_blockchain(Some(block::Height(height))).await?;
     }
     Ok(())
 }
@@ -346,7 +345,7 @@ async fn continuous_blockchain_test() -> Result<(), Report> {
 /// Test a continuous blockchain in the BlockVerifier and CheckpointVerifier,
 /// restarting verification at `restart_height`.
 #[spandoc::spandoc]
-async fn continuous_blockchain(restart_height: Option<BlockHeight>) -> Result<(), Report> {
+async fn continuous_blockchain(restart_height: Option<block::Height>) -> Result<(), Report> {
     zebra_test::init();
 
     // A continuous blockchain
@@ -381,7 +380,7 @@ async fn continuous_blockchain(restart_height: Option<BlockHeight>) -> Result<()
     }
 
     // The checkpoint list will contain only blocks 0 and 4
-    let checkpoint_list: BTreeMap<BlockHeight, block::Hash> = checkpoints
+    let checkpoint_list: BTreeMap<block::Height, block::Hash> = checkpoints
         .iter()
         .map(|(_block, height, hash)| (*height, *hash))
         .collect();
@@ -407,7 +406,7 @@ async fn continuous_blockchain(restart_height: Option<BlockHeight>) -> Result<()
         }
     }
     let initial_tip = restart_height
-        .map(|BlockHeight(height)| &blockchain[height as usize].0)
+        .map(|block::Height(height)| &blockchain[height as usize].0)
         .cloned();
 
     let block_verifier = crate::block::init(state_service.clone());

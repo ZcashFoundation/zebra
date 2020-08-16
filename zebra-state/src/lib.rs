@@ -22,8 +22,7 @@ use std::{error, iter, sync::Arc};
 use tower::{Service, ServiceExt};
 
 use zebra_chain::{
-    block::BlockHeight,
-    block::{Block, self},
+    block::{self, Block},
     parameters::Network,
 };
 
@@ -35,13 +34,13 @@ pub mod on_disk;
 /// A transaction MUST NOT spend a transparent output of a coinbase transaction
 /// from a block less than 100 blocks prior to the spend. Note that transparent
 /// outputs of coinbase transactions include Founders' Reward outputs.
-const MIN_TRASPARENT_COINBASE_MATURITY: BlockHeight = BlockHeight(100);
+const MIN_TRASPARENT_COINBASE_MATURITY: block::Height = block::Height(100);
 
 /// The maximum chain reorganisation height.
 ///
 /// Allowing reorganisations past this height could allow double-spends of
 /// coinbase transactions.
-const MAX_BLOCK_REORG_HEIGHT: BlockHeight = BlockHeight(MIN_TRASPARENT_COINBASE_MATURITY.0 - 1);
+const MAX_BLOCK_REORG_HEIGHT: block::Height = block::Height(MIN_TRASPARENT_COINBASE_MATURITY.0 - 1);
 
 /// Configuration for the state service.
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -162,7 +161,7 @@ pub enum Response {
 }
 
 /// Get the heights of the blocks for constructing a block_locator list
-fn block_locator_heights(tip_height: BlockHeight) -> impl Iterator<Item = BlockHeight> {
+fn block_locator_heights(tip_height: block::Height) -> impl Iterator<Item = block::Height> {
     // Stop at the reorg limit, or the genesis block.
     let min_locator_height = tip_height.0.saturating_sub(MAX_BLOCK_REORG_HEIGHT.0);
     let locators = iter::successors(Some(1u32), |h| h.checked_mul(2))
@@ -171,7 +170,7 @@ fn block_locator_heights(tip_height: BlockHeight) -> impl Iterator<Item = BlockH
         .chain(locators)
         .take_while(move |&height| height > min_locator_height)
         .chain(iter::once(min_locator_height))
-        .map(BlockHeight);
+        .map(block::Height);
 
     let locators: Vec<_> = locators.collect();
     tracing::info!(
@@ -279,7 +278,7 @@ mod tests {
     #[test]
     fn test_block_locator_heights() {
         for (height, min_height) in BLOCK_LOCATOR_CASES.iter().cloned() {
-            let locator = block_locator_heights(BlockHeight(height)).collect::<Vec<_>>();
+            let locator = block_locator_heights(block::Height(height)).collect::<Vec<_>>();
 
             assert!(!locator.is_empty(), "locators must not be empty");
             if (height - min_height) > 1 {
@@ -291,7 +290,7 @@ mod tests {
 
             assert_eq!(
                 locator[0],
-                BlockHeight(height),
+                block::Height(height),
                 "locators must start with the tip height"
             );
 
@@ -305,7 +304,7 @@ mod tests {
             let final_height = locator[locator.len() - 1];
             assert_eq!(
                 final_height,
-                BlockHeight(min_height),
+                block::Height(min_height),
                 "locators must end with the specified final height"
             );
             assert!(height - final_height.0 <= MAX_BLOCK_REORG_HEIGHT.0,

@@ -2,7 +2,7 @@
 
 use NetworkUpgrade::*;
 
-use crate::block::BlockHeight;
+use crate::block;
 use crate::parameters::{Network, Network::*};
 
 use std::collections::{BTreeMap, HashMap};
@@ -41,30 +41,30 @@ pub enum NetworkUpgrade {
 ///
 /// This is actually a bijective map, but it is const, so we use a vector, and
 /// do the uniqueness check in the unit tests.
-pub(crate) const MAINNET_ACTIVATION_HEIGHTS: &[(BlockHeight, NetworkUpgrade)] = &[
-    (BlockHeight(0), Genesis),
-    (BlockHeight(1), BeforeOverwinter),
-    (BlockHeight(347_500), Overwinter),
-    (BlockHeight(419_200), Sapling),
-    (BlockHeight(653_600), Blossom),
-    (BlockHeight(903_000), Heartwood),
-    (BlockHeight(1_046_400), Canopy),
+pub(crate) const MAINNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] = &[
+    (block::Height(0), Genesis),
+    (block::Height(1), BeforeOverwinter),
+    (block::Height(347_500), Overwinter),
+    (block::Height(419_200), Sapling),
+    (block::Height(653_600), Blossom),
+    (block::Height(903_000), Heartwood),
+    (block::Height(1_046_400), Canopy),
 ];
 
 /// Testnet network upgrade activation heights.
 ///
 /// This is actually a bijective map, but it is const, so we use a vector, and
 /// do the uniqueness check in the unit tests.
-pub(crate) const TESTNET_ACTIVATION_HEIGHTS: &[(BlockHeight, NetworkUpgrade)] = &[
-    (BlockHeight(0), Genesis),
-    (BlockHeight(1), BeforeOverwinter),
-    (BlockHeight(207_500), Overwinter),
-    (BlockHeight(280_000), Sapling),
-    (BlockHeight(584_000), Blossom),
-    (BlockHeight(903_800), Heartwood),
+pub(crate) const TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] = &[
+    (block::Height(0), Genesis),
+    (block::Height(1), BeforeOverwinter),
+    (block::Height(207_500), Overwinter),
+    (block::Height(280_000), Sapling),
+    (block::Height(584_000), Blossom),
+    (block::Height(903_800), Heartwood),
     // As of 27 July 2020, the Canopy testnet height is under final review.
     // See ZIP 251 for any updates.
-    (BlockHeight(1_028_500), Canopy),
+    (block::Height(1_028_500), Canopy),
 ];
 
 /// The Consensus Branch Id, used to bind transactions and blocks to a
@@ -101,7 +101,7 @@ impl NetworkUpgrade {
     /// network upgrade does not appear in the list.
     ///
     /// This is actually a bijective map.
-    pub(crate) fn activation_list(network: Network) -> BTreeMap<BlockHeight, NetworkUpgrade> {
+    pub(crate) fn activation_list(network: Network) -> BTreeMap<block::Height, NetworkUpgrade> {
         match network {
             Mainnet => MAINNET_ACTIVATION_HEIGHTS,
             Testnet => TESTNET_ACTIVATION_HEIGHTS,
@@ -112,7 +112,7 @@ impl NetworkUpgrade {
     }
 
     /// Returns the current network upgrade for `network` and `height`.
-    pub fn current(network: Network, height: BlockHeight) -> NetworkUpgrade {
+    pub fn current(network: Network, height: block::Height) -> NetworkUpgrade {
         NetworkUpgrade::activation_list(network)
             .range(..=height)
             .map(|(_, nu)| *nu)
@@ -123,7 +123,7 @@ impl NetworkUpgrade {
     /// Returns the next network upgrade for `network` and `height`.
     ///
     /// Returns None if the name of the next upgrade has not been decided yet.
-    pub fn next(network: Network, height: BlockHeight) -> Option<NetworkUpgrade> {
+    pub fn next(network: Network, height: block::Height) -> Option<NetworkUpgrade> {
         NetworkUpgrade::activation_list(network)
             .range((Excluded(height), Unbounded))
             .map(|(_, nu)| *nu)
@@ -134,7 +134,7 @@ impl NetworkUpgrade {
     ///
     /// Returns None if this network upgrade is a future upgrade, and its
     /// activation height has not been set yet.
-    pub fn activation_height(&self, network: Network) -> Option<BlockHeight> {
+    pub fn activation_height(&self, network: Network) -> Option<block::Height> {
         NetworkUpgrade::activation_list(network)
             .iter()
             .filter(|(_, nu)| nu == &self)
@@ -166,7 +166,7 @@ impl ConsensusBranchId {
     /// Returns the current consensus branch id for `network` and `height`.
     ///
     /// Returns None if the network has no branch id at this height.
-    pub fn current(network: Network, height: BlockHeight) -> Option<ConsensusBranchId> {
+    pub fn current(network: Network, height: block::Height) -> Option<ConsensusBranchId> {
         NetworkUpgrade::current(network, height).branch_id()
     }
 }

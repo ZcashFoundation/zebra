@@ -6,7 +6,7 @@ use proptest_derive::Arbitrary;
 
 use crate::{
     amount::{Amount, NonNegative},
-    block::BlockHeight,
+    block,
     primitives::Script,
 };
 
@@ -59,7 +59,7 @@ pub enum TransparentInput {
     /// New coins created by the block reward.
     Coinbase {
         /// The height of this block.
-        height: BlockHeight,
+        height: block::Height,
         /// Free data inserted by miners after the block height.
         data: CoinbaseData,
         /// The sequence number for the output.

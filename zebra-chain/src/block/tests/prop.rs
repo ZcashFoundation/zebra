@@ -26,7 +26,11 @@ proptest! {
     }
 
     #[test]
-    fn root_hash_roundtrip(bytes in any::<[u8; 32]>(), network in any::<Network>(), block_height in any::<BlockHeight>()) {
+    fn root_hash_roundtrip(
+        bytes in any::<[u8; 32]>(),
+        network in any::<Network>(),
+        block_height in any::<Height>()
+    ) {
         let root_hash = RootHash::from_bytes(bytes, network, block_height);
         let other_bytes = root_hash.to_bytes();
 

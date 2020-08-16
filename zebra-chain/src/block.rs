@@ -13,7 +13,7 @@ mod tests;
 
 pub use hash::Hash;
 pub use header::BlockHeader;
-pub use height::BlockHeight;
+pub use height::Height;
 pub use root_hash::RootHash;
 
 /// The error type for Block checks.
@@ -45,7 +45,7 @@ pub struct Block {
 
 impl Block {
     /// Return the block height reported in the coinbase transaction, if any.
-    pub fn coinbase_height(&self) -> Option<BlockHeight> {
+    pub fn coinbase_height(&self) -> Option<Height> {
         use crate::transaction::TransparentInput;
         self.transactions
             .get(0)

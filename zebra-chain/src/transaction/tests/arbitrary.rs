@@ -4,7 +4,7 @@ use proptest::{arbitrary::any, array, collection::vec, option, prelude::*};
 
 use crate::{
     amount::{Amount, NonNegative},
-    block::BlockHeight,
+    block,
     primitives::{Bctv14Proof, Groth16Proof, Script, ZkSnarkProof},
     sapling, sprout,
 };
@@ -52,7 +52,7 @@ impl Transaction {
             vec(any::<TransparentInput>(), 0..10),
             vec(any::<TransparentOutput>(), 0..10),
             any::<LockTime>(),
-            any::<BlockHeight>(),
+            any::<block::Height>(),
             option::of(any::<JoinSplitData<Bctv14Proof>>()),
         )
             .prop_map(
@@ -72,7 +72,7 @@ impl Transaction {
             vec(any::<TransparentInput>(), 0..10),
             vec(any::<TransparentOutput>(), 0..10),
             any::<LockTime>(),
-            any::<BlockHeight>(),
+            any::<block::Height>(),
             any::<Amount>(),
             option::of(any::<ShieldedData>()),
             option::of(any::<JoinSplitData<Groth16Proof>>()),
@@ -121,8 +121,8 @@ impl Arbitrary for LockTime {
 
     fn arbitrary_with(_args: ()) -> Self::Strategy {
         prop_oneof![
-            (BlockHeight::MIN.0..=BlockHeight::MAX.0)
-                .prop_map(|n| LockTime::Height(BlockHeight(n))),
+            (block::Height::MIN.0..=block::Height::MAX.0)
+                .prop_map(|n| LockTime::Height(block::Height(n))),
             (LockTime::MIN_TIMESTAMP..=LockTime::MAX_TIMESTAMP)
                 .prop_map(|n| { LockTime::Time(Utc.timestamp(n as i64, 0)) })
         ]
@@ -326,7 +326,11 @@ impl Arbitrary for TransparentInput {
                     }
                 })
                 .boxed(),
-            (any::<BlockHeight>(), vec(any::<u8>(), 0..95), any::<u32>())
+            (
+                any::<block::Height>(),
+                vec(any::<u8>(), 0..95),
+                any::<u32>()
+            )
                 .prop_map(|(height, data, sequence)| {
                     TransparentInput::Coinbase {
                         height,

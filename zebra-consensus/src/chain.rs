@@ -27,8 +27,7 @@ use std::{
 use tower::{buffer::Buffer, Service, ServiceExt};
 use tracing_futures::Instrument;
 
-use zebra_chain::block::BlockHeight;
-use zebra_chain::block::{Block, self};
+use zebra_chain::block::{self, Block};
 use zebra_chain::parameters::{Network, NetworkUpgrade::Sapling};
 
 /// The maximum expected gap between blocks.
@@ -45,7 +44,7 @@ struct ChainCheckpointVerifier {
     verifier: Buffer<CheckpointVerifier, Arc<Block>>,
 
     /// The maximum checkpoint height for `checkpoint_verifier`.
-    max_height: BlockHeight,
+    max_height: block::Height,
 }
 
 /// A service that verifies the chain, using its associated `CheckpointVerifier`
@@ -77,7 +76,7 @@ where
     /// Used for debugging.
     ///
     /// Updated before verification: the block at this height might not be valid.
-    last_block_height: Option<BlockHeight>,
+    last_block_height: Option<block::Height>,
 }
 
 /// The error type for the ChainVerifier Service.
@@ -125,10 +124,10 @@ where
 
         // Log an info-level message on unexpected high blocks
         let is_unexpected_high_block = match (block_height, self.last_block_height) {
-            (Some(BlockHeight(block_height)), Some(BlockHeight(last_block_height)))
+            (Some(block::Height(block_height)), Some(block::Height(last_block_height)))
                 if (block_height > last_block_height + MAX_EXPECTED_BLOCK_GAP) =>
             {
-                self.last_block_height = Some(BlockHeight(block_height));
+                self.last_block_height = Some(block::Height(block_height));
                 true
             }
             (Some(block_height), _) => {
@@ -190,8 +189,8 @@ where
 ///
 /// Returns false if the block does not have a height.
 fn is_higher_than_max_checkpoint(
-    block_height: Option<BlockHeight>,
-    max_checkpoint_height: Option<BlockHeight>,
+    block_height: Option<block::Height>,
+    max_checkpoint_height: Option<block::Height>,
 ) -> bool {
     match (block_height, max_checkpoint_height) {
         (Some(block_height), Some(max_checkpoint_height)) => block_height > max_checkpoint_height,

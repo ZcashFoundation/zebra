@@ -3,7 +3,7 @@
 use crate::parameters::{Network, NetworkUpgrade, NetworkUpgrade::*};
 use crate::sapling::tree::SaplingNoteTreeRootHash;
 
-use super::BlockHeight;
+use super::Height;
 
 /// Zcash blocks contain different kinds of root hashes, depending on the network upgrade.
 ///
@@ -46,7 +46,7 @@ pub enum RootHash {
 impl RootHash {
     /// Returns `bytes` as the LightClientRootHash variant for `network` and
     /// `height`.
-    pub(super) fn from_bytes(bytes: [u8; 32], network: Network, height: BlockHeight) -> RootHash {
+    pub(super) fn from_bytes(bytes: [u8; 32], network: Network, height: Height) -> RootHash {
         use RootHash::*;
 
         match NetworkUpgrade::current(network, height) {

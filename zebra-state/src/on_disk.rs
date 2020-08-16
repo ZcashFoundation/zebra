@@ -13,8 +13,7 @@ use tower::{buffer::Buffer, util::BoxService, Service};
 use tracing::instrument;
 use zebra_chain::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 use zebra_chain::{
-    block::BlockHeight,
-    block::{Block, self},
+    block::{self, Block},
     parameters::Network,
 };
 
@@ -75,7 +74,7 @@ impl SledState {
     #[instrument(skip(self))]
     pub(super) fn get_main_chain_at(
         &self,
-        height: BlockHeight,
+        height: block::Height,
     ) -> Result<Option<block::Hash>, Error> {
         let height_map = self.storage.open_tree(b"height_map")?;
         let key = height.0.to_be_bytes();
@@ -212,12 +211,12 @@ impl Service<Request> for SledState {
     }
 }
 
-/// An alternate repr for `BlockHeight` that implements `AsRef<[u8]>` for usage
+/// An alternate repr for `block::Height` that implements `AsRef<[u8]>` for usage
 /// with sled
 struct BytesHeight(u32, [u8; 4]);
 
-impl From<BlockHeight> for BytesHeight {
-    fn from(height: BlockHeight) -> Self {
+impl From<block::Height> for BytesHeight {
+    fn from(height: block::Height) -> Self {
         let bytes = height.0.to_be_bytes();
         Self(height.0, bytes)
     }
@@ -231,7 +230,7 @@ impl AsRef<[u8]> for BytesHeight {
 
 pub(super) enum BlockQuery {
     ByHash(block::Hash),
-    ByHeight(BlockHeight),
+    ByHeight(block::Height),
 }
 
 impl From<block::Hash> for BlockQuery {
@@ -240,8 +239,8 @@ impl From<block::Hash> for BlockQuery {
     }
 }
 
-impl From<BlockHeight> for BlockQuery {
-    fn from(height: BlockHeight) -> Self {
+impl From<block::Height> for BlockQuery {
+    fn from(height: block::Height) -> Self {
         Self::ByHeight(height)
     }
 }
