@@ -44,7 +44,7 @@ impl AsRef<[u8]> for CoinbaseData {
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct OutPoint {
     /// References the transaction that contains the UTXO being spent.
-    pub hash: transaction::TransactionHash,
+    pub hash: transaction::Hash,
 
     /// Identifies which UTXO from that transaction is referenced; the
     /// first output is 0, etc.

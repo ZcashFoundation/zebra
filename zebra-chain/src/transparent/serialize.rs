@@ -37,7 +37,7 @@ impl ZcashSerialize for OutPoint {
 impl ZcashDeserialize for OutPoint {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         Ok(OutPoint {
-            hash: transaction::TransactionHash(reader.read_32_bytes()?),
+            hash: transaction::Hash(reader.read_32_bytes()?),
             index: reader.read_u32::<LittleEndian>()?,
         })
     }
@@ -204,7 +204,7 @@ impl ZcashDeserialize for Input {
         } else {
             Ok(Input::PrevOut {
                 outpoint: OutPoint {
-                    hash: transaction::TransactionHash(bytes),
+                    hash: transaction::Hash(bytes),
                     index: reader.read_u32::<LittleEndian>()?,
                 },
                 unlock_script: Script::zcash_deserialize(&mut reader)?,

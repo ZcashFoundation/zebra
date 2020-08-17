@@ -12,7 +12,7 @@ mod shielded_data;
 #[cfg(test)]
 mod tests;
 
-pub use hash::TransactionHash;
+pub use hash::Hash;
 pub use joinsplit::JoinSplitData;
 pub use lock_time::LockTime;
 pub use memo::Memo;
