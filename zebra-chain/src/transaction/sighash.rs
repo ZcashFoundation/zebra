@@ -38,8 +38,8 @@ impl<'a> SigHasher<'a> {
             .to_state();
 
         match self.network_upgrade() {
-            Genesis => unimplemented!(),
-            BeforeOverwinter => unimplemented!(),
+            Genesis => unreachable!("Zebra checkpoints on Sapling activation"),
+            BeforeOverwinter => unreachable!("Zebra checkpoints on Sapling activation"),
             Overwinter | Sapling => self
                 .hash_sighash_zip143(&mut hash)
                 .expect("serialization into hasher never fails"),
@@ -107,8 +107,8 @@ impl<'a> SigHasher<'a> {
 
     fn hash_groupid<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_u32::<LittleEndian>(match &self.trans {
-            Transaction::V1 { .. } => unreachable!(),
-            Transaction::V2 { .. } => unreachable!(),
+            Transaction::V1 { .. } => unimplemented!("value to be determined"),
+            Transaction::V2 { .. } => unimplemented!("value to be determined"),
             Transaction::V3 { .. } => OVERWINTER_VERSION_GROUP_ID,
             Transaction::V4 { .. } => SAPLING_VERSION_GROUP_ID,
         })
@@ -124,8 +124,6 @@ impl<'a> SigHasher<'a> {
             .personal(ZCASH_PREVOUTS_HASH_PERSONALIZATION)
             .to_state();
 
-        let mut buf = vec![];
-
         self.trans
             .inputs()
             .iter()
@@ -133,9 +131,7 @@ impl<'a> SigHasher<'a> {
                 TransparentInput::PrevOut { outpoint, .. } => Some(outpoint),
                 TransparentInput::Coinbase { .. } => None,
             })
-            .try_for_each(|outpoint| outpoint.zcash_serialize(&mut buf))?;
-
-        hash.update(&buf);
+            .try_for_each(|outpoint| outpoint.zcash_serialize(&mut hash))?;
 
         writer.write_all(hash.finalize().as_ref())
     }
@@ -153,8 +149,6 @@ impl<'a> SigHasher<'a> {
             .personal(ZCASH_SEQUENCE_HASH_PERSONALIZATION)
             .to_state();
 
-        let mut buf = vec![];
-
         self.trans
             .inputs()
             .iter()
@@ -162,9 +156,7 @@ impl<'a> SigHasher<'a> {
                 TransparentInput::PrevOut { sequence, .. } => sequence,
                 TransparentInput::Coinbase { sequence, .. } => sequence,
             })
-            .try_for_each(|sequence| (&mut buf).write_u32::<LittleEndian>(*sequence))?;
-
-        hash.update(&buf);
+            .try_for_each(|sequence| (&mut hash).write_u32::<LittleEndian>(*sequence))?;
 
         writer.write_all(hash.finalize().as_ref())
     }
