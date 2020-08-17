@@ -2,7 +2,7 @@
 
 use std::cmp::Ordering;
 
-use zebra_chain::types::BlockHeight;
+use zebra_chain::block;
 
 use Progress::*;
 use Target::*;
@@ -33,7 +33,7 @@ pub enum Progress<HeightOrHash> {
 }
 
 /// Block height progress, in chain order.
-impl Ord for Progress<BlockHeight> {
+impl Ord for Progress<block::Height> {
     fn cmp(&self, other: &Self) -> Ordering {
         if self == other {
             return Ordering::Equal;
@@ -56,7 +56,7 @@ impl Ord for Progress<BlockHeight> {
 /// Partial order for block height progress.
 ///
 /// The partial order must match the total order.
-impl PartialOrd for Progress<BlockHeight> {
+impl PartialOrd for Progress<block::Height> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
@@ -79,7 +79,7 @@ pub enum Target<HeightOrHash> {
 /// Block height target, in chain order.
 ///
 /// `WaitingForBlocks` is incomparable with itself and `Checkpoint(_)`.
-impl PartialOrd for Target<BlockHeight> {
+impl PartialOrd for Target<block::Height> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         match (self, other) {
             // FinishedVerifying is the final state

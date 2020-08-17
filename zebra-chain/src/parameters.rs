@@ -1,4 +1,4 @@
-//! The consensus parameters for each Zcash network.
+//! Consensus parameters for each Zcash network.
 //!
 //! This module contains the consensus parameters which are required for
 //! parsing.
@@ -12,8 +12,10 @@
 //! Typically, consensus parameters are accessed via a function that takes a
 //! `Network` and `BlockHeight`.
 
-pub mod network_upgrade;
+mod network;
+mod network_upgrade;
 
+pub use network::Network;
 pub use network_upgrade::*;
 
 #[cfg(test)]

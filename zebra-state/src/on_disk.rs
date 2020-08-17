@@ -13,9 +13,8 @@ use tower::{buffer::Buffer, util::BoxService, Service};
 use tracing::instrument;
 use zebra_chain::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 use zebra_chain::{
-    block::{Block, BlockHeaderHash},
-    types::BlockHeight,
-    Network,
+    block::{self, Block},
+    parameters::Network,
 };
 
 /// Type alias of our wrapped service
@@ -40,9 +39,9 @@ impl SledState {
     pub(super) fn insert(
         &mut self,
         block: impl Into<Arc<Block>> + std::fmt::Debug,
-    ) -> Result<BlockHeaderHash, Error> {
+    ) -> Result<block::Hash, Error> {
         let block = block.into();
-        let hash: BlockHeaderHash = block.as_ref().into();
+        let hash = block.hash();
         let height = block.coinbase_height().unwrap();
 
         let height_map = self.storage.open_tree(b"height_map")?;
@@ -58,7 +57,7 @@ impl SledState {
     }
 
     #[instrument(skip(self))]
-    pub(super) fn get(&self, hash: BlockHeaderHash) -> Result<Option<Arc<Block>>, Error> {
+    pub(super) fn get(&self, hash: block::Hash) -> Result<Option<Arc<Block>>, Error> {
         let by_hash = self.storage.open_tree(b"by_hash")?;
         let key = &hash.0;
         let value = by_hash.get(key)?;
@@ -75,8 +74,8 @@ impl SledState {
     #[instrument(skip(self))]
     pub(super) fn get_main_chain_at(
         &self,
-        height: BlockHeight,
-    ) -> Result<Option<BlockHeaderHash>, Error> {
+        height: block::Height,
+    ) -> Result<Option<block::Hash>, Error> {
         let height_map = self.storage.open_tree(b"height_map")?;
         let key = height.0.to_be_bytes();
         let value = height_map.get(key)?;
@@ -91,7 +90,7 @@ impl SledState {
     }
 
     #[instrument(skip(self))]
-    pub(super) fn get_tip(&self) -> Result<Option<BlockHeaderHash>, Error> {
+    pub(super) fn get_tip(&self) -> Result<Option<block::Hash>, Error> {
         let tree = self.storage.open_tree(b"height_map")?;
         let last_entry = tree.iter().values().next_back();
 
@@ -103,7 +102,7 @@ impl SledState {
     }
 
     #[instrument(skip(self))]
-    fn contains(&self, hash: &BlockHeaderHash) -> Result<bool, Error> {
+    fn contains(&self, hash: &block::Hash) -> Result<bool, Error> {
         let by_hash = self.storage.open_tree(b"by_hash")?;
         let key = &hash.0;
 
@@ -212,12 +211,12 @@ impl Service<Request> for SledState {
     }
 }
 
-/// An alternate repr for `BlockHeight` that implements `AsRef<[u8]>` for usage
+/// An alternate repr for `block::Height` that implements `AsRef<[u8]>` for usage
 /// with sled
 struct BytesHeight(u32, [u8; 4]);
 
-impl From<BlockHeight> for BytesHeight {
-    fn from(height: BlockHeight) -> Self {
+impl From<block::Height> for BytesHeight {
+    fn from(height: block::Height) -> Self {
         let bytes = height.0.to_be_bytes();
         Self(height.0, bytes)
     }
@@ -230,18 +229,18 @@ impl AsRef<[u8]> for BytesHeight {
 }
 
 pub(super) enum BlockQuery {
-    ByHash(BlockHeaderHash),
-    ByHeight(BlockHeight),
+    ByHash(block::Hash),
+    ByHeight(block::Height),
 }
 
-impl From<BlockHeaderHash> for BlockQuery {
-    fn from(hash: BlockHeaderHash) -> Self {
+impl From<block::Hash> for BlockQuery {
+    fn from(hash: block::Hash) -> Self {
         Self::ByHash(hash)
     }
 }
 
-impl From<BlockHeight> for BlockQuery {
-    fn from(height: BlockHeight) -> Self {
+impl From<block::Height> for BlockQuery {
+    fn from(height: block::Height) -> Self {
         Self::ByHeight(height)
     }
 }

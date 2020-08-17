@@ -4,30 +4,22 @@ use std::{fmt, io};
 use proptest_derive::Arbitrary;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize},
-    sha256d_writer::Sha256dWriter,
+use crate::serialization::{
+    sha256d, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
 };
 
-use super::BlockHeader;
+use super::Header;
 
-/// A SHA-256d hash of a BlockHeader.
+/// A hash of a block, used to identify blocks and link blocks into a chain. ⛓️
 ///
-/// This is useful when one block header is pointing to its parent
-/// block header in the block chain. ⛓️
-///
-/// This is usually called a 'block hash', as it is frequently used
-/// to identify the entire block, since the hash preimage includes
-/// the merkle root of the transactions in this block. But
-/// _technically_, this is just a hash of the block _header_, not
-/// the direct bytes of the transactions as well as the header. So
-/// for now I want to call it a `BlockHeaderHash` because that's
-/// more explicit.
+/// Technically, this is the (SHA256d) hash of a block *header*, but since the
+/// block header includes the Merkle root of the transaction Merkle tree, it
+/// binds the entire contents of the block and is used to identify entire blocks.
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[cfg_attr(test, derive(Arbitrary))]
-pub struct BlockHeaderHash(pub [u8; 32]);
+pub struct Hash(pub [u8; 32]);
 
-impl fmt::Debug for BlockHeaderHash {
+impl fmt::Debug for Hash {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_tuple("BlockHeaderHash")
             .field(&hex::encode(&self.0))
@@ -35,9 +27,9 @@ impl fmt::Debug for BlockHeaderHash {
     }
 }
 
-impl<'a> From<&'a BlockHeader> for BlockHeaderHash {
-    fn from(block_header: &'a BlockHeader) -> Self {
-        let mut hash_writer = Sha256dWriter::default();
+impl<'a> From<&'a Header> for Hash {
+    fn from(block_header: &'a Header) -> Self {
+        let mut hash_writer = sha256d::Writer::default();
         block_header
             .zcash_serialize(&mut hash_writer)
             .expect("Sha256dWriter is infallible");
@@ -45,27 +37,27 @@ impl<'a> From<&'a BlockHeader> for BlockHeaderHash {
     }
 }
 
-impl ZcashSerialize for BlockHeaderHash {
+impl ZcashSerialize for Hash {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_all(&self.0)?;
         Ok(())
     }
 }
 
-impl ZcashDeserialize for BlockHeaderHash {
+impl ZcashDeserialize for Hash {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        Ok(BlockHeaderHash(reader.read_32_bytes()?))
+        Ok(Hash(reader.read_32_bytes()?))
     }
 }
 
-impl std::str::FromStr for BlockHeaderHash {
+impl std::str::FromStr for Hash {
     type Err = SerializationError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut bytes = [0; 32];
         if hex::decode_to_slice(s, &mut bytes[..]).is_err() {
             Err(SerializationError::Parse("hex decoding error"))
         } else {
-            Ok(BlockHeaderHash(bytes))
+            Ok(Hash(bytes))
         }
     }
 }

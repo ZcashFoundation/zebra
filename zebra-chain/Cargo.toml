@@ -9,6 +9,7 @@ edition = "2018"
 
 [dependencies]
 bech32 = "0.7.2"
+bitvec = "0.17.4"
 blake2b_simd = "0.5.10"
 blake2s_simd = "0.5.10"
 bs58 = { version = "0.3", features = ["check"] }

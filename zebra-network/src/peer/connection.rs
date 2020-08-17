@@ -28,7 +28,7 @@ use tower::Service;
 use tracing_futures::Instrument;
 
 use zebra_chain::{
-    block::{Block, BlockHeaderHash},
+    block::{self, Block},
     serialization::SerializationError,
 };
 
@@ -49,7 +49,7 @@ pub(super) enum Handler {
     Ping(Nonce),
     GetPeers,
     GetBlocksByHash {
-        hashes: HashSet<BlockHeaderHash>,
+        hashes: HashSet<block::Hash>,
         blocks: Vec<Arc<Block>>,
     },
     FindBlocks,
@@ -87,7 +87,7 @@ impl Handler {
                 },
                 Message::Block(block),
             ) => {
-                if hashes.remove(&BlockHeaderHash::from(block.as_ref())) {
+                if hashes.remove(&block.hash()) {
                     blocks.push(block);
                     if hashes.is_empty() {
                         Finished(Ok(Response::Blocks(blocks)))
@@ -98,7 +98,7 @@ impl Handler {
                     Finished(Err(PeerError::WrongBlock.into()))
                 }
             }
-            (FindBlocks, Message::Inv(inv_hashes)) => Finished(Ok(Response::BlockHeaderHashes(
+            (FindBlocks, Message::Inv(inv_hashes)) => Finished(Ok(Response::BlockHashes(
                 inv_hashes
                     .into_iter()
                     .filter_map(|inv| match inv {
@@ -385,7 +385,7 @@ where
                 .peer_tx
                 .send(Message::GetBlocks {
                     block_locator_hashes: known_blocks,
-                    hash_stop: stop.unwrap_or(BlockHeaderHash([0; 32])),
+                    hash_stop: stop.unwrap_or(block::Hash([0; 32])),
                 })
                 .await
                 .map_err(|e| e.into())
@@ -502,7 +502,7 @@ where
                     }
                 }
             }
-            Response::BlockHeaderHashes(hashes) => {
+            Response::BlockHashes(hashes) => {
                 if let Err(e) = self
                     .peer_tx
                     .send(Message::Inv(hashes.into_iter().map(Into::into).collect()))

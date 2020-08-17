@@ -1,59 +1,19 @@
-// XXX this name seems too long?
-use crate::note_commitment_tree::SaplingNoteTreeRootHash;
-use crate::notes::sapling;
-use crate::proofs::Groth16Proof;
-use crate::redjubjub::{self, Binding, SpendAuth};
-use crate::serde_helpers;
 use futures::future::Either;
 
-/// A _Spend Description_, as described in [protocol specification §7.3][ps].
+use crate::{
+    primitives::redjubjub::{Binding, Signature},
+    sapling::{Output, Spend},
+    serialization::serde_helpers,
+};
+
+/// A bundle of [`Spend`] and [`Output`] descriptions and signature data.
 ///
-/// [ps]: https://zips.z.cash/protocol/protocol.pdf#spendencoding
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Spend {
-    /// A value commitment to the value of the input note.
-    ///
-    /// XXX refine to a specific type.
-    pub cv: [u8; 32],
-    /// A root of the Sapling note commitment tree at some block height in the past.
-    pub anchor: SaplingNoteTreeRootHash,
-    /// The nullifier of the input note.
-    pub nullifier: crate::nullifier::sapling::Nullifier,
-    /// The randomized public key for `spend_auth_sig`.
-    pub rk: redjubjub::VerificationKeyBytes<SpendAuth>,
-    /// The ZK spend proof.
-    pub zkproof: Groth16Proof,
-    /// A signature authorizing this spend.
-    pub spend_auth_sig: redjubjub::Signature<SpendAuth>,
-}
-
-/// A _Output Description_, as described in [protocol specification §7.4][ps].
-///
-/// [ps]: https://zips.z.cash/protocol/protocol.pdf#outputencoding
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Output {
-    /// A value commitment to the value of the input note.
-    ///
-    /// XXX refine to a specific type.
-    pub cv: [u8; 32],
-    /// The u-coordinate of the note commitment for the output note.
-    ///
-    /// XXX refine to a specific type.
-    pub cmu: [u8; 32],
-    /// An encoding of an ephemeral Jubjub public key.
-    #[serde(with = "serde_helpers::AffinePoint")]
-    pub ephemeral_key: jubjub::AffinePoint,
-    /// A ciphertext component for the encrypted output note.
-    pub enc_ciphertext: sapling::EncryptedCiphertext,
-    /// A ciphertext component for the encrypted output note.
-    pub out_ciphertext: sapling::OutCiphertext,
-    /// The ZK output proof.
-    pub zkproof: Groth16Proof,
-}
-
-impl Eq for Output {}
-
-/// Sapling-on-Groth16 spend and output descriptions.
+/// Spend and Output descriptions are optional, but Zcash transactions must
+/// include a binding signature if and only if there is at least one Spend *or*
+/// Output description. This wrapper type bundles at least one Spend or Output
+/// description with the required signature data, so that an
+/// `Option<ShieldedData>` correctly models the presence or absence of any
+/// shielded data.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ShieldedData {
     /// Either a spend or output description.
@@ -78,7 +38,7 @@ pub struct ShieldedData {
     /// over all output descriptions.
     pub rest_outputs: Vec<Output>,
     /// A signature on the transaction hash.
-    pub binding_sig: redjubjub::Signature<Binding>,
+    pub binding_sig: Signature<Binding>,
 }
 
 impl ShieldedData {

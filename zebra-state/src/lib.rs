@@ -22,10 +22,8 @@ use std::{error, iter, sync::Arc};
 use tower::{Service, ServiceExt};
 
 use zebra_chain::{
-    block::{Block, BlockHeaderHash},
-    types::BlockHeight,
-    Network,
-    Network::*,
+    block::{self, Block},
+    parameters::Network,
 };
 
 pub mod in_memory;
@@ -36,13 +34,13 @@ pub mod on_disk;
 /// A transaction MUST NOT spend a transparent output of a coinbase transaction
 /// from a block less than 100 blocks prior to the spend. Note that transparent
 /// outputs of coinbase transactions include Founders' Reward outputs.
-const MIN_TRASPARENT_COINBASE_MATURITY: BlockHeight = BlockHeight(100);
+const MIN_TRASPARENT_COINBASE_MATURITY: block::Height = block::Height(100);
 
 /// The maximum chain reorganisation height.
 ///
 /// Allowing reorganisations past this height could allow double-spends of
 /// coinbase transactions.
-const MAX_BLOCK_REORG_HEIGHT: BlockHeight = BlockHeight(MIN_TRASPARENT_COINBASE_MATURITY.0 - 1);
+const MAX_BLOCK_REORG_HEIGHT: block::Height = block::Height(MIN_TRASPARENT_COINBASE_MATURITY.0 - 1);
 
 /// Configuration for the state service.
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -78,8 +76,8 @@ impl Config {
     /// provided `zebra_state::Config`.
     pub(crate) fn sled_config(&self, network: Network) -> sled::Config {
         let net_dir = match network {
-            Mainnet => "mainnet",
-            Testnet => "testnet",
+            Network::Mainnet => "mainnet",
+            Network::Testnet => "testnet",
         };
         let path = self.cache_dir.join(net_dir).join("state");
 
@@ -114,19 +112,19 @@ pub enum Request {
     /// Get a block from the zebra-state
     GetBlock {
         /// The hash used to identify the block
-        hash: BlockHeaderHash,
+        hash: block::Hash,
     },
     /// Get a block locator list for the current best chain
     GetBlockLocator {
         /// The genesis block of the current best chain
-        genesis: BlockHeaderHash,
+        genesis: block::Hash,
     },
     /// Get the block that is the tip of the current chain
     GetTip,
     /// Ask the state if the given hash is part of the current best chain
     GetDepth {
         /// The hash to check against the current chain
-        hash: BlockHeaderHash,
+        hash: block::Hash,
     },
 }
 
@@ -137,7 +135,7 @@ pub enum Response {
     /// added to the state
     Added {
         /// The hash of the block that was added
-        hash: BlockHeaderHash,
+        hash: block::Hash,
     },
     /// The response to a `GetBlock` request by hash
     Block {
@@ -147,12 +145,12 @@ pub enum Response {
     /// The response to a `GetBlockLocator` request
     BlockLocator {
         /// The set of blocks that make up the block locator
-        block_locator: Vec<BlockHeaderHash>,
+        block_locator: Vec<block::Hash>,
     },
     /// The response to a `GetTip` request
     Tip {
         /// The hash of the block at the tip of the current chain
-        hash: BlockHeaderHash,
+        hash: block::Hash,
     },
     /// The response to a `Contains` request indicating that the given has is in
     /// the current best chain
@@ -163,7 +161,7 @@ pub enum Response {
 }
 
 /// Get the heights of the blocks for constructing a block_locator list
-fn block_locator_heights(tip_height: BlockHeight) -> impl Iterator<Item = BlockHeight> {
+fn block_locator_heights(tip_height: block::Height) -> impl Iterator<Item = block::Height> {
     // Stop at the reorg limit, or the genesis block.
     let min_locator_height = tip_height.0.saturating_sub(MAX_BLOCK_REORG_HEIGHT.0);
     let locators = iter::successors(Some(1u32), |h| h.checked_mul(2))
@@ -172,7 +170,7 @@ fn block_locator_heights(tip_height: BlockHeight) -> impl Iterator<Item = BlockH
         .chain(locators)
         .take_while(move |&height| height > min_locator_height)
         .chain(iter::once(min_locator_height))
-        .map(BlockHeight);
+        .map(block::Height);
 
     let locators: Vec<_> = locators.collect();
     tracing::info!(
@@ -238,12 +236,12 @@ mod tests {
 
     #[test]
     fn test_path_mainnet() {
-        test_path(Mainnet);
+        test_path(Network::Mainnet);
     }
 
     #[test]
     fn test_path_testnet() {
-        test_path(Testnet);
+        test_path(Network::Testnet);
     }
 
     /// Check the sled path for `network`.
@@ -258,8 +256,8 @@ mod tests {
         assert_eq!(path.file_name(), Some(OsStr::new("state")));
         assert!(path.pop());
         match network {
-            Mainnet => assert_eq!(path.file_name(), Some(OsStr::new("mainnet"))),
-            Testnet => assert_eq!(path.file_name(), Some(OsStr::new("testnet"))),
+            Network::Mainnet => assert_eq!(path.file_name(), Some(OsStr::new("mainnet"))),
+            Network::Testnet => assert_eq!(path.file_name(), Some(OsStr::new("testnet"))),
         }
     }
 
@@ -280,7 +278,7 @@ mod tests {
     #[test]
     fn test_block_locator_heights() {
         for (height, min_height) in BLOCK_LOCATOR_CASES.iter().cloned() {
-            let locator = block_locator_heights(BlockHeight(height)).collect::<Vec<_>>();
+            let locator = block_locator_heights(block::Height(height)).collect::<Vec<_>>();
 
             assert!(!locator.is_empty(), "locators must not be empty");
             if (height - min_height) > 1 {
@@ -292,7 +290,7 @@ mod tests {
 
             assert_eq!(
                 locator[0],
-                BlockHeight(height),
+                block::Height(height),
                 "locators must start with the tip height"
             );
 
@@ -306,7 +304,7 @@ mod tests {
             let final_height = locator[locator.len() - 1];
             assert_eq!(
                 final_height,
-                BlockHeight(min_height),
+                block::Height(min_height),
                 "locators must end with the specified final height"
             );
             assert!(height - final_height.0 <= MAX_BLOCK_REORG_HEIGHT.0,

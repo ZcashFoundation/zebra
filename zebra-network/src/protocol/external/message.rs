@@ -5,8 +5,10 @@ use std::{net, sync::Arc};
 
 use chrono::{DateTime, Utc};
 
-use zebra_chain::block::{Block, BlockHeader, BlockHeaderHash};
-use zebra_chain::{transaction::Transaction, types::BlockHeight};
+use zebra_chain::{
+    block::{self, Block},
+    transaction::Transaction,
+};
 
 use super::inv::InventoryHash;
 use super::types::*;
@@ -66,7 +68,7 @@ pub enum Message {
         user_agent: String,
 
         /// The last block received by the emitting node.
-        start_height: BlockHeight,
+        start_height: block::Height,
 
         /// Whether the remote peer should announce relayed
         /// transactions or not, see [BIP 0037](https://github.com/bitcoin/bips/blob/master/bip-0037.mediawiki)
@@ -161,12 +163,12 @@ pub enum Message {
     // many results.
     GetBlocks {
         /// Block locators, from newest back to genesis block.
-        block_locator_hashes: Vec<BlockHeaderHash>,
+        block_locator_hashes: Vec<block::Hash>,
 
         /// `BlockHeaderHash` of the last desired block.
         ///
         /// Set to zero to get as many blocks as possible (500).
-        hash_stop: BlockHeaderHash,
+        hash_stop: block::Hash,
     },
 
     /// A `headers` message.
@@ -178,7 +180,7 @@ pub enum Message {
     // transaction count (a var_int, so there can be more than 81
     // bytes per header) as opposed to the block headers that are
     // hashed by miners.
-    Headers(Vec<BlockHeader>),
+    Headers(Vec<block::Header>),
 
     /// A `getheaders` message.
     ///
@@ -201,12 +203,12 @@ pub enum Message {
     // many results.
     GetHeaders {
         /// Block locators, from newest back to genesis block.
-        block_locator_hashes: Vec<BlockHeaderHash>,
+        block_locator_hashes: Vec<block::Hash>,
 
-        /// `BlockHeaderHash` of the last desired block header.
+        /// `block::Hash` of the last desired block header.
         ///
         /// Set to zero to get as many block headers as possible (2000).
-        hash_stop: BlockHeaderHash,
+        hash_stop: block::Hash,
     },
 
     /// An `inv` message.

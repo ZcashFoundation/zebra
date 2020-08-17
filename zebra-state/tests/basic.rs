@@ -2,7 +2,7 @@ use color_eyre::eyre::Report;
 use once_cell::sync::Lazy;
 use std::sync::Arc;
 use tempdir::TempDir;
-use zebra_chain::{block::Block, serialization::ZcashDeserialize, Network, Network::*};
+use zebra_chain::{block::Block, parameters::Network, serialization::ZcashDeserialize};
 use zebra_test::transcript::{TransError, Transcript};
 
 use zebra_state::*;
@@ -97,12 +97,12 @@ static GET_TIP_TRANSCRIPT_TESTNET: Lazy<Vec<(Request, Result<Response, TransErro
 
 #[tokio::test]
 async fn check_transcripts_mainnet() -> Result<(), Report> {
-    check_transcripts(Mainnet).await
+    check_transcripts(Network::Mainnet).await
 }
 
 #[tokio::test]
 async fn check_transcripts_testnet() -> Result<(), Report> {
-    check_transcripts(Testnet).await
+    check_transcripts(Network::Testnet).await
 }
 
 #[spandoc::spandoc]
