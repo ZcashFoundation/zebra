@@ -117,63 +117,6 @@ impl<P: ZkSnarkProof> ZcashDeserialize for Option<JoinSplitData<P>> {
     }
 }
 
-impl ZcashSerialize for Spend {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        self.cv.zcash_serialize(&mut writer)?;
-        writer.write_all(&self.anchor.0[..])?;
-        writer.write_32_bytes(&self.nullifier.into())?;
-        writer.write_all(&<[u8; 32]>::from(self.rk)[..])?;
-        self.zkproof.zcash_serialize(&mut writer)?;
-        writer.write_all(&<[u8; 64]>::from(self.spend_auth_sig)[..])?;
-        Ok(())
-    }
-}
-
-impl ZcashDeserialize for Spend {
-    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        use crate::sapling::{
-            commitment::ValueCommitment, note::Nullifier, tree::SaplingNoteTreeRootHash,
-        };
-        Ok(Spend {
-            cv: ValueCommitment::zcash_deserialize(&mut reader)?,
-            anchor: SaplingNoteTreeRootHash(reader.read_32_bytes()?),
-            nullifier: Nullifier::from(reader.read_32_bytes()?),
-            rk: reader.read_32_bytes()?.into(),
-            zkproof: Groth16Proof::zcash_deserialize(&mut reader)?,
-            spend_auth_sig: reader.read_64_bytes()?.into(),
-        })
-    }
-}
-
-impl ZcashSerialize for Output {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        self.cv.zcash_serialize(&mut writer)?;
-        writer.write_all(&self.cm_u.to_bytes())?;
-        self.ephemeral_key.zcash_serialize(&mut writer)?;
-        self.enc_ciphertext.zcash_serialize(&mut writer)?;
-        self.out_ciphertext.zcash_serialize(&mut writer)?;
-        self.zkproof.zcash_serialize(&mut writer)?;
-        Ok(())
-    }
-}
-
-impl ZcashDeserialize for Output {
-    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        use crate::sapling::{
-            commitment::ValueCommitment, keys::EphemeralPublicKey, note::EncryptedCiphertext,
-            note::OutCiphertext,
-        };
-        Ok(Output {
-            cv: ValueCommitment::zcash_deserialize(&mut reader)?,
-            cm_u: jubjub::Fq::zcash_deserialize(&mut reader)?,
-            ephemeral_key: EphemeralPublicKey::zcash_deserialize(&mut reader)?,
-            enc_ciphertext: EncryptedCiphertext::zcash_deserialize(&mut reader)?,
-            out_ciphertext: OutCiphertext::zcash_deserialize(&mut reader)?,
-            zkproof: Groth16Proof::zcash_deserialize(&mut reader)?,
-        })
-    }
-}
-
 impl ZcashSerialize for Transaction {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         // Post-Sapling, transaction size is limited to MAX_BLOCK_BYTES.
