@@ -5,7 +5,14 @@ use crate::{
     sprout::JoinSplit,
 };
 
-/// A bundle of JoinSplit descriptions and signature data.
+/// A bundle of [`JoinSplit`] descriptions and signature data.
+///
+/// JoinSplit descriptions are optional, but Zcash transactions must include a
+/// JoinSplit signature and verification key if and only if there is at least one
+/// JoinSplit description. This wrapper type bundles at least one JoinSplit
+/// description with the required signature data, so that an
+/// `Option<JoinSplitData>` correctly models the presence or absence of any
+/// JoinSplit data.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JoinSplitData<P: ZkSnarkProof> {
     /// The first JoinSplit description, using proofs of type `P`.

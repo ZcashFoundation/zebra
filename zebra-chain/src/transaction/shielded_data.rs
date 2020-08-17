@@ -6,7 +6,14 @@ use crate::{
     serialization::serde_helpers,
 };
 
-/// Sapling-on-Groth16 spend and output descriptions.
+/// A bundle of [`Spend`] and [`Output`] descriptions and signature data.
+///
+/// Spend and Output descriptions are optional, but Zcash transactions must
+/// include a binding signature if and only if there is at least one Spend *or*
+/// Output description. This wrapper type bundles at least one Spend or Output
+/// description with the required signature data, so that an
+/// `Option<ShieldedData>` correctly models the presence or absence of any
+/// shielded data.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ShieldedData {
     /// Either a spend or output description.
