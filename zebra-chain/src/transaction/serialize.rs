@@ -31,56 +31,6 @@ impl ZcashDeserialize for jubjub::Fq {
         }
     }
 }
-
-impl<P: ZkSnarkProof> ZcashSerialize for JoinSplit<P> {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        writer.write_u64::<LittleEndian>(self.vpub_old.into())?;
-        writer.write_u64::<LittleEndian>(self.vpub_new.into())?;
-        writer.write_32_bytes(&self.anchor.into())?;
-        writer.write_32_bytes(&self.nullifiers[0].into())?;
-        writer.write_32_bytes(&self.nullifiers[1].into())?;
-        writer.write_32_bytes(&self.commitments[0].into())?;
-        writer.write_32_bytes(&self.commitments[1].into())?;
-        writer.write_all(&self.ephemeral_key.as_bytes()[..])?;
-        writer.write_all(&self.random_seed[..])?;
-        self.vmacs[0].zcash_serialize(&mut writer)?;
-        self.vmacs[1].zcash_serialize(&mut writer)?;
-        self.zkproof.zcash_serialize(&mut writer)?;
-        self.enc_ciphertexts[0].zcash_serialize(&mut writer)?;
-        self.enc_ciphertexts[1].zcash_serialize(&mut writer)?;
-        Ok(())
-    }
-}
-
-impl<P: ZkSnarkProof> ZcashDeserialize for JoinSplit<P> {
-    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        Ok(JoinSplit::<P> {
-            vpub_old: reader.read_u64::<LittleEndian>()?.try_into()?,
-            vpub_new: reader.read_u64::<LittleEndian>()?.try_into()?,
-            anchor: sprout::tree::NoteTreeRootHash::from(reader.read_32_bytes()?),
-            nullifiers: [
-                reader.read_32_bytes()?.into(),
-                reader.read_32_bytes()?.into(),
-            ],
-            commitments: [
-                sprout::commitment::NoteCommitment::from(reader.read_32_bytes()?),
-                sprout::commitment::NoteCommitment::from(reader.read_32_bytes()?),
-            ],
-            ephemeral_key: x25519_dalek::PublicKey::from(reader.read_32_bytes()?),
-            random_seed: reader.read_32_bytes()?,
-            vmacs: [
-                sprout::note::MAC::zcash_deserialize(&mut reader)?,
-                sprout::note::MAC::zcash_deserialize(&mut reader)?,
-            ],
-            zkproof: P::zcash_deserialize(&mut reader)?,
-            enc_ciphertexts: [
-                sprout::note::EncryptedCiphertext::zcash_deserialize(&mut reader)?,
-                sprout::note::EncryptedCiphertext::zcash_deserialize(&mut reader)?,
-            ],
-        })
-    }
-}
-
 impl<P: ZkSnarkProof> ZcashSerialize for JoinSplitData<P> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_compactsize(self.joinsplits().count() as u64)?;
@@ -99,10 +49,10 @@ impl<P: ZkSnarkProof> ZcashDeserialize for Option<JoinSplitData<P>> {
         match num_joinsplits {
             0 => Ok(None),
             n => {
-                let first = JoinSplit::zcash_deserialize(&mut reader)?;
+                let first = sprout::JoinSplit::zcash_deserialize(&mut reader)?;
                 let mut rest = Vec::with_capacity((n - 1) as usize);
                 for _ in 0..(n - 1) {
-                    rest.push(JoinSplit::zcash_deserialize(&mut reader)?);
+                    rest.push(sprout::JoinSplit::zcash_deserialize(&mut reader)?);
                 }
                 let pub_key = reader.read_32_bytes()?.into();
                 let sig = reader.read_64_bytes()?.into();

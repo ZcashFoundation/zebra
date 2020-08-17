@@ -1,10 +1,10 @@
 //! Sapling-related functionality.
 
-mod spend;
 mod output;
+mod spend;
 
-pub use spend::Spend;
 pub use output::Output;
+pub use spend::Spend;
 
 // XXX clean up these modules
 
