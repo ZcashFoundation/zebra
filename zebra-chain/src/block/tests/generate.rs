@@ -4,7 +4,8 @@ use std::sync::Arc;
 
 use crate::{
     serialization::{ZcashDeserialize, ZcashSerialize},
-    transaction::{LockTime, Transaction, TransparentInput, TransparentOutput},
+    transaction::{LockTime, Transaction},
+    transparent,
 };
 
 use super::super::{serialize::MAX_BLOCK_BYTES, Block, Header};
@@ -71,9 +72,9 @@ fn multi_transaction_block(oversized: bool) -> Block {
 fn single_transaction_block(oversized: bool) -> Block {
     // Dummy input and output
     let input =
-        TransparentInput::zcash_deserialize(&zebra_test::vectors::DUMMY_INPUT1[..]).unwrap();
+        transparent::Input::zcash_deserialize(&zebra_test::vectors::DUMMY_INPUT1[..]).unwrap();
     let output =
-        TransparentOutput::zcash_deserialize(&zebra_test::vectors::DUMMY_OUTPUT1[..]).unwrap();
+        transparent::Output::zcash_deserialize(&zebra_test::vectors::DUMMY_OUTPUT1[..]).unwrap();
 
     // A block header
     let header = block_header();

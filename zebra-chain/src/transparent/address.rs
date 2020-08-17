@@ -11,9 +11,10 @@ use proptest::{arbitrary::Arbitrary, collection::vec, prelude::*};
 
 use crate::{
     parameters::Network,
-    primitives::Script,
     serialization::{SerializationError, ZcashDeserialize, ZcashSerialize},
 };
+
+use super::Script;
 
 /// Magic numbers used to identify what networks Transparent Addresses
 /// are associated with.

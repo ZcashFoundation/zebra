@@ -5,11 +5,9 @@
 //! whose functionality is implemented elsewhere.
 
 mod proofs;
-mod script;
 
 pub use ed25519_zebra as ed25519;
 pub use redjubjub;
 pub use x25519_dalek as x25519;
 
 pub use proofs::{Bctv14Proof, Groth16Proof, ZkSnarkProof};
-pub use script::Script;

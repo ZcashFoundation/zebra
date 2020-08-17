@@ -8,7 +8,6 @@ mod lock_time;
 mod memo;
 mod serialize;
 mod shielded_data;
-mod transparent;
 
 #[cfg(test)]
 mod tests;
@@ -18,11 +17,13 @@ pub use joinsplit::{JoinSplit, JoinSplitData};
 pub use lock_time::LockTime;
 pub use memo::Memo;
 pub use shielded_data::{Output, ShieldedData, Spend};
-pub use transparent::{CoinbaseData, OutPoint, TransparentInput, TransparentOutput};
 
-use crate::amount::Amount;
-use crate::block;
-use crate::primitives::{Bctv14Proof, Groth16Proof};
+use crate::{
+    amount::Amount,
+    block,
+    primitives::{Bctv14Proof, Groth16Proof},
+    transparent,
+};
 
 /// A Zcash transaction.
 ///
@@ -42,9 +43,9 @@ pub enum Transaction {
     /// A fully transparent transaction (`version = 1`).
     V1 {
         /// The transparent inputs to the transaction.
-        inputs: Vec<TransparentInput>,
+        inputs: Vec<transparent::Input>,
         /// The transparent outputs from the transaction.
-        outputs: Vec<TransparentOutput>,
+        outputs: Vec<transparent::Output>,
         /// The earliest time or block height that this transaction can be added to the
         /// chain.
         lock_time: LockTime,
@@ -52,9 +53,9 @@ pub enum Transaction {
     /// A Sprout transaction (`version = 2`).
     V2 {
         /// The transparent inputs to the transaction.
-        inputs: Vec<TransparentInput>,
+        inputs: Vec<transparent::Input>,
         /// The transparent outputs from the transaction.
-        outputs: Vec<TransparentOutput>,
+        outputs: Vec<transparent::Output>,
         /// The earliest time or block height that this transaction can be added to the
         /// chain.
         lock_time: LockTime,
@@ -64,9 +65,9 @@ pub enum Transaction {
     /// An Overwinter transaction (`version = 3`).
     V3 {
         /// The transparent inputs to the transaction.
-        inputs: Vec<TransparentInput>,
+        inputs: Vec<transparent::Input>,
         /// The transparent outputs from the transaction.
-        outputs: Vec<TransparentOutput>,
+        outputs: Vec<transparent::Output>,
         /// The earliest time or block height that this transaction can be added to the
         /// chain.
         lock_time: LockTime,
@@ -78,9 +79,9 @@ pub enum Transaction {
     /// A Sapling transaction (`version = 4`).
     V4 {
         /// The transparent inputs to the transaction.
-        inputs: Vec<TransparentInput>,
+        inputs: Vec<transparent::Input>,
         /// The transparent outputs from the transaction.
-        outputs: Vec<TransparentOutput>,
+        outputs: Vec<transparent::Output>,
         /// The earliest time or block height that this transaction can be added to the
         /// chain.
         lock_time: LockTime,
@@ -97,7 +98,7 @@ pub enum Transaction {
 
 impl Transaction {
     /// Access the transparent inputs of this transaction, regardless of version.
-    pub fn inputs(&self) -> &[TransparentInput] {
+    pub fn inputs(&self) -> &[transparent::Input] {
         match self {
             Transaction::V1 { ref inputs, .. } => inputs,
             Transaction::V2 { ref inputs, .. } => inputs,
@@ -107,7 +108,7 @@ impl Transaction {
     }
 
     /// Access the transparent outputs of this transaction, regardless of version.
-    pub fn outputs(&self) -> &[TransparentOutput] {
+    pub fn outputs(&self) -> &[transparent::Output] {
         match self {
             Transaction::V1 { ref outputs, .. } => outputs,
             Transaction::V2 { ref outputs, .. } => outputs,
@@ -140,7 +141,7 @@ impl Transaction {
     pub fn contains_coinbase_input(&self) -> bool {
         self.inputs()
             .iter()
-            .any(|input| matches!(input, TransparentInput::Coinbase { .. }))
+            .any(|input| matches!(input, transparent::Input::Coinbase { .. }))
     }
 
     /// Returns `true` if this transaction is a coinbase transaction.
@@ -148,7 +149,7 @@ impl Transaction {
         self.inputs().len() == 1
             && matches!(
                 self.inputs().get(0),
-                Some(TransparentInput::Coinbase { .. })
+                Some(transparent::Input::Coinbase { .. })
             )
     }
 }

@@ -23,8 +23,7 @@ type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 use serde::{Deserialize, Serialize};
 
-use crate::parameters::Network;
-use crate::transaction::Transaction;
+use crate::{parameters::Network, transaction::Transaction, transparent};
 
 #[cfg(test)]
 use proptest_derive::Arbitrary;
@@ -42,12 +41,11 @@ pub struct Block {
 impl Block {
     /// Return the block height reported in the coinbase transaction, if any.
     pub fn coinbase_height(&self) -> Option<Height> {
-        use crate::transaction::TransparentInput;
         self.transactions
             .get(0)
             .and_then(|tx| tx.inputs().get(0))
             .and_then(|input| match input {
-                TransparentInput::Coinbase { ref height, .. } => Some(*height),
+                transparent::Input::Coinbase { ref height, .. } => Some(*height),
                 _ => None,
             })
     }

@@ -5,20 +5,19 @@ use proptest::{arbitrary::any, array, collection::vec, option, prelude::*};
 use crate::{
     amount::{Amount, NonNegative},
     block,
-    primitives::{Bctv14Proof, Groth16Proof, Script, ZkSnarkProof},
-    sapling, sprout,
+    primitives::{Bctv14Proof, Groth16Proof, ZkSnarkProof},
+    sapling, sprout, transparent,
 };
 
 use super::super::{
-    CoinbaseData, JoinSplit, JoinSplitData, LockTime, Memo, OutPoint, Output, ShieldedData, Spend,
-    Transaction, TransparentInput, TransparentOutput,
+    JoinSplit, JoinSplitData, LockTime, Memo, Output, ShieldedData, Spend, Transaction,
 };
 
 impl Transaction {
     pub fn v1_strategy() -> impl Strategy<Value = Self> {
         (
-            vec(any::<TransparentInput>(), 0..10),
-            vec(any::<TransparentOutput>(), 0..10),
+            vec(any::<transparent::Input>(), 0..10),
+            vec(any::<transparent::Output>(), 0..10),
             any::<LockTime>(),
         )
             .prop_map(|(inputs, outputs, lock_time)| Transaction::V1 {
@@ -31,8 +30,8 @@ impl Transaction {
 
     pub fn v2_strategy() -> impl Strategy<Value = Self> {
         (
-            vec(any::<TransparentInput>(), 0..10),
-            vec(any::<TransparentOutput>(), 0..10),
+            vec(any::<transparent::Input>(), 0..10),
+            vec(any::<transparent::Output>(), 0..10),
             any::<LockTime>(),
             option::of(any::<JoinSplitData<Bctv14Proof>>()),
         )
@@ -49,8 +48,8 @@ impl Transaction {
 
     pub fn v3_strategy() -> impl Strategy<Value = Self> {
         (
-            vec(any::<TransparentInput>(), 0..10),
-            vec(any::<TransparentOutput>(), 0..10),
+            vec(any::<transparent::Input>(), 0..10),
+            vec(any::<transparent::Output>(), 0..10),
             any::<LockTime>(),
             any::<block::Height>(),
             option::of(any::<JoinSplitData<Bctv14Proof>>()),
@@ -69,8 +68,8 @@ impl Transaction {
 
     pub fn v4_strategy() -> impl Strategy<Value = Self> {
         (
-            vec(any::<TransparentInput>(), 0..10),
-            vec(any::<TransparentOutput>(), 0..10),
+            vec(any::<transparent::Input>(), 0..10),
+            vec(any::<transparent::Output>(), 0..10),
             any::<LockTime>(),
             any::<block::Height>(),
             any::<Amount>(),
@@ -305,40 +304,6 @@ impl Arbitrary for Transaction {
             Self::v2_strategy(),
             Self::v3_strategy(),
             Self::v4_strategy()
-        ]
-        .boxed()
-    }
-
-    type Strategy = BoxedStrategy<Self>;
-}
-
-impl Arbitrary for TransparentInput {
-    type Parameters = ();
-
-    fn arbitrary_with(_args: ()) -> Self::Strategy {
-        prop_oneof![
-            (any::<OutPoint>(), any::<Script>(), any::<u32>())
-                .prop_map(|(outpoint, unlock_script, sequence)| {
-                    TransparentInput::PrevOut {
-                        outpoint,
-                        unlock_script,
-                        sequence,
-                    }
-                })
-                .boxed(),
-            (
-                any::<block::Height>(),
-                vec(any::<u8>(), 0..95),
-                any::<u32>()
-            )
-                .prop_map(|(height, data, sequence)| {
-                    TransparentInput::Coinbase {
-                        height,
-                        data: CoinbaseData(data),
-                        sequence,
-                    }
-                })
-                .boxed(),
         ]
         .boxed()
     }
