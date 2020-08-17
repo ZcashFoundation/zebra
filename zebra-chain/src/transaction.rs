@@ -1,31 +1,31 @@
-//! Transaction types.
+//! Transactions and transaction-related structures.
 
 use serde::{Deserialize, Serialize};
 
 mod hash;
 mod joinsplit;
+mod lock_time;
+mod memo;
 mod serialize;
 mod shielded_data;
 mod sighash;
-mod transparent;
 
 #[cfg(test)]
 mod tests;
 
-pub use hash::TransactionHash;
-pub use joinsplit::{JoinSplit, JoinSplitData};
-pub use shielded_data::{Output, ShieldedData, Spend};
-pub use transparent::{CoinbaseData, OutPoint, TransparentInput, TransparentOutput};
+pub use hash::Hash;
+pub use joinsplit::JoinSplitData;
+pub use lock_time::LockTime;
+pub use memo::Memo;
+pub use shielded_data::ShieldedData;
 
-use crate::proofs::{Bctv14Proof, Groth16Proof};
 use crate::{
-    types::{amount::Amount, BlockHeight, LockTime},
-    Network,
+    amount::Amount,
+    block,
+    parameters::Network,
+    primitives::{Bctv14Proof, Groth16Proof},
+    transparent,
 };
-use blake2b_simd::Hash;
-
-const OVERWINTER_VERSION_GROUP_ID: u32 = 0x03C4_8270;
-const SAPLING_VERSION_GROUP_ID: u32 = 0x892F_2085;
 
 /// A Zcash transaction.
 ///
@@ -45,9 +45,9 @@ pub enum Transaction {
     /// A fully transparent transaction (`version = 1`).
     V1 {
         /// The transparent inputs to the transaction.
-        inputs: Vec<TransparentInput>,
+        inputs: Vec<transparent::Input>,
         /// The transparent outputs from the transaction.
-        outputs: Vec<TransparentOutput>,
+        outputs: Vec<transparent::Output>,
         /// The earliest time or block height that this transaction can be added to the
         /// chain.
         lock_time: LockTime,
@@ -55,9 +55,9 @@ pub enum Transaction {
     /// A Sprout transaction (`version = 2`).
     V2 {
         /// The transparent inputs to the transaction.
-        inputs: Vec<TransparentInput>,
+        inputs: Vec<transparent::Input>,
         /// The transparent outputs from the transaction.
-        outputs: Vec<TransparentOutput>,
+        outputs: Vec<transparent::Output>,
         /// The earliest time or block height that this transaction can be added to the
         /// chain.
         lock_time: LockTime,
@@ -67,28 +67,28 @@ pub enum Transaction {
     /// An Overwinter transaction (`version = 3`).
     V3 {
         /// The transparent inputs to the transaction.
-        inputs: Vec<TransparentInput>,
+        inputs: Vec<transparent::Input>,
         /// The transparent outputs from the transaction.
-        outputs: Vec<TransparentOutput>,
+        outputs: Vec<transparent::Output>,
         /// The earliest time or block height that this transaction can be added to the
         /// chain.
         lock_time: LockTime,
         /// The latest block height that this transaction can be added to the chain.
-        expiry_height: BlockHeight,
+        expiry_height: block::Height,
         /// The JoinSplit data for this transaction, if any.
         joinsplit_data: Option<JoinSplitData<Bctv14Proof>>,
     },
     /// A Sapling transaction (`version = 4`).
     V4 {
         /// The transparent inputs to the transaction.
-        inputs: Vec<TransparentInput>,
+        inputs: Vec<transparent::Input>,
         /// The transparent outputs from the transaction.
-        outputs: Vec<TransparentOutput>,
+        outputs: Vec<transparent::Output>,
         /// The earliest time or block height that this transaction can be added to the
         /// chain.
         lock_time: LockTime,
         /// The latest block height that this transaction can be added to the chain.
-        expiry_height: BlockHeight,
+        expiry_height: block::Height,
         /// The net value of Sapling spend transfers minus output transfers.
         value_balance: Amount,
         /// The shielded data for this transaction, if any.
@@ -100,7 +100,7 @@ pub enum Transaction {
 
 impl Transaction {
     /// Access the transparent inputs of this transaction, regardless of version.
-    pub fn inputs(&self) -> &[TransparentInput] {
+    pub fn inputs(&self) -> &[transparent::Input] {
         match self {
             Transaction::V1 { ref inputs, .. } => inputs,
             Transaction::V2 { ref inputs, .. } => inputs,
@@ -110,7 +110,7 @@ impl Transaction {
     }
 
     /// Access the transparent outputs of this transaction, regardless of version.
-    pub fn outputs(&self) -> &[TransparentOutput] {
+    pub fn outputs(&self) -> &[transparent::Output] {
         match self {
             Transaction::V1 { ref outputs, .. } => outputs,
             Transaction::V2 { ref outputs, .. } => outputs,
@@ -130,7 +130,7 @@ impl Transaction {
     }
 
     /// Get this transaction's expiry height, if any.
-    pub fn expiry_height(&self) -> Option<BlockHeight> {
+    pub fn expiry_height(&self) -> Option<block::Height> {
         match self {
             Transaction::V1 { .. } => None,
             Transaction::V2 { .. } => None,
@@ -143,7 +143,7 @@ impl Transaction {
     pub fn contains_coinbase_input(&self) -> bool {
         self.inputs()
             .iter()
-            .any(|input| matches!(input, TransparentInput::Coinbase { .. }))
+            .any(|input| matches!(input, transparent::Input::Coinbase { .. }))
     }
 
     /// Returns `true` if this transaction is a coinbase transaction.
@@ -151,12 +151,17 @@ impl Transaction {
         self.inputs().len() == 1
             && matches!(
                 self.inputs().get(0),
-                Some(TransparentInput::Coinbase { .. })
+                Some(transparent::Input::Coinbase { .. })
             )
     }
 
     // TODO(jlusby): refine type
-    pub fn sighash(&self, network: Network, height: BlockHeight, hash_type: u32) -> Hash {
+    pub fn sighash(
+        &self,
+        network: Network,
+        height: block::Height,
+        hash_type: u32,
+    ) -> blake2b_simd::Hash {
         sighash::SigHasher {
             trans: self,
             network,

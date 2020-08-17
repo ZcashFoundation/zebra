@@ -2,23 +2,26 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{TimeZone, Utc};
 use std::io;
 
-use crate::block::difficulty::CompactDifficulty;
-use crate::equihash_solution::EquihashSolution;
-use crate::merkle_tree::MerkleTreeRootHash;
 use crate::serialization::ZcashDeserializeInto;
 use crate::serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize};
+use crate::work::{difficulty::CompactDifficulty, equihash};
 
-use super::Block;
-use super::BlockHeader;
-use super::BlockHeaderHash;
-use super::MAX_BLOCK_BYTES;
+use super::{merkle, Block, Hash, Header};
 
-impl ZcashSerialize for BlockHeader {
+/// The maximum size of a Zcash block, in bytes.
+///
+/// Post-Sapling, this is also the maximum size of a transaction
+/// in the Zcash specification. (But since blocks also contain a
+/// block header and transaction count, the maximum size of a
+/// transaction in the chain is approximately 1.5 kB smaller.)
+pub const MAX_BLOCK_BYTES: u64 = 2_000_000;
+
+impl ZcashSerialize for Header {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_u32::<LittleEndian>(self.version)?;
         self.previous_block_hash.zcash_serialize(&mut writer)?;
-        writer.write_all(&self.merkle_root_hash.0[..])?;
-        writer.write_all(&self.light_client_root_bytes[..])?;
+        writer.write_all(&self.merkle_root.0[..])?;
+        writer.write_all(&self.root_bytes[..])?;
         // this is a truncating cast, rather than a saturating cast
         // but u32 times are valid until 2106, and our block verification time
         // checks should detect any truncation.
@@ -30,7 +33,7 @@ impl ZcashSerialize for BlockHeader {
     }
 }
 
-impl ZcashDeserialize for BlockHeader {
+impl ZcashDeserialize for Header {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         // The Zcash specification says that
         // "The current and only defined block version number for Zcash is 4."
@@ -62,16 +65,16 @@ impl ZcashDeserialize for BlockHeader {
             return Err(SerializationError::Parse("version must be at least 4"));
         }
 
-        Ok(BlockHeader {
+        Ok(Header {
             version,
-            previous_block_hash: BlockHeaderHash::zcash_deserialize(&mut reader)?,
-            merkle_root_hash: MerkleTreeRootHash(reader.read_32_bytes()?),
-            light_client_root_bytes: reader.read_32_bytes()?,
+            previous_block_hash: Hash::zcash_deserialize(&mut reader)?,
+            merkle_root: merkle::Root(reader.read_32_bytes()?),
+            root_bytes: reader.read_32_bytes()?,
             // This can't panic, because all u32 values are valid `Utc.timestamp`s
             time: Utc.timestamp(reader.read_u32::<LittleEndian>()? as i64, 0),
             difficulty_threshold: CompactDifficulty(reader.read_u32::<LittleEndian>()?),
             nonce: reader.read_32_bytes()?,
-            solution: EquihashSolution::zcash_deserialize(reader)?,
+            solution: equihash::Solution::zcash_deserialize(reader)?,
         })
     }
 }

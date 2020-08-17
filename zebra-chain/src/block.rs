@@ -1,65 +1,51 @@
-//! Definitions of block datastructures.
+//! Blocks and block-related structures (heights, headers, etc.)
 #![allow(clippy::unit_arg)]
 
-mod difficulty;
 mod hash;
 mod header;
-mod light_client;
+mod height;
+mod root_hash;
 mod serialize;
+
+pub mod merkle;
 
 #[cfg(test)]
 mod tests;
 
+pub use hash::Hash;
+pub use header::Header;
+pub use height::Height;
+pub use root_hash::RootHash;
+
+/// The error type for Block checks.
+// XXX try to remove this -- block checks should be done in zebra-consensus
+type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
+
 use serde::{Deserialize, Serialize};
-use std::{error, sync::Arc};
+
+use crate::{parameters::Network, transaction::Transaction, transparent};
 
 #[cfg(test)]
 use proptest_derive::Arbitrary;
 
-use crate::transaction::Transaction;
-use crate::types::BlockHeight;
-use crate::Network;
-
-pub use hash::BlockHeaderHash;
-pub use header::BlockHeader;
-pub use light_client::LightClientRootHash;
-
-/// A block in your blockchain.
-///
-/// A block is a data structure with two fields:
-///
-/// Block header: a data structure containing the block's metadata
-/// Transactions: an array (vector in Rust) of transactions
+/// A Zcash block, containing a header and a list of transactions.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct Block {
     /// The block header, containing block metadata.
-    pub header: BlockHeader,
+    pub header: Header,
     /// The block transactions.
-    pub transactions: Vec<Arc<Transaction>>,
+    pub transactions: Vec<std::sync::Arc<Transaction>>,
 }
-
-/// The maximum size of a Zcash block, in bytes.
-///
-/// Post-Sapling, this is also the maximum size of a transaction
-/// in the Zcash specification. (But since blocks also contain a
-/// block header and transaction count, the maximum size of a
-/// transaction in the chain is approximately 1.5 kB smaller.)
-pub const MAX_BLOCK_BYTES: u64 = 2_000_000;
-
-/// The error type for Block checks.
-// TODO(jlusby): Error = Report ?
-type Error = Box<dyn error::Error + Send + Sync + 'static>;
 
 impl Block {
     /// Return the block height reported in the coinbase transaction, if any.
-    pub fn coinbase_height(&self) -> Option<BlockHeight> {
-        use crate::transaction::TransparentInput;
+    pub fn coinbase_height(&self) -> Option<Height> {
         self.transactions
             .get(0)
             .and_then(|tx| tx.inputs().get(0))
             .and_then(|input| match input {
-                TransparentInput::Coinbase { ref height, .. } => Some(*height),
+                transparent::Input::Coinbase { ref height, .. } => Some(*height),
                 _ => None,
             })
     }
@@ -79,29 +65,29 @@ impl Block {
             .ok_or_else(|| "block has no transactions")?;
         let mut rest = self.transactions.iter().skip(1);
         if !first.is_coinbase() {
-            Err("first transaction must be coinbase")?;
+            return Err("first transaction must be coinbase".into());
         }
         if rest.any(|tx| tx.contains_coinbase_input()) {
-            Err("coinbase input found in non-coinbase transaction")?;
+            return Err("coinbase input found in non-coinbase transaction".into());
         }
         Ok(())
     }
 
     /// Get the hash for the current block
-    pub fn hash(&self) -> BlockHeaderHash {
-        BlockHeaderHash::from(self)
+    pub fn hash(&self) -> Hash {
+        Hash::from(self)
     }
 
-    /// Get the parsed light client root hash for this block.
+    /// Get the parsed root hash for this block.
     ///
-    /// The interpretation of the light client root hash depends on the
+    /// The interpretation of the root hash depends on the
     /// configured `network`, and this block's height.
     ///
     /// Returns None if this block does not have a block height.
-    pub fn light_client_root_hash(&self, network: Network) -> Option<LightClientRootHash> {
+    pub fn root_hash(&self, network: Network) -> Option<RootHash> {
         match self.coinbase_height() {
-            Some(height) => Some(LightClientRootHash::from_bytes(
-                self.header.light_client_root_bytes,
+            Some(height) => Some(RootHash::from_bytes(
+                self.header.root_bytes,
                 network,
                 height,
             )),
@@ -110,8 +96,8 @@ impl Block {
     }
 }
 
-impl<'a> From<&'a Block> for BlockHeaderHash {
-    fn from(block: &'a Block) -> BlockHeaderHash {
+impl<'a> From<&'a Block> for Hash {
+    fn from(block: &'a Block) -> Hash {
         (&block.header).into()
     }
 }

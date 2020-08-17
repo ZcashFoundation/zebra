@@ -25,8 +25,7 @@ use std::{
 use tokio::time;
 use tower::{buffer::Buffer, Service, ServiceExt};
 
-use zebra_chain::block::{Block, BlockHeaderHash};
-use zebra_chain::types::BlockHeight;
+use zebra_chain::block::{self, Block};
 
 /// A service that verifies blocks.
 #[derive(Debug)]
@@ -60,7 +59,7 @@ where
         + 'static,
     S::Future: Send + 'static,
 {
-    type Response = BlockHeaderHash;
+    type Response = block::Hash;
     type Error = Error;
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
@@ -84,7 +83,7 @@ where
             let height = block
                 .coinbase_height()
                 .ok_or("Invalid block: missing block height.")?;
-            if height > BlockHeight::MAX {
+            if height > block::Height::MAX {
                 Err("Invalid block height: greater than the maximum height.")?;
             }
 
@@ -126,7 +125,7 @@ where
                 let previous_block = BlockVerifier::await_block(
                     &mut state,
                     previous_block_hash,
-                    BlockHeight(height.0 - 1),
+                    block::Height(height.0 - 1),
                 )
                 .await?;
 
@@ -158,7 +157,7 @@ where
     ///
     /// If there is no block for that hash, returns `Ok(None)`.
     /// Returns an error if `state.poll_ready` errors.
-    async fn get_block(state: &mut S, hash: BlockHeaderHash) -> Result<Option<Arc<Block>>, Report> {
+    async fn get_block(state: &mut S, hash: block::Hash) -> Result<Option<Arc<Block>>, Report> {
         let block = state
             .ready_and()
             .await
@@ -179,8 +178,8 @@ where
     /// Returns an error if `state.poll_ready` errors.
     async fn await_block(
         state: &mut S,
-        hash: BlockHeaderHash,
-        height: BlockHeight,
+        hash: block::Hash,
+        height: block::Height,
     ) -> Result<Arc<Block>, Report> {
         loop {
             match BlockVerifier::get_block(state, hash).await? {
@@ -215,9 +214,9 @@ pub fn init<S>(
     state_service: S,
 ) -> impl Service<
     Arc<Block>,
-    Response = BlockHeaderHash,
+    Response = block::Hash,
     Error = Error,
-    Future = impl Future<Output = Result<BlockHeaderHash, Error>>,
+    Future = impl Future<Output = Result<block::Hash, Error>>,
 > + Send
        + Clone
        + 'static

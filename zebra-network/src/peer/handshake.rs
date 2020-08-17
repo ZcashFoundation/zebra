@@ -18,7 +18,7 @@ use tower::Service;
 use tracing::{span, Level};
 use tracing_futures::Instrument;
 
-use zebra_chain::types::BlockHeight;
+use zebra_chain::block;
 
 use crate::{
     constants,
@@ -137,7 +137,7 @@ where
                 // for a service that gets the current block height. Among other
                 // things we need it to reject peers who don't know about the
                 // current protocol epoch.
-                start_height: BlockHeight(0),
+                start_height: block::Height(0),
                 relay: false,
             };
 

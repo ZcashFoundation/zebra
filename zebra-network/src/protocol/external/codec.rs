@@ -9,13 +9,13 @@ use chrono::{TimeZone, Utc};
 use tokio_util::codec::{Decoder, Encoder};
 
 use zebra_chain::{
-    block::{Block, BlockHeaderHash},
+    block::{self, Block},
+    parameters::Network,
     serialization::{
-        ReadZcashExt, SerializationError as Error, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
+        sha256d, ReadZcashExt, SerializationError as Error, WriteZcashExt, ZcashDeserialize,
+        ZcashSerialize,
     },
     transaction::Transaction,
-    types::{BlockHeight, Sha256dChecksum},
-    Network,
 };
 
 use crate::constants;
@@ -162,7 +162,7 @@ impl Encoder for Codec {
         header_writer.write_all(&Magic::from(self.builder.network).0[..])?;
         header_writer.write_all(command)?;
         header_writer.write_u32::<LittleEndian>(body.len() as u32)?;
-        header_writer.write_all(&Sha256dChecksum::from(&body[..]).0)?;
+        header_writer.write_all(&sha256d::Checksum::from(&body[..]).0)?;
 
         dst.reserve(HEADER_LEN + body.len());
         dst.extend_from_slice(&header);
@@ -276,7 +276,7 @@ enum DecodeState {
     Body {
         body_len: usize,
         command: [u8; 12],
-        checksum: Sha256dChecksum,
+        checksum: sha256d::Checksum,
     },
 }
 
@@ -321,7 +321,7 @@ impl Decoder for Codec {
                 let magic = Magic(header_reader.read_4_bytes()?);
                 let command = header_reader.read_12_bytes()?;
                 let body_len = header_reader.read_u32::<LittleEndian>()? as usize;
-                let checksum = Sha256dChecksum(header_reader.read_4_bytes()?);
+                let checksum = sha256d::Checksum(header_reader.read_4_bytes()?);
                 trace!(
                     ?self.state,
                     ?magic,
@@ -371,7 +371,7 @@ impl Decoder for Codec {
                 let body = src.split_to(body_len);
                 self.state = DecodeState::Head;
 
-                if checksum != Sha256dChecksum::from(&body[..]) {
+                if checksum != sha256d::Checksum::from(&body[..]) {
                     return Err(Parse(
                         "supplied message checksum does not match computed checksum",
                     ));
@@ -428,7 +428,7 @@ impl Codec {
             ),
             nonce: Nonce(reader.read_u64::<LittleEndian>()?),
             user_agent: reader.read_string()?,
-            start_height: BlockHeight(reader.read_u32::<LittleEndian>()?),
+            start_height: block::Height(reader.read_u32::<LittleEndian>()?),
             relay: match reader.read_u8()? {
                 0 => false,
                 1 => true,
@@ -485,7 +485,7 @@ impl Codec {
         if self.builder.version == Version(reader.read_u32::<LittleEndian>()?) {
             Ok(Message::GetBlocks {
                 block_locator_hashes: Vec::zcash_deserialize(&mut reader)?,
-                hash_stop: BlockHeaderHash::zcash_deserialize(&mut reader)?,
+                hash_stop: block::Hash::zcash_deserialize(&mut reader)?,
             })
         } else {
             Err(Error::Parse("getblocks version did not match negotiation"))
@@ -505,7 +505,7 @@ impl Codec {
         if self.builder.version == Version(reader.read_u32::<LittleEndian>()?) {
             Ok(Message::GetHeaders {
                 block_locator_hashes: Vec::zcash_deserialize(&mut reader)?,
-                hash_stop: BlockHeaderHash::zcash_deserialize(&mut reader)?,
+                hash_stop: block::Hash::zcash_deserialize(&mut reader)?,
             })
         } else {
             Err(Error::Parse("getblocks version did not match negotiation"))
@@ -598,7 +598,7 @@ mod tests {
             ),
             nonce: Nonce(0x9082_4908_8927_9238),
             user_agent: "Zebra".to_owned(),
-            start_height: BlockHeight(540_000),
+            start_height: block::Height(540_000),
             relay: true,
         };
 
@@ -689,29 +689,6 @@ mod tests {
                 .expect("a next message should be available")
                 .expect_err("that message should not deserialize")
         });
-    }
-
-    #[test]
-    fn decode_state_debug() {
-        assert_eq!(format!("{:?}", DecodeState::Head), "DecodeState::Head");
-
-        let decode_state = DecodeState::Body {
-            body_len: 43,
-            command: [118, 101, 114, 115, 105, 111, 110, 0, 0, 0, 0, 0],
-            checksum: Sha256dChecksum([186, 250, 162, 227]),
-        };
-
-        assert_eq!(format!("{:?}", decode_state),
-                   "DecodeState::Body { body_len: 43, command: \"version\\u{0}\\u{0}\\u{0}\\u{0}\\u{0}\", checksum: Sha256dChecksum(\"bafaa2e3\") }");
-
-        let decode_state = DecodeState::Body {
-            body_len: 43,
-            command: [118, 240, 144, 128, 105, 111, 110, 0, 0, 0, 0, 0],
-            checksum: Sha256dChecksum([186, 250, 162, 227]),
-        };
-
-        assert_eq!(format!("{:?}", decode_state),
-                   "DecodeState::Body { body_len: 43, command: \"v�ion\\u{0}\\u{0}\\u{0}\\u{0}\\u{0}\", checksum: Sha256dChecksum(\"bafaa2e3\") }");
     }
 
     #[test]

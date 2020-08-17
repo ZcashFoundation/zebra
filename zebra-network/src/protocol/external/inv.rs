@@ -8,11 +8,11 @@ use std::io::{Read, Write};
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
-use zebra_chain::block::BlockHeaderHash;
-use zebra_chain::serialization::{
-    ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
+use zebra_chain::{
+    block,
+    serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize},
+    transaction,
 };
-use zebra_chain::transaction::TransactionHash;
 
 /// An inventory hash which refers to some advertised or requested data.
 ///
@@ -28,29 +28,29 @@ pub enum InventoryHash {
     /// so we don't include a typed hash.
     Error,
     /// A hash of a transaction.
-    Tx(TransactionHash),
+    Tx(transaction::Hash),
     /// A hash of a block.
-    Block(BlockHeaderHash),
+    Block(block::Hash),
     /// A hash of a filtered block.
     ///
     /// The Bitcoin wiki says: Hash of a block header, but only to be used in
     /// getdata message. Indicates the reply should be a merkleblock message
     /// rather than a block message; this only works if a bloom filter has been
     /// set.
-    FilteredBlock(BlockHeaderHash),
+    FilteredBlock(block::Hash),
 }
 
-impl From<TransactionHash> for InventoryHash {
-    fn from(tx: TransactionHash) -> InventoryHash {
+impl From<transaction::Hash> for InventoryHash {
+    fn from(tx: transaction::Hash) -> InventoryHash {
         InventoryHash::Tx(tx)
     }
 }
 
-impl From<BlockHeaderHash> for InventoryHash {
-    fn from(block: BlockHeaderHash) -> InventoryHash {
+impl From<block::Hash> for InventoryHash {
+    fn from(hash: block::Hash) -> InventoryHash {
         // Auto-convert to Block rather than FilteredBlock because filtered
         // blocks aren't useful for Zcash.
-        InventoryHash::Block(block)
+        InventoryHash::Block(hash)
     }
 }
 
@@ -74,9 +74,9 @@ impl ZcashDeserialize for InventoryHash {
         let bytes = reader.read_32_bytes()?;
         match code {
             0 => Ok(InventoryHash::Error),
-            1 => Ok(InventoryHash::Tx(TransactionHash(bytes))),
-            2 => Ok(InventoryHash::Block(BlockHeaderHash(bytes))),
-            3 => Ok(InventoryHash::FilteredBlock(BlockHeaderHash(bytes))),
+            1 => Ok(InventoryHash::Tx(transaction::Hash(bytes))),
+            2 => Ok(InventoryHash::Block(block::Hash(bytes))),
+            3 => Ok(InventoryHash::FilteredBlock(block::Hash(bytes))),
             _ => Err(SerializationError::Parse("invalid inventory code")),
         }
     }

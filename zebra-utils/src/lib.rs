@@ -1,14 +1,3 @@
-//! A Zebra utilities crate.
-
-// TODO: split this crate up into crates with meaningful names.
-
-#![deny(missing_docs)]
-#![allow(clippy::try_err)]
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
-    }
-}
+//! Utilities for Zebra development, not for library or application users.
+//!
+//! Currently this consists only of the zebra-checkpoints binary.

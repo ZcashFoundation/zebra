@@ -4,8 +4,11 @@ use super::*;
 
 use std::sync::Arc;
 
-use zebra_chain::{block::Block, serialization::ZcashDeserialize};
-use zebra_chain::{Network, NetworkUpgrade::Sapling};
+use zebra_chain::parameters::{Network, NetworkUpgrade::Sapling};
+use zebra_chain::{
+    block::{self, Block},
+    serialization::ZcashDeserialize,
+};
 
 /// Make a checkpoint list containing only the genesis block
 #[test]
@@ -16,14 +19,14 @@ fn checkpoint_list_genesis() -> Result<(), Error> {
     let mut checkpoint_data = Vec::new();
     let block =
         Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
-    let hash: BlockHeaderHash = block.as_ref().into();
+    let hash = block.hash();
     checkpoint_data.push((
         block.coinbase_height().expect("test block has height"),
         hash,
     ));
 
     // Make a checkpoint list containing the genesis block
-    let checkpoint_list: BTreeMap<BlockHeight, BlockHeaderHash> =
+    let checkpoint_list: BTreeMap<block::Height, block::Hash> =
         checkpoint_data.iter().cloned().collect();
     let _ = CheckpointList::from_list(checkpoint_list)?;
 
@@ -44,7 +47,7 @@ fn checkpoint_list_multiple() -> Result<(), Error> {
         &zebra_test::vectors::BLOCK_MAINNET_434873_BYTES[..],
     ] {
         let block = Arc::<Block>::zcash_deserialize(*b)?;
-        let hash: BlockHeaderHash = block.as_ref().into();
+        let hash = block.hash();
         checkpoint_data.push((
             block.coinbase_height().expect("test block has height"),
             hash,
@@ -52,7 +55,7 @@ fn checkpoint_list_multiple() -> Result<(), Error> {
     }
 
     // Make a checkpoint list containing all the blocks
-    let checkpoint_list: BTreeMap<BlockHeight, BlockHeaderHash> =
+    let checkpoint_list: BTreeMap<block::Height, block::Hash> =
         checkpoint_data.iter().cloned().collect();
     let _ = CheckpointList::from_list(checkpoint_list)?;
 
@@ -77,14 +80,14 @@ fn checkpoint_list_no_genesis_fail() -> Result<(), Error> {
     // Parse a non-genesis block
     let mut checkpoint_data = Vec::new();
     let block = Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..])?;
-    let hash: BlockHeaderHash = block.as_ref().into();
+    let hash = block.hash();
     checkpoint_data.push((
         block.coinbase_height().expect("test block has height"),
         hash,
     ));
 
     // Make a checkpoint list containing the non-genesis block
-    let checkpoint_list: BTreeMap<BlockHeight, BlockHeaderHash> =
+    let checkpoint_list: BTreeMap<block::Height, block::Hash> =
         checkpoint_data.iter().cloned().collect();
     let _ = CheckpointList::from_list(checkpoint_list)
         .expect_err("a checkpoint list with no genesis block should fail");
@@ -97,10 +100,10 @@ fn checkpoint_list_no_genesis_fail() -> Result<(), Error> {
 fn checkpoint_list_null_hash_fail() -> Result<(), Error> {
     zebra_test::init();
 
-    let checkpoint_data = vec![(BlockHeight(0), BlockHeaderHash([0; 32]))];
+    let checkpoint_data = vec![(block::Height(0), block::Hash([0; 32]))];
 
     // Make a checkpoint list containing the non-genesis block
-    let checkpoint_list: BTreeMap<BlockHeight, BlockHeaderHash> =
+    let checkpoint_list: BTreeMap<block::Height, block::Hash> =
         checkpoint_data.iter().cloned().collect();
     let _ = CheckpointList::from_list(checkpoint_list)
         .expect_err("a checkpoint list with a null block hash should fail");
@@ -114,21 +117,21 @@ fn checkpoint_list_bad_height_fail() -> Result<(), Error> {
     zebra_test::init();
 
     let checkpoint_data = vec![(
-        BlockHeight(BlockHeight::MAX.0 + 1),
-        BlockHeaderHash([1; 32]),
+        block::Height(block::Height::MAX.0 + 1),
+        block::Hash([1; 32]),
     )];
 
     // Make a checkpoint list containing the non-genesis block
-    let checkpoint_list: BTreeMap<BlockHeight, BlockHeaderHash> =
+    let checkpoint_list: BTreeMap<block::Height, block::Hash> =
         checkpoint_data.iter().cloned().collect();
     let _ = CheckpointList::from_list(checkpoint_list).expect_err(
-        "a checkpoint list with an invalid block height (BlockHeight::MAX + 1) should fail",
+        "a checkpoint list with an invalid block height (block::Height::MAX + 1) should fail",
     );
 
-    let checkpoint_data = vec![(BlockHeight(u32::MAX), BlockHeaderHash([1; 32]))];
+    let checkpoint_data = vec![(block::Height(u32::MAX), block::Hash([1; 32]))];
 
     // Make a checkpoint list containing the non-genesis block
-    let checkpoint_list: BTreeMap<BlockHeight, BlockHeaderHash> =
+    let checkpoint_list: BTreeMap<block::Height, block::Hash> =
         checkpoint_data.iter().cloned().collect();
     let _ = CheckpointList::from_list(checkpoint_list)
         .expect_err("a checkpoint list with an invalid block height (u32::MAX) should fail");
@@ -149,7 +152,7 @@ fn checkpoint_list_duplicate_blocks_fail() -> Result<(), Error> {
         &zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..],
     ] {
         let block = Arc::<Block>::zcash_deserialize(*b)?;
-        let hash: BlockHeaderHash = block.as_ref().into();
+        let hash = block.hash();
         checkpoint_data.push((
             block.coinbase_height().expect("test block has height"),
             hash,
@@ -173,7 +176,7 @@ fn checkpoint_list_duplicate_heights_fail() -> Result<(), Error> {
     let mut checkpoint_data = Vec::new();
     for b in &[&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..]] {
         let block = Arc::<Block>::zcash_deserialize(*b)?;
-        let hash: BlockHeaderHash = block.as_ref().into();
+        let hash = block.hash();
         checkpoint_data.push((
             block.coinbase_height().expect("test block has height"),
             hash,
@@ -181,8 +184,8 @@ fn checkpoint_list_duplicate_heights_fail() -> Result<(), Error> {
     }
 
     // Then add some fake entries with duplicate heights
-    checkpoint_data.push((BlockHeight(1), BlockHeaderHash([0xaa; 32])));
-    checkpoint_data.push((BlockHeight(1), BlockHeaderHash([0xbb; 32])));
+    checkpoint_data.push((block::Height(1), block::Hash([0xaa; 32])));
+    checkpoint_data.push((block::Height(1), block::Hash([0xbb; 32])));
 
     // Make a checkpoint list containing some duplicate blocks
     let _ = CheckpointList::from_list(checkpoint_data)
@@ -201,7 +204,7 @@ fn checkpoint_list_duplicate_hashes_fail() -> Result<(), Error> {
     let mut checkpoint_data = Vec::new();
     for b in &[&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..]] {
         let block = Arc::<Block>::zcash_deserialize(*b)?;
-        let hash: BlockHeaderHash = block.as_ref().into();
+        let hash = block.hash();
         checkpoint_data.push((
             block.coinbase_height().expect("test block has height"),
             hash,
@@ -209,8 +212,8 @@ fn checkpoint_list_duplicate_hashes_fail() -> Result<(), Error> {
     }
 
     // Then add some fake entries with duplicate hashes
-    checkpoint_data.push((BlockHeight(1), BlockHeaderHash([0xcc; 32])));
-    checkpoint_data.push((BlockHeight(2), BlockHeaderHash([0xcc; 32])));
+    checkpoint_data.push((block::Height(1), block::Hash([0xcc; 32])));
+    checkpoint_data.push((block::Height(2), block::Hash([0xcc; 32])));
 
     // Make a checkpoint list containing some duplicate blocks
     let _ = CheckpointList::from_list(checkpoint_data)
@@ -231,20 +234,20 @@ fn checkpoint_list_load_hard_coded() -> Result<(), Error> {
         .parse()
         .expect("hard-coded Testnet checkpoint list should parse");
 
-    let _ = CheckpointList::new(Mainnet);
-    let _ = CheckpointList::new(Testnet);
+    let _ = CheckpointList::new(Network::Mainnet);
+    let _ = CheckpointList::new(Network::Testnet);
 
     Ok(())
 }
 
 #[test]
 fn checkpoint_list_hard_coded_sapling_mainnet() -> Result<(), Error> {
-    checkpoint_list_hard_coded_sapling(Mainnet)
+    checkpoint_list_hard_coded_sapling(Network::Mainnet)
 }
 
 #[test]
 fn checkpoint_list_hard_coded_sapling_testnet() -> Result<(), Error> {
-    checkpoint_list_hard_coded_sapling(Testnet)
+    checkpoint_list_hard_coded_sapling(Network::Testnet)
 }
 
 /// Check that the hard-coded lists cover the Sapling network upgrade

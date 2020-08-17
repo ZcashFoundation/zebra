@@ -1,12 +1,17 @@
 #![allow(dead_code, unused_variables)]
-use super::{Transaction, TransparentInput, OVERWINTER_VERSION_GROUP_ID, SAPLING_VERSION_GROUP_ID};
+use super::Transaction;
 use crate::{
-    parameters::ConsensusBranchId, serialization::ZcashSerialize, types::BlockHeight, Network,
-    NetworkUpgrade,
+    block,
+    parameters::{ConsensusBranchId, Network, NetworkUpgrade},
+    serialization::ZcashSerialize,
+    transparent,
 };
 use blake2b_simd::Hash;
 use byteorder::{LittleEndian, WriteBytesExt};
 use std::io;
+
+const OVERWINTER_VERSION_GROUP_ID: u32 = 0x03C4_8270;
+const SAPLING_VERSION_GROUP_ID: u32 = 0x892F_2085;
 
 const ZCASH_SIGHASH_PERSONALIZATION_PREFIX: &[u8; 12] = b"ZcashSigHash";
 const ZCASH_PREVOUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashPrevoutHash";
@@ -26,7 +31,7 @@ pub(super) struct SigHasher<'a> {
     pub(super) trans: &'a Transaction,
     pub(super) hash_type: u32,
     pub(super) network: Network,
-    pub(super) height: BlockHeight,
+    pub(super) height: block::Height,
 }
 
 impl<'a> SigHasher<'a> {
@@ -128,8 +133,8 @@ impl<'a> SigHasher<'a> {
             .inputs()
             .iter()
             .filter_map(|input| match input {
-                TransparentInput::PrevOut { outpoint, .. } => Some(outpoint),
-                TransparentInput::Coinbase { .. } => None,
+                transparent::Input::PrevOut { outpoint, .. } => Some(outpoint),
+                transparent::Input::Coinbase { .. } => None,
             })
             .try_for_each(|outpoint| outpoint.zcash_serialize(&mut hash))?;
 
@@ -153,8 +158,8 @@ impl<'a> SigHasher<'a> {
             .inputs()
             .iter()
             .map(|input| match input {
-                TransparentInput::PrevOut { sequence, .. } => sequence,
-                TransparentInput::Coinbase { sequence, .. } => sequence,
+                transparent::Input::PrevOut { sequence, .. } => sequence,
+                transparent::Input::Coinbase { sequence, .. } => sequence,
             })
             .try_for_each(|sequence| (&mut hash).write_u32::<LittleEndian>(*sequence))?;
 
@@ -219,8 +224,9 @@ impl<'a> SigHasher<'a> {
 #[cfg(test)]
 mod test {
     use super::SigHasher;
+    use crate::block;
     use crate::{
-        serialization::ZcashDeserializeInto, transaction::Transaction, types::BlockHeight, Network,
+        parameters::Network, serialization::ZcashDeserializeInto, transaction::Transaction,
     };
     use color_eyre::eyre;
     use eyre::Result;
@@ -246,7 +252,7 @@ mod test {
             trans: &transaction,
             hash_type: 1,
             network: Network::Mainnet,
-            height: BlockHeight(653600 - 1),
+            height: block::Height(653600 - 1),
         };
 
         assert_hash_eq!(b"03000080", hasher, hash_header);

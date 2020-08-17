@@ -8,8 +8,8 @@ use tower::{builder::ServiceBuilder, retry::Retry, timeout::Timeout, Service, Se
 use tracing_futures::Instrument;
 
 use zebra_chain::{
-    block::{Block, BlockHeaderHash},
-    Network,
+    block::{self, Block},
+    parameters::Network,
 };
 use zebra_consensus::checkpoint;
 use zebra_consensus::parameters;
@@ -31,8 +31,8 @@ const SYNC_RESTART_TIMEOUT: Duration = Duration::from_secs(20);
 /// the returned hashes actually extend a chain tip.
 #[derive(Debug, Hash, PartialEq, Eq)]
 struct CheckedTip {
-    tip: BlockHeaderHash,
-    expected_next: BlockHeaderHash,
+    tip: block::Hash,
+    expected_next: block::Hash,
 }
 
 #[derive(Debug)]
@@ -42,7 +42,7 @@ where
     ZN::Future: Send,
     ZS: Service<zs::Request, Response = zs::Response, Error = Error> + Send + Clone + 'static,
     ZS::Future: Send,
-    ZV: Service<Arc<Block>, Response = BlockHeaderHash, Error = Error> + Send + Clone + 'static,
+    ZV: Service<Arc<Block>, Response = block::Hash, Error = Error> + Send + Clone + 'static,
     ZV::Future: Send,
 {
     /// Used to perform extendtips requests, with no retry logic (failover is handled using fanout).
@@ -52,8 +52,8 @@ where
     state: ZS,
     verifier: ZV,
     prospective_tips: HashSet<CheckedTip>,
-    pending_blocks: Pin<Box<FuturesUnordered<JoinHandle<Result<BlockHeaderHash, Error>>>>>,
-    genesis_hash: BlockHeaderHash,
+    pending_blocks: Pin<Box<FuturesUnordered<JoinHandle<Result<block::Hash, Error>>>>>,
+    genesis_hash: block::Hash,
 }
 
 impl<ZN, ZS, ZV> Syncer<ZN, ZS, ZV>
@@ -62,7 +62,7 @@ where
     ZN::Future: Send,
     ZS: Service<zs::Request, Response = zs::Response, Error = Error> + Send + Clone + 'static,
     ZS::Future: Send,
-    ZV: Service<Arc<Block>, Response = BlockHeaderHash, Error = Error> + Send + Clone + 'static,
+    ZV: Service<Arc<Block>, Response = block::Hash, Error = Error> + Send + Clone + 'static,
     ZV::Future: Send,
 {
     /// Returns a new syncer instance, using:
@@ -197,7 +197,7 @@ where
         let mut download_set = HashSet::new();
         while let Some(res) = requests.next().await {
             match res.map_err::<Report, _>(|e| eyre!(e)) {
-                Ok(zn::Response::BlockHeaderHashes(hashes)) => {
+                Ok(zn::Response::BlockHashes(hashes)) => {
                     let mut first_unknown = None;
                     for (i, &hash) in hashes.iter().enumerate() {
                         if !self.state_contains(hash).await? {
@@ -277,7 +277,7 @@ where
             }
             while let Some(res) = responses.next().await {
                 match res.map_err::<Report, _>(|e| eyre!(e)) {
-                    Ok(zn::Response::BlockHeaderHashes(hashes)) => {
+                    Ok(zn::Response::BlockHashes(hashes)) => {
                         tracing::debug!(first = ?hashes.first(), len = ?hashes.len());
 
                         let unknown_hashes = match hashes.split_first() {
@@ -362,7 +362,7 @@ where
     }
 
     /// Queue downloads for each block that isn't currently known to our node
-    async fn request_blocks(&mut self, hashes: Vec<BlockHeaderHash>) -> Result<(), Report> {
+    async fn request_blocks(&mut self, hashes: Vec<block::Hash>) -> Result<(), Report> {
         tracing::debug!(hashes.len = hashes.len(), "requesting blocks");
         for hash in hashes.into_iter() {
             // TODO: remove this check once the sync service is more reliable
@@ -423,7 +423,7 @@ where
     ///
     /// TODO: handle multiple tips in the state.
     #[instrument(skip(self))]
-    async fn state_contains(&mut self, hash: BlockHeaderHash) -> Result<bool, Report> {
+    async fn state_contains(&mut self, hash: block::Hash) -> Result<bool, Report> {
         match self
             .state
             .ready_and()

@@ -1,19 +1,18 @@
 use chrono::{DateTime, Duration, Utc};
 
-use crate::equihash_solution::EquihashSolution;
-use crate::merkle_tree::MerkleTreeRootHash;
 use crate::serialization::ZcashSerialize;
+use crate::work::{difficulty::CompactDifficulty, equihash::Solution};
 
-use super::{difficulty::CompactDifficulty, BlockHeaderHash, Error};
+use super::{merkle, Error, Hash};
 
-/// Block header.
+/// A block header, containing metadata about a block.
 ///
 /// How are blocks chained together? They are chained together via the
 /// backwards reference (previous header hash) present in the block
 /// header. Each block points backwards to its parent, all the way
 /// back to the genesis block (the first block in the blockchain).
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct BlockHeader {
+pub struct Header {
     /// The block's version field. This is supposed to be `4`:
     ///
     /// > The current and only defined block version number for Zcash is 4.
@@ -24,26 +23,27 @@ pub struct BlockHeader {
     /// interpreted as an `i32`.
     pub version: u32,
 
-    /// A SHA-256d hash in internal byte order of the previous block’s
-    /// header. This ensures no previous block can be changed without
-    /// also changing this block’s header.
-    pub previous_block_hash: BlockHeaderHash,
+    /// The hash of the previous block, used to create a chain of blocks back to
+    /// the genesis block.
+    ///
+    /// This ensures no previous block can be changed without also changing this
+    /// block’s header.
+    pub previous_block_hash: Hash,
 
-    /// A SHA-256d hash in internal byte order. The merkle root is
-    /// derived from the SHA256d hashes of all transactions included
-    /// in this block as assembled in a binary tree, ensuring that
-    /// none of those transactions can be modied without modifying the
-    /// header.
-    pub merkle_root_hash: MerkleTreeRootHash,
+    /// The root of the transaction Merkle tree.
+    ///
+    /// The Merkle root is derived from the SHA256d hashes of all transactions
+    /// included in this block as assembled in a binary tree, ensuring that none
+    /// of those transactions can be modied without modifying the header.
+    pub merkle_root: merkle::Root,
 
-    /// The light client root hash.
+    /// Some kind of root hash.
     ///
     /// Unfortunately, the interpretation of this field was changed without
     /// incrementing the version, so it cannot be parsed without the block height
-    /// and network. Use
-    /// [`Block::light_client_root_hash`](super::Block::light_client_root_hash)
-    /// to get the parsed [`LightClientRootHash`](super::LightClientRootHash).
-    pub light_client_root_bytes: [u8; 32],
+    /// and network. Use [`Block::root_hash`](super::Block::root_hash) to get the
+    /// parsed [`RootHash`](super::RootHash).
+    pub root_bytes: [u8; 32],
 
     /// The block timestamp is a Unix epoch time (UTC) when the miner
     /// started hashing the header (according to the miner).
@@ -65,10 +65,10 @@ pub struct BlockHeader {
     pub nonce: [u8; 32],
 
     /// The Equihash solution.
-    pub solution: EquihashSolution,
+    pub solution: Solution,
 }
 
-impl BlockHeader {
+impl Header {
     /// Returns true if the header is valid based on its `EquihashSolution`
     pub fn is_equihash_solution_valid(&self) -> Result<(), EquihashError> {
         let n = 200;
@@ -80,7 +80,7 @@ impl BlockHeader {
         self.zcash_serialize(&mut input)
             .expect("serialization into a vec can't fail");
 
-        let input = &input[0..EquihashSolution::INPUT_LENGTH];
+        let input = &input[0..Solution::INPUT_LENGTH];
 
         equihash::is_valid_solution(n, k, input, nonce, solution)?;
 
@@ -108,7 +108,7 @@ impl BlockHeader {
         if self.time <= two_hours_in_the_future {
             Ok(())
         } else {
-            Err("block header time is more than 2 hours in the future")?
+            Err("block header time is more than 2 hours in the future".into())
         }
     }
 }
