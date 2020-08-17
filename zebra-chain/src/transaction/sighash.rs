@@ -56,9 +56,9 @@ impl<'a> SigHasher<'a> {
     }
 
     fn consensus_branch_id(&self) -> ConsensusBranchId {
-        self.network_upgrade().branch_id().expect(
-            "Pre-Overwinter blocks with V3 or later transactions have already been rejected",
-        )
+        self.network_upgrade()
+            .branch_id()
+            .expect("Zebra checkpoints on Sapling activation")
     }
 
     /// Sighash implementation for the overwinter and sapling consensus branches
