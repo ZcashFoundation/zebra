@@ -1,54 +1,10 @@
 use futures::future::Either;
 
 use crate::{
-    primitives::{
-        redjubjub::{self, Binding, SpendAuth},
-        Groth16Proof,
-    },
-    sapling::{commitment, keys, note, tree},
+    primitives::redjubjub::{Binding, Signature},
+    sapling::{Output, Spend},
     serialization::serde_helpers,
 };
-
-/// A _Spend Description_, as described in [protocol specification §7.3][ps].
-///
-/// [ps]: https://zips.z.cash/protocol/protocol.pdf#spendencoding
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Spend {
-    /// A value commitment to the value of the input note.
-    pub cv: commitment::ValueCommitment,
-    /// A root of the Sapling note commitment tree at some block height in the past.
-    pub anchor: tree::SaplingNoteTreeRootHash,
-    /// The nullifier of the input note.
-    pub nullifier: note::Nullifier,
-    /// The randomized public key for `spend_auth_sig`.
-    pub rk: redjubjub::VerificationKeyBytes<SpendAuth>,
-    /// The ZK spend proof.
-    pub zkproof: Groth16Proof,
-    /// A signature authorizing this spend.
-    pub spend_auth_sig: redjubjub::Signature<SpendAuth>,
-}
-
-/// A _Output Description_, as described in [protocol specification §7.4][ps].
-///
-/// [ps]: https://zips.z.cash/protocol/protocol.pdf#outputencoding
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Output {
-    /// A value commitment to the value of the input note.
-    pub cv: commitment::ValueCommitment,
-    /// The u-coordinate of the note commitment for the output note.
-    #[serde(with = "serde_helpers::Fq")]
-    pub cm_u: jubjub::Fq,
-    /// An encoding of an ephemeral Jubjub public key.
-    pub ephemeral_key: keys::EphemeralPublicKey,
-    /// A ciphertext component for the encrypted output note.
-    pub enc_ciphertext: note::EncryptedCiphertext,
-    /// A ciphertext component for the encrypted output note.
-    pub out_ciphertext: note::OutCiphertext,
-    /// The ZK output proof.
-    pub zkproof: Groth16Proof,
-}
-
-impl Eq for Output {}
 
 /// Sapling-on-Groth16 spend and output descriptions.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -75,7 +31,7 @@ pub struct ShieldedData {
     /// over all output descriptions.
     pub rest_outputs: Vec<Output>,
     /// A signature on the transaction hash.
-    pub binding_sig: redjubjub::Signature<Binding>,
+    pub binding_sig: Signature<Binding>,
 }
 
 impl ShieldedData {

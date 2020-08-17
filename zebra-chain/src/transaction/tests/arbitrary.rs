@@ -10,7 +10,7 @@ use crate::{
 };
 
 use super::super::{
-    JoinSplit, JoinSplitData, LockTime, Memo, Output, ShieldedData, Spend, Transaction,
+    JoinSplit, JoinSplitData, LockTime, Memo, ShieldedData, Transaction,
 };
 
 impl Transaction {
@@ -206,45 +206,17 @@ impl<P: ZkSnarkProof + Arbitrary + 'static> Arbitrary for JoinSplitData<P> {
     type Strategy = BoxedStrategy<Self>;
 }
 
-impl Arbitrary for Output {
-    type Parameters = ();
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        (
-            any::<sapling::commitment::ValueCommitment>(),
-            any::<sapling::commitment::NoteCommitment>(),
-            any::<sapling::keys::EphemeralPublicKey>(),
-            any::<sapling::note::EncryptedCiphertext>(),
-            any::<sapling::note::OutCiphertext>(),
-            any::<Groth16Proof>(),
-        )
-            .prop_map(
-                |(cv, cm, ephemeral_key, enc_ciphertext, out_ciphertext, zkproof)| Self {
-                    cv,
-                    cm_u: cm.extract_u(),
-                    ephemeral_key,
-                    enc_ciphertext,
-                    out_ciphertext,
-                    zkproof,
-                },
-            )
-            .boxed()
-    }
-
-    type Strategy = BoxedStrategy<Self>;
-}
-
 impl Arbitrary for ShieldedData {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         (
             prop_oneof![
-                any::<Spend>().prop_map(Either::Left),
-                any::<Output>().prop_map(Either::Right)
+                any::<sapling::Spend>().prop_map(Either::Left),
+                any::<sapling::Output>().prop_map(Either::Right)
             ],
-            vec(any::<Spend>(), 0..10),
-            vec(any::<Output>(), 0..10),
+            vec(any::<sapling::Spend>(), 0..10),
+            vec(any::<sapling::Output>(), 0..10),
             vec(any::<u8>(), 64),
         )
             .prop_map(|(first, rest_spends, rest_outputs, sig_bytes)| Self {
@@ -263,37 +235,6 @@ impl Arbitrary for ShieldedData {
     type Strategy = BoxedStrategy<Self>;
 }
 
-impl Arbitrary for Spend {
-    type Parameters = ();
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        (
-            any::<sapling::tree::SaplingNoteTreeRootHash>(),
-            any::<sapling::commitment::ValueCommitment>(),
-            any::<sapling::note::Nullifier>(),
-            array::uniform32(any::<u8>()),
-            any::<Groth16Proof>(),
-            vec(any::<u8>(), 64),
-        )
-            .prop_map(
-                |(anchor, cv, nullifier, rpk_bytes, proof, sig_bytes)| Self {
-                    anchor,
-                    cv,
-                    nullifier,
-                    rk: redjubjub::VerificationKeyBytes::from(rpk_bytes),
-                    zkproof: proof,
-                    spend_auth_sig: redjubjub::Signature::from({
-                        let mut b = [0u8; 64];
-                        b.copy_from_slice(sig_bytes.as_slice());
-                        b
-                    }),
-                },
-            )
-            .boxed()
-    }
-
-    type Strategy = BoxedStrategy<Self>;
-}
 
 impl Arbitrary for Transaction {
     type Parameters = ();

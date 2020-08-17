@@ -16,7 +16,7 @@ pub use hash::TransactionHash;
 pub use joinsplit::{JoinSplit, JoinSplitData};
 pub use lock_time::LockTime;
 pub use memo::Memo;
-pub use shielded_data::{Output, ShieldedData, Spend};
+pub use shielded_data::ShieldedData;
 
 use crate::{
     amount::Amount,
