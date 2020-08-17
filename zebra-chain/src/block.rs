@@ -1,4 +1,5 @@
 //! Blocks and block-related structures (heights, headers, etc.)
+#![allow(clippy::unit_arg)]
 
 mod hash;
 mod header;
