@@ -1,9 +1,8 @@
-
 use proptest::{arbitrary::any, array, collection::vec, prelude::*};
 
 use crate::primitives::Groth16Proof;
 
-use super::super::{Spend, Output, keys, tree, commitment, note};
+use super::super::{commitment, keys, note, tree, Output, Spend};
 
 impl Arbitrary for Spend {
     type Parameters = ();

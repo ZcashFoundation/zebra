@@ -1,65 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    amount::{Amount, NonNegative},
-    primitives::{ed25519, x25519, ZkSnarkProof},
-    sprout,
+    primitives::{ed25519, ZkSnarkProof},
+    sprout::JoinSplit,
 };
-
-/// A _JoinSplit Description_, as described in [protocol specification §7.2][ps].
-///
-/// [ps]: https://zips.z.cash/protocol/protocol.pdf#joinsplitencoding
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct JoinSplit<P: ZkSnarkProof> {
-    /// A value that the JoinSplit transfer removes from the transparent value
-    /// pool.
-    pub vpub_old: Amount<NonNegative>,
-    /// A value that the JoinSplit transfer inserts into the transparent value
-    /// pool.
-    ///
-    pub vpub_new: Amount<NonNegative>,
-    /// A root of the Sprout note commitment tree at some block height in the
-    /// past, or the root produced by a previous JoinSplit transfer in this
-    /// transaction.
-    pub anchor: sprout::tree::NoteTreeRootHash,
-    /// A nullifier for the input notes.
-    pub nullifiers: [sprout::note::Nullifier; 2],
-    /// A note commitment for this output note.
-    pub commitments: [sprout::commitment::NoteCommitment; 2],
-    /// An X25519 public key.
-    pub ephemeral_key: x25519::PublicKey,
-    /// A 256-bit seed that must be chosen independently at random for each
-    /// JoinSplit description.
-    pub random_seed: [u8; 32],
-    /// A message authentication tag.
-    pub vmacs: [sprout::note::MAC; 2],
-    /// A ZK JoinSplit proof, either a
-    /// [`Groth16Proof`](crate::primitives::Groth16Proof) or a
-    /// [`Bctv14Proof`](crate::primitives::Bctv14Proof).
-    #[serde(bound(serialize = "P: ZkSnarkProof", deserialize = "P: ZkSnarkProof"))]
-    pub zkproof: P,
-    /// A ciphertext component for this output note.
-    pub enc_ciphertexts: [sprout::note::EncryptedCiphertext; 2],
-}
-
-// Because x25519_dalek::PublicKey does not impl PartialEq
-impl<P: ZkSnarkProof> PartialEq for JoinSplit<P> {
-    fn eq(&self, other: &Self) -> bool {
-        self.vpub_old == other.vpub_old
-            && self.vpub_new == other.vpub_new
-            && self.anchor == other.anchor
-            && self.nullifiers == other.nullifiers
-            && self.commitments == other.commitments
-            && self.ephemeral_key.as_bytes() == other.ephemeral_key.as_bytes()
-            && self.random_seed == other.random_seed
-            && self.vmacs == other.vmacs
-            && self.zkproof == other.zkproof
-            && self.enc_ciphertexts == other.enc_ciphertexts
-    }
-}
-
-// Because x25519_dalek::PublicKey does not impl Eq
-impl<P: ZkSnarkProof> Eq for JoinSplit<P> {}
 
 /// A bundle of JoinSplit descriptions and signature data.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -68,7 +12,7 @@ pub struct JoinSplitData<P: ZkSnarkProof> {
     ///
     /// Storing this separately from `rest` ensures that it is impossible
     /// to construct an invalid `JoinSplitData` with no `JoinSplit`s.
-    ///
+    ///`
     /// However, it's not necessary to access or process `first` and `rest`
     /// separately, as the [`JoinSplitData::joinsplits`] method provides an
     /// iterator over all of the `JoinSplit`s.

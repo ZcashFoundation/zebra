@@ -3,15 +3,13 @@ use futures::future::Either;
 use proptest::{arbitrary::any, array, collection::vec, option, prelude::*};
 
 use crate::{
-    amount::{Amount, NonNegative},
+    amount::Amount,
     block,
     primitives::{Bctv14Proof, Groth16Proof, ZkSnarkProof},
     sapling, sprout, transparent,
 };
 
-use super::super::{
-    JoinSplit, JoinSplitData, LockTime, Memo, ShieldedData, Transaction,
-};
+use super::super::{JoinSplitData, LockTime, Memo, ShieldedData, Transaction};
 
 impl Transaction {
     pub fn v1_strategy() -> impl Strategy<Value = Self> {
@@ -131,62 +129,13 @@ impl Arbitrary for LockTime {
     type Strategy = BoxedStrategy<Self>;
 }
 
-impl<P: ZkSnarkProof + Arbitrary + 'static> Arbitrary for JoinSplit<P> {
-    type Parameters = ();
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        (
-            any::<Amount<NonNegative>>(),
-            any::<Amount<NonNegative>>(),
-            any::<sprout::tree::NoteTreeRootHash>(),
-            array::uniform2(any::<sprout::note::Nullifier>()),
-            array::uniform2(any::<sprout::commitment::NoteCommitment>()),
-            array::uniform32(any::<u8>()),
-            array::uniform32(any::<u8>()),
-            array::uniform2(any::<sprout::note::MAC>()),
-            any::<P>(),
-            array::uniform2(any::<sprout::note::EncryptedCiphertext>()),
-        )
-            .prop_map(
-                |(
-                    vpub_old,
-                    vpub_new,
-                    anchor,
-                    nullifiers,
-                    commitments,
-                    ephemeral_key_bytes,
-                    random_seed,
-                    vmacs,
-                    zkproof,
-                    enc_ciphertexts,
-                )| {
-                    Self {
-                        vpub_old,
-                        vpub_new,
-                        anchor,
-                        nullifiers,
-                        commitments,
-                        ephemeral_key: x25519_dalek::PublicKey::from(ephemeral_key_bytes),
-                        random_seed,
-                        vmacs,
-                        zkproof,
-                        enc_ciphertexts,
-                    }
-                },
-            )
-            .boxed()
-    }
-
-    type Strategy = BoxedStrategy<Self>;
-}
-
 impl<P: ZkSnarkProof + Arbitrary + 'static> Arbitrary for JoinSplitData<P> {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         (
-            any::<JoinSplit<P>>(),
-            vec(any::<JoinSplit<P>>(), 0..10),
+            any::<sprout::JoinSplit<P>>(),
+            vec(any::<sprout::JoinSplit<P>>(), 0..10),
             array::uniform32(any::<u8>()),
             vec(any::<u8>(), 64),
         )
@@ -234,7 +183,6 @@ impl Arbitrary for ShieldedData {
 
     type Strategy = BoxedStrategy<Self>;
 }
-
 
 impl Arbitrary for Transaction {
     type Parameters = ();
