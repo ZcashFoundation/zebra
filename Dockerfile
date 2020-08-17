@@ -2,7 +2,9 @@ FROM rust:stretch as builder
 
 RUN apt-get update && \
 	apt-get install -y --no-install-recommends \
-	make cmake g++ gcc llvm libclang-dev libc++-dev
+	make cmake g++ gcc llvm libclang-dev libc++1
+
+# libc++-dev
 
 RUN mkdir /zebra
 WORKDIR /zebra
