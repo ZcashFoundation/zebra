@@ -4,8 +4,6 @@ RUN apt-get update && \
 	apt-get install -y --no-install-recommends \
 	make cmake g++ gcc llvm libclang-dev
 
-# libc++-dev
-
 RUN mkdir /zebra
 WORKDIR /zebra
 
