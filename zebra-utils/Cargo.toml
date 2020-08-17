@@ -4,6 +4,8 @@ authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 version = "3.0.0-alpha.0"
 edition = "2018"
+# Prevent accidental publication of this utility crate.
+publish = false
 
 [dependencies]
 abscissa_core = "0.5"
