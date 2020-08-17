@@ -9,6 +9,7 @@
 //! The block work is used to find the chain with the greatest total work. Each
 //! block's work value depends on the fixed threshold in the block header, not
 //! the actual work represented by the block header hash.
+#![allow(clippy::unit_arg)]
 
 use crate::block;
 
