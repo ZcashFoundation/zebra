@@ -397,14 +397,13 @@ impl ZcashSerialize for Transaction {
         //
         // Since we checkpoint on Sapling activation, we won't ever need
         // to check the smaller pre-Sapling transaction size limit.
-        writer.write_u32::<LittleEndian>(self.header())?;
-
         match self {
             Transaction::V1 {
                 inputs,
                 outputs,
                 lock_time,
             } => {
+                writer.write_u32::<LittleEndian>(1)?;
                 inputs.zcash_serialize(&mut writer)?;
                 outputs.zcash_serialize(&mut writer)?;
                 lock_time.zcash_serialize(&mut writer)?;
@@ -415,6 +414,7 @@ impl ZcashSerialize for Transaction {
                 lock_time,
                 joinsplit_data,
             } => {
+                writer.write_u32::<LittleEndian>(2)?;
                 inputs.zcash_serialize(&mut writer)?;
                 outputs.zcash_serialize(&mut writer)?;
                 lock_time.zcash_serialize(&mut writer)?;
@@ -431,6 +431,8 @@ impl ZcashSerialize for Transaction {
                 expiry_height,
                 joinsplit_data,
             } => {
+                // Write version 3 and set the fOverwintered bit.
+                writer.write_u32::<LittleEndian>(3 | (1 << 31))?;
                 writer.write_u32::<LittleEndian>(OVERWINTER_VERSION_GROUP_ID)?;
                 inputs.zcash_serialize(&mut writer)?;
                 outputs.zcash_serialize(&mut writer)?;
@@ -451,6 +453,8 @@ impl ZcashSerialize for Transaction {
                 shielded_data,
                 joinsplit_data,
             } => {
+                // Write version 4 and set the fOverwintered bit.
+                writer.write_u32::<LittleEndian>(4 | (1 << 31))?;
                 writer.write_u32::<LittleEndian>(SAPLING_VERSION_GROUP_ID)?;
                 inputs.zcash_serialize(&mut writer)?;
                 outputs.zcash_serialize(&mut writer)?;

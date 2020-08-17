@@ -165,22 +165,4 @@ impl Transaction {
         }
         .sighash()
     }
-
-    fn header(&self) -> u32 {
-        match self {
-            Transaction::V1 { .. } => 1,
-            Transaction::V2 { .. } => 2,
-            Transaction::V3 { .. } => 3 | 1 << 31,
-            Transaction::V4 { .. } => 4 | 1 << 31,
-        }
-    }
-
-    fn group_id(&self) -> Option<u32> {
-        match self {
-            Transaction::V1 { .. } => None,
-            Transaction::V2 { .. } => None,
-            Transaction::V3 { .. } => Some(OVERWINTER_VERSION_GROUP_ID),
-            Transaction::V4 { .. } => Some(SAPLING_VERSION_GROUP_ID),
-        }
-    }
 }

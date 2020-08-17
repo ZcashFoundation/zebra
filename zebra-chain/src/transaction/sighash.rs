@@ -1,5 +1,5 @@
 #![allow(dead_code, unused_variables)]
-use super::{Transaction, TransparentInput};
+use super::{Transaction, TransparentInput, OVERWINTER_VERSION_GROUP_ID, SAPLING_VERSION_GROUP_ID};
 use crate::{
     parameters::ConsensusBranchId, serialization::ZcashSerialize, types::BlockHeight, Network,
     NetworkUpgrade,
@@ -22,11 +22,11 @@ const SIGHASH_SINGLE: u32 = 3;
 const SIGHASH_MASK: u32 = 0x1f;
 const SIGHASH_ANYONECANPAY: u32 = 0x80;
 
-pub struct SigHasher<'a> {
-    pub(crate) trans: &'a Transaction,
-    pub(crate) hash_type: u32,
-    pub(crate) network: Network,
-    pub(crate) height: BlockHeight,
+pub(super) struct SigHasher<'a> {
+    pub(super) trans: &'a Transaction,
+    pub(super) hash_type: u32,
+    pub(super) network: Network,
+    pub(super) height: BlockHeight,
 }
 
 impl<'a> SigHasher<'a> {
@@ -97,11 +97,21 @@ impl<'a> SigHasher<'a> {
     }
 
     fn hash_header<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        writer.write_u32::<LittleEndian>(self.trans.header())
+        writer.write_u32::<LittleEndian>(match &self.trans {
+            Transaction::V1 { .. } => 1,
+            Transaction::V2 { .. } => 2,
+            Transaction::V3 { .. } => 3 | 1 << 31,
+            Transaction::V4 { .. } => 4 | 1 << 31,
+        })
     }
 
     fn hash_groupid<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        writer.write_u32::<LittleEndian>(self.trans.group_id().expect("Transaction is V3 or later"))
+        writer.write_u32::<LittleEndian>(match &self.trans {
+            Transaction::V1 { .. } => unreachable!(),
+            Transaction::V2 { .. } => unreachable!(),
+            Transaction::V3 { .. } => OVERWINTER_VERSION_GROUP_ID,
+            Transaction::V4 { .. } => SAPLING_VERSION_GROUP_ID,
+        })
     }
 
     fn hash_prevouts<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
