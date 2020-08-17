@@ -6,7 +6,7 @@ mod keys;
 mod script;
 mod serialize;
 
-pub use address::TransparentAddress;
+pub use address::Address;
 pub use script::Script;
 
 #[cfg(test)]

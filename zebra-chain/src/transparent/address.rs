@@ -42,7 +42,7 @@ mod magics {
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#transparentaddrencoding
 #[derive(Copy, Clone, Eq, PartialEq)]
-pub enum TransparentAddress {
+pub enum Address {
     /// P2SH (Pay to Script Hash) addresses
     PayToScriptHash {
         /// Production, test, or other network
@@ -60,19 +60,19 @@ pub enum TransparentAddress {
     },
 }
 
-impl fmt::Debug for TransparentAddress {
+impl fmt::Debug for Address {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut debug_struct = f.debug_struct("TransparentAddress");
 
         match self {
-            TransparentAddress::PayToScriptHash {
+            Address::PayToScriptHash {
                 network,
                 script_hash,
             } => debug_struct
                 .field("network", network)
                 .field("script_hash", &hex::encode(script_hash))
                 .finish(),
-            TransparentAddress::PayToPublicKeyHash {
+            Address::PayToPublicKeyHash {
                 network,
                 pub_key_hash,
             } => debug_struct
@@ -83,7 +83,7 @@ impl fmt::Debug for TransparentAddress {
     }
 }
 
-impl fmt::Display for TransparentAddress {
+impl fmt::Display for Address {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut bytes = io::Cursor::new(Vec::new());
         let _ = self.zcash_serialize(&mut bytes);
@@ -92,25 +92,25 @@ impl fmt::Display for TransparentAddress {
     }
 }
 
-impl From<Script> for TransparentAddress {
+impl From<Script> for Address {
     fn from(script: Script) -> Self {
-        TransparentAddress::PayToScriptHash {
+        Address::PayToScriptHash {
             network: Network::Mainnet,
             script_hash: Self::hash_payload(&script.0[..]),
         }
     }
 }
 
-impl From<PublicKey> for TransparentAddress {
+impl From<PublicKey> for Address {
     fn from(pub_key: PublicKey) -> Self {
-        TransparentAddress::PayToPublicKeyHash {
+        Address::PayToPublicKeyHash {
             network: Network::Mainnet,
             pub_key_hash: Self::hash_payload(&pub_key.serialize()[..]),
         }
     }
 }
 
-impl std::str::FromStr for TransparentAddress {
+impl std::str::FromStr for Address {
     type Err = SerializationError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -123,10 +123,10 @@ impl std::str::FromStr for TransparentAddress {
     }
 }
 
-impl ZcashSerialize for TransparentAddress {
+impl ZcashSerialize for Address {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         match self {
-            TransparentAddress::PayToScriptHash {
+            Address::PayToScriptHash {
                 network,
                 script_hash,
             } => {
@@ -138,7 +138,7 @@ impl ZcashSerialize for TransparentAddress {
                 }
                 writer.write_all(script_hash)?
             }
-            TransparentAddress::PayToPublicKeyHash {
+            Address::PayToPublicKeyHash {
                 network,
                 pub_key_hash,
             } => {
@@ -156,7 +156,7 @@ impl ZcashSerialize for TransparentAddress {
     }
 }
 
-impl ZcashDeserialize for TransparentAddress {
+impl ZcashDeserialize for Address {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         let mut version_bytes = [0; 2];
         reader.read_exact(&mut version_bytes)?;
@@ -165,19 +165,19 @@ impl ZcashDeserialize for TransparentAddress {
         reader.read_exact(&mut hash_bytes)?;
 
         match version_bytes {
-            magics::p2sh::MAINNET => Ok(TransparentAddress::PayToScriptHash {
+            magics::p2sh::MAINNET => Ok(Address::PayToScriptHash {
                 network: Network::Mainnet,
                 script_hash: hash_bytes,
             }),
-            magics::p2sh::TESTNET => Ok(TransparentAddress::PayToScriptHash {
+            magics::p2sh::TESTNET => Ok(Address::PayToScriptHash {
                 network: Network::Testnet,
                 script_hash: hash_bytes,
             }),
-            magics::p2pkh::MAINNET => Ok(TransparentAddress::PayToPublicKeyHash {
+            magics::p2pkh::MAINNET => Ok(Address::PayToPublicKeyHash {
                 network: Network::Mainnet,
                 pub_key_hash: hash_bytes,
             }),
-            magics::p2pkh::TESTNET => Ok(TransparentAddress::PayToPublicKeyHash {
+            magics::p2pkh::TESTNET => Ok(Address::PayToPublicKeyHash {
                 network: Network::Testnet,
                 pub_key_hash: hash_bytes,
             }),
@@ -186,7 +186,7 @@ impl ZcashDeserialize for TransparentAddress {
     }
 }
 
-impl TransparentAddress {
+impl Address {
     /// A hash of a transparent address payload, as used in
     /// transparent pay-to-script-hash and pay-to-publickey-hash
     /// addresses.
@@ -204,7 +204,7 @@ impl TransparentAddress {
 }
 
 #[cfg(test)]
-impl TransparentAddress {
+impl Address {
     fn p2pkh_strategy() -> impl Strategy<Value = Self> {
         (any::<Network>(), vec(any::<u8>(), 20))
             .prop_map(|(network, payload_bytes)| {
@@ -233,7 +233,7 @@ impl TransparentAddress {
 }
 
 #[cfg(test)]
-impl Arbitrary for TransparentAddress {
+impl Arbitrary for Address {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
@@ -258,7 +258,7 @@ mod tests {
         ])
         .expect("A PublicKey from slice");
 
-        let t_addr = TransparentAddress::from(pub_key);
+        let t_addr = Address::from(pub_key);
 
         assert_eq!(format!("{}", t_addr), "t1bmMa1wJDFdbc2TiURQP5BbBz6jHjUBuHq");
     }
@@ -267,21 +267,21 @@ mod tests {
     fn empty_script() {
         let script = Script(vec![0; 20]);
 
-        let t_addr = TransparentAddress::from(script);
+        let t_addr = Address::from(script);
 
         assert_eq!(format!("{}", t_addr), "t3Y5pHwfgHbS6pDjj1HLuMFxhFFip1fcJ6g");
     }
 
     #[test]
     fn from_string() {
-        let t_addr: TransparentAddress = "t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd".parse().unwrap();
+        let t_addr: Address = "t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd".parse().unwrap();
 
         assert_eq!(format!("{}", t_addr), "t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd");
     }
 
     #[test]
     fn debug() {
-        let t_addr: TransparentAddress = "t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd".parse().unwrap();
+        let t_addr: Address = "t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd".parse().unwrap();
 
         assert_eq!(
             format!("{:?}", t_addr),
@@ -294,13 +294,13 @@ mod tests {
 proptest! {
 
     #[test]
-    fn transparent_address_roundtrip(taddr in any::<TransparentAddress>()) {
+    fn transparent_address_roundtrip(taddr in any::<Address>()) {
 
         let mut data = Vec::new();
 
         taddr.zcash_serialize(&mut data).expect("t-addr should serialize");
 
-        let taddr2 = TransparentAddress::zcash_deserialize(&data[..]).expect("randomized t-addr should deserialize");
+        let taddr2 = Address::zcash_deserialize(&data[..]).expect("randomized t-addr should deserialize");
 
         prop_assert_eq![taddr, taddr2];
     }
