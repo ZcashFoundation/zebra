@@ -15,9 +15,8 @@ use zcash_script::{
     zcash_script_error_t_zcash_script_ERR_TX_SIZE_MISMATCH,
 };
 use zebra_chain::{
-    parameters::ConsensusBranchId,
-    serialization::ZcashSerialize,
-    transaction::{Transaction, TransparentOutput},
+    parameters::ConsensusBranchId, serialization::ZcashSerialize, transaction::Transaction,
+    transparent,
 };
 
 #[derive(Debug, Display, Error)]
@@ -99,7 +98,7 @@ fn verify_script(
 }
 
 /// Verify a script within a transaction given the corresponding
-/// `TransparentOutput` it is spending and the `ConsensusBranchId` of the block
+/// `transparent::Output` it is spending and the `ConsensusBranchId` of the block
 /// containing the transaction.
 ///
 /// # Details
@@ -109,7 +108,7 @@ fn verify_script(
 pub fn is_valid(
     transaction: Arc<Transaction>,
     branch_id: ConsensusBranchId,
-    (input_index, previous_output): (u32, TransparentOutput),
+    (input_index, previous_output): (u32, transparent::Output),
 ) -> Result<(), Error> {
     assert!((input_index as usize) < transaction.inputs().len());
 
@@ -117,7 +116,7 @@ pub fn is_valid(
         .zcash_serialize_to_vec()
         .expect("serialization into a vec is infallible");
 
-    let TransparentOutput { value, lock_script } = previous_output;
+    let transparent::Output { value, lock_script } = previous_output;
 
     verify_script(
         &lock_script.0,
@@ -136,7 +135,7 @@ mod tests {
     use hex::FromHex;
     use std::convert::TryInto;
     use std::sync::Arc;
-    use zebra_chain::{serialization::ZcashDeserializeInto, types::Script};
+    use zebra_chain::{serialization::ZcashDeserializeInto, transparent};
     use zebra_test::prelude::*;
 
     lazy_static::lazy_static! {
@@ -152,9 +151,9 @@ mod tests {
             SCRIPT_TX.zcash_deserialize_into::<Arc<zebra_chain::transaction::Transaction>>()?;
         let coin = u64::pow(10, 8);
         let amount = 212 * coin;
-        let output = TransparentOutput {
+        let output = transparent::Output {
             value: amount.try_into()?,
-            lock_script: Script(SCRIPT_PUBKEY.clone()),
+            lock_script: transparent::Script(SCRIPT_PUBKEY.clone()),
         };
         let input_index = 0;
         let branch_id = ConsensusBranchId::BLOSSOM;
