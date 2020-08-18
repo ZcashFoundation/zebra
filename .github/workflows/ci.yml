@@ -24,6 +24,9 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: fetch
+      - name: install LLVM on Windows
+        if: matrix.os == 'windows-latest'
+        run: choco install llvm -y
       - name: Run tests
         uses: actions-rs/cargo@v1
         with:
@@ -43,6 +46,9 @@ jobs:
         with:
           toolchain: stable
           override: true
+      - name: install LLVM on Windows
+        if: matrix.os == 'windows-latest'
+        run: choco install llvm -y
       - name: cargo fetch
         uses: actions-rs/cargo@v1
         with:
@@ -99,4 +105,4 @@ jobs:
           version: 'latest'
           timeout: 600
       - name: Upload coverage report to Codecov
-        uses: codecov/codecov-action@v1.0.12
+        uses: codecov/codecov-action@v1.0.13

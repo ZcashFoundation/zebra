@@ -72,8 +72,25 @@ pub(crate) const TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] 
 #[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
 pub struct ConsensusBranchId(u32);
 
+impl ConsensusBranchId {
+    /// Consensus branch ID for the overwinter network branch
+    pub const OVERWINTER: ConsensusBranchId = ConsensusBranchId(0x5ba81b19);
+
+    /// Consensus branch ID for the sapling network branch
+    pub const SAPLING: ConsensusBranchId = ConsensusBranchId(0x76b809bb);
+
+    /// Consensus branch ID for the blossom network branch
+    pub const BLOSSOM: ConsensusBranchId = ConsensusBranchId(0x2bb40e60);
+
+    /// Consensus branch ID for the heartwood network branch
+    pub const HEARTWOOD: ConsensusBranchId = ConsensusBranchId(0xf5b9230b);
+
+    /// Consensus branch ID for the canopy network branch
+    pub const CANOPY: ConsensusBranchId = ConsensusBranchId(0xe9ff75a6);
+}
+
 impl From<ConsensusBranchId> for u32 {
-    fn from(branch: ConsensusBranchId) -> Self {
+    fn from(branch: ConsensusBranchId) -> u32 {
         branch.0
     }
 }
@@ -90,13 +107,13 @@ impl From<ConsensusBranchId> for u32 {
 /// do the uniqueness check in the unit tests.
 pub(crate) const CONSENSUS_BRANCH_IDS: &[(NetworkUpgrade, ConsensusBranchId)] = &[
     // TODO(teor): byte order?
-    (Overwinter, ConsensusBranchId(0x5ba81b19)),
-    (Sapling, ConsensusBranchId(0x76b809bb)),
-    (Blossom, ConsensusBranchId(0x2bb40e60)),
-    (Heartwood, ConsensusBranchId(0xf5b9230b)),
+    (Overwinter, ConsensusBranchId::OVERWINTER),
+    (Sapling, ConsensusBranchId::SAPLING),
+    (Blossom, ConsensusBranchId::BLOSSOM),
+    (Heartwood, ConsensusBranchId::HEARTWOOD),
     // As of 21 July 2020. Could change before mainnet activation.
     // See ZIP 251 for updates.
-    (Canopy, ConsensusBranchId(0xe9ff75a6)),
+    (Canopy, ConsensusBranchId::CANOPY),
 ];
 
 impl NetworkUpgrade {
