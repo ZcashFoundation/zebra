@@ -22,7 +22,7 @@ pub fn get_child(args: &[&str], tempdir: &PathBuf) -> Result<TestChild> {
 #[test]
 fn generate_no_args() -> Result<()> {
     zebra_test::init();
-    let (tempdir, _guard) = tempdir(true)?;
+    let (tempdir, _guard) = tempdir(true, None)?;
 
     let child = get_child(&["generate"], &tempdir)?;
     let output = child.wait_with_output()?;
@@ -37,7 +37,7 @@ fn generate_no_args() -> Result<()> {
 #[test]
 fn generate_args() -> Result<()> {
     zebra_test::init();
-    let (tempdir, _guard) = tempdir(false)?;
+    let (tempdir, _guard) = tempdir(false, None)?;
 
     // unexpected free argument `argument`
     let child = get_child(&["generate", "argument"], &tempdir)?;
@@ -79,7 +79,7 @@ fn generate_args() -> Result<()> {
 #[test]
 fn help_no_args() -> Result<()> {
     zebra_test::init();
-    let (tempdir, _guard) = tempdir(true)?;
+    let (tempdir, _guard) = tempdir(true, None)?;
 
     let child = get_child(&["help"], &tempdir)?;
     let output = child.wait_with_output()?;
@@ -97,7 +97,7 @@ fn help_no_args() -> Result<()> {
 #[test]
 fn help_args() -> Result<()> {
     zebra_test::init();
-    let (tempdir, _guard) = tempdir(true)?;
+    let (tempdir, _guard) = tempdir(true, None)?;
 
     // The subcommand "argument" wasn't recognized.
     let child = get_child(&["help", "argument"], &tempdir)?;
@@ -115,7 +115,7 @@ fn help_args() -> Result<()> {
 #[test]
 fn revhex_args() -> Result<()> {
     zebra_test::init();
-    let (tempdir, _guard) = tempdir(true)?;
+    let (tempdir, _guard) = tempdir(true, None)?;
 
     // Valid
     let child = get_child(&["revhex", "33eeff55"], &tempdir)?;
@@ -127,9 +127,13 @@ fn revhex_args() -> Result<()> {
     Ok(())
 }
 
+#[test]
 fn seed_no_args() -> Result<()> {
     zebra_test::init();
-    let (tempdir, _guard) = tempdir(true)?;
+    let (tempdir, _guard) = tempdir(
+        true,
+        Some("[network]\nlisten_addr = '127.0.0.1:0'\n".to_string()),
+    )?;
 
     let mut child = get_child(&["-v", "seed"], &tempdir)?;
 
@@ -151,7 +155,7 @@ fn seed_no_args() -> Result<()> {
 #[test]
 fn seed_args() -> Result<()> {
     zebra_test::init();
-    let (tempdir, _guard) = tempdir(true)?;
+    let (tempdir, _guard) = tempdir(true, None)?;
 
     // unexpected free argument `argument`
     let child = get_child(&["seed", "argument"], &tempdir)?;
@@ -171,9 +175,13 @@ fn seed_args() -> Result<()> {
     Ok(())
 }
 
+#[test]
 fn start_no_args() -> Result<()> {
     zebra_test::init();
-    let (tempdir, _guard) = tempdir(true)?;
+    let (tempdir, _guard) = tempdir(
+        true,
+        Some("[network]\nlisten_addr = '127.0.0.1:0'\n".to_string()),
+    )?;
 
     let mut child = get_child(&["-v", "start"], &tempdir)?;
 
@@ -192,9 +200,13 @@ fn start_no_args() -> Result<()> {
     Ok(())
 }
 
+#[test]
 fn start_args() -> Result<()> {
     zebra_test::init();
-    let (tempdir, _guard) = tempdir(true)?;
+    let (tempdir, _guard) = tempdir(
+        true,
+        Some("[network]\nlisten_addr = '127.0.0.1:0'\n".to_string()),
+    )?;
 
     // Any free argument is valid
     let mut child = get_child(&["start", "argument"], &tempdir)?;
@@ -219,7 +231,7 @@ fn start_args() -> Result<()> {
 #[test]
 fn app_no_args() -> Result<()> {
     zebra_test::init();
-    let (tempdir, _guard) = tempdir(true)?;
+    let (tempdir, _guard) = tempdir(true, None)?;
 
     let child = get_child(&[], &tempdir)?;
     let output = child.wait_with_output()?;
@@ -233,7 +245,7 @@ fn app_no_args() -> Result<()> {
 #[test]
 fn version_no_args() -> Result<()> {
     zebra_test::init();
-    let (tempdir, _guard) = tempdir(true)?;
+    let (tempdir, _guard) = tempdir(true, None)?;
 
     let child = get_child(&["version"], &tempdir)?;
     let output = child.wait_with_output()?;
@@ -247,7 +259,7 @@ fn version_no_args() -> Result<()> {
 #[test]
 fn version_args() -> Result<()> {
     zebra_test::init();
-    let (tempdir, _guard) = tempdir(true)?;
+    let (tempdir, _guard) = tempdir(true, None)?;
 
     // unexpected free argument `argument`
     let child = get_child(&["version", "argument"], &tempdir)?;
@@ -263,18 +275,12 @@ fn version_args() -> Result<()> {
 }
 
 #[test]
-fn serialized_tests() -> Result<()> {
-    start_no_args()?;
-    start_args()?;
-    seed_no_args()?;
-    valid_generated_config()?;
-
-    Ok(())
-}
-
 fn valid_generated_config() -> Result<()> {
     zebra_test::init();
-    let (tempdir, _guard) = tempdir(false)?;
+    let (tempdir, _guard) = tempdir(
+        false,
+        Some("[network]\nlisten_addr = '127.0.0.1:0'\n".to_string()),
+    )?;
 
     // Add a config file name to tempdir path
     let mut generated_config_path = tempdir.clone();

@@ -17,23 +17,29 @@ pub fn test_cmd(command_path: &str, tempdir: &PathBuf) -> Result<Command> {
     Ok(cmd)
 }
 
-/// Create a temp directory and optional config file
-pub fn tempdir(create_config: bool) -> Result<(PathBuf, impl Drop)> {
+/// Create a temp directory and optional default config file with optional additional options
+pub fn tempdir(
+    create_config: bool,
+    additional_config: Option<String>,
+) -> Result<(PathBuf, impl Drop)> {
     let dir = TempDir::new("zebrad_tests")?;
 
     if create_config {
         let cache_dir = dir.path().join("state");
         fs::create_dir(&cache_dir)?;
-        fs::File::create(dir.path().join("zebrad.toml"))?.write_all(
-            format!(
-                "[state]\ncache_dir = '{}'\nmemory_cache_bytes = 256000000",
-                cache_dir
-                    .into_os_string()
-                    .into_string()
-                    .map_err(|_| eyre!("tmp dir path cannot be encoded as UTF8"))?
-            )
-            .as_bytes(),
-        )?;
+
+        let mut content: String = format!(
+            "[state]\ncache_dir = '{}'\nmemory_cache_bytes = 256000000\n",
+            cache_dir
+                .into_os_string()
+                .into_string()
+                .map_err(|_| eyre!("tmp dir path cannot be encoded as UTF8"))?
+        );
+        if additional_config.is_some() {
+            content = format!("{}{}", content, additional_config.unwrap());
+        }
+
+        fs::File::create(dir.path().join("zebrad.toml"))?.write_all(content.as_bytes())?;
     }
 
     Ok((dir.path().to_path_buf(), dir))
