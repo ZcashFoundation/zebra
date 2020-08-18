@@ -1,8 +1,8 @@
-FROM rust:stretch as builder
+FROM rust:buster as builder
 
 RUN apt-get update && \
 	apt-get install -y --no-install-recommends \
-	make cmake g++ gcc
+	make cmake g++ gcc llvm libclang-dev
 
 RUN mkdir /zebra
 WORKDIR /zebra
