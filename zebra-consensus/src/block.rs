@@ -8,9 +8,12 @@
 //! Verification is provided via a `tower::Service`, to support backpressure and batch
 //! verification.
 
+mod checks;
+
 #[cfg(test)]
 mod tests;
 
+use checks::*;
 use chrono::Utc;
 use color_eyre::eyre::{eyre, Report};
 use futures_util::FutureExt;
@@ -106,7 +109,7 @@ where
             // Field validity and structure checks
             let now = Utc::now();
             block.header.is_time_valid_at(now)?;
-            block.is_coinbase_first()?;
+            is_coinbase_first(&block)?;
 
             // TODO:
             //   - context-free header verification: merkle root
