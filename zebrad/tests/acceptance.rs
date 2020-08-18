@@ -277,10 +277,7 @@ fn version_args() -> Result<()> {
 #[test]
 fn valid_generated_config() -> Result<()> {
     zebra_test::init();
-    let (tempdir, _guard) = tempdir(
-        false,
-        Some("[network]\nlisten_addr = '127.0.0.1:0'\n".to_string()),
-    )?;
+    let (tempdir, _guard) = tempdir(false, None)?;
 
     // Add a config file name to tempdir path
     let mut generated_config_path = tempdir.clone();
