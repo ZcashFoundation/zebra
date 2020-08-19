@@ -127,6 +127,7 @@ fn revhex_args() -> Result<()> {
     Ok(())
 }
 
+#[test]
 fn seed_no_args() -> Result<()> {
     zebra_test::init();
     let (tempdir, _guard) = tempdir(true)?;
@@ -171,6 +172,7 @@ fn seed_args() -> Result<()> {
     Ok(())
 }
 
+#[test]
 fn start_no_args() -> Result<()> {
     zebra_test::init();
     let (tempdir, _guard) = tempdir(true)?;
@@ -192,6 +194,7 @@ fn start_no_args() -> Result<()> {
     Ok(())
 }
 
+#[test]
 fn start_args() -> Result<()> {
     zebra_test::init();
     let (tempdir, _guard) = tempdir(true)?;
@@ -263,15 +266,6 @@ fn version_args() -> Result<()> {
 }
 
 #[test]
-fn serialized_tests() -> Result<()> {
-    start_no_args()?;
-    start_args()?;
-    seed_no_args()?;
-    valid_generated_config()?;
-
-    Ok(())
-}
-
 fn valid_generated_config() -> Result<()> {
     zebra_test::init();
     let (tempdir, _guard) = tempdir(false)?;

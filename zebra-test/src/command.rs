@@ -26,7 +26,7 @@ pub fn tempdir(create_config: bool) -> Result<(PathBuf, impl Drop)> {
         fs::create_dir(&cache_dir)?;
         fs::File::create(dir.path().join("zebrad.toml"))?.write_all(
             format!(
-                "[state]\ncache_dir = '{}'\nmemory_cache_bytes = 256000000",
+                "[state]\ncache_dir = '{}'\nmemory_cache_bytes = 256000000\n[network]\nlisten_addr = '127.0.0.1:0'\n",
                 cache_dir
                     .into_os_string()
                     .into_string()
