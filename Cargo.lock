@@ -3126,7 +3126,6 @@ dependencies = [
  "tracing-error",
  "tracing-futures",
  "zebra-chain",
- "zebra-consensus",
  "zebra-test",
 ]
 
@@ -3166,7 +3165,6 @@ dependencies = [
  "tower",
  "tracing",
  "tracing-error",
- "tracing-futures",
  "zebra-chain",
  "zebra-test",
 ]
@@ -3194,7 +3192,6 @@ dependencies = [
 name = "zebra-utils"
 version = "3.0.0-alpha.0"
 dependencies = [
- "abscissa_core",
  "color-eyre",
  "hex",
  "serde_json",
