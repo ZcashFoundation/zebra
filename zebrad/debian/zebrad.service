@@ -1,0 +1,13 @@
+[Unit]
+AssertPathExists=/usr/bin/zebrad
+
+[Service]
+WorkingDirectory=~
+ExecStart=/usr/bin/zebrad start
+Restart=always
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+Alias=zebrad
+WantedBy=default.target

@@ -5,6 +5,16 @@ license = "MIT OR Apache-2.0"
 version = "3.0.0-alpha.0"
 edition = "2018"
 
+[package.metadata.deb]
+extended-description = "Zebra Node"
+assets = [
+    ["../target/release/zebrad", "/usr/bin/zebrad", "755"],
+    ["debian/zebrad.service", "/lib/systemd/system/zebrad.service", "644"],
+]
+maintainer-scripts = "debian/scripts"
+
+[package.metadata.deb.systemd-units]
+
 [dependencies]
 zebra-chain = { path = "../zebra-chain" }
 zebra-consensus = { path = "../zebra-consensus/" }
