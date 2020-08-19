@@ -335,7 +335,6 @@ where
 
     /// Queue a download for the genesis block, if it isn't currently known to
     /// our node.
-    #[instrument(skip(self))]
     async fn request_genesis(&mut self) -> Result<(), Report> {
         // Due to Bitcoin protocol limitations, we can't request the genesis
         // block using our standard tip-following algorithm:
@@ -422,7 +421,6 @@ where
     /// Returns `Err(_)` if an error occurs.
     ///
     /// TODO: handle multiple tips in the state.
-    #[instrument(skip(self))]
     async fn state_contains(&mut self, hash: block::Hash) -> Result<bool, Report> {
         match self
             .state
