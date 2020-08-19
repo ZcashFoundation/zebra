@@ -33,7 +33,6 @@ tracing-futures = "0.2"
 tracing-error = { version = "0.1.2", features = ["traced-error"] }
 
 zebra-chain = { path = "../zebra-chain" }
-zebra-consensus = { path = "../zebra-consensus" }
 
 [dev-dependencies]
 proptest = "0.10"
