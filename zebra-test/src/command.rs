@@ -39,7 +39,6 @@ pub fn tempdir(create_config: bool) -> Result<(PathBuf, impl Drop)> {
     Ok((dir.path().to_path_buf(), dir))
 }
 
-
 pub trait CommandExt {
     /// wrapper for `status` fn on `Command` that constructs informative error
     /// reports
