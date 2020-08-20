@@ -186,7 +186,9 @@ fn start_no_args() -> Result<()> {
     let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
 
-    output.stdout_contains(r"Starting zebrad")?;
+    // start is the default mode, so we check for end of line, to distinguish it
+    // from seed
+    output.stdout_contains(r"Starting zebrad$")?;
 
     // Make sure the command was killed
     assert!(output.was_killed());
@@ -270,7 +272,7 @@ fn valid_generated_config_test() -> Result<()> {
     // Unlike the other tests, these tests can not be run in parallel, because
     // they use the generated config. So parallel execution can cause port and
     // cache conflicts.
-    valid_generated_config("start", r"Starting zebrad")?;
+    valid_generated_config("start", r"Starting zebrad$")?;
     valid_generated_config("seed", r"Starting zebrad in seed mode")?;
 
     Ok(())
