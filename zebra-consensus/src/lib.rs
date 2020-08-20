@@ -18,9 +18,13 @@
 pub mod block;
 pub mod chain;
 pub mod checkpoint;
+pub mod config;
 pub mod mempool;
 pub mod parameters;
+
 #[allow(dead_code)] // Remove this once transaction verification is implemented
 mod primitives;
 mod script;
 mod transaction;
+
+pub use crate::config::Config;

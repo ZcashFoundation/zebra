@@ -8,6 +8,7 @@ use std::{net::SocketAddr, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use zebra_consensus::Config as ConsensusSection;
 use zebra_network::Config as NetworkSection;
 use zebra_state::Config as StateSection;
 
@@ -19,6 +20,9 @@ use zebra_state::Config as StateSection;
 #[derive(Clone, Default, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct ZebradConfig {
+    /// Consensus configuration
+    pub consensus: ConsensusSection,
+
     /// Metrics configuration
     pub metrics: MetricsSection,
 
