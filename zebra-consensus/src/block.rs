@@ -91,7 +91,17 @@ where
 
             // Check that this block is actually a new block
             if BlockVerifier::get_block(&mut state, hash).await?.is_some() {
-                Err(format!("Block has already been verified. {:?} {:?}", height, hash))?;
+                // Treat duplicate blocks as a harmless mistake.
+                //
+                // Otherwise, the syncer restarts twice on errors, once on the
+                // original error, and again as it re-submits duplicate blocks.
+                //
+                // TODO:
+                //   - use an error kind enum
+                //   - modify the syncer so it doesn't restart on duplicate
+                //     verify errors
+                tracing::info!(height = ?height, hash = ?hash, "Block is already in the state");
+                return Ok(hash);
             }
 
             // Do the difficulty checks first, to raise the threshold for

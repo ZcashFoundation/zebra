@@ -321,7 +321,10 @@ impl CheckpointVerifier {
     ///  - verification has finished
     fn check_height(&self, height: block::Height) -> Result<(), Error> {
         if height > self.checkpoint_list.max_height() {
-            Err("block is higher than the maximum checkpoint")?;
+            // This is a serious logic error, which we can't recover from
+            panic!(
+                "Block is higher than the maximum checkpoint: caller should check before verifying"
+            );
         }
 
         match self.previous_checkpoint_height() {
@@ -331,11 +334,11 @@ impl CheckpointVerifier {
             InitialTip(previous_height) | PreviousCheckpoint(previous_height)
                 if (height <= previous_height) =>
             {
-                Err(format!("Block has already been verified. {:?}", height))?
+                Err("Block has already been verified")?
             }
             InitialTip(_) | PreviousCheckpoint(_) => {}
             // We're finished, so no checkpoint height is valid
-            FinalCheckpoint => Err("verification has finished")?,
+            FinalCheckpoint => Err("Verification has finished")?,
         };
 
         Ok(())
@@ -364,18 +367,6 @@ impl CheckpointVerifier {
         }
     }
 
-    /// If the block height of `block` is valid, returns that height.
-    ///
-    /// Returns an error if the block's height is invalid, see `check_height()`
-    /// for details.
-    fn check_block(&self, block: &Block) -> Result<block::Height, Error> {
-        let block_height = block
-            .coinbase_height()
-            .ok_or("the block does not have a coinbase height")?;
-        self.check_height(block_height)?;
-        Ok(block_height)
-    }
-
     /// Queue `block` for verification, and return the `Receiver` for the
     /// block's verification result.
     ///
@@ -384,36 +375,47 @@ impl CheckpointVerifier {
     ///
     /// If the block does not have a coinbase height, sends an error on `tx`,
     /// and does not queue the block.
-    fn queue_block(&mut self, block: Arc<Block>) -> oneshot::Receiver<Result<block::Hash, Error>> {
+    pub(super) fn queue_block(
+        &mut self,
+        block: Arc<Block>,
+    ) -> oneshot::Receiver<Result<block::Hash, Error>> {
         // Set up a oneshot channel to send results
         let (tx, rx) = oneshot::channel();
 
         // Check for a valid height
-        let height = match self.check_block(&block) {
-            Ok(height) => height,
-            Err(error) => {
-                // Block errors happen frequently on mainnet, due to bad peers.
+        let height = match block.coinbase_height() {
+            Some(height) => height,
+            None => {
+                let error = "the block does not have a coinbase height".into();
                 tracing::debug!(?error);
-
-                // Sending might fail, depending on what the caller does with rx,
-                // but there's nothing we can do about it.
                 let _ = tx.send(Err(error));
                 return rx;
             }
         };
 
-        // Since we're using Arc<Block>, each entry is a single pointer to the
-        // Arc. But there are a lot of QueuedBlockLists in the queue, so we keep
+        let hash = block.hash();
+
+        // Treat duplicate verified blocks as successful verifies.
+        // Otherwise, the syncer restarts twice on errors, once on the
+        // original error, and again as it re-submits duplicate blocks.
+        if let Err(err) = self.check_height(height) {
+            // Either the block is behind the initial tip from the state, or it
+            // has already been verified by a previous checkpoint.
+            tracing::info!(height = ?height, hash = ?hash, err = ?err);
+            let _ = tx.send(Ok(hash));
+            return rx;
+        }
+
+        // There are a lot of QueuedBlockLists in the queue, so we keep
         // allocations as small as possible.
         let qblocks = self
             .queued
             .entry(height)
             .or_insert_with(|| QueuedBlockList::with_capacity(1));
 
-        let hash = block.hash();
-
         for qb in qblocks.iter_mut() {
             if qb.hash == hash {
+                // TODO: don't restart the syncer on duplicate blocks
                 let old_tx = std::mem::replace(&mut qb.tx, tx);
                 let e = "rejected older of duplicate verification requests".into();
                 tracing::debug!(?e);
@@ -432,19 +434,14 @@ impl CheckpointVerifier {
 
         // Add the block to the list of queued blocks at this height
         let new_qblock = QueuedBlock { block, hash, tx };
-        // This is a no-op for the first block in each QueuedBlockList.
         qblocks.reserve_exact(1);
         qblocks.push(new_qblock);
 
         let is_checkpoint = self.checkpoint_list.contains(height);
-        tracing::debug!(?height, ?hash, ?is_checkpoint, "Queued block");
-
-        // TODO(teor):
-        //   - Remove this log once the CheckpointVerifier is working?
-        //   - Modify the default filter or add another log, so users see
-        //     regular download progress info (vs verification info)
         if is_checkpoint {
             tracing::info!(?height, ?hash, ?is_checkpoint, "Queued checkpoint block");
+        } else {
+            tracing::debug!(?height, ?hash, ?is_checkpoint, "Queued block");
         }
 
         rx

@@ -361,19 +361,22 @@ async fn continuous_blockchain(restart_height: Option<block::Height>) -> Result<
     Ok(())
 }
 
-#[tokio::test]
-async fn block_higher_than_max_checkpoint_fail_test() -> Result<(), Report> {
-    block_higher_than_max_checkpoint_fail().await
+#[test]
+#[should_panic(expected = "higher than the maximum checkpoint")]
+fn block_higher_than_max_checkpoint_fail_test() {
+    block_higher_than_max_checkpoint_fail()
 }
 
 #[spandoc::spandoc]
-async fn block_higher_than_max_checkpoint_fail() -> Result<(), Report> {
+fn block_higher_than_max_checkpoint_fail() {
     zebra_test::init();
 
     let block0 =
-        Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
+        Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
+            .expect("Block should parse");
     let block415000 =
-        Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])?;
+        Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])
+            .expect("Block should parse");
 
     // Make a checkpoint list containing only the genesis block
     let genesis_checkpoint_list: BTreeMap<block::Height, block::Hash> =
@@ -382,8 +385,8 @@ async fn block_higher_than_max_checkpoint_fail() -> Result<(), Report> {
             .cloned()
             .collect();
 
-    let mut checkpoint_verifier =
-        CheckpointVerifier::from_list(genesis_checkpoint_list, None).map_err(|e| eyre!(e))?;
+    let mut checkpoint_verifier = CheckpointVerifier::from_list(genesis_checkpoint_list, None)
+        .expect("CheckpointVerifier::from_list should return Ok");
 
     assert_eq!(
         checkpoint_verifier.previous_checkpoint_height(),
@@ -398,38 +401,8 @@ async fn block_higher_than_max_checkpoint_fail() -> Result<(), Report> {
         block::Height(0)
     );
 
-    /// SPANDOC: Make sure the verifier service is ready
-    let ready_verifier_service = checkpoint_verifier
-        .ready_and()
-        .map_err(|e| eyre!(e))
-        .await?;
-    /// SPANDOC: Set up the future for block 415000
-    let verify_future = timeout(
-        Duration::from_secs(VERIFY_TIMEOUT_SECONDS),
-        ready_verifier_service.call(block415000.clone()),
-    );
-    /// SPANDOC: Wait for the response for block 415000, and expect failure
-    // TODO(teor || jlusby): check error kind
-    let _ = verify_future
-        .map_err(|e| eyre!(e))
-        .await
-        .expect("timeout should not happen")
-        .expect_err("bad block hash should fail");
-
-    assert_eq!(
-        checkpoint_verifier.previous_checkpoint_height(),
-        BeforeGenesis
-    );
-    assert_eq!(
-        checkpoint_verifier.target_checkpoint_height(),
-        WaitingForBlocks
-    );
-    assert_eq!(
-        checkpoint_verifier.checkpoint_list.max_height(),
-        block::Height(0)
-    );
-
-    Ok(())
+    // Should panic in check_block
+    let _ = checkpoint_verifier.queue_block(block415000);
 }
 
 #[tokio::test]
