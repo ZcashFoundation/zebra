@@ -299,8 +299,15 @@ fn valid_generated_config() -> Result<()> {
 
     output.stdout_contains(r"Starting zebrad")?;
 
-    // Make sure the command was killed
-    assert!(output.was_killed());
+    // If the test child has a cache or port conflict with another test, or a
+    // running zebrad or zcashd, then it will panic. But the acceptance tests
+    // expect it to run until it is killed.
+    //
+    // If these conflicts cause test failures:
+    //   - run the tests in an isolated environment,
+    //   - run zebrad on a custom cache path and port,
+    //   - run zcashd on a custom port.
+    assert!(output.was_killed(), "Expected zebrad with generated config to succeed. Are there other acceptance test, zebrad, or zcashd processes running?");
 
     // Run seed using temp dir and kill it at 1 second
     let mut child = get_child(
