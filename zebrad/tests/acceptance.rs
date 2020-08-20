@@ -266,7 +266,17 @@ fn version_args() -> Result<()> {
 }
 
 #[test]
-fn valid_generated_config() -> Result<()> {
+fn valid_generated_config_test() -> Result<()> {
+    // Unlike the other tests, these tests can not be run in parallel, because
+    // they use the generated config. So parallel execution can cause port and
+    // cache conflicts.
+    valid_generated_config("start", r"Starting zebrad")?;
+    valid_generated_config("seed", r"Starting zebrad in seed mode")?;
+
+    Ok(())
+}
+
+fn valid_generated_config(command: &str, expected_output: &str) -> Result<()> {
     zebra_test::init();
     let (tempdir, _guard) = tempdir(false)?;
 
@@ -286,9 +296,9 @@ fn valid_generated_config() -> Result<()> {
     // Check if the file was created
     assert!(generated_config_path.exists());
 
-    // Run start using temp dir and kill it at 1 second
+    // Run command using temp dir and kill it at 1 second
     let mut child = get_child(
-        &["-c", generated_config_path.to_str().unwrap(), "start"],
+        &["-c", generated_config_path.to_str().unwrap(), command],
         &tempdir,
     )?;
     std::thread::sleep(Duration::from_secs(1));
@@ -297,7 +307,7 @@ fn valid_generated_config() -> Result<()> {
     let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
 
-    output.stdout_contains(r"Starting zebrad")?;
+    output.stdout_contains(expected_output)?;
 
     // If the test child has a cache or port conflict with another test, or a
     // running zebrad or zcashd, then it will panic. But the acceptance tests
@@ -309,26 +319,10 @@ fn valid_generated_config() -> Result<()> {
     //   - run zcashd on a custom port.
     assert!(output.was_killed(), "Expected zebrad with generated config to succeed. Are there other acceptance test, zebrad, or zcashd processes running?");
 
-    // Run seed using temp dir and kill it at 1 second
-    let mut child = get_child(
-        &["-c", generated_config_path.to_str().unwrap(), "seed"],
-        &tempdir,
-    )?;
-    std::thread::sleep(Duration::from_secs(1));
-    child.kill()?;
-
-    let output = child.wait_with_output()?;
-    let output = output.assert_failure()?;
-
-    output.stdout_contains(r"Starting zebrad in seed mode")?;
-
-    // Make sure the command was killed
-    assert!(output.was_killed());
-
-    // Check if the temp dir still exist
+    // Check if the temp dir still exists
     assert!(tempdir.exists());
 
-    // Check if the created config file still exist
+    // Check if the created config file still exists
     assert!(generated_config_path.exists());
 
     Ok(())
