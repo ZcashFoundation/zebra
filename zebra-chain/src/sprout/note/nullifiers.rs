@@ -14,7 +14,7 @@ use super::super::keys::SpendingKey;
 /// https://zips.z.cash/protocol/protocol.pdf#commitmentsandnullifiers
 fn prf_nf(a_sk: [u8; 32], rho: [u8; 32]) -> [u8; 32] {
     let mut state = [0u32; 8];
-    let mut block: GenericArray<u8, U64> = GenericArray::default();
+    let mut block = GenericArray::<u8, U64>::default();
 
     block.as_mut_slice()[0..32].copy_from_slice(&a_sk[..]);
     // The first four bits –i.e. the most signicant four bits of the
