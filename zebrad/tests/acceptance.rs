@@ -127,6 +127,7 @@ fn revhex_args() -> Result<()> {
     Ok(())
 }
 
+#[test]
 fn seed_no_args() -> Result<()> {
     zebra_test::init();
     let (tempdir, _guard) = tempdir(true)?;
@@ -171,6 +172,7 @@ fn seed_args() -> Result<()> {
     Ok(())
 }
 
+#[test]
 fn start_no_args() -> Result<()> {
     zebra_test::init();
     let (tempdir, _guard) = tempdir(true)?;
@@ -184,7 +186,9 @@ fn start_no_args() -> Result<()> {
     let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
 
-    output.stdout_contains(r"Starting zebrad")?;
+    // start is the default mode, so we check for end of line, to distinguish it
+    // from seed
+    output.stdout_contains(r"Starting zebrad$")?;
 
     // Make sure the command was killed
     assert!(output.was_killed());
@@ -192,6 +196,7 @@ fn start_no_args() -> Result<()> {
     Ok(())
 }
 
+#[test]
 fn start_args() -> Result<()> {
     zebra_test::init();
     let (tempdir, _guard) = tempdir(true)?;
@@ -263,16 +268,17 @@ fn version_args() -> Result<()> {
 }
 
 #[test]
-fn serialized_tests() -> Result<()> {
-    start_no_args()?;
-    start_args()?;
-    seed_no_args()?;
-    valid_generated_config()?;
+fn valid_generated_config_test() -> Result<()> {
+    // Unlike the other tests, these tests can not be run in parallel, because
+    // they use the generated config. So parallel execution can cause port and
+    // cache conflicts.
+    valid_generated_config("start", r"Starting zebrad$")?;
+    valid_generated_config("seed", r"Starting zebrad in seed mode")?;
 
     Ok(())
 }
 
-fn valid_generated_config() -> Result<()> {
+fn valid_generated_config(command: &str, expected_output: &str) -> Result<()> {
     zebra_test::init();
     let (tempdir, _guard) = tempdir(false)?;
 
@@ -292,9 +298,9 @@ fn valid_generated_config() -> Result<()> {
     // Check if the file was created
     assert!(generated_config_path.exists());
 
-    // Run start using temp dir and kill it at 1 second
+    // Run command using temp dir and kill it at 1 second
     let mut child = get_child(
-        &["-c", generated_config_path.to_str().unwrap(), "start"],
+        &["-c", generated_config_path.to_str().unwrap(), command],
         &tempdir,
     )?;
     std::thread::sleep(Duration::from_secs(1));
@@ -303,31 +309,22 @@ fn valid_generated_config() -> Result<()> {
     let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
 
-    output.stdout_contains(r"Starting zebrad")?;
+    output.stdout_contains(expected_output)?;
 
-    // Make sure the command was killed
-    assert!(output.was_killed());
+    // If the test child has a cache or port conflict with another test, or a
+    // running zebrad or zcashd, then it will panic. But the acceptance tests
+    // expect it to run until it is killed.
+    //
+    // If these conflicts cause test failures:
+    //   - run the tests in an isolated environment,
+    //   - run zebrad on a custom cache path and port,
+    //   - run zcashd on a custom port.
+    assert!(output.was_killed(), "Expected zebrad with generated config to succeed. Are there other acceptance test, zebrad, or zcashd processes running?");
 
-    // Run seed using temp dir and kill it at 1 second
-    let mut child = get_child(
-        &["-c", generated_config_path.to_str().unwrap(), "seed"],
-        &tempdir,
-    )?;
-    std::thread::sleep(Duration::from_secs(1));
-    child.kill()?;
-
-    let output = child.wait_with_output()?;
-    let output = output.assert_failure()?;
-
-    output.stdout_contains(r"Starting zebrad in seed mode")?;
-
-    // Make sure the command was killed
-    assert!(output.was_killed());
-
-    // Check if the temp dir still exist
+    // Check if the temp dir still exists
     assert!(tempdir.exists());
 
-    // Check if the created config file still exist
+    // Check if the created config file still exists
     assert!(generated_config_path.exists());
 
     Ok(())

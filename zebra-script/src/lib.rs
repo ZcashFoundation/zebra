@@ -135,7 +135,9 @@ mod tests {
     use hex::FromHex;
     use std::convert::TryInto;
     use std::sync::Arc;
-    use zebra_chain::{serialization::ZcashDeserializeInto, transparent};
+    use zebra_chain::{
+        parameters::NetworkUpgrade::*, serialization::ZcashDeserializeInto, transparent,
+    };
     use zebra_test::prelude::*;
 
     lazy_static::lazy_static! {
@@ -156,7 +158,9 @@ mod tests {
             lock_script: transparent::Script(SCRIPT_PUBKEY.clone()),
         };
         let input_index = 0;
-        let branch_id = ConsensusBranchId::BLOSSOM;
+        let branch_id = Blossom
+            .branch_id()
+            .expect("Blossom has a ConsensusBranchId");
 
         is_valid(transaction, branch_id, (input_index, output))?;
 
