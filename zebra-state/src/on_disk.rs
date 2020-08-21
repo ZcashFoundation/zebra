@@ -40,6 +40,8 @@ impl SledState {
         &mut self,
         block: impl Into<Arc<Block>> + std::fmt::Debug,
     ) -> Result<block::Hash, Error> {
+        use sled::Transactional;
+
         let block = block.into();
         let hash = block.hash();
         let height = block.coinbase_height().unwrap();
@@ -49,9 +51,11 @@ impl SledState {
 
         let bytes = block.zcash_serialize_to_vec()?;
 
-        // TODO(jlusby): make this transactional
-        height_map.insert(&height.0.to_be_bytes(), &hash.0)?;
-        by_hash.insert(&hash.0, bytes)?;
+        (&height_map, &by_hash).transaction(|(height_map, by_hash)| {
+            height_map.insert(&height.0.to_be_bytes(), &hash.0)?;
+            by_hash.insert(&hash.0, bytes.clone())?;
+            Ok(())
+        })?;
 
         Ok(hash)
     }
@@ -280,6 +284,7 @@ impl_from! {
     SerializationError,
     std::io::Error,
     sled::Error,
+    sled::transaction::TransactionError,
 }
 
 impl Into<BoxError> for Error {
