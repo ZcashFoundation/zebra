@@ -37,12 +37,12 @@ impl From<Note> for NoteCommitment {
     fn from(note: Note) -> NoteCommitment {
         let leading_byte: u8 = 0xB0;
         let mut hasher = Sha256::default();
-        hasher.input([leading_byte]);
-        hasher.input(note.paying_key);
-        hasher.input(note.value.to_bytes());
-        hasher.input(note.rho);
-        hasher.input(note.rcm);
-        NoteCommitment(hasher.result().into())
+        hasher.update([leading_byte]);
+        hasher.update(note.paying_key);
+        hasher.update(note.value.to_bytes());
+        hasher.update(note.rho);
+        hasher.update(note.rcm);
+        NoteCommitment(hasher.finalize().into())
     }
 }
 

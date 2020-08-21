@@ -11,6 +11,7 @@ use std::{fmt, io};
 
 use byteorder::{ByteOrder, LittleEndian};
 use rand_core::{CryptoRng, RngCore};
+use sha2::digest::generic_array::{typenum::U64, GenericArray};
 
 #[cfg(test)]
 use proptest::{array, prelude::*};
@@ -37,17 +38,17 @@ mod sk_magics {
 /// https://zips.z.cash/protocol/protocol.pdf#sproutkeycomponents
 fn prf_addr(x: [u8; 32], t: u8) -> [u8; 32] {
     let mut state = [0u32; 8];
-    let mut block = [0u8; 64];
+    let mut block: GenericArray<u8, U64> = GenericArray::default();
 
-    block[0..32].copy_from_slice(&x[..]);
+    block.as_mut_slice()[0..32].copy_from_slice(&x[..]);
     // The first four bits –i.e. the most signicant four bits of the
     // first byte– are used to separate distinct uses
     // of SHA256Compress, ensuring that the functions are independent.
-    block[0] |= 0b1100_0000;
+    block.as_mut_slice()[0] |= 0b1100_0000;
 
-    block[32] = t;
+    block.as_mut_slice()[32] = t;
 
-    sha2::compress256(&mut state, &block);
+    sha2::compress256(&mut state, &[block]);
 
     let mut derived_bytes = [0u8; 32];
     LittleEndian::write_u32_into(&state, &mut derived_bytes);
