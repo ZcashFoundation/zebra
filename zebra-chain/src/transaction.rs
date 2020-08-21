@@ -161,12 +161,14 @@ impl Transaction {
         network: Network,
         height: block::Height,
         hash_type: u32,
+        input_index: Option<u32>,
     ) -> blake2b_simd::Hash {
         sighash::SigHasher {
             trans: self,
             network,
             height,
-            hash_type,
+            hash_type: sighash::HashType::from_bits_truncate(hash_type),
+            input_index,
         }
         .sighash()
     }

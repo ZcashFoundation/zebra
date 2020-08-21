@@ -34,6 +34,7 @@ displaydoc = "0.1.7"
 ed25519-zebra = "1"
 equihash = "0.1"
 redjubjub = "0.2"
+bitflags = "1.2.1"
 
 [dev-dependencies]
 bincode = "1"
