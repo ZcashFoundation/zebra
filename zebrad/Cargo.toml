@@ -40,4 +40,5 @@ inferno = { version = "0.10.0", default-features = false }
 [dev-dependencies]
 abscissa_core = { version = "0.5", features = ["testing"] }
 once_cell = "1.4"
+tempdir = "0.3.7"
 zebra-test = { path = "../zebra-test" }

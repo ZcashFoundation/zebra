@@ -2,9 +2,8 @@ use color_eyre::{
     eyre::{eyre, Context, Report, Result},
     Help, SectionExt,
 };
+use std::path::PathBuf;
 use std::process::{Child, Command, ExitStatus, Output};
-use std::{fs, io::Write, path::PathBuf};
-use tempdir::TempDir;
 
 #[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
@@ -15,28 +14,6 @@ pub fn test_cmd(command_path: &str, tempdir: &PathBuf) -> Result<Command> {
     cmd.current_dir(tempdir);
 
     Ok(cmd)
-}
-
-/// Create a temp directory and optional config file
-pub fn tempdir(create_config: bool) -> Result<(PathBuf, impl Drop)> {
-    let dir = TempDir::new("zebrad_tests")?;
-
-    if create_config {
-        let cache_dir = dir.path().join("state");
-        fs::create_dir(&cache_dir)?;
-        fs::File::create(dir.path().join("zebrad.toml"))?.write_all(
-            format!(
-                "[state]\ncache_dir = '{}'\nmemory_cache_bytes = 256000000\n[network]\nlisten_addr = '127.0.0.1:0'\n",
-                cache_dir
-                    .into_os_string()
-                    .into_string()
-                    .map_err(|_| eyre!("tmp dir path cannot be encoded as UTF8"))?
-            )
-            .as_bytes(),
-        )?;
-    }
-
-    Ok((dir.path().to_path_buf(), dir))
 }
 
 pub trait CommandExt {
