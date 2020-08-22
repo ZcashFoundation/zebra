@@ -69,6 +69,12 @@ pub struct Config {
 
     /// The maximum number of bytes to use caching data in memory.
     pub memory_cache_bytes: u64,
+
+    /// Whether to use an ephemeral, in-memory store instead of writing to disk.
+    ///
+    /// Set to `false` by default. If this is set to `true`, [`cache_dir`] is ignored and no state
+    /// is written to disk (meaning the entire blockchain may be loaded into memory).
+    pub ephemeral: bool,
 }
 
 impl Config {
@@ -79,12 +85,19 @@ impl Config {
             Network::Mainnet => "mainnet",
             Network::Testnet => "testnet",
         };
-        let path = self.cache_dir.join(net_dir).join("state");
 
-        sled::Config::default()
-            .path(path)
-            .cache_capacity(self.memory_cache_bytes)
-            .mode(sled::Mode::LowSpace)
+        if self.ephemeral {
+            sled::Config::default()
+                .cache_capacity(self.memory_cache_bytes)
+                .mode(sled::Mode::LowSpace)
+                .temporary(self.ephemeral)
+        } else {
+            let path = self.cache_dir.join(net_dir).join("state");
+            sled::Config::default()
+                .path(path)
+                .cache_capacity(self.memory_cache_bytes)
+                .mode(sled::Mode::LowSpace)
+        }
     }
 }
 
@@ -96,6 +109,7 @@ impl Default for Config {
         Self {
             cache_dir,
             memory_cache_bytes: 512 * 1024 * 1024,
+            ephemeral: false,
         }
     }
 }

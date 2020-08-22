@@ -15,11 +15,8 @@ pub fn tempdir(create_config: bool) -> Result<(PathBuf, impl Drop)> {
     let dir = TempDir::new("zebrad_tests")?;
 
     if create_config {
-        let cache_dir = dir.path().join("state");
-        fs::create_dir(&cache_dir)?;
-
         let mut config = ZebradConfig::default();
-        config.state.cache_dir = cache_dir;
+        config.state.ephemeral = true;
         config.state.memory_cache_bytes = 256000000;
         config.network.listen_addr = "127.0.0.1:0".parse()?;
 
