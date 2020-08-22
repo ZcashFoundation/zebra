@@ -5,8 +5,31 @@
 #![forbid(unsafe_code)]
 
 use color_eyre::eyre::Result;
-use std::{path::PathBuf, time::Duration};
+use std::{fs, io::Write, path::PathBuf, time::Duration};
+use tempdir::TempDir;
+use toml;
+
 use zebra_test::prelude::*;
+use zebrad::config::ZebradConfig;
+
+pub fn tempdir(create_config: bool) -> Result<(PathBuf, impl Drop)> {
+    let dir = TempDir::new("zebrad_tests")?;
+
+    if create_config {
+        let cache_dir = dir.path().join("state");
+        fs::create_dir(&cache_dir)?;
+
+        let mut config = ZebradConfig::default();
+        config.state.cache_dir = cache_dir;
+        config.state.memory_cache_bytes = 256000000;
+        config.network.listen_addr = "127.0.0.1:0".parse()?;
+
+        fs::File::create(dir.path().join("zebrad.toml"))?
+            .write_all(toml::to_string(&config)?.as_bytes())?;
+    }
+
+    Ok((dir.path().to_path_buf(), dir))
+}
 
 pub fn get_child(args: &[&str], tempdir: &PathBuf) -> Result<TestChild> {
     let mut cmd = test_cmd(env!("CARGO_BIN_EXE_zebrad"), &tempdir)?;
