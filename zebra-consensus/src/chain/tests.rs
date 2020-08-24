@@ -226,8 +226,14 @@ async fn verify_block() -> Result<(), Report> {
 
 #[tokio::test]
 async fn verify_checkpoint_test() -> Result<(), Report> {
-    verify_checkpoint(true).await?;
-    verify_checkpoint(false).await?;
+    verify_checkpoint(Config {
+        checkpoint_sync: true,
+    })
+    .await?;
+    verify_checkpoint(Config {
+        checkpoint_sync: false,
+    })
+    .await?;
 
     Ok(())
 }
@@ -236,10 +242,8 @@ async fn verify_checkpoint_test() -> Result<(), Report> {
 ///
 /// Also tests the `chain::init` function.
 #[spandoc::spandoc]
-async fn verify_checkpoint(checkpoint_sync: bool) -> Result<(), Report> {
+async fn verify_checkpoint(config: Config) -> Result<(), Report> {
     zebra_test::init();
-
-    let config = Config { checkpoint_sync };
 
     // Test that the chain::init function works. Most of the other tests use
     // init_from_verifiers.
