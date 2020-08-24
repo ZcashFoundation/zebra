@@ -254,6 +254,10 @@ fn start_args() -> Result<()> {
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
+    // Check that we do not generate cache_dir
+    let cache_dir = tempdir.join("state");
+    assert!(!cache_dir.exists());
+
     Ok(())
 }
 
