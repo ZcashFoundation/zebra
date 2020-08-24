@@ -70,10 +70,11 @@ pub struct Config {
     /// The maximum number of bytes to use caching data in memory.
     pub memory_cache_bytes: u64,
 
-    /// Whether to use an ephemeral, in-memory store instead of writing to disk.
+    /// Whether to use an ephemeral database.
     ///
-    /// Set to `false` by default. If this is set to `true`, [`cache_dir`] is ignored and no state
-    /// is written to disk (meaning the entire blockchain may be loaded into memory).
+    /// Ephemeral databases are stored in memory on Linux, and in a temporary directory on other OSes.
+    ///
+    /// Set to `false` by default. If this is set to `true`, [`cache_dir`] is ignored.
     pub ephemeral: bool,
 }
 
