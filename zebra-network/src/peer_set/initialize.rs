@@ -4,7 +4,7 @@
 // which is (c) 2019 Tower Contributors (MIT licensed).
 
 use std::{
-    net::SocketAddr,
+    net::{SocketAddr, ToSocketAddrs},
     sync::{Arc, Mutex},
 };
 
@@ -105,16 +105,24 @@ where
         Network::Mainnet => (Network::Testnet, 18233),
         Network::Testnet => (Network::Mainnet, 8233),
     };
-    if config.listen_addr.port() == wrong_net_port {
+
+    let mut resolve = match config.listen_addr.to_socket_addrs() {
+        Ok(resolve) => resolve,
+        Err(_) => panic!("Was not able to resolve listen_addr"),
+    };
+
+    let listen_address = resolve.next().unwrap();
+
+    if listen_address.port() == wrong_net_port {
         warn!(
             "We are configured with port {} for {:?}, but that port is the default port for {:?}",
-            config.listen_addr.port(),
+            listen_address.port(),
             config.network,
             wrong_net
         );
     }
 
-    let listen_guard = tokio::spawn(listen(config.listen_addr, listener, peerset_tx.clone()));
+    let listen_guard = tokio::spawn(listen(listen_address, listener, peerset_tx.clone()));
 
     // 3. Outgoing peers we connect to in response to load.
     let mut candidates = CandidateSet::new(address_book.clone(), peer_set.clone());

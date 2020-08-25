@@ -12,7 +12,7 @@ use zebra_chain::parameters::Network;
 #[serde(deny_unknown_fields, default)]
 pub struct Config {
     /// The address on which this node should listen for connections.
-    pub listen_addr: SocketAddr,
+    pub listen_addr: String,
 
     /// The network to connect to.
     pub network: Network,
