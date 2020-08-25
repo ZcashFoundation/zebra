@@ -351,3 +351,61 @@ fn valid_generated_config(command: &str, expected_output: &str) -> Result<()> {
 
     Ok(())
 }
+
+#[test]
+fn listener_address_test() -> Result<()> {
+    listener_address(
+        "localhost:8233",
+        Some("Opened Zcash protocol endpoint at 127.0.0.1:8233"),
+    )?;
+    listener_address(
+        "127.0.0.1:8233",
+        Some("Opened Zcash protocol endpoint at 127.0.0.1:8233"),
+    )?;
+    listener_address(
+        "::1:8233",
+        Some("Opened Zcash protocol endpoint at \\[::1\\]:8233"),
+    )?;
+    listener_address("invalid", None)?;
+
+    Ok(())
+}
+
+fn listener_address(request: &str, expected_response: Option<&str>) -> Result<()> {
+    zebra_test::init();
+
+    // Create a temp dir to work in
+    let dir = TempDir::new("zebrad_tests")?;
+
+    // Create a config file with request as listen_addr
+    let mut config = ZebradConfig::default();
+    config.state.cache_dir = dir.path().join("state");
+    config.state.memory_cache_bytes = 256000000;
+    config.network.listen_addr = request.parse()?;
+    let config_path = dir.path().join("zebrad.toml");
+    fs::File::create(&config_path)?.write_all(toml::to_string(&config)?.as_bytes())?;
+
+    // Start zebrad with created config and kill it at 3 seconds.
+    // This should be enough time to open port.
+    let mut child = get_child(
+        &["-c", config_path.to_str().unwrap(), "start"],
+        &dir.path().to_path_buf(),
+    )?;
+    std::thread::sleep(Duration::from_secs(3));
+    child.kill()?;
+
+    let output = child.wait_with_output()?;
+    let output = output.assert_failure()?;
+
+    // Check response
+    if expected_response.is_some() {
+        output.stdout_contains(expected_response.unwrap())?;
+        // Exit by kill
+        assert!(output.was_killed());
+    } else {
+        // Exit by panic
+        assert!(!output.was_killed());
+    }
+
+    Ok(())
+}
