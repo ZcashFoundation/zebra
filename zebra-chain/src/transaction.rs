@@ -22,7 +22,7 @@ pub use shielded_data::ShieldedData;
 use crate::{
     amount::Amount,
     block,
-    parameters::Network,
+    parameters::NetworkUpgrade,
     primitives::{Bctv14Proof, Groth16Proof},
     transparent,
 };
@@ -158,17 +158,15 @@ impl Transaction {
     // TODO(jlusby): refine type
     pub fn sighash(
         &self,
-        network: Network,
-        height: block::Height,
+        network_upgrade: NetworkUpgrade,
         hash_type: u32,
-        input_index: Option<u32>,
+        input: Option<(u32, transparent::Output)>,
     ) -> blake2b_simd::Hash {
         sighash::SigHasher {
             trans: self,
-            network,
-            height,
+            network_upgrade,
             hash_type: sighash::HashType::from_bits_truncate(hash_type),
-            input_index,
+            input,
         }
         .sighash()
     }

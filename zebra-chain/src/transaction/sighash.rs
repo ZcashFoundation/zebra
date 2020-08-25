@@ -1,8 +1,7 @@
 #![allow(dead_code, unused_variables)]
 use super::Transaction;
 use crate::{
-    block,
-    parameters::{ConsensusBranchId, Network, NetworkUpgrade},
+    parameters::{ConsensusBranchId, NetworkUpgrade},
     serialization::ZcashSerialize,
     transparent,
 };
@@ -40,9 +39,8 @@ impl HashType {
 pub(super) struct SigHasher<'a> {
     pub(super) trans: &'a Transaction,
     pub(super) hash_type: HashType,
-    pub(super) network: Network,
-    pub(super) height: block::Height,
-    pub(super) input_index: Option<u32>,
+    pub(super) network_upgrade: NetworkUpgrade,
+    pub(super) input: Option<(u32, transparent::Output)>,
 }
 
 impl<'a> SigHasher<'a> {
@@ -53,31 +51,27 @@ impl<'a> SigHasher<'a> {
             .personal(&self.personal())
             .to_state();
 
-        match self.network_upgrade() {
+        match self.network_upgrade {
             Genesis => unreachable!("Zebra checkpoints on Sapling activation"),
             BeforeOverwinter => unreachable!("Zebra checkpoints on Sapling activation"),
-            Overwinter | Sapling => self
+            Overwinter => self
                 .hash_sighash_zip143(&mut hash)
                 .expect("serialization into hasher never fails"),
-            Blossom => unimplemented!(),
-            Heartwood => unimplemented!(),
-            Canopy => unimplemented!(),
+            Sapling | Blossom | Heartwood | Canopy => self
+                .hash_sighash_zip243(&mut hash)
+                .expect("serialization into hasher never fails"),
         }
 
         hash.finalize()
     }
 
-    fn network_upgrade(&self) -> NetworkUpgrade {
-        NetworkUpgrade::current(self.network, self.height)
-    }
-
     fn consensus_branch_id(&self) -> ConsensusBranchId {
-        self.network_upgrade()
+        self.network_upgrade
             .branch_id()
             .expect("Zebra checkpoints on Sapling activation")
     }
 
-    /// Sighash implementation for the overwinter and sapling consensus branches
+    /// Sighash implementation for the overwinter consensus branch
     fn hash_sighash_zip143<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         self.hash_header(&mut writer)?;
         self.hash_groupid(&mut writer)?;
@@ -88,17 +82,27 @@ impl<'a> SigHasher<'a> {
         self.hash_lock_time(&mut writer)?;
         self.hash_expiry_height(&mut writer)?;
         self.hash_hash_type(&mut writer)?;
+        self.hash_input(&mut writer)?;
 
-        // if let Some((n, script_code, amount)) = transparent_input {
-        //     let mut data = vec![];
-        //     tx.vin[n].prevout.write(&mut data).unwrap();
-        //     script_code.write(&mut data).unwrap();
-        //     data.extend_from_slice(&amount.to_i64_le_bytes());
-        //     (&mut data)
-        //         .write_u32::<LittleEndian>(tx.vin[n].sequence)
-        //         .unwrap();
-        //     h.update(&data);
-        // }
+        Ok(())
+    }
+
+    /// Sighash implementation for the sapling consensus branch and every
+    /// subsequent consensus branch
+    fn hash_sighash_zip243<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        self.hash_header(&mut writer)?;
+        self.hash_groupid(&mut writer)?;
+        self.hash_prevouts(&mut writer)?;
+        self.hash_sequence(&mut writer)?;
+        self.hash_outputs(&mut writer)?;
+        self.hash_joinsplits(&mut writer)?;
+        self.hash_shielded_spends(&mut writer)?;
+        self.hash_shielded_outputs(&mut writer)?;
+        self.hash_lock_time(&mut writer)?;
+        self.hash_expiry_height(&mut writer)?;
+        self.hash_value_balance(&mut writer)?;
+        self.hash_hash_type(&mut writer)?;
+        self.hash_input(&mut writer)?;
 
         Ok(())
     }
@@ -184,8 +188,9 @@ impl<'a> SigHasher<'a> {
             self.outputs_hash(writer)
         } else if self.hash_type.masked() == HashType::SINGLE
             && self
-                .input_index
-                .map(|index| (index as usize) < self.trans.outputs().len())
+                .input
+                .as_ref()
+                .map(|(index, _)| (*index as usize) < self.trans.outputs().len())
                 .unwrap_or(false)
         {
             self.single_output_hash(writer)
@@ -209,8 +214,9 @@ impl<'a> SigHasher<'a> {
     }
 
     fn single_output_hash<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        let index = self
-            .input_index
+        let (index, outpoint) = self
+            .input
+            .as_ref()
             .expect("already checked index is some in `hash_outputs`");
 
         let mut hash = blake2b_simd::Params::new()
@@ -218,7 +224,7 @@ impl<'a> SigHasher<'a> {
             .personal(ZCASH_OUTPUTS_HASH_PERSONALIZATION)
             .to_state();
 
-        self.trans.outputs()[index as usize].zcash_serialize(&mut hash)?;
+        self.trans.outputs()[*index as usize].zcash_serialize(&mut hash)?;
 
         writer.write_all(hash.finalize().as_ref())
     }
@@ -286,6 +292,45 @@ impl<'a> SigHasher<'a> {
     fn hash_hash_type<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_u32::<LittleEndian>(self.hash_type.bits())
     }
+
+    fn hash_input<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        let (index, transparent::Output { value, lock_script }) =
+            if let Some(input) = self.input.as_ref() {
+                input
+            } else {
+                return Ok(());
+            };
+
+        let (outpoint, unlock_script, sequence) = match &self.trans.inputs()[*index as usize] {
+            transparent::Input::PrevOut {
+                outpoint,
+                unlock_script,
+                sequence,
+            } => (outpoint, unlock_script, sequence),
+            transparent::Input::Coinbase { .. } => {
+                unreachable!("sighash should only ever be called for valid Input types")
+            }
+        };
+
+        outpoint.zcash_serialize(&mut writer)?;
+        // todo: wtf is script code?
+        writer.write_all(&value.to_bytes())?;
+        writer.write_u32::<LittleEndian>(*sequence)?;
+
+        Ok(())
+    }
+
+    fn hash_shielded_spends<W: io::Write>(&self, writer: W) -> Result<(), io::Error> {
+        todo!()
+    }
+
+    fn hash_shielded_outputs<W: io::Write>(&self, writer: W) -> Result<(), io::Error> {
+        todo!()
+    }
+
+    fn hash_value_balance<W: io::Write>(&self, writer: W) -> Result<(), io::Error> {
+        todo!()
+    }
 }
 
 #[cfg(test)]
@@ -328,9 +373,8 @@ mod test {
         let hasher = SigHasher {
             trans: &transaction,
             hash_type: HashType::from_bits_truncate(1),
-            network: Network::Mainnet,
-            height: block::Height(653600 - 1),
-            input_index: None,
+            network_upgrade: NetworkUpgrade::current(Network::Mainnet, block::Height(653600 - 1)),
+            input: None,
         };
 
         assert_hash_eq!("03000080", hasher, hash_header);
@@ -397,9 +441,9 @@ mod test {
         let hasher = SigHasher {
             trans: &transaction,
             hash_type: HashType::from_bits_truncate(3),
-            network: Network::Mainnet,
-            height: block::Height(653600 - 1),
-            input_index: Some(1),
+            network_upgrade: NetworkUpgrade::current(Network::Mainnet, block::Height(653600 - 1)),
+            // input: Some(1),  TODO: figure out the correct inputs
+            input: None,
         };
 
         assert_hash_eq!("03000080", hasher, hash_header);
