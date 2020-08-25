@@ -313,7 +313,7 @@ impl<'a> SigHasher<'a> {
         let input = &self.trans.inputs()[*index as usize];
 
         self.hash_input_prevout(input, &mut writer)?;
-        self.hash_input_script_code(&mut writer)?;
+        self.hash_input_script_code(lock_script, &mut writer)?;
         self.hash_input_amount(*value, &mut writer)?;
         self.hash_input_sequence(input, &mut writer)?;
 
@@ -337,8 +337,14 @@ impl<'a> SigHasher<'a> {
         Ok(())
     }
 
-    fn hash_input_script_code<W: io::Write>(&self, writer: W) -> Result<(), io::Error> {
-        todo!()
+    fn hash_input_script_code<W: io::Write>(
+        &self,
+        lock_script: &transparent::Script,
+        mut writer: W,
+    ) -> Result<(), io::Error> {
+        writer.write_all(&lock_script.0)?;
+
+        Ok(())
     }
 
     fn hash_input_amount<W: io::Write, C>(
@@ -454,7 +460,8 @@ mod test {
                 tracing::Level::ERROR,
                 "compare_vecs",
                 expected.len = expected.len(),
-                result.len = result.len()
+                result.len = result.len(),
+                hash_fn = stringify!($f)
             );
             let guard = span.enter();
             assert_eq!(expected, result);
@@ -470,7 +477,7 @@ mod test {
 
         let hasher = SigHasher {
             trans: &transaction,
-            hash_type: HashType::from_bits_truncate(1),
+            hash_type: HashType::ALL,
             network_upgrade: NetworkUpgrade::Overwinter,
             input: None,
         };
@@ -534,11 +541,38 @@ mod test {
     fn test_vec2() -> Result<()> {
         zebra_test::init();
 
-        let transaction = ZIP143_2.zcash_deserialize_into::<Transaction>()?;
+        let transaction = dbg!(ZIP143_2.zcash_deserialize_into::<Transaction>()?);
+
+        // inputs: [
+        //     PrevOut {
+        //         outpoint: OutPoint {
+        //             hash: TransactionHash(
+        //                 "4201cfb1cd8dbf69b8250c18ef41294ca97993db546c1fe01f7e9c8e36d6a5e2",
+        //             ),
+        //             index: 2804960925,
+        //         },
+        //         unlock_script: Script(
+        //             "ac6a00",
+        //         ),
+        //         sequence: 1763459736,
+        //     },
+        //     PrevOut {
+        //         outpoint: OutPoint {
+        //             hash: TransactionHash(
+        //                 "378af1e40f64e125946f62c2fa7b2fecbcb64b6968912a6381ce3dc166d56a1d",
+        //             ),
+        //             index: 3618174306,
+        //         },
+        //         unlock_script: Script(
+        //             "6363635353",
+        //         ),
+        //         sequence: 1025558504,
+        //     },
+        // ],
 
         let hasher = SigHasher {
             trans: &transaction,
-            hash_type: HashType::from_bits_truncate(3),
+            hash_type: HashType::SINGLE,
             network_upgrade: NetworkUpgrade::Overwinter,
             // input: Some(1),  TODO: figure out the correct inputs
             input: None,
