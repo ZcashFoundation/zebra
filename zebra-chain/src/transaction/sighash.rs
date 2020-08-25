@@ -1,14 +1,23 @@
 #![allow(dead_code, unused_variables)]
 use super::Transaction;
 use crate::{
+    amount::Amount,
     parameters::{ConsensusBranchId, NetworkUpgrade},
-    serialization::ZcashSerialize,
+    serialization::{WriteZcashExt, ZcashSerialize},
     transparent,
 };
 use blake2b_simd::Hash;
 use byteorder::{LittleEndian, WriteBytesExt};
 use io::Write;
 use std::io;
+
+// TODO: figure out how to write this more concisely
+static ZIP243_EXPLANATION: &str =
+    "The new algorithm MUST be used for signatures created over the Sapling
+transaction format 2. Combined with the new consensus rule that v3
+transaction formats will be invalid from the Sapling upgrade, this
+effectively means that all transaction signatures from the Sapling activation
+height (as specified in 6) will use the new algorithm.";
 
 const OVERWINTER_VERSION_GROUP_ID: u32 = 0x03C4_8270;
 const SAPLING_VERSION_GROUP_ID: u32 = 0x892F_2085;
@@ -301,45 +310,134 @@ impl<'a> SigHasher<'a> {
                 return Ok(());
             };
 
-        let (outpoint, unlock_script, sequence) = match &self.trans.inputs()[*index as usize] {
-            transparent::Input::PrevOut {
-                outpoint,
-                unlock_script,
-                sequence,
-            } => (outpoint, unlock_script, sequence),
+        let input = &self.trans.inputs()[*index as usize];
+
+        self.hash_input_prevout(input, &mut writer)?;
+        self.hash_input_script_code(&mut writer)?;
+        self.hash_input_amount(*value, &mut writer)?;
+        self.hash_input_sequence(input, &mut writer)?;
+
+        Ok(())
+    }
+
+    fn hash_input_prevout<W: io::Write>(
+        &self,
+        input: &transparent::Input,
+        mut writer: W,
+    ) -> Result<(), io::Error> {
+        let outpoint = match input {
+            transparent::Input::PrevOut { outpoint, .. } => outpoint,
             transparent::Input::Coinbase { .. } => {
                 unreachable!("sighash should only ever be called for valid Input types")
             }
         };
 
         outpoint.zcash_serialize(&mut writer)?;
-        // todo: wtf is script code?
+
+        Ok(())
+    }
+
+    fn hash_input_script_code<W: io::Write>(&self, writer: W) -> Result<(), io::Error> {
+        todo!()
+    }
+
+    fn hash_input_amount<W: io::Write, C>(
+        &self,
+        value: Amount<C>,
+        mut writer: W,
+    ) -> Result<(), io::Error> {
         writer.write_all(&value.to_bytes())?;
+
+        Ok(())
+    }
+
+    fn hash_input_sequence<W: io::Write>(
+        &self,
+        input: &transparent::Input,
+        mut writer: W,
+    ) -> Result<(), io::Error> {
+        let sequence = match input {
+            transparent::Input::PrevOut { sequence, .. } => sequence,
+            transparent::Input::Coinbase { .. } => {
+                unreachable!("sighash should only ever be called for valid Input types")
+            }
+        };
+
         writer.write_u32::<LittleEndian>(*sequence)?;
 
         Ok(())
     }
 
-    fn hash_shielded_spends<W: io::Write>(&self, writer: W) -> Result<(), io::Error> {
-        todo!()
+    fn hash_shielded_spends<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        let shielded_data = match self.trans {
+            Transaction::V4 {
+                shielded_data: Some(shielded_data),
+                ..
+            } => shielded_data,
+            _ => return writer.write_all(&[0; 32]),
+        };
+
+        if shielded_data.spends().next().is_none() {
+            return writer.write_all(&[0; 32]);
+        }
+
+        let mut hash = blake2b_simd::Params::new()
+            .hash_length(32)
+            .personal(ZCASH_SHIELDED_SPENDS_HASH_PERSONALIZATION)
+            .to_state();
+
+        for spend in shielded_data.spends() {
+            spend.cv.zcash_serialize(&mut hash)?;
+            hash.write_all(&spend.anchor.0[..])?;
+            hash.write_32_bytes(&spend.nullifier.into())?;
+            hash.write_all(&<[u8; 32]>::from(spend.rk)[..])?;
+            spend.zkproof.zcash_serialize(&mut hash)?;
+        }
+
+        writer.write_all(hash.finalize().as_ref())
     }
 
-    fn hash_shielded_outputs<W: io::Write>(&self, writer: W) -> Result<(), io::Error> {
-        todo!()
+    fn hash_shielded_outputs<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        let shielded_data = match self.trans {
+            Transaction::V4 {
+                shielded_data: Some(shielded_data),
+                ..
+            } => shielded_data,
+            _ => return writer.write_all(&[0; 32]),
+        };
+
+        if shielded_data.outputs().next().is_none() {
+            return writer.write_all(&[0; 32]);
+        }
+
+        let mut hash = blake2b_simd::Params::new()
+            .hash_length(32)
+            .personal(ZCASH_SHIELDED_OUTPUTS_HASH_PERSONALIZATION)
+            .to_state();
+
+        for output in shielded_data.outputs() {
+            output.zcash_serialize(&mut hash)?;
+        }
+
+        writer.write_all(hash.finalize().as_ref())
     }
 
-    fn hash_value_balance<W: io::Write>(&self, writer: W) -> Result<(), io::Error> {
-        todo!()
+    fn hash_value_balance<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        let value_balance = match self.trans {
+            Transaction::V4 { value_balance, .. } => value_balance,
+            _ => unreachable!(ZIP243_EXPLANATION),
+        };
+
+        writer.write_all(&value_balance.to_bytes())?;
+
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::block;
-    use crate::{
-        parameters::Network, serialization::ZcashDeserializeInto, transaction::Transaction,
-    };
+    use crate::{serialization::ZcashDeserializeInto, transaction::Transaction};
     use color_eyre::eyre;
     use eyre::Result;
     use zebra_test::vectors::{ZIP143_1, ZIP143_2};
@@ -373,7 +471,7 @@ mod test {
         let hasher = SigHasher {
             trans: &transaction,
             hash_type: HashType::from_bits_truncate(1),
-            network_upgrade: NetworkUpgrade::current(Network::Mainnet, block::Height(653600 - 1)),
+            network_upgrade: NetworkUpgrade::Overwinter,
             input: None,
         };
 
@@ -441,7 +539,7 @@ mod test {
         let hasher = SigHasher {
             trans: &transaction,
             hash_type: HashType::from_bits_truncate(3),
-            network_upgrade: NetworkUpgrade::current(Network::Mainnet, block::Height(653600 - 1)),
+            network_upgrade: NetworkUpgrade::Overwinter,
             // input: Some(1),  TODO: figure out the correct inputs
             input: None,
         };
