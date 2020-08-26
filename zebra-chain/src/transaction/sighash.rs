@@ -30,7 +30,7 @@ const ZCASH_SHIELDED_SPENDS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashSSpendsHash
 const ZCASH_SHIELDED_OUTPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashSOutputHash";
 
 bitflags::bitflags! {
-    pub(super) struct HashType: u32 {
+    pub struct HashType: u32 {
         const ALL = 0b0000_0001;
         const NONE = 0b0000_0010;
         const SINGLE = Self::ALL.bits | Self::NONE.bits;
@@ -88,8 +88,7 @@ impl<'a> SigHasher<'a> {
             .to_state();
 
         match self.network_upgrade {
-            Genesis => unreachable!("Zebra checkpoints on Sapling activation"),
-            BeforeOverwinter => unreachable!("Zebra checkpoints on Sapling activation"),
+            Genesis | BeforeOverwinter => unreachable!("Zebra checkpoints on Sapling activation"),
             Overwinter => self
                 .hash_sighash_zip143(&mut hash)
                 .expect("serialization into hasher never fails"),
@@ -163,8 +162,9 @@ impl<'a> SigHasher<'a> {
 
     fn hash_groupid<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_u32::<LittleEndian>(match &self.trans {
-            Transaction::V1 { .. } => unimplemented!("value to be determined"),
-            Transaction::V2 { .. } => unimplemented!("value to be determined"),
+            Transaction::V1 { .. } | Transaction::V2 { .. } => {
+                unreachable!("V1 and V2 transactions are rejected post overwinter")
+            }
             Transaction::V3 { .. } => OVERWINTER_VERSION_GROUP_ID,
             Transaction::V4 { .. } => SAPLING_VERSION_GROUP_ID,
         })

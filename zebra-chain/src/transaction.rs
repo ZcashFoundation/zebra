@@ -155,19 +155,13 @@ impl Transaction {
             )
     }
 
-    // TODO(jlusby): refine type
+    /// Calculate the sighash for the current transaction
     pub fn sighash(
         &self,
         network_upgrade: NetworkUpgrade,
-        hash_type: u32,
+        hash_type: sighash::HashType,
         input: Option<(u32, transparent::Output)>,
     ) -> blake2b_simd::Hash {
-        sighash::SigHasher::new(
-            self,
-            sighash::HashType::from_bits_truncate(hash_type),
-            network_upgrade,
-            input,
-        )
-        .sighash()
+        sighash::SigHasher::new(self, hash_type, network_upgrade, input).sighash()
     }
 }
