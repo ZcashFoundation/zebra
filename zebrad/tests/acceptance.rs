@@ -15,19 +15,22 @@ pub fn tempdir(create_config: bool) -> Result<(PathBuf, impl Drop)> {
     let dir = TempDir::new("zebrad_tests")?;
 
     if create_config {
-        let cache_dir = dir.path().join("state");
-        fs::create_dir(&cache_dir)?;
-
-        let mut config = ZebradConfig::default();
-        config.state.cache_dir = cache_dir;
-        config.state.memory_cache_bytes = 256000000;
-        config.network.listen_addr = "127.0.0.1:0".parse()?;
-
-        fs::File::create(dir.path().join("zebrad.toml"))?
-            .write_all(toml::to_string(&config)?.as_bytes())?;
+        let (config_path, config) = default_config(dir.path().to_path_buf())?;
+        fs::File::create(&config_path)?.write_all(toml::to_string(&config)?.as_bytes())?;
     }
 
     Ok((dir.path().to_path_buf(), dir))
+}
+
+pub fn default_config(tempdir: PathBuf) -> Result<(PathBuf, ZebradConfig)> {
+    let cache_dir = tempdir.join("state");
+    let mut config = ZebradConfig::default();
+    config.state.cache_dir = cache_dir;
+    config.state.memory_cache_bytes = 256000000;
+    config.network.listen_addr = "127.0.0.1:0".parse()?;
+
+    let config_path = tempdir.join("zebrad.toml");
+    Ok((config_path, config))
 }
 
 pub fn get_child(args: &[&str], tempdir: &PathBuf) -> Result<TestChild> {
@@ -377,12 +380,9 @@ fn listener_address(request: &str, expected_response: Option<&str>) -> Result<()
     // Create a temp dir to work in
     let dir = TempDir::new("zebrad_tests")?;
 
-    // Create a config file with request as listen_addr
-    let mut config = ZebradConfig::default();
-    config.state.cache_dir = dir.path().join("state");
-    config.state.memory_cache_bytes = 256000000;
+    // Create a default config file and add request as listen_addr
+    let (config_path, mut config) = default_config(dir.path().to_path_buf())?;
     config.network.listen_addr = request.parse()?;
-    let config_path = dir.path().join("zebrad.toml");
     fs::File::create(&config_path)?.write_all(toml::to_string(&config)?.as_bytes())?;
 
     // Start zebrad with created config and kill it at 3 seconds.
