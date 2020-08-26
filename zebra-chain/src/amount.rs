@@ -282,7 +282,6 @@ where
         Ok(reader.read_i64::<LittleEndian>()?.try_into()?)
     }
 }
-// writer.write_i64::<LittleEndian>((*value_balance).into())?;
 
 #[cfg(test)]
 mod test {

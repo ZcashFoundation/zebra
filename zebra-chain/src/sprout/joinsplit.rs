@@ -1,6 +1,5 @@
 use std::io;
 
-use byteorder::{LittleEndian, WriteBytesExt};
 use serde::{Deserialize, Serialize};
 
 use crate::{
