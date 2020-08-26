@@ -44,7 +44,7 @@ const MAX_BLOCK_REORG_HEIGHT: block::Height = block::Height(MIN_TRASPARENT_COINB
 
 /// Configuration for the state service.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default)]
 pub struct Config {
     /// The root directory for storing cached data.
     ///

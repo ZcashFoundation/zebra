@@ -2,6 +2,7 @@
 
 use byteorder::{ByteOrder, LittleEndian};
 use serde::{Deserialize, Serialize};
+use sha2::digest::generic_array::{typenum::U64, GenericArray};
 
 use super::super::keys::SpendingKey;
 
@@ -13,17 +14,17 @@ use super::super::keys::SpendingKey;
 /// https://zips.z.cash/protocol/protocol.pdf#commitmentsandnullifiers
 fn prf_nf(a_sk: [u8; 32], rho: [u8; 32]) -> [u8; 32] {
     let mut state = [0u32; 8];
-    let mut block = [0u8; 64];
+    let mut block = GenericArray::<u8, U64>::default();
 
-    block[0..32].copy_from_slice(&a_sk[..]);
+    block.as_mut_slice()[0..32].copy_from_slice(&a_sk[..]);
     // The first four bits –i.e. the most signicant four bits of the
     // first byte– are used to separate distinct uses
     // of SHA256Compress, ensuring that the functions are independent.
-    block[0] |= 0b1110_0000;
+    block.as_mut_slice()[0] |= 0b1100_0000;
 
-    block[32..].copy_from_slice(&rho[..]);
+    block.as_mut_slice()[32..].copy_from_slice(&rho[..]);
 
-    sha2::compress256(&mut state, &block);
+    sha2::compress256(&mut state, &[block]);
 
     let mut derived_bytes = [0u8; 32];
     LittleEndian::write_u32_into(&state, &mut derived_bytes);

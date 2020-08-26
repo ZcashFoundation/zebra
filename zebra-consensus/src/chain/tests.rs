@@ -18,6 +18,7 @@ use zebra_chain::{
 use zebra_test::transcript::{TransError, Transcript};
 
 use crate::checkpoint::CheckpointList;
+use crate::Config;
 
 use super::*;
 
@@ -225,19 +226,33 @@ async fn verify_block() -> Result<(), Report> {
 
 #[tokio::test]
 async fn verify_checkpoint_test() -> Result<(), Report> {
-    verify_checkpoint().await
+    verify_checkpoint(Config {
+        checkpoint_sync: true,
+    })
+    .await?;
+    verify_checkpoint(Config {
+        checkpoint_sync: false,
+    })
+    .await?;
+
+    Ok(())
 }
 
 /// Test that checkpoint verifies work.
 ///
 /// Also tests the `chain::init` function.
 #[spandoc::spandoc]
-async fn verify_checkpoint() -> Result<(), Report> {
+async fn verify_checkpoint(config: Config) -> Result<(), Report> {
     zebra_test::init();
 
     // Test that the chain::init function works. Most of the other tests use
     // init_from_verifiers.
-    let chain_verifier = super::init(Network::Mainnet, zebra_state::in_memory::init()).await;
+    let chain_verifier = super::init(
+        config.clone(),
+        Network::Mainnet,
+        zebra_state::in_memory::init(),
+    )
+    .await;
 
     // Add a timeout layer
     let chain_verifier =

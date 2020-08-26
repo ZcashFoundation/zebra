@@ -15,6 +15,7 @@
 mod tests;
 
 use crate::checkpoint::{CheckpointList, CheckpointVerifier};
+use crate::Config;
 
 use futures_util::FutureExt;
 use std::{
@@ -199,7 +200,8 @@ fn is_higher_than_max_checkpoint(
     }
 }
 
-/// Return a chain verification service, using `network` and `state_service`.
+/// Return a chain verification service, using `config`, `network` and
+/// `state_service`.
 ///
 /// Gets the initial tip from the state service, and uses it to create a block
 /// verifier and checkpoint verifier (if needed).
@@ -212,6 +214,7 @@ fn is_higher_than_max_checkpoint(
 //       mempool transactions. We might want to share the BlockVerifier, and we
 //       might not want to add generated blocks to the state.
 pub async fn init<S>(
+    config: Config,
     network: Network,
     state_service: S,
 ) -> impl Service<
@@ -234,7 +237,10 @@ where
         .expect("State service poll_ready is Ok");
 
     let block_verifier = crate::block::init(state_service.clone());
-    let checkpoint_list = CheckpointList::new(network);
+    let checkpoint_list = match config.checkpoint_sync {
+        true => CheckpointList::new(network),
+        false => CheckpointList::new_up_to(network, Sapling),
+    };
 
     init_from_verifiers(
         network,
@@ -263,7 +269,7 @@ where
 ///
 /// Panics:
 ///
-/// Panics if the `checkpoint_verifier` is None, and the `initial_tip_height` is
+/// Panics if the `checkpoint_list` is None, and the `initial_tip_height` is
 /// below the Sapling network upgrade for `network`. (The `block_verifier` can't
 /// verify all the constraints on pre-Sapling blocks, so they require
 /// checkpoints.)
