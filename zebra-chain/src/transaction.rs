@@ -156,6 +156,12 @@ impl Transaction {
     }
 
     /// Calculate the sighash for the current transaction
+    ///
+    /// # Details
+    ///
+    /// # Panics
+    ///
+    /// This function only supports transactions from after NetworkUpgrade::Overwinter
     pub fn sighash(
         &self,
         network_upgrade: NetworkUpgrade,

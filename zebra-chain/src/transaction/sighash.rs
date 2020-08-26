@@ -11,6 +11,7 @@ use std::io;
 
 static ZIP243_EXPLANATION: &str =
     "Invalid transaction version: after Sapling activation, transaction version 4 is required";
+static ZIP143_EXPLANATION: &str = "V1 and V2 transactions are rejected post overwinter";
 
 const OVERWINTER_VERSION_GROUP_ID: u32 = 0x03C4_8270;
 const SAPLING_VERSION_GROUP_ID: u32 = 0x892F_2085;
@@ -77,7 +78,7 @@ impl<'a> SigHasher<'a> {
             .to_state();
 
         match self.network_upgrade {
-            Genesis | BeforeOverwinter => unreachable!("Zebra checkpoints on Sapling activation"),
+            Genesis | BeforeOverwinter => unreachable!(ZIP143_EXPLANATION),
             Overwinter => self
                 .hash_sighash_zip143(&mut hash)
                 .expect("serialization into hasher never fails"),
@@ -90,9 +91,7 @@ impl<'a> SigHasher<'a> {
     }
 
     fn consensus_branch_id(&self) -> ConsensusBranchId {
-        self.network_upgrade
-            .branch_id()
-            .expect("Zebra checkpoints on Sapling activation")
+        self.network_upgrade.branch_id().expect(ZIP143_EXPLANATION)
     }
 
     /// Sighash implementation for the overwinter consensus branch
@@ -111,26 +110,6 @@ impl<'a> SigHasher<'a> {
         Ok(())
     }
 
-    /// Sighash implementation for the sapling consensus branch and every
-    /// subsequent consensus branch
-    fn hash_sighash_zip243<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        self.hash_header(&mut writer)?;
-        self.hash_groupid(&mut writer)?;
-        self.hash_prevouts(&mut writer)?;
-        self.hash_sequence(&mut writer)?;
-        self.hash_outputs(&mut writer)?;
-        self.hash_joinsplits(&mut writer)?;
-        self.hash_shielded_spends(&mut writer)?;
-        self.hash_shielded_outputs(&mut writer)?;
-        self.hash_lock_time(&mut writer)?;
-        self.hash_expiry_height(&mut writer)?;
-        self.hash_value_balance(&mut writer)?;
-        self.hash_hash_type(&mut writer)?;
-        self.hash_input(&mut writer)?;
-
-        Ok(())
-    }
-
     pub(super) fn personal(&self) -> [u8; 16] {
         let mut personal = [0; 16];
         (&mut personal[..12]).copy_from_slice(ZCASH_SIGHASH_PERSONALIZATION_PREFIX);
@@ -141,19 +120,18 @@ impl<'a> SigHasher<'a> {
     }
 
     fn hash_header<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        let overwintered_flag = 1 << 31;
+
         writer.write_u32::<LittleEndian>(match &self.trans {
-            Transaction::V1 { .. } => 1,
-            Transaction::V2 { .. } => 2,
-            Transaction::V3 { .. } => 3 | 1 << 31,
-            Transaction::V4 { .. } => 4 | 1 << 31,
+            Transaction::V1 { .. } | Transaction::V2 { .. } => unreachable!(ZIP143_EXPLANATION),
+            Transaction::V3 { .. } => 3 | overwintered_flag,
+            Transaction::V4 { .. } => 4 | overwintered_flag,
         })
     }
 
     fn hash_groupid<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_u32::<LittleEndian>(match &self.trans {
-            Transaction::V1 { .. } | Transaction::V2 { .. } => {
-                unreachable!("V1 and V2 transactions are rejected post overwinter")
-            }
+            Transaction::V1 { .. } | Transaction::V2 { .. } => unreachable!(ZIP143_EXPLANATION),
             Transaction::V3 { .. } => OVERWINTER_VERSION_GROUP_ID,
             Transaction::V4 { .. } => SAPLING_VERSION_GROUP_ID,
         })
@@ -259,10 +237,8 @@ impl<'a> SigHasher<'a> {
 
     fn hash_joinsplits<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         let has_joinsplits = match self.trans {
-            Transaction::V1 { .. } => false,
-            Transaction::V2 { joinsplit_data, .. } | Transaction::V3 { joinsplit_data, .. } => {
-                joinsplit_data.is_some()
-            }
+            Transaction::V1 { .. } | Transaction::V2 { .. } => unreachable!(ZIP143_EXPLANATION),
+            Transaction::V3 { joinsplit_data, .. } => joinsplit_data.is_some(),
             Transaction::V4 { joinsplit_data, .. } => joinsplit_data.is_some(),
         };
 
@@ -276,11 +252,7 @@ impl<'a> SigHasher<'a> {
             .to_state();
 
         match self.trans {
-            Transaction::V2 {
-                joinsplit_data: Some(jsd),
-                ..
-            }
-            | Transaction::V3 {
+            Transaction::V3 {
                 joinsplit_data: Some(jsd),
                 ..
             } => {
@@ -298,7 +270,7 @@ impl<'a> SigHasher<'a> {
                 }
                 (&mut hash).write_all(&<[u8; 32]>::from(jsd.pub_key)[..])?;
             }
-            _ => unreachable!("already checked for joinsplits"),
+            _ => unreachable!("already checked transaction kind above"),
         };
 
         writer.write_all(hash.finalize().as_ref())
@@ -309,12 +281,7 @@ impl<'a> SigHasher<'a> {
     }
 
     fn hash_expiry_height<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        writer.write_u32::<LittleEndian>(
-            self.trans
-                .expiry_height()
-                .expect("Transaction is V3 or later")
-                .0,
-        )
+        writer.write_u32::<LittleEndian>(self.trans.expiry_height().expect(ZIP143_EXPLANATION).0)
     }
 
     fn hash_hash_type<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
@@ -390,13 +357,37 @@ impl<'a> SigHasher<'a> {
         Ok(())
     }
 
+    // ********************
+    // * ZIP243 ADDITIONS *
+    // ********************
+
+    /// Sighash implementation for the sapling consensus branch and every
+    /// subsequent consensus branch
+    fn hash_sighash_zip243<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        self.hash_header(&mut writer)?;
+        self.hash_groupid(&mut writer)?;
+        self.hash_prevouts(&mut writer)?;
+        self.hash_sequence(&mut writer)?;
+        self.hash_outputs(&mut writer)?;
+        self.hash_joinsplits(&mut writer)?;
+        self.hash_shielded_spends(&mut writer)?;
+        self.hash_shielded_outputs(&mut writer)?;
+        self.hash_lock_time(&mut writer)?;
+        self.hash_expiry_height(&mut writer)?;
+        self.hash_value_balance(&mut writer)?;
+        self.hash_hash_type(&mut writer)?;
+        self.hash_input(&mut writer)?;
+
+        Ok(())
+    }
+
     fn hash_shielded_spends<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         let shielded_data = match self.trans {
             Transaction::V4 {
                 shielded_data: Some(shielded_data),
                 ..
             } => shielded_data,
-            _ => return writer.write_all(&[0; 32]),
+            _ => unreachable!(ZIP243_EXPLANATION),
         };
 
         if shielded_data.spends().next().is_none() {
@@ -425,7 +416,7 @@ impl<'a> SigHasher<'a> {
                 shielded_data: Some(shielded_data),
                 ..
             } => shielded_data,
-            _ => return writer.write_all(&[0; 32]),
+            _ => unreachable!(ZIP243_EXPLANATION),
         };
 
         if shielded_data.outputs().next().is_none() {
