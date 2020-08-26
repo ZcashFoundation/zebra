@@ -465,7 +465,7 @@ mod test {
     use color_eyre::eyre;
     use eyre::Result;
     use transparent::Script;
-    use zebra_test::vectors::{ZIP143_1, ZIP143_2, ZIP243_1};
+    use zebra_test::vectors::{ZIP143_1, ZIP143_2, ZIP243_1, ZIP243_2, ZIP243_3};
 
     macro_rules! assert_hash_eq {
         ($expected:literal, $hasher:expr, $f:ident) => {
@@ -704,6 +704,208 @@ mod test {
 
         let hash = hasher.sighash();
         let expected = "63d18534de5f2d1c9e169b73f9c783718adbef5c8a7d55b5e7a37affa1dd3ff3";
+        let result = hex::encode(hash.as_bytes());
+        let span = tracing::span!(
+            tracing::Level::ERROR,
+            "compare_final",
+            expected.len = expected.len(),
+            buf.len = result.len()
+        );
+        let guard = span.enter();
+        assert_eq!(expected, result);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_vec243_2() -> Result<()> {
+        zebra_test::init();
+
+        let transaction = ZIP243_2.zcash_deserialize_into::<Transaction>()?;
+
+        let value = hex::decode("adedf02996510200")?.zcash_deserialize_into::<Amount<_>>()?;
+        let lock_script = Script(hex::decode("00")?);
+        let input_ind = 1;
+
+        let hasher = SigHasher::new(
+            &transaction,
+            HashType::NONE,
+            NetworkUpgrade::Sapling,
+            Some((input_ind, transparent::Output { value, lock_script })),
+        );
+
+        assert_hash_eq!("04000080", hasher, hash_header);
+
+        assert_hash_eq!("85202f89", hasher, hash_groupid);
+
+        assert_hash_eq!(
+            "cacf0f5210cce5fa65a59f314292b3111d299e7d9d582753cf61e1e408552ae4",
+            hasher,
+            hash_prevouts
+        );
+
+        assert_hash_eq!(
+            "0000000000000000000000000000000000000000000000000000000000000000",
+            hasher,
+            hash_sequence
+        );
+
+        assert_hash_eq!(
+            "0000000000000000000000000000000000000000000000000000000000000000",
+            hasher,
+            hash_outputs
+        );
+
+        assert_hash_eq!(
+            "0000000000000000000000000000000000000000000000000000000000000000",
+            hasher,
+            hash_joinsplits
+        );
+
+        assert_hash_eq!(
+            "0000000000000000000000000000000000000000000000000000000000000000",
+            hasher,
+            hash_shielded_spends
+        );
+
+        assert_hash_eq!(
+            "b79530fcec83211d21e3c355db538c138d625784c27370e9d1039a8515a23f87",
+            hasher,
+            hash_shielded_outputs
+        );
+
+        assert_hash_eq!("d7034302", hasher, hash_lock_time);
+
+        assert_hash_eq!("011b9a07", hasher, hash_expiry_height);
+
+        assert_hash_eq!("6620edc067ff0200", hasher, hash_value_balance);
+
+        assert_hash_eq!("02000000", hasher, hash_hash_type);
+
+        assert_hash_eq!(
+            "090f47a068e227433f9e49d3aa09e356d8d66d0c0121e91a3c4aa3f27fa1b63396e2b41d",
+            hasher,
+            hash_input_prevout
+        );
+
+        assert_hash_eq!("00", hasher, hash_input_script_code);
+
+        assert_hash_eq!("adedf02996510200", hasher, hash_input_amount);
+
+        assert_hash_eq!("4e970568", hasher, hash_input_sequence);
+
+        assert_hash_eq!(
+            "0400008085202f89cacf0f5210cce5fa65a59f314292b3111d299e7d9d582753cf61e1e408552ae40000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000b79530fcec83211d21e3c355db538c138d625784c27370e9d1039a8515a23f87d7034302011b9a076620edc067ff020002000000090f47a068e227433f9e49d3aa09e356d8d66d0c0121e91a3c4aa3f27fa1b63396e2b41d00adedf029965102004e970568",
+            hasher,
+            hash_sighash_zip243
+        );
+
+        let hash = hasher.sighash();
+        let expected = "bbe6d84f57c56b29b914c694baaccb891297e961de3eb46c68e3c89c47b1a1db";
+        let result = hex::encode(hash.as_bytes());
+        let span = tracing::span!(
+            tracing::Level::ERROR,
+            "compare_final",
+            expected.len = expected.len(),
+            buf.len = result.len()
+        );
+        let guard = span.enter();
+        assert_eq!(expected, result);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_vec243_3() -> Result<()> {
+        zebra_test::init();
+
+        let transaction = ZIP243_3.zcash_deserialize_into::<Transaction>()?;
+
+        let value = hex::decode("80f0fa0200000000")?.zcash_deserialize_into::<Amount<_>>()?;
+        let lock_script = Script(hex::decode(
+            "1976a914507173527b4c3318a2aecd793bf1cfed705950cf88ac",
+        )?);
+        let input_ind = 0;
+
+        let hasher = SigHasher::new(
+            &transaction,
+            HashType::ALL,
+            NetworkUpgrade::Sapling,
+            Some((input_ind, transparent::Output { value, lock_script })),
+        );
+
+        assert_hash_eq!("04000080", hasher, hash_header);
+
+        assert_hash_eq!("85202f89", hasher, hash_groupid);
+
+        assert_hash_eq!(
+            "fae31b8dec7b0b77e2c8d6b6eb0e7e4e55abc6574c26dd44464d9408a8e33f11",
+            hasher,
+            hash_prevouts
+        );
+
+        assert_hash_eq!(
+            "6c80d37f12d89b6f17ff198723e7db1247c4811d1a695d74d930f99e98418790",
+            hasher,
+            hash_sequence
+        );
+
+        assert_hash_eq!(
+            "d2b04118469b7810a0d1cc59568320aad25a84f407ecac40b4f605a4e6868454",
+            hasher,
+            hash_outputs
+        );
+
+        assert_hash_eq!(
+            "0000000000000000000000000000000000000000000000000000000000000000",
+            hasher,
+            hash_joinsplits
+        );
+
+        assert_hash_eq!(
+            "0000000000000000000000000000000000000000000000000000000000000000",
+            hasher,
+            hash_shielded_spends
+        );
+
+        assert_hash_eq!(
+            "0000000000000000000000000000000000000000000000000000000000000000",
+            hasher,
+            hash_shielded_outputs
+        );
+
+        assert_hash_eq!("29b00400", hasher, hash_lock_time);
+
+        assert_hash_eq!("48b00400", hasher, hash_expiry_height);
+
+        assert_hash_eq!("0000000000000000", hasher, hash_value_balance);
+
+        assert_hash_eq!("01000000", hasher, hash_hash_type);
+
+        assert_hash_eq!(
+            "a8c685478265f4c14dada651969c45a65e1aeb8cd6791f2f5bb6a1d9952104d901000000",
+            hasher,
+            hash_input_prevout
+        );
+
+        assert_hash_eq!(
+            "1976a914507173527b4c3318a2aecd793bf1cfed705950cf88ac",
+            hasher,
+            hash_input_script_code
+        );
+
+        assert_hash_eq!("80f0fa0200000000", hasher, hash_input_amount);
+
+        assert_hash_eq!("feffffff", hasher, hash_input_sequence);
+
+        assert_hash_eq!(
+            "0400008085202f89fae31b8dec7b0b77e2c8d6b6eb0e7e4e55abc6574c26dd44464d9408a8e33f116c80d37f12d89b6f17ff198723e7db1247c4811d1a695d74d930f99e98418790d2b04118469b7810a0d1cc59568320aad25a84f407ecac40b4f605a4e686845400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000029b0040048b00400000000000000000001000000a8c685478265f4c14dada651969c45a65e1aeb8cd6791f2f5bb6a1d9952104d9010000001976a914507173527b4c3318a2aecd793bf1cfed705950cf88ac80f0fa0200000000feffffff",
+            hasher,
+            hash_sighash_zip243
+        );
+
+        let hash = hasher.sighash();
+        let expected = "f3148f80dfab5e573d5edfe7a850f5fd39234f80b5429d3a57edcc11e34c585b";
         let result = hex::encode(hash.as_bytes());
         let span = tracing::span!(
             tracing::Level::ERROR,
