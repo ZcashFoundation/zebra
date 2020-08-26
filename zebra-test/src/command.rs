@@ -219,7 +219,8 @@ impl TestOutput {
         let stdout = || stdout.into_owned().header("Stdout:");
 
         Err(eyre!(
-            "stdout of command did not contain any matches for the given regex"
+            "stdout of command did not contain any matches for the given regex '{}'",
+            regex
         ))
         .with_section(command)
         .with_section(stdout)
@@ -235,9 +236,12 @@ impl TestOutput {
         let command = || self.cmd.clone().header("Command:");
         let stdout = || stdout.into_owned().header("Stdout:");
 
-        Err(eyre!("stdout of command is not equal the given string"))
-            .with_section(command)
-            .with_section(stdout)
+        Err(eyre!(
+            "stdout of command is not equal the given string '{}'",
+            s
+        ))
+        .with_section(command)
+        .with_section(stdout)
     }
 
     pub fn stdout_matches(&self, regex: &str) -> Result<&Self> {
@@ -251,9 +255,12 @@ impl TestOutput {
         let command = || self.cmd.clone().header("Command:");
         let stdout = || stdout.into_owned().header("Stdout:");
 
-        Err(eyre!("stdout of command is not equal to the given regex"))
-            .with_section(command)
-            .with_section(stdout)
+        Err(eyre!(
+            "stdout of command is not equal to the given regex '{}'",
+            regex
+        ))
+        .with_section(command)
+        .with_section(stdout)
     }
 
     /// Returns true if the program was killed, false if exit was by another reason.
