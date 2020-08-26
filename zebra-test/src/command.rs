@@ -208,6 +208,7 @@ impl TestOutput {
     pub fn stdout_contains(&self, regex: &str) -> Result<&Self> {
         let re = regex::Regex::new(regex)?;
         let stdout = String::from_utf8_lossy(&self.output.stdout);
+        let stderr = String::from_utf8_lossy(&self.output.stderr);
 
         for line in stdout.lines() {
             if re.is_match(line) {
@@ -217,6 +218,7 @@ impl TestOutput {
 
         let command = || self.cmd.clone().header("Command:");
         let stdout = || stdout.into_owned().header("Stdout:");
+        let stderr = || stderr.into_owned().header("Stderr:");
 
         Err(eyre!(
             "stdout of command did not contain any matches for the given regex '{}'",
@@ -224,10 +226,12 @@ impl TestOutput {
         ))
         .with_section(command)
         .with_section(stdout)
+        .with_section(stderr)
     }
 
     pub fn stdout_equals(&self, s: &str) -> Result<&Self> {
         let stdout = String::from_utf8_lossy(&self.output.stdout);
+        let stderr = String::from_utf8_lossy(&self.output.stderr);
 
         if stdout == s {
             return Ok(self);
@@ -235,6 +239,7 @@ impl TestOutput {
 
         let command = || self.cmd.clone().header("Command:");
         let stdout = || stdout.into_owned().header("Stdout:");
+        let stderr = || stderr.into_owned().header("Stderr:");
 
         Err(eyre!(
             "stdout of command is not equal the given string '{}'",
@@ -242,11 +247,13 @@ impl TestOutput {
         ))
         .with_section(command)
         .with_section(stdout)
+        .with_section(stderr)
     }
 
     pub fn stdout_matches(&self, regex: &str) -> Result<&Self> {
         let re = regex::Regex::new(regex)?;
         let stdout = String::from_utf8_lossy(&self.output.stdout);
+        let stderr = String::from_utf8_lossy(&self.output.stderr);
 
         if re.is_match(&stdout) {
             return Ok(self);
@@ -254,6 +261,7 @@ impl TestOutput {
 
         let command = || self.cmd.clone().header("Command:");
         let stdout = || stdout.into_owned().header("Stdout:");
+        let stderr = || stderr.into_owned().header("Stderr:");
 
         Err(eyre!(
             "stdout of command is not equal to the given regex '{}'",
@@ -261,6 +269,7 @@ impl TestOutput {
         ))
         .with_section(command)
         .with_section(stdout)
+        .with_section(stderr)
     }
 
     /// Returns true if the program was killed, false if exit was by another reason.
