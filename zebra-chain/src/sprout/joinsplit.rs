@@ -71,8 +71,8 @@ impl<P: ZkSnarkProof> Eq for JoinSplit<P> {}
 
 impl<P: ZkSnarkProof> ZcashSerialize for JoinSplit<P> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        writer.write_u64::<LittleEndian>(self.vpub_old.into())?;
-        writer.write_u64::<LittleEndian>(self.vpub_new.into())?;
+        self.vpub_old.zcash_serialize(&mut writer)?;
+        self.vpub_new.zcash_serialize(&mut writer)?;
         writer.write_32_bytes(&self.anchor.into())?;
         writer.write_32_bytes(&self.nullifiers[0].into())?;
         writer.write_32_bytes(&self.nullifiers[1].into())?;

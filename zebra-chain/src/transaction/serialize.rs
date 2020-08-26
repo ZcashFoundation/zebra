@@ -144,7 +144,7 @@ impl ZcashSerialize for Transaction {
                 outputs.zcash_serialize(&mut writer)?;
                 lock_time.zcash_serialize(&mut writer)?;
                 writer.write_u32::<LittleEndian>(expiry_height.0)?;
-                writer.write_i64::<LittleEndian>((*value_balance).into())?;
+                value_balance.zcash_serialize(&mut writer)?;
 
                 // The previous match arms serialize in one go, because the
                 // internal structure happens to nicely line up with the

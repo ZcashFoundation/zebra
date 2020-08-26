@@ -214,7 +214,7 @@ impl ZcashDeserialize for Input {
 
 impl ZcashSerialize for Output {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        writer.write_u64::<LittleEndian>(self.value.into())?;
+        self.value.zcash_serialize(&mut writer)?;
         self.lock_script.zcash_serialize(&mut writer)?;
         Ok(())
     }

@@ -11,8 +11,8 @@ use std::{
     ops::RangeInclusive,
 };
 
-use crate::serialization::ZcashDeserialize;
-use byteorder::{ByteOrder, LittleEndian, ReadBytesExt};
+use crate::serialization::{ZcashDeserialize, ZcashSerialize};
+use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
 
 type Result<T, E = Error> = std::result::Result<T, E>;
 
@@ -263,6 +263,15 @@ pub trait Constraint {
     }
 }
 
+impl<C> ZcashSerialize for Amount<C>
+where
+    C: Constraint,
+{
+    fn zcash_serialize<W: std::io::Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
+        writer.write_i64::<LittleEndian>(self.0)
+    }
+}
+
 impl<C> ZcashDeserialize for Amount<C>
 where
     C: Constraint,
@@ -273,6 +282,7 @@ where
         Ok(reader.read_i64::<LittleEndian>()?.try_into()?)
     }
 }
+// writer.write_i64::<LittleEndian>((*value_balance).into())?;
 
 #[cfg(test)]
 mod test {
