@@ -9,13 +9,8 @@ use byteorder::{LittleEndian, WriteBytesExt};
 use io::Write;
 use std::io;
 
-// TODO: figure out how to write this more concisely
 static ZIP243_EXPLANATION: &str =
-    "The new algorithm MUST be used for signatures created over the Sapling
-transaction format 2. Combined with the new consensus rule that v3
-transaction formats will be invalid from the Sapling upgrade, this
-effectively means that all transaction signatures from the Sapling activation
-height (as specified in 6) will use the new algorithm.";
+    "Invalid transaction version: after Sapling activation, transaction version 4 is required";
 
 const OVERWINTER_VERSION_GROUP_ID: u32 = 0x03C4_8270;
 const SAPLING_VERSION_GROUP_ID: u32 = 0x892F_2085;
