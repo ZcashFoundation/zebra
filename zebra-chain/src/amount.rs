@@ -263,23 +263,36 @@ pub trait Constraint {
     }
 }
 
-impl<C> ZcashSerialize for Amount<C>
-where
-    C: Constraint,
-{
+impl ZcashSerialize for Amount<NegativeAllowed> {
     fn zcash_serialize<W: std::io::Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
         writer.write_i64::<LittleEndian>(self.0)
     }
 }
 
-impl<C> ZcashDeserialize for Amount<C>
-where
-    C: Constraint,
-{
+impl ZcashDeserialize for Amount<NegativeAllowed> {
     fn zcash_deserialize<R: std::io::Read>(
         mut reader: R,
     ) -> Result<Self, crate::serialization::SerializationError> {
         Ok(reader.read_i64::<LittleEndian>()?.try_into()?)
+    }
+}
+
+impl ZcashSerialize for Amount<NonNegative> {
+    fn zcash_serialize<W: std::io::Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
+        let amount = self
+            .0
+            .try_into()
+            .expect("constaint guarantees value is positive");
+
+        writer.write_u64::<LittleEndian>(amount)
+    }
+}
+
+impl ZcashDeserialize for Amount<NonNegative> {
+    fn zcash_deserialize<R: std::io::Read>(
+        mut reader: R,
+    ) -> Result<Self, crate::serialization::SerializationError> {
+        Ok(reader.read_u64::<LittleEndian>()?.try_into()?)
     }
 }
 
