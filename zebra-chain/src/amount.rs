@@ -12,7 +12,7 @@ use std::{
 };
 
 use crate::serialization::ZcashDeserialize;
-use byteorder::{ByteOrder, LittleEndian};
+use byteorder::{ByteOrder, LittleEndian, ReadBytesExt};
 
 type Result<T, E = Error> = std::result::Result<T, E>;
 
@@ -270,8 +270,6 @@ where
     fn zcash_deserialize<R: std::io::Read>(
         mut reader: R,
     ) -> Result<Self, crate::serialization::SerializationError> {
-        use byteorder::ReadBytesExt;
-
         Ok(reader.read_u64::<LittleEndian>()?.try_into()?)
     }
 }
