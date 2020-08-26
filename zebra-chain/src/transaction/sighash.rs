@@ -47,11 +47,7 @@ pub(super) struct SigHasher<'a> {
     trans: &'a Transaction,
     hash_type: HashType,
     network_upgrade: NetworkUpgrade,
-    input: Option<(
-        transparent::Output,
-        &'a transparent::Input,
-        &'a transparent::Output,
-    )>,
+    input: Option<(transparent::Output, &'a transparent::Input, usize)>,
 }
 
 impl<'a> SigHasher<'a> {
@@ -64,9 +60,8 @@ impl<'a> SigHasher<'a> {
         let input = if let Some((index, prevout)) = input {
             let index = index as usize;
             let inputs = trans.inputs();
-            let outputs = trans.outputs();
 
-            Some((prevout, &inputs[index], &outputs[index]))
+            Some((prevout, &inputs[index], index))
         } else {
             None
         };
@@ -221,7 +216,14 @@ impl<'a> SigHasher<'a> {
         if self.hash_type.masked() != HashType::SINGLE && self.hash_type.masked() != HashType::NONE
         {
             self.outputs_hash(writer)
-        } else if self.hash_type.masked() == HashType::SINGLE && self.input.is_some() {
+        } else if self.hash_type.masked() == HashType::SINGLE
+            && self
+                .input
+                .as_ref()
+                .map(|&(_, _, index)| index)
+                .map(|index| index < self.trans.outputs().len())
+                .unwrap_or(false)
+        {
             self.single_output_hash(writer)
         } else {
             writer.write_all(&[0; 32])
@@ -243,10 +245,12 @@ impl<'a> SigHasher<'a> {
     }
 
     fn single_output_hash<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        let (_, _, output) = self
+        let &(_, _, output) = self
             .input
             .as_ref()
             .expect("already checked index is some in `hash_outputs`");
+
+        let output = &self.trans.outputs()[output];
 
         let mut hash = blake2b_simd::Params::new()
             .hash_length(32)
