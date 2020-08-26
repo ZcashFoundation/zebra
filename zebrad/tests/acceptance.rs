@@ -385,13 +385,13 @@ fn listener_address(request: &str, expected_response: Option<&str>) -> Result<()
     config.network.listen_addr = request.parse()?;
     fs::File::create(&config_path)?.write_all(toml::to_string(&config)?.as_bytes())?;
 
-    // Start zebrad with created config and kill it at 3 seconds.
+    // Start zebrad with created config and kill it at 5 seconds.
     // This should be enough time to open port.
     let mut child = get_child(
         &["-c", config_path.to_str().unwrap(), "start"],
         &dir.path().to_path_buf(),
     )?;
-    std::thread::sleep(Duration::from_secs(3));
+    std::thread::sleep(Duration::from_secs(5));
     child.kill()?;
 
     let output = child.wait_with_output()?;
