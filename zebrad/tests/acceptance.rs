@@ -355,16 +355,16 @@ fn valid_generated_config(command: &str, expected_output: &str) -> Result<()> {
 #[test]
 fn listener_address_test() -> Result<()> {
     listener_address(
-        "localhost:8233",
-        Some("Opened Zcash protocol endpoint at 127.0.0.1:8233"),
+        "localhost:0",
+        Some("Opened Zcash protocol endpoint at 127.0.0.1:"),
     )?;
     listener_address(
-        "127.0.0.1:8233",
-        Some("Opened Zcash protocol endpoint at 127.0.0.1:8233"),
+        "127.0.0.1:0",
+        Some("Opened Zcash protocol endpoint at 127.0.0.1:"),
     )?;
     listener_address(
-        "::1:8233",
-        Some("Opened Zcash protocol endpoint at \\[::1\\]:8233"),
+        "::1:0",
+        Some("Opened Zcash protocol endpoint at \\[::1\\]:"),
     )?;
     listener_address("invalid", None)?;
 
