@@ -1,4 +1,3 @@
-#![allow(dead_code, unused_variables)]
 use super::Transaction;
 use crate::{
     parameters::{ConsensusBranchId, NetworkUpgrade},
@@ -550,7 +549,7 @@ mod test {
             expected.len = expected.len(),
             buf.len = result.len()
         );
-        let guard = span.enter();
+        let _guard = span.enter();
         assert_eq!(expected, result);
 
         Ok(())
@@ -629,7 +628,7 @@ mod test {
             expected.len = expected.len(),
             buf.len = result.len()
         );
-        let guard = span.enter();
+        let _guard = span.enter();
         assert_eq!(expected, result);
 
         Ok(())
@@ -711,7 +710,7 @@ mod test {
             expected.len = expected.len(),
             buf.len = result.len()
         );
-        let guard = span.enter();
+        let _guard = span.enter();
         assert_eq!(expected, result);
 
         Ok(())
@@ -809,7 +808,7 @@ mod test {
             expected.len = expected.len(),
             buf.len = result.len()
         );
-        let guard = span.enter();
+        let _guard = span.enter();
         assert_eq!(expected, result);
 
         Ok(())
@@ -913,7 +912,7 @@ mod test {
             expected.len = expected.len(),
             buf.len = result.len()
         );
-        let guard = span.enter();
+        let _guard = span.enter();
         assert_eq!(expected, result);
 
         Ok(())
