@@ -70,7 +70,7 @@ impl<'a> SigHasher<'a> {
         }
     }
 
-    pub fn sighash(self) -> Hash {
+    pub(super) fn sighash(self) -> Hash {
         use NetworkUpgrade::*;
         let mut hash = blake2b_simd::Params::new()
             .hash_length(32)
@@ -251,6 +251,16 @@ impl<'a> SigHasher<'a> {
             .personal(ZCASH_JOINSPLITS_HASH_PERSONALIZATION)
             .to_state();
 
+        // This code, and the check above for has_joinsplits cannot be combined
+        // into a single branch because the `joinsplit_data` type of each
+        // tranaction kind has a different type.
+        //
+        // For v3 joinsplit_data is a JoinSplitData<Bctv14Proof>
+        // For v4 joinsplit_data is a JoinSplitData<Groth16Proof>
+        //
+        // The type parameter on these types prevents them from being unified,
+        // which forces us to duplicate the logic in each branch even though the
+        // code within each branch is identical.
         match self.trans {
             Transaction::V3 {
                 joinsplit_data: Some(jsd),
