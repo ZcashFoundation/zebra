@@ -1,7 +1,6 @@
 #![allow(dead_code, unused_variables)]
 use super::Transaction;
 use crate::{
-    amount::Amount,
     parameters::{ConsensusBranchId, NetworkUpgrade},
     serialization::{WriteZcashExt, ZcashSerialize},
     transparent,
@@ -46,13 +45,41 @@ impl HashType {
 }
 
 pub(super) struct SigHasher<'a> {
-    pub(super) trans: &'a Transaction,
-    pub(super) hash_type: HashType,
-    pub(super) network_upgrade: NetworkUpgrade,
-    pub(super) input: Option<(u32, transparent::Output)>,
+    trans: &'a Transaction,
+    hash_type: HashType,
+    network_upgrade: NetworkUpgrade,
+    input: Option<(
+        transparent::Output,
+        &'a transparent::Input,
+        &'a transparent::Output,
+    )>,
 }
 
 impl<'a> SigHasher<'a> {
+    pub fn new(
+        trans: &'a Transaction,
+        hash_type: HashType,
+        network_upgrade: NetworkUpgrade,
+        input: Option<(u32, transparent::Output)>,
+    ) -> Self {
+        let input = if let Some((index, prevout)) = input {
+            let index = index as usize;
+            let inputs = trans.inputs();
+            let outputs = trans.outputs();
+
+            Some((prevout, &inputs[index], &outputs[index]))
+        } else {
+            None
+        };
+
+        SigHasher {
+            trans,
+            hash_type,
+            network_upgrade,
+            input,
+        }
+    }
+
     pub fn sighash(self) -> Hash {
         use NetworkUpgrade::*;
         let mut hash = blake2b_simd::Params::new()
@@ -195,13 +222,7 @@ impl<'a> SigHasher<'a> {
         if self.hash_type.masked() != HashType::SINGLE && self.hash_type.masked() != HashType::NONE
         {
             self.outputs_hash(writer)
-        } else if self.hash_type.masked() == HashType::SINGLE
-            && self
-                .input
-                .as_ref()
-                .map(|(index, _)| (*index as usize) < self.trans.outputs().len())
-                .unwrap_or(false)
-        {
+        } else if self.hash_type.masked() == HashType::SINGLE && self.input.is_some() {
             self.single_output_hash(writer)
         } else {
             writer.write_all(&[0; 32])
@@ -223,7 +244,7 @@ impl<'a> SigHasher<'a> {
     }
 
     fn single_output_hash<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        let (index, outpoint) = self
+        let (_, _, output) = self
             .input
             .as_ref()
             .expect("already checked index is some in `hash_outputs`");
@@ -233,7 +254,7 @@ impl<'a> SigHasher<'a> {
             .personal(ZCASH_OUTPUTS_HASH_PERSONALIZATION)
             .to_state();
 
-        self.trans.outputs()[*index as usize].zcash_serialize(&mut hash)?;
+        output.zcash_serialize(&mut hash)?;
 
         writer.write_all(hash.finalize().as_ref())
     }
@@ -303,28 +324,22 @@ impl<'a> SigHasher<'a> {
     }
 
     fn hash_input<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        let (index, transparent::Output { value, lock_script }) =
-            if let Some(input) = self.input.as_ref() {
-                input
-            } else {
-                return Ok(());
-            };
-
-        let input = &self.trans.inputs()[*index as usize];
-
-        self.hash_input_prevout(input, &mut writer)?;
-        self.hash_input_script_code(lock_script, &mut writer)?;
-        self.hash_input_amount(*value, &mut writer)?;
-        self.hash_input_sequence(input, &mut writer)?;
+        if self.input.is_some() {
+            self.hash_input_prevout(&mut writer)?;
+            self.hash_input_script_code(&mut writer)?;
+            self.hash_input_amount(&mut writer)?;
+            self.hash_input_sequence(&mut writer)?;
+        }
 
         Ok(())
     }
 
-    fn hash_input_prevout<W: io::Write>(
-        &self,
-        input: &transparent::Input,
-        mut writer: W,
-    ) -> Result<(), io::Error> {
+    fn hash_input_prevout<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        let (_, input, _) = self
+            .input
+            .as_ref()
+            .expect("caller verifies input is not none");
+
         let outpoint = match input {
             transparent::Input::PrevOut { outpoint, .. } => outpoint,
             transparent::Input::Coinbase { .. } => {
@@ -337,31 +352,34 @@ impl<'a> SigHasher<'a> {
         Ok(())
     }
 
-    fn hash_input_script_code<W: io::Write>(
-        &self,
-        lock_script: &transparent::Script,
-        mut writer: W,
-    ) -> Result<(), io::Error> {
+    fn hash_input_script_code<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        let (transparent::Output { lock_script, .. }, _, _) = self
+            .input
+            .as_ref()
+            .expect("caller verifies input is not none");
+
         writer.write_all(&lock_script.0)?;
 
         Ok(())
     }
 
-    fn hash_input_amount<W: io::Write, C>(
-        &self,
-        value: Amount<C>,
-        mut writer: W,
-    ) -> Result<(), io::Error> {
+    fn hash_input_amount<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        let (transparent::Output { value, .. }, _, _) = self
+            .input
+            .as_ref()
+            .expect("caller verifies input is not none");
+
         writer.write_all(&value.to_bytes())?;
 
         Ok(())
     }
 
-    fn hash_input_sequence<W: io::Write>(
-        &self,
-        input: &transparent::Input,
-        mut writer: W,
-    ) -> Result<(), io::Error> {
+    fn hash_input_sequence<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        let (_, input, _) = self
+            .input
+            .as_ref()
+            .expect("caller verifies input is not none");
+
         let sequence = match input {
             transparent::Input::PrevOut { sequence, .. } => sequence,
             transparent::Input::Coinbase { .. } => {
@@ -443,10 +461,11 @@ impl<'a> SigHasher<'a> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{serialization::ZcashDeserializeInto, transaction::Transaction};
+    use crate::{amount::Amount, serialization::ZcashDeserializeInto, transaction::Transaction};
     use color_eyre::eyre;
     use eyre::Result;
-    use zebra_test::vectors::{ZIP143_1, ZIP143_2};
+    use transparent::Script;
+    use zebra_test::vectors::{ZIP143_1, ZIP143_2, ZIP243_1};
 
     macro_rules! assert_hash_eq {
         ($expected:literal, $hasher:expr, $f:ident) => {
@@ -470,7 +489,7 @@ mod test {
     }
 
     #[test]
-    fn test_vec1() -> Result<()> {
+    fn test_vec143_1() -> Result<()> {
         zebra_test::init();
 
         let transaction = ZIP143_1.zcash_deserialize_into::<Transaction>()?;
@@ -538,45 +557,21 @@ mod test {
     }
 
     #[test]
-    fn test_vec2() -> Result<()> {
+    fn test_vec143_2() -> Result<()> {
         zebra_test::init();
 
-        let transaction = dbg!(ZIP143_2.zcash_deserialize_into::<Transaction>()?);
+        let transaction = ZIP143_2.zcash_deserialize_into::<Transaction>()?;
 
-        // inputs: [
-        //     PrevOut {
-        //         outpoint: OutPoint {
-        //             hash: TransactionHash(
-        //                 "4201cfb1cd8dbf69b8250c18ef41294ca97993db546c1fe01f7e9c8e36d6a5e2",
-        //             ),
-        //             index: 2804960925,
-        //         },
-        //         unlock_script: Script(
-        //             "ac6a00",
-        //         ),
-        //         sequence: 1763459736,
-        //     },
-        //     PrevOut {
-        //         outpoint: OutPoint {
-        //             hash: TransactionHash(
-        //                 "378af1e40f64e125946f62c2fa7b2fecbcb64b6968912a6381ce3dc166d56a1d",
-        //             ),
-        //             index: 3618174306,
-        //         },
-        //         unlock_script: Script(
-        //             "6363635353",
-        //         ),
-        //         sequence: 1025558504,
-        //     },
-        // ],
+        let value = hex::decode("2f6e04963b4c0100")?.zcash_deserialize_into::<Amount<_>>()?;
+        let lock_script = Script(hex::decode("0153")?);
+        let input_ind = 1;
 
-        let hasher = SigHasher {
-            trans: &transaction,
-            hash_type: HashType::SINGLE,
-            network_upgrade: NetworkUpgrade::Overwinter,
-            // input: Some(1),  TODO: figure out the correct inputs
-            input: None,
-        };
+        let hasher = SigHasher::new(
+            &transaction,
+            HashType::SINGLE,
+            NetworkUpgrade::Overwinter,
+            Some((input_ind, transparent::Output { value, lock_script })),
+        );
 
         assert_hash_eq!("03000080", hasher, hash_header);
 
@@ -612,10 +607,104 @@ mod test {
 
         assert_hash_eq!("03000000", hasher, hash_hash_type);
 
+        assert_hash_eq!(
+            "378af1e40f64e125946f62c2fa7b2fecbcb64b6968912a6381ce3dc166d56a1d62f5a8d7",
+            hasher,
+            hash_input_prevout
+        );
+
+        assert_hash_eq!("0153", hasher, hash_input_script_code);
+
+        assert_hash_eq!("2f6e04963b4c0100", hasher, hash_input_amount);
+
+        assert_hash_eq!("e8c7203d", hasher, hash_input_sequence);
+
         let hash = hasher.sighash();
         let expected = "23652e76cb13b85a0e3363bb5fca061fa791c40c533eccee899364e6e60bb4f7";
         let result = hash.as_bytes();
         let result = hex::encode(result);
+        let span = tracing::span!(
+            tracing::Level::ERROR,
+            "compare_final",
+            expected.len = expected.len(),
+            buf.len = result.len()
+        );
+        let guard = span.enter();
+        assert_eq!(expected, result);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_vec243_1() -> Result<()> {
+        zebra_test::init();
+
+        let transaction = ZIP243_1.zcash_deserialize_into::<Transaction>()?;
+
+        let hasher = SigHasher {
+            trans: &transaction,
+            hash_type: HashType::ALL,
+            network_upgrade: NetworkUpgrade::Sapling,
+            input: None,
+        };
+
+        assert_hash_eq!("04000080", hasher, hash_header);
+
+        assert_hash_eq!("85202f89", hasher, hash_groupid);
+
+        assert_hash_eq!(
+            "d53a633bbecf82fe9e9484d8a0e727c73bb9e68c96e72dec30144f6a84afa136",
+            hasher,
+            hash_prevouts
+        );
+
+        assert_hash_eq!(
+            "a5f25f01959361ee6eb56a7401210ee268226f6ce764a4f10b7f29e54db37272",
+            hasher,
+            hash_sequence
+        );
+
+        assert_hash_eq!(
+            "ab6f7f6c5ad6b56357b5f37e16981723db6c32411753e28c175e15589172194a",
+            hasher,
+            hash_outputs
+        );
+
+        assert_hash_eq!(
+            "0000000000000000000000000000000000000000000000000000000000000000",
+            hasher,
+            hash_joinsplits
+        );
+
+        assert_hash_eq!(
+            "3fd9edb96dccf5b9aeb71e3db3710e74be4f1dfb19234c1217af26181f494a36",
+            hasher,
+            hash_shielded_spends
+        );
+
+        assert_hash_eq!(
+            "dafece799f638ba7268bf8fe43f02a5112f0bb32a84c4a8c2f508c41ff1c78b5",
+            hasher,
+            hash_shielded_outputs
+        );
+
+        assert_hash_eq!("481cdd86", hasher, hash_lock_time);
+
+        assert_hash_eq!("b3cc4318", hasher, hash_expiry_height);
+
+        assert_hash_eq!("442117623ceb0500", hasher, hash_value_balance);
+
+        assert_hash_eq!("01000000", hasher, hash_hash_type);
+
+        assert_hash_eq!(
+            "0400008085202f89d53a633bbecf82fe9e9484d8a0e727c73bb9e68c96e72dec30144f6a84afa136a5f25f01959361ee6eb56a7401210ee268226f6ce764a4f10b7f29e54db37272ab6f7f6c5ad6b56357b5f37e16981723db6c32411753e28c175e15589172194a00000000000000000000000000000000000000000000000000000000000000003fd9edb96dccf5b9aeb71e3db3710e74be4f1dfb19234c1217af26181f494a36dafece799f638ba7268bf8fe43f02a5112f0bb32a84c4a8c2f508c41ff1c78b5481cdd86b3cc4318442117623ceb050001000000",
+            hasher,
+            hash_sighash_zip243
+        );
+
+        let hash = hasher.sighash();
+        let expected = "63d18534de5f2d1c9e169b73f9c783718adbef5c8a7d55b5e7a37affa1dd3ff3";
+        let result = hex::encode(hash.as_bytes());
         let span = tracing::span!(
             tracing::Level::ERROR,
             "compare_final",

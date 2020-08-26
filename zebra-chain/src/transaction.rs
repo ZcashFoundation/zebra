@@ -162,12 +162,12 @@ impl Transaction {
         hash_type: u32,
         input: Option<(u32, transparent::Output)>,
     ) -> blake2b_simd::Hash {
-        sighash::SigHasher {
-            trans: self,
+        sighash::SigHasher::new(
+            self,
+            sighash::HashType::from_bits_truncate(hash_type),
             network_upgrade,
-            hash_type: sighash::HashType::from_bits_truncate(hash_type),
             input,
-        }
+        )
         .sighash()
     }
 }

@@ -1,14 +1,12 @@
-use std::{
-    convert::TryInto,
-    io::{self, Read},
-};
+use std::io::{self, Read};
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 use crate::{
     block,
     serialization::{
-        ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
+        ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashDeserializeInto,
+        ZcashSerialize,
     },
     transaction,
 };
@@ -224,9 +222,11 @@ impl ZcashSerialize for Output {
 
 impl ZcashDeserialize for Output {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        let reader = &mut reader;
+
         Ok(Output {
-            value: reader.read_u64::<LittleEndian>()?.try_into()?,
-            lock_script: Script::zcash_deserialize(&mut reader)?,
+            value: reader.zcash_deserialize_into()?,
+            lock_script: Script::zcash_deserialize(reader)?,
         })
     }
 }

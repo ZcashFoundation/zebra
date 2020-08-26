@@ -11,6 +11,7 @@ use std::{
     ops::RangeInclusive,
 };
 
+use crate::serialization::ZcashDeserialize;
 use byteorder::{ByteOrder, LittleEndian};
 
 type Result<T, E = Error> = std::result::Result<T, E>;
@@ -259,6 +260,19 @@ pub trait Constraint {
         } else {
             Ok(value)
         }
+    }
+}
+
+impl<C> ZcashDeserialize for Amount<C>
+where
+    C: Constraint,
+{
+    fn zcash_deserialize<R: std::io::Read>(
+        mut reader: R,
+    ) -> Result<Self, crate::serialization::SerializationError> {
+        use byteorder::ReadBytesExt;
+
+        Ok(reader.read_u64::<LittleEndian>()?.try_into()?)
     }
 }
 
