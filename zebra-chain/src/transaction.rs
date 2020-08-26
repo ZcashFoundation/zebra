@@ -166,9 +166,8 @@ impl Transaction {
     ///
     /// # Panics
     ///
-    /// This function only supports transactions from after
-    /// NetworkUpgrade::Overwinter and will panic if passed in any earlier
-    /// NetworkUpgrade.
+    /// - if passed in any NetworkUpgrade from before NetworkUpgrade::Overwinter
+    /// - if called on a v1 or v2 transaction
     pub fn sighash(
         &self,
         network_upgrade: NetworkUpgrade,
