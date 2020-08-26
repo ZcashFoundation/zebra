@@ -1,13 +1,14 @@
-use std::{convert::TryInto, io};
+use std::io;
 
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use byteorder::{LittleEndian, WriteBytesExt};
 use serde::{Deserialize, Serialize};
 
 use crate::{
     amount::{Amount, NonNegative},
     primitives::{x25519, ZkSnarkProof},
     serialization::{
-        ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
+        ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashDeserializeInto,
+        ZcashSerialize,
     },
 };
 
@@ -91,8 +92,8 @@ impl<P: ZkSnarkProof> ZcashSerialize for JoinSplit<P> {
 impl<P: ZkSnarkProof> ZcashDeserialize for JoinSplit<P> {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         Ok(JoinSplit::<P> {
-            vpub_old: reader.read_u64::<LittleEndian>()?.try_into()?,
-            vpub_new: reader.read_u64::<LittleEndian>()?.try_into()?,
+            vpub_old: (&mut reader).zcash_deserialize_into()?,
+            vpub_new: (&mut reader).zcash_deserialize_into()?,
             anchor: tree::NoteTreeRootHash::from(reader.read_32_bytes()?),
             nullifiers: [
                 reader.read_32_bytes()?.into(),
