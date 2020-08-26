@@ -270,7 +270,7 @@ where
     fn zcash_deserialize<R: std::io::Read>(
         mut reader: R,
     ) -> Result<Self, crate::serialization::SerializationError> {
-        Ok(reader.read_u64::<LittleEndian>()?.try_into()?)
+        Ok(reader.read_i64::<LittleEndian>()?.try_into()?)
     }
 }
 
