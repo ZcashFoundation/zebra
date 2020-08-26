@@ -392,12 +392,18 @@ impl<'a> SigHasher<'a> {
     }
 
     fn hash_shielded_spends<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        use Transaction::*;
+
         let shielded_data = match self.trans {
             Transaction::V4 {
                 shielded_data: Some(shielded_data),
                 ..
             } => shielded_data,
-            _ => unreachable!(ZIP243_EXPLANATION),
+            Transaction::V4 {
+                shielded_data: None,
+                ..
+            } => return writer.write_all(&[0; 32]),
+            V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(ZIP243_EXPLANATION),
         };
 
         if shielded_data.spends().next().is_none() {
@@ -421,12 +427,18 @@ impl<'a> SigHasher<'a> {
     }
 
     fn hash_shielded_outputs<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        use Transaction::*;
+
         let shielded_data = match self.trans {
             Transaction::V4 {
                 shielded_data: Some(shielded_data),
                 ..
             } => shielded_data,
-            _ => unreachable!(ZIP243_EXPLANATION),
+            Transaction::V4 {
+                shielded_data: None,
+                ..
+            } => return writer.write_all(&[0; 32]),
+            V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(ZIP243_EXPLANATION),
         };
 
         if shielded_data.outputs().next().is_none() {
@@ -446,9 +458,11 @@ impl<'a> SigHasher<'a> {
     }
 
     fn hash_value_balance<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        use Transaction::*;
+
         let value_balance = match self.trans {
             Transaction::V4 { value_balance, .. } => value_balance,
-            _ => unreachable!(ZIP243_EXPLANATION),
+            V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(ZIP243_EXPLANATION),
         };
 
         writer.write_all(&value_balance.to_bytes())?;
