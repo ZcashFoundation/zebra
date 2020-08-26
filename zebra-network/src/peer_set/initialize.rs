@@ -111,7 +111,9 @@ where
         Err(_) => panic!("Was not able to resolve listen_addr"),
     };
 
-    let listen_address = resolve.next().unwrap();
+    let listen_address = resolve
+        .next()
+        .expect("listen_addr resolves to at least one address");
 
     if listen_address.port() == wrong_net_port {
         warn!(
