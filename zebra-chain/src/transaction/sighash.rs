@@ -94,7 +94,7 @@ impl<'a> SigHasher<'a> {
         self.network_upgrade.branch_id().expect(ZIP143_EXPLANATION)
     }
 
-    /// Sighash implementation for the overwinter consensus branch
+    /// Sighash implementation for the overwinter network upgrade
     fn hash_sighash_zip143<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         self.hash_header(&mut writer)?;
         self.hash_groupid(&mut writer)?;
