@@ -168,6 +168,8 @@ impl Transaction {
     ///
     /// - if passed in any NetworkUpgrade from before NetworkUpgrade::Overwinter
     /// - if called on a v1 or v2 transaction
+    /// - if the input index points to a transparent::Input::CoinBase
+    /// - if the input index is out of bounds for self.inputs()
     pub fn sighash(
         &self,
         network_upgrade: NetworkUpgrade,
