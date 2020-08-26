@@ -159,9 +159,16 @@ impl Transaction {
     ///
     /// # Details
     ///
+    /// The `input` argument indicates the transparent Input for which we are
+    /// producing a sighash. It is comprised of the index identifying the
+    /// transparent::Input within the transaction and the transparent::Output
+    /// representing the UTXO being spent by that input.
+    ///
     /// # Panics
     ///
-    /// This function only supports transactions from after NetworkUpgrade::Overwinter
+    /// This function only supports transactions from after
+    /// NetworkUpgrade::Overwinter and will panic if passed in any earlier
+    /// NetworkUpgrade.
     pub fn sighash(
         &self,
         network_upgrade: NetworkUpgrade,

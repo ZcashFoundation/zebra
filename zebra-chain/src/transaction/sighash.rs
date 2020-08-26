@@ -371,8 +371,8 @@ impl<'a> SigHasher<'a> {
     // * ZIP243 ADDITIONS *
     // ********************
 
-    /// Sighash implementation for the sapling consensus branch and every
-    /// subsequent consensus branch
+    /// Sighash implementation for the sapling network upgrade and every
+    /// subsequent network upgrade
     fn hash_sighash_zip243<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         self.hash_header(&mut writer)?;
         self.hash_groupid(&mut writer)?;
