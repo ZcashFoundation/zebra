@@ -356,7 +356,7 @@ fn valid_generated_config(command: &str, expected_output: &str) -> Result<()> {
 }
 
 #[test]
-fn listener_address_test1() -> Result<()> {
+fn listener_address_test_valid_hostname() -> Result<()> {
     listener_address(
         "localhost:0",
         Some("Opened Zcash protocol endpoint at 127.0.0.1:"),
@@ -364,7 +364,7 @@ fn listener_address_test1() -> Result<()> {
     Ok(())
 }
 #[test]
-fn listener_address_test2() -> Result<()> {
+fn listener_address_test_ipv4() -> Result<()> {
     listener_address(
         "127.0.0.1:0",
         Some("Opened Zcash protocol endpoint at 127.0.0.1:"),
@@ -372,15 +372,15 @@ fn listener_address_test2() -> Result<()> {
     Ok(())
 }
 #[test]
-fn listener_address_test3() -> Result<()> {
+fn listener_address_test_ipv6() -> Result<()> {
     listener_address(
-        "::1:0",
+        "[::1]:0",
         Some("Opened Zcash protocol endpoint at \\[::1\\]:"),
     )?;
     Ok(())
 }
 #[test]
-fn listener_address_test4() -> Result<()> {
+fn listener_address_test_invalid_hostname() -> Result<()> {
     listener_address("invalid", None)?;
     Ok(())
 }
