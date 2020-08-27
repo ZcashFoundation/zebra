@@ -31,7 +31,7 @@ x25519-dalek = { version = "1", features = ["serde"] }
 
 # ZF deps
 displaydoc = "0.1.7"
-ed25519-zebra = "1"
+ed25519-zebra = "2"
 equihash = "0.1"
 redjubjub = "0.2"
 

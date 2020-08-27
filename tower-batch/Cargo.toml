@@ -15,7 +15,7 @@ tracing-futures = "0.2.4"
 futures = "0.3.5"
 
 [dev-dependencies]
-ed25519-zebra = "2.1.0"
+ed25519-zebra = "2.1.2"
 rand = "0.7"
 tokio = { version = "0.2", features = ["full"]}
 tracing = "0.1.19"
