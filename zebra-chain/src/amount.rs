@@ -282,7 +282,7 @@ impl ZcashSerialize for Amount<NonNegative> {
         let amount = self
             .0
             .try_into()
-            .expect("constaint guarantees value is positive");
+            .expect("constraint guarantees value is positive");
 
         writer.write_u64::<LittleEndian>(amount)
     }
