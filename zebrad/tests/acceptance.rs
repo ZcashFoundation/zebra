@@ -167,7 +167,7 @@ fn seed_no_args() -> Result<()> {
     let mut child = get_child(&["-v", "seed"], &tempdir)?;
 
     // Run the program and kill it at 1 second
-    std::thread::sleep(Duration::from_secs(5));
+    std::thread::sleep(Duration::from_secs(1));
     child.kill()?;
 
     let output = child.wait_with_output()?;
@@ -225,6 +225,55 @@ fn start_no_args() -> Result<()> {
     // Make sure the command was killed
     assert!(output.was_killed());
 
+    Ok(())
+}
+
+#[test]
+fn start_args() -> Result<()> {
+    zebra_test::init();
+    let (tempdir, _guard) = tempdir(ConfigMode::Ephemeral)?;
+
+    // Any free argument is valid
+    let mut child = get_child(&["start", "argument"], &tempdir)?;
+    // Run the program and kill it at 1 second
+    std::thread::sleep(Duration::from_secs(1));
+    child.kill()?;
+    let output = child.wait_with_output()?;
+
+    // Make sure the command was killed
+    assert!(output.was_killed());
+
+    output.assert_failure()?;
+
+    // unrecognized option `-f`
+    let child = get_child(&["start", "-f"], &tempdir)?;
+    let output = child.wait_with_output()?;
+    output.assert_failure()?;
+
+    Ok(())
+}
+
+#[test]
+fn persistent_mode() -> Result<()> {
+    zebra_test::init();
+    let (tempdir, _guard) = tempdir(ConfigMode::Persistent)?;
+
+    let mut child = get_child(&["-v", "start"], &tempdir)?;
+
+    // Run the program and kill it at 1 second
+    std::thread::sleep(Duration::from_secs(1));
+    child.kill()?;
+
+    let output = child.wait_with_output()?;
+    let output = output.assert_failure()?;
+
+    // start is the default mode, so we check for end of line, to distinguish it
+    // from seed
+    output.stdout_contains(r"Starting zebrad$")?;
+
+    // Make sure the command was killed
+    assert!(output.was_killed());
+
     // Check that we have persistent sled database
     let cache_dir = tempdir.join("state");
     assert!(cache_dir.read_dir()?.count() > 0);
@@ -233,7 +282,7 @@ fn start_no_args() -> Result<()> {
 }
 
 #[test]
-fn start_args() -> Result<()> {
+fn ephemeral_mode() -> Result<()> {
     zebra_test::init();
     let (tempdir, _guard) = tempdir(ConfigMode::Ephemeral)?;
 
