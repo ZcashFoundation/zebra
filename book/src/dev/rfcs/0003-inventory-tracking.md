@@ -148,7 +148,7 @@ maintain a `tokio::time::Interval` with some interval parameter, and check in
 `poll_ready` whether the interval stream has any items, calling `rotate` for
 each one:
 
-```
+```rust
 while let Poll::Ready(Some(_)) = timer.poll_next(cx) {
     registry.rotate();
 }
