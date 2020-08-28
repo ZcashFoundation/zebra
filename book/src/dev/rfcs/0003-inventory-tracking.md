@@ -1,7 +1,7 @@
 - Feature Name: `inventory_tracking`
 - Start Date: 2020-08-25
-- Design PR: [ZcashFoundation/zebra#0000](https://github.com/ZcashFoundation/zebra/pull/0000)
-- Zebra Issue: [ZcashFoundation/zebra#0000](https://github.com/ZcashFoundation/zebra/issues/0000)
+- Design PR: [ZcashFoundation/zebra#952](https://github.com/ZcashFoundation/zebra/pull/952)
+- Zebra Issue: [ZcashFoundation/zebra#960](https://github.com/ZcashFoundation/zebra/issues/960)
 
 # Summary
 [summary]: #summary
@@ -163,7 +163,75 @@ and discussed below.
 [rationale-and-alternatives]: #rationale-and-alternatives
 
 The rationale is described above.  The alternative choices are primarily around
-the routing logic (to be filled in).
+the routing logic.
+
+Because the `Service` trait does not allow applying backpressure based on the
+*content* of a request, only based on the service's internal data (via the
+`&mut self` parameter of `Service::poll_ready`) and on the type of the
+request (which determines which `impl Service` is used). This means that it
+is impossible for us to apply backpressure until a service that can process a
+specific inventory request is ready, because until we get the request, we
+can't determine which peers might be required to process it.
+
+We could attempt to ensure that the peer set would be ready to process a
+specific inventory request would be to pre-emptively "reserve" a peer as soon
+as it advertises an inventory item. But this doesn't actually work to ensure
+readiness, because a peer could advertise two inventory items, and only be
+able to service one request at a time. It also potentially locks the peer
+set, since if there are only a few peers and they all advertise inventory,
+the service can't process any other requests.  So this approach does not work.
+
+Another alternative would be to do some kind of buffering of inventory
+requests that cannot immediately be processed by a peer that advertised that
+inventory. There are two basic sub-approaches here.
+
+In the first case, we could maintain an unbounded queue of yet-to-be
+processed inventory requests in the peer set, and every time `poll_ready` is
+called, we check whether a service that could serve those inventory requests
+became ready, and start processing the request if we can. This would provide
+the lowest latency, because we can dispatch the request to the first
+available peer. For instance, if peer A advertises inventory I, the peer set
+gets an inventory request for I, peer A is busy so the request is queued, and
+peer B advertises inventory I, we could dispatch the queued request to B
+rather than waiting for A.
+
+However, it's not clear exactly how we'd implement this, because this
+mechanism is driven by calls to `poll_ready`, and those might not happen. So
+we'd need some separate task that would drive processing the buffered task to
+completion, but this may not be able to do so by `poll_ready`, since that
+method requires owning the service, and the peer set will be owned by a
+`Buffer` worker.
+
+In the second case, we could select an unready peer that advertised the
+requested inventory, clone it, and move the cloned peer into a task that
+would wait for that peer to become ready and then make the request. This is
+conceptually much cleaner than the above mechanism, but it has the downside
+that we don't dispatch the request to the first ready peer. In the example
+above, if we cloned peer A and dispatched the request to it, we'd have to
+wait for A to become ready, even if the second peer B advertised the same
+inventory just after we dispatched the request to A. However, this is not
+presently possible anyways, because the `peer::Client`s that handle requests
+are not clonable. They could be made clonable (they send messages to the
+connection state machine over a mpsc channel), but we cannot make this change
+without altering our liveness mechanism, which uses bounds on the
+time-since-last-message to determine whether a peer connection is live and to
+prevent immediate reconnections to recently disconnected peers.
+
+A final alternative would be to fail inventory requests that we cannot route
+to a peer which advertised that inventory. This moves the failure forward in
+time, but preemptively fails some cases where the request might succeed --
+for instance, if the peer has inventory but just didn't tell us, or received
+the inventory between when we dispatch the request and when it receives our
+message.  It seems preferable to try and fail than to not try at all.
+
+In practice, we're likely to care about the gossip protocol and inventory
+fetching once we've already synced close to the chain tip. In this setting,
+we're likely to already have peer connections, and we're unlikely to be
+saturating our peer set with requests (as we do during initial block sync).
+This suggests that the common case is one where we have many idle peers, and
+that therefore we are unlikely to have dispatched any recent requests to the
+peer that advertised inventory. So our common case should be one where all of
+this analysis is irrelevant.
 
 # Future possibilities
 [future-possibilities]: #future-possibilities
