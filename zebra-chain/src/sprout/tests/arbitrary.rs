@@ -14,7 +14,7 @@ impl<P: ZkSnarkProof + Arbitrary + 'static> Arbitrary for JoinSplit<P> {
         (
             any::<Amount<NonNegative>>(),
             any::<Amount<NonNegative>>(),
-            any::<tree::NoteTreeRootHash>(),
+            any::<tree::Root>(),
             array::uniform2(any::<note::Nullifier>()),
             array::uniform2(any::<commitment::NoteCommitment>()),
             array::uniform32(any::<u8>()),

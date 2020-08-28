@@ -1,7 +1,7 @@
 //! The LightClientRootHash enum, used for the corresponding block header field.
 
 use crate::parameters::{Network, NetworkUpgrade, NetworkUpgrade::*};
-use crate::sapling::tree::SaplingNoteTreeRootHash;
+use crate::sapling::tree::Root;
 
 use super::Height;
 
@@ -21,7 +21,7 @@ pub enum RootHash {
     ///
     /// The root LEBS2OSP256(rt) of the Sapling note commitment tree
     /// corresponding to the final Sapling treestate of this block.
-    FinalSaplingRoot(SaplingNoteTreeRootHash),
+    FinalSaplingRoot(Root),
 
     /// [Heartwood activation block] Reserved field.
     ///
@@ -51,7 +51,7 @@ impl RootHash {
 
         match NetworkUpgrade::current(network, height) {
             Genesis | BeforeOverwinter | Overwinter => PreSaplingReserved(bytes),
-            Sapling | Blossom => FinalSaplingRoot(SaplingNoteTreeRootHash(bytes)),
+            Sapling | Blossom => FinalSaplingRoot(Root(bytes)),
             Heartwood if Some(height) == Heartwood.activation_height(network) => {
                 ChainHistoryActivationReserved(bytes)
             }

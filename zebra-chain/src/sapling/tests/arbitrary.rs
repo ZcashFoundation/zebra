@@ -9,7 +9,7 @@ impl Arbitrary for Spend {
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         (
-            any::<tree::SaplingNoteTreeRootHash>(),
+            any::<tree::Root>(),
             any::<commitment::ValueCommitment>(),
             any::<note::Nullifier>(),
             array::uniform32(any::<u8>()),
