@@ -30,15 +30,15 @@ mod human_readable_parts {
 ///
 /// [4.2.2]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
 #[derive(Clone, Copy, Eq, PartialEq)]
-pub struct SaplingShieldedAddress {
+pub struct Address {
     network: Network,
     diversifier: keys::Diversifier,
     transmission_key: keys::TransmissionKey,
 }
 
-impl fmt::Debug for SaplingShieldedAddress {
+impl fmt::Debug for Address {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("SaplingShieldedAddress")
+        f.debug_struct("SaplingAddress")
             .field("network", &self.network)
             .field("diversifier", &self.diversifier)
             .field("transmission_key", &self.transmission_key)
@@ -46,7 +46,7 @@ impl fmt::Debug for SaplingShieldedAddress {
     }
 }
 
-impl fmt::Display for SaplingShieldedAddress {
+impl fmt::Display for Address {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut bytes = io::Cursor::new(Vec::new());
 
@@ -62,7 +62,7 @@ impl fmt::Display for SaplingShieldedAddress {
     }
 }
 
-impl std::str::FromStr for SaplingShieldedAddress {
+impl std::str::FromStr for Address {
     type Err = SerializationError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -75,7 +75,7 @@ impl std::str::FromStr for SaplingShieldedAddress {
 
                 let transmission_key_bytes = decoded_bytes.read_32_bytes()?;
 
-                Ok(SaplingShieldedAddress {
+                Ok(Address {
                     network: match hrp.as_str() {
                         human_readable_parts::MAINNET => Network::Mainnet,
                         _ => Network::Testnet,
@@ -90,7 +90,7 @@ impl std::str::FromStr for SaplingShieldedAddress {
 }
 
 #[cfg(test)]
-impl Arbitrary for SaplingShieldedAddress {
+impl Arbitrary for Address {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
@@ -119,7 +119,7 @@ mod tests {
 
     #[test]
     fn from_str_display() {
-        let zs_addr: SaplingShieldedAddress =
+        let zs_addr: Address =
             "zs1qqqqqqqqqqqqqqqqqrjq05nyfku05msvu49mawhg6kr0wwljahypwyk2h88z6975u563j8nfaxd"
                 .parse()
                 .unwrap();
@@ -145,7 +145,7 @@ mod tests {
         let diversifier = keys::Diversifier::new(&mut OsRng);
         let transmission_key = keys::TransmissionKey::from((incoming_viewing_key, diversifier));
 
-        let _sapling_shielded_address = SaplingShieldedAddress {
+        let _sapling_shielded_address = Address {
             network: Network::Mainnet,
             diversifier,
             transmission_key,
@@ -157,11 +157,11 @@ mod tests {
 proptest! {
 
     #[test]
-    fn sapling_address_roundtrip(zaddr in any::<SaplingShieldedAddress>()) {
+    fn sapling_address_roundtrip(zaddr in any::<Address>()) {
 
         let string = zaddr.to_string();
 
-        let zaddr2 = string.parse::<SaplingShieldedAddress>()
+        let zaddr2 = string.parse::<Address>()
             .expect("randomized sapling z-addr should deserialize");
 
         prop_assert_eq![zaddr, zaddr2];
