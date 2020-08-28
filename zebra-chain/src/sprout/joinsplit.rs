@@ -28,7 +28,7 @@ pub struct JoinSplit<P: ZkSnarkProof> {
     /// A root of the Sprout note commitment tree at some block height in the
     /// past, or the root produced by a previous JoinSplit transfer in this
     /// transaction.
-    pub anchor: tree::NoteTreeRootHash,
+    pub anchor: tree::Root,
     /// A nullifier for the input notes.
     pub nullifiers: [note::Nullifier; 2],
     /// A note commitment for this output note.
@@ -93,7 +93,7 @@ impl<P: ZkSnarkProof> ZcashDeserialize for JoinSplit<P> {
         Ok(JoinSplit::<P> {
             vpub_old: reader.read_u64::<LittleEndian>()?.try_into()?,
             vpub_new: reader.read_u64::<LittleEndian>()?.try_into()?,
-            anchor: tree::NoteTreeRootHash::from(reader.read_32_bytes()?),
+            anchor: tree::Root::from(reader.read_32_bytes()?),
             nullifiers: [
                 reader.read_32_bytes()?.into(),
                 reader.read_32_bytes()?.into(),

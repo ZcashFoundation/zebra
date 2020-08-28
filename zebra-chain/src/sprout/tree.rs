@@ -24,24 +24,22 @@ use proptest_derive::Arbitrary;
 /// each treestate.
 #[derive(Clone, Copy, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(Arbitrary))]
-pub struct NoteTreeRootHash([u8; 32]);
+pub struct Root([u8; 32]);
 
-impl fmt::Debug for NoteTreeRootHash {
+impl fmt::Debug for Root {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple("SproutNoteTreeRootHash")
-            .field(&hex::encode(&self.0))
-            .finish()
+        f.debug_tuple("Root").field(&hex::encode(&self.0)).finish()
     }
 }
 
-impl From<[u8; 32]> for NoteTreeRootHash {
-    fn from(bytes: [u8; 32]) -> NoteTreeRootHash {
+impl From<[u8; 32]> for Root {
+    fn from(bytes: [u8; 32]) -> Root {
         Self(bytes)
     }
 }
 
-impl From<NoteTreeRootHash> for [u8; 32] {
-    fn from(rt: NoteTreeRootHash) -> [u8; 32] {
+impl From<Root> for [u8; 32] {
+    fn from(rt: Root) -> [u8; 32] {
         rt.0
     }
 }
