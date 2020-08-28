@@ -26,6 +26,8 @@ that they have it.
 - Inventory hash: the hash of an inventory item, represented by the
   [`InventoryHash`](https://doc-internal.zebra.zfnd.org/zebra_network/protocol/external/inv/enum.InventoryHash.html)
   type.
+- Inventory advertisement: a notification from another peer that they have some inventory item.
+- Inventory request: a request to another peer for an inventory item.
 
 # Guide-level explanation
 [guide-level-explanation]: #guide-level-explanation
@@ -232,8 +234,3 @@ This suggests that the common case is one where we have many idle peers, and
 that therefore we are unlikely to have dispatched any recent requests to the
 peer that advertised inventory. So our common case should be one where all of
 this analysis is irrelevant.
-
-# Future possibilities
-[future-possibilities]: #future-possibilities
-
-(to be filled in)
