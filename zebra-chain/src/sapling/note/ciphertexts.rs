@@ -6,6 +6,8 @@ use proptest::{arbitrary::any, prelude::*};
 use crate::serialization::{serde_helpers, SerializationError, ZcashDeserialize, ZcashSerialize};
 
 /// A ciphertext component for encrypted output notes.
+///
+/// Corresponds to the Sapling 'encCiphertext's
 #[derive(Deserialize, Serialize)]
 pub struct EncryptedNote(#[serde(with = "serde_helpers::BigArray")] pub [u8; 580]);
 
