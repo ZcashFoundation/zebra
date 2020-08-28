@@ -2,7 +2,7 @@ use proptest::{arbitrary::any, collection::vec, prelude::*};
 
 use super::*;
 
-impl Arbitrary for EncryptedCiphertext {
+impl Arbitrary for EncryptedNote {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
@@ -18,7 +18,7 @@ impl Arbitrary for EncryptedCiphertext {
     type Strategy = BoxedStrategy<Self>;
 }
 
-impl Arbitrary for OutCiphertext {
+impl Arbitrary for WrappedNoteKey {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {

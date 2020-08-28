@@ -44,8 +44,8 @@ impl Arbitrary for Output {
             any::<commitment::ValueCommitment>(),
             any::<commitment::NoteCommitment>(),
             any::<keys::EphemeralPublicKey>(),
-            any::<note::EncryptedCiphertext>(),
-            any::<note::OutCiphertext>(),
+            any::<note::EncryptedNote>(),
+            any::<note::WrappedNoteKey>(),
             any::<Groth16Proof>(),
         )
             .prop_map(

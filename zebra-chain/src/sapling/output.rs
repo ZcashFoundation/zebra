@@ -20,9 +20,9 @@ pub struct Output {
     /// An encoding of an ephemeral Jubjub public key.
     pub ephemeral_key: keys::EphemeralPublicKey,
     /// A ciphertext component for the encrypted output note.
-    pub enc_ciphertext: note::EncryptedCiphertext,
+    pub enc_ciphertext: note::EncryptedNote,
     /// A ciphertext component for the encrypted output note.
-    pub out_ciphertext: note::OutCiphertext,
+    pub out_ciphertext: note::WrappedNoteKey,
     /// The ZK output proof.
     pub zkproof: Groth16Proof,
 }
@@ -45,8 +45,8 @@ impl ZcashDeserialize for Output {
             cv: commitment::ValueCommitment::zcash_deserialize(&mut reader)?,
             cm_u: jubjub::Fq::zcash_deserialize(&mut reader)?,
             ephemeral_key: keys::EphemeralPublicKey::zcash_deserialize(&mut reader)?,
-            enc_ciphertext: note::EncryptedCiphertext::zcash_deserialize(&mut reader)?,
-            out_ciphertext: note::OutCiphertext::zcash_deserialize(&mut reader)?,
+            enc_ciphertext: note::EncryptedNote::zcash_deserialize(&mut reader)?,
+            out_ciphertext: note::WrappedNoteKey::zcash_deserialize(&mut reader)?,
             zkproof: Groth16Proof::zcash_deserialize(&mut reader)?,
         })
     }
