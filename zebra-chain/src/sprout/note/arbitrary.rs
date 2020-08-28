@@ -1,6 +1,6 @@
 use proptest::{arbitrary::any, collection::vec, prelude::*};
 
-impl Arbitrary for super::EncryptedCiphertext {
+impl Arbitrary for super::EncryptedNote {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {

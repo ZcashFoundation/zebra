@@ -18,7 +18,7 @@ use super::{commitment::CommitmentRandomness, keys::PayingKey};
 
 pub use mac::MAC;
 
-pub use ciphertexts::EncryptedCiphertext;
+pub use ciphertexts::EncryptedNote;
 
 pub use nullifiers::{Nullifier, NullifierSeed};
 

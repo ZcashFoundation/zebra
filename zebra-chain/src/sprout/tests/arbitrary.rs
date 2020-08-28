@@ -21,7 +21,7 @@ impl<P: ZkSnarkProof + Arbitrary + 'static> Arbitrary for JoinSplit<P> {
             array::uniform32(any::<u8>()),
             array::uniform2(any::<note::MAC>()),
             any::<P>(),
-            array::uniform2(any::<note::EncryptedCiphertext>()),
+            array::uniform2(any::<note::EncryptedNote>()),
         )
             .prop_map(
                 |(

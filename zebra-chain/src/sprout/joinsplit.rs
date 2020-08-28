@@ -46,7 +46,7 @@ pub struct JoinSplit<P: ZkSnarkProof> {
     #[serde(bound(serialize = "P: ZkSnarkProof", deserialize = "P: ZkSnarkProof"))]
     pub zkproof: P,
     /// A ciphertext component for this output note.
-    pub enc_ciphertexts: [note::EncryptedCiphertext; 2],
+    pub enc_ciphertexts: [note::EncryptedNote; 2],
 }
 
 // Because x25519_dalek::PublicKey does not impl PartialEq
@@ -110,8 +110,8 @@ impl<P: ZkSnarkProof> ZcashDeserialize for JoinSplit<P> {
             ],
             zkproof: P::zcash_deserialize(&mut reader)?,
             enc_ciphertexts: [
-                note::EncryptedCiphertext::zcash_deserialize(&mut reader)?,
-                note::EncryptedCiphertext::zcash_deserialize(&mut reader)?,
+                note::EncryptedNote::zcash_deserialize(&mut reader)?,
+                note::EncryptedNote::zcash_deserialize(&mut reader)?,
             ],
         })
     }

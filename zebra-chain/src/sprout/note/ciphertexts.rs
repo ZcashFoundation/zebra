@@ -8,12 +8,14 @@ use serde::{Deserialize, Serialize};
 use crate::serialization::{serde_helpers, SerializationError, ZcashDeserialize, ZcashSerialize};
 
 /// A ciphertext component for encrypted output notes.
+///
+/// Corresponds to the Sprout 'encCiphertext's
 #[derive(Serialize, Deserialize)]
-pub struct EncryptedCiphertext(#[serde(with = "serde_helpers::BigArray")] pub [u8; 601]);
+pub struct EncryptedNote(#[serde(with = "serde_helpers::BigArray")] pub [u8; 601]);
 
-impl fmt::Debug for EncryptedCiphertext {
+impl fmt::Debug for EncryptedNote {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple("EncryptedCiphertext")
+        f.debug_tuple("EncryptedNote")
             .field(&hex::encode(&self.0[..]))
             .finish()
     }
@@ -21,9 +23,9 @@ impl fmt::Debug for EncryptedCiphertext {
 
 // These impls all only exist because of array length restrictions.
 
-impl Copy for EncryptedCiphertext {}
+impl Copy for EncryptedNote {}
 
-impl Clone for EncryptedCiphertext {
+impl Clone for EncryptedNote {
     fn clone(&self) -> Self {
         let mut bytes = [0; 601];
         bytes[..].copy_from_slice(&self.0[..]);
@@ -31,22 +33,22 @@ impl Clone for EncryptedCiphertext {
     }
 }
 
-impl PartialEq for EncryptedCiphertext {
+impl PartialEq for EncryptedNote {
     fn eq(&self, other: &Self) -> bool {
         self.0[..] == other.0[..]
     }
 }
 
-impl Eq for EncryptedCiphertext {}
+impl Eq for EncryptedNote {}
 
-impl ZcashSerialize for EncryptedCiphertext {
+impl ZcashSerialize for EncryptedNote {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_all(&self.0[..])?;
         Ok(())
     }
 }
 
-impl ZcashDeserialize for EncryptedCiphertext {
+impl ZcashDeserialize for EncryptedNote {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         let mut bytes = [0; 601];
         reader.read_exact(&mut bytes[..])?;
@@ -58,13 +60,13 @@ impl ZcashDeserialize for EncryptedCiphertext {
 proptest! {
 
     #[test]
-    fn encrypted_ciphertext_roundtrip(ec in any::<EncryptedCiphertext>()) {
+    fn encrypted_ciphertext_roundtrip(ec in any::<EncryptedNote>()) {
 
         let mut data = Vec::new();
 
-        ec.zcash_serialize(&mut data).expect("EncryptedCiphertext should serialize");
+        ec.zcash_serialize(&mut data).expect("EncryptedNote should serialize");
 
-        let ec2 = EncryptedCiphertext::zcash_deserialize(&data[..]).expect("randomized EncryptedCiphertext should deserialize");
+        let ec2 = EncryptedNote::zcash_deserialize(&data[..]).expect("randomized EncryptedNote should deserialize");
 
         prop_assert_eq![ec, ec2];
     }
