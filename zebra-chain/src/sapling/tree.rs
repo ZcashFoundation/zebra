@@ -54,7 +54,7 @@ pub struct Position(pub(crate) u64);
 /// Sapling Note Commitment Tree
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(test, derive(Arbitrary))]
-pub struct SaplingNoteCommitmentTree;
+struct SaplingNoteCommitmentTree;
 
 /// Sapling note commitment tree root node hash.
 ///
