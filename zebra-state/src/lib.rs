@@ -24,6 +24,7 @@ use tower::{Service, ServiceExt};
 use zebra_chain::{
     block::{self, Block},
     parameters::Network,
+    transparent,
 };
 
 pub mod in_memory;
@@ -126,6 +127,11 @@ pub enum Request {
         /// The hash to check against the current chain
         hash: block::Hash,
     },
+    /// Request a UTXO identified by the given Outpoint
+    AwaitUtxo(
+        /// The outpoint identifying with the requested UTXO
+        transparent::OutPoint,
+    ),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -157,6 +163,11 @@ pub enum Response {
     Depth(
         /// The number of blocks above the given block in the current best chain
         Option<u32>,
+    ),
+    /// The response to a `AwaitUtxo` request
+    Utxo(
+        /// The transparent::Output representing the requested UTXO
+        transparent::Output,
     ),
 }
 

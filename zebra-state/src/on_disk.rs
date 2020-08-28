@@ -17,6 +17,8 @@ use zebra_chain::{
     parameters::Network,
 };
 
+mod utxo;
+
 /// Type alias of our wrapped service
 pub type StateService = Buffer<BoxService<Request, Response, Error>, Request>;
 
@@ -211,6 +213,7 @@ impl Service<Request> for SledState {
                 }
                 .boxed()
             }
+            Request::AwaitUtxo(_) => todo!("blocked waiting for chain state RFC implementation"),
         }
     }
 }

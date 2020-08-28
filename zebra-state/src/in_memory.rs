@@ -105,6 +105,7 @@ impl Service<Request> for InMemoryState {
 
                 async move { Ok(Response::BlockLocator { block_locator }) }.boxed()
             }
+            Request::AwaitUtxo(_) => unimplemented!("this Service is being removed"),
         }
     }
 }
