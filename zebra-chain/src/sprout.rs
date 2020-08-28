@@ -1,7 +1,8 @@
 //! Sprout-related functionality.
 
 mod joinsplit;
-pub use joinsplit::JoinSplit;
+#[cfg(test)]
+mod tests;
 
 // XXX clean up these modules
 
@@ -11,5 +12,5 @@ pub mod keys;
 pub mod note;
 pub mod tree;
 
-#[cfg(test)]
-mod tests;
+pub use joinsplit::JoinSplit;
+pub use note::{EncryptedNote, Note, Nullifier};
