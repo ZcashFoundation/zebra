@@ -122,29 +122,45 @@ circumstances.  These pairs should be fed into an `InventoryRegistry` structure
 along these lines:
 
 ```rust
-struct InventoryRegistry(HashMap<InventoryHash, HashSet<SocketAddr>>);
+struct InventoryRegistry{
+    current: HashMap<InventoryHash, HashSet<SocketAddr>>,
+    prev: HashMap<InventoryHash, HashSet<SocketAddr>>,
+}
 
 impl InventoryRegistry {
     pub fn register(&mut self, item: InventoryHash, addr: SocketAddr) {
-	self.0.entry(item).or_insert(HashSet::new).insert(addr);
+        self.0.entry(item).or_insert(HashSet::new).insert(addr);
     }
 
-    pub fn peers(&self, item: InventoryHash) -> Option<&HashSet<SocketAddr>> {
-	self.0.get(item)
+    pub fn rotate(&mut self) {
+        self.prev = std::mem::take(self.current)
+    }
+
+    pub fn peers(&self, item: InventoryHash) -> impl Iterator<Item=&SocketAddr> {
+        self.prev.get(item).chain(self.current.get(item)).flatten()
     }
 }
 ```
 
-This API does not provide a way to remove inventory advertisements.  Instead,
-the peer set should maintain a `tokio::time::Interval` with some interval
-parameter, and check in `poll_ready` whether the timer has elapsed.  If so, it
-should use `std::mem::take` to extract and drop the current inventory registry.
-This is much simpler than trying to manage the lifetime of individual
-advertisements.  The downside is that if we drop the inventory registry before
-we look up some data, we may not be able to find it until it's widely
-distributed.  To minimize the chance of this happening, the timer check should
-be done **before** processing new channel entries, and the timeout could be
-chosen to be coprime to the block interval (e.g., 79 seconds).
+This API allows pruning the inventory registry using `rotate`, which
+implements generational pruning of registry entries. The peer set should
+maintain a `tokio::time::Interval` with some interval parameter, and check in
+`poll_ready` whether the interval stream has any items, calling `rotate` for
+each one:
+
+```
+while let Poll::Ready(Some(_)) = timer.poll_next(cx) {
+    registry.rotate();
+}
+```
+By rotating for each available item in the interval stream, rather than just
+once, we ensure that if the peer set's `poll_ready` is not called for a long
+time, `rotate` will be called enough times to correctly flush old entries. 
+
+Inventory advertisements live in the registry for twice the length of the
+timer, so it should be chosen to be half of the desired lifetime for
+inventory advertisements. Setting the timer to 75 seconds, the block
+interval, seems like a reasonable choice.
 
 ## Routing Logic
 
