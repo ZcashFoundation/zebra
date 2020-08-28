@@ -130,7 +130,7 @@ fn jubjub_group_hash(d: [u8; 8], m: &[u8]) -> Option<jubjub::ExtendedPoint> {
 /// https://zips.z.cash/protocol/protocol.pdf#concretegrouphashjubjub
 // TODO: move common functions like these out of the keys module into
 // a more appropriate location
-pub fn find_group_hash(d: [u8; 8], m: &[u8]) -> jubjub::ExtendedPoint {
+pub(super) fn find_group_hash(d: [u8; 8], m: &[u8]) -> jubjub::ExtendedPoint {
     let mut tag = m.to_vec();
     let i = tag.len();
     tag.push(0u8);
