@@ -87,17 +87,14 @@ impl Config {
             Network::Testnet => "testnet",
         };
 
+        let config = sled::Config::default()
+            .cache_capacity(self.memory_cache_bytes)
+            .mode(sled::Mode::LowSpace);
         if self.ephemeral {
-            sled::Config::default()
-                .cache_capacity(self.memory_cache_bytes)
-                .mode(sled::Mode::LowSpace)
-                .temporary(self.ephemeral)
+            config.temporary(self.ephemeral)
         } else {
             let path = self.cache_dir.join(net_dir).join("state");
-            sled::Config::default()
-                .path(path)
-                .cache_capacity(self.memory_cache_bytes)
-                .mode(sled::Mode::LowSpace)
+            config.path(path)
         }
     }
 }
