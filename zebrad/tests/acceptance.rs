@@ -256,7 +256,7 @@ fn start_args() -> Result<()> {
 
     // Check that we do not generate cache_dir
     let cache_dir = tempdir.join("state");
-    assert!(!cache_dir.exists());
+    assert!(!cache_dir.exists() || cache_dir.read_dir()?.count() == 0);
 
     Ok(())
 }
