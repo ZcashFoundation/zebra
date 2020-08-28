@@ -55,12 +55,14 @@ impl ZcashDeserialize for EncryptedNote {
 }
 
 /// A ciphertext component for encrypted output notes.
+///
+/// Corresponds to Sapling's 'outCiphertext'
 #[derive(Deserialize, Serialize)]
-pub struct OutCiphertext(#[serde(with = "serde_helpers::BigArray")] pub [u8; 80]);
+pub struct WrappedNoteKey(#[serde(with = "serde_helpers::BigArray")] pub [u8; 80]);
 
-impl fmt::Debug for OutCiphertext {
+impl fmt::Debug for WrappedNoteKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple("OutCiphertext")
+        f.debug_tuple("WrappedNoteKey")
             .field(&hex::encode(&self.0[..]))
             .finish()
     }
@@ -68,9 +70,9 @@ impl fmt::Debug for OutCiphertext {
 
 // These impls all only exist because of array length restrictions.
 
-impl Copy for OutCiphertext {}
+impl Copy for WrappedNoteKey {}
 
-impl Clone for OutCiphertext {
+impl Clone for WrappedNoteKey {
     fn clone(&self) -> Self {
         let mut bytes = [0; 80];
         bytes[..].copy_from_slice(&self.0[..]);
@@ -78,22 +80,22 @@ impl Clone for OutCiphertext {
     }
 }
 
-impl PartialEq for OutCiphertext {
+impl PartialEq for WrappedNoteKey {
     fn eq(&self, other: &Self) -> bool {
         self.0[..] == other.0[..]
     }
 }
 
-impl Eq for OutCiphertext {}
+impl Eq for WrappedNoteKey {}
 
-impl ZcashSerialize for OutCiphertext {
+impl ZcashSerialize for WrappedNoteKey {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_all(&self.0[..])?;
         Ok(())
     }
 }
 
-impl ZcashDeserialize for OutCiphertext {
+impl ZcashDeserialize for WrappedNoteKey {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         let mut bytes = [0; 80];
         reader.read_exact(&mut bytes[..])?;
@@ -117,13 +119,13 @@ proptest! {
     }
 
     #[test]
-    fn out_ciphertext_roundtrip(oc in any::<OutCiphertext>()) {
+    fn out_ciphertext_roundtrip(oc in any::<WrappedNoteKey>()) {
 
         let mut data = Vec::new();
 
-        oc.zcash_serialize(&mut data).expect("OutCiphertext should serialize");
+        oc.zcash_serialize(&mut data).expect("WrappedNoteKey should serialize");
 
-        let oc2 = OutCiphertext::zcash_deserialize(&data[..]).expect("randomized OutCiphertext should deserialize");
+        let oc2 = WrappedNoteKey::zcash_deserialize(&data[..]).expect("randomized WrappedNoteKey should deserialize");
 
         prop_assert_eq![oc, oc2];
     }
