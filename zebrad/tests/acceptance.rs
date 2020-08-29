@@ -263,13 +263,7 @@ fn persistent_mode() -> Result<()> {
     // Run the program and kill it at 1 second
     std::thread::sleep(Duration::from_secs(1));
     child.kill()?;
-
     let output = child.wait_with_output()?;
-    let output = output.assert_failure()?;
-
-    // start is the default mode, so we check for end of line, to distinguish it
-    // from seed
-    output.stdout_contains(r"Starting zebrad$")?;
 
     // Make sure the command was killed
     assert!(output.was_killed());
@@ -296,16 +290,45 @@ fn ephemeral_mode() -> Result<()> {
     // Make sure the command was killed
     assert!(output.was_killed());
 
-    output.assert_failure()?;
-
-    // unrecognized option `-f`
-    let child = get_child(&["start", "-f"], &tempdir)?;
-    let output = child.wait_with_output()?;
-    output.assert_failure()?;
-
-    // Check that we do not generate cache_dir
     let cache_dir = tempdir.join("state");
-    assert!(!cache_dir.exists() || cache_dir.read_dir()?.count() == 0);
+    assert!(!cache_dir.exists() || cache_dir.read_dir()?.count() > 0);
+
+    Ok(())
+}
+
+#[test]
+fn misconfigured_ephemeral_mode() -> Result<()> {
+    zebra_test::init();
+
+    let dir = TempDir::new("zebrad_tests")?;
+    let cache_dir = dir.path().join("state");
+
+    // Write a configuration that has both cache_dir and ephemeral options set
+    let mut config = ZebradConfig::default();
+    config.state.ephemeral = true;
+    // Although cache_dir has a default value, we set it a new temp directory
+    // to test that it is empty later.
+    fs::create_dir(&cache_dir)?;
+    config.state.cache_dir = cache_dir.clone();
+    config.state.memory_cache_bytes = 256000000;
+    config.network.listen_addr = "127.0.0.1:0".parse()?;
+    fs::File::create(dir.path().join("zebrad.toml"))?
+        .write_all(toml::to_string(&config)?.as_bytes())?;
+
+    let tempdir = dir.path().to_path_buf();
+
+    // Any free argument is valid
+    let mut child = get_child(&["start", "argument"], &tempdir)?;
+    // Run the program and kill it at 1 second
+    std::thread::sleep(Duration::from_secs(1));
+    child.kill()?;
+    let output = child.wait_with_output()?;
+
+    // Make sure the command was killed
+    assert!(output.was_killed());
+
+    // Check that ephemeral takes precedence over cache_dir
+    assert_eq!(cache_dir.read_dir()?.count(), 0);
 
     Ok(())
 }
