@@ -1,6 +1,6 @@
 - Start Date: 2020-08-10
-- Design PR: [ZcashFoundation/zebra#0000](https://github.com/ZcashFoundation/zebra/pull/0000)
-- Zebra Issue: [ZcashFoundation/zebra#0000](https://github.com/ZcashFoundation/zebra/issues/0000)
+- Design PR: [ZcashFoundation/zebra#868](https://github.com/ZcashFoundation/zebra/pull/868)
+- Zebra Issue: [ZcashFoundation/zebra#964](https://github.com/ZcashFoundation/zebra/issues/964)
 
 # Summary
 [summary]: #summary
