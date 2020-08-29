@@ -12,7 +12,7 @@ use futures::{
     channel::{mpsc, oneshot},
     prelude::*,
 };
-use tokio::net::TcpStream;
+use tokio::{net::TcpStream, sync::broadcast};
 use tokio_util::codec::Framed;
 use tower::Service;
 use tracing::{span, Level};
@@ -23,7 +23,7 @@ use zebra_chain::block;
 use crate::{
     constants,
     protocol::{
-        external::{types::*, Codec, Message},
+        external::{types::*, Codec, InventoryHash, Message},
         internal::{Request, Response},
     },
     types::MetaAddr,
@@ -38,6 +38,7 @@ pub struct Handshake<S> {
     config: Config,
     internal_service: S,
     timestamp_collector: mpsc::Sender<MetaAddr>,
+    inv_collector: broadcast::Sender<(InventoryHash, SocketAddr)>,
     nonces: Arc<Mutex<HashSet<Nonce>>>,
 }
 
@@ -47,6 +48,7 @@ impl<S: Clone> Clone for Handshake<S> {
             config: self.config.clone(),
             internal_service: self.internal_service.clone(),
             timestamp_collector: self.timestamp_collector.clone(),
+            inv_collector: self.inv_collector.clone(),
             nonces: self.nonces.clone(),
         }
     }
@@ -62,6 +64,7 @@ where
         config: Config,
         internal_service: S,
         timestamp_collector: mpsc::Sender<MetaAddr>,
+        inv_collector: broadcast::Sender<(InventoryHash, SocketAddr)>,
     ) -> Self {
         // XXX this function has too many parameters, but it's not clear how to
         // do a nice builder as all fields are mandatory. Could have Builder1,
@@ -72,6 +75,7 @@ where
             config,
             internal_service,
             timestamp_collector,
+            inv_collector,
             nonces: Arc::new(Mutex::new(HashSet::new())),
         }
     }
@@ -104,6 +108,7 @@ where
         let nonces = self.nonces.clone();
         let internal_service = self.internal_service.clone();
         let timestamp_collector = self.timestamp_collector.clone();
+        let inv_collector = self.inv_collector.clone();
         let network = self.config.network;
 
         let fut = async move {
@@ -273,6 +278,18 @@ where
                                     last_seen: Utc::now(),
                                 })
                                 .await;
+                        }
+                        msg
+                    }
+                })
+                .then(move |msg| {
+                    let inv_collector = inv_collector.clone();
+                    async move {
+                        if let Ok(Message::Inv(hashes)) = &msg {
+                            if hashes.len() == 1 {
+                                let hash = hashes[0];
+                                let _ = inv_collector.send((hash, addr));
+                            }
                         }
                         msg
                     }

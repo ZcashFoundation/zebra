@@ -1,3 +1,4 @@
+use std::net::SocketAddr;
 use std::{
     collections::HashMap,
     convert::TryInto,
@@ -14,7 +15,7 @@ use futures::{
     stream::FuturesUnordered,
 };
 use indexmap::IndexMap;
-use tokio::sync::oneshot::error::TryRecvError;
+use tokio::sync::{broadcast, oneshot::error::TryRecvError};
 use tokio::task::JoinHandle;
 use tower::{
     discover::{Change, Discover},
@@ -23,11 +24,17 @@ use tower::{
 use tower_load::Load;
 
 use crate::{
-    protocol::internal::{Request, Response},
+    protocol::{
+        external::InventoryHash,
+        internal::{Request, Response},
+    },
     BoxedStdError,
 };
 
-use super::unready_service::{Error as UnreadyError, UnreadyService};
+use super::{
+    inventory_registry::InventoryRegistry,
+    unready_service::{Error as UnreadyError, UnreadyService},
+};
 
 /// A [`tower::Service`] that abstractly represents "the rest of the network".
 ///
@@ -71,7 +78,7 @@ use super::unready_service::{Error as UnreadyError, UnreadyService};
 /// [p2c]: http://www.eecs.harvard.edu/~michaelm/postscripts/handbook2001.pdf
 pub struct PeerSet<D>
 where
-    D: Discover,
+    D: Discover<Key = SocketAddr>,
 {
     discover: D,
     ready_services: IndexMap<D::Key, D::Service>,
@@ -88,12 +95,14 @@ where
     /// These guards are checked for errors as part of `poll_ready` which lets
     /// the `PeerSet` propagate errors from background tasks back to the user
     guards: futures::stream::FuturesUnordered<JoinHandle<Result<(), BoxedStdError>>>,
+    /// Stream of incoming inventory hashes to
+    inv_stream: broadcast::Receiver<(InventoryHash, SocketAddr)>,
+    inventory_registry: InventoryRegistry,
 }
 
 impl<D> PeerSet<D>
 where
-    D: Discover + Unpin,
-    D::Key: Clone + Debug,
+    D: Discover<Key = SocketAddr> + Unpin,
     D::Service: Service<Request, Response = Response> + Load,
     D::Error: Into<BoxedStdError>,
     <D::Service as Service<Request>>::Error: Into<BoxedStdError> + 'static,
@@ -105,6 +114,7 @@ where
         discover: D,
         demand_signal: mpsc::Sender<()>,
         handle_rx: tokio::sync::oneshot::Receiver<Vec<JoinHandle<Result<(), BoxedStdError>>>>,
+        inv_stream: broadcast::Receiver<(InventoryHash, SocketAddr)>,
     ) -> Self {
         Self {
             discover,
@@ -115,6 +125,8 @@ where
             demand_signal,
             guards: futures::stream::FuturesUnordered::new(),
             handle_rx,
+            inv_stream,
+            inventory_registry: Default::default(),
         }
     }
 
@@ -160,7 +172,7 @@ where
 
     fn push_unready(&mut self, key: D::Key, svc: D::Service) {
         let (tx, rx) = oneshot::channel();
-        self.cancel_handles.insert(key.clone(), tx);
+        self.cancel_handles.insert(key, tx);
         self.unready_services.push(UnreadyService {
             key: Some(key),
             service: Some(svc),
@@ -254,8 +266,7 @@ where
 
 impl<D> Service<Request> for PeerSet<D>
 where
-    D: Discover + Unpin,
-    D::Key: Clone + Debug + ToString,
+    D: Discover<Key = SocketAddr> + Unpin,
     D::Service: Service<Request, Response = Response> + Load,
     D::Error: Into<BoxedStdError>,
     <D::Service as Service<Request>>::Error: Into<BoxedStdError> + 'static,
