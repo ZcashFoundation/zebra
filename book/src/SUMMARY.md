@@ -13,7 +13,7 @@
     - [Pipelinable Block Lookup](dev/rfcs/0001-pipelinable-block-lookup.md)
     - [Parallel Verification](dev/rfcs/0002-parallel-verification.md)
     - [Inventory Tracking](dev/rfcs/0003-inventory-tracking.md)
-    - [Asynchronous Script Verification](dev/rfcs/XXXX-asynchronous-script-verification.md)
+    - [Asynchronous Script Verification](dev/rfcs/0004-asynchronous-script-verification.md)
   - [Diagrams](dev/diagrams.md)
     - [Network Architecture](dev/diagrams/zebra-network.md)
   - [zebra-checkpoints](dev/zebra-checkpoints.md)
