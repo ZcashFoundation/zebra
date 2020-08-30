@@ -8,12 +8,11 @@ assignees: ''
 ---
 
 <!--
-This template is for design RFCs.  The RFC process is documented in CONTRIBUTING.md
+This template is for design RFCs.
 
-- [ ] Copy the fields from the text of your RFC below
-- [ ] Leave the Design PR number blank, then fill it in *after* you create the PR (and the issue number is created)
-- [ ] After creating the Design PR, take the next available RFC number (not conflicting with any lower-number RFCs) and name your RFC book/rfcs/XYZT-my-rfc.md).
-- [ ] Leave the Zebra Issue number blank.  *After* the RFC is merged, create an issue to track implementation of the RFC and edit the PR description for cross-referencing.
+The RFC process is documented in CONTRIBUTING.md.
+
+Please see the checklist there: https://zebra.zfnd.org/CONTRIBUTING.html
 -->
 
 Feature Name: `my_feature`
