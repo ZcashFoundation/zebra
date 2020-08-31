@@ -11,6 +11,15 @@ use tempdir::TempDir;
 use zebra_test::prelude::*;
 use zebrad::config::ZebradConfig;
 
+fn default_test_config() -> Result<ZebradConfig> {
+    let mut config = ZebradConfig::default();
+    config.state.ephemeral = true;
+    config.state.memory_cache_bytes = 256000000;
+    config.network.listen_addr = "127.0.0.1:0".parse()?;
+
+    Ok(config)
+}
+
 #[derive(PartialEq)]
 enum ConfigMode {
     NoConfig,
@@ -22,16 +31,13 @@ fn tempdir(config_mode: ConfigMode) -> Result<(PathBuf, impl Drop)> {
     let dir = TempDir::new("zebrad_tests")?;
 
     if config_mode != ConfigMode::NoConfig {
-        let mut config = ZebradConfig::default();
-        if config_mode == ConfigMode::Ephemeral {
-            config.state.ephemeral = true;
-        } else {
+        let mut config = default_test_config()?;
+        if config_mode == ConfigMode::Persistent {
             let cache_dir = dir.path().join("state");
             fs::create_dir(&cache_dir)?;
             config.state.cache_dir = cache_dir;
+            config.state.ephemeral = false;
         }
-        config.state.memory_cache_bytes = 256000000;
-        config.network.listen_addr = "127.0.0.1:0".parse()?;
 
         fs::File::create(dir.path().join("zebrad.toml"))?
             .write_all(toml::to_string(&config)?.as_bytes())?;
@@ -303,16 +309,14 @@ fn misconfigured_ephemeral_mode() -> Result<()> {
 
     let dir = TempDir::new("zebrad_tests")?;
     let cache_dir = dir.path().join("state");
+    fs::create_dir(&cache_dir)?;
 
     // Write a configuration that has both cache_dir and ephemeral options set
-    let mut config = ZebradConfig::default();
-    config.state.ephemeral = true;
+    let mut config = default_test_config()?;
     // Although cache_dir has a default value, we set it a new temp directory
     // to test that it is empty later.
-    fs::create_dir(&cache_dir)?;
     config.state.cache_dir = cache_dir.clone();
-    config.state.memory_cache_bytes = 256000000;
-    config.network.listen_addr = "127.0.0.1:0".parse()?;
+
     fs::File::create(dir.path().join("zebrad.toml"))?
         .write_all(toml::to_string(&config)?.as_bytes())?;
 
