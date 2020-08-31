@@ -169,9 +169,9 @@ We use the following Sled trees:
 
 | Tree                 |                  Keys |                              Values |
 |----------------------|-----------------------|-------------------------------------|
-| `blocks_by_hash`     | `BlockHeaderHash`     | `Block`                             |
-| `hash_by_height`     | `BE32(height)`        | `BlockHeaderHash`                   |
-| `tx_by_hash`         | `TransactionHash`     | `BlockHeaderHash || BE32(tx_index)` |
+| `blocks_by_hash`     | `block::Hash`     | `Block`                             |
+| `hash_by_height`     | `BE32(height)`        | `block::Hash`                   |
+| `tx_by_hash`         | `transaction::Hash`     | `block::Hash || BE32(tx_index)` |
 | `utxo_by_outpoint`   | `OutPoint`            | `TransparentOutput`                 |
 | `sprout_nullifiers`  | `sprout::Nullifier`   | `()`                                |
 | `sapling_nullifiers` | `sapling::Nullifier`  | `()`                                |
