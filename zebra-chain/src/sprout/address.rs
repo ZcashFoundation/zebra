@@ -34,7 +34,7 @@ impl fmt::Debug for SproutShieldedAddress {
         f.debug_struct("SproutShieldedAddress")
             .field("network", &self.network)
             .field("paying_key", &self.paying_key)
-            // Because x25519_dalek::PublicKey doesn't impl Debug.
+            // Use hex formatting for the transmission key.
             .field(
                 "transmission_key",
                 &hex::encode(&self.transmission_key.as_bytes()),
