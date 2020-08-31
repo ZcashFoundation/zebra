@@ -207,7 +207,7 @@ fn seed_args() -> Result<()> {
 #[test]
 fn start_no_args() -> Result<()> {
     zebra_test::init();
-    let (tempdir, _guard) = tempdir(ConfigMode::Persistent)?;
+    let (tempdir, _guard) = tempdir(ConfigMode::Ephemeral)?;
 
     let mut child = get_child(&["-v", "start"], &tempdir)?;
 
@@ -291,7 +291,7 @@ fn ephemeral_mode() -> Result<()> {
     assert!(output.was_killed());
 
     let cache_dir = tempdir.join("state");
-    assert!(!cache_dir.exists() || cache_dir.read_dir()?.count() > 0);
+    assert!(!cache_dir.exists());
 
     Ok(())
 }
