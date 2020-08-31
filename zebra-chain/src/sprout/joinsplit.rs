@@ -16,7 +16,7 @@ use super::{commitment, note, tree};
 /// A _JoinSplit Description_, as described in [protocol specification §7.2][ps].
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#joinsplitencoding
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct JoinSplit<P: ZkSnarkProof> {
     /// A value that the JoinSplit transfer removes from the transparent value
     /// pool.
@@ -48,25 +48,6 @@ pub struct JoinSplit<P: ZkSnarkProof> {
     /// A ciphertext component for this output note.
     pub enc_ciphertexts: [note::EncryptedNote; 2],
 }
-
-// Because x25519_dalek::PublicKey does not impl PartialEq
-impl<P: ZkSnarkProof> PartialEq for JoinSplit<P> {
-    fn eq(&self, other: &Self) -> bool {
-        self.vpub_old == other.vpub_old
-            && self.vpub_new == other.vpub_new
-            && self.anchor == other.anchor
-            && self.nullifiers == other.nullifiers
-            && self.commitments == other.commitments
-            && self.ephemeral_key.as_bytes() == other.ephemeral_key.as_bytes()
-            && self.random_seed == other.random_seed
-            && self.vmacs == other.vmacs
-            && self.zkproof == other.zkproof
-            && self.enc_ciphertexts == other.enc_ciphertexts
-    }
-}
-
-// Because x25519_dalek::PublicKey does not impl Eq
-impl<P: ZkSnarkProof> Eq for JoinSplit<P> {}
 
 impl<P: ZkSnarkProof> ZcashSerialize for JoinSplit<P> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
