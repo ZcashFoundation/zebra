@@ -207,7 +207,8 @@ fn seed_args() -> Result<()> {
 #[test]
 fn start_no_args() -> Result<()> {
     zebra_test::init();
-    let (tempdir, _guard) = tempdir(ConfigMode::Ephemeral)?;
+    // start caches state, so run one of the start tests with persistent state
+    let (tempdir, _guard) = tempdir(ConfigMode::Persistent)?;
 
     let mut child = get_child(&["-v", "start"], &tempdir)?;
 
