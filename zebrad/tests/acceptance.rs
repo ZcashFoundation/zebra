@@ -8,12 +8,13 @@ use color_eyre::eyre::Result;
 use std::{fs, io::Write, path::PathBuf, time::Duration};
 use tempdir::TempDir;
 
+use zebra_state::StorageMode;
 use zebra_test::prelude::*;
 use zebrad::config::ZebradConfig;
 
 fn default_test_config() -> Result<ZebradConfig> {
     let mut config = ZebradConfig::default();
-    config.state.ephemeral = true;
+    config.state.storage = StorageMode::Ephemeral;
     config.state.memory_cache_bytes = 256000000;
     config.network.listen_addr = "127.0.0.1:0".parse()?;
 
@@ -35,8 +36,7 @@ fn tempdir(config_mode: ConfigMode) -> Result<(PathBuf, impl Drop)> {
         if config_mode == ConfigMode::Persistent {
             let cache_dir = dir.path().join("state");
             fs::create_dir(&cache_dir)?;
-            config.state.cache_dir = cache_dir;
-            config.state.ephemeral = false;
+            config.state.storage = StorageMode::OnDisk { cache_dir };
         }
 
         fs::File::create(dir.path().join("zebrad.toml"))?
@@ -299,41 +299,6 @@ fn ephemeral_mode() -> Result<()> {
 
     let cache_dir = tempdir.join("state");
     assert!(!cache_dir.exists());
-
-    Ok(())
-}
-
-#[test]
-fn misconfigured_ephemeral_mode() -> Result<()> {
-    zebra_test::init();
-
-    let dir = TempDir::new("zebrad_tests")?;
-    let cache_dir = dir.path().join("state");
-    fs::create_dir(&cache_dir)?;
-
-    // Write a configuration that has both cache_dir and ephemeral options set
-    let mut config = default_test_config()?;
-    // Although cache_dir has a default value, we set it a new temp directory
-    // to test that it is empty later.
-    config.state.cache_dir = cache_dir.clone();
-
-    fs::File::create(dir.path().join("zebrad.toml"))?
-        .write_all(toml::to_string(&config)?.as_bytes())?;
-
-    let tempdir = dir.path().to_path_buf();
-
-    // Any free argument is valid
-    let mut child = get_child(&["start", "argument"], &tempdir)?;
-    // Run the program and kill it at 1 second
-    std::thread::sleep(Duration::from_secs(1));
-    child.kill()?;
-    let output = child.wait_with_output()?;
-
-    // Make sure the command was killed
-    assert!(output.was_killed());
-
-    // Check that ephemeral takes precedence over cache_dir
-    assert_eq!(cache_dir.read_dir()?.count(), 0);
 
     Ok(())
 }

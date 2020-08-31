@@ -70,7 +70,7 @@ fn verifiers_from_checkpoint_list(
         + Clone
         + 'static,
 ) {
-    let state_service = zebra_state::in_memory::init();
+    let state_service = zebra_state::on_disk::init(zebra_state::Config::ephemeral(), network);
     let block_verifier = crate::block::init(state_service.clone());
     let chain_verifier = super::init_from_verifiers(
         network,
@@ -245,12 +245,14 @@ async fn verify_checkpoint_test() -> Result<(), Report> {
 async fn verify_checkpoint(config: Config) -> Result<(), Report> {
     zebra_test::init();
 
+    let network = Network::Mainnet;
+
     // Test that the chain::init function works. Most of the other tests use
     // init_from_verifiers.
     let chain_verifier = super::init(
         config.clone(),
-        Network::Mainnet,
-        zebra_state::in_memory::init(),
+        network,
+        zebra_state::on_disk::init(zebra_state::Config::ephemeral(), network),
     )
     .await;
 
@@ -362,6 +364,7 @@ async fn continuous_blockchain_test() -> Result<(), Report> {
 #[spandoc::spandoc]
 async fn continuous_blockchain(restart_height: Option<block::Height>) -> Result<(), Report> {
     zebra_test::init();
+    let network = Network::Mainnet;
 
     // A continuous blockchain
     let mut blockchain = Vec::new();
@@ -401,7 +404,7 @@ async fn continuous_blockchain(restart_height: Option<block::Height>) -> Result<
         .collect();
     let checkpoint_list = CheckpointList::from_list(checkpoint_list).map_err(|e| eyre!(e))?;
 
-    let mut state_service = zebra_state::in_memory::init();
+    let mut state_service = zebra_state::on_disk::init(zebra_state::Config::ephemeral(), network);
     /// SPANDOC: Add blocks to the state from 0..=restart_height {?restart_height}
     if restart_height.is_some() {
         for block in blockchain
@@ -426,7 +429,7 @@ async fn continuous_blockchain(restart_height: Option<block::Height>) -> Result<
 
     let block_verifier = crate::block::init(state_service.clone());
     let mut chain_verifier = super::init_from_verifiers(
-        Network::Mainnet,
+        network,
         block_verifier,
         Some(checkpoint_list),
         state_service.clone(),
