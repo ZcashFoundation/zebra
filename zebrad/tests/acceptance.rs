@@ -8,13 +8,12 @@ use color_eyre::eyre::Result;
 use std::{fs, io::Write, path::PathBuf, time::Duration};
 use tempdir::TempDir;
 
-use zebra_state::StorageMode;
 use zebra_test::prelude::*;
 use zebrad::config::ZebradConfig;
 
 fn default_test_config() -> Result<ZebradConfig> {
     let mut config = ZebradConfig::default();
-    config.state.storage = StorageMode::Ephemeral;
+    config.state.cache_dir = None;
     config.state.memory_cache_bytes = 256000000;
     config.network.listen_addr = "127.0.0.1:0".parse()?;
 
@@ -36,7 +35,7 @@ fn tempdir(config_mode: ConfigMode) -> Result<(PathBuf, impl Drop)> {
         if config_mode == ConfigMode::Persistent {
             let cache_dir = dir.path().join("state");
             fs::create_dir(&cache_dir)?;
-            config.state.storage = StorageMode::OnDisk { cache_dir };
+            config.state.cache_dir = Some(cache_dir);
         }
 
         fs::File::create(dir.path().join("zebrad.toml"))?

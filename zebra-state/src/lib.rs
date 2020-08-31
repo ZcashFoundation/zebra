@@ -45,47 +45,32 @@ const MAX_BLOCK_REORG_HEIGHT: block::Height = block::Height(MIN_TRASPARENT_COINB
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct Config {
-    /// The setting for how data should be stored
-    pub storage: StorageMode,
+    /// The root directory for storing cached data.
+    ///
+    /// Cached data includes any state that can be replicated from the network
+    /// (e.g., the chain state, the blocks, the UTXO set, etc.). It does *not*
+    /// include private data that cannot be replicated from the network, such as
+    /// wallet data.  That data is not handled by `zebra-state`.
+    ///
+    /// Each network has a separate state, which is stored in "mainnet/state"
+    /// and "testnet/state" subdirectories.
+    ///
+    /// The default directory is platform dependent, based on
+    /// [`dirs::cache_dir()`](https://docs.rs/dirs/3.0.1/dirs/fn.cache_dir.html):
+    ///
+    /// |Platform | Value                                           | Example                            |
+    /// | ------- | ----------------------------------------------- | ---------------------------------- |
+    /// | Linux   | `$XDG_CACHE_HOME/zebra` or `$HOME/.cache/zebra` | /home/alice/.cache/zebra           |
+    /// | macOS   | `$HOME/Library/Caches/zebra`                    | /Users/Alice/Library/Caches/zebra  |
+    /// | Windows | `{FOLDERID_LocalAppData}\zebra`                 | C:\Users\Alice\AppData\Local\zebra |
+    /// | Other   | `std::env::current_dir()/cache`                 |                                    |
+    ///
+    /// Setting this value to `None` will cause it to use an in memory ephemeral
+    /// database instead of storing database on the disk.
+    pub cache_dir: Option<PathBuf>,
 
     /// The maximum number of bytes to use caching data in memory.
     pub memory_cache_bytes: u64,
-}
-
-#[non_exhaustive]
-#[derive(Clone, Debug, Deserialize, Serialize)]
-/// Enum representing the mutually exclusive configuration options available for
-/// how `zebra_state::Service` handles storing its data.
-pub enum StorageMode {
-    /// Use an on disk database
-    OnDisk {
-        /// The root directory for storing cached data.
-        ///
-        /// Cached data includes any state that can be replicated from the network
-        /// (e.g., the chain state, the blocks, the UTXO set, etc.). It does *not*
-        /// include private data that cannot be replicated from the network, such as
-        /// wallet data.  That data is not handled by `zebra-state`.
-        ///
-        /// Each network has a separate state, which is stored in "mainnet/state"
-        /// and "testnet/state" subdirectories.
-        ///
-        /// The default directory is platform dependent, based on
-        /// [`dirs::cache_dir()`](https://docs.rs/dirs/3.0.1/dirs/fn.cache_dir.html):
-        ///
-        /// |Platform | Value                                           | Example                            |
-        /// | ------- | ----------------------------------------------- | ---------------------------------- |
-        /// | Linux   | `$XDG_CACHE_HOME/zebra` or `$HOME/.cache/zebra` | /home/alice/.cache/zebra           |
-        /// | macOS   | `$HOME/Library/Caches/zebra`                    | /Users/Alice/Library/Caches/zebra  |
-        /// | Windows | `{FOLDERID_LocalAppData}\zebra`                 | C:\Users\Alice\AppData\Local\zebra |
-        /// | Other   | `std::env::current_dir()/cache`                 |                                    |
-        cache_dir: PathBuf,
-    },
-    /// Use an ephemeral database.
-    ///
-    /// Ephemeral databases are stored in memory on Linux, and in a temporary directory on other OSes.
-    ///
-    /// Set to `false` by default. If this is set to `true`, [`cache_dir`] is ignored.
-    Ephemeral,
 }
 
 impl Config {
@@ -101,21 +86,20 @@ impl Config {
             .cache_capacity(self.memory_cache_bytes)
             .mode(sled::Mode::LowSpace);
 
-        match &self.storage {
-            StorageMode::Ephemeral => config.temporary(true),
-            StorageMode::OnDisk { cache_dir } => {
+        match &self.cache_dir {
+            Some(cache_dir) => {
                 let path = cache_dir.join(net_dir).join("state");
                 config.path(path)
             }
+            None => config.temporary(true),
         }
     }
 
     /// Construct a config for an ephemeral in memory database
     pub fn ephemeral() -> Self {
-        Self {
-            storage: StorageMode::Ephemeral,
-            memory_cache_bytes: 512 * 1024 * 1024,
-        }
+        let mut config = Self::default();
+        config.cache_dir = None;
+        config
     }
 }
 
@@ -126,7 +110,7 @@ impl Default for Config {
             .join("zebra");
 
         Self {
-            storage: StorageMode::OnDisk { cache_dir },
+            cache_dir: Some(cache_dir),
             memory_cache_bytes: 512 * 1024 * 1024,
         }
     }
