@@ -95,8 +95,6 @@ where
     /// These guards are checked for errors as part of `poll_ready` which lets
     /// the `PeerSet` propagate errors from background tasks back to the user
     guards: futures::stream::FuturesUnordered<JoinHandle<Result<(), BoxedStdError>>>,
-    /// Stream of incoming inventory hashes to
-    inv_stream: broadcast::Receiver<(InventoryHash, SocketAddr)>,
     inventory_registry: InventoryRegistry,
 }
 
@@ -125,8 +123,7 @@ where
             demand_signal,
             guards: futures::stream::FuturesUnordered::new(),
             handle_rx,
-            inv_stream,
-            inventory_registry: Default::default(),
+            inventory_registry: InventoryRegistry::new(inv_stream),
         }
     }
 
