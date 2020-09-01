@@ -68,17 +68,14 @@ impl Configurable<ZebradConfig> for ZebradCmd {
     fn config_path(&self) -> Option<PathBuf> {
         let if_exists = |f: PathBuf| if f.exists() { Some(f) } else { None };
 
-        // Note: Changes in how configuration is loaded may need usage
-        // edits in generate.rs
-        std::env::current_dir()
-            .ok()
+        dirs::preference_dir()
             .map(|path| path.join(CONFIG_FILE))
             .and_then(if_exists)
-            .or_else(|| {
-                dirs::preference_dir()
-                    .map(|path| path.join(CONFIG_FILE))
-                    .and_then(if_exists)
-            })
+            .or_else(|| std::env::current_dir().ok())
+            .map(|path| path.join(CONFIG_FILE))
+            .and_then(if_exists)
+        // Note: Changes in how configuration is loaded may need usage
+        // edits in generate.rs
     }
 
     /// Apply changes to the config after it's been loaded, e.g. overriding
