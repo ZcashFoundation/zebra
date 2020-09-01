@@ -284,9 +284,9 @@ impl ContextFrom<Output> for Report {
                 .header("Stderr:")
         };
 
-        self.with_section(stdout)
+        self.context_from(&source.status)
+            .with_section(stdout)
             .with_section(stderr)
-            .context_from(&source.status)
     }
 }
 
@@ -304,11 +304,22 @@ impl ContextFrom<ExitStatus> for Report {
             self.with_section(|| {
                 format!("command exited {} with status code {}", how, code).header("Exit Status:")
             })
+        } else if cfg!(unix) {
+            if let Some(signal) = source.signal() {
+                self.with_section(|| {
+                    format!("command terminated {} by signal {}", how, signal)
+                        .header("Exit Status:")
+                })
+            } else {
+                unreachable!(
+                    "on unix all processes either terminate via signal or with an exit code"
+                );
+            }
         } else {
             self.with_section(|| {
-                format!("command exited {} without a status code", how).header("Exit Status:")
+                format!("command exited {} without a status code or signal", how)
+                    .header("Exit Status:")
             })
-            .note("processes exit without a status code on unix if terminated by a signal")
         }
     }
 }
