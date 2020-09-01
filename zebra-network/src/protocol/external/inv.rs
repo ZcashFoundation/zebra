@@ -20,7 +20,7 @@ use zebra_chain::{
 /// container, so we do not use that term to avoid confusion with `Vec<T>`.
 ///
 /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#Inventory_Vectors)
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum InventoryHash {
     /// An error.
     ///

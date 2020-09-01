@@ -1,3 +1,4 @@
+use std::net::SocketAddr;
 use std::{
     collections::HashMap,
     convert::TryInto,
@@ -14,7 +15,7 @@ use futures::{
     stream::FuturesUnordered,
 };
 use indexmap::IndexMap;
-use tokio::sync::oneshot::error::TryRecvError;
+use tokio::sync::{broadcast, oneshot::error::TryRecvError};
 use tokio::task::JoinHandle;
 use tower::{
     discover::{Change, Discover},
@@ -23,11 +24,17 @@ use tower::{
 use tower_load::Load;
 
 use crate::{
-    protocol::internal::{Request, Response},
+    protocol::{
+        external::InventoryHash,
+        internal::{Request, Response},
+    },
     BoxedStdError,
 };
 
-use super::unready_service::{Error as UnreadyError, UnreadyService};
+use super::{
+    unready_service::{Error as UnreadyError, UnreadyService},
+    InventoryRegistry,
+};
 
 /// A [`tower::Service`] that abstractly represents "the rest of the network".
 ///
@@ -71,7 +78,7 @@ use super::unready_service::{Error as UnreadyError, UnreadyService};
 /// [p2c]: http://www.eecs.harvard.edu/~michaelm/postscripts/handbook2001.pdf
 pub struct PeerSet<D>
 where
-    D: Discover,
+    D: Discover<Key = SocketAddr>,
 {
     discover: D,
     ready_services: IndexMap<D::Key, D::Service>,
@@ -88,12 +95,12 @@ where
     /// These guards are checked for errors as part of `poll_ready` which lets
     /// the `PeerSet` propagate errors from background tasks back to the user
     guards: futures::stream::FuturesUnordered<JoinHandle<Result<(), BoxedStdError>>>,
+    inventory_registry: InventoryRegistry,
 }
 
 impl<D> PeerSet<D>
 where
-    D: Discover + Unpin,
-    D::Key: Clone + Debug,
+    D: Discover<Key = SocketAddr> + Unpin,
     D::Service: Service<Request, Response = Response> + Load,
     D::Error: Into<BoxedStdError>,
     <D::Service as Service<Request>>::Error: Into<BoxedStdError> + 'static,
@@ -105,6 +112,7 @@ where
         discover: D,
         demand_signal: mpsc::Sender<()>,
         handle_rx: tokio::sync::oneshot::Receiver<Vec<JoinHandle<Result<(), BoxedStdError>>>>,
+        inv_stream: broadcast::Receiver<(InventoryHash, SocketAddr)>,
     ) -> Self {
         Self {
             discover,
@@ -115,6 +123,7 @@ where
             demand_signal,
             guards: futures::stream::FuturesUnordered::new(),
             handle_rx,
+            inventory_registry: InventoryRegistry::new(inv_stream),
         }
     }
 
@@ -160,7 +169,7 @@ where
 
     fn push_unready(&mut self, key: D::Key, svc: D::Service) {
         let (tx, rx) = oneshot::channel();
-        self.cancel_handles.insert(key.clone(), tx);
+        self.cancel_handles.insert(key, tx);
         self.unready_services.push(UnreadyService {
             key: Some(key),
             service: Some(svc),
@@ -250,12 +259,38 @@ where
         let (_, svc) = self.ready_services.get_index(index).expect("invalid index");
         svc.load()
     }
+
+    fn best_peer_for(&mut self, req: &Request) -> (SocketAddr, D::Service) {
+        if let Request::BlocksByHash(hashes) = req {
+            for hash in hashes.iter() {
+                let mut peers = self.inventory_registry.peers(&(*hash).into());
+                if let Some(index) = peers.find_map(|addr| self.ready_services.get_index_of(addr)) {
+                    return self
+                        .ready_services
+                        .swap_remove_index(index)
+                        .expect("found index must be valid");
+                }
+            }
+        }
+
+        self.default_peer()
+    }
+
+    fn default_peer(&mut self) -> (SocketAddr, D::Service) {
+        let index = self
+            .next_idx
+            .take()
+            .expect("ready service must have valid preselected index");
+
+        self.ready_services
+            .swap_remove_index(index)
+            .expect("preselected index must be valid")
+    }
 }
 
 impl<D> Service<Request> for PeerSet<D>
 where
-    D: Discover + Unpin,
-    D::Key: Clone + Debug + ToString,
+    D: Discover<Key = SocketAddr> + Unpin,
     D::Service: Service<Request, Response = Response> + Load,
     D::Error: Into<BoxedStdError>,
     <D::Service as Service<Request>>::Error: Into<BoxedStdError> + 'static,
@@ -271,6 +306,7 @@ where
         self.check_for_background_errors(cx)?;
         // Process peer discovery updates.
         let _ = self.poll_discover(cx)?;
+        self.inventory_registry.poll_inventory(cx)?;
 
         // Poll unready services to drive them to readiness.
         self.poll_unready(cx);
@@ -325,14 +361,7 @@ where
     }
 
     fn call(&mut self, req: Request) -> Self::Future {
-        let index = self
-            .next_idx
-            .take()
-            .expect("ready service must have valid preselected index");
-        let (key, mut svc) = self
-            .ready_services
-            .swap_remove_index(index)
-            .expect("preselected index must be valid");
+        let (key, mut svc) = self.best_peer_for(&req);
 
         // XXX add a dimension tagging request metrics by type
         metrics::counter!(

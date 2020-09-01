@@ -12,7 +12,7 @@ use futures::{
     channel::{mpsc, oneshot},
     prelude::*,
 };
-use tokio::net::TcpStream;
+use tokio::{net::TcpStream, sync::broadcast};
 use tokio_util::codec::Framed;
 use tower::Service;
 use tracing::{span, Level};
@@ -23,7 +23,7 @@ use zebra_chain::block;
 use crate::{
     constants,
     protocol::{
-        external::{types::*, Codec, Message},
+        external::{types::*, Codec, InventoryHash, Message},
         internal::{Request, Response},
     },
     types::MetaAddr,
@@ -39,6 +39,7 @@ pub struct Handshake<S> {
     config: Config,
     inbound_service: S,
     timestamp_collector: mpsc::Sender<MetaAddr>,
+    inv_collector: broadcast::Sender<(InventoryHash, SocketAddr)>,
     nonces: Arc<Mutex<HashSet<Nonce>>>,
     user_agent: String,
     our_services: PeerServices,
@@ -52,6 +53,7 @@ pub struct Builder<S> {
     our_services: Option<PeerServices>,
     user_agent: Option<String>,
     relay: Option<bool>,
+    inv_collector: Option<broadcast::Sender<(InventoryHash, SocketAddr)>>,
 }
 
 impl<S> Builder<S>
@@ -68,6 +70,15 @@ where
     /// Provide a service to handle inbound requests. Mandatory.
     pub fn with_inbound_service(mut self, inbound_service: S) -> Self {
         self.inbound_service = Some(inbound_service);
+        self
+    }
+
+    /// Provide a channel for registering inventory advertisements. Optional.
+    pub fn with_inventory_collector(
+        mut self,
+        inv_collector: broadcast::Sender<(InventoryHash, SocketAddr)>,
+    ) -> Self {
+        self.inv_collector = Some(inv_collector);
         self
     }
 
@@ -111,6 +122,10 @@ where
         let inbound_service = self
             .inbound_service
             .ok_or("did not specify inbound service")?;
+        let inv_collector = self.inv_collector.unwrap_or_else(|| {
+            let (tx, _) = broadcast::channel(100);
+            tx
+        });
         let timestamp_collector = self.timestamp_collector.unwrap_or_else(|| {
             // No timestamp collector was passed, so create a stub channel.
             // Dropping the receiver means sends will fail, but we don't care.
@@ -124,6 +139,7 @@ where
         Ok(Handshake {
             config,
             inbound_service,
+            inv_collector,
             timestamp_collector,
             nonces,
             user_agent,
@@ -150,6 +166,7 @@ where
             user_agent: None,
             our_services: None,
             relay: None,
+            inv_collector: None,
         }
     }
 }
@@ -181,6 +198,7 @@ where
         let nonces = self.nonces.clone();
         let inbound_service = self.inbound_service.clone();
         let timestamp_collector = self.timestamp_collector.clone();
+        let inv_collector = self.inv_collector.clone();
         let network = self.config.network;
         let our_addr = self.config.listen_addr;
         let user_agent = self.user_agent.clone();
@@ -370,6 +388,23 @@ where
                                     last_seen: Utc::now(),
                                 })
                                 .await;
+                        }
+                        msg
+                    }
+                })
+                .then(move |msg| {
+                    let inv_collector = inv_collector.clone();
+                    async move {
+                        if let Ok(Message::Inv(hashes)) = &msg {
+                            // We reject inventory messages with more than one
+                            // item because they are most likely replies to a
+                            // query rather than a newly gosipped block.
+                            //
+                            // https://zebra.zfnd.org/dev/rfcs/0003-inventory-tracking.html#inventory-monitoring
+                            if hashes.len() == 1 {
+                                let hash = hashes[0];
+                                let _ = inv_collector.send((hash, addr));
+                            }
                         }
                         msg
                     }
