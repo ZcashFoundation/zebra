@@ -232,66 +232,52 @@ impl TestOutput {
 }
 
 /// Add context to an error report
-trait Contextualize<S> {
-    type WithContext;
+trait ContextFrom<S> {
+    type Return;
 
-    fn context_from(self, source: &S) -> Self::WithContext;
+    fn context_from(self, source: &S) -> Self::Return;
 }
 
-impl<T, E> Contextualize<TestChild> for Result<T, E>
-where
-    E: Into<Report>,
-{
-    type WithContext = Result<T, Report>;
+impl ContextFrom<TestChild> for Report {
+    type Return = Report;
 
-    fn context_from(self, source: &TestChild) -> Self::WithContext {
-        let with_report = self.map_err(|e| e.into());
-
+    fn context_from(self, source: &TestChild) -> Self::Return {
         let command = || source.cmd.clone().header("Command:");
         let child = || format!("{:?}", source.child).header("Child Process:");
 
-        with_report.with_section(command).with_section(child)
+        self.with_section(command).with_section(child)
     }
 }
 
-impl<T, E> Contextualize<ExitStatus> for Result<T, E>
+impl<C, T, E> ContextFrom<C> for Result<T, E>
 where
     E: Into<Report>,
+    Report: ContextFrom<C, Return = Report>,
 {
-    type WithContext = Result<T, Report>;
+    type Return = Result<T, Report>;
 
-    fn context_from(self, source: &ExitStatus) -> Self::WithContext {
-        let with_report = self.map_err(|e| e.into());
-
-        let how = if source.success() {
-            "successfully"
-        } else {
-            "unsuccessfully"
-        };
-
-        if let Some(code) = source.code() {
-            with_report.with_section(|| {
-                format!("command exited {} with status code {}", how, code).header("Exit Status:")
-            })
-        } else {
-            with_report
-                .with_section(|| {
-                    format!("command exited {} without a status code", how).header("Exit Status:")
-                })
-                .note("processes exit without a status code on unix if terminated by a signal")
-        }
+    fn context_from(self, source: &C) -> Self::Return {
+        self.map_err(|e| e.into())
+            .map_err(|report| report.context_from(source))
     }
 }
 
-impl<T, E> Contextualize<Output> for Result<T, E>
-where
-    E: Into<Report>,
-{
-    type WithContext = Result<T, Report>;
+impl ContextFrom<TestOutput> for Report {
+    type Return = Report;
 
-    fn context_from(self, source: &Output) -> Self::WithContext {
-        let with_report = self.map_err(|e| e.into());
+    fn context_from(self, source: &TestOutput) -> Self::Return {
+        let with_report = self.context_from(&source.output);
 
+        let command = || source.cmd.clone().header("Command:");
+
+        with_report.with_section(command)
+    }
+}
+
+impl ContextFrom<Output> for Report {
+    type Return = Report;
+
+    fn context_from(self, source: &Output) -> Self::Return {
         let stdout = || {
             String::from_utf8_lossy(&source.stdout)
                 .into_owned()
@@ -303,24 +289,31 @@ where
                 .header("Stderr:")
         };
 
-        with_report
-            .with_section(stdout)
+        self.with_section(stdout)
             .with_section(stderr)
             .context_from(&source.status)
     }
 }
 
-impl<T, E> Contextualize<TestOutput> for Result<T, E>
-where
-    E: Into<Report>,
-{
-    type WithContext = Result<T, Report>;
+impl ContextFrom<ExitStatus> for Report {
+    type Return = Report;
 
-    fn context_from(self, source: &TestOutput) -> Self::WithContext {
-        let with_report = self.context_from(&source.output);
+    fn context_from(self, source: &ExitStatus) -> Self::Return {
+        let how = if source.success() {
+            "successfully"
+        } else {
+            "unsuccessfully"
+        };
 
-        let command = || source.cmd.clone().header("Command:");
-
-        with_report.with_section(command)
+        if let Some(code) = source.code() {
+            self.with_section(|| {
+                format!("command exited {} with status code {}", how, code).header("Exit Status:")
+            })
+        } else {
+            self.with_section(|| {
+                format!("command exited {} without a status code", how).header("Exit Status:")
+            })
+            .note("processes exit without a status code on unix if terminated by a signal")
+        }
     }
 }
