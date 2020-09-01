@@ -398,7 +398,7 @@ where
                         if let Ok(Message::Inv(hashes)) = &msg {
                             // We reject inventory messages with more than one
                             // item because they are most likely replies to a
-                            // query rather than a newly gosipped block.
+                            // query rather than a newly gossiped block.
                             //
                             // https://zebra.zfnd.org/dev/rfcs/0003-inventory-tracking.html#inventory-monitoring
                             if hashes.len() == 1 {
