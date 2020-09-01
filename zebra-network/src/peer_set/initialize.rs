@@ -62,7 +62,6 @@ where
             .with_config(config.clone())
             .with_inbound_service(inbound_service)
             .with_timestamp_collector(timestamp_collector)
-            // XXX .with_addr(addr) once we can access our configured address
             .with_advertised_services(PeerServices::NODE_NETWORK)
             .with_user_agent(crate::constants::USER_AGENT.to_string())
             .want_transactions(true)
