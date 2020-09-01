@@ -305,26 +305,23 @@ impl ContextFrom<ExitStatus> for Report {
         };
 
         if let Some(code) = source.code() {
-            self.with_section(|| {
+            return self.with_section(|| {
                 format!("command exited {} with status code {}", how, code).header("Exit Status:")
-            })
-        } else if cfg!(unix) {
-            #[cfg(unix)]
-            if let Some(signal) = source.signal() {
-                self.with_section(|| {
-                    format!("command terminated {} by signal {}", how, signal)
-                        .header("Exit Status:")
-                })
-            } else {
-                unreachable!(
-                    "on unix all processes either terminate via signal or with an exit code"
-                );
-            }
-        } else {
-            self.with_section(|| {
-                format!("command exited {} without a status code or signal", how)
-                    .header("Exit Status:")
-            })
+            });
         }
+
+        #[cfg(unix)]
+        if let Some(signal) = source.signal() {
+            self.with_section(|| {
+                format!("command terminated {} by signal {}", how, signal).header("Exit Status:")
+            })
+        } else {
+            unreachable!("on unix all processes either terminate via signal or with an exit code");
+        }
+
+        #[cfg(not(unix))]
+        self.with_section(|| {
+            format!("command exited {} without a status code or signal", how).header("Exit Status:")
+        })
     }
 }
