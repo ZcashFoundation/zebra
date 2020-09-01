@@ -267,6 +267,13 @@ impl CheckpointVerifier {
             if height == block::Height(pending_height.0 + 1) {
                 pending_height = height;
             } else {
+                let gap = height.0 - pending_height.0;
+                // Try to log a useful message when checkpointing has issues
+                tracing::trace!(contiguous_height = ?pending_height,
+                                next_height = ?height,
+                                ?gap,
+                                "Waiting for more checkpoint blocks");
+                metrics::gauge!("checkpoint.contiguous.height", pending_height.0 as i64);
                 break;
             }
         }
@@ -331,7 +338,10 @@ impl CheckpointVerifier {
             InitialTip(previous_height) | PreviousCheckpoint(previous_height)
                 if (height <= previous_height) =>
             {
-                Err(format!("Block has already been verified. {:?}", height))?
+                Err(format!(
+                    "Block height has already been verified. {:?}",
+                    height
+                ))?
             }
             InitialTip(_) | PreviousCheckpoint(_) => {}
             // We're finished, so no checkpoint height is valid

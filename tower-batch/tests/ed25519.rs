@@ -123,33 +123,35 @@ where
 }
 
 #[tokio::test]
-async fn batch_flushes_on_max_items() {
+async fn batch_flushes_on_max_items() -> Result<(), Report> {
     use tokio::time::timeout;
     zebra_test::init();
 
     // Use a very long max_latency and a short timeout to check that
     // flushing is happening based on hitting max_items.
     let verifier = Batch::new(Ed25519Verifier::new(), 10, Duration::from_secs(1000));
-    assert!(
-        timeout(Duration::from_secs(1), sign_and_verify(verifier, 100, None))
-            .await
-            .is_ok()
-    );
+    timeout(Duration::from_secs(1), sign_and_verify(verifier, 100, None))
+        .await
+        .map_err(|e| eyre!(e))?
+        .map_err(|e| eyre!(e))?;
+
+    Ok(())
 }
 
 #[tokio::test]
-async fn batch_flushes_on_max_latency() {
+async fn batch_flushes_on_max_latency() -> Result<(), Report> {
     use tokio::time::timeout;
     zebra_test::init();
 
     // Use a very high max_items and a short timeout to check that
     // flushing is happening based on hitting max_latency.
     let verifier = Batch::new(Ed25519Verifier::new(), 100, Duration::from_millis(500));
-    assert!(
-        timeout(Duration::from_secs(1), sign_and_verify(verifier, 10, None))
-            .await
-            .is_ok()
-    );
+    timeout(Duration::from_secs(1), sign_and_verify(verifier, 10, None))
+        .await
+        .map_err(|e| eyre!(e))?
+        .map_err(|e| eyre!(e))?;
+
+    Ok(())
 }
 
 #[tokio::test]
