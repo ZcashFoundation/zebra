@@ -11,7 +11,6 @@ use zebra_chain::{
     parameters::Network,
     serialization::{ZcashDeserialize, ZcashDeserializeInto},
 };
-use zebra_state::{on_disk, Config};
 use zebra_test::transcript::{TransError, Transcript};
 
 static VALID_BLOCK_TRANSCRIPT: Lazy<Vec<(Arc<Block>, Result<block::Hash, TransError>)>> =
@@ -107,7 +106,7 @@ async fn check_transcripts() -> Result<(), Report> {
     zebra_test::init();
 
     let network = Network::Mainnet;
-    let state_service = on_disk::init(Config::ephemeral(), network);
+    let state_service = zebra_state::on_disk::init(zebra_state::Config::ephemeral(), network);
 
     let block_verifier = super::init(state_service.clone());
 
