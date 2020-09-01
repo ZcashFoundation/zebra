@@ -73,7 +73,7 @@ where
         self
     }
 
-    /// Provide a channel for registering inventory advertisements. Mandatory.
+    /// Provide a channel for registering inventory advertisements. Optional.
     pub fn with_inventory_collector(
         mut self,
         inv_collector: broadcast::Sender<(InventoryHash, SocketAddr)>,
@@ -122,9 +122,10 @@ where
         let inbound_service = self
             .inbound_service
             .ok_or("did not specify inbound service")?;
-        let inv_collector = self
-            .inv_collector
-            .ok_or("did not specify a inventory collector")?;
+        let inv_collector = self.inv_collector.unwrap_or_else(|| {
+            let (tx, _) = broadcast::channel(100);
+            tx
+        });
         let timestamp_collector = self.timestamp_collector.unwrap_or_else(|| {
             // No timestamp collector was passed, so create a stub channel.
             // Dropping the receiver means sends will fail, but we don't care.
