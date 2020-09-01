@@ -19,6 +19,3 @@ panic = "abort"
 
 [profile.release]
 panic = "abort"
-
-[patch.crates-io]
-color-eyre = { path = "/home/jlusby/git/yaahc/color-eyre" }
