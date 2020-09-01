@@ -32,8 +32,8 @@ use crate::{
 };
 
 use super::{
-    inventory_registry::InventoryRegistry,
     unready_service::{Error as UnreadyError, UnreadyService},
+    InventoryRegistry,
 };
 
 /// A [`tower::Service`] that abstractly represents "the rest of the network".
@@ -259,6 +259,33 @@ where
         let (_, svc) = self.ready_services.get_index(index).expect("invalid index");
         svc.load()
     }
+
+    fn best_peer_for(&mut self, req: &Request) -> (SocketAddr, D::Service) {
+        if let Request::BlocksByHash(hashes) = req {
+            for hash in hashes.iter() {
+                let mut peers = self.inventory_registry.peers(&(*hash).into());
+                if let Some(index) = peers.find_map(|addr| self.ready_services.get_index_of(addr)) {
+                    return self
+                        .ready_services
+                        .swap_remove_index(index)
+                        .expect("found index must be valid");
+                }
+            }
+        }
+
+        self.default_peer()
+    }
+
+    fn default_peer(&mut self) -> (SocketAddr, D::Service) {
+        let index = self
+            .next_idx
+            .take()
+            .expect("ready service must have valid preselected index");
+
+        self.ready_services
+            .swap_remove_index(index)
+            .expect("preselected index must be valid")
+    }
 }
 
 impl<D> Service<Request> for PeerSet<D>
@@ -279,6 +306,7 @@ where
         self.check_for_background_errors(cx)?;
         // Process peer discovery updates.
         let _ = self.poll_discover(cx)?;
+        self.inventory_registry.poll_inventory(cx)?;
 
         // Poll unready services to drive them to readiness.
         self.poll_unready(cx);
@@ -333,14 +361,7 @@ where
     }
 
     fn call(&mut self, req: Request) -> Self::Future {
-        let index = self
-            .next_idx
-            .take()
-            .expect("ready service must have valid preselected index");
-        let (key, mut svc) = self
-            .ready_services
-            .swap_remove_index(index)
-            .expect("preselected index must be valid");
+        let (key, mut svc) = self.best_peer_for(&req);
 
         // XXX add a dimension tagging request metrics by type
         metrics::counter!(
