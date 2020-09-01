@@ -3137,7 +3137,6 @@ dependencies = [
  "redjubjub",
  "serde",
  "spandoc",
- "tempdir",
  "tokio",
  "tower",
  "tower-batch",
