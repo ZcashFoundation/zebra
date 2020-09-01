@@ -451,8 +451,6 @@ where
             let span = tracing::info_span!("block_fetch_verify", ?hash);
             let mut verifier = self.verifier.clone();
             let task = tokio::spawn(
-                // TODO: refactor this task into its own async function, and
-                //       wrap_err the result with hash
                 async move {
                     async {
                         let block = match block_req.await {
