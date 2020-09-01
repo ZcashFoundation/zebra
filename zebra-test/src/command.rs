@@ -164,7 +164,7 @@ impl TestOutput {
         }
 
         Err(eyre!(
-            "stdout of command did not contain any matches for the given regex "
+            "stdout of command did not contain any matches for the given regex"
         ))
         .context_from(self)
     }
