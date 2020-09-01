@@ -25,9 +25,51 @@ we have in the block header (the root of the note commitment tree).
 # Definitions
 [definitions]: #definitions
 
+Many terms used here are defined in the [Zcash Protocol Specification](https://zips.z.cash/protocol/protocol.pdf)
+
+**notes**: Represents that a value is spendable by the recipient who holds the
+spending key corresponding to a given shielded payment address.
+
+**nullifiers**: Revealed by Spend descriptions when its associated note is spent.
+
+**nullifier set**: The set of unique nullifiers revealed by any transactions
+within a block. Nullifiers are enforced to be unique within a valid block chain
+by commiting to previous treestates in Spend descriptions, in order to prevent
+double-spends.
+
+**note commitments**: Pedersen commitment to the values consisting a note. One
+should not be able to construct a note from its commitment.
+
+**note position**: The index of a note commitment at the leafmost layer.
+
+**note commitment tree**: An incremental Merkle tree of fixed depth used to
+store note commitments that JoinSplit transfers or Spend transfers produce. It
+is used to express the existence of value and the capability to spend it. It is
+not the job of this tree to protect against double-spending, as it is
+append-only: that's what the nullifier set is for.
+
+**root**: Layer 0 of a note commitment tree associated with each treestate.
+
+**anchor**: A Merkle tree root of a note commitment tree. It uniquely identies a
+note commitment tree state given the assumed security properties of the Merkle
+tree’s hash function.  Since the nullier set is always updated together with the
+note commitment tree, this also identies a particular state of the associated
+nullier set.
+
+**joinsplits**:
+
+**spend descriptions**:
+
+**output descriptions**:
+
+
 
 # Guide-level explanation
 [guide-level-explanation]: #guide-level-explanation
+
+As the transactions within a block are parsed, Sapling shielded transactions
+including Spend descriptions and Output descriptions describe the spending and
+creation of Zcash notes. A Spend description includes an anchor,
 
 
 # Reference-level explanation
