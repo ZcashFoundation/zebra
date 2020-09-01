@@ -65,6 +65,7 @@ where
             // XXX .with_addr(addr) once we can access our configured address
             .with_advertised_services(PeerServices::NODE_NETWORK)
             .with_user_agent(crate::constants::USER_AGENT.to_string())
+            .want_transactions(true)
             .finish()
             .expect("configured all required parameters");
         (
