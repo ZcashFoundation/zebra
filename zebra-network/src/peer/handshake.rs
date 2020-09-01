@@ -34,39 +34,21 @@ use super::{Client, Connection, ErrorSlot, HandshakeError};
 
 /// A [`Service`] that handshakes with a remote peer and constructs a
 /// client/server pair.
+#[derive(Clone)]
 pub struct Handshake<S> {
     config: Config,
     inbound_service: S,
     timestamp_collector: mpsc::Sender<MetaAddr>,
     nonces: Arc<Mutex<HashSet<Nonce>>>,
-    our_addr: SocketAddr,
     user_agent: String,
     our_services: PeerServices,
     relay: bool,
-}
-
-// This is manually implemented because we can't pass an
-// S: Clone bound to #[derive(Clone)].
-impl<S: Clone> Clone for Handshake<S> {
-    fn clone(&self) -> Self {
-        Handshake {
-            config: self.config.clone(),
-            inbound_service: self.inbound_service.clone(),
-            timestamp_collector: self.timestamp_collector.clone(),
-            nonces: self.nonces.clone(),
-            our_addr: self.our_addr.clone(),
-            user_agent: self.user_agent.clone(),
-            our_services: self.our_services.clone(),
-            relay: self.relay.clone(),
-        }
-    }
 }
 
 pub struct Builder<S> {
     config: Option<Config>,
     inbound_service: Option<S>,
     timestamp_collector: Option<mpsc::Sender<MetaAddr>>,
-    our_addr: Option<SocketAddr>,
     our_services: Option<PeerServices>,
     user_agent: Option<String>,
     relay: Option<bool>,
@@ -94,14 +76,6 @@ where
     /// If this is unset, timestamps will not be collected.
     pub fn with_timestamp_collector(mut self, timestamp_collector: mpsc::Sender<MetaAddr>) -> Self {
         self.timestamp_collector = Some(timestamp_collector);
-        self
-    }
-
-    /// Provide this node's address, to send to peers.  Optional.
-    ///
-    /// If this is unset, the default of 0.0.0.0:8233 will be used.
-    pub fn with_addr(mut self, addr: SocketAddr) -> Self {
-        self.our_addr = Some(addr);
         self
     }
 
@@ -145,10 +119,7 @@ where
         });
         let nonces = Arc::new(Mutex::new(HashSet::new()));
         let user_agent = self.user_agent.unwrap_or_else(|| "".to_string());
-        let our_addr = self
-            .our_addr
-            .unwrap_or_else(|| "0.0.0.0:8233".parse().unwrap());
-        let our_services = self.our_services.unwrap_or(PeerServices::empty());
+        let our_services = self.our_services.unwrap_or_else(PeerServices::empty);
         let relay = self.relay.unwrap_or(false);
         Ok(Handshake {
             config,
@@ -156,7 +127,6 @@ where
             timestamp_collector,
             nonces,
             user_agent,
-            our_addr,
             our_services,
             relay,
         })
@@ -176,7 +146,6 @@ where
             inbound_service: None,
             timestamp_collector: None,
             user_agent: None,
-            our_addr: None,
             our_services: None,
             relay: None,
         }
@@ -211,7 +180,7 @@ where
         let inbound_service = self.inbound_service.clone();
         let timestamp_collector = self.timestamp_collector.clone();
         let network = self.config.network;
-        let our_addr = self.our_addr.clone();
+        let our_addr = self.config.listen_addr;
         let user_agent = self.user_agent.clone();
         let our_services = self.our_services;
         let relay = self.relay;
