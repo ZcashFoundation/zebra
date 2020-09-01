@@ -396,7 +396,7 @@ where
                     let inv_collector = inv_collector.clone();
                     async move {
                         if let Ok(Message::Inv(hashes)) = &msg {
-                            // We reject inventory messages with more than one
+                            // We ignore inventory messages with more than one
                             // item because they are most likely replies to a
                             // query rather than a newly gossiped block.
                             //
