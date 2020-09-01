@@ -97,8 +97,8 @@ where
             while let Some(Some(rsp)) = self.pending_blocks.next().now_or_never() {
                 match rsp.expect("block download and verify tasks should not panic") {
                     Ok(hash) => tracing::trace!(?hash, "verified and committed block to state"),
-                    Err((e, hash)) => {
-                        tracing::trace!(?e, ?hash, "sync error before restarting sync, ignoring")
+                    Err((e, _)) => {
+                        tracing::trace!(?e, "sync error before restarting sync, ignoring")
                     }
                 }
             }
@@ -138,12 +138,10 @@ where
                             // stop following an ancient side-chain.
                             if self.state_contains(hash).await? {
                                 tracing::debug!(?e,
-                                                ?hash,
                                                 "sync error in ready task, but block is already verified, ignoring");
                             } else {
                                 tracing::warn!(
                                     ?e,
-                                    ?hash,
                                     "sync error in ready task, waiting to restart sync"
                                 );
                                 delay_for(SYNC_RESTART_TIMEOUT).await;
@@ -178,11 +176,9 @@ where
                             // See the comment above for details.
                             if self.state_contains(hash).await? {
                                 tracing::debug!(?e,
-                                                ?hash,
                                                 "sync error with pending above lookahead limit, but block is already verified, ignoring");
                             } else {
                                 tracing::warn!(?e,
-                                               ?hash,
                                                "sync error with pending above lookahead limit, waiting to restart sync");
                                 delay_for(SYNC_RESTART_TIMEOUT).await;
                                 continue 'sync;
@@ -413,9 +409,8 @@ where
                 .expect("block download tasks should not panic")
             {
                 Ok(hash) => tracing::trace!(?hash, "verified and committed block to state"),
-                Err((e, hash)) => tracing::warn!(
+                Err((e, _)) => tracing::warn!(
                     ?e,
-                    ?hash,
                     "could not download or verify genesis block, retrying"
                 ),
             }
