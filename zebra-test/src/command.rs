@@ -309,6 +309,7 @@ impl ContextFrom<ExitStatus> for Report {
                 format!("command exited {} with status code {}", how, code).header("Exit Status:")
             })
         } else if cfg!(unix) {
+            #[cfg(unix)]
             if let Some(signal) = source.signal() {
                 self.with_section(|| {
                     format!("command terminated {} by signal {}", how, signal)
