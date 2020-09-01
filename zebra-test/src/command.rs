@@ -7,6 +7,7 @@ use std::process::{Child, Command, ExitStatus, Output};
 
 #[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
+use tracing::instrument;
 
 /// Runs a command
 pub fn test_cmd(command_path: &str, tempdir: &PathBuf) -> Result<Command> {
@@ -151,6 +152,7 @@ impl TestOutput {
         Ok(self)
     }
 
+    #[instrument(skip(self))]
     pub fn stdout_contains(&self, regex: &str) -> Result<&Self> {
         let re = regex::Regex::new(regex)?;
         let stdout = String::from_utf8_lossy(&self.output.stdout);
@@ -162,11 +164,12 @@ impl TestOutput {
         }
 
         Err(eyre!(
-            "stdout of command did not contain any matches for the given regex"
+            "stdout of command did not contain any matches for the given regex "
         ))
         .context_from(self)
     }
 
+    #[instrument(skip(self))]
     pub fn stdout_equals(&self, s: &str) -> Result<&Self> {
         let stdout = String::from_utf8_lossy(&self.output.stdout);
 
@@ -177,6 +180,7 @@ impl TestOutput {
         Err(eyre!("stdout of command is not equal the given string")).context_from(self)
     }
 
+    #[instrument(skip(self))]
     pub fn stdout_matches(&self, regex: &str) -> Result<&Self> {
         let re = regex::Regex::new(regex)?;
         let stdout = String::from_utf8_lossy(&self.output.stdout);
