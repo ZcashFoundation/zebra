@@ -66,17 +66,31 @@ impl ZebradCmd {
 impl Configurable<ZebradConfig> for ZebradCmd {
     /// Location of the configuration file
     fn config_path(&self) -> Option<PathBuf> {
-        let if_exists = |f: PathBuf| if f.exists() { Some(f) } else { None };
+        let if_exists = |f: PathBuf| {
+            if dbg!(dbg!(&f).exists()) {
+                Some(f)
+            } else {
+                None
+            }
+        };
 
-        dirs::preference_dir()
+        let path = std::env::current_dir()
+            .ok()
             .map(|path| path.join(CONFIG_FILE))
             .and_then(if_exists)
-            .or_else(|| std::env::current_dir().ok())
-            .map(|path| path.join(CONFIG_FILE))
-            .and_then(if_exists)
+            .or_else(|| {
+                dirs::preference_dir()
+                    .map(|path| path.join(CONFIG_FILE))
+                    .and_then(if_exists)
+            });
+
+        if let Some(path) = path.as_ref() {
+            eprintln!("{}", std::fs::read_to_string(&path).unwrap());
+        }
 
         // Note: Changes in how configuration is loaded may need usage
         // edits in generate.rs
+        path
     }
 
     /// Apply changes to the config after it's been loaded, e.g. overriding

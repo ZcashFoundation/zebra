@@ -256,12 +256,63 @@ impl TestOutput {
             .with_section(stdout)
     }
 
-    /// Returns true if the program was killed, false if exit was by another reason.
-    pub fn was_killed(&self) -> bool {
-        #[cfg(unix)]
-        return self.output.status.signal() == Some(9);
+    /// Returns Ok if the program was killed, Err(Report) if exit was by another
+    /// reason.
+    pub fn assert_was_killed(&self) -> Result<()> {
+        if self.was_killed() {
+            let command = || self.cmd.clone().header("Command:");
+            let stdout = || {
+                String::from_utf8_lossy(&self.output.stdout)
+                    .into_owned()
+                    .header("Stdout:")
+            };
+            let stderr = || {
+                String::from_utf8_lossy(&self.output.stderr)
+                    .into_owned()
+                    .header("Stderr:")
+            };
 
-        #[cfg(not(unix))]
-        return self.output.status.code() == Some(1);
+            Err(eyre!("command was killed"))
+                .with_section(command)
+                .with_section(stdout)
+                .with_section(stderr)?
+        }
+
+        Ok(())
+    }
+
+    /// Returns Ok if the program wasn't killed, Err(Report) if exit was by another
+    /// reason.
+    pub fn assert_wasnt_killed(&self) -> Result<()> {
+        if !self.was_killed() {
+            let command = || self.cmd.clone().header("Command:");
+            let stdout = || {
+                String::from_utf8_lossy(&self.output.stdout)
+                    .into_owned()
+                    .header("Stdout:")
+            };
+            let stderr = || {
+                String::from_utf8_lossy(&self.output.stderr)
+                    .into_owned()
+                    .header("Stderr:")
+            };
+
+            Err(eyre!("command wasn't killed"))
+                .with_section(command)
+                .with_section(stdout)
+                .with_section(stderr)?
+        }
+
+        Ok(())
+    }
+
+    #[cfg(not(unix))]
+    fn was_killed(&self) -> bool {
+        self.output.status.code() != Some(1)
+    }
+
+    #[cfg(unix)]
+    fn was_killed(&self) -> bool {
+        self.output.status.signal() != Some(9)
     }
 }

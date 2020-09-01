@@ -42,6 +42,8 @@ impl StartCmd {
         info!(?self, "starting to connect to the network");
 
         let config = app_config();
+        dbg!(&config.state);
+        let _ = dbg!(std::env::current_dir());
         let state = zebra_state::on_disk::init(config.state.clone(), config.network.network);
         let verifier = zebra_consensus::chain::init(
             config.consensus.clone(),

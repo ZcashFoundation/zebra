@@ -64,13 +64,17 @@ pub struct Config {
     /// | macOS   | `$HOME/Library/Caches/zebra`                    | /Users/Alice/Library/Caches/zebra  |
     /// | Windows | `{FOLDERID_LocalAppData}\zebra`                 | C:\Users\Alice\AppData\Local\zebra |
     /// | Other   | `std::env::current_dir()/cache`                 |                                    |
-    ///
-    /// Setting this value to `None` will cause it to use an in memory ephemeral
-    /// database instead of storing database on the disk.
-    pub cache_dir: Option<PathBuf>,
+    pub cache_dir: PathBuf,
 
     /// The maximum number of bytes to use caching data in memory.
     pub memory_cache_bytes: u64,
+
+    /// Whether to use an ephemeral database.
+    ///
+    /// Ephemeral databases are stored in memory on Linux, and in a temporary directory on other OSes.
+    ///
+    /// Set to `false` by default.
+    pub ephemeral: bool,
 }
 
 impl Config {
@@ -86,19 +90,18 @@ impl Config {
             .cache_capacity(self.memory_cache_bytes)
             .mode(sled::Mode::LowSpace);
 
-        match &self.cache_dir {
-            Some(cache_dir) => {
-                let path = cache_dir.join(net_dir).join("state");
-                config.path(path)
-            }
-            None => config.temporary(true),
+        if self.ephemeral {
+            config.temporary(self.ephemeral)
+        } else {
+            let path = self.cache_dir.join(net_dir).join("state");
+            config.path(path)
         }
     }
 
     /// Construct a config for an ephemeral in memory database
     pub fn ephemeral() -> Self {
         let mut config = Self::default();
-        config.cache_dir = None;
+        config.ephemeral = true;
         config
     }
 }
@@ -110,8 +113,9 @@ impl Default for Config {
             .join("zebra");
 
         Self {
-            cache_dir: Some(cache_dir),
+            cache_dir,
             memory_cache_bytes: 512 * 1024 * 1024,
+            ephemeral: false,
         }
     }
 }

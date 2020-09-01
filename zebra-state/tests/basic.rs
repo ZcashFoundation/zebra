@@ -117,7 +117,7 @@ async fn check_transcripts(network: Network) -> Result<(), Report> {
         _ => mainnet_transcript,
     } {
         let storage_guard = TempDir::new("")?;
-        let cache_dir = Some(storage_guard.path().to_owned());
+        let cache_dir = storage_guard.path().to_owned();
         let service = on_disk::init(
             Config {
                 cache_dir,
