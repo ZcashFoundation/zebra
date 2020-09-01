@@ -20,13 +20,14 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::{error, iter, sync::Arc};
 use tower::{Service, ServiceExt};
-
 use zebra_chain::{
     block::{self, Block},
     parameters::Network,
 };
 
-pub mod on_disk;
+pub use on_disk::init;
+
+mod on_disk;
 
 /// The maturity threshold for transparent coinbase outputs.
 ///
@@ -74,6 +75,8 @@ pub struct Config {
     /// Ephemeral databases are stored in memory on Linux, and in a temporary directory on other OSes.
     ///
     /// Set to `false` by default. If this is set to `true`, [`cache_dir`] is ignored.
+    ///
+    /// [`cache_dir`]: struct.Config.html#structfield.cache_dir
     pub ephemeral: bool,
 }
 

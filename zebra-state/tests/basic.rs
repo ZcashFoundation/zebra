@@ -118,7 +118,7 @@ async fn check_transcripts(network: Network) -> Result<(), Report> {
     } {
         let storage_guard = TempDir::new("")?;
         let cache_dir = storage_guard.path().to_owned();
-        let service = on_disk::init(
+        let service = zebra_state::init(
             Config {
                 cache_dir,
                 ..Config::default()

@@ -70,7 +70,7 @@ fn verifiers_from_checkpoint_list(
         + Clone
         + 'static,
 ) {
-    let state_service = zebra_state::on_disk::init(zebra_state::Config::ephemeral(), network);
+    let state_service = zebra_state::init(zebra_state::Config::ephemeral(), network);
     let block_verifier = crate::block::init(state_service.clone());
     let chain_verifier = super::init_from_verifiers(
         network,
@@ -252,7 +252,7 @@ async fn verify_checkpoint(config: Config) -> Result<(), Report> {
     let chain_verifier = super::init(
         config.clone(),
         network,
-        zebra_state::on_disk::init(zebra_state::Config::ephemeral(), network),
+        zebra_state::init(zebra_state::Config::ephemeral(), network),
     )
     .await;
 
@@ -404,7 +404,7 @@ async fn continuous_blockchain(restart_height: Option<block::Height>) -> Result<
         .collect();
     let checkpoint_list = CheckpointList::from_list(checkpoint_list).map_err(|e| eyre!(e))?;
 
-    let mut state_service = zebra_state::on_disk::init(zebra_state::Config::ephemeral(), network);
+    let mut state_service = zebra_state::init(zebra_state::Config::ephemeral(), network);
     /// SPANDOC: Add blocks to the state from 0..=restart_height {?restart_height}
     if restart_height.is_some() {
         for block in blockchain
