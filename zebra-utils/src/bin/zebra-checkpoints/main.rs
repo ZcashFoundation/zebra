@@ -13,14 +13,12 @@
 
 use color_eyre::eyre::{ensure, Result};
 use serde_json::Value;
+#[cfg(unix)]
+use std::os::unix::process::ExitStatusExt;
 use std::process::Stdio;
 use structopt::StructOpt;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-
 use zebra_chain::block;
-
-#[cfg(unix)]
-use std::os::unix::process::ExitStatusExt;
 
 mod args;
 

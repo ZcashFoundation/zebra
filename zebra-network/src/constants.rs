@@ -1,10 +1,8 @@
 //! Definitions of constants.
 
-use std::time::Duration;
-
 // XXX should these constants be split into protocol also?
 use crate::protocol::external::types::*;
-
+use std::time::Duration;
 use zebra_chain::parameters::NetworkUpgrade;
 
 /// The buffer size for the peer set.
@@ -82,7 +80,6 @@ pub mod magics {
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
 
     /// This assures that the `Duration` value we are computing for

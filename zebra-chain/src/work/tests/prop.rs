@@ -1,9 +1,7 @@
-use proptest::prelude::*;
-
+use super::super::*;
 use crate::block::{self, Block};
 use crate::serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize};
-
-use super::super::*;
+use proptest::prelude::*;
 
 #[test]
 fn equihash_solution_roundtrip() {

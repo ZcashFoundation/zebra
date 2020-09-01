@@ -1,13 +1,16 @@
 //! A Tokio codec mapping byte streams to Bitcoin message streams.
 
-use std::fmt;
-use std::io::{Cursor, Read, Write};
-
+use super::{
+    message::{Message, RejectReason},
+    types::*,
+};
+use crate::constants;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use bytes::BytesMut;
 use chrono::{TimeZone, Utc};
+use std::fmt;
+use std::io::{Cursor, Read, Write};
 use tokio_util::codec::{Decoder, Encoder};
-
 use zebra_chain::{
     block::{self, Block},
     parameters::Network,
@@ -16,13 +19,6 @@ use zebra_chain::{
         ZcashSerialize,
     },
     transaction::Transaction,
-};
-
-use crate::constants;
-
-use super::{
-    message::{Message, RejectReason},
-    types::*,
 };
 
 /// The length of a Bitcoin message header.

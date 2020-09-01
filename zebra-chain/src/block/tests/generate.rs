@@ -1,14 +1,12 @@
 //! Generate blockchain testing constructions
-use chrono::{DateTime, NaiveDateTime, Utc};
-use std::sync::Arc;
-
+use super::super::{serialize::MAX_BLOCK_BYTES, Block, Header};
 use crate::{
     serialization::{ZcashDeserialize, ZcashSerialize},
     transaction::{LockTime, Transaction},
     transparent,
 };
-
-use super::super::{serialize::MAX_BLOCK_BYTES, Block, Header};
+use chrono::{DateTime, NaiveDateTime, Utc};
+use std::sync::Arc;
 
 /// Generate a block header
 pub fn block_header() -> Header {

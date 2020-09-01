@@ -3,16 +3,21 @@
 // Portions of this submodule were adapted from tower-balance,
 // which is (c) 2019 Tower Contributors (MIT licensed).
 
-use std::{
-    net::SocketAddr,
-    sync::{Arc, Mutex},
+use super::CandidateSet;
+use super::PeerSet;
+use crate::{
+    constants, peer, timestamp_collector::TimestampCollector, AddressBook, BoxedStdError, Config,
+    Request, Response,
 };
-
 use futures::{
     channel::mpsc,
     future::{self, FutureExt},
     sink::SinkExt,
     stream::{FuturesUnordered, StreamExt},
+};
+use std::{
+    net::SocketAddr,
+    sync::{Arc, Mutex},
 };
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -26,16 +31,7 @@ use tower::{
     Service, ServiceExt,
 };
 use tower_load::{peak_ewma::PeakEwmaDiscover, NoInstrument};
-
-use crate::{
-    constants, peer, timestamp_collector::TimestampCollector, AddressBook, BoxedStdError, Config,
-    Request, Response,
-};
-
 use zebra_chain::parameters::Network;
-
-use super::CandidateSet;
-use super::PeerSet;
 
 type PeerChange = Result<Change<SocketAddr, peer::Client>, BoxedStdError>;
 

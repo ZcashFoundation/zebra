@@ -1,9 +1,7 @@
+use super::SerializationError;
+use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 use std::io;
 use std::net::{IpAddr, SocketAddr};
-
-use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
-
-use super::SerializationError;
 
 /// Extends [`Read`] with methods for writing Zcash/Bitcoin types.
 ///

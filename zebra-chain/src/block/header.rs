@@ -1,9 +1,7 @@
-use chrono::{DateTime, Duration, Utc};
-
+use super::{merkle, Error, Hash};
 use crate::serialization::ZcashSerialize;
 use crate::work::{difficulty::CompactDifficulty, equihash::Solution};
-
-use super::{merkle, Error, Hash};
+use chrono::{DateTime, Duration, Utc};
 
 /// A block header, containing metadata about a block.
 ///

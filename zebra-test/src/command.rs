@@ -2,11 +2,10 @@ use color_eyre::{
     eyre::{eyre, Context, Report, Result},
     Help, SectionExt,
 };
-use std::path::PathBuf;
-use std::process::{Child, Command, ExitStatus, Output};
-
 #[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
+use std::path::PathBuf;
+use std::process::{Child, Command, ExitStatus, Output};
 use tracing::instrument;
 
 /// Runs a command

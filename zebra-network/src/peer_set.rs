@@ -5,7 +5,6 @@ mod set;
 mod unready_service;
 
 use candidate_set::CandidateSet;
+pub use initialize::init;
 use inventory_registry::InventoryRegistry;
 use set::PeerSet;
-
-pub use initialize::init;

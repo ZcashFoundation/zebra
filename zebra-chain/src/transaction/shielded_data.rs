@@ -1,10 +1,9 @@
-use futures::future::Either;
-
 use crate::{
     primitives::redjubjub::{Binding, Signature},
     sapling::{Output, Spend},
     serialization::serde_helpers,
 };
+use futures::future::Either;
 
 /// A bundle of [`Spend`] and [`Output`] descriptions and signature data.
 ///

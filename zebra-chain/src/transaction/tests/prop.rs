@@ -1,9 +1,7 @@
+use super::super::*;
+use crate::serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize};
 use proptest::prelude::*;
 use std::io::Cursor;
-
-use super::super::*;
-
-use crate::serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize};
 
 proptest! {
     #[test]

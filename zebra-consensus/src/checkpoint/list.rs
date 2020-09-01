@@ -9,14 +9,12 @@
 mod tests;
 
 use crate::parameters;
-
 use std::{
     collections::{BTreeMap, HashSet},
     error,
     ops::RangeBounds,
     str::FromStr,
 };
-
 use zebra_chain::block;
 use zebra_chain::parameters::{Network, NetworkUpgrade, NetworkUpgrade::*};
 
@@ -56,7 +54,11 @@ impl FromStr for CheckpointList {
             if let [height, hash] = fields[..] {
                 checkpoint_list.push((height.parse()?, hash.parse()?));
             } else {
-                Err(format!("Invalid checkpoint format: expected 2 space-separated fields but found {}: '{}'", fields.len(), checkpoint))?;
+                Err(format!(
+                    "Invalid checkpoint format: expected 2 space-separated fields but found {}: '{}'",
+                    fields.len(),
+                    checkpoint
+                ))?;
             };
         }
 
@@ -93,8 +95,10 @@ impl CheckpointList {
         let full_list = Self::new(network);
 
         match limit {
-            Genesis | BeforeOverwinter | Overwinter => unreachable!("Caller passed a pre-Sapling network upgrade: Zebra must checkpoint up to Sapling activation"),
-            _ => {},
+            Genesis | BeforeOverwinter | Overwinter => unreachable!(
+                "Caller passed a pre-Sapling network upgrade: Zebra must checkpoint up to Sapling activation"
+            ),
+            _ => {}
         };
 
         let activation = match limit.activation_height(network) {
@@ -172,7 +176,9 @@ impl CheckpointList {
 
         let checkpoints = CheckpointList(checkpoints);
         if checkpoints.max_height() > block::Height::MAX {
-            Err("checkpoint list contains invalid checkpoint: checkpoint height is greater than the maximum block height")?;
+            Err(
+                "checkpoint list contains invalid checkpoint: checkpoint height is greater than the maximum block height",
+            )?;
         }
 
         Ok(checkpoints)

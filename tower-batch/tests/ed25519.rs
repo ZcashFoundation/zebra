@@ -1,3 +1,7 @@
+use color_eyre::{eyre::eyre, Report};
+use ed25519_zebra::*;
+use futures::stream::{FuturesUnordered, StreamExt};
+use rand::thread_rng;
 use std::{
     future::Future,
     mem,
@@ -5,11 +9,6 @@ use std::{
     task::{Context, Poll},
     time::Duration,
 };
-
-use color_eyre::{eyre::eyre, Report};
-use ed25519_zebra::*;
-use futures::stream::{FuturesUnordered, StreamExt};
-use rand::thread_rng;
 use tokio::sync::broadcast::{channel, RecvError, Sender};
 use tower::{Service, ServiceExt};
 use tower_batch::{Batch, BatchControl};

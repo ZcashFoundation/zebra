@@ -3,9 +3,8 @@ use once_cell::sync::Lazy;
 use std::sync::Arc;
 use tempdir::TempDir;
 use zebra_chain::{block::Block, parameters::Network, serialization::ZcashDeserialize};
-use zebra_test::transcript::{TransError, Transcript};
-
 use zebra_state::*;
+use zebra_test::transcript::{TransError, Transcript};
 
 static ADD_BLOCK_TRANSCRIPT_MAINNET: Lazy<Vec<(Request, Result<Response, TransError>)>> =
     Lazy::new(|| {

@@ -16,6 +16,7 @@
 #![allow(clippy::try_err)]
 
 use color_eyre::eyre::{eyre, Report};
+pub use on_disk::init;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::{error, iter, sync::Arc};
@@ -24,8 +25,6 @@ use zebra_chain::{
     block::{self, Block},
     parameters::Network,
 };
-
-pub use on_disk::init;
 
 mod on_disk;
 
@@ -254,7 +253,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-
     use std::ffi::OsStr;
 
     #[test]
@@ -330,12 +328,16 @@ mod tests {
                 block::Height(min_height),
                 "locators must end with the specified final height"
             );
-            assert!(height - final_height.0 <= MAX_BLOCK_REORG_HEIGHT.0,
-                    format!("locator for {} must not be more than the maximum reorg height {} below the tip, but {} is {} blocks below the tip",
-                         height,
-                         MAX_BLOCK_REORG_HEIGHT.0,
-                         final_height.0,
-                         height - final_height.0));
+            assert!(
+                height - final_height.0 <= MAX_BLOCK_REORG_HEIGHT.0,
+                format!(
+                    "locator for {} must not be more than the maximum reorg height {} below the tip, but {} is {} blocks below the tip",
+                    height,
+                    MAX_BLOCK_REORG_HEIGHT.0,
+                    final_height.0,
+                    height - final_height.0
+                )
+            );
         }
     }
 }

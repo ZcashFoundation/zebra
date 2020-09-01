@@ -1,3 +1,20 @@
+use super::{
+    unready_service::{Error as UnreadyError, UnreadyService},
+    InventoryRegistry,
+};
+use crate::{
+    protocol::{
+        external::InventoryHash,
+        internal::{Request, Response},
+    },
+    BoxedStdError,
+};
+use futures::{
+    channel::{mpsc, oneshot},
+    prelude::*,
+    stream::FuturesUnordered,
+};
+use indexmap::IndexMap;
 use std::net::SocketAddr;
 use std::{
     collections::HashMap,
@@ -8,13 +25,6 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
-
-use futures::{
-    channel::{mpsc, oneshot},
-    prelude::*,
-    stream::FuturesUnordered,
-};
-use indexmap::IndexMap;
 use tokio::sync::{broadcast, oneshot::error::TryRecvError};
 use tokio::task::JoinHandle;
 use tower::{
@@ -22,19 +32,6 @@ use tower::{
     Service,
 };
 use tower_load::Load;
-
-use crate::{
-    protocol::{
-        external::InventoryHash,
-        internal::{Request, Response},
-    },
-    BoxedStdError,
-};
-
-use super::{
-    unready_service::{Error as UnreadyError, UnreadyService},
-    InventoryRegistry,
-};
 
 /// A [`tower::Service`] that abstractly represents "the rest of the network".
 ///

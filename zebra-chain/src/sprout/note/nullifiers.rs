@@ -1,10 +1,9 @@
 #![allow(dead_code)]
 
+use super::super::keys::SpendingKey;
 use byteorder::{ByteOrder, LittleEndian};
 use serde::{Deserialize, Serialize};
 use sha2::digest::generic_array::{typenum::U64, GenericArray};
-
-use super::super::keys::SpendingKey;
 
 /// PRF^nf is used to derive a Sprout nullifer from the receiver's
 /// spending key a_sk and a nullifier seed ρ, instantiated using the

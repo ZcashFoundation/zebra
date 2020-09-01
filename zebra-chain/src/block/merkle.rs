@@ -1,13 +1,11 @@
 //! The Bitcoin-inherited Merkle tree of transactions.
 #![allow(clippy::unit_arg)]
 
-use std::{fmt, io};
-
-#[cfg(test)]
-use proptest_derive::Arbitrary;
-
 use crate::serialization::{sha256d, SerializationError, ZcashDeserialize, ZcashSerialize};
 use crate::transaction::Transaction;
+#[cfg(test)]
+use proptest_derive::Arbitrary;
+use std::{fmt, io};
 
 /// A binary hash tree of SHA256d (two rounds of SHA256) hashes for
 /// node values.

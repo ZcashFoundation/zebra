@@ -1,5 +1,4 @@
-use std::io;
-
+use super::{commitment, note, tree};
 use crate::{
     primitives::{
         redjubjub::{self, SpendAuth},
@@ -9,8 +8,7 @@ use crate::{
         ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
     },
 };
-
-use super::{commitment, note, tree};
+use std::io;
 
 /// A _Spend Description_, as described in [protocol specification §7.3][ps].
 ///

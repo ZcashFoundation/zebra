@@ -1,9 +1,9 @@
 #![allow(clippy::unit_arg)]
 
 use crate::constants::magics;
-
+#[cfg(test)]
+use proptest_derive::Arbitrary;
 use std::fmt;
-
 use zebra_chain::{
     block,
     parameters::{
@@ -11,9 +11,6 @@ use zebra_chain::{
         NetworkUpgrade::{self, *},
     },
 };
-
-#[cfg(test)]
-use proptest_derive::Arbitrary;
 
 /// A magic number identifying the network.
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -113,12 +110,9 @@ pub struct Filter(pub Vec<u8>);
 
 #[cfg(test)]
 mod proptest {
-
-    use proptest::prelude::*;
-
     use super::Magic;
-
     use crate::constants::magics;
+    use proptest::prelude::*;
 
     #[test]
     fn magic_debug() {
@@ -179,8 +173,10 @@ mod test {
     /// are consistent for `network`.
     fn version_consistent(network: Network) {
         let highest_network_upgrade = NetworkUpgrade::current(network, block::Height::MAX);
-        assert!(highest_network_upgrade == Canopy || highest_network_upgrade == Heartwood,
-                "expected coverage of all network upgrades: add the new network upgrade to the list in this test");
+        assert!(
+            highest_network_upgrade == Canopy || highest_network_upgrade == Heartwood,
+            "expected coverage of all network upgrades: add the new network upgrade to the list in this test"
+        );
 
         for &network_upgrade in &[
             BeforeOverwinter,

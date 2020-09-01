@@ -1,5 +1,4 @@
 use super::super::*;
-
 use crate::{
     block::Block,
     serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},

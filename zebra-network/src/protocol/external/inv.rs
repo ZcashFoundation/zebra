@@ -4,10 +4,8 @@
 // until we have more pieces in place the optimal global arrangement of items is
 // a little unclear.
 
-use std::io::{Read, Write};
-
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-
+use std::io::{Read, Write};
 use zebra_chain::{
     block,
     serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize},

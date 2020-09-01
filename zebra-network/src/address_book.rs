@@ -1,19 +1,17 @@
 //! The addressbook manages information about what peers exist, when they were
 //! seen, and what services they provide.
 
+use crate::{
+    constants,
+    types::{MetaAddr, PeerServices},
+};
+use chrono::{DateTime, Utc};
 use std::{
     collections::{BTreeSet, HashMap},
     iter::Extend,
     net::SocketAddr,
 };
-
-use chrono::{DateTime, Utc};
 use tracing::Span;
-
-use crate::{
-    constants,
-    types::{MetaAddr, PeerServices},
-};
 
 /// A database of peers, their advertised services, and information on when they
 /// were last seen.

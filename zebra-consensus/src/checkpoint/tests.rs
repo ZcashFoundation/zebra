@@ -1,17 +1,14 @@
 //! Tests for checkpoint-based block verification
 
-use super::*;
-
 use super::types::Progress::*;
 use super::types::Target::*;
-
+use super::*;
 use color_eyre::eyre::{eyre, Report};
 use futures::{future::TryFutureExt, stream::FuturesUnordered};
 use std::{cmp::min, mem::drop, time::Duration};
 use tokio::{stream::StreamExt, time::timeout};
 use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
-
 use zebra_chain::serialization::ZcashDeserialize;
 
 /// The timeout we apply to each verify future during testing.

@@ -9,17 +9,13 @@ mod ciphertexts;
 mod mac;
 mod nullifiers;
 
+use super::{commitment::CommitmentRandomness, keys::PayingKey};
 use crate::{
     amount::{Amount, NonNegative},
     transaction::Memo,
 };
-
-use super::{commitment::CommitmentRandomness, keys::PayingKey};
-
-pub use mac::MAC;
-
 pub use ciphertexts::EncryptedNote;
-
+pub use mac::MAC;
 pub use nullifiers::{Nullifier, NullifierSeed};
 
 /// A Note represents that a value is spendable by the recipient who

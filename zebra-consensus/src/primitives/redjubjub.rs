@@ -3,17 +3,16 @@
 #[cfg(test)]
 mod tests;
 
+use futures::future::{ready, Ready};
+use once_cell::sync::Lazy;
+use rand::thread_rng;
+use redjubjub::{batch, *};
 use std::{
     future::Future,
     mem,
     pin::Pin,
     task::{Context, Poll},
 };
-
-use futures::future::{ready, Ready};
-use once_cell::sync::Lazy;
-use rand::thread_rng;
-use redjubjub::{batch, *};
 use tokio::sync::broadcast::{channel, RecvError, Sender};
 use tower::Service;
 use tower_batch::{Batch, BatchControl};

@@ -1,7 +1,6 @@
 //! Consensus parameter tests for Zebra.
 
 use super::*;
-
 use zebra_chain::{
     block,
     parameters::Network::{self, *},

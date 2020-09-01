@@ -185,7 +185,7 @@ impl Service<Request> for SledState {
                         None => {
                             return Ok(Response::BlockLocator {
                                 block_locator: vec![genesis],
-                            })
+                            });
                         }
                     };
 

@@ -1,9 +1,7 @@
-use std::{fmt, io};
-
+use crate::serialization::{serde_helpers, SerializationError, ZcashDeserialize, ZcashSerialize};
 #[cfg(test)]
 use proptest::{arbitrary::any, prelude::*};
-
-use crate::serialization::{serde_helpers, SerializationError, ZcashDeserialize, ZcashSerialize};
+use std::{fmt, io};
 
 /// A ciphertext component for encrypted output notes.
 ///

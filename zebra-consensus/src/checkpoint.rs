@@ -19,13 +19,9 @@ mod types;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use list::CheckpointList;
-use types::{Progress, Progress::*};
-use types::{Target, Target::*};
-
 use crate::parameters;
-
 use futures_util::FutureExt;
+pub(crate) use list::CheckpointList;
 use std::{
     collections::BTreeMap,
     error,
@@ -37,7 +33,8 @@ use std::{
 };
 use tokio::sync::oneshot;
 use tower::Service;
-
+use types::{Progress, Progress::*};
+use types::{Target, Target::*};
 use zebra_chain::{
     block::{self, Block},
     parameters::Network,
@@ -483,9 +480,10 @@ impl CheckpointVerifier {
             // from the target checkpoint, so the last block must also be valid.
             // This is probably a bad checkpoint list, a zebra bug, or a bad
             // chain (in a testing mode like regtest).
-            assert_eq!(expected_hash, checkpoint_hash,
-                           "checkpoints in the range should match: bad checkpoint list, zebra bug, or bad chain"
-                );
+            assert_eq!(
+                expected_hash, checkpoint_hash,
+                "checkpoints in the range should match: bad checkpoint list, zebra bug, or bad chain"
+            );
         }
 
         // Find a queued block at this height, which is part of the hash chain.

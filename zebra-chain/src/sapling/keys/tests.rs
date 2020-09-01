@@ -1,6 +1,5 @@
 #![allow(clippy::module_inception)]
 use super::*;
-
 #[cfg(test)]
 use proptest::prelude::*;
 
@@ -32,7 +31,6 @@ impl Arbitrary for TransmissionKey {
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
 
     #[test]

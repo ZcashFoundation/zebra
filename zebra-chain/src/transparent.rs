@@ -11,13 +11,12 @@ pub use script::Script;
 
 #[cfg(test)]
 mod tests;
-#[cfg(test)]
-use proptest_derive::Arbitrary;
-
 use crate::{
     amount::{Amount, NonNegative},
     block, transaction,
 };
+#[cfg(test)]
+use proptest_derive::Arbitrary;
 
 /// Arbitrary data inserted by miners into a coinbase transaction.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

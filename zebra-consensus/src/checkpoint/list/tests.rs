@@ -1,10 +1,8 @@
 //! Tests for CheckpointList
 
 use super::*;
-
 use std::ops::Bound::*;
 use std::sync::Arc;
-
 use zebra_chain::parameters::{Network, Network::*, NetworkUpgrade, NetworkUpgrade::*};
 use zebra_chain::{
     block::{self, Block},

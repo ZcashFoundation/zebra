@@ -1,12 +1,9 @@
-use std::env;
-use std::io::ErrorKind;
-
-use proptest::{arbitrary::any, prelude::*, test_runner::Config};
-
+use super::super::{serialize::MAX_BLOCK_BYTES, *};
 use crate::parameters::Network;
 use crate::serialization::{SerializationError, ZcashDeserializeInto, ZcashSerialize};
-
-use super::super::{serialize::MAX_BLOCK_BYTES, *};
+use proptest::{arbitrary::any, prelude::*, test_runner::Config};
+use std::env;
+use std::io::ErrorKind;
 
 proptest! {
     #[test]

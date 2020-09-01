@@ -3,6 +3,5 @@
 
 /// Application state accessors
 pub use crate::application::{app_config, app_reader, app_writer};
-
 /// Commonly used Abscissa traits
 pub use abscissa_core::{Application, Command, Runnable};

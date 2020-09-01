@@ -1,17 +1,15 @@
 //! Future types for the `Fallback` middleware.
 
+use crate::BoxedError;
+use futures_core::ready;
+use pin_project::pin_project;
 use std::{
     fmt::Debug,
     future::Future,
     pin::Pin,
     task::{Context, Poll},
 };
-
-use futures_core::ready;
-use pin_project::pin_project;
 use tower::Service;
-
-use crate::BoxedError;
 
 /// Future that completes either with the first service's successful response, or
 /// with the second service's response.
@@ -104,7 +102,7 @@ where
                     }
                 },
                 ResponseStateProj::PollResponse2 { fut } => {
-                    return fut.poll(cx).map_err(Into::into)
+                    return fut.poll(cx).map_err(Into::into);
                 }
                 ResponseStateProj::Tmp => unreachable!(),
             }

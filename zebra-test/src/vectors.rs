@@ -1,5 +1,4 @@
 use hex::FromHex;
-
 use lazy_static::lazy_static;
 
 // Copied from librustzcash

@@ -1,14 +1,11 @@
-use std::{fmt, io};
-
-#[cfg(test)]
-use proptest_derive::Arbitrary;
-use serde::{Deserialize, Serialize};
-
+use super::Header;
 use crate::serialization::{
     sha256d, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
 };
-
-use super::Header;
+#[cfg(test)]
+use proptest_derive::Arbitrary;
+use serde::{Deserialize, Serialize};
+use std::{fmt, io};
 
 /// A hash of a block, used to identify blocks and link blocks into a chain. ⛓️
 ///

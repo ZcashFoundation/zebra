@@ -3,11 +3,9 @@
 //! We don't impl Arbitrary for PublicKey since it's being pulled in
 //! from secp256k1 and we don't want to wrap it.
 
-use std::io;
-
-use secp256k1::PublicKey;
-
 use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
+use secp256k1::PublicKey;
+use std::io;
 
 impl ZcashSerialize for PublicKey {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {

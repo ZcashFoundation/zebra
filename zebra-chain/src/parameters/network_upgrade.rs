@@ -1,12 +1,10 @@
 //! Network upgrade consensus parameters for Zcash.
 
-use NetworkUpgrade::*;
-
 use crate::block;
 use crate::parameters::{Network, Network::*};
-
 use std::collections::{BTreeMap, HashMap};
 use std::ops::Bound::*;
+use NetworkUpgrade::*;
 
 /// A Zcash network upgrade.
 ///

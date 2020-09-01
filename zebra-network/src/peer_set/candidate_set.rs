@@ -1,11 +1,9 @@
-use std::sync::{Arc, Mutex};
-
+use crate::{types::MetaAddr, AddressBook, BoxedStdError, Request, Response};
 use chrono::Utc;
 use futures::stream::{FuturesUnordered, StreamExt};
+use std::sync::{Arc, Mutex};
 use tower::{Service, ServiceExt};
 use tracing::Level;
-
-use crate::{types::MetaAddr, AddressBook, BoxedStdError, Request, Response};
 
 /// The `CandidateSet` maintains a pool of candidate peers.
 ///

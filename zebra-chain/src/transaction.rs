@@ -12,18 +12,17 @@ mod shielded_data;
 #[cfg(test)]
 mod tests;
 
-pub use hash::Hash;
-pub use joinsplit::JoinSplitData;
-pub use lock_time::LockTime;
-pub use memo::Memo;
-pub use shielded_data::ShieldedData;
-
 use crate::{
     amount::Amount,
     block,
     primitives::{Bctv14Proof, Groth16Proof},
     transparent,
 };
+pub use hash::Hash;
+pub use joinsplit::JoinSplitData;
+pub use lock_time::LockTime;
+pub use memo::Memo;
+pub use shielded_data::ShieldedData;
 
 /// A Zcash transaction.
 ///

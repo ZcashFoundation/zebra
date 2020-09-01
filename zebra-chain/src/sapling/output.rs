@@ -1,11 +1,9 @@
-use std::io;
-
+use super::{commitment, keys, note};
 use crate::{
     primitives::Groth16Proof,
     serialization::{serde_helpers, SerializationError, ZcashDeserialize, ZcashSerialize},
 };
-
-use super::{commitment, keys, note};
+use std::io;
 
 /// A _Output Description_, as described in [protocol specification §7.4][ps].
 ///

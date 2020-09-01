@@ -1,8 +1,6 @@
-use std::{fmt, io};
-
-use serde::{Deserialize, Serialize};
-
 use crate::serialization::{serde_helpers, SerializationError, ZcashDeserialize, ZcashSerialize};
+use serde::{Deserialize, Serialize};
+use std::{fmt, io};
 
 /// An encoding of a BCTV14 proof, as used in Zcash.
 #[derive(Serialize, Deserialize)]

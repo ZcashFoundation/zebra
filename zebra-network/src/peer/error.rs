@@ -1,7 +1,5 @@
 use std::sync::{Arc, Mutex};
-
 use thiserror::Error;
-
 use tracing_error::TracedError;
 use zebra_chain::serialization::SerializationError;
 

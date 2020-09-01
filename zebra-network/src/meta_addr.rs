@@ -1,19 +1,16 @@
 //! An address-with-metadata type used in Bitcoin networking.
 
+use crate::protocol::types::PeerServices;
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use chrono::{DateTime, TimeZone, Utc};
 use std::{
     cmp::{Ord, Ordering},
     io::{Read, Write},
     net::SocketAddr,
 };
-
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use chrono::{DateTime, TimeZone, Utc};
-
 use zebra_chain::serialization::{
     ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
 };
-
-use crate::protocol::types::PeerServices;
 
 /// An address with metadata on its advertised services and last-seen time.
 ///

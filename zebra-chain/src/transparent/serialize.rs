@@ -1,10 +1,4 @@
-use std::{
-    convert::TryInto,
-    io::{self, Read},
-};
-
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-
+use super::{CoinbaseData, Input, OutPoint, Output, Script};
 use crate::{
     block,
     serialization::{
@@ -12,8 +6,11 @@ use crate::{
     },
     transaction,
 };
-
-use super::{CoinbaseData, Input, OutPoint, Output, Script};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use std::{
+    convert::TryInto,
+    io::{self, Read},
+};
 
 /// The coinbase data for a genesis block.
 ///

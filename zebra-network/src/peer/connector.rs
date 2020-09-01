@@ -1,17 +1,14 @@
+use super::{Client, Handshake};
+use crate::{BoxedStdError, Request, Response};
+use futures::prelude::*;
 use std::{
     future::Future,
     net::SocketAddr,
     pin::Pin,
     task::{Context, Poll},
 };
-
-use futures::prelude::*;
 use tokio::net::TcpStream;
 use tower::{discover::Change, Service, ServiceExt};
-
-use crate::{BoxedStdError, Request, Response};
-
-use super::{Client, Handshake};
 
 /// A wrapper around [`peer::Handshake`] that opens a TCP connection before
 /// forwarding to the inner handshake service. Writing this as its own

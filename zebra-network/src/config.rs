@@ -4,7 +4,6 @@ use std::{
     string::String,
     time::Duration,
 };
-
 use zebra_chain::parameters::Network;
 
 /// Configuration for networking code.

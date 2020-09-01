@@ -1,7 +1,6 @@
+use byteorder::{BigEndian, LittleEndian, WriteBytesExt};
 use std::io;
 use std::net::{IpAddr, SocketAddr};
-
-use byteorder::{BigEndian, LittleEndian, WriteBytesExt};
 
 /// Extends [`Write`] with methods for writing Zcash/Bitcoin types.
 ///

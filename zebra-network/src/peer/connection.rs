@@ -14,24 +14,7 @@
 // The danger is to the mind. The danger is unleashed only if you substantially
 // disturb this code. This code is best shunned and left encapsulated.
 
-use std::collections::HashSet;
-use std::sync::Arc;
-
-use futures::{
-    channel::{mpsc, oneshot},
-    future::{self, Either},
-    prelude::*,
-    stream::Stream,
-};
-use tokio::time::{delay_for, Delay};
-use tower::Service;
-use tracing_futures::Instrument;
-
-use zebra_chain::{
-    block::{self, Block},
-    serialization::SerializationError,
-};
-
+use super::{ClientRequest, ErrorSlot, PeerError, SharedPeerError};
 use crate::{
     constants,
     protocol::{
@@ -40,8 +23,21 @@ use crate::{
     },
     BoxedStdError,
 };
-
-use super::{ClientRequest, ErrorSlot, PeerError, SharedPeerError};
+use futures::{
+    channel::{mpsc, oneshot},
+    future::{self, Either},
+    prelude::*,
+    stream::Stream,
+};
+use std::collections::HashSet;
+use std::sync::Arc;
+use tokio::time::{delay_for, Delay};
+use tower::Service;
+use tracing_futures::Instrument;
+use zebra_chain::{
+    block::{self, Block},
+    serialization::SerializationError,
+};
 
 pub(super) enum Handler {
     /// Indicates that the handler has finished processing the request.

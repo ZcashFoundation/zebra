@@ -1,14 +1,11 @@
+use super::flame;
+use abscissa_core::{Component, FrameworkError, FrameworkErrorKind, Shutdown};
 use std::path::Path;
-
 use tracing_error::ErrorLayer;
 use tracing_subscriber::{
     fmt::Formatter, layer::SubscriberExt, reload::Handle, util::SubscriberInitExt, EnvFilter,
     FmtSubscriber,
 };
-
-use abscissa_core::{Component, FrameworkError, FrameworkErrorKind, Shutdown};
-
-use super::flame;
 
 /// Abscissa component for initializing the `tracing` subsystem
 pub struct Tracing {

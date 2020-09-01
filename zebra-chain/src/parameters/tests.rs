@@ -1,11 +1,8 @@
 //! Consensus parameter tests for Zebra.
 
-use std::collections::HashSet;
-
-use crate::block;
-
 use super::*;
-
+use crate::block;
+use std::collections::HashSet;
 use Network::*;
 use NetworkUpgrade::*;
 

@@ -1,8 +1,4 @@
-use std::{convert::TryInto, io};
-
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use serde::{Deserialize, Serialize};
-
+use super::{commitment, note, tree};
 use crate::{
     amount::{Amount, NonNegative},
     primitives::{x25519, ZkSnarkProof},
@@ -10,8 +6,9 @@ use crate::{
         ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
     },
 };
-
-use super::{commitment, note, tree};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use serde::{Deserialize, Serialize};
+use std::{convert::TryInto, io};
 
 /// A _JoinSplit Description_, as described in [protocol specification §7.2][ps].
 ///

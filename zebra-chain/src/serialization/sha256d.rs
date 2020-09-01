@@ -1,8 +1,7 @@
 //! SHA256d, a.k.a., double SHA2, a.k.a., 2 SHA 2 Furious
 
-use std::{fmt, io::prelude::*};
-
 use sha2::{Digest, Sha256};
+use std::{fmt, io::prelude::*};
 
 /// An `io::Write` instance that produces a SHA256d output.
 #[derive(Default)]

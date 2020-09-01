@@ -9,18 +9,15 @@ mod nullifiers;
 #[cfg(test)]
 mod arbitrary;
 
-use crate::{
-    amount::{Amount, NonNegative},
-    transaction::Memo,
-};
-
 use super::{
     commitment::CommitmentRandomness,
     keys::{Diversifier, TransmissionKey},
 };
-
+use crate::{
+    amount::{Amount, NonNegative},
+    transaction::Memo,
+};
 pub use ciphertexts::{EncryptedNote, WrappedNoteKey};
-
 pub use nullifiers::Nullifier;
 
 /// A Note represents that a value is spendable by the recipient who

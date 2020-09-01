@@ -1,9 +1,7 @@
 //! Supporting types for checkpoint-based block verification
 
 use std::cmp::Ordering;
-
 use zebra_chain::block;
-
 use Progress::*;
 use Target::*;
 

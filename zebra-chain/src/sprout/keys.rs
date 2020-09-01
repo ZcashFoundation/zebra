@@ -7,21 +7,18 @@
 //! [ps]: https://zips.z.cash/protocol/protocol.pdf#sproutkeycomponents
 #![allow(clippy::unit_arg)]
 
-use std::{fmt, io};
-
-use byteorder::{ByteOrder, LittleEndian};
-use rand_core::{CryptoRng, RngCore};
-use sha2::digest::generic_array::{typenum::U64, GenericArray};
-
-#[cfg(test)]
-use proptest::{array, prelude::*};
-#[cfg(test)]
-use proptest_derive::Arbitrary;
-
 use crate::{
     parameters::Network,
     serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize},
 };
+use byteorder::{ByteOrder, LittleEndian};
+#[cfg(test)]
+use proptest::{array, prelude::*};
+#[cfg(test)]
+use proptest_derive::Arbitrary;
+use rand_core::{CryptoRng, RngCore};
+use sha2::digest::generic_array::{typenum::U64, GenericArray};
+use std::{fmt, io};
 
 /// Magic numbers used to identify with what networks Sprout Spending
 /// Keys are associated.
@@ -333,10 +330,8 @@ impl Arbitrary for IncomingViewingKey {
 
 #[cfg(test)]
 mod tests {
-
-    use rand_core::OsRng;
-
     use super::*;
+    use rand_core::OsRng;
 
     #[test]
     // TODO: test vectors, not just random data

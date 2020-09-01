@@ -1,18 +1,15 @@
 //! Definitions of network messages.
 
+use super::inv::InventoryHash;
+use super::types::*;
+use crate::meta_addr::MetaAddr;
+use chrono::{DateTime, Utc};
 use std::error::Error;
 use std::{net, sync::Arc};
-
-use chrono::{DateTime, Utc};
-
 use zebra_chain::{
     block::{self, Block},
     transaction::Transaction,
 };
-
-use super::inv::InventoryHash;
-use super::types::*;
-use crate::meta_addr::MetaAddr;
 
 /// A Bitcoin-like network message for the Zcash protocol.
 ///

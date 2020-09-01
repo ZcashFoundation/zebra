@@ -16,25 +16,22 @@ mod test_vectors;
 #[cfg(test)]
 mod tests;
 
-use std::{
-    convert::{From, Into, TryFrom},
-    fmt,
-    io::{self, Write},
-    str::FromStr,
-};
-
-use bech32::{self, FromBase32, ToBase32};
-use rand_core::{CryptoRng, RngCore};
-
-#[cfg(test)]
-use proptest_derive::Arbitrary;
-
 use crate::{
     parameters::Network,
     primitives::redjubjub::{self, SpendAuth},
     serialization::{
         serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
     },
+};
+use bech32::{self, FromBase32, ToBase32};
+#[cfg(test)]
+use proptest_derive::Arbitrary;
+use rand_core::{CryptoRng, RngCore};
+use std::{
+    convert::{From, Into, TryFrom},
+    fmt,
+    io::{self, Write},
+    str::FromStr,
 };
 
 /// The [Randomness Beacon][1] ("URS").

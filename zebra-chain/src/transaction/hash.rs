@@ -1,13 +1,10 @@
 #![allow(clippy::unit_arg)]
-use std::fmt;
-
+use super::Transaction;
+use crate::serialization::{sha256d, SerializationError, ZcashSerialize};
 #[cfg(test)]
 use proptest_derive::Arbitrary;
 use serde::{Deserialize, Serialize};
-
-use crate::serialization::{sha256d, SerializationError, ZcashSerialize};
-
-use super::Transaction;
+use std::fmt;
 
 /// A hash of a `Transaction`
 ///

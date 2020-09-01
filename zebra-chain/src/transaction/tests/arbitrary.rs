@@ -1,15 +1,13 @@
-use chrono::{TimeZone, Utc};
-use futures::future::Either;
-use proptest::{arbitrary::any, array, collection::vec, option, prelude::*};
-
+use super::super::{JoinSplitData, LockTime, Memo, ShieldedData, Transaction};
 use crate::{
     amount::Amount,
     block,
     primitives::{Bctv14Proof, Groth16Proof, ZkSnarkProof},
     sapling, sprout, transparent,
 };
-
-use super::super::{JoinSplitData, LockTime, Memo, ShieldedData, Transaction};
+use chrono::{TimeZone, Utc};
+use futures::future::Either;
+use proptest::{arbitrary::any, array, collection::vec, option, prelude::*};
 
 impl Transaction {
     pub fn v1_strategy() -> impl Strategy<Value = Self> {
@@ -75,15 +73,17 @@ impl Transaction {
             option::of(any::<JoinSplitData<Groth16Proof>>()),
         )
             .prop_map(
-                |(
-                    inputs,
-                    outputs,
-                    lock_time,
-                    expiry_height,
-                    value_balance,
-                    shielded_data,
-                    joinsplit_data,
-                )| Transaction::V4 {
+                |
+                    (
+                        inputs,
+                        outputs,
+                        lock_time,
+                        expiry_height,
+                        value_balance,
+                        shielded_data,
+                        joinsplit_data,
+                    ),
+                | Transaction::V4 {
                     inputs,
                     outputs,
                     lock_time,

@@ -5,13 +5,12 @@
 //! operations, which return values, arithmetic on [`Amount`]s returns
 //! [`Result`](std::result::Result)s.
 
+use byteorder::{ByteOrder, LittleEndian};
 use std::{
     convert::{TryFrom, TryInto},
     marker::PhantomData,
     ops::RangeInclusive,
 };
-
-use byteorder::{ByteOrder, LittleEndian};
 
 type Result<T, E = Error> = std::result::Result<T, E>;
 

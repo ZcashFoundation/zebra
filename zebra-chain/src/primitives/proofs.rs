@@ -1,10 +1,8 @@
 //! ZK proofs used in Zcash.
 
-use std::fmt::Debug;
-
-use serde::{de::DeserializeOwned, Serialize};
-
 use crate::serialization::{ZcashDeserialize, ZcashSerialize};
+use serde::{de::DeserializeOwned, Serialize};
+use std::fmt::Debug;
 
 mod bctv14;
 mod groth16;

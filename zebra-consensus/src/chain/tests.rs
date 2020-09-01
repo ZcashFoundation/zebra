@@ -1,26 +1,22 @@
 //! Tests for chain verification
 
-use std::{collections::BTreeMap, mem::drop, sync::Arc, time::Duration};
-
+use super::*;
+use crate::checkpoint::CheckpointList;
+use crate::Config;
 use color_eyre::eyre::eyre;
 use color_eyre::eyre::Report;
 use futures::{future::TryFutureExt, stream::FuturesUnordered};
 use once_cell::sync::Lazy;
+use std::{collections::BTreeMap, mem::drop, sync::Arc, time::Duration};
 use tokio::{stream::StreamExt, time::timeout};
 use tower::{layer::Layer, timeout::TimeoutLayer, Service, ServiceExt};
 use tracing_futures::Instrument;
-
 use zebra_chain::{
     block::{self, Block},
     parameters::Network,
     serialization::ZcashDeserialize,
 };
 use zebra_test::transcript::{TransError, Transcript};
-
-use crate::checkpoint::CheckpointList;
-use crate::Config;
-
-use super::*;
 
 /// The timeout we apply to each verify future during testing.
 ///
@@ -54,21 +50,21 @@ fn verifiers_from_checkpoint_list(
     checkpoint_list: CheckpointList,
 ) -> (
     impl Service<
-            Arc<Block>,
-            Response = block::Hash,
-            Error = Error,
-            Future = impl Future<Output = Result<block::Hash, Error>>,
-        > + Send
-        + Clone
-        + 'static,
+        Arc<Block>,
+        Response = block::Hash,
+        Error = Error,
+        Future = impl Future<Output = Result<block::Hash, Error>>,
+    > + Send
+    + Clone
+    + 'static,
     impl Service<
-            zebra_state::Request,
-            Response = zebra_state::Response,
-            Error = Error,
-            Future = impl Future<Output = Result<zebra_state::Response, Error>>,
-        > + Send
-        + Clone
-        + 'static,
+        zebra_state::Request,
+        Response = zebra_state::Response,
+        Error = Error,
+        Future = impl Future<Output = Result<zebra_state::Response, Error>>,
+    > + Send
+    + Clone
+    + 'static,
 ) {
     let state_service = zebra_state::init(zebra_state::Config::ephemeral(), network);
     let block_verifier = crate::block::init(state_service.clone());
@@ -89,21 +85,21 @@ fn verifiers_from_network(
     network: Network,
 ) -> (
     impl Service<
-            Arc<Block>,
-            Response = block::Hash,
-            Error = Error,
-            Future = impl Future<Output = Result<block::Hash, Error>>,
-        > + Send
-        + Clone
-        + 'static,
+        Arc<Block>,
+        Response = block::Hash,
+        Error = Error,
+        Future = impl Future<Output = Result<block::Hash, Error>>,
+    > + Send
+    + Clone
+    + 'static,
     impl Service<
-            zebra_state::Request,
-            Response = zebra_state::Response,
-            Error = Error,
-            Future = impl Future<Output = Result<zebra_state::Response, Error>>,
-        > + Send
-        + Clone
-        + 'static,
+        zebra_state::Request,
+        Response = zebra_state::Response,
+        Error = Error,
+        Future = impl Future<Output = Result<zebra_state::Response, Error>>,
+    > + Send
+    + Clone
+    + 'static,
 ) {
     verifiers_from_checkpoint_list(network, CheckpointList::new(network))
 }

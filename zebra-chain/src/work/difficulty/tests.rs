@@ -1,8 +1,6 @@
 use super::*;
-
 use crate::block::Block;
 use crate::serialization::ZcashDeserialize;
-
 use color_eyre::eyre::Report;
 use proptest::prelude::*;
 use std::sync::Arc;

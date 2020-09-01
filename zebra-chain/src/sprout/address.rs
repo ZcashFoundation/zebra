@@ -1,16 +1,13 @@
 //! Sprout Shielded Payment Address types.
 
-use std::{fmt, io};
-
-#[cfg(test)]
-use proptest::{arbitrary::Arbitrary, array, prelude::*};
-
+use super::keys;
 use crate::{
     parameters::Network,
     serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize},
 };
-
-use super::keys;
+#[cfg(test)]
+use proptest::{arbitrary::Arbitrary, array, prelude::*};
+use std::{fmt, io};
 
 /// Magic numbers used to identify what networks Sprout Shielded
 /// Addresses are associated with.
@@ -133,7 +130,6 @@ impl Arbitrary for SproutShieldedAddress {
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
 
     #[test]

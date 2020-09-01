@@ -1,10 +1,8 @@
 //! The timestamp collector collects liveness information from peers.
 
-use std::sync::{Arc, Mutex};
-
-use futures::{channel::mpsc, prelude::*};
-
 use crate::{types::MetaAddr, AddressBook};
+use futures::{channel::mpsc, prelude::*};
+use std::sync::{Arc, Mutex};
 
 /// The timestamp collector hooks into incoming message streams for each peer and
 /// records per-connection last-seen timestamps into an [`AddressBook`].

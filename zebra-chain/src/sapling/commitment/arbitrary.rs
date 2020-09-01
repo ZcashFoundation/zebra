@@ -1,8 +1,6 @@
-use std::convert::TryFrom;
-
-use proptest::{arbitrary::any, array, prelude::*};
-
 use super::super::commitment;
+use proptest::{arbitrary::any, array, prelude::*};
+use std::convert::TryFrom;
 
 impl Arbitrary for commitment::NoteCommitment {
     type Parameters = ();

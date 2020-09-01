@@ -7,21 +7,17 @@ mod test_vectors;
 
 pub mod pedersen_hashes;
 
-use std::{convert::TryFrom, fmt, io};
-
-use bitvec::prelude::*;
-use rand_core::{CryptoRng, RngCore};
-
+use super::keys::{find_group_hash, Diversifier, TransmissionKey};
 use crate::{
     amount::{Amount, NonNegative},
     serialization::{
         serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
     },
 };
-
-use super::keys::{find_group_hash, Diversifier, TransmissionKey};
-
+use bitvec::prelude::*;
 use pedersen_hashes::*;
+use rand_core::{CryptoRng, RngCore};
+use std::{convert::TryFrom, fmt, io};
 
 /// The randomness used in the Pedersen Hash for note commitment.
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -218,7 +214,6 @@ impl ValueCommitment {
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
 
     #[test]

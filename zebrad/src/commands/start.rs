@@ -22,7 +22,6 @@
 use crate::components::tokio::RuntimeRun;
 use crate::config::ZebradConfig;
 use crate::{components::tokio::TokioComponent, prelude::*};
-
 use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
 use color_eyre::eyre::Report;
 use tower::{buffer::Buffer, service_fn};

@@ -1,9 +1,8 @@
 //! The LightClientRootHash enum, used for the corresponding block header field.
 
+use super::Height;
 use crate::parameters::{Network, NetworkUpgrade, NetworkUpgrade::*};
 use crate::sapling::tree::Root;
-
-use super::Height;
 
 /// Zcash blocks contain different kinds of root hashes, depending on the network upgrade.
 ///

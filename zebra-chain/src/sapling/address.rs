@@ -1,21 +1,17 @@
 //! Shielded addresses.
 
-use std::{
-    fmt,
-    io::{self, Read, Write},
-};
-
-use bech32::{self, FromBase32, ToBase32};
-
-#[cfg(test)]
-use proptest::prelude::*;
-
+use super::keys;
 use crate::{
     parameters::Network,
     serialization::{ReadZcashExt, SerializationError},
 };
-
-use super::keys;
+use bech32::{self, FromBase32, ToBase32};
+#[cfg(test)]
+use proptest::prelude::*;
+use std::{
+    fmt,
+    io::{self, Read, Write},
+};
 
 /// Human-Readable Parts for input to bech32 encoding.
 mod human_readable_parts {
@@ -112,10 +108,8 @@ impl Arbitrary for Address {
 
 #[cfg(test)]
 mod tests {
-
-    use rand_core::OsRng;
-
     use super::*;
+    use rand_core::OsRng;
 
     #[test]
     fn from_str_display() {

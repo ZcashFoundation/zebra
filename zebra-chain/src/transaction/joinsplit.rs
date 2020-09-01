@@ -1,9 +1,8 @@
-use serde::{Deserialize, Serialize};
-
 use crate::{
     primitives::{ed25519, ZkSnarkProof},
     sprout::JoinSplit,
 };
+use serde::{Deserialize, Serialize};
 
 /// A bundle of [`JoinSplit`] descriptions and signature data.
 ///

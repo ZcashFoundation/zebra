@@ -1,6 +1,5 @@
-use std::io;
-
 use super::{ReadZcashExt, SerializationError};
+use std::io;
 
 /// Consensus-critical serialization for Zcash.
 ///

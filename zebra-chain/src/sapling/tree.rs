@@ -13,15 +13,12 @@
 #![allow(clippy::unit_arg)]
 #![allow(dead_code)]
 
-use std::{fmt, io};
-
+use super::commitment::pedersen_hashes::pedersen_hash;
+use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 use bitvec::prelude::*;
 #[cfg(test)]
 use proptest_derive::Arbitrary;
-
-use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
-
-use super::commitment::pedersen_hashes::pedersen_hash;
+use std::{fmt, io};
 
 /// MerkleCRH^Sapling Hash Function
 ///

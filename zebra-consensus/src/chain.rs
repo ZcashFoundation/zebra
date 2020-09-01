@@ -16,7 +16,6 @@ mod tests;
 
 use crate::checkpoint::{CheckpointList, CheckpointVerifier};
 use crate::Config;
-
 use futures_util::FutureExt;
 use std::{
     error,
@@ -27,7 +26,6 @@ use std::{
 };
 use tower::{buffer::Buffer, Service, ServiceExt};
 use tracing_futures::Instrument;
-
 use zebra_chain::block::{self, Block};
 use zebra_chain::parameters::{Network, NetworkUpgrade::Sapling};
 
@@ -223,8 +221,8 @@ pub async fn init<S>(
     Error = Error,
     Future = impl Future<Output = Result<block::Hash, Error>>,
 > + Send
-       + Clone
-       + 'static
++ Clone
++ 'static
 where
     S: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>
         + Send
@@ -285,8 +283,8 @@ pub(crate) fn init_from_verifiers<BV, S>(
     Error = Error,
     Future = impl Future<Output = Result<block::Hash, Error>>,
 > + Send
-       + Clone
-       + 'static
++ Clone
++ 'static
 where
     BV: Service<Arc<Block>, Response = block::Hash, Error = Error> + Send + Clone + 'static,
     BV::Future: Send + 'static,
@@ -314,21 +312,33 @@ where
 
     let checkpoint = match (initial_height, checkpoint_list, max_checkpoint_height) {
         // If we need to verify pre-Sapling blocks, make sure we have checkpoints for them.
-        (None, None, _) => panic!("We have no checkpoints, and we have no cached blocks: Pre-Sapling blocks must be verified by checkpoints"),
-        (Some(initial_height), None, _) if (initial_height < sapling_activation) => panic!("We have no checkpoints, and we don't have a cached Sapling activation block: Pre-Sapling blocks must be verified by checkpoints"),
+        (None, None, _) => panic!(
+            "We have no checkpoints, and we have no cached blocks: Pre-Sapling blocks must be verified by checkpoints"
+        ),
+        (Some(initial_height), None, _) if (initial_height < sapling_activation) => panic!(
+            "We have no checkpoints, and we don't have a cached Sapling activation block: Pre-Sapling blocks must be verified by checkpoints"
+        ),
 
         // If we're past the checkpoint range, don't create a checkpoint verifier.
-        (Some(initial_height), _, Some(max_checkpoint_height)) if (initial_height > max_checkpoint_height) => None,
+        (Some(initial_height), _, Some(max_checkpoint_height))
+            if (initial_height > max_checkpoint_height) =>
+        {
+            None
+        }
         // No list, no checkpoint verifier
         (_, None, _) => None,
 
-        (_, Some(_), None) => panic!("Missing max checkpoint height: height must be Some if verifier is Some"),
+        (_, Some(_), None) => {
+            panic!("Missing max checkpoint height: height must be Some if verifier is Some")
+        }
         // We've done all the checks we need to create a checkpoint verifier
-        (_, Some(list), Some(max_height)) => Some(
-            ChainCheckpointVerifier {
-                verifier: Buffer::new(CheckpointVerifier::from_checkpoint_list(list, initial_tip), 1),
-                max_height,
-            }),
+        (_, Some(list), Some(max_height)) => Some(ChainCheckpointVerifier {
+            verifier: Buffer::new(
+                CheckpointVerifier::from_checkpoint_list(list, initial_tip),
+                1,
+            ),
+            max_height,
+        }),
     };
 
     Buffer::new(

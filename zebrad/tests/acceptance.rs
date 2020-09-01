@@ -7,7 +7,6 @@
 use color_eyre::eyre::Result;
 use std::{fs, io::Write, path::PathBuf, time::Duration};
 use tempdir::TempDir;
-
 use zebra_test::prelude::*;
 use zebrad::config::ZebradConfig;
 

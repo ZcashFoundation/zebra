@@ -1,11 +1,9 @@
 //! Tests for redjubjub signature verification
 
 use super::*;
-
-use std::time::Duration;
-
 use color_eyre::eyre::{eyre, Result};
 use futures::stream::{FuturesUnordered, StreamExt};
+use std::time::Duration;
 use tower::ServiceExt;
 use tower_batch::Batch;
 

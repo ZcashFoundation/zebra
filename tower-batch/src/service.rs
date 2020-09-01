@@ -4,7 +4,6 @@ use super::{
     worker::{Handle, Worker},
     BatchControl,
 };
-
 use futures_core::ready;
 use std::task::{Context, Poll};
 use tokio::sync::{mpsc, oneshot};

@@ -1,25 +1,4 @@
-use std::{
-    collections::HashSet,
-    future::Future,
-    net::SocketAddr,
-    pin::Pin,
-    sync::{Arc, Mutex},
-    task::{Context, Poll},
-};
-
-use chrono::{TimeZone, Utc};
-use futures::{
-    channel::{mpsc, oneshot},
-    prelude::*,
-};
-use tokio::{net::TcpStream, sync::broadcast};
-use tokio_util::codec::Framed;
-use tower::Service;
-use tracing::{span, Level};
-use tracing_futures::Instrument;
-
-use zebra_chain::block;
-
+use super::{Client, Connection, ErrorSlot, HandshakeError};
 use crate::{
     constants,
     protocol::{
@@ -29,8 +8,25 @@ use crate::{
     types::MetaAddr,
     BoxedStdError, Config,
 };
-
-use super::{Client, Connection, ErrorSlot, HandshakeError};
+use chrono::{TimeZone, Utc};
+use futures::{
+    channel::{mpsc, oneshot},
+    prelude::*,
+};
+use std::{
+    collections::HashSet,
+    future::Future,
+    net::SocketAddr,
+    pin::Pin,
+    sync::{Arc, Mutex},
+    task::{Context, Poll},
+};
+use tokio::{net::TcpStream, sync::broadcast};
+use tokio_util::codec::Framed;
+use tower::Service;
+use tracing::{span, Level};
+use tracing_futures::Instrument;
+use zebra_chain::block;
 
 /// A [`Service`] that handshakes with a remote peer and constructs a
 /// client/server pair.

@@ -1,12 +1,10 @@
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use chrono::{TimeZone, Utc};
-use std::io;
-
+use super::{merkle, Block, Hash, Header};
 use crate::serialization::ZcashDeserializeInto;
 use crate::serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize};
 use crate::work::{difficulty::CompactDifficulty, equihash};
-
-use super::{merkle, Block, Hash, Header};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use chrono::{TimeZone, Utc};
+use std::io;
 
 /// The maximum size of a Zcash block, in bytes.
 ///

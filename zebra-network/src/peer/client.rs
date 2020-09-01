@@ -1,18 +1,15 @@
+use super::{ErrorSlot, SharedPeerError};
+use crate::protocol::internal::{Request, Response};
+use futures::{
+    channel::{mpsc, oneshot},
+    future, ready,
+};
 use std::{
     future::Future,
     pin::Pin,
     task::{Context, Poll},
 };
-
-use futures::{
-    channel::{mpsc, oneshot},
-    future, ready,
-};
 use tower::Service;
-
-use crate::protocol::internal::{Request, Response};
-
-use super::{ErrorSlot, SharedPeerError};
 
 /// The "client" duplex half of a peer connection.
 pub struct Client {

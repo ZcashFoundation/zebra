@@ -2,7 +2,6 @@
 
 use super::*;
 use proptest::prelude::*;
-
 use std::io::Cursor;
 
 proptest! {

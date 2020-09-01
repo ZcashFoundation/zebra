@@ -1,9 +1,8 @@
 //! Pedersen hash functions and helpers.
 
+use super::super::keys::find_group_hash;
 use bitvec::prelude::*;
 use rand_core::{CryptoRng, RngCore};
-
-use super::super::keys::find_group_hash;
 
 /// I_i
 ///

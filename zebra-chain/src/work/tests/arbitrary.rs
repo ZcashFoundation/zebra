@@ -1,5 +1,4 @@
 use super::super::*;
-
 use proptest::{arbitrary::Arbitrary, collection::vec, prelude::*};
 
 impl Arbitrary for equihash::Solution {

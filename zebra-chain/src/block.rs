@@ -21,12 +21,10 @@ pub use root_hash::RootHash;
 // XXX try to remove this -- block checks should be done in zebra-consensus
 type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 
-use serde::{Deserialize, Serialize};
-
 use crate::{parameters::Network, transaction::Transaction, transparent};
-
 #[cfg(test)]
 use proptest_derive::Arbitrary;
+use serde::{Deserialize, Serialize};
 
 /// A Zcash block, containing a header and a list of transactions.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

@@ -1,7 +1,6 @@
+use crate::serialization::{serde_helpers, SerializationError, ZcashDeserialize, ZcashSerialize};
 use serde::{Deserialize, Serialize};
 use std::{fmt, io};
-
-use crate::serialization::{serde_helpers, SerializationError, ZcashDeserialize, ZcashSerialize};
 
 /// An encoding of a Groth16 proof, as used in Zcash.
 #[derive(Serialize, Deserialize)]

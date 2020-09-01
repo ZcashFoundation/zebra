@@ -4,10 +4,8 @@
 //! application's configuration file and/or command-line options
 //! for specifying it.
 
-use std::{net::SocketAddr, path::PathBuf};
-
 use serde::{Deserialize, Serialize};
-
+use std::{net::SocketAddr, path::PathBuf};
 use zebra_consensus::Config as ConsensusSection;
 use zebra_network::Config as NetworkSection;
 use zebra_state::Config as StateSection;

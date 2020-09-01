@@ -1,8 +1,6 @@
-use std::convert::TryFrom;
-
-use proptest::{arbitrary::any, array, prelude::*};
-
 use super::*;
+use proptest::{arbitrary::any, array, prelude::*};
+use std::convert::TryFrom;
 
 impl Arbitrary for EphemeralPublicKey {
     type Parameters = ();

@@ -1,11 +1,9 @@
 //! An HTTP endpoint for metrics collection.
 
-use std::net::SocketAddr;
-
+use crate::{components::tokio::TokioComponent, config::ZebradConfig};
 use abscissa_core::{Component, FrameworkError};
 use metrics_runtime::{exporters::HttpExporter, observers::PrometheusBuilder, Receiver};
-
-use crate::{components::tokio::TokioComponent, config::ZebradConfig};
+use std::net::SocketAddr;
 
 /// Abscissa component which runs a metrics endpoint.
 #[derive(Debug, Component)]

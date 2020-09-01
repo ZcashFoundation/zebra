@@ -1,8 +1,6 @@
-use proptest::{arbitrary::any, collection::vec, prelude::*};
-
-use crate::block;
-
 use super::super::{CoinbaseData, Input, OutPoint, Script};
+use crate::block;
+use proptest::{arbitrary::any, collection::vec, prelude::*};
 
 impl Arbitrary for Input {
     type Parameters = ();

@@ -1,8 +1,6 @@
-use std::collections::HashSet;
-
-use zebra_chain::block;
-
 use super::super::types::Nonce;
+use std::collections::HashSet;
+use zebra_chain::block;
 
 /// A network request, represented in internal format.
 ///

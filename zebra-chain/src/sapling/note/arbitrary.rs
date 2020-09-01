@@ -1,6 +1,5 @@
-use proptest::{arbitrary::any, collection::vec, prelude::*};
-
 use super::*;
+use proptest::{arbitrary::any, collection::vec, prelude::*};
 
 impl Arbitrary for EncryptedNote {
     type Parameters = ();

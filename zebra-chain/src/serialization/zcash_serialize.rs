@@ -1,6 +1,5 @@
-use std::io;
-
 use super::WriteZcashExt;
+use std::io;
 
 /// Consensus-critical serialization for Zcash.
 ///

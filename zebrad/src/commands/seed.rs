@@ -1,21 +1,18 @@
 //! `seed` subcommand - runs a dns seeder
 
+use crate::components::tokio::RuntimeRun;
+use crate::prelude::*;
+use abscissa_core::{Command, Options, Runnable};
+use color_eyre::eyre::{eyre, Report};
+use futures::{channel::oneshot, prelude::*};
 use std::{
     future::Future,
     pin::Pin,
     sync::{Arc, Mutex},
     task::{Context, Poll},
 };
-
-use abscissa_core::{Command, Options, Runnable};
-use futures::{channel::oneshot, prelude::*};
 use tower::{buffer::Buffer, Service, ServiceExt};
-
 use zebra_network::{AddressBook, BoxedStdError, Request, Response};
-
-use crate::components::tokio::RuntimeRun;
-use crate::prelude::*;
-use color_eyre::eyre::{eyre, Report};
 
 /// Whether our `SeedService` is poll_ready or not.
 #[derive(Debug)]

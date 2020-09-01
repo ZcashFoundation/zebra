@@ -2,9 +2,8 @@
 
 #![allow(clippy::unit_arg)]
 
-use sha2::{Digest, Sha256};
-
 use super::note::Note;
+use sha2::{Digest, Sha256};
 
 /// The randomness used in the Pedersen Hash for note commitment.
 #[derive(Copy, Clone, Debug, PartialEq)]

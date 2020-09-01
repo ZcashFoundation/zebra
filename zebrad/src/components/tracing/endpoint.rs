@@ -1,14 +1,11 @@
 //! An HTTP endpoint for dynamically setting tracing filters.
 
-use std::net::SocketAddr;
-
+use super::Tracing;
+use crate::{components::tokio::TokioComponent, config::ZebradConfig, prelude::*};
 use abscissa_core::{Component, FrameworkError};
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Request, Response, Server};
-
-use crate::{components::tokio::TokioComponent, config::ZebradConfig, prelude::*};
-
-use super::Tracing;
+use std::net::SocketAddr;
 
 /// Abscissa component which runs a tracing filter endpoint.
 #[derive(Debug, Component)]

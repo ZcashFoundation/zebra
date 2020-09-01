@@ -12,14 +12,11 @@
 #![allow(clippy::unit_arg)]
 
 use crate::block;
-
-use std::cmp::{Ordering, PartialEq, PartialOrd};
-use std::{fmt, ops::Add, ops::AddAssign};
-
 use primitive_types::U256;
-
 #[cfg(test)]
 use proptest_derive::Arbitrary;
+use std::cmp::{Ordering, PartialEq, PartialOrd};
+use std::{fmt, ops::Add, ops::AddAssign};
 #[cfg(test)]
 mod tests;
 

@@ -40,12 +40,10 @@ impl ZcashDeserialize for Script {
 
 #[cfg(test)]
 mod proptests {
-    use std::io::Cursor;
-
-    use proptest::prelude::*;
-
     use super::*;
     use crate::serialization::{ZcashDeserialize, ZcashSerialize};
+    use proptest::prelude::*;
+    use std::io::Cursor;
 
     proptest! {
         #[test]

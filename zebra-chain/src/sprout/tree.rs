@@ -11,10 +11,9 @@
 //! A root of a note commitment tree is associated with each treestate.
 #![allow(clippy::unit_arg)]
 
-use std::fmt;
-
 #[cfg(test)]
 use proptest_derive::Arbitrary;
+use std::fmt;
 
 /// Sprout note commitment tree root node hash.
 ///

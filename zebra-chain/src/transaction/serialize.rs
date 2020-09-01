@@ -1,10 +1,7 @@
 //! Contains impls of `ZcashSerialize`, `ZcashDeserialize` for all of the
 //! transaction types, so that all of the serialization logic is in one place.
 
-use std::{convert::TryInto, io, sync::Arc};
-
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-
+use super::*;
 use crate::{
     primitives::ZkSnarkProof,
     serialization::{
@@ -12,8 +9,8 @@ use crate::{
     },
     sprout,
 };
-
-use super::*;
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use std::{convert::TryInto, io, sync::Arc};
 
 const OVERWINTER_VERSION_GROUP_ID: u32 = 0x03C4_8270;
 const SAPLING_VERSION_GROUP_ID: u32 = 0x892F_2085;
