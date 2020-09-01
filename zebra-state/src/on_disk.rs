@@ -2,19 +2,19 @@
 use super::{Request, Response};
 use crate::Config;
 use futures::prelude::*;
-use std::sync::Arc;
 use std::{
     error,
     future::Future,
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
 };
 use tower::{buffer::Buffer, util::BoxService, Service};
 use tracing::instrument;
-use zebra_chain::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 use zebra_chain::{
     block::{self, Block},
     parameters::Network,
+    serialization::{SerializationError, ZcashDeserialize, ZcashSerialize},
 };
 
 /// Type alias of our wrapped service

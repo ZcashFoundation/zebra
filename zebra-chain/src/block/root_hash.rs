@@ -1,7 +1,9 @@
 //! The LightClientRootHash enum, used for the corresponding block header field.
 
-use crate::parameters::{Network, NetworkUpgrade, NetworkUpgrade::*};
-use crate::sapling::tree::Root;
+use crate::{
+    parameters::{Network, NetworkUpgrade, NetworkUpgrade::*},
+    sapling::tree::Root,
+};
 
 use super::Height;
 

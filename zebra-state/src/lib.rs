@@ -17,8 +17,7 @@
 
 use color_eyre::eyre::{eyre, Report};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
-use std::{error, iter, sync::Arc};
+use std::{error, iter, path::PathBuf, sync::Arc};
 use tower::{Service, ServiceExt};
 use zebra_chain::{
     block::{self, Block},

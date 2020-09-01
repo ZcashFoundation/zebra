@@ -1,9 +1,12 @@
 use color_eyre::{
     eyre::{eyre, Context, Report, Result},
-    Help, SectionExt,
+    Help,
+    SectionExt,
 };
-use std::path::PathBuf;
-use std::process::{Child, Command, ExitStatus, Output};
+use std::{
+    path::PathBuf,
+    process::{Child, Command, ExitStatus, Output},
+};
 
 #[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;

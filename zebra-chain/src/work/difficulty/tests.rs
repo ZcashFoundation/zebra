@@ -1,7 +1,6 @@
 use super::*;
 
-use crate::block::Block;
-use crate::serialization::ZcashDeserialize;
+use crate::{block::Block, serialization::ZcashDeserialize};
 
 use color_eyre::eyre::Report;
 use proptest::prelude::*;

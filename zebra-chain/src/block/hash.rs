@@ -5,7 +5,11 @@ use proptest_derive::Arbitrary;
 use serde::{Deserialize, Serialize};
 
 use crate::serialization::{
-    sha256d, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
+    sha256d,
+    ReadZcashExt,
+    SerializationError,
+    ZcashDeserialize,
+    ZcashSerialize,
 };
 
 use super::Header;

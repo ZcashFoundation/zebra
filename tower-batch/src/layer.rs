@@ -1,7 +1,6 @@
 use super::{service::Batch, BatchControl};
 use std::{fmt, marker::PhantomData};
-use tower::layer::Layer;
-use tower::Service;
+use tower::{layer::Layer, Service};
 
 /// Adds a layer performing batch processing of requests.
 ///

@@ -6,7 +6,11 @@ use crate::{
         Groth16Proof,
     },
     serialization::{
-        ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
+        ReadZcashExt,
+        SerializationError,
+        WriteZcashExt,
+        ZcashDeserialize,
+        ZcashSerialize,
     },
 };
 

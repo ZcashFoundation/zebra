@@ -1,7 +1,9 @@
 //! A Tokio codec mapping byte streams to Bitcoin message streams.
 
-use std::fmt;
-use std::io::{Cursor, Read, Write};
+use std::{
+    fmt,
+    io::{Cursor, Read, Write},
+};
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use bytes::BytesMut;
@@ -12,7 +14,11 @@ use zebra_chain::{
     block::{self, Block},
     parameters::Network,
     serialization::{
-        sha256d, ReadZcashExt, SerializationError as Error, WriteZcashExt, ZcashDeserialize,
+        sha256d,
+        ReadZcashExt,
+        SerializationError as Error,
+        WriteZcashExt,
+        ZcashDeserialize,
         ZcashSerialize,
     },
     transaction::Transaction,

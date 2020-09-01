@@ -19,9 +19,11 @@
 //!    * This task runs in the background and continuously queries the network for
 //!    new blocks to be verified and added to the local state
 
-use crate::components::tokio::RuntimeRun;
-use crate::config::ZebradConfig;
-use crate::{components::tokio::TokioComponent, prelude::*};
+use crate::{
+    components::tokio::{RuntimeRun, TokioComponent},
+    config::ZebradConfig,
+    prelude::*,
+};
 
 use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
 use color_eyre::eyre::Report;

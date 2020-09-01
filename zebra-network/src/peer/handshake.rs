@@ -27,7 +27,8 @@ use crate::{
         internal::{Request, Response},
     },
     types::MetaAddr,
-    BoxedStdError, Config,
+    BoxedStdError,
+    Config,
 };
 
 use super::{Client, Connection, ErrorSlot, HandshakeError};

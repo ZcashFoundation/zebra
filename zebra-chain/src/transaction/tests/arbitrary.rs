@@ -6,7 +6,9 @@ use crate::{
     amount::Amount,
     block,
     primitives::{Bctv14Proof, Groth16Proof, ZkSnarkProof},
-    sapling, sprout, transparent,
+    sapling,
+    sprout,
+    transparent,
 };
 
 use super::super::{JoinSplitData, LockTime, Memo, ShieldedData, Transaction};

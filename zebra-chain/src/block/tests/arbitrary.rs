@@ -1,5 +1,7 @@
-use crate::parameters::Network;
-use crate::work::{difficulty::CompactDifficulty, equihash};
+use crate::{
+    parameters::Network,
+    work::{difficulty::CompactDifficulty, equihash},
+};
 
 use super::super::*;
 

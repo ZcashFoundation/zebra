@@ -14,8 +14,7 @@
 // The danger is to the mind. The danger is unleashed only if you substantially
 // disturb this code. This code is best shunned and left encapsulated.
 
-use std::collections::HashSet;
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
 use futures::{
     channel::{mpsc, oneshot},

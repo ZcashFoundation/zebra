@@ -6,8 +6,10 @@ use std::{fmt, io};
 #[cfg(test)]
 use proptest_derive::Arbitrary;
 
-use crate::serialization::{sha256d, SerializationError, ZcashDeserialize, ZcashSerialize};
-use crate::transaction::Transaction;
+use crate::{
+    serialization::{sha256d, SerializationError, ZcashDeserialize, ZcashSerialize},
+    transaction::Transaction,
+};
 
 /// A binary hash tree of SHA256d (two rounds of SHA256) hashes for
 /// node values.

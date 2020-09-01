@@ -2,8 +2,7 @@
 
 use color_eyre::{
     eyre::{eyre, Report, WrapErr},
-    section::Section,
-    section::SectionExt,
+    section::{Section, SectionExt},
 };
 use futures::future::{ready, Ready};
 use std::{

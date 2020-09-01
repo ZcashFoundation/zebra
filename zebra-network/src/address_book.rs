@@ -137,8 +137,10 @@ impl AddressBook {
     /// recently seen to least recently seen.
     pub fn disconnected_peers<'a>(&'a self) -> impl Iterator<Item = MetaAddr> + 'a {
         let _guard = self.span.enter();
-        use std::net::{IpAddr, Ipv4Addr};
-        use std::ops::Bound::{Excluded, Unbounded};
+        use std::{
+            net::{IpAddr, Ipv4Addr},
+            ops::Bound::{Excluded, Unbounded},
+        };
         let cutoff_meta = MetaAddr {
             last_seen: AddressBook::cutoff_time(),
             // The ordering on MetaAddrs is newest-first, then arbitrary,

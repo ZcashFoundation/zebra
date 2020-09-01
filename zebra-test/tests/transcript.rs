@@ -1,8 +1,7 @@
 #![allow(clippy::try_err)]
 
 use tower::{Service, ServiceExt};
-use zebra_test::transcript::TransError;
-use zebra_test::transcript::Transcript;
+use zebra_test::transcript::{TransError, Transcript};
 
 const TRANSCRIPT_DATA: [(&str, Result<&str, TransError>); 4] = [
     ("req1", Ok("rsp1")),

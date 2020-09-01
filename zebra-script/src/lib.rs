@@ -9,13 +9,16 @@ use std::convert::TryInto;
 use std::sync::Arc;
 use thiserror::Error;
 use zcash_script::{
-    zcash_script_error_t, zcash_script_error_t_zcash_script_ERR_OK,
+    zcash_script_error_t,
+    zcash_script_error_t_zcash_script_ERR_OK,
     zcash_script_error_t_zcash_script_ERR_TX_DESERIALIZE,
     zcash_script_error_t_zcash_script_ERR_TX_INDEX,
     zcash_script_error_t_zcash_script_ERR_TX_SIZE_MISMATCH,
 };
 use zebra_chain::{
-    parameters::ConsensusBranchId, serialization::ZcashSerialize, transaction::Transaction,
+    parameters::ConsensusBranchId,
+    serialization::ZcashSerialize,
+    transaction::Transaction,
     transparent,
 };
 
@@ -133,10 +136,11 @@ pub fn is_valid(
 mod tests {
     use super::*;
     use hex::FromHex;
-    use std::convert::TryInto;
-    use std::sync::Arc;
+    use std::{convert::TryInto, sync::Arc};
     use zebra_chain::{
-        parameters::NetworkUpgrade::*, serialization::ZcashDeserializeInto, transparent,
+        parameters::NetworkUpgrade::*,
+        serialization::ZcashDeserializeInto,
+        transparent,
     };
     use zebra_test::prelude::*;
 

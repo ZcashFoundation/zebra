@@ -13,8 +13,11 @@
 
 use crate::block;
 
-use std::cmp::{Ordering, PartialEq, PartialOrd};
-use std::{fmt, ops::Add, ops::AddAssign};
+use std::{
+    cmp::{Ordering, PartialEq, PartialOrd},
+    fmt,
+    ops::{Add, AddAssign},
+};
 
 use primitive_types::U256;
 

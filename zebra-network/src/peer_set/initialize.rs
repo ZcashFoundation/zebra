@@ -23,19 +23,25 @@ use tower::{
     discover::{Change, ServiceStream},
     layer::Layer,
     util::BoxService,
-    Service, ServiceExt,
+    Service,
+    ServiceExt,
 };
 use tower_load::{peak_ewma::PeakEwmaDiscover, NoInstrument};
 
 use crate::{
-    constants, peer, timestamp_collector::TimestampCollector, AddressBook, BoxedStdError, Config,
-    Request, Response,
+    constants,
+    peer,
+    timestamp_collector::TimestampCollector,
+    AddressBook,
+    BoxedStdError,
+    Config,
+    Request,
+    Response,
 };
 
 use zebra_chain::parameters::Network;
 
-use super::CandidateSet;
-use super::PeerSet;
+use super::{CandidateSet, PeerSet};
 
 type PeerChange = Result<Change<SocketAddr, peer::Client>, BoxedStdError>;
 

@@ -17,8 +17,10 @@ use std::{
     str::FromStr,
 };
 
-use zebra_chain::block;
-use zebra_chain::parameters::{Network, NetworkUpgrade, NetworkUpgrade::*};
+use zebra_chain::{
+    block,
+    parameters::{Network, NetworkUpgrade, NetworkUpgrade::*},
+};
 
 const MAINNET_CHECKPOINTS: &str = include_str!("main-checkpoints.txt");
 const TESTNET_CHECKPOINTS: &str = include_str!("test-checkpoints.txt");

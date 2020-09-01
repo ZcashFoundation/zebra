@@ -2,11 +2,15 @@
 
 use NetworkUpgrade::*;
 
-use crate::block;
-use crate::parameters::{Network, Network::*};
+use crate::{
+    block,
+    parameters::{Network, Network::*},
+};
 
-use std::collections::{BTreeMap, HashMap};
-use std::ops::Bound::*;
+use std::{
+    collections::{BTreeMap, HashMap},
+    ops::Bound::*,
+};
 
 /// A Zcash network upgrade.
 ///

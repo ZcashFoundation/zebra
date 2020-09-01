@@ -6,7 +6,12 @@ use abscissa_core::{
     config,
     config::Configurable,
     terminal::component::Terminal,
-    Application, Component, EntryPoint, FrameworkError, Shutdown, StandardPaths,
+    Application,
+    Component,
+    EntryPoint,
+    FrameworkError,
+    Shutdown,
+    StandardPaths,
 };
 use application::fatal_error;
 use std::process;
@@ -101,7 +106,9 @@ impl Application for ZebradApp {
     /// to do so.
     fn register_components(&mut self, command: &Self::Cmd) -> Result<(), FrameworkError> {
         use crate::components::{
-            metrics::MetricsEndpoint, tokio::TokioComponent, tracing::TracingEndpoint,
+            metrics::MetricsEndpoint,
+            tokio::TokioComponent,
+            tracing::TracingEndpoint,
         };
 
         let mut components = self.framework_components(command)?;

@@ -10,7 +10,11 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{DateTime, TimeZone, Utc};
 
 use zebra_chain::serialization::{
-    ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
+    ReadZcashExt,
+    SerializationError,
+    WriteZcashExt,
+    ZcashDeserialize,
+    ZcashSerialize,
 };
 
 use crate::protocol::types::PeerServices;

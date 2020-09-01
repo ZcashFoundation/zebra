@@ -16,7 +16,8 @@ use proptest_derive::Arbitrary;
 
 use crate::{
     amount::{Amount, NonNegative},
-    block, transaction,
+    block,
+    transaction,
 };
 
 /// Arbitrary data inserted by miners into a coinbase transaction.

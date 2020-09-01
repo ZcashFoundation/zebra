@@ -1,7 +1,9 @@
 use proptest::prelude::*;
 
-use crate::block::{self, Block};
-use crate::serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize};
+use crate::{
+    block::{self, Block},
+    serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
+};
 
 use super::super::*;
 

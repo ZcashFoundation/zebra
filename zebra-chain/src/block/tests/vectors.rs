@@ -5,11 +5,15 @@ use std::{
 
 use chrono::{DateTime, Duration, LocalResult, TimeZone, Utc};
 
-use crate::serialization::{sha256d, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize};
-use crate::transaction::LockTime;
+use crate::{
+    serialization::{sha256d, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
+    transaction::LockTime,
+};
 
-use super::super::{serialize::MAX_BLOCK_BYTES, *};
-use super::generate; // XXX this should be rewritten as strategies
+use super::{
+    super::{serialize::MAX_BLOCK_BYTES, *},
+    generate,
+}; // XXX this should be rewritten as strategies
 
 #[test]
 fn blockheaderhash_debug() {

@@ -75,8 +75,7 @@ fn generate_no_args() -> Result<()> {
 macro_rules! assert_with_context {
     ($pred:expr, $source:expr) => {
         if !$pred {
-            use color_eyre::Section as _;
-            use color_eyre::SectionExt as _;
+            use color_eyre::{Section as _, SectionExt as _};
             use zebra_test::command::ContextFrom as _;
             let report = color_eyre::eyre::eyre!("failed assertion")
                 .section(stringify!($pred).header("Predicate:"))

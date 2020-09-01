@@ -4,8 +4,7 @@ use color_eyre::eyre::Report;
 use std::{
     fs::File,
     io::{BufReader, BufWriter},
-    path::Path,
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 use tracing::Subscriber;
 use tracing_subscriber::{registry::LookupSpan, Layer};

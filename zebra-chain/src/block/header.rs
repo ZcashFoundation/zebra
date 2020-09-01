@@ -1,7 +1,9 @@
 use chrono::{DateTime, Duration, Utc};
 
-use crate::serialization::ZcashSerialize;
-use crate::work::{difficulty::CompactDifficulty, equihash::Solution};
+use crate::{
+    serialization::ZcashSerialize,
+    work::{difficulty::CompactDifficulty, equihash::Solution},
+};
 
 use super::{merkle, Error, Hash};
 

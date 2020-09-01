@@ -15,7 +15,11 @@ use rand_core::{CryptoRng, RngCore};
 use crate::{
     amount::{Amount, NonNegative},
     serialization::{
-        serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
+        serde_helpers,
+        ReadZcashExt,
+        SerializationError,
+        ZcashDeserialize,
+        ZcashSerialize,
     },
 };
 

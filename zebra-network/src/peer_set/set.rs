@@ -1,10 +1,10 @@
-use std::net::SocketAddr;
 use std::{
     collections::HashMap,
     convert::TryInto,
     fmt::Debug,
     future::Future,
     marker::PhantomData,
+    net::SocketAddr,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -15,8 +15,10 @@ use futures::{
     stream::FuturesUnordered,
 };
 use indexmap::IndexMap;
-use tokio::sync::{broadcast, oneshot::error::TryRecvError};
-use tokio::task::JoinHandle;
+use tokio::{
+    sync::{broadcast, oneshot::error::TryRecvError},
+    task::JoinHandle,
+};
 use tower::{
     discover::{Change, Discover},
     Service,

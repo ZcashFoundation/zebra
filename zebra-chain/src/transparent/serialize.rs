@@ -8,7 +8,11 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use crate::{
     block,
     serialization::{
-        ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
+        ReadZcashExt,
+        SerializationError,
+        WriteZcashExt,
+        ZcashDeserialize,
+        ZcashSerialize,
     },
     transaction,
 };

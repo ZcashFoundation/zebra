@@ -2,9 +2,16 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{TimeZone, Utc};
 use std::io;
 
-use crate::serialization::ZcashDeserializeInto;
-use crate::serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize};
-use crate::work::{difficulty::CompactDifficulty, equihash};
+use crate::{
+    serialization::{
+        ReadZcashExt,
+        SerializationError,
+        ZcashDeserialize,
+        ZcashDeserializeInto,
+        ZcashSerialize,
+    },
+    work::{difficulty::CompactDifficulty, equihash},
+};
 
 use super::{merkle, Block, Hash, Header};
 

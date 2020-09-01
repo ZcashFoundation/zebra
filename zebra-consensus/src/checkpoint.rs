@@ -20,8 +20,7 @@ mod types;
 mod tests;
 
 pub(crate) use list::CheckpointList;
-use types::{Progress, Progress::*};
-use types::{Target, Target::*};
+use types::{Progress, Progress::*, Target, Target::*};
 
 use crate::parameters;
 

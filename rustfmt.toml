@@ -1,0 +1,5 @@
+# Defaults are good.  Let's keep the defaults except if we really, really,
+# really want to do something else.
+
+merge_imports = true
+imports_layout = "HorizontalVertical"

@@ -7,7 +7,11 @@ use crate::{
     amount::{Amount, NonNegative},
     primitives::{x25519, ZkSnarkProof},
     serialization::{
-        ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
+        ReadZcashExt,
+        SerializationError,
+        WriteZcashExt,
+        ZcashDeserialize,
+        ZcashSerialize,
     },
 };
 

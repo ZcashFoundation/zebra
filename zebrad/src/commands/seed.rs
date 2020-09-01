@@ -13,8 +13,7 @@ use tower::{buffer::Buffer, Service, ServiceExt};
 
 use zebra_network::{AddressBook, BoxedStdError, Request, Response};
 
-use crate::components::tokio::RuntimeRun;
-use crate::prelude::*;
+use crate::{components::tokio::RuntimeRun, prelude::*};
 use color_eyre::eyre::{eyre, Report};
 
 /// Whether our `SeedService` is poll_ready or not.

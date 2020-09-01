@@ -6,7 +6,8 @@ use std::{
 
 use futures::{
     channel::{mpsc, oneshot},
-    future, ready,
+    future,
+    ready,
 };
 use tower::Service;
 

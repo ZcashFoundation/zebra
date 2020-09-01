@@ -1,8 +1,10 @@
 use std::{collections::HashSet, iter, pin::Pin, sync::Arc, time::Duration};
 
 use color_eyre::eyre::{eyre, Report};
-use futures::future::FutureExt;
-use futures::stream::{FuturesUnordered, StreamExt};
+use futures::{
+    future::FutureExt,
+    stream::{FuturesUnordered, StreamExt},
+};
 use tokio::{task::JoinHandle, time::delay_for};
 use tower::{builder::ServiceBuilder, retry::Retry, timeout::Timeout, Service, ServiceExt};
 use tracing_futures::Instrument;
@@ -11,8 +13,7 @@ use zebra_chain::{
     block::{self, Block},
     parameters::Network,
 };
-use zebra_consensus::checkpoint;
-use zebra_consensus::parameters;
+use zebra_consensus::{checkpoint, parameters};
 use zebra_network::{self as zn, RetryLimit};
 use zebra_state as zs;
 

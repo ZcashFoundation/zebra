@@ -33,7 +33,11 @@ use crate::{
     parameters::Network,
     primitives::redjubjub::{self, SpendAuth},
     serialization::{
-        serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
+        serde_helpers,
+        ReadZcashExt,
+        SerializationError,
+        ZcashDeserialize,
+        ZcashSerialize,
     },
 };
 

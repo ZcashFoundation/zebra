@@ -2,7 +2,11 @@ use std::path::Path;
 
 use tracing_error::ErrorLayer;
 use tracing_subscriber::{
-    fmt::Formatter, layer::SubscriberExt, reload::Handle, util::SubscriberInitExt, EnvFilter,
+    fmt::Formatter,
+    layer::SubscriberExt,
+    reload::Handle,
+    util::SubscriberInitExt,
+    EnvFilter,
     FmtSubscriber,
 };
 

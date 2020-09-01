@@ -2,8 +2,7 @@
 
 use std::{collections::BTreeMap, mem::drop, sync::Arc, time::Duration};
 
-use color_eyre::eyre::eyre;
-use color_eyre::eyre::Report;
+use color_eyre::eyre::{eyre, Report};
 use futures::{future::TryFutureExt, stream::FuturesUnordered};
 use once_cell::sync::Lazy;
 use tokio::{stream::StreamExt, time::timeout};
@@ -17,8 +16,7 @@ use zebra_chain::{
 };
 use zebra_test::transcript::{TransError, Transcript};
 
-use crate::checkpoint::CheckpointList;
-use crate::Config;
+use crate::{checkpoint::CheckpointList, Config};
 
 use super::*;
 

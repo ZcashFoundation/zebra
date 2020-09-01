@@ -1,5 +1,7 @@
-use std::io;
-use std::net::{IpAddr, SocketAddr};
+use std::{
+    io,
+    net::{IpAddr, SocketAddr},
+};
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 

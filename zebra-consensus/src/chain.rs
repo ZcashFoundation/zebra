@@ -14,8 +14,10 @@
 #[cfg(test)]
 mod tests;
 
-use crate::checkpoint::{CheckpointList, CheckpointVerifier};
-use crate::Config;
+use crate::{
+    checkpoint::{CheckpointList, CheckpointVerifier},
+    Config,
+};
 
 use futures_util::FutureExt;
 use std::{
@@ -28,8 +30,10 @@ use std::{
 use tower::{buffer::Buffer, Service, ServiceExt};
 use tracing_futures::Instrument;
 
-use zebra_chain::block::{self, Block};
-use zebra_chain::parameters::{Network, NetworkUpgrade::Sapling};
+use zebra_chain::{
+    block::{self, Block},
+    parameters::{Network, NetworkUpgrade::Sapling},
+};
 
 /// The maximum expected gap between blocks.
 ///

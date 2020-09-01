@@ -6,8 +6,8 @@ use chrono::Utc;
 use color_eyre::eyre::{eyre, Report};
 use once_cell::sync::Lazy;
 
-use zebra_chain::block::{self, Block};
 use zebra_chain::{
+    block::{self, Block},
     parameters::Network,
     serialization::{ZcashDeserialize, ZcashDeserializeInto},
 };

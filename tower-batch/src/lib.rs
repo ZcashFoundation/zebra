@@ -108,5 +108,4 @@ impl<R> From<R> for BatchControl<R> {
     }
 }
 
-pub use self::layer::BatchLayer;
-pub use self::service::Batch;
+pub use self::{layer::BatchLayer, service::Batch};

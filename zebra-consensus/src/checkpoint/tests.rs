@@ -2,8 +2,7 @@
 
 use super::*;
 
-use super::types::Progress::*;
-use super::types::Target::*;
+use super::types::{Progress::*, Target::*};
 
 use color_eyre::eyre::{eyre, Report};
 use futures::{future::TryFutureExt, stream::FuturesUnordered};

@@ -6,15 +6,25 @@ mod seed;
 mod start;
 mod version;
 
-use self::ZebradCmd::*;
 use self::{
-    generate::GenerateCmd, revhex::RevhexCmd, seed::SeedCmd, start::StartCmd, version::VersionCmd,
+    generate::GenerateCmd,
+    revhex::RevhexCmd,
+    seed::SeedCmd,
+    start::StartCmd,
+    version::VersionCmd,
+    ZebradCmd::*,
 };
 
 use crate::config::ZebradConfig;
 
 use abscissa_core::{
-    config::Override, Command, Configurable, FrameworkError, Help, Options, Runnable,
+    config::Override,
+    Command,
+    Configurable,
+    FrameworkError,
+    Help,
+    Options,
+    Runnable,
 };
 use std::path::PathBuf;
 

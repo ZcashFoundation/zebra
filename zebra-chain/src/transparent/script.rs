@@ -1,6 +1,10 @@
 #![allow(clippy::unit_arg)]
 use crate::serialization::{
-    ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
+    ReadZcashExt,
+    SerializationError,
+    WriteZcashExt,
+    ZcashDeserialize,
+    ZcashSerialize,
 };
 use std::{
     fmt,
