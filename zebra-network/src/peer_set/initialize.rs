@@ -61,12 +61,17 @@ where
     let (listener, connector) = {
         use tower::timeout::TimeoutLayer;
         let hs_timeout = TimeoutLayer::new(constants::HANDSHAKE_TIMEOUT);
-        let hs = peer::Handshake::new(
-            config.clone(),
-            inbound_service,
-            timestamp_collector,
-            inv_sender,
-        );
+        use crate::protocol::external::types::PeerServices;
+        let hs = peer::Handshake::builder()
+            .with_config(config.clone())
+            .with_inbound_service(inbound_service)
+            .with_inventory_collector(inv_sender)
+            .with_timestamp_collector(timestamp_collector)
+            .with_advertised_services(PeerServices::NODE_NETWORK)
+            .with_user_agent(crate::constants::USER_AGENT.to_string())
+            .want_transactions(true)
+            .finish()
+            .expect("configured all required parameters");
         (
             hs_timeout.layer(hs.clone()),
             hs_timeout.layer(peer::Connector::new(hs)),

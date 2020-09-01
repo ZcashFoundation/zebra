@@ -7,7 +7,7 @@ use std::{
     task::{Context, Poll},
 };
 
-use chrono::Utc;
+use chrono::{TimeZone, Utc};
 use futures::{
     channel::{mpsc, oneshot},
     prelude::*,
@@ -34,23 +34,117 @@ use super::{Client, Connection, ErrorSlot, HandshakeError};
 
 /// A [`Service`] that handshakes with a remote peer and constructs a
 /// client/server pair.
+#[derive(Clone)]
 pub struct Handshake<S> {
     config: Config,
-    internal_service: S,
+    inbound_service: S,
     timestamp_collector: mpsc::Sender<MetaAddr>,
     inv_collector: broadcast::Sender<(InventoryHash, SocketAddr)>,
     nonces: Arc<Mutex<HashSet<Nonce>>>,
+    user_agent: String,
+    our_services: PeerServices,
+    relay: bool,
 }
 
-impl<S: Clone> Clone for Handshake<S> {
-    fn clone(&self) -> Self {
-        Handshake {
-            config: self.config.clone(),
-            internal_service: self.internal_service.clone(),
-            timestamp_collector: self.timestamp_collector.clone(),
-            inv_collector: self.inv_collector.clone(),
-            nonces: self.nonces.clone(),
-        }
+pub struct Builder<S> {
+    config: Option<Config>,
+    inbound_service: Option<S>,
+    timestamp_collector: Option<mpsc::Sender<MetaAddr>>,
+    our_services: Option<PeerServices>,
+    user_agent: Option<String>,
+    relay: Option<bool>,
+    inv_collector: Option<broadcast::Sender<(InventoryHash, SocketAddr)>>,
+}
+
+impl<S> Builder<S>
+where
+    S: Service<Request, Response = Response, Error = BoxedStdError> + Clone + Send + 'static,
+    S::Future: Send,
+{
+    /// Provide a config.  Mandatory.
+    pub fn with_config(mut self, config: Config) -> Self {
+        self.config = Some(config);
+        self
+    }
+
+    /// Provide a service to handle inbound requests. Mandatory.
+    pub fn with_inbound_service(mut self, inbound_service: S) -> Self {
+        self.inbound_service = Some(inbound_service);
+        self
+    }
+
+    /// Provide a channel for registering inventory advertisements. Mandatory.
+    pub fn with_inventory_collector(
+        mut self,
+        inv_collector: broadcast::Sender<(InventoryHash, SocketAddr)>,
+    ) -> Self {
+        self.inv_collector = Some(inv_collector);
+        self
+    }
+
+    /// Provide a hook for timestamp collection. Optional.
+    ///
+    /// If this is unset, timestamps will not be collected.
+    pub fn with_timestamp_collector(mut self, timestamp_collector: mpsc::Sender<MetaAddr>) -> Self {
+        self.timestamp_collector = Some(timestamp_collector);
+        self
+    }
+
+    /// Provide the services this node advertises to other peers.  Optional.
+    ///
+    /// If this is unset, the node will advertise itself as a client.
+    pub fn with_advertised_services(mut self, services: PeerServices) -> Self {
+        self.our_services = Some(services);
+        self
+    }
+
+    /// Provide this node's user agent.  Optional.
+    ///
+    /// This must be a valid BIP14 string.  If it is unset, the user-agent will be empty.
+    pub fn with_user_agent(mut self, user_agent: String) -> Self {
+        self.user_agent = Some(user_agent);
+        self
+    }
+
+    /// Whether to request that peers relay transactions to our node.  Optional.
+    ///
+    /// If this is unset, the node will not request transactions.
+    pub fn want_transactions(mut self, relay: bool) -> Self {
+        self.relay = Some(relay);
+        self
+    }
+
+    /// Consume this builder and produce a [`Handshake`].
+    ///
+    /// Returns an error only if any mandatory field was unset.
+    pub fn finish(self) -> Result<Handshake<S>, &'static str> {
+        let config = self.config.ok_or("did not specify config")?;
+        let inbound_service = self
+            .inbound_service
+            .ok_or("did not specify inbound service")?;
+        let inv_collector = self
+            .inv_collector
+            .ok_or("did not specify a inventory collector")?;
+        let timestamp_collector = self.timestamp_collector.unwrap_or_else(|| {
+            // No timestamp collector was passed, so create a stub channel.
+            // Dropping the receiver means sends will fail, but we don't care.
+            let (tx, _rx) = mpsc::channel(1);
+            tx
+        });
+        let nonces = Arc::new(Mutex::new(HashSet::new()));
+        let user_agent = self.user_agent.unwrap_or_else(|| "".to_string());
+        let our_services = self.our_services.unwrap_or_else(PeerServices::empty);
+        let relay = self.relay.unwrap_or(false);
+        Ok(Handshake {
+            config,
+            inbound_service,
+            inv_collector,
+            timestamp_collector,
+            nonces,
+            user_agent,
+            our_services,
+            relay,
+        })
     }
 }
 
@@ -59,24 +153,19 @@ where
     S: Service<Request, Response = Response, Error = BoxedStdError> + Clone + Send + 'static,
     S::Future: Send,
 {
-    /// Construct a new `PeerConnector`.
-    pub fn new(
-        config: Config,
-        internal_service: S,
-        timestamp_collector: mpsc::Sender<MetaAddr>,
-        inv_collector: broadcast::Sender<(InventoryHash, SocketAddr)>,
-    ) -> Self {
-        // XXX this function has too many parameters, but it's not clear how to
-        // do a nice builder as all fields are mandatory. Could have Builder1,
-        // Builder2, ..., with Builder1::with_config() -> Builder2;
-        // Builder2::with_internal_service() -> ... or use Options in a single
-        // Builder type or use the derive_builder crate.
-        Handshake {
-            config,
-            internal_service,
-            timestamp_collector,
-            inv_collector,
-            nonces: Arc::new(Mutex::new(HashSet::new())),
+    /// Create a builder that configures a [`Handshake`] service.
+    pub fn builder() -> Builder<S> {
+        // We don't derive `Default` because the derive inserts a `where S:
+        // Default` bound even though `Option<S>` implements `Default` even if
+        // `S` does not.
+        Builder {
+            config: None,
+            inbound_service: None,
+            timestamp_collector: None,
+            user_agent: None,
+            our_services: None,
+            relay: None,
+            inv_collector: None,
         }
     }
 }
@@ -106,10 +195,14 @@ where
 
         // Clone these upfront, so they can be moved into the future.
         let nonces = self.nonces.clone();
-        let internal_service = self.internal_service.clone();
+        let inbound_service = self.inbound_service.clone();
         let timestamp_collector = self.timestamp_collector.clone();
         let inv_collector = self.inv_collector.clone();
         let network = self.config.network;
+        let our_addr = self.config.listen_addr;
+        let user_agent = self.user_agent.clone();
+        let our_services = self.our_services;
+        let relay = self.relay;
 
         let fut = async move {
             debug!("connecting to remote peer");
@@ -128,22 +221,38 @@ where
                 .expect("mutex should be unpoisoned")
                 .insert(local_nonce);
 
+            // Don't leak our exact clock skew to our peers. On the other hand,
+            // we can't deviate too much, or zcashd will get confused.
+            // Inspection of the zcashd source code reveals that the timestamp
+            // is only ever used at the end of parsing the version message, in
+            //
+            // pfrom->nTimeOffset = timeWarning.AddTimeData(pfrom->addr, nTime, GetTime());
+            //
+            // AddTimeData is defined in src/timedata.cpp and is a no-op as long
+            // as the difference between the specified timestamp and the
+            // zcashd's local time is less than TIMEDATA_WARNING_THRESHOLD, set
+            // to 10 * 60 seconds (10 minutes).
+            //
+            // nTimeOffset is peer metadata that is never used, except for
+            // statistics.
+            //
+            // To try to stay within the range where zcashd will ignore our clock skew,
+            // truncate the timestamp to the nearest 5 minutes.
+            let now = Utc::now().timestamp();
+            let timestamp = Utc.timestamp(now - now.rem_euclid(5 * 60), 0);
+
             let version = Message::Version {
                 version: constants::CURRENT_VERSION,
-                services: PeerServices::NODE_NETWORK,
-                timestamp: Utc::now(),
+                services: our_services,
+                timestamp,
                 address_recv: (PeerServices::NODE_NETWORK, addr),
-                // TODO: when we've implemented block and transaction relaying,
-                //       send our configured address to the peer
-                address_from: (PeerServices::NODE_NETWORK, "0.0.0.0:8233".parse().unwrap()),
+                address_from: (our_services, our_addr),
                 nonce: local_nonce,
-                user_agent: constants::USER_AGENT.to_string(),
-                // XXX eventually the `PeerConnector` will need to have a handle
-                // for a service that gets the current block height. Among other
-                // things we need it to reject peers who don't know about the
-                // current protocol epoch.
+                user_agent,
+                // The protocol works fine if we don't reveal our current block height,
+                // and not sending it means we don't need to be connected to the chain state.
                 start_height: block::Height(0),
-                relay: false,
+                relay,
             };
 
             debug!(?version, "sending initial version message");
@@ -304,7 +413,7 @@ where
             use super::connection;
             let server = Connection {
                 state: connection::State::AwaitingRequest,
-                svc: internal_service,
+                svc: inbound_service,
                 client_rx: server_rx,
                 error_slot: slot,
                 peer_tx,
