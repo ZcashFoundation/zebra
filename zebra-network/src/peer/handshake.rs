@@ -140,7 +140,9 @@ where
 {
     /// Create a builder that configures a [`Handshake`] service.
     pub fn builder() -> Builder<S> {
-        // can't derive Builder::default without a bound on S :(
+        // We don't derive `Default` because the derive inserts a `where S:
+        // Default` bound even though `Option<S>` implements `Default` even if
+        // `S` does not.
         Builder {
             config: None,
             inbound_service: None,
