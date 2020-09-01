@@ -54,7 +54,7 @@ pub struct Position(pub(crate) u64);
 /// Sapling Note Commitment Tree
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(test, derive(Arbitrary))]
-pub struct SaplingNoteCommitmentTree;
+struct SaplingNoteCommitmentTree;
 
 /// Sapling note commitment tree root node hash.
 ///
@@ -64,17 +64,15 @@ pub struct SaplingNoteCommitmentTree;
 /// each treestate.
 #[derive(Clone, Copy, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(Arbitrary))]
-pub struct SaplingNoteTreeRootHash(pub [u8; 32]);
+pub struct Root(pub [u8; 32]);
 
-impl fmt::Debug for SaplingNoteTreeRootHash {
+impl fmt::Debug for Root {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple("SaplingNoteTreeRootHash")
-            .field(&hex::encode(&self.0))
-            .finish()
+        f.debug_tuple("Root").field(&hex::encode(&self.0)).finish()
     }
 }
 
-impl From<SaplingNoteCommitmentTree> for SaplingNoteTreeRootHash {
+impl From<SaplingNoteCommitmentTree> for Root {
     fn from(_tree: SaplingNoteCommitmentTree) -> Self {
         // TODO: The Sapling note commitment tree requires a Pedersen
         // hash function, not SHA256.

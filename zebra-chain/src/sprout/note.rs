@@ -18,7 +18,7 @@ use super::{commitment::CommitmentRandomness, keys::PayingKey};
 
 pub use mac::MAC;
 
-pub use ciphertexts::EncryptedCiphertext;
+pub use ciphertexts::EncryptedNote;
 
 pub use nullifiers::{Nullifier, NullifierSeed};
 
@@ -27,7 +27,7 @@ pub use nullifiers::{Nullifier, NullifierSeed};
 /// address.
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#notes
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub struct Note {
     /// The paying key of the recipient’s shielded payment address
@@ -39,14 +39,6 @@ pub struct Note {
     pub rho: NullifierSeed,
     /// A random commitment trapdoor
     pub rcm: CommitmentRandomness,
-}
-
-/// The decrypted form of encrypted Sprout notes on the blockchain.
-#[derive(Clone, Debug)]
-#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
-pub struct NotePlaintext {
-    value: Amount<NonNegative>,
-    rho: NullifierSeed,
-    rcm: CommitmentRandomness,
-    memo: Memo,
+    /// The note memo, after decryption
+    pub memo: Memo,
 }

@@ -1,4 +1,4 @@
-//! An HTTP endpoint for dynamically setting tracing filters.
+//! A tracing flamegraph component.
 
 use color_eyre::eyre::Report;
 use std::{

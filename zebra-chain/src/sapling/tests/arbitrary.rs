@@ -9,7 +9,7 @@ impl Arbitrary for Spend {
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         (
-            any::<tree::SaplingNoteTreeRootHash>(),
+            any::<tree::Root>(),
             any::<commitment::ValueCommitment>(),
             any::<note::Nullifier>(),
             array::uniform32(any::<u8>()),
@@ -44,8 +44,8 @@ impl Arbitrary for Output {
             any::<commitment::ValueCommitment>(),
             any::<commitment::NoteCommitment>(),
             any::<keys::EphemeralPublicKey>(),
-            any::<note::EncryptedCiphertext>(),
-            any::<note::OutCiphertext>(),
+            any::<note::EncryptedNote>(),
+            any::<note::WrappedNoteKey>(),
             any::<Groth16Proof>(),
         )
             .prop_map(

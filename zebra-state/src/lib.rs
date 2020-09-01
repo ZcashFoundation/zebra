@@ -69,6 +69,13 @@ pub struct Config {
 
     /// The maximum number of bytes to use caching data in memory.
     pub memory_cache_bytes: u64,
+
+    /// Whether to use an ephemeral database.
+    ///
+    /// Ephemeral databases are stored in memory on Linux, and in a temporary directory on other OSes.
+    ///
+    /// Set to `false` by default. If this is set to `true`, [`cache_dir`] is ignored.
+    pub ephemeral: bool,
 }
 
 impl Config {
@@ -79,12 +86,16 @@ impl Config {
             Network::Mainnet => "mainnet",
             Network::Testnet => "testnet",
         };
-        let path = self.cache_dir.join(net_dir).join("state");
 
-        sled::Config::default()
-            .path(path)
+        let config = sled::Config::default()
             .cache_capacity(self.memory_cache_bytes)
-            .mode(sled::Mode::LowSpace)
+            .mode(sled::Mode::LowSpace);
+        if self.ephemeral {
+            config.temporary(self.ephemeral)
+        } else {
+            let path = self.cache_dir.join(net_dir).join("state");
+            config.path(path)
+        }
     }
 }
 
@@ -96,6 +107,7 @@ impl Default for Config {
         Self {
             cache_dir,
             memory_cache_bytes: 512 * 1024 * 1024,
+            ephemeral: false,
         }
     }
 }

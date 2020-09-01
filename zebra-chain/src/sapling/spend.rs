@@ -20,7 +20,7 @@ pub struct Spend {
     /// A value commitment to the value of the input note.
     pub cv: commitment::ValueCommitment,
     /// A root of the Sapling note commitment tree at some block height in the past.
-    pub anchor: tree::SaplingNoteTreeRootHash,
+    pub anchor: tree::Root,
     /// The nullifier of the input note.
     pub nullifier: note::Nullifier,
     /// The randomized public key for `spend_auth_sig`.
@@ -45,12 +45,10 @@ impl ZcashSerialize for Spend {
 
 impl ZcashDeserialize for Spend {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        use crate::sapling::{
-            commitment::ValueCommitment, note::Nullifier, tree::SaplingNoteTreeRootHash,
-        };
+        use crate::sapling::{commitment::ValueCommitment, note::Nullifier};
         Ok(Spend {
             cv: ValueCommitment::zcash_deserialize(&mut reader)?,
-            anchor: SaplingNoteTreeRootHash(reader.read_32_bytes()?),
+            anchor: tree::Root(reader.read_32_bytes()?),
             nullifier: Nullifier::from(reader.read_32_bytes()?),
             rk: reader.read_32_bytes()?.into(),
             zkproof: Groth16Proof::zcash_deserialize(&mut reader)?,

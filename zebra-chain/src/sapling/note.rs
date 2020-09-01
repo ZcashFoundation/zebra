@@ -19,13 +19,14 @@ use super::{
     keys::{Diversifier, TransmissionKey},
 };
 
-pub use ciphertexts::{EncryptedCiphertext, OutCiphertext};
+pub use ciphertexts::{EncryptedNote, WrappedNoteKey};
 
 pub use nullifiers::Nullifier;
 
 /// A Note represents that a value is spendable by the recipient who
 /// holds the spending key corresponding to a given shielded payment
 /// address.
+#[derive(Clone, Debug)]
 pub struct Note {
     /// The diversifer of the recipient’s shielded payment address.
     pub diversifier: Diversifier,
@@ -37,12 +38,6 @@ pub struct Note {
     /// A random commitment trapdoor used to produce the associated
     /// note commitment.
     pub rcm: CommitmentRandomness,
-}
-
-/// The decrypted form of encrypted Sapling notes on the blockchain.
-pub struct NotePlaintext {
-    diversifier: Diversifier,
-    value: Amount<NonNegative>,
-    rcm: CommitmentRandomness,
-    memo: Memo,
+    /// The note memo, after decryption
+    pub memo: Memo,
 }

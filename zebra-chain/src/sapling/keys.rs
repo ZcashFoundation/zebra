@@ -47,7 +47,7 @@ use crate::{
 ///
 /// [0]: https://docs.rs/zcash_primitives/0.2.0/zcash_primitives/constants/constant.GH_FIRST_BLOCK.html
 /// [1]: https://zips.z.cash/protocol/protocol.pdf#beacon
-pub const RANDOMNESS_BEACON_URS: &[u8; 64] =
+pub(super) const RANDOMNESS_BEACON_URS: &[u8; 64] =
     b"096b36a5804bfacef1691e173c366a47ff5ba84a44f26ddd7e8d9f79d5b42df0";
 
 /// Invokes Blake2b-512 as PRF^expand with parameter t, to derive a
@@ -130,7 +130,7 @@ fn jubjub_group_hash(d: [u8; 8], m: &[u8]) -> Option<jubjub::ExtendedPoint> {
 /// https://zips.z.cash/protocol/protocol.pdf#concretegrouphashjubjub
 // TODO: move common functions like these out of the keys module into
 // a more appropriate location
-pub fn find_group_hash(d: [u8; 8], m: &[u8]) -> jubjub::ExtendedPoint {
+pub(super) fn find_group_hash(d: [u8; 8], m: &[u8]) -> jubjub::ExtendedPoint {
     let mut tag = m.to_vec();
     let i = tag.len();
     tag.push(0u8);
