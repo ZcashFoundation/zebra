@@ -238,17 +238,6 @@ trait ContextFrom<S> {
     fn context_from(self, source: &S) -> Self::Return;
 }
 
-impl ContextFrom<TestChild> for Report {
-    type Return = Report;
-
-    fn context_from(self, source: &TestChild) -> Self::Return {
-        let command = || source.cmd.clone().header("Command:");
-        let child = || format!("{:?}", source.child).header("Child Process:");
-
-        self.with_section(command).with_section(child)
-    }
-}
-
 impl<C, T, E> ContextFrom<C> for Result<T, E>
 where
     E: Into<Report>,
@@ -259,6 +248,17 @@ where
     fn context_from(self, source: &C) -> Self::Return {
         self.map_err(|e| e.into())
             .map_err(|report| report.context_from(source))
+    }
+}
+
+impl ContextFrom<TestChild> for Report {
+    type Return = Report;
+
+    fn context_from(self, source: &TestChild) -> Self::Return {
+        let command = || source.cmd.clone().header("Command:");
+        let child = || format!("{:?}", source.child).header("Child Process:");
+
+        self.with_section(command).with_section(child)
     }
 }
 
