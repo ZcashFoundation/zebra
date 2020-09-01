@@ -221,8 +221,8 @@ pub async fn init<S>(
     Error = Error,
     Future = impl Future<Output = Result<block::Hash, Error>>,
 > + Send
-+ Clone
-+ 'static
+       + Clone
+       + 'static
 where
     S: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>
         + Send
@@ -283,8 +283,8 @@ pub(crate) fn init_from_verifiers<BV, S>(
     Error = Error,
     Future = impl Future<Output = Result<block::Hash, Error>>,
 > + Send
-+ Clone
-+ 'static
+       + Clone
+       + 'static
 where
     BV: Service<Arc<Block>, Response = block::Hash, Error = Error> + Send + Clone + 'static,
     BV::Future: Send + 'static,

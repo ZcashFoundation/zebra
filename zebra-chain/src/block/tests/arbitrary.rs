@@ -38,18 +38,16 @@ impl Arbitrary for Header {
             any::<equihash::Solution>(),
         )
             .prop_map(
-                |
-                    (
-                        version,
-                        previous_block_hash,
-                        merkle_root_hash,
-                        root_bytes,
-                        timestamp,
-                        difficulty_threshold,
-                        nonce,
-                        solution,
-                    ),
-                | Header {
+                |(
+                    version,
+                    previous_block_hash,
+                    merkle_root_hash,
+                    root_bytes,
+                    timestamp,
+                    difficulty_threshold,
+                    nonce,
+                    solution,
+                )| Header {
                     version,
                     previous_block_hash,
                     merkle_root: merkle_root_hash,

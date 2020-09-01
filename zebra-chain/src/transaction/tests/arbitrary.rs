@@ -73,17 +73,15 @@ impl Transaction {
             option::of(any::<JoinSplitData<Groth16Proof>>()),
         )
             .prop_map(
-                |
-                    (
-                        inputs,
-                        outputs,
-                        lock_time,
-                        expiry_height,
-                        value_balance,
-                        shielded_data,
-                        joinsplit_data,
-                    ),
-                | Transaction::V4 {
+                |(
+                    inputs,
+                    outputs,
+                    lock_time,
+                    expiry_height,
+                    value_balance,
+                    shielded_data,
+                    joinsplit_data,
+                )| Transaction::V4 {
                     inputs,
                     outputs,
                     lock_time,

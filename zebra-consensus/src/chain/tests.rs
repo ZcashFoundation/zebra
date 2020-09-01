@@ -50,21 +50,21 @@ fn verifiers_from_checkpoint_list(
     checkpoint_list: CheckpointList,
 ) -> (
     impl Service<
-        Arc<Block>,
-        Response = block::Hash,
-        Error = Error,
-        Future = impl Future<Output = Result<block::Hash, Error>>,
-    > + Send
-    + Clone
-    + 'static,
+            Arc<Block>,
+            Response = block::Hash,
+            Error = Error,
+            Future = impl Future<Output = Result<block::Hash, Error>>,
+        > + Send
+        + Clone
+        + 'static,
     impl Service<
-        zebra_state::Request,
-        Response = zebra_state::Response,
-        Error = Error,
-        Future = impl Future<Output = Result<zebra_state::Response, Error>>,
-    > + Send
-    + Clone
-    + 'static,
+            zebra_state::Request,
+            Response = zebra_state::Response,
+            Error = Error,
+            Future = impl Future<Output = Result<zebra_state::Response, Error>>,
+        > + Send
+        + Clone
+        + 'static,
 ) {
     let state_service = zebra_state::init(zebra_state::Config::ephemeral(), network);
     let block_verifier = crate::block::init(state_service.clone());
@@ -85,21 +85,21 @@ fn verifiers_from_network(
     network: Network,
 ) -> (
     impl Service<
-        Arc<Block>,
-        Response = block::Hash,
-        Error = Error,
-        Future = impl Future<Output = Result<block::Hash, Error>>,
-    > + Send
-    + Clone
-    + 'static,
+            Arc<Block>,
+            Response = block::Hash,
+            Error = Error,
+            Future = impl Future<Output = Result<block::Hash, Error>>,
+        > + Send
+        + Clone
+        + 'static,
     impl Service<
-        zebra_state::Request,
-        Response = zebra_state::Response,
-        Error = Error,
-        Future = impl Future<Output = Result<zebra_state::Response, Error>>,
-    > + Send
-    + Clone
-    + 'static,
+            zebra_state::Request,
+            Response = zebra_state::Response,
+            Error = Error,
+            Future = impl Future<Output = Result<zebra_state::Response, Error>>,
+        > + Send
+        + Clone
+        + 'static,
 ) {
     verifiers_from_checkpoint_list(network, CheckpointList::new(network))
 }

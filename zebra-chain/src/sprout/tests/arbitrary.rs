@@ -22,20 +22,18 @@ impl<P: ZkSnarkProof + Arbitrary + 'static> Arbitrary for JoinSplit<P> {
             array::uniform2(any::<note::EncryptedNote>()),
         )
             .prop_map(
-                |
-                    (
-                        vpub_old,
-                        vpub_new,
-                        anchor,
-                        nullifiers,
-                        commitments,
-                        ephemeral_key_bytes,
-                        random_seed,
-                        vmacs,
-                        zkproof,
-                        enc_ciphertexts,
-                    ),
-                | {
+                |(
+                    vpub_old,
+                    vpub_new,
+                    anchor,
+                    nullifiers,
+                    commitments,
+                    ephemeral_key_bytes,
+                    random_seed,
+                    vmacs,
+                    zkproof,
+                    enc_ciphertexts,
+                )| {
                     Self {
                         vpub_old,
                         vpub_new,

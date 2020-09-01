@@ -39,12 +39,11 @@ impl<K, S: Service<Req>, Req> Future for UnreadyService<K, S, Req> {
             return Poll::Ready(Err((key, Error::Canceled)));
         }
 
-        let res = ready!(
-            this.service
-                .as_mut()
-                .expect("poll after ready")
-                .poll_ready(cx)
-        );
+        let res = ready!(this
+            .service
+            .as_mut()
+            .expect("poll after ready")
+            .poll_ready(cx));
 
         let key = this.key.take().expect("polled after ready");
         let svc = this.service.take().expect("polled after ready");
