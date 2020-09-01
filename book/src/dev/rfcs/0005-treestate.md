@@ -2,7 +2,7 @@
 
 - Feature Name: treestate
 - Start Date: 2020-08-31
-- Design PR:
+- Design PR: [ZcashFoundation/zebra#983](https://github.com/ZcashFoundation/zebra/issues/983)
 - Zebra Issue: [ZcashFoundation/zebra#958](https://github.com/ZcashFoundation/zebra/issues/958)
 
 # Summary
