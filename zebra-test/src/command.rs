@@ -83,36 +83,20 @@ pub struct TestStatus {
 
 impl TestStatus {
     pub fn assert_success(self) -> Result<Self> {
-        assert_success(&self.status, &self.cmd)?;
+        if !self.status.success() {
+            Err(eyre!("command exited unsuccessfully")).context_from(&self)?;
+        }
 
         Ok(self)
     }
 
     pub fn assert_failure(self) -> Result<Self> {
-        assert_failure(&self.status, &self.cmd)?;
+        if self.status.success() {
+            Err(eyre!("command unexpectedly exited successfully")).context_from(&self)?;
+        }
 
         Ok(self)
     }
-}
-
-fn assert_success(status: &ExitStatus, cmd: &str) -> Result<()> {
-    if !status.success() {
-        Err(eyre!("command exited unsuccessfully"))
-            .with_section(|| cmd.to_string().header("Command:"))
-            .context_from(status)?;
-    }
-
-    Ok(())
-}
-
-fn assert_failure(status: &ExitStatus, cmd: &str) -> Result<()> {
-    if status.success() {
-        Err(eyre!("command unexpectedly exited successfully"))
-            .with_section(|| cmd.to_string().header("Command:"))
-            .context_from(status)?;
-    }
-
-    Ok(())
 }
 
 #[derive(Debug)]
@@ -152,13 +136,17 @@ pub struct TestOutput {
 
 impl TestOutput {
     pub fn assert_success(self) -> Result<Self> {
-        assert_success(&self.output.status, &self.cmd).context_from(&self)?;
+        if !self.output.status.success() {
+            Err(eyre!("command exited unsuccessfully")).context_from(&self)?;
+        }
 
         Ok(self)
     }
 
     pub fn assert_failure(self) -> Result<Self> {
-        assert_failure(&self.output.status, &self.cmd).context_from(&self)?;
+        if self.output.status.success() {
+            Err(eyre!("command unexpectedly exited successfully")).context_from(&self)?;
+        }
 
         Ok(self)
     }
@@ -251,6 +239,16 @@ where
     }
 }
 
+impl ContextFrom<TestStatus> for Report {
+    type Return = Report;
+
+    fn context_from(self, source: &TestStatus) -> Self::Return {
+        let command = || source.cmd.clone().header("Command:");
+
+        self.with_section(command).context_from(&source.status)
+    }
+}
+
 impl ContextFrom<TestChild> for Report {
     type Return = Report;
 
@@ -266,11 +264,8 @@ impl ContextFrom<TestOutput> for Report {
     type Return = Report;
 
     fn context_from(self, source: &TestOutput) -> Self::Return {
-        let with_report = self.context_from(&source.output);
-
-        let command = || source.cmd.clone().header("Command:");
-
-        with_report.with_section(command)
+        self.with_section(|| source.cmd.clone().header("Command:"))
+            .context_from(&source.output)
     }
 }
 
