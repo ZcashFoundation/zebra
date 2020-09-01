@@ -7,7 +7,7 @@ use std::{
     task::{Context, Poll},
 };
 
-use chrono::Utc;
+use chrono::{TimeZone, Utc};
 use futures::{
     channel::{mpsc, oneshot},
     prelude::*,
@@ -233,10 +233,30 @@ where
                 .expect("mutex should be unpoisoned")
                 .insert(local_nonce);
 
+            // Don't leak our exact clock skew to our peers. On the other hand,
+            // we can't deviate too much, or zcashd will get confused.
+            // Inspection of the zcashd source code reveals that the timestamp
+            // is only ever used at the end of parsing the version message, in
+            //
+            // pfrom->nTimeOffset = timeWarning.AddTimeData(pfrom->addr, nTime, GetTime());
+            //
+            // AddTimeData is defined in src/timedata.cpp and is a no-op as long
+            // as the difference between the specified timestamp and the
+            // zcashd's local time is less than TIMEDATA_WARNING_THRESHOLD, set
+            // to 10 * 60 seconds (10 minutes).
+            //
+            // nTimeOffset is peer metadata that is never used, except for
+            // statistics.
+            //
+            // To try to stay within the range where zcashd will ignore our clock skew,
+            // truncate the timestamp to the nearest 5 minutes.
+            let now = Utc::now().timestamp();
+            let timestamp = Utc.timestamp(now - now.rem_euclid(5 * 60), 0);
+
             let version = Message::Version {
                 version: constants::CURRENT_VERSION,
                 services: our_services,
-                timestamp: Utc::now(),
+                timestamp,
                 address_recv: (PeerServices::NODE_NETWORK, addr),
                 address_from: (our_services, our_addr),
                 nonce: local_nonce,
