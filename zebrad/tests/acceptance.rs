@@ -46,9 +46,12 @@ fn tempdir(config_mode: ConfigMode) -> Result<(PathBuf, impl Drop)> {
     Ok((dir.path().to_path_buf(), dir))
 }
 
-pub fn get_child(args: &[&str], tempdir: &PathBuf) -> Result<TestChild> {
+fn get_child(args: &[&str], tempdir: &PathBuf, config_mode: ConfigMode) -> Result<TestChild> {
     let mut cmd = test_cmd(env!("CARGO_BIN_EXE_zebrad"), &tempdir)?;
 
+    if config_mode != ConfigMode::NoConfig {
+        cmd.args(&["-c", tempdir.join("zebrad.toml").to_str().unwrap()]);
+    }
     Ok(cmd
         .args(args)
         .stdout(Stdio::piped())
@@ -62,7 +65,7 @@ fn generate_no_args() -> Result<()> {
     zebra_test::init();
     let (tempdir, _guard) = tempdir(ConfigMode::Ephemeral)?;
 
-    let child = get_child(&["generate"], &tempdir)?;
+    let child = get_child(&["generate"], &tempdir, ConfigMode::Ephemeral)?;
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
@@ -93,17 +96,17 @@ fn generate_args() -> Result<()> {
     let (tempdir, _guard) = tempdir(ConfigMode::NoConfig)?;
 
     // unexpected free argument `argument`
-    let child = get_child(&["generate", "argument"], &tempdir)?;
+    let child = get_child(&["generate", "argument"], &tempdir, ConfigMode::NoConfig)?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
     // unrecognized option `-f`
-    let child = get_child(&["generate", "-f"], &tempdir)?;
+    let child = get_child(&["generate", "-f"], &tempdir, ConfigMode::NoConfig)?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
     // missing argument to option `-o`
-    let child = get_child(&["generate", "-o"], &tempdir)?;
+    let child = get_child(&["generate", "-o"], &tempdir, ConfigMode::NoConfig)?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
@@ -115,6 +118,7 @@ fn generate_args() -> Result<()> {
     let child = get_child(
         &["generate", "-o", generated_config_path.to_str().unwrap()],
         &tempdir,
+        ConfigMode::NoConfig,
     )?;
 
     let output = child.wait_with_output()?;
@@ -134,7 +138,7 @@ fn help_no_args() -> Result<()> {
     zebra_test::init();
     let (tempdir, _guard) = tempdir(ConfigMode::Ephemeral)?;
 
-    let child = get_child(&["help"], &tempdir)?;
+    let child = get_child(&["help"], &tempdir, ConfigMode::Ephemeral)?;
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
@@ -150,15 +154,15 @@ fn help_no_args() -> Result<()> {
 #[test]
 fn help_args() -> Result<()> {
     zebra_test::init();
-    let (tempdir, _guard) = tempdir(ConfigMode::Ephemeral)?;
+    let (tempdir, _guard) = tempdir(ConfigMode::NoConfig)?;
 
     // The subcommand "argument" wasn't recognized.
-    let child = get_child(&["help", "argument"], &tempdir)?;
+    let child = get_child(&["help", "argument"], &tempdir, ConfigMode::NoConfig)?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
     // option `-f` does not accept an argument
-    let child = get_child(&["help", "-f"], &tempdir)?;
+    let child = get_child(&["help", "-f"], &tempdir, ConfigMode::NoConfig)?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
@@ -171,7 +175,7 @@ fn revhex_args() -> Result<()> {
     let (tempdir, _guard) = tempdir(ConfigMode::Ephemeral)?;
 
     // Valid
-    let child = get_child(&["revhex", "33eeff55"], &tempdir)?;
+    let child = get_child(&["revhex", "33eeff55"], &tempdir, ConfigMode::Ephemeral)?;
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
@@ -185,7 +189,7 @@ fn seed_no_args() -> Result<()> {
     zebra_test::init();
     let (tempdir, _guard) = tempdir(ConfigMode::Ephemeral)?;
 
-    let mut child = get_child(&["-v", "seed"], &tempdir)?;
+    let mut child = get_child(&["-v", "seed"], &tempdir, ConfigMode::Ephemeral)?;
 
     // Run the program and kill it at 1 second
     std::thread::sleep(Duration::from_secs(1));
@@ -208,17 +212,17 @@ fn seed_args() -> Result<()> {
     let (tempdir, _guard) = tempdir(ConfigMode::Ephemeral)?;
 
     // unexpected free argument `argument`
-    let child = get_child(&["seed", "argument"], &tempdir)?;
+    let child = get_child(&["seed", "argument"], &tempdir, ConfigMode::Ephemeral)?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
     // unrecognized option `-f`
-    let child = get_child(&["seed", "-f"], &tempdir)?;
+    let child = get_child(&["seed", "-f"], &tempdir, ConfigMode::Ephemeral)?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
     // unexpected free argument `start`
-    let child = get_child(&["seed", "start"], &tempdir)?;
+    let child = get_child(&["seed", "start"], &tempdir, ConfigMode::Ephemeral)?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
@@ -231,7 +235,7 @@ fn start_no_args() -> Result<()> {
     // start caches state, so run one of the start tests with persistent state
     let (tempdir, _guard) = tempdir(ConfigMode::Persistent)?;
 
-    let mut child = get_child(&["-v", "start"], &tempdir)?;
+    let mut child = get_child(&["-v", "start"], &tempdir, ConfigMode::Persistent)?;
 
     // Run the program and kill it at 1 second
     std::thread::sleep(Duration::from_secs(1));
@@ -256,7 +260,7 @@ fn start_args() -> Result<()> {
     let (tempdir, _guard) = tempdir(ConfigMode::Ephemeral)?;
 
     // Any free argument is valid
-    let mut child = get_child(&["start", "argument"], &tempdir)?;
+    let mut child = get_child(&["start", "argument"], &tempdir, ConfigMode::Ephemeral)?;
     // Run the program and kill it at 1 second
     std::thread::sleep(Duration::from_secs(1));
     child.kill()?;
@@ -268,7 +272,7 @@ fn start_args() -> Result<()> {
     output.assert_failure()?;
 
     // unrecognized option `-f`
-    let child = get_child(&["start", "-f"], &tempdir)?;
+    let child = get_child(&["start", "-f"], &tempdir, ConfigMode::Ephemeral)?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
@@ -280,7 +284,7 @@ fn persistent_mode() -> Result<()> {
     zebra_test::init();
     let (tempdir, _guard) = tempdir(ConfigMode::Persistent)?;
 
-    let mut child = get_child(&["-v", "start"], &tempdir)?;
+    let mut child = get_child(&["-v", "start"], &tempdir, ConfigMode::Persistent)?;
 
     // Run the program and kill it at 1 second
     std::thread::sleep(Duration::from_secs(1));
@@ -303,7 +307,7 @@ fn ephemeral_mode() -> Result<()> {
     let (tempdir, _guard) = tempdir(ConfigMode::Ephemeral)?;
 
     // Any free argument is valid
-    let mut child = get_child(&["start", "argument"], &tempdir)?;
+    let mut child = get_child(&["start", "argument"], &tempdir, ConfigMode::Ephemeral)?;
     // Run the program and kill it at 1 second
     std::thread::sleep(Duration::from_secs(1));
     child.kill()?;
@@ -338,7 +342,7 @@ fn misconfigured_ephemeral_mode() -> Result<()> {
     let tempdir = dir.path().to_path_buf();
 
     // Any free argument is valid
-    let mut child = get_child(&["start", "argument"], &tempdir)?;
+    let mut child = get_child(&["start", "argument"], &tempdir, ConfigMode::NoConfig)?;
     // Run the program and kill it at 1 second
     std::thread::sleep(Duration::from_secs(1));
     child.kill()?;
@@ -358,7 +362,7 @@ fn app_no_args() -> Result<()> {
     zebra_test::init();
     let (tempdir, _guard) = tempdir(ConfigMode::Ephemeral)?;
 
-    let child = get_child(&[], &tempdir)?;
+    let child = get_child(&[], &tempdir, ConfigMode::Ephemeral)?;
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
@@ -372,7 +376,7 @@ fn version_no_args() -> Result<()> {
     zebra_test::init();
     let (tempdir, _guard) = tempdir(ConfigMode::Ephemeral)?;
 
-    let child = get_child(&["version"], &tempdir)?;
+    let child = get_child(&["version"], &tempdir, ConfigMode::Ephemeral)?;
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
@@ -387,12 +391,12 @@ fn version_args() -> Result<()> {
     let (tempdir, _guard) = tempdir(ConfigMode::Ephemeral)?;
 
     // unexpected free argument `argument`
-    let child = get_child(&["version", "argument"], &tempdir)?;
+    let child = get_child(&["version", "argument"], &tempdir, ConfigMode::Ephemeral)?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
     // unrecognized option `-f`
-    let child = get_child(&["version", "-f"], &tempdir)?;
+    let child = get_child(&["version", "-f"], &tempdir, ConfigMode::Ephemeral)?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
@@ -422,6 +426,7 @@ fn valid_generated_config(command: &str, expected_output: &str) -> Result<()> {
     let child = get_child(
         &["generate", "-o", generated_config_path.to_str().unwrap()],
         &tempdir,
+        ConfigMode::NoConfig,
     )?;
 
     let output = child.wait_with_output()?;
@@ -431,10 +436,7 @@ fn valid_generated_config(command: &str, expected_output: &str) -> Result<()> {
     assert_with_context!(generated_config_path.exists(), &output);
 
     // Run command using temp dir and kill it at 1 second
-    let mut child = get_child(
-        &["-c", generated_config_path.to_str().unwrap(), command],
-        &tempdir,
-    )?;
+    let mut child = get_child(&[command], &tempdir, ConfigMode::Ephemeral)?;
     std::thread::sleep(Duration::from_secs(1));
     child.kill()?;
 
