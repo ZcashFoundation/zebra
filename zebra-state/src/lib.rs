@@ -73,7 +73,7 @@ pub struct Config {
     ///
     /// Ephemeral databases are stored in memory on Linux, and in a temporary directory on other OSes.
     ///
-    /// Set to `false` by default.
+    /// Set to `false` by default. If this is set to `true`, [`cache_dir`] is ignored.
     pub ephemeral: bool,
 }
 

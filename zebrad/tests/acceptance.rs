@@ -36,6 +36,7 @@ fn tempdir(config_mode: ConfigMode) -> Result<(PathBuf, impl Drop)> {
             let cache_dir = dir.path().join("state");
             fs::create_dir(&cache_dir)?;
             config.state.cache_dir = cache_dir;
+            config.state.ephemeral = false;
         }
 
         fs::File::create(dir.path().join("zebrad.toml"))?
@@ -404,11 +405,7 @@ fn valid_generated_config(command: &str, expected_output: &str) -> Result<()> {
 
     // Generate configuration in temp dir path
     let child = get_child(
-        &[
-            "generate",
-            "-o",
-            dbg!(generated_config_path.to_str().unwrap()),
-        ],
+        &["generate", "-o", generated_config_path.to_str().unwrap()],
         &tempdir,
     )?;
 
@@ -417,10 +414,6 @@ fn valid_generated_config(command: &str, expected_output: &str) -> Result<()> {
 
     // Check if the file was created
     assert!(generated_config_path.exists());
-    println!(
-        "{}",
-        std::fs::read_to_string(&generated_config_path).unwrap()
-    );
 
     // Run command using temp dir and kill it at 1 second
     let mut child = get_child(
