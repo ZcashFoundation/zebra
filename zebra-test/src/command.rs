@@ -220,7 +220,7 @@ impl TestOutput {
 }
 
 /// Add context to an error report
-trait ContextFrom<S> {
+pub trait ContextFrom<S> {
     type Return;
 
     fn context_from(self, source: &S) -> Self::Return;
