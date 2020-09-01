@@ -13,7 +13,7 @@ use zebrad::config::ZebradConfig;
 
 fn default_test_config() -> Result<ZebradConfig> {
     let mut config = ZebradConfig::default();
-    config.state.ephemeral = true;
+    config.state = zebra_state::Config::ephemeral();
     config.state.memory_cache_bytes = 256000000;
     config.network.listen_addr = "127.0.0.1:0".parse()?;
 
@@ -72,6 +72,21 @@ fn generate_no_args() -> Result<()> {
     Ok(())
 }
 
+macro_rules! assert_with_context {
+    ($pred:expr, $source:expr) => {
+        if !$pred {
+            use color_eyre::Section as _;
+            use color_eyre::SectionExt as _;
+            use zebra_test::command::ContextFrom as _;
+            let report = color_eyre::eyre::eyre!("failed assertion")
+                .section(stringify!($pred).header("Predicate:"))
+                .context_from($source);
+
+            panic!("Error: {:?}", report);
+        }
+    };
+}
+
 #[test]
 fn generate_args() -> Result<()> {
     zebra_test::init();
@@ -103,13 +118,13 @@ fn generate_args() -> Result<()> {
     )?;
 
     let output = child.wait_with_output()?;
-    output.assert_success()?;
+    let output = output.assert_success()?;
 
     // Check if the temp dir still exist
-    assert!(tempdir.exists());
+    assert_with_context!(tempdir.exists(), &output);
 
     // Check if the file was created
-    assert!(generated_config_path.exists());
+    assert_with_context!(generated_config_path.exists(), &output);
 
     Ok(())
 }
@@ -182,7 +197,7 @@ fn seed_no_args() -> Result<()> {
     output.stdout_contains(r"Starting zebrad in seed mode")?;
 
     // Make sure the command was killed
-    assert!(output.was_killed());
+    output.assert_was_killed()?;
 
     Ok(())
 }
@@ -230,7 +245,7 @@ fn start_no_args() -> Result<()> {
     output.stdout_contains(r"Starting zebrad$")?;
 
     // Make sure the command was killed
-    assert!(output.was_killed());
+    output.assert_was_killed()?;
 
     Ok(())
 }
@@ -248,7 +263,7 @@ fn start_args() -> Result<()> {
     let output = child.wait_with_output()?;
 
     // Make sure the command was killed
-    assert!(output.was_killed());
+    output.assert_was_killed()?;
 
     output.assert_failure()?;
 
@@ -273,11 +288,11 @@ fn persistent_mode() -> Result<()> {
     let output = child.wait_with_output()?;
 
     // Make sure the command was killed
-    assert!(output.was_killed());
+    output.assert_was_killed()?;
 
     // Check that we have persistent sled database
     let cache_dir = tempdir.join("state");
-    assert!(cache_dir.read_dir()?.count() > 0);
+    assert_with_context!(cache_dir.read_dir()?.count() > 0, &output);
 
     Ok(())
 }
@@ -295,10 +310,10 @@ fn ephemeral_mode() -> Result<()> {
     let output = child.wait_with_output()?;
 
     // Make sure the command was killed
-    assert!(output.was_killed());
+    output.assert_was_killed()?;
 
     let cache_dir = tempdir.join("state");
-    assert!(!cache_dir.exists());
+    assert_with_context!(!cache_dir.exists(), &output);
 
     Ok(())
 }
@@ -330,10 +345,10 @@ fn misconfigured_ephemeral_mode() -> Result<()> {
     let output = child.wait_with_output()?;
 
     // Make sure the command was killed
-    assert!(output.was_killed());
+    output.assert_was_killed()?;
 
     // Check that ephemeral takes precedence over cache_dir
-    assert_eq!(cache_dir.read_dir()?.count(), 0);
+    assert_with_context!(cache_dir.read_dir()?.count() == 0, &output);
 
     Ok(())
 }
@@ -410,10 +425,10 @@ fn valid_generated_config(command: &str, expected_output: &str) -> Result<()> {
     )?;
 
     let output = child.wait_with_output()?;
-    output.assert_success()?;
+    let output = output.assert_success()?;
 
     // Check if the file was created
-    assert!(generated_config_path.exists());
+    assert_with_context!(generated_config_path.exists(), &output);
 
     // Run command using temp dir and kill it at 1 second
     let mut child = get_child(
@@ -436,13 +451,13 @@ fn valid_generated_config(command: &str, expected_output: &str) -> Result<()> {
     //   - run the tests in an isolated environment,
     //   - run zebrad on a custom cache path and port,
     //   - run zcashd on a custom port.
-    assert!(output.was_killed(), "Expected zebrad with generated config to succeed. Are there other acceptance test, zebrad, or zcashd processes running?");
+    output.assert_was_killed().expect("Expected zebrad with generated config to succeed. Are there other acceptance test, zebrad, or zcashd processes running?");
 
     // Check if the temp dir still exists
-    assert!(tempdir.exists());
+    assert_with_context!(tempdir.exists(), &output);
 
     // Check if the created config file still exists
-    assert!(generated_config_path.exists());
+    assert_with_context!(generated_config_path.exists(), &output);
 
     Ok(())
 }

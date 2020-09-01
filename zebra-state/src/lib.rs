@@ -20,14 +20,14 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::{error, iter, sync::Arc};
 use tower::{Service, ServiceExt};
-
 use zebra_chain::{
     block::{self, Block},
     parameters::Network,
 };
 
-pub mod in_memory;
-pub mod on_disk;
+pub use on_disk::init;
+
+mod on_disk;
 
 /// The maturity threshold for transparent coinbase outputs.
 ///
@@ -75,6 +75,8 @@ pub struct Config {
     /// Ephemeral databases are stored in memory on Linux, and in a temporary directory on other OSes.
     ///
     /// Set to `false` by default. If this is set to `true`, [`cache_dir`] is ignored.
+    ///
+    /// [`cache_dir`]: struct.Config.html#structfield.cache_dir
     pub ephemeral: bool,
 }
 
@@ -90,12 +92,20 @@ impl Config {
         let config = sled::Config::default()
             .cache_capacity(self.memory_cache_bytes)
             .mode(sled::Mode::LowSpace);
+
         if self.ephemeral {
             config.temporary(self.ephemeral)
         } else {
             let path = self.cache_dir.join(net_dir).join("state");
             config.path(path)
         }
+    }
+
+    /// Construct a config for an ephemeral in memory database
+    pub fn ephemeral() -> Self {
+        let mut config = Self::default();
+        config.ephemeral = true;
+        config
     }
 }
 
@@ -104,6 +114,7 @@ impl Default for Config {
         let cache_dir = dirs::cache_dir()
             .unwrap_or_else(|| std::env::current_dir().unwrap().join("cache"))
             .join("zebra");
+
         Self {
             cache_dir,
             memory_cache_bytes: 512 * 1024 * 1024,

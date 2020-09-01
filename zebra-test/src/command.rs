@@ -7,6 +7,7 @@ use std::process::{Child, Command, ExitStatus, Output};
 
 #[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
+use tracing::instrument;
 
 /// Runs a command
 pub fn test_cmd(command_path: &str, tempdir: &PathBuf) -> Result<Command> {
@@ -83,52 +84,20 @@ pub struct TestStatus {
 
 impl TestStatus {
     pub fn assert_success(self) -> Result<Self> {
-        assert_success(&self.status, &self.cmd)?;
+        if !self.status.success() {
+            Err(eyre!("command exited unsuccessfully")).context_from(&self)?;
+        }
 
         Ok(self)
     }
 
     pub fn assert_failure(self) -> Result<Self> {
-        assert_failure(&self.status, &self.cmd)?;
+        if self.status.success() {
+            Err(eyre!("command unexpectedly exited successfully")).context_from(&self)?;
+        }
 
         Ok(self)
     }
-}
-
-fn assert_success(status: &ExitStatus, cmd: &str) -> Result<()> {
-    if !status.success() {
-        let exit_code = || {
-            if let Some(code) = status.code() {
-                format!("Exit Code: {}", code)
-            } else {
-                "Exit Code: None".into()
-            }
-        };
-
-        Err(eyre!("command exited unsuccessfully"))
-            .with_section(|| cmd.to_string().header("Command:"))
-            .with_section(exit_code)?;
-    }
-
-    Ok(())
-}
-
-fn assert_failure(status: &ExitStatus, cmd: &str) -> Result<()> {
-    if status.success() {
-        let exit_code = || {
-            if let Some(code) = status.code() {
-                format!("Exit Code: {}", code)
-            } else {
-                "Exit Code: None".into()
-            }
-        };
-
-        Err(eyre!("command unexpectedly exited successfully"))
-            .with_section(|| cmd.to_string().header("Command:"))
-            .with_section(exit_code)?;
-    }
-
-    Ok(())
 }
 
 #[derive(Debug)]
@@ -141,9 +110,7 @@ impl TestChild {
     #[spandoc::spandoc]
     pub fn kill(&mut self) -> Result<()> {
         /// SPANDOC: Killing child process
-        self.child
-            .kill()
-            .with_section(|| self.cmd.clone().header("Child Process:"))?;
+        self.child.kill().context_from(self)?;
 
         Ok(())
     }
@@ -170,41 +137,22 @@ pub struct TestOutput {
 
 impl TestOutput {
     pub fn assert_success(self) -> Result<Self> {
-        let output = &self.output;
-
-        assert_success(&self.output.status, &self.cmd)
-            .with_section(|| {
-                String::from_utf8_lossy(output.stdout.as_slice())
-                    .to_string()
-                    .header("Stdout:")
-            })
-            .with_section(|| {
-                String::from_utf8_lossy(output.stderr.as_slice())
-                    .to_string()
-                    .header("Stderr:")
-            })?;
+        if !self.output.status.success() {
+            Err(eyre!("command exited unsuccessfully")).context_from(&self)?;
+        }
 
         Ok(self)
     }
 
     pub fn assert_failure(self) -> Result<Self> {
-        let output = &self.output;
-
-        assert_failure(&self.output.status, &self.cmd)
-            .with_section(|| {
-                String::from_utf8_lossy(output.stdout.as_slice())
-                    .to_string()
-                    .header("Stdout:")
-            })
-            .with_section(|| {
-                String::from_utf8_lossy(output.stderr.as_slice())
-                    .to_string()
-                    .header("Stderr:")
-            })?;
+        if self.output.status.success() {
+            Err(eyre!("command unexpectedly exited successfully")).context_from(&self)?;
+        }
 
         Ok(self)
     }
 
+    #[instrument(skip(self))]
     pub fn stdout_contains(&self, regex: &str) -> Result<&Self> {
         let re = regex::Regex::new(regex)?;
         let stdout = String::from_utf8_lossy(&self.output.stdout);
@@ -215,16 +163,13 @@ impl TestOutput {
             }
         }
 
-        let command = || self.cmd.clone().header("Command:");
-        let stdout = || stdout.into_owned().header("Stdout:");
-
         Err(eyre!(
             "stdout of command did not contain any matches for the given regex"
         ))
-        .with_section(command)
-        .with_section(stdout)
+        .context_from(self)
     }
 
+    #[instrument(skip(self))]
     pub fn stdout_equals(&self, s: &str) -> Result<&Self> {
         let stdout = String::from_utf8_lossy(&self.output.stdout);
 
@@ -232,14 +177,10 @@ impl TestOutput {
             return Ok(self);
         }
 
-        let command = || self.cmd.clone().header("Command:");
-        let stdout = || stdout.into_owned().header("Stdout:");
-
-        Err(eyre!("stdout of command is not equal the given string"))
-            .with_section(command)
-            .with_section(stdout)
+        Err(eyre!("stdout of command is not equal the given string")).context_from(self)
     }
 
+    #[instrument(skip(self))]
     pub fn stdout_matches(&self, regex: &str) -> Result<&Self> {
         let re = regex::Regex::new(regex)?;
         let stdout = String::from_utf8_lossy(&self.output.stdout);
@@ -248,20 +189,139 @@ impl TestOutput {
             return Ok(self);
         }
 
-        let command = || self.cmd.clone().header("Command:");
-        let stdout = || stdout.into_owned().header("Stdout:");
-
-        Err(eyre!("stdout of command is not equal to the given regex"))
-            .with_section(command)
-            .with_section(stdout)
+        Err(eyre!("stdout of command is not equal to the given regex")).context_from(self)
     }
 
-    /// Returns true if the program was killed, false if exit was by another reason.
-    pub fn was_killed(&self) -> bool {
+    /// Returns Ok if the program was killed, Err(Report) if exit was by another
+    /// reason.
+    pub fn assert_was_killed(&self) -> Result<()> {
+        if self.was_killed() {
+            Err(eyre!("command was killed")).context_from(self)?
+        }
+
+        Ok(())
+    }
+
+    /// Returns Ok if the program was not killed, Err(Report) if exit was by
+    /// another reason.
+    pub fn assert_was_not_killed(&self) -> Result<()> {
+        if !self.was_killed() {
+            Err(eyre!("command wasn't killed")).context_from(self)?
+        }
+
+        Ok(())
+    }
+
+    #[cfg(not(unix))]
+    fn was_killed(&self) -> bool {
+        self.output.status.code() != Some(1)
+    }
+
+    #[cfg(unix)]
+    fn was_killed(&self) -> bool {
+        self.output.status.signal() != Some(9)
+    }
+}
+
+/// Add context to an error report
+pub trait ContextFrom<S> {
+    type Return;
+
+    fn context_from(self, source: &S) -> Self::Return;
+}
+
+impl<C, T, E> ContextFrom<C> for Result<T, E>
+where
+    E: Into<Report>,
+    Report: ContextFrom<C, Return = Report>,
+{
+    type Return = Result<T, Report>;
+
+    fn context_from(self, source: &C) -> Self::Return {
+        self.map_err(|e| e.into())
+            .map_err(|report| report.context_from(source))
+    }
+}
+
+impl ContextFrom<TestStatus> for Report {
+    type Return = Report;
+
+    fn context_from(self, source: &TestStatus) -> Self::Return {
+        let command = || source.cmd.clone().header("Command:");
+
+        self.with_section(command).context_from(&source.status)
+    }
+}
+
+impl ContextFrom<TestChild> for Report {
+    type Return = Report;
+
+    fn context_from(self, source: &TestChild) -> Self::Return {
+        let command = || source.cmd.clone().header("Command:");
+        let child = || format!("{:?}", source.child).header("Child Process:");
+
+        self.with_section(command).with_section(child)
+    }
+}
+
+impl ContextFrom<TestOutput> for Report {
+    type Return = Report;
+
+    fn context_from(self, source: &TestOutput) -> Self::Return {
+        self.with_section(|| source.cmd.clone().header("Command:"))
+            .context_from(&source.output)
+    }
+}
+
+impl ContextFrom<Output> for Report {
+    type Return = Report;
+
+    fn context_from(self, source: &Output) -> Self::Return {
+        let stdout = || {
+            String::from_utf8_lossy(&source.stdout)
+                .into_owned()
+                .header("Stdout:")
+        };
+        let stderr = || {
+            String::from_utf8_lossy(&source.stderr)
+                .into_owned()
+                .header("Stderr:")
+        };
+
+        self.context_from(&source.status)
+            .with_section(stdout)
+            .with_section(stderr)
+    }
+}
+
+impl ContextFrom<ExitStatus> for Report {
+    type Return = Report;
+
+    fn context_from(self, source: &ExitStatus) -> Self::Return {
+        let how = if source.success() {
+            "successfully"
+        } else {
+            "unsuccessfully"
+        };
+
+        if let Some(code) = source.code() {
+            return self.with_section(|| {
+                format!("command exited {} with status code {}", how, code).header("Exit Status:")
+            });
+        }
+
         #[cfg(unix)]
-        return self.output.status.signal() == Some(9);
+        if let Some(signal) = source.signal() {
+            self.with_section(|| {
+                format!("command terminated {} by signal {}", how, signal).header("Exit Status:")
+            })
+        } else {
+            unreachable!("on unix all processes either terminate via signal or with an exit code");
+        }
 
         #[cfg(not(unix))]
-        return self.output.status.code() == Some(1);
+        self.with_section(|| {
+            format!("command exited {} without a status code or signal", how).header("Exit Status:")
+        })
     }
 }

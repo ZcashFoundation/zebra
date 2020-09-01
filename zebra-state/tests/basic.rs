@@ -116,14 +116,9 @@ async fn check_transcripts(network: Network) -> Result<(), Report> {
         Network::Testnet => testnet_transcript,
         _ => mainnet_transcript,
     } {
-        let service = in_memory::init();
-        let transcript = Transcript::from(transcript_data.iter().cloned());
-        /// SPANDOC: check the in memory service against the transcript
-        transcript.check(service).await?;
-
         let storage_guard = TempDir::new("")?;
         let cache_dir = storage_guard.path().to_owned();
-        let service = on_disk::init(
+        let service = zebra_state::init(
             Config {
                 cache_dir,
                 ..Config::default()

@@ -42,7 +42,7 @@ impl StartCmd {
         info!(?self, "starting to connect to the network");
 
         let config = app_config();
-        let state = zebra_state::on_disk::init(config.state.clone(), config.network.network);
+        let state = zebra_state::init(config.state.clone(), config.network.network);
         let verifier = zebra_consensus::chain::init(
             config.consensus.clone(),
             config.network.network,
