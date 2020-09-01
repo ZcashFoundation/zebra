@@ -286,6 +286,11 @@ where
                     let inv_collector = inv_collector.clone();
                     async move {
                         if let Ok(Message::Inv(hashes)) = &msg {
+                            // We reject inventory messages with more than one
+                            // item because they are most likely replies to a
+                            // query rather than a newly gosipped block.
+                            //
+                            // https://zebra.zfnd.org/dev/rfcs/0003-inventory-tracking.html#inventory-monitoring
                             if hashes.len() == 1 {
                                 let hash = hashes[0];
                                 let _ = inv_collector.send((hash, addr));
