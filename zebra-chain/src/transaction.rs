@@ -97,6 +97,11 @@ pub enum Transaction {
 }
 
 impl Transaction {
+    /// Compute the hash of this transaction.
+    pub fn hash(&self) -> Hash {
+        Hash::from(self)
+    }
+
     /// Access the transparent inputs of this transaction, regardless of version.
     pub fn inputs(&self) -> &[transparent::Input] {
         match self {
