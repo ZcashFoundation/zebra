@@ -198,6 +198,24 @@ where
         while let Some(res) = requests.next().await {
             match res.map_err::<Report, _>(|e| eyre!(e)) {
                 Ok(zn::Response::BlockHashes(hashes)) => {
+                    tracing::trace!(?hashes);
+
+                    // zcashd sometimes appends an unrelated hash at the start
+                    // or end of its response.
+                    //
+                    // We can't discard the first hash, because it might be a
+                    // block we want to download. So we just accept any
+                    // out-of-order first hashes.
+
+                    // We use the last hash for the tip, and we want to avoid bad
+                    // tips. So we discard the last hash. (We don't need to worry
+                    // about missed downloads, because we will pick them up again
+                    // in ExtendTips.)
+                    let hashes = match hashes.split_last() {
+                        None => continue,
+                        Some((_last, rest)) => rest,
+                    };
+
                     let mut first_unknown = None;
                     for (i, &hash) in hashes.iter().enumerate() {
                         if !self.state_contains(hash).await? {
@@ -235,7 +253,10 @@ where
                             .retain(|t| !unknown_hashes.contains(&t.expected_next));
                         self.prospective_tips.insert(new_tip);
                     } else {
-                        tracing::debug!(?new_tip, "discarding tip already queued for download");
+                        tracing::debug!(
+                            ?new_tip,
+                            "discarding prospective tip: already in download set"
+                        );
                     }
 
                     let prev_download_len = download_set.len();
@@ -296,7 +317,14 @@ where
                             }
                         };
 
-                        tracing::trace!(?unknown_hashes);
+                        // We use the last hash for the tip, and we want to avoid
+                        // bad tips. So we discard the last hash. (We don't need
+                        // to worry about missed downloads, because we will pick
+                        // them up again in the next ExtendTips.)
+                        let unknown_hashes = match unknown_hashes.split_last() {
+                            None => continue,
+                            Some((_last, rest)) => rest,
+                        };
 
                         let new_tip = if let Some(end) = unknown_hashes.rchunks_exact(2).next() {
                             CheckedTip {
@@ -308,7 +336,7 @@ where
                             continue;
                         };
 
-                        tracing::trace!(?hashes);
+                        tracing::trace!(?unknown_hashes);
 
                         // Make sure we get the same tips, regardless of the
                         // order of peer responses
@@ -319,7 +347,10 @@ where
                                 .retain(|t| !unknown_hashes.contains(&t.expected_next));
                             self.prospective_tips.insert(new_tip);
                         } else {
-                            tracing::debug!(?new_tip, "discarding tip already queued for download");
+                            tracing::debug!(
+                                ?new_tip,
+                                "discarding prospective tip: already in download set"
+                            );
                         }
 
                         let prev_download_len = download_set.len();
@@ -343,7 +374,7 @@ where
         Ok(())
     }
 
-    /// Queue a download for the genesis block, if it isn't currently known to
+    /// Download and verify the genesis block, if it isn't currently known to
     /// our node.
     async fn request_genesis(&mut self) -> Result<(), Report> {
         // Due to Bitcoin protocol limitations, we can't request the genesis
@@ -352,15 +383,15 @@ where
         //  - responses start with the block *after* the requested block, and
         //  - the genesis hash is used as a placeholder for "no matches".
         //
-        // So we just queue the genesis block here.
+        // So we just download and verify the genesis block here.
         while !self.state_contains(self.genesis_hash).await? {
             self.request_blocks(vec![self.genesis_hash]).await?;
             match self
                 .pending_blocks
                 .next()
                 .await
-                .expect("inserted a download request")
-                .expect("block download tasks should not panic")
+                .expect("inserted a download and verify request")
+                .expect("block download and verify tasks should not panic")
             {
                 Ok(hash) => tracing::debug!(?hash, "verified and committed block to state"),
                 Err(e) => tracing::warn!(?e, "could not download genesis block, retrying"),
@@ -370,11 +401,13 @@ where
         Ok(())
     }
 
-    /// Queue downloads for each block that isn't currently known to our node
+    /// Queue download and verify tasks for each block that isn't currently known to our node
     async fn request_blocks(&mut self, hashes: Vec<block::Hash>) -> Result<(), Report> {
         tracing::debug!(hashes.len = hashes.len(), "requesting blocks");
         for hash in hashes.into_iter() {
-            // TODO: remove this check once the sync service is more reliable
+            // Avoid re-downloading blocks that have already been verified.
+            // This is particularly important for nodes on slow or unreliable
+            // networks.
             if self.state_contains(hash).await? {
                 tracing::debug!(
                     ?hash,
@@ -382,7 +415,7 @@ where
                 );
                 continue;
             }
-            // We construct the block download requests sequentially, waiting
+            // We construct the block requests sequentially, waiting
             // for the peer set to be ready to process each request. This
             // ensures that we start block downloads in the order we want them
             // (though they may resolve out of order), and it means that we
@@ -397,7 +430,7 @@ where
                 .map_err(|e| eyre!(e))?
                 .call(zn::Request::BlocksByHash(iter::once(hash).collect()));
 
-            tracing::debug!(?hash, "requested block");
+            tracing::trace!(?hash, "requested block");
 
             let span = tracing::info_span!("block_fetch_verify", ?hash);
             let mut verifier = self.verifier.clone();
@@ -425,10 +458,8 @@ where
         Ok(())
     }
 
-    /// Returns `Ok(true)` if the hash is present in the state, and `Ok(false)`
+    /// Returns `true` if the hash is present in the state, and `false`
     /// if the hash is not present in the state.
-    ///
-    /// Returns `Err(_)` if an error occurs.
     ///
     /// TODO: handle multiple tips in the state.
     async fn state_contains(&mut self, hash: block::Hash) -> Result<bool, Report> {
