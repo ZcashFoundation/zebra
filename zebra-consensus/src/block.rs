@@ -123,19 +123,34 @@ where
             // Skip contextual checks for the genesis block
             let previous_block_hash = block.header.previous_block_hash;
             if previous_block_hash != crate::parameters::GENESIS_PREVIOUS_BLOCK_HASH {
-                tracing::debug!(?height, "Awaiting previous block from state");
+                if height == block::Height(0) {
+                    Err("Invalid block: height is 0, but previous block hash is not null.")?;
+                }
+
+                let expected_height = block::Height(height.0 - 1);
+                tracing::trace!(?expected_height, ?previous_block_hash, "Waiting for previous block");
+                metrics::gauge!("block.waiting.block.height", expected_height.0 as i64);
+                metrics::counter!("block.waiting.count", 1);
+
                 let previous_block = BlockVerifier::await_block(
                     &mut state,
                     previous_block_hash,
-                    block::Height(height.0 - 1),
+                    expected_height,
                 )
                 .await?;
 
                 let previous_height = previous_block.coinbase_height().unwrap();
-                if height.0 != previous_height.0 + 1 {
+                if previous_height != expected_height {
                     Err("Invalid block height: must be 1 more than the previous block height.")?;
                 }
             }
+
+            tracing::trace!(?height, ?hash, "Verified block");
+            metrics::gauge!(
+                "block.verified.block.height",
+                height.0 as _
+            );
+            metrics::counter!("block.verified.block.count", 1);
 
             Ok(hash)
         }
