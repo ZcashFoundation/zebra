@@ -34,7 +34,7 @@ impl Runnable for GenerateCmd {
 #     zebrad start
 #
 # If there is no -c flag on the command line, zebrad looks for zebrad.toml in
-# the current directory. If that file does not exist, zebrad uses the default
+# the user's preference directory. If that file does not exist, zebrad uses the default
 # config.
 
 "
