@@ -284,15 +284,35 @@ where
                 match res.map_err::<Report, _>(|e| eyre!(e)) {
                     Ok(zn::Response::BlockHashes(hashes)) => {
                         tracing::debug!(first = ?hashes.first(), len = ?hashes.len());
+                        tracing::trace!(?hashes);
 
+                        // zcashd sometimes appends an unrelated hash at the
+                        // start or end of its response. Check the first hash
+                        // against the previous response, and discard mismatches
                         let unknown_hashes = match hashes.split_first() {
                             None => continue,
                             Some((expected_hash, rest)) if expected_hash == &tip.expected_next => {
                                 rest
                             }
-                            Some((other_hash, _rest)) => {
-                                tracing::debug!(?other_hash, ?tip.expected_next, "discarding response with unexpected next hash");
-                                continue;
+                            Some((other_hash, rest)) => {
+                                // See if it's just one extra hash
+                                // TODO: un-nest matches, probably by extracting this logic into a function
+                                match rest.split_first() {
+                                    None => {
+                                        tracing::debug!(?other_hash, ?tip.expected_next, ?tip.tip, "discarding response containing a single unexpected hash");
+                                        continue;
+                                    }
+                                    Some((expected_hash, rest))
+                                        if expected_hash == &tip.expected_next =>
+                                    {
+                                        tracing::debug!(?other_hash, ?tip.expected_next, ?tip.tip, "discarding unexpected next hash, using the rest");
+                                        rest
+                                    }
+                                    Some((after_other_hash, _rest)) => {
+                                        tracing::debug!(?other_hash, ?after_other_hash, ?tip.expected_next, ?tip.tip, "discarding response with two unexpected hashes");
+                                        continue;
+                                    }
+                                }
                             }
                         };
 
