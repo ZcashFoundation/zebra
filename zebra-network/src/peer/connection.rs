@@ -30,6 +30,7 @@ use tracing_futures::Instrument;
 use zebra_chain::{
     block::{self, Block},
     serialization::SerializationError,
+    transaction::{self, Transaction},
 };
 
 use crate::{
@@ -47,12 +48,16 @@ pub(super) enum Handler {
     /// Indicates that the handler has finished processing the request.
     Finished(Result<Response, SharedPeerError>),
     Ping(Nonce),
-    GetPeers,
-    GetBlocksByHash {
+    Peers,
+    FindBlocks,
+    BlocksByHash {
         hashes: HashSet<block::Hash>,
         blocks: Vec<Arc<Block>>,
     },
-    FindBlocks,
+    TransactionsByHash {
+        hashes: HashSet<transaction::Hash>,
+        transactions: Vec<Arc<Transaction>>,
+    },
 }
 
 impl Handler {
@@ -79,9 +84,37 @@ impl Handler {
                     Ping(req_nonce)
                 }
             }
-            (GetPeers, Message::Addr(addrs)) => Finished(Ok(Response::Peers(addrs))),
+            (Peers, Message::Addr(addrs)) => Finished(Ok(Response::Peers(addrs))),
             (
-                GetBlocksByHash {
+                TransactionsByHash {
+                    mut hashes,
+                    mut transactions,
+                },
+                Message::Tx(transaction),
+            ) => {
+                if hashes.remove(&transaction.hash()) {
+                    transactions.push(transaction);
+                    if hashes.is_empty() {
+                        Finished(Ok(Response::Transactions(transactions)))
+                    } else {
+                        TransactionsByHash {
+                            hashes,
+                            transactions,
+                        }
+                    }
+                } else {
+                    // This transaction isn't the one we asked for,
+                    // but unsolicited transactions are OK, so leave
+                    // for future handling.
+                    ignored_msg = Some(Message::Tx(transaction));
+                    TransactionsByHash {
+                        hashes,
+                        transactions,
+                    }
+                }
+            }
+            (
+                BlocksByHash {
                     mut hashes,
                     mut blocks,
                 },
@@ -92,9 +125,11 @@ impl Handler {
                     if hashes.is_empty() {
                         Finished(Ok(Response::Blocks(blocks)))
                     } else {
-                        GetBlocksByHash { hashes, blocks }
+                        BlocksByHash { hashes, blocks }
                     }
                 } else {
+                    // Blocks shouldn't be sent unsolicited,
+                    // so fail the request if we got the wrong one.
                     Finished(Err(PeerError::WrongBlock.into()))
                 }
             }
@@ -352,7 +387,7 @@ where
                 .await
                 .map_err(|e| e.into())
                 .map(|()| AwaitingResponse {
-                    handler: Handler::GetPeers,
+                    handler: Handler::Peers,
                     tx,
                     span,
                 }),
@@ -374,8 +409,23 @@ where
                 .await
                 .map_err(|e| e.into())
                 .map(|()| AwaitingResponse {
-                    handler: Handler::GetBlocksByHash {
+                    handler: Handler::BlocksByHash {
                         blocks: Vec::with_capacity(hashes.len()),
+                        hashes,
+                    },
+                    tx,
+                    span,
+                }),
+            (AwaitingRequest, TransactionsByHash(hashes)) => self
+                .peer_tx
+                .send(Message::GetData(
+                    hashes.iter().map(|h| (*h).into()).collect(),
+                ))
+                .await
+                .map_err(|e| e.into())
+                .map(|()| AwaitingResponse {
+                    handler: Handler::TransactionsByHash {
+                        transactions: Vec::with_capacity(hashes.len()),
                         hashes,
                     },
                     tx,
@@ -394,6 +444,32 @@ where
                     tx,
                     span,
                 }),
+            (AwaitingRequest, PushTransaction(transaction)) => {
+                // Since we're not waiting for further messages, we need to
+                // send a response before dropping tx.
+                let _ = tx.send(Ok(Response::Nil));
+                self.peer_tx
+                    .send(Message::Tx(transaction))
+                    .await
+                    .map_err(|e| e.into())
+                    .map(|()| AwaitingRequest)
+            }
+            (AwaitingRequest, AdvertiseTransactions(hashes)) => {
+                let _ = tx.send(Ok(Response::Nil));
+                self.peer_tx
+                    .send(Message::Inv(hashes.iter().map(|h| (*h).into()).collect()))
+                    .await
+                    .map_err(|e| e.into())
+                    .map(|()| AwaitingRequest)
+            }
+            (AwaitingRequest, AdvertiseBlock(hash)) => {
+                let _ = tx.send(Ok(Response::Nil));
+                self.peer_tx
+                    .send(Message::Inv(vec![hash.into()]))
+                    .await
+                    .map_err(|e| e.into())
+                    .map(|()| AwaitingRequest)
+            }
         } {
             Ok(new_state) => {
                 self.state = new_state;
@@ -407,6 +483,8 @@ where
     // context (namely, the work of processing the inbound msg as a request)
     #[instrument(skip(self))]
     async fn handle_message_as_request(&mut self, msg: Message) {
+        // XXX(hdevalence) -- using multiple match statements here
+        // prevents us from having exhaustiveness checking.
         trace!(?msg);
         // These messages are transport-related, handle them separately:
         match msg {
@@ -449,6 +527,78 @@ where
                 None
             }
             Message::GetAddr => Some(Request::Peers),
+            Message::GetData(items)
+                if items
+                    .iter()
+                    .all(|item| matches!(item, InventoryHash::Block(_))) =>
+            {
+                Some(Request::BlocksByHash(
+                    items
+                        .iter()
+                        .map(|item| {
+                            if let InventoryHash::Block(hash) = item {
+                                *hash
+                            } else {
+                                unreachable!("already checked all items are InventoryHash::Block")
+                            }
+                        })
+                        .collect(),
+                ))
+            }
+            Message::GetData(items)
+                if items
+                    .iter()
+                    .all(|item| matches!(item, InventoryHash::Tx(_))) =>
+            {
+                Some(Request::TransactionsByHash(
+                    items
+                        .iter()
+                        .map(|item| {
+                            if let InventoryHash::Tx(hash) = item {
+                                *hash
+                            } else {
+                                unreachable!("already checked all items are InventoryHash::Tx")
+                            }
+                        })
+                        .collect(),
+                ))
+            }
+            Message::GetData(items) => {
+                debug!(?items, "could not interpret getdata message");
+                None
+            }
+            Message::Tx(transaction) => Some(Request::PushTransaction(transaction)),
+            // We don't expect to be advertised multiple blocks at a time,
+            // so we ignore any advertisements of multiple blocks.
+            Message::Inv(items)
+                if items.len() == 1 && matches!(items[0], InventoryHash::Block(_)) =>
+            {
+                if let InventoryHash::Block(hash) = items[0] {
+                    Some(Request::AdvertiseBlock(hash))
+                } else {
+                    unreachable!("already checked we got a single block hash");
+                }
+            }
+            // This match arm is terrible, because we have to check that all the items
+            // are the correct kind and *then* convert them all.
+            Message::Inv(items)
+                if items
+                    .iter()
+                    .all(|item| matches!(item, InventoryHash::Tx(_))) =>
+            {
+                Some(Request::AdvertiseTransactions(
+                    items
+                        .iter()
+                        .map(|item| {
+                            if let InventoryHash::Tx(hash) = item {
+                                *hash
+                            } else {
+                                unreachable!("already checked all items are InventoryHash::Tx")
+                            }
+                        })
+                        .collect(),
+                ))
+            }
             _ => {
                 debug!("unhandled message type");
                 None
@@ -492,6 +642,14 @@ where
             Response::Peers(addrs) => {
                 if let Err(e) = self.peer_tx.send(Message::Addr(addrs)).await {
                     self.fail_with(e.into());
+                }
+            }
+            Response::Transactions(transactions) => {
+                // Generate one tx message per transaction.
+                for transaction in transactions.into_iter() {
+                    if let Err(e) = self.peer_tx.send(Message::Tx(transaction)).await {
+                        self.fail_with(e.into());
+                    }
                 }
             }
             Response::Blocks(blocks) => {
