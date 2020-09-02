@@ -58,6 +58,7 @@ pub type BoxedStdError = Box<dyn std::error::Error + Send + Sync + 'static>;
 mod address_book;
 mod config;
 mod constants;
+mod isolated;
 mod meta_addr;
 mod peer;
 mod peer_set;
@@ -68,6 +69,7 @@ mod timestamp_collector;
 pub use crate::{
     address_book::AddressBook,
     config::Config,
+    isolated::connect_isolated,
     peer_set::init,
     policies::{RetryErrors, RetryLimit},
     protocol::internal::{Request, Response},
