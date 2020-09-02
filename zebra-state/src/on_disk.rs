@@ -57,6 +57,10 @@ impl SledState {
             Ok(())
         })?;
 
+        tracing::trace!(?height, ?hash, "Committed block");
+        metrics::gauge!("state.committed.block.height", height.0 as _);
+        metrics::counter!("state.committed.block.count", 1);
+
         Ok(hash)
     }
 
