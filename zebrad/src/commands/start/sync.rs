@@ -16,11 +16,29 @@ use zebra_consensus::parameters;
 use zebra_network::{self as zn, RetryLimit};
 use zebra_state as zs;
 
+/// Controls the number of peers used for each ObtainTips and ExtendTips request.
 // XXX in the future, we may not be able to access the checkpoint module.
 const FANOUT: usize = checkpoint::MAX_QUEUED_BLOCKS_PER_HEIGHT;
+/// Controls how many times we will retry each block download.
+///
+/// If all the retries fail, then the syncer will reset, and start downloading
+/// blocks from the verified tip in the state, including blocks which previously
+/// downloaded successfully.
+///
+/// But if a node is on a slow or unreliable network, sync restarts can result
+/// in a flood of download requests, making future syncs more likely to fail.
+/// So it's much faster to retry each block multiple times.
+///
+/// When we implement a peer reputation system, we can reduce the number of
+/// retries, because we will be more likely to choose a good peer.
+const BLOCK_DOWNLOAD_RETRY_LIMIT: usize = 5;
+
 /// Controls how far ahead of the chain tip the syncer tries to download before
 /// waiting for queued verifications to complete. Set to twice the maximum
 /// checkpoint distance.
+///
+/// Some checkpoints contain larger blocks, so the maximum checkpoint gap can
+/// represent multiple gigabytes of data.
 const LOOKAHEAD_LIMIT: usize = checkpoint::MAX_CHECKPOINT_HEIGHT_GAP * 2;
 
 /// Controls how long we wait for a tips response to return.
@@ -53,7 +71,23 @@ const BLOCK_VERIFY_TIMEOUT: Duration = Duration::from_secs(MAX_CHECKPOINT_DOWNLO
 /// their connection state.
 const TIPS_RETRY_TIMEOUT: Duration = Duration::from_secs(60);
 /// Controls how long we wait to restart syncing after finishing a sync run.
-const SYNC_RESTART_TIMEOUT: Duration = Duration::from_secs(20);
+///
+/// This timeout should be long enough to:
+///   - allow pending downloads and verifies to complete or time out.
+///     Sync restarts don't cancel downloads, so quick restarts can overload
+///     network-bound nodes with lots of peers, leading to further failures.
+///     (The total number of requests being processed by peers is only
+///     constrained by the number of peers.)
+///   - allow zcashd peers to process pending requests. If the node only has a
+///     few peers, we want to clear as much peer state as possible. In
+///     particular, zcashd sends "next block range" hints, based on zcashd's
+///     internal model of our sync progress. But we want to discard these hints,
+///     so they don't get confused with ObtainTips and ExtendTips responses.
+///
+/// Make sure each sync run can download an entire checkpoint, even on instances
+/// with slow or unreliable networks. This is particularly important on testnet,
+/// which has a small number of slow peers.
+const SYNC_RESTART_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Helps work around defects in the bitcoin protocol by checking whether
 /// the returned hashes actually extend a chain tip.
@@ -642,3 +676,32 @@ where
 
 type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 type ReportAndHash = (Report, block::Hash);
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    /// Make sure the timeout values are consistent with each other.
+    #[test]
+    fn ensure_timeouts_consistent() {
+        let max_download_retry_time =
+            BLOCK_DOWNLOAD_TIMEOUT.as_secs() * (BLOCK_DOWNLOAD_RETRY_LIMIT as u64);
+        assert!(
+            max_download_retry_time < BLOCK_VERIFY_TIMEOUT.as_secs(),
+            "Verify timeout should allow for previous block download retries"
+        );
+        assert!(
+            BLOCK_DOWNLOAD_TIMEOUT.as_secs() * 2 < SYNC_RESTART_TIMEOUT.as_secs(),
+            "Sync restart should allow for pending and buffered requests to complete"
+        );
+
+        assert!(
+            TIPS_RETRY_TIMEOUT < BLOCK_VERIFY_TIMEOUT,
+            "Verify timeout should allow for retrying tips"
+        );
+        assert!(
+            SYNC_RESTART_TIMEOUT < BLOCK_VERIFY_TIMEOUT,
+            "Verify timeout should allow for a sync restart"
+        );
+    }
+}
