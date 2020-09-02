@@ -1,0 +1,31 @@
+#!/bin/bash
+
+set -euo pipefail
+
+# Reads stdin or the file $1, replacing hashes with block info
+#
+# Uses zebrad-hash-lookup, which uses zcash-cli.
+#
+# Usage:
+#   zebrad start | zebrad-log-filter
+#   ZCASH_CLI="zcash-cli -testnet" zebrad start | zebrad-log-filter
+
+# Find GNU sed
+if command -v gsed > /dev/null; then
+    GNU_SED=${GNU_SED:-gsed}
+else
+    # Just assume it's GNU sed
+    GNU_SED=${GNU_SED:-sed}
+fi
+
+while read line; do
+    # Put each hash on a separate line, then expand them
+    echo "$line" | \
+        $GNU_SED -r \
+            's/([0-9a-f]{64})/\n\1/g' | \
+        $GNU_SED -r \
+            's/(.*)([0-9a-f]{64})(.*)/ \
+                echo -n '\''\1'\''; \
+                echo '\''\2'\'' | zebrad-hash-lookup; \
+                echo -n '\''\3'\''; /e'
+done < "${1:-/dev/stdin}"
