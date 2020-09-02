@@ -409,10 +409,9 @@ where
                 .expect("block download tasks should not panic")
             {
                 Ok(hash) => tracing::trace!(?hash, "verified and committed block to state"),
-                Err((e, _)) => tracing::warn!(
-                    ?e,
-                    "could not download or verify genesis block, retrying"
-                ),
+                Err((e, _)) => {
+                    tracing::warn!(?e, "could not download or verify genesis block, retrying")
+                }
             }
         }
 
@@ -450,37 +449,35 @@ where
 
             let span = tracing::info_span!("block_fetch_verify", ?hash);
             let mut verifier = self.verifier.clone();
-            let task = tokio::spawn(
-                async move {
-                    async {
-                        let block = match block_req.await {
-                            Ok(zn::Response::Blocks(blocks)) => blocks
-                                .into_iter()
-                                .next()
-                                .expect("successful response has the block in it"),
-                            Ok(_) => unreachable!("wrong response to block request"),
-                            // Make sure we can distinguish download and verify timeouts
-                            Err(e) => Err(eyre!(e)).wrap_err("failed to download block")?,
-                        };
-                        metrics::counter!("sync.downloaded.block.count", 1);
+            let task = tokio::spawn(async move {
+                async {
+                    let block = match block_req.await {
+                        Ok(zn::Response::Blocks(blocks)) => blocks
+                            .into_iter()
+                            .next()
+                            .expect("successful response has the block in it"),
+                        Ok(_) => unreachable!("wrong response to block request"),
+                        // Make sure we can distinguish download and verify timeouts
+                        Err(e) => Err(eyre!(e)).wrap_err("failed to download block")?,
+                    };
+                    metrics::counter!("sync.downloaded.block.count", 1);
 
-                        let result = verifier
-                            .ready_and()
-                            .await
-                            .map_err(|e| eyre!(e))
-                            .wrap_err("verifier service failed to be ready")?
-                            .call(block)
-                            .await
-                            .map_err(|e| eyre!(e))
-                            .wrap_err("failed to verify block")?;
-                        metrics::counter!("sync.verified.block.count", 1);
-                        Result::<block::Hash, Report>::Ok(result)
-                    }
-                    .instrument(span)
-                    .await
-                    .map_err(|e| (e, hash))
-                },
-            );
+                    let result = verifier
+                        .ready_and()
+                        .await
+                        .map_err(|e| eyre!(e))
+                        .wrap_err("verifier service failed to be ready")?
+                        .call(block)
+                        .await
+                        .map_err(|e| eyre!(e))
+                        .wrap_err("failed to verify block")?;
+                    metrics::counter!("sync.verified.block.count", 1);
+                    Result::<block::Hash, Report>::Ok(result)
+                }
+                .instrument(span)
+                .await
+                .map_err(|e| (e, hash))
+            });
             self.pending_blocks.push(task);
         }
 
