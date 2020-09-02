@@ -24,12 +24,18 @@ const FANOUT: usize = checkpoint::MAX_QUEUED_BLOCKS_PER_HEIGHT;
 const LOOKAHEAD_LIMIT: usize = checkpoint::MAX_CHECKPOINT_HEIGHT_GAP * 2;
 /// Controls how long we wait for a block download request to complete.
 const BLOCK_TIMEOUT: Duration = Duration::from_secs(6);
+
+/// Controls how long we wait to retry ObtainTips or ExtendTips after they fail.
+///
+/// This timeout should be long enough to allow some of our peers to clear
+/// their connection state.
+const TIPS_RETRY_TIMEOUT: Duration = Duration::from_secs(60);
 /// Controls how long we wait to restart syncing after finishing a sync run.
 const SYNC_RESTART_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Helps work around defects in the bitcoin protocol by checking whether
 /// the returned hashes actually extend a chain tip.
-#[derive(Debug, Hash, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 struct CheckedTip {
     tip: block::Hash,
     expected_next: block::Hash,
@@ -107,12 +113,20 @@ where
             // Wipe state from prevous iterations.
             self.prospective_tips = HashSet::new();
             self.pending_blocks = Box::pin(FuturesUnordered::new());
+            self.update_metrics();
 
             tracing::info!("starting sync, obtaining new tips");
-            if self.obtain_tips().await.is_err() {
-                tracing::warn!("failed to obtain tips, waiting to restart sync");
-                delay_for(SYNC_RESTART_TIMEOUT).await;
-                continue 'sync;
+            if self.obtain_tips().await.is_err() || self.prospective_tips.is_empty() {
+                // Retry ObtainTips once
+                tracing::info!("failed to obtain tips, waiting to retry obtain tips");
+                delay_for(TIPS_RETRY_TIMEOUT).await;
+                let _ = self.obtain_tips().await;
+
+                if self.prospective_tips.is_empty() {
+                    tracing::warn!("failed to obtain tips, waiting to restart sync");
+                    delay_for(SYNC_RESTART_TIMEOUT).await;
+                    continue 'sync;
+                }
             };
             self.update_metrics();
 
@@ -149,23 +163,37 @@ where
                             }
                         }
                     }
-                    self.update_metrics();
                 }
+                self.update_metrics();
 
-                // If we have too many pending tasks, wait for one to finish:
-                if self.pending_blocks.len() > LOOKAHEAD_LIMIT {
-                    tracing::debug!(
-                        tips.len = self.prospective_tips.len(),
-                        pending.len = self.pending_blocks.len(),
-                        pending.limit = LOOKAHEAD_LIMIT,
-                        "waiting for pending blocks",
-                    );
+                // If we have too many pending tasks, wait for some to finish.
+                //
+                // Starting to wait is interesting, but logging each wait can be
+                // very verbose.
+                let mut first_wait = true;
+                while self.pending_blocks.len() > LOOKAHEAD_LIMIT {
+                    if first_wait {
+                        tracing::info!(
+                            tips.len = self.prospective_tips.len(),
+                            pending.len = self.pending_blocks.len(),
+                            pending.limit = LOOKAHEAD_LIMIT,
+                            "waiting for pending blocks",
+                        );
+                        first_wait = false;
+                    } else {
+                        tracing::trace!(
+                            tips.len = self.prospective_tips.len(),
+                            pending.len = self.pending_blocks.len(),
+                            pending.limit = LOOKAHEAD_LIMIT,
+                            "continuing to wait for pending blocks",
+                        );
+                    }
                     match self
                         .pending_blocks
                         .next()
                         .await
                         .expect("pending_blocks is nonempty")
-                        .expect("block download tasks should not panic")
+                        .expect("block download and verify tasks should not panic")
                     {
                         Ok(hash) => {
                             tracing::trace!(?hash, "verified and committed block to state");
@@ -185,14 +213,28 @@ where
                             }
                         }
                     }
-                } else {
-                    // Otherwise, we can keep extending the tips.
-                    tracing::info!(
-                        tips.len = self.prospective_tips.len(),
-                        pending.len = self.pending_blocks.len(),
-                        pending.limit = LOOKAHEAD_LIMIT,
-                        "extending tips",
-                    );
+                    self.update_metrics();
+                }
+
+                // Once we're below the lookahead limit, we can keep extending the tips.
+                tracing::info!(
+                    tips.len = self.prospective_tips.len(),
+                    pending.len = self.pending_blocks.len(),
+                    pending.limit = LOOKAHEAD_LIMIT,
+                    "extending tips",
+                );
+                let old_tips = self.prospective_tips.clone();
+                let _ = self.extend_tips().await;
+
+                // If ExtendTips fails, wait, then give it another shot.
+                //
+                // If we don't have many peers, waiting and retrying helps us
+                // ignore unsolicited BlockHashes from peers.
+                if self.prospective_tips.is_empty() {
+                    self.update_metrics();
+                    tracing::info!("no new tips, waiting to retry extend tips");
+                    delay_for(TIPS_RETRY_TIMEOUT).await;
+                    self.prospective_tips = old_tips;
                     let _ = self.extend_tips().await;
                 }
                 self.update_metrics();
