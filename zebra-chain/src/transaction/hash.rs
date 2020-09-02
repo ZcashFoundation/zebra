@@ -17,8 +17,8 @@ use super::Transaction;
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct Hash(pub [u8; 32]);
 
-impl From<Transaction> for Hash {
-    fn from(transaction: Transaction) -> Self {
+impl<'a> From<&'a Transaction> for Hash {
+    fn from(transaction: &'a Transaction) -> Self {
         let mut hash_writer = sha256d::Writer::default();
         transaction
             .zcash_serialize(&mut hash_writer)
