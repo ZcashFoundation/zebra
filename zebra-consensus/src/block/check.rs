@@ -15,7 +15,7 @@ pub fn is_coinbase_first(block: &Block) -> Result<(), Error> {
     let first = block
         .transactions
         .get(0)
-        .ok_or_else(|| "block has no transactions")?;
+        .ok_or("block has no transactions")?;
     let mut rest = block.transactions.iter().skip(1);
     if !first.is_coinbase() {
         return Err("first transaction must be coinbase".into());

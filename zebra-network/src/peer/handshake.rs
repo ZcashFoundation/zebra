@@ -262,7 +262,7 @@ where
             let remote_msg = stream
                 .next()
                 .await
-                .ok_or_else(|| HandshakeError::ConnectionClosed)??;
+                .ok_or(HandshakeError::ConnectionClosed)??;
 
             // Check that we got a Version and destructure its fields into the local scope.
             debug!(?remote_msg, "got message from remote peer");
@@ -295,7 +295,7 @@ where
             let remote_msg = stream
                 .next()
                 .await
-                .ok_or_else(|| HandshakeError::ConnectionClosed)??;
+                .ok_or(HandshakeError::ConnectionClosed)??;
             if let Message::Verack = remote_msg {
                 debug!("got verack from remote peer");
             } else {
