@@ -21,7 +21,7 @@ pub struct Hash(pub [u8; 32]);
 
 impl fmt::Debug for Hash {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple("BlockHeaderHash")
+        f.debug_tuple("block::Hash")
             .field(&hex::encode(&self.0))
             .finish()
     }
