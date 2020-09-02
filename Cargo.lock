@@ -247,6 +247,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "bitvec"
+version = "0.18.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8c1f0df4bb4c441080e98d6ea2dc3281fc19bb440e69ce03075e3d705894f1cb"
+dependencies = [
+ "funty",
+ "radium",
+ "wyz",
+]
+
+[[package]]
 name = "blake2b_simd"
 version = "0.5.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -844,6 +855,12 @@ name = "fuchsia-zircon-sys"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3dcaa9ae7725d12cdb85b3ad99a434db70b468c09ded17e012d86b5c1010f7a7"
+
+[[package]]
+name = "funty"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ba62103ce691c2fd80fbae2213dfdda9ce60804973ac6b6e97de818ea7f52c8"
 
 [[package]]
 name = "futures"
@@ -1651,7 +1668,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "34d38aeaffc032ec69faa476b3caaca8d4dd7f3f798137ff30359e5c7869ceb6"
 dependencies = [
  "arrayvec 0.5.1",
- "bitvec",
+ "bitvec 0.17.4",
  "byte-slice-cast",
  "serde",
 ]
@@ -3055,6 +3072,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "wyz"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "85e60b0d1b5f99db2556934e21937020776a5d31520bf169e851ac44e6420214"
+
+[[package]]
 name = "x25519-dalek"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3094,7 +3117,7 @@ version = "3.0.0-alpha.0"
 dependencies = [
  "bech32",
  "bincode",
- "bitvec",
+ "bitvec 0.18.1",
  "blake2b_simd",
  "blake2s_simd",
  "bs58",
