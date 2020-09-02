@@ -22,8 +22,30 @@ const FANOUT: usize = checkpoint::MAX_QUEUED_BLOCKS_PER_HEIGHT;
 /// waiting for queued verifications to complete. Set to twice the maximum
 /// checkpoint distance.
 const LOOKAHEAD_LIMIT: usize = checkpoint::MAX_CHECKPOINT_HEIGHT_GAP * 2;
+
+/// Controls how long we wait for a tips response to return.
+///
+/// The network layer also imposes a timeout on requests.
+const TIPS_RESPONSE_TIMEOUT: Duration = Duration::from_secs(6);
 /// Controls how long we wait for a block download request to complete.
-const BLOCK_TIMEOUT: Duration = Duration::from_secs(6);
+///
+/// The network layer also imposes a timeout on requests.
+const BLOCK_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// The maximum amount of time that Zebra should take to download a checkpoint
+/// full of blocks. Based on the current `MAX_CHECKPOINT_BYTE_SIZE`.
+///
+/// We assume that Zebra nodes have at least 10 Mbps bandwidth, and allow some
+/// extra time for request latency.
+const MAX_CHECKPOINT_DOWNLOAD_SECONDS: u64 = 300;
+
+/// Controls how long we wait for a block verify task to complete.
+///
+/// This timeout makes sure that the syncer and verifiers do not deadlock.
+/// When the `LOOKAHEAD_LIMIT` is reached, the syncer waits for blocks to verify
+/// (or fail). If the verifiers are also waiting for more blocks from the syncer,
+/// then without a timeout, Zebra would deadlock.
+const BLOCK_VERIFY_TIMEOUT: Duration = Duration::from_secs(MAX_CHECKPOINT_DOWNLOAD_SECONDS);
 
 /// Controls how long we wait to retry ObtainTips or ExtendTips after they fail.
 ///
@@ -51,12 +73,13 @@ where
     ZV: Service<Arc<Block>, Response = block::Hash, Error = Error> + Send + Clone + 'static,
     ZV::Future: Send,
 {
-    /// Used to perform extendtips requests, with no retry logic (failover is handled using fanout).
-    tip_network: ZN,
+    /// Used to perform ObtainTips and ExtendTips requests, with no retry logic
+    /// (failover is handled using fanout).
+    tip_network: Timeout<ZN>,
     /// Used to download blocks, with retry logic.
     block_network: Retry<RetryLimit, Timeout<ZN>>,
     state: ZS,
-    verifier: ZV,
+    verifier: Timeout<ZV>,
     prospective_tips: HashSet<CheckedTip>,
     pending_blocks: Pin<Box<FuturesUnordered<JoinHandle<Result<block::Hash, ReportAndHash>>>>>,
     genesis_hash: block::Hash,
@@ -77,12 +100,14 @@ where
     ///  - state: the zebra-state that stores the chain
     ///  - verifier: the zebra-consensus verifier that checks the chain
     pub fn new(chain: Network, peers: ZN, state: ZS, verifier: ZV) -> Self {
+        let tip_network = Timeout::new(peers.clone(), TIPS_RESPONSE_TIMEOUT);
         let block_network = ServiceBuilder::new()
-            .retry(RetryLimit::new(3))
-            .timeout(BLOCK_TIMEOUT)
-            .service(peers.clone());
+            .retry(RetryLimit::new(BLOCK_DOWNLOAD_RETRY_LIMIT))
+            .timeout(BLOCK_DOWNLOAD_TIMEOUT)
+            .service(peers);
+        let verifier = Timeout::new(verifier, BLOCK_VERIFY_TIMEOUT);
         Self {
-            tip_network: peers,
+            tip_network,
             block_network,
             state,
             verifier,
