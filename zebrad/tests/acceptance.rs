@@ -461,3 +461,37 @@ fn valid_generated_config(command: &str, expected_output: &str) -> Result<()> {
 
     Ok(())
 }
+
+#[test]
+fn metrics_tracing_listeners() -> Result<()> {
+    zebra_test::init();
+
+    // Write a configuration that has both metrics endpoint_addr and tracing endpoint_addr options set
+    let mut config = default_test_config()?;
+    config.metrics.endpoint_addr = Some("127.0.0.1:0".parse().unwrap());
+    config.tracing.endpoint_addr = Some("127.0.0.1:0".parse().unwrap());
+
+    let dir = TempDir::new("zebrad_tests")?;
+    fs::File::create(dir.path().join("zebrad.toml"))?
+        .write_all(toml::to_string(&config)?.as_bytes())?;
+
+    let tempdir = dir.path().to_path_buf();
+
+    let mut child = get_child(&["start"], &tempdir)?;
+
+    // Run the program and kill it at 1 second
+    std::thread::sleep(Duration::from_secs(1));
+    child.kill()?;
+
+    let output = child.wait_with_output()?;
+    let output = output.assert_failure()?;
+
+    // Make sure metrics and tracing endpoints were started
+    output.stdout_contains(r"Initializing metrics endpoint at 127.0.0.1")?;
+    output.stdout_contains(r"Initializing tracing endpoint at 127.0.0.1")?;
+
+    // Make sure the command was killed
+    output.assert_was_killed()?;
+
+    Ok(())
+}
