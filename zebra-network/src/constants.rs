@@ -8,10 +8,14 @@ use crate::protocol::external::types::*;
 use zebra_chain::parameters::NetworkUpgrade;
 
 /// The buffer size for the peer set.
+///
+/// We assume that Zebra nodes have at least 10 Mbps bandwidth. Therefore, a
+/// maximum-sized block will take 2 seconds to download. Based on the current
+/// `BLOCK_DOWNLOAD_TIMEOUT`, this is the largest buffer size we can support.
 pub const PEERSET_BUFFER_SIZE: usize = 10;
 
 /// The timeout for requests made to a remote peer.
-pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// The timeout for handshakes when connecting to new peers.
 pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(4);
@@ -27,7 +31,7 @@ pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(4);
 /// This avoids explicit synchronization, but relies on the peer
 /// connector actually setting up channels and these heartbeats in a
 /// specific manner that matches up with this math.
-pub const LIVE_PEER_DURATION: Duration = Duration::from_secs(60 + 10 + 10 + 10);
+pub const LIVE_PEER_DURATION: Duration = Duration::from_secs(60 + 20 + 20 + 20);
 
 /// Regular interval for sending keepalive `Ping` messages to each
 /// connected peer.
@@ -66,10 +70,20 @@ pub const CURRENT_VERSION: Version = Version(170_012);
 pub const MIN_NETWORK_UPGRADE: NetworkUpgrade = NetworkUpgrade::Heartwood;
 
 /// The default RTT estimate for peer responses.
-pub const EWMA_DEFAULT_RTT: Duration = Duration::from_secs(1);
+///
+/// We choose a high value for the default RTT, so that new peers must prove they
+/// are fast, before we prefer them to other peers. This is particularly
+/// important on testnet, which has a small number of peers, which are often
+/// slow.
+///
+/// Make the default RTT one second higher than the response timeout.
+pub const EWMA_DEFAULT_RTT: Duration = Duration::from_secs(20 + 1);
 
 /// The decay time for the EWMA response time metric used for load balancing.
-pub const EWMA_DECAY_TIME: Duration = Duration::from_secs(60);
+///
+/// This should be much larger than the `SYNC_RESTART_TIMEOUT`, so we choose
+/// better peers when we restart the sync.
+pub const EWMA_DECAY_TIME: Duration = Duration::from_secs(120);
 
 /// Magic numbers used to identify different Zcash networks.
 pub mod magics {
@@ -94,5 +108,19 @@ mod tests {
             HEARTBEAT_INTERVAL + REQUEST_TIMEOUT + REQUEST_TIMEOUT + REQUEST_TIMEOUT;
 
         assert_eq!(LIVE_PEER_DURATION, constructed_live_peer_duration);
+    }
+
+    /// Make sure that the timeout values are consistent with each other.
+    #[test]
+    fn ensure_timeouts_consistent() {
+        assert!(HANDSHAKE_TIMEOUT <= REQUEST_TIMEOUT,
+                "Handshakes are requests, so the handshake timeout can't be longer than the timeout for all requests.");
+        // This check is particularly important on testnet, which has a small
+        // number of peers, which are often slow.
+        assert!(EWMA_DEFAULT_RTT > REQUEST_TIMEOUT,
+                "The default EWMA RTT should be higher than the request timeout, so new peers are required to prove they are fast, before we prefer them to other peers.");
+
+        assert!(EWMA_DECAY_TIME > REQUEST_TIMEOUT,
+                "The EWMA decay time should be higher than the request timeout, so timed out peers are penalised by the EWMA.");
     }
 }
