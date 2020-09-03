@@ -46,9 +46,13 @@ fn tempdir(config_mode: ConfigMode) -> Result<(PathBuf, impl Drop)> {
     Ok((dir.path().to_path_buf(), dir))
 }
 
-pub fn get_child(args: &[&str], tempdir: &PathBuf) -> Result<TestChild> {
+fn get_child(args: &[&str], tempdir: &PathBuf) -> Result<TestChild> {
     let mut cmd = test_cmd(env!("CARGO_BIN_EXE_zebrad"), &tempdir)?;
 
+    let default_config_path = tempdir.join("zebrad.toml");
+    if default_config_path.exists() {
+        cmd.args(&["-c", default_config_path.to_str().unwrap()]);
+    }
     Ok(cmd
         .args(args)
         .stdout(Stdio::piped())
@@ -150,7 +154,7 @@ fn help_no_args() -> Result<()> {
 #[test]
 fn help_args() -> Result<()> {
     zebra_test::init();
-    let (tempdir, _guard) = tempdir(ConfigMode::Ephemeral)?;
+    let (tempdir, _guard) = tempdir(ConfigMode::NoConfig)?;
 
     // The subcommand "argument" wasn't recognized.
     let child = get_child(&["help", "argument"], &tempdir)?;
@@ -431,10 +435,7 @@ fn valid_generated_config(command: &str, expected_output: &str) -> Result<()> {
     assert_with_context!(generated_config_path.exists(), &output);
 
     // Run command using temp dir and kill it at 1 second
-    let mut child = get_child(
-        &["-c", generated_config_path.to_str().unwrap(), command],
-        &tempdir,
-    )?;
+    let mut child = get_child(&[command], &tempdir)?;
     std::thread::sleep(Duration::from_secs(1));
     child.kill()?;
 
