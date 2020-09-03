@@ -1,7 +1,7 @@
 use std::{collections::HashSet, iter, pin::Pin, sync::Arc, time::Duration};
 
 use color_eyre::eyre::{eyre, Report, WrapErr};
-use futures::future::FutureExt;
+use futures::future::{FutureExt, TryFutureExt};
 use futures::stream::{FuturesUnordered, StreamExt};
 use tokio::{task::JoinHandle, time::delay_for};
 use tower::{builder::ServiceBuilder, retry::Retry, timeout::Timeout, Service, ServiceExt};
@@ -449,8 +449,8 @@ where
 
             let span = tracing::info_span!("block_fetch_verify", ?hash);
             let mut verifier = self.verifier.clone();
-            let task = tokio::spawn(async move {
-                async {
+            let task = tokio::spawn(
+                async move {
                     let block = match block_req.await {
                         Ok(zn::Response::Blocks(blocks)) => blocks
                             .into_iter()
@@ -475,9 +475,8 @@ where
                     Result::<block::Hash, Report>::Ok(result)
                 }
                 .instrument(span)
-                .await
-                .map_err(|e| (e, hash))
-            });
+                .map_err(move |e| (e, hash)),
+            );
             self.pending_blocks.push(task);
         }
 
