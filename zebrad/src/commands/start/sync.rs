@@ -288,31 +288,38 @@ where
 
                         // zcashd sometimes appends an unrelated hash at the
                         // start or end of its response. Check the first hash
-                        // against the previous response, and discard mismatches
-                        let unknown_hashes = match hashes.split_first() {
-                            None => continue,
-                            Some((expected_hash, rest)) if expected_hash == &tip.expected_next => {
+                        // against the previous response, and discard mismatches.
+                        let unknown_hashes = match hashes.as_slice() {
+                            [expected_hash, rest @ ..] if expected_hash == &tip.expected_next => {
                                 rest
                             }
-                            Some((other_hash, rest)) => {
-                                // See if it's just one extra hash
-                                // TODO: un-nest matches, probably by extracting this logic into a function
-                                match rest.split_first() {
-                                    None => {
-                                        tracing::debug!(?other_hash, ?tip.expected_next, ?tip.tip, "discarding response containing a single unexpected hash");
-                                        continue;
-                                    }
-                                    Some((expected_hash, rest))
-                                        if expected_hash == &tip.expected_next =>
-                                    {
-                                        tracing::debug!(?other_hash, ?tip.expected_next, ?tip.tip, "discarding unexpected next hash, using the rest");
-                                        rest
-                                    }
-                                    Some((after_other_hash, _rest)) => {
-                                        tracing::debug!(?other_hash, ?after_other_hash, ?tip.expected_next, ?tip.tip, "discarding response with two unexpected hashes");
-                                        continue;
-                                    }
-                                }
+                            // If the first hash doesn't match, retry with the second.
+                            [first_hash, expected_hash, rest @ ..]
+                                if expected_hash == &tip.expected_next =>
+                            {
+                                tracing::debug!(?first_hash,
+                                                ?tip.expected_next,
+                                                ?tip.tip,
+                                                "unexpected first hash, but the second matches: using the hashes after the match");
+                                rest
+                            }
+                            // We ignore these responses
+                            [] => continue,
+                            [single_hash] => {
+                                tracing::debug!(?single_hash,
+                                                ?tip.expected_next,
+                                                ?tip.tip,
+                                                "discarding response containing a single unexpected hash");
+                                continue;
+                            }
+                            [first_hash, second_hash, rest @ ..] => {
+                                tracing::debug!(?first_hash,
+                                                ?second_hash,
+                                                rest_len = ?rest.len(),
+                                                ?tip.expected_next,
+                                                ?tip.tip,
+                                                "discarding response that starts with two unexpected hashes");
+                                continue;
                             }
                         };
 
