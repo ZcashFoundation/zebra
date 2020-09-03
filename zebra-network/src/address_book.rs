@@ -116,6 +116,18 @@ impl AddressBook {
         Utc::now() - CD::from_std(constants::LIVE_PEER_DURATION).unwrap()
     }
 
+    /// Used for range bounds, see cutoff_time
+    fn cutoff_meta() -> MetaAddr {
+        use std::net::{IpAddr, Ipv4Addr};
+        MetaAddr {
+            last_seen: AddressBook::cutoff_time(),
+            // The ordering on MetaAddrs is newest-first, then arbitrary,
+            // so any fields will do here.
+            addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 0),
+            services: PeerServices::default(),
+        }
+    }
+
     /// Returns true if the given [`SocketAddr`] could potentially be connected
     /// to a node feeding timestamps into this address book.
     pub fn is_potentially_connected(&self, addr: &SocketAddr) -> bool {
@@ -137,18 +149,22 @@ impl AddressBook {
     /// recently seen to least recently seen.
     pub fn disconnected_peers<'a>(&'a self) -> impl Iterator<Item = MetaAddr> + 'a {
         let _guard = self.span.enter();
-        use std::net::{IpAddr, Ipv4Addr};
         use std::ops::Bound::{Excluded, Unbounded};
-        let cutoff_meta = MetaAddr {
-            last_seen: AddressBook::cutoff_time(),
-            // The ordering on MetaAddrs is newest-first, then arbitrary,
-            // so any fields will do here.
-            addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 0),
-            services: PeerServices::default(),
-        };
 
         self.by_time
-            .range((Excluded(cutoff_meta), Unbounded))
+            .range((Excluded(Self::cutoff_meta()), Unbounded))
+            .rev()
+            .cloned()
+    }
+
+    /// Return an iterator over peers that could potentially be connected, ordered from most
+    /// recently seen to least recently seen.
+    pub fn potentially_connected_peers<'a>(&'a self) -> impl Iterator<Item = MetaAddr> + 'a {
+        let _guard = self.span.enter();
+        use std::ops::Bound::{Included, Unbounded};
+
+        self.by_time
+            .range((Unbounded, Included(Self::cutoff_meta())))
             .rev()
             .cloned()
     }
