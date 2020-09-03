@@ -36,7 +36,7 @@ use std::{
     task::{Context, Poll},
 };
 use tokio::sync::oneshot;
-use tower::Service;
+use tower::{Service, ServiceExt};
 
 use zebra_chain::{
     block::{self, Block},
@@ -87,7 +87,14 @@ pub const MAX_CHECKPOINT_HEIGHT_GAP: usize = 2_000;
 /// Verifies blocks using a supplied list of checkpoints. There must be at
 /// least one checkpoint for the genesis block.
 #[derive(Debug)]
-pub struct CheckpointVerifier {
+pub struct CheckpointVerifier<S>
+where
+    S: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>
+        + Send
+        + Clone
+        + 'static,
+    S::Future: Send + 'static,
+{
     // Inputs
     //
     /// The checkpoint list for this verifier.
@@ -95,6 +102,9 @@ pub struct CheckpointVerifier {
 
     /// The hash of the initial tip, if any.
     initial_tip_hash: Option<block::Hash>,
+
+    /// The underlying state service, possibly wrapped in other services.
+    state_service: S,
 
     // Queued Blocks
     //
@@ -117,17 +127,30 @@ pub struct CheckpointVerifier {
 /// The CheckpointVerifier implementation.
 ///
 /// Contains non-service utility functions for CheckpointVerifiers.
-impl CheckpointVerifier {
+impl<S> CheckpointVerifier<S>
+where
+    S: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>
+        + Send
+        + Clone
+        + 'static,
+    S::Future: Send + 'static,
+{
     /// Return a checkpoint verification service for `network`, using the
-    /// hard-coded checkpoint list. If `initial_tip` is Some(_), the
-    /// verifier starts at that initial tip, which does not have to be in the
-    /// hard-coded checkpoint list.
+    /// hard-coded checkpoint list, and the provided `state_service`.
+    ///
+    /// If `initial_tip` is Some(_), the verifier starts at that initial tip.
+    /// The initial tip can be between the checkpoints in the hard-coded
+    /// checkpoint list.
+    ///
+    /// The checkpoint verifier holds a state service of type `S`, into which newly
+    /// verified blocks will be committed. This state is pluggable to allow for
+    /// testing or instrumentation.
     ///
     /// This function should be called only once for a particular network, rather
     /// than constructing multiple verification services for the same network. To
     /// clone a CheckpointVerifier, you might need to wrap it in a
     /// `tower::Buffer` service.
-    pub fn new(network: Network, initial_tip: Option<Arc<Block>>) -> Self {
+    pub fn new(network: Network, initial_tip: Option<Arc<Block>>, state_service: S) -> Self {
         let checkpoint_list = CheckpointList::new(network);
         let max_height = checkpoint_list.max_height();
         let initial_height = initial_tip.clone().map(|b| b.coinbase_height()).flatten();
@@ -137,38 +160,44 @@ impl CheckpointVerifier {
             ?initial_height,
             "initialising CheckpointVerifier"
         );
-        Self::from_checkpoint_list(checkpoint_list, initial_tip)
+        Self::from_checkpoint_list(checkpoint_list, initial_tip, state_service)
     }
 
-    /// Return a checkpoint verification service using `list` and `initial_tip`.
+    /// Return a checkpoint verification service using `list`, `initial_tip`,
+    /// and `state_service`.
     ///
     /// Assumes that the provided genesis checkpoint is correct.
     ///
     /// Callers should prefer `CheckpointVerifier::new`, which uses the
-    /// hard-coded checkpoint lists. See `CheckpointVerifier::new` and
-    /// `CheckpointList::from_list` for more details.
-    //
-    // This function is designed for use in tests.
+    /// hard-coded checkpoint lists, or `CheckpointList::from_list` if you need
+    /// to specify a custom checkpoint list. See those functions for more
+    /// details.
+    ///
+    /// This function is designed for use in tests.
     #[allow(dead_code)]
     pub(crate) fn from_list(
         list: impl IntoIterator<Item = (block::Height, block::Hash)>,
         initial_tip: Option<Arc<Block>>,
+        state_service: S,
     ) -> Result<Self, Error> {
         Ok(Self::from_checkpoint_list(
             CheckpointList::from_list(list)?,
             initial_tip,
+            state_service,
         ))
     }
 
-    /// Return a checkpoint verification service using `checkpoint_list` and
-    /// `initial_tip`.
+    /// Return a checkpoint verification service using `checkpoint_list`,
+    /// `initial_tip`, and `state_service`.
+    ///
+    /// Assumes that the provided genesis checkpoint is correct.
     ///
     /// Callers should prefer `CheckpointVerifier::new`, which uses the
-    /// hard-coded checkpoint lists. See `CheckpointVerifier::new` and
-    /// `CheckpointList::from_list` for more details.
+    /// hard-coded checkpoint lists. See that function for more details.
     pub(crate) fn from_checkpoint_list(
         checkpoint_list: CheckpointList,
         initial_tip: Option<Arc<Block>>,
+        state_service: S,
     ) -> Self {
         // All the initialisers should call this function, so we only have to
         // change fields or default values in one place.
@@ -193,6 +222,7 @@ impl CheckpointVerifier {
         CheckpointVerifier {
             checkpoint_list,
             initial_tip_hash,
+            state_service,
             queued: BTreeMap::new(),
             verifier_progress,
         }
@@ -534,12 +564,13 @@ impl CheckpointVerifier {
 
     /// Check all the blocks in the current checkpoint range.
     ///
-    /// Send `Ok` for the blocks that are in the chain, and `Err` for side-chain
-    /// blocks.
+    /// If a checkpoint range is complete, returns a list of blocks that have
+    /// been validated as part of the main chain. Sends `Err` on the channels
+    /// of side-chain blocks, and drops them.
     ///
-    /// Does nothing if we are waiting for more blocks, or if verification has
-    /// finished.
-    fn process_checkpoint_range(&mut self) {
+    /// If we are waiting for more blocks, or if verification has finished,
+    /// does nothing, and returns an empty list of valid blocks.
+    fn process_checkpoint_range(&mut self) -> Vec<QueuedBlock> {
         // If this code shows up in profiles, we can try the following
         // optimisations:
         //   - only check the chain when the length of the queue is greater
@@ -555,7 +586,7 @@ impl CheckpointVerifier {
             // consensus parameters.
             BeforeGenesis => parameters::GENESIS_PREVIOUS_BLOCK_HASH,
             InitialTip(hash) | PreviousCheckpoint(hash) => hash,
-            FinalCheckpoint => return,
+            FinalCheckpoint => return Vec::new(),
         };
         // Return early if we're still waiting for more blocks
         let (target_checkpoint_height, mut expected_hash) = match self.target_checkpoint_height() {
@@ -566,7 +597,7 @@ impl CheckpointVerifier {
                     .expect("every checkpoint height must have a hash"),
             ),
             WaitingForBlocks => {
-                return;
+                return Vec::new();
             }
             FinishedVerifying => {
                 unreachable!("the FinalCheckpoint case should have returned earlier")
@@ -641,7 +672,7 @@ impl CheckpointVerifier {
                 );
 
                 // Stop verifying, and wait for the next valid block
-                return;
+                return Vec::new();
             }
         }
 
@@ -660,14 +691,7 @@ impl CheckpointVerifier {
         );
         metrics::counter!("checkpoint.verified.block.count", block_count as _);
 
-        // All the blocks we've kept are valid, so let's verify them
-        // in height order.
-        for qblock in rev_valid_blocks.drain(..).rev() {
-            // Sending can fail, but there's nothing we can do about it.
-            let _ = qblock.tx.send(Ok(qblock.hash));
-        }
-
-        // Finally, update the checkpoint bounds
+        // Update the checkpoint bounds
         self.update_progress(target_checkpoint_height);
 
         // Ensure that we're making progress
@@ -698,11 +722,21 @@ impl CheckpointVerifier {
             new_target == WaitingForBlocks || new_target == FinishedVerifying,
             "processing must cover all available checkpoints"
         );
+
+        // Return the blocks we need to commit, in chain order
+        rev_valid_blocks.drain(..).rev().collect()
     }
 }
 
 /// CheckpointVerifier rejects pending futures on drop.
-impl Drop for CheckpointVerifier {
+impl<S> Drop for CheckpointVerifier<S>
+where
+    S: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>
+        + Send
+        + Clone
+        + 'static,
+    S::Future: Send + 'static,
+{
     /// Send an error on `tx` for any `QueuedBlock`s that haven't been verified.
     ///
     /// We can't implement `Drop` on QueuedBlock, because `send()` consumes
@@ -727,7 +761,14 @@ impl Drop for CheckpointVerifier {
 /// The CheckpointVerifier service implementation.
 ///
 /// After verification, the block futures resolve to their hashes.
-impl Service<Arc<Block>> for CheckpointVerifier {
+impl<S> Service<Arc<Block>> for CheckpointVerifier<S>
+where
+    S: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>
+        + Send
+        + Clone
+        + 'static,
+    S::Future: Send + 'static,
+{
     type Response = block::Hash;
     type Error = Error;
     type Future =
@@ -754,16 +795,74 @@ impl Service<Arc<Block>> for CheckpointVerifier {
         // on the next call(). Failures always reject a block, so we know
         // there will be at least one more call().
         //
-        // TODO(teor): retry on failure (low priority, failures should be rare)
-        self.process_checkpoint_range();
+        // We don't retry with a smaller range on failure, because failures
+        // should be rare.
+        let mut valid_blocks = self.process_checkpoint_range();
 
         metrics::gauge!("checkpoint.queued_slots", self.queued.len() as i64);
 
-        async move {
-            // Remove the Result<..., RecvError> wrapper from the channel future
-            rx.await
-                .expect("CheckpointVerifier does not leave dangling receivers")
+        // Optimisation: return a small future in the common case.
+        //
+        // Rust 1.46 and later have known regressions in future size and
+        // complexity, so we want to return a small future in the common case.
+        if valid_blocks.is_empty() {
+            async move {
+                // Remove the Result<..., RecvError> wrapper from the channel future.
+                rx.await
+                    .expect("CheckpointVerifier does not leave dangling receivers")
+            }
+            .boxed()
+        } else {
+            let mut state_service = self.state_service.clone();
+
+            async move {
+                // All the blocks in the current range are valid. Commit them to the
+                // state.
+                for qblock in valid_blocks.drain(..) {
+                    // Since we're executing in a future, these blocks could be
+                    // committed out of order. That's ok, the state service will
+                    // handle out-of-order blocks.
+                    let ready_state = state_service.ready_and().await?;
+
+                    let result = match ready_state
+                        .call(zebra_state::Request::AddBlock {
+                            block: qblock.block.clone(),
+                        })
+                        .await?
+                    {
+                        zebra_state::Response::Added {
+                            hash: committed_hash,
+                        } => {
+                            assert_eq!(
+                                committed_hash, qblock.hash,
+                                "state returned wrong hash: hashes must be equal"
+                            );
+                            Ok(qblock.hash)
+                        }
+                        _ => Err(format!(
+                            "adding block {:?} {:?} to state failed",
+                            qblock.block.coinbase_height(),
+                            qblock.hash
+                        )
+                        .into()),
+                    };
+
+                    // Finally, tell the caller the result.
+                    // Sending can fail, but there's nothing we can do about it.
+                    let _ = qblock.tx.send(result);
+                }
+
+                // Remove the Result<..., RecvError> wrapper from the channel future.
+                //
+                // If the current block was just committed, then this await should
+                // return immediately. But that's not always guaranteed: if the last
+                // call discovered an error in a later checkpoint of a
+                // multi-checkpoint range, then this call will commit the earlier
+                // checkpoints, which might not include the current block.
+                rx.await
+                    .expect("CheckpointVerifier does not leave dangling receivers")
+            }
+            .boxed()
         }
-        .boxed()
     }
 }
