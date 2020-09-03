@@ -211,9 +211,9 @@ where
                     // tips. So we discard the last hash. (We don't need to worry
                     // about missed downloads, because we will pick them up again
                     // in ExtendTips.)
-                    let hashes = match hashes.split_last() {
-                        None => continue,
-                        Some((_last, rest)) => rest,
+                    let hashes = match hashes.as_slice() {
+                        [] => continue,
+                        [rest @ .., _last] => rest,
                     };
 
                     let mut first_unknown = None;
@@ -321,9 +321,9 @@ where
                         // bad tips. So we discard the last hash. (We don't need
                         // to worry about missed downloads, because we will pick
                         // them up again in the next ExtendTips.)
-                        let unknown_hashes = match unknown_hashes.split_last() {
-                            None => continue,
-                            Some((_last, rest)) => rest,
+                        let unknown_hashes = match unknown_hashes {
+                            [] => continue,
+                            [rest @ .., _last] => rest,
                         };
 
                         let new_tip = if let Some(end) = unknown_hashes.rchunks_exact(2).next() {
