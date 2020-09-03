@@ -39,9 +39,7 @@ where
         + 'static,
     S::Future: Send + 'static,
 {
-    /// The underlying `ZebraState`, possibly wrapped in other services.
-    // TODO: contextual verification
-    #[allow(dead_code)]
+    /// The underlying state service, possibly wrapped in other services.
     state_service: S,
 }
 
@@ -74,7 +72,7 @@ where
     }
 
     fn call(&mut self, block: Arc<Block>) -> Self::Future {
-        let mut state = self.state_service.clone();
+        let mut state_service = self.state_service.clone();
 
         // TODO(jlusby): Error = Report, handle errors from state_service.
         async move {
@@ -147,7 +145,7 @@ where
                 metrics::counter!("block.waiting.count", 1);
 
                 let previous_block = BlockVerifier::await_block(
-                    &mut state,
+                    &mut state_service,
                     previous_block_hash,
                     expected_height,
                 )
@@ -170,7 +168,20 @@ where
             );
             metrics::counter!("block.verified.block.count", 1);
 
-            Ok(hash)
+            // We need to add the block after the previous block is in the state,
+            // and before this future returns. Otherwise, blocks could be
+            // committed out of order.
+            let ready_state = state_service
+                .ready_and()
+                .await?;
+
+            match ready_state.call(zebra_state::Request::AddBlock { block }).await? {
+                zebra_state::Response::Added { hash: committed_hash } => {
+                    assert_eq!(committed_hash, hash, "state returned wrong hash: hashes must be equal");
+                    Ok(hash)
+                }
+                _ => Err(format!("adding block {:?} {:?} to state failed", height, hash))?,
+            }
         }
         .boxed()
     }
@@ -191,9 +202,12 @@ where
     /// Get the block for `hash`, using `state`.
     ///
     /// If there is no block for that hash, returns `Ok(None)`.
-    /// Returns an error if `state.poll_ready` errors.
-    async fn get_block(state: &mut S, hash: block::Hash) -> Result<Option<Arc<Block>>, Report> {
-        let block = state
+    /// Returns an error if `state_service.poll_ready` errors.
+    async fn get_block(
+        state_service: &mut S,
+        hash: block::Hash,
+    ) -> Result<Option<Arc<Block>>, Report> {
+        let block = state_service
             .ready_and()
             .await
             .map_err(|e| eyre!(e))?
@@ -208,16 +222,16 @@ where
         Ok(block)
     }
 
-    /// Wait until a block with `hash` is in `state`.
+    /// Wait until a block with `hash` is in `state_service`.
     ///
-    /// Returns an error if `state.poll_ready` errors.
+    /// Returns an error if `state_service.poll_ready` errors.
     async fn await_block(
-        state: &mut S,
+        state_service: &mut S,
         hash: block::Hash,
         height: block::Height,
     ) -> Result<Arc<Block>, Report> {
         loop {
-            match BlockVerifier::get_block(state, hash).await? {
+            match BlockVerifier::get_block(state_service, hash).await? {
                 Some(block) => return Ok(block),
                 // Busy-waiting is only a temporary solution to waiting for blocks.
                 // Replace with the contextual verification RFC design
@@ -232,9 +246,9 @@ where
 
 /// Return a block verification service, using the provided state service.
 ///
-/// The block verifier holds a state service of type `S`, used as context for
-/// block validation. This state is pluggable to allow for testing or
-/// instrumentation.
+/// The block verifier holds a state service of type `S`, into which newly
+/// verified blocks will be committed. This state is pluggable to allow for
+/// testing or instrumentation.
 ///
 /// The returned type is opaque to allow instrumentation or other wrappers, but
 /// can be boxed for storage. It is also `Clone` to allow sharing of a
