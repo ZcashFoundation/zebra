@@ -84,21 +84,36 @@ where
             // height for parsed blocks when we deserialize them.
             let height = block
                 .coinbase_height()
-                .ok_or("Invalid block: missing block height.")?;
+                .ok_or_else(|| format!("invalid block {:?}: missing block height",
+                                       hash))?;
             if height > block::Height::MAX {
-                Err("Invalid block height: greater than the maximum height.")?;
+                Err(format!("invalid block height {:?} in {:?}: greater than the maximum height {:?}",
+                            height,
+                            hash,
+                            block::Height::MAX))?;
             }
 
             // Check that this block is actually a new block
-            if BlockVerifier::get_block(&mut state, hash).await?.is_some() {
-                Err(format!("Block has already been verified. {:?} {:?}", height, hash))?;
+            if BlockVerifier::get_block(&mut state_service, hash).await?.is_some() {
+                Err(format!("duplicate block {:?} {:?}: block has already been verified",
+                            height,
+                            hash))?;
             }
 
             // Do the difficulty checks first, to raise the threshold for
             // attacks that use any other fields.
-            let difficulty_threshold = block.header.difficulty_threshold.to_expanded().ok_or("Invalid difficulty threshold in block header.")?;
+            let difficulty_threshold = block
+                .header
+                .difficulty_threshold
+                .to_expanded()
+                .ok_or_else(|| format!("invalid difficulty threshold in block header {:?} {:?}",
+                                       height,
+                                       hash))?;
             if hash > difficulty_threshold {
-                Err("Block failed the difficulty filter: hash must be less than or equal to the difficulty threshold.")?;
+                Err(format!("block {:?} failed the difficulty filter: hash {:?} must be less than or equal to the difficulty threshold {:?}",
+                            height,
+                            hash,
+                            difficulty_threshold))?;
             }
             block.header.is_equihash_solution_valid()?;
 
@@ -110,21 +125,20 @@ where
             block.header.is_time_valid_at(now)?;
             check::is_coinbase_first(&block)?;
 
-            // TODO:
-            //   - context-free header verification: merkle root
-            //   - contextual verification
+            // TODO: context-free header verification: merkle root
 
             // As a temporary solution for chain gaps, wait for the previous block,
             // and check its height.
-            // TODO:
-            //   - Add a previous block height and hash constraint to the AddBlock request,
-            //     so that we can verify in parallel, then check constraints before committing
+            //
+            // TODO: replace this check with the contextual verification RFC design
             //
             // Skip contextual checks for the genesis block
             let previous_block_hash = block.header.previous_block_hash;
             if previous_block_hash != crate::parameters::GENESIS_PREVIOUS_BLOCK_HASH {
                 if height == block::Height(0) {
-                    Err("Invalid block: height is 0, but previous block hash is not null.")?;
+                    Err(format!("invalid block {:?}: height is 0, but previous block hash {:?} is not null",
+                                hash,
+                                previous_block_hash))?;
                 }
 
                 let expected_height = block::Height(height.0 - 1);
@@ -141,11 +155,15 @@ where
 
                 let previous_height = previous_block.coinbase_height().unwrap();
                 if previous_height != expected_height {
-                    Err("Invalid block height: must be 1 more than the previous block height.")?;
+                    Err(format!("invalid block height {:?} for {:?}: must be 1 more than the previous block height {:?} in {:?}",
+                                height,
+                                hash,
+                                previous_height,
+                                previous_block_hash))?;
                 }
             }
 
-            tracing::trace!(?height, ?hash, "Verified block");
+            tracing::trace!("verified block");
             metrics::gauge!(
                 "block.verified.block.height",
                 height.0 as _
@@ -202,9 +220,7 @@ where
             match BlockVerifier::get_block(state, hash).await? {
                 Some(block) => return Ok(block),
                 // Busy-waiting is only a temporary solution to waiting for blocks.
-                // TODO:
-                //   - Get an AwaitBlock future from the state
-                //   - Replace with AddBlock constraints
+                // Replace with the contextual verification RFC design
                 None => {
                     tracing::debug!(?height, ?hash, "Waiting for state to have block");
                     time::delay_for(Duration::from_millis(50)).await

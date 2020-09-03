@@ -33,7 +33,7 @@ use zebra_chain::parameters::{Network, NetworkUpgrade::Sapling};
 
 /// The maximum expected gap between blocks.
 ///
-/// Used to identify unexpected high blocks.
+/// Used to identify unexpected out of order blocks.
 const MAX_EXPECTED_BLOCK_GAP: u32 = 100_000;
 
 /// A wrapper type that holds the `ChainVerifier`'s `CheckpointVerifier`, and
@@ -120,10 +120,11 @@ where
         let checkpoint_verifier = self.checkpoint.clone().map(|c| c.verifier);
         let max_checkpoint_height = self.checkpoint.clone().map(|c| c.max_height);
 
-        // Log an info-level message on unexpected high blocks
-        let is_unexpected_high_block = match (height, self.last_block_height) {
+        // Log an info-level message on unexpected out of order blocks
+        let is_unexpected_gap = match (height, self.last_block_height) {
             (Some(block::Height(height)), Some(block::Height(last_block_height)))
-                if (height > last_block_height + MAX_EXPECTED_BLOCK_GAP) =>
+                if (height > last_block_height + MAX_EXPECTED_BLOCK_GAP)
+                    || (height + MAX_EXPECTED_BLOCK_GAP < last_block_height) =>
             {
                 self.last_block_height = Some(block::Height(height));
                 true
@@ -137,20 +138,14 @@ where
         };
 
         async move {
-            // TODO(teor): in the post-sapling checkpoint range, allow callers
-            //             to use BlockVerifier, CheckpointVerifier, or both.
-
             // Call a verifier based on the block height and checkpoints.
             if is_higher_than_max_checkpoint(height, max_checkpoint_height) {
-                // Log a message on early high blocks.
+                // Log a message on unexpected out of order blocks.
+                //
                 // The sync service rejects most of these blocks, but we
                 // still want to know if a large number get through.
-                //
-                // This message can also happen if we keep getting unexpected
-                // low blocks. (We can't distinguish between these cases, until
-                // we've verified the blocks.)
-                if is_unexpected_high_block {
-                    tracing::debug!(?height, "unexpected high block, or recent unexpected low blocks");
+                if is_unexpected_gap {
+                    tracing::debug!("large block height gap: this block or the previous block is out of order");
                 }
 
                 block_verifier
@@ -160,17 +155,17 @@ where
                     .await?;
             } else {
                 checkpoint_verifier
-                    .expect("Missing checkpoint verifier: verifier must be Some if max checkpoint height is Some")
+                    .expect("missing checkpoint verifier: verifier must be Some if max checkpoint height is Some")
                     .ready_and()
                     .await?
                     .call(block.clone())
                     .await?;
             }
 
-            tracing::trace!(?height, ?hash, "Verified block");
+            tracing::trace!(?height, ?hash, "verified block");
             metrics::gauge!(
                 "chain.verified.block.height",
-                height.expect("Valid blocks have a block height").0 as _
+                height.expect("valid blocks have a block height").0 as _
             );
             metrics::counter!("chain.verified.block.count", 1);
 

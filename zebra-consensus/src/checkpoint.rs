@@ -653,7 +653,7 @@ impl CheckpointVerifier {
         );
 
         let block_count = rev_valid_blocks.len();
-        tracing::info!(?block_count, ?current_range, "Verified checkpoint range");
+        tracing::info!(?block_count, ?current_range, "verified checkpoint range");
         metrics::gauge!(
             "checkpoint.verified.block.height",
             target_checkpoint_height.0 as _
