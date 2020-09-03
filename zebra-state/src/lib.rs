@@ -4,7 +4,7 @@
 //!
 //! zebra-state tracks `Blocks` using two key-value trees
 //!
-//! * Hash -> Block
+//! * block::Hash -> Block
 //! * Height -> Block
 //!
 //! Inserting a block into the service will create a mapping in each tree for that block.

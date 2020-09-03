@@ -175,7 +175,7 @@ Verification is implemented by the following traits and services:
     data structures from a byte buffer.
 * **Semantic Verification:**
   * `ChainVerifier`: Provides a verifier service that accepts a `Block` request,
-    performs verification on the block, and responds with a `Hash` on
+    performs verification on the block, and responds with a `block::Hash` on
     success.
   * Internally, the `ChainVerifier` selects between a `CheckpointVerifier` for
     blocks that are within the checkpoint range, and a `BlockVerifier` for
