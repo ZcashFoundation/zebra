@@ -111,12 +111,9 @@ where
 
     fn call(&mut self, block: Arc<Block>) -> Self::Future {
         // TODO(jlusby): Error = Report, handle errors from state_service.
-        let span = tracing::debug_span!(
-            "block_verify",
-            height = ?block.coinbase_height(),
-            hash = ?block.hash()
-        );
-        let block_height = block.coinbase_height();
+        let height = block.coinbase_height();
+        let hash = block.hash();
+        let span = tracing::debug_span!("block_verify", ?height, ?hash,);
 
         let mut block_verifier = self.block_verifier.clone();
         let mut state_service = self.state_service.clone();
@@ -124,15 +121,15 @@ where
         let max_checkpoint_height = self.checkpoint.clone().map(|c| c.max_height);
 
         // Log an info-level message on unexpected high blocks
-        let is_unexpected_high_block = match (block_height, self.last_block_height) {
-            (Some(block::Height(block_height)), Some(block::Height(last_block_height)))
-                if (block_height > last_block_height + MAX_EXPECTED_BLOCK_GAP) =>
+        let is_unexpected_high_block = match (height, self.last_block_height) {
+            (Some(block::Height(height)), Some(block::Height(last_block_height)))
+                if (height > last_block_height + MAX_EXPECTED_BLOCK_GAP) =>
             {
-                self.last_block_height = Some(block::Height(block_height));
+                self.last_block_height = Some(block::Height(height));
                 true
             }
-            (Some(block_height), _) => {
-                self.last_block_height = Some(block_height);
+            (Some(height), _) => {
+                self.last_block_height = Some(height);
                 false
             }
             // The other cases are covered by the verifiers
@@ -144,7 +141,7 @@ where
             //             to use BlockVerifier, CheckpointVerifier, or both.
 
             // Call a verifier based on the block height and checkpoints.
-            if is_higher_than_max_checkpoint(block_height, max_checkpoint_height) {
+            if is_higher_than_max_checkpoint(height, max_checkpoint_height) {
                 // Log a message on early high blocks.
                 // The sync service rejects most of these blocks, but we
                 // still want to know if a large number get through.
@@ -153,7 +150,7 @@ where
                 // low blocks. (We can't distinguish between these cases, until
                 // we've verified the blocks.)
                 if is_unexpected_high_block {
-                    tracing::debug!(?block_height, "unexpected high block, or recent unexpected low blocks");
+                    tracing::debug!(?height, "unexpected high block, or recent unexpected low blocks");
                 }
 
                 block_verifier
@@ -169,6 +166,13 @@ where
                     .call(block.clone())
                     .await?;
             }
+
+            tracing::trace!(?height, ?hash, "Verified block");
+            metrics::gauge!(
+                "chain.verified.block.height",
+                height.expect("Valid blocks have a block height").0 as _
+            );
+            metrics::counter!("chain.verified.block.count", 1);
 
             let add_block = state_service
                 .ready_and()
