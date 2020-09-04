@@ -133,7 +133,12 @@ impl Service<Request> for SledState {
             Request::AddBlock { block } => {
                 let mut storage = self.clone();
 
-                async move { storage.insert(block).map(|hash| Response::Added { hash }) }.boxed()
+                // Make sure writes to the state are serialised, by performing
+                // them in the state's call.
+                // (See the state design RFC #0005 for details.)
+                let result = storage.insert(block).map(|hash| Response::Added { hash });
+
+                async { result }.boxed()
             }
             Request::GetBlock { hash } => {
                 let storage = self.clone();
