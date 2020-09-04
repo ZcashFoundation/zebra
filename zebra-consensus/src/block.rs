@@ -100,7 +100,7 @@ where
             if hash > difficulty_threshold {
                 Err("Block failed the difficulty filter: hash must be less than or equal to the difficulty threshold.")?;
             }
-            block.header.is_equihash_solution_valid()?;
+            check::is_equihash_solution_valid(&block.header)?;
 
             // Since errors cause an early exit, try to do the
             // quick checks first.

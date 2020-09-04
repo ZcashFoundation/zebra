@@ -1,7 +1,10 @@
 //! Consensus check functions
 
 use super::*;
-use zebra_chain::block::Block;
+use zebra_chain::{
+    block::{Block, Header},
+    work::equihash,
+};
 
 /// Check that there is exactly one coinbase transaction in `Block`, and that
 /// the coinbase transaction is the first transaction in the block.
@@ -24,4 +27,8 @@ pub fn is_coinbase_first(block: &Block) -> Result<(), Error> {
         return Err("coinbase input found in non-coinbase transaction".into());
     }
     Ok(())
+}
+
+pub fn is_equihash_solution_valid(header: &Header) -> Result<(), equihash::Error> {
+    header.solution.check(&header)
 }

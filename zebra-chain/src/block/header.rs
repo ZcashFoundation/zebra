@@ -1,6 +1,5 @@
 use chrono::{DateTime, Duration, Utc};
 
-use crate::serialization::ZcashSerialize;
 use crate::work::{difficulty::CompactDifficulty, equihash::Solution};
 
 use super::{merkle, Error, Hash};
@@ -69,24 +68,6 @@ pub struct Header {
 }
 
 impl Header {
-    /// Returns true if the header is valid based on its `EquihashSolution`
-    pub fn is_equihash_solution_valid(&self) -> Result<(), EquihashError> {
-        let n = 200;
-        let k = 9;
-        let nonce = &self.nonce;
-        let solution = &self.solution.0;
-        let mut input = Vec::new();
-
-        self.zcash_serialize(&mut input)
-            .expect("serialization into a vec can't fail");
-
-        let input = &input[0..Solution::INPUT_LENGTH];
-
-        equihash::is_valid_solution(n, k, input, nonce, solution)?;
-
-        Ok(())
-    }
-
     /// Check if `self.time` is less than or equal to
     /// 2 hours in the future, according to the node's local clock (`now`).
     ///
@@ -112,8 +93,3 @@ impl Header {
         }
     }
 }
-
-#[non_exhaustive]
-#[derive(Debug, thiserror::Error)]
-#[error("invalid equihash solution for BlockHeader")]
-pub struct EquihashError(#[from] equihash::Error);
