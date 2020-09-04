@@ -2,7 +2,6 @@ use std::{net::SocketAddr, sync::Arc};
 
 //use futures::stream::{FuturesUnordered, StreamExt};
 use structopt::StructOpt;
-use tracing_subscriber;
 
 use stolon::*;
 
@@ -21,21 +20,6 @@ struct Opt {
     /// Perform this many broadcasts simultaneously.
     #[structopt(short, long, default_value = "3")]
     fanout: usize,
-}
-
-// This can't actually be spawned, because
-// https://github.com/rust-lang/rust/issues/64552 causes rustc to "forget"
-// that the boxed error is actually 'static, which makes all of the
-// BoxError-returning functions impossible to use in a spawned task.
-// This also occurs when BoxError is replaced with eyre::Report.
-async fn broadcast(
-    tor_addr: SocketAddr,
-    network: Network,
-    transaction: Arc<Transaction>,
-) -> Result<(), BoxError> {
-    let peer_addr = obtain_peer_addr(tor_addr, network).await?;
-    send_transaction(tor_addr, peer_addr, transaction.clone()).await?;
-    Ok(())
 }
 
 #[tokio::main]
@@ -61,9 +45,16 @@ async fn main() {
         tasks.push(tokio::spawn(broadcast(tor_addr, network, transaction.clone())));
     }
     */
+
+    // This can't actually be spawned, because
+    // https://github.com/rust-lang/rust/issues/64552 causes rustc to "forget"
+    // that the boxed error is actually 'static, which makes all of the
+    // BoxError-returning functions impossible to use in a spawned task.
+    // This also occurs when BoxError is replaced with eyre::Report.
+
     // Run fanout tasks sequentially to work around the 'static bug.
     for _ in 0..opt.fanout {
-        let _ = broadcast(tor_addr, network, transaction.clone()).await;
+        let _ = send_transaction(tor_addr, network, transaction.clone()).await;
     }
 
     //tasks.collect::<Vec<_>>().await;
