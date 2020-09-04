@@ -56,14 +56,14 @@ static GET_TIP_TRANSCRIPT_MAINNET: Lazy<Vec<(Request, Result<Response, TransErro
         let hash0 = block0.as_ref().into();
         let hash1 = block1.as_ref().into();
         vec![
-            // Insert higher block first, lower block second
-            (
-                Request::AddBlock { block: block1 },
-                Ok(Response::Added { hash: hash1 }),
-            ),
+            // Insert the blocks in order
             (
                 Request::AddBlock { block: block0 },
                 Ok(Response::Added { hash: hash0 }),
+            ),
+            (
+                Request::AddBlock { block: block1 },
+                Ok(Response::Added { hash: hash1 }),
             ),
             (Request::GetTip, Ok(Response::Tip { hash: hash1 })),
         ]
@@ -82,14 +82,14 @@ static GET_TIP_TRANSCRIPT_TESTNET: Lazy<Vec<(Request, Result<Response, TransErro
         let hash0 = block0.as_ref().into();
         let hash1 = block1.as_ref().into();
         vec![
-            // Insert higher block first, lower block second
-            (
-                Request::AddBlock { block: block1 },
-                Ok(Response::Added { hash: hash1 }),
-            ),
+            // Insert the blocks in order
             (
                 Request::AddBlock { block: block0 },
                 Ok(Response::Added { hash: hash0 }),
+            ),
+            (
+                Request::AddBlock { block: block1 },
+                Ok(Response::Added { hash: hash1 }),
             ),
             (Request::GetTip, Ok(Response::Tip { hash: hash1 })),
         ]
