@@ -44,7 +44,42 @@ impl SledState {
 
         let block = block.into();
         let hash = block.hash();
-        let height = block.coinbase_height().unwrap();
+        let height = block
+            .coinbase_height()
+            .expect("missing height: valid blocks must have a height");
+
+        // Make sure blocks are inserted in order, as a defence in depth.
+        // See the state design RFC #0005 for details.
+        //
+        // TODO: handle multiple chains
+        match self.get_tip()? {
+            None => {
+                // This is a defence in depth - there is no need to check the
+                // genesis hash or previous block hash here.
+                assert_eq!(
+                    height,
+                    block::Height(0),
+                    "out of order block: the first block must be at the genesis height"
+                );
+            }
+            Some(tip_hash) => {
+                assert_eq!(
+                    block.header.previous_block_hash, tip_hash,
+                    "out of order block: the next block must be a child of the current tip"
+                );
+                let tip_block = self
+                    .get(tip_hash)?
+                    .expect("missing tip block: tip hashes must have a corresponding block");
+                let tip_height = tip_block
+                    .coinbase_height()
+                    .expect("missing height: valid blocks must have a height");
+                assert_eq!(
+                    height,
+                    block::Height(tip_height.0 + 1),
+                    "out of order block: the next height must be 1 greater than the tip height"
+                );
+            }
+        };
 
         let height_map = self.storage.open_tree(b"height_map")?;
         let by_hash = self.storage.open_tree(b"by_hash")?;
