@@ -9,10 +9,7 @@ use crate::serialization::{sha256d, SerializationError, ZcashSerialize};
 
 use super::Transaction;
 
-/// A hash of a `Transaction`
-///
-/// TODO: I'm pretty sure this is also a SHA256d hash but I haven't
-/// confirmed it yet.
+/// A transaction hash.
 #[derive(Copy, Clone, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct Hash(pub [u8; 32]);
