@@ -462,14 +462,22 @@ fn valid_generated_config(command: &str, expected_output: &str) -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn metrics_tracing_listeners() -> Result<()> {
+#[tokio::test]
+async fn metrics_tracing_listeners() -> Result<()> {
+    use hyper::{Client, Uri};
+
     zebra_test::init();
+
+    // From here we dont know what port the OS selected for us if we use port 0 so we use a hard coded port for the 2 endpoints.
+    let metrics_endpoint = "127.0.0.1:9998";
+    let metrics_url = "http://127.0.0.1:9998";
+    let tracing_endpoint = "127.0.0.1:9999";
+    let tracing_url = "http://127.0.0.1:9999";
 
     // Write a configuration that has both metrics endpoint_addr and tracing endpoint_addr options set
     let mut config = default_test_config()?;
-    config.metrics.endpoint_addr = Some("127.0.0.1:0".parse().unwrap());
-    config.tracing.endpoint_addr = Some("127.0.0.1:0".parse().unwrap());
+    config.metrics.endpoint_addr = Some(metrics_endpoint.parse().unwrap());
+    config.tracing.endpoint_addr = Some(tracing_endpoint.parse().unwrap());
 
     let dir = TempDir::new("zebrad_tests")?;
     fs::File::create(dir.path().join("zebrad.toml"))?
@@ -481,14 +489,39 @@ fn metrics_tracing_listeners() -> Result<()> {
 
     // Run the program and kill it at 1 second
     std::thread::sleep(Duration::from_secs(1));
+
+    // Test metrics endpoint
+    let metrics_client = Client::new();
+    let metrics_res = metrics_client.get(Uri::from_static(metrics_url)).await?;
+    assert!(metrics_res.status().is_success());
+    let metrics_body = hyper::body::to_bytes(metrics_res).await?;
+    assert!(std::str::from_utf8(&metrics_body)
+        .unwrap()
+        .contains("metrics snapshot"));
+
+    // Test tracing endpoint
+    let tracing_client = Client::new();
+    let tracing_res = tracing_client.get(Uri::from_static(tracing_url)).await?;
+    assert!(tracing_res.status().is_success());
+    let tracing_body = hyper::body::to_bytes(tracing_res).await?;
+    assert!(std::str::from_utf8(&tracing_body)
+        .unwrap()
+        .contains("This HTTP endpoint allows dynamic control of the filter"));
+    // Todo: Set a filter and query the filter
+    // To be done after #1001 is fixed.
+
     child.kill()?;
 
     let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
 
     // Make sure metrics and tracing endpoints were started
-    output.stdout_contains(r"Initializing metrics endpoint at 127.0.0.1")?;
-    output.stdout_contains(r"Initializing tracing endpoint at 127.0.0.1")?;
+    output.stdout_contains(
+        format!(r"Initializing metrics endpoint at {}", metrics_endpoint).as_str(),
+    )?;
+    output.stdout_contains(
+        format!(r"Initializing tracing endpoint at {}", tracing_endpoint).as_str(),
+    )?;
 
     // Make sure the command was killed
     output.assert_was_killed()?;
