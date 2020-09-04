@@ -95,6 +95,7 @@ static GET_TIP_ADD_ORDERED_TRANSCRIPT_TESTNET: Lazy<Vec<(Request, Result<Respons
         ]
     });
 
+#[allow(dead_code)]
 static GET_TIP_ADD_REVERSED_TRANSCRIPT_MAINNET: Lazy<Vec<(Request, Result<Response, TransError>)>> =
     Lazy::new(|| {
         let block0: Arc<_> =
@@ -121,6 +122,7 @@ static GET_TIP_ADD_REVERSED_TRANSCRIPT_MAINNET: Lazy<Vec<(Request, Result<Respon
         ]
     });
 
+#[allow(dead_code)]
 static GET_TIP_ADD_REVERSED_TRANSCRIPT_TESTNET: Lazy<Vec<(Request, Result<Response, TransError>)>> =
     Lazy::new(|| {
         let block0: Arc<_> =
@@ -164,12 +166,14 @@ async fn check_transcripts(network: Network) -> Result<(), Report> {
     let mainnet_transcript = &[
         &ADD_BLOCK_TRANSCRIPT_MAINNET,
         &GET_TIP_ADD_ORDERED_TRANSCRIPT_MAINNET,
-        &GET_TIP_ADD_REVERSED_TRANSCRIPT_MAINNET,
+        // Temporarily disabled, until the state accepts out-of-order blocks
+        //&GET_TIP_ADD_REVERSED_TRANSCRIPT_MAINNET,
     ];
     let testnet_transcript = &[
         &ADD_BLOCK_TRANSCRIPT_TESTNET,
         &GET_TIP_ADD_ORDERED_TRANSCRIPT_TESTNET,
-        &GET_TIP_ADD_REVERSED_TRANSCRIPT_TESTNET,
+        // Temporarily disabled, until the state accepts out-of-order blocks
+        //&GET_TIP_ADD_REVERSED_TRANSCRIPT_TESTNET,
     ];
 
     for transcript_data in match network {
