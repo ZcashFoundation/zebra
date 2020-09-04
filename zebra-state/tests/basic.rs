@@ -10,7 +10,7 @@ use zebra_state::*;
 static ADD_BLOCK_TRANSCRIPT_MAINNET: Lazy<Vec<(Request, Result<Response, TransError>)>> =
     Lazy::new(|| {
         let block: Arc<_> =
-            Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])
+            Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
                 .unwrap()
                 .into();
         let hash = block.as_ref().into();
@@ -28,7 +28,7 @@ static ADD_BLOCK_TRANSCRIPT_MAINNET: Lazy<Vec<(Request, Result<Response, TransEr
 static ADD_BLOCK_TRANSCRIPT_TESTNET: Lazy<Vec<(Request, Result<Response, TransError>)>> =
     Lazy::new(|| {
         let block: Arc<_> =
-            Block::zcash_deserialize(&zebra_test::vectors::BLOCK_TESTNET_10_BYTES[..])
+            Block::zcash_deserialize(&zebra_test::vectors::BLOCK_TESTNET_GENESIS_BYTES[..])
                 .unwrap()
                 .into();
         let hash = block.as_ref().into();
@@ -76,7 +76,7 @@ static GET_TIP_TRANSCRIPT_TESTNET: Lazy<Vec<(Request, Result<Response, TransErro
                 .unwrap()
                 .into();
         let block1: Arc<_> =
-            Block::zcash_deserialize(&zebra_test::vectors::BLOCK_TESTNET_10_BYTES[..])
+            Block::zcash_deserialize(&zebra_test::vectors::BLOCK_TESTNET_1_BYTES[..])
                 .unwrap()
                 .into();
         let hash0 = block0.as_ref().into();

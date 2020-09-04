@@ -268,7 +268,7 @@ async fn continuous_blockchain(restart_height: Option<block::Height>) -> Result<
             .cloned();
         let state_service = zebra_state::init(zebra_state::Config::ephemeral(), Mainnet);
         let mut checkpoint_verifier =
-            CheckpointVerifier::from_list(checkpoint_list, initial_tip, state_service)
+            CheckpointVerifier::from_list(checkpoint_list, initial_tip, state_service.clone())
                 .map_err(|e| eyre!(e))?;
 
         // Setup checks
@@ -305,7 +305,18 @@ async fn continuous_blockchain(restart_height: Option<block::Height>) -> Result<
         for (block, height, _hash) in blockchain {
             if let Some(restart_height) = restart_height {
                 if height <= restart_height {
-                    continue;
+                    let mut state_service = state_service.clone();
+                    /// SPANDOC: Make sure the state service is ready for block {?height}
+                    let ready_state_service =
+                        state_service.ready_and().map_err(|e| eyre!(e)).await?;
+
+                    /// SPANDOC: Add block to the state {?height}
+                    ready_state_service
+                        .call(zebra_state::Request::AddBlock {
+                            block: block.clone(),
+                        })
+                        .await
+                        .map_err(|e| eyre!(e))?;
                 }
             }
             if height > checkpoint_verifier.checkpoint_list.max_height() {
