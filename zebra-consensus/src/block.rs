@@ -22,9 +22,7 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
-    time::Duration,
 };
-use tokio::time;
 use tower::{buffer::Buffer, Service, ServiceExt};
 
 use zebra_chain::block::{self, Block};
@@ -125,42 +123,6 @@ where
 
             // TODO: context-free header verification: merkle root
 
-            // As a temporary solution for chain gaps, wait for the previous block,
-            // and check its height.
-            //
-            // TODO: replace this check with the contextual verification RFC design
-            //
-            // Skip contextual checks for the genesis block
-            let previous_block_hash = block.header.previous_block_hash;
-            if previous_block_hash != crate::parameters::GENESIS_PREVIOUS_BLOCK_HASH {
-                if height == block::Height(0) {
-                    Err(format!("invalid block {:?}: height is 0, but previous block hash {:?} is not null",
-                                hash,
-                                previous_block_hash))?;
-                }
-
-                let expected_height = block::Height(height.0 - 1);
-                tracing::trace!(?expected_height, ?previous_block_hash, "Waiting for previous block");
-                metrics::gauge!("block.waiting.block.height", expected_height.0 as i64);
-                metrics::counter!("block.waiting.count", 1);
-
-                let previous_block = BlockVerifier::await_block(
-                    &mut state_service,
-                    previous_block_hash,
-                    expected_height,
-                )
-                .await?;
-
-                let previous_height = previous_block.coinbase_height().unwrap();
-                if previous_height != expected_height {
-                    Err(format!("invalid block height {:?} for {:?}: must be 1 more than the previous block height {:?} in {:?}",
-                                height,
-                                hash,
-                                previous_height,
-                                previous_block_hash))?;
-                }
-            }
-
             tracing::trace!("verified block");
             metrics::gauge!(
                 "block.verified.block.height",
@@ -168,9 +130,8 @@ where
             );
             metrics::counter!("block.verified.block.count", 1);
 
-            // We need to add the block after the previous block is in the state,
-            // and before this future returns. Otherwise, blocks could be
-            // committed out of order.
+            // Commit the block in the future - the state will handle out of
+            // order blocks.
             let ready_state = state_service
                 .ready_and()
                 .await?;
@@ -220,27 +181,6 @@ where
             .ok();
 
         Ok(block)
-    }
-
-    /// Wait until a block with `hash` is in `state_service`.
-    ///
-    /// Returns an error if `state_service.poll_ready` errors.
-    async fn await_block(
-        state_service: &mut S,
-        hash: block::Hash,
-        height: block::Height,
-    ) -> Result<Arc<Block>, Report> {
-        loop {
-            match BlockVerifier::get_block(state_service, hash).await? {
-                Some(block) => return Ok(block),
-                // Busy-waiting is only a temporary solution to waiting for blocks.
-                // Replace with the contextual verification RFC design
-                None => {
-                    tracing::debug!(?height, ?hash, "Waiting for state to have block");
-                    time::delay_for(Duration::from_millis(50)).await
-                }
-            };
-        }
     }
 }
 
