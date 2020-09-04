@@ -1,10 +1,17 @@
 //! Equihash Solution and related items.
 
+use crate::block::Header;
 use crate::serialization::{
     serde_helpers, ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize,
     ZcashSerialize,
 };
 use std::{fmt, io};
+
+/// The error type for Equihash
+#[non_exhaustive]
+#[derive(Debug, thiserror::Error)]
+#[error("invalid equihash solution for BlockHeader")]
+pub struct Error(#[from] equihash::Error);
 
 /// The size of an Equihash solution in bytes (always 1344).
 pub(crate) const SOLUTION_SIZE: usize = 1344;
@@ -24,6 +31,25 @@ impl Solution {
     /// The length of the portion of the header used as input when verifying
     /// equihash solutions, in bytes
     pub const INPUT_LENGTH: usize = 4 + 32 * 3 + 4 * 2;
+
+    /// Returns true if the header is valid based on its `EquihashSolution`
+    pub fn check(&self, block: &Header) -> Result<(), Error> {
+        let n = 200;
+        let k = 9;
+        let nonce = &block.nonce;
+        let solution = &self.0;
+        let mut input = Vec::new();
+
+        block
+            .zcash_serialize(&mut input)
+            .expect("serialization into a vec can't fail");
+
+        let input = &input[0..Solution::INPUT_LENGTH];
+
+        equihash::is_valid_solution(n, k, input, nonce, solution)?;
+
+        Ok(())
+    }
 }
 
 impl PartialEq<Solution> for Solution {

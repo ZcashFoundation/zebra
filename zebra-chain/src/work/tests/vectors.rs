@@ -31,7 +31,7 @@ fn equihash_solution_test_vector_is_valid() -> color_eyre::eyre::Result<()> {
 
     let block = Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])
         .expect("block test vector should deserialize");
-    block.header.is_equihash_solution_valid()?;
+    block.header.solution.check(&block.header)?;
 
     Ok(())
 }
