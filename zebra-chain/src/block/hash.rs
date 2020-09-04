@@ -22,6 +22,12 @@ use super::Header;
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct Hash(pub [u8; 32]);
 
+impl fmt::Display for Hash {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(&hex::encode(&self.0))
+    }
+}
+
 impl fmt::Debug for Hash {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_tuple("BlockHeaderHash")
