@@ -147,26 +147,28 @@ impl<T> TestChild<T> {
         self
     }
 
-    // #[instrument(skip(self))]
+    #[instrument(skip(self))]
     pub fn expect_stdout(&mut self, regex: &str) -> Result<&mut Self> {
         if self.stdout.is_none() {
             self.stdout = self.child.stdout.take().map(BufReader::new)
         }
 
+        let re = regex::Regex::new(regex).expect("regex must be valid");
+        let mut line = String::new();
         let mut reader = self
             .stdout
             .take()
             .expect("child must capture stdout to call expect_stdout");
 
-        let re = regex::Regex::new(regex)?;
-        // using bufread here can cause data to be dropped between calls to
-        // `expect_stdout`, but I think it won't in practice so long as we only
-        // call `read_line` instead of `lines`.
-
-        let mut line = String::new();
-
-        while !self.past_deadline() && self.is_running() && reader.read_line(&mut line)? > 0 {
+        while !self.past_deadline()
+            && self.is_running()
+            && reader.read_line(&mut line).context_from(self)? > 0
+        {
+            // since we're about to discard this line write it to stdout so our
+            // test runner can capture it and display if the test fails, may
+            // cause weird reordering for stdout / stderr
             print!("{}", line);
+
             if re.is_match(&line) {
                 self.stdout = Some(reader);
                 return Ok(self);
