@@ -7,7 +7,11 @@ use tracing::instrument;
 #[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
 use std::path::Path;
-use std::process::{Child, Command, ExitStatus, Output};
+use std::{
+    io::{BufRead, BufReader},
+    process::{Child, ChildStdout, Command, ExitStatus, Output},
+    time::{Duration, Instant},
+};
 
 /// Runs a command
 pub fn test_cmd(command_path: &str, tempdir: &Path) -> Result<Command> {
@@ -72,7 +76,13 @@ impl CommandExt for Command {
             .wrap_err("failed to execute process")
             .with_section(|| cmd.clone().header("Command:"))?;
 
-        Ok(TestChild { child, cmd, dir })
+        Ok(TestChild {
+            child,
+            cmd,
+            dir,
+            deadline: None,
+            stdout: None,
+        })
     }
 }
 
@@ -105,6 +115,8 @@ pub struct TestChild<T> {
     dir: T,
     pub cmd: String,
     pub child: Child,
+    pub stdout: Option<BufReader<ChildStdout>>,
+    pub deadline: Option<Instant>,
 }
 
 impl<T> TestChild<T> {
@@ -128,6 +140,57 @@ impl<T> TestChild<T> {
             output,
             cmd: self.cmd,
         })
+    }
+
+    pub fn timeout(mut self, timeout: Duration) -> Self {
+        self.deadline = Some(Instant::now() + timeout);
+        self
+    }
+
+    // #[instrument(skip(self))]
+    pub fn expect_stdout(&mut self, regex: &str) -> Result<&mut Self> {
+        if self.stdout.is_none() {
+            self.stdout = self.child.stdout.take().map(BufReader::new)
+        }
+
+        let mut reader = self
+            .stdout
+            .take()
+            .expect("child must capture stdout to call expect_stdout");
+
+        let re = regex::Regex::new(regex)?;
+        // using bufread here can cause data to be dropped between calls to
+        // `expect_stdout`, but I think it won't in practice so long as we only
+        // call `read_line` instead of `lines`.
+
+        let mut line = String::new();
+
+        while !self.past_deadline() && self.is_running() && reader.read_line(&mut line)? > 0 {
+            print!("{}", line);
+            if re.is_match(&line) {
+                self.stdout = Some(reader);
+                return Ok(self);
+            }
+        }
+
+        if self.past_deadline() && !self.is_running() {
+            self.kill()?;
+        }
+
+        Err(eyre!(
+            "stdout of command did not contain any matches for the given regex"
+        ))
+        .context_from(self)
+    }
+
+    fn past_deadline(&self) -> bool {
+        self.deadline
+            .map(|deadline| Instant::now() > deadline)
+            .unwrap_or(false)
+    }
+
+    fn is_running(&mut self) -> bool {
+        matches!(self.child.try_wait(), Ok(None))
     }
 }
 
@@ -259,9 +322,8 @@ impl<T> ContextFrom<TestChild<T>> for Report {
 
     fn context_from(self, source: &TestChild<T>) -> Self::Return {
         let command = || source.cmd.clone().header("Command:");
-        let child = || format!("{:?}", source.child).header("Child Process:");
 
-        self.with_section(command).with_section(child)
+        self.with_section(command)
     }
 }
 
