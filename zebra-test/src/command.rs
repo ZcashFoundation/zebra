@@ -8,7 +8,7 @@ use tracing::instrument;
 use std::os::unix::process::ExitStatusExt;
 use std::path::Path;
 use std::{
-    io::{BufRead, BufReader},
+    io::{BufRead, BufReader, Lines},
     process::{Child, ChildStdout, Command, ExitStatus, Output},
     time::{Duration, Instant},
 };
@@ -115,7 +115,7 @@ pub struct TestChild<T> {
     dir: T,
     pub cmd: String,
     pub child: Child,
-    pub stdout: Option<BufReader<ChildStdout>>,
+    pub stdout: Option<Lines<BufReader<ChildStdout>>>,
     pub deadline: Option<Instant>,
 }
 
@@ -142,7 +142,7 @@ impl<T> TestChild<T> {
         })
     }
 
-    pub fn timeout(mut self, timeout: Duration) -> Self {
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.deadline = Some(Instant::now() + timeout);
         self
     }
@@ -150,27 +150,34 @@ impl<T> TestChild<T> {
     #[instrument(skip(self))]
     pub fn expect_stdout(&mut self, regex: &str) -> Result<&mut Self> {
         if self.stdout.is_none() {
-            self.stdout = self.child.stdout.take().map(BufReader::new)
+            self.stdout = self
+                .child
+                .stdout
+                .take()
+                .map(BufReader::new)
+                .map(BufRead::lines)
         }
 
         let re = regex::Regex::new(regex).expect("regex must be valid");
-        let mut line = String::new();
-        let mut reader = self
+        let mut lines = self
             .stdout
             .take()
             .expect("child must capture stdout to call expect_stdout");
 
-        while !self.past_deadline()
-            && self.is_running()
-            && reader.read_line(&mut line).context_from(self)? > 0
-        {
+        while !self.past_deadline() && self.is_running() {
+            let line = if let Some(line) = lines.next() {
+                line?
+            } else {
+                break;
+            };
+
             // since we're about to discard this line write it to stdout so our
             // test runner can capture it and display if the test fails, may
             // cause weird reordering for stdout / stderr
-            print!("{}", line);
+            println!("{}", line);
 
             if re.is_match(&line) {
-                self.stdout = Some(reader);
+                self.stdout = Some(lines);
                 return Ok(self);
             }
         }
