@@ -415,6 +415,7 @@ impl<'a> SigHasher<'a> {
             .to_state();
 
         for spend in shielded_data.spends() {
+            // This is the canonical transaction serialization, minus the `spendAuthSig`.
             spend.cv.zcash_serialize(&mut hash)?;
             hash.write_all(&spend.anchor.0[..])?;
             hash.write_32_bytes(&spend.nullifier.into())?;
