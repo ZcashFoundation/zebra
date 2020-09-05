@@ -11,7 +11,8 @@ use std::{
     ops::RangeInclusive,
 };
 
-use byteorder::{ByteOrder, LittleEndian};
+use crate::serialization::{ZcashDeserialize, ZcashSerialize};
+use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
 
 type Result<T, E = Error> = std::result::Result<T, E>;
 
@@ -259,6 +260,39 @@ pub trait Constraint {
         } else {
             Ok(value)
         }
+    }
+}
+
+impl ZcashSerialize for Amount<NegativeAllowed> {
+    fn zcash_serialize<W: std::io::Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
+        writer.write_i64::<LittleEndian>(self.0)
+    }
+}
+
+impl ZcashDeserialize for Amount<NegativeAllowed> {
+    fn zcash_deserialize<R: std::io::Read>(
+        mut reader: R,
+    ) -> Result<Self, crate::serialization::SerializationError> {
+        Ok(reader.read_i64::<LittleEndian>()?.try_into()?)
+    }
+}
+
+impl ZcashSerialize for Amount<NonNegative> {
+    fn zcash_serialize<W: std::io::Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
+        let amount = self
+            .0
+            .try_into()
+            .expect("constraint guarantees value is positive");
+
+        writer.write_u64::<LittleEndian>(amount)
+    }
+}
+
+impl ZcashDeserialize for Amount<NonNegative> {
+    fn zcash_deserialize<R: std::io::Read>(
+        mut reader: R,
+    ) -> Result<Self, crate::serialization::SerializationError> {
+        Ok(reader.read_u64::<LittleEndian>()?.try_into()?)
     }
 }
 

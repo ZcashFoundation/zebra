@@ -3094,6 +3094,7 @@ version = "3.0.0-alpha.0"
 dependencies = [
  "bech32",
  "bincode",
+ "bitflags",
  "bitvec",
  "blake2b_simd",
  "blake2s_simd",
