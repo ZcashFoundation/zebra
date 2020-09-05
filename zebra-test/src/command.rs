@@ -2,15 +2,15 @@ use color_eyre::{
     eyre::{eyre, Context, Report, Result},
     Help, SectionExt,
 };
-use std::path::PathBuf;
-use std::process::{Child, Command, ExitStatus, Output};
+use tracing::instrument;
 
 #[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
-use tracing::instrument;
+use std::path::Path;
+use std::process::{Child, Command, ExitStatus, Output};
 
 /// Runs a command
-pub fn test_cmd(command_path: &str, tempdir: &PathBuf) -> Result<Command> {
+pub fn test_cmd(command_path: &str, tempdir: &Path) -> Result<Command> {
     let mut cmd = Command::new(command_path);
     cmd.current_dir(tempdir);
 
@@ -28,7 +28,7 @@ pub trait CommandExt {
 
     /// wrapper for `spawn` fn on `Command` that constructs informative error
     /// reports
-    fn spawn2(&mut self) -> Result<TestChild, Report>;
+    fn spawn2<T>(&mut self, dir: T) -> Result<TestChild<T>, Report>;
 }
 
 impl CommandExt for Command {
@@ -64,7 +64,7 @@ impl CommandExt for Command {
 
     /// wrapper for `spawn` fn on `Command` that constructs informative error
     /// reports
-    fn spawn2(&mut self) -> Result<TestChild, Report> {
+    fn spawn2<T>(&mut self, dir: T) -> Result<TestChild<T>, Report> {
         let cmd = format!("{:?}", self);
         let child = self.spawn();
 
@@ -72,7 +72,7 @@ impl CommandExt for Command {
             .wrap_err("failed to execute process")
             .with_section(|| cmd.clone().header("Command:"))?;
 
-        Ok(TestChild { child, cmd })
+        Ok(TestChild { child, cmd, dir })
     }
 }
 
@@ -101,12 +101,13 @@ impl TestStatus {
 }
 
 #[derive(Debug)]
-pub struct TestChild {
+pub struct TestChild<T> {
+    dir: T,
     pub cmd: String,
     pub child: Child,
 }
 
-impl TestChild {
+impl<T> TestChild<T> {
     #[spandoc::spandoc]
     pub fn kill(&mut self) -> Result<()> {
         /// SPANDOC: Killing child process
@@ -253,10 +254,10 @@ impl ContextFrom<TestStatus> for Report {
     }
 }
 
-impl ContextFrom<TestChild> for Report {
+impl<T> ContextFrom<TestChild<T>> for Report {
     type Return = Report;
 
-    fn context_from(self, source: &TestChild) -> Self::Return {
+    fn context_from(self, source: &TestChild<T>) -> Self::Return {
         let command = || source.cmd.clone().header("Command:");
         let child = || format!("{:?}", source.child).header("Child Process:");
 

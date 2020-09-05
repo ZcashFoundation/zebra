@@ -3237,6 +3237,7 @@ dependencies = [
  "lazy_static",
  "regex",
  "spandoc",
+ "tempdir",
  "thiserror",
  "tokio",
  "tower",
