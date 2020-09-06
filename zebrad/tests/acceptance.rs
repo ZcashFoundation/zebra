@@ -464,7 +464,7 @@ fn valid_generated_config(command: &str, expected_output: &str) -> Result<()> {
 
 #[tokio::test]
 async fn metrics_tracing_listeners() -> Result<()> {
-    use hyper::{Client, Uri};
+    use hyper::{Body, Client, Request, Uri};
 
     zebra_test::init();
 
@@ -472,7 +472,7 @@ async fn metrics_tracing_listeners() -> Result<()> {
     let metrics_endpoint = "127.0.0.1:9998";
     let metrics_url = "http://127.0.0.1:9998";
     let tracing_endpoint = "127.0.0.1:9999";
-    let tracing_url = "http://127.0.0.1:9999";
+    let tracing_url = "http://127.0.0.1:9999/filter";
 
     // Write a configuration that has both metrics endpoint_addr and tracing endpoint_addr options set
     let mut config = default_test_config()?;
@@ -487,12 +487,14 @@ async fn metrics_tracing_listeners() -> Result<()> {
 
     let mut child = get_child(&["start"], &tempdir)?;
 
-    // Run the program and kill it at 1 second
+    // Run the program for a second before testing the endpoints
     std::thread::sleep(Duration::from_secs(1));
 
+    // Create an http client
+    let client = Client::new();
+
     // Test metrics endpoint
-    let metrics_client = Client::new();
-    let metrics_res = metrics_client.get(Uri::from_static(metrics_url)).await?;
+    let metrics_res = client.get(Uri::from_static(metrics_url)).await?;
     assert!(metrics_res.status().is_success());
     let metrics_body = hyper::body::to_bytes(metrics_res).await?;
     assert!(std::str::from_utf8(&metrics_body)
@@ -500,15 +502,22 @@ async fn metrics_tracing_listeners() -> Result<()> {
         .contains("metrics snapshot"));
 
     // Test tracing endpoint
-    let tracing_client = Client::new();
-    let tracing_res = tracing_client.get(Uri::from_static(tracing_url)).await?;
+    let tracing_res = client.get(Uri::from_static(tracing_url)).await?;
+    assert!(tracing_res.status().is_success());
+    let tracing_body = hyper::body::to_bytes(tracing_res).await?;
+    assert!(std::str::from_utf8(&tracing_body).unwrap().contains("info"));
+    // Set a filter and make sure it was changed
+    let request = Request::post(tracing_endpoint)
+        .body(Body::from("zebrad=trace"))
+        .unwrap();
+    let _post = client.request(request);
+
+    let tracing_res = client.get(Uri::from_static(tracing_url)).await?;
     assert!(tracing_res.status().is_success());
     let tracing_body = hyper::body::to_bytes(tracing_res).await?;
     assert!(std::str::from_utf8(&tracing_body)
         .unwrap()
-        .contains("This HTTP endpoint allows dynamic control of the filter"));
-    // Todo: Set a filter and query the filter
-    // To be done after #1001 is fixed.
+        .contains("zebrad=trace"));
 
     child.kill()?;
 
@@ -522,6 +531,7 @@ async fn metrics_tracing_listeners() -> Result<()> {
     output.stdout_contains(
         format!(r"Initializing tracing endpoint at {}", tracing_endpoint).as_str(),
     )?;
+    // Todo: Match some trace level messages from output
 
     // Make sure the command was killed
     output.assert_was_killed()?;
