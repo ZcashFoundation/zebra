@@ -507,10 +507,10 @@ async fn metrics_tracing_listeners() -> Result<()> {
     let tracing_body = hyper::body::to_bytes(tracing_res).await?;
     assert!(std::str::from_utf8(&tracing_body).unwrap().contains("info"));
     // Set a filter and make sure it was changed
-    let request = Request::post(tracing_endpoint)
+    let request = Request::post(tracing_url)
         .body(Body::from("zebrad=trace"))
         .unwrap();
-    let _post = client.request(request);
+    let _post = client.request(request).await?;
 
     let tracing_res = client.get(Uri::from_static(tracing_url)).await?;
     assert!(tracing_res.status().is_success());
