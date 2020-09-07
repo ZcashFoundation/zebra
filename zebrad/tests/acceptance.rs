@@ -15,6 +15,7 @@
 #![forbid(unsafe_code)]
 
 use color_eyre::eyre::Result;
+use eyre::WrapErr;
 use std::{fs, io::Write, path::PathBuf, time::Duration};
 use tempdir::TempDir;
 
@@ -454,7 +455,7 @@ fn valid_generated_config(command: &str, expected_output: &str) -> Result<()> {
     output.stdout_contains(expected_output)?;
 
     // [Note on port conflict](#Note on port conflict)
-    output.assert_was_killed().expect("Expected zebrad with generated config to succeed. Are there other acceptance test, zebrad, or zcashd processes running?");
+    output.assert_was_killed().wrap_err("Possible port or cache conflict. Are there other acceptance test, zebrad, or zcashd processes running?")?;
 
     // Check if the temp dir still exists
     assert_with_context!(tempdir.exists(), &output);
@@ -509,8 +510,10 @@ async fn metrics_endpoint() -> Result<()> {
     // Make sure metrics was started
     output.stdout_contains(format!(r"Initializing metrics endpoint at {}", endpoint).as_str())?;
 
-    // Make sure the command was killed
-    output.assert_was_killed()?;
+    // [Note on port conflict](#Note on port conflict)
+    output
+        .assert_was_killed()
+        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
 
     Ok(())
 }
@@ -575,8 +578,10 @@ async fn tracing_endpoint() -> Result<()> {
     output.stdout_contains(format!(r"Initializing tracing endpoint at {}", endpoint).as_str())?;
     // Todo: Match some trace level messages from output
 
-    // Make sure the command was killed
-    output.assert_was_killed()?;
+    // [Note on port conflict](#Note on port conflict)
+    output
+        .assert_was_killed()
+        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
 
     Ok(())
 }
