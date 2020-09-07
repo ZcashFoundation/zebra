@@ -20,40 +20,32 @@ fn default_test_config() -> Result<ZebradConfig> {
     Ok(config)
 }
 
-#[derive(PartialEq)]
-enum ConfigMode {
-    NoConfig,
-    Ephemeral,
-    Persistent,
+fn persistent_test_config() -> Result<ZebradConfig> {
+    let mut config = default_test_config()?;
+    config.state.ephemeral = false;
+    Ok(config)
 }
 
-fn tempdir(config_mode: ConfigMode) -> Result<TempDir> {
-    let dir = TempDir::new("zebrad_tests")?;
-
-    if config_mode != ConfigMode::NoConfig {
-        let mut config = default_test_config()?;
-        if config_mode == ConfigMode::Persistent {
-            let cache_dir = dir.path().join("state");
-            fs::create_dir(&cache_dir)?;
-            config.state.cache_dir = cache_dir;
-            config.state.ephemeral = false;
-        }
-
-        fs::File::create(dir.path().join("zebrad.toml"))?
-            .write_all(toml::to_string(&config)?.as_bytes())?;
-    }
-
-    Ok(dir)
+fn testdir() -> Result<TempDir> {
+    TempDir::new("zebrad_tests").map_err(Into::into)
 }
 
-trait GetChild
+/// Extension trait for methods on `tempdir::TempDir` for using it as a test
+/// directory.
+trait TestDirExt
 where
     Self: Borrow<TempDir> + Sized,
 {
+    /// Spawn the zebrad as a child process in this test directory, potentially
+    /// taking ownership of the tempdir for the duration of the child process.
     fn spawn_child(self, args: &[&str]) -> Result<TestChild<Self>>;
+
+    /// Add the given config to the test directory and use it for all
+    /// subsequently spawned processes.
+    fn with_config(self, config: ZebradConfig) -> Result<Self>;
 }
 
-impl<T> GetChild for T
+impl<T> TestDirExt for T
 where
     Self: Borrow<TempDir> + Sized,
 {
@@ -74,12 +66,29 @@ where
             .spawn2(self)
             .unwrap())
     }
+
+    fn with_config(self, mut config: ZebradConfig) -> Result<Self> {
+        let dir = self.borrow().path();
+
+        if !config.state.ephemeral {
+            let cache_dir = dir.join("state");
+            fs::create_dir(&cache_dir)?;
+            config.state.cache_dir = cache_dir;
+        }
+
+        fs::File::create(dir.join("zebrad.toml"))?
+            .write_all(toml::to_string(&config)?.as_bytes())?;
+
+        todo!()
+    }
 }
 
 #[test]
 fn generate_no_args() -> Result<()> {
     zebra_test::init();
-    let child = tempdir(ConfigMode::Ephemeral)?.spawn_child(&["generate"])?;
+    let child = testdir()?
+        .with_config(default_test_config()?)?
+        .spawn_child(&["generate"])?;
 
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
@@ -108,7 +117,7 @@ macro_rules! assert_with_context {
 #[test]
 fn generate_args() -> Result<()> {
     zebra_test::init();
-    let testdir = tempdir(ConfigMode::NoConfig)?;
+    let testdir = testdir()?;
     let testdir = &testdir;
 
     // unexpected free argument `argument`
@@ -148,7 +157,7 @@ fn generate_args() -> Result<()> {
 #[test]
 fn help_no_args() -> Result<()> {
     zebra_test::init();
-    let testdir = tempdir(ConfigMode::Ephemeral)?;
+    let testdir = testdir()?.with_config(default_test_config()?)?;
 
     let child = testdir.spawn_child(&["help"])?;
     let output = child.wait_with_output()?;
@@ -166,7 +175,7 @@ fn help_no_args() -> Result<()> {
 #[test]
 fn help_args() -> Result<()> {
     zebra_test::init();
-    let testdir = tempdir(ConfigMode::NoConfig)?;
+    let testdir = testdir()?;
     let testdir = &testdir;
 
     // The subcommand "argument" wasn't recognized.
@@ -185,7 +194,7 @@ fn help_args() -> Result<()> {
 #[test]
 fn revhex_args() -> Result<()> {
     zebra_test::init();
-    let testdir = tempdir(ConfigMode::Ephemeral)?;
+    let testdir = testdir()?.with_config(default_test_config()?)?;
 
     // Valid
     let child = testdir.spawn_child(&["revhex", "33eeff55"])?;
@@ -200,7 +209,7 @@ fn revhex_args() -> Result<()> {
 #[test]
 fn seed_no_args() -> Result<()> {
     zebra_test::init();
-    let testdir = tempdir(ConfigMode::Ephemeral)?;
+    let testdir = testdir()?.with_config(default_test_config()?)?;
 
     let mut child = testdir.spawn_child(&["-v", "seed"])?;
 
@@ -222,7 +231,7 @@ fn seed_no_args() -> Result<()> {
 #[test]
 fn seed_args() -> Result<()> {
     zebra_test::init();
-    let testdir = tempdir(ConfigMode::Ephemeral)?;
+    let testdir = testdir()?.with_config(default_test_config()?)?;
     let testdir = &testdir;
 
     // unexpected free argument `argument`
@@ -247,7 +256,7 @@ fn seed_args() -> Result<()> {
 fn start_no_args() -> Result<()> {
     zebra_test::init();
     // start caches state, so run one of the start tests with persistent state
-    let testdir = tempdir(ConfigMode::Persistent)?;
+    let testdir = testdir()?.with_config(persistent_test_config()?)?;
 
     let mut child = testdir.spawn_child(&["-v", "start"])?;
 
@@ -271,7 +280,7 @@ fn start_no_args() -> Result<()> {
 #[test]
 fn start_args() -> Result<()> {
     zebra_test::init();
-    let testdir = tempdir(ConfigMode::Ephemeral)?;
+    let testdir = testdir()?.with_config(default_test_config()?)?;
     let testdir = &testdir;
 
     // Any free argument is valid
@@ -297,7 +306,7 @@ fn start_args() -> Result<()> {
 #[test]
 fn persistent_mode() -> Result<()> {
     zebra_test::init();
-    let testdir = tempdir(ConfigMode::Persistent)?;
+    let testdir = testdir()?.with_config(persistent_test_config()?)?;
     let testdir = &testdir;
 
     let mut child = testdir.spawn_child(&["-v", "start"])?;
@@ -320,7 +329,7 @@ fn persistent_mode() -> Result<()> {
 #[test]
 fn ephemeral_mode() -> Result<()> {
     zebra_test::init();
-    let testdir = tempdir(ConfigMode::Ephemeral)?;
+    let testdir = testdir()?.with_config(default_test_config()?)?;
     let testdir = &testdir;
 
     // Any free argument is valid
@@ -375,7 +384,7 @@ fn misconfigured_ephemeral_mode() -> Result<()> {
 #[test]
 fn app_no_args() -> Result<()> {
     zebra_test::init();
-    let testdir = tempdir(ConfigMode::Ephemeral)?;
+    let testdir = testdir()?.with_config(default_test_config()?)?;
 
     let child = testdir.spawn_child(&[])?;
     let output = child.wait_with_output()?;
@@ -389,7 +398,7 @@ fn app_no_args() -> Result<()> {
 #[test]
 fn version_no_args() -> Result<()> {
     zebra_test::init();
-    let testdir = tempdir(ConfigMode::Ephemeral)?;
+    let testdir = testdir()?.with_config(default_test_config()?)?;
 
     let child = testdir.spawn_child(&["version"])?;
     let output = child.wait_with_output()?;
@@ -403,7 +412,7 @@ fn version_no_args() -> Result<()> {
 #[test]
 fn version_args() -> Result<()> {
     zebra_test::init();
-    let testdir = tempdir(ConfigMode::Ephemeral)?;
+    let testdir = testdir()?.with_config(default_test_config()?)?;
     let testdir = &testdir;
 
     // unexpected free argument `argument`
@@ -432,7 +441,7 @@ fn valid_generated_config_test() -> Result<()> {
 
 fn valid_generated_config(command: &str, expected_output: &str) -> Result<()> {
     zebra_test::init();
-    let testdir = tempdir(ConfigMode::NoConfig)?;
+    let testdir = testdir()?;
     let testdir = &testdir;
 
     // Add a config file name to tempdir path
