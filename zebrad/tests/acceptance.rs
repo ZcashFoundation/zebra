@@ -491,9 +491,13 @@ fn valid_generated_config(command: &str, expected_output: &str) -> Result<()> {
 fn sync_one_checkpoint() -> Result<()> {
     zebra_test::init();
 
-    tempdir(ConfigMode::Persistent)?
+    let mut child = testdir()?
+        .with_config(persistent_test_config()?)?
         .spawn_child(&["start"])?
-        .with_timeout(Duration::from_secs(1))
-        .expect_stdout("verified checkpoint range")?
-        .kill()
+        .with_timeout(Duration::from_secs(1));
+
+    child.expect_stdout("verified checkpoint range")?;
+    child.kill()?;
+
+    Ok(())
 }
