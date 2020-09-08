@@ -79,7 +79,7 @@ where
         fs::File::create(dir.join("zebrad.toml"))?
             .write_all(toml::to_string(&config)?.as_bytes())?;
 
-        todo!()
+        Ok(self)
     }
 }
 
@@ -366,7 +366,9 @@ fn misconfigured_ephemeral_mode() -> Result<()> {
         .write_all(toml::to_string(&config)?.as_bytes())?;
 
     // Any free argument is valid
-    let mut child = dir.spawn_child(&["start", "argument"])?;
+    let mut child = dir
+        .with_config(config)?
+        .spawn_child(&["start", "argument"])?;
     // Run the program and kill it at 1 second
     std::thread::sleep(Duration::from_secs(1));
     child.kill()?;
@@ -376,7 +378,14 @@ fn misconfigured_ephemeral_mode() -> Result<()> {
     output.assert_was_killed()?;
 
     // Check that ephemeral takes precedence over cache_dir
-    assert_with_context!(cache_dir.read_dir()?.count() == 0, &output);
+    assert_with_context!(
+        cache_dir
+            .read_dir()
+            .expect("cache_dir should still exist")
+            .count()
+            == 0,
+        &output
+    );
 
     Ok(())
 }
