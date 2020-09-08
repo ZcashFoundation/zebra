@@ -394,6 +394,7 @@ where
                 })
                 .then(move |msg| {
                     let inv_collector = inv_collector.clone();
+                    let span = debug_span!("inventory_filter");
                     async move {
                         if let Ok(Message::Inv(hashes)) = &msg {
                             // We ignore inventory messages with more than one
@@ -405,24 +406,21 @@ where
                                 [hash @ InventoryHash::Block(_)] => {
                                     let _ = inv_collector.send((*hash, addr));
                                 }
-                                [hashes @ ..]
-                                    if hashes
-                                        .iter()
-                                        .any(|&hash| matches!(hash, InventoryHash::Tx(_))) =>
-                                {
+                                [hashes @ ..] => {
                                     for hash in hashes {
                                         if matches!(hash, InventoryHash::Tx(_)) {
+                                            debug!(?hash, "registering Tx inventory hash");
                                             let _ = inv_collector.send((*hash, addr));
                                         } else {
-                                            debug!(?hash, "ignored non Tx inventory hash")
+                                            trace!(?hash, "ignoring non Tx inventory hash")
                                         }
                                     }
                                 }
-                                ignored => debug!(?ignored, "ignored inventory advert"),
                             }
                         }
                         msg
                     }
+                    .instrument(span)
                 })
                 .boxed();
 
