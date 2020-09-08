@@ -169,14 +169,35 @@ We use the following Sled trees:
 
 | Tree                 |                  Keys |                              Values |
 |----------------------|-----------------------|-------------------------------------|
-| `blocks_by_hash`     | `block::Hash`     | `Block`                             |
-| `hash_by_height`     | `BE32(height)`        | `block::Hash`                   |
-| `tx_by_hash`         | `transaction::Hash`     | `block::Hash || BE32(tx_index)` |
+| `hash_by_height`     | `BE32(height)`        | `block::Hash`                       |
+| `height_by_hash`     | `block::Hash`         | `BE32(height)`                      |
+| `block_by_height`    | `BE32(height)`        | `Block`                             |
+| `tx_by_hash`         | `transaction::Hash`   | `BE32(height) || BE32(tx_index)`    |
 | `utxo_by_outpoint`   | `OutPoint`            | `TransparentOutput`                 |
 | `sprout_nullifiers`  | `sprout::Nullifier`   | `()`                                |
 | `sapling_nullifiers` | `sapling::Nullifier`  | `()`                                |
 
 Zcash structures are encoded using `ZcashSerialize`/`ZcashDeserialize`.
+
+### Notes on Sled trees
+
+- The `hash_by_height` and `height_by_hash` trees provide the bijection between
+  block heights and block hashes.  (Since the Sled state only stores finalized
+  state, this is actually a bijection).
+
+- Blocks are stored by height, not by hash.  This has the downside that looking
+  up a block by hash requires an extra level of indirection.  The upside is
+  that blocks with adjacent heights are adjacent in the database, and many
+  common access patterns, such as helping a client sync the chain or doing
+  analysis, access blocks in (potentially sparse) height order.  In addition,
+  the fact that we commit blocks in order means we're writing only to the end
+  of the Sled tree, which may help save space.
+
+- Transaction references are stored as a `(height, index)` pair referencing the
+  height of the transaction's parent block and the transaction's index in that
+  block.  This would more traditionally be a `(hash, index)` pair, but because
+  we store blocks by height, storing the height saves one level of indirection.
+
 
 ## Request / Response API
 [request-response]: #request-response
@@ -216,13 +237,19 @@ Finally, process any queued children of the newly committed block the same way.
 [request-commit-finalized-block]: #request-finalized-block
 
 Commits a finalized block to the sled state, skipping contextual validation.
-The block's parent must be the current sled tip. This is exposed for use in
-checkpointing, which produces in-order finalized blocks. Returns
-`Response::Added(BlockHeaderHash)` with the hash of the committed block if
-successful.
+This is exposed for use in checkpointing, which produces in-order finalized
+blocks. Returns `Response::Added(BlockHeaderHash)` with the hash of the
+committed block if successful.
 
-This should be implemented as a wrapper around a function also called by
-[`Request::CommitBlock`](#request-commit-block), which should:
+If the parent block is not committed, add the block to an internal queue for
+future processing.  Otherwise, call the wrapper function described below, then
+process any queued children.  (Although the checkpointer generates verified
+blocks in order when it completes a checkpoint, the blocks are committed in the
+response futures, so they may arrive out of order).
+
+Committing a block to the sled state should be implemented as a wrapper around
+a function also called by [`Request::CommitBlock`](#request-commit-block),
+which should:
 
 1. Obtain the highest entry of `hash_by_height` as `(old_height, old_tip)`.
 Check that `block`'s parent hash is `old_tip` and its height is
@@ -230,12 +257,14 @@ Check that `block`'s parent hash is `old_tip` and its height is
 to prevent database corruption, but it is the caller's responsibility to
 commit finalized blocks in order.
 
-2. Insert `(block_hash, block)` into `blocks_by_hash` and
-   `(BE32(height), block_hash)` into `hash_by_height`.
+2. Insert:
+    - `(hash, height)` into `height_by_hash`;
+    - `(height, hash)` into `hash_by_height`;
+    - `(height, block)` into `block_by_height`.
 
 3. Iterate over the enumerated transactions in the block. For each transaction:
 
-   1. Insert `(transaction_hash, block_hash || BE32(tx_index))` to
+   1. Insert `(transaction_hash, block_height || BE32(tx_index))` to
    `tx_by_hash`;
 
    2. For each `TransparentInput::PrevOut { outpoint, .. }` in the
@@ -255,7 +284,6 @@ commit finalized blocks in order.
 [`JoinSplit`]: https://doc.zebra.zfnd.org/zebra_chain/transaction/struct.JoinSplit.html
 [`Spend`]: https://doc.zebra.zfnd.org/zebra_chain/transaction/struct.Spend.html
 
-    
 These updates can be performed in a batch or without necessarily iterating
 over all transactions, if the data is available by other means; they're
 specified this way for clarity.
@@ -269,10 +297,14 @@ hash, returning
 - `Response::Depth(Some(depth))` if the block is in the main chain;
 - `Response::Depth(None)` otherwise.
 
+Implemented by querying `height_by_hash`.
+
 ### `Request::Tip`
 [request-tip]: #request-tip
 
 Returns `Response::Tip(BlockHeaderHash)` with the current best chain tip.
+
+Implemented by querying `hash_by_height`.
 
 ### `Request::BlockLocator`
 [request-block-locator]: #request-block-locator
