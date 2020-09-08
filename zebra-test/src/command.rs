@@ -9,6 +9,8 @@ use std::os::unix::process::ExitStatusExt;
 use std::path::Path;
 use std::process::{Child, Command, ExitStatus, Output};
 
+use std::convert::Infallible as NoDir;
+
 /// Runs a command
 pub fn test_cmd(command_path: &str, tempdir: &Path) -> Result<Command> {
     let mut cmd = Command::new(command_path);
@@ -24,7 +26,7 @@ pub trait CommandExt {
 
     /// wrapper for `output` fn on `Command` that constructs informative error
     /// reports
-    fn output2(&mut self) -> Result<TestOutput, Report>;
+    fn output2(&mut self) -> Result<TestOutput<NoDir>, Report>;
 
     /// wrapper for `spawn` fn on `Command` that constructs informative error
     /// reports
@@ -49,7 +51,7 @@ impl CommandExt for Command {
 
     /// wrapper for `output` fn on `Command` that constructs informative error
     /// reports
-    fn output2(&mut self) -> Result<TestOutput, Report> {
+    fn output2(&mut self) -> Result<TestOutput<NoDir>, Report> {
         let output = self.output();
 
         let output = output
@@ -57,6 +59,7 @@ impl CommandExt for Command {
             .with_section(|| format!("{:?}", self).header("Command:"))?;
 
         Ok(TestOutput {
+            dir: None,
             output,
             cmd: format!("{:?}", self),
         })
@@ -117,7 +120,7 @@ impl<T> TestChild<T> {
     }
 
     #[spandoc::spandoc]
-    pub fn wait_with_output(self) -> Result<TestOutput> {
+    pub fn wait_with_output(self) -> Result<TestOutput<T>> {
         /// SPANDOC: waiting for command to exit
         let output = self.child.wait_with_output().with_section({
             let cmd = self.cmd.clone();
@@ -127,16 +130,21 @@ impl<T> TestChild<T> {
         Ok(TestOutput {
             output,
             cmd: self.cmd,
+            dir: Some(self.dir),
         })
     }
 }
 
-pub struct TestOutput {
+pub struct TestOutput<T> {
+    #[allow(dead_code)]
+    // this just keeps the test dir around from `TestChild` so it doesnt get
+    // deleted during `wait_with_output`
+    dir: Option<T>,
     pub cmd: String,
     pub output: Output,
 }
 
-impl TestOutput {
+impl<T> TestOutput<T> {
     pub fn assert_success(self) -> Result<Self> {
         if !self.output.status.success() {
             Err(eyre!("command exited unsuccessfully")).context_from(&self)?;
@@ -265,10 +273,10 @@ impl<T> ContextFrom<TestChild<T>> for Report {
     }
 }
 
-impl ContextFrom<TestOutput> for Report {
+impl<T> ContextFrom<TestOutput<T>> for Report {
     type Return = Report;
 
-    fn context_from(self, source: &TestOutput) -> Self::Return {
+    fn context_from(self, source: &TestOutput<T>) -> Self::Return {
         self.with_section(|| source.cmd.clone().header("Command:"))
             .context_from(&source.output)
     }
