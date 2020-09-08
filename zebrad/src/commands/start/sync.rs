@@ -76,18 +76,24 @@ const TIPS_RETRY_TIMEOUT: Duration = Duration::from_secs(60);
 ///   - allow pending downloads and verifies to complete or time out.
 ///     Sync restarts don't cancel downloads, so quick restarts can overload
 ///     network-bound nodes with lots of peers, leading to further failures.
-///     (The total number of requests being processed by peers is only
-///     constrained by the number of peers.)
+///     (The total number of requests being processed by peers is the sum of
+///     the number of peers, and the peer request buffer size.)
+///
+///     We assume that Zebra nodes have at least 10 Mbps bandwidth. So a
+///     maximum-sized block can take up to 2 seconds to download. Therefore, we
+///     set this timeout to twice the default number of peers. (The peer request
+///     buffer size is small enough that any buffered requests will overlap with
+///     the post-restart ObtainTips.)
+///
 ///   - allow zcashd peers to process pending requests. If the node only has a
 ///     few peers, we want to clear as much peer state as possible. In
 ///     particular, zcashd sends "next block range" hints, based on zcashd's
 ///     internal model of our sync progress. But we want to discard these hints,
 ///     so they don't get confused with ObtainTips and ExtendTips responses.
 ///
-/// Make sure each sync run can download an entire checkpoint, even on instances
-/// with slow or unreliable networks. This is particularly important on testnet,
-/// which has a small number of slow peers.
-const SYNC_RESTART_TIMEOUT: Duration = Duration::from_secs(60);
+/// This timeout is particularly important on instances with slow or unreliable
+/// networks, and on testnet, which has a small number of slow peers.
+const SYNC_RESTART_TIMEOUT: Duration = Duration::from_secs(100);
 
 /// Helps work around defects in the bitcoin protocol by checking whether
 /// the returned hashes actually extend a chain tip.
