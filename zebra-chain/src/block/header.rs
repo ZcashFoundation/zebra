@@ -68,20 +68,8 @@ pub struct Header {
 }
 
 impl Header {
-    /// Check if `self.time` is less than or equal to
-    /// 2 hours in the future, according to the node's local clock (`now`).
-    ///
-    /// This is a non-deterministic rule, as clocks vary over time, and
-    /// between different nodes.
-    ///
-    /// "In addition, a full validator MUST NOT accept blocks with nTime
-    /// more than two hours in the future according to its clock. This
-    /// is not strictly a consensus rule because it is nondeterministic,
-    /// and clock time varies between nodes. Also note that a block that
-    /// is rejected by this rule at a given point in time may later be
-    /// accepted." [§7.5][7.5]
-    ///
-    /// [7.5]: https://zips.z.cash/protocol/protocol.pdf#blockheader
+    /// TODO Inline this function in zebra_consensus::block::check see
+    /// https://github.com/ZcashFoundation/zebra/issues/1021 for more details
     pub fn is_time_valid_at(&self, now: DateTime<Utc>) -> Result<(), Error> {
         let two_hours_in_the_future = now
             .checked_add_signed(Duration::hours(2))
