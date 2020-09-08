@@ -293,7 +293,7 @@ These updates can be performed in a batch or without necessarily iterating
 over all transactions, if the data is available by other means; they're
 specified this way for clarity.
 
-### `Request::Depth(BlockHeaderHash)`
+### `Request::Depth(block::Hash)`
 [request-depth]: #request-depth
 
 Computes the depth in the best chain of the block identified by the given
@@ -302,29 +302,72 @@ hash, returning
 - `Response::Depth(Some(depth))` if the block is in the main chain;
 - `Response::Depth(None)` otherwise.
 
-Implemented by querying `height_by_hash`.
+Implemented by querying:
+
+- (non-finalized) XXX parts of the non-finalized state;
+- (finalized) the `height_by_hash` tree.
 
 ### `Request::Tip`
 [request-tip]: #request-tip
 
 Returns `Response::Tip(BlockHeaderHash)` with the current best chain tip.
 
-Implemented by querying `hash_by_height`.
+Implemented by querying:
+
+- (non-finalized) XXX parts of the non-finalized state;
+- (finalized) the `hash_by_height` tree.
 
 ### `Request::BlockLocator`
 [request-block-locator]: #request-block-locator
 
-- XXX fill in
+Returns `Response::BlockLocator(Vec<block::Hash>)` with hashes starting from
+the current chain tip and reaching backwards towards the genesis block. The
+first hash is the current chain tip. The last hash is the tip of the
+finalized portion of the state. If the state is empty, the block locator is
+also empty.
+
+This can be used by the sync component to request hashes of subsequent
+blocks.
+
+Implemented by querying:
+
+- (non-finalized) XXX parts of the non-finalized state;
+- (finalized) the `hash_by_height` tree.
 
 ### `Request::Transaction(TransactionHash)`
 [request-transaction]: #request-transaction
 
-- XXX fill in
+Returns
+
+- `Response::Transaction(Some(Transaction))` if the transaction identified by
+    the given hash is contained in the state;
+
+- `Response::Transaction(None)` if the transaction identified by the given
+    hash is not contained in the state.
+
+Implemented by querying:
+
+- (non-finalized) XXX parts of the non-finalized state;
+- (finalized) the `tx_by_hash` (to get the parent block) and then
+    `block_by_height` (to get the transaction data) trees.
 
 ### `Request::Block(BlockHeaderHash)`
 [request-block]: #request-block
 
-- XXX fill in
+Returns
+
+- `Response::Block(Some(Arc<Block>))` if the block identified by the given
+    hash is contained in the state;
+
+- `Response::Block(None)` if the block identified by the given hash is not
+    contained in the state;
+
+Implemented by querying:
+
+- (non-finalized) XXX parts of the non-finalized state;
+- (finalized) the `height_by_hash` (to get the block height) and then
+    `block_by_height` (to get the block data) trees.
+
 
 # Drawbacks
 [drawbacks]: #drawbacks
