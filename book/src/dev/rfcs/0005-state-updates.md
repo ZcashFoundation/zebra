@@ -167,6 +167,25 @@ chains, so that the map ordering is the ordering of best to worst chains.
 
 - XXX fill in details on exact types
 
+- **Chain**: `(im::OrdMap<block::Height, Arc<Block>>, HashSet<Nullifier>, HashSet<block::Hash>)`
+  - Ord impl is ordered by work
+  - push => add a block to the end of a chain, does contextual verification
+  checks, extracts info from block for extra data sets
+  - pop => remove the lowest block
+  - fork => create a new chain fork based on a given block(hash) within
+  another chain, calls push repeatedly
+- **ChainSet**: `(BTreeSet<Chain>, BTreeMap<block::Height, Arc<Block>>)`
+  - `fn finalize(&mut self) -> Arc<Block>`
+  - `fn commit_block(&mut self, block: Arc<Block>) -> Result<(), Err>`
+    - iterate through chains, if the parent of `block` is the tip of any
+    chains, try to push block onto that chain
+    - if not, iterate through chains, checking if the parent is contained in
+    that chain
+    - if so, fork the chain at the parent and try to push `block` onto that
+    fork and add newly extended chain if the push succeeds
+    - if not, queue block, prune queued blocks that are below the reorg limit
+
+
 - XXX work out whether we should store extra data (e.g., a HashSet of UTXOs
   spent by some block etc.) to speed up checks.
 
