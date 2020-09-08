@@ -96,7 +96,7 @@ including Spend descriptions and Output descriptions describe the spending and
 creation of Zcash Sapling notes, and JoinSplit-on-Groth16 descriptions to
 transfer/spend/create Sprout notes and transparent value. JoinSplit and Spend
 descriptions specify an anchor, which references a previous note commitment tree
-root: for Spend's, this is a previous block's anchor as defined in their block
+root: for `Spend`s, this is a previous block's anchor as defined in their block
 header, for JoinSplit's, it may be a previous block's anchor or the root
 produced by a strictly previous JoinSplit description in its transaction. For
 Spend's, this is convenient because we can query our state service for
@@ -191,4 +191,3 @@ time).
 
 # Future possibilities
 [future-possibilities]: #future-possibilities
-
