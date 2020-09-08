@@ -9,15 +9,24 @@ use zebra_chain::parameters::NetworkUpgrade;
 
 /// The buffer size for the peer set.
 ///
+/// This should be greater than 1 to avoid sender contention, but also reasonably
+/// small, to avoid queueing too many in-flight block downloads. (A large queue
+/// of in-flight block downloads can choke a constrained local network
+/// connection, or a small peer set on testnet.)
+///
 /// We assume that Zebra nodes have at least 10 Mbps bandwidth. Therefore, a
-/// maximum-sized block will take 2 seconds to download. Based on the current
-/// `BLOCK_DOWNLOAD_TIMEOUT`, this is the largest buffer size we can support.
-pub const PEERSET_BUFFER_SIZE: usize = 10;
+/// maximum-sized block can take up to 2 seconds to download. So the peer set
+/// buffer adds up to 6 seconds worth of blocks to the queue.
+pub const PEERSET_BUFFER_SIZE: usize = 3;
 
 /// The timeout for requests made to a remote peer.
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// The timeout for handshakes when connecting to new peers.
+///
+/// This timeout should remain small, because it helps stop slow peers getting
+/// into the peer set. This is particularly important for network-constrained
+/// nodes, and on testnet.
 pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(4);
 
 /// We expect to receive a message from a live peer at least once in this time duration.
