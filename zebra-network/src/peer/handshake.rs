@@ -401,9 +401,24 @@ where
                             // query rather than a newly gossiped block.
                             //
                             // https://zebra.zfnd.org/dev/rfcs/0003-inventory-tracking.html#inventory-monitoring
-                            if hashes.len() == 1 {
-                                let hash = hashes[0];
-                                let _ = inv_collector.send((hash, addr));
+                            match hashes.as_slice() {
+                                [hash @ InventoryHash::Block(_)] => {
+                                    let _ = inv_collector.send((*hash, addr));
+                                }
+                                [hashes @ ..]
+                                    if hashes
+                                        .iter()
+                                        .any(|&hash| matches!(hash, InventoryHash::Tx(_))) =>
+                                {
+                                    for hash in hashes {
+                                        if matches!(hash, InventoryHash::Tx(_)) {
+                                            let _ = inv_collector.send((*hash, addr));
+                                        } else {
+                                            debug!(?hash, "ignored non Tx inventory hash")
+                                        }
+                                    }
+                                }
+                                ignored => debug!(?ignored, "ignored inventory advert"),
                             }
                         }
                         msg
