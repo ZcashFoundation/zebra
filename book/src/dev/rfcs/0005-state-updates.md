@@ -48,7 +48,15 @@ state service.
 * **chain reorganization**: Occurs when a new best chain is found and the
   previous best chain becomes a side chain.
 
+* **reorg limit**: The longest reorganization accepted by Zcashd, 100 blocks.
+
 * **orphaned block**: A block which is no longer included in the best chain.
+
+* **non-finalized state**: State data corresponding to blocks above the reorg
+  limit. This data can change in the event of a chain reorg.
+
+* **finalized state**: State data corresponding to blocks below the reorg
+  limit. This data cannot change in the event of a chain reorg.
 
 # Guide-level explanation
 [guide-level-explanation]: #guide-level-explanation
@@ -74,10 +82,11 @@ finality, while in Zcash, chain state is final once it is beyond the reorg
 limit. To simplify our implementation, we split the representation of the
 state data at the finality boundary provided by the reorg limit.
 
-State data from blocks *above* the reorg limit is stored in-memory using
-immutable data structures from the `im` crate. State data from blocks *below*
-the reorg limit is stored persistently using `sled`. This allows a
-simplification of our state handling, because only final data is persistent.
+State data from blocks *above* the reorg limit (*non-finalized state*) is
+stored in-memory using immutable data structures from the `im` crate. State
+data from blocks *below* the reorg limit (*finalized state*) is stored
+persistently using `sled`. This allows a simplification of our state
+handling, because only finalized data is persistent.
 
 We choose `im` because it provides best-in-class manipulation of persistent
 data structures. We choose `sled` because of its ease of integration and API
@@ -86,6 +95,13 @@ simplicity.
 One downside of this design is that restarting the node loses the last 100
 blocks, but node restarts are relatively infrequent and a short re-sync is
 cheap relative to the cost of additional implementation complexity.
+
+Another downside of this design is that we do not achieve exactly the same
+behavior as Zcashd in the event of a 51% attack: Zcashd limits *each* chain
+reorganization to 100 blocks, but permits multiple reorgs, while Zebra limits
+*all* chain reorgs to 100 blocks. In the event of a successful 51% attack on
+Zcash, this could be resolved by wiping the Sled state and re-syncing the new
+chain, but in this scenario there are worse problems.
 
 ## Service Interface
 [service-interface]: #service-interface
@@ -155,7 +171,24 @@ chains, so that the map ordering is the ordering of best to worst chains.
   spent by some block etc.) to speed up checks.
 
 When a new block extends the best chain past 100 blocks, the old root is
-removed from the in-memory state and committed to sled.
+removed from the non-finalized state and committed to the finalized state.
+
+## Committing non-finalized blocks
+
+If the parent block is not committed, add the block to an internal queue for
+future processing.
+
+Otherwise, attempt to perform contextual validation checks and the commit the
+given block to the state. The exact list of contextual validation checks will
+be specified in a later RFC. If contextual validation checks succeed, commit
+the new blocks to the non-finalized state as described below. Next, if the
+resulting non-finalized chain is longer than 100 blocks, the oldest block is
+now past the reorg limit. Remove it from the non-finalized state and commit
+it as a finalized block, as described in the next section.
+
+XXX: fill in details of non-finalized state.
+
+Finally, process any queued children of the newly committed block the same way.
 
 ## Sled data structures
 [sled]: #sled
@@ -200,52 +233,11 @@ Zcash structures are encoded using `ZcashSerialize`/`ZcashDeserialize`.
   block.  This would more traditionally be a `(hash, index)` pair, but because
   we store blocks by height, storing the height saves one level of indirection.
 
-
-## Request / Response API
-[request-response]: #request-response
-
-The state API is provided by a pair of `Request`/`Response` enums. Each
-`Request` variant corresponds to particular `Response` variants, and it's
-fine (and encouraged) for caller code to unwrap the expected variants with
-`unreachable!` on the unexpected variants. This is slightly inconvenient but
-it means that we have a unified state interface with unified backpressure.
-
-This API includes both write and read calls. Spotting `Commit` requests in
-code review should not be a problem, but in the future, if we need to
-restrict access to write calls, we could implement a wrapper service that
-rejects these, and export "read" and "write" frontends to the same inner service.
-
-### `Request::CommitBlock(Arc<Block>)`
-[request-commit-block]: #request-commit-block
-
-Performs contextual validation of the given block, committing it to the state
-if successful. Returns `Response::Added(BlockHeaderHash)` with the hash of
-the newly committed block or an error.
+## Committing finalized blocks
 
 If the parent block is not committed, add the block to an internal queue for
-future processing.
-
-Otherwise, attempt to perform contextual validation checks and the commit the
-given block to the state. The exact list of contextual validation checks will
-be specified in a later RFC. If contextual validation checks succeed, the new
-block is added to one of the in-memory chains. If the resulting chain is
-longer than 100 blocks, the oldest block is now past the reorg limit, so we
-remove it from all in-memory chains and commit it to sled as described below
-in `CommitFinalizedBlock`.
-
-Finally, process any queued children of the newly committed block the same way.
-
-### `Request::CommitFinalizedBlock(Arc<Block>)`
-[request-commit-finalized-block]: #request-finalized-block
-
-Commits a finalized block to the sled state, skipping contextual validation.
-This is exposed for use in checkpointing, which produces in-order finalized
-blocks. Returns `Response::Added(BlockHeaderHash)` with the hash of the
-committed block if successful.
-
-If the parent block is not committed, add the block to an internal queue for
-future processing.  Otherwise, call the wrapper function described below, then
-process any queued children.  (Although the checkpointer generates verified
+future processing.  Otherwise, commit the block described below, then
+commit any queued children.  (Although the checkpointer generates verified
 blocks in order when it completes a checkpoint, the blocks are committed in the
 response futures, so they may arrive out of order).
 
@@ -293,6 +285,35 @@ These updates can be performed in a batch or without necessarily iterating
 over all transactions, if the data is available by other means; they're
 specified this way for clarity.
 
+
+## Request / Response API
+[request-response]: #request-response
+
+The state API is provided by a pair of `Request`/`Response` enums. Each
+`Request` variant corresponds to particular `Response` variants, and it's
+fine (and encouraged) for caller code to unwrap the expected variants with
+`unreachable!` on the unexpected variants. This is slightly inconvenient but
+it means that we have a unified state interface with unified backpressure.
+
+This API includes both write and read calls. Spotting `Commit` requests in
+code review should not be a problem, but in the future, if we need to
+restrict access to write calls, we could implement a wrapper service that
+rejects these, and export "read" and "write" frontends to the same inner service.
+
+### `Request::CommitBlock(Arc<Block>)`
+[request-commit-block]: #request-commit-block
+
+Performs contextual validation of the given block, committing it to the state
+if successful. Returns `Response::Added(BlockHeaderHash)` with the hash of
+the newly committed block or an error.
+
+### `Request::CommitFinalizedBlock(Arc<Block>)`
+[request-commit-finalized-block]: #request-finalized-block
+
+Commits a finalized block to the sled state, skipping contextual validation.
+This is exposed for use in checkpointing, which produces in-order finalized
+blocks. Returns `Response::Added(BlockHeaderHash)` with the hash of the
+committed block if successful.
 ### `Request::Depth(block::Hash)`
 [request-depth]: #request-depth
 
