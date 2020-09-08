@@ -14,6 +14,20 @@ fn librustzcash_tx_deserialize_and_round_trip() {
 }
 
 #[test]
+fn librustzcash_tx_hash() {
+    let tx = Transaction::zcash_deserialize(&zebra_test::vectors::GENERIC_TESTNET_TX[..])
+        .expect("transaction test vector from librustzcash should deserialize");
+
+    // TxID taken from comment in zebra_test::vectors
+    let hash = tx.hash();
+    let expected = "3956b54c11736f4ac5e2c474029cba8f5b83dca2e38f355337e20ce37fbdf064"
+        .parse::<Hash>()
+        .expect("hash should parse correctly");
+
+    assert_eq!(hash, expected);
+}
+
+#[test]
 fn zip143_deserialize_and_round_trip() {
     let tx1 = Transaction::zcash_deserialize(&zebra_test::vectors::ZIP143_1[..])
         .expect("transaction test vector from ZIP143 should deserialize");

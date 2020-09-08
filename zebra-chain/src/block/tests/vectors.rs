@@ -21,7 +21,7 @@ fn blockheaderhash_debug() {
 
     assert_eq!(
         format!("{:?}", hash),
-        "BlockHeaderHash(\"bf46b4b5030752fedac6f884976162bbfb29a9398f104a280b3e34d51b416631\")"
+        "block::Hash(\"bf46b4b5030752fedac6f884976162bbfb29a9398f104a280b3e34d51b416631\")"
     );
 }
 
@@ -33,7 +33,7 @@ fn blockheaderhash_from_blockheader() {
 
     assert_eq!(
         format!("{:?}", hash),
-        "BlockHeaderHash(\"39c92b8c6b582797830827c78d58674c7205fcb21991887c124d1dbe4b97d6d1\")"
+        "block::Hash(\"39c92b8c6b582797830827c78d58674c7205fcb21991887c124d1dbe4b97d6d1\")"
     );
 
     let mut bytes = Cursor::new(Vec::new());

@@ -1,13 +1,13 @@
-use std::{convert::TryInto, io};
+use std::io;
 
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use serde::{Deserialize, Serialize};
 
 use crate::{
     amount::{Amount, NonNegative},
     primitives::{x25519, ZkSnarkProof},
     serialization::{
-        ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
+        ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashDeserializeInto,
+        ZcashSerialize,
     },
 };
 
@@ -51,8 +51,8 @@ pub struct JoinSplit<P: ZkSnarkProof> {
 
 impl<P: ZkSnarkProof> ZcashSerialize for JoinSplit<P> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        writer.write_u64::<LittleEndian>(self.vpub_old.into())?;
-        writer.write_u64::<LittleEndian>(self.vpub_new.into())?;
+        self.vpub_old.zcash_serialize(&mut writer)?;
+        self.vpub_new.zcash_serialize(&mut writer)?;
         writer.write_32_bytes(&self.anchor.into())?;
         writer.write_32_bytes(&self.nullifiers[0].into())?;
         writer.write_32_bytes(&self.nullifiers[1].into())?;
@@ -72,8 +72,8 @@ impl<P: ZkSnarkProof> ZcashSerialize for JoinSplit<P> {
 impl<P: ZkSnarkProof> ZcashDeserialize for JoinSplit<P> {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         Ok(JoinSplit::<P> {
-            vpub_old: reader.read_u64::<LittleEndian>()?.try_into()?,
-            vpub_new: reader.read_u64::<LittleEndian>()?.try_into()?,
+            vpub_old: (&mut reader).zcash_deserialize_into()?,
+            vpub_new: (&mut reader).zcash_deserialize_into()?,
             anchor: tree::Root::from(reader.read_32_bytes()?),
             nullifiers: [
                 reader.read_32_bytes()?.into(),

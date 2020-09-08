@@ -15,13 +15,22 @@ use super::Header;
 /// Technically, this is the (SHA256d) hash of a block *header*, but since the
 /// block header includes the Merkle root of the transaction Merkle tree, it
 /// binds the entire contents of the block and is used to identify entire blocks.
+///
+/// Note: Zebra displays transaction and block hashes in their actual byte-order,
+/// not in reversed byte-order.
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct Hash(pub [u8; 32]);
 
+impl fmt::Display for Hash {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(&hex::encode(&self.0))
+    }
+}
+
 impl fmt::Debug for Hash {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple("BlockHeaderHash")
+        f.debug_tuple("block::Hash")
             .field(&hex::encode(&self.0))
             .finish()
     }

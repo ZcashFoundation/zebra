@@ -1,12 +1,24 @@
 //! Acceptance test: runs zebrad as a subprocess and asserts its
 //! output for given argument combinations matches what is expected.
+//!
+//! ### Note on port conflict
+//! If the test child has a cache or port conflict with another test, or a
+//! running zebrad or zcashd, then it will panic. But the acceptance tests
+//! expect it to run until it is killed.
+//!
+//! If these conflicts cause test failures:
+//!   - run the tests in an isolated environment,
+//!   - run zebrad on a custom cache path and port,
+//!   - run zcashd on a custom port.
 
 #![warn(warnings, missing_docs, trivial_casts, unused_qualifications)]
 #![forbid(unsafe_code)]
 
 use color_eyre::eyre::Result;
-use std::{borrow::Borrow, fs, io::Write, time::Duration};
+use eyre::WrapErr;
 use tempdir::TempDir;
+
+use std::{borrow::Borrow, fs, io::Write, time::Duration};
 
 use zebra_test::prelude::*;
 use zebrad::config::ZebradConfig;
@@ -476,21 +488,130 @@ fn valid_generated_config(command: &str, expected_output: &str) -> Result<()> {
 
     output.stdout_contains(expected_output)?;
 
-    // If the test child has a cache or port conflict with another test, or a
-    // running zebrad or zcashd, then it will panic. But the acceptance tests
-    // expect it to run until it is killed.
-    //
-    // If these conflicts cause test failures:
-    //   - run the tests in an isolated environment,
-    //   - run zebrad on a custom cache path and port,
-    //   - run zcashd on a custom port.
-    output.assert_was_killed().expect("Expected zebrad with generated config to succeed. Are there other acceptance test, zebrad, or zcashd processes running?");
+    // [Note on port conflict](#Note on port conflict)
+    output.assert_was_killed().wrap_err("Possible port or cache conflict. Are there other acceptance test, zebrad, or zcashd processes running?")?;
 
     // Check if the temp dir still exists
     assert_with_context!(testdir.path().exists(), &output);
 
     // Check if the created config file still exists
     assert_with_context!(generated_config_path.exists(), &output);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn metrics_endpoint() -> Result<()> {
+    use hyper::{Client, Uri};
+
+    zebra_test::init();
+
+    // [Note on port conflict](#Note on port conflict)
+    let endpoint = "127.0.0.1:50001";
+    let url = "http://127.0.0.1:50001";
+
+    // Write a configuration that has metrics endpoint_addr set
+    let mut config = default_test_config()?;
+    config.metrics.endpoint_addr = Some(endpoint.parse().unwrap());
+
+    let dir = TempDir::new("zebrad_tests")?;
+    fs::File::create(dir.path().join("zebrad.toml"))?
+        .write_all(toml::to_string(&config)?.as_bytes())?;
+
+    let mut child = dir.spawn_child(&["start"])?;
+
+    // Run the program for a second before testing the endpoint
+    std::thread::sleep(Duration::from_secs(1));
+
+    // Create an http client
+    let client = Client::new();
+
+    // Test metrics endpoint
+    let res = client.get(Uri::from_static(url)).await?;
+    assert!(res.status().is_success());
+    let body = hyper::body::to_bytes(res).await?;
+    assert!(std::str::from_utf8(&body)
+        .unwrap()
+        .contains("metrics snapshot"));
+
+    child.kill()?;
+
+    let output = child.wait_with_output()?;
+    let output = output.assert_failure()?;
+
+    // Make sure metrics was started
+    output.stdout_contains(format!(r"Initializing metrics endpoint at {}", endpoint).as_str())?;
+
+    // [Note on port conflict](#Note on port conflict)
+    output
+        .assert_was_killed()
+        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore]
+async fn tracing_endpoint() -> Result<()> {
+    use hyper::{Body, Client, Request, Uri};
+
+    zebra_test::init();
+
+    // [Note on port conflict](#Note on port conflict)
+    let endpoint = "127.0.0.1:50002";
+    let url_default = "http://127.0.0.1:50002";
+    let url_filter = "http://127.0.0.1:50002/filter";
+
+    // Write a configuration that has tracing endpoint_addr option set
+    let mut config = default_test_config()?;
+    config.tracing.endpoint_addr = Some(endpoint.parse().unwrap());
+
+    let dir = TempDir::new("zebrad_tests")?;
+    fs::File::create(dir.path().join("zebrad.toml"))?
+        .write_all(toml::to_string(&config)?.as_bytes())?;
+
+    let mut child = dir.spawn_child(&["start"])?;
+
+    // Run the program for a second before testing the endpoint
+    std::thread::sleep(Duration::from_secs(1));
+
+    // Create an http client
+    let client = Client::new();
+
+    // Test tracing endpoint
+    let res = client.get(Uri::from_static(url_default)).await?;
+    assert!(res.status().is_success());
+    let body = hyper::body::to_bytes(res).await?;
+    assert!(std::str::from_utf8(&body).unwrap().contains(
+        "This HTTP endpoint allows dynamic control of the filter applied to\ntracing events."
+    ));
+
+    // Set a filter and make sure it was changed
+    let request = Request::post(url_filter)
+        .body(Body::from("zebrad=debug"))
+        .unwrap();
+    let _post = client.request(request).await?;
+
+    let tracing_res = client.get(Uri::from_static(url_filter)).await?;
+    assert!(tracing_res.status().is_success());
+    let tracing_body = hyper::body::to_bytes(tracing_res).await?;
+    assert!(std::str::from_utf8(&tracing_body)
+        .unwrap()
+        .contains("zebrad=debug"));
+
+    child.kill()?;
+
+    let output = child.wait_with_output()?;
+    let output = output.assert_failure()?;
+
+    // Make sure tracing endpoint was started
+    output.stdout_contains(format!(r"Initializing tracing endpoint at {}", endpoint).as_str())?;
+    // Todo: Match some trace level messages from output
+
+    // [Note on port conflict](#Note on port conflict)
+    output
+        .assert_was_killed()
+        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
 
     Ok(())
 }

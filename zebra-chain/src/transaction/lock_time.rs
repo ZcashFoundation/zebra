@@ -12,7 +12,7 @@ use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize}
 /// # Invariants
 ///
 /// Users should not construct a `LockTime` with:
-///   - a `BlockHeight` greater than MAX_BLOCK_HEIGHT,
+///   - a `block::Height` greater than MAX_BLOCK_HEIGHT,
 ///   - a timestamp before 6 November 1985
 ///     (Unix timestamp less than MIN_LOCK_TIMESTAMP), or
 ///   - a timestamp after 5 February 2106
