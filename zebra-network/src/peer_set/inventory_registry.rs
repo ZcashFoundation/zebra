@@ -85,6 +85,7 @@ impl InventoryRegistry {
             match channel_result {
                 Ok((hash, addr)) => self.register(hash, addr),
                 Err(RecvError::Lagged(count)) => {
+                    metrics::counter!("pool.inventory.dropped", 1);
                     tracing::debug!(count, "dropped lagged inventory advertisements");
                 }
                 // This indicates all senders, including the one in the handshaker,
