@@ -147,7 +147,7 @@ other Sapling descriptions in future transactions.
 
 For Sprout, we must compute/update interstitial note commitment trees between
 JoinSplit's that may reference an earlier one's root as its anchor. If we do
-this at the transaction layer, we can iterate throught all the JoinSplit's and
+this at the transaction layer, we can iterate through all the JoinSplit's and
 compute the Sprout note commitment tree and nullifier set similar to how we do
 the Sapling ones as described above, but at each state change (ie,
 per-JoinSplit) we note the root and cache it for lookup later. As the
