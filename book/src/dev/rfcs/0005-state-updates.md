@@ -300,20 +300,37 @@ code review should not be a problem, but in the future, if we need to
 restrict access to write calls, we could implement a wrapper service that
 rejects these, and export "read" and "write" frontends to the same inner service.
 
-### `Request::CommitBlock(Arc<Block>)`
+### `Request::CommitBlock`
 [request-commit-block]: #request-commit-block
+
+```rust
+CommitBlock {
+    block: Arc<Block>,
+    sprout_anchor: sprout::tree::Root,
+    sapling_anchor: sapling::tree::Root,
+}
+```
 
 Performs contextual validation of the given block, committing it to the state
 if successful. Returns `Response::Added(BlockHeaderHash)` with the hash of
 the newly committed block or an error.
 
-### `Request::CommitFinalizedBlock(Arc<Block>)`
+### `Request::CommitFinalizedBlock`
 [request-commit-finalized-block]: #request-finalized-block
+
+```rust
+CommitFinalizedBlock {
+    block: Arc<Block>,
+    sprout_anchor: sprout::tree::Root,
+    sapling_anchor: sapling::tree::Root,
+}
+```
 
 Commits a finalized block to the sled state, skipping contextual validation.
 This is exposed for use in checkpointing, which produces in-order finalized
 blocks. Returns `Response::Added(BlockHeaderHash)` with the hash of the
 committed block if successful.
+
 ### `Request::Depth(block::Hash)`
 [request-depth]: #request-depth
 
