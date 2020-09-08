@@ -229,24 +229,21 @@ where
                 //
                 // Starting to wait is interesting, but logging each wait can be
                 // very verbose.
-                let mut first_wait = true;
+                if self.pending_blocks.len() > LOOKAHEAD_LIMIT {
+                    tracing::info!(
+                        tips.len = self.prospective_tips.len(),
+                        pending.len = self.pending_blocks.len(),
+                        pending.limit = LOOKAHEAD_LIMIT,
+                        "waiting for pending blocks",
+                    );
+                }
                 while self.pending_blocks.len() > LOOKAHEAD_LIMIT {
-                    if first_wait {
-                        tracing::info!(
-                            tips.len = self.prospective_tips.len(),
-                            pending.len = self.pending_blocks.len(),
-                            pending.limit = LOOKAHEAD_LIMIT,
-                            "waiting for pending blocks",
-                        );
-                        first_wait = false;
-                    } else {
-                        tracing::trace!(
-                            tips.len = self.prospective_tips.len(),
-                            pending.len = self.pending_blocks.len(),
-                            pending.limit = LOOKAHEAD_LIMIT,
-                            "continuing to wait for pending blocks",
-                        );
-                    }
+                    tracing::trace!(
+                        tips.len = self.prospective_tips.len(),
+                        pending.len = self.pending_blocks.len(),
+                        pending.limit = LOOKAHEAD_LIMIT,
+                        "continuing to wait for pending blocks",
+                    );
                     match self
                         .pending_blocks
                         .next()
