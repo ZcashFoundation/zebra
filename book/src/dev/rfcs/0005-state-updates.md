@@ -2,7 +2,7 @@
 
 - Feature Name: state_updates
 - Start Date: 2020-08-14
-- Design PR: XXX
+- Design PR: https://github.com/ZcashFoundation/zebra/pull/902
 - Zebra Issue: XXX
 
 # Summary
