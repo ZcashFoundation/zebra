@@ -1,4 +1,7 @@
-use zebra_chain::block::{self, Block};
+use zebra_chain::{
+    block::{self, Block},
+    transaction::Transaction,
+};
 
 use crate::meta_addr::MetaAddr;
 use std::sync::Arc;
@@ -17,4 +20,7 @@ pub enum Response {
 
     /// A list of block hashes.
     BlockHashes(Vec<block::Hash>),
+
+    /// A list of transactions.
+    Transactions(Vec<Arc<Transaction>>),
 }

@@ -1,6 +1,9 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::Arc};
 
-use zebra_chain::block;
+use zebra_chain::{
+    block,
+    transaction::{self, Transaction},
+};
 
 use super::super::types::Nonce;
 
@@ -39,10 +42,29 @@ pub enum Request {
     /// didn't start with a `Vec` but with, e.g., an iterator, they can collect
     /// directly into a `HashSet` and save work.
     ///
+    /// If this requests a recently-advertised block, the peer set will make a
+    /// best-effort attempt to route the request to a peer that advertised the
+    /// block. This routing is only used for request sets of size 1.
+    /// Otherwise, it is routed using the normal load-balancing strategy.
+    ///
     /// # Returns
     ///
     /// Returns [`Response::Blocks`](super::Response::Blocks).
     BlocksByHash(HashSet<block::Hash>),
+
+    /// Request transactions by hash.
+    ///
+    /// This uses a `HashSet` for the same reason as [`Request::BlocksByHash`].
+    ///
+    /// If this requests a recently-advertised transaction, the peer set will
+    /// make a best-effort attempt to route the request to a peer that advertised
+    /// the transaction. This routing is only used for request sets of size 1.
+    /// Otherwise, it is routed using the normal load-balancing strategy.
+    ///
+    /// # Returns
+    ///
+    /// Returns [`Response::Transactions`](super::Response::Transactions).
+    TransactionsByHash(HashSet<transaction::Hash>),
 
     /// Request block hashes of subsequent blocks in the chain, giving hashes of
     /// known blocks.
@@ -69,4 +91,50 @@ pub enum Request {
         /// Optionally, the last header to request.
         stop: Option<block::Hash>,
     },
+
+    /// Push a transaction to a remote peer, without advertising it to them first.
+    ///
+    /// This is implemented by sending an unsolicited `tx` message.
+    ///
+    /// # Returns
+    ///
+    /// Returns [`Response::Nil`](super::Response::Nil).
+    PushTransaction(Arc<Transaction>),
+
+    /// Advertise a set of transactions to all peers.
+    ///
+    /// This is intended to be used in Zebra with a single transaction at a time
+    /// (set of size 1), but multiple transactions are permitted because this is
+    /// how we interpret advertisements from Zcashd, which sometimes advertises
+    /// multiple transactions at once.
+    ///
+    /// This is implemented by sending an `inv` message containing the
+    /// transaction hash, allowing the remote peer to choose whether to download
+    /// it. Remote peers who choose to download the transaction will generate a
+    /// [`Request::TransactionsByHash`] against the "inbound" service passed to
+    /// [`zebra_network::init`].
+    ///
+    /// The peer set routes this request specially, sending it to *every*
+    /// available peer.
+    ///
+    /// # Returns
+    ///
+    /// Returns [`Response::Nil`](super::Response::Nil).
+    AdvertiseTransactions(HashSet<transaction::Hash>),
+
+    /// Advertise a block to all peers.
+    ///
+    /// This is implemented by sending an `inv` message containing the
+    /// block hash, allowing the remote peer to choose whether to download
+    /// it. Remote peers who choose to download the transaction will generate a
+    /// [`Request::BlocksByHash`] against the "inbound" service passed to
+    /// [`zebra_network::init`].
+    ///
+    /// The peer set routes this request specially, sending it to *every*
+    /// available peer.
+    ///
+    /// # Returns
+    ///
+    /// Returns [`Response::Nil`](super::Response::Nil).
+    AdvertiseBlock(block::Hash),
 }

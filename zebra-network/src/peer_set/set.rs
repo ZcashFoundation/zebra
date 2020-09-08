@@ -11,6 +11,7 @@ use std::{
 
 use futures::{
     channel::{mpsc, oneshot},
+    future::TryFutureExt,
     prelude::*,
     stream::FuturesUnordered,
 };
@@ -260,31 +261,78 @@ where
         svc.load()
     }
 
-    fn best_peer_for(&mut self, req: &Request) -> (SocketAddr, D::Service) {
-        if let Request::BlocksByHash(hashes) = req {
-            for hash in hashes.iter() {
-                let mut peers = self.inventory_registry.peers(&(*hash).into());
-                if let Some(index) = peers.find_map(|addr| self.ready_services.get_index_of(addr)) {
-                    return self
-                        .ready_services
-                        .swap_remove_index(index)
-                        .expect("found index must be valid");
-                }
-            }
-        }
-
-        self.default_peer()
-    }
-
-    fn default_peer(&mut self) -> (SocketAddr, D::Service) {
+    /// Routes a request using P2C load-balancing.
+    fn route_p2c(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
         let index = self
             .next_idx
             .take()
             .expect("ready service must have valid preselected index");
 
-        self.ready_services
+        let (key, mut svc) = self
+            .ready_services
             .swap_remove_index(index)
-            .expect("preselected index must be valid")
+            .expect("preselected index must be valid");
+
+        let fut = svc.call(req);
+        self.push_unready(key, svc);
+        fut.map_err(Into::into).boxed()
+    }
+
+    /// Tries to route a request to a peer that advertised that inventory,
+    /// falling back to P2C if there is no ready peer.
+    fn route_inv(
+        &mut self,
+        req: Request,
+        hash: InventoryHash,
+    ) -> <Self as tower::Service<Request>>::Future {
+        let candidate_index = self
+            .inventory_registry
+            .peers(&hash)
+            .find_map(|addr| self.ready_services.get_index_of(addr));
+
+        match candidate_index {
+            Some(index) => {
+                let (key, mut svc) = self
+                    .ready_services
+                    .swap_remove_index(index)
+                    .expect("found index must be valid");
+                tracing::debug!(?hash, ?key, "routing based on inventory");
+
+                let fut = svc.call(req);
+                self.push_unready(key, svc);
+                fut.map_err(Into::into).boxed()
+            }
+            None => {
+                tracing::debug!(
+                    ?hash,
+                    "could not find ready peer for inventory hash, falling back to p2c"
+                );
+                self.route_p2c(req)
+            }
+        }
+    }
+
+    // Routes a request to all ready peers, ignoring return values.
+    fn route_all(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
+        // This is not needless: otherwise, we'd hold a &mut reference to self.ready_services,
+        // blocking us from passing &mut self to push_unready.
+        let ready_services = std::mem::take(&mut self.ready_services);
+
+        let futs = FuturesUnordered::new();
+        for (key, mut svc) in ready_services {
+            futs.push(svc.call(req.clone()).map_err(|_| ()));
+            self.push_unready(key, svc);
+        }
+
+        async move {
+            let results = futs.collect::<Vec<Result<_, _>>>().await;
+            tracing::debug!(
+                ok.len = results.iter().filter(|r| r.is_ok()).count(),
+                err.len = results.iter().filter(|r| r.is_err()).count(),
+            );
+            Ok(Response::Nil)
+        }
+        .boxed()
     }
 }
 
@@ -361,19 +409,19 @@ where
     }
 
     fn call(&mut self, req: Request) -> Self::Future {
-        let (key, mut svc) = self.best_peer_for(&req);
-
-        // XXX add a dimension tagging request metrics by type
-        metrics::counter!(
-            "outbound_requests",
-            1,
-            "key" => key.to_string(),
-        );
-
-        let fut = svc.call(req);
-        self.push_unready(key, svc);
-
-        use futures::future::TryFutureExt;
-        fut.map_err(Into::into).boxed()
+        match req {
+            // Only do inventory-aware routing on individual items.
+            Request::BlocksByHash(ref hashes) if hashes.len() == 1 => {
+                let hash = InventoryHash::from(*hashes.iter().next().unwrap());
+                self.route_inv(req, hash)
+            }
+            Request::TransactionsByHash(ref hashes) if hashes.len() == 1 => {
+                let hash = InventoryHash::from(*hashes.iter().next().unwrap());
+                self.route_inv(req, hash)
+            }
+            Request::AdvertiseTransactions(_) => self.route_all(req),
+            Request::AdvertiseBlock(_) => self.route_all(req),
+            _ => self.route_p2c(req),
+        }
     }
 }
