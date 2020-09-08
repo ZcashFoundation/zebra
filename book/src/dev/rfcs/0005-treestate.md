@@ -106,7 +106,7 @@ been satisfied and the Spend description can be validated independently. For
 JoinSplit's, if it's not a previously finalized block anchor, it must be the
 treestate anchor of previous JoinSplit in this transaction, and we have to wait
 for that one to be parsed and its root computed to check that ours is
-valid. Luckily, it can only be a previous JoinSplit in this transaction, and are
+valid. Luckily, it can only be a previous JoinSplit in this transaction, and is
 [usually the immediately previous one](zcashd), so the set of candidate anchors
 is smaller for earlier JoinSplit's in a transcation, but larger for the later
 ones. For these JoinSplit's, they can be validated independently of their
