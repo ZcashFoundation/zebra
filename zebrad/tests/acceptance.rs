@@ -503,7 +503,7 @@ fn sync_one_checkpoint() -> Result<()> {
     let mut child = testdir()?
         .with_config(persistent_test_config()?)?
         .spawn_child(&["start"])?
-        .with_timeout(Duration::from_secs(1));
+        .with_timeout(Duration::from_secs(20));
 
     child.expect_stdout("verified checkpoint range")?;
     child.kill()?;
