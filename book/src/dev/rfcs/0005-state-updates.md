@@ -176,6 +176,8 @@ We use the following Sled trees:
 | `utxo_by_outpoint`   | `OutPoint`            | `TransparentOutput`                 |
 | `sprout_nullifiers`  | `sprout::Nullifier`   | `()`                                |
 | `sapling_nullifiers` | `sapling::Nullifier`  | `()`                                |
+| `sprout_anchors`     | `sprout::tree::Root`  | `()`                                |
+| `sapling_anchors`    | `sapling::tree::Root` | `()`                                |
 
 Zcash structures are encoded using `ZcashSerialize`/`ZcashDeserialize`.
 
@@ -262,7 +264,10 @@ commit finalized blocks in order.
     - `(height, hash)` into `hash_by_height`;
     - `(height, block)` into `block_by_height`.
 
-3. Iterate over the enumerated transactions in the block. For each transaction:
+3.  Update the `sprout_anchors` and `sapling_anchors` trees with the Sprout
+    and Sapling anchors (XXX: how??)
+
+4. Iterate over the enumerated transactions in the block. For each transaction:
 
    1. Insert `(transaction_hash, block_height || BE32(tx_index))` to
    `tx_by_hash`;
