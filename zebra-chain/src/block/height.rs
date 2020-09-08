@@ -4,7 +4,7 @@ use crate::serialization::SerializationError;
 ///
 /// # Invariants
 ///
-/// Users should not construct block heights greater than `BlockHeight::MAX`.
+/// Users should not construct block heights greater than `Height::MAX`.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Height(pub u32);
 
@@ -13,34 +13,30 @@ impl std::str::FromStr for Height {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.parse() {
             Ok(h) if (Height(h) <= Height::MAX) => Ok(Height(h)),
-            Ok(_) => Err(SerializationError::Parse(
-                "BlockHeight exceeds maximum height",
-            )),
-            Err(_) => Err(SerializationError::Parse(
-                "BlockHeight(u32) integer parse error",
-            )),
+            Ok(_) => Err(SerializationError::Parse("Height exceeds maximum height")),
+            Err(_) => Err(SerializationError::Parse("Height(u32) integer parse error")),
         }
     }
 }
 
 impl Height {
-    /// The minimum BlockHeight.
+    /// The minimum Height.
     ///
     /// Due to the underlying type, it is impossible to construct block heights
-    /// less than `BlockHeight::MIN`.
+    /// less than `Height::MIN`.
     ///
-    /// Style note: Sometimes, `BlockHeight::MIN` is less readable than
-    /// `BlockHeight(0)`. Use whichever makes sense in context.
+    /// Style note: Sometimes, `Height::MIN` is less readable than
+    /// `Height(0)`. Use whichever makes sense in context.
     pub const MIN: Height = Height(0);
 
-    /// The maximum BlockHeight.
+    /// The maximum Height.
     ///
-    /// Users should not construct block heights greater than `BlockHeight::MAX`.
+    /// Users should not construct block heights greater than `Height::MAX`.
     pub const MAX: Height = Height(499_999_999);
 
-    /// The maximum BlockHeight as a u32, for range patterns.
+    /// The maximum Height as a u32, for range patterns.
     ///
-    /// `BlockHeight::MAX.0` can't be used in match range patterns, use this
+    /// `Height::MAX.0` can't be used in match range patterns, use this
     /// alias instead.
     pub const MAX_AS_U32: u32 = Self::MAX.0;
 }

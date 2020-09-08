@@ -8,6 +8,7 @@ mod lock_time;
 mod memo;
 mod serialize;
 mod shielded_data;
+mod sighash;
 
 #[cfg(test)]
 mod tests;
@@ -21,6 +22,7 @@ pub use shielded_data::ShieldedData;
 use crate::{
     amount::Amount,
     block,
+    parameters::NetworkUpgrade,
     primitives::{Bctv14Proof, Groth16Proof},
     transparent,
 };
@@ -97,6 +99,11 @@ pub enum Transaction {
 }
 
 impl Transaction {
+    /// Compute the hash of this transaction.
+    pub fn hash(&self) -> Hash {
+        Hash::from(self)
+    }
+
     /// Access the transparent inputs of this transaction, regardless of version.
     pub fn inputs(&self) -> &[transparent::Input] {
         match self {
@@ -151,5 +158,29 @@ impl Transaction {
                 self.inputs().get(0),
                 Some(transparent::Input::Coinbase { .. })
             )
+    }
+
+    /// Calculate the sighash for the current transaction
+    ///
+    /// # Details
+    ///
+    /// The `input` argument indicates the transparent Input for which we are
+    /// producing a sighash. It is comprised of the index identifying the
+    /// transparent::Input within the transaction and the transparent::Output
+    /// representing the UTXO being spent by that input.
+    ///
+    /// # Panics
+    ///
+    /// - if passed in any NetworkUpgrade from before NetworkUpgrade::Overwinter
+    /// - if called on a v1 or v2 transaction
+    /// - if the input index points to a transparent::Input::CoinBase
+    /// - if the input index is out of bounds for self.inputs()
+    pub fn sighash(
+        &self,
+        network_upgrade: NetworkUpgrade,
+        hash_type: sighash::HashType,
+        input: Option<(u32, transparent::Output)>,
+    ) -> blake2b_simd::Hash {
+        sighash::SigHasher::new(self, hash_type, network_upgrade, input).sighash()
     }
 }

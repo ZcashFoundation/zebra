@@ -1,14 +1,15 @@
 //! Contains impls of `ZcashSerialize`, `ZcashDeserialize` for all of the
 //! transaction types, so that all of the serialization logic is in one place.
 
-use std::{convert::TryInto, io, sync::Arc};
+use std::{io, sync::Arc};
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 use crate::{
     primitives::ZkSnarkProof,
     serialization::{
-        ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
+        ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashDeserializeInto,
+        ZcashSerialize,
     },
     sprout,
 };
@@ -143,7 +144,7 @@ impl ZcashSerialize for Transaction {
                 outputs.zcash_serialize(&mut writer)?;
                 lock_time.zcash_serialize(&mut writer)?;
                 writer.write_u32::<LittleEndian>(expiry_height.0)?;
-                writer.write_i64::<LittleEndian>((*value_balance).into())?;
+                value_balance.zcash_serialize(&mut writer)?;
 
                 // The previous match arms serialize in one go, because the
                 // internal structure happens to nicely line up with the
@@ -250,7 +251,7 @@ impl ZcashDeserialize for Transaction {
                 let outputs = Vec::zcash_deserialize(&mut reader)?;
                 let lock_time = LockTime::zcash_deserialize(&mut reader)?;
                 let expiry_height = block::Height(reader.read_u32::<LittleEndian>()?);
-                let value_balance = reader.read_i64::<LittleEndian>()?.try_into()?;
+                let value_balance = (&mut reader).zcash_deserialize_into()?;
                 let mut shielded_spends = Vec::zcash_deserialize(&mut reader)?;
                 let mut shielded_outputs = Vec::zcash_deserialize(&mut reader)?;
                 let joinsplit_data = OptV4JSD::zcash_deserialize(&mut reader)?;
