@@ -107,7 +107,7 @@ where
 
             // Field validity and structure checks
             let now = Utc::now();
-            block.header.is_time_valid_at(now)?;
+            check::is_time_valid_at(&block.header, now)?;
             check::is_coinbase_first(&block)?;
 
             // TODO:
