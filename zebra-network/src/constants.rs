@@ -92,7 +92,7 @@ pub const EWMA_DEFAULT_RTT: Duration = Duration::from_secs(20 + 1);
 ///
 /// This should be much larger than the `SYNC_RESTART_TIMEOUT`, so we choose
 /// better peers when we restart the sync.
-pub const EWMA_DECAY_TIME: Duration = Duration::from_secs(120);
+pub const EWMA_DECAY_TIME: Duration = Duration::from_secs(200);
 
 /// Magic numbers used to identify different Zcash networks.
 pub mod magics {
