@@ -22,6 +22,7 @@ type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 /// Represents a [`Stream`] of download and verification tasks during chain sync.
 #[pin_project]
+#[derive(Debug)]
 pub struct Downloads<ZN, ZV>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + 'static,
