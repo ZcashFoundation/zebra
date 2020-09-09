@@ -21,13 +21,14 @@
 
 use crate::components::tokio::RuntimeRun;
 use crate::config::ZebradConfig;
-use crate::{components::tokio::TokioComponent, prelude::*};
+use crate::{
+    components::{tokio::TokioComponent, Syncer},
+    prelude::*,
+};
 
 use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
 use color_eyre::eyre::Report;
 use tower::{buffer::Buffer, service_fn};
-
-mod sync;
 
 /// `start` subcommand
 #[derive(Command, Debug, Options)]
@@ -60,7 +61,7 @@ impl StartCmd {
         );
         let (peer_set, _address_book) = zebra_network::init(config.network.clone(), node).await;
 
-        let mut syncer = sync::Syncer::new(config.network.network, peer_set, state, verifier);
+        let mut syncer = Syncer::new(config.network.network, peer_set, state, verifier);
 
         syncer.sync().await
     }
