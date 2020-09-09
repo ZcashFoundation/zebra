@@ -3,4 +3,4 @@ mod sync;
 pub mod tokio;
 pub mod tracing;
 
-pub use sync::Syncer;
+pub use sync::ChainSync;
