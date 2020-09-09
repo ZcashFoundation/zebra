@@ -247,6 +247,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "bitvec"
+version = "0.18.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8c1f0df4bb4c441080e98d6ea2dc3281fc19bb440e69ce03075e3d705894f1cb"
+dependencies = [
+ "funty",
+ "radium",
+ "wyz",
+]
+
+[[package]]
 name = "blake2b_simd"
 version = "0.5.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -309,11 +320,11 @@ dependencies = [
 
 [[package]]
 name = "bls12_381"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d4bb0547678ace536b8bd0cb9c033cffd6a8a660b70cbe0da3bb44a1dbda8ad0"
+checksum = "c3eb0d667c378a788aafad3ddb5e9fe77ad3bb478cd32d756bb3cdda02e018ab"
 dependencies = [
- "byteorder",
+ "bitvec 0.18.1",
  "ff",
  "rand_core 0.5.1",
  "subtle",
@@ -786,11 +797,11 @@ checksum = "e88a8acf291dafb59c2d96e8f59828f3838bb1a70398823ade51a84de6a6deed"
 
 [[package]]
 name = "ff"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "01d11efdc125f2647dde5a0f5f88010a5b0f89b700f86052afa1d148c4696047"
+checksum = "01646e077d4ebda82b73f1bca002ea1e91561a77df2431a9e79729bcc31950ef"
 dependencies = [
- "byteorder",
+ "bitvec 0.18.1",
  "rand_core 0.5.1",
  "subtle",
 ]
@@ -844,6 +855,12 @@ name = "fuchsia-zircon-sys"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3dcaa9ae7725d12cdb85b3ad99a434db70b468c09ded17e012d86b5c1010f7a7"
+
+[[package]]
+name = "funty"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ba62103ce691c2fd80fbae2213dfdda9ce60804973ac6b6e97de818ea7f52c8"
 
 [[package]]
 name = "futures"
@@ -1002,14 +1019,13 @@ checksum = "9b919933a397b79c37e33b77bb2aa3dc8eb6e165ad809e58ff75bc7db2e34574"
 
 [[package]]
 name = "group"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a7010d72d6222af90b421f4dbc9c1f05a6d658cce9ed35d441c3dda0ede59fee"
+checksum = "cc11f9f5fbf1943b48ae7c2bf6846e7d827a512d1be4f23af708f5ca5d01dde1"
 dependencies = [
  "byteorder",
  "ff",
- "rand 0.7.3",
- "rand_xorshift",
+ "rand_core 0.5.1",
  "subtle",
 ]
 
@@ -1246,12 +1262,12 @@ dependencies = [
 
 [[package]]
 name = "jubjub"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3b0d7e8d9439803f270fbeb2285f2818dfa989ecf47465fa4c87a59ea9c90e6"
+checksum = "79501f40b75b5555203632fedbd37642acece2a2138660e8fc7bf0c2a83f6459"
 dependencies = [
- "bls12_381 0.2.0",
- "byteorder",
+ "bitvec 0.18.1",
+ "bls12_381 0.3.0",
  "ff",
  "group",
  "rand_core 0.5.1",
@@ -1648,7 +1664,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "34d38aeaffc032ec69faa476b3caaca8d4dd7f3f798137ff30359e5c7869ceb6"
 dependencies = [
  "arrayvec 0.5.1",
- "bitvec",
+ "bitvec 0.17.4",
  "byte-slice-cast",
  "serde",
 ]
@@ -3052,6 +3068,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "wyz"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "85e60b0d1b5f99db2556934e21937020776a5d31520bf169e851ac44e6420214"
+
+[[package]]
 name = "x25519-dalek"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3092,7 +3114,7 @@ dependencies = [
  "bech32",
  "bincode",
  "bitflags",
- "bitvec",
+ "bitvec 0.17.4",
  "blake2b_simd",
  "blake2s_simd",
  "bs58",
@@ -3104,7 +3126,7 @@ dependencies = [
  "equihash",
  "futures",
  "hex",
- "jubjub 0.4.0",
+ "jubjub 0.5.0",
  "lazy_static",
  "primitive-types",
  "proptest",
