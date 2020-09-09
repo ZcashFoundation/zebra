@@ -17,6 +17,9 @@ use zebra_consensus::{checkpoint, parameters};
 use zebra_network as zn;
 use zebra_state as zs;
 
+mod downloads;
+use downloads::Downloads;
+
 /// Controls the number of peers used for each ObtainTips and ExtendTips request.
 // XXX in the future, we may not be able to access the checkpoint module.
 const FANOUT: usize = checkpoint::MAX_QUEUED_BLOCKS_PER_HEIGHT;
