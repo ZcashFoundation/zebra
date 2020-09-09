@@ -16,6 +16,9 @@ use zebra_chain::{
 use zebra_network as zn;
 use zebra_state as zs;
 
+mod downloads;
+use downloads::Downloads;
+
 /// Controls the number of peers used for each ObtainTips and ExtendTips request.
 const FANOUT: usize = 4;
 
