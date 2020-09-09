@@ -65,10 +65,12 @@ const MAX_CHECKPOINT_DOWNLOAD_SECONDS: u64 = 300;
 /// then without a timeout, Zebra would deadlock.
 const BLOCK_VERIFY_TIMEOUT: Duration = Duration::from_secs(MAX_CHECKPOINT_DOWNLOAD_SECONDS);
 
-/// Controls how long we wait to retry ObtainTips or ExtendTips after they fail.
+/// Controls how long we wait to retry ExtendTips after it fails.
 ///
 /// This timeout should be long enough to allow some of our peers to clear
 /// their connection state.
+///
+/// (ObtainTips failures use the sync restart timeout.)
 const TIPS_RETRY_TIMEOUT: Duration = Duration::from_secs(60);
 /// Controls how long we wait to restart syncing after finishing a sync run.
 ///
@@ -182,18 +184,11 @@ where
 
             tracing::info!("starting sync, obtaining new tips");
             if self.obtain_tips().await.is_err() || self.prospective_tips.is_empty() {
-                // Retry ObtainTips once
-                tracing::info!("failed to obtain tips, waiting to retry obtain tips");
-                delay_for(TIPS_RETRY_TIMEOUT).await;
-                let _ = self.obtain_tips().await;
-
-                if self.prospective_tips.is_empty() {
-                    tracing::warn!("failed to obtain tips, waiting to restart sync");
-                    delay_for(SYNC_RESTART_TIMEOUT).await;
-                    continue 'sync;
-                }
+                self.update_metrics();
+                tracing::warn!("failed to obtain tips, waiting to restart sync");
+                delay_for(SYNC_RESTART_TIMEOUT).await;
+                continue 'sync;
             };
-            self.update_metrics();
 
             while !self.prospective_tips.is_empty() {
                 // Check whether any block tasks are currently ready:
