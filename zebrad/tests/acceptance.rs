@@ -20,6 +20,7 @@ use tempdir::TempDir;
 
 use std::{borrow::Borrow, fs, io::Write, time::Duration};
 
+use zebra_chain::parameters::Network::{self, *};
 use zebra_test::prelude::*;
 use zebrad::config::ZebradConfig;
 
@@ -453,14 +454,30 @@ fn valid_generated_config(command: &str, expected_output: &str) -> Result<()> {
 
 #[test]
 #[ignore]
-fn sync_one_checkpoint() -> Result<()> {
+fn sync_one_checkpoint_mainnet() -> Result<()> {
+    sync_one_checkpoint(Mainnet)
+}
+
+#[test]
+#[ignore]
+fn sync_one_checkpoint_testnet() -> Result<()> {
+    sync_one_checkpoint(Testnet)
+}
+
+fn sync_one_checkpoint(network: Network) -> Result<()> {
     zebra_test::init();
 
+    let mut config = persistent_test_config()?;
+    // TODO: add a convenience method?
+    config.network.network = network;
+
     let mut child = testdir()?
-        .with_config(persistent_test_config()?)?
+        .with_config(config)?
         .spawn_child(&["start"])?
         .with_timeout(Duration::from_secs(20));
 
+    // TODO: is there a way to check for testnet or mainnet here?
+    // For example: "network=Mainnet" or "network=Testnet"
     child.expect_stdout("verified checkpoint range")?;
     child.kill()?;
 
