@@ -398,8 +398,11 @@ where
                     async move {
                         if let Ok(Message::Inv(hashes)) = &msg {
                             // We ignore inventory messages with more than one
-                            // item because they are most likely replies to a
-                            // query rather than a newly gossiped block.
+                            // block, because they are most likely replies to a
+                            // query, rather than a newly gossiped block.
+                            //
+                            // (We process inventory messages with any number of
+                            // transactions.)
                             //
                             // https://zebra.zfnd.org/dev/rfcs/0003-inventory-tracking.html#inventory-monitoring
                             match hashes.as_slice() {
