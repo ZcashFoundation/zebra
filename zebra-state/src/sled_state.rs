@@ -241,7 +241,7 @@ impl Service<Request> for SledState {
                         .coinbase_height()
                         .expect("tip of the current chain will have a coinbase height");
 
-                    let heights = crate::block_locator_heights(tip_height);
+                    let heights = crate::util::block_locator_heights(tip_height);
 
                     let block_locator = heights
                         .map(|height| {
