@@ -283,8 +283,12 @@ where
                     }
                 }
                 // We're awaiting a response to a client request,
-                // so wait on either a peer message, or on a request timeout.
-                State::AwaitingResponse { ref span, .. } => {
+                // so wait on either a peer message, or on a request cancellation.
+                State::AwaitingResponse {
+                    ref span,
+                    ref mut tx,
+                    ..
+                } => {
                     // we have to get rid of the span reference so we can tamper with the state
                     let span = span.clone();
                     trace!(parent: &span, "awaiting response to client request");
@@ -292,13 +296,14 @@ where
                         .request_timer
                         .as_mut()
                         .expect("timeout must be set while awaiting response");
-                    match future::select(peer_rx.next(), timer_ref)
+                    let cancel = future::select(timer_ref, tx.cancellation());
+                    match future::select(peer_rx.next(), cancel)
                         .instrument(span.clone())
                         .await
                     {
                         Either::Left((None, _)) => self.fail_with(PeerError::ConnectionClosed),
                         Either::Left((Some(Err(e)), _)) => self.fail_with(e.into()),
-                        Either::Left((Some(Ok(peer_msg)), _timer)) => {
+                        Either::Left((Some(Ok(peer_msg)), _cancel)) => {
                             // Try to process the message using the handler.
                             // This extremely awkward construction avoids
                             // keeping a live reference to handler across the
@@ -335,7 +340,7 @@ where
                                 };
                             }
                         }
-                        Either::Right(((), _peer_fut)) => {
+                        Either::Right((Either::Left(_), _peer_fut)) => {
                             trace!(parent: &span, "client request timed out");
                             let e = PeerError::ClientRequestTimeout;
                             self.state = match self.state {
@@ -354,6 +359,10 @@ where
                                 }
                                 _ => unreachable!(),
                             };
+                        }
+                        Either::Right((Either::Right(_), _peer_fut)) => {
+                            trace!(parent: &span, "client request was cancelled");
+                            self.state = State::AwaitingRequest;
                         }
                     }
                 }
@@ -421,6 +430,12 @@ where
         use Request::*;
         use State::*;
         let ClientRequest { request, tx, span } = req;
+
+        if tx.is_canceled() {
+            metrics::counter!("peer.canceled", 1);
+            tracing::debug!("ignoring canceled request");
+            return;
+        }
 
         // XXX(hdevalence) this is truly horrible, but let's fix it later
 
