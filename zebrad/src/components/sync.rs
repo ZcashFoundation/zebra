@@ -106,7 +106,7 @@ struct CheckedTip {
 }
 
 #[derive(Debug)]
-pub struct Syncer<ZN, ZS, ZV>
+pub struct ChainSync<ZN, ZS, ZV>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = Error> + Send + Clone + 'static,
     ZN::Future: Send,
@@ -127,7 +127,7 @@ where
     genesis_hash: block::Hash,
 }
 
-impl<ZN, ZS, ZV> Syncer<ZN, ZS, ZV>
+impl<ZN, ZS, ZV> ChainSync<ZN, ZS, ZV>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = Error> + Send + Clone + 'static,
     ZN::Future: Send,

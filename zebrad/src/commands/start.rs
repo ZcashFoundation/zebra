@@ -22,7 +22,7 @@
 use crate::components::tokio::RuntimeRun;
 use crate::config::ZebradConfig;
 use crate::{
-    components::{tokio::TokioComponent, Syncer},
+    components::{tokio::TokioComponent, ChainSync},
     prelude::*,
 };
 
@@ -61,7 +61,7 @@ impl StartCmd {
         );
         let (peer_set, _address_book) = zebra_network::init(config.network.clone(), node).await;
 
-        let mut syncer = Syncer::new(config.network.network, peer_set, state, verifier);
+        let mut syncer = ChainSync::new(config.network.network, peer_set, state, verifier);
 
         syncer.sync().await
     }
