@@ -267,10 +267,10 @@ straightforward to implement using `zebra-network`.  The required steps are:
 
     This method takes an existing `TcpStream` so that it can be used with a
     pre-constructed Tor circuit. This method should construct a new `Handshake`
-    instance and configure it with fixed default values. The `Handshake`
-    service takes a handler `Service` used to process inbound requests from the
-    remote peer; `connect_isolated` should pass a no-op `service_fn` that
-    ignores requests.
+    instance and configure it with the fixed default values specified below.
+    The `Handshake` service takes a handler `Service` used to process inbound
+    requests from the remote peer; `connect_isolated` should pass a no-op
+    `service_fn` that ignores requests.
 
 3.  Use `tokio-socks` to construct a `TcpStream` backed by a fresh Tor circuit,
     and pass it to `connect_isolated`.
@@ -298,6 +298,53 @@ lookup to the Zcash Foundation's DNS seeders, and then sends the transaction to
 those peers.
 
 Zcashd can implement Stolon by using the `stolon` crate as a library.
+
+### Handshake parameters
+
+To be minimally-distinguishable, the version message sent during the handshake
+should have the following fields:
+
+| Field           | Value                                                   |
+|-----------------|---------------------------------------------------------|
+| `version`       | Current supported Zebra network version                 |
+| `services`      | `0`, no advertised services                             |
+| `timestamp`     | Local UNIX timestamp, truncated to 5-minute intervals   |
+| `address_recv`  | (`NODE_ADDR`, `0.0.0.0:8233`)                           |
+| `address_from`  | (`0`, `0.0.0.0:8233`)                                   |
+| `nonce`         | Random value                                            |
+| `user_agent`    | `""`, the empty string                                  |
+| `start_height`  | `0`                                                     |
+| `relay`         | `false`                                                 |
+
+The timestamp is chosen to be truncated to 5-minute intervals as a balance
+between two goals:
+
+* providing minimally-distinguishable data in the handshake;
+* not interfering with `zcashd`'s existing code.
+
+There is no specification of the network protocol, so when considering the
+latter goal the best we can do is to make inferences based on the current state
+of the `zcashd` source code.  Currently, `zcashd` only uses the handshake
+timestamp at the end of parsing the version message:
+```
+pfrom->nTimeOffset = timeWarning.AddTimeData(pfrom->addr, nTime, GetTime());
+```
+The `AddTimeData` method defined in `src/timedata.cpp` is a no-op as long as
+the difference between the specified timestamp and `zcashd`'s local time is less
+than a `TIMEDATA_WARNING_THRESHOLD` set to 10 minutes.  Otherwise, the data is fed
+into a process that attempts to detect when the local time is wrong.
+Truncating to the nearest 5 minutes (half of `TIMEDATA_WARNING_THRESHOLD`)
+attempts to try to stay within this interval, so as to not confuse `zcashd`.
+
+In general, truncation may not be sufficient to prevent an observer from
+obtaining distinguishing information, because of aliasing between the truncated
+data and the original signal.  For instance, continuously broadcasting the
+node's timestamp truncated to a 5-minute interval would not hide the node's
+clock skew, which would be revealed at the moment the node switched to the next
+truncation.  However, this is unlikely to be a problem in practice, because the
+number of samples an observer can obtain from a single node is likely to be
+small. And, unlike other approaches like adding random noise, truncation is
+simple, reliable, and deterministic, making it easy to test.
 
 ## Deployment considerations and non-Tor relay fallback
 
