@@ -97,6 +97,9 @@ const TIPS_RETRY_TIMEOUT: Duration = Duration::from_secs(60);
 /// networks, and on testnet, which has a small number of slow peers.
 const SYNC_RESTART_TIMEOUT: Duration = Duration::from_secs(100);
 
+type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
+type ReportAndHash = (Report, block::Hash);
+
 /// Helps work around defects in the bitcoin protocol by checking whether
 /// the returned hashes actually extend a chain tip.
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
@@ -108,11 +111,11 @@ struct CheckedTip {
 #[derive(Debug)]
 pub struct ChainSync<ZN, ZS, ZV>
 where
-    ZN: Service<zn::Request, Response = zn::Response, Error = Error> + Send + Clone + 'static,
+    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
     ZN::Future: Send,
-    ZS: Service<zs::Request, Response = zs::Response, Error = Error> + Send + Clone + 'static,
+    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send,
-    ZV: Service<Arc<Block>, Response = block::Hash, Error = Error> + Send + Clone + 'static,
+    ZV: Service<Arc<Block>, Response = block::Hash, Error = BoxError> + Send + Clone + 'static,
     ZV::Future: Send,
 {
     /// Used to perform ObtainTips and ExtendTips requests, with no retry logic
@@ -135,11 +138,11 @@ where
 /// diffusion.
 impl<ZN, ZS, ZV> ChainSync<ZN, ZS, ZV>
 where
-    ZN: Service<zn::Request, Response = zn::Response, Error = Error> + Send + Clone + 'static,
+    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
     ZN::Future: Send,
-    ZS: Service<zs::Request, Response = zs::Response, Error = Error> + Send + Clone + 'static,
+    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send,
-    ZV: Service<Arc<Block>, Response = block::Hash, Error = Error> + Send + Clone + 'static,
+    ZV: Service<Arc<Block>, Response = block::Hash, Error = BoxError> + Send + Clone + 'static,
     ZV::Future: Send,
 {
     /// Returns a new syncer instance, using:
@@ -675,9 +678,6 @@ where
         metrics::gauge!("sync.pending_blocks.len", self.pending_blocks.len() as i64);
     }
 }
-
-type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
-type ReportAndHash = (Report, block::Hash);
 
 #[cfg(test)]
 mod test {
