@@ -25,13 +25,11 @@ use super::commitment::pedersen_hashes::pedersen_hash;
 
 /// MerkleCRH^Sapling Hash Function
 ///
-/// MerkleCRH^Sapling(layer, left, right) := PedersenHash(“Zcash_PH”, l || left ||right)
+/// MerkleCRH^Sapling(layer, left, right) := PedersenHash(“Zcash_PH”, l || left || right)
 /// where l = I2LEBSP_6(MerkleDepth^Sapling − 1 − layer)
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#merklecrh
-// TODO: refine layer as a wrapper type around a bitvec/bitslice?
-// TODO: refine output type as *NodeHash, combine with RootHash
-fn merkle_crh_sapling(layer: u8, left: [u8; 32], right: [u8; 32]) -> jubjub::Fq {
+fn merkle_crh_sapling(layer: u8, left: [u8; 32], right: [u8; 32]) -> [u8; 32] {
     let mut s: BitVec<Lsb0, u8> = BitVec::new();
 
     // Prefix: l = I2LEBSP_6(MerkleDepth^Sapling − 1 − layer)
@@ -39,7 +37,7 @@ fn merkle_crh_sapling(layer: u8, left: [u8; 32], right: [u8; 32]) -> jubjub::Fq 
     s.append(&mut BitVec::<Lsb0, u8>::from_slice(&left[..]));
     s.append(&mut BitVec::<Lsb0, u8>::from_slice(&right[..]));
 
-    pedersen_hash(*b"Zcash_PH", &s)
+    pedersen_hash(*b"Zcash_PH", &s).to_bytes()
 }
 
 /// The index of a note’s commitment at the leafmost layer of its Note
@@ -54,7 +52,7 @@ pub struct Position(pub(crate) u64);
 /// Sapling Note Commitment Tree
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
-struct SaplingNoteCommitmentTree;
+struct NoteCommitmentTree;
 
 /// Sapling note commitment tree root node hash.
 ///
@@ -72,8 +70,8 @@ impl fmt::Debug for Root {
     }
 }
 
-impl From<SaplingNoteCommitmentTree> for Root {
-    fn from(_tree: SaplingNoteCommitmentTree) -> Self {
+impl From<NoteCommitmentTree> for Root {
+    fn from(_tree: NoteCommitmentTree) -> Self {
         // TODO: The Sapling note commitment tree requires a Pedersen
         // hash function, not SHA256.
 
@@ -87,7 +85,7 @@ impl From<SaplingNoteCommitmentTree> for Root {
     }
 }
 
-impl SaplingNoteCommitmentTree {
+impl NoteCommitmentTree {
     /// Get the Jubjub-based Pedersen hash of root node of this merkle
     /// tree of commitment notes.
     pub fn hash(&self) -> [u8; 32] {
@@ -95,13 +93,13 @@ impl SaplingNoteCommitmentTree {
     }
 }
 
-impl ZcashSerialize for SaplingNoteCommitmentTree {
+impl ZcashSerialize for NoteCommitmentTree {
     fn zcash_serialize<W: io::Write>(&self, _writer: W) -> Result<(), io::Error> {
         unimplemented!();
     }
 }
 
-impl ZcashDeserialize for SaplingNoteCommitmentTree {
+impl ZcashDeserialize for NoteCommitmentTree {
     fn zcash_deserialize<R: io::Read>(_reader: R) -> Result<Self, SerializationError> {
         unimplemented!();
     }
