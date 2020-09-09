@@ -1,8 +1,10 @@
 use std::{collections::HashSet, iter, pin::Pin, sync::Arc, time::Duration};
 
 use color_eyre::eyre::{eyre, Report, WrapErr};
-use futures::future::{FutureExt, TryFutureExt};
-use futures::stream::{FuturesUnordered, StreamExt};
+use futures::{
+    future::{FutureExt, TryFutureExt},
+    stream::{FuturesUnordered, StreamExt},
+};
 use tokio::{task::JoinHandle, time::delay_for};
 use tower::{builder::ServiceBuilder, retry::Retry, timeout::Timeout, Service, ServiceExt};
 use tracing_futures::Instrument;
@@ -11,9 +13,8 @@ use zebra_chain::{
     block::{self, Block},
     parameters::Network,
 };
-use zebra_consensus::checkpoint;
-use zebra_consensus::parameters;
-use zebra_network::{self as zn, RetryLimit};
+use zebra_consensus::{checkpoint, parameters};
+use zebra_network as zn;
 use zebra_state as zs;
 
 /// Controls the number of peers used for each ObtainTips and ExtendTips request.
@@ -119,7 +120,7 @@ where
     /// (failover is handled using fanout).
     tip_network: Timeout<ZN>,
     /// Used to download blocks, with retry logic.
-    block_network: Retry<RetryLimit, Timeout<ZN>>,
+    block_network: Retry<zn::RetryLimit, Timeout<ZN>>,
     state: ZS,
     verifier: Timeout<ZV>,
     prospective_tips: HashSet<CheckedTip>,
@@ -144,7 +145,7 @@ where
     pub fn new(chain: Network, peers: ZN, state: ZS, verifier: ZV) -> Self {
         let tip_network = Timeout::new(peers.clone(), TIPS_RESPONSE_TIMEOUT);
         let block_network = ServiceBuilder::new()
-            .retry(RetryLimit::new(BLOCK_DOWNLOAD_RETRY_LIMIT))
+            .retry(zn::RetryLimit::new(BLOCK_DOWNLOAD_RETRY_LIMIT))
             .timeout(BLOCK_DOWNLOAD_TIMEOUT)
             .service(peers);
         let verifier = Timeout::new(verifier, BLOCK_VERIFY_TIMEOUT);
