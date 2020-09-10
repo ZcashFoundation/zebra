@@ -23,7 +23,7 @@ use memory_state::MemoryState;
 use sled_state::SledState;
 
 pub use config::Config;
-pub use request::Request;
+pub use request::{HashOrHeight, Request};
 pub use response::Response;
 pub use service::init;
 

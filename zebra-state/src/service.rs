@@ -6,7 +6,7 @@ use std::{
 use tower::{buffer::Buffer, util::BoxService, Service};
 use zebra_chain::parameters::Network;
 
-use crate::{BoxError, Config, MemoryState, Request, Response, SledState};
+use crate::{BoxError, Config, HashOrHeight, MemoryState, Request, Response, SledState};
 
 struct StateService {
     /// Holds data relating to finalized chain state.
@@ -35,11 +35,14 @@ impl Service<Request> for StateService {
 
     fn call(&mut self, req: Request) -> Self::Future {
         match req {
-            Request::AddBlock { block } => unimplemented!(),
-            Request::GetBlock { hash } => unimplemented!(),
-            Request::GetTip => unimplemented!(),
-            Request::GetDepth { hash } => unimplemented!(),
-            Request::GetBlockLocator { genesis } => unimplemented!(),
+            Request::CommitBlock { block } => unimplemented!(),
+            Request::CommitFinalizedBlock { block } => unimplemented!(),
+            Request::Depth(hash) => unimplemented!(),
+            Request::Tip => unimplemented!(),
+            Request::BlockLocator => unimplemented!(),
+            Request::Transaction(hash) => unimplemented!(),
+            Request::Block(HashOrHeight::Hash(hash)) => unimplemented!(),
+            Request::Block(HashOrHeight::Height(height)) => unimplemented!(),
         }
     }
 }
