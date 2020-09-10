@@ -7,145 +7,43 @@ use zebra_test::transcript::{TransError, Transcript};
 
 use zebra_state::*;
 
-static ADD_BLOCK_TRANSCRIPT_MAINNET: Lazy<Vec<(Request, Result<Response, TransError>)>> =
+static COMMIT_FINALIZED_BLOCK_MAINNET: Lazy<Vec<(Request, Result<Response, TransError>)>> =
     Lazy::new(|| {
         let block: Arc<_> =
             Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
                 .unwrap()
                 .into();
-        let hash = block.as_ref().into();
+        let block2 = block.clone();
+        let hash = block.hash();
         vec![
             (
-                Request::AddBlock {
-                    block: block.clone(),
-                },
-                Ok(Response::Added { hash }),
+                Request::CommitFinalizedBlock { block },
+                Ok(Response::Committed(hash)),
             ),
-            (Request::GetBlock { hash }, Ok(Response::Block { block })),
+            (
+                Request::Block(hash.into()),
+                Ok(Response::Block(Some(block2))),
+            ),
         ]
     });
 
-static ADD_BLOCK_TRANSCRIPT_TESTNET: Lazy<Vec<(Request, Result<Response, TransError>)>> =
+static COMMIT_FINALIZED_BLOCK_TESTNET: Lazy<Vec<(Request, Result<Response, TransError>)>> =
     Lazy::new(|| {
         let block: Arc<_> =
             Block::zcash_deserialize(&zebra_test::vectors::BLOCK_TESTNET_GENESIS_BYTES[..])
                 .unwrap()
                 .into();
-        let hash = block.as_ref().into();
+        let block2 = block.clone();
+        let hash = block.hash();
         vec![
             (
-                Request::AddBlock {
-                    block: block.clone(),
-                },
-                Ok(Response::Added { hash }),
-            ),
-            (Request::GetBlock { hash }, Ok(Response::Block { block })),
-        ]
-    });
-
-static GET_TIP_ADD_ORDERED_TRANSCRIPT_MAINNET: Lazy<Vec<(Request, Result<Response, TransError>)>> =
-    Lazy::new(|| {
-        let block0: Arc<_> =
-            Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
-                .unwrap()
-                .into();
-        let block1: Arc<_> =
-            Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..])
-                .unwrap()
-                .into();
-        let hash0 = block0.as_ref().into();
-        let hash1 = block1.as_ref().into();
-        vec![
-            // Insert the blocks in order
-            (
-                Request::AddBlock { block: block0 },
-                Ok(Response::Added { hash: hash0 }),
+                Request::CommitFinalizedBlock { block },
+                Ok(Response::Committed(hash)),
             ),
             (
-                Request::AddBlock { block: block1 },
-                Ok(Response::Added { hash: hash1 }),
+                Request::Block(hash.into()),
+                Ok(Response::Block(Some(block2))),
             ),
-            (Request::GetTip, Ok(Response::Tip { hash: hash1 })),
-        ]
-    });
-
-static GET_TIP_ADD_ORDERED_TRANSCRIPT_TESTNET: Lazy<Vec<(Request, Result<Response, TransError>)>> =
-    Lazy::new(|| {
-        let block0: Arc<_> =
-            Block::zcash_deserialize(&zebra_test::vectors::BLOCK_TESTNET_GENESIS_BYTES[..])
-                .unwrap()
-                .into();
-        let block1: Arc<_> =
-            Block::zcash_deserialize(&zebra_test::vectors::BLOCK_TESTNET_1_BYTES[..])
-                .unwrap()
-                .into();
-        let hash0 = block0.as_ref().into();
-        let hash1 = block1.as_ref().into();
-        vec![
-            // Insert the blocks in order
-            (
-                Request::AddBlock { block: block0 },
-                Ok(Response::Added { hash: hash0 }),
-            ),
-            (
-                Request::AddBlock { block: block1 },
-                Ok(Response::Added { hash: hash1 }),
-            ),
-            (Request::GetTip, Ok(Response::Tip { hash: hash1 })),
-        ]
-    });
-
-#[allow(dead_code)]
-static GET_TIP_ADD_REVERSED_TRANSCRIPT_MAINNET: Lazy<Vec<(Request, Result<Response, TransError>)>> =
-    Lazy::new(|| {
-        let block0: Arc<_> =
-            Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
-                .unwrap()
-                .into();
-        let block1: Arc<_> =
-            Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..])
-                .unwrap()
-                .into();
-        let hash0 = block0.as_ref().into();
-        let hash1 = block1.as_ref().into();
-        vec![
-            // Insert the blocks in reverse order
-            (
-                Request::AddBlock { block: block1 },
-                Ok(Response::Added { hash: hash1 }),
-            ),
-            (
-                Request::AddBlock { block: block0 },
-                Ok(Response::Added { hash: hash0 }),
-            ),
-            (Request::GetTip, Ok(Response::Tip { hash: hash1 })),
-        ]
-    });
-
-#[allow(dead_code)]
-static GET_TIP_ADD_REVERSED_TRANSCRIPT_TESTNET: Lazy<Vec<(Request, Result<Response, TransError>)>> =
-    Lazy::new(|| {
-        let block0: Arc<_> =
-            Block::zcash_deserialize(&zebra_test::vectors::BLOCK_TESTNET_GENESIS_BYTES[..])
-                .unwrap()
-                .into();
-        let block1: Arc<_> =
-            Block::zcash_deserialize(&zebra_test::vectors::BLOCK_TESTNET_1_BYTES[..])
-                .unwrap()
-                .into();
-        let hash0 = block0.as_ref().into();
-        let hash1 = block1.as_ref().into();
-        vec![
-            // Insert the blocks in reverse order
-            (
-                Request::AddBlock { block: block1 },
-                Ok(Response::Added { hash: hash1 }),
-            ),
-            (
-                Request::AddBlock { block: block0 },
-                Ok(Response::Added { hash: hash0 }),
-            ),
-            (Request::GetTip, Ok(Response::Tip { hash: hash1 })),
         ]
     });
 
@@ -163,18 +61,8 @@ async fn check_transcripts_testnet() -> Result<(), Report> {
 async fn check_transcripts(network: Network) -> Result<(), Report> {
     zebra_test::init();
 
-    let mainnet_transcript = &[
-        &ADD_BLOCK_TRANSCRIPT_MAINNET,
-        &GET_TIP_ADD_ORDERED_TRANSCRIPT_MAINNET,
-        // Temporarily disabled, until the state accepts out-of-order blocks
-        //&GET_TIP_ADD_REVERSED_TRANSCRIPT_MAINNET,
-    ];
-    let testnet_transcript = &[
-        &ADD_BLOCK_TRANSCRIPT_TESTNET,
-        &GET_TIP_ADD_ORDERED_TRANSCRIPT_TESTNET,
-        // Temporarily disabled, until the state accepts out-of-order blocks
-        //&GET_TIP_ADD_REVERSED_TRANSCRIPT_TESTNET,
-    ];
+    let mainnet_transcript = &[&COMMIT_FINALIZED_BLOCK_MAINNET];
+    let testnet_transcript = &[&COMMIT_FINALIZED_BLOCK_TESTNET];
 
     for transcript_data in match network {
         Network::Mainnet => mainnet_transcript,
