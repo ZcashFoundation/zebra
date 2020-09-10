@@ -1,14 +1,28 @@
 use std::{
     future::Future,
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
 };
 
 use futures::future::{FutureExt, TryFutureExt};
+use tokio::sync::oneshot;
 use tower::{buffer::Buffer, util::BoxService, Service};
-use zebra_chain::parameters::Network;
+use zebra_chain::{
+    block::{self, Block},
+    parameters::Network,
+};
 
 use crate::{BoxError, Config, HashOrHeight, MemoryState, Request, Response, SledState};
+
+// todo: put this somewhere
+pub struct QueuedBlock {
+    pub block: Arc<Block>,
+    // TODO: add these parameters when we can compute anchors.
+    // sprout_anchor: sprout::tree::Root,
+    // sapling_anchor: sapling::tree::Root,
+    pub rsp_tx: oneshot::Sender<Result<block::Hash, BoxError>>,
+}
 
 struct StateService {
     /// Holds data relating to finalized chain state.
@@ -39,12 +53,18 @@ impl Service<Request> for StateService {
         match req {
             Request::CommitBlock { block } => unimplemented!(),
             Request::CommitFinalizedBlock { block } => {
-                let rsp = self
-                    .sled
-                    .commit_finalized(block)
-                    .map(|hash| Response::Committed(hash));
+                let (rsp_tx, rsp_rx) = oneshot::channel();
 
-                async move { rsp }.boxed()
+                self.sled.queue(QueuedBlock { block, rsp_tx });
+                self.sled.process_queue();
+
+                async move {
+                    rsp_rx
+                        .await
+                        .expect("sender oneshot is not dropped")
+                        .map(|hash| Response::Committed(hash))
+                }
+                .boxed()
             }
             Request::Depth(hash) => {
                 // todo: handle in memory and sled
