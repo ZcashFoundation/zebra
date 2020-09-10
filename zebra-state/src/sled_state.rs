@@ -10,6 +10,23 @@ use zebra_chain::{
 
 use crate::{BoxError, Config, HashOrHeight, QueuedBlock};
 
+/// The finalized part of the chain state, stored in sled.
+///
+/// This structure has two categories of methods:
+///
+/// - *synchronous* methods that perform writes to the sled state;
+/// - *asynchronous* methods that perform reads.
+///
+/// For more on this distinction, see RFC5. The synchronous methods are
+/// implemented as ordinary methods on the [`SledState`]. The asynchronous
+/// methods are not implemented using `async fn`, but using normal methods that
+/// return `impl Future<Output = ...>`. This allows them to move data (e.g.,
+/// clones of handles for [`sled::Tree`]s) into the futures they return.
+///
+/// This means that the returned futures have a `'static` lifetime and don't
+/// borrow any resources from the [`SledState`], and the actual database work is
+/// performed asynchronously when the returned future is polled, not while it is
+/// created.  This is analogous to the way [`tower::Service::call`] works.
 pub struct SledState {
     /// Queued blocks that arrived out of order, indexed by their parent block hash.
     queued_by_prev_hash: HashMap<block::Hash, QueuedBlock>,
@@ -42,11 +59,19 @@ impl SledState {
     }
 
     /// Queue a finalized block to be committed to the state.
+    ///
+    /// After queueing a finalized block, call [`process_queue`] to check whether
+    /// the newly queued block (and any of its descendants) can be committed to
+    /// the state.
     pub fn queue(&mut self, queued_block: QueuedBlock) {
         let prev_hash = queued_block.block.header.previous_block_hash;
         self.queued_by_prev_hash.insert(prev_hash, queued_block);
     }
 
+    /// Process the queue of finalized blocks, committing any that can be committed in-order.
+    ///
+    /// This should be called after [`queue`], to check whether the newly queued block
+    /// (and any of its descendants) can be committed to the state.
     pub fn process_queue(&mut self) {
         // Cloning means the closure doesn't hold a borrow of &self,
         // conflicting with mutable access in the loop below.
@@ -63,8 +88,11 @@ impl SledState {
         }
     }
 
-    /// Commit a finalized block to the state. It's the caller's responsibility
-    /// to ensure that blocks are committed in order.
+    /// Commit a finalized block to the state.
+    ///
+    /// It's the caller's responsibility to ensure that blocks are committed in
+    /// order. This function is called by [`process_queue`], which does, and is
+    /// intentionally not exposed as part of the public API of the [`SledState`].
     fn commit_finalized(&mut self, queued_block: QueuedBlock) {
         let QueuedBlock { block, rsp_tx } = queued_block;
 
