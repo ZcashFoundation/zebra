@@ -92,23 +92,6 @@ static BLOCK_VERIFY_TRANSCRIPT_GENESIS_FAIL: Lazy<
     vec![(block, Err(TransError::Any))]
 });
 
-static BLOCK_VERIFY_TRANSCRIPT_GENESIS_TO_BLOCK_1: Lazy<
-    Vec<(Arc<Block>, Result<block::Hash, TransError>)>,
-> = Lazy::new(|| {
-    let block0: Arc<_> =
-        Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
-            .unwrap()
-            .into();
-    let hash0 = Ok(block0.hash());
-
-    let block1: Arc<_> = Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..])
-        .unwrap()
-        .into();
-    let hash1 = Ok(block1.hash());
-
-    vec![(block0, hash0), (block1, hash1)]
-});
-
 static NO_COINBASE_TRANSCRIPT: Lazy<Vec<(Arc<Block>, Result<block::Hash, TransError>)>> =
     Lazy::new(|| {
         let block = block_no_transactions();
@@ -137,29 +120,6 @@ static STATE_VERIFY_TRANSCRIPT_GENESIS: Lazy<Vec<(zs::Request, Result<zs::Respon
             Ok(zs::Response::Block(Some(block))),
         )]
     });
-
-#[tokio::test]
-async fn verify_genesis_test() -> Result<(), Report> {
-    verify_genesis().await
-}
-
-/// Test that block verifies work
-///
-/// Uses a custom checkpoint list, containing only the genesis block. Since the
-/// maximum checkpoint height is 0, non-genesis blocks are verified using the
-/// BlockVerifier.
-#[spandoc::spandoc]
-async fn verify_genesis() -> Result<(), Report> {
-    zebra_test::init();
-
-    // The hardcoded checkpoint list contains the genesis block.
-    let (chain_verifier, _) = verifiers_from_network(Network::Mainnet).await;
-
-    let transcript = Transcript::from(BLOCK_VERIFY_TRANSCRIPT_GENESIS_TO_BLOCK_1.iter().cloned());
-    transcript.check(chain_verifier).await.unwrap();
-
-    Ok(())
-}
 
 #[tokio::test]
 async fn verify_checkpoint_test() -> Result<(), Report> {
