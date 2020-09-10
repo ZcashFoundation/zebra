@@ -167,11 +167,11 @@ chains, so that the map ordering is the ordering of best to worst chains.
 
 - XXX fill in details on exact types
 
-- **Chain**: `(im::OrdMap<block::Height, Arc<Block>>, HashSet<Nullifier>, HashSet<block::Hash>)`
+- **Chain**: `(im::OrdMap<block::Height, Arc<Block>>, HashSet<Nullifier>, HashSet<block::Hash>, HashSet<Anchor>, HashSet<UTXO>)`
   - Ord impl is ordered by work
   - push => add a block to the end of a chain, does contextual verification
   checks, extracts info from block for extra data sets
-  - pop => remove the lowest block
+  - pop => remove the lowest block, remove references to contents from block in various extra data sets (nullifiers, hashes, etc)
   - fork => create a new chain fork based on a given block(hash) within
   another chain, calls push repeatedly
 - **ChainSet**: `(BTreeSet<Chain>, BTreeMap<block::Height, Arc<Block>>)`
