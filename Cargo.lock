@@ -320,9 +320,9 @@ dependencies = [
 
 [[package]]
 name = "bls12_381"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3eb0d667c378a788aafad3ddb5e9fe77ad3bb478cd32d756bb3cdda02e018ab"
+checksum = "4caf0101205582491f772d60a6fcb6bcec19963e68209cb631851eeadb01421f"
 dependencies = [
  "bitvec 0.18.1",
  "ff",
@@ -1262,12 +1262,12 @@ dependencies = [
 
 [[package]]
 name = "jubjub"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79501f40b75b5555203632fedbd37642acece2a2138660e8fc7bf0c2a83f6459"
+checksum = "620638af3b80d23f4df0cae21e3cc9809ac8826767f345066f010bcea66a2c55"
 dependencies = [
  "bitvec 0.18.1",
- "bls12_381 0.3.0",
+ "bls12_381 0.3.1",
  "ff",
  "group",
  "rand_core 0.5.1",
@@ -3126,7 +3126,7 @@ dependencies = [
  "equihash",
  "futures",
  "hex",
- "jubjub 0.5.0",
+ "jubjub 0.5.1",
  "lazy_static",
  "primitive-types",
  "proptest",
