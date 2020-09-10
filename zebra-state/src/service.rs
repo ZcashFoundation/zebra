@@ -62,26 +62,23 @@ impl Service<Request> for StateService {
                     rsp_rx
                         .await
                         .expect("sender oneshot is not dropped")
-                        .map(|hash| Response::Committed(hash))
+                        .map(Response::Committed)
                 }
                 .boxed()
             }
             Request::Depth(hash) => {
                 // todo: handle in memory and sled
-                self.sled
-                    .depth(hash)
-                    .map_ok(|depth| Response::Depth(depth))
-                    .boxed()
+                self.sled.depth(hash).map_ok(Response::Depth).boxed()
             }
             Request::Tip => {
                 // todo: handle in memory and sled
-                self.sled.tip().map_ok(|tip| Response::Tip(tip)).boxed()
+                self.sled.tip().map_ok(Response::Tip).boxed()
             }
             Request::BlockLocator => {
                 // todo: handle in memory and sled
                 self.sled
                     .block_locator()
-                    .map_ok(|locator| Response::BlockLocator(locator))
+                    .map_ok(Response::BlockLocator)
                     .boxed()
             }
             Request::Transaction(_) => unimplemented!(),
@@ -89,7 +86,7 @@ impl Service<Request> for StateService {
                 //todo: handle in memory and sled
                 self.sled
                     .block(hash_or_height)
-                    .map_ok(|block| Response::Block(block))
+                    .map_ok(Response::Block)
                     .boxed()
             }
         }
