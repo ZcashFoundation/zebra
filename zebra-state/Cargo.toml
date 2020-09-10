@@ -23,6 +23,7 @@ tower = "0.3.1"
 tracing = "0.1"
 tracing-error = "0.1.2"
 thiserror = "1.0.20"
+tokio = { version = "0.2.22", features = ["sync"] }
 
 [dev-dependencies]
 zebra-test = { path = "../zebra-test/" }

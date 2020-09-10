@@ -20,6 +20,7 @@ mod util;
 mod tests;
 
 use memory_state::MemoryState;
+use service::QueuedBlock;
 use sled_state::SledState;
 
 pub use config::Config;
