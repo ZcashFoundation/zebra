@@ -123,7 +123,7 @@ where
             .expect("hardcoded checkpoint list extends past sapling activation")
     };
 
-    let tip_hash = match state_service
+    let tip = match state_service
         .ready_and()
         .await
         .unwrap()
@@ -133,21 +133,6 @@ where
     {
         zs::Response::Tip(tip) => tip,
         _ => unreachable!("wrong response to Request::Tip"),
-    };
-    let tip = if let Some((_height, hash)) = tip_hash {
-        match state_service
-            .ready_and()
-            .await
-            .unwrap()
-            .call(zs::Request::Block(hash.into()))
-            .await
-            .unwrap()
-        {
-            zs::Response::Block(block) => block,
-            _ => unreachable!("wrong response to Request::Block"),
-        }
-    } else {
-        None
     };
 
     let block = BlockVerifier::new(state_service.clone());
