@@ -763,13 +763,15 @@ where
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        match self.previous_checkpoint_height() {
-            FinalCheckpoint => Poll::Ready(Err("there are no checkpoints left to verify".into())),
-            _ => Poll::Ready(Ok(())),
-        }
+        Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, block: Arc<Block>) -> Self::Future {
+        // Immediately reject all incoming blocks that arrive after we've finished.
+        if let FinalCheckpoint = self.previous_checkpoint_height() {
+            return async { Err("checkpoint request after checkpointing finished".into()) }.boxed();
+        }
+
         // Queue the block for verification, until we receive all the blocks for
         // the current checkpoint range.
         let rx = self.queue_block(block.clone());
