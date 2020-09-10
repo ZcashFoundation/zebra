@@ -13,7 +13,7 @@ use zebra_chain::{
     parameters::Network,
 };
 
-use crate::{BoxError, Config, HashOrHeight, MemoryState, Request, Response, SledState};
+use crate::{BoxError, Config, MemoryState, Request, Response, SledState};
 
 // todo: put this somewhere
 pub struct QueuedBlock {
@@ -85,8 +85,13 @@ impl Service<Request> for StateService {
                     .boxed()
             }
             Request::Transaction(hash) => unimplemented!(),
-            Request::Block(HashOrHeight::Hash(hash)) => unimplemented!(),
-            Request::Block(HashOrHeight::Height(height)) => unimplemented!(),
+            Request::Block(hash_or_height) => {
+                //todo: handle in memory and sled
+                self.sled
+                    .block(hash_or_height)
+                    .map_ok(|block| Response::Block(block))
+                    .boxed()
+            }
         }
     }
 }

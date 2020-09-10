@@ -1,14 +1,14 @@
 //! The primary implementation of the `zebra_state::Service` built upon sled
 
-use std::{collections::HashMap, convert::TryInto, future::Future};
+use std::{collections::HashMap, convert::TryInto, future::Future, sync::Arc};
 
-use zebra_chain::serialization::ZcashSerialize;
+use zebra_chain::serialization::{ZcashDeserialize, ZcashSerialize};
 use zebra_chain::{
-    block::{self},
+    block::{self, Block},
     parameters::Network,
 };
 
-use crate::{BoxError, Config, QueuedBlock};
+use crate::{BoxError, Config, HashOrHeight, QueuedBlock};
 
 pub struct SledState {
     /// Queued blocks that arrived out of order, indexed by their parent block hash.
@@ -81,7 +81,7 @@ impl SledState {
             &self.height_by_hash,
             &self.block_by_height,
         )
-            .transaction(|(hash_by_height, height_by_hash, block_by_height)| {
+            .transaction(move |(hash_by_height, height_by_hash, block_by_height)| {
                 // TODO: do serialization above
                 // for some reason this wouldn't move into the closure (??)
                 let block_bytes = block
@@ -149,6 +149,31 @@ impl SledState {
             let (tip_height, _) = tip.await?.expect("tip must exist");
 
             Ok(Some(tip_height.0 - height.0))
+        }
+    }
+
+    pub fn block(
+        &self,
+        hash_or_height: HashOrHeight,
+    ) -> impl Future<Output = Result<Option<Arc<Block>>, BoxError>> {
+        let height_by_hash = self.height_by_hash.clone();
+        let block_by_height = self.block_by_height.clone();
+
+        async move {
+            let height = match hash_or_height {
+                HashOrHeight::Height(height) => height,
+                HashOrHeight::Hash(hash) => match height_by_hash.get(&hash.0)? {
+                    Some(bytes) => {
+                        block::Height(u32::from_be_bytes(bytes.as_ref().try_into().unwrap()))
+                    }
+                    None => return Ok(None),
+                },
+            };
+
+            match block_by_height.get(&height.0.to_be_bytes())? {
+                Some(bytes) => Ok(Some(Arc::<Block>::zcash_deserialize(bytes.as_ref())?)),
+                None => Ok(None),
+            }
         }
     }
 }
