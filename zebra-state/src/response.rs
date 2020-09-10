@@ -17,10 +17,10 @@ pub enum Response {
     Committed(block::Hash),
 
     /// Response to [`Request::Depth`] with the depth of the specified block.
-    Depth(Option<block::Height>),
+    Depth(Option<u32>),
 
     /// Response to [`Request::Tip`] with the current best chain tip.
-    Tip(Option<block::Hash>),
+    Tip(Option<(block::Height, block::Hash)>),
 
     /// Response to [`Request::BlockLocator`] with a block locator object.
     BlockLocator(Vec<block::Hash>),
