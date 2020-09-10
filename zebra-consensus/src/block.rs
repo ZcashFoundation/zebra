@@ -8,57 +8,44 @@
 //! Verification is provided via a `tower::Service`, to support backpressure and batch
 //! verification.
 
-mod check;
-
-#[cfg(test)]
-mod tests;
-
-use chrono::Utc;
-use color_eyre::eyre::{eyre, Report};
-use futures_util::FutureExt;
 use std::{
-    error,
     future::Future,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
 };
+
+use chrono::Utc;
+use futures_util::FutureExt;
 use tower::{buffer::Buffer, Service, ServiceExt};
 
 use zebra_chain::block::{self, Block};
+use zebra_state as zs;
+
+use crate::BoxError;
+
+mod check;
+#[cfg(test)]
+mod tests;
 
 /// A service that verifies blocks.
 #[derive(Debug)]
 struct BlockVerifier<S>
 where
-    S: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>
-        + Send
-        + Clone
-        + 'static,
+    S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
 {
     /// The underlying state service, possibly wrapped in other services.
     state_service: S,
 }
 
-/// The error type for the BlockVerifier Service.
-// TODO(jlusby): Error = Report ?
-type Error = Box<dyn error::Error + Send + Sync + 'static>;
-
-/// The BlockVerifier service implementation.
-///
-/// The state service is only used for contextual verification.
-/// (The `ChainVerifier` updates the state.)
 impl<S> Service<Arc<Block>> for BlockVerifier<S>
 where
-    S: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>
-        + Send
-        + Clone
-        + 'static,
+    S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
 {
     type Response = block::Hash;
-    type Error = Error;
+    type Error = BoxError;
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
@@ -76,6 +63,19 @@ where
         async move {
             let hash = block.hash();
 
+            // Check that this block is actually a new block.
+            match state_service.ready_and().await?.call(zs::Request::Depth(hash)).await? {
+                zs::Response::Depth(Some(depth)) => {
+                    return Err(format!(
+                        "block {} is already in the chain at depth {:?}",
+                        hash,
+                        depth,
+                    ).into())
+                },
+                zs::Response::Depth(None) => {},
+                _ => unreachable!("wrong response to Request::Depth"),
+            }
+
             // These checks only apply to generated blocks. We check the block
             // height for parsed blocks when we deserialize them.
             let height = block
@@ -87,13 +87,6 @@ where
                             height,
                             hash,
                             block::Height::MAX))?;
-            }
-
-            // Check that this block is actually a new block
-            if BlockVerifier::get_block(&mut state_service, hash).await?.is_some() {
-                Err(format!("duplicate block {:?} {:?}: block has already been verified",
-                            height,
-                            hash))?;
             }
 
             // Do the difficulty checks first, to raise the threshold for
@@ -130,57 +123,16 @@ where
             );
             metrics::counter!("block.verified.block.count", 1);
 
-            // Commit the block in the future - the state will handle out of
-            // order blocks.
-            let ready_state = state_service
-                .ready_and()
-                .await?;
-
-            match ready_state.call(zebra_state::Request::AddBlock { block }).await? {
-                zebra_state::Response::Added { hash: committed_hash } => {
+            // Finally, submit the block for contextual verification.
+            match state_service.oneshot(zs::Request::CommitBlock{ block }).await? {
+                zs::Response::Committed(committed_hash) => {
                     assert_eq!(committed_hash, hash, "state returned wrong hash: hashes must be equal");
                     Ok(hash)
                 }
-                _ => Err(format!("adding block {:?} {:?} to state failed", height, hash))?,
+                _ => unreachable!("wrong response to CommitBlock"),
             }
         }
         .boxed()
-    }
-}
-
-/// The BlockVerifier implementation.
-///
-/// The state service is only used for contextual verification.
-/// (The `ChainVerifier` updates the state.)
-impl<S> BlockVerifier<S>
-where
-    S: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>
-        + Send
-        + Clone
-        + 'static,
-    S::Future: Send + 'static,
-{
-    /// Get the block for `hash`, using `state`.
-    ///
-    /// If there is no block for that hash, returns `Ok(None)`.
-    /// Returns an error if `state_service.poll_ready` errors.
-    async fn get_block(
-        state_service: &mut S,
-        hash: block::Hash,
-    ) -> Result<Option<Arc<Block>>, Report> {
-        let block = state_service
-            .ready_and()
-            .await
-            .map_err(|e| eyre!(e))?
-            .call(zebra_state::Request::GetBlock { hash })
-            .await
-            .map(|response| match response {
-                zebra_state::Response::Block { block } => block,
-                _ => unreachable!("GetBlock request can only result in Response::Block"),
-            })
-            .ok();
-
-        Ok(block)
     }
 }
 
@@ -202,16 +154,13 @@ pub fn init<S>(
 ) -> impl Service<
     Arc<Block>,
     Response = block::Hash,
-    Error = Error,
-    Future = impl Future<Output = Result<block::Hash, Error>>,
+    Error = BoxError,
+    Future = impl Future<Output = Result<block::Hash, BoxError>>,
 > + Send
        + Clone
        + 'static
 where
-    S: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>
-        + Send
-        + Clone
-        + 'static,
+    S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
 {
     Buffer::new(BlockVerifier { state_service }, 1)

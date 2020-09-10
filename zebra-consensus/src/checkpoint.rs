@@ -13,6 +13,27 @@
 //! Verification is provided via a `tower::Service`, to support backpressure and batch
 //! verification.
 
+use std::{
+    collections::BTreeMap,
+    future::Future,
+    ops::{Bound, Bound::*},
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+};
+
+use futures_util::FutureExt;
+use tokio::sync::oneshot;
+use tower::{Service, ServiceExt};
+
+use zebra_chain::{
+    block::{self, Block},
+    parameters::Network,
+};
+use zebra_state as zs;
+
+use crate::{parameters, BoxError};
+
 pub(crate) mod list;
 mod types;
 
@@ -23,30 +44,6 @@ pub(crate) use list::CheckpointList;
 use types::{Progress, Progress::*};
 use types::{Target, Target::*};
 
-use crate::parameters;
-
-use futures_util::FutureExt;
-use std::{
-    collections::BTreeMap,
-    error,
-    future::Future,
-    ops::{Bound, Bound::*},
-    pin::Pin,
-    sync::Arc,
-    task::{Context, Poll},
-};
-use tokio::sync::oneshot;
-use tower::{Service, ServiceExt};
-
-use zebra_chain::{
-    block::{self, Block},
-    parameters::Network,
-};
-
-/// The inner error type for CheckpointVerifier.
-// TODO(jlusby): Error = Report ?
-type Error = Box<dyn error::Error + Send + Sync + 'static>;
-
 /// An unverified block, which is in the queue for checkpoint verification.
 #[derive(Debug)]
 struct QueuedBlock {
@@ -55,7 +52,7 @@ struct QueuedBlock {
     /// `block`'s cached header hash.
     hash: block::Hash,
     /// The transmitting end of the oneshot channel for this block's result.
-    tx: oneshot::Sender<Result<block::Hash, Error>>,
+    tx: oneshot::Sender<Result<block::Hash, BoxError>>,
 }
 
 /// A list of unverified blocks at a particular height.
@@ -89,10 +86,7 @@ pub const MAX_CHECKPOINT_HEIGHT_GAP: usize = 2_000;
 #[derive(Debug)]
 pub struct CheckpointVerifier<S>
 where
-    S: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>
-        + Send
-        + Clone
-        + 'static,
+    S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
 {
     // Inputs
@@ -129,10 +123,7 @@ where
 /// Contains non-service utility functions for CheckpointVerifiers.
 impl<S> CheckpointVerifier<S>
 where
-    S: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>
-        + Send
-        + Clone
-        + 'static,
+    S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
 {
     /// Return a checkpoint verification service for `network`, using the
@@ -179,7 +170,7 @@ where
         list: impl IntoIterator<Item = (block::Height, block::Hash)>,
         initial_tip: Option<Arc<Block>>,
         state_service: S,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, BoxError> {
         Ok(Self::from_checkpoint_list(
             CheckpointList::from_list(list)?,
             initial_tip,
@@ -365,7 +356,7 @@ where
     ///  - the block's height is less than or equal to the previously verified
     ///    checkpoint
     ///  - verification has finished
-    fn check_height(&self, height: block::Height) -> Result<(), Error> {
+    fn check_height(&self, height: block::Height) -> Result<(), BoxError> {
         if height > self.checkpoint_list.max_height() {
             Err("block is higher than the maximum checkpoint")?;
         }
@@ -419,7 +410,7 @@ where
     ///
     /// Returns an error if the block's height is invalid, see `check_height()`
     /// for details.
-    fn check_block(&self, block: &Block) -> Result<block::Height, Error> {
+    fn check_block(&self, block: &Block) -> Result<block::Height, BoxError> {
         let block_height = block
             .coinbase_height()
             .ok_or("the block does not have a coinbase height")?;
@@ -435,7 +426,10 @@ where
     ///
     /// If the block does not have a coinbase height, sends an error on `tx`,
     /// and does not queue the block.
-    fn queue_block(&mut self, block: Arc<Block>) -> oneshot::Receiver<Result<block::Hash, Error>> {
+    fn queue_block(
+        &mut self,
+        block: Arc<Block>,
+    ) -> oneshot::Receiver<Result<block::Hash, BoxError>> {
         // Set up a oneshot channel to send results
         let (tx, rx) = oneshot::channel();
 
@@ -734,10 +728,7 @@ where
 /// CheckpointVerifier rejects pending futures on drop.
 impl<S> Drop for CheckpointVerifier<S>
 where
-    S: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>
-        + Send
-        + Clone
-        + 'static,
+    S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
 {
     /// Send an error on `tx` for any `QueuedBlock`s that haven't been verified.
@@ -766,14 +757,11 @@ where
 /// After verification, the block futures resolve to their hashes.
 impl<S> Service<Arc<Block>> for CheckpointVerifier<S>
 where
-    S: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>
-        + Send
-        + Clone
-        + 'static,
+    S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
 {
     type Response = block::Hash;
-    type Error = Error;
+    type Error = BoxError;
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
@@ -805,23 +793,25 @@ where
         metrics::gauge!("checkpoint.queued_slots", self.queued.len() as i64);
 
         async move {
-            match rx.await.expect(
-                "unexpected closed receiver: CheckpointVerifier does not leave dangling receivers",
-            ) {
+            match rx
+                .await
+                .expect("CheckpointVerifier does not leave dangling receivers")
+            {
                 Ok(hash) => {
                     let verified_hash = match state_service
-                        .oneshot(zebra_state::Request::AddBlock { block })
-                        .await? {
-                            zebra_state::Response::Added { hash } => hash,
-                            _ => unreachable!("unexpected response type: state service should return the correct response type for each request"),
-                        };
+                        .oneshot(zs::Request::CommitFinalizedBlock { block })
+                        .await?
+                    {
+                        zs::Response::Committed(hash) => hash,
+                        _ => unreachable!("wrong response for CommitFinalizedBlock"),
+                    };
                     assert_eq!(
                         verified_hash, hash,
                         "state service returned wrong hash: hashes must be equal"
                     );
                     Ok(hash)
                 }
-                Err(e) => Err(e)?,
+                Err(e) => Err(e),
             }
         }
         .boxed()

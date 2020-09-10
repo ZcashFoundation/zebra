@@ -15,6 +15,7 @@ use zebra_chain::{
     parameters::Network,
     serialization::ZcashDeserialize,
 };
+use zebra_state as zs;
 use zebra_test::transcript::{TransError, Transcript};
 
 use crate::checkpoint::CheckpointList;
@@ -62,15 +63,15 @@ fn verifiers_from_checkpoint_list(
         + Clone
         + 'static,
     impl Service<
-            zebra_state::Request,
-            Response = zebra_state::Response,
+            zs::Request,
+            Response = zs::Response,
             Error = Error,
-            Future = impl Future<Output = Result<zebra_state::Response, Error>>,
+            Future = impl Future<Output = Result<zs::Response, Error>>,
         > + Send
         + Clone
         + 'static,
 ) {
-    let state_service = zebra_state::init(zebra_state::Config::ephemeral(), network);
+    let state_service = zs::init(zs::Config::ephemeral(), network);
     let block_verifier = crate::block::init(state_service.clone());
     let chain_verifier = super::init_from_verifiers(
         network,
@@ -97,10 +98,10 @@ fn verifiers_from_network(
         + Clone
         + 'static,
     impl Service<
-            zebra_state::Request,
-            Response = zebra_state::Response,
+            zs::Request,
+            Response = zs::Response,
             Error = Error,
-            Future = impl Future<Output = Result<zebra_state::Response, Error>>,
+            Future = impl Future<Output = Result<zs::Response, Error>>,
         > + Send
         + Clone
         + 'static,
@@ -154,38 +155,27 @@ static NO_COINBASE_TRANSCRIPT: Lazy<Vec<(Arc<Block>, Result<block::Hash, TransEr
         vec![(Arc::new(block), Err(TransError::Any))]
     });
 
-static NO_COINBASE_STATE_TRANSCRIPT: Lazy<
-    Vec<(
-        zebra_state::Request,
-        Result<zebra_state::Response, TransError>,
-    )>,
-> = Lazy::new(|| {
-    let block = block_no_transactions();
-    let hash = block.hash();
+static NO_COINBASE_STATE_TRANSCRIPT: Lazy<Vec<(zs::Request, Result<zs::Response, TransError>)>> =
+    Lazy::new(|| {
+        let block = block_no_transactions();
+        let hash = block.hash();
 
-    vec![(
-        zebra_state::Request::GetBlock { hash },
-        Err(TransError::Any),
-    )]
-});
+        vec![(zs::Request::Block(hash.into()), Err(TransError::Any))]
+    });
 
-static STATE_VERIFY_TRANSCRIPT_GENESIS: Lazy<
-    Vec<(
-        zebra_state::Request,
-        Result<zebra_state::Response, TransError>,
-    )>,
-> = Lazy::new(|| {
-    let block: Arc<_> =
-        Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
-            .unwrap()
-            .into();
-    let hash = block.hash();
+static STATE_VERIFY_TRANSCRIPT_GENESIS: Lazy<Vec<(zs::Request, Result<zs::Response, TransError>)>> =
+    Lazy::new(|| {
+        let block: Arc<_> =
+            Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
+                .unwrap()
+                .into();
+        let hash = block.hash();
 
-    vec![(
-        zebra_state::Request::GetBlock { hash },
-        Ok(zebra_state::Response::Block { block }),
-    )]
-});
+        vec![(
+            zs::Request::Block(hash.into()),
+            Ok(zs::Response::Block(Some(block))),
+        )]
+    });
 
 #[tokio::test]
 async fn verify_block_test() -> Result<(), Report> {
@@ -252,7 +242,7 @@ async fn verify_checkpoint(config: Config) -> Result<(), Report> {
     let chain_verifier = super::init(
         config.clone(),
         network,
-        zebra_state::init(zebra_state::Config::ephemeral(), network),
+        zs::init(zs::Config::ephemeral(), network),
     )
     .await;
 
@@ -350,6 +340,12 @@ async fn verify_fail_add_block_checkpoint() -> Result<(), Report> {
     Ok(())
 }
 
+/*
+// This test is disabled because it doesn't test the right thing:
+// the BlockVerifier and CheckpointVerifier make different requests
+// and produce different transcripts.
+
+
 #[tokio::test]
 // Temporarily ignore this test, until the state can handle out-of-order blocks
 #[ignore]
@@ -406,7 +402,7 @@ async fn continuous_blockchain(restart_height: Option<block::Height>) -> Result<
         .collect();
     let checkpoint_list = CheckpointList::from_list(checkpoint_list).map_err(|e| eyre!(e))?;
 
-    let mut state_service = zebra_state::init(zebra_state::Config::ephemeral(), network);
+    let mut state_service = zs::init(zs::Config::ephemeral(), network);
     /// SPANDOC: Add blocks to the state from 0..=restart_height {?restart_height}
     if restart_height.is_some() {
         for block in blockchain
@@ -418,7 +414,7 @@ async fn continuous_blockchain(restart_height: Option<block::Height>) -> Result<
                 .ready_and()
                 .map_err(|e| eyre!(e))
                 .await?
-                .call(zebra_state::Request::AddBlock {
+                .call(zs::Request::AddBlock {
                     block: block.clone(),
                 })
                 .map_err(|e| eyre!(e))
@@ -465,3 +461,4 @@ async fn continuous_blockchain(restart_height: Option<block::Height>) -> Result<
 
     Ok(())
 }
+*/

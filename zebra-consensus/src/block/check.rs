@@ -1,11 +1,13 @@
 //! Consensus check functions
 
-use super::*;
 use chrono::{DateTime, Utc};
+
 use zebra_chain::{
     block::{Block, Header},
     work::equihash,
 };
+
+use crate::BoxError;
 
 /// Check that there is exactly one coinbase transaction in `Block`, and that
 /// the coinbase transaction is the first transaction in the block.
@@ -15,7 +17,7 @@ use zebra_chain::{
 /// fees paid by transactions included in this block." [§3.10][3.10]
 ///
 /// [3.10]: https://zips.z.cash/protocol/protocol.pdf#coinbasetransactions
-pub fn is_coinbase_first(block: &Block) -> Result<(), Error> {
+pub fn is_coinbase_first(block: &Block) -> Result<(), BoxError> {
     let first = block
         .transactions
         .get(0)
@@ -49,6 +51,6 @@ pub fn is_equihash_solution_valid(header: &Header) -> Result<(), equihash::Error
 /// accepted." [§7.5][7.5]
 ///
 /// [7.5]: https://zips.z.cash/protocol/protocol.pdf#blockheader
-pub fn is_time_valid_at(header: &Header, now: DateTime<Utc>) -> Result<(), Error> {
+pub fn is_time_valid_at(header: &Header, now: DateTime<Utc>) -> Result<(), BoxError> {
     header.is_time_valid_at(now)
 }
