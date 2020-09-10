@@ -312,12 +312,10 @@ where
             .ready_and()
             .await
             .map_err(|e| eyre!(e))?
-            .call(zebra_state::Request::GetBlockLocator {
-                genesis: self.genesis_hash,
-            })
+            .call(zebra_state::Request::BlockLocator)
             .await
             .map(|response| match response {
-                zebra_state::Response::BlockLocator { block_locator } => block_locator,
+                zebra_state::Response::BlockLocator(block_locator) => block_locator,
                 _ => unreachable!(
                     "GetBlockLocator request can only result in Response::BlockLocator"
                 ),
@@ -654,7 +652,7 @@ where
             .ready_and()
             .await
             .map_err(|e| eyre!(e))?
-            .call(zebra_state::Request::GetDepth { hash })
+            .call(zebra_state::Request::Depth(hash))
             .await
             .map_err(|e| eyre!(e))?
         {
