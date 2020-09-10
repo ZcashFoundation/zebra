@@ -770,8 +770,6 @@ where
     }
 
     fn call(&mut self, block: Arc<Block>) -> Self::Future {
-        let state_service = self.state_service.clone();
-
         // Queue the block for verification, until we receive all the blocks for
         // the current checkpoint range.
         let rx = self.queue_block(block.clone());
@@ -789,26 +787,23 @@ where
 
         metrics::gauge!("checkpoint.queued_slots", self.queued.len() as i64);
 
+        let mut state_service = self.state_service.clone();
         async move {
-            match rx
+            let hash = rx
                 .await
-                .expect("CheckpointVerifier does not leave dangling receivers")
+                .expect("CheckpointVerifier does not leave dangling receivers")?;
+
+            match state_service
+                .ready_and()
+                .await?
+                .call(zs::Request::CommitFinalizedBlock { block })
+                .await?
             {
-                Ok(hash) => {
-                    let verified_hash = match state_service
-                        .oneshot(zs::Request::CommitFinalizedBlock { block })
-                        .await?
-                    {
-                        zs::Response::Committed(hash) => hash,
-                        _ => unreachable!("wrong response for CommitFinalizedBlock"),
-                    };
-                    assert_eq!(
-                        verified_hash, hash,
-                        "state service returned wrong hash: hashes must be equal"
-                    );
+                zs::Response::Committed(committed_hash) => {
+                    assert_eq!(committed_hash, hash, "state must commit correct hash");
                     Ok(hash)
                 }
-                Err(e) => Err(e),
+                _ => unreachable!("wrong response for CommitFinalizedBlock"),
             }
         }
         .boxed()
