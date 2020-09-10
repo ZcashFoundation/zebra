@@ -134,7 +134,7 @@ where
         zs::Response::Tip(tip) => tip,
         _ => unreachable!("wrong response to Request::Tip"),
     };
-    let tip = if let Some(hash) = tip_hash {
+    let tip = if let Some((_height, hash)) = tip_hash {
         match state_service
             .ready_and()
             .await
