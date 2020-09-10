@@ -104,7 +104,10 @@ static NO_COINBASE_STATE_TRANSCRIPT: Lazy<Vec<(zs::Request, Result<zs::Response,
         let block = block_no_transactions();
         let hash = block.hash();
 
-        vec![(zs::Request::Block(hash.into()), Err(TransError::Any))]
+        vec![(
+            zs::Request::Block(hash.into()),
+            Ok(zs::Response::Block(None)),
+        )]
     });
 
 static STATE_VERIFY_TRANSCRIPT_GENESIS: Lazy<Vec<(zs::Request, Result<zs::Response, TransError>)>> =
