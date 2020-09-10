@@ -134,12 +134,17 @@ where
             metrics::counter!("block.verified.block.count", 1);
 
             // Finally, submit the block for contextual verification.
-            match state_service.oneshot(zs::Request::CommitBlock{ block }).await? {
+            match state_service
+                .ready_and()
+                .await?
+                .call(zs::Request::CommitBlock { block })
+                .await?
+            {
                 zs::Response::Committed(committed_hash) => {
-                    assert_eq!(committed_hash, hash, "state returned wrong hash: hashes must be equal");
+                    assert_eq!(committed_hash, hash, "state must commit correct hash");
                     Ok(hash)
                 }
-                _ => unreachable!("wrong response to CommitBlock"),
+                _ => unreachable!("wrong response for CommitBlock"),
             }
         }
         .boxed()
