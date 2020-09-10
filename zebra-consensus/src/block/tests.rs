@@ -100,6 +100,8 @@ static INVALID_COINBASE_TRANSCRIPT: Lazy<Vec<(Arc<Block>, Result<block::Hash, Tr
     });
 
 #[tokio::test]
+// TODO: enable this test after implementing contextual verification
+#[ignore]
 async fn check_transcripts_test() -> Result<(), Report> {
     check_transcripts().await
 }
