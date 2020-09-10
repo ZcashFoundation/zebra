@@ -28,14 +28,14 @@ struct StateService {
     /// Holds data relating to finalized chain state.
     sled: SledState,
     /// Holds data relating to non-finalized chain state.
-    mem: MemoryState,
+    _mem: MemoryState,
 }
 
 impl StateService {
     pub fn new(config: Config, network: Network) -> Self {
         let sled = SledState::new(&config, network);
-        let mem = MemoryState {};
-        Self { sled, mem }
+        let _mem = MemoryState {};
+        Self { sled, _mem }
     }
 }
 
@@ -51,7 +51,7 @@ impl Service<Request> for StateService {
 
     fn call(&mut self, req: Request) -> Self::Future {
         match req {
-            Request::CommitBlock { block } => unimplemented!(),
+            Request::CommitBlock { .. } => unimplemented!(),
             Request::CommitFinalizedBlock { block } => {
                 let (rsp_tx, rsp_rx) = oneshot::channel();
 
@@ -84,7 +84,7 @@ impl Service<Request> for StateService {
                     .map_ok(|locator| Response::BlockLocator(locator))
                     .boxed()
             }
-            Request::Transaction(hash) => unimplemented!(),
+            Request::Transaction(_) => unimplemented!(),
             Request::Block(hash_or_height) => {
                 //todo: handle in memory and sled
                 self.sled
