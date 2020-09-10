@@ -27,5 +27,5 @@ pub use request::Request;
 pub use response::Response;
 pub use service::init;
 
-/// A boxed `std::error::Error`.
+/// A boxed [`std::error::Error`].
 pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
