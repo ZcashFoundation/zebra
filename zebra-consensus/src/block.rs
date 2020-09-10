@@ -17,7 +17,7 @@ use std::{
 
 use chrono::Utc;
 use futures_util::FutureExt;
-use tower::{buffer::Buffer, Service, ServiceExt};
+use tower::{Service, ServiceExt};
 
 use zebra_chain::block::{self, Block};
 use zebra_state as zs;
@@ -30,13 +30,23 @@ mod tests;
 
 /// A service that verifies blocks.
 #[derive(Debug)]
-struct BlockVerifier<S>
+pub struct BlockVerifier<S>
 where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
 {
     /// The underlying state service, possibly wrapped in other services.
     state_service: S,
+}
+
+impl<S> BlockVerifier<S>
+where
+    S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
+    S::Future: Send + 'static,
+{
+    pub fn new(state_service: S) -> Self {
+        Self { state_service }
+    }
 }
 
 impl<S> Service<Arc<Block>> for BlockVerifier<S>
@@ -134,34 +144,4 @@ where
         }
         .boxed()
     }
-}
-
-/// Return a block verification service, using the provided state service.
-///
-/// The block verifier holds a state service of type `S`, into which newly
-/// verified blocks will be committed. This state is pluggable to allow for
-/// testing or instrumentation.
-///
-/// The returned type is opaque to allow instrumentation or other wrappers, but
-/// can be boxed for storage. It is also `Clone` to allow sharing of a
-/// verification service.
-///
-/// This function should be called only once for a particular state service (and
-/// the result be shared, cloning if needed). Constructing multiple services
-/// from the same underlying state might cause synchronisation bugs.
-pub fn init<S>(
-    state_service: S,
-) -> impl Service<
-    Arc<Block>,
-    Response = block::Hash,
-    Error = BoxError,
-    Future = impl Future<Output = Result<block::Hash, BoxError>>,
-> + Send
-       + Clone
-       + 'static
-where
-    S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
-    S::Future: Send + 'static,
-{
-    Buffer::new(BlockVerifier { state_service }, 1)
 }

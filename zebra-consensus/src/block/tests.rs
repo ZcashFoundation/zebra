@@ -7,6 +7,7 @@ use std::sync::Arc;
 use chrono::Utc;
 use color_eyre::eyre::{eyre, Report};
 use once_cell::sync::Lazy;
+use tower::buffer::Buffer;
 
 use zebra_chain::block::{self, Block};
 use zebra_chain::{
@@ -110,7 +111,7 @@ async fn check_transcripts() -> Result<(), Report> {
     let network = Network::Mainnet;
     let state_service = zebra_state::init(zebra_state::Config::ephemeral(), network);
 
-    let block_verifier = super::init(state_service.clone());
+    let block_verifier = Buffer::new(BlockVerifier::new(state_service.clone()), 1);
 
     for transcript_data in &[
         &VALID_BLOCK_TRANSCRIPT,
