@@ -56,7 +56,6 @@ impl Service<Request> for StateService {
                 let (rsp_tx, rsp_rx) = oneshot::channel();
 
                 self.sled.queue(QueuedBlock { block, rsp_tx });
-                self.sled.process_queue();
 
                 async move {
                     rsp_rx

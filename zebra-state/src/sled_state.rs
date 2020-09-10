@@ -60,19 +60,12 @@ impl SledState {
 
     /// Queue a finalized block to be committed to the state.
     ///
-    /// After queueing a finalized block, call [`process_queue`] to check whether
-    /// the newly queued block (and any of its descendants) can be committed to
-    /// the state.
+    /// After queueing a finalized block, this method checks whether the newly
+    /// queued block (and any of its descendants) can be committed to the state.
     pub fn queue(&mut self, queued_block: QueuedBlock) {
         let prev_hash = queued_block.block.header.previous_block_hash;
         self.queued_by_prev_hash.insert(prev_hash, queued_block);
-    }
 
-    /// Process the queue of finalized blocks, committing any that can be committed in-order.
-    ///
-    /// This should be called after [`queue`], to check whether the newly queued block
-    /// (and any of its descendants) can be committed to the state.
-    pub fn process_queue(&mut self) {
         // Cloning means the closure doesn't hold a borrow of &self,
         // conflicting with mutable access in the loop below.
         let hash_by_height = self.hash_by_height.clone();
