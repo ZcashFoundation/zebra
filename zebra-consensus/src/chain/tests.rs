@@ -1,14 +1,10 @@
 //! Tests for chain verification
 
-use std::{collections::BTreeMap, mem::drop, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
-use color_eyre::eyre::eyre;
 use color_eyre::eyre::Report;
-use futures::{future::TryFutureExt, stream::FuturesUnordered};
 use once_cell::sync::Lazy;
-use tokio::{stream::StreamExt, time::timeout};
-use tower::{layer::Layer, timeout::TimeoutLayer, Service, ServiceExt};
-use tracing_futures::Instrument;
+use tower::{layer::Layer, timeout::TimeoutLayer, Service};
 
 use zebra_chain::{
     block::{self, Block},
@@ -18,7 +14,6 @@ use zebra_chain::{
 use zebra_state as zs;
 use zebra_test::transcript::{TransError, Transcript};
 
-use crate::checkpoint::CheckpointList;
 use crate::Config;
 
 use super::*;
@@ -46,67 +41,33 @@ pub fn block_no_transactions() -> Block {
     }
 }
 
-/// Return a new `(chain_verifier, state_service)` using `checkpoint_list`.
-///
-/// Also creates a new block verfier and checkpoint verifier, so it can
-/// initialise the chain verifier.
-fn verifiers_from_checkpoint_list(
+/// Return a new `(chain_verifier, state_service)` using the hard-coded
+/// checkpoint list for `network`.
+async fn verifiers_from_network(
     network: Network,
-    checkpoint_list: CheckpointList,
 ) -> (
     impl Service<
             Arc<Block>,
             Response = block::Hash,
-            Error = Error,
-            Future = impl Future<Output = Result<block::Hash, Error>>,
+            Error = BoxError,
+            Future = impl Future<Output = Result<block::Hash, BoxError>>,
         > + Send
         + Clone
         + 'static,
     impl Service<
             zs::Request,
             Response = zs::Response,
-            Error = Error,
-            Future = impl Future<Output = Result<zs::Response, Error>>,
+            Error = BoxError,
+            Future = impl Future<Output = Result<zs::Response, BoxError>>,
         > + Send
         + Clone
         + 'static,
 ) {
     let state_service = zs::init(zs::Config::ephemeral(), network);
-    let block_verifier = crate::block::init(state_service.clone());
-    let chain_verifier = super::init_from_verifiers(
-        network,
-        block_verifier,
-        Some(checkpoint_list),
-        state_service.clone(),
-        None,
-    );
+    let chain_verifier =
+        crate::chain::init(Config::default(), network, state_service.clone()).await;
 
     (chain_verifier, state_service)
-}
-
-/// Return a new `(chain_verifier, state_service)` using the hard-coded
-/// checkpoint list for `network`.
-fn verifiers_from_network(
-    network: Network,
-) -> (
-    impl Service<
-            Arc<Block>,
-            Response = block::Hash,
-            Error = Error,
-            Future = impl Future<Output = Result<block::Hash, Error>>,
-        > + Send
-        + Clone
-        + 'static,
-    impl Service<
-            zs::Request,
-            Response = zs::Response,
-            Error = Error,
-            Future = impl Future<Output = Result<zs::Response, Error>>,
-        > + Send
-        + Clone
-        + 'static,
-) {
-    verifiers_from_checkpoint_list(network, CheckpointList::new(network))
 }
 
 static BLOCK_VERIFY_TRANSCRIPT_GENESIS: Lazy<Vec<(Arc<Block>, Result<block::Hash, TransError>)>> =
@@ -178,8 +139,8 @@ static STATE_VERIFY_TRANSCRIPT_GENESIS: Lazy<Vec<(zs::Request, Result<zs::Respon
     });
 
 #[tokio::test]
-async fn verify_block_test() -> Result<(), Report> {
-    verify_block().await
+async fn verify_genesis_test() -> Result<(), Report> {
+    verify_genesis().await
 }
 
 /// Test that block verifies work
@@ -188,25 +149,11 @@ async fn verify_block_test() -> Result<(), Report> {
 /// maximum checkpoint height is 0, non-genesis blocks are verified using the
 /// BlockVerifier.
 #[spandoc::spandoc]
-async fn verify_block() -> Result<(), Report> {
+async fn verify_genesis() -> Result<(), Report> {
     zebra_test::init();
 
-    // Parse the genesis block
-    let mut checkpoint_data = Vec::new();
-    let block0 =
-        Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
-    let hash0 = block0.hash();
-    checkpoint_data.push((
-        block0.coinbase_height().expect("test block has height"),
-        hash0,
-    ));
-
-    // Make a checkpoint list containing the genesis block
-    let checkpoint_list: BTreeMap<block::Height, block::Hash> =
-        checkpoint_data.iter().cloned().collect();
-    let checkpoint_list = CheckpointList::from_list(checkpoint_list).map_err(|e| eyre!(e))?;
-
-    let (chain_verifier, _) = verifiers_from_checkpoint_list(Network::Mainnet, checkpoint_list);
+    // The hardcoded checkpoint list contains the genesis block.
+    let (chain_verifier, _) = verifiers_from_network(Network::Mainnet).await;
 
     let transcript = Transcript::from(BLOCK_VERIFY_TRANSCRIPT_GENESIS_TO_BLOCK_1.iter().cloned());
     transcript.check(chain_verifier).await.unwrap();
@@ -269,7 +216,7 @@ async fn verify_fail_no_coinbase_test() -> Result<(), Report> {
 async fn verify_fail_no_coinbase() -> Result<(), Report> {
     zebra_test::init();
 
-    let (chain_verifier, state_service) = verifiers_from_network(Network::Mainnet);
+    let (chain_verifier, state_service) = verifiers_from_network(Network::Mainnet).await;
 
     // Add a timeout layer
     let chain_verifier =
@@ -294,7 +241,7 @@ async fn round_trip_checkpoint_test() -> Result<(), Report> {
 async fn round_trip_checkpoint() -> Result<(), Report> {
     zebra_test::init();
 
-    let (chain_verifier, state_service) = verifiers_from_network(Network::Mainnet);
+    let (chain_verifier, state_service) = verifiers_from_network(Network::Mainnet).await;
 
     // Add a timeout layer
     let chain_verifier =
@@ -319,7 +266,7 @@ async fn verify_fail_add_block_checkpoint_test() -> Result<(), Report> {
 async fn verify_fail_add_block_checkpoint() -> Result<(), Report> {
     zebra_test::init();
 
-    let (chain_verifier, state_service) = verifiers_from_network(Network::Mainnet);
+    let (chain_verifier, state_service) = verifiers_from_network(Network::Mainnet).await;
 
     // Add a timeout layer
     let chain_verifier =

@@ -2,10 +2,9 @@
 
 use super::*;
 
-use std::ops::Bound::*;
 use std::sync::Arc;
 
-use zebra_chain::parameters::{Network, Network::*, NetworkUpgrade, NetworkUpgrade::*};
+use zebra_chain::parameters::{Network, Network::*, NetworkUpgrade::*};
 use zebra_chain::{
     block::{self, Block},
     serialization::ZcashDeserialize,
@@ -264,87 +263,6 @@ fn checkpoint_list_hard_coded_sapling(network: Network) -> Result<(), Error> {
     assert!(
         list.max_height() >= sapling_activation,
         "Pre-Sapling blocks must be verified by checkpoints"
-    );
-
-    Ok(())
-}
-
-#[test]
-fn checkpoint_list_up_to_mainnet() -> Result<(), Error> {
-    checkpoint_list_up_to(Mainnet, Sapling)?;
-    checkpoint_list_up_to(Mainnet, Blossom)?;
-    checkpoint_list_up_to(Mainnet, Heartwood)?;
-    checkpoint_list_up_to(Mainnet, Canopy)?;
-
-    Ok(())
-}
-
-#[test]
-fn checkpoint_list_up_to_testnet() -> Result<(), Error> {
-    checkpoint_list_up_to(Testnet, Sapling)?;
-    checkpoint_list_up_to(Testnet, Blossom)?;
-    checkpoint_list_up_to(Testnet, Heartwood)?;
-    checkpoint_list_up_to(Testnet, Canopy)?;
-
-    Ok(())
-}
-
-/// Check that CheckpointList::new_up_to works
-fn checkpoint_list_up_to(network: Network, limit: NetworkUpgrade) -> Result<(), Error> {
-    zebra_test::init();
-
-    let sapling_activation = Sapling
-        .activation_height(network)
-        .expect("Unexpected network upgrade info: Sapling must have an activation height");
-
-    let limited_list = CheckpointList::new_up_to(network, limit);
-    let full_list = CheckpointList::new(network);
-
-    assert!(
-        limited_list.max_height() >= sapling_activation,
-        "Pre-Sapling blocks must be verified by checkpoints"
-    );
-
-    if let Some(limit_activation) = limit.activation_height(network) {
-        if limit_activation <= full_list.max_height() {
-            assert!(
-                limited_list.max_height() >= limit_activation,
-                "The 'limit' network upgrade must be verified by checkpoints"
-            );
-
-            let next_checkpoint_after_limit = limited_list
-                .min_height_in_range((Included(limit_activation), Unbounded))
-                .expect("There must be a checkpoint at or after the limit");
-
-            assert_eq!(
-                limited_list
-                    .min_height_in_range((Excluded(next_checkpoint_after_limit), Unbounded)),
-                None,
-                "There must not be multiple checkpoints after the limit"
-            );
-
-            let next_activation = NetworkUpgrade::next(network, limit_activation)
-                .map(|nu| nu.activation_height(network))
-                .flatten();
-            if let Some(next_activation) = next_activation {
-                // We expect that checkpoints happen much more often than network upgrades
-                assert!(
-                    limited_list.max_height() < next_activation,
-                    "The next network upgrade after 'limit' must not be verified by checkpoints"
-                );
-            }
-
-            // We have an effective limit, so skip the "no limit" test
-            return Ok(());
-        }
-    }
-
-    // Either the activation height is unspecified, or it is above the maximum
-    // checkpoint height (in the full checkpoint list)
-    assert_eq!(
-        limited_list.max_height(),
-        full_list.max_height(),
-        "Future network upgrades must not limit checkpoints"
     );
 
     Ok(())
