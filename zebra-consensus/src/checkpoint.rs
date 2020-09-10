@@ -141,14 +141,17 @@ where
     /// than constructing multiple verification services for the same network. To
     /// clone a CheckpointVerifier, you might need to wrap it in a
     /// `tower::Buffer` service.
-    pub fn new(network: Network, initial_tip: Option<Arc<Block>>, state_service: S) -> Self {
+    pub fn new(
+        network: Network,
+        initial_tip: Option<(block::Height, block::Hash)>,
+        state_service: S,
+    ) -> Self {
         let checkpoint_list = CheckpointList::new(network);
         let max_height = checkpoint_list.max_height();
-        let initial_height = initial_tip.clone().map(|b| b.coinbase_height()).flatten();
         tracing::info!(
             ?max_height,
             ?network,
-            ?initial_height,
+            ?initial_tip,
             "initialising CheckpointVerifier"
         );
         Self::from_checkpoint_list(checkpoint_list, initial_tip, state_service)
@@ -168,7 +171,7 @@ where
     #[allow(dead_code)]
     pub(crate) fn from_list(
         list: impl IntoIterator<Item = (block::Height, block::Hash)>,
-        initial_tip: Option<Arc<Block>>,
+        initial_tip: Option<(block::Height, block::Hash)>,
         state_service: S,
     ) -> Result<Self, BoxError> {
         Ok(Self::from_checkpoint_list(
@@ -187,24 +190,18 @@ where
     /// hard-coded checkpoint lists. See that function for more details.
     pub(crate) fn from_checkpoint_list(
         checkpoint_list: CheckpointList,
-        initial_tip: Option<Arc<Block>>,
+        initial_tip: Option<(block::Height, block::Hash)>,
         state_service: S,
     ) -> Self {
         // All the initialisers should call this function, so we only have to
         // change fields or default values in one place.
         let (initial_tip_hash, verifier_progress) = match initial_tip {
-            Some(initial_tip) => {
-                let initial_height = initial_tip
-                    .coinbase_height()
-                    .expect("Bad initial tip: must have coinbase height");
-                if initial_height >= checkpoint_list.max_height() {
+            Some((height, hash)) => {
+                if height >= checkpoint_list.max_height() {
                     (None, Progress::FinalCheckpoint)
                 } else {
-                    metrics::gauge!("checkpoint.previous.height", initial_height.0 as i64);
-                    (
-                        Some(initial_tip.hash()),
-                        Progress::InitialTip(initial_height),
-                    )
+                    metrics::gauge!("checkpoint.previous.height", height.0 as i64);
+                    (Some(hash), Progress::InitialTip(height))
                 }
             }
             // We start by verifying the genesis block, by itself
