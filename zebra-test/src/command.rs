@@ -6,11 +6,11 @@ use tracing::instrument;
 
 use std::convert::Infallible as NoDir;
 use std::fmt::Write as _;
-use std::path::Path;
 #[cfg(unix)]
-use std::{io::Read, os::unix::process::ExitStatusExt};
+use std::os::unix::process::ExitStatusExt;
+use std::path::Path;
 use std::{
-    io::{BufRead, BufReader, Lines},
+    io::{BufRead, BufReader, Lines, Read},
     process::{Child, ChildStdout, Command, ExitStatus, Output},
     time::{Duration, Instant},
 };
