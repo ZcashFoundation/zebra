@@ -28,3 +28,6 @@ mod script;
 mod transaction;
 
 pub use crate::config::Config;
+
+/// A boxed [`std::error::Error`].
+pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;

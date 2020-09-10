@@ -28,8 +28,12 @@ use std::{
 use tower::{buffer::Buffer, Service, ServiceExt};
 use tracing_futures::Instrument;
 
-use zebra_chain::block::{self, Block};
-use zebra_chain::parameters::{Network, NetworkUpgrade::Sapling};
+use zebra_chain::{
+    block::{self, Block},
+    parameters::{Network, NetworkUpgrade::Sapling},
+};
+
+use zebra_state as zs;
 
 /// The maximum expected gap between blocks.
 ///
@@ -41,10 +45,7 @@ const MAX_EXPECTED_BLOCK_GAP: u32 = 100_000;
 #[derive(Clone)]
 struct ChainCheckpointVerifier<S>
 where
-    S: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>
-        + Send
-        + Clone
-        + 'static,
+    S: Service<zs::Request, Response = zs::Response, Error = Error> + Send + Clone + 'static,
     S::Future: Send + 'static,
 {
     /// The underlying `CheckpointVerifier`, wrapped in a buffer, so we can
@@ -61,10 +62,7 @@ struct ChainVerifier<BV, S>
 where
     BV: Service<Arc<Block>, Response = block::Hash, Error = Error> + Send + Clone + 'static,
     BV::Future: Send + 'static,
-    S: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>
-        + Send
-        + Clone
-        + 'static,
+    S: Service<zs::Request, Response = zs::Response, Error = Error> + Send + Clone + 'static,
     S::Future: Send + 'static,
 {
     /// The underlying `BlockVerifier`, possibly wrapped in other services.
@@ -95,10 +93,7 @@ impl<BV, S> Service<Arc<Block>> for ChainVerifier<BV, S>
 where
     BV: Service<Arc<Block>, Response = block::Hash, Error = Error> + Send + Clone + 'static,
     BV::Future: Send + 'static,
-    S: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>
-        + Send
-        + Clone
-        + 'static,
+    S: Service<zs::Request, Response = zs::Response, Error = Error> + Send + Clone + 'static,
     S::Future: Send + 'static,
 {
     type Response = block::Hash;
@@ -222,15 +217,26 @@ pub async fn init<S>(
        + Clone
        + 'static
 where
-    S: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>
-        + Send
-        + Clone
-        + 'static,
+    S: Service<zs::Request, Response = zs::Response, Error = Error> + Send + Clone + 'static,
     S::Future: Send + 'static,
 {
-    let initial_tip = zebra_state::current_tip(state_service.clone())
+    /*
+    let initial_tip = if let zs::Response::Tip(tip) = state_service
+        .ready_and()
         .await
-        .expect("State service poll_ready is Ok");
+        .unwrap()
+        .call(zs::Request::Tip)
+        .await
+        .unwrap()
+    {
+        tip
+    } else {
+        unreachable!("wrong response to Request::Tip");
+    };
+    */
+    // TODO: restore this after figuring out what data is required,
+    // after simplification of the chainverifier code.
+    let initial_tip = None;
 
     let block_verifier = crate::block::init(state_service.clone());
     let checkpoint_list = match config.checkpoint_sync {
@@ -282,10 +288,7 @@ pub(crate) fn init_from_verifiers<BV, S>(
 where
     BV: Service<Arc<Block>, Response = block::Hash, Error = Error> + Send + Clone + 'static,
     BV::Future: Send + 'static,
-    S: Service<zebra_state::Request, Response = zebra_state::Response, Error = Error>
-        + Send
-        + Clone
-        + 'static,
+    S: Service<zs::Request, Response = zs::Response, Error = Error> + Send + Clone + 'static,
     S::Future: Send + 'static,
 {
     let max_checkpoint_height = checkpoint_list.clone().map(|c| c.max_height());
