@@ -54,7 +54,7 @@ impl StartCmd {
         // The service that our node uses to respond to requests by peers
         let node = Buffer::new(
             service_fn(|req| async move {
-                info!(?req);
+                debug!(?req, "inbound peer request");
                 Ok::<zebra_network::Response, Report>(zebra_network::Response::Nil)
             }),
             1,
