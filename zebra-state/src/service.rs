@@ -44,7 +44,7 @@ impl Service<Request> for StateService {
     }
 }
 
-/// Initialize a state service from the provided `config`.
+/// Initialize a state service from the provided [`Config`].
 ///
 /// Each `network` has its own separate sled database.
 ///
