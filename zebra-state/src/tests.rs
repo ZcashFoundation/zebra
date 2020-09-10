@@ -48,7 +48,7 @@ static BLOCK_LOCATOR_CASES: &[(u32, u32)] = &[
 #[test]
 fn test_block_locator_heights() {
     for (height, min_height) in BLOCK_LOCATOR_CASES.iter().cloned() {
-        let locator = util::block_locator_heights(block::Height(height)).collect::<Vec<_>>();
+        let locator = util::block_locator_heights(block::Height(height));
 
         assert!(!locator.is_empty(), "locators must not be empty");
         if (height - min_height) > 1 {

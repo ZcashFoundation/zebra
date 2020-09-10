@@ -3,6 +3,8 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
+
+use futures::future::{FutureExt, TryFutureExt};
 use tower::{buffer::Buffer, util::BoxService, Service};
 use zebra_chain::parameters::Network;
 
@@ -36,10 +38,32 @@ impl Service<Request> for StateService {
     fn call(&mut self, req: Request) -> Self::Future {
         match req {
             Request::CommitBlock { block } => unimplemented!(),
-            Request::CommitFinalizedBlock { block } => unimplemented!(),
-            Request::Depth(hash) => unimplemented!(),
-            Request::Tip => unimplemented!(),
-            Request::BlockLocator => unimplemented!(),
+            Request::CommitFinalizedBlock { block } => {
+                let rsp = self
+                    .sled
+                    .commit_finalized(block)
+                    .map(|hash| Response::Committed(hash));
+
+                async move { rsp }.boxed()
+            }
+            Request::Depth(hash) => {
+                // todo: handle in memory and sled
+                self.sled
+                    .depth(hash)
+                    .map_ok(|depth| Response::Depth(depth))
+                    .boxed()
+            }
+            Request::Tip => {
+                // todo: handle in memory and sled
+                self.sled.tip().map_ok(|tip| Response::Tip(tip)).boxed()
+            }
+            Request::BlockLocator => {
+                // todo: handle in memory and sled
+                self.sled
+                    .block_locator()
+                    .map_ok(|locator| Response::BlockLocator(locator))
+                    .boxed()
+            }
             Request::Transaction(hash) => unimplemented!(),
             Request::Block(HashOrHeight::Hash(hash)) => unimplemented!(),
             Request::Block(HashOrHeight::Height(height)) => unimplemented!(),

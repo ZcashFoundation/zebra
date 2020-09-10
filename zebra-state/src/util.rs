@@ -4,7 +4,7 @@ use zebra_chain::block;
 use crate::constants;
 
 /// Get the heights of the blocks for constructing a block_locator list
-pub fn block_locator_heights(tip_height: block::Height) -> impl Iterator<Item = block::Height> {
+pub fn block_locator_heights(tip_height: block::Height) -> Vec<block::Height> {
     // Stop at the reorg limit, or the genesis block.
     let min_locator_height = tip_height
         .0
@@ -17,13 +17,12 @@ pub fn block_locator_heights(tip_height: block::Height) -> impl Iterator<Item = 
         .chain(iter::once(min_locator_height))
         .map(block::Height);
 
-    let locators: Vec<_> = locators.collect();
+    let locators = locators.collect();
     tracing::info!(
         ?tip_height,
         ?min_locator_height,
         ?locators,
         "created block locator"
     );
-
-    locators.into_iter()
+    locators
 }
