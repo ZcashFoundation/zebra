@@ -8,8 +8,10 @@
 
 mod config;
 mod constants;
+mod memory_state;
 mod request;
 mod response;
+mod service;
 mod sled_state;
 mod util;
 
@@ -17,7 +19,13 @@ mod util;
 #[cfg(test)]
 mod tests;
 
+use memory_state::MemoryState;
+use sled_state::SledState;
+
 pub use config::Config;
 pub use request::Request;
 pub use response::Response;
-pub use sled_state::init;
+pub use service::init;
+
+/// A boxed `std::error::Error`.
+pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;

@@ -1,15 +1,7 @@
 //! The primary implementation of the `zebra_state::Service` built upon sled
-use super::{Request, Response};
 use crate::Config;
-use futures::prelude::*;
+use std::error;
 use std::sync::Arc;
-use std::{
-    error,
-    future::Future,
-    pin::Pin,
-    task::{Context, Poll},
-};
-use tower::{buffer::Buffer, util::BoxService, Service};
 use tracing::instrument;
 use zebra_chain::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 use zebra_chain::{
@@ -17,11 +9,8 @@ use zebra_chain::{
     parameters::Network,
 };
 
-/// Type alias of our wrapped service
-pub type StateService = Buffer<BoxService<Request, Response, Error>, Request>;
-
 #[derive(Clone)]
-struct SledState {
+pub struct SledState {
     storage: sled::Db,
 }
 
@@ -153,112 +142,6 @@ impl SledState {
     }
 }
 
-impl Service<Request> for SledState {
-    type Response = Response;
-    type Error = Error;
-    type Future =
-        Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
-
-    fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
-    }
-
-    fn call(&mut self, req: Request) -> Self::Future {
-        match req {
-            Request::AddBlock { block } => {
-                let mut storage = self.clone();
-
-                // Make sure writes to the state are serialised, by performing
-                // them in the state's call.
-                // (See the state design RFC #0005 for details.)
-                let result = storage.insert(block).map(|hash| Response::Added { hash });
-
-                async { result }.boxed()
-            }
-            Request::GetBlock { hash } => {
-                let storage = self.clone();
-                async move {
-                    storage
-                        .get(hash)?
-                        .map(|block| Response::Block { block })
-                        .ok_or_else(|| "block could not be found".into())
-                }
-                .boxed()
-            }
-            Request::GetTip => {
-                let storage = self.clone();
-                async move {
-                    storage
-                        .get_tip()?
-                        .map(|hash| Response::Tip { hash })
-                        .ok_or_else(|| "zebra-state contains no blocks".into())
-                }
-                .boxed()
-            }
-            Request::GetDepth { hash } => {
-                let storage = self.clone();
-
-                async move {
-                    if !storage.contains(&hash)? {
-                        return Ok(Response::Depth(None));
-                    }
-
-                    let block = storage
-                        .get(hash)?
-                        .expect("block must be present if contains returned true");
-                    let tip_hash = storage
-                        .get_tip()?
-                        .expect("storage must have a tip if it contains the previous block");
-                    let tip = storage
-                        .get(tip_hash)?
-                        .expect("block must be present if contains returned true");
-
-                    let depth =
-                        tip.coinbase_height().unwrap().0 - block.coinbase_height().unwrap().0;
-
-                    Ok(Response::Depth(Some(depth)))
-                }
-                .boxed()
-            }
-            Request::GetBlockLocator { genesis } => {
-                let storage = self.clone();
-
-                async move {
-                    let tip_hash = match storage.get_tip()? {
-                        Some(tip) => tip,
-                        None => {
-                            return Ok(Response::BlockLocator {
-                                block_locator: vec![genesis],
-                            })
-                        }
-                    };
-
-                    let tip = storage
-                        .get(tip_hash)?
-                        .expect("block must be present if contains returned true");
-
-                    let tip_height = tip
-                        .coinbase_height()
-                        .expect("tip of the current chain will have a coinbase height");
-
-                    let heights = crate::util::block_locator_heights(tip_height);
-
-                    let block_locator = heights
-                        .map(|height| {
-                            storage.get_main_chain_at(height).map(|hash| {
-                                hash.expect("there should be no holes in the current chain")
-                            })
-                        })
-                        .collect::<Result<_, _>>()?;
-
-                    Ok(Response::BlockLocator { block_locator })
-                }
-                .boxed()
-            }
-        }
-    }
-}
-
 /// An alternate repr for `block::Height` that implements `AsRef<[u8]>` for usage
 /// with sled
 struct BytesHeight(u32, [u8; 4]);
@@ -335,11 +218,4 @@ impl Into<BoxError> for Error {
     fn into(self) -> BoxError {
         BoxError::from(self.0)
     }
-}
-
-/// Returns a type that implements the `zebra_state::Service` using `sled`.
-///
-/// Each `network` has its own separate sled database.
-pub fn init(config: Config, network: Network) -> StateService {
-    Buffer::new(BoxService::new(SledState::new(&config, network)), 1)
 }
