@@ -50,11 +50,15 @@ where
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
-    fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        // We don't expect the verifiers to exert backpressure on our
-        // users, so we don't need to call the verifier's `poll_ready` here.
-        // (And we don't know which verifier to choose at this point, anyway.)
-        Poll::Ready(Ok(()))
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        match (self.checkpoint.poll_ready(cx), self.block.poll_ready(cx)) {
+            // First, fail if either service fails.
+            (Poll::Ready(Err(e)), _) | (_, Poll::Ready(Err(e))) => Poll::Ready(Err(e)),
+            // Second, we're unready if either service is unready.
+            (Poll::Pending, _) | (_, Poll::Pending) => Poll::Pending,
+            // Finally, we're ready if both services are ready and OK.
+            (Poll::Ready(Ok(())), Poll::Ready(Ok(()))) => Poll::Ready(Ok(())),
+        }
     }
 
     fn call(&mut self, block: Arc<Block>) -> Self::Future {
