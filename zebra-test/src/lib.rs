@@ -69,6 +69,14 @@ pub fn init() {
                     })
                 });
             }))
+            .display_env_section(false)
+            // Once I make a release with
+            // https://github.com/yaahc/color-eyre/pull/57 I'm going to add a
+            // custom PanicMessage handler for skipping the message in panics
+            // when the message is the exact one created by panics in tests that
+            // returned an Err. It will still print the content of the Err in
+            // the case where an error is returned.
+            // .panic_message(SkipTestReturnedErrPanicMessages)
             .install()
             .unwrap();
     })

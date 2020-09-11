@@ -2,15 +2,21 @@ use color_eyre::{
     eyre::{eyre, Context, Report, Result},
     Help, SectionExt,
 };
-use std::path::PathBuf;
-use std::process::{Child, Command, ExitStatus, Output};
-
-#[cfg(unix)]
-use std::os::unix::process::ExitStatusExt;
 use tracing::instrument;
 
+use std::convert::Infallible as NoDir;
+use std::fmt::Write as _;
+#[cfg(unix)]
+use std::os::unix::process::ExitStatusExt;
+use std::path::Path;
+use std::{
+    io::{BufRead, BufReader, Lines, Read},
+    process::{Child, ChildStdout, Command, ExitStatus, Output},
+    time::{Duration, Instant},
+};
+
 /// Runs a command
-pub fn test_cmd(command_path: &str, tempdir: &PathBuf) -> Result<Command> {
+pub fn test_cmd(command_path: &str, tempdir: &Path) -> Result<Command> {
     let mut cmd = Command::new(command_path);
     cmd.current_dir(tempdir);
 
@@ -24,11 +30,11 @@ pub trait CommandExt {
 
     /// wrapper for `output` fn on `Command` that constructs informative error
     /// reports
-    fn output2(&mut self) -> Result<TestOutput, Report>;
+    fn output2(&mut self) -> Result<TestOutput<NoDir>, Report>;
 
     /// wrapper for `spawn` fn on `Command` that constructs informative error
     /// reports
-    fn spawn2(&mut self) -> Result<TestChild, Report>;
+    fn spawn2<T>(&mut self, dir: T) -> Result<TestChild<T>, Report>;
 }
 
 impl CommandExt for Command {
@@ -49,7 +55,7 @@ impl CommandExt for Command {
 
     /// wrapper for `output` fn on `Command` that constructs informative error
     /// reports
-    fn output2(&mut self) -> Result<TestOutput, Report> {
+    fn output2(&mut self) -> Result<TestOutput<NoDir>, Report> {
         let output = self.output();
 
         let output = output
@@ -57,6 +63,7 @@ impl CommandExt for Command {
             .with_section(|| format!("{:?}", self).header("Command:"))?;
 
         Ok(TestOutput {
+            dir: None,
             output,
             cmd: format!("{:?}", self),
         })
@@ -64,7 +71,7 @@ impl CommandExt for Command {
 
     /// wrapper for `spawn` fn on `Command` that constructs informative error
     /// reports
-    fn spawn2(&mut self) -> Result<TestChild, Report> {
+    fn spawn2<T>(&mut self, dir: T) -> Result<TestChild<T>, Report> {
         let cmd = format!("{:?}", self);
         let child = self.spawn();
 
@@ -72,7 +79,13 @@ impl CommandExt for Command {
             .wrap_err("failed to execute process")
             .with_section(|| cmd.clone().header("Command:"))?;
 
-        Ok(TestChild { child, cmd })
+        Ok(TestChild {
+            child,
+            cmd,
+            dir,
+            deadline: None,
+            stdout: None,
+        })
     }
 }
 
@@ -101,12 +114,15 @@ impl TestStatus {
 }
 
 #[derive(Debug)]
-pub struct TestChild {
+pub struct TestChild<T> {
+    dir: T,
     pub cmd: String,
     pub child: Child,
+    pub stdout: Option<Lines<BufReader<ChildStdout>>>,
+    pub deadline: Option<Instant>,
 }
 
-impl TestChild {
+impl<T> TestChild<T> {
     #[spandoc::spandoc]
     pub fn kill(&mut self) -> Result<()> {
         /// SPANDOC: Killing child process
@@ -116,7 +132,7 @@ impl TestChild {
     }
 
     #[spandoc::spandoc]
-    pub fn wait_with_output(self) -> Result<TestOutput> {
+    pub fn wait_with_output(self) -> Result<TestOutput<T>> {
         /// SPANDOC: waiting for command to exit
         let output = self.child.wait_with_output().with_section({
             let cmd = self.cmd.clone();
@@ -126,16 +142,81 @@ impl TestChild {
         Ok(TestOutput {
             output,
             cmd: self.cmd,
+            dir: Some(self.dir),
         })
+    }
+
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.deadline = Some(Instant::now() + timeout);
+        self
+    }
+
+    #[instrument(skip(self))]
+    pub fn expect_stdout(&mut self, regex: &str) -> Result<&mut Self> {
+        if self.stdout.is_none() {
+            self.stdout = self
+                .child
+                .stdout
+                .take()
+                .map(BufReader::new)
+                .map(BufRead::lines)
+        }
+
+        let re = regex::Regex::new(regex).expect("regex must be valid");
+        let mut lines = self
+            .stdout
+            .take()
+            .expect("child must capture stdout to call expect_stdout");
+
+        while !self.past_deadline() && self.is_running() {
+            let line = if let Some(line) = lines.next() {
+                line?
+            } else {
+                break;
+            };
+
+            // since we're about to discard this line write it to stdout so our
+            // test runner can capture it and display if the test fails, may
+            // cause weird reordering for stdout / stderr
+            println!("{}", line);
+
+            if re.is_match(&line) {
+                self.stdout = Some(lines);
+                return Ok(self);
+            }
+        }
+
+        if self.past_deadline() && !self.is_running() {
+            self.kill()?;
+        }
+
+        let report = eyre!("stdout of command did not contain any matches for the given regex")
+            .context_from(self);
+
+        Err(report)
+    }
+
+    fn past_deadline(&self) -> bool {
+        self.deadline
+            .map(|deadline| Instant::now() > deadline)
+            .unwrap_or(false)
+    }
+
+    fn is_running(&mut self) -> bool {
+        matches!(self.child.try_wait(), Ok(None))
     }
 }
 
-pub struct TestOutput {
+pub struct TestOutput<T> {
+    #[allow(dead_code)]
+    // this just keeps the test dir around from `TestChild` so it doesnt get
+    // deleted during `wait_with_output`
+    dir: Option<T>,
     pub cmd: String,
     pub output: Output,
 }
 
-impl TestOutput {
+impl<T> TestOutput<T> {
     pub fn assert_success(self) -> Result<Self> {
         if !self.output.status.success() {
             Err(eyre!("command exited unsuccessfully")).context_from(&self)?;
@@ -227,7 +308,7 @@ impl TestOutput {
 pub trait ContextFrom<S> {
     type Return;
 
-    fn context_from(self, source: &S) -> Self::Return;
+    fn context_from(self, source: S) -> Self::Return;
 }
 
 impl<C, T, E> ContextFrom<C> for Result<T, E>
@@ -237,13 +318,13 @@ where
 {
     type Return = Result<T, Report>;
 
-    fn context_from(self, source: &C) -> Self::Return {
+    fn context_from(self, source: C) -> Self::Return {
         self.map_err(|e| e.into())
             .map_err(|report| report.context_from(source))
     }
 }
 
-impl ContextFrom<TestStatus> for Report {
+impl ContextFrom<&TestStatus> for Report {
     type Return = Report;
 
     fn context_from(self, source: &TestStatus) -> Self::Return {
@@ -253,27 +334,47 @@ impl ContextFrom<TestStatus> for Report {
     }
 }
 
-impl ContextFrom<TestChild> for Report {
+impl<T> ContextFrom<&mut TestChild<T>> for Report {
     type Return = Report;
 
-    fn context_from(self, source: &TestChild) -> Self::Return {
-        let command = || source.cmd.clone().header("Command:");
-        let child = || format!("{:?}", source.child).header("Child Process:");
+    fn context_from(mut self, source: &mut TestChild<T>) -> Self::Return {
+        self = self.section(source.cmd.clone().header("Command:"));
 
-        self.with_section(command).with_section(child)
+        if let Ok(Some(status)) = source.child.try_wait() {
+            self = self.context_from(&status);
+        }
+
+        let mut stdout_buf = String::new();
+        let mut stderr_buf = String::new();
+
+        if let Some(stdout) = &mut source.stdout {
+            for line in stdout {
+                let line = if let Ok(line) = line { line } else { break };
+                let _ = writeln!(&mut stdout_buf, "{}", line);
+            }
+        } else if let Some(stdout) = &mut source.child.stdout {
+            let _ = stdout.read_to_string(&mut stdout_buf);
+        }
+
+        if let Some(stderr) = &mut source.child.stderr {
+            let _ = stderr.read_to_string(&mut stderr_buf);
+        }
+
+        self.section(stdout_buf.header("Unread Stdout:"))
+            .section(stderr_buf.header("Unread Stderr:"))
     }
 }
 
-impl ContextFrom<TestOutput> for Report {
+impl<T> ContextFrom<&TestOutput<T>> for Report {
     type Return = Report;
 
-    fn context_from(self, source: &TestOutput) -> Self::Return {
+    fn context_from(self, source: &TestOutput<T>) -> Self::Return {
         self.with_section(|| source.cmd.clone().header("Command:"))
             .context_from(&source.output)
     }
 }
 
-impl ContextFrom<Output> for Report {
+impl ContextFrom<&Output> for Report {
     type Return = Report;
 
     fn context_from(self, source: &Output) -> Self::Return {
@@ -294,7 +395,7 @@ impl ContextFrom<Output> for Report {
     }
 }
 
-impl ContextFrom<ExitStatus> for Report {
+impl ContextFrom<&ExitStatus> for Report {
     type Return = Report;
 
     fn context_from(self, source: &ExitStatus) -> Self::Return {
