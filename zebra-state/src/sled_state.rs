@@ -89,10 +89,9 @@ impl SledState {
     fn commit_finalized(&mut self, queued_block: QueuedBlock) {
         let QueuedBlock { block, rsp_tx } = queued_block;
 
-        // The only valid block without a coinbase height is the genesis
-        // block.  By this point the block has been validated, so if
-        // there's no coinbase height, it must be the genesis block.
-        let height = block.coinbase_height().unwrap_or(block::Height(0));
+        let height = block
+            .coinbase_height()
+            .expect("finalized blocks are valid and have a coinbase height");
         let height_bytes = height.0.to_be_bytes();
         let hash = block.hash();
 
