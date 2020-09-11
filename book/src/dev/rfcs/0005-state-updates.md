@@ -83,14 +83,11 @@ limit. To simplify our implementation, we split the representation of the
 state data at the finality boundary provided by the reorg limit.
 
 State data from blocks *above* the reorg limit (*non-finalized state*) is
-stored in-memory using immutable data structures from the `im` crate. State
-data from blocks *below* the reorg limit (*finalized state*) is stored
-persistently using `sled`. This allows a simplification of our state
-handling, because only finalized data is persistent.
-
-We choose `im` because it provides best-in-class manipulation of persistent
-data structures. We choose `sled` because of its ease of integration and API
-simplicity.
+stored in-memory and handles multiple chains. State data from blocks *below*
+the reorg limit (*finalized state*) is stored persistently using `sled` and
+only tracks a single chain. This allows a simplification of our state
+handling, because only finalized data is persistent and the logic for
+finalized data handles less invariants.
 
 One downside of this design is that restarting the node loses the last 100
 blocks, but node restarts are relatively infrequent and a short re-sync is
@@ -165,10 +162,18 @@ each rooted at the highest finalized block. Each chain consists of a map from
 heights to blocks. Chains are stored using an ordered map from difficulty to
 chains, so that the map ordering is the ordering of best to worst chains.
 
-- index queued blocks by height rather than by hash because it lets us simultaniously limit the number of candidates as well as know when we want to prune the queue.
+- index queued blocks by height rather than by hash because it lets us
+  simultaniously limit the number of candidates as well as know when we want
+  to prune the queue.
 
 - XXX fill in details on exact types
 
+
+### `Chain` Type
+[chain-type]: #chain-type
+
+We represent the non-finalized portion of a chain with the following data
+structure and API:
 
 ```rust
 struct Chain {
@@ -182,127 +187,158 @@ struct Chain {
     sprout_nullifiers: HashSet<sprout::Nullifier>,
     partial_cumulative_work: PartialCumulativeWork,
 }
+```
 
-impl Chain {
-    // Push a block into a chain as the new tip
-    fn push(&mut self, block: Arc<Block>) -> Result<(), Error> {
-        // Do contextual validation checks...
+The `Chain` type consists of a set of blocks, representing the non-finalized
+portion of the chain it represents where the lowest height block's parent is
+the tip of the finalized state. All of the other members cache information
+contained within that set of blocks for fast lookup.
 
-        // Add block to end of `self.blocks`
-        // Add hash to `height_by_hash`
-        // Add new utxos and remove consumed utxos from `self.utxos`
-        // Add anchors to the appropriate `self.<version>_anchors`
-        // Add nullifiers to the appropriate `self.<version>_nullifiers`
-        // Add work to `self.partial_cumulative_work`
-    }
+The `Chain` type exposes 3 public functions to manipulate chain data structures and one private helper function.
 
-    fn pop_root(&mut self) -> Arc<Block> {
-        // Remove the lowest height block from `self.blocks`
-        // Remove the corresponding hash from `self.height_by_hash`
-        // Remove new utxos from `self.utxos`
-        // Remove the anchors from the appropriate `self.<version>_anchors`
-        // Remove the nullifiers from the appropriate `self.<version>_nullifiers`
+#### `pub fn push(&mut self, block: Arc<Block>) -> Result<(), Error>`
 
-        // Return the block
-    }
+Push a block into a chain as the new tip if the block is a valid extension of
+that chain.
 
-    fn pop_tip(&mut self) -> Arc<Block> {
-        // Remove the hightest height block from `self.blocks`
-        // Remove the corresponding hash from `self.height_by_hash`
-        // Add consumed utxos and remove new utxos from `self.utxos`
-        // Remove anchors from the appropriate `self.<version>_anchors`
-        // Remove the nullifiers from the appropriate `self.<version>_nullifiers`
-        // Subtract work from `self.partial_cumulative_work`
+1. Run contextual validation checks on block against Self
+1. Update cummulative data members
+    - Add block to end of `self.blocks`
+    - Add hash to `height_by_hash`
+    - Add new utxos and remove consumed utxos from `self.utxos`
+    - Add anchors to the appropriate `self.<version>_anchors`
+    - Add nullifiers to the appropriate `self.<version>_nullifiers`
+    - Add work to `self.partial_cumulative_work`
 
-        // return the block
-    }
+#### `pub fn pop_root(&mut self) -> Arc<Block>`
 
-    fn fork(&self, parent: block::Hash) -> Self {
-        // assert self contains parent
-        // clone self
-        // while clone.tip.hash != parent { let _ = self.pop_tip(); }
-        // return clone
-    }
-}
+Remove the lowest height block of the non-finalized portion of a chain.
 
-impl Ord for Chain {
-    fn cmp(&self, other: &Self) -> Ordering {
-        // first compare partial_cumulative_work, return ordering if not equal
-        // if tied compare blockheaderhashes of the respective tips, return ordering
-    }
-}
+1. Remove the lowest height block from `self.blocks`
+1. Update cummulative data members
+    - Remove the block's hash from `self.height_by_hash`
+    - Remove new utxos from `self.utxos`
+    - Remove the anchors from the appropriate `self.<version>_anchors`
+    - Remove the nullifiers from the appropriate `self.<version>_nullifiers`
+1. Return the block
 
+**Note**: We do not subtract work from `self.partial_cummulative_work`. This
+is to make make the ordering of chains stable while finalizing blocks.
+
+#### `pub fn fork(&self, new_tip: block::Hash) -> Option<Self>`
+
+Fork a chain at the block with the given hash, if it is part of this chain.
+
+1. If `self` does not contain `new_tip` return `None`
+2. Clone self as `forked`
+3. While the tip of `forked` is not equal to `new_tip`
+   - call `forked.pop_tip()` and discard the old tip
+4. Return `forked`
+
+#### `fn pop_tip(&mut self) -> Arc<Block>`
+
+Remove the highest height block of the non-finalized portion of a chain.
+
+1. Remove the highest height block from `self.blocks`
+1. Update cummulative data members
+    - Remove the corresponding hash from `self.height_by_hash`
+    - Add consumed utxos and remove new utxos from `self.utxos`
+    - Remove anchors from the appropriate `self.<version>_anchors`
+    - Remove the nullifiers from the appropriate `self.<version>_nullifiers`
+    - Subtract work from `self.partial_cumulative_work`
+1. Return the block
+
+#### `Ord`
+
+The `Chain` type also implements `Ord` for reorganizing chains. First chains
+are compared by their `partial_cummulative_work`. Ties are then broken by
+comparing `BlockHeaderHashes` of the tips of each chain.
+
+### `ChainSet` Type
+[chainset-type]: #chainset-type
+
+The `ChainSet` type represents the set of all non-finalized state. It
+consists of a set of non-finalized but verified chains and a set of
+unverified blocks which are waiting for the full context needed to verify
+them to become available.
+
+`ChainState` is defined by the following structure:
+
+```rust
 struct ChainSet {
     chains: BTreeSet<Chain>,
     queued_blocks: BTreeMap<block::Height, Vec<Arc<Block>>>,
 }
-
-impl ChainSet {
-    fn finalize(&mut self) -> Arc<Block> {
-        // move all chains to a temporary vec of chains
-        // pop root block from the best chain, called `block` hereafter
-        // add best chain back to `self.chains`
-        // iterate over the remaining of chains
-        //    if chain starts with `block` remove `block` and re-add too `self.chains`
-        //    if chain doesn't start with `block` drop chain
-
-        // return `block`
-    }
-
-    fn commit_block(&mut self, block: Arc<Block>) -> Result<(), Error> {
-        // iterate through chains,
-        //    if parent of `block` is tip of any chains, try to push block onto
-        //    that chain
-        //
-        // if no chains end in `block`'s parent search for a chain that contains `block`
-        // if a chain is found, for chain at `block.parent`, try to push `block` onto `fork`, if successful add fork to `self.chains`
-        // if no chain is found queue block, prune queued blocks that are below the reorg limit
-    }
-}
 ```
 
-- **Chain**: `(im::OrdMap<block::Height, Arc<Block>>, HashSet<Nullifier>, HashSet<block::Hash>, HashSet<Anchor>, HashSet<UTXO>, PartialCumulativeWork)`
-  - Ord impl is ordered by work, tie break using block header hash
-  - push => add a block to the end of a chain, does contextual verification
-  checks, extracts info from block for extra data sets
-  - pop => remove the lowest block, remove references to contents from block in various extra data sets (nullifiers, hashes, etc)
-  - pop_tip => remove the highest block, remove references to contents in the block
-  - fork => create a new chain fork based on a given block(hash) within
-  another chain, clones the original chain and calls pop_tip repeatedly until the given block is the tip
-- **ChainSet**: `(BTreeSet<Chain>, queued_blocks: BTreeMap<block::Height, Vec<Arc<Block>>>)`
-  - `fn finalize(&mut self) -> Arc<Block>`
-  - `fn commit_block(&mut self, block: Arc<Block>) -> Result<(), Err>`
-    - iterate through chains, if the parent of `block` is the tip of any
-    chains, try to push block onto that chain
-    - if not, iterate through chains, checking if the parent is contained in
-    that chain
-    - if so, fork the chain at the parent and try to push `block` onto that
-    fork and add newly extended chain if the push succeeds
-    - if not, queue block, prune queued blocks that are below the reorg limit
+And provides the following two public methods for manipulating the
+non-finalized state:
 
+#### `pub fn finalize(&mut self) -> Arc<Block>`
 
-- XXX work out whether we should store extra data (e.g., a HashSet of UTXOs
-  spent by some block etc.) to speed up checks.
+Finalize the lowest height block in the non-finalized portion of a chain and
+updates all side chains to match.
 
-When a new block extends the best chain past 100 blocks, the old root is
-removed from the non-finalized state and committed to the finalized state.
+1. Move all chains from `self.chains` into a temporary buffer, a `Vec` for
+   example`, so they can be mutated.
+1. Remove the lowest height block from the best chain with
+   `let block = best_chain.pop_root();`
+1. Add `best_chain` back to `self.chains`
+1. For each remaining `chain`
+    - If `chain` starts with `block`, remove `block` and add `chain` back to
+    `self.chains`
+    - Else, drop `chain`
+1. Return `block`
+
+### `pub fn commit_block(&mut self, block: Arc<Block>) -> Result<(), Error>`
+
+Try to commit `block` to the non-finalized state.
+
+1. For each `chain`
+    - if `block.parent` == `chain.tip`
+      - try to push `block` onto that chain
+      - return result of `chain.push(block)`
+1. Find the first chain that contains `block.parent` and fork it with
+  `block.parent` as the new tip
+    - `let fork = self.chains.iter().find_map(|chain| chain.fork(block.parent));`
+1. If `fork` is `Some`
+    - try to push `block` onto that chain
+    - return result of `chain.push(block)`
+1. Else add `block` to `self.queued_blocks`
+
+### `pub fn process_queued_blocks(&mut self)`
+
+XXX: fill out description
+
+XXX: Do we need to add some channels to the `queued_blocks` for notifying
+consumers that their blocks have been processed?
+
+In Summary:
+
+- `Chain` represents the non-finalized portion of a single chain
+- `ChainSet` represents the non-finalized portion of all chains and all
+  unverified blocks that are waiting for context to be available.
+- `chain_set::commit_block` handles committing or queueing blocks and
+  reorganizing chains but not finalizing them
+- Finalized blocks are returned from `finalize` and must still be committed
+  to disk afterwards
 
 ## Committing non-finalized blocks
 
-If the parent block is not committed, add the block to an internal queue for
-future processing.
+Given the above structures for manipulating the non-finalized state new
+`non-finalized` blocks are commited in 3 steps. First we commit the block to
+the in memory state, then we finalize the lowest height block if it is past
+the reorg limit, finally we process any queued blocks and prune any that are
+now past the reorg limit.
 
-Otherwise, attempt to perform contextual validation checks and the commit the
-given block to the state. The exact list of contextual validation checks will
-be specified in a later RFC. If contextual validation checks succeed, commit
-the new blocks to the non-finalized state as described below. Next, if the
-resulting non-finalized chain is longer than 100 blocks, the oldest block is
-now past the reorg limit. Remove it from the non-finalized state and commit
-it as a finalized block, as described in the next section.
-
-XXX: fill in details of non-finalized state.
-
-Finally, process any queued children of the newly committed block the same way.
+1. Try to commit the block to the non-finalized state with
+   `chain_set.commit_block(block)?;`
+1. If the best chain is longer than the reorg limit
+   - Finalize the lowest height block in the best chain with
+     `let finalized = chain_set.finalize()?;`
+    - commit `finalized` to disk with `CommitFinalizedBlock`
+1. Process and prune any queued blocks with
+   `chain_set.process_queued_blocks();`
 
 ## Sled data structures
 [sled]: #sled
