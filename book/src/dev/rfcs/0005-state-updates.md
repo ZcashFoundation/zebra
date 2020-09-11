@@ -165,16 +165,111 @@ each rooted at the highest finalized block. Each chain consists of a map from
 heights to blocks. Chains are stored using an ordered map from difficulty to
 chains, so that the map ordering is the ordering of best to worst chains.
 
+- index queued blocks by height rather than by hash because it lets us simultaniously limit the number of candidates as well as know when we want to prune the queue.
+
 - XXX fill in details on exact types
 
-- **Chain**: `(im::OrdMap<block::Height, Arc<Block>>, HashSet<Nullifier>, HashSet<block::Hash>, HashSet<Anchor>, HashSet<UTXO>)`
-  - Ord impl is ordered by work
+
+```rust
+struct Chain {
+    blocks: BTreeMap<block::Height, Arc<Block>>,
+    height_by_hash: HashMap<block::Hash, block::Height>,
+
+    utxos: HashSet<transparent::Output>,
+    sapling_anchors: HashSet<sapling::tree::Root>,
+    sprout_anchors: HashSet<sprout::tree::Root>,
+    sapling_nullifiers: HashSet<sapling::Nullifier>,
+    sprout_nullifiers: HashSet<sprout::Nullifier>,
+    partial_cumulative_work: PartialCumulativeWork,
+}
+
+impl Chain {
+    // Push a block into a chain as the new tip
+    fn push(&mut self, block: Arc<Block>) -> Result<(), Error> {
+        // Do contextual validation checks...
+
+        // Add block to end of `self.blocks`
+        // Add hash to `height_by_hash`
+        // Add new utxos and remove consumed utxos from `self.utxos`
+        // Add anchors to the appropriate `self.<version>_anchors`
+        // Add nullifiers to the appropriate `self.<version>_nullifiers`
+        // Add work to `self.partial_cumulative_work`
+    }
+
+    fn pop_root(&mut self) -> Arc<Block> {
+        // Remove the lowest height block from `self.blocks`
+        // Remove the corresponding hash from `self.height_by_hash`
+        // Remove new utxos from `self.utxos`
+        // Remove the anchors from the appropriate `self.<version>_anchors`
+        // Remove the nullifiers from the appropriate `self.<version>_nullifiers`
+
+        // Return the block
+    }
+
+    fn pop_tip(&mut self) -> Arc<Block> {
+        // Remove the hightest height block from `self.blocks`
+        // Remove the corresponding hash from `self.height_by_hash`
+        // Add consumed utxos and remove new utxos from `self.utxos`
+        // Remove anchors from the appropriate `self.<version>_anchors`
+        // Remove the nullifiers from the appropriate `self.<version>_nullifiers`
+        // Subtract work from `self.partial_cumulative_work`
+
+        // return the block
+    }
+
+    fn fork(&self, parent: block::Hash) -> Self {
+        // assert self contains parent
+        // clone self
+        // while clone.tip.hash != parent { let _ = self.pop_tip(); }
+        // return clone
+    }
+}
+
+impl Ord for Chain {
+    fn cmp(&self, other: &Self) -> Ordering {
+        // first compare partial_cumulative_work, return ordering if not equal
+        // if tied compare blockheaderhashes of the respective tips, return ordering
+    }
+}
+
+struct ChainSet {
+    chains: BTreeSet<Chain>,
+    queued_blocks: BTreeMap<block::Height, Vec<Arc<Block>>>,
+}
+
+impl ChainSet {
+    fn finalize(&mut self) -> Arc<Block> {
+        // move all chains to a temporary vec of chains
+        // pop root block from the best chain, called `block` hereafter
+        // add best chain back to `self.chains`
+        // iterate over the remaining of chains
+        //    if chain starts with `block` remove `block` and re-add too `self.chains`
+        //    if chain doesn't start with `block` drop chain
+
+        // return `block`
+    }
+
+    fn commit_block(&mut self, block: Arc<Block>) -> Result<(), Error> {
+        // iterate through chains,
+        //    if parent of `block` is tip of any chains, try to push block onto
+        //    that chain
+        //
+        // if no chains end in `block`'s parent search for a chain that contains `block`
+        // if a chain is found, for chain at `block.parent`, try to push `block` onto `fork`, if successful add fork to `self.chains`
+        // if no chain is found queue block, prune queued blocks that are below the reorg limit
+    }
+}
+```
+
+- **Chain**: `(im::OrdMap<block::Height, Arc<Block>>, HashSet<Nullifier>, HashSet<block::Hash>, HashSet<Anchor>, HashSet<UTXO>, PartialCumulativeWork)`
+  - Ord impl is ordered by work, tie break using block header hash
   - push => add a block to the end of a chain, does contextual verification
   checks, extracts info from block for extra data sets
   - pop => remove the lowest block, remove references to contents from block in various extra data sets (nullifiers, hashes, etc)
+  - pop_tip => remove the highest block, remove references to contents in the block
   - fork => create a new chain fork based on a given block(hash) within
-  another chain, calls push repeatedly
-- **ChainSet**: `(BTreeSet<Chain>, BTreeMap<block::Height, Arc<Block>>)`
+  another chain, clones the original chain and calls pop_tip repeatedly until the given block is the tip
+- **ChainSet**: `(BTreeSet<Chain>, queued_blocks: BTreeMap<block::Height, Vec<Arc<Block>>>)`
   - `fn finalize(&mut self) -> Arc<Block>`
   - `fn commit_block(&mut self, block: Arc<Block>) -> Result<(), Err>`
     - iterate through chains, if the parent of `block` is the tip of any
