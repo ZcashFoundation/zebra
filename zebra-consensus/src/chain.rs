@@ -8,6 +8,7 @@ use std::{
     task::{Context, Poll},
 };
 use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
+use tracing::instrument;
 
 use zebra_chain::{
     block::{self, Block},
@@ -109,6 +110,7 @@ where
 /// `state_service`.
 ///
 /// This function should only be called once for a particular state service.
+#[instrument(skip(state_service))]
 pub async fn init<S>(
     config: Config,
     network: Network,
@@ -138,6 +140,7 @@ where
         zs::Response::Tip(tip) => tip,
         _ => unreachable!("wrong response to Request::Tip"),
     };
+    tracing::info!(?tip, ?max_checkpoint_height, "initializing chain verifier");
 
     let block = BlockVerifier::new(state_service.clone());
     let checkpoint = CheckpointVerifier::from_checkpoint_list(list, tip, state_service);
