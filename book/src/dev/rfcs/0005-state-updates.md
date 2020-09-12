@@ -179,6 +179,7 @@ structure and API:
 struct Chain {
     blocks: BTreeMap<block::Height, Arc<Block>>,
     height_by_hash: HashMap<block::Hash, block::Height>,
+    tx_by_hash: HashMap<transaction::Hash, (block::Height, tx_index)>,
 
     utxos: HashSet<transparent::Output>,
     sapling_anchors: HashSet<sapling::tree::Root>,
@@ -189,12 +190,13 @@ struct Chain {
 }
 ```
 
-The `Chain` type consists of a set of blocks, representing the non-finalized
+The `Chain` type consists of a set of blocks, containing the non-finalized
 portion of the chain it represents where the lowest height block's parent is
-the tip of the finalized state. All of the other members cache information
-contained within that set of blocks for fast lookup.
+the tip of the finalized state. All of the other members of `Chain` cache
+information contained within that set of blocks for fast lookup.
 
-The `Chain` type exposes 3 public functions to manipulate chain data structures and one private helper function.
+The `Chain` type exposes 3 public functions to manipulate chain data
+structures and one private helper function.
 
 #### `pub fn push(&mut self, block: Arc<Block>) -> Result<(), Error>`
 
@@ -205,6 +207,8 @@ that chain.
 1. Update cummulative data members
     - Add block to end of `self.blocks`
     - Add hash to `height_by_hash`
+    - for each `transaction` in `block`
+      - add key: `transaction.hash` and value: `(height, tx_index)` to `tx_by_hash`
     - Add new utxos and remove consumed utxos from `self.utxos`
     - Add anchors to the appropriate `self.<version>_anchors`
     - Add nullifiers to the appropriate `self.<version>_nullifiers`
@@ -217,6 +221,8 @@ Remove the lowest height block of the non-finalized portion of a chain.
 1. Remove the lowest height block from `self.blocks`
 1. Update cummulative data members
     - Remove the block's hash from `self.height_by_hash`
+    - for each `transaction` in `block`
+      - remove `transaction.hash` from `tx_by_hash`
     - Remove new utxos from `self.utxos`
     - Remove the anchors from the appropriate `self.<version>_anchors`
     - Remove the nullifiers from the appropriate `self.<version>_nullifiers`
@@ -239,9 +245,11 @@ Fork a chain at the block with the given hash, if it is part of this chain.
 
 Remove the highest height block of the non-finalized portion of a chain.
 
-1. Remove the highest height block from `self.blocks`
+1. Remove the highest height `block` from `self.blocks`
 1. Update cummulative data members
     - Remove the corresponding hash from `self.height_by_hash`
+    - for each `transaction` in `block`
+      - remove `transaction.hash` from `tx_by_hash`
     - Add consumed utxos and remove new utxos from `self.utxos`
     - Remove anchors from the appropriate `self.<version>_anchors`
     - Remove the nullifiers from the appropriate `self.<version>_nullifiers`
@@ -492,8 +500,8 @@ hash, returning
 
 Implemented by querying:
 
-- (non-finalized) XXX parts of the non-finalized state;
-- (finalized) the `height_by_hash` tree.
+- (non-finalized) the `height_by_hash` map in the best chain
+- (finalized) the `height_by_hash` tree
 
 ### `Request::Tip`
 [request-tip]: #request-tip
@@ -502,8 +510,8 @@ Returns `Response::Tip(BlockHeaderHash)` with the current best chain tip.
 
 Implemented by querying:
 
-- (non-finalized) XXX parts of the non-finalized state;
-- (finalized) the `hash_by_height` tree.
+- (non-finalized) the highest height block in the best chain
+- (finalized) the `hash_by_height` tree only if there is no `non-finalized` state
 
 ### `Request::BlockLocator`
 [request-block-locator]: #request-block-locator
@@ -519,7 +527,7 @@ blocks.
 
 Implemented by querying:
 
-- (non-finalized) XXX parts of the non-finalized state;
+- (non-finalized) the `hash_by_height` map in the best chain
 - (finalized) the `hash_by_height` tree.
 
 ### `Request::Transaction(TransactionHash)`
@@ -535,7 +543,9 @@ Returns
 
 Implemented by querying:
 
-- (non-finalized) XXX parts of the non-finalized state;
+- (non-finalized) the `tx_by_hash` map (to get the parent block) of each
+  chain starting with the best chain, and then find block in `blocks` of that
+  chain.
 - (finalized) the `tx_by_hash` (to get the parent block) and then
     `block_by_height` (to get the transaction data) trees.
 
@@ -552,7 +562,8 @@ Returns
 
 Implemented by querying:
 
-- (non-finalized) XXX parts of the non-finalized state;
+- (non-finalized) the `height_by_hash` of each chain starting with the best
+  chain, then find block in `blocks` of that chain.
 - (finalized) the `height_by_hash` (to get the block height) and then
     `block_by_height` (to get the block data) trees.
 
