@@ -1,12 +1,11 @@
 //! Zebrad Subcommands
 
 mod generate;
-mod revhex;
 mod start;
 mod version;
 
 use self::ZebradCmd::*;
-use self::{generate::GenerateCmd, revhex::RevhexCmd, start::StartCmd, version::VersionCmd};
+use self::{generate::GenerateCmd, start::StartCmd, version::VersionCmd};
 
 use crate::config::ZebradConfig;
 
@@ -29,10 +28,6 @@ pub enum ZebradCmd {
     #[options(help = "get usage information")]
     Help(Help<Self>),
 
-    /// The `revhex` subcommand
-    #[options(help = "reverses the endianness of a hex string, like a block or transaction hash")]
-    Revhex(RevhexCmd),
-
     /// The `start` subcommand
     #[options(help = "start the application")]
     Start(StartCmd),
@@ -50,7 +45,7 @@ impl ZebradCmd {
         match self {
             // List all the commands, so new commands have to make a choice here
             Start(_) => true,
-            Generate(_) | Help(_) | Revhex(_) | Version(_) => false,
+            Generate(_) | Help(_) | Version(_) => false,
         }
     }
 }

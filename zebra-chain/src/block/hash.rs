@@ -24,14 +24,18 @@ pub struct Hash(pub [u8; 32]);
 
 impl fmt::Display for Hash {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str(&hex::encode(&self.0))
+        let mut reversed_bytes = self.0;
+        reversed_bytes.reverse();
+        f.write_str(&hex::encode(&reversed_bytes))
     }
 }
 
 impl fmt::Debug for Hash {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut reversed_bytes = self.0;
+        reversed_bytes.reverse();
         f.debug_tuple("block::Hash")
-            .field(&hex::encode(&self.0))
+            .field(&hex::encode(&reversed_bytes))
             .finish()
     }
 }
@@ -66,6 +70,7 @@ impl std::str::FromStr for Hash {
         if hex::decode_to_slice(s, &mut bytes[..]).is_err() {
             Err(SerializationError::Parse("hex decoding error"))
         } else {
+            bytes.reverse();
             Ok(Hash(bytes))
         }
     }
