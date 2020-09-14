@@ -76,3 +76,57 @@ impl Service<Request> for Wrapper {
         self.0.call(req).map_err(Into::into).boxed()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn connect_isolated_sends_minimally_distinguished_version_message() {
+        use crate::{
+            protocol::external::{Codec, Message},
+            types::PeerServices,
+        };
+        use futures::stream::StreamExt;
+        use tokio_util::codec::Framed;
+
+        let mut listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let listen_addr = listener.local_addr().unwrap();
+
+        let conn = tokio::net::TcpStream::connect(listen_addr).await.unwrap();
+
+        tokio::spawn(connect_isolated(conn, "".to_string()));
+
+        let (conn, _) = listener.accept().await.unwrap();
+
+        let mut stream = Framed::new(conn, Codec::builder().finish());
+        if let Message::Version {
+            services,
+            timestamp,
+            address_from,
+            user_agent,
+            start_height,
+            relay,
+            ..
+        } = stream
+            .next()
+            .await
+            .expect("stream item")
+            .expect("item is Ok(msg)")
+        {
+            // Check that the version message sent by connect_isolated
+            // has the fields specified in the Stolon RFC.
+            assert_eq!(services, PeerServices::empty());
+            assert_eq!(timestamp.timestamp() % (5 * 60), 0);
+            assert_eq!(
+                address_from,
+                (PeerServices::empty(), "0.0.0.0:8233".parse().unwrap())
+            );
+            assert_eq!(user_agent, "");
+            assert_eq!(start_height.0, 0);
+            assert_eq!(relay, false);
+        } else {
+            panic!("handshake did not send version message");
+        }
+    }
+}
