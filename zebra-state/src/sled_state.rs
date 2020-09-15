@@ -65,6 +65,7 @@ impl SledState {
     pub fn queue(&mut self, queued_block: QueuedBlock) {
         let prev_hash = queued_block.block.header.previous_block_hash;
         self.queued_by_prev_hash.insert(prev_hash, queued_block);
+        metrics::gauge!("state.queued.block.count", self.queued_by_prev_hash.len() as _);
 
         // Cloning means the closure doesn't hold a borrow of &self,
         // conflicting with mutable access in the loop below.
@@ -78,7 +79,14 @@ impl SledState {
 
         while let Some(queued_block) = self.queued_by_prev_hash.remove(&tip_hash()) {
             self.commit_finalized(queued_block)
+            metrics::counter!("state.committed.block.count", 1);
         }
+        if let Some(block::Height(height)) = read_tip()
+                                                 .expect("inability to look up tip is unrecoverable")
+                                                 .map(|(height, _hash)| height);
+            metrics::gauge!("state.committed.block.height", height as _);
+        }
+        metrics::gauge!("state.queued.block.count", self.queued_by_prev_hash.len() as _);
     }
 
     /// Commit a finalized block to the state.
