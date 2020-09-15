@@ -3,7 +3,8 @@
 - Feature Name: state_updates
 - Start Date: 2020-08-14
 - Design PR: https://github.com/ZcashFoundation/zebra/pull/902
-- Zebra Issue: XXX
+- Zebra Issue: https://github.com/ZcashFoundation/zebra/issues/1049
+
 
 # Summary
 [summary]: #summary
@@ -62,6 +63,8 @@ state service.
 [guide-level-explanation]: #guide-level-explanation
 
 XXX fill in after writing other details
+
+XXX(jane): I am planning on writing a guide-level explanation of the interface to zebra-state, intended for consumers of the `zebra-state` crate.
 
 # Reference-level explanation
 [reference-level-explanation]: #reference-level-explanation
@@ -152,7 +155,8 @@ In summary:
 - **Sled reads** may be done synchronously (in `call`) or asynchronously (in
   the `Future`), depending on the context;
 
-- **Sled writes** must be done synchronously (in `call`).
+- **Sled writes** must be done synchronously (in `call`), which is guaranteed
+  by the state's external API (a `Buffer`ed `tower::Service`).
 
 ## In-memory data structures
 [in-memory]: #in-memory
@@ -164,6 +168,11 @@ chains, so that the map ordering is the ordering of best to worst chains.
 
 ### `Chain` Type
 [chain-type]: #chain-type
+
+The `Chain` type consists of a set of blocks, containing the non-finalized
+portion of the chain it represents where the lowest height block's parent is
+the tip of the finalized state. All of the other members of `Chain` cache
+information contained within that set of blocks for fast lookup.
 
 We represent the non-finalized portion of a chain with the following data
 structure and API:
@@ -183,20 +192,13 @@ struct Chain {
 }
 ```
 
-The `Chain` type consists of a set of blocks, containing the non-finalized
-portion of the chain it represents where the lowest height block's parent is
-the tip of the finalized state. All of the other members of `Chain` cache
-information contained within that set of blocks for fast lookup.
-
-The `Chain` type exposes 3 public functions to manipulate chain data
-structures and one private helper function.
-
 #### `pub fn push(&mut self, block: Arc<Block>) -> Result<(), Error>`
 
 Push a block into a chain as the new tip if the block is a valid extension of
 that chain.
 
 1. Run contextual validation checks on block against Self
+
 1. Update cummulative data members
     - Add block to end of `self.blocks`
     - Add hash to `height_by_hash`
@@ -212,6 +214,7 @@ that chain.
 Remove the lowest height block of the non-finalized portion of a chain.
 
 1. Remove the lowest height block from `self.blocks`
+
 1. Update cummulative data members
     - Remove the block's hash from `self.height_by_hash`
     - for each `transaction` in `block`
@@ -219,6 +222,7 @@ Remove the lowest height block of the non-finalized portion of a chain.
     - Remove new utxos from `self.utxos`
     - Remove the anchors from the appropriate `self.<version>_anchors`
     - Remove the nullifiers from the appropriate `self.<version>_nullifiers`
+
 1. Return the block
 
 **Note**: We do not subtract work from `self.partial_cummulative_work`. This
@@ -229,9 +233,12 @@ is to make make the ordering of chains stable while finalizing blocks.
 Fork a chain at the block with the given hash, if it is part of this chain.
 
 1. If `self` does not contain `new_tip` return `None`
+
 2. Clone self as `forked`
+
 3. While the tip of `forked` is not equal to `new_tip`
    - call `forked.pop_tip()` and discard the old tip
+
 4. Return `forked`
 
 #### `fn pop_tip(&mut self) -> Arc<Block>`
@@ -239,6 +246,7 @@ Fork a chain at the block with the given hash, if it is part of this chain.
 Remove the highest height block of the non-finalized portion of a chain.
 
 1. Remove the highest height `block` from `self.blocks`
+
 1. Update cummulative data members
     - Remove the corresponding hash from `self.height_by_hash`
     - for each `transaction` in `block`
@@ -247,6 +255,7 @@ Remove the highest height block of the non-finalized portion of a chain.
     - Remove anchors from the appropriate `self.<version>_anchors`
     - Remove the nullifiers from the appropriate `self.<version>_nullifiers`
     - Subtract work from `self.partial_cumulative_work`
+
 1. Return the block
 
 #### `Ord`
@@ -281,20 +290,26 @@ Finalize the lowest height block in the non-finalized portion of the best
 chain and updates all side chains to match.
 
 1. Extract the best chain from `self.chains` into `best_chain`
+
 1. Extract the rest of the chains into a `side_chains` temporary variable, so
    they can be mutated
+
 1. Remove the lowest height block from the best chain with
    `let block = best_chain.pop_root();`
+
 1. Add `best_chain` back to `self.chains`
+
 1. For each remaining `chain` in `side_chains`
     - If `chain` starts with `block`, remove `block` and add `chain` back to
     `self.chains`
     - Else, drop `chain`
+
 1. for each `height` in `self.queued_by_height` where the height is lower than the
    new reorg limit
    - for each `hash` in `self.queued_by_height` at `height`
      - Remove the key `hash` from `self.queued_blocks` and store the removed `block`
      - Find and remove `hash` from `self.queued_by_parent` using `block.parent`'s hash
+
 1. Return `block`
 
 ### `pub fn queue(&mut self, block: QueuedBlock)`
@@ -305,13 +320,16 @@ After queueing a non-finalized block, this method checks whether the newly
 queued block (and any of its descendants) can be committed to the state
 
 1. Check if the parent block exists in any current chain
+
 1. If it does, call `let ret = self.commit_block(block)`
-  1. Call `self.process_queued(new_parents)` if `ret` is `Some`
+    - Call `self.process_queued(new_parents)` if `ret` is `Some`
+
 1. Else Add `block` to `self.queued_blocks` and related members and return
 
 ### `fn process_queued(&mut self, new_parent: block::Hash)`
 
 1. Create a list of `new_parents` and populate it with `new_parent`
+
 1. While let Some(parent) = new_parents.pop()
     - for each `hash` in `self.queued_by_parent.remove(&parent.hash)`
       - lookup the `block` for `hash`
@@ -330,39 +348,48 @@ cannot be committed due to missing context.
       - try to push `block` onto that chain
       - broadcast `result` via `block.rsp_tx`
       - return Some(block.hash) if `result.is_ok()`
+
 1. Find the first chain that contains `block.parent` and fork it with
   `block.parent` as the new tip
     - `let fork = self.chains.iter().find_map(|chain| chain.fork(block.parent));`
+
 1. If `fork` is `Some`
     - try to push `block` onto that chain
       - if successful add `fork` to `self.chains`
     - broadcast `result` via `block.rsp_tx`
     - return Some(block.hash) if `result.is_ok()`
+
 1. Else panic, this should be unreachable because `commit_block` is only
    called when it's ready to be committed.
 
 In Summary:
 
 - `Chain` represents the non-finalized portion of a single chain
+
 - `ChainSet` represents the non-finalized portion of all chains and all
   unverified blocks that are waiting for context to be available.
+
 - `chain_set::queue` handles queueing and or commiting blocks and
   reorganizing chains (via `commit_block`) but not finalizing them
+
 - Finalized blocks are returned from `finalize` and must still be committed
   to disk afterwards
+
+- `finalize` handles pruning queued blocks that are past the reorg limit
 
 ## Committing non-finalized blocks
 
 Given the above structures for manipulating the non-finalized state new
-`non-finalized` blocks are commited in 3 steps. First we commit the block to
-the in memory state, then we finalize the lowest height block if it is past
-the reorg limit, finally we process any queued blocks and prune any that are
-now past the reorg limit.
+`non-finalized` blocks are commited in two steps. First we commit the block
+to the in memory state, then we finalize the lowest height block if it is
+past the reorg limit, finally we process any queued blocks and prune any that
+are now past the reorg limit.
 
-1. Try to commit the block to the non-finalized state with
-   `chain_set.commit_block(block)?;`
+1. Try to commit or queue the block to the non-finalized state with
+   `chain_set.queue(block)?;`
+
 1. If the best chain is longer than the reorg limit
-   - Finalize the lowest height block in the best chain with
+    - Finalize the lowest height block in the best chain with
      `let finalized = chain_set.finalize()?;`
     - commit `finalized` to disk with `CommitFinalizedBlock`
 
@@ -423,9 +450,9 @@ which should:
 
 1. Obtain the highest entry of `hash_by_height` as `(old_height, old_tip)`.
 Check that `block`'s parent hash is `old_tip` and its height is
-`old_height+1`, or panic.  This check is performed as defense-in-depth
-to prevent database corruption, but it is the caller's responsibility to
-commit finalized blocks in order.
+`old_height+1`, or panic. This check is performed as defense-in-depth to
+prevent database corruption, but it is the caller's responsibility (e.g. the
+zebra-state service's responsibility) to commit finalized blocks in order.
 
 2. Insert:
     - `(hash, height)` into `height_by_hash`;
