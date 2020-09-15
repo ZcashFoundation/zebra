@@ -78,7 +78,7 @@ impl SledState {
         };
 
         while let Some(queued_block) = self.queued_by_prev_hash.remove(&tip_hash()) {
-            self.commit_finalized(queued_block)
+            self.commit_finalized(queued_block);
             metrics::counter!("state.committed.block.count", 1);
         }
         if let Some(block::Height(height)) = read_tip()
