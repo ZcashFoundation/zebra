@@ -62,9 +62,70 @@ state service.
 # Guide-level explanation
 [guide-level-explanation]: #guide-level-explanation
 
-XXX fill in after writing other details
+The `zebra-state` crate provides an implementation of the chain state storage
+logic in a zcash consensus node. Its main responsibility is to store chain
+state, validating new blocks against the existing chain state in the process,
+and to allow later querying of said chain state. `zebra-state` provides this
+interface via a `tower::Service` based on the actor model with a
+request/response interface for passing messages back and forth between the
+state service and the rest of the application.
 
-XXX(jane): I am planning on writing a guide-level explanation of the interface to zebra-state, intended for consumers of the `zebra-state` crate.
+The main entry point for the `zebra-state` crate is the `init` function. This
+function takes a `zebra_state::Config` and constructs a new state service,
+which it returns wrapped by a tower::Buffer. This service is then interacted
+with via the `tower::Service` trait.
+
+```rust
+use tower::{Service, ServiceExt};
+
+let config = app_config();
+let state_config = config.state;
+let network = config.network;
+
+let state = zebra_state::on_disk::init(state_config, network);
+let request = zebra_state::Request::GetBlockLocator { genesis: genesis_hash };
+let response = state.ready_and().await?.call(request).await?;
+
+assert!(matches!(response, zebra_state::Response::BlockLocator(_)));
+```
+
+**Note**: The `tower::Service` API requires that `ready` is always called
+exactly once before each `call`. It is up to users of the zebra state service
+to uphold this contract.
+
+The service itself is clonable. When cloned it only clones the buffered
+interface, and not the wrapped service, providing shared access to a common
+chain state across multithreaded applications.
+
+The set of operations supported by `zebra-state` are encoded in its `Request`
+enum. This enum has one variant for each supported operation.
+
+```rust
+pub enum Request {
+    CommitBlock {
+        block: Arc<Block>,
+    },
+    CommitFinalizedBlock {
+        block: Arc<Block>,
+    },
+    Depth(Hash),
+    Tip,
+    BlockLocator,
+    Transaction(Hash),
+    Block(HashOrHeight),
+
+    // .. some variants omitted
+}
+```
+
+`zebra-state` breaks down its requests into two categories and provides
+different guarantees for category. Those that modify the state and those that
+do not. Requests that update the state are guaranteed to run sequentially and
+will never race against each other. Requests that read state are done
+asynchronously and are guaranteed to read at least the state present at the
+time the request was processed, or a later state. The state service avoids
+race conditions between the read state and the written state by doing all
+contextual verification internally.
 
 # Reference-level explanation
 [reference-level-explanation]: #reference-level-explanation
