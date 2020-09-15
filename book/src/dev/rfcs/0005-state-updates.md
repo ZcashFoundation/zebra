@@ -677,14 +677,15 @@ Implemented by querying:
 # Drawbacks
 [drawbacks]: #drawbacks
 
-# Rationale and alternatives
-[rationale-and-alternatives]: #rationale-and-alternatives
+- Restarts can cause `zebrad` to redownload up to the last one hundred blocks
+  it verified.
 
-# Prior art
-[prior-art]: #prior-art
+- The service interface puts some extra responsibility on callers to ensure
+  it is used correctly and does not verify the usage is correct at compile
+  time.
 
-# Unresolved questions
-[unresolved-questions]: #unresolved-questions
+- the service API is verbose and requires manually unwrapping enums
 
-# Future possibilities
-[future-possibilities]: #future-possibilities
+- We do not handle reorgs the same way zcashd does, and could in theory need
+  to delete our entire on disk state and resync the chain in some
+  pathological reorg cases.
