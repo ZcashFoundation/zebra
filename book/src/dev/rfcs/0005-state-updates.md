@@ -270,8 +270,8 @@ struct ChainSet {
     chains: BTreeSet<Chain>,
 
     queued_blocks: BTreeMap<block::Hash, QueuedBlock>,
-    queued_blocks_by_parent: BTreeMap<block::Hash, Vec<block::Hash>>,
-    queued_by_height: BTreeMap<block::Height, HashSet<block::Hash>>,
+    queued_by_parent: BTreeMap<block::Hash, Vec<block::Hash>>,
+    queued_by_height: BTreeMap<block::Height, Vec<block::Hash>>,
 }
 ```
 
@@ -280,15 +280,21 @@ struct ChainSet {
 Finalize the lowest height block in the non-finalized portion of the best
 chain and updates all side chains to match.
 
-1. Move all chains from `self.chains` into a temporary buffer, a `Vec` for
-   example`, so they can be mutated.
+1. Extract the best chain from `self.chains` into `best_chain`
+1. Extract the rest of the chains into a `side_chains` temporary variable, so
+   they can be mutated
 1. Remove the lowest height block from the best chain with
    `let block = best_chain.pop_root();`
 1. Add `best_chain` back to `self.chains`
-1. For each remaining `chain`
+1. For each remaining `chain` in `side_chains`
     - If `chain` starts with `block`, remove `block` and add `chain` back to
     `self.chains`
     - Else, drop `chain`
+1. for each `height` in `self.queued_by_height` where the height is lower than the
+   new reorg limit
+   - for each `hash` in `self.queued_by_height` at `height`
+     - Remove the key `hash` from `self.queued_blocks` and store the removed `block`
+     - Find and remove `hash` from `self.queued_by_parent` using `block.parent`'s hash
 1. Return `block`
 
 ### `pub fn queue(&mut self, block: QueuedBlock)`
@@ -298,17 +304,23 @@ Queue a non-finalized block to be committed to the state.
 After queueing a non-finalized block, this method checks whether the newly
 queued block (and any of its descendants) can be committed to the state
 
-1. Add `block` to `self.queued_blocks` and related members
-1. add `block.hash` to a new list of `pending` blocks to be processed
-1. while let Some(`hash`) = pending.pop()
-    - lookup the `block` for `hash`
-    - if `self.commit_block(block)` returns Some(`result`)
-      - broadcast `result` via `block.rsp_tx`
-      - remove `block` from `self.queued_blocks` and related members
-      - for each `hash` in `self.queued_blocks_by_parent.get(block.hash)`
-        - add `hash` to `pending`
+1. Check if the parent block exists in any current chain
+1. If it does, call `let ret = self.commit_block(block)`
+  1. Call `self.process_queued(new_parents)` if `ret` is `Some`
+1. Else Add `block` to `self.queued_blocks` and related members and return
 
-### `fn commit_block(&mut self, block: Arc<Block>) -> Option<Result<block::Hash, BoxError>>`
+### `fn process_queued(&mut self, new_parent: block::Hash)`
+
+1. Create a list of `new_parents` and populate it with `new_parent`
+1. While let Some(parent) = new_parents.pop()
+    - for each `hash` in `self.queued_by_parent.remove(&parent.hash)`
+      - lookup the `block` for `hash`
+      - remove `block` from `self.queued_blocks`
+      - remove `hash` from `self.queued_by_height`
+      - let result = `self.commit_block(block)`;
+      - add `result` to `new_parents`
+
+### `fn commit_block(&mut self, block: QueuedBlock) -> Option<block::Hash>`
 
 Try to commit `block` to the non-finalized state. Returns `None` if the block
 cannot be committed due to missing context.
@@ -316,15 +328,18 @@ cannot be committed due to missing context.
 1. For each `chain`
     - if `block.parent` == `chain.tip`
       - try to push `block` onto that chain
-      - return Some(result) where `result` is result of `chain.push(block)`
+      - broadcast `result` via `block.rsp_tx`
+      - return Some(block.hash) if `result.is_ok()`
 1. Find the first chain that contains `block.parent` and fork it with
   `block.parent` as the new tip
     - `let fork = self.chains.iter().find_map(|chain| chain.fork(block.parent));`
 1. If `fork` is `Some`
     - try to push `block` onto that chain
       - if successful add `fork` to `self.chains`
-    - return Some(result) where `result` is result of `fork.push(block)`
-1. Else return None
+    - broadcast `result` via `block.rsp_tx`
+    - return Some(block.hash) if `result.is_ok()`
+1. Else panic, this should be unreachable because `commit_block` is only
+   called when it's ready to be committed.
 
 In Summary:
 
@@ -350,8 +365,6 @@ now past the reorg limit.
    - Finalize the lowest height block in the best chain with
      `let finalized = chain_set.finalize()?;`
     - commit `finalized` to disk with `CommitFinalizedBlock`
-1. Process and prune any queued blocks with
-   `chain_set.process_queued_blocks();`
 
 ## Sled data structures
 [sled]: #sled
