@@ -162,13 +162,6 @@ each rooted at the highest finalized block. Each chain consists of a map from
 heights to blocks. Chains are stored using an ordered map from difficulty to
 chains, so that the map ordering is the ordering of best to worst chains.
 
-- index queued blocks by height rather than by hash because it lets us
-  simultaniously limit the number of candidates as well as know when we want
-  to prune the queue.
-
-- XXX fill in details on exact types
-
-
 ### `Chain` Type
 [chain-type]: #chain-type
 
@@ -270,22 +263,22 @@ consists of a set of non-finalized but verified chains and a set of
 unverified blocks which are waiting for the full context needed to verify
 them to become available.
 
-`ChainState` is defined by the following structure:
+`ChainState` is defined by the following structure and API:
 
 ```rust
 struct ChainSet {
     chains: BTreeSet<Chain>,
-    queued_blocks: BTreeMap<block::Height, Vec<Arc<Block>>>,
+
+    queued_blocks: BTreeMap<block::Hash, QueuedBlock>,
+    queued_blocks_by_parent: BTreeMap<block::Hash, Vec<block::Hash>>,
+    queued_by_height: BTreeMap<block::Height, HashSet<block::Hash>>,
 }
 ```
 
-And provides the following two public methods for manipulating the
-non-finalized state:
-
 #### `pub fn finalize(&mut self) -> Arc<Block>`
 
-Finalize the lowest height block in the non-finalized portion of a chain and
-updates all side chains to match.
+Finalize the lowest height block in the non-finalized portion of the best
+chain and updates all side chains to match.
 
 1. Move all chains from `self.chains` into a temporary buffer, a `Vec` for
    example`, so they can be mutated.
@@ -298,36 +291,48 @@ updates all side chains to match.
     - Else, drop `chain`
 1. Return `block`
 
-### `pub fn commit_block(&mut self, block: Arc<Block>) -> Result<(), Error>`
+### `pub fn queue(&mut self, block: QueuedBlock)`
 
-Try to commit `block` to the non-finalized state.
+Queue a non-finalized block to be committed to the state.
+
+After queueing a non-finalized block, this method checks whether the newly
+queued block (and any of its descendants) can be committed to the state
+
+1. Add `block` to `self.queued_blocks` and related members
+1. add `block.hash` to a new list of `pending` blocks to be processed
+1. while let Some(`hash`) = pending.pop()
+    - lookup the `block` for `hash`
+    - if `self.commit_block(block)` returns Some(`result`)
+      - broadcast `result` via `block.rsp_tx`
+      - remove `block` from `self.queued_blocks` and related members
+      - for each `hash` in `self.queued_blocks_by_parent.get(block.hash)`
+        - add `hash` to `pending`
+
+### `fn commit_block(&mut self, block: Arc<Block>) -> Option<Result<block::Hash, BoxError>>`
+
+Try to commit `block` to the non-finalized state. Returns `None` if the block
+cannot be committed due to missing context.
 
 1. For each `chain`
     - if `block.parent` == `chain.tip`
       - try to push `block` onto that chain
-      - return result of `chain.push(block)`
+      - return Some(result) where `result` is result of `chain.push(block)`
 1. Find the first chain that contains `block.parent` and fork it with
   `block.parent` as the new tip
     - `let fork = self.chains.iter().find_map(|chain| chain.fork(block.parent));`
 1. If `fork` is `Some`
     - try to push `block` onto that chain
-    - return result of `chain.push(block)`
-1. Else add `block` to `self.queued_blocks`
-
-### `pub fn process_queued_blocks(&mut self)`
-
-XXX: fill out description
-
-XXX: Do we need to add some channels to the `queued_blocks` for notifying
-consumers that their blocks have been processed?
+      - if successful add `fork` to `self.chains`
+    - return Some(result) where `result` is result of `fork.push(block)`
+1. Else return None
 
 In Summary:
 
 - `Chain` represents the non-finalized portion of a single chain
 - `ChainSet` represents the non-finalized portion of all chains and all
   unverified blocks that are waiting for context to be available.
-- `chain_set::commit_block` handles committing or queueing blocks and
-  reorganizing chains but not finalizing them
+- `chain_set::queue` handles queueing and or commiting blocks and
+  reorganizing chains (via `commit_block`) but not finalizing them
 - Finalized blocks are returned from `finalize` and must still be committed
   to disk afterwards
 
