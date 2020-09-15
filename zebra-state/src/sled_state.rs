@@ -83,7 +83,7 @@ impl SledState {
         }
         if let Some(block::Height(height)) = read_tip()
                                                  .expect("inability to look up tip is unrecoverable")
-                                                 .map(|(height, _hash)| height);
+                                                 .map(|(height, _hash)| height) {
             metrics::gauge!("state.committed.block.height", height as _);
         }
         metrics::gauge!("state.queued.block.count", self.queued_by_prev_hash.len() as _);
