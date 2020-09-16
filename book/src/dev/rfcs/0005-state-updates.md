@@ -72,7 +72,7 @@ state service and the rest of the application.
 
 The main entry point for the `zebra-state` crate is the `init` function. This
 function takes a `zebra_state::Config` and constructs a new state service,
-which it returns wrapped by a tower::Buffer. This service is then interacted
+which it returns wrapped by a `tower::Buffer`. This service is then interacted
 with via the `tower::Service` trait.
 
 ```rust
@@ -93,9 +93,7 @@ assert!(matches!(response, zebra_state::Response::BlockLocator(_)));
 exactly once before each `call`. It is up to users of the zebra state service
 to uphold this contract.
 
-The service itself is clonable. When cloned it only clones the buffered
-interface, and not the wrapped service, providing shared access to a common
-chain state across multithreaded applications.
+The `tower::Buffer` wrapper is `Clone`able, allowing shared access to a common state service.  This allows different tasks to share access to the chain state.
 
 The set of operations supported by `zebra-state` are encoded in its `Request`
 enum. This enum has one variant for each supported operation.
@@ -227,7 +225,7 @@ each rooted at the highest finalized block. Each chain consists of a map from
 heights to blocks. Chains are stored using an ordered map from difficulty to
 chains, so that the map ordering is the ordering of best to worst chains.
 
-### `Chain` Type
+### The `Chain` type
 [chain-type]: #chain-type
 
 The `Chain` type consists of a set of blocks, containing the non-finalized
