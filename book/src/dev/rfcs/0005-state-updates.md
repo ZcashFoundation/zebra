@@ -360,7 +360,7 @@ chain and updates all side chains to match.
 
 1. for each `height` in `self.queued_by_height` where the height is lower than the
    new reorg limit
-   - for each `hash` in `self.queued_by_height` at `height`
+   - for each `hash` in `self.queued_by_height.remove(height)`
      - Remove the key `hash` from `self.queued_blocks` and store the removed `block`
      - Find and remove `hash` from `self.queued_by_parent` using `block.parent`'s hash
 
