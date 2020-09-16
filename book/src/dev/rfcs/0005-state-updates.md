@@ -421,7 +421,7 @@ cannot be committed due to missing context.
 1. Else panic, this should be unreachable because `commit_block` is only
    called when it's ready to be committed.
 
-In Summary:
+### Summary
 
 - `Chain` represents the non-finalized portion of a single chain
 
