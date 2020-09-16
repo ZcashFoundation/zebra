@@ -78,10 +78,6 @@ with via the `tower::Service` trait.
 ```rust
 use tower::{Service, ServiceExt};
 
-let config = app_config();
-let state_config = config.state;
-let network = config.network;
-
 let state = zebra_state::on_disk::init(state_config, network);
 let request = zebra_state::Request::BlockLocator;
 let response = state.ready_and().await?.call(request).await?;
@@ -209,13 +205,12 @@ synchronous or asynchronous, we ensure that writes cannot race each other.
 Asynchronous reads are guaranteed to read at least the state present at the
 time the request was processed, or a later state.
 
-In summary:
+### Summary
 
 - **Sled reads** may be done synchronously (in `call`) or asynchronously (in
   the `Future`), depending on the context;
 
-- **Sled writes** must be done synchronously (in `call`), which is guaranteed
-  by the state's external API (a `Buffer`ed `tower::Service`).
+- **Sled writes** must be done synchronously (in `call`)
 
 ## In-memory data structures
 [in-memory]: #in-memory
