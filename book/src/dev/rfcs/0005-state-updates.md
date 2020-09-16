@@ -83,7 +83,7 @@ let state_config = config.state;
 let network = config.network;
 
 let state = zebra_state::on_disk::init(state_config, network);
-let request = zebra_state::Request::GetBlockLocator { genesis: genesis_hash };
+let request = zebra_state::Request::BlockLocator;
 let response = state.ready_and().await?.call(request).await?;
 
 assert!(matches!(response, zebra_state::Response::BlockLocator(_)));
