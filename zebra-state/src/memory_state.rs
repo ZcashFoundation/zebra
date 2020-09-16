@@ -78,6 +78,10 @@ impl Chain {
 
 impl PartialEq for Chain {
     fn eq(&self, other: &Self) -> bool {
+        if self.partial_cumulative_work != other.partial_cumulative_work {
+            return false;
+        }
+
         self.blocks.eq(&other.blocks)
     }
 }
