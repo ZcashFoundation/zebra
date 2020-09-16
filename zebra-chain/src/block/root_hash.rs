@@ -1,4 +1,4 @@
-//! The LightClientRootHash enum, used for the corresponding block header field.
+//! The RootHash enum, used for the corresponding block header field.
 
 use crate::parameters::{Network, NetworkUpgrade, NetworkUpgrade::*};
 use crate::sapling::tree::Root;
@@ -44,8 +44,7 @@ pub enum RootHash {
 }
 
 impl RootHash {
-    /// Returns `bytes` as the LightClientRootHash variant for `network` and
-    /// `height`.
+    /// Returns `bytes` as the RootHash variant for `network` and `height`.
     pub(super) fn from_bytes(bytes: [u8; 32], network: Network, height: Height) -> RootHash {
         use RootHash::*;
 
@@ -59,7 +58,7 @@ impl RootHash {
         }
     }
 
-    /// Returns the serialized bytes for this LightClientRootHash.
+    /// Returns the serialized bytes for this RootHash.
     #[allow(dead_code)]
     pub(super) fn to_bytes(self) -> [u8; 32] {
         use RootHash::*;
