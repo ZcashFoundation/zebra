@@ -84,8 +84,9 @@ impl SledState {
     /// Commit a finalized block to the state.
     ///
     /// It's the caller's responsibility to ensure that blocks are committed in
-    /// order. This function is called by [`process_queue`], which does, and is
-    /// intentionally not exposed as part of the public API of the [`SledState`].
+    /// order. This function is called by [`process_queue`], which ensures order.
+    /// It is intentionally not exposed as part of the public API of the
+    /// [`SledState`].
     fn commit_finalized(&mut self, queued_block: QueuedBlock) {
         let QueuedBlock { block, rsp_tx } = queued_block;
 
