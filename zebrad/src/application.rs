@@ -91,7 +91,7 @@ impl Application for ZebradApp {
         // handler is the last one installed
         color_eyre::config::HookBuilder::default()
             .issue_url("https://github.com/ZcashFoundation/zebra/issues/new")
-            .add_issue_metadata("version", "3.0.0-alpha.0")
+            .add_issue_metadata("version", env!("CARGO_PKG_VERSION"))
             .install()
             .unwrap();
 
