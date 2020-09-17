@@ -22,7 +22,7 @@ pub fn is_coinbase_first(block: &Block) -> Result<(), BoxError> {
     let first = block
         .transactions
         .get(0)
-        .ok_or(TransactionError::NoTransactions)?;
+        .ok_or(BlockError::NoTransactions)?;
     let mut rest = block.transactions.iter().skip(1);
     if !first.is_coinbase() {
         return Err(TransactionError::CoinbasePosition.into());

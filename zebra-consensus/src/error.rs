@@ -4,9 +4,6 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum TransactionError {
-    #[error("no transactions")]
-    NoTransactions,
-
     #[error("first transaction must be coinbase")]
     CoinbasePosition,
 
@@ -18,6 +15,9 @@ pub enum TransactionError {
 pub enum BlockError {
     #[error("invalid transaction")]
     Transaction(#[from] TransactionError),
+
+    #[error("no transactions")]
+    NoTransactions,
 
     #[error("block {0} is already in the chain at depth {1:?}")]
     AlreadyInChain(zebra_chain::block::Hash, u32),
