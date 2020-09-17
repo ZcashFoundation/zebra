@@ -22,7 +22,7 @@ use tower::{Service, ServiceExt};
 use zebra_chain::block::{self, Block};
 use zebra_state as zs;
 
-use crate::errors::*;
+use crate::error::*;
 use crate::BoxError;
 
 mod check;

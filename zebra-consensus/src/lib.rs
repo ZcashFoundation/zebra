@@ -20,7 +20,7 @@ pub mod block;
 pub mod chain;
 pub mod checkpoint;
 pub mod config;
-pub mod errors;
+pub mod error;
 pub mod mempool;
 pub mod parameters;
 

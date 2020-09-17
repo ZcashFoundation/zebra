@@ -7,7 +7,7 @@ use zebra_chain::{
     work::equihash,
 };
 
-use crate::errors::*;
+use crate::error::*;
 use crate::BoxError;
 
 /// Check that there is exactly one coinbase transaction in `Block`, and that
