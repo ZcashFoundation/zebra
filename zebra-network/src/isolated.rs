@@ -35,14 +35,19 @@ use crate::{peer, BoxedStdError, Config, Request, Response};
 /// connection allows this method to be used with clearnet or Tor transports.
 ///
 /// - `user_agent`: a valid BIP14 user-agent, e.g., the empty string.
-pub async fn connect_isolated(
+pub fn connect_isolated(
     conn: TcpStream,
     user_agent: String,
-) -> Result<BoxService<Request, Response, BoxedStdError>, BoxedStdError> {
+) -> impl Future<
+    Output = Result<
+        BoxService<Request, Response, Box<dyn std::error::Error + Send + Sync + 'static>>,
+        Box<dyn std::error::Error + Send + Sync + 'static>,
+    >,
+> {
     let handshake = peer::Handshake::builder()
         .with_config(Config::default())
         .with_inbound_service(tower::service_fn(|_req| async move {
-            Ok::<Response, BoxedStdError>(Response::Nil)
+            Ok::<Response, Box<dyn std::error::Error + Send + Sync + 'static>>(Response::Nil)
         }))
         .with_user_agent(user_agent)
         .finish()
@@ -54,9 +59,7 @@ pub async fn connect_isolated(
     // touch it at all.
     let remote_addr = "0.0.0.0:8233".parse().unwrap();
 
-    let client = Oneshot::new(handshake, (conn, remote_addr)).await?;
-
-    Ok(BoxService::new(Wrapper(client)))
+    Oneshot::new(handshake, (conn, remote_addr)).map_ok(|client| BoxService::new(Wrapper(client)))
 }
 
 // This can be deleted when a new version of Tower with map_err is released.
