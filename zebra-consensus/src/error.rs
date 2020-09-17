@@ -13,13 +13,13 @@ pub enum TransactionError {
 
 #[derive(Error, Debug)]
 pub enum BlockError {
-    #[error("invalid transaction")]
+    #[error("block contains invalid transactions")]
     Transaction(#[from] TransactionError),
 
-    #[error("no transactions")]
+    #[error("block haves no transactions")]
     NoTransactions,
 
-    #[error("block {0} is already in the chain at depth {1:?}")]
+    #[error("block {0:?} is already in the chain at depth {1:?}")]
     AlreadyInChain(zebra_chain::block::Hash, u32),
 
     #[error("invalid block {0:?}: missing block height")]
