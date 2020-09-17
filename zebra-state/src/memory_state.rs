@@ -1,4 +1,5 @@
 use std::{
+    cmp::Ordering,
     collections::BTreeSet,
     collections::HashSet,
     collections::{BTreeMap, HashMap},
@@ -78,18 +79,14 @@ impl Chain {
 
 impl PartialEq for Chain {
     fn eq(&self, other: &Self) -> bool {
-        if self.partial_cumulative_work != other.partial_cumulative_work {
-            return false;
-        }
-
-        self.blocks.eq(&other.blocks)
+        self.partial_cmp(other) == Some(Ordering::Equal)
     }
 }
 
 impl Eq for Chain {}
 
 impl PartialOrd for Chain {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         if self.partial_cumulative_work != other.partial_cumulative_work {
             self.partial_cumulative_work
                 .partial_cmp(&other.partial_cumulative_work)
@@ -100,7 +97,7 @@ impl PartialOrd for Chain {
 }
 
 impl Ord for Chain {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+    fn cmp(&self, other: &Self) -> Ordering {
         self.partial_cmp(other)
             .or_else(|| {
                 let self_hash = self
