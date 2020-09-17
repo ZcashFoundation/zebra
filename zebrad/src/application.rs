@@ -90,7 +90,7 @@ impl Application for ZebradApp {
         // This MUST happen after `Terminal::new` to ensure our preferred panic
         // handler is the last one installed
         color_eyre::config::HookBuilder::default()
-            .issue_url("https://github.com/ZcashFoundation/zebra/issues/new")
+            .issue_url(concat!(env!("CARGO_PKG_REPOSITORY"), "/issues/new"))
             .add_issue_metadata("version", env!("CARGO_PKG_VERSION"))
             .install()
             .unwrap();
