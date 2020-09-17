@@ -49,7 +49,7 @@ suggestion is described and motivated below).
 We previously agreed on a tentative versioning policy for `zebrad` and the
 component `zebra-` libraries.  In both cases, we follow semver rules.  For
 `zebrad`, we plan to align the major version number with the NU number, so that
-NU3 corresponds to `3.x`, NU4 to `4.x`, etc.  For the `zebra-` libraries, we
+mainnet NU3 corresponds to `3.x`, mainnet NU4 to `4.x`, etc.  For the `zebra-` libraries, we
 commit to following semver rules, but plan to increment the major versions as
 fast as we need to implement the features we want.
 
@@ -187,4 +187,3 @@ Why make these choices?
   queued a massive set of changes between releases, but because releases are
   low-friction and we control the distribution channel, we can avoid this
   problem by releasing frequently, on a weekly or daily basis.
-
