@@ -223,13 +223,24 @@ chains, so that the map ordering is the ordering of best to worst chains.
 ### The `Chain` type
 [chain-type]: #chain-type
 
-The `Chain` type consists of a set of blocks, containing the non-finalized
-portion of the chain it represents where the lowest height block's parent is
-the tip of the finalized state. All of the other members of `Chain` cache
-information contained within that set of blocks for fast lookup.
 
-We represent the non-finalized portion of a chain with the following data
-structure and API:
+The `Chain` type represents a chain of blocks. Each block represents an
+incremental state update, and the `Chain` type caches the cumulative state
+update from its root to its tip.
+
+The `Chain` type is used to represent the non-finalized portion of a complete
+chain of blocks rooted at the genesis block. The parent block of the root of
+a `Chain` is the tip of the finalized portion of the chain.
+
+The `Chain` type supports serveral operations to manipulate chains, `push`,
+`pop_root`, and `fork`. `push` is the most fundamental operation and handles
+contextual validation of chains as they are extended. `pop_root` is provided
+for finalization, and is how we move blocks from the non-finalized portion of
+the state to the finalized portion. `fork` on the other hand handles creating
+new chains for `push` when new blocks arrive whose parent isn't a tip of an
+existing chain.
+
+The `Chain` type is defined by the following struct and API:
 
 ```rust
 struct Chain {
@@ -253,7 +264,7 @@ that chain.
 
 1. Run contextual validation checks on block against Self
 
-1. Update cummulative data members
+1. Update cumulative data members
     - Add block to end of `self.blocks`
     - Add hash to `height_by_hash`
     - for each `transaction` in `block`
@@ -269,7 +280,7 @@ Remove the lowest height block of the non-finalized portion of a chain.
 
 1. Remove the lowest height block from `self.blocks`
 
-1. Update cummulative data members
+1. Update cumulative data members
     - Remove the block's hash from `self.height_by_hash`
     - for each `transaction` in `block`
       - remove `transaction.hash` from `tx_by_hash`
@@ -301,7 +312,7 @@ Remove the highest height block of the non-finalized portion of a chain.
 
 1. Remove the highest height `block` from `self.blocks`
 
-1. Update cummulative data members
+2. Update cumulative data members
     - Remove the corresponding hash from `self.height_by_hash`
     - for each `transaction` in `block`
       - remove `transaction.hash` from `tx_by_hash`
@@ -310,7 +321,7 @@ Remove the highest height block of the non-finalized portion of a chain.
     - Remove the nullifiers from the appropriate `self.<version>_nullifiers`
     - Subtract work from `self.partial_cumulative_work`
 
-1. Return the block
+3. Return the block
 
 #### `Ord`
 
@@ -346,26 +357,26 @@ chain and updates all side chains to match.
 
 1. Extract the best chain from `self.chains` into `best_chain`
 
-1. Extract the rest of the chains into a `side_chains` temporary variable, so
+2. Extract the rest of the chains into a `side_chains` temporary variable, so
    they can be mutated
 
-1. Remove the lowest height block from the best chain with
+3. Remove the lowest height block from the best chain with
    `let block = best_chain.pop_root();`
 
-1. Add `best_chain` back to `self.chains`
+4. Add `best_chain` back to `self.chains`
 
-1. For each remaining `chain` in `side_chains`
+5. For each remaining `chain` in `side_chains`
     - If `chain` starts with `block`, remove `block` and add `chain` back to
     `self.chains`
     - Else, drop `chain`
 
-1. for each `height` in `self.queued_by_height` where the height is lower than the
+6. for each `height` in `self.queued_by_height` where the height is lower than the
    new reorg limit
    - for each `hash` in `self.queued_by_height.remove(height)`
      - Remove the key `hash` from `self.queued_blocks` and store the removed `block`
      - Find and remove `hash` from `self.queued_by_parent` using `block.parent`'s hash
 
-1. Return `block`
+7. Return `block`
 
 ### `pub fn queue(&mut self, block: QueuedBlock)`
 
@@ -376,16 +387,16 @@ queued block (and any of its descendants) can be committed to the state
 
 1. Check if the parent block exists in any current chain
 
-1. If it does, call `let ret = self.commit_block(block)`
+2. If it does, call `let ret = self.commit_block(block)`
     - Call `self.process_queued(new_parents)` if `ret` is `Some`
 
-1. Else Add `block` to `self.queued_blocks` and related members and return
+3. Else Add `block` to `self.queued_blocks` and related members and return
 
 ### `fn process_queued(&mut self, new_parent: block::Hash)`
 
 1. Create a list of `new_parents` and populate it with `new_parent`
 
-1. While let Some(parent) = new_parents.pop()
+2. While let Some(parent) = new_parents.pop()
     - for each `hash` in `self.queued_by_parent.remove(&parent.hash)`
       - lookup the `block` for `hash`
       - remove `block` from `self.queued_blocks`
@@ -404,17 +415,17 @@ cannot be committed due to missing context.
       - broadcast `result` via `block.rsp_tx`
       - return Some(block.hash) if `result.is_ok()`
 
-1. Find the first chain that contains `block.parent` and fork it with
+2. Find the first chain that contains `block.parent` and fork it with
   `block.parent` as the new tip
     - `let fork = self.chains.iter().find_map(|chain| chain.fork(block.parent));`
 
-1. If `fork` is `Some`
+3. If `fork` is `Some`
     - try to push `block` onto that chain
       - if successful add `fork` to `self.chains`
     - broadcast `result` via `block.rsp_tx`
     - return Some(block.hash) if `result.is_ok()`
 
-1. Else panic, this should be unreachable because `commit_block` is only
+4. Else panic, this should be unreachable because `commit_block` is only
    called when it's ready to be committed.
 
 ### Summary
@@ -443,7 +454,7 @@ are now past the reorg limit.
 1. Try to commit or queue the block to the non-finalized state with
    `chain_set.queue(block)?;`
 
-1. If the best chain is longer than the reorg limit
+2. If the best chain is longer than the reorg limit
     - Finalize the lowest height block in the best chain with
      `let finalized = chain_set.finalize()?;`
     - commit `finalized` to disk with `CommitFinalizedBlock`
