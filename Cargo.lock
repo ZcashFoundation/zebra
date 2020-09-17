@@ -2477,7 +2477,7 @@ dependencies = [
  "tower",
  "tracing",
  "tracing-futures",
- "tracing-subscriber 0.2.11",
+ "tracing-subscriber 0.2.12",
  "zebra-chain",
  "zebra-network",
 ]

@@ -1,6 +1,6 @@
 use std::{net::SocketAddr, sync::Arc};
 
-//use futures::stream::{FuturesUnordered, StreamExt};
+use futures::stream::{FuturesUnordered, StreamExt};
 use structopt::StructOpt;
 
 use stolon::*;
@@ -39,23 +39,30 @@ async fn main() {
     let transaction = Arc::<Transaction>::zcash_deserialize(std::io::stdin())
         .expect("could not read transaction from stdin");
 
-    /*
     let tasks = FuturesUnordered::new();
     for _ in 0..opt.fanout {
-        tasks.push(tokio::spawn(broadcast(tor_addr, network, transaction.clone())));
-    }
-    */
-
-    // This can't actually be spawned, because
-    // https://github.com/rust-lang/rust/issues/64552 causes rustc to "forget"
-    // that the boxed error is actually 'static, which makes all of the
-    // BoxError-returning functions impossible to use in a spawned task.
-    // This also occurs when BoxError is replaced with eyre::Report.
-
-    // Run fanout tasks sequentially to work around the 'static bug.
-    for _ in 0..opt.fanout {
-        let _ = send_transaction(tor_addr, network, transaction.clone()).await;
+        tasks.push(tokio::spawn(send_transaction(
+            tor_addr,
+            network,
+            transaction.clone(),
+        )));
     }
 
-    //tasks.collect::<Vec<_>>().await;
+    let rsp = tasks
+        .map(|task| task.expect("spawned tasks should not panic"))
+        .collect::<Vec<_>>()
+        .await;
+    tracing::debug!(?rsp);
+
+    let ok_count = rsp.iter().filter(|r| r.is_ok()).count();
+    let err_count = rsp.iter().filter(|r| r.is_err()).count();
+    tracing::info!(opt.fanout, ok_count, err_count);
+
+    // If this binary is used as a component of some other program, rather than
+    // as a standalone tool, it would be useful to use error codes to signal
+    // success or failure. But at the moment, there are no such concrete users,
+    // so let's wait until there are before polishing the tool.
+    if ok_count == 0 {
+        tracing::error!("failed to send transaction to any peers")
+    }
 }
