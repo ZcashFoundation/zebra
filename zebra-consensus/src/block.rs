@@ -22,6 +22,7 @@ use tower::{Service, ServiceExt};
 use zebra_chain::block::{self, Block};
 use zebra_state as zs;
 
+use crate::errors::*;
 use crate::BoxError;
 
 mod check;
@@ -74,15 +75,16 @@ where
             let hash = block.hash();
 
             // Check that this block is actually a new block.
-            match state_service.ready_and().await?.call(zs::Request::Depth(hash)).await? {
+            match state_service
+                .ready_and()
+                .await?
+                .call(zs::Request::Depth(hash))
+                .await?
+            {
                 zs::Response::Depth(Some(depth)) => {
-                    return Err(format!(
-                        "block {} is already in the chain at depth {:?}",
-                        hash,
-                        depth,
-                    ).into())
-                },
-                zs::Response::Depth(None) => {},
+                    return Err(BlockError::AlreadyInChain(hash, depth).into())
+                }
+                zs::Response::Depth(None) => {}
                 _ => unreachable!("wrong response to Request::Depth"),
             }
 
@@ -90,13 +92,9 @@ where
             // height for parsed blocks when we deserialize them.
             let height = block
                 .coinbase_height()
-                .ok_or_else(|| format!("invalid block {:?}: missing block height",
-                                       hash))?;
+                .ok_or_else(|| BlockError::MissingHeight(hash))?;
             if height > block::Height::MAX {
-                Err(format!("invalid block height {:?} in {:?}: greater than the maximum height {:?}",
-                            height,
-                            hash,
-                            block::Height::MAX))?;
+                Err(BlockError::MaxHeight(height, hash, block::Height::MAX))?;
             }
 
             // Do the difficulty checks first, to raise the threshold for
@@ -105,14 +103,13 @@ where
                 .header
                 .difficulty_threshold
                 .to_expanded()
-                .ok_or_else(|| format!("invalid difficulty threshold in block header {:?} {:?}",
-                                       height,
-                                       hash))?;
+                .ok_or_else(|| BlockError::InvalidDifficulty(height, hash))?;
             if hash > difficulty_threshold {
-                Err(format!("block {:?} failed the difficulty filter: hash {:?} must be less than or equal to the difficulty threshold {:?}",
-                            height,
-                            hash,
-                            difficulty_threshold))?;
+                Err(BlockError::DifficultyFilter(
+                    height,
+                    hash,
+                    difficulty_threshold,
+                ))?;
             }
             check::is_equihash_solution_valid(&block.header)?;
 
@@ -127,10 +124,7 @@ where
             // TODO: context-free header verification: merkle root
 
             tracing::trace!("verified block");
-            metrics::gauge!(
-                "block.verified.block.height",
-                height.0 as _
-            );
+            metrics::gauge!("block.verified.block.height", height.0 as _);
             metrics::counter!("block.verified.block.count", 1);
 
             // Finally, submit the block for contextual verification.

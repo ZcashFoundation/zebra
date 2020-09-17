@@ -7,6 +7,7 @@ use zebra_chain::{
     work::equihash,
 };
 
+use crate::errors::*;
 use crate::BoxError;
 
 /// Check that there is exactly one coinbase transaction in `Block`, and that
@@ -21,14 +22,15 @@ pub fn is_coinbase_first(block: &Block) -> Result<(), BoxError> {
     let first = block
         .transactions
         .get(0)
-        .ok_or("block has no transactions")?;
+        .ok_or(TransactionError::NoTransactions)?;
     let mut rest = block.transactions.iter().skip(1);
     if !first.is_coinbase() {
-        return Err("first transaction must be coinbase".into());
+        return Err(TransactionError::CoinbasePosition.into());
     }
     if rest.any(|tx| tx.contains_coinbase_input()) {
-        return Err("coinbase input found in non-coinbase transaction".into());
+        return Err(TransactionError::CoinbaseInputFound.into());
     }
+
     Ok(())
 }
 
