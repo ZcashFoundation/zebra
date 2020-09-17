@@ -103,7 +103,9 @@ Instead, we can publish `zebrad` as a Rust crate and recommend `cargo install`.
 This approach has two major downsides.  First, installation takes longer,
 because Zebra is compiled locally.  Second, as long as we have a dependency on
 `zcashconsensus`, we'll have to instruct users to install some
-platform-specific equivalent of a `build-essential` package.  However, even for
+platform-specific equivalent of a `build-essential` package. And as long as
+we depend on `zcash_script`, we'll have to instruct users to install `libclang`.
+However, even for
 crates such as `zcashconsensus` that build native code, the `cargo`-managed
 build process is far, far more reliable than build processes for C or C++
 projects.  We would not be asking users to run autotools or `./configure`, just
