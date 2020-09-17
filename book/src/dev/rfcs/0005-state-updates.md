@@ -117,7 +117,7 @@ different guarantees for category. Those that modify the state and those that
 do not. Requests that update the state are guaranteed to run sequentially and
 will never race against each other. Requests that read state are done
 asynchronously and are guaranteed to read at least the state present at the
-time the request was processed, or a later state. The state service avoids
+time the request was processed by the service, or a later state present at the time the request future is executed. The state service avoids
 race conditions between the read state and the written state by doing all
 contextual verification internally.
 
@@ -280,7 +280,7 @@ Remove the lowest height block of the non-finalized portion of a chain.
 1. Return the block
 
 **Note**: We do not subtract work from `self.partial_cummulative_work`. This
-is to make make the ordering of chains stable while finalizing blocks.
+is to make sure that the ordering of chains is stable while finalizing blocks.
 
 #### `pub fn fork(&self, new_tip: block::Hash) -> Option<Self>`
 
@@ -316,8 +316,9 @@ Remove the highest height block of the non-finalized portion of a chain.
 
 The `Chain` type also implements `Ord` for reorganizing chains. First chains
 are compared by their `partial_cummulative_work`. Ties are then broken by
-comparing `BlockHeaderHashes` of the tips of each chain.
+comparing `block::Hash`es of the tips of each chain.
 
+**Note**: Unlike `zcashd`, Zebra does not use block arrival times as a tie-breaker for the best tip. Since Zebra downloads blocks in parallel, download times are not guaranteed to be unique. Using the `block::Hash` provides a consistent tip order. (As a side-effect, the tip order is also consistent after a node restart, and between nodes.)
 ### `ChainSet` Type
 [chainset-type]: #chainset-type
 
@@ -326,7 +327,7 @@ consists of a set of non-finalized but verified chains and a set of
 unverified blocks which are waiting for the full context needed to verify
 them to become available.
 
-`ChainState` is defined by the following structure and API:
+`ChainSet` is defined by the following structure and API:
 
 ```rust
 struct ChainSet {
@@ -423,7 +424,7 @@ cannot be committed due to missing context.
 - `ChainSet` represents the non-finalized portion of all chains and all
   unverified blocks that are waiting for context to be available.
 
-- `chain_set::queue` handles queueing and or commiting blocks and
+- `ChainSet::queue` handles queueing and or commiting blocks and
   reorganizing chains (via `commit_block`) but not finalizing them
 
 - Finalized blocks are returned from `finalize` and must still be committed
@@ -610,7 +611,7 @@ Returns `Response::Tip(BlockHeaderHash)` with the current best chain tip.
 Implemented by querying:
 
 - (non-finalized) the highest height block in the best chain
-- (finalized) the `hash_by_height` tree only if there is no `non-finalized` state
+- (finalized) the highest height block in the `hash_by_height` tree only if there is no `non-finalized` state
 
 ### `Request::BlockLocator`
 [request-block-locator]: #request-block-locator
@@ -642,10 +643,10 @@ Returns
 
 Implemented by querying:
 
-- (non-finalized) the `tx_by_hash` map (to get the parent block) of each
+- (non-finalized) the `tx_by_hash` map (to get the block that contains the transaction) of each
   chain starting with the best chain, and then find block in `blocks` of that
   chain.
-- (finalized) the `tx_by_hash` (to get the parent block) and then
+- (finalized) the `tx_by_hash` (to get the block that contains the transaction) and then
     `block_by_height` (to get the transaction data) trees.
 
 ### `Request::Block(BlockHeaderHash)`
@@ -671,7 +672,7 @@ Implemented by querying:
 [drawbacks]: #drawbacks
 
 - Restarts can cause `zebrad` to redownload up to the last one hundred blocks
-  it verified.
+  it verified in the best chain, and potentially some recent side-chain blocks.
 
 - The service interface puts some extra responsibility on callers to ensure
   it is used correctly and does not verify the usage is correct at compile
@@ -682,3 +683,4 @@ Implemented by querying:
 - We do not handle reorgs the same way zcashd does, and could in theory need
   to delete our entire on disk state and resync the chain in some
   pathological reorg cases.
+- testnet rollbacks are infrequent, but possible: each rollback will require additional state service code.
