@@ -133,7 +133,9 @@ orphaned (no longer included in the best chain). Their state updates are
 therefore no longer included in the best chain's chain state. The process of
 rolling back orphaned blocks and applying new blocks is called a chain
 reorganization. Bitcoin allows chain reorganizations of arbitrary depth,
-while `zcashd` limits reorganizations to 100 blocks.
+while `zcashd` limits chain reorganizations to 100 blocks. (In `zcashd`, the
+new best chain must be a side-chain that forked within 100 blocks of the tip
+of the current best chain.)
 
 This difference means that in Bitcoin, chain state only has probabilistic
 finality, while in Zcash, chain state is final once it is beyond the reorg
@@ -217,7 +219,7 @@ time the request was processed, or a later state.
 
 At a high level, the in-memory data structures store a collection of chains,
 each rooted at the highest finalized block. Each chain consists of a map from
-heights to blocks. Chains are stored using an ordered map from difficulty to
+heights to blocks. Chains are stored using an ordered map from cumulative work to
 chains, so that the map ordering is the ordering of best to worst chains.
 
 ### The `Chain` type
@@ -230,7 +232,8 @@ update from its root to its tip.
 
 The `Chain` type is used to represent the non-finalized portion of a complete
 chain of blocks rooted at the genesis block. The parent block of the root of
-a `Chain` is the tip of the finalized portion of the chain.
+a `Chain` is the tip of the finalized portion of the chain. As an exception, the finalized
+portion of the chain is initially empty, until the genesis block has been finalized.
 
 The `Chain` type supports serveral operations to manipulate chains, `push`,
 `pop_root`, and `fork`. `push` is the most fundamental operation and handles
@@ -262,7 +265,8 @@ struct Chain {
 Push a block into a chain as the new tip if the block is a valid extension of
 that chain.
 
-1. Run contextual validation checks on block against Self
+1. Run contextual validation checks on block against self and the finalized state
+  - genesis blocks have no context - the CheckpointVerifier performs the necessary `zero height` and `null parent hash` checks
 
 1. Update cumulative data members
     - Add block to end of `self.blocks`
@@ -447,7 +451,7 @@ cannot be committed due to missing context.
 
 Given the above structures for manipulating the non-finalized state new
 `non-finalized` blocks are commited in two steps. First we commit the block
-to the in memory state, then we finalize the lowest height block if it is
+to the in memory state, then we finalize all lowest height blocks that are
 past the reorg limit, finally we process any queued blocks and prune any that
 are now past the reorg limit.
 
