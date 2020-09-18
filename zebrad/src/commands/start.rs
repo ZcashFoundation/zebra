@@ -64,7 +64,7 @@ impl StartCmd {
         let inbound = ServiceBuilder::new()
             .load_shed()
             .buffer(20)
-            .service(Inbound::new(setup_rx));
+            .service(Inbound::new(setup_rx, state.clone()));
 
         let (peer_set, address_book) = zebra_network::init(config.network.clone(), inbound).await;
         setup_tx
