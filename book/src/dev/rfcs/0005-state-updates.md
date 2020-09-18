@@ -339,11 +339,31 @@ Remove the highest height block of the non-finalized portion of a chain.
 
 #### `Ord`
 
-The `Chain` type also implements `Ord` for reorganizing chains. First chains
+The `Chain` type implements `Ord` for reorganizing chains. First chains
 are compared by their `partial_cumulative_work`. Ties are then broken by
 comparing `block::Hash`es of the tips of each chain.
 
-**Note**: Unlike `zcashd`, Zebra does not use block arrival times as a tie-breaker for the best tip. Since Zebra downloads blocks in parallel, download times are not guaranteed to be unique. Using the `block::Hash` provides a consistent tip order. (As a side-effect, the tip order is also consistent after a node restart, and between nodes.)
+**Note**: Unlike `zcashd`, Zebra does not use block arrival times as a
+tie-breaker for the best tip. Since Zebra downloads blocks in parallel,
+download times are not guaranteed to be unique. Using the `block::Hash`
+provides a consistent tip order. (As a side-effect, the tip order is also
+consistent after a node restart, and between nodes.)
+
+#### `Default`
+
+The `Chain` type implements `Default` for constructing new chains whose
+parent block is the tip of the finalized state. This implementation should be
+handled by `#[derive(Default)]`.
+
+1. initialise cumulative data members
+    - Construct an empty `self.blocks`, `height_by_hash`, `tx_by_hash`, `self.utxos`, `self.<version>_anchors`, `self.<version>_nullifiers`
+    - Zero `self.partial_cumulative_work`
+
+**Note:** The chain can be empty if:
+  - after a restart - the non-finalized state is empty
+  - during a fork from the finalized tip - the forked Chain is empty, because all its blocks have been `pop`ped
+
+
 ### `ChainSet` Type
 [chainset-type]: #chainset-type
 
@@ -426,9 +446,9 @@ Try to commit `block` to the non-finalized state. Returns `None` if the block
 cannot be committed due to missing context.
 
 1. Search for the first chain where `block.parent` == `chain.tip`. If it exists:
-      - try to push `block` onto that chain
-      - broadcast `result` via `block.rsp_tx`
-      - return Some(block.hash) if `result.is_ok()`
+    - try to push `block` onto that chain
+    - broadcast `result` via `block.rsp_tx`
+    - return Some(block.hash) if `result.is_ok()`
 
 2. Find the first chain that contains `block.parent` and fork it with
   `block.parent` as the new tip
@@ -440,7 +460,14 @@ cannot be committed due to missing context.
     - broadcast `result` via `block.rsp_tx`
     - return Some(block.hash) if `result.is_ok()`
 
-4. Else panic, this should be unreachable because `commit_block` is only
+4. If `block.parent` == `finalized_tip.hash`
+    - Construct a new `Chain` with `Chain::default`
+    - try to push `block` onto that chain
+      - if successful add `fork` to `self.chains`
+    - broadcast `result` via `block.rsp_tx`
+    - return Some(block.hash) if `result.is_ok()`
+
+5. Else panic, this should be unreachable because `commit_block` is only
    called when it's ready to be committed.
 
 ### Summary
