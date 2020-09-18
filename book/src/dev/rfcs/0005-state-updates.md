@@ -45,6 +45,8 @@ state service.
   represents the consensus state of the Zcash network and transactions.
 
 * **side chain**: A chain which is not contained in the best chain.
+  Side chains are pruned at the reorg limit, when they are no longer
+  connected to the finalized state.
 
 * **chain reorganization**: Occurs when a new best chain is found and the
   previous best chain becomes a side chain.
@@ -58,6 +60,14 @@ state service.
 
 * **finalized state**: State data corresponding to blocks below the reorg
   limit. This data cannot change in the event of a chain reorg.
+
+* **non-finalized tips**: The highest blocks in each non-finalized chain. These
+  tips might be at different heights.
+
+* **finalized tip**: The highest block in the finalized state. The tip of the best
+  chain is usually 100 blocks (the reorg limit) above the finalized tip. But it can
+  be lower during the initial sync, and after a chain reorganization, if the new
+  best chain is at a lower height.
 
 # Guide-level explanation
 [guide-level-explanation]: #guide-level-explanation
@@ -330,7 +340,7 @@ Remove the highest height block of the non-finalized portion of a chain.
 #### `Ord`
 
 The `Chain` type also implements `Ord` for reorganizing chains. First chains
-are compared by their `partial_cummulative_work`. Ties are then broken by
+are compared by their `partial_cumulative_work`. Ties are then broken by
 comparing `block::Hash`es of the tips of each chain.
 
 **Note**: Unlike `zcashd`, Zebra does not use block arrival times as a tie-breaker for the best tip. Since Zebra downloads blocks in parallel, download times are not guaranteed to be unique. Using the `block::Hash` provides a consistent tip order. (As a side-effect, the tip order is also consistent after a node restart, and between nodes.)
@@ -374,6 +384,8 @@ chain and updates all side chains to match.
     `self.chains`
     - Else, drop `chain`
 
+5. calculate the new finalized tip height from the new `best_chain`
+
 6. for each `height` in `self.queued_by_height` where the height is lower than the
    new reorg limit
    - for each `hash` in `self.queued_by_height.remove(height)`
@@ -413,8 +425,7 @@ queued block (and any of its descendants) can be committed to the state
 Try to commit `block` to the non-finalized state. Returns `None` if the block
 cannot be committed due to missing context.
 
-1. For each `chain`
-    - if `block.parent` == `chain.tip`
+1. Search for the first chain where `block.parent` == `chain.tip`. If it exists:
       - try to push `block` onto that chain
       - broadcast `result` via `block.rsp_tx`
       - return Some(block.hash) if `result.is_ok()`
@@ -459,9 +470,14 @@ are now past the reorg limit.
    `chain_set.queue(block)?;`
 
 2. If the best chain is longer than the reorg limit
-    - Finalize the lowest height block in the best chain with
-     `let finalized = chain_set.finalize()?;`
-    - commit `finalized` to disk with `CommitFinalizedBlock`
+    - Finalize all lowest height blocks in the best chain, and commit them to disk with `CommitFinalizedBlock`:
+      ```
+      while self.best_chain().len() > reorg_limit {
+        let finalized = chain_set.finalize()?;
+        let request = CommitFinalizedBlock { finalized };
+        sled_state.ready_and().await?.call(request).await?;
+      };
+      ```
 
 ## Sled data structures
 [sled]: #sled
@@ -486,6 +502,8 @@ We use the following Sled trees:
 | `sapling_anchors`    | `sapling::tree::Root` | `()`                                |
 
 Zcash structures are encoded using `ZcashSerialize`/`ZcashDeserialize`.
+
+**Note:** We do not store the cumulative work for the finalized chain, because the finalized work is equal for all non-finalized chains. So the additional non-finalized work can be used to calculate the relative chain order, and choose the best chain.
 
 ### Notes on Sled trees
 
@@ -524,10 +542,18 @@ Check that `block`'s parent hash is `old_tip` and its height is
 prevent database corruption, but it is the caller's responsibility (e.g. the
 zebra-state service's responsibility) to commit finalized blocks in order.
 
+The genesis block does not have a parent block. For genesis blocks,
+check that `block`'s parent hash is `null` (all zeroes) and its height is `0`.
+
 2. Insert:
     - `(hash, height)` into `height_by_hash`;
     - `(height, hash)` into `hash_by_height`;
     - `(height, block)` into `block_by_height`.
+
+3. If the block is a genesis block, skip any transaction updates.
+
+(Due to a [bug in zcashd](https://github.com/ZcashFoundation/zebra/issues/559), genesis block transactions
+are ignored during validation.)
 
 3.  Update the `sprout_anchors` and `sapling_anchors` trees with the Sprout
     and Sapling anchors (XXX: how??)
@@ -601,7 +627,7 @@ CommitFinalizedBlock {
 
 Commits a finalized block to the sled state, skipping contextual validation.
 This is exposed for use in checkpointing, which produces in-order finalized
-blocks. Returns `Response::Added(BlockHeaderHash)` with the hash of the
+blocks. Returns `Response::Added(block::Hash)` with the hash of the
 committed block if successful.
 
 ### `Request::Depth(block::Hash)`
@@ -610,31 +636,32 @@ committed block if successful.
 Computes the depth in the best chain of the block identified by the given
 hash, returning
 
-- `Response::Depth(Some(depth))` if the block is in the main chain;
+- `Response::Depth(Some(depth))` if the block is in the best chain;
 - `Response::Depth(None)` otherwise.
 
 Implemented by querying:
 
-- (non-finalized) the `height_by_hash` map in the best chain
+- (non-finalized) the `height_by_hash` map in the best chain, and
 - (finalized) the `height_by_hash` tree
 
 ### `Request::Tip`
 [request-tip]: #request-tip
 
-Returns `Response::Tip(BlockHeaderHash)` with the current best chain tip.
+Returns `Response::Tip(block::Hash)` with the current best chain tip.
 
 Implemented by querying:
 
 - (non-finalized) the highest height block in the best chain
-- (finalized) the highest height block in the `hash_by_height` tree only if there is no `non-finalized` state
+if the `non-finalized` state is empty
+- (finalized) the highest height block in the `hash_by_height` tree
 
 ### `Request::BlockLocator`
 [request-block-locator]: #request-block-locator
 
 Returns `Response::BlockLocator(Vec<block::Hash>)` with hashes starting from
 the current chain tip and reaching backwards towards the genesis block. The
-first hash is the current chain tip. The last hash is the tip of the
-finalized portion of the state. If the state is empty, the block locator is
+first hash is the best chain tip. The last hash is the tip of the
+finalized portion of the state. If the finalized and non-finalized states are both empty, the block locator is
 also empty.
 
 This can be used by the sync component to request hashes of subsequent
