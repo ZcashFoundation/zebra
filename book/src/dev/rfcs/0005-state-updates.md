@@ -687,10 +687,11 @@ Returns
 Implemented by querying:
 
 - (non-finalized) the `tx_by_hash` map (to get the block that contains the transaction) of each
-  chain starting with the best chain, and then find block in `blocks` of that
-  chain.
-- (finalized) the `tx_by_hash` (to get the block that contains the transaction) and then
-    `block_by_height` (to get the transaction data) trees.
+  chain starting with the best chain, and then find block that chain's `blocks` (to get the block containing
+  the transaction data)
+if the transaction is not in any non-finalized chain:
+- (finalized) the `tx_by_hash` tree (to get the block that contains the transaction) and then
+    `block_by_height` tree (to get the block containing the transaction data).
 
 ### `Request::Block(BlockHeaderHash)`
 [request-block]: #request-block
@@ -706,9 +707,10 @@ Returns
 Implemented by querying:
 
 - (non-finalized) the `height_by_hash` of each chain starting with the best
-  chain, then find block in `blocks` of that chain.
-- (finalized) the `height_by_hash` (to get the block height) and then
-    `block_by_height` (to get the block data) trees.
+  chain, then find block that chain's `blocks` (to get the block data)
+if the block is not in any non-finalized chain:
+- (finalized) the `height_by_hash` tree (to get the block height) and then
+    the `block_by_height` tree (to get the block data).
 
 
 # Drawbacks
@@ -726,4 +728,4 @@ Implemented by querying:
 - We do not handle reorgs the same way zcashd does, and could in theory need
   to delete our entire on disk state and resync the chain in some
   pathological reorg cases.
-- testnet rollbacks are infrequent, but possible: each rollback will require additional state service code.
+- testnet rollbacks are infrequent, but possible, due to bugs in testnet releases. Each testnet rollback will require additional state service code.
