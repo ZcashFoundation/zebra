@@ -39,7 +39,7 @@ use crate::{
         external::{types::Nonce, InventoryHash, Message},
         internal::{Request, Response},
     },
-    BoxedStdError,
+    BoxError,
 };
 
 use super::{ClientRequest, ErrorSlot, PeerError, SharedPeerError};
@@ -184,8 +184,8 @@ pub struct Connection<S, Tx> {
 
 impl<S, Tx> Connection<S, Tx>
 where
-    S: Service<Request, Response = Response, Error = BoxedStdError>,
-    S::Error: Into<BoxedStdError>,
+    S: Service<Request, Response = Response, Error = BoxError>,
+    S::Error: Into<BoxError>,
     Tx: Sink<Message, Error = SerializationError> + Unpin,
 {
     /// Consume this `Connection` to form a spawnable future containing its event loop.

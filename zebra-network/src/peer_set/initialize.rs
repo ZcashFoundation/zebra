@@ -28,7 +28,7 @@ use tower::{
 use tower_load::{peak_ewma::PeakEwmaDiscover, NoInstrument};
 
 use crate::{
-    constants, peer, timestamp_collector::TimestampCollector, AddressBook, BoxedStdError, Config,
+    constants, peer, timestamp_collector::TimestampCollector, AddressBook, BoxError, Config,
     Request, Response,
 };
 
@@ -37,18 +37,18 @@ use zebra_chain::parameters::Network;
 use super::CandidateSet;
 use super::PeerSet;
 
-type PeerChange = Result<Change<SocketAddr, peer::Client>, BoxedStdError>;
+type PeerChange = Result<Change<SocketAddr, peer::Client>, BoxError>;
 
 /// Initialize a peer set with the given `config`, forwarding peer requests to the `inbound_service`.
 pub async fn init<S>(
     config: Config,
     inbound_service: S,
 ) -> (
-    Buffer<BoxService<Request, Response, BoxedStdError>, Request>,
+    Buffer<BoxService<Request, Response, BoxError>, Request>,
     Arc<Mutex<AddressBook>>,
 )
 where
-    S: Service<Request, Response = Response, Error = BoxedStdError> + Clone + Send + 'static,
+    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
     S::Future: Send + 'static,
 {
     let (address_book, timestamp_collector) = TimestampCollector::spawn();
@@ -169,10 +169,9 @@ async fn add_initial_peers<S>(
     initial_peers: std::collections::HashSet<SocketAddr>,
     connector: S,
     mut tx: mpsc::Sender<PeerChange>,
-) -> Result<(), BoxedStdError>
+) -> Result<(), BoxError>
 where
-    S: Service<SocketAddr, Response = Change<SocketAddr, peer::Client>, Error = BoxedStdError>
-        + Clone,
+    S: Service<SocketAddr, Response = Change<SocketAddr, peer::Client>, Error = BoxError> + Clone,
     S::Future: Send + 'static,
 {
     info!(?initial_peers, "Connecting to initial peer set");
@@ -194,9 +193,9 @@ async fn listen<S>(
     addr: SocketAddr,
     mut handshaker: S,
     tx: mpsc::Sender<PeerChange>,
-) -> Result<(), BoxedStdError>
+) -> Result<(), BoxError>
 where
-    S: Service<(TcpStream, SocketAddr), Response = peer::Client, Error = BoxedStdError> + Clone,
+    S: Service<(TcpStream, SocketAddr), Response = peer::Client, Error = BoxError> + Clone,
     S::Future: Send + 'static,
 {
     let mut listener = TcpListener::bind(addr).await?;
@@ -236,12 +235,11 @@ async fn crawl_and_dial<C, S>(
     mut candidates: CandidateSet<S>,
     mut connector: C,
     mut success_tx: mpsc::Sender<PeerChange>,
-) -> Result<(), BoxedStdError>
+) -> Result<(), BoxError>
 where
-    C: Service<SocketAddr, Response = Change<SocketAddr, peer::Client>, Error = BoxedStdError>
-        + Clone,
+    C: Service<SocketAddr, Response = Change<SocketAddr, peer::Client>, Error = BoxError> + Clone,
     C::Future: Send + 'static,
-    S: Service<Request, Response = Response, Error = BoxedStdError>,
+    S: Service<Request, Response = Response, Error = BoxError>,
     S::Future: Send + 'static,
 {
     use futures::{

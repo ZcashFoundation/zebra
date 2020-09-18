@@ -14,7 +14,7 @@ use tower::{
     Service,
 };
 
-use crate::{peer, BoxedStdError, Config, Request, Response};
+use crate::{peer, BoxError, Config, Request, Response};
 
 /// Use the provided TCP connection to create a Zcash connection completely
 /// isolated from all other node state.
@@ -67,7 +67,7 @@ struct Wrapper(peer::Client);
 
 impl Service<Request> for Wrapper {
     type Response = Response;
-    type Error = BoxedStdError;
+    type Error = BoxError;
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
