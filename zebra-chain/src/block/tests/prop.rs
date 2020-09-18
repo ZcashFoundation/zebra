@@ -10,11 +10,18 @@ use super::super::{serialize::MAX_BLOCK_BYTES, *};
 
 proptest! {
     #[test]
-    fn blockheaderhash_roundtrip(hash in any::<Hash>()) {
+    fn block_hash_roundtrip(hash in any::<Hash>()) {
         let bytes = hash.zcash_serialize_to_vec()?;
         let other_hash: Hash = bytes.zcash_deserialize_into()?;
 
         prop_assert_eq![hash, other_hash];
+    }
+
+    #[test]
+    fn block_hash_display_fromstr_roundtrip(hash in any::<Hash>()) {
+        let display = format!("{}", hash);
+        let parsed = display.parse::<Hash>().expect("hash should parse");
+        prop_assert_eq!(hash, parsed);
     }
 
     #[test]

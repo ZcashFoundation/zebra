@@ -15,13 +15,15 @@ dirs = "3.0.1"
 hex = "0.4.2"
 lazy_static = "1.4.0"
 serde = { version = "1", features = ["serde_derive"] }
-sled = "0.34.3"
+sled = "0.34.4"
 
 futures = "0.3.5"
+metrics = "0.12"
 tower = "0.3.1"
 tracing = "0.1"
 tracing-error = "0.1.2"
 thiserror = "1.0.20"
+tokio = { version = "0.2.22", features = ["sync"] }
 
 [dev-dependencies]
 zebra-test = { path = "../zebra-test/" }

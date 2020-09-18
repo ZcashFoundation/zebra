@@ -1,10 +1,7 @@
 name: CI
 
-on:
-  pull_request:
-    branches:
-      - main
-
+on: pull_request
+    
 jobs:
 
   test:
@@ -91,20 +88,3 @@ jobs:
         with:
           command: fmt
           args: --all -- --check
-
-  coverage:
-    name: Coverage
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
-      - name: Run cargo-tarpaulin
-        uses: actions-rs/tarpaulin@v0.1
-        with:
-          version: 'latest'
-          timeout: 600
-      - name: Upload coverage report to Codecov
-        uses: codecov/codecov-action@v1.0.13

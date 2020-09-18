@@ -14,7 +14,10 @@ use futures::{
     sink::SinkExt,
     stream::{FuturesUnordered, StreamExt},
 };
-use tokio::net::{TcpListener, TcpStream};
+use tokio::{
+    net::{TcpListener, TcpStream},
+    sync::broadcast,
+};
 use tower::{
     buffer::Buffer,
     discover::{Change, ServiceStream},
@@ -49,6 +52,7 @@ where
     S::Future: Send + 'static,
 {
     let (address_book, timestamp_collector) = TimestampCollector::spawn();
+    let (inv_sender, inv_receiver) = broadcast::channel(100);
 
     // Construct services that handle inbound handshakes and perform outbound
     // handshakes. These use the same handshake service internally to detect
@@ -57,7 +61,17 @@ where
     let (listener, connector) = {
         use tower::timeout::TimeoutLayer;
         let hs_timeout = TimeoutLayer::new(constants::HANDSHAKE_TIMEOUT);
-        let hs = peer::Handshake::new(config.clone(), inbound_service, timestamp_collector);
+        use crate::protocol::external::types::PeerServices;
+        let hs = peer::Handshake::builder()
+            .with_config(config.clone())
+            .with_inbound_service(inbound_service)
+            .with_inventory_collector(inv_sender)
+            .with_timestamp_collector(timestamp_collector)
+            .with_advertised_services(PeerServices::NODE_NETWORK)
+            .with_user_agent(crate::constants::USER_AGENT.to_string())
+            .want_transactions(true)
+            .finish()
+            .expect("configured all required parameters");
         (
             hs_timeout.layer(hs.clone()),
             hs_timeout.layer(peer::Connector::new(hs)),
@@ -84,6 +98,7 @@ where
         ),
         demand_tx.clone(),
         handle_rx,
+        inv_receiver,
     );
     let peer_set = Buffer::new(BoxService::new(peer_set), constants::PEERSET_BUFFER_SIZE);
 

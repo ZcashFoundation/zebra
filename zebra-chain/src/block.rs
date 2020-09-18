@@ -50,7 +50,7 @@ impl Block {
             })
     }
 
-    /// Get the hash for the current block
+    /// Compute the hash of this block.
     pub fn hash(&self) -> Hash {
         Hash::from(self)
     }

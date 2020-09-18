@@ -165,7 +165,7 @@ pub enum Message {
         /// Block locators, from newest back to genesis block.
         block_locator_hashes: Vec<block::Hash>,
 
-        /// `BlockHeaderHash` of the last desired block.
+        /// `block::Hash` of the last desired block.
         ///
         /// Set to zero to get as many blocks as possible (500).
         hash_stop: block::Hash,

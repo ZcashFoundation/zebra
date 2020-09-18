@@ -1,7 +1,4 @@
-use std::{
-    io::{Cursor, Write},
-    sync::Arc,
-};
+use std::io::{Cursor, Write};
 
 use chrono::{DateTime, Duration, LocalResult, TimeZone, Utc};
 
@@ -21,7 +18,7 @@ fn blockheaderhash_debug() {
 
     assert_eq!(
         format!("{:?}", hash),
-        "BlockHeaderHash(\"bf46b4b5030752fedac6f884976162bbfb29a9398f104a280b3e34d51b416631\")"
+        "block::Hash(\"bf46b4b5030752fedac6f884976162bbfb29a9398f104a280b3e34d51b416631\")"
     );
 }
 
@@ -33,7 +30,7 @@ fn blockheaderhash_from_blockheader() {
 
     assert_eq!(
         format!("{:?}", hash),
-        "BlockHeaderHash(\"39c92b8c6b582797830827c78d58674c7205fcb21991887c124d1dbe4b97d6d1\")"
+        "block::Hash(\"39c92b8c6b582797830827c78d58674c7205fcb21991887c124d1dbe4b97d6d1\")"
     );
 
     let mut bytes = Cursor::new(Vec::new());
@@ -143,25 +140,6 @@ fn block_limits_single_tx() {
 
     // Will fail as block overall size is above limit
     Block::zcash_deserialize(&data[..]).expect_err("block should not deserialize");
-}
-
-#[test]
-fn time_check_past_block() {
-    // This block is also verified as part of the BlockVerifier service
-    // tests.
-    let block =
-        Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])
-            .expect("block should deserialize");
-    let now = Utc::now();
-
-    // This check is non-deterministic, but BLOCK_MAINNET_415000 is
-    // a long time in the past. So it's unlikely that the test machine
-    // will have a clock that's far enough in the past for the test to
-    // fail.
-    block
-        .header
-        .is_time_valid_at(now)
-        .expect("the header time from a mainnet block should be valid");
 }
 
 /// Test wrapper for `BlockHeader.is_time_valid_at`.

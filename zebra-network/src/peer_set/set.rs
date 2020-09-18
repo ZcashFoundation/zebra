@@ -1,3 +1,4 @@
+use std::net::SocketAddr;
 use std::{
     collections::HashMap,
     convert::TryInto,
@@ -10,11 +11,12 @@ use std::{
 
 use futures::{
     channel::{mpsc, oneshot},
+    future::TryFutureExt,
     prelude::*,
     stream::FuturesUnordered,
 };
 use indexmap::IndexMap;
-use tokio::sync::oneshot::error::TryRecvError;
+use tokio::sync::{broadcast, oneshot::error::TryRecvError};
 use tokio::task::JoinHandle;
 use tower::{
     discover::{Change, Discover},
@@ -23,11 +25,17 @@ use tower::{
 use tower_load::Load;
 
 use crate::{
-    protocol::internal::{Request, Response},
+    protocol::{
+        external::InventoryHash,
+        internal::{Request, Response},
+    },
     BoxedStdError,
 };
 
-use super::unready_service::{Error as UnreadyError, UnreadyService};
+use super::{
+    unready_service::{Error as UnreadyError, UnreadyService},
+    InventoryRegistry,
+};
 
 /// A [`tower::Service`] that abstractly represents "the rest of the network".
 ///
@@ -71,7 +79,7 @@ use super::unready_service::{Error as UnreadyError, UnreadyService};
 /// [p2c]: http://www.eecs.harvard.edu/~michaelm/postscripts/handbook2001.pdf
 pub struct PeerSet<D>
 where
-    D: Discover,
+    D: Discover<Key = SocketAddr>,
 {
     discover: D,
     ready_services: IndexMap<D::Key, D::Service>,
@@ -88,12 +96,12 @@ where
     /// These guards are checked for errors as part of `poll_ready` which lets
     /// the `PeerSet` propagate errors from background tasks back to the user
     guards: futures::stream::FuturesUnordered<JoinHandle<Result<(), BoxedStdError>>>,
+    inventory_registry: InventoryRegistry,
 }
 
 impl<D> PeerSet<D>
 where
-    D: Discover + Unpin,
-    D::Key: Clone + Debug,
+    D: Discover<Key = SocketAddr> + Unpin,
     D::Service: Service<Request, Response = Response> + Load,
     D::Error: Into<BoxedStdError>,
     <D::Service as Service<Request>>::Error: Into<BoxedStdError> + 'static,
@@ -105,6 +113,7 @@ where
         discover: D,
         demand_signal: mpsc::Sender<()>,
         handle_rx: tokio::sync::oneshot::Receiver<Vec<JoinHandle<Result<(), BoxedStdError>>>>,
+        inv_stream: broadcast::Receiver<(InventoryHash, SocketAddr)>,
     ) -> Self {
         Self {
             discover,
@@ -115,6 +124,7 @@ where
             demand_signal,
             guards: futures::stream::FuturesUnordered::new(),
             handle_rx,
+            inventory_registry: InventoryRegistry::new(inv_stream),
         }
     }
 
@@ -160,7 +170,7 @@ where
 
     fn push_unready(&mut self, key: D::Key, svc: D::Service) {
         let (tx, rx) = oneshot::channel();
-        self.cancel_handles.insert(key.clone(), tx);
+        self.cancel_handles.insert(key, tx);
         self.unready_services.push(UnreadyService {
             key: Some(key),
             service: Some(svc),
@@ -250,12 +260,85 @@ where
         let (_, svc) = self.ready_services.get_index(index).expect("invalid index");
         svc.load()
     }
+
+    /// Routes a request using P2C load-balancing.
+    fn route_p2c(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
+        let index = self
+            .next_idx
+            .take()
+            .expect("ready service must have valid preselected index");
+
+        let (key, mut svc) = self
+            .ready_services
+            .swap_remove_index(index)
+            .expect("preselected index must be valid");
+
+        let fut = svc.call(req);
+        self.push_unready(key, svc);
+        fut.map_err(Into::into).boxed()
+    }
+
+    /// Tries to route a request to a peer that advertised that inventory,
+    /// falling back to P2C if there is no ready peer.
+    fn route_inv(
+        &mut self,
+        req: Request,
+        hash: InventoryHash,
+    ) -> <Self as tower::Service<Request>>::Future {
+        let candidate_index = self
+            .inventory_registry
+            .peers(&hash)
+            .find_map(|addr| self.ready_services.get_index_of(addr));
+
+        match candidate_index {
+            Some(index) => {
+                let (key, mut svc) = self
+                    .ready_services
+                    .swap_remove_index(index)
+                    .expect("found index must be valid");
+                tracing::debug!(?hash, ?key, "routing based on inventory");
+
+                let fut = svc.call(req);
+                self.push_unready(key, svc);
+                fut.map_err(Into::into).boxed()
+            }
+            None => {
+                tracing::debug!(
+                    ?hash,
+                    "could not find ready peer for inventory hash, falling back to p2c"
+                );
+                self.route_p2c(req)
+            }
+        }
+    }
+
+    // Routes a request to all ready peers, ignoring return values.
+    fn route_all(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
+        // This is not needless: otherwise, we'd hold a &mut reference to self.ready_services,
+        // blocking us from passing &mut self to push_unready.
+        let ready_services = std::mem::take(&mut self.ready_services);
+
+        let futs = FuturesUnordered::new();
+        for (key, mut svc) in ready_services {
+            futs.push(svc.call(req.clone()).map_err(|_| ()));
+            self.push_unready(key, svc);
+        }
+
+        async move {
+            let results = futs.collect::<Vec<Result<_, _>>>().await;
+            tracing::debug!(
+                ok.len = results.iter().filter(|r| r.is_ok()).count(),
+                err.len = results.iter().filter(|r| r.is_err()).count(),
+            );
+            Ok(Response::Nil)
+        }
+        .boxed()
+    }
 }
 
 impl<D> Service<Request> for PeerSet<D>
 where
-    D: Discover + Unpin,
-    D::Key: Clone + Debug + ToString,
+    D: Discover<Key = SocketAddr> + Unpin,
     D::Service: Service<Request, Response = Response> + Load,
     D::Error: Into<BoxedStdError>,
     <D::Service as Service<Request>>::Error: Into<BoxedStdError> + 'static,
@@ -271,6 +354,7 @@ where
         self.check_for_background_errors(cx)?;
         // Process peer discovery updates.
         let _ = self.poll_discover(cx)?;
+        self.inventory_registry.poll_inventory(cx)?;
 
         // Poll unready services to drive them to readiness.
         self.poll_unready(cx);
@@ -325,26 +409,19 @@ where
     }
 
     fn call(&mut self, req: Request) -> Self::Future {
-        let index = self
-            .next_idx
-            .take()
-            .expect("ready service must have valid preselected index");
-        let (key, mut svc) = self
-            .ready_services
-            .swap_remove_index(index)
-            .expect("preselected index must be valid");
-
-        // XXX add a dimension tagging request metrics by type
-        metrics::counter!(
-            "outbound_requests",
-            1,
-            "key" => key.to_string(),
-        );
-
-        let fut = svc.call(req);
-        self.push_unready(key, svc);
-
-        use futures::future::TryFutureExt;
-        fut.map_err(Into::into).boxed()
+        match req {
+            // Only do inventory-aware routing on individual items.
+            Request::BlocksByHash(ref hashes) if hashes.len() == 1 => {
+                let hash = InventoryHash::from(*hashes.iter().next().unwrap());
+                self.route_inv(req, hash)
+            }
+            Request::TransactionsByHash(ref hashes) if hashes.len() == 1 => {
+                let hash = InventoryHash::from(*hashes.iter().next().unwrap());
+                self.route_inv(req, hash)
+            }
+            Request::AdvertiseTransactions(_) => self.route_all(req),
+            Request::AdvertiseBlock(_) => self.route_all(req),
+            _ => self.route_p2c(req),
+        }
     }
 }

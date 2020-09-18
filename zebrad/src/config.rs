@@ -57,7 +57,7 @@ pub struct TracingSection {
     /// `zebra_network` crate.
     ///
     /// ```ascii,no_run
-    /// [block_verify{height=Some\(BlockHeight\(.*000\)\)}]=trace
+    /// [block_verify{height=Some\(block::Height\(.*000\)\)}]=trace
     /// ```
     /// sets `trace` level for all events occurring in the context of a
     /// `block_verify` span whose `height` field ends in `000`, i.e., traces the

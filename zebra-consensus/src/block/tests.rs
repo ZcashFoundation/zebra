@@ -2,12 +2,18 @@
 
 use super::*;
 
+use std::sync::Arc;
+
 use chrono::Utc;
 use color_eyre::eyre::{eyre, Report};
 use once_cell::sync::Lazy;
+use tower::buffer::Buffer;
 
 use zebra_chain::block::{self, Block};
-use zebra_chain::serialization::{ZcashDeserialize, ZcashDeserializeInto};
+use zebra_chain::{
+    parameters::Network,
+    serialization::{ZcashDeserialize, ZcashDeserializeInto},
+};
 use zebra_test::transcript::{TransError, Transcript};
 
 static VALID_BLOCK_TRANSCRIPT: Lazy<Vec<(Arc<Block>, Result<block::Hash, TransError>)>> =
@@ -94,6 +100,8 @@ static INVALID_COINBASE_TRANSCRIPT: Lazy<Vec<(Arc<Block>, Result<block::Hash, Tr
     });
 
 #[tokio::test]
+// TODO: enable this test after implementing contextual verification
+#[ignore]
 async fn check_transcripts_test() -> Result<(), Report> {
     check_transcripts().await
 }
@@ -101,8 +109,11 @@ async fn check_transcripts_test() -> Result<(), Report> {
 #[spandoc::spandoc]
 async fn check_transcripts() -> Result<(), Report> {
     zebra_test::init();
-    let state_service = zebra_state::in_memory::init();
-    let block_verifier = super::init(state_service.clone());
+
+    let network = Network::Mainnet;
+    let state_service = zebra_state::init(zebra_state::Config::ephemeral(), network);
+
+    let block_verifier = Buffer::new(BlockVerifier::new(state_service.clone()), 1);
 
     for transcript_data in &[
         &VALID_BLOCK_TRANSCRIPT,
@@ -114,4 +125,21 @@ async fn check_transcripts() -> Result<(), Report> {
         transcript.check(block_verifier.clone()).await.unwrap();
     }
     Ok(())
+}
+
+#[test]
+fn time_check_past_block() {
+    // This block is also verified as part of the BlockVerifier service
+    // tests.
+    let block =
+        Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])
+            .expect("block should deserialize");
+    let now = Utc::now();
+
+    // This check is non-deterministic, but BLOCK_MAINNET_415000 is
+    // a long time in the past. So it's unlikely that the test machine
+    // will have a clock that's far enough in the past for the test to
+    // fail.
+    check::is_time_valid_at(&block.header, now)
+        .expect("the header time from a mainnet block should be valid");
 }
