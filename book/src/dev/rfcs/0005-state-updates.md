@@ -113,7 +113,7 @@ pub enum Request {
 ```
 
 `zebra-state` breaks down its requests into two categories and provides
-different guarantees for category. Those that modify the state and those that
+different guarantees for each category: requests that modify the state, and requests that
 do not. Requests that update the state are guaranteed to run sequentially and
 will never race against each other. Requests that read state are done
 asynchronously and are guaranteed to read at least the state present at the
