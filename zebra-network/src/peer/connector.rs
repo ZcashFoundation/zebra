@@ -9,7 +9,7 @@ use futures::prelude::*;
 use tokio::net::TcpStream;
 use tower::{discover::Change, Service, ServiceExt};
 
-use crate::{BoxedStdError, Request, Response};
+use crate::{BoxError, Request, Response};
 
 use super::{Client, Handshake};
 
@@ -36,11 +36,11 @@ impl<S> Connector<S> {
 
 impl<S> Service<SocketAddr> for Connector<S>
 where
-    S: Service<Request, Response = Response, Error = BoxedStdError> + Clone + Send + 'static,
+    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
     S::Future: Send,
 {
     type Response = Change<SocketAddr, Client>;
-    type Error = BoxedStdError;
+    type Error = BoxError;
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 

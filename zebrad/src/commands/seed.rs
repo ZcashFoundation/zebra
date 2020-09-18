@@ -11,7 +11,7 @@ use abscissa_core::{Command, Options, Runnable};
 use futures::{channel::oneshot, prelude::*};
 use tower::{buffer::Buffer, Service, ServiceExt};
 
-use zebra_network::{AddressBook, BoxedStdError, Request, Response};
+use zebra_network::{AddressBook, BoxError, Request, Response};
 
 use crate::components::tokio::RuntimeRun;
 use crate::prelude::*;
@@ -33,7 +33,7 @@ struct SeedService {
 
 impl Service<Request> for SeedService {
     type Response = Response;
-    type Error = BoxedStdError;
+    type Error = BoxError;
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 

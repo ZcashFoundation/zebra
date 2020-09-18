@@ -29,7 +29,7 @@ use crate::{
         external::InventoryHash,
         internal::{Request, Response},
     },
-    BoxedStdError,
+    BoxError,
 };
 
 use super::{
@@ -90,12 +90,12 @@ where
     /// Channel for passing ownership of tokio JoinHandles from PeerSet's background tasks
     ///
     /// The join handles passed into the PeerSet are used populate the `guards` member
-    handle_rx: tokio::sync::oneshot::Receiver<Vec<JoinHandle<Result<(), BoxedStdError>>>>,
+    handle_rx: tokio::sync::oneshot::Receiver<Vec<JoinHandle<Result<(), BoxError>>>>,
     /// Unordered set of handles to background tasks associated with the `PeerSet`
     ///
     /// These guards are checked for errors as part of `poll_ready` which lets
     /// the `PeerSet` propagate errors from background tasks back to the user
-    guards: futures::stream::FuturesUnordered<JoinHandle<Result<(), BoxedStdError>>>,
+    guards: futures::stream::FuturesUnordered<JoinHandle<Result<(), BoxError>>>,
     inventory_registry: InventoryRegistry,
 }
 
@@ -103,8 +103,8 @@ impl<D> PeerSet<D>
 where
     D: Discover<Key = SocketAddr> + Unpin,
     D::Service: Service<Request, Response = Response> + Load,
-    D::Error: Into<BoxedStdError>,
-    <D::Service as Service<Request>>::Error: Into<BoxedStdError> + 'static,
+    D::Error: Into<BoxError>,
+    <D::Service as Service<Request>>::Error: Into<BoxError> + 'static,
     <D::Service as Service<Request>>::Future: Send + 'static,
     <D::Service as Load>::Metric: Debug,
 {
@@ -112,7 +112,7 @@ where
     pub fn new(
         discover: D,
         demand_signal: mpsc::Sender<()>,
-        handle_rx: tokio::sync::oneshot::Receiver<Vec<JoinHandle<Result<(), BoxedStdError>>>>,
+        handle_rx: tokio::sync::oneshot::Receiver<Vec<JoinHandle<Result<(), BoxError>>>>,
         inv_stream: broadcast::Receiver<(InventoryHash, SocketAddr)>,
     ) -> Self {
         Self {
@@ -128,7 +128,7 @@ where
         }
     }
 
-    fn poll_discover(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), BoxedStdError>> {
+    fn poll_discover(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
         use futures::ready;
         loop {
             match ready!(Pin::new(&mut self.discover).poll_discover(cx)).map_err(Into::into)? {
@@ -179,7 +179,7 @@ where
         });
     }
 
-    fn check_for_background_errors(&mut self, cx: &mut Context) -> Result<(), BoxedStdError> {
+    fn check_for_background_errors(&mut self, cx: &mut Context) -> Result<(), BoxError> {
         if self.guards.is_empty() {
             match self.handle_rx.try_recv() {
                 Ok(handles) => {
@@ -340,13 +340,13 @@ impl<D> Service<Request> for PeerSet<D>
 where
     D: Discover<Key = SocketAddr> + Unpin,
     D::Service: Service<Request, Response = Response> + Load,
-    D::Error: Into<BoxedStdError>,
-    <D::Service as Service<Request>>::Error: Into<BoxedStdError> + 'static,
+    D::Error: Into<BoxError>,
+    <D::Service as Service<Request>>::Error: Into<BoxError> + 'static,
     <D::Service as Service<Request>>::Future: Send + 'static,
     <D::Service as Load>::Metric: Debug,
 {
     type Response = Response;
-    type Error = BoxedStdError;
+    type Error = BoxError;
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
