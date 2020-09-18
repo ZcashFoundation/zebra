@@ -39,7 +39,26 @@ use super::PeerSet;
 
 type PeerChange = Result<Change<SocketAddr, peer::Client>, BoxError>;
 
-/// Initialize a peer set with the given `config`, forwarding peer requests to the `inbound_service`.
+/// Initialize a peer set.
+///
+/// The peer set abstracts away peer management to provide a
+/// [`tower::Service`] representing "the network" that load-balances requests
+/// over available peers.  The peer set automatically crawls the network to
+/// find more peer addresses and opportunistically connects to new peers.
+///
+/// Each peer connection's message handling is isolated from other
+/// connections, unlike in `zcashd`.  The peer connection first attempts to
+/// interpret inbound messages as part of a response to a previously-issued
+/// request.  Otherwise, inbound messages are interpreted as requests and sent
+/// to the supplied `inbound_service`.
+///
+/// Wrapping the `inbound_service` in [`tower::load_shed`] middleware will
+/// cause the peer set to shrink when the inbound service is unable to keep up
+/// with the volume of inbound requests.
+///
+/// In addition to returning a service for outbound requests, this method
+/// returns a shared [`AddressBook`] updated with last-seen timestamps for
+/// connected peers.
 pub async fn init<S>(
     config: Config,
     inbound_service: S,
