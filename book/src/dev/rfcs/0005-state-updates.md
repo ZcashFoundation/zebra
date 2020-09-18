@@ -555,8 +555,9 @@ check that `block`'s parent hash is `null` (all zeroes) and its height is `0`.
 (Due to a [bug in zcashd](https://github.com/ZcashFoundation/zebra/issues/559), genesis block transactions
 are ignored during validation.)
 
-3.  Update the `sprout_anchors` and `sapling_anchors` trees with the Sprout
-    and Sapling anchors (XXX: how??)
+3.  Update the `sprout_anchors` and `sapling_anchors` trees with the Sprout and Sapling anchors.
+
+**Note**: The Sprout and Sapling anchors are the roots of the Sprout and Sapling note commitment trees that have already been calculated for the last transaction(s) in the block that have `JoinSplit`s in the Sprout case and/or `Spend`/`Output` descriptions in the Sapling case. These should be passed as fields in the `Commit*Block` requests.
 
 4. Iterate over the enumerated transactions in the block. For each transaction:
 
