@@ -219,52 +219,6 @@ fn revhex_args() -> Result<()> {
 }
 
 #[test]
-fn seed_no_args() -> Result<()> {
-    zebra_test::init();
-    let testdir = testdir()?.with_config(default_test_config()?)?;
-
-    let mut child = testdir.spawn_child(&["-v", "seed"])?;
-
-    // Run the program and kill it at 1 second
-    std::thread::sleep(Duration::from_secs(1));
-    child.kill()?;
-
-    let output = child.wait_with_output()?;
-    let output = output.assert_failure()?;
-
-    output.stdout_contains(r"Starting zebrad in seed mode")?;
-
-    // Make sure the command was killed
-    output.assert_was_killed()?;
-
-    Ok(())
-}
-
-#[test]
-fn seed_args() -> Result<()> {
-    zebra_test::init();
-    let testdir = testdir()?.with_config(default_test_config()?)?;
-    let testdir = &testdir;
-
-    // unexpected free argument `argument`
-    let child = testdir.spawn_child(&["seed", "argument"])?;
-    let output = child.wait_with_output()?;
-    output.assert_failure()?;
-
-    // unrecognized option `-f`
-    let child = testdir.spawn_child(&["seed", "-f"])?;
-    let output = child.wait_with_output()?;
-    output.assert_failure()?;
-
-    // unexpected free argument `start`
-    let child = testdir.spawn_child(&["seed", "start"])?;
-    let output = child.wait_with_output()?;
-    output.assert_failure()?;
-
-    Ok(())
-}
-
-#[test]
 fn start_no_args() -> Result<()> {
     zebra_test::init();
     // start caches state, so run one of the start tests with persistent state
@@ -279,8 +233,6 @@ fn start_no_args() -> Result<()> {
     let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
 
-    // start is the default mode, so we check for end of line, to distinguish it
-    // from seed
     output.stdout_contains(r"Starting zebrad$")?;
 
     // Make sure the command was killed
@@ -455,7 +407,6 @@ fn valid_generated_config_test() -> Result<()> {
     // they use the generated config. So parallel execution can cause port and
     // cache conflicts.
     valid_generated_config("start", r"Starting zebrad$")?;
-    valid_generated_config("seed", r"Starting zebrad in seed mode")?;
 
     Ok(())
 }
