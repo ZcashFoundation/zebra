@@ -21,6 +21,27 @@ type State = Buffer<BoxService<zs::Request, zs::Response, zs::BoxError>, zs::Req
 
 pub type SetupData = (Outbound, Arc<Mutex<AddressBook>>);
 
+/// Uses the node state to respond to inbound peer requests.
+///
+/// This service, wrapped in appropriate middleware, is passed to
+/// `zebra_network::init` to respond to inbound peer requests.
+///
+/// The `Inbound` service is responsible for:
+///
+/// - supplying network data like peer addresses to other nodes;
+/// - supplying chain data like blocks to other nodes;
+/// - performing transaction diffusion;
+/// - performing block diffusion.
+///
+/// Because the `Inbound` service is responsible for participating in the gossip
+/// protocols used for transaction and block diffusion, there is a potential
+/// overlap with the `ChainSync` component.
+///
+/// The division of responsibility is that the `ChainSync` component is
+/// *internally driven*, periodically polling the network to check whether it is
+/// behind the current tip, while the `Inbound` service is *externally driven*,
+/// responding to block gossip by attempting to download and validate advertised
+/// blocks.
 pub struct Inbound {
     // invariant: outbound, address_book are Some if network_setup is None
     //
