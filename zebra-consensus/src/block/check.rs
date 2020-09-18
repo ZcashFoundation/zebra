@@ -18,17 +18,17 @@ use crate::BoxError;
 /// fees paid by transactions included in this block." [§3.10][3.10]
 ///
 /// [3.10]: https://zips.z.cash/protocol/protocol.pdf#coinbasetransactions
-pub fn is_coinbase_first(block: &Block) -> Result<(), BoxError> {
+pub fn is_coinbase_first(block: &Block) -> Result<(), BlockError> {
     let first = block
         .transactions
         .get(0)
         .ok_or(BlockError::NoTransactions)?;
     let mut rest = block.transactions.iter().skip(1);
     if !first.is_coinbase() {
-        return Err(TransactionError::CoinbasePosition.into());
+        return Err(TransactionError::CoinbasePosition)?;
     }
     if rest.any(|tx| tx.contains_coinbase_input()) {
-        return Err(TransactionError::CoinbaseInputFound.into());
+        return Err(TransactionError::CoinbaseInputFound)?;
     }
 
     Ok(())
