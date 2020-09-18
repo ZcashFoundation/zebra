@@ -57,7 +57,9 @@ impl StartCmd {
 
         info!("initializing network");
 
-        // The service that our node uses to respond to requests by peers
+        // The service that our node uses to respond to requests by peers. The
+        // load_shed middleware ensures that we reduce the size of the peer set
+        // in response to excess load.
         let (setup_tx, setup_rx) = oneshot::channel();
         let inbound = ServiceBuilder::new()
             .load_shed()
