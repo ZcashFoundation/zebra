@@ -88,6 +88,20 @@ pub enum Request {
     FindBlocks {
         /// Hashes of known blocks, ordered from highest height to lowest height.
         known_blocks: Vec<block::Hash>,
+        /// Optionally, the last block hash to request.
+        stop: Option<block::Hash>,
+    },
+
+    /// Request headers of subsequent blocks in the chain, giving hashes of
+    /// known blocks.
+    ///
+    /// # Returns
+    ///
+    /// Returns
+    /// [`Response::BlockHeaders`](super::Response::BlockHeaders).
+    FindHeaders {
+        /// Hashes of known blocks, ordered from highest height to lowest height.
+        known_blocks: Vec<block::Hash>,
         /// Optionally, the last header to request.
         stop: Option<block::Hash>,
     },
@@ -137,4 +151,11 @@ pub enum Request {
     ///
     /// Returns [`Response::Nil`](super::Response::Nil).
     AdvertiseBlock(block::Hash),
+
+    /// Request the contents of this node's mempool.
+    ///
+    /// # Returns
+    ///
+    /// Returns [`Response::TransactionHashes`](super::Response::TransactionHashes).
+    MempoolTransactions,
 }
