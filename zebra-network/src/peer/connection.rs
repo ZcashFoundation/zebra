@@ -74,21 +74,20 @@ impl Handler {
         // into responses to messages in the internal request/response protocol.
         // This conversion is done by a sequence of (request, message) match arms,
         // each of which contains the conversion logic for that pair.
-        use Handler::*;
         let mut ignored_msg = None;
         // XXX can this be avoided?
-        let tmp_state = std::mem::replace(self, Finished(Ok(Response::Nil)));
+        let tmp_state = std::mem::replace(self, Handler::Finished(Ok(Response::Nil)));
         *self = match (tmp_state, msg) {
-            (Ping(req_nonce), Message::Pong(rsp_nonce)) => {
+            (Handler::Ping(req_nonce), Message::Pong(rsp_nonce)) => {
                 if req_nonce == rsp_nonce {
-                    Finished(Ok(Response::Nil))
+                    Handler::Finished(Ok(Response::Nil))
                 } else {
-                    Ping(req_nonce)
+                    Handler::Ping(req_nonce)
                 }
             }
-            (Peers, Message::Addr(addrs)) => Finished(Ok(Response::Peers(addrs))),
+            (Handler::Peers, Message::Addr(addrs)) => Handler::Finished(Ok(Response::Peers(addrs))),
             (
-                TransactionsByHash {
+                Handler::TransactionsByHash {
                     mut hashes,
                     mut transactions,
                 },
@@ -97,9 +96,9 @@ impl Handler {
                 if hashes.remove(&transaction.hash()) {
                     transactions.push(transaction);
                     if hashes.is_empty() {
-                        Finished(Ok(Response::Transactions(transactions)))
+                        Handler::Finished(Ok(Response::Transactions(transactions)))
                     } else {
-                        TransactionsByHash {
+                        Handler::TransactionsByHash {
                             hashes,
                             transactions,
                         }
@@ -109,14 +108,14 @@ impl Handler {
                     // but unsolicited transactions are OK, so leave
                     // for future handling.
                     ignored_msg = Some(Message::Tx(transaction));
-                    TransactionsByHash {
+                    Handler::TransactionsByHash {
                         hashes,
                         transactions,
                     }
                 }
             }
             (
-                BlocksByHash {
+                Handler::BlocksByHash {
                     mut hashes,
                     mut blocks,
                 },
@@ -125,36 +124,36 @@ impl Handler {
                 if hashes.remove(&block.hash()) {
                     blocks.push(block);
                     if hashes.is_empty() {
-                        Finished(Ok(Response::Blocks(blocks)))
+                        Handler::Finished(Ok(Response::Blocks(blocks)))
                     } else {
-                        BlocksByHash { hashes, blocks }
+                        Handler::BlocksByHash { hashes, blocks }
                     }
                 } else {
                     // Blocks shouldn't be sent unsolicited,
                     // so fail the request if we got the wrong one.
-                    Finished(Err(PeerError::WrongBlock.into()))
+                    Handler::Finished(Err(PeerError::WrongBlock.into()))
                 }
             }
-            (FindBlocks, Message::Inv(items))
+            (Handler::FindBlocks, Message::Inv(items))
                 if items
                     .iter()
                     .all(|item| matches!(item, InventoryHash::Block(_))) =>
             {
-                Finished(Ok(Response::BlockHashes(
+                Handler::Finished(Ok(Response::BlockHashes(
                     block_hashes(&items[..]).collect(),
                 )))
             }
-            (MempoolTransactions, Message::Inv(items))
+            (Handler::MempoolTransactions, Message::Inv(items))
                 if items
                     .iter()
                     .all(|item| matches!(item, InventoryHash::Tx(_))) =>
             {
-                Finished(Ok(Response::TransactionHashes(
+                Handler::Finished(Ok(Response::TransactionHashes(
                     transaction_hashes(&items[..]).collect(),
                 )))
             }
-            (FindHeaders, Message::Headers(headers)) => {
-                Finished(Ok(Response::BlockHeaders(headers)))
+            (Handler::FindHeaders, Message::Headers(headers)) => {
+                Handler::Finished(Ok(Response::BlockHeaders(headers)))
             }
             // By default, messages are not responses.
             (state, msg) => {
