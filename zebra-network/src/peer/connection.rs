@@ -483,11 +483,15 @@ where
     // context (namely, the work of processing the inbound msg as a request)
     #[instrument(skip(self))]
     async fn handle_message_as_request(&mut self, msg: Message) {
-        // XXX(hdevalence) -- using multiple match statements here
-        // prevents us from having exhaustiveness checking.
-        trace!(?msg);
-        // These messages are transport-related, handle them separately:
-        match msg {
+        let req = match msg {
+            Message::Ping(nonce) => {
+                trace!(?nonce, "responding to heartbeat");
+                if let Err(e) = self.peer_tx.send(Message::Pong(nonce)).await {
+                    self.fail_with(e.into());
+                }
+                return;
+            }
+            // These messages shouldn't be sent outside of a handshake.
             Message::Version { .. } => {
                 self.fail_with(PeerError::DuplicateHandshake);
                 return;
@@ -496,118 +500,99 @@ where
                 self.fail_with(PeerError::DuplicateHandshake);
                 return;
             }
-            Message::Ping(nonce) => {
-                trace!(?nonce, "responding to heartbeat");
-                match self.peer_tx.send(Message::Pong(nonce)).await {
-                    Ok(()) => {}
-                    Err(e) => self.fail_with(e.into()),
-                }
-                return;
-            }
-            _ => {}
-        }
-
-        // Per BIP-011, since we don't advertise NODE_BLOOM, we MUST
-        // disconnect from this peer immediately.
-        match msg {
-            Message::FilterLoad { .. }
-            | Message::FilterAdd { .. }
-            | Message::FilterClear { .. } => {
+            // These messages should already be handled as a response if they
+            // could be a response, so if we see them here, they were either
+            // sent unsolicited, or we've failed to handle messages correctly.
+            Message::Reject { .. } => {
+                trace!("rejecting unsolicited reject message");
                 self.fail_with(PeerError::UnsupportedMessage);
                 return;
             }
-            _ => {}
-        }
-
-        // Interpret `msg` as a request from the remote peer to our node,
-        // and try to construct an appropriate request object.
-        let req = match msg {
+            Message::NotFound { .. } => {
+                trace!("rejecting unsolicited notfound message");
+                self.fail_with(PeerError::UnsupportedMessage);
+                return;
+            }
+            Message::Pong(_) => {
+                trace!("rejecting unsolicited pong message");
+                self.fail_with(PeerError::UnsupportedMessage);
+                return;
+            }
+            Message::Block(_) => {
+                trace!("rejecting unsolicited block message");
+                self.fail_with(PeerError::UnsupportedMessage);
+                return;
+            }
+            Message::Headers(_) => {
+                trace!("rejecting unsolicited headers message");
+                self.fail_with(PeerError::UnsupportedMessage);
+                return;
+            }
+            // These messages should never be sent by peers.
+            Message::FilterLoad { .. }
+            | Message::FilterAdd { .. }
+            | Message::FilterClear { .. } => {
+                trace!("got BIP11 message without NODE_BLOOM");
+                self.fail_with(PeerError::UnsupportedMessage);
+                return;
+            }
+            // Zebra crawls the network proactively, to prevent
+            // peers from inserting data into our address book.
             Message::Addr(_) => {
-                debug!("ignoring unsolicited addr message");
-                None
+                trace!("ignoring unsolicited addr message");
+                return;
             }
-            Message::GetAddr => Some(Request::Peers),
-            Message::GetData(items)
-                if items
-                    .iter()
-                    .all(|item| matches!(item, InventoryHash::Block(_))) =>
-            {
-                Some(Request::BlocksByHash(
-                    items
-                        .iter()
-                        .map(|item| {
-                            if let InventoryHash::Block(hash) = item {
-                                *hash
-                            } else {
-                                unreachable!("already checked all items are InventoryHash::Block")
-                            }
-                        })
-                        .collect(),
-                ))
-            }
-            Message::GetData(items)
-                if items
-                    .iter()
-                    .all(|item| matches!(item, InventoryHash::Tx(_))) =>
-            {
-                Some(Request::TransactionsByHash(
-                    items
-                        .iter()
-                        .map(|item| {
-                            if let InventoryHash::Tx(hash) = item {
-                                *hash
-                            } else {
-                                unreachable!("already checked all items are InventoryHash::Tx")
-                            }
-                        })
-                        .collect(),
-                ))
-            }
-            Message::GetData(items) => {
-                debug!(?items, "could not interpret getdata message");
-                None
-            }
-            Message::Tx(transaction) => Some(Request::PushTransaction(transaction)),
-            // We don't expect to be advertised multiple blocks at a time,
-            // so we ignore any advertisements of multiple blocks.
-            Message::Inv(items)
-                if items.len() == 1 && matches!(items[0], InventoryHash::Block(_)) =>
-            {
-                if let InventoryHash::Block(hash) = items[0] {
-                    Some(Request::AdvertiseBlock(hash))
-                } else {
-                    unreachable!("already checked we got a single block hash");
+            Message::Tx(transaction) => Request::PushTransaction(transaction),
+            Message::Inv(items) => match &items[..] {
+                // We don't expect to be advertised multiple blocks at a time,
+                // so we ignore any advertisements of multiple blocks.
+                [InventoryHash::Block(hash)] => Request::AdvertiseBlock(*hash),
+                [InventoryHash::Tx(_), rest @ ..]
+                    if rest.iter().all(|item| matches!(item, InventoryHash::Tx(_))) =>
+                {
+                    Request::TransactionsByHash(transaction_hashes(&items))
                 }
-            }
-            // This match arm is terrible, because we have to check that all the items
-            // are the correct kind and *then* convert them all.
-            Message::Inv(items)
-                if items
-                    .iter()
-                    .all(|item| matches!(item, InventoryHash::Tx(_))) =>
-            {
-                Some(Request::AdvertiseTransactions(
-                    items
+                _ => {
+                    debug!(?items, "ignoring unrecognized inv message");
+                    self.fail_with(PeerError::UnsupportedMessage);
+                    return;
+                }
+            },
+            Message::GetData(items) => match &items[..] {
+                [InventoryHash::Block(_), rest @ ..]
+                    if rest
                         .iter()
-                        .map(|item| {
-                            if let InventoryHash::Tx(hash) = item {
-                                *hash
-                            } else {
-                                unreachable!("already checked all items are InventoryHash::Tx")
-                            }
-                        })
-                        .collect(),
-                ))
+                        .all(|item| matches!(item, InventoryHash::Block(_))) =>
+                {
+                    Request::BlocksByHash(block_hashes(&items))
+                }
+                [InventoryHash::Tx(_), rest @ ..]
+                    if rest.iter().all(|item| matches!(item, InventoryHash::Tx(_))) =>
+                {
+                    Request::TransactionsByHash(transaction_hashes(&items))
+                }
+                _ => {
+                    trace!(?items, "ignoring getdata with mixed item types");
+                    self.fail_with(PeerError::UnsupportedMessage);
+                    return;
+                }
+            },
+            Message::GetAddr => Request::Peers,
+            Message::GetBlocks { .. } => {
+                debug!("ignoring unimplemented getblocks message");
+                return;
             }
-            _ => {
-                debug!("unhandled message type");
-                None
+            Message::GetHeaders { .. } => {
+                debug!("ignoring unimplemented getheaders message");
+                return;
+            }
+            Message::Mempool => {
+                debug!("ignoring unimplemented mempool message");
+                return;
             }
         };
 
-        if let Some(req) = req {
-            self.drive_peer_request(req).await
-        }
+        self.drive_peer_request(req).await
     }
 
     /// Given a `req` originating from the peer, drive it to completion and send
@@ -671,4 +656,30 @@ where
             }
         }
     }
+}
+
+fn transaction_hashes(items: &[InventoryHash]) -> HashSet<transaction::Hash> {
+    items
+        .iter()
+        .filter_map(|item| {
+            if let InventoryHash::Tx(hash) = item {
+                Some(*hash)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn block_hashes(items: &[InventoryHash]) -> HashSet<block::Hash> {
+    items
+        .iter()
+        .filter_map(|item| {
+            if let InventoryHash::Block(hash) = item {
+                Some(*hash)
+            } else {
+                None
+            }
+        })
+        .collect()
 }
