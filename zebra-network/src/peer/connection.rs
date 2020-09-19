@@ -433,10 +433,7 @@ where
                 }),
             (AwaitingRequest, FindBlocks { known_blocks, stop }) => self
                 .peer_tx
-                .send(Message::GetBlocks {
-                    block_locator_hashes: known_blocks,
-                    hash_stop: stop.unwrap_or(block::Hash([0; 32])),
-                })
+                .send(Message::GetBlocks { known_blocks, stop })
                 .await
                 .map_err(|e| e.into())
                 .map(|()| AwaitingResponse {
