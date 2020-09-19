@@ -99,7 +99,6 @@ impl From<Vec<NoteCommitment>> for NoteCommitmentTree {
 }
 
 impl From<Vec<jubjub::Fq>> for NoteCommitmentTree {
-    // XXX broken
     fn from(values: Vec<jubjub::Fq>) -> Self {
         if values.is_empty() {
             return NoteCommitmentTree {
@@ -110,21 +109,19 @@ impl From<Vec<jubjub::Fq>> for NoteCommitmentTree {
         }
 
         let count = values.len() as u32;
-        let mut height = 0;
+        let mut height = 0u8;
         let mut current_layer: Vec<[u8; 32]> =
             values.into_iter().map(|cm_u| cm_u.to_bytes()).collect();
 
-        while current_layer.len() > 1 {
+        while height < 32 {
             let mut next_layer_up = vec![];
 
             while !current_layer.is_empty() {
                 let left = current_layer.remove(0);
                 let right;
                 if current_layer.is_empty() {
-                    right = jubjub::Fq::one().to_bytes();
-                //next_layer_up.push(current_layer.remove(0));
+                    right = EMPTY_ROOTS[height as usize];
                 } else {
-                    //let left = current_layer.remove(0);
                     right = current_layer.remove(0);
                 }
                 next_layer_up.push(merkle_crh_sapling(height, left, right));
@@ -196,6 +193,13 @@ mod tests {
     ];
 
     #[test]
+    fn empty_roots() {
+        for i in 0..32 {
+            assert_eq!(hex::encode(EMPTY_ROOTS[i]), HEX_EMPTY_ROOTS[i]);
+        }
+    }
+
+    #[test]
     fn incremental_roots() {
         // From https://github.com/zcash/zcash/blob/master/src/test/data/merkle_commitments_sapling.json
         // Byte-reversed from those ones because the original test vectors are loaded using uint256S()
@@ -218,43 +222,38 @@ mod tests {
             "3a3661bc12b72646c94bc6c92796e81953985ee62d80a9ec3645a9a95740ac15",
         ];
 
-        // From https://github.com/zcash/zcash/blob/master/src/test/data/merkle_roots_sapling.json
-        let _roots = [
-            "8c3daa300c9710bf24d2595536e7c80ff8d147faca726636d28e8683a0c27703",
-            "8611f17378eb55e8c3c3f0a5f002e2b0a7ca39442fc928322b8072d1079c213d",
-            "3db73b998d536be0e1c2ec124df8e0f383ae7b602968ff6a5276ca0695023c46",
-            "7ac2e6442fec5970e116dfa4f2ee606f395366cafb1fa7dfd6c3de3ce18c4363",
-            "6a8f11ab2a11c262e39ed4ea3825ae6c94739ccf94479cb69402c5722b034532",
-            "149595eed0b54a7e694cc8a68372525b9ae2c7b102514f527460db91eb690565",
-            "8c0432f1994a2381a7a4b5fda770336011f9e0b30784f9a5597901619c797045",
-            "e780c48d70420601f3313ff8488d7766b70c059c53aa3cda2ff1ef57ff62383c",
-            "f919f03caaed8a2c60f58c0d43838f83e670dc7e8ccd25daa04a13f3e8f45541",
-            "74f32b36629724038e71cbd6823b5a666440205a7d1a9242e95870b53d81f34a",
-            "a4af205a4e1ee02102866b23a68930ac33efda9235832f49b17fcc4939be4525",
-            "a946a42f1636045a16e65b2308e036d9da70089686c87c692e45912bd1cab772",
-            "a1db2dbac055364c1cb43cbeb49c7e2815bff855122602a2ad0fb981a91e0e39",
-            "16329b3ba4f0640f4d306532d9ea6ba0fbf0e70e44ed57d27b4277ed9cda6849",
-            "7b6523b2d9b23f72fec6234aa6a1f8fae3dba1c6a266023ea8b1826feba7a25c",
-            "5c0bea7e17bde5bee4eb795c2eec3d389a68da587b36dd687b134826ecc09308",
+        // Calculated by modifying TestCommitmentTree in
+        // https://github.com/zcash/librustzcash/blob/master/zcash_primitives/src/merkle_tree.rs
+        // to compute the full Sapling height root (32).
+        let roots = [
+            "ee880ed73e96ba0739578c87ba8e6a4bc33b5e63bb98875e6e2f04b214e9fb59",
+            "321aef631f1a9b7914d40d7bab34c29145ac6cf69d24bf0fc566b33ac9029972",
+            "ddaa1ab86de5c153993414f34ba97e9674c459dfadde112b89eeeafa0e5a204c",
+            "0b337c75535b09468955d499e37cb7e2466f1f0c861ddea929aa13c699c1a454",
+            "5a9b9764d76a45848012eec306d6f6bface319ad5d9bf88db96b3b19edded716",
+            "004075c72e360d7b2ab113555e97dcf4fb50f211d74841eafb05aaff705e3235",
+            "ebf2139c2ef10d51f21fee18521963b91b64987f2743d908be2b80b4ae29e622",
+            "70d07f5662eafaf054327899abce515b1c1cbac6600edea86297c2800e806534",
+            "f72dad9cd0f4d4783444f6dc64d9be2edc74cffddcb60bf244e56eada508c22a",
+            "7635d357c7755c91ea4d6b53e8fd42756329118577fe8b9ade3d33b316fa4948",
+            "fca0c26ce07fc7e563b031d9187f829fa41715f193f08bd0ac25e5122ac75c2e",
+            "0b727c9c6f66c3c749ef9c1df6c5356db8adf80fcc3c1d7fdf56b82cb8d47a3c",
+            "d77d030ed3c2521567eae9555b95eca89442b0c263b82fea4359f802e0f31668",
+            "3d84c8b65e5a8036d115161bb6e3ca2a556e42d376abc3d74a16bc22685b7d61",
+            "84f752458538a24483e9731e32fa95cabf56aebbbc6bff8475f45299bcdcba35",
+            "bb3cc8f85773c05f3332a25cc8281a68450a90807cef859b49b2f1d9d2d3a64d",
         ];
 
-        for i in 0..32 {
-            println!("EMPTY_ROOT    : {:?}", hex::encode(EMPTY_ROOTS[i]));
-            println!("HEX_EMPTY_ROOT: {:?}", HEX_EMPTY_ROOTS[i]);
+        let mut leaves = vec![];
+
+        for (i, cm_u) in commitments.iter().enumerate() {
+            let bytes = <[u8; 32]>::from_hex(cm_u).unwrap();
+
+            leaves.push(jubjub::Fq::from_bytes(&bytes).unwrap());
+
+            let tree = NoteCommitmentTree::from(leaves.clone());
+
+            assert_eq!(hex::encode(tree.hash()), roots[i]);
         }
-
-        // let mut leaves = vec![];
-
-        // for cm_u in commitments.iter() {
-        //     let bytes = <[u8; 32]>::from_hex(cm_u).unwrap();
-
-        //     println!("bytes: {:?}", hex::encode(bytes));
-
-        //     leaves.push(jubjub::Fq::from_bytes(&bytes).unwrap());
-
-        //     let tree = NoteCommitmentTree::from(leaves.clone());
-
-        //     println!("root: {:x?}", hex::encode(tree.hash()));
-        // }
     }
 }
