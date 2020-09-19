@@ -91,6 +91,8 @@ pub fn pedersen_hash_to_point(domain: [u8; 8], M: &BitVec<Lsb0, u8>) -> jubjub::
 
 /// Pedersen Hash Function
 ///
+/// This is technically returning 255 (l_MerkleSapling) bits, not 256.
+///
 /// https://zips.z.cash/protocol/protocol.pdf#concretepedersenhash
 #[allow(non_snake_case)]
 pub fn pedersen_hash(domain: [u8; 8], M: &BitVec<Lsb0, u8>) -> jubjub::Fq {
