@@ -504,36 +504,32 @@ where
             // could be a response, so if we see them here, they were either
             // sent unsolicited, or we've failed to handle messages correctly.
             Message::Reject { .. } => {
-                trace!("rejecting unsolicited reject message");
-                self.fail_with(PeerError::UnsupportedMessage);
+                self.fail_with(PeerError::WrongMessage("unsolicited reject message"));
                 return;
             }
             Message::NotFound { .. } => {
-                trace!("rejecting unsolicited notfound message");
-                self.fail_with(PeerError::UnsupportedMessage);
+                self.fail_with(PeerError::WrongMessage("unsolicited notfound message"));
                 return;
             }
             Message::Pong(_) => {
-                trace!("rejecting unsolicited pong message");
-                self.fail_with(PeerError::UnsupportedMessage);
+                self.fail_with(PeerError::WrongMessage("unsolicited pong message"));
                 return;
             }
             Message::Block(_) => {
-                trace!("rejecting unsolicited block message");
-                self.fail_with(PeerError::UnsupportedMessage);
+                self.fail_with(PeerError::WrongMessage("unsolicited block message"));
                 return;
             }
             Message::Headers(_) => {
-                trace!("rejecting unsolicited headers message");
-                self.fail_with(PeerError::UnsupportedMessage);
+                self.fail_with(PeerError::WrongMessage("unsolicited headers message"));
                 return;
             }
             // These messages should never be sent by peers.
             Message::FilterLoad { .. }
             | Message::FilterAdd { .. }
             | Message::FilterClear { .. } => {
-                trace!("got BIP11 message without NODE_BLOOM");
-                self.fail_with(PeerError::UnsupportedMessage);
+                self.fail_with(PeerError::UnsupportedMessage(
+                    "got BIP11 message without advertising NODE_BLOOM",
+                ));
                 return;
             }
             // Zebra crawls the network proactively, to prevent
@@ -553,8 +549,7 @@ where
                     Request::TransactionsByHash(transaction_hashes(&items))
                 }
                 _ => {
-                    debug!(?items, "ignoring unrecognized inv message");
-                    self.fail_with(PeerError::UnsupportedMessage);
+                    self.fail_with(PeerError::WrongMessage("inv with mixed item types"));
                     return;
                 }
             },
@@ -572,8 +567,7 @@ where
                     Request::TransactionsByHash(transaction_hashes(&items))
                 }
                 _ => {
-                    trace!(?items, "ignoring getdata with mixed item types");
-                    self.fail_with(PeerError::UnsupportedMessage);
+                    self.fail_with(PeerError::WrongMessage("getdata with mixed item types"));
                     return;
                 }
             },
