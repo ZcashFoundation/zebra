@@ -22,6 +22,8 @@ use proptest_derive::Arbitrary;
 
 use super::commitment::{pedersen_hashes::pedersen_hash, NoteCommitment};
 
+const MERKLE_DEPTH: usize = 32;
+
 /// MerkleCRH^Sapling Hash Function
 ///
 /// MerkleCRH^Sapling(layer, left, right) := PedersenHash(“Zcash_PH”, l || left || right)
@@ -48,7 +50,7 @@ lazy_static! {
         // Uncommitted^Sapling = I2LEBSP_l_MerkleSapling(1)
         let mut v = vec![jubjub::Fq::one().to_bytes()];
 
-        for d in 0..32 {
+        for d in 0..MERKLE_DEPTH {
             let next = merkle_crh_sapling(d as u8, v[d], v[d]);
             v.push(next);
         }
@@ -113,7 +115,7 @@ impl From<Vec<jubjub::Fq>> for NoteCommitmentTree {
         let mut current_layer: Vec<[u8; 32]> =
             values.into_iter().map(|cm_u| cm_u.to_bytes()).collect();
 
-        while height < 32 {
+        while usize::from(height) < MERKLE_DEPTH {
             let mut next_layer_up = vec![];
 
             while !current_layer.is_empty() {
@@ -194,7 +196,7 @@ mod tests {
 
     #[test]
     fn empty_roots() {
-        for i in 0..32 {
+        for i in 0..EMPTY_ROOTS.len() {
             assert_eq!(hex::encode(EMPTY_ROOTS[i]), HEX_EMPTY_ROOTS[i]);
         }
     }
