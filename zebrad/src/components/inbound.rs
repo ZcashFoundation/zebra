@@ -158,6 +158,10 @@ impl Service<zn::Request> for Inbound {
                 debug!("ignoring unimplemented request");
                 async { Ok(zn::Response::Nil) }.boxed()
             }
+            zn::Request::FindHeaders { .. } => {
+                debug!("ignoring unimplemented request");
+                async { Ok(zn::Response::Nil) }.boxed()
+            }
             zn::Request::PushTransaction(_transaction) => {
                 debug!("ignoring unimplemented request");
                 async { Ok(zn::Response::Nil) }.boxed()
@@ -167,6 +171,10 @@ impl Service<zn::Request> for Inbound {
                 async { Ok(zn::Response::Nil) }.boxed()
             }
             zn::Request::AdvertiseBlock(_block) => {
+                debug!("ignoring unimplemented request");
+                async { Ok(zn::Response::Nil) }.boxed()
+            }
+            zn::Request::MempoolTransactions => {
                 debug!("ignoring unimplemented request");
                 async { Ok(zn::Response::Nil) }.boxed()
             }

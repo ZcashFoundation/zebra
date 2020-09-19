@@ -50,6 +50,7 @@ pub(super) enum Handler {
     Ping(Nonce),
     Peers,
     FindBlocks,
+    FindHeaders,
     BlocksByHash {
         hashes: HashSet<block::Hash>,
         blocks: Vec<Arc<Block>>,
@@ -58,6 +59,7 @@ pub(super) enum Handler {
         hashes: HashSet<transaction::Hash>,
         transactions: Vec<Arc<Transaction>>,
     },
+    MempoolTransactions,
 }
 
 impl Handler {
@@ -133,15 +135,27 @@ impl Handler {
                     Finished(Err(PeerError::WrongBlock.into()))
                 }
             }
-            (FindBlocks, Message::Inv(inv_hashes)) => Finished(Ok(Response::BlockHashes(
-                inv_hashes
-                    .into_iter()
-                    .filter_map(|inv| match inv {
-                        InventoryHash::Block(hash) => Some(hash),
-                        _ => None,
-                    })
-                    .collect(),
-            ))),
+            (FindBlocks, Message::Inv(items))
+                if items
+                    .iter()
+                    .all(|item| matches!(item, InventoryHash::Block(_))) =>
+            {
+                Finished(Ok(Response::BlockHashes(
+                    block_hashes(&items[..]).collect(),
+                )))
+            }
+            (MempoolTransactions, Message::Inv(items))
+                if items
+                    .iter()
+                    .all(|item| matches!(item, InventoryHash::Tx(_))) =>
+            {
+                Finished(Ok(Response::TransactionHashes(
+                    transaction_hashes(&items[..]).collect(),
+                )))
+            }
+            (FindHeaders, Message::Headers(headers)) => {
+                Finished(Ok(Response::BlockHeaders(headers)))
+            }
             // By default, messages are not responses.
             (state, msg) => {
                 trace!(?msg, "did not interpret message as response");
@@ -441,6 +455,26 @@ where
                     tx,
                     span,
                 }),
+            (AwaitingRequest, FindHeaders { known_blocks, stop }) => self
+                .peer_tx
+                .send(Message::GetHeaders { known_blocks, stop })
+                .await
+                .map_err(|e| e.into())
+                .map(|()| AwaitingResponse {
+                    handler: Handler::FindHeaders,
+                    tx,
+                    span,
+                }),
+            (AwaitingRequest, MempoolTransactions) => self
+                .peer_tx
+                .send(Message::Mempool)
+                .await
+                .map_err(|e| e.into())
+                .map(|()| AwaitingResponse {
+                    handler: Handler::MempoolTransactions,
+                    tx,
+                    span,
+                }),
             (AwaitingRequest, PushTransaction(transaction)) => {
                 // Since we're not waiting for further messages, we need to
                 // send a response before dropping tx.
@@ -543,7 +577,7 @@ where
                 [InventoryHash::Tx(_), rest @ ..]
                     if rest.iter().all(|item| matches!(item, InventoryHash::Tx(_))) =>
                 {
-                    Request::TransactionsByHash(transaction_hashes(&items))
+                    Request::TransactionsByHash(transaction_hashes(&items).collect())
                 }
                 _ => {
                     self.fail_with(PeerError::WrongMessage("inv with mixed item types"));
@@ -556,12 +590,12 @@ where
                         .iter()
                         .all(|item| matches!(item, InventoryHash::Block(_))) =>
                 {
-                    Request::BlocksByHash(block_hashes(&items))
+                    Request::BlocksByHash(block_hashes(&items).collect())
                 }
                 [InventoryHash::Tx(_), rest @ ..]
                     if rest.iter().all(|item| matches!(item, InventoryHash::Tx(_))) =>
                 {
-                    Request::TransactionsByHash(transaction_hashes(&items))
+                    Request::TransactionsByHash(transaction_hashes(&items).collect())
                 }
                 _ => {
                     self.fail_with(PeerError::WrongMessage("getdata with mixed item types"));
@@ -569,18 +603,11 @@ where
                 }
             },
             Message::GetAddr => Request::Peers,
-            Message::GetBlocks { .. } => {
-                debug!("ignoring unimplemented getblocks message");
-                return;
+            Message::GetBlocks { known_blocks, stop } => Request::FindBlocks { known_blocks, stop },
+            Message::GetHeaders { known_blocks, stop } => {
+                Request::FindHeaders { known_blocks, stop }
             }
-            Message::GetHeaders { .. } => {
-                debug!("ignoring unimplemented getheaders message");
-                return;
-            }
-            Message::Mempool => {
-                debug!("ignoring unimplemented mempool message");
-                return;
-            }
+            Message::Mempool => Request::MempoolTransactions,
         };
 
         self.drive_peer_request(req).await
@@ -645,32 +672,42 @@ where
                     self.fail_with(e.into())
                 }
             }
+            Response::BlockHeaders(headers) => {
+                if let Err(e) = self.peer_tx.send(Message::Headers(headers)).await {
+                    self.fail_with(e.into())
+                }
+            }
+            Response::TransactionHashes(hashes) => {
+                if let Err(e) = self
+                    .peer_tx
+                    .send(Message::Inv(hashes.into_iter().map(Into::into).collect()))
+                    .await
+                {
+                    self.fail_with(e.into())
+                }
+            }
         }
     }
 }
 
-fn transaction_hashes(items: &[InventoryHash]) -> HashSet<transaction::Hash> {
-    items
-        .iter()
-        .filter_map(|item| {
-            if let InventoryHash::Tx(hash) = item {
-                Some(*hash)
-            } else {
-                None
-            }
-        })
-        .collect()
+fn transaction_hashes<'a>(
+    items: &'a [InventoryHash],
+) -> impl Iterator<Item = transaction::Hash> + 'a {
+    items.iter().filter_map(|item| {
+        if let InventoryHash::Tx(hash) = item {
+            Some(*hash)
+        } else {
+            None
+        }
+    })
 }
 
-fn block_hashes(items: &[InventoryHash]) -> HashSet<block::Hash> {
-    items
-        .iter()
-        .filter_map(|item| {
-            if let InventoryHash::Block(hash) = item {
-                Some(*hash)
-            } else {
-                None
-            }
-        })
-        .collect()
+fn block_hashes<'a>(items: &'a [InventoryHash]) -> impl Iterator<Item = block::Hash> + 'a {
+    items.iter().filter_map(|item| {
+        if let InventoryHash::Block(hash) = item {
+            Some(*hash)
+        } else {
+            None
+        }
+    })
 }
