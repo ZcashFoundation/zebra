@@ -5,6 +5,8 @@ use thiserror::Error;
 use tracing_error::TracedError;
 use zebra_chain::serialization::SerializationError;
 
+use crate::protocol::external::InventoryHash;
+
 /// A wrapper around `Arc<PeerError>` that implements `Error`.
 #[derive(Error, Debug, Clone)]
 #[error(transparent)]
@@ -57,6 +59,9 @@ pub enum PeerError {
     /// The remote peer responded with a block we didn't ask for.
     #[error("Remote peer responded with a block we didn't ask for.")]
     WrongBlock,
+    /// We requested data that the peer couldn't find.
+    #[error("Remote peer could not find items: {0:?}")]
+    NotFound(Vec<InventoryHash>),
 }
 
 #[derive(Default, Clone)]
