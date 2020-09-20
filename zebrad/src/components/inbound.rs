@@ -73,61 +73,62 @@ impl Service<zn::Request> for Inbound {
 
     #[instrument(skip(self, cx))]
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        use oneshot::error::TryRecvError;
-        match self.network_setup.take() {
-            // If we're waiting for setup, check if we became ready
-            Some(mut rx) => match rx.try_recv() {
+        // Check whether the network setup is finished, but don't wait for it to
+        // become ready before reporting readiness. We expect to get it "soon",
+        // and reporting unreadiness might cause unwanted load-shedding, since
+        // the load-shed middleware is unable to distinguish being unready due
+        // to load from being unready while waiting on setup.
+        if let Some(mut rx) = self.network_setup.take() {
+            use oneshot::error::TryRecvError;
+            match rx.try_recv() {
                 Ok((outbound, address_book)) => {
                     self.outbound = Some(outbound);
                     self.address_book = Some(address_book);
                     self.network_setup = None;
-                    Poll::Ready(Ok(()))
-                }
-                Err(e @ TryRecvError::Closed) => {
-                    // returning poll_ready(err) means that poll_ready should
-                    // never be called again, but put the oneshot back so we
-                    // error again in case someone does.
-                    self.network_setup = Some(rx);
-                    Poll::Ready(Err(e.into()))
                 }
                 Err(TryRecvError::Empty) => {
                     self.network_setup = Some(rx);
-                    Poll::Pending
                 }
-            },
-            // Otherwise, check readiness of services we might call to propagate backpressure.
-            None => {
-                match (
-                    self.state.poll_ready(cx),
-                    self.outbound.as_mut().unwrap().poll_ready(cx),
-                ) {
-                    (Poll::Ready(Err(e)), _) | (_, Poll::Ready(Err(e))) => Poll::Ready(Err(e)),
-                    (Poll::Pending, _) | (_, Poll::Pending) => Poll::Pending,
-                    (Poll::Ready(Ok(())), Poll::Ready(Ok(()))) => Poll::Ready(Ok(())),
+                Err(e @ TryRecvError::Closed) => {
+                    // In this case, report that the service failed, and put the
+                    // failed oneshot back so we'll fail again in case
+                    // poll_ready is called after failure.
+                    self.network_setup = Some(rx);
+                    return Poll::Ready(Err(e.into()));
                 }
-            }
+            };
+        }
+        // Now report readiness based on readiness of the inner services, if they're available.
+        // XXX do we want to propagate backpressure from the network here?
+        match (
+            self.state.poll_ready(cx),
+            self.outbound
+                .as_mut()
+                .map(|svc| svc.poll_ready(cx))
+                .unwrap_or(Poll::Ready(Ok(()))),
+        ) {
+            (Poll::Ready(Err(e)), _) | (_, Poll::Ready(Err(e))) => Poll::Ready(Err(e)),
+            (Poll::Pending, _) | (_, Poll::Pending) => Poll::Pending,
+            (Poll::Ready(Ok(())), Poll::Ready(Ok(()))) => Poll::Ready(Ok(())),
         }
     }
 
     #[instrument(skip(self))]
     fn call(&mut self, req: zn::Request) -> Self::Future {
         match req {
-            zn::Request::Peers => {
-                // We could truncate the list to try to not reveal our entire
-                // peer set. But because we don't monitor repeated requests,
-                // this wouldn't actually achieve anything, because a crawler
-                // could just repeatedly query it.
-                let mut peers = self
-                    .address_book
-                    .as_ref()
-                    .unwrap()
-                    .lock()
-                    .unwrap()
-                    .sanitized();
-                const MAX_ADDR: usize = 1000; // bitcoin protocol constant
-                peers.truncate(MAX_ADDR);
-                async { Ok(zn::Response::Peers(peers)) }.boxed()
-            }
+            zn::Request::Peers => match self.address_book.as_ref() {
+                Some(addrs) => {
+                    // We could truncate the list to try to not reveal our entire
+                    // peer set. But because we don't monitor repeated requests,
+                    // this wouldn't actually achieve anything, because a crawler
+                    // could just repeatedly query it.
+                    let mut peers = addrs.lock().unwrap().sanitized();
+                    const MAX_ADDR: usize = 1000; // bitcoin protocol constant
+                    peers.truncate(MAX_ADDR);
+                    async { Ok(zn::Response::Peers(peers)) }.boxed()
+                }
+                None => async { Err("not ready to serve addresses".into()) }.boxed(),
+            },
             zn::Request::BlocksByHash(hashes) => {
                 let state = self.state.clone();
                 let requests = futures::stream::iter(
