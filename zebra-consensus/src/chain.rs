@@ -152,6 +152,6 @@ where
             max_checkpoint_height,
             last_block_height: None,
         }),
-        1,
+        3,
     )
 }
