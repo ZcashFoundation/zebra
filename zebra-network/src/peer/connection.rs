@@ -664,6 +664,8 @@ where
         let rsp = match self.svc.call(req).await {
             Err(e) => {
                 if e.is::<Overloaded>() {
+                    tracing::warn!("inbound service is overloaded, closing connection");
+                    metrics::counter!("pool.closed.loadshed", 1);
                     self.fail_with(PeerError::Overloaded);
                 } else {
                     // We could send a reject to the remote peer.
