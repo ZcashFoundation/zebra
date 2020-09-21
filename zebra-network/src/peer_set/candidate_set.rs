@@ -106,6 +106,7 @@ where
         // existing peers, but we don't make too many because update may be
         // called while the peer set is already loaded.
         let mut responses = FuturesUnordered::new();
+        // Yes this loops only once (for now), until we add fanout back.
         for _ in 0..1usize {
             self.peer_service.ready_and().await?;
             responses.push(self.peer_service.call(Request::Peers));
