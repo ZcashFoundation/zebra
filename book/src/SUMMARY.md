@@ -14,6 +14,7 @@
     - [Parallel Verification](dev/rfcs/0002-parallel-verification.md)
     - [Inventory Tracking](dev/rfcs/0003-inventory-tracking.md)
     - [Asynchronous Script Verification](dev/rfcs/0004-asynchronous-script-verification.md)
+    - [State Updates](dev/rfcs/0005-state-updates.md)
   - [Diagrams](dev/diagrams.md)
     - [Network Architecture](dev/diagrams/zebra-network.md)
   - [zebra-checkpoints](dev/zebra-checkpoints.md)
