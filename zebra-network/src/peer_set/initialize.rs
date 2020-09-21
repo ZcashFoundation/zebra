@@ -19,13 +19,9 @@ use tokio::{
     sync::broadcast,
 };
 use tower::{
-    buffer::Buffer,
-    discover::{Change, ServiceStream},
-    layer::Layer,
-    util::BoxService,
-    Service, ServiceExt,
+    buffer::Buffer, discover::Change, layer::Layer, load::peak_ewma::PeakEwmaDiscover,
+    util::BoxService, Service, ServiceExt,
 };
-use tower_load::{peak_ewma::PeakEwmaDiscover, NoInstrument};
 
 use crate::{
     constants, peer, timestamp_collector::TimestampCollector, AddressBook, BoxError, Config,
@@ -106,14 +102,12 @@ where
     // Connect the rx end to a PeerSet, wrapping new peers in load instruments.
     let peer_set = PeerSet::new(
         PeakEwmaDiscover::new(
-            ServiceStream::new(
-                // ServiceStream interprets an error as stream termination,
-                // so discard any errored connections...
-                peerset_rx.filter(|result| future::ready(result.is_ok())),
-            ),
+            // Discover interprets an error as stream termination,
+            // so discard any errored connections...
+            peerset_rx.filter(|result| future::ready(result.is_ok())),
             constants::EWMA_DEFAULT_RTT,
             constants::EWMA_DECAY_TIME,
-            NoInstrument,
+            tower::load::CompleteOnResponse::default(),
         ),
         demand_tx.clone(),
         handle_rx,

@@ -20,9 +20,9 @@ use tokio::sync::{broadcast, oneshot::error::TryRecvError};
 use tokio::task::JoinHandle;
 use tower::{
     discover::{Change, Discover},
+    load::Load,
     Service,
 };
-use tower_load::Load;
 
 use crate::{
     protocol::{
@@ -131,7 +131,10 @@ where
     fn poll_discover(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
         use futures::ready;
         loop {
-            match ready!(Pin::new(&mut self.discover).poll_discover(cx)).map_err(Into::into)? {
+            match ready!(Pin::new(&mut self.discover).poll_discover(cx))
+                .ok_or("discovery stream closed")?
+                .map_err(Into::into)?
+            {
                 Change::Remove(key) => {
                     trace!(?key, "got Change::Remove from Discover");
                     self.remove(&key);
