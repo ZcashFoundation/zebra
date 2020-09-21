@@ -27,6 +27,7 @@ tower-fallback = { path = "../tower-fallback/" }
 tower-batch = { path = "../tower-batch/" }
 zebra-chain = { path = "../zebra-chain" }
 zebra-state = { path = "../zebra-state" }
+displaydoc = "0.1.7"
 
 [dev-dependencies]
 rand = "0.7"

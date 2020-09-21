@@ -3182,6 +3182,7 @@ version = "3.0.0-alpha.0"
 dependencies = [
  "chrono",
  "color-eyre",
+ "displaydoc",
  "futures",
  "futures-util",
  "metrics",
@@ -3190,6 +3191,7 @@ dependencies = [
  "redjubjub",
  "serde",
  "spandoc",
+ "thiserror",
  "tokio",
  "tower",
  "tower-batch",

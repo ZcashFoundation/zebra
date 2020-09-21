@@ -1,12 +1,15 @@
 #[cfg(test)]
 mod tests;
 
+use displaydoc::Display;
+use futures::{FutureExt, TryFutureExt};
 use std::{
     future::Future,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
 };
+use thiserror::Error;
 use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
 use tracing::instrument;
 
@@ -19,7 +22,8 @@ use zebra_state as zs;
 
 use crate::{
     block::BlockVerifier,
-    checkpoint::{CheckpointList, CheckpointVerifier},
+    block::VerifyBlockError,
+    checkpoint::{CheckpointList, CheckpointVerifier, VerifyCheckpointError},
     BoxError, Config,
 };
 
@@ -41,20 +45,29 @@ where
     last_block_height: Option<block::Height>,
 }
 
+#[derive(Debug, Display, Error)]
+pub enum VerifyChainError {
+    /// block could not be checkpointed
+    Checkpoint(VerifyCheckpointError),
+    /// block could not be verified
+    Block(VerifyBlockError),
+}
+
 impl<S> Service<Arc<Block>> for ChainVerifier<S>
 where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
 {
     type Response = block::Hash;
-    type Error = BoxError;
+    type Error = VerifyChainError;
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         match (self.checkpoint.poll_ready(cx), self.block.poll_ready(cx)) {
             // First, fail if either service fails.
-            (Poll::Ready(Err(e)), _) | (_, Poll::Ready(Err(e))) => Poll::Ready(Err(e)),
+            (Poll::Ready(Err(e)), _) => Poll::Ready(Err(VerifyChainError::Checkpoint(e))),
+            (_, Poll::Ready(Err(e))) => Poll::Ready(Err(VerifyChainError::Block(e))),
             // Second, we're unready if either service is unready.
             (Poll::Pending, _) | (_, Poll::Pending) => Poll::Pending,
             // Finally, we're ready if both services are ready and OK.
@@ -99,9 +112,15 @@ where
         // we can interpret a missing coinbase height as 0; the checkpoint verifier
         // will reject it.
         if height.unwrap_or(block::Height(0)) < self.max_checkpoint_height {
-            self.checkpoint.call(block)
+            self.checkpoint
+                .call(block)
+                .map_err(VerifyChainError::Checkpoint)
+                .boxed()
         } else {
-            self.block.call(block)
+            self.block
+                .call(block)
+                .map_err(VerifyChainError::Block)
+                .boxed()
         }
     }
 }
@@ -115,7 +134,7 @@ pub async fn init<S>(
     config: Config,
     network: Network,
     mut state_service: S,
-) -> Buffer<BoxService<Arc<Block>, block::Hash, BoxError>, Arc<Block>>
+) -> Buffer<BoxService<Arc<Block>, block::Hash, VerifyChainError>, Arc<Block>>
 where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,

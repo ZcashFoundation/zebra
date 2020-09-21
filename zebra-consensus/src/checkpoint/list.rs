@@ -8,11 +8,10 @@
 #[cfg(test)]
 mod tests;
 
-use crate::parameters;
+use crate::{parameters, BoxError};
 
 use std::{
     collections::{BTreeMap, HashSet},
-    error,
     ops::RangeBounds,
     str::FromStr,
 };
@@ -22,10 +21,6 @@ use zebra_chain::parameters::Network;
 
 const MAINNET_CHECKPOINTS: &str = include_str!("main-checkpoints.txt");
 const TESTNET_CHECKPOINTS: &str = include_str!("test-checkpoints.txt");
-
-/// The inner error type for CheckpointVerifier.
-// TODO(jlusby): Error = Report ?
-type Error = Box<dyn error::Error + Send + Sync + 'static>;
 
 /// A list of block height and hash checkpoints.
 ///
@@ -40,7 +35,7 @@ type Error = Box<dyn error::Error + Send + Sync + 'static>;
 pub(crate) struct CheckpointList(BTreeMap<block::Height, block::Hash>);
 
 impl FromStr for CheckpointList {
-    type Err = Error;
+    type Err = BoxError;
 
     /// Parse a string into a CheckpointList.
     ///
@@ -95,7 +90,7 @@ impl CheckpointList {
     /// (All other checkpoints are optional.)
     pub(crate) fn from_list(
         list: impl IntoIterator<Item = (block::Height, block::Hash)>,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, BoxError> {
         // BTreeMap silently ignores duplicates, so we count the checkpoints
         // before adding them to the map
         let original_checkpoints: Vec<(block::Height, block::Hash)> = list.into_iter().collect();

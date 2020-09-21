@@ -17,9 +17,13 @@ use std::{
 
 use chrono::Utc;
 use futures_util::FutureExt;
+use thiserror::Error;
 use tower::{Service, ServiceExt};
 
-use zebra_chain::block::{self, Block};
+use zebra_chain::{
+    block::{self, Block},
+    work::equihash,
+};
 use zebra_state as zs;
 
 use crate::error::*;
@@ -40,6 +44,27 @@ where
     state_service: S,
 }
 
+#[non_exhaustive]
+#[derive(Debug, Error)]
+pub enum VerifyBlockError {
+    #[error("unable to verify depth for block {hash} from chain state during block verification")]
+    Depth { source: BoxError, hash: block::Hash },
+    #[error(transparent)]
+    Block {
+        #[from]
+        source: BlockError,
+    },
+    #[error(transparent)]
+    Equihash {
+        #[from]
+        source: equihash::Error,
+    },
+    #[error(transparent)]
+    Time(BoxError),
+    #[error("unable to commit block after semantic verification")]
+    Commit(#[source] BoxError),
+}
+
 impl<S> BlockVerifier<S>
 where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
@@ -56,7 +81,7 @@ where
     S::Future: Send + 'static,
 {
     type Response = block::Hash;
-    type Error = BoxError;
+    type Error = VerifyBlockError;
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
@@ -77,9 +102,11 @@ where
             // Check that this block is actually a new block.
             match state_service
                 .ready_and()
-                .await?
+                .await
+                .map_err(|source| VerifyBlockError::Depth { source, hash })?
                 .call(zs::Request::Depth(hash))
-                .await?
+                .await
+                .map_err(|source| VerifyBlockError::Depth { source, hash })?
             {
                 zs::Response::Depth(Some(depth)) => {
                     return Err(BlockError::AlreadyInChain(hash, depth).into())
@@ -118,7 +145,7 @@ where
 
             // Field validity and structure checks
             let now = Utc::now();
-            check::is_time_valid_at(&block.header, now)?;
+            check::is_time_valid_at(&block.header, now).map_err(VerifyBlockError::Time)?;
             check::is_coinbase_first(&block)?;
 
             // TODO: context-free header verification: merkle root
@@ -130,9 +157,11 @@ where
             // Finally, submit the block for contextual verification.
             match state_service
                 .ready_and()
-                .await?
+                .await
+                .map_err(VerifyBlockError::Commit)?
                 .call(zs::Request::CommitBlock { block })
-                .await?
+                .await
+                .map_err(VerifyBlockError::Commit)?
             {
                 zs::Response::Committed(committed_hash) => {
                     assert_eq!(committed_hash, hash, "state must commit correct hash");
