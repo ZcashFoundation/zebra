@@ -12,13 +12,25 @@ use futures::{
 };
 use pin_project::pin_project;
 use tokio::{sync::oneshot, task::JoinHandle};
-use tower::{Service, ServiceExt};
+use tower::{hedge, Service, ServiceExt};
 use tracing_futures::Instrument;
 
 use zebra_chain::block::{self, Block};
 use zebra_network as zn;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
+
+#[derive(Copy, Clone, Debug)]
+pub(super) struct AlwaysRetry;
+
+impl<Request: Clone> hedge::Policy<Request> for AlwaysRetry {
+    fn can_retry(&self, _req: &Request) -> bool {
+        true
+    }
+    fn clone_request(&self, req: &Request) -> Option<Request> {
+        Some(req.clone())
+    }
+}
 
 /// Represents a [`Stream`] of download and verification tasks during chain sync.
 #[pin_project]

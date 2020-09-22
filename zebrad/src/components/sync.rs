@@ -6,7 +6,10 @@ use futures::{
     stream::{FuturesUnordered, StreamExt},
 };
 use tokio::time::delay_for;
-use tower::{builder::ServiceBuilder, retry::Retry, timeout::Timeout, Service, ServiceExt};
+use tower::{
+    buffer::Buffer, builder::ServiceBuilder, hedge::Hedge, retry::Retry, timeout::Timeout, Service,
+    ServiceExt,
+};
 
 use zebra_chain::{
     block::{self, Block},
@@ -17,11 +20,12 @@ use zebra_network as zn;
 use zebra_state as zs;
 
 mod downloads;
-use downloads::Downloads;
+use downloads::{AlwaysRetry, Downloads};
 
 /// Controls the number of peers used for each ObtainTips and ExtendTips request.
 // XXX in the future, we may not be able to access the checkpoint module.
 const FANOUT: usize = checkpoint::MAX_QUEUED_BLOCKS_PER_HEIGHT;
+
 /// Controls how many times we will retry each block download.
 ///
 /// If all the retries fail, then the syncer will reset, and start downloading
@@ -34,7 +38,7 @@ const FANOUT: usize = checkpoint::MAX_QUEUED_BLOCKS_PER_HEIGHT;
 ///
 /// When we implement a peer reputation system, we can reduce the number of
 /// retries, because we will be more likely to choose a good peer.
-const BLOCK_DOWNLOAD_RETRY_LIMIT: usize = 5;
+const BLOCK_DOWNLOAD_RETRY_LIMIT: usize = 2;
 
 /// Controls how far ahead of the chain tip the syncer tries to download before
 /// waiting for queued verifications to complete. Set to twice the maximum
@@ -42,12 +46,13 @@ const BLOCK_DOWNLOAD_RETRY_LIMIT: usize = 5;
 ///
 /// Some checkpoints contain larger blocks, so the maximum checkpoint gap can
 /// represent multiple gigabytes of data.
-const LOOKAHEAD_LIMIT: usize = checkpoint::MAX_CHECKPOINT_HEIGHT_GAP * 2;
+const LOOKAHEAD_LIMIT: usize = checkpoint::MAX_CHECKPOINT_HEIGHT_GAP * 4;
 
 /// Controls how long we wait for a tips response to return.
 ///
 /// The network layer also imposes a timeout on requests.
 const TIPS_RESPONSE_TIMEOUT: Duration = Duration::from_secs(6);
+
 /// Controls how long we wait for a block download request to complete.
 ///
 /// The network layer also imposes a timeout on requests.
@@ -91,7 +96,7 @@ const BLOCK_VERIFY_TIMEOUT: Duration = Duration::from_secs(MAX_CHECKPOINT_DOWNLO
 ///
 /// This timeout is particularly important on instances with slow or unreliable
 /// networks, and on testnet, which has a small number of slow peers.
-const SYNC_RESTART_TIMEOUT: Duration = Duration::from_secs(100);
+const SYNC_RESTART_TIMEOUT: Duration = Duration::from_secs(30);
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
@@ -103,7 +108,6 @@ struct CheckedTip {
     expected_next: block::Hash,
 }
 
-#[derive(Debug)]
 pub struct ChainSync<ZN, ZS, ZV>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
@@ -119,7 +123,14 @@ where
     state: ZS,
     prospective_tips: HashSet<CheckedTip>,
     genesis_hash: block::Hash,
-    downloads: Pin<Box<Downloads<Retry<zn::RetryLimit, Timeout<ZN>>, Timeout<ZV>>>>,
+    downloads: Pin<
+        Box<
+            Downloads<
+                Retry<zn::RetryLimit, Buffer<Hedge<Timeout<ZN>, AlwaysRetry>, zn::Request>>,
+                Timeout<ZV>,
+            >,
+        >,
+    >,
 }
 
 /// Polls the network to determine whether further blocks are available and
@@ -147,8 +158,15 @@ where
         let downloads = Downloads::new(
             ServiceBuilder::new()
                 .retry(zn::RetryLimit::new(BLOCK_DOWNLOAD_RETRY_LIMIT))
-                .timeout(BLOCK_DOWNLOAD_TIMEOUT)
-                .service(peers),
+                .buffer(1) // the Hedge has to be clonable to use retries.
+                // Sadly there's no .hedge() yet so we construct the middleware inline.
+                .service(Hedge::new(
+                    Timeout::new(peers, BLOCK_DOWNLOAD_TIMEOUT),
+                    AlwaysRetry,
+                    20,
+                    0.95,
+                    4 * BLOCK_DOWNLOAD_TIMEOUT,
+                )),
             Timeout::new(verifier, BLOCK_VERIFY_TIMEOUT),
         );
         Self {
