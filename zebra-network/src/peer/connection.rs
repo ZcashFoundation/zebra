@@ -582,25 +582,26 @@ where
             }
             // These messages should already be handled as a response if they
             // could be a response, so if we see them here, they were either
-            // sent unsolicited, or we've failed to handle messages correctly.
+            // sent unsolicited, or they were sent in response to a canceled request
+            // that we've already forgotten about.
             Message::Reject { .. } => {
-                self.fail_with(PeerError::WrongMessage("unsolicited reject message"));
+                tracing::debug!("got reject message unsolicited or from canceled request");
                 return;
             }
             Message::NotFound { .. } => {
-                self.fail_with(PeerError::WrongMessage("unsolicited notfound message"));
+                tracing::debug!("got notfound message unsolicited or from canceled request");
                 return;
             }
             Message::Pong(_) => {
-                self.fail_with(PeerError::WrongMessage("unsolicited pong message"));
+                tracing::debug!("got pong message unsolicited or from canceled request");
                 return;
             }
             Message::Block(_) => {
-                self.fail_with(PeerError::WrongMessage("unsolicited block message"));
+                tracing::debug!("got block message unsolicited or from canceled request");
                 return;
             }
             Message::Headers(_) => {
-                self.fail_with(PeerError::WrongMessage("unsolicited headers message"));
+                tracing::debug!("got headers message unsolicited or from canceled request");
                 return;
             }
             // These messages should never be sent by peers.
