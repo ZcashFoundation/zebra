@@ -22,7 +22,7 @@ rand = "0.7"
 hyper = "0.13.8"
 futures = "0.3"
 tokio = { version = "0.2.22", features = ["time", "rt-threaded", "stream", "macros", "tracing", "signal"] }
-tower = "0.3"
+tower = { version = "0.3", features = ["hedge"] }
 pin-project = "0.4.23"
 
 color-eyre = { version = "0.5.6", features = ["issue-url"] }
