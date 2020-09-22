@@ -138,37 +138,21 @@ pub enum Message {
 
     /// A `getblocks` message.
     ///
-    /// Requests the list of blocks starting right after the last
-    /// known hash in `block_locator_hashes`, up to `hash_stop` or 500
-    /// blocks, whichever comes first.
+    /// `known_blocks` is a series of known block hashes spaced out along the
+    /// peer's best chain. The remote peer uses them to compute the intersection
+    /// of its best chain and determine the blocks following the intersection
+    /// point.
     ///
-    /// You can send in fewer known hashes down to a minimum of just
-    /// one hash. However, the purpose of the block locator object is
-    /// to detect a wrong branch in the caller's main chain. If the
-    /// peer detects that you are off the main chain, it will send in
-    /// block hashes which are earlier than your last known block. So
-    /// if you just send in your last known hash and it is off the
-    /// main chain, the peer starts over at block #1.
+    /// The peer responds with an `inv` packet with the hashes of subsequent blocks.
+    /// If supplied, the `stop` parameter specifies the last header to request.
+    /// Otherwise, an inv packet with the maximum number (500) are sent.
     ///
-    /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#getblocks)
-    // The locator hashes are processed by a node in the order as they
-    // appear in the message. If a block hash is found in the node's
-    // main chain, the list of its children is returned back via the
-    // inv message and the remaining locators are ignored, no matter
-    // if the requested limit was reached, or not.
-    //
-    // The 500 headers number is from the Bitcoin docs, we are not
-    // certain (yet) that other implementations of Zcash obey this
-    // restriction, or if they don't, what happens if we send them too
-    // many results.
+    /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#getheaders)
     GetBlocks {
-        /// Block locators, from newest back to genesis block.
-        block_locator_hashes: Vec<block::Hash>,
-
-        /// `block::Hash` of the last desired block.
-        ///
-        /// Set to zero to get as many blocks as possible (500).
-        hash_stop: block::Hash,
+        /// Hashes of known blocks, ordered from highest height to lowest height.
+        known_blocks: Vec<block::Hash>,
+        /// Optionally, the last header to request.
+        stop: Option<block::Hash>,
     },
 
     /// A `headers` message.
@@ -184,31 +168,21 @@ pub enum Message {
 
     /// A `getheaders` message.
     ///
-    /// Requests a series of block headers starting right after the
-    /// last known hash in `block_locator_hashes`, up to `hash_stop`
-    /// or 2000 blocks, whichever comes first.
+    /// `known_blocks` is a series of known block hashes spaced out along the
+    /// peer's best chain. The remote peer uses them to compute the intersection
+    /// of its best chain and determine the blocks following the intersection
+    /// point.
     ///
-    /// You can send in fewer known hashes down to a minimum of just
-    /// one hash. However, the purpose of the block locator object is
-    /// to detect a wrong branch in the caller's main chain. If the
-    /// peer detects that you are off the main chain, it will send in
-    /// block hashes which are earlier than your last known block. So
-    /// if you just send in your last known hash and it is off the
-    /// main chain, the peer starts over at block #1.
+    /// The peer responds with an `headers` packet with the hashes of subsequent blocks.
+    /// If supplied, the `stop` parameter specifies the last header to request.
+    /// Otherwise, the maximum number of block headers (160) are sent.
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#getheaders)
-    // The 2000 headers number is from the Bitcoin docs, we are not
-    // certain (yet) that other implementations of Zcash obey this
-    // restriction, or if they don't, what happens if we send them too
-    // many results.
     GetHeaders {
-        /// Block locators, from newest back to genesis block.
-        block_locator_hashes: Vec<block::Hash>,
-
-        /// `block::Hash` of the last desired block header.
-        ///
-        /// Set to zero to get as many block headers as possible (2000).
-        hash_stop: block::Hash,
+        /// Hashes of known blocks, ordered from highest height to lowest height.
+        known_blocks: Vec<block::Hash>,
+        /// Optionally, the last header to request.
+        stop: Option<block::Hash>,
     },
 
     /// An `inv` message.

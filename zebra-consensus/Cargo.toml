@@ -16,8 +16,9 @@ serde = { version = "1", features = ["serde_derive"] }
 futures = "0.3.5"
 futures-util = "0.3.5"
 metrics = "0.12"
+thiserror = "1.0.20"
 tokio = { version = "0.2.22", features = ["time", "sync", "stream", "tracing"] }
-tower = "0.3"
+tower = { version = "0.3", features = ["timeout", "util", "buffer"] }
 tower-util = "0.3"
 tracing = "0.1.19"
 tracing-futures = "0.2.4"
@@ -26,6 +27,7 @@ tower-fallback = { path = "../tower-fallback/" }
 tower-batch = { path = "../tower-batch/" }
 zebra-chain = { path = "../zebra-chain" }
 zebra-state = { path = "../zebra-state" }
+displaydoc = "0.1.7"
 
 [dev-dependencies]
 rand = "0.7"

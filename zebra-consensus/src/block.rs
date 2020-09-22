@@ -17,11 +17,16 @@ use std::{
 
 use chrono::Utc;
 use futures_util::FutureExt;
+use thiserror::Error;
 use tower::{Service, ServiceExt};
 
-use zebra_chain::block::{self, Block};
+use zebra_chain::{
+    block::{self, Block},
+    work::equihash,
+};
 use zebra_state as zs;
 
+use crate::error::*;
 use crate::BoxError;
 
 mod check;
@@ -37,6 +42,27 @@ where
 {
     /// The underlying state service, possibly wrapped in other services.
     state_service: S,
+}
+
+#[non_exhaustive]
+#[derive(Debug, Error)]
+pub enum VerifyBlockError {
+    #[error("unable to verify depth for block {hash} from chain state during block verification")]
+    Depth { source: BoxError, hash: block::Hash },
+    #[error(transparent)]
+    Block {
+        #[from]
+        source: BlockError,
+    },
+    #[error(transparent)]
+    Equihash {
+        #[from]
+        source: equihash::Error,
+    },
+    #[error(transparent)]
+    Time(BoxError),
+    #[error("unable to commit block after semantic verification")]
+    Commit(#[source] BoxError),
 }
 
 impl<S> BlockVerifier<S>
@@ -55,7 +81,7 @@ where
     S::Future: Send + 'static,
 {
     type Response = block::Hash;
-    type Error = BoxError;
+    type Error = VerifyBlockError;
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
@@ -74,15 +100,18 @@ where
             let hash = block.hash();
 
             // Check that this block is actually a new block.
-            match state_service.ready_and().await?.call(zs::Request::Depth(hash)).await? {
+            match state_service
+                .ready_and()
+                .await
+                .map_err(|source| VerifyBlockError::Depth { source, hash })?
+                .call(zs::Request::Depth(hash))
+                .await
+                .map_err(|source| VerifyBlockError::Depth { source, hash })?
+            {
                 zs::Response::Depth(Some(depth)) => {
-                    return Err(format!(
-                        "block {} is already in the chain at depth {:?}",
-                        hash,
-                        depth,
-                    ).into())
-                },
-                zs::Response::Depth(None) => {},
+                    return Err(BlockError::AlreadyInChain(hash, depth).into())
+                }
+                zs::Response::Depth(None) => {}
                 _ => unreachable!("wrong response to Request::Depth"),
             }
 
@@ -90,13 +119,9 @@ where
             // height for parsed blocks when we deserialize them.
             let height = block
                 .coinbase_height()
-                .ok_or_else(|| format!("invalid block {:?}: missing block height",
-                                       hash))?;
+                .ok_or_else(|| BlockError::MissingHeight(hash))?;
             if height > block::Height::MAX {
-                Err(format!("invalid block height {:?} in {:?}: greater than the maximum height {:?}",
-                            height,
-                            hash,
-                            block::Height::MAX))?;
+                Err(BlockError::MaxHeight(height, hash, block::Height::MAX))?;
             }
 
             // Do the difficulty checks first, to raise the threshold for
@@ -105,14 +130,13 @@ where
                 .header
                 .difficulty_threshold
                 .to_expanded()
-                .ok_or_else(|| format!("invalid difficulty threshold in block header {:?} {:?}",
-                                       height,
-                                       hash))?;
+                .ok_or_else(|| BlockError::InvalidDifficulty(height, hash))?;
             if hash > difficulty_threshold {
-                Err(format!("block {:?} failed the difficulty filter: hash {:?} must be less than or equal to the difficulty threshold {:?}",
-                            height,
-                            hash,
-                            difficulty_threshold))?;
+                Err(BlockError::DifficultyFilter(
+                    height,
+                    hash,
+                    difficulty_threshold,
+                ))?;
             }
             check::is_equihash_solution_valid(&block.header)?;
 
@@ -121,24 +145,23 @@ where
 
             // Field validity and structure checks
             let now = Utc::now();
-            check::is_time_valid_at(&block.header, now)?;
+            check::is_time_valid_at(&block.header, now).map_err(VerifyBlockError::Time)?;
             check::is_coinbase_first(&block)?;
 
             // TODO: context-free header verification: merkle root
 
             tracing::trace!("verified block");
-            metrics::gauge!(
-                "block.verified.block.height",
-                height.0 as _
-            );
+            metrics::gauge!("block.verified.block.height", height.0 as _);
             metrics::counter!("block.verified.block.count", 1);
 
             // Finally, submit the block for contextual verification.
             match state_service
                 .ready_and()
-                .await?
+                .await
+                .map_err(VerifyBlockError::Commit)?
                 .call(zs::Request::CommitBlock { block })
-                .await?
+                .await
+                .map_err(VerifyBlockError::Commit)?
             {
                 zs::Response::Committed(committed_hash) => {
                     assert_eq!(committed_hash, hash, "state must commit correct hash");

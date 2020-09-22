@@ -27,7 +27,7 @@ use crate::{
         internal::{Request, Response},
     },
     types::MetaAddr,
-    BoxedStdError, Config,
+    BoxError, Config,
 };
 
 use super::{Client, Connection, ErrorSlot, HandshakeError};
@@ -58,7 +58,7 @@ pub struct Builder<S> {
 
 impl<S> Builder<S>
 where
-    S: Service<Request, Response = Response, Error = BoxedStdError> + Clone + Send + 'static,
+    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
     S::Future: Send,
 {
     /// Provide a config.  Mandatory.
@@ -151,7 +151,7 @@ where
 
 impl<S> Handshake<S>
 where
-    S: Service<Request, Response = Response, Error = BoxedStdError> + Clone + Send + 'static,
+    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
     S::Future: Send,
 {
     /// Create a builder that configures a [`Handshake`] service.
@@ -173,11 +173,11 @@ where
 
 impl<S> Service<(TcpStream, SocketAddr)> for Handshake<S>
 where
-    S: Service<Request, Response = Response, Error = BoxedStdError> + Clone + Send + 'static,
+    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
     S::Future: Send,
 {
     type Response = Client;
-    type Error = BoxedStdError;
+    type Error = BoxError;
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 

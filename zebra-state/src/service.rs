@@ -104,5 +104,5 @@ pub fn init(
     config: Config,
     network: Network,
 ) -> Buffer<BoxService<Request, Response, BoxError>, Request> {
-    Buffer::new(BoxService::new(StateService::new(config, network)), 1)
+    Buffer::new(BoxService::new(StateService::new(config, network)), 3)
 }

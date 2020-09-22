@@ -1,7 +1,7 @@
 //! Inventory Registry Implementation
 //!
 //! [RFC]: https://zebra.zfnd.org/dev/rfcs/0003-inventory-tracking.html
-use crate::{protocol::external::InventoryHash, BoxedStdError};
+use crate::{protocol::external::InventoryHash, BoxError};
 use futures::Stream;
 use std::{
     collections::{HashMap, HashSet},
@@ -59,7 +59,7 @@ impl InventoryRegistry {
     ///
     /// - rotates HashMaps based on interval events
     /// - drains the inv_stream channel and registers all advertised inventory
-    pub fn poll_inventory(&mut self, cx: &mut Context<'_>) -> Result<(), BoxedStdError> {
+    pub fn poll_inventory(&mut self, cx: &mut Context<'_>) -> Result<(), BoxError> {
         while let Poll::Ready(_) = self.interval.poll_tick(cx) {
             self.rotate();
         }

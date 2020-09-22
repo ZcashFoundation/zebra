@@ -2,14 +2,11 @@
 
 mod generate;
 mod revhex;
-mod seed;
 mod start;
 mod version;
 
 use self::ZebradCmd::*;
-use self::{
-    generate::GenerateCmd, revhex::RevhexCmd, seed::SeedCmd, start::StartCmd, version::VersionCmd,
-};
+use self::{generate::GenerateCmd, revhex::RevhexCmd, start::StartCmd, version::VersionCmd};
 
 use crate::config::ZebradConfig;
 
@@ -36,10 +33,6 @@ pub enum ZebradCmd {
     #[options(help = "reverses the endianness of a hex string, like a block or transaction hash")]
     Revhex(RevhexCmd),
 
-    /// The `seed` subcommand
-    #[options(help = "dns seeder")]
-    Seed(SeedCmd),
-
     /// The `start` subcommand
     #[options(help = "start the application")]
     Start(StartCmd),
@@ -56,7 +49,7 @@ impl ZebradCmd {
     pub(crate) fn is_server(&self) -> bool {
         match self {
             // List all the commands, so new commands have to make a choice here
-            Seed(_) | Start(_) => true,
+            Start(_) => true,
             Generate(_) | Help(_) | Revhex(_) | Version(_) => false,
         }
     }
