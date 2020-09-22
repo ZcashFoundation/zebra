@@ -6,7 +6,9 @@ use futures::{
     stream::{FuturesUnordered, StreamExt},
 };
 use tokio::time::delay_for;
-use tower::{builder::ServiceBuilder, retry::Retry, timeout::Timeout, Service, ServiceExt};
+use tower::{
+    builder::ServiceBuilder, hedge::Hedge, retry::Retry, timeout::Timeout, Service, ServiceExt,
+};
 
 use zebra_chain::{
     block::{self, Block},
@@ -16,37 +18,37 @@ use zebra_network as zn;
 use zebra_state as zs;
 
 mod downloads;
-use downloads::Downloads;
+use downloads::{AlwaysHedge, Downloads};
 
 /// Controls the number of peers used for each ObtainTips and ExtendTips request.
 const FANOUT: usize = 4;
 
 /// Controls how many times we will retry each block download.
 ///
-/// If all the retries fail, then the syncer will reset, and start downloading
-/// blocks from the verified tip in the state, including blocks which previously
-/// downloaded successfully.
+/// Failing block downloads is important because it defends against peers who
+/// feed us bad hashes. But spurious failures of valid blocks cause the syncer to
+/// restart from the previous checkpoint, potentially re-downloading blocks.
 ///
-/// But if a node is on a slow or unreliable network, sync restarts can result
-/// in a flood of download requests, making future syncs more likely to fail.
-/// So it's much faster to retry each block multiple times.
-///
-/// When we implement a peer reputation system, we can reduce the number of
-/// retries, because we will be more likely to choose a good peer.
-const BLOCK_DOWNLOAD_RETRY_LIMIT: usize = 5;
+/// We also hedge requests, so we may retry up to twice this many times.
+const BLOCK_DOWNLOAD_RETRY_LIMIT: usize = 2;
 
 /// Controls how far ahead of the chain tip the syncer tries to download before
-/// waiting for queued verifications to complete. Set to twice the maximum
-/// checkpoint distance.
+/// waiting for queued verifications to complete.
 ///
-/// Some checkpoints contain larger blocks, so the maximum checkpoint gap can
-/// represent multiple gigabytes of data.
+/// Increasing this limit increases the buffer size, so it reduces the impact of
+/// missing a block on the critical path. The block size limit is 2MB, so in
+/// theory, this could represent multiple gigabytes of data, if we downloaded
+/// arbitrary blocks. However, because we randomly load balance outbound
+/// requests, and separate block download from obtaining block hashes, an
+/// adversary would have to control a significant fraction of our peers to lead
+/// us astray.
 const LOOKAHEAD_LIMIT: usize = zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP * 2;
 
 /// Controls how long we wait for a tips response to return.
 ///
 /// The network layer also imposes a timeout on requests.
 const TIPS_RESPONSE_TIMEOUT: Duration = Duration::from_secs(6);
+
 /// Controls how long we wait for a block download request to complete.
 ///
 /// The network layer also imposes a timeout on requests.
@@ -70,18 +72,6 @@ const BLOCK_VERIFY_TIMEOUT: Duration = Duration::from_secs(MAX_CHECKPOINT_DOWNLO
 /// Controls how long we wait to restart syncing after finishing a sync run.
 ///
 /// This timeout should be long enough to:
-///   - allow pending downloads and verifies to complete or time out.
-///     Sync restarts don't cancel downloads, so quick restarts can overload
-///     network-bound nodes with lots of peers, leading to further failures.
-///     (The total number of requests being processed by peers is the sum of
-///     the number of peers, and the peer request buffer size.)
-///
-///     We assume that Zebra nodes have at least 10 Mbps bandwidth. So a
-///     maximum-sized block can take up to 2 seconds to download. Therefore, we
-///     set this timeout to twice the default number of peers. (The peer request
-///     buffer size is small enough that any buffered requests will overlap with
-///     the post-restart ObtainTips.)
-///
 ///   - allow zcashd peers to process pending requests. If the node only has a
 ///     few peers, we want to clear as much peer state as possible. In
 ///     particular, zcashd sends "next block range" hints, based on zcashd's
@@ -90,7 +80,7 @@ const BLOCK_VERIFY_TIMEOUT: Duration = Duration::from_secs(MAX_CHECKPOINT_DOWNLO
 ///
 /// This timeout is particularly important on instances with slow or unreliable
 /// networks, and on testnet, which has a small number of slow peers.
-const SYNC_RESTART_TIMEOUT: Duration = Duration::from_secs(100);
+const SYNC_RESTART_TIMEOUT: Duration = Duration::from_secs(45);
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
@@ -102,7 +92,6 @@ struct CheckedTip {
     expected_next: block::Hash,
 }
 
-#[derive(Debug)]
 pub struct ChainSync<ZN, ZS, ZV>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
@@ -118,7 +107,8 @@ where
     state: ZS,
     prospective_tips: HashSet<CheckedTip>,
     genesis_hash: block::Hash,
-    downloads: Pin<Box<Downloads<Retry<zn::RetryLimit, Timeout<ZN>>, Timeout<ZV>>>>,
+    downloads:
+        Pin<Box<Downloads<Hedge<Retry<zn::RetryLimit, Timeout<ZN>>, AlwaysHedge>, Timeout<ZV>>>>,
 }
 
 /// Polls the network to determine whether further blocks are available and
@@ -143,17 +133,30 @@ where
     ///  - verifier: the zebra-consensus verifier that checks the chain
     pub fn new(chain: Network, peers: ZN, state: ZS, verifier: ZV) -> Self {
         let tip_network = Timeout::new(peers.clone(), TIPS_RESPONSE_TIMEOUT);
-        let downloads = Downloads::new(
+        // The Hedge middleware is the outermost layer, hedging requests
+        // between two retry-wrapped networks.  The innermost timeout
+        // layer is relatively unimportant, because slow requests will
+        // probably be pre-emptively hedged.
+        //
+        // XXX add ServiceBuilder::hedge() so this becomes
+        // ServiceBuilder::new().hedge(...).retry(...)...
+        let block_network = Hedge::new(
             ServiceBuilder::new()
                 .retry(zn::RetryLimit::new(BLOCK_DOWNLOAD_RETRY_LIMIT))
                 .timeout(BLOCK_DOWNLOAD_TIMEOUT)
                 .service(peers),
-            Timeout::new(verifier, BLOCK_VERIFY_TIMEOUT),
+            AlwaysHedge,
+            20,
+            0.95,
+            2 * SYNC_RESTART_TIMEOUT,
         );
         Self {
             tip_network,
             state,
-            downloads: Box::pin(downloads),
+            downloads: Box::pin(Downloads::new(
+                block_network,
+                Timeout::new(verifier, BLOCK_VERIFY_TIMEOUT),
+            )),
             prospective_tips: HashSet::new(),
             genesis_hash: genesis_hash(chain),
         }
