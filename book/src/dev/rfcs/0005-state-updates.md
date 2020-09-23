@@ -466,7 +466,7 @@ queued block (and any of its descendants) can be committed to the state
 Try to commit `block` to the non-finalized state. Must succeed, because
 `commit_block` is only called when `block` is ready to be committed.
 
-1. If the block is a pre-Sapling block, return an error.
+1. If the block is a pre-Sapling block, panic.
 
 2. Search for the first chain where `block.parent` == `chain.tip`. If it exists:
     - push `block` onto that chain
