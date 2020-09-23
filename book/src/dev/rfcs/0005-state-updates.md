@@ -469,21 +469,32 @@ Try to commit `block` to the non-finalized state. Must succeed, because
 1. If the block is a pre-Sapling block, panic.
 
 2. Search for the first chain where `block.parent` == `chain.tip`. If it exists:
-    - push `block` onto that chain
-    - broadcast `result` via `block.rsp_tx`
-    - return `block.hash` if `result.is_ok()`
+    - return `self.push_block_on_chain(block, chain)`
 
 3. Find the first chain that contains `block.parent` and fork it with
   `block.parent` as the new tip
     - `let fork = self.chains.iter().find_map(|chain| chain.fork(block.parent));`
 
 4. If `fork` is `Some`
-    - push `block` onto that chain
+    - call `let hash = self.push_block_on_chain(block, fork)`
     - add `fork` to `self.chains`
-    - broadcast `result` via `block.rsp_tx`
-    - return `block.hash` if `result.is_ok()`
+    - return `hash`
 
 5. Else panic, this should be unreachable because `commit_block` is only
+   called when `block` is ready to be committed.
+   
+### `pub(super) fn push_block_on_chain(&mut self, block: QueuedBlock, &mut chain: Chain) -> block::Hash`
+
+Try to commit `block` to `chain`. Must succeed, because
+`push_block_on_chain` is only called when `block` is ready to be committed.
+
+1. push `block` onto `chain`
+
+2. broadcast `result` via `block.rsp_tx`
+
+3. return `block.hash` if `result.is_ok()`
+
+4. Else panic, this should be unreachable because `push_block_on_chain` is only
    called when `block` is ready to be committed.
 
 ### Summary
@@ -513,11 +524,10 @@ are now past the reorg limit.
    finalized state
 
 2. If `block.parent` == `finalized_tip.hash`
-    - Construct a new `Chain` with `Chain::default`
-    - push `block` onto that chain
+    - Construct a new `chain` with `Chain::default`
+    - call `let hash = chain_set.push_block_on_chain(block, chain)`
     - add `fork` to `chain_set.chains`
-    - broadcast `result` via `block.rsp_tx`
-    - return block.hash if `result.is_ok()`
+    - return `hash`
 
 3. Otherwise, commit or queue the block to the non-finalized state with
    `chain_set.queue(block);`
