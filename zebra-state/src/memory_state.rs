@@ -55,12 +55,18 @@ struct Chain {
     height_by_hash: HashMap<block::Hash, block::Height>,
     tx_by_hash: HashMap<transaction::Hash, (block::Height, TodoSize)>,
 
-    utxos: HashSet<transparent::Output>,
+    utxos: HashMap<transparent::OutPoint, UTXODiff>,
     sprout_anchors: HashSet<sprout::tree::Root>,
     sapling_anchors: HashSet<sapling::tree::Root>,
     sprout_nullifiers: HashSet<sprout::Nullifier>,
     sapling_nullifiers: HashSet<sapling::Nullifier>,
     partial_cumulative_work: PartialCumulativeWork,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum UTXODiff {
+    Created,
+    Spent,
 }
 
 impl Chain {
@@ -69,21 +75,24 @@ impl Chain {
             .coinbase_height()
             .expect("valid non-finalized blocks have a coinbase height");
 
+        // update cumulative data members
         self.update_chain_state_with(&block);
-
         self.blocks.insert(block_height, block);
     }
 
     pub fn pop_root(&mut self) -> Arc<Block> {
         let block_height = self.lowest_height();
 
+        // remove the lowest height block from self.blocks
         let block = self
             .blocks
             .remove(&block_height)
             .expect("only called while block is populated");
 
+        // update cumulative data members
         self.revert_chain_state_with(&block);
 
+        // return the block
         block
     }
 
@@ -159,12 +168,13 @@ impl UpdateWith<Arc<Block>> for Chain {
         let block_height = block
             .coinbase_height()
             .expect("valid non-finalized blocks have a coinbase height");
-
         let block_hash = block.hash();
 
+        // add hash to height_by_hash
         let prior_height = self.height_by_hash.insert(block_hash, block_height);
         assert!(prior_height.is_none());
 
+        // for each transaction in block
         for (transaction_index, transaction) in block.transactions.iter().enumerate() {
             let (inputs, outputs, shielded_data, joinsplit_data) = match transaction.deref() {
                 transaction::Transaction::V4 {
@@ -179,15 +189,23 @@ impl UpdateWith<Arc<Block>> for Chain {
                 ),
             };
 
+            // add key `transaction.hash` and value `(height, tx_index)` to `tx_by_hash`
             let transaction_hash = transaction.hash();
             let prior_pair = self
                 .tx_by_hash
                 .insert(transaction_hash, (block_height, transaction_index));
-
             assert!(prior_pair.is_none());
 
             // add deltas for utxos this produced
-            self.update_chain_state_with(outputs);
+            for (utxo_index, _) in outputs.iter().enumerate() {
+                self.utxos.insert(
+                    transparent::OutPoint {
+                        hash: transaction_hash,
+                        index: utxo_index as u32,
+                    },
+                    UTXODiff::Created,
+                );
+            }
             // add deltas for utxos this consumed
             self.update_chain_state_with(inputs);
             // add sprout anchor and nullifiers
@@ -196,20 +214,22 @@ impl UpdateWith<Arc<Block>> for Chain {
             self.update_chain_state_with(shielded_data);
         }
 
+        // add work to partial cumulative work
         let block_work = block
             .header
             .difficulty_threshold
             .to_work()
             .expect("XXX: explain why we should always have work");
-
         self.partial_cumulative_work += block_work;
     }
 
     fn revert_chain_state_with(&mut self, block: &Arc<Block>) {
         let block_hash = block.hash();
 
+        // remove the blocks hash from `height_by_hash`
         assert!(self.height_by_hash.remove(&block_hash).is_some());
 
+        // for each transaction in block
         for (transaction_index, transaction) in block.transactions.iter().enumerate() {
             let (inputs, outputs, shielded_data, joinsplit_data) = match transaction.deref() {
                 transaction::Transaction::V4 {
@@ -224,12 +244,20 @@ impl UpdateWith<Arc<Block>> for Chain {
                 ),
             };
 
+            // remove `transaction.hash` from `tx_by_hash`
             let transaction_hash = transaction.hash();
-
             assert!(self.tx_by_hash.remove(&transaction_hash).is_some());
 
             // remove the deltas for utxos this produced
-            self.revert_chain_state_with(outputs);
+            for (utxo_index, _) in outputs.iter().enumerate() {
+                assert!(self
+                    .utxos
+                    .remove(&transparent::OutPoint {
+                        hash: transaction_hash,
+                        index: utxo_index as u32,
+                    })
+                    .is_some());
+            }
             // remove the deltas for utxos this consumed
             self.revert_chain_state_with(inputs);
             // remove sprout anchor and nullifiers
@@ -238,27 +266,23 @@ impl UpdateWith<Arc<Block>> for Chain {
             self.revert_chain_state_with(shielded_data);
         }
 
+        // remove work from partial_cumulative_work
         let block_work = block
             .header
             .difficulty_threshold
             .to_work()
             .expect("XXX: explain why we should always have work");
-
         self.partial_cumulative_work -= block_work;
     }
 }
 
-impl UpdateWith<Vec<transparent::Output>> for Chain {
-    fn update_chain_state_with(&mut self, outputs: &Vec<transparent::Output>) {
-        for created_utxo in outputs {
-            self.utxos.insert(created_utxo.clone());
-        }
+impl UpdateWith<transparent::OutPoint> for Chain {
+    fn update_chain_state_with(&mut self, outpoint: &transparent::OutPoint) {
+        self.utxos.insert(*outpoint, UTXODiff::Created);
     }
 
-    fn revert_chain_state_with(&mut self, outputs: &Vec<transparent::Output>) {
-        for created_utxo in outputs {
-            assert!(self.utxos.remove(&created_utxo));
-        }
+    fn revert_chain_state_with(&mut self, outpoint: &transparent::OutPoint) {
+        assert!(self.utxos.remove(outpoint).is_some());
     }
 }
 
@@ -266,20 +290,10 @@ impl UpdateWith<Vec<transparent::Input>> for Chain {
     fn update_chain_state_with(&mut self, inputs: &Vec<transparent::Input>) {
         for consumed_utxo in inputs {
             match consumed_utxo {
-                transparent::Input::PrevOut {
-                    outpoint: transparent::OutPoint { hash, index },
-                    unlock_script,
-                    sequence,
-                } => todo!(
-                    "we need to change the representation of this at because
-                    they may remove finalized utxos but we do not wish for
-                    that removal itself to be finalized"
-                ),
-                transparent::Input::Coinbase {
-                    height,
-                    data,
-                    sequence,
-                } => todo!("what do we do with these?"),
+                transparent::Input::PrevOut { outpoint, .. } => {
+                    self.utxos.insert(*outpoint, UTXODiff::Spent);
+                }
+                transparent::Input::Coinbase { .. } => {}
             }
         }
     }
@@ -287,20 +301,10 @@ impl UpdateWith<Vec<transparent::Input>> for Chain {
     fn revert_chain_state_with(&mut self, inputs: &Vec<transparent::Input>) {
         for consumed_utxo in inputs {
             match consumed_utxo {
-                transparent::Input::PrevOut {
-                    outpoint: transparent::OutPoint { hash, index },
-                    unlock_script,
-                    sequence,
-                } => todo!(
-                    "we need to change the representation of this at because
-                    they may remove finalized utxos but we do not wish for
-                    that removal itself to be finalized"
-                ),
-                transparent::Input::Coinbase {
-                    height,
-                    data,
-                    sequence,
-                } => todo!("what do we do with these?"),
+                transparent::Input::PrevOut { outpoint, .. } => {
+                    assert!(self.utxos.remove(outpoint).is_some());
+                }
+                transparent::Input::Coinbase { .. } => {}
             }
         }
     }

@@ -40,7 +40,7 @@ impl AsRef<[u8]> for CoinbaseData {
 /// OutPoint
 ///
 /// A particular transaction output reference.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct OutPoint {
     /// References the transaction that contains the UTXO being spent.
