@@ -16,6 +16,7 @@ use zebra_chain::{
 use crate::{BoxError, Config, MemoryState, Request, Response, SledState};
 
 // todo: put this somewhere
+#[derive(Debug)]
 pub struct QueuedBlock {
     pub block: Arc<Block>,
     // TODO: add these parameters when we can compute anchors.
@@ -34,7 +35,7 @@ struct StateService {
 impl StateService {
     pub fn new(config: Config, network: Network) -> Self {
         let sled = SledState::new(&config, network);
-        let _mem = MemoryState {};
+        let _mem = MemoryState::default();
         Self { sled, _mem }
     }
 }

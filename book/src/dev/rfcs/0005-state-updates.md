@@ -373,23 +373,35 @@ handled by `#[derive(Default)]`.
     all its blocks have been `pop`ped
 
 
-### `ChainSet` Type
-[chainset-type]: #chainset-type
+### `MemoryState` Type
+[memorystate-type]: #memorystate-type
 
-The `ChainSet` type represents the set of all non-finalized state. It
+The `MemoryState` type represents the set of all non-finalized state. It
 consists of a set of non-finalized but verified chains and a set of
 unverified blocks which are waiting for the full context needed to verify
 them to become available.
 
-`ChainSet` is defined by the following structure and API:
+`MemoryState` is defined by the following structure and API:
 
 ```rust
-struct ChainSet {
-    chains: BTreeSet<Chain>,
+/// The state of the chains in memory, incuding queued blocks.
+#[derive(Debug, Default)]
+pub struct MemoryState {
+    /// Verified, non-finalized chains.
+    chain_set: BTreeSet<Chain>,
+    /// Blocks awaiting their parent blocks for contextual verification.
+    contextual_queue: QueuedBlocks,
+}
 
-    queued_blocks: BTreeMap<block::Hash, QueuedBlock>,
-    queued_by_parent: BTreeMap<block::Hash, Vec<block::Hash>>,
-    queued_by_height: BTreeMap<block::Height, Vec<block::Hash>>,
+/// A queue of blocks, awaiting the arrival of parent blocks.
+#[derive(Debug, Default)]
+struct QueuedBlocks {
+    /// Blocks awaiting their parent blocks for contextual verification.
+    blocks: HashMap<block::Hash, QueuedBlock>,
+    /// Hashes from `queued_blocks`, indexed by parent hash.
+    by_parent: HashMap<block::Hash, Vec<block::Hash>>,
+    /// Hashes from `queued_blocks`, indexed by block height.
+    by_height: BTreeMap<block::Height, Vec<block::Hash>>,
 }
 ```
 
@@ -476,10 +488,10 @@ cannot be committed due to missing context.
 
 - `Chain` represents the non-finalized portion of a single chain
 
-- `ChainSet` represents the non-finalized portion of all chains and all
+- `MemoryState` represents the non-finalized portion of all chains and all
   unverified blocks that are waiting for context to be available.
 
-- `ChainSet::queue` handles queueing and or commiting blocks and
+- `MemoryState::queue` handles queueing and or commiting blocks and
   reorganizing chains (via `commit_block`) but not finalizing them
 
 - Finalized blocks are returned from `finalize` and must still be committed
