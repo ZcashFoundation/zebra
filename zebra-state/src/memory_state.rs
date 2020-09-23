@@ -11,10 +11,9 @@ use zebra_chain::{
     primitives::Groth16Proof,
     sapling, sprout, transaction, transparent,
     work::difficulty::PartialCumulativeWork,
-    work::difficulty::Work,
 };
 
-use crate::{service::QueuedBlock, BoxError};
+use crate::service::QueuedBlock;
 
 pub struct MemoryState {
     // TODO
@@ -227,7 +226,7 @@ impl UpdateWith<Arc<Block>> for Chain {
         self.partial_cumulative_work -= block_work;
 
         // for each transaction in block
-        for (transaction_index, transaction) in block.transactions.iter().enumerate() {
+        for transaction in &block.transactions {
             let (inputs, outputs, shielded_data, joinsplit_data) = match transaction.deref() {
                 transaction::Transaction::V4 {
                     inputs,

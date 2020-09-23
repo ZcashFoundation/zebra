@@ -285,7 +285,7 @@ struct Chain {
 Push a block into a chain as the new tip
 
 1. Update cumulative data members
-    - Add hash to `height_by_hash`
+    - Add the block's hash to `height_by_hash`
     - Add work to `self.partial_cumulative_work`
     - For each `transaction` in `block`
       - Add key: `transaction.hash` and value: `(height, tx_index)` to `tx_by_hash`

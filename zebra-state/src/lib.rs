@@ -5,7 +5,6 @@
 #![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_state")]
 #![warn(missing_docs)]
 #![allow(clippy::try_err)]
-#![allow(unused_imports, unused_variables, dead_code)]
 
 mod config;
 mod constants;
