@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use std::{
     cmp::Ordering,
     collections::BTreeSet,
@@ -17,7 +18,7 @@ use crate::service::QueuedBlock;
 
 /// The state of the chains in memory, incuding queued blocks.
 #[derive(Debug, Default)]
-pub struct MemoryState {
+pub struct NonFinalizedState {
     /// Verified, non-finalized chains.
     chain_set: BTreeSet<Chain>,
     /// Blocks awaiting their parent blocks for contextual verification.
@@ -35,20 +36,20 @@ struct QueuedBlocks {
     by_height: BTreeMap<block::Height, Vec<block::Hash>>,
 }
 
-impl MemoryState {
+impl NonFinalizedState {
     pub fn finalize(&mut self) -> Arc<Block> {
         todo!()
     }
 
-    pub fn queue(&mut self, block: QueuedBlock) {
+    pub fn queue(&mut self, _block: QueuedBlock) {
         todo!()
     }
 
-    fn process_queued(&mut self, new_parent: block::Hash) {
+    fn process_queued(&mut self, _new_parent: block::Hash) {
         todo!()
     }
 
-    fn commit_block(&mut self, block: QueuedBlock) -> Option<block::Hash> {
+    fn commit_block(&mut self, _block: QueuedBlock) -> Option<block::Hash> {
         todo!()
     }
 }

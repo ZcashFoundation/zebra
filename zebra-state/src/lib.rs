@@ -19,9 +19,9 @@ mod util;
 #[cfg(test)]
 mod tests;
 
-use memory_state::MemoryState;
+use memory_state::NonFinalizedState;
 use service::QueuedBlock;
-use sled_state::SledState;
+use sled_state::FinalizedState;
 
 pub use config::Config;
 pub use request::{HashOrHeight, Request};

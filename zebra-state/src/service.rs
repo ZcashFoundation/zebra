@@ -13,7 +13,7 @@ use zebra_chain::{
     parameters::Network,
 };
 
-use crate::{BoxError, Config, MemoryState, Request, Response, SledState};
+use crate::{BoxError, Config, FinalizedState, NonFinalizedState, Request, Response};
 
 // todo: put this somewhere
 #[derive(Debug)]
@@ -27,15 +27,15 @@ pub struct QueuedBlock {
 
 struct StateService {
     /// Holds data relating to finalized chain state.
-    sled: SledState,
+    sled: FinalizedState,
     /// Holds data relating to non-finalized chain state.
-    _mem: MemoryState,
+    _mem: NonFinalizedState,
 }
 
 impl StateService {
     pub fn new(config: Config, network: Network) -> Self {
-        let sled = SledState::new(&config, network);
-        let _mem = MemoryState::default();
+        let sled = FinalizedState::new(&config, network);
+        let _mem = NonFinalizedState::default();
         Self { sled, _mem }
     }
 }

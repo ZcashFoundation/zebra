@@ -373,20 +373,20 @@ handled by `#[derive(Default)]`.
     all its blocks have been `pop`ped
 
 
-### `MemoryState` Type
-[memorystate-type]: #memorystate-type
+### `NonFinalizedState` Type
+[nonfinalizedstate-type]: #nonfinalizedstate-type
 
-The `MemoryState` type represents the set of all non-finalized state. It
-consists of a set of non-finalized but verified chains and a set of
+The `NonFinalizedState` type represents the set of all non-finalized state.
+It consists of a set of non-finalized but verified chains and a set of
 unverified blocks which are waiting for the full context needed to verify
 them to become available.
 
-`MemoryState` is defined by the following structure and API:
+`NonFinalizedState` is defined by the following structure and API:
 
 ```rust
 /// The state of the chains in memory, incuding queued blocks.
 #[derive(Debug, Default)]
-pub struct MemoryState {
+pub struct NonFinalizedState {
     /// Verified, non-finalized chains.
     chain_set: BTreeSet<Chain>,
     /// Blocks awaiting their parent blocks for contextual verification.
@@ -488,10 +488,10 @@ cannot be committed due to missing context.
 
 - `Chain` represents the non-finalized portion of a single chain
 
-- `MemoryState` represents the non-finalized portion of all chains and all
+- `NonFinalizedState` represents the non-finalized portion of all chains and all
   unverified blocks that are waiting for context to be available.
 
-- `MemoryState::queue` handles queueing and or commiting blocks and
+- `NonFinalizedState::queue` handles queueing and or commiting blocks and
   reorganizing chains (via `commit_block`) but not finalizing them
 
 - Finalized blocks are returned from `finalize` and must still be committed
