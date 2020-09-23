@@ -13,10 +13,7 @@
 
 use crate::block;
 
-use std::{
-    cmp::{Ordering, PartialEq, PartialOrd},
-    convert::TryInto,
-};
+use std::cmp::{Ordering, PartialEq, PartialOrd};
 use std::{fmt, ops::Add, ops::AddAssign};
 
 use primitive_types::U256;
@@ -332,9 +329,10 @@ impl std::ops::Add<Work> for PartialCumulativeWork {
     type Output = PartialCumulativeWork;
 
     fn add(self, rhs: Work) -> Self::Output {
-        let result = self.0
+        let result = self
+            .0
             .checked_add(rhs.0)
-            .expect("Work values do not overflow")
+            .expect("Work values do not overflow");
 
         PartialCumulativeWork(result)
     }
@@ -352,7 +350,7 @@ impl std::ops::Sub<Work> for PartialCumulativeWork {
     fn sub(self, rhs: Work) -> Self::Output {
         let result = self.0
             .checked_sub(rhs.0)
-            .expect("PartialCumulativeWork values do not underflow: all subtracted Work values must have been previously added to the PartialCumulativeWork")
+            .expect("PartialCumulativeWork values do not underflow: all subtracted Work values must have been previously added to the PartialCumulativeWork");
 
         PartialCumulativeWork(result)
     }

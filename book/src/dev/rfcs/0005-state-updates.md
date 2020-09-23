@@ -285,15 +285,16 @@ struct Chain {
 Push a block into a chain as the new tip
 
 1. Update cumulative data members
-    - Add block hash to `height_by_hash`
+    - Add hash to `height_by_hash`
+    - Add work to `self.partial_cumulative_work`
     - For each `transaction` in `block`
       - Add key: `transaction.hash` and value: `(height, tx_index)` to `tx_by_hash`
       - Add created utxos to `self.created_utxos`
       - Add spent utxos to `self.spent_utxos`
       - Add anchors to the appropriate `self.<version>_anchors`
       - Add nullifiers to the appropriate `self.<version>_nullifiers`
-    - Add work to `self.partial_cumulative_work`
-    - Add block to end of `self.blocks`
+
+2. Add block to `self.blocks`
 
 #### `pub fn pop_root(&mut self) -> Arc<Block>`
 
@@ -303,13 +304,13 @@ Remove the lowest height block of the non-finalized portion of a chain.
 
 2. Update cumulative data members
     - Remove the block's hash from `self.height_by_hash`
+    - Subtract work from `self.partial_cumulative_work`
     - For each `transaction` in `block`
       - Remove `transaction.hash` from `tx_by_hash`
       - Remove created utxos from `self.created_utxos`
       - Remove spent utxos from `self.spent_utxos`
       - Remove the anchors from the appropriate `self.<version>_anchors`
       - Remove the nullifiers from the appropriate `self.<version>_nullifiers`
-    - Subtract work from `self.partial_cumulative_work`
 
 3. Return the block
 
@@ -334,12 +335,13 @@ Remove the highest height block of the non-finalized portion of a chain.
 
 2. Update cumulative data members
     - Remove the corresponding hash from `self.height_by_hash`
+    - Subtract work from `self.partial_cumulative_work`
     - for each `transaction` in `block`
       - remove `transaction.hash` from `tx_by_hash`
-    - Add consumed utxos and remove new utxos from `self.utxos`
-    - Remove anchors from the appropriate `self.<version>_anchors`
-    - Remove the nullifiers from the appropriate `self.<version>_nullifiers`
-    - Subtract work from `self.partial_cumulative_work`
+      - Remove created utxos from `self.created_utxos`
+      - Remove spent utxos from `self.spent_utxos`
+      - Remove anchors from the appropriate `self.<version>_anchors`
+      - Remove the nullifiers from the appropriate `self.<version>_nullifiers`
 
 #### `Ord`
 
@@ -361,7 +363,8 @@ handled by `#[derive(Default)]`.
 
 1. initialise cumulative data members
     - Construct an empty `self.blocks`, `height_by_hash`, `tx_by_hash`,
-    `self.utxos`, `self.<version>_anchors`, `self.<version>_nullifiers`
+    `self.created_utxos`, `self.spent_utxos`, `self.<version>_anchors`,
+    `self.<version>_nullifiers`
     - Zero `self.partial_cumulative_work`
 
 **Note:** The chain can be empty if:

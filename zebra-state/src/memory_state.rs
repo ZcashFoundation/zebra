@@ -62,6 +62,7 @@ struct Chain {
 }
 
 impl Chain {
+    /// Push a contextually valid non-finalized block into a chain as the new tip.
     pub fn push(&mut self, block: Arc<Block>) {
         let block_height = block
             .coinbase_height()
@@ -72,6 +73,7 @@ impl Chain {
         self.blocks.insert(block_height, block);
     }
 
+    /// Remove the lowest height block of the non-finalized portion of a chain.
     pub fn pop_root(&mut self) -> Arc<Block> {
         let block_height = self.lowest_height();
 
@@ -96,6 +98,8 @@ impl Chain {
             .expect("only called while blocks is populated")
     }
 
+    /// Fork a chain at the block with the givin hash, if it is part of this
+    /// chain.
     pub fn fork(&self, fork_tip: block::Hash) -> Option<Self> {
         if !self.height_by_hash.contains_key(&fork_tip) {
             return None;
@@ -118,6 +122,7 @@ impl Chain {
             .hash()
     }
 
+    /// Remove the highest height block of the non-finalized portion of a chain.
     fn pop_tip(&mut self) {
         let block_height = self.non_finalized_tip_height();
 
@@ -166,6 +171,14 @@ impl UpdateWith<Arc<Block>> for Chain {
         let prior_height = self.height_by_hash.insert(block_hash, block_height);
         assert!(prior_height.is_none());
 
+        // add work to partial cumulative work
+        let block_work = block
+            .header
+            .difficulty_threshold
+            .to_work()
+            .expect("work has already been validated");
+        self.partial_cumulative_work += block_work;
+
         // for each transaction in block
         for (transaction_index, transaction) in block.transactions.iter().enumerate() {
             let (inputs, outputs, shielded_data, joinsplit_data) = match transaction.deref() {
@@ -197,14 +210,6 @@ impl UpdateWith<Arc<Block>> for Chain {
             // add sapling anchor and nullifier
             self.update_chain_state_with(shielded_data);
         }
-
-        // add work to partial cumulative work
-        let block_work = block
-            .header
-            .difficulty_threshold
-            .to_work()
-            .expect("work has already been validated");
-        self.partial_cumulative_work += block_work;
     }
 
     fn revert_chain_state_with(&mut self, block: &Arc<Block>) {
@@ -212,6 +217,14 @@ impl UpdateWith<Arc<Block>> for Chain {
 
         // remove the blocks hash from `height_by_hash`
         assert!(self.height_by_hash.remove(&block_hash).is_some());
+
+        // remove work from partial_cumulative_work
+        let block_work = block
+            .header
+            .difficulty_threshold
+            .to_work()
+            .expect("work has already been validated");
+        self.partial_cumulative_work -= block_work;
 
         // for each transaction in block
         for (transaction_index, transaction) in block.transactions.iter().enumerate() {
@@ -241,14 +254,6 @@ impl UpdateWith<Arc<Block>> for Chain {
             // remove sapling anchor and nullfier
             self.revert_chain_state_with(shielded_data);
         }
-
-        // remove work from partial_cumulative_work
-        let block_work = block
-            .header
-            .difficulty_threshold
-            .to_work()
-            .expect("work has already been validated");
-        self.partial_cumulative_work -= block_work;
     }
 }
 
@@ -399,8 +404,8 @@ impl Ord for Chain {
             // This comparison is a tie-breaker within the local node, so it does not need to
             // be consistent with the ordering on `ExpandedDifficulty` and `block::Hash`.
             match self_hash.0.cmp(&other_hash.0) {
-                Ordering::Eq => unreachable!("Chain tip block hashes are always unique"),
-                ordering @ _ => ordering,
+                Ordering::Equal => unreachable!("Chain tip block hashes are always unique"),
+                ordering => ordering,
             }
         }
     }
