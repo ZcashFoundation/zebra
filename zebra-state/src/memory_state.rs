@@ -139,6 +139,11 @@ impl Chain {
             .remove(&block_height)
             .expect("only called while blocks is populated");
 
+        assert!(
+            !self.blocks.is_empty(),
+            "Non-finalized chains must have at least one block to be valid"
+        );
+
         self.revert_chain_state_with(&block);
     }
 
@@ -177,7 +182,10 @@ impl UpdateWith<Arc<Block>> for Chain {
 
         // add hash to height_by_hash
         let prior_height = self.height_by_hash.insert(block_hash, block_height);
-        assert!(prior_height.is_none());
+        assert!(
+            prior_height.is_none(),
+            "block heights must be unique within a single chain"
+        );
 
         // add work to partial cumulative work
         let block_work = block
@@ -207,7 +215,10 @@ impl UpdateWith<Arc<Block>> for Chain {
             let prior_pair = self
                 .tx_by_hash
                 .insert(transaction_hash, (block_height, transaction_index));
-            assert!(prior_pair.is_none());
+            assert!(
+                prior_pair.is_none(),
+                "transactions must be unique within a single chain"
+            );
 
             // add the utxos this produced
             self.update_chain_state_with(&(transaction_hash, outputs));
@@ -224,7 +235,10 @@ impl UpdateWith<Arc<Block>> for Chain {
         let block_hash = block.hash();
 
         // remove the blocks hash from `height_by_hash`
-        assert!(self.height_by_hash.remove(&block_hash).is_some());
+        assert!(
+            self.height_by_hash.remove(&block_hash).is_some(),
+            "hash must be present if block was"
+        );
 
         // remove work from partial_cumulative_work
         let block_work = block
@@ -251,7 +265,10 @@ impl UpdateWith<Arc<Block>> for Chain {
 
             // remove `transaction.hash` from `tx_by_hash`
             let transaction_hash = transaction.hash();
-            assert!(self.tx_by_hash.remove(&transaction_hash).is_some());
+            assert!(
+                self.tx_by_hash.remove(&transaction_hash).is_some(),
+                "transactions must be present if block was"
+            );
 
             // remove the utxos this produced
             self.revert_chain_state_with(&(transaction_hash, outputs));
@@ -283,10 +300,13 @@ impl UpdateWith<(transaction::Hash, &Vec<transparent::Output>)> for Chain {
         (transaction_hash, outputs): &(transaction::Hash, &Vec<transparent::Output>),
     ) {
         for (utxo_index, _) in outputs.iter().enumerate() {
-            assert!(self.created_utxos.remove(&transparent::OutPoint {
-                hash: *transaction_hash,
-                index: utxo_index as u32,
-            }));
+            assert!(
+                self.created_utxos.remove(&transparent::OutPoint {
+                    hash: *transaction_hash,
+                    index: utxo_index as u32,
+                }),
+                "created_utxos must be present if block was"
+            );
         }
     }
 }
@@ -307,7 +327,10 @@ impl UpdateWith<Vec<transparent::Input>> for Chain {
         for consumed_utxo in inputs {
             match consumed_utxo {
                 transparent::Input::PrevOut { outpoint, .. } => {
-                    assert!(self.spent_utxos.remove(outpoint));
+                    assert!(
+                        self.spent_utxos.remove(outpoint),
+                        "spent_utxos must be present if block was"
+                    );
                 }
                 transparent::Input::Coinbase { .. } => {}
             }
@@ -341,9 +364,18 @@ impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
                 anchor, nullifiers, ..
             } in joinsplit_data.joinsplits()
             {
-                assert!(self.sprout_anchors.remove(anchor));
-                assert!(self.sprout_nullifiers.remove(&nullifiers[0]));
-                assert!(self.sprout_nullifiers.remove(&nullifiers[1]));
+                assert!(
+                    self.sprout_anchors.remove(anchor),
+                    "anchor must be present if block was"
+                );
+                assert!(
+                    self.sprout_nullifiers.remove(&nullifiers[0]),
+                    "nullifiers must be present if block was"
+                );
+                assert!(
+                    self.sprout_nullifiers.remove(&nullifiers[1]),
+                    "nullifiers must be present if block was"
+                );
             }
         }
     }
@@ -368,8 +400,14 @@ impl UpdateWith<Option<transaction::ShieldedData>> for Chain {
                 anchor, nullifier, ..
             } in shielded_data.spends()
             {
-                assert!(self.sapling_anchors.remove(anchor));
-                assert!(self.sapling_nullifiers.remove(nullifier));
+                assert!(
+                    self.sapling_anchors.remove(anchor),
+                    "anchor must be present if block was"
+                );
+                assert!(
+                    self.sapling_nullifiers.remove(nullifier),
+                    "nullifier must be present if block was"
+                );
             }
         }
     }
