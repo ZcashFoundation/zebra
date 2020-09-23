@@ -52,18 +52,13 @@ struct Chain {
     height_by_hash: HashMap<block::Hash, block::Height>,
     tx_by_hash: HashMap<transaction::Hash, (block::Height, usize)>,
 
-    utxos: HashMap<transparent::OutPoint, UTXODiff>,
+    created_utxos: HashSet<transparent::OutPoint>,
+    spent_utxos: HashSet<transparent::OutPoint>,
     sprout_anchors: HashSet<sprout::tree::Root>,
     sapling_anchors: HashSet<sapling::tree::Root>,
     sprout_nullifiers: HashSet<sprout::Nullifier>,
     sapling_nullifiers: HashSet<sapling::Nullifier>,
     partial_cumulative_work: PartialCumulativeWork,
-}
-
-#[derive(Debug, Clone, Copy)]
-enum UTXODiff {
-    Created,
-    Spent,
 }
 
 impl Chain {
@@ -194,15 +189,7 @@ impl UpdateWith<Arc<Block>> for Chain {
             assert!(prior_pair.is_none());
 
             // add deltas for utxos this produced
-            for (utxo_index, _) in outputs.iter().enumerate() {
-                self.utxos.insert(
-                    transparent::OutPoint {
-                        hash: transaction_hash,
-                        index: utxo_index as u32,
-                    },
-                    UTXODiff::Created,
-                );
-            }
+            self.update_chain_state_with(&(transaction_hash, outputs));
             // add deltas for utxos this consumed
             self.update_chain_state_with(inputs);
             // add sprout anchor and nullifiers
@@ -246,15 +233,7 @@ impl UpdateWith<Arc<Block>> for Chain {
             assert!(self.tx_by_hash.remove(&transaction_hash).is_some());
 
             // remove the deltas for utxos this produced
-            for (utxo_index, _) in outputs.iter().enumerate() {
-                assert!(self
-                    .utxos
-                    .remove(&transparent::OutPoint {
-                        hash: transaction_hash,
-                        index: utxo_index as u32,
-                    })
-                    .is_some());
-            }
+            self.revert_chain_state_with(&(transaction_hash, outputs));
             // remove the deltas for utxos this consumed
             self.revert_chain_state_with(inputs);
             // remove sprout anchor and nullifiers
@@ -273,13 +252,29 @@ impl UpdateWith<Arc<Block>> for Chain {
     }
 }
 
-impl UpdateWith<transparent::OutPoint> for Chain {
-    fn update_chain_state_with(&mut self, outpoint: &transparent::OutPoint) {
-        self.utxos.insert(*outpoint, UTXODiff::Created);
+impl UpdateWith<(transaction::Hash, &Vec<transparent::Output>)> for Chain {
+    fn update_chain_state_with(
+        &mut self,
+        (transaction_hash, outputs): &(transaction::Hash, &Vec<transparent::Output>),
+    ) {
+        for (utxo_index, _) in outputs.iter().enumerate() {
+            self.created_utxos.insert(transparent::OutPoint {
+                hash: *transaction_hash,
+                index: utxo_index as u32,
+            });
+        }
     }
 
-    fn revert_chain_state_with(&mut self, outpoint: &transparent::OutPoint) {
-        assert!(self.utxos.remove(outpoint).is_some());
+    fn revert_chain_state_with(
+        &mut self,
+        (transaction_hash, outputs): &(transaction::Hash, &Vec<transparent::Output>),
+    ) {
+        for (utxo_index, _) in outputs.iter().enumerate() {
+            assert!(self.created_utxos.remove(&transparent::OutPoint {
+                hash: *transaction_hash,
+                index: utxo_index as u32,
+            }));
+        }
     }
 }
 
@@ -288,7 +283,7 @@ impl UpdateWith<Vec<transparent::Input>> for Chain {
         for consumed_utxo in inputs {
             match consumed_utxo {
                 transparent::Input::PrevOut { outpoint, .. } => {
-                    self.utxos.insert(*outpoint, UTXODiff::Spent);
+                    self.spent_utxos.insert(*outpoint);
                 }
                 transparent::Input::Coinbase { .. } => {}
             }
@@ -299,7 +294,7 @@ impl UpdateWith<Vec<transparent::Input>> for Chain {
         for consumed_utxo in inputs {
             match consumed_utxo {
                 transparent::Input::PrevOut { outpoint, .. } => {
-                    assert!(self.utxos.remove(outpoint).is_some());
+                    assert!(self.spent_utxos.remove(outpoint));
                 }
                 transparent::Input::Coinbase { .. } => {}
             }

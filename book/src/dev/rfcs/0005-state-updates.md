@@ -286,8 +286,8 @@ Push a block into a chain as the new tip
     - Add hash to `height_by_hash`
     - For each `transaction` in `block`
       - Add key: `transaction.hash` and value: `(height, tx_index)` to `tx_by_hash`
-      - Add new utxos and consumed utxos to `self.utxos`
-        - XXX(Jane): what about coinbase inputs?
+      - Add created utxos to `self.created_utxos`
+      - Add spent utxos to `self.spent_utxos`
       - Add anchors to the appropriate `self.<version>_anchors`
       - Add nullifiers to the appropriate `self.<version>_nullifiers`
     - Add work to `self.partial_cumulative_work`
@@ -301,9 +301,10 @@ Remove the lowest height block of the non-finalized portion of a chain.
 
 2. Update cumulative data members
     - Remove the block's hash from `self.height_by_hash`
-    - for each `transaction` in `block`
-      - remove `transaction.hash` from `tx_by_hash`
-      - Remove new utxos and consumed utxos from `self.utxos`
+    - For each `transaction` in `block`
+      - Remove `transaction.hash` from `tx_by_hash`
+      - Remove created utxos from `self.created_utxos`
+      - Remove spent utxos from `self.spent_utxos`
       - Remove the anchors from the appropriate `self.<version>_anchors`
       - Remove the nullifiers from the appropriate `self.<version>_nullifiers`
     - Remove work from `self.partial_cumulative_work`
@@ -757,6 +758,15 @@ Implemented by querying:
 if the block is not in any non-finalized chain:
 - (finalized) the `height_by_hash` tree (to get the block height) and then
     the `block_by_height` tree (to get the block data).
+
+
+### TODO document request for utxo is available
+
+utxo_is_available:
+* is it in spent? Return false
+* is it in created? Return true
+* is it in the permanent state? Return true
+* otherwise, Return false
 
 
 # Drawbacks
