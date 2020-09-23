@@ -68,7 +68,7 @@ impl Chain {
             .coinbase_height()
             .expect("valid non-finalized blocks have a coinbase height");
 
-        self.add_cumulative_members(&block);
+        self.add_cumulative_members_with(&block);
 
         self.blocks.insert(block_height, block);
     }
@@ -81,7 +81,7 @@ impl Chain {
             .remove(&block_height)
             .expect("only called while block is populated");
 
-        self.remove_cumulative_members(&block);
+        self.remove_cumulative_members_with(&block);
 
         block
     }
@@ -106,7 +106,7 @@ impl Chain {
             .remove(&block_height)
             .expect("only called while block is populated");
 
-        self.remove_cumulative_members(&block);
+        self.remove_cumulative_members_with(&block);
 
         block
     }
@@ -121,8 +121,8 @@ impl Chain {
 }
 
 /// Helper trait to organize inverse operations done on the `Chain` type. Used to
-/// overload the `add_cumulative_members` and `remove_cumulative_members` methods
-/// based on the type of the argument.
+/// overload the `add_cumulative_members_with` and
+/// `remove_cumulative_members_with` methods based on the type of the argument.
 ///
 /// This trait was motivated by the length of the `push` and `pop_root` functions
 /// and fear that it would be easy to introduce bugs when updating them unless
@@ -130,15 +130,15 @@ impl Chain {
 trait UpdateWith<T> {
     /// Update `Chain` cumulative data members to add data that are derived from
     /// `T`
-    fn add_cumulative_members(&mut self, _: &T);
+    fn add_cumulative_members_with(&mut self, _: &T);
 
     /// Update `Chain` cumulative data members to remove data that are derived
     /// from `T`
-    fn remove_cumulative_members(&mut self, _: &T);
+    fn remove_cumulative_members_with(&mut self, _: &T);
 }
 
 impl UpdateWith<Arc<Block>> for Chain {
-    fn add_cumulative_members(&mut self, block: &Arc<Block>) {
+    fn add_cumulative_members_with(&mut self, block: &Arc<Block>) {
         let block_height = block
             .coinbase_height()
             .expect("valid non-finalized blocks have a coinbase height");
@@ -170,13 +170,13 @@ impl UpdateWith<Arc<Block>> for Chain {
             assert!(prior_pair.is_none());
 
             // add deltas for utxos this produced
-            self.add_cumulative_members(outputs);
+            self.add_cumulative_members_with(outputs);
             // add deltas for utxos this consumed
-            self.add_cumulative_members(inputs);
+            self.add_cumulative_members_with(inputs);
             // add sprout anchor and nullifiers
-            self.add_cumulative_members(joinsplit_data);
+            self.add_cumulative_members_with(joinsplit_data);
             // add sapling anchor and nullifier
-            self.add_cumulative_members(shielded_data);
+            self.add_cumulative_members_with(shielded_data);
         }
 
         let block_work = block
@@ -188,7 +188,7 @@ impl UpdateWith<Arc<Block>> for Chain {
         self.partial_cumulative_work += block_work;
     }
 
-    fn remove_cumulative_members(&mut self, block: &Arc<Block>) {
+    fn remove_cumulative_members_with(&mut self, block: &Arc<Block>) {
         let block_hash = block.hash();
 
         assert!(self.height_by_hash.remove(&block_hash).is_some());
@@ -212,13 +212,13 @@ impl UpdateWith<Arc<Block>> for Chain {
             assert!(self.tx_by_hash.remove(&transaction_hash).is_some());
 
             // remove the deltas for utxos this produced
-            self.remove_cumulative_members(outputs);
+            self.remove_cumulative_members_with(outputs);
             // remove the deltas for utxos this consumed
-            self.remove_cumulative_members(inputs);
+            self.remove_cumulative_members_with(inputs);
             // remove sprout anchor and nullifiers
-            self.remove_cumulative_members(joinsplit_data);
+            self.remove_cumulative_members_with(joinsplit_data);
             // remove sapling anchor and nullfier
-            self.remove_cumulative_members(shielded_data);
+            self.remove_cumulative_members_with(shielded_data);
         }
 
         let block_work = block
@@ -232,13 +232,13 @@ impl UpdateWith<Arc<Block>> for Chain {
 }
 
 impl UpdateWith<Vec<transparent::Output>> for Chain {
-    fn add_cumulative_members(&mut self, outputs: &Vec<transparent::Output>) {
+    fn add_cumulative_members_with(&mut self, outputs: &Vec<transparent::Output>) {
         for created_utxo in outputs {
             self.utxos.insert(created_utxo.clone());
         }
     }
 
-    fn remove_cumulative_members(&mut self, outputs: &Vec<transparent::Output>) {
+    fn remove_cumulative_members_with(&mut self, outputs: &Vec<transparent::Output>) {
         for created_utxo in outputs {
             assert!(self.utxos.remove(&created_utxo));
         }
@@ -246,7 +246,7 @@ impl UpdateWith<Vec<transparent::Output>> for Chain {
 }
 
 impl UpdateWith<Vec<transparent::Input>> for Chain {
-    fn add_cumulative_members(&mut self, inputs: &Vec<transparent::Input>) {
+    fn add_cumulative_members_with(&mut self, inputs: &Vec<transparent::Input>) {
         for consumed_utxo in inputs {
             match consumed_utxo {
                 transparent::Input::PrevOut {
@@ -267,7 +267,7 @@ impl UpdateWith<Vec<transparent::Input>> for Chain {
         }
     }
 
-    fn remove_cumulative_members(&mut self, inputs: &Vec<transparent::Input>) {
+    fn remove_cumulative_members_with(&mut self, inputs: &Vec<transparent::Input>) {
         for consumed_utxo in inputs {
             match consumed_utxo {
                 transparent::Input::PrevOut {
@@ -290,7 +290,7 @@ impl UpdateWith<Vec<transparent::Input>> for Chain {
 }
 
 impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
-    fn add_cumulative_members(
+    fn add_cumulative_members_with(
         &mut self,
         joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
     ) {
@@ -306,7 +306,7 @@ impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
         }
     }
 
-    fn remove_cumulative_members(
+    fn remove_cumulative_members_with(
         &mut self,
         joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
     ) {
@@ -324,7 +324,7 @@ impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
 }
 
 impl UpdateWith<Option<transaction::ShieldedData>> for Chain {
-    fn add_cumulative_members(&mut self, shielded_data: &Option<transaction::ShieldedData>) {
+    fn add_cumulative_members_with(&mut self, shielded_data: &Option<transaction::ShieldedData>) {
         if let Some(shielded_data) = shielded_data {
             for sapling::Spend {
                 anchor, nullifier, ..
@@ -336,7 +336,10 @@ impl UpdateWith<Option<transaction::ShieldedData>> for Chain {
         }
     }
 
-    fn remove_cumulative_members(&mut self, shielded_data: &Option<transaction::ShieldedData>) {
+    fn remove_cumulative_members_with(
+        &mut self,
+        shielded_data: &Option<transaction::ShieldedData>,
+    ) {
         if let Some(shielded_data) = shielded_data {
             for sapling::Spend {
                 anchor, nullifier, ..
