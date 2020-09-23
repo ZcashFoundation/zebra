@@ -15,16 +15,22 @@ use zebra_chain::{
 
 use crate::service::QueuedBlock;
 
-pub struct MemoryState {
-    // TODO
+/// A queue of blocks, awaiting the arrival of parent blocks.
+pub struct QueuedBlocks {
+    /// Blocks awaiting their parent blocks for contextual verification.
+    blocks: BTreeMap<block::Hash, QueuedBlock>,
+    /// Hashes from `queued_blocks`, indexed by parent hash.
+    by_parent: BTreeMap<block::Hash, Vec<block::Hash>>,
+    /// Hashes from `queued_blocks`, indexed by block height.
+    by_height: BTreeMap<block::Height, Vec<block::Hash>>,
 }
 
-struct ChainSet {
-    chains: BTreeSet<Chain>,
-
-    queued_blocks: BTreeMap<block::Hash, QueuedBlock>,
-    queued_by_parent: BTreeMap<block::Hash, Vec<block::Hash>>,
-    queued_by_height: BTreeMap<block::Height, Vec<block::Hash>>,
+/// The state of the chains in memory, incuding queued blocks.
+struct ChainState {
+    /// Verified, non-finalized chains.
+    chain_set: BTreeSet<Chain>,
+    /// Blocks awaiting their parent blocks for contextual verification.
+    contextual_queue: QueuedBlocks,
 }
 
 impl ChainSet {
