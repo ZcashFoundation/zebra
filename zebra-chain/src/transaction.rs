@@ -10,6 +10,8 @@ mod serialize;
 mod shielded_data;
 mod sighash;
 
+#[cfg(any(test, feature = "proptest-impl"))]
+mod arbitrary;
 #[cfg(test)]
 mod tests;
 

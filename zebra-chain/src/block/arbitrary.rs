@@ -1,7 +1,7 @@
 use crate::parameters::Network;
 use crate::work::{difficulty::CompactDifficulty, equihash};
 
-use super::super::*;
+use super::*;
 
 use chrono::{TimeZone, Utc};
 use proptest::{

@@ -13,7 +13,7 @@
 
 use std::fmt;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
 /// Sprout note commitment tree root node hash.
@@ -23,7 +23,7 @@ use proptest_derive::Arbitrary;
 /// this block. A root of a note commitment tree is associated with
 /// each treestate.
 #[derive(Clone, Copy, Default, Eq, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(test, derive(Arbitrary))]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct Root([u8; 32]);
 
 impl fmt::Debug for Root {

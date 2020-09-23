@@ -3282,6 +3282,7 @@ dependencies = [
  "lazy_static",
  "owo-colors",
  "pretty_assertions",
+ "proptest",
  "regex",
  "spandoc",
  "thiserror",

@@ -1,6 +1,6 @@
 use std::{fmt, io};
 
-#[cfg(test)]
+#[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 use serde::{Deserialize, Serialize};
 
@@ -19,7 +19,7 @@ use super::Header;
 /// Note: Zebra displays transaction and block hashes in their actual byte-order,
 /// not in reversed byte-order.
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
-#[cfg_attr(test, derive(Arbitrary))]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct Hash(pub [u8; 32]);
 
 impl fmt::Display for Hash {

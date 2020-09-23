@@ -6,7 +6,10 @@ use std::io::{self, Read};
 /// binding h_sig to each a_sk of the JoinSplit description, computed as
 /// described in § 4.10 ‘Non-malleability (Sprout)’ on p. 37
 #[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
+#[cfg_attr(
+    any(test, feature = "proptest-impl"),
+    derive(proptest_derive::Arbitrary)
+)]
 pub struct MAC([u8; 32]);
 
 impl ZcashDeserialize for MAC {
