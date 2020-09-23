@@ -1,14 +1,16 @@
 use std::{
     cmp::Ordering,
     collections::BTreeSet,
-    collections::HashSet,
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
+    ops::Deref,
     sync::Arc,
 };
 
 use zebra_chain::{
     block::{self, Block},
+    primitives::Groth16Proof,
     sapling, sprout, transaction, transparent,
+    work::difficulty::Work,
 };
 
 use crate::{service::QueuedBlock, BoxError};
@@ -46,34 +48,304 @@ impl ChainSet {
     }
 }
 
+#[derive(Debug, Default)]
 struct Chain {
     blocks: BTreeMap<block::Height, Arc<Block>>,
     height_by_hash: HashMap<block::Hash, block::Height>,
     tx_by_hash: HashMap<transaction::Hash, (block::Height, TodoSize)>,
 
     utxos: HashSet<transparent::Output>,
-    sapling_anchors: HashSet<sapling::tree::Root>,
     sprout_anchors: HashSet<sprout::tree::Root>,
-    sapling_nullifiers: HashSet<sapling::Nullifier>,
+    sapling_anchors: HashSet<sapling::tree::Root>,
     sprout_nullifiers: HashSet<sprout::Nullifier>,
+    sapling_nullifiers: HashSet<sapling::Nullifier>,
     partial_cumulative_work: PartialCumulativeWork,
 }
 
 impl Chain {
-    pub fn push(&mut self, block: Arc<Block>) -> Result<(), BoxError> {
-        todo!()
+    pub fn push(&mut self, block: Arc<Block>) {
+        let block_height = block
+            .coinbase_height()
+            .expect("valid non-finalized blocks have a coinbase height");
+
+        self.add_cumulative_members(&block);
+
+        self.blocks.insert(block_height, block);
     }
 
     pub fn pop_root(&mut self) -> Arc<Block> {
-        todo!()
+        let block_height = self.lowest_height();
+
+        let block = self
+            .blocks
+            .remove(&block_height)
+            .expect("only called while block is populated");
+
+        self.remove_cumulative_members(&block);
+
+        block
     }
 
-    pub fn fork(&self, new_typ: block::Hash) -> Option<Self> {
+    fn lowest_height(&self) -> block::Height {
+        self.blocks
+            .keys()
+            .next()
+            .cloned()
+            .expect("only called while block is populated")
+    }
+
+    pub fn fork(&self, new_tip: block::Hash) -> Option<Self> {
         todo!()
     }
 
     fn pop_tip(&mut self) -> Arc<Block> {
-        todo!()
+        let block_height = self.non_finalized_tip_height();
+
+        let block = self
+            .blocks
+            .remove(&block_height)
+            .expect("only called while block is populated");
+
+        self.remove_cumulative_members(&block);
+
+        block
+    }
+
+    fn non_finalized_tip_height(&self) -> block::Height {
+        self.blocks
+            .keys()
+            .next()
+            .cloned()
+            .expect("only called while block is populated")
+    }
+}
+
+/// Helper trait to organize inverse operations done on the `Chain` type. Used to
+/// overload the `add_cumulative_members` and `remove_cumulative_members` methods
+/// based on the type of the argument.
+///
+/// This trait was motivated by the length of the `push` and `pop_root` functions
+/// and fear that it would be easy to introduce bugs when updating them unless
+/// the code was reorganized to keep related operations adjacent to eachother.
+trait UpdateWith<T> {
+    /// Update `Chain` cumulative data members to add data that are derived from
+    /// `T`
+    fn add_cumulative_members(&mut self, _: &T);
+
+    /// Update `Chain` cumulative data members to remove data that are derived
+    /// from `T`
+    fn remove_cumulative_members(&mut self, _: &T);
+}
+
+impl UpdateWith<Arc<Block>> for Chain {
+    fn add_cumulative_members(&mut self, block: &Arc<Block>) {
+        let block_height = block
+            .coinbase_height()
+            .expect("valid non-finalized blocks have a coinbase height");
+
+        let block_hash = block.hash();
+
+        let prior_height = self.height_by_hash.insert(block_hash, block_height);
+        assert!(prior_height.is_none());
+
+        for (transaction_index, transaction) in block.transactions.iter().enumerate() {
+            let (inputs, outputs, shielded_data, joinsplit_data) = match transaction.deref() {
+                transaction::Transaction::V4 {
+                    inputs,
+                    outputs,
+                    shielded_data,
+                    joinsplit_data,
+                    ..
+                } => (inputs, outputs, shielded_data, joinsplit_data),
+                _ => unreachable!(
+                    "older transaction versions only exist in finalized blocks pre sapling",
+                ),
+            };
+
+            let transaction_hash = transaction.hash();
+            let prior_pair = self
+                .tx_by_hash
+                .insert(transaction_hash, (block_height, transaction_index));
+
+            assert!(prior_pair.is_none());
+
+            // add deltas for utxos this produced
+            self.add_cumulative_members(outputs);
+            // add deltas for utxos this consumed
+            self.add_cumulative_members(inputs);
+            // add sprout anchor and nullifiers
+            self.add_cumulative_members(joinsplit_data);
+            // add sapling anchor and nullifier
+            self.add_cumulative_members(shielded_data);
+        }
+
+        let block_work = block
+            .header
+            .difficulty_threshold
+            .to_work()
+            .expect("XXX: explain why we should always have work");
+
+        self.partial_cumulative_work += block_work;
+    }
+
+    fn remove_cumulative_members(&mut self, block: &Arc<Block>) {
+        let block_hash = block.hash();
+
+        assert!(self.height_by_hash.remove(&block_hash).is_some());
+
+        for (transaction_index, transaction) in block.transactions.iter().enumerate() {
+            let (inputs, outputs, shielded_data, joinsplit_data) = match transaction.deref() {
+                transaction::Transaction::V4 {
+                    inputs,
+                    outputs,
+                    shielded_data,
+                    joinsplit_data,
+                    ..
+                } => (inputs, outputs, shielded_data, joinsplit_data),
+                _ => unreachable!(
+                    "older transaction versions only exist in finalized blocks pre sapling",
+                ),
+            };
+
+            let transaction_hash = transaction.hash();
+
+            assert!(self.tx_by_hash.remove(&transaction_hash).is_some());
+
+            // remove the deltas for utxos this produced
+            self.remove_cumulative_members(outputs);
+            // remove the deltas for utxos this consumed
+            self.remove_cumulative_members(inputs);
+            // remove sprout anchor and nullifiers
+            self.remove_cumulative_members(joinsplit_data);
+            // remove sapling anchor and nullfier
+            self.remove_cumulative_members(shielded_data);
+        }
+
+        let block_work = block
+            .header
+            .difficulty_threshold
+            .to_work()
+            .expect("XXX: explain why we should always have work");
+
+        self.partial_cumulative_work -= block_work;
+    }
+}
+
+impl UpdateWith<Vec<transparent::Output>> for Chain {
+    fn add_cumulative_members(&mut self, outputs: &Vec<transparent::Output>) {
+        for created_utxo in outputs {
+            self.utxos.insert(created_utxo.clone());
+        }
+    }
+
+    fn remove_cumulative_members(&mut self, outputs: &Vec<transparent::Output>) {
+        for created_utxo in outputs {
+            assert!(self.utxos.remove(&created_utxo));
+        }
+    }
+}
+
+impl UpdateWith<Vec<transparent::Input>> for Chain {
+    fn add_cumulative_members(&mut self, inputs: &Vec<transparent::Input>) {
+        for consumed_utxo in inputs {
+            match consumed_utxo {
+                transparent::Input::PrevOut {
+                    outpoint: transparent::OutPoint { hash, index },
+                    unlock_script,
+                    sequence,
+                } => todo!(
+                    "we need to change the representation of this at because
+                    they may remove finalized utxos but we do not wish for
+                    that removal itself to be finalized"
+                ),
+                transparent::Input::Coinbase {
+                    height,
+                    data,
+                    sequence,
+                } => todo!("what do we do with these?"),
+            }
+        }
+    }
+
+    fn remove_cumulative_members(&mut self, inputs: &Vec<transparent::Input>) {
+        for consumed_utxo in inputs {
+            match consumed_utxo {
+                transparent::Input::PrevOut {
+                    outpoint: transparent::OutPoint { hash, index },
+                    unlock_script,
+                    sequence,
+                } => todo!(
+                    "we need to change the representation of this at because
+                    they may remove finalized utxos but we do not wish for
+                    that removal itself to be finalized"
+                ),
+                transparent::Input::Coinbase {
+                    height,
+                    data,
+                    sequence,
+                } => todo!("what do we do with these?"),
+            }
+        }
+    }
+}
+
+impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
+    fn add_cumulative_members(
+        &mut self,
+        joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
+    ) {
+        if let Some(joinsplit_data) = joinsplit_data {
+            for sprout::JoinSplit {
+                anchor, nullifiers, ..
+            } in joinsplit_data.joinsplits()
+            {
+                self.sprout_anchors.insert(*anchor);
+                self.sprout_nullifiers.insert(nullifiers[0]);
+                self.sprout_nullifiers.insert(nullifiers[1]);
+            }
+        }
+    }
+
+    fn remove_cumulative_members(
+        &mut self,
+        joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
+    ) {
+        if let Some(joinsplit_data) = joinsplit_data {
+            for sprout::JoinSplit {
+                anchor, nullifiers, ..
+            } in joinsplit_data.joinsplits()
+            {
+                assert!(self.sprout_anchors.remove(anchor));
+                assert!(self.sprout_nullifiers.remove(&nullifiers[0]));
+                assert!(self.sprout_nullifiers.remove(&nullifiers[1]));
+            }
+        }
+    }
+}
+
+impl UpdateWith<Option<transaction::ShieldedData>> for Chain {
+    fn add_cumulative_members(&mut self, shielded_data: &Option<transaction::ShieldedData>) {
+        if let Some(shielded_data) = shielded_data {
+            for sapling::Spend {
+                anchor, nullifier, ..
+            } in shielded_data.spends()
+            {
+                self.sapling_anchors.insert(*anchor);
+                self.sapling_nullifiers.insert(*nullifier);
+            }
+        }
+    }
+
+    fn remove_cumulative_members(&mut self, shielded_data: &Option<transaction::ShieldedData>) {
+        if let Some(shielded_data) = shielded_data {
+            for sapling::Spend {
+                anchor, nullifier, ..
+            } in shielded_data.spends()
+            {
+                assert!(self.sapling_anchors.remove(anchor));
+                assert!(self.sapling_nullifiers.remove(nullifier));
+            }
+        }
     }
 }
 
@@ -120,5 +392,33 @@ impl Ord for Chain {
     }
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 struct PartialCumulativeWork(TodoSize);
+
+impl std::ops::Add<Work> for PartialCumulativeWork {
+    type Output = PartialCumulativeWork;
+
+    fn add(self, rhs: Work) -> Self::Output {
+        todo!()
+    }
+}
+
+impl std::ops::AddAssign<Work> for PartialCumulativeWork {
+    fn add_assign(&mut self, rhs: Work) {
+        todo!()
+    }
+}
+
+impl std::ops::Sub<Work> for PartialCumulativeWork {
+    type Output = PartialCumulativeWork;
+
+    fn sub(self, rhs: Work) -> Self::Output {
+        todo!()
+    }
+}
+
+impl std::ops::SubAssign<Work> for PartialCumulativeWork {
+    fn sub_assign(&mut self, rhs: Work) {
+        todo!()
+    }
+}

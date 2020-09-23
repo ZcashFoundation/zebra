@@ -62,7 +62,7 @@ struct SaplingNoteCommitmentTree;
 /// commitment tree corresponding to the final Sapling treestate of
 /// this block. A root of a note commitment tree is associated with
 /// each treestate.
-#[derive(Clone, Copy, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct Root(pub [u8; 32]);
 

@@ -26,7 +26,7 @@ fn prf_nf(nk: [u8; 32], rho: [u8; 32]) -> [u8; 32] {
 }
 
 /// A Nullifier for Sapling transactions
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub struct Nullifier([u8; 32]);
 

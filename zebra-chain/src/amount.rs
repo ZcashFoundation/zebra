@@ -17,7 +17,7 @@ use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
 type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// A runtime validated type for representing amounts of zatoshis
-#[derive(Debug, Eq, PartialEq, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Eq, PartialEq, Clone, Copy, Serialize, Deserialize, Hash)]
 #[serde(try_from = "i64")]
 #[serde(bound = "C: Constraint")]
 pub struct Amount<C = NegativeAllowed>(i64, PhantomData<C>);
@@ -234,7 +234,7 @@ impl Constraint for NegativeAllowed {
 ///     0..=MAX_MONEY,
 /// );
 /// ```
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct NonNegative {}
 
 impl Constraint for NonNegative {

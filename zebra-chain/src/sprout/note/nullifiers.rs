@@ -59,7 +59,7 @@ impl From<NullifierSeed> for [u8; 32] {
 }
 
 /// A Nullifier for Sprout transactions
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Hash)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub struct Nullifier(pub(crate) [u8; 32]);
 

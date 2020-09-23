@@ -86,7 +86,7 @@ pub enum Input {
 /// I only own one UTXO worth 2 ZEC, I would construct a transaction
 /// that spends my UTXO and sends 1 ZEC to you and 1 ZEC back to me
 /// (just like receiving change).
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct Output {
     /// Transaction value.

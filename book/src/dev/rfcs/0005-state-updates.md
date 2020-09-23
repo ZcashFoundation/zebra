@@ -283,14 +283,15 @@ struct Chain {
 Push a block into a chain as the new tip
 
 1. Update cumulative data members
-    - Add block to end of `self.blocks`
     - Add hash to `height_by_hash`
-    - for each `transaction` in `block`
-      - add key: `transaction.hash` and value: `(height, tx_index)` to `tx_by_hash`
-    - Add new utxos and remove consumed utxos from `self.utxos`
-    - Add anchors to the appropriate `self.<version>_anchors`
-    - Add nullifiers to the appropriate `self.<version>_nullifiers`
+    - For each `transaction` in `block`
+      - Add key: `transaction.hash` and value: `(height, tx_index)` to `tx_by_hash`
+      - Add new utxos and consumed utxos to `self.utxos`
+        - XXX(Jane): what about coinbase inputs?
+      - Add anchors to the appropriate `self.<version>_anchors`
+      - Add nullifiers to the appropriate `self.<version>_nullifiers`
     - Add work to `self.partial_cumulative_work`
+    - Add block to end of `self.blocks`
 
 #### `pub fn pop_root(&mut self) -> Arc<Block>`
 
@@ -302,9 +303,10 @@ Remove the lowest height block of the non-finalized portion of a chain.
     - Remove the block's hash from `self.height_by_hash`
     - for each `transaction` in `block`
       - remove `transaction.hash` from `tx_by_hash`
-    - Remove new utxos from `self.utxos`
-    - Remove the anchors from the appropriate `self.<version>_anchors`
-    - Remove the nullifiers from the appropriate `self.<version>_nullifiers`
+      - Remove new utxos and consumed utxos from `self.utxos`
+      - Remove the anchors from the appropriate `self.<version>_anchors`
+      - Remove the nullifiers from the appropriate `self.<version>_nullifiers`
+    - Remove work from `self.partial_cumulative_work`
 
 3. Return the block
 
