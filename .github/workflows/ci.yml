@@ -32,13 +32,9 @@ jobs:
           command: test
           args: --verbose --all
 
-  test-chain-no-features:
-    name: Test zebra chain without features on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest, macOS-latest]
-
+  build-chain-no-features:
+    name: build zebra-chain without features
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v1
       - uses: actions-rs/toolchain@v1
@@ -49,11 +45,11 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: fetch
-      - name: Run tests without features enabled
+      - name: Run build without features enabled
         working-directory: ./zebra-chain
         env:
           RUST_BACKTRACE: full
-        run: cargo test --verbose --no-default-features
+        run: cargo build --verbose --no-default-features
 
   build:
     name: Build on ${{ matrix.os }}

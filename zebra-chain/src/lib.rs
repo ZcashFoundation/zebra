@@ -21,4 +21,5 @@ pub mod serialization;
 pub mod sprout;
 pub mod transaction;
 pub mod transparent;
+#[cfg(any(test, feature = "proptest-impl"))]
 pub mod work;
