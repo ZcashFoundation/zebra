@@ -502,19 +502,22 @@ to the in memory state, then we finalize all lowest height blocks that are
 past the reorg limit, finally we process any queued blocks and prune any that
 are now past the reorg limit.
 
-1. Run contextual validation on `block` against the finalized and non
+1. If the block itself exists in the finalized chain, it has already been successfully verified:
+  - broadcast `Ok(block.hash())` via `block.rsp_tx`, and return
+
+2. Run contextual validation on `block` against the finalized and non
    finalized state
 
-2. If `block.parent` == `finalized_tip.hash`
+3. If `block.parent` == `finalized_tip.hash`
     - Construct a new `chain` with `Chain::default`
     - call `let hash = chain_set.push_block_on_chain(block, chain)`
     - add `fork` to `chain_set.chains`
     - return `hash`
 
-3. Otherwise, commit or queue the block to the non-finalized state with
+4. Otherwise, commit or queue the block to the non-finalized state with
    `chain_set.queue(block);`
 
-4. If the best chain is longer than the reorg limit
+5. If the best chain is longer than the reorg limit
     - Finalize all lowest height blocks in the best chain, and commit them to
     disk with `CommitFinalizedBlock`:
 
