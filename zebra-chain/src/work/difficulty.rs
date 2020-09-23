@@ -326,17 +326,15 @@ impl AddAssign for Work {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 /// Partial work used to track relative work in non-finalized chains
-pub struct PartialCumulativeWork(usize);
+pub struct PartialCumulativeWork(u128);
 
 impl std::ops::Add<Work> for PartialCumulativeWork {
     type Output = PartialCumulativeWork;
 
     fn add(self, rhs: Work) -> Self::Output {
-        let result = (self.0 as u128)
+        let result = self.0
             .checked_add(rhs.0)
             .expect("Work values do not overflow")
-            .try_into()
-            .expect("......... uhhhh, suddenly wondering why work is a u128");
 
         PartialCumulativeWork(result)
     }
@@ -352,11 +350,9 @@ impl std::ops::Sub<Work> for PartialCumulativeWork {
     type Output = PartialCumulativeWork;
 
     fn sub(self, rhs: Work) -> Self::Output {
-        let result = (self.0 as u128)
+        let result = self.0
             .checked_sub(rhs.0)
-            .expect("Work values do not overflow")
-            .try_into()
-            .expect("......... uhhhh, suddenly wondering why work is a u128");
+            .expect("PartialCumulativeWork values do not underflow: all subtracted Work values must have been previously added to the PartialCumulativeWork")
 
         PartialCumulativeWork(result)
     }

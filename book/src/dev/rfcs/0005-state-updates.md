@@ -285,7 +285,7 @@ struct Chain {
 Push a block into a chain as the new tip
 
 1. Update cumulative data members
-    - Add hash to `height_by_hash`
+    - Add block hash to `height_by_hash`
     - For each `transaction` in `block`
       - Add key: `transaction.hash` and value: `(height, tx_index)` to `tx_by_hash`
       - Add created utxos to `self.created_utxos`
@@ -309,7 +309,7 @@ Remove the lowest height block of the non-finalized portion of a chain.
       - Remove spent utxos from `self.spent_utxos`
       - Remove the anchors from the appropriate `self.<version>_anchors`
       - Remove the nullifiers from the appropriate `self.<version>_nullifiers`
-    - Remove work from `self.partial_cumulative_work`
+    - Subtract work from `self.partial_cumulative_work`
 
 3. Return the block
 

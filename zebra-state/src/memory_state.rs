@@ -79,7 +79,7 @@ impl Chain {
         let block = self
             .blocks
             .remove(&block_height)
-            .expect("only called while block is populated");
+            .expect("only called while blocks is populated");
 
         // update cumulative data members
         self.revert_chain_state_with(&block);
@@ -93,17 +93,17 @@ impl Chain {
             .keys()
             .next()
             .cloned()
-            .expect("only called while block is populated")
+            .expect("only called while blocks is populated")
     }
 
-    pub fn fork(&self, new_tip: block::Hash) -> Option<Self> {
-        if !self.height_by_hash.contains_key(&new_tip) {
+    pub fn fork(&self, fork_tip: block::Hash) -> Option<Self> {
+        if !self.height_by_hash.contains_key(&fork_tip) {
             return None;
         }
 
         let mut forked = self.clone();
 
-        while forked.non_finalized_tip_hash() != new_tip {
+        while forked.non_finalized_tip_hash() != fork_tip {
             forked.pop_tip();
         }
 
@@ -114,7 +114,7 @@ impl Chain {
         self.blocks
             .values()
             .next_back()
-            .expect("only called while block is populated")
+            .expect("only called while blocks is populated")
             .hash()
     }
 
@@ -124,7 +124,7 @@ impl Chain {
         let block = self
             .blocks
             .remove(&block_height)
-            .expect("only called while block is populated");
+            .expect("only called while blocks is populated");
 
         self.revert_chain_state_with(&block);
     }
@@ -134,7 +134,7 @@ impl Chain {
             .blocks
             .keys()
             .next_back()
-            .expect("only called while block is populated")
+            .expect("only called while blocks is populated")
     }
 }
 
@@ -372,35 +372,36 @@ impl Eq for Chain {}
 
 impl PartialOrd for Chain {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        if self.partial_cumulative_work != other.partial_cumulative_work {
-            self.partial_cumulative_work
-                .partial_cmp(&other.partial_cumulative_work)
-        } else {
-            None
-        }
+        Some(self.cmp(other))
     }
 }
 
 impl Ord for Chain {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.partial_cmp(other)
-            .or_else(|| {
-                let self_hash = self
-                    .blocks
-                    .values()
-                    .last()
-                    .expect("always at least 1 element")
-                    .hash();
+        if self.partial_cumulative_work != other.partial_cumulative_work {
+            self.partial_cumulative_work
+                .cmp(&other.partial_cumulative_work)
+        } else {
+            let self_hash = self
+                .blocks
+                .values()
+                .last()
+                .expect("always at least 1 element")
+                .hash();
 
-                let other_hash = other
-                    .blocks
-                    .values()
-                    .last()
-                    .expect("always at least 1 element")
-                    .hash();
+            let other_hash = other
+                .blocks
+                .values()
+                .last()
+                .expect("always at least 1 element")
+                .hash();
 
-                self_hash.0.partial_cmp(&other_hash.0)
-            })
-            .expect("block hashes are always unique")
+            // This comparison is a tie-breaker within the local node, so it does not need to
+            // be consistent with the ordering on `ExpandedDifficulty` and `block::Hash`.
+            match self_hash.0.cmp(&other_hash.0) {
+                Ordering::Eq => unreachable!("Chain tip block hashes are always unique"),
+                ordering @ _ => ordering,
+            }
+        }
     }
 }
