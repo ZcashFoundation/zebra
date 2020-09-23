@@ -269,7 +269,8 @@ struct Chain {
     height_by_hash: HashMap<block::Hash, block::Height>,
     tx_by_hash: HashMap<transaction::Hash, (block::Height, tx_index)>,
 
-    utxos: HashSet<transparent::Output>,
+    created_utxos: HashSet<transparent::OutPoint>,
+    spent_utxos: HashSet<transparent::OutPoint>,
     sapling_anchors: HashSet<sapling::tree::Root>,
     sprout_anchors: HashSet<sprout::tree::Root>,
     sapling_nullifiers: HashSet<sapling::Nullifier>,
