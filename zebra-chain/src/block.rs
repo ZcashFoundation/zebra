@@ -9,6 +9,8 @@ mod serialize;
 
 pub mod merkle;
 
+#[cfg(any(test, feature = "proptest-impl"))]
+mod arbitrary;
 #[cfg(test)]
 mod tests;
 
@@ -25,12 +27,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::{parameters::Network, transaction::Transaction, transparent};
 
-#[cfg(test)]
+#[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
 /// A Zcash block, containing a header and a list of transactions.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(test, derive(Arbitrary))]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct Block {
     /// The block header, containing block metadata.
     pub header: Header,

@@ -1,6 +1,6 @@
 //! Note and value commitments.
 
-#[cfg(test)]
+#[cfg(any(test, feature = "proptest-impl"))]
 mod arbitrary;
 #[cfg(test)]
 mod test_vectors;

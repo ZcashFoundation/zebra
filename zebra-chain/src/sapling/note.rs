@@ -6,7 +6,7 @@
 mod ciphertexts;
 mod nullifiers;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "proptest-impl"))]
 mod arbitrary;
 
 use crate::{

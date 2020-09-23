@@ -16,7 +16,7 @@
 use std::{fmt, io};
 
 use bitvec::prelude::*;
-#[cfg(test)]
+#[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
 use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
@@ -53,7 +53,7 @@ pub struct Position(pub(crate) u64);
 
 /// Sapling Note Commitment Tree
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-#[cfg_attr(test, derive(Arbitrary))]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 struct SaplingNoteCommitmentTree;
 
 /// Sapling note commitment tree root node hash.
@@ -63,7 +63,7 @@ struct SaplingNoteCommitmentTree;
 /// this block. A root of a note commitment tree is associated with
 /// each treestate.
 #[derive(Clone, Copy, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(test, derive(Arbitrary))]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct Root(pub [u8; 32]);
 
 impl fmt::Debug for Root {

@@ -51,10 +51,10 @@ impl ZcashDeserialize for Bctv14Proof {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "proptest-impl"))]
 use proptest::{arbitrary::Arbitrary, collection::vec, prelude::*};
 
-#[cfg(test)]
+#[cfg(any(test, feature = "proptest-impl"))]
 impl Arbitrary for Bctv14Proof {
     type Parameters = ();
 

@@ -1,8 +1,5 @@
 use std::{fmt, io};
 
-#[cfg(test)]
-use proptest::{arbitrary::any, prelude::*};
-
 use serde::{Deserialize, Serialize};
 
 use crate::serialization::{serde_helpers, SerializationError, ZcashDeserialize, ZcashSerialize};
@@ -56,6 +53,8 @@ impl ZcashDeserialize for EncryptedNote {
     }
 }
 
+#[cfg(test)]
+use proptest::prelude::*;
 #[cfg(test)]
 proptest! {
 

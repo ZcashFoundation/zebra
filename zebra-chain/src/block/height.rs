@@ -79,9 +79,9 @@ impl Sub<i32> for Height {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "proptest-impl"))]
 use proptest::prelude::*;
-#[cfg(test)]
+#[cfg(any(test, feature = "proptest-impl"))]
 impl Arbitrary for Height {
     type Parameters = ();
 

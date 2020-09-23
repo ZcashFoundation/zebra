@@ -1,7 +1,7 @@
 #![allow(clippy::unit_arg)]
 use std::fmt;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 use serde::{Deserialize, Serialize};
 
@@ -14,7 +14,7 @@ use super::Transaction;
 /// Note: Zebra displays transaction and block hashes in their actual byte-order,
 /// not in reversed byte-order.
 #[derive(Copy, Clone, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(test, derive(Arbitrary))]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct Hash(pub [u8; 32]);
 
 impl<'a> From<&'a Transaction> for Hash {

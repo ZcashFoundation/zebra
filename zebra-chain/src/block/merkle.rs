@@ -3,7 +3,7 @@
 
 use std::{fmt, io};
 
-#[cfg(test)]
+#[cfg(any(any(test, feature = "proptest-impl"), feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
 use crate::serialization::{sha256d, SerializationError, ZcashDeserialize, ZcashSerialize};
@@ -31,7 +31,7 @@ impl<Transaction> ZcashDeserialize for Tree<Transaction> {
 /// A SHA-256d hash of the root node of a merkle tree of SHA256-d
 /// hashed transactions in a block.
 #[derive(Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(test, derive(Arbitrary))]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct Root(pub [u8; 32]);
 
 impl From<Tree<Transaction>> for Root {
