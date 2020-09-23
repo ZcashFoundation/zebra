@@ -219,7 +219,7 @@ impl UpdateWith<Arc<Block>> for Chain {
             .header
             .difficulty_threshold
             .to_work()
-            .expect("XXX: explain why we should always have work");
+            .expect("work has already been validated");
         self.partial_cumulative_work += block_work;
     }
 
@@ -271,7 +271,7 @@ impl UpdateWith<Arc<Block>> for Chain {
             .header
             .difficulty_threshold
             .to_work()
-            .expect("XXX: explain why we should always have work");
+            .expect("work has already been validated");
         self.partial_cumulative_work -= block_work;
     }
 }
