@@ -188,9 +188,9 @@ impl UpdateWith<Arc<Block>> for Chain {
                 .insert(transaction_hash, (block_height, transaction_index));
             assert!(prior_pair.is_none());
 
-            // add deltas for utxos this produced
+            // add the utxos this produced
             self.update_chain_state_with(&(transaction_hash, outputs));
-            // add deltas for utxos this consumed
+            // add the utxos this consumed
             self.update_chain_state_with(inputs);
             // add sprout anchor and nullifiers
             self.update_chain_state_with(joinsplit_data);
@@ -232,9 +232,9 @@ impl UpdateWith<Arc<Block>> for Chain {
             let transaction_hash = transaction.hash();
             assert!(self.tx_by_hash.remove(&transaction_hash).is_some());
 
-            // remove the deltas for utxos this produced
+            // remove the utxos this produced
             self.revert_chain_state_with(&(transaction_hash, outputs));
-            // remove the deltas for utxos this consumed
+            // remove the utxos this consumed
             self.revert_chain_state_with(inputs);
             // remove sprout anchor and nullifiers
             self.revert_chain_state_with(joinsplit_data);
