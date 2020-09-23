@@ -264,17 +264,18 @@ is completely empty.
 The `Chain` type is defined by the following struct and API:
 
 ```rust
+#[derive(Debug, Default, Clone)]
 struct Chain {
     blocks: BTreeMap<block::Height, Arc<Block>>,
     height_by_hash: HashMap<block::Hash, block::Height>,
-    tx_by_hash: HashMap<transaction::Hash, (block::Height, tx_index)>,
+    tx_by_hash: HashMap<transaction::Hash, (block::Height, usize)>,
 
     created_utxos: HashSet<transparent::OutPoint>,
     spent_utxos: HashSet<transparent::OutPoint>,
-    sapling_anchors: HashSet<sapling::tree::Root>,
     sprout_anchors: HashSet<sprout::tree::Root>,
-    sapling_nullifiers: HashSet<sapling::Nullifier>,
+    sapling_anchors: HashSet<sapling::tree::Root>,
     sprout_nullifiers: HashSet<sprout::Nullifier>,
+    sapling_nullifiers: HashSet<sapling::Nullifier>,
     partial_cumulative_work: PartialCumulativeWork,
 }
 ```
