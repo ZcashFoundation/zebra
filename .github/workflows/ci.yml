@@ -33,7 +33,7 @@ jobs:
           args: --verbose --all
 
   test-chain-no-features:
-    name: Test on ${{ matrix.os }}
+    name: Test zebra chain without features on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
