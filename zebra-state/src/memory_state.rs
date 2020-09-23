@@ -17,7 +17,7 @@ use zebra_chain::{
 use crate::service::QueuedBlock;
 
 /// The state of the chains in memory, incuding queued blocks.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct NonFinalizedState {
     /// Verified, non-finalized chains.
     chain_set: BTreeSet<Chain>,
@@ -26,7 +26,7 @@ pub struct NonFinalizedState {
 }
 
 /// A queue of blocks, awaiting the arrival of parent blocks.
-#[derive(Debug, Default)]
+#[derive(Default)]
 struct QueuedBlocks {
     /// Blocks awaiting their parent blocks for contextual verification.
     blocks: HashMap<block::Hash, QueuedBlock>,
@@ -54,7 +54,7 @@ impl NonFinalizedState {
     }
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Default, Clone)]
 struct Chain {
     blocks: BTreeMap<block::Height, Arc<Block>>,
     height_by_hash: HashMap<block::Hash, block::Height>,
@@ -215,6 +215,7 @@ impl UpdateWith<Arc<Block>> for Chain {
             let prior_pair = self
                 .tx_by_hash
                 .insert(transaction_hash, (block_height, transaction_index));
+
             assert!(
                 prior_pair.is_none(),
                 "transactions must be unique within a single chain"
@@ -454,5 +455,135 @@ impl Ord for Chain {
                 ordering => ordering,
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use proptest::collection::vec;
+    use transaction::Transaction;
+
+    use std::mem;
+
+    use zebra_chain::serialization::ZcashDeserializeInto;
+    use zebra_test::prelude::*;
+
+    use self::assert_eq;
+    use super::*;
+
+    /// Helper trait for constructing "valid" looking chains of blocks
+    trait FakeChainHelper {
+        fn make_fake_child(&self) -> Arc<Block>;
+    }
+
+    impl FakeChainHelper for Block {
+        fn make_fake_child(&self) -> Arc<Block> {
+            let parent_hash = self.hash();
+            let mut child = Block::clone(self);
+            let mut transactions = mem::take(&mut child.transactions);
+            let mut tx = transactions.remove(0);
+
+            let input = match Arc::make_mut(&mut tx) {
+                Transaction::V1 { inputs, .. } => &mut inputs[0],
+                Transaction::V2 { inputs, .. } => &mut inputs[0],
+                Transaction::V3 { inputs, .. } => &mut inputs[0],
+                Transaction::V4 { inputs, .. } => &mut inputs[0],
+            };
+
+            match input {
+                transparent::Input::Coinbase { height, .. } => height.0 += 1,
+                _ => panic!("block must have a coinbase height to create a child"),
+            }
+
+            child.transactions.push(tx);
+            child.header.previous_block_hash = parent_hash;
+
+            Arc::new(child)
+        }
+    }
+
+    #[test]
+    fn construct_empty() {
+        zebra_test::init();
+        let _chain = Chain::default();
+    }
+
+    #[test]
+    fn construct_single() -> Result<()> {
+        zebra_test::init();
+        let block = zebra_test::vectors::BLOCK_MAINNET_434873_BYTES.zcash_deserialize_into()?;
+
+        let mut chain = Chain::default();
+        chain.push(block);
+
+        assert_eq!(1, chain.blocks.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn construct_many() -> Result<()> {
+        zebra_test::init();
+
+        let mut block: Arc<Block> =
+            zebra_test::vectors::BLOCK_MAINNET_434873_BYTES.zcash_deserialize_into()?;
+        let mut blocks = vec![];
+
+        while blocks.len() < 100 {
+            let next_block = block.make_fake_child();
+            blocks.push(block);
+            block = next_block;
+        }
+
+        let mut chain = Chain::default();
+
+        for block in blocks {
+            chain.push(block);
+        }
+
+        assert_eq!(100, chain.blocks.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn forked_equals_pushed() -> Result<()> {
+        zebra_test::init();
+
+        prop_compose! {
+            fn arbitrary_chain(mut height: block::Height)
+                (chain in vec(any::<Arc<Block>>(), 0..100)) -> Vec<Arc<Block>>
+            {
+
+            }
+
+            fn arbitrary_chain_and_index()
+                (chain in vec(any::<Arc<Block>>(), 0..100))
+                (index in 0..chain.len(), chain in Just(chain)) -> (Vec<Arc<Block>>, usize)
+            {
+                (chain, index)
+            }
+        }
+
+        proptest!(|((chain, index) in arbitrary_chain_and_index())| {
+            let fork_tip_hash = chain[index].hash();
+            let mut full_chain = Chain::default();
+            let mut partial_chain = Chain::default();
+
+            for block in chain.iter().take(index) {
+                partial_chain.push(block.clone());
+            }
+
+            for block in chain {
+                full_chain.push(block);
+            }
+
+            let forked = full_chain.fork(fork_tip_hash).expect("hash is present");
+
+            assert_eq!(forked.blocks.len(), partial_chain.blocks.len());
+
+        });
+
+        Ok(())
     }
 }
