@@ -16,9 +16,6 @@ use zebra_chain::{
 
 use crate::{service::QueuedBlock, BoxError};
 
-// Todo replace usages of this with the correct integer types
-type TodoSize = usize;
-
 pub struct MemoryState {
     // TODO
 }
@@ -53,7 +50,7 @@ impl ChainSet {
 struct Chain {
     blocks: BTreeMap<block::Height, Arc<Block>>,
     height_by_hash: HashMap<block::Hash, block::Height>,
-    tx_by_hash: HashMap<transaction::Hash, (block::Height, TodoSize)>,
+    tx_by_hash: HashMap<transaction::Hash, (block::Height, usize)>,
 
     utxos: HashMap<transparent::OutPoint, UTXODiff>,
     sprout_anchors: HashSet<sprout::tree::Root>,
