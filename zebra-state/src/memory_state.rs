@@ -10,6 +10,7 @@ use zebra_chain::{
     block::{self, Block},
     primitives::Groth16Proof,
     sapling, sprout, transaction, transparent,
+    work::difficulty::PartialCumulativeWork,
     work::difficulty::Work,
 };
 
@@ -48,7 +49,7 @@ impl ChainSet {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct Chain {
     blocks: BTreeMap<block::Height, Arc<Block>>,
     height_by_hash: HashMap<block::Hash, block::Height>,
@@ -68,7 +69,7 @@ impl Chain {
             .coinbase_height()
             .expect("valid non-finalized blocks have a coinbase height");
 
-        self.add_cumulative_members_with(&block);
+        self.update_chain_state_with(&block);
 
         self.blocks.insert(block_height, block);
     }
@@ -81,7 +82,7 @@ impl Chain {
             .remove(&block_height)
             .expect("only called while block is populated");
 
-        self.remove_cumulative_members_with(&block);
+        self.revert_chain_state_with(&block);
 
         block
     }
@@ -95,10 +96,28 @@ impl Chain {
     }
 
     pub fn fork(&self, new_tip: block::Hash) -> Option<Self> {
-        todo!()
+        if !self.height_by_hash.contains_key(&new_tip) {
+            return None;
+        }
+
+        let mut forked = self.clone();
+
+        while forked.non_finalized_tip_hash() != new_tip {
+            forked.pop_tip();
+        }
+
+        Some(forked)
     }
 
-    fn pop_tip(&mut self) -> Arc<Block> {
+    fn non_finalized_tip_hash(&self) -> block::Hash {
+        self.blocks
+            .values()
+            .next_back()
+            .expect("only called while block is populated")
+            .hash()
+    }
+
+    fn pop_tip(&mut self) {
         let block_height = self.non_finalized_tip_height();
 
         let block = self
@@ -106,23 +125,21 @@ impl Chain {
             .remove(&block_height)
             .expect("only called while block is populated");
 
-        self.remove_cumulative_members_with(&block);
-
-        block
+        self.revert_chain_state_with(&block);
     }
 
     fn non_finalized_tip_height(&self) -> block::Height {
-        self.blocks
+        *self
+            .blocks
             .keys()
-            .next()
-            .cloned()
+            .next_back()
             .expect("only called while block is populated")
     }
 }
 
 /// Helper trait to organize inverse operations done on the `Chain` type. Used to
-/// overload the `add_cumulative_members_with` and
-/// `remove_cumulative_members_with` methods based on the type of the argument.
+/// overload the `update_chain_state_with` and `revert_chain_state_with` methods
+/// based on the type of the argument.
 ///
 /// This trait was motivated by the length of the `push` and `pop_root` functions
 /// and fear that it would be easy to introduce bugs when updating them unless
@@ -130,15 +147,15 @@ impl Chain {
 trait UpdateWith<T> {
     /// Update `Chain` cumulative data members to add data that are derived from
     /// `T`
-    fn add_cumulative_members_with(&mut self, _: &T);
+    fn update_chain_state_with(&mut self, _: &T);
 
     /// Update `Chain` cumulative data members to remove data that are derived
     /// from `T`
-    fn remove_cumulative_members_with(&mut self, _: &T);
+    fn revert_chain_state_with(&mut self, _: &T);
 }
 
 impl UpdateWith<Arc<Block>> for Chain {
-    fn add_cumulative_members_with(&mut self, block: &Arc<Block>) {
+    fn update_chain_state_with(&mut self, block: &Arc<Block>) {
         let block_height = block
             .coinbase_height()
             .expect("valid non-finalized blocks have a coinbase height");
@@ -170,13 +187,13 @@ impl UpdateWith<Arc<Block>> for Chain {
             assert!(prior_pair.is_none());
 
             // add deltas for utxos this produced
-            self.add_cumulative_members_with(outputs);
+            self.update_chain_state_with(outputs);
             // add deltas for utxos this consumed
-            self.add_cumulative_members_with(inputs);
+            self.update_chain_state_with(inputs);
             // add sprout anchor and nullifiers
-            self.add_cumulative_members_with(joinsplit_data);
+            self.update_chain_state_with(joinsplit_data);
             // add sapling anchor and nullifier
-            self.add_cumulative_members_with(shielded_data);
+            self.update_chain_state_with(shielded_data);
         }
 
         let block_work = block
@@ -188,7 +205,7 @@ impl UpdateWith<Arc<Block>> for Chain {
         self.partial_cumulative_work += block_work;
     }
 
-    fn remove_cumulative_members_with(&mut self, block: &Arc<Block>) {
+    fn revert_chain_state_with(&mut self, block: &Arc<Block>) {
         let block_hash = block.hash();
 
         assert!(self.height_by_hash.remove(&block_hash).is_some());
@@ -212,13 +229,13 @@ impl UpdateWith<Arc<Block>> for Chain {
             assert!(self.tx_by_hash.remove(&transaction_hash).is_some());
 
             // remove the deltas for utxos this produced
-            self.remove_cumulative_members_with(outputs);
+            self.revert_chain_state_with(outputs);
             // remove the deltas for utxos this consumed
-            self.remove_cumulative_members_with(inputs);
+            self.revert_chain_state_with(inputs);
             // remove sprout anchor and nullifiers
-            self.remove_cumulative_members_with(joinsplit_data);
+            self.revert_chain_state_with(joinsplit_data);
             // remove sapling anchor and nullfier
-            self.remove_cumulative_members_with(shielded_data);
+            self.revert_chain_state_with(shielded_data);
         }
 
         let block_work = block
@@ -232,13 +249,13 @@ impl UpdateWith<Arc<Block>> for Chain {
 }
 
 impl UpdateWith<Vec<transparent::Output>> for Chain {
-    fn add_cumulative_members_with(&mut self, outputs: &Vec<transparent::Output>) {
+    fn update_chain_state_with(&mut self, outputs: &Vec<transparent::Output>) {
         for created_utxo in outputs {
             self.utxos.insert(created_utxo.clone());
         }
     }
 
-    fn remove_cumulative_members_with(&mut self, outputs: &Vec<transparent::Output>) {
+    fn revert_chain_state_with(&mut self, outputs: &Vec<transparent::Output>) {
         for created_utxo in outputs {
             assert!(self.utxos.remove(&created_utxo));
         }
@@ -246,7 +263,7 @@ impl UpdateWith<Vec<transparent::Output>> for Chain {
 }
 
 impl UpdateWith<Vec<transparent::Input>> for Chain {
-    fn add_cumulative_members_with(&mut self, inputs: &Vec<transparent::Input>) {
+    fn update_chain_state_with(&mut self, inputs: &Vec<transparent::Input>) {
         for consumed_utxo in inputs {
             match consumed_utxo {
                 transparent::Input::PrevOut {
@@ -267,7 +284,7 @@ impl UpdateWith<Vec<transparent::Input>> for Chain {
         }
     }
 
-    fn remove_cumulative_members_with(&mut self, inputs: &Vec<transparent::Input>) {
+    fn revert_chain_state_with(&mut self, inputs: &Vec<transparent::Input>) {
         for consumed_utxo in inputs {
             match consumed_utxo {
                 transparent::Input::PrevOut {
@@ -290,7 +307,7 @@ impl UpdateWith<Vec<transparent::Input>> for Chain {
 }
 
 impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
-    fn add_cumulative_members_with(
+    fn update_chain_state_with(
         &mut self,
         joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
     ) {
@@ -306,7 +323,7 @@ impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
         }
     }
 
-    fn remove_cumulative_members_with(
+    fn revert_chain_state_with(
         &mut self,
         joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
     ) {
@@ -324,7 +341,7 @@ impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
 }
 
 impl UpdateWith<Option<transaction::ShieldedData>> for Chain {
-    fn add_cumulative_members_with(&mut self, shielded_data: &Option<transaction::ShieldedData>) {
+    fn update_chain_state_with(&mut self, shielded_data: &Option<transaction::ShieldedData>) {
         if let Some(shielded_data) = shielded_data {
             for sapling::Spend {
                 anchor, nullifier, ..
@@ -336,10 +353,7 @@ impl UpdateWith<Option<transaction::ShieldedData>> for Chain {
         }
     }
 
-    fn remove_cumulative_members_with(
-        &mut self,
-        shielded_data: &Option<transaction::ShieldedData>,
-    ) {
+    fn revert_chain_state_with(&mut self, shielded_data: &Option<transaction::ShieldedData>) {
         if let Some(shielded_data) = shielded_data {
             for sapling::Spend {
                 anchor, nullifier, ..
@@ -392,36 +406,5 @@ impl Ord for Chain {
                 self_hash.0.partial_cmp(&other_hash.0)
             })
             .expect("block hashes are always unique")
-    }
-}
-
-#[derive(Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
-struct PartialCumulativeWork(TodoSize);
-
-impl std::ops::Add<Work> for PartialCumulativeWork {
-    type Output = PartialCumulativeWork;
-
-    fn add(self, rhs: Work) -> Self::Output {
-        todo!()
-    }
-}
-
-impl std::ops::AddAssign<Work> for PartialCumulativeWork {
-    fn add_assign(&mut self, rhs: Work) {
-        todo!()
-    }
-}
-
-impl std::ops::Sub<Work> for PartialCumulativeWork {
-    type Output = PartialCumulativeWork;
-
-    fn sub(self, rhs: Work) -> Self::Output {
-        todo!()
-    }
-}
-
-impl std::ops::SubAssign<Work> for PartialCumulativeWork {
-    fn sub_assign(&mut self, rhs: Work) {
-        todo!()
     }
 }

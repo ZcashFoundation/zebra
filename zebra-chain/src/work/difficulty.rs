@@ -13,7 +13,10 @@
 
 use crate::block;
 
-use std::cmp::{Ordering, PartialEq, PartialOrd};
+use std::{
+    cmp::{Ordering, PartialEq, PartialOrd},
+    convert::TryInto,
+};
 use std::{fmt, ops::Add, ops::AddAssign};
 
 use primitive_types::U256;
@@ -318,5 +321,49 @@ impl Add for Work {
 impl AddAssign for Work {
     fn add_assign(&mut self, rhs: Work) {
         *self = *self + rhs;
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+/// Partial work used to track relative work in non-finalized chains
+pub struct PartialCumulativeWork(usize);
+
+impl std::ops::Add<Work> for PartialCumulativeWork {
+    type Output = PartialCumulativeWork;
+
+    fn add(self, rhs: Work) -> Self::Output {
+        let result = (self.0 as u128)
+            .checked_add(rhs.0)
+            .expect("Work values do not overflow")
+            .try_into()
+            .expect("......... uhhhh, suddenly wondering why work is a u128");
+
+        PartialCumulativeWork(result)
+    }
+}
+
+impl std::ops::AddAssign<Work> for PartialCumulativeWork {
+    fn add_assign(&mut self, rhs: Work) {
+        *self = *self + rhs;
+    }
+}
+
+impl std::ops::Sub<Work> for PartialCumulativeWork {
+    type Output = PartialCumulativeWork;
+
+    fn sub(self, rhs: Work) -> Self::Output {
+        let result = (self.0 as u128)
+            .checked_sub(rhs.0)
+            .expect("Work values do not overflow")
+            .try_into()
+            .expect("......... uhhhh, suddenly wondering why work is a u128");
+
+        PartialCumulativeWork(result)
+    }
+}
+
+impl std::ops::SubAssign<Work> for PartialCumulativeWork {
+    fn sub_assign(&mut self, rhs: Work) {
+        *self = *self - rhs;
     }
 }

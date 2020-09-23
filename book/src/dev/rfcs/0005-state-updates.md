@@ -323,7 +323,7 @@ Fork a chain at the block with the given hash, if it is part of this chain.
 
 4. Return `forked`
 
-#### `fn pop_tip(&mut self) -> Arc<Block>`
+#### `fn pop_tip(&mut self)`
 
 Remove the highest height block of the non-finalized portion of a chain.
 
@@ -337,8 +337,6 @@ Remove the highest height block of the non-finalized portion of a chain.
     - Remove anchors from the appropriate `self.<version>_anchors`
     - Remove the nullifiers from the appropriate `self.<version>_nullifiers`
     - Subtract work from `self.partial_cumulative_work`
-
-3. Return the block
 
 #### `Ord`
 
