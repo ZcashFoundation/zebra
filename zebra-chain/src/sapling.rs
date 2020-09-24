@@ -1,6 +1,8 @@
 //! Sapling-related functionality.
 
 mod address;
+#[cfg(any(test, feature = "proptest-impl"))]
+mod arbitrary;
 mod commitment;
 mod note;
 mod output;

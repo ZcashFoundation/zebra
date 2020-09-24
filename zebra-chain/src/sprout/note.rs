@@ -3,7 +3,7 @@
 #![allow(clippy::unit_arg)]
 #![allow(dead_code)]
 
-#[cfg(test)]
+#[cfg(any(test, feature = "proptest-impl"))]
 mod arbitrary;
 mod ciphertexts;
 mod mac;
@@ -28,7 +28,10 @@ pub use nullifiers::{Nullifier, NullifierSeed};
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#notes
 #[derive(Clone, Debug)]
-#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
+#[cfg_attr(
+    any(test, feature = "proptest-impl"),
+    derive(proptest_derive::Arbitrary)
+)]
 pub struct Note {
     /// The paying key of the recipient’s shielded payment address
     pub paying_key: PayingKey,

@@ -13,9 +13,9 @@ use byteorder::{ByteOrder, LittleEndian};
 use rand_core::{CryptoRng, RngCore};
 use sha2::digest::generic_array::{typenum::U64, GenericArray};
 
-#[cfg(test)]
+#[cfg(any(test, feature = "proptest-impl"))]
 use proptest::{array, prelude::*};
-#[cfg(test)]
+#[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
 use crate::{
@@ -61,7 +61,7 @@ fn prf_addr(x: [u8; 32], t: u8) -> [u8; 32] {
 /// All other Sprout key types derive from the SpendingKey value.
 /// Actually 252 bits.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-#[cfg_attr(test, derive(Arbitrary))]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct SpendingKey {
     /// What would normally be the value inside a tuple struct.
     pub bytes: [u8; 32],
@@ -183,7 +183,10 @@ impl From<SpendingKey> for ReceivingKey {
 
 /// Derived from a _SpendingKey_.
 #[derive(Copy, Clone, Eq, PartialEq)]
-#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
+#[cfg_attr(
+    any(test, feature = "proptest-impl"),
+    derive(proptest_derive::Arbitrary)
+)]
 pub struct PayingKey(pub [u8; 32]);
 
 impl AsRef<[u8]> for PayingKey {
@@ -310,7 +313,7 @@ impl std::str::FromStr for IncomingViewingKey {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "proptest-impl"))]
 impl Arbitrary for IncomingViewingKey {
     type Parameters = ();
 

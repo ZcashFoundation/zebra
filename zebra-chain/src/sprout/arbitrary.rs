@@ -5,7 +5,7 @@ use crate::{
     primitives::ZkSnarkProof,
 };
 
-use super::super::{commitment, note, tree, JoinSplit};
+use super::{commitment, note, tree, JoinSplit};
 
 impl<P: ZkSnarkProof + Arbitrary + 'static> Arbitrary for JoinSplit<P> {
     type Parameters = ();

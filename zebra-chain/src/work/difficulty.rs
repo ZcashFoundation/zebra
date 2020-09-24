@@ -18,9 +18,9 @@ use std::{fmt, ops::Add, ops::AddAssign};
 
 use primitive_types::U256;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
-#[cfg(test)]
+#[cfg(tests)]
 mod tests;
 
 /// A 32-bit "compact bits" value, which represents the difficulty threshold for
@@ -52,7 +52,7 @@ mod tests;
 /// multiple equivalent `CompactDifficulty` values, due to redundancy in the
 /// floating-point format.
 #[derive(Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(test, derive(Arbitrary))]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct CompactDifficulty(pub u32);
 
 impl fmt::Debug for CompactDifficulty {

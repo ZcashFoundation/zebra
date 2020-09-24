@@ -9,7 +9,10 @@ use std::{
 
 /// An encoding of a Bitcoin script.
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
+#[cfg_attr(
+    any(test, feature = "proptest-impl"),
+    derive(proptest_derive::Arbitrary)
+)]
 pub struct Script(pub Vec<u8>);
 
 impl fmt::Debug for Script {

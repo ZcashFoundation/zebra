@@ -8,7 +8,10 @@ use super::note::Note;
 
 /// The randomness used in the Pedersen Hash for note commitment.
 #[derive(Copy, Clone, Debug, PartialEq)]
-#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
+#[cfg_attr(
+    any(test, feature = "proptest-impl"),
+    derive(proptest_derive::Arbitrary)
+)]
 pub struct CommitmentRandomness(pub [u8; 32]);
 
 impl AsRef<[u8]> for CommitmentRandomness {
@@ -19,7 +22,10 @@ impl AsRef<[u8]> for CommitmentRandomness {
 
 /// Note commitments for the output notes.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
-#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
+#[cfg_attr(
+    any(test, feature = "proptest-impl"),
+    derive(proptest_derive::Arbitrary)
+)]
 pub struct NoteCommitment(pub(crate) [u8; 32]);
 
 impl Eq for NoteCommitment {}
