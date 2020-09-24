@@ -2,7 +2,7 @@ use proptest::{arbitrary::any, collection::vec, prelude::*};
 
 use crate::block;
 
-use super::super::{CoinbaseData, Input, OutPoint, Script};
+use super::{CoinbaseData, Input, OutPoint, Script};
 
 impl Arbitrary for Input {
     type Parameters = ();

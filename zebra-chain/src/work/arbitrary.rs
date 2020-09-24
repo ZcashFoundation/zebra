@@ -1,4 +1,4 @@
-use super::super::*;
+use super::*;
 
 use proptest::{arbitrary::Arbitrary, collection::vec, prelude::*};
 

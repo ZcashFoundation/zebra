@@ -9,9 +9,10 @@ use crate::{
     sapling, sprout, transparent,
 };
 
-use super::super::{JoinSplitData, LockTime, Memo, ShieldedData, Transaction};
+use super::{JoinSplitData, LockTime, Memo, ShieldedData, Transaction};
 
 impl Transaction {
+    /// Generate a proptest strategy for V1 Transactions
     pub fn v1_strategy() -> impl Strategy<Value = Self> {
         (
             vec(any::<transparent::Input>(), 0..10),
@@ -26,6 +27,7 @@ impl Transaction {
             .boxed()
     }
 
+    /// Generate a proptest strategy for V2 Transactions
     pub fn v2_strategy() -> impl Strategy<Value = Self> {
         (
             vec(any::<transparent::Input>(), 0..10),
@@ -44,6 +46,7 @@ impl Transaction {
             .boxed()
     }
 
+    /// Generate a proptest strategy for V3 Transactions
     pub fn v3_strategy() -> impl Strategy<Value = Self> {
         (
             vec(any::<transparent::Input>(), 0..10),
@@ -64,6 +67,7 @@ impl Transaction {
             .boxed()
     }
 
+    /// Generate a proptest strategy for V4 Transactions
     pub fn v4_strategy() -> impl Strategy<Value = Self> {
         (
             vec(any::<transparent::Input>(), 0..10),

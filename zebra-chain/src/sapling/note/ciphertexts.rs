@@ -1,8 +1,5 @@
 use std::{fmt, io};
 
-#[cfg(test)]
-use proptest::{arbitrary::any, prelude::*};
-
 use crate::serialization::{serde_helpers, SerializationError, ZcashDeserialize, ZcashSerialize};
 
 /// A ciphertext component for encrypted output notes.
@@ -103,6 +100,8 @@ impl ZcashDeserialize for WrappedNoteKey {
     }
 }
 
+#[cfg(test)]
+use proptest::prelude::*;
 #[cfg(test)]
 proptest! {
 
