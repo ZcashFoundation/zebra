@@ -14,10 +14,7 @@ impl Arbitrary for Block {
     type Parameters = LedgerState;
 
     fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
-        (
-            any::<Header>(),
-            any::<Vec<Arc<Transaction>>>(),
-        )
+        (any::<Header>(), any::<Vec<std::sync::Arc<Transaction>>>());
         todo!()
     }
 
