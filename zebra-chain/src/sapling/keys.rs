@@ -869,7 +869,9 @@ impl FromStr for FullViewingKey {
 ///
 /// https://zips.z.cash/protocol/canopy.pdf#concretesaplingkeyagreement
 #[derive(Copy, Clone, Deserialize, PartialEq, Serialize)]
-pub struct EphemeralPublicKey(#[serde(with = "serde_helpers::AffinePoint")] jubjub::AffinePoint);
+pub struct EphemeralPublicKey(
+    #[serde(with = "serde_helpers::AffinePoint")] pub jubjub::AffinePoint,
+);
 
 impl fmt::Debug for EphemeralPublicKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

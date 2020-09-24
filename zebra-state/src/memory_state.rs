@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 use std::{
     cmp::Ordering,
-    collections::BTreeSet,
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    fmt,
     ops::Deref,
     sync::Arc,
 };
@@ -460,13 +460,15 @@ impl Ord for Chain {
 
 #[cfg(test)]
 mod tests {
-    use proptest::collection::vec;
     use transaction::Transaction;
 
     use std::mem;
 
-    use zebra_chain::parameters::{Network, NetworkUpgrade};
     use zebra_chain::serialization::ZcashDeserializeInto;
+    use zebra_chain::{
+        parameters::{Network, NetworkUpgrade},
+        LedgerState,
+    };
     use zebra_test::prelude::*;
 
     use self::assert_eq;
@@ -546,20 +548,24 @@ mod tests {
 
         Ok(())
     }
-    prop_compose! {
-        fn arbitrary_chain(mut height: block::Height)
-            (chain in vec(any::<Arc<Block>>(), 0..100)) -> Vec<Arc<Block>>
-        {
-            unimplemented!()
-        }
+
+    fn arbitrary_chain(height: block::Height) -> BoxedStrategy<Vec<Arc<Block>>> {
+        Block::partial_chain_strategy(
+            LedgerState {
+                tip_height: height,
+                is_coinbase: true,
+                network: Network::Mainnet,
+            },
+            100,
+        )
     }
 
     prop_compose! {
-        fn arbitrary_chain_and_index()
-            (chain in arbitrary_chain(NetworkUpgrade::Sapling.activation_height(Network::Mainnet).unwrap()))
-            (index in 0..chain.len(), chain in Just(chain)) -> (Vec<Arc<Block>>, usize)
+        fn arbitrary_chain_and_count()
+            (chain in arbitrary_chain(NetworkUpgrade::Blossom.activation_height(Network::Mainnet).unwrap()))
+            (count in 1..chain.len(), chain in Just(chain)) -> (NoDebug<Vec<Arc<Block>>>, usize)
         {
-            (chain, index)
+            (NoDebug(chain), count)
         }
     }
 
@@ -567,12 +573,13 @@ mod tests {
     fn forked_equals_pushed() -> Result<()> {
         zebra_test::init();
 
-        proptest!(|((chain, index) in arbitrary_chain_and_index())| {
-            let fork_tip_hash = chain[index].hash();
+        proptest!(|((chain, count) in arbitrary_chain_and_count())| {
+            let chain = chain.0;
+            let fork_tip_hash = chain[count - 1].hash();
             let mut full_chain = Chain::default();
             let mut partial_chain = Chain::default();
 
-            for block in chain.iter().take(index) {
+            for block in chain.iter().take(count) {
                 partial_chain.push(block.clone());
             }
 
@@ -582,10 +589,47 @@ mod tests {
 
             let forked = full_chain.fork(fork_tip_hash).expect("hash is present");
 
-            assert_eq!(forked.blocks.len(), partial_chain.blocks.len());
+            prop_assert_eq!(forked.blocks.len(), partial_chain.blocks.len());
 
         });
 
         Ok(())
+    }
+
+    #[test]
+    fn finalized_equals_pushed() -> Result<()> {
+        zebra_test::init();
+
+        proptest!(|((chain, end_count) in arbitrary_chain_and_count())| {
+            let chain = chain.0;
+            let finalized_count = chain.len() - end_count;
+            let mut full_chain = Chain::default();
+            let mut partial_chain = Chain::default();
+
+            for block in chain.iter().skip(finalized_count) {
+                partial_chain.push(block.clone());
+            }
+
+            for block in chain {
+                full_chain.push(block);
+            }
+
+            for _ in 0..finalized_count {
+                let _finalized = full_chain.pop_root();
+            }
+
+            prop_assert_eq!(full_chain.blocks.len(), partial_chain.blocks.len());
+
+        });
+
+        Ok(())
+    }
+}
+
+struct NoDebug<T>(T);
+
+impl<T> fmt::Debug for NoDebug<Vec<T>> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}, len={}", std::any::type_name::<T>(), self.0.len())
     }
 }

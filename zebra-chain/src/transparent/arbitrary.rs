@@ -1,25 +1,20 @@
 use proptest::{arbitrary::any, collection::vec, prelude::*};
 
-use crate::block;
+use crate::{block, LedgerState};
 
 use super::{CoinbaseData, Input, OutPoint, Script};
 
 impl Input {
     /// Construct a strategy for creating validish vecs of Inputs.
-    pub fn vec_strategy(height: block::Height, max_size: usize) -> BoxedStrategy<Vec<Self>> {
-        (0..max_size)
-            .prop_flat_map(move |count| {
-                let mut inputs = vec![];
-                for ind in 0..count {
-                    if ind == 0 {
-                        inputs.push(Self::arbitrary_with(Some(height)))
-                    } else {
-                        inputs.push(Self::arbitrary_with(None))
-                    }
-                }
-                inputs
-            })
-            .boxed()
+    pub fn vec_strategy(ledger_state: LedgerState, max_size: usize) -> BoxedStrategy<Vec<Self>> {
+        if ledger_state.is_coinbase {
+            let height = block::Height(ledger_state.tip_height.0 + 1);
+            Self::arbitrary_with(Some(height))
+                .prop_map(|input| vec![input])
+                .boxed()
+        } else {
+            vec(Self::arbitrary_with(None), max_size).boxed()
+        }
     }
 }
 

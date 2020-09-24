@@ -23,29 +23,25 @@ pub mod transaction;
 pub mod transparent;
 pub mod work;
 
-#[derive(Default)]
+#[derive(Debug, Clone, Copy)]
 #[cfg(any(test, feature = "proptest-impl"))]
-pub struct LedgerState(pub Option<InProgressLedgerState>);
-
-#[cfg(any(test, feature = "proptest-impl"))]
-pub struct InProgressLedgerState {
-    tip_height: block::Height,
-    tip_hash: block::Hash,
-    network: parameters::Network,
+pub struct LedgerState {
+    pub tip_height: block::Height,
+    pub is_coinbase: bool,
+    pub network: parameters::Network,
 }
 
 #[cfg(any(test, feature = "proptest-impl"))]
-impl Default for InProgressLedgerState {
+impl Default for LedgerState {
     fn default() -> Self {
         let network = parameters::Network::Mainnet;
         let tip_height = parameters::NetworkUpgrade::Sapling
             .activation_height(network)
             .unwrap();
-        let tip_hash = block::Hash(Default::default());
 
         Self {
-            tip_hash,
             tip_height,
+            is_coinbase: true,
             network,
         }
     }

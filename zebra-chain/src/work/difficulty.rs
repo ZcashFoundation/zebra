@@ -20,7 +20,8 @@ use primitive_types::U256;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
-#[cfg(tests)]
+
+#[cfg(test)]
 mod tests;
 
 /// A 32-bit "compact bits" value, which represents the difficulty threshold for
