@@ -3,6 +3,37 @@
 use hex::FromHex;
 use lazy_static::lazy_static;
 
+// Update this list of test blocks when you add a new block test vector to
+// this file
+lazy_static! {
+    pub static ref TEST_BLOCKS: Vec<&'static [u8]> = vec![
+        &BLOCK_MAINNET_GENESIS_BYTES,
+        &BLOCK_MAINNET_1_BYTES,
+        &BLOCK_MAINNET_2_BYTES,
+        &BLOCK_MAINNET_3_BYTES,
+        &BLOCK_MAINNET_4_BYTES,
+        &BLOCK_MAINNET_5_BYTES,
+        &BLOCK_MAINNET_6_BYTES,
+        &BLOCK_MAINNET_7_BYTES,
+        &BLOCK_MAINNET_8_BYTES,
+        &BLOCK_MAINNET_9_BYTES,
+        &BLOCK_MAINNET_10_BYTES,
+        &BLOCK_MAINNET_415000_BYTES,
+        &BLOCK_MAINNET_434873_BYTES,
+        &BLOCK_TESTNET_GENESIS_BYTES,
+        &BLOCK_TESTNET_1_BYTES,
+        &BLOCK_TESTNET_2_BYTES,
+        &BLOCK_TESTNET_3_BYTES,
+        &BLOCK_TESTNET_4_BYTES,
+        &BLOCK_TESTNET_5_BYTES,
+        &BLOCK_TESTNET_6_BYTES,
+        &BLOCK_TESTNET_7_BYTES,
+        &BLOCK_TESTNET_8_BYTES,
+        &BLOCK_TESTNET_9_BYTES,
+        &BLOCK_TESTNET_10_BYTES,
+    ];
+}
+
 // Mainnet
 //
 // for i in `seq 0 9`; do
@@ -45,12 +76,6 @@ const BLOCK_TESTNET_9_HEX: &str = include_str!("block-test-0-000-009.txt");
 const BLOCK_TESTNET_10_HEX: &str = include_str!("block-test-0-000-010.txt");
 
 lazy_static! {
-    pub static ref TEST_BLOCKS: Vec<&'static [u8]> = vec![
-        &BLOCK_MAINNET_GENESIS_BYTES,
-        &BLOCK_MAINNET_1_BYTES,
-        &BLOCK_MAINNET_415000_BYTES,
-        &BLOCK_MAINNET_434873_BYTES
-    ];
     pub static ref BLOCK_MAINNET_GENESIS_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(BLOCK_MAINNET_GENESIS_HEX.trim())
             .expect("Block bytes are in valid hex representation");
