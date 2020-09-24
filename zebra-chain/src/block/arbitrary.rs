@@ -3,11 +3,26 @@ use crate::work::{difficulty::CompactDifficulty, equihash};
 
 use super::*;
 
+use crate::LedgerState;
 use chrono::{TimeZone, Utc};
 use proptest::{
     arbitrary::{any, Arbitrary},
     prelude::*,
 };
+
+impl Arbitrary for Block {
+    type Parameters = LedgerState;
+
+    fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
+        (
+            any::<Header>(),
+            any::<Vec<Arc<Transaction>>>(),
+        )
+        todo!()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
 
 impl Arbitrary for RootHash {
     type Parameters = ();

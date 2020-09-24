@@ -1,3 +1,4 @@
+use block::Height;
 use chrono::{TimeZone, Utc};
 use futures::future::Either;
 use proptest::{arbitrary::any, array, collection::vec, option, prelude::*};
@@ -5,17 +6,19 @@ use proptest::{arbitrary::any, array, collection::vec, option, prelude::*};
 use crate::{
     amount::Amount,
     block,
+    parameters::NetworkUpgrade,
     primitives::{Bctv14Proof, Groth16Proof, ZkSnarkProof},
     sapling, sprout, transparent,
 };
+use crate::{parameters::Network, InProgressLedgerState, LedgerState};
 
 use super::{JoinSplitData, LockTime, Memo, ShieldedData, Transaction};
 
 impl Transaction {
     /// Generate a proptest strategy for V1 Transactions
-    pub fn v1_strategy() -> impl Strategy<Value = Self> {
+    pub fn v1_strategy(height: block::Height) -> BoxedStrategy<Self> {
         (
-            vec(any::<transparent::Input>(), 0..10),
+            transparent::Input::vec_strategy(height, 10),
             vec(any::<transparent::Output>(), 0..10),
             any::<LockTime>(),
         )
@@ -28,9 +31,9 @@ impl Transaction {
     }
 
     /// Generate a proptest strategy for V2 Transactions
-    pub fn v2_strategy() -> impl Strategy<Value = Self> {
+    pub fn v2_strategy(height: block::Height) -> BoxedStrategy<Self> {
         (
-            vec(any::<transparent::Input>(), 0..10),
+            transparent::Input::vec_strategy(height, 10),
             vec(any::<transparent::Output>(), 0..10),
             any::<LockTime>(),
             option::of(any::<JoinSplitData<Bctv14Proof>>()),
@@ -47,9 +50,9 @@ impl Transaction {
     }
 
     /// Generate a proptest strategy for V3 Transactions
-    pub fn v3_strategy() -> impl Strategy<Value = Self> {
+    pub fn v3_strategy(height: block::Height) -> BoxedStrategy<Self> {
         (
-            vec(any::<transparent::Input>(), 0..10),
+            transparent::Input::vec_strategy(height, 10),
             vec(any::<transparent::Output>(), 0..10),
             any::<LockTime>(),
             any::<block::Height>(),
@@ -68,9 +71,9 @@ impl Transaction {
     }
 
     /// Generate a proptest strategy for V4 Transactions
-    pub fn v4_strategy() -> impl Strategy<Value = Self> {
+    pub fn v4_strategy(height: block::Height) -> BoxedStrategy<Self> {
         (
-            vec(any::<transparent::Input>(), 0..10),
+            transparent::Input::vec_strategy(height, 10),
             vec(any::<transparent::Output>(), 0..10),
             any::<LockTime>(),
             any::<block::Height>(),
@@ -189,16 +192,31 @@ impl Arbitrary for ShieldedData {
 }
 
 impl Arbitrary for Transaction {
-    type Parameters = ();
+    type Parameters = LedgerState;
 
-    fn arbitrary_with(_args: ()) -> Self::Strategy {
-        prop_oneof![
-            Self::v1_strategy(),
-            Self::v2_strategy(),
-            Self::v3_strategy(),
-            Self::v4_strategy()
-        ]
-        .boxed()
+    fn arbitrary_with(mut ledger_state: Self::Parameters) -> Self::Strategy {
+        if ledger_state.0.is_none() {
+            ledger_state.0 = Some(InProgressLedgerState::default());
+        }
+
+        let InProgressLedgerState {
+            tip_height,
+            network,
+            ..
+        } = ledger_state.0.unwrap();
+
+        let height = Height(tip_height.0 + 1);
+
+        let network_upgrade = NetworkUpgrade::current(network, height);
+
+        match network_upgrade {
+            NetworkUpgrade::Genesis | NetworkUpgrade::BeforeOverwinter => Self::v1_strategy(height),
+            NetworkUpgrade::Overwinter => Self::v2_strategy(height),
+            NetworkUpgrade::Sapling => Self::v3_strategy(height),
+            NetworkUpgrade::Blossom | NetworkUpgrade::Heartwood | NetworkUpgrade::Canopy => {
+                Self::v4_strategy(height)
+            }
+        }
     }
 
     type Strategy = BoxedStrategy<Self>;

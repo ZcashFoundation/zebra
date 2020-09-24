@@ -465,6 +465,7 @@ mod tests {
 
     use std::mem;
 
+    use zebra_chain::parameters::{Network, NetworkUpgrade};
     use zebra_chain::serialization::ZcashDeserializeInto;
     use zebra_test::prelude::*;
 
@@ -545,25 +546,26 @@ mod tests {
 
         Ok(())
     }
+    prop_compose! {
+        fn arbitrary_chain(mut height: block::Height)
+            (chain in vec(any::<Arc<Block>>(), 0..100)) -> Vec<Arc<Block>>
+        {
+            unimplemented!()
+        }
+    }
+
+    prop_compose! {
+        fn arbitrary_chain_and_index()
+            (chain in arbitrary_chain(NetworkUpgrade::Sapling.activation_height(Network::Mainnet).unwrap()))
+            (index in 0..chain.len(), chain in Just(chain)) -> (Vec<Arc<Block>>, usize)
+        {
+            (chain, index)
+        }
+    }
 
     #[test]
     fn forked_equals_pushed() -> Result<()> {
         zebra_test::init();
-
-        prop_compose! {
-            fn arbitrary_chain(mut height: block::Height)
-                (chain in vec(any::<Arc<Block>>(), 0..100)) -> Vec<Arc<Block>>
-            {
-
-            }
-
-            fn arbitrary_chain_and_index()
-                (chain in vec(any::<Arc<Block>>(), 0..100))
-                (index in 0..chain.len(), chain in Just(chain)) -> (Vec<Arc<Block>>, usize)
-            {
-                (chain, index)
-            }
-        }
 
         proptest!(|((chain, index) in arbitrary_chain_and_index())| {
             let fork_tip_hash = chain[index].hash();
