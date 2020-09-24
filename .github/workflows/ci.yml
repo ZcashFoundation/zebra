@@ -32,7 +32,7 @@ jobs:
           args: --verbose --all
 
   build-chain-no-features:
-    name: build zebra-chain without features
+    name: Build zebra-chain w/o features on ubuntu-latest
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v1
