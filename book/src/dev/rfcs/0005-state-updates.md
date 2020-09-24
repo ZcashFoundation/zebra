@@ -783,6 +783,8 @@ Returns
 
 - `Response::Utxo(transparent::Output)`
 
+Implemented by querying:
+
 - (non-finalized) if any `Chains` contain an `OutPoint` in their `created_utxos` and not their `spent_utxo` get the `transparent::Output` from `OutPoint`'s transaction
 - (finalized) else if `OutPoint` is in `utxos_by_outpoint` return the associated `transparent::Output`.
 - else wait for `OutPoint` to be created as described in [RFC0004]
