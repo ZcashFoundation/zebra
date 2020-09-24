@@ -218,7 +218,6 @@ impl UpdateWith<Arc<Block>> for Chain {
             let prior_pair = self
                 .tx_by_hash
                 .insert(transaction_hash, (block_height, transaction_index));
-
             assert!(
                 prior_pair.is_none(),
                 "transactions must be unique within a single chain"
