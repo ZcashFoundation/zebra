@@ -18,16 +18,16 @@ use crate::{BoxError, Config, HashOrHeight, QueuedBlock};
 /// - *asynchronous* methods that perform reads.
 ///
 /// For more on this distinction, see RFC5. The synchronous methods are
-/// implemented as ordinary methods on the [`SledState`]. The asynchronous
+/// implemented as ordinary methods on the [`FinalizedState`]. The asynchronous
 /// methods are not implemented using `async fn`, but using normal methods that
 /// return `impl Future<Output = ...>`. This allows them to move data (e.g.,
 /// clones of handles for [`sled::Tree`]s) into the futures they return.
 ///
 /// This means that the returned futures have a `'static` lifetime and don't
-/// borrow any resources from the [`SledState`], and the actual database work is
+/// borrow any resources from the [`FinalizedState`], and the actual database work is
 /// performed asynchronously when the returned future is polled, not while it is
 /// created.  This is analogous to the way [`tower::Service::call`] works.
-pub struct SledState {
+pub struct FinalizedState {
     /// Queued blocks that arrived out of order, indexed by their parent block hash.
     queued_by_prev_hash: HashMap<block::Hash, QueuedBlock>,
 
@@ -42,7 +42,7 @@ pub struct SledState {
     // sapling_anchors: sled::Tree,
 }
 
-impl SledState {
+impl FinalizedState {
     pub fn new(config: &Config, network: Network) -> Self {
         let db = config.sled_config(network).open().unwrap();
 
@@ -86,7 +86,7 @@ impl SledState {
     /// It's the caller's responsibility to ensure that blocks are committed in
     /// order. This function is called by [`process_queue`], which ensures order.
     /// It is intentionally not exposed as part of the public API of the
-    /// [`SledState`].
+    /// [`FinalizedState`].
     fn commit_finalized(&mut self, queued_block: QueuedBlock) {
         let QueuedBlock { block, rsp_tx } = queued_block;
 

@@ -22,7 +22,7 @@ use proptest_derive::Arbitrary;
 /// commitment tree corresponding to the final Sprout treestate of
 /// this block. A root of a note commitment tree is associated with
 /// each treestate.
-#[derive(Clone, Copy, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct Root([u8; 32]);
 

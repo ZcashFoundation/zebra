@@ -93,10 +93,10 @@ pub enum Transaction {
         expiry_height: block::Height,
         /// The net value of Sapling spend transfers minus output transfers.
         value_balance: Amount,
-        /// The shielded data for this transaction, if any.
-        shielded_data: Option<ShieldedData>,
         /// The JoinSplit data for this transaction, if any.
         joinsplit_data: Option<JoinSplitData<Groth16Proof>>,
+        /// The shielded data for this transaction, if any.
+        shielded_data: Option<ShieldedData>,
     },
 }
 

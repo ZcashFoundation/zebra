@@ -8,7 +8,7 @@ use std::{
 };
 
 /// An encoding of a Bitcoin script.
-#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),
     derive(proptest_derive::Arbitrary)

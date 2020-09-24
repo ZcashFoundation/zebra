@@ -264,16 +264,18 @@ is completely empty.
 The `Chain` type is defined by the following struct and API:
 
 ```rust
+#[derive(Debug, Default, Clone)]
 struct Chain {
     blocks: BTreeMap<block::Height, Arc<Block>>,
     height_by_hash: HashMap<block::Hash, block::Height>,
-    tx_by_hash: HashMap<transaction::Hash, (block::Height, tx_index)>,
+    tx_by_hash: HashMap<transaction::Hash, (block::Height, usize)>,
 
-    utxos: HashSet<transparent::Output>,
-    sapling_anchors: HashSet<sapling::tree::Root>,
+    created_utxos: HashSet<transparent::OutPoint>,
+    spent_utxos: HashSet<transparent::OutPoint>,
     sprout_anchors: HashSet<sprout::tree::Root>,
-    sapling_nullifiers: HashSet<sapling::Nullifier>,
+    sapling_anchors: HashSet<sapling::tree::Root>,
     sprout_nullifiers: HashSet<sprout::Nullifier>,
+    sapling_nullifiers: HashSet<sapling::Nullifier>,
     partial_cumulative_work: PartialCumulativeWork,
 }
 ```
@@ -283,14 +285,16 @@ struct Chain {
 Push a block into a chain as the new tip
 
 1. Update cumulative data members
-    - Add block to end of `self.blocks`
-    - Add hash to `height_by_hash`
-    - for each `transaction` in `block`
-      - add key: `transaction.hash` and value: `(height, tx_index)` to `tx_by_hash`
-    - Add new utxos and remove consumed utxos from `self.utxos`
-    - Add anchors to the appropriate `self.<version>_anchors`
-    - Add nullifiers to the appropriate `self.<version>_nullifiers`
+    - Add the block's hash to `height_by_hash`
     - Add work to `self.partial_cumulative_work`
+    - For each `transaction` in `block`
+      - Add key: `transaction.hash` and value: `(height, tx_index)` to `tx_by_hash`
+      - Add created utxos to `self.created_utxos`
+      - Add spent utxos to `self.spent_utxos`
+      - Add anchors to the appropriate `self.<version>_anchors`
+      - Add nullifiers to the appropriate `self.<version>_nullifiers`
+
+2. Add block to `self.blocks`
 
 #### `pub fn pop_root(&mut self) -> Arc<Block>`
 
@@ -300,11 +304,13 @@ Remove the lowest height block of the non-finalized portion of a chain.
 
 2. Update cumulative data members
     - Remove the block's hash from `self.height_by_hash`
-    - for each `transaction` in `block`
-      - remove `transaction.hash` from `tx_by_hash`
-    - Remove new utxos from `self.utxos`
-    - Remove the anchors from the appropriate `self.<version>_anchors`
-    - Remove the nullifiers from the appropriate `self.<version>_nullifiers`
+    - Subtract work from `self.partial_cumulative_work`
+    - For each `transaction` in `block`
+      - Remove `transaction.hash` from `tx_by_hash`
+      - Remove created utxos from `self.created_utxos`
+      - Remove spent utxos from `self.spent_utxos`
+      - Remove the anchors from the appropriate `self.<version>_anchors`
+      - Remove the nullifiers from the appropriate `self.<version>_nullifiers`
 
 3. Return the block
 
@@ -321,7 +327,7 @@ Fork a chain at the block with the given hash, if it is part of this chain.
 
 4. Return `forked`
 
-#### `fn pop_tip(&mut self) -> Arc<Block>`
+#### `fn pop_tip(&mut self)`
 
 Remove the highest height block of the non-finalized portion of a chain.
 
@@ -329,14 +335,13 @@ Remove the highest height block of the non-finalized portion of a chain.
 
 2. Update cumulative data members
     - Remove the corresponding hash from `self.height_by_hash`
+    - Subtract work from `self.partial_cumulative_work`
     - for each `transaction` in `block`
       - remove `transaction.hash` from `tx_by_hash`
-    - Add consumed utxos and remove new utxos from `self.utxos`
-    - Remove anchors from the appropriate `self.<version>_anchors`
-    - Remove the nullifiers from the appropriate `self.<version>_nullifiers`
-    - Subtract work from `self.partial_cumulative_work`
-
-3. Return the block
+      - Remove created utxos from `self.created_utxos`
+      - Remove spent utxos from `self.spent_utxos`
+      - Remove anchors from the appropriate `self.<version>_anchors`
+      - Remove the nullifiers from the appropriate `self.<version>_nullifiers`
 
 #### `Ord`
 
@@ -358,7 +363,8 @@ handled by `#[derive(Default)]`.
 
 1. initialise cumulative data members
     - Construct an empty `self.blocks`, `height_by_hash`, `tx_by_hash`,
-    `self.utxos`, `self.<version>_anchors`, `self.<version>_nullifiers`
+    `self.created_utxos`, `self.spent_utxos`, `self.<version>_anchors`,
+    `self.<version>_nullifiers`
     - Zero `self.partial_cumulative_work`
 
 **Note:** The chain can be empty if:
@@ -367,23 +373,35 @@ handled by `#[derive(Default)]`.
     all its blocks have been `pop`ped
 
 
-### `ChainSet` Type
-[chainset-type]: #chainset-type
+### `NonFinalizedState` Type
+[nonfinalizedstate-type]: #nonfinalizedstate-type
 
-The `ChainSet` type represents the set of all non-finalized state. It
-consists of a set of non-finalized but verified chains and a set of
+The `NonFinalizedState` type represents the set of all non-finalized state.
+It consists of a set of non-finalized but verified chains and a set of
 unverified blocks which are waiting for the full context needed to verify
 them to become available.
 
-`ChainSet` is defined by the following structure and API:
+`NonFinalizedState` is defined by the following structure and API:
 
 ```rust
-struct ChainSet {
-    chains: BTreeSet<Chain>,
+/// The state of the chains in memory, incuding queued blocks.
+#[derive(Debug, Default)]
+pub struct NonFinalizedState {
+    /// Verified, non-finalized chains.
+    chain_set: BTreeSet<Chain>,
+    /// Blocks awaiting their parent blocks for contextual verification.
+    contextual_queue: QueuedBlocks,
+}
 
-    queued_blocks: BTreeMap<block::Hash, QueuedBlock>,
-    queued_by_parent: BTreeMap<block::Hash, Vec<block::Hash>>,
-    queued_by_height: BTreeMap<block::Height, Vec<block::Hash>>,
+/// A queue of blocks, awaiting the arrival of parent blocks.
+#[derive(Debug, Default)]
+struct QueuedBlocks {
+    /// Blocks awaiting their parent blocks for contextual verification.
+    blocks: HashMap<block::Hash, QueuedBlock>,
+    /// Hashes from `queued_blocks`, indexed by parent hash.
+    by_parent: HashMap<block::Hash, Vec<block::Hash>>,
+    /// Hashes from `queued_blocks`, indexed by block height.
+    by_height: BTreeMap<block::Height, Vec<block::Hash>>,
 }
 ```
 
@@ -470,10 +488,10 @@ cannot be committed due to missing context.
 
 - `Chain` represents the non-finalized portion of a single chain
 
-- `ChainSet` represents the non-finalized portion of all chains and all
+- `NonFinalizedState` represents the non-finalized portion of all chains and all
   unverified blocks that are waiting for context to be available.
 
-- `ChainSet::queue` handles queueing and or commiting blocks and
+- `NonFinalizedState::queue` handles queueing and or commiting blocks and
   reorganizing chains (via `commit_block`) but not finalizing them
 
 - Finalized blocks are returned from `finalize` and must still be committed
@@ -758,6 +776,20 @@ if the block is not in any non-finalized chain:
 - (finalized) the `height_by_hash` tree (to get the block height) and then
     the `block_by_height` tree (to get the block data).
 
+
+### `Request::AwaitUtxo(OutPoint)`
+
+Returns
+
+- `Response::Utxo(transparent::Output)`
+
+Implemented by querying:
+
+- (non-finalized) if any `Chains` contain an `OutPoint` in their `created_utxos` and not their `spent_utxo` get the `transparent::Output` from `OutPoint`'s transaction
+- (finalized) else if `OutPoint` is in `utxos_by_outpoint` return the associated `transparent::Output`.
+- else wait for `OutPoint` to be created as described in [RFC0004]
+
+[RFC0004]: https://zebra.zfnd.org/dev/rfcs/0004-asynchronous-script-verification.html
 
 # Drawbacks
 [drawbacks]: #drawbacks
