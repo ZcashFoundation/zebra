@@ -777,14 +777,17 @@ if the block is not in any non-finalized chain:
     the `block_by_height` tree (to get the block data).
 
 
-### TODO document request for utxo is available
+### `Request::AwaitUtxo(OutPoint)`
 
-utxo_is_available:
-* is it in spent? Return false
-* is it in created? Return true
-* is it in the permanent state? Return true
-* otherwise, Return false
+Returns
 
+- `Response::Utxo(transparent::Output)`
+
+- (non-finalized) if any `Chains` contain an `OutPoint` in their `created_utxos` and not their `spent_utxo` get the `transparent::Output` from `OutPoint`'s transaction
+- (finalized) else if `OutPoint` is in `utxos_by_outpoint` return the associated `transparent::Output`.
+- else wait for `OutPoint` to be created as described in [RFC0004]
+
+[RFC0004]: https://zebra.zfnd.org/dev/rfcs/0004-asynchronous-script-verification.html
 
 # Drawbacks
 [drawbacks]: #drawbacks

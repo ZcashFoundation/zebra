@@ -14,20 +14,21 @@ on the ordering of operations in the state layer.
 
 As in the rest of Zebra, we want to express our work as a collection of
 work-items with explicit dependencies, then execute these items concurrently
-and in parallel on a thread pool.  
+and in parallel on a thread pool.
 
 # Definitions
 [definitions]: #definitions
 
-- *UTXO*: unspent transaction output. Transaction outputs are modeled in `zebra-chain` by the [`TransparentOutput`][transout] structure.
-- Transaction input: an output of a previous transaction consumed by a later transaction (the one it is an input to).  Modeled in `zebra-chain` by the [`TransparentInput`][transin] structure.
-- lock script: the script that defines the conditions under which some UTXO can be spent.  Stored in the [`TransparentOutput::lock_script`][lock_script] field.
-- unlock script: a script satisfying the conditions of the lock script, allowing a UTXO to be spent.  Stored in the [`TransparentInput::PrevOut::lock_script`][lock_script] field.
+- *UTXO*: unspent transaction output. Transaction outputs are modeled in `zebra-chain` by the [`transparent::Output`][transout] structure.
+- Transaction input: an output of a previous transaction consumed by a later transaction (the one it is an input to).  Modeled in `zebra-chain` by the [`transparent::Input`][transin] structure.
+- lock script: the script that defines the conditions under which some UTXO can be spent.  Stored in the [`transparent::Output::lock_script`][lock_script] field.
+- unlock script: a script satisfying the conditions of the lock script, allowing a UTXO to be spent.  Stored in the [`transparent::Input::PrevOut::lock_script`][lock_script] field.
 
-[transout]: https://doc.zebra.zfnd.org/zebra_chain/transaction/struct.TransparentOutput.html
-[lock_script]: https://doc.zebra.zfnd.org/zebra_chain/transaction/struct.TransparentOutput.html#structfield.lock_script
-[transin]: https://doc.zebra.zfnd.org/zebra_chain/transaction/enum.TransparentInput.html
-[unlock_script]: https://doc.zebra.zfnd.org/zebra_chain/transaction/enum.TransparentInput.html#variant.PrevOut.field.unlock_script
+[transout]: https://doc.zebra.zfnd.org/zebra_chain/transparent/struct.Output.html
+[lock_script]: https://doc.zebra.zfnd.org/zebra_chain/transparent/struct.Output.html#structfield.lock_script
+[transin]: https://doc.zebra.zfnd.org/zebra_chain/transparent/enum.Input.html
+[unlock_script]: https://doc.zebra.zfnd.org/zebra_chain/transparent/enum.Input.html#variant.PrevOut.field.unlock_script
+
 
 # Guide-level explanation
 [guide-level-explanation]: #guide-level-explanation
@@ -55,8 +56,8 @@ done later, at the point that its containing block is committed to the chain.
 
 At a high level, this adds a new request/response pair to the state service:
 
-- `Request::AwaitUtxo(OutPoint)` requests a `TransparentOutput` specified by `OutPoint` from the state layer;
-- `Response::Utxo(TransparentOutput)` supplies requested the `TransparentOutput`.
+- `Request::AwaitUtxo(OutPoint)` requests a `transparent::Output` specified by `OutPoint` from the state layer;
+- `Response::Utxo(transparent::Output)` supplies requested the `transparent::Output`.
 
 Note that this request is named differently from the other requests,
 `AwaitUtxo` rather than `GetUtxo` or similar. This is because the request has
@@ -72,7 +73,7 @@ is available. For instance, if we begin parallel download and verification of
 500 blocks, we should be able to begin script verification of all scripts
 referencing outputs from existing blocks in parallel, and begin verification
 of scripts referencing outputs from new blocks as soon as they are committed
-to the chain.  
+to the chain.
 
 Because spending outputs from older blocks is more common than spending
 outputs from recent blocks, this should allow a significant amount of
@@ -82,7 +83,7 @@ parallelism.
 [reference-level-explanation]: #reference-level-explanation
 
 We add a `Request::AwaitUtxo(OutPoint)` and
-`Response::Utxo(TransparentOutput)` to the state protocol. As described
+`Response::Utxo(transparent::Output)` to the state protocol. As described
 above, the request name is intended to indicate the request's behavior: the
 request does not resolve until the state layer learns of a UTXO described by
 the request.
@@ -163,7 +164,7 @@ structure described below.
 ```rust
 // sketch
 #[derive(Default, Debug)]
-struct PendingUtxos(HashMap<OutPoint, oneshot::Sender<TransparentOutput>>);
+struct PendingUtxos(HashMap<OutPoint, oneshot::Sender<transparent::Output>>);
 
 impl PendingUtxos {
     // adds the outpoint and returns (wrapped) rx end of oneshot
@@ -171,7 +172,7 @@ impl PendingUtxos {
     pub fn queue(&mut self, outpoint: OutPoint) -> impl Future<Output=Result<Response, ...>>;
 
     // if outpoint is a hashmap key, remove the entry and send output on the channel
-    pub fn respond(&mut self, outpoint: OutPoint, output: TransparentOutput);
+    pub fn respond(&mut self, outpoint: OutPoint, output: transparent::Output);
 
 
     // scans the hashmap and removes any entries with closed senders
