@@ -1,3 +1,6 @@
+//! Non-finalized chain state management as defined by [RFC0005]
+//!
+//! [RFC0005]: https://zebra.zfnd.org/dev/rfcs/0005-state-updates.html
 #![allow(dead_code)]
 use std::{
     cmp::Ordering,
