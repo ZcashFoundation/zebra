@@ -1,4 +1,6 @@
 use std::{
+    collections::BTreeMap,
+    collections::HashMap,
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -25,18 +27,144 @@ pub struct QueuedBlock {
     pub rsp_tx: oneshot::Sender<Result<block::Hash, BoxError>>,
 }
 
+/// A queue of blocks, awaiting the arrival of parent blocks.
+#[derive(Default)]
+struct QueuedBlocks {
+    /// Blocks awaiting their parent blocks for contextual verification.
+    blocks: HashMap<block::Hash, QueuedBlock>,
+    /// Hashes from `queued_blocks`, indexed by parent hash.
+    by_parent: HashMap<block::Hash, Vec<block::Hash>>,
+    /// Hashes from `queued_blocks`, indexed by block height.
+    by_height: BTreeMap<block::Height, Vec<block::Hash>>,
+}
+
+impl QueuedBlocks {
+    fn queue(&mut self, new: QueuedBlock) {
+        let new_hash = new.block.hash();
+        let new_height = new
+            .block
+            .coinbase_height()
+            .expect("validated non-finalized blocks have a coinbase height");
+        let parent_hash = new.block.header.previous_block_hash;
+
+        self.blocks.insert(new_hash, new);
+        self.by_height.entry(new_height).or_default().push(new_hash);
+        self.by_parent
+            .entry(parent_hash)
+            .or_default()
+            .push(new_hash);
+    }
+
+    fn dequeue_children(&mut self, parent: block::Hash) -> Vec<QueuedBlock> {
+        let queued_children = self
+            .by_parent
+            .remove(&parent)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|hash| {
+                self.blocks
+                    .remove(&hash)
+                    .expect("block is present if its hash is in by_parent")
+            })
+            .collect::<Vec<_>>();
+
+        for queued in &queued_children {
+            let height = queued.block.coinbase_height().unwrap();
+            self.by_height.remove(&height);
+        }
+
+        queued_children
+    }
+}
+
 struct StateService {
     /// Holds data relating to finalized chain state.
     sled: FinalizedState,
     /// Holds data relating to non-finalized chain state.
-    _mem: NonFinalizedState,
+    mem: NonFinalizedState,
+    /// Blocks awaiting their parent blocks for contextual verification.
+    contextual_queue: QueuedBlocks,
 }
 
+enum ValidateContextError {}
+
 impl StateService {
+    const REORG_LIMIT: usize = 100;
+
     pub fn new(config: Config, network: Network) -> Self {
         let sled = FinalizedState::new(&config, network);
-        let _mem = NonFinalizedState::default();
-        Self { sled, _mem }
+        let mem = NonFinalizedState::default();
+        let contextual_queue = QueuedBlocks::default();
+
+        Self {
+            sled,
+            mem,
+            contextual_queue,
+        }
+    }
+
+    fn queue(&mut self, new: QueuedBlock) {
+        let parent_hash = new.block.header.previous_block_hash;
+
+        self.contextual_queue.queue(new);
+
+        if !self.contains(&parent_hash) {
+            return;
+        }
+
+        self.process_queued(parent_hash);
+
+        while self.mem.best_chain_len() > Self::REORG_LIMIT {
+            let finalized = self.mem.finalize();
+            self.sled
+                .commit_finalized_direct(finalized)
+                .expect("sled would never do us dirty like that");
+        }
+    }
+
+    fn validate_and_commit(&mut self, ready: QueuedBlock) {
+        let validity = self.check_contextual_validity(&ready.block);
+
+        if let Err(_err) = validity {
+            todo!("wrap with error and send back on channel")
+        }
+
+        let block_hash = ready.block.hash();
+
+        if self.finalized_tip_hash() == &block_hash {
+            self.mem.commit_new_chain(ready.block);
+            todo!("send success back through channel");
+        } else {
+            self.mem.commit_block(ready.block);
+            todo!("send success back through channel");
+        }
+    }
+
+    fn check_contextual_validity(&mut self, _block: &Block) -> Result<(), ValidateContextError> {
+        // Draw the rest of the owl
+        Ok(())
+    }
+
+    fn contains(&self, hash: &block::Hash) -> bool {
+        self.mem.any_chain_contains(hash) || self.sled.contains(hash)
+    }
+
+    fn finalized_tip_hash(&self) -> &block::Hash {
+        unimplemented!()
+    }
+
+    fn process_queued(&mut self, new_parent: block::Hash) {
+        let mut new_parents = vec![new_parent];
+
+        while let Some(parent) = new_parents.pop() {
+            let queued_children = self.contextual_queue.dequeue_children(parent);
+
+            for ready in queued_children {
+                let hash = ready.block.hash();
+                self.validate_and_commit(ready);
+                new_parents.push(hash);
+            }
+        }
     }
 }
 
@@ -52,7 +180,19 @@ impl Service<Request> for StateService {
 
     fn call(&mut self, req: Request) -> Self::Future {
         match req {
-            Request::CommitBlock { .. } => unimplemented!(),
+            Request::CommitBlock { block } => {
+                let (rsp_tx, rsp_rx) = oneshot::channel();
+
+                self.queue(QueuedBlock { block, rsp_tx });
+
+                async move {
+                    rsp_rx
+                        .await
+                        .expect("sender oneshot is not dropped")
+                        .map(Response::Committed)
+                }
+                .boxed()
+            }
             Request::CommitFinalizedBlock { block } => {
                 let (rsp_tx, rsp_rx) = oneshot::channel();
 

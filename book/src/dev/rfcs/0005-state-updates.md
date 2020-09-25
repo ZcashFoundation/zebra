@@ -461,10 +461,9 @@ queued block (and any of its descendants) can be committed to the state
       - let result = `self.commit_block(block)`;
       - add `result` to `new_parents`
 
-### `fn commit_block(&mut self, block: QueuedBlock) -> Option<block::Hash>`
+### `fn commit_block(&mut self, block: QueuedBlock)`
 
-Try to commit `block` to the non-finalized state. Returns `None` if the block
-cannot be committed due to missing context.
+Commit `block` to the non-finalized state.
 
 1. Search for the first chain where `block.parent` == `chain.tip`. If it exists:
     - push `block` onto that chain

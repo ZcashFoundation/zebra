@@ -81,14 +81,8 @@ impl FinalizedState {
         }
     }
 
-    /// Commit a finalized block to the state.
-    ///
-    /// It's the caller's responsibility to ensure that blocks are committed in
-    /// order. This function is called by [`process_queue`], which ensures order.
-    /// It is intentionally not exposed as part of the public API of the
-    /// [`FinalizedState`].
-    fn commit_finalized(&mut self, queued_block: QueuedBlock) {
-        let QueuedBlock { block, rsp_tx } = queued_block;
+    pub fn commit_finalized_direct(&mut self, block: Arc<Block>) -> Result<block::Hash, BoxError> {
+        use sled::Transactional;
 
         let height = block
             .coinbase_height()
@@ -96,8 +90,7 @@ impl FinalizedState {
         let height_bytes = height.0.to_be_bytes();
         let hash = block.hash();
 
-        use sled::Transactional;
-        let transaction_result = (
+        (
             &self.hash_by_height,
             &self.height_by_hash,
             &self.block_by_height,
@@ -116,10 +109,21 @@ impl FinalizedState {
                 block_by_height.insert(&height_bytes, block_bytes)?;
 
                 // for some reason type inference fails here
-                Ok::<_, sled::transaction::ConflictableTransactionError>(())
-            });
+                Ok::<_, sled::transaction::ConflictableTransactionError>(hash)
+            })
+            .map_err(Into::into)
+    }
 
-        let _ = rsp_tx.send(transaction_result.map(|_| hash).map_err(Into::into));
+    /// Commit a finalized block to the state.
+    ///
+    /// It's the caller's responsibility to ensure that blocks are committed in
+    /// order. This function is called by [`queue`], which ensures order.
+    /// It is intentionally not exposed as part of the public API of the
+    /// [`FinalizedState`].
+    pub fn commit_finalized(&mut self, queued_block: QueuedBlock) {
+        let QueuedBlock { block, rsp_tx } = queued_block;
+        let result = self.commit_finalized_direct(block);
+        let _ = rsp_tx.send(result);
     }
 
     // TODO: this impl works only during checkpointing, it needs to be rewritten
@@ -171,6 +175,10 @@ impl FinalizedState {
 
             Ok(Some(tip_height.0 - height.0))
         }
+    }
+
+    pub fn contains(&self, hash: &block::Hash) -> bool {
+        self.height_by_hash.get(&hash.0).is_ok()
     }
 
     pub fn block(
