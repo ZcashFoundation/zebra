@@ -141,6 +141,7 @@ lazy_static! {
     pub static ref BLOCK_MAINNET_419201_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("block-main-0-419-201.txt").trim())
             .expect("Block bytes are in valid hex representation");
+    // this one has a bad version field
     // zcash-cli getblock 434873 0 > block-main-0-434-873.txt
     pub static ref BLOCK_MAINNET_434873_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("block-main-0-434-873.txt").trim())
@@ -297,4 +298,24 @@ lazy_static! {
     pub static ref BLOCK_TESTNET_1095000_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("block-test-1-095-000.txt").trim())
             .expect("Block bytes are in valid hex representation");
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    use std::collections::HashSet;
+
+    #[test]
+    fn block_test_vectors_unique() {
+        let block_count = TEST_BLOCKS.len();
+        let block_set: HashSet<_> = TEST_BLOCKS.iter().collect();
+
+        // putting the same block in two files is an easy mistake to make
+        assert_eq!(
+            block_count,
+            block_set.len(),
+            "block test vectors must be unique"
+        );
+    }
 }
