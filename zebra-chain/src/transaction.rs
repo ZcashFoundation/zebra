@@ -20,6 +20,7 @@ pub use joinsplit::JoinSplitData;
 pub use lock_time::LockTime;
 pub use memo::Memo;
 pub use shielded_data::ShieldedData;
+pub use sighash::HashType;
 
 use crate::{
     amount::Amount,
