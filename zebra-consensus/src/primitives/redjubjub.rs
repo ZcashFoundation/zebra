@@ -13,11 +13,12 @@ use std::{
 use futures::future::{ready, Ready};
 use once_cell::sync::Lazy;
 use rand::thread_rng;
-use redjubjub::{batch, *};
+
 use tokio::sync::broadcast::{channel, RecvError, Sender};
 use tower::{util::ServiceFn, Service};
 use tower_batch::{Batch, BatchControl};
 use tower_fallback::Fallback;
+use zebra_chain::primitives::redjubjub::{batch, *};
 
 /// Global batch verification context for RedJubjub signatures.
 ///
