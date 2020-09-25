@@ -169,6 +169,8 @@ mod tests {
     //
     // TODO: pull these in with bytes reversed:
     // https://github.com/zcash/zcash/blob/master/src/test/data/merkle_roots.json
+    // or these? they're different:
+    // https://github.com/zcash/zcash/blob/master/src/zcash/IncrementalMerkleTree.cpp#L439
     const HEX_EMPTY_ROOTS: [&str; 30] = [
         "0000000000000000000000000000000000000000000000000000000000000000",
         "1416a57ca83b5c422fdd54cee70a02c2d174e5b60f6d1398cc267eaea6e70bbf",
@@ -202,21 +204,10 @@ mod tests {
         "25136bcbdfc1066ad6a942242ee0ae3ca3ccdc53b68d393f682734241622498d",
     ];
 
-    // const HEX_EMPTY_ROOTS: [&str; 16] = [];
-
     #[test]
     fn empty_roots() {
         for i in 0..EMPTY_ROOTS.len() {
-            // let reversed_bytes: Vec<u8> = hex::decode(HEX_EMPTY_ROOTS[i])
-            //     .unwrap()
-            //     .into_iter()
-            //     .rev()
-            //     .collect();
-
-            println!("computed    root: {:?}", hex::encode(EMPTY_ROOTS[i]));
-
-            // println!("precomputed root: {:?}", HEX_EMPTY_ROOTS[i]);
-            // println!("reversed    root: {:?}\n", hex::encode(reversed_bytes));
+            println!("computed root: {:?}", hex::encode(EMPTY_ROOTS[i]));
 
             // assert_eq!(hex::encode(EMPTY_ROOTS[i]), HEX_EMPTY_ROOTS[i]);
         }
