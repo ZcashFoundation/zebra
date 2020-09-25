@@ -8,9 +8,9 @@ lazy_static! {
     // this file
     pub static ref TEST_BLOCKS: Vec<&'static [u8]> = vec![
         // Mainnet
-    // Genesis
+        // Genesis
         &BLOCK_MAINNET_GENESIS_BYTES,
-    // BeforeOverwinter
+        // BeforeOverwinter
         &BLOCK_MAINNET_1_BYTES,
         &BLOCK_MAINNET_2_BYTES,
         &BLOCK_MAINNET_3_BYTES,
@@ -22,29 +22,29 @@ lazy_static! {
         &BLOCK_MAINNET_9_BYTES,
         &BLOCK_MAINNET_10_BYTES,
         &BLOCK_MAINNET_347499_BYTES,
-    // Overwinter
+        // Overwinter
         &BLOCK_MAINNET_347500_BYTES,
         &BLOCK_MAINNET_347501_BYTES,
         &BLOCK_MAINNET_415000_BYTES,
         &BLOCK_MAINNET_419199_BYTES,
-    // Sapling
+        // Sapling
         &BLOCK_MAINNET_419200_BYTES,
         &BLOCK_MAINNET_419201_BYTES,
         &BLOCK_MAINNET_434873_BYTES,
         &BLOCK_MAINNET_653599_BYTES,
-    // Blossom
+        // Blossom
         &BLOCK_MAINNET_653600_BYTES,
         &BLOCK_MAINNET_653601_BYTES,
         &BLOCK_MAINNET_902999_BYTES,
-    // Heartwood
+        // Heartwood
         &BLOCK_MAINNET_903000_BYTES,
         &BLOCK_MAINNET_903001_BYTES,
-    // TODO: Canopy
+        // TODO: Canopy
 
         // Testnet
-    // Genesis
+        // Genesis
         &BLOCK_TESTNET_GENESIS_BYTES,
-    // BeforeOverwinter
+        // BeforeOverwinter
         &BLOCK_TESTNET_1_BYTES,
         &BLOCK_TESTNET_2_BYTES,
         &BLOCK_TESTNET_3_BYTES,
@@ -55,28 +55,28 @@ lazy_static! {
         &BLOCK_TESTNET_8_BYTES,
         &BLOCK_TESTNET_9_BYTES,
         &BLOCK_TESTNET_10_BYTES,
-    &BLOCK_TESTNET_207499_BYTES,
-    // Overwinter
-    &BLOCK_TESTNET_207500_BYTES,
-    &BLOCK_TESTNET_207501_BYTES,
-    &BLOCK_TESTNET_279999_BYTES,
-    // Sapling
-    &BLOCK_TESTNET_280000_BYTES,
-    &BLOCK_TESTNET_280001_BYTES,
-    &BLOCK_TESTNET_583999_BYTES,
-    // Blossom
-    &BLOCK_TESTNET_584000_BYTES,
-    &BLOCK_TESTNET_584001_BYTES,
-    &BLOCK_TESTNET_903799_BYTES,
-    // Heartwood
-    &BLOCK_TESTNET_903800_BYTES,
-    &BLOCK_TESTNET_903801_BYTES,
-    &BLOCK_TESTNET_1028499_BYTES,
-    // Canopy
-    &BLOCK_TESTNET_1028500_BYTES,
-    &BLOCK_TESTNET_1028501_BYTES,
-    &BLOCK_TESTNET_1095000_BYTES,
-];
+        &BLOCK_TESTNET_207499_BYTES,
+        // Overwinter
+        &BLOCK_TESTNET_207500_BYTES,
+        &BLOCK_TESTNET_207501_BYTES,
+        &BLOCK_TESTNET_279999_BYTES,
+        // Sapling
+        &BLOCK_TESTNET_280000_BYTES,
+        &BLOCK_TESTNET_280001_BYTES,
+        &BLOCK_TESTNET_583999_BYTES,
+        // Blossom
+        &BLOCK_TESTNET_584000_BYTES,
+        &BLOCK_TESTNET_584001_BYTES,
+        &BLOCK_TESTNET_903799_BYTES,
+        // Heartwood
+        &BLOCK_TESTNET_903800_BYTES,
+        &BLOCK_TESTNET_903801_BYTES,
+        &BLOCK_TESTNET_1028499_BYTES,
+        // Canopy
+        &BLOCK_TESTNET_1028500_BYTES,
+        &BLOCK_TESTNET_1028501_BYTES,
+        &BLOCK_TESTNET_1095000_BYTES,
+    ];
 
     // Mainnet
 
