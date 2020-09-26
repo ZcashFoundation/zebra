@@ -2,7 +2,7 @@ use futures::future::Either;
 
 use crate::{
     primitives::redjubjub::{Binding, Signature},
-    sapling::{Output, Spend},
+    sapling::{Nullifier, Output, Spend},
     serialization::serde_helpers,
 };
 
@@ -60,6 +60,17 @@ impl ShieldedData {
         }
         .into_iter()
         .chain(self.rest_outputs.iter())
+    }
+
+    /// Collect the [`Nullifier`]s for this transaction, if it contains
+    /// [`Spend`]s.
+    pub fn nullifiers(&self) -> Vec<Nullifier> {
+        self.spends().map(|spend| spend.nullifier).collect()
+    }
+
+    /// Collect the cm_u's for this transaction, if it contains [`Output`]s.
+    pub fn note_commitments(&self) -> Vec<jubjub::Fq> {
+        self.outputs().map(|output| output.cm_u).collect()
     }
 }
 
