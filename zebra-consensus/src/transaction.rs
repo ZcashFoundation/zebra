@@ -180,18 +180,29 @@ where
                 binding_sig,
             } = shielded_data_d;
 
-            self.redjubjub
-                .call((
-                    pub_key.into(),
-                    binding_sig.into(),
-                    tx.sighash(
-                        Network::Sapling, // TODO: pass this in
-                        HashType::ALL,    // TODO: check these
-                        None,             // TODO: check these
-                    ),
-                ))
-                .map_err(VerifyTransactionError::Redjubjub)
-                .boxed();
+            let sighash = tx.sighash(
+                Network::Sapling, // TODO: pass this in
+                HashType::ALL,    // TODO: check these
+                None,             // TODO: check these
+            );
+
+            // Checks the balance.
+            //
+            // The net value of Spend transfers minus Output transfers in a
+            // transaction is called the balancing value, measured in zatoshi as
+            // a signed integer v_balance.
+            //
+            // Consistency of v_balance with the value commitments in Spend
+            // descriptions and Output descriptions is enforced by the binding
+            // signature.
+            //
+            // Instead of generating a key pair at random, we generate it as a
+            // function of the value commitments in the Spend descriptions and
+            // Output descriptions of the transaction, and the balancing value.
+            //
+            // https://zips.z.cash/protocol/canopy.pdf#saplingbalance
+            let bsk = shielded_data_d.binding_validating_key(value_balance);
+            bsk.verify(sighash, &binding_sig);
         }
     }
 }
