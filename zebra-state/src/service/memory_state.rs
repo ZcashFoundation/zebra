@@ -18,7 +18,7 @@ use zebra_chain::{
 
 use crate::service::QueuedBlock;
 
-#[derive(Clone, Default)]
+#[derive(Default, Clone)]
 struct Chain {
     blocks: BTreeMap<block::Height, Arc<Block>>,
     height_by_hash: HashMap<block::Hash, block::Height>,
