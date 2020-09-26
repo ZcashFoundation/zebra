@@ -534,9 +534,9 @@ pub struct QueuedBlocks {
     /// Blocks awaiting their parent blocks for contextual verification.
     blocks: HashMap<block::Hash, QueuedBlock>,
     /// Hashes from `queued_blocks`, indexed by parent hash.
-    by_parent: HashMap<block::Hash, Vec<block::Hash>>,
+    by_parent: HashMap<block::Hash, HashSet<block::Hash>>,
     /// Hashes from `queued_blocks`, indexed by block height.
-    by_height: BTreeMap<block::Height, Vec<block::Hash>>,
+    by_height: BTreeMap<block::Height, HashSet<block::Hash>>,
 }
 
 impl QueuedBlocks {
@@ -548,12 +548,20 @@ impl QueuedBlocks {
             .expect("validated non-finalized blocks have a coinbase height");
         let parent_hash = new.block.header.previous_block_hash;
 
-        self.blocks.insert(new_hash, new);
-        self.by_height.entry(new_height).or_default().push(new_hash);
-        self.by_parent
+        let replaced = self.blocks.insert(new_hash, new);
+        assert!(replaced.is_none(), "hashes must be unique");
+        let was_present = self
+            .by_height
+            .entry(new_height)
+            .or_default()
+            .insert(new_hash);
+        assert!(!was_present, "hashes must be unique");
+        let was_present = self
+            .by_parent
             .entry(parent_hash)
             .or_default()
-            .push(new_hash);
+            .insert(new_hash);
+        assert!(!was_present, "hashes must be unique");
     }
 
     pub fn dequeue_children(&mut self, parent: block::Hash) -> Vec<QueuedBlock> {
@@ -578,7 +586,22 @@ impl QueuedBlocks {
     }
 
     pub fn prune_by_height(&mut self, finalized_tip_height: block::Height) {
-        todo!()
+        let by_height = std::mem::take(&mut self.by_height).into_iter();
+
+        for (height, hashes) in by_height {
+            if height <= finalized_tip_height {
+                for hash in hashes {
+                    let expired = self.blocks.remove(&hash).expect("block is present");
+                    let parent_hash = &expired.block.header.previous_block_hash;
+                    self.by_parent
+                        .get_mut(parent_hash)
+                        .expect("parent is present")
+                        .remove(&hash);
+                }
+            } else {
+                self.by_height.insert(height, hashes);
+            }
+        }
     }
 }
 
