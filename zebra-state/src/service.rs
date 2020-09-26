@@ -8,6 +8,7 @@ use std::{
 };
 
 use futures::future::{FutureExt, TryFutureExt};
+use thiserror::Error;
 use tokio::sync::oneshot;
 use tower::{buffer::Buffer, util::BoxService, Service};
 use zebra_chain::{
@@ -86,6 +87,11 @@ struct StateService {
     contextual_queue: QueuedBlocks,
 }
 
+#[derive(Debug, Error)]
+#[error("block is not contextually valid")]
+struct CommitError(#[from] ValidateContextError);
+
+#[derive(Debug, Error)]
 enum ValidateContextError {}
 
 impl StateService {
@@ -122,22 +128,17 @@ impl StateService {
         }
     }
 
-    fn validate_and_commit(&mut self, ready: QueuedBlock) {
-        let validity = self.check_contextual_validity(&ready.block);
-
-        if let Err(_err) = validity {
-            todo!("wrap with error and send back on channel")
-        }
-
-        let block_hash = ready.block.hash();
+    fn validate_and_commit(&mut self, block: Arc<Block>) -> Result<(), CommitError> {
+        self.check_contextual_validity(&block)?;
+        let block_hash = block.hash();
 
         if self.finalized_tip_hash() == &block_hash {
-            self.mem.commit_new_chain(ready.block);
-            todo!("send success back through channel");
+            self.mem.commit_new_chain(block);
         } else {
-            self.mem.commit_block(ready.block);
-            todo!("send success back through channel");
+            self.mem.commit_block(block);
         }
+
+        Ok(())
     }
 
     fn check_contextual_validity(&mut self, _block: &Block) -> Result<(), ValidateContextError> {
@@ -159,9 +160,13 @@ impl StateService {
         while let Some(parent) = new_parents.pop() {
             let queued_children = self.contextual_queue.dequeue_children(parent);
 
-            for ready in queued_children {
-                let hash = ready.block.hash();
-                self.validate_and_commit(ready);
+            for QueuedBlock { block, rsp_tx } in queued_children {
+                let hash = block.hash();
+                let result = self
+                    .validate_and_commit(block)
+                    .map(|()| hash)
+                    .map_err(Into::into);
+                let _ = rsp_tx.send(result);
                 new_parents.push(hash);
             }
         }
