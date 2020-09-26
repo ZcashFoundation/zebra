@@ -5,6 +5,7 @@
 use std::{
     cmp::Ordering,
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    mem,
     ops::Deref,
     sync::Arc,
 };
@@ -432,7 +433,7 @@ impl NonFinalizedState {
     /// Finalize the lowest eight block in the non-finalized portion of the best
     /// chain and update all side-chains to match.
     pub fn finalize(&mut self) -> Arc<Block> {
-        let chains = std::mem::take(&mut self.chain_set);
+        let chains = mem::take(&mut self.chain_set);
         let mut chains = chains.into_iter();
 
         // extract best chain
@@ -505,7 +506,7 @@ impl NonFinalizedState {
     where
         F: Fn(&Chain) -> bool,
     {
-        let chains = std::mem::take(&mut self.chain_set);
+        let chains = mem::take(&mut self.chain_set);
         let mut chains = chains.into_iter();
 
         while let Some(chain) = chains.next() {
@@ -586,10 +587,12 @@ impl QueuedBlocks {
     }
 
     pub fn prune_by_height(&mut self, finalized_tip_height: block::Height) {
-        let mut hashes = self.by_height.split_off(&finalized_tip_height);
-        std::mem::swap(&mut self.by_height, &mut hashes);
+        // split_off returns the values _above_ the key, so we have to swap
+        // after to get the ones blow the key
+        let mut by_height = self.by_height.split_off(&finalized_tip_height);
+        mem::swap(&mut self.by_height, &mut by_height);
 
-        for hash in hashes.into_iter().flat_map(|(_, hashes)| hashes) {
+        for hash in by_height.into_iter().flat_map(|(_, hashes)| hashes) {
             let expired = self.blocks.remove(&hash).expect("block is present");
             let parent_hash = &expired.block.header.previous_block_hash;
             self.by_parent
@@ -604,7 +607,7 @@ impl QueuedBlocks {
 mod tests {
     use transaction::Transaction;
 
-    use std::{fmt, mem};
+    use std::fmt;
 
     use zebra_chain::serialization::ZcashDeserializeInto;
     use zebra_chain::{
