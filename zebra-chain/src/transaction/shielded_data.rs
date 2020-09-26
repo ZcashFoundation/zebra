@@ -1,8 +1,11 @@
+use std::convert::TryFrom;
+
 use futures::future::Either;
 
 use crate::{
-    primitives::redjubjub::{Binding, Signature},
-    sapling::{Output, Spend},
+    amount::Amount,
+    primitives::redjubjub::{Binding, Signature, VerificationKey},
+    sapling::{Nullifier, Output, Spend, ValueCommitment},
     serialization::serde_helpers,
 };
 
@@ -60,6 +63,32 @@ impl ShieldedData {
         }
         .into_iter()
         .chain(self.rest_outputs.iter())
+    }
+
+    /// Collect the [`Nullifier`]s for this transaction, if it contains
+    /// [`Spend`]s.
+    pub fn nullifiers(&self) -> Vec<Nullifier> {
+        self.spends().map(|spend| spend.nullifier).collect()
+    }
+
+    /// Collect the cm_u's for this transaction, if it contains [`Output`]s.
+    pub fn note_commitments(&self) -> Vec<jubjub::Fq> {
+        self.outputs().map(|output| output.cm_u).collect()
+    }
+
+    /// Calculate the transaction binding validating key from the spend and
+    /// output value commitments and the value_balance.
+    pub fn binding_validating_key(
+        &self,
+        value_balance: Amount,
+    ) -> Result<VerificationKey<Binding>, redjubjub::Error> {
+        let cv_old: ValueCommitment = self.spends().map(|spend| spend.cv).sum();
+        let cv_new: ValueCommitment = self.outputs().map(|output| output.cv).sum();
+        let cv_balance: ValueCommitment = ValueCommitment::new(jubjub::Fr::zero(), value_balance);
+
+        let key_bytes: [u8; 32] = (cv_old - cv_new - cv_balance).into();
+
+        VerificationKey::<Binding>::try_from(key_bytes)
     }
 }
 
