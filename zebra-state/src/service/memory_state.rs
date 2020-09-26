@@ -551,18 +551,18 @@ impl QueuedBlocks {
 
         let replaced = self.blocks.insert(new_hash, new);
         assert!(replaced.is_none(), "hashes must be unique");
-        let was_present = self
+        let inserted = self
             .by_height
             .entry(new_height)
             .or_default()
             .insert(new_hash);
-        assert!(!was_present, "hashes must be unique");
-        let was_present = self
+        assert!(inserted, "hashes must be unique");
+        let inserted = self
             .by_parent
             .entry(parent_hash)
             .or_default()
             .insert(new_hash);
-        assert!(!was_present, "hashes must be unique");
+        assert!(inserted, "hashes must be unique");
     }
 
     pub fn dequeue_children(&mut self, parent: block::Hash) -> Vec<QueuedBlock> {
