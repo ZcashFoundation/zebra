@@ -586,21 +586,16 @@ impl QueuedBlocks {
     }
 
     pub fn prune_by_height(&mut self, finalized_tip_height: block::Height) {
-        let by_height = std::mem::take(&mut self.by_height).into_iter();
+        let mut hashes = self.by_height.split_off(&finalized_tip_height);
+        std::mem::swap(&mut self.by_height, &mut hashes);
 
-        for (height, hashes) in by_height {
-            if height <= finalized_tip_height {
-                for hash in hashes {
-                    let expired = self.blocks.remove(&hash).expect("block is present");
-                    let parent_hash = &expired.block.header.previous_block_hash;
-                    self.by_parent
-                        .get_mut(parent_hash)
-                        .expect("parent is present")
-                        .remove(&hash);
-                }
-            } else {
-                self.by_height.insert(height, hashes);
-            }
+        for hash in hashes.into_iter().flat_map(|(_, hashes)| hashes) {
+            let expired = self.blocks.remove(&hash).expect("block is present");
+            let parent_hash = &expired.block.header.previous_block_hash;
+            self.by_parent
+                .get_mut(parent_hash)
+                .expect("parent is present")
+                .remove(&hash);
         }
     }
 }
