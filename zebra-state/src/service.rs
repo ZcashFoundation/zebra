@@ -10,6 +10,7 @@ use memory_state::{NonFinalizedState, QueuedBlocks};
 use thiserror::Error;
 use tokio::sync::oneshot;
 use tower::{buffer::Buffer, util::BoxService, Service};
+use tracing::instrument;
 use zebra_chain::{
     block::{self, Block},
     parameters::Network,
@@ -42,8 +43,11 @@ struct StateService {
 #[error("block is not contextually valid")]
 struct CommitError(#[from] ValidateContextError);
 
-#[derive(Debug, Error)]
-enum ValidateContextError {}
+#[derive(displaydoc::Display, Debug, Error)]
+enum ValidateContextError {
+    /// block.height is lower than the current finalized height
+    OrphanedBlock,
+}
 
 impl StateService {
     const REORG_LIMIT: usize = 100;
@@ -96,9 +100,10 @@ impl StateService {
     }
 
     fn contains(&self, hash: &block::Hash) -> bool {
-        self.mem.any_chain_contains(hash) || self.sled.contains(hash)
+        self.mem.any_chain_contains(hash) || &self.sled.finalized_tip_hash() == hash
     }
 
+    #[instrument(skip(self))]
     fn process_queued(&mut self, new_parent: block::Hash) {
         let mut new_parents = vec![new_parent];
 
@@ -117,7 +122,13 @@ impl StateService {
         }
     }
 
-    fn check_contextual_validity(&mut self, _block: &Block) -> Result<(), ValidateContextError> {
+    fn check_contextual_validity(&mut self, block: &Block) -> Result<(), ValidateContextError> {
+        use ValidateContextError::*;
+
+        if block.coinbase_height().unwrap() <= self.sled.finalized_tip_height() {
+            Err(OrphanedBlock)?;
+        }
+
         // Draw the rest of the owl
         Ok(())
     }

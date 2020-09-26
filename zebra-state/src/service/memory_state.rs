@@ -10,6 +10,7 @@ use std::{
     sync::Arc,
 };
 
+use tracing::error_span;
 use zebra_chain::{
     block::{self, Block},
     primitives::Groth16Proof,

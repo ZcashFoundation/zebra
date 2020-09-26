@@ -3254,6 +3254,7 @@ version = "3.0.0-alpha.0"
 dependencies = [
  "color-eyre",
  "dirs",
+ "displaydoc",
  "futures",
  "hex",
  "lazy_static",
