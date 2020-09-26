@@ -1,6 +1,4 @@
 use std::{
-    collections::BTreeMap,
-    collections::HashMap,
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -8,6 +6,7 @@ use std::{
 };
 
 use futures::future::{FutureExt, TryFutureExt};
+use memory_state::{NonFinalizedState, QueuedBlocks};
 use thiserror::Error;
 use tokio::sync::oneshot;
 use tower::{buffer::Buffer, util::BoxService, Service};
@@ -16,7 +15,9 @@ use zebra_chain::{
     parameters::Network,
 };
 
-use crate::{BoxError, Config, FinalizedState, NonFinalizedState, Request, Response};
+use crate::{BoxError, Config, FinalizedState, Request, Response};
+
+mod memory_state;
 
 // todo: put this somewhere
 #[derive(Debug)]
@@ -26,56 +27,6 @@ pub struct QueuedBlock {
     // sprout_anchor: sprout::tree::Root,
     // sapling_anchor: sapling::tree::Root,
     pub rsp_tx: oneshot::Sender<Result<block::Hash, BoxError>>,
-}
-
-/// A queue of blocks, awaiting the arrival of parent blocks.
-#[derive(Default)]
-struct QueuedBlocks {
-    /// Blocks awaiting their parent blocks for contextual verification.
-    blocks: HashMap<block::Hash, QueuedBlock>,
-    /// Hashes from `queued_blocks`, indexed by parent hash.
-    by_parent: HashMap<block::Hash, Vec<block::Hash>>,
-    /// Hashes from `queued_blocks`, indexed by block height.
-    by_height: BTreeMap<block::Height, Vec<block::Hash>>,
-}
-
-impl QueuedBlocks {
-    fn queue(&mut self, new: QueuedBlock) {
-        let new_hash = new.block.hash();
-        let new_height = new
-            .block
-            .coinbase_height()
-            .expect("validated non-finalized blocks have a coinbase height");
-        let parent_hash = new.block.header.previous_block_hash;
-
-        self.blocks.insert(new_hash, new);
-        self.by_height.entry(new_height).or_default().push(new_hash);
-        self.by_parent
-            .entry(parent_hash)
-            .or_default()
-            .push(new_hash);
-    }
-
-    fn dequeue_children(&mut self, parent: block::Hash) -> Vec<QueuedBlock> {
-        let queued_children = self
-            .by_parent
-            .remove(&parent)
-            .unwrap_or_default()
-            .into_iter()
-            .map(|hash| {
-                self.blocks
-                    .remove(&hash)
-                    .expect("block is present if its hash is in by_parent")
-            })
-            .collect::<Vec<_>>();
-
-        for queued in &queued_children {
-            let height = queued.block.coinbase_height().unwrap();
-            self.by_height.remove(&height);
-        }
-
-        queued_children
-    }
 }
 
 struct StateService {
@@ -126,13 +77,16 @@ impl StateService {
                 .commit_finalized_direct(finalized)
                 .expect("sled would never do us dirty like that");
         }
+
+        self.contextual_queue
+            .prune_by_height(self.sled.finalized_tip_height());
     }
 
     fn validate_and_commit(&mut self, block: Arc<Block>) -> Result<(), CommitError> {
         self.check_contextual_validity(&block)?;
         let block_hash = block.hash();
 
-        if self.finalized_tip_hash() == &block_hash {
+        if self.sled.finalized_tip_hash() == block_hash {
             self.mem.commit_new_chain(block);
         } else {
             self.mem.commit_block(block);
@@ -141,17 +95,8 @@ impl StateService {
         Ok(())
     }
 
-    fn check_contextual_validity(&mut self, _block: &Block) -> Result<(), ValidateContextError> {
-        // Draw the rest of the owl
-        Ok(())
-    }
-
     fn contains(&self, hash: &block::Hash) -> bool {
         self.mem.any_chain_contains(hash) || self.sled.contains(hash)
-    }
-
-    fn finalized_tip_hash(&self) -> &block::Hash {
-        unimplemented!()
     }
 
     fn process_queued(&mut self, new_parent: block::Hash) {
@@ -170,6 +115,11 @@ impl StateService {
                 new_parents.push(hash);
             }
         }
+    }
+
+    fn check_contextual_validity(&mut self, _block: &Block) -> Result<(), ValidateContextError> {
+        // Draw the rest of the owl
+        Ok(())
     }
 }
 

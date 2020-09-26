@@ -435,7 +435,7 @@ chain and updates all side chains to match.
 
 8. Return `block`
 
-### `pub fn queue(&mut self, block: QueuedBlock)`
+#### `pub fn queue(&mut self, block: QueuedBlock)`
 
 Queue a non-finalized block to be committed to the state.
 
@@ -449,7 +449,7 @@ queued block (and any of its descendants) can be committed to the state
 
 3. Else Add `block` to `self.queued_blocks` and related members and return
 
-### `fn process_queued(&mut self, new_parent: block::Hash)`
+#### `fn process_queued(&mut self, new_parent: block::Hash)`
 
 1. Create a list of `new_parents` and populate it with `new_parent`
 
@@ -461,7 +461,7 @@ queued block (and any of its descendants) can be committed to the state
       - let result = `self.commit_block(block)`;
       - add `result` to `new_parents`
 
-### `fn commit_block(&mut self, block: QueuedBlock)`
+#### `fn commit_block(&mut self, block: QueuedBlock)`
 
 Commit `block` to the non-finalized state.
 
@@ -483,20 +483,64 @@ Commit `block` to the non-finalized state.
 5. Else panic, this should be unreachable because `commit_block` is only
    called when it's ready to be committed.
 
+### The `QueuedBlocks` type
+
+The queued blocks type represents the non-finalized blocks that were commited
+before their parent blocks were. It is responsible for tracking which blocks
+are queued by their parent so they can be commited immediately after the
+parent is commited. It also tracks blocks by their height so they can be
+discarded if they ever end up below the reorg limit.
+
+`NonFinalizedState` is defined by the following structure and API:
+
+#### `pub fn queue(&mut self, new: QueuedBlock)`
+
+Add a block to the queue of blocks waiting for their requisite context to
+become available.
+
+1. extract the `parent_hash`, `new_hash`, and `new_height` from `new.block`
+
+2. Add `new` to `self.blocks` using `new_hash` as the key
+
+3. Add `new_hash` to the set of hashes in
+   `self.by_parent.entry(parent_hash).or_default()`
+
+4. Add `new_hash` to the set of hashes in
+   `self.by_height.entry(new_height).or_default()`
+
+#### `pub fn dequeue_children(&mut self, parent: block::Hash) -> Vec<QueuedBlock>`
+
+Dequeue the set of blocks waiting on `parent`.
+
+1. Remove the set of hashes waiting on `parent` from `self.by_parent`
+
+2. Remove and collect each block in that set of hashes from `self.blocks` as
+  `queued_children`
+
+3. For each `block` in `queued_children` remove the associated `block.hash`
+  from `self.by_height`
+
+4. Return `queued_children`
+
+#### `pub fn prune_by_height(&mut self, finalized_height: block::Height)`
+
+TODO
+
+
 ### Summary
 
 - `Chain` represents the non-finalized portion of a single chain
 
-- `NonFinalizedState` represents the non-finalized portion of all chains and all
-  unverified blocks that are waiting for context to be available.
+- `NonFinalizedState` represents the non-finalized portion of all chains
 
-- `NonFinalizedState::queue` handles queueing and or commiting blocks and
-  reorganizing chains (via `commit_block`) but not finalizing them
+- `QueuedBlocks` represents all unverified blocks that are waiting for
+  context to be available.
+
+- `finalize` must be called manually after calling `commit_block` to prevent
+  chains in `NonFinalizedState` from growing beyond the reorg limit.
 
 - Finalized blocks are returned from `finalize` and must still be committed
   to disk afterwards
-
-- `finalize` handles pruning queued blocks that are past the reorg limit
 
 ## Committing non-finalized blocks
 

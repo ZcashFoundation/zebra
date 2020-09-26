@@ -66,19 +66,23 @@ impl FinalizedState {
         let prev_hash = queued_block.block.header.previous_block_hash;
         self.queued_by_prev_hash.insert(prev_hash, queued_block);
 
-        // Cloning means the closure doesn't hold a borrow of &self,
-        // conflicting with mutable access in the loop below.
-        let hash_by_height = self.hash_by_height.clone();
-        let tip_hash = || {
-            read_tip(&hash_by_height)
-                .expect("inability to look up tip is unrecoverable")
-                .map(|(_height, hash)| hash)
-                .unwrap_or(block::Hash([0; 32]))
-        };
-
-        while let Some(queued_block) = self.queued_by_prev_hash.remove(&tip_hash()) {
+        while let Some(queued_block) = self.queued_by_prev_hash.remove(&self.finalized_tip_hash()) {
             self.commit_finalized(queued_block)
         }
+    }
+
+    pub fn finalized_tip_hash(&self) -> block::Hash {
+        read_tip(&self.hash_by_height)
+            .expect("inability to look up tip is unrecoverable")
+            .map(|(_, hash)| hash)
+            .unwrap_or(block::Hash([0; 32]))
+    }
+
+    pub fn finalized_tip_height(&self) -> block::Height {
+        read_tip(&self.hash_by_height)
+            .expect("inability to look up tip is unrecoverable")
+            .map(|(height, _)| height)
+            .unwrap_or(block::Height(0))
     }
 
     pub fn commit_finalized_direct(&mut self, block: Arc<Block>) -> Result<block::Hash, BoxError> {

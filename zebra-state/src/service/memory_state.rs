@@ -16,112 +16,7 @@ use zebra_chain::{
     work::difficulty::PartialCumulativeWork,
 };
 
-/// The state of the chains in memory, incuding queued blocks.
-#[derive(Default)]
-pub struct NonFinalizedState {
-    /// Verified, non-finalized chains.
-    chain_set: BTreeSet<Box<Chain>>,
-}
-
-impl NonFinalizedState {
-    /// Finalize the lowest eight block in the non-finalized portion of the best
-    /// chain and update all side-chains to match.
-    pub fn finalize(&mut self) -> Arc<Block> {
-        let chains = std::mem::take(&mut self.chain_set);
-        let mut chains = chains.into_iter();
-
-        // extract best chain
-        let mut best_chain = chains.next().expect("there's at least one chain");
-        // extract the rest into side_chains so they can be mutated
-        let side_chains = chains;
-
-        // remove the lowest height block from the best_chain as finalized_block
-        let finalized_block = best_chain.pop_root();
-        // add best_chain back to `self.chain_set`
-        self.chain_set.insert(best_chain);
-
-        // for each remaining chain in side_chains
-        for mut chain in side_chains {
-            // remove the first block from `chain`
-            let chain_start = chain.pop_root();
-            // if block equals finalized_block
-            if chain_start == finalized_block {
-                // add the chain back to `self.chain_set`
-                self.chain_set.insert(chain);
-            }
-            // else discard `chain`
-        }
-
-        // return the finalized block
-        finalized_block
-    }
-
-    /// Commit block to the non-finalize state.
-    pub fn commit_block(&mut self, block: Arc<Block>) {
-        let parent_hash = block.header.previous_block_hash;
-
-        let mut parent_chain = self
-            .take_chain_if(|chain| chain.non_finalized_tip_hash() == parent_hash)
-            .or_else(|| {
-                self.chain_set
-                    .iter()
-                    .find_map(|chain| chain.fork(parent_hash))
-                    .map(Box::new)
-            })
-            .expect("commit_block is only called with blocks that are ready to be commited");
-
-        parent_chain.push(block);
-        self.chain_set.insert(parent_chain);
-    }
-
-    pub fn commit_new_chain(&mut self, block: Arc<Block>) {
-        let mut chain = Chain::default();
-        chain.push(block);
-        self.chain_set.insert(Box::new(chain));
-    }
-
-    pub fn best_chain_len(&self) -> usize {
-        self.chain_set
-            .iter()
-            .next()
-            .expect("only called after inserting a block")
-            .blocks
-            .len()
-    }
-
-    pub fn any_chain_contains(&self, hash: &block::Hash) -> bool {
-        self.chain_set
-            .iter()
-            .any(|chain| chain.height_by_hash.contains_key(hash))
-    }
-
-    /// Remove and return the first chain satisfying the given predicate.
-    fn take_chain_if<F>(&mut self, predicate: F) -> Option<Box<Chain>>
-    where
-        F: Fn(&Chain) -> bool,
-    {
-        let chains = std::mem::take(&mut self.chain_set);
-        let mut chains = chains.into_iter();
-
-        while let Some(chain) = chains.next() {
-            // if the predicate says we should remove it
-            if predicate(&chain) {
-                // add back the remaining chains
-                for chain in chains {
-                    self.chain_set.insert(chain);
-                }
-
-                // and return the chain
-                return Some(chain);
-            } else {
-                // add the chain back to the set and continue
-                self.chain_set.insert(chain);
-            }
-        }
-
-        None
-    }
-}
+use crate::service::QueuedBlock;
 
 #[derive(Clone, Default)]
 struct Chain {
@@ -523,6 +418,167 @@ impl Ord for Chain {
                 ordering => ordering,
             }
         }
+    }
+}
+
+/// The state of the chains in memory, incuding queued blocks.
+#[derive(Default)]
+pub struct NonFinalizedState {
+    /// Verified, non-finalized chains.
+    chain_set: BTreeSet<Box<Chain>>,
+}
+
+impl NonFinalizedState {
+    /// Finalize the lowest eight block in the non-finalized portion of the best
+    /// chain and update all side-chains to match.
+    pub fn finalize(&mut self) -> Arc<Block> {
+        let chains = std::mem::take(&mut self.chain_set);
+        let mut chains = chains.into_iter();
+
+        // extract best chain
+        let mut best_chain = chains.next().expect("there's at least one chain");
+        // extract the rest into side_chains so they can be mutated
+        let side_chains = chains;
+
+        // remove the lowest height block from the best_chain as finalized_block
+        let finalized_block = best_chain.pop_root();
+        // add best_chain back to `self.chain_set`
+        self.chain_set.insert(best_chain);
+
+        // for each remaining chain in side_chains
+        for mut chain in side_chains {
+            // remove the first block from `chain`
+            let chain_start = chain.pop_root();
+            // if block equals finalized_block
+            if chain_start == finalized_block {
+                // add the chain back to `self.chain_set`
+                self.chain_set.insert(chain);
+            }
+            // else discard `chain`
+        }
+
+        // return the finalized block
+        finalized_block
+    }
+
+    /// Commit block to the non-finalize state.
+    pub fn commit_block(&mut self, block: Arc<Block>) {
+        let parent_hash = block.header.previous_block_hash;
+
+        let mut parent_chain = self
+            .take_chain_if(|chain| chain.non_finalized_tip_hash() == parent_hash)
+            .or_else(|| {
+                self.chain_set
+                    .iter()
+                    .find_map(|chain| chain.fork(parent_hash))
+                    .map(Box::new)
+            })
+            .expect("commit_block is only called with blocks that are ready to be commited");
+
+        parent_chain.push(block);
+        self.chain_set.insert(parent_chain);
+    }
+
+    pub fn commit_new_chain(&mut self, block: Arc<Block>) {
+        let mut chain = Chain::default();
+        chain.push(block);
+        self.chain_set.insert(Box::new(chain));
+    }
+
+    pub fn best_chain_len(&self) -> usize {
+        self.chain_set
+            .iter()
+            .next()
+            .expect("only called after inserting a block")
+            .blocks
+            .len()
+    }
+
+    pub fn any_chain_contains(&self, hash: &block::Hash) -> bool {
+        self.chain_set
+            .iter()
+            .any(|chain| chain.height_by_hash.contains_key(hash))
+    }
+
+    /// Remove and return the first chain satisfying the given predicate.
+    fn take_chain_if<F>(&mut self, predicate: F) -> Option<Box<Chain>>
+    where
+        F: Fn(&Chain) -> bool,
+    {
+        let chains = std::mem::take(&mut self.chain_set);
+        let mut chains = chains.into_iter();
+
+        while let Some(chain) = chains.next() {
+            // if the predicate says we should remove it
+            if predicate(&chain) {
+                // add back the remaining chains
+                for chain in chains {
+                    self.chain_set.insert(chain);
+                }
+
+                // and return the chain
+                return Some(chain);
+            } else {
+                // add the chain back to the set and continue
+                self.chain_set.insert(chain);
+            }
+        }
+
+        None
+    }
+}
+
+/// A queue of blocks, awaiting the arrival of parent blocks.
+#[derive(Default)]
+pub struct QueuedBlocks {
+    /// Blocks awaiting their parent blocks for contextual verification.
+    blocks: HashMap<block::Hash, QueuedBlock>,
+    /// Hashes from `queued_blocks`, indexed by parent hash.
+    by_parent: HashMap<block::Hash, Vec<block::Hash>>,
+    /// Hashes from `queued_blocks`, indexed by block height.
+    by_height: BTreeMap<block::Height, Vec<block::Hash>>,
+}
+
+impl QueuedBlocks {
+    pub fn queue(&mut self, new: QueuedBlock) {
+        let new_hash = new.block.hash();
+        let new_height = new
+            .block
+            .coinbase_height()
+            .expect("validated non-finalized blocks have a coinbase height");
+        let parent_hash = new.block.header.previous_block_hash;
+
+        self.blocks.insert(new_hash, new);
+        self.by_height.entry(new_height).or_default().push(new_hash);
+        self.by_parent
+            .entry(parent_hash)
+            .or_default()
+            .push(new_hash);
+    }
+
+    pub fn dequeue_children(&mut self, parent: block::Hash) -> Vec<QueuedBlock> {
+        let queued_children = self
+            .by_parent
+            .remove(&parent)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|hash| {
+                self.blocks
+                    .remove(&hash)
+                    .expect("block is present if its hash is in by_parent")
+            })
+            .collect::<Vec<_>>();
+
+        for queued in &queued_children {
+            let height = queued.block.coinbase_height().unwrap();
+            self.by_height.remove(&height);
+        }
+
+        queued_children
+    }
+
+    pub fn prune_by_height(&mut self, finalized_tip_height: block::Height) {
+        todo!()
     }
 }
 
