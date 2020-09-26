@@ -24,6 +24,7 @@ const ZCASH_SHIELDED_SPENDS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashSSpendsHash
 const ZCASH_SHIELDED_OUTPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashSOutputHash";
 
 bitflags::bitflags! {
+    /// The different SigHash types, as defined in https://zips.z.cash/zip-0143
     pub struct HashType: u32 {
         const ALL = 0b0000_0001;
         const NONE = 0b0000_0010;
