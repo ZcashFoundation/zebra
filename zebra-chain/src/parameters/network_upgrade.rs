@@ -62,8 +62,6 @@ pub(crate) const TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] 
     (block::Height(280_000), Sapling),
     (block::Height(584_000), Blossom),
     (block::Height(903_800), Heartwood),
-    // As of 27 July 2020, the Canopy testnet height is under final review.
-    // See ZIP 251 for any updates.
     (block::Height(1_028_500), Canopy),
 ];
 
@@ -93,8 +91,8 @@ pub(crate) const CONSENSUS_BRANCH_IDS: &[(NetworkUpgrade, ConsensusBranchId)] = 
     (Sapling, ConsensusBranchId(0x76b809bb)),
     (Blossom, ConsensusBranchId(0x2bb40e60)),
     (Heartwood, ConsensusBranchId(0xf5b9230b)),
-    // As of 21 July 2020. Could change before mainnet activation.
-    // See ZIP 251 for updates.
+    // As of 24 September 2020. Could change before mainnet activation.
+    // See ZIP 251 for any updates.
     (Canopy, ConsensusBranchId(0xe9ff75a6)),
 ];
 
