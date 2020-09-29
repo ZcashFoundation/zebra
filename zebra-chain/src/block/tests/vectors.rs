@@ -91,6 +91,33 @@ fn block_test_vectors_unique() {
 }
 
 #[test]
+fn block_test_vectors_height_mainnet() {
+    block_test_vectors_height(Network::Mainnet);
+}
+
+#[test]
+fn block_test_vectors_height_testnet() {
+    block_test_vectors_height(Network::Testnet);
+}
+
+fn block_test_vectors_height(network: Network) {
+    let block_iter = match network {
+        Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
+        Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
+    };
+
+    for (&height, block) in block_iter {
+        let block = block
+            .zcash_deserialize_into::<Block>()
+            .expect("block is structurally valid");
+        assert_eq!(
+            block.coinbase_height().expect("block height is valid").0,
+            height
+        );
+    }
+}
+
+#[test]
 fn block_limits_multi_tx() {
     // Test multiple small transactions to fill a block max size
 
