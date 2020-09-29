@@ -18,7 +18,7 @@ use crate::BoxError;
 /// fees paid by transactions included in this block." [§3.10][3.10]
 ///
 /// [3.10]: https://zips.z.cash/protocol/protocol.pdf#coinbasetransactions
-pub fn is_coinbase_first(block: &Block) -> Result<(), BlockError> {
+pub fn coinbase_is_first(block: &Block) -> Result<(), BlockError> {
     let first = block
         .transactions
         .get(0)
@@ -35,7 +35,7 @@ pub fn is_coinbase_first(block: &Block) -> Result<(), BlockError> {
 }
 
 /// Returns true if the header is valid based on its `EquihashSolution`
-pub fn is_equihash_solution_valid(header: &Header) -> Result<(), equihash::Error> {
+pub fn equihash_solution_is_valid(header: &Header) -> Result<(), equihash::Error> {
     header.solution.check(&header)
 }
 
@@ -53,6 +53,6 @@ pub fn is_equihash_solution_valid(header: &Header) -> Result<(), equihash::Error
 /// accepted." [§7.5][7.5]
 ///
 /// [7.5]: https://zips.z.cash/protocol/protocol.pdf#blockheader
-pub fn is_time_valid_at(header: &Header, now: DateTime<Utc>) -> Result<(), BoxError> {
+pub fn time_is_valid_at(header: &Header, now: DateTime<Utc>) -> Result<(), BoxError> {
     header.is_time_valid_at(now)
 }

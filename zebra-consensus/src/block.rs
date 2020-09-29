@@ -138,15 +138,15 @@ where
                     difficulty_threshold,
                 ))?;
             }
-            check::is_equihash_solution_valid(&block.header)?;
+            check::equihash_solution_is_valid(&block.header)?;
 
             // Since errors cause an early exit, try to do the
             // quick checks first.
 
             // Field validity and structure checks
             let now = Utc::now();
-            check::is_time_valid_at(&block.header, now).map_err(VerifyBlockError::Time)?;
-            check::is_coinbase_first(&block)?;
+            check::time_is_valid_at(&block.header, now).map_err(VerifyBlockError::Time)?;
+            check::coinbase_is_first(&block)?;
 
             // TODO: context-free header verification: merkle root
 
