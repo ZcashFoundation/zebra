@@ -50,7 +50,7 @@ enum ValidateContextError {
 }
 
 impl StateService {
-    const REORG_LIMIT: usize = 100;
+    const REORG_LIMIT: block::Height = crate::constants::MAX_BLOCK_REORG_HEIGHT;
 
     pub fn new(config: Config, network: Network) -> Self {
         let sled = FinalizedState::new(&config, network);

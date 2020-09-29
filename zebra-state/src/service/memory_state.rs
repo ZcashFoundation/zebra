@@ -484,13 +484,15 @@ impl NonFinalizedState {
         self.chain_set.insert(Box::new(chain));
     }
 
-    pub fn best_chain_len(&self) -> usize {
-        self.chain_set
-            .iter()
-            .next()
-            .expect("only called after inserting a block")
-            .blocks
-            .len()
+    pub fn best_chain_len(&self) -> block::Height {
+        block::Height(
+            self.chain_set
+                .iter()
+                .next()
+                .expect("only called after inserting a block")
+                .blocks
+                .len() as u32,
+        )
     }
 
     pub fn any_chain_contains(&self, hash: &block::Hash) -> bool {
