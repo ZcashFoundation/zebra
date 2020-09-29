@@ -31,6 +31,7 @@ use crate::error::*;
 use crate::BoxError;
 
 mod check;
+mod subsidy;
 #[cfg(test)]
 mod tests;
 
