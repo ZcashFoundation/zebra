@@ -113,7 +113,7 @@ async fn check_transcripts() -> Result<(), Report> {
     let network = Network::Mainnet;
     let state_service = zebra_state::init(zebra_state::Config::ephemeral(), network);
 
-    let block_verifier = Buffer::new(BlockVerifier::new(state_service.clone()), 1);
+    let block_verifier = Buffer::new(BlockVerifier::new(network, state_service.clone()), 1);
 
     for transcript_data in &[
         &VALID_BLOCK_TRANSCRIPT,

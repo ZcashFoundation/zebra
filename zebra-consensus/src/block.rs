@@ -22,6 +22,7 @@ use tower::{Service, ServiceExt};
 
 use zebra_chain::{
     block::{self, Block},
+    parameters::Network,
     work::equihash,
 };
 use zebra_state as zs;
@@ -40,6 +41,9 @@ where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
 {
+    /// The network to be verified.
+    network: Network,
+
     /// The underlying state service, possibly wrapped in other services.
     state_service: S,
 }
@@ -70,8 +74,11 @@ where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
 {
-    pub fn new(state_service: S) -> Self {
-        Self { state_service }
+    pub fn new(network: Network, state_service: S) -> Self {
+        Self {
+            network,
+            state_service,
+        }
     }
 }
 
@@ -94,6 +101,7 @@ where
 
     fn call(&mut self, block: Arc<Block>) -> Self::Future {
         let mut state_service = self.state_service.clone();
+        let _network = self.network;
 
         // TODO(jlusby): Error = Report, handle errors from state_service.
         async move {
