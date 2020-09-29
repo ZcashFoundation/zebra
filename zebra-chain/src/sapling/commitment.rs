@@ -137,6 +137,21 @@ impl NoteCommitment {
 #[derive(Clone, Copy, Deserialize, PartialEq, Serialize)]
 pub struct ValueCommitment(#[serde(with = "serde_helpers::AffinePoint")] pub jubjub::AffinePoint);
 
+impl std::ops::Add<ValueCommitment> for ValueCommitment {
+    type Output = Self;
+
+    fn add(self, rhs: ValueCommitment) -> Self::Output {
+        let value = self.0.to_extended() + rhs.0.to_extended();
+        ValueCommitment(value.into())
+    }
+}
+
+impl std::ops::AddAssign<ValueCommitment> for ValueCommitment {
+    fn add_assign(&mut self, rhs: ValueCommitment) {
+        *self = *self + rhs
+    }
+}
+
 impl fmt::Debug for ValueCommitment {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("ValueCommitment")
@@ -161,6 +176,32 @@ impl Eq for ValueCommitment {}
 impl From<ValueCommitment> for [u8; 32] {
     fn from(cm: ValueCommitment) -> [u8; 32] {
         cm.0.to_bytes()
+    }
+}
+
+impl std::ops::Sub<ValueCommitment> for ValueCommitment {
+    type Output = Self;
+
+    fn sub(self, rhs: ValueCommitment) -> Self::Output {
+        ValueCommitment((self.0.to_extended() - rhs.0.to_extended()).into())
+    }
+}
+
+impl std::ops::SubAssign<ValueCommitment> for ValueCommitment {
+    fn sub_assign(&mut self, rhs: ValueCommitment) {
+        *self = *self - rhs;
+    }
+}
+
+impl std::iter::Sum for ValueCommitment {
+    fn sum<I>(iter: I) -> Self
+    where
+        I: Iterator<Item = ValueCommitment>,
+    {
+        iter.fold(
+            ValueCommitment(jubjub::AffinePoint::identity()),
+            std::ops::Add::add,
+        )
     }
 }
 
