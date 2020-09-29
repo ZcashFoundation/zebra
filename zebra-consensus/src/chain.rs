@@ -107,21 +107,26 @@ where
 
         self.last_block_height = height;
 
-        // The only valid block without a coinbase height is the genesis block,
-        // which omitted it by mistake.  So for the purposes of routing requests,
-        // we can interpret a missing coinbase height as 0; the checkpoint verifier
-        // will reject it.
-        if height.unwrap_or(block::Height(0)) < self.max_checkpoint_height {
-            self.checkpoint
-                .call(block)
-                .map_err(VerifyChainError::Checkpoint)
-                .boxed()
-        } else {
-            self.block
-                .call(block)
-                .map_err(VerifyChainError::Block)
-                .boxed()
+
+        if let Some(height) = height
+            if height <= self.max_checkpoint_height {
+                return self.checkpoint
+                    .call(block)
+                    .map_err(VerifyChainError::Checkpoint)
+                    .boxed()
+            }
         }
+
+        // For the purposes of routing requests, we can send blocks
+        // with no height to the block verifier, which will reject them.
+        //
+        // We choose the block verifier because it doesn't have any
+        // internal state, so it will always return the same error for a
+        // block with no height.
+        self.block
+            .call(block)
+            .map_err(VerifyChainError::Block)
+            .boxed()
     }
 }
 
