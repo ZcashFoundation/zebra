@@ -555,11 +555,8 @@ mod test {
         let zero = Amount::<NonNegative>::try_from(0)?;
 
         assert!(one > zero);
-        assert!(one == one);
         assert!(one != zero);
-        assert!(one >= one);
         assert!(zero < one);
-        assert!(zero == zero);
         assert!(zero != one);
         assert!(zero <= one);
 
@@ -569,7 +566,6 @@ mod test {
         let negative_two = Amount::<NegativeAllowed>::try_from(-2)?;
 
         assert!(negative_one < zero);
-        assert!(negative_one == negative_one);
         assert!(negative_one != zero);
         assert!(negative_one <= one);
         assert!(zero > negative_one);
