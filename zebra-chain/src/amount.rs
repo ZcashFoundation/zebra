@@ -191,6 +191,61 @@ where
     }
 }
 
+impl<C> PartialOrd for Amount<C>
+where
+    Amount<C>: Eq,
+    C: Constraint,
+{
+    fn partial_cmp(&self, other: &Amount<C>) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<C> Ord for Amount<C>
+where
+    Amount<C>: Eq,
+    C: Constraint,
+{
+    fn cmp(&self, other: &Amount<C>) -> std::cmp::Ordering {
+        self.0.cmp(&other.0)
+    }
+}
+
+impl std::ops::Mul<u64> for Amount<NonNegative> {
+    type Output = Result<Amount<NonNegative>>;
+
+    fn mul(self, rhs: u64) -> Self::Output {
+        let value = (self.0 as u64)
+            .checked_mul(rhs)
+            .ok_or(Error::MultiplicationOverflow {
+                amount: self.0,
+                multiplier: rhs,
+            })?;
+        value.try_into()
+    }
+}
+
+impl std::ops::Mul<Amount<NonNegative>> for u64 {
+    type Output = Result<Amount<NonNegative>>;
+
+    fn mul(self, rhs: Amount<NonNegative>) -> Self::Output {
+        rhs.mul(self)
+    }
+}
+
+impl std::ops::Div<u64> for Amount<NonNegative> {
+    type Output = Result<Amount<NonNegative>>;
+
+    fn div(self, rhs: u64) -> Self::Output {
+        let quotient = (self.0 as u64)
+            .checked_div(rhs)
+            .ok_or(Error::DivideByZero { amount: self.0 })?;
+        // since this is a division by a positive integer,
+        // the quotient must be within the constrained range
+        Ok(quotient.try_into().unwrap())
+    }
+}
+
 #[derive(thiserror::Error, Debug, displaydoc::Display, Clone, PartialEq)]
 #[allow(missing_docs)]
 /// Errors that can be returned when validating `Amount`s
@@ -205,6 +260,10 @@ pub enum Error {
         value: u64,
         source: std::num::TryFromIntError,
     },
+    /// i64 overflow when multiplying i64 non-negative amount {amount} by u64 {multiplier}
+    MultiplicationOverflow { amount: i64, multiplier: u64 },
+    /// division by zero is an invalid operation, amount {amount}
+    DivideByZero { amount: i64 },
 }
 
 /// Marker type for `Amount` that allows negative values.
@@ -243,8 +302,11 @@ impl Constraint for NonNegative {
     }
 }
 
+/// Number of zatoshis in 1 ZEC
+pub const COIN: i64 = 100_000_000;
+
 /// The maximum zatoshi amount.
-pub const MAX_MONEY: i64 = 21_000_000 * 100_000_000;
+pub const MAX_MONEY: i64 = 21_000_000 * COIN;
 
 /// A trait for defining constraints on `Amount`
 pub trait Constraint {
@@ -483,6 +545,37 @@ mod test {
             .expect("NegativeAllowed deserialization should allow negative values");
 
         assert_eq!(amount.0, neg);
+
+        Ok(())
+    }
+
+    #[test]
+    fn ordering() -> Result<()> {
+        let one = Amount::<NonNegative>::try_from(1)?;
+        let zero = Amount::<NonNegative>::try_from(0)?;
+
+        assert!(one > zero);
+        assert!(one == one);
+        assert!(one != zero);
+        assert!(one >= one);
+        assert!(zero < one);
+        assert!(zero == zero);
+        assert!(zero != one);
+        assert!(zero <= one);
+
+        let one = Amount::<NegativeAllowed>::try_from(1)?;
+        let zero = Amount::<NegativeAllowed>::try_from(0)?;
+        let negative_one = Amount::<NegativeAllowed>::try_from(-1)?;
+        let negative_two = Amount::<NegativeAllowed>::try_from(-2)?;
+
+        assert!(negative_one < zero);
+        assert!(negative_one == negative_one);
+        assert!(negative_one != zero);
+        assert!(negative_one <= one);
+        assert!(zero > negative_one);
+        assert!(zero >= negative_one);
+        assert!(negative_two < negative_one);
+        assert!(negative_one > negative_two);
 
         Ok(())
     }
