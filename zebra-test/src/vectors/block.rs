@@ -17,8 +17,12 @@ lazy_static! {
 
     // Update these lists of blocks when you add new block test vectors to
     // this file
+    //
+    // We use integer heights in these maps, to avoid a dependency on zebra_chain
 
     /// Mainnet blocks, indexed by height
+    ///
+    /// This is actually a bijective map, the tests ensure that values are unique.
     pub static ref MAINNET_BLOCKS: BTreeMap<u32, &'static [u8]> = BTreeMap::from_iter(
         [
             // Genesis
@@ -57,6 +61,8 @@ lazy_static! {
     );
 
     /// Testnet blocks, indexed by height
+    ///
+    /// This is actually a bijective map, the tests ensure that values are unique.
     pub static ref TESTNET_BLOCKS: BTreeMap<u32, &'static [u8]> = BTreeMap::from_iter(
         [
             // Genesis
