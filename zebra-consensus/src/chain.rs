@@ -108,7 +108,7 @@ where
         self.last_block_height = height;
 
 
-        if let Some(height) = height
+        if let Some(height) = height {
             if height <= self.max_checkpoint_height {
                 return self.checkpoint
                     .call(block)
