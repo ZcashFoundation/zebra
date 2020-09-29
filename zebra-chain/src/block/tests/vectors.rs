@@ -112,7 +112,8 @@ fn block_test_vectors_height(network: Network) {
             .expect("block is structurally valid");
         assert_eq!(
             block.coinbase_height().expect("block height is valid").0,
-            height
+            height,
+            "deserialized height must match BTreeMap key height"
         );
     }
 }
