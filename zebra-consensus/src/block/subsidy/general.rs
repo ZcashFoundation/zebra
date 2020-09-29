@@ -170,4 +170,20 @@ mod test {
             miner_subsidy(canopy_height, network)
         )
     }
+
+    #[test]
+    fn subsidy_is_correct_test() -> Result<(), Report> {
+        use crate::block::check;
+        use std::sync::Arc;
+        use zebra_chain::{block::Block, serialization::ZcashDeserialize};
+
+        let network = Network::Mainnet;
+
+        for b in &[&zebra_test::vectors::BLOCK_MAINNET_434873_BYTES[..]] {
+            let block = Arc::<Block>::zcash_deserialize(*b)?;
+            check::subsidy_is_correct(network, &block)
+                .expect("subsidies should pass for this block");
+        }
+        Ok(())
+    }
 }

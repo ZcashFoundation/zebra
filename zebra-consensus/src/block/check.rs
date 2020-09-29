@@ -3,12 +3,18 @@
 use chrono::{DateTime, Utc};
 
 use zebra_chain::{
+    amount::{Amount, NonNegative},
     block::{Block, Header},
     work::equihash,
 };
 
 use crate::error::*;
 use crate::BoxError;
+
+use std::convert::TryInto;
+use zebra_chain::parameters::{Network, NetworkUpgrade::*};
+
+use super::subsidy;
 
 /// Check that there is exactly one coinbase transaction in `Block`, and that
 /// the coinbase transaction is the first transaction in the block.
@@ -55,4 +61,45 @@ pub fn equihash_solution_is_valid(header: &Header) -> Result<(), equihash::Error
 /// [7.5]: https://zips.z.cash/protocol/protocol.pdf#blockheader
 pub fn time_is_valid_at(header: &Header, now: DateTime<Utc>) -> Result<(), BoxError> {
     header.is_time_valid_at(now)
+}
+
+/// [3.9]: https://zips.z.cash/protocol/protocol.pdf#subsidyconcepts
+pub fn subsidy_is_correct(network: Network, block: &Block) -> Result<(), BlockError> {
+    let height = block
+        .coinbase_height()
+        .expect("always called on blocks with a coinbase height");
+
+    let coinbase = block.transactions.get(0).ok_or(SubsidyError::NoCoinbase)?;
+    let outputs = coinbase.outputs();
+
+    let canopy_height = Canopy
+        .activation_height(network)
+        .ok_or(SubsidyError::NoCanopy)?;
+    if height >= canopy_height {
+        panic!("Can't validate Canopy yet");
+    }
+
+    // validate founders reward
+    let mut valid_founders_reward = false;
+    if height < canopy_height {
+        let founders_reward = subsidy::founders_reward::founders_reward(height, network)
+            .expect("founders reward should be always a valid value");
+
+        let values = || {
+            outputs
+                .iter()
+                .map(|o| o.value.try_into().expect("value will be a valid amount"))
+        };
+
+        if values().any(|value: Amount<NonNegative>| value == founders_reward) {
+            valid_founders_reward = true;
+        }
+    }
+    if !valid_founders_reward {
+        Err(SubsidyError::FoundersRewardNotFound)?
+    } else {
+        // TODO: the exact founders reward value must be sent as a single output to the correct address
+        // TODO: the sum of the coinbase transaction outputs must be less than or equal to the block subsidy plus transaction fees
+        Ok(())
+    }
 }

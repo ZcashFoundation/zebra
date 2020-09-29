@@ -3,12 +3,33 @@
 use thiserror::Error;
 
 #[derive(Error, Debug)]
+pub enum SubsidyError {
+    #[error("not a coinbase transaction")]
+    NoCoinbase,
+
+    #[error("no canopy block configured")]
+    NoCanopy,
+
+    #[error("founders reward output not found")]
+    FoundersRewardNotFound,
+}
+
+#[derive(Error, Debug)]
 pub enum TransactionError {
     #[error("first transaction must be coinbase")]
     CoinbasePosition,
 
     #[error("coinbase input found in non-coinbase transaction")]
     CoinbaseInputFound,
+
+    #[error("coinbase transaction contains invalid subsidy parameters")]
+    Subsidy(#[from] SubsidyError),
+}
+
+impl From<SubsidyError> for BlockError {
+    fn from(err: SubsidyError) -> BlockError {
+        BlockError::Transaction(TransactionError::Subsidy(err))
+    }
 }
 
 #[derive(Error, Debug)]

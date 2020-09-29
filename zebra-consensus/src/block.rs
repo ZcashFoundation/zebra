@@ -102,7 +102,7 @@ where
 
     fn call(&mut self, block: Arc<Block>) -> Self::Future {
         let mut state_service = self.state_service.clone();
-        let _network = self.network;
+        let network = self.network;
 
         // TODO(jlusby): Error = Report, handle errors from state_service.
         async move {
@@ -156,6 +156,7 @@ where
             let now = Utc::now();
             check::time_is_valid_at(&block.header, now).map_err(VerifyBlockError::Time)?;
             check::coinbase_is_first(&block)?;
+            check::subsidy_is_correct(network, &block)?;
 
             // TODO: context-free header verification: merkle root
 
