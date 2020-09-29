@@ -428,7 +428,7 @@ pub struct NonFinalizedState {
 }
 
 impl NonFinalizedState {
-    /// Finalize the lowest eight block in the non-finalized portion of the best
+    /// Finalize the lowest height block in the non-finalized portion of the best
     /// chain and update all side-chains to match.
     pub fn finalize(&mut self) -> Arc<Block> {
         let chains = mem::take(&mut self.chain_set);
