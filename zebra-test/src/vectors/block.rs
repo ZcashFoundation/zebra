@@ -9,7 +9,7 @@ use std::iter::FromIterator;
 lazy_static! {
 
     /// All block test vectors
-    pub static ref TEST_BLOCKS: Vec<&'static [u8]> = MAINNET_BLOCKS.iter().chain(TESTNET_BLOCKS.iter()).map(|(_height, block)| *block).collect();
+    pub static ref BLOCKS: Vec<&'static [u8]> = MAINNET_BLOCKS.iter().chain(TESTNET_BLOCKS.iter()).map(|(_height, block)| *block).collect();
 
     // Update these lists of blocks when you add new block test vectors to
     // this file
@@ -323,8 +323,8 @@ mod test {
 
     #[test]
     fn block_test_vectors_unique() {
-        let block_count = TEST_BLOCKS.len();
-        let block_set: HashSet<_> = TEST_BLOCKS.iter().collect();
+        let block_count = BLOCKS.len();
+        let block_set: HashSet<_> = BLOCKS.iter().collect();
 
         // putting the same block in two files is an easy mistake to make
         assert_eq!(
@@ -340,7 +340,7 @@ mod test {
     #[test]
     fn block_test_vectors_count() {
         assert!(
-            TEST_BLOCKS.len() > 50,
+            BLOCKS.len() > 50,
             "there should be a reasonable number of block test vectors"
         );
     }

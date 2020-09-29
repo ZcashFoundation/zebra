@@ -63,7 +63,7 @@ fn deserialize_block() {
         .zcash_deserialize_into::<Block>()
         .expect("block test vector should deserialize");
 
-    for block in zebra_test::vectors::TEST_BLOCKS.iter() {
+    for block in zebra_test::vectors::BLOCKS.iter() {
         block
             .zcash_deserialize_into::<Block>()
             .expect("block is structurally valid");
@@ -72,8 +72,8 @@ fn deserialize_block() {
 
 #[test]
 fn block_test_vectors_unique() {
-    let block_count = zebra_test::vectors::TEST_BLOCKS.len();
-    let block_hashes: HashSet<_> = zebra_test::vectors::TEST_BLOCKS
+    let block_count = zebra_test::vectors::BLOCKS.len();
+    let block_hashes: HashSet<_> = zebra_test::vectors::BLOCKS
         .iter()
         .map(|b| {
             b.zcash_deserialize_into::<Block>()
