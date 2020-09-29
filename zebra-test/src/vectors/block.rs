@@ -9,7 +9,11 @@ use std::iter::FromIterator;
 lazy_static! {
 
     /// All block test vectors
-    pub static ref BLOCKS: Vec<&'static [u8]> = MAINNET_BLOCKS.iter().chain(TESTNET_BLOCKS.iter()).map(|(_height, block)| *block).collect();
+    pub static ref BLOCKS: Vec<&'static [u8]> = MAINNET_BLOCKS
+        .iter()
+        .chain(TESTNET_BLOCKS.iter())
+        .map(|(_height, block)| *block)
+        .collect();
 
     // Update these lists of blocks when you add new block test vectors to
     // this file
@@ -101,24 +105,33 @@ lazy_static! {
     // done
     pub static ref BLOCK_MAINNET_GENESIS_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("block-main-0-000-000.txt").trim())
-            .expect("Block bytes are in valid hex representation");
-    pub static ref BLOCK_MAINNET_1_BYTES: Vec<u8> = <Vec<u8>>::from_hex(include_str!("block-main-0-000-001.txt").trim())
         .expect("Block bytes are in valid hex representation");
-    pub static ref BLOCK_MAINNET_2_BYTES: Vec<u8> = <Vec<u8>>::from_hex(include_str!("block-main-0-000-002.txt").trim())
+    pub static ref BLOCK_MAINNET_1_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-main-0-000-001.txt").trim())
         .expect("Block bytes are in valid hex representation");
-    pub static ref BLOCK_MAINNET_3_BYTES: Vec<u8> = <Vec<u8>>::from_hex(include_str!("block-main-0-000-003.txt").trim())
+    pub static ref BLOCK_MAINNET_2_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-main-0-000-002.txt").trim())
         .expect("Block bytes are in valid hex representation");
-    pub static ref BLOCK_MAINNET_4_BYTES: Vec<u8> = <Vec<u8>>::from_hex(include_str!("block-main-0-000-004.txt").trim())
+    pub static ref BLOCK_MAINNET_3_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-main-0-000-003.txt").trim())
         .expect("Block bytes are in valid hex representation");
-    pub static ref BLOCK_MAINNET_5_BYTES: Vec<u8> = <Vec<u8>>::from_hex(include_str!("block-main-0-000-005.txt").trim())
+    pub static ref BLOCK_MAINNET_4_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-main-0-000-004.txt").trim())
         .expect("Block bytes are in valid hex representation");
-    pub static ref BLOCK_MAINNET_6_BYTES: Vec<u8> = <Vec<u8>>::from_hex(include_str!("block-main-0-000-006.txt").trim())
+    pub static ref BLOCK_MAINNET_5_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-main-0-000-005.txt").trim())
         .expect("Block bytes are in valid hex representation");
-    pub static ref BLOCK_MAINNET_7_BYTES: Vec<u8> = <Vec<u8>>::from_hex(include_str!("block-main-0-000-007.txt").trim())
+    pub static ref BLOCK_MAINNET_6_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-main-0-000-006.txt").trim())
         .expect("Block bytes are in valid hex representation");
-    pub static ref BLOCK_MAINNET_8_BYTES: Vec<u8> = <Vec<u8>>::from_hex(include_str!("block-main-0-000-008.txt").trim())
+    pub static ref BLOCK_MAINNET_7_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-main-0-000-007.txt").trim())
         .expect("Block bytes are in valid hex representation");
-    pub static ref BLOCK_MAINNET_9_BYTES: Vec<u8> = <Vec<u8>>::from_hex(include_str!("block-main-0-000-009.txt").trim())
+    pub static ref BLOCK_MAINNET_8_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-main-0-000-008.txt").trim())
+        .expect("Block bytes are in valid hex representation");
+    pub static ref BLOCK_MAINNET_9_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-main-0-000-009.txt").trim())
         .expect("Block bytes are in valid hex representation");
     // zcash-cli getblock 10 0 > block-main-0-000-010.txt
     pub static ref BLOCK_MAINNET_10_BYTES: Vec<u8> =
@@ -209,29 +222,38 @@ lazy_static! {
     // done
     pub static ref BLOCK_TESTNET_GENESIS_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("block-test-0-000-000.txt").trim())
-            .expect("Block bytes are in valid hex representation");
-    pub static ref BLOCK_TESTNET_1_BYTES: Vec<u8> = <Vec<u8>>::from_hex(include_str!("block-test-0-000-001.txt").trim())
         .expect("Block bytes are in valid hex representation");
-    pub static ref BLOCK_TESTNET_2_BYTES: Vec<u8> = <Vec<u8>>::from_hex(include_str!("block-test-0-000-002.txt").trim())
+    pub static ref BLOCK_TESTNET_1_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-test-0-000-001.txt").trim())
         .expect("Block bytes are in valid hex representation");
-    pub static ref BLOCK_TESTNET_3_BYTES: Vec<u8> = <Vec<u8>>::from_hex(include_str!("block-test-0-000-003.txt").trim())
+    pub static ref BLOCK_TESTNET_2_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-test-0-000-002.txt").trim())
         .expect("Block bytes are in valid hex representation");
-    pub static ref BLOCK_TESTNET_4_BYTES: Vec<u8> = <Vec<u8>>::from_hex(include_str!("block-test-0-000-004.txt").trim())
+    pub static ref BLOCK_TESTNET_3_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-test-0-000-003.txt").trim())
         .expect("Block bytes are in valid hex representation");
-    pub static ref BLOCK_TESTNET_5_BYTES: Vec<u8> = <Vec<u8>>::from_hex(include_str!("block-test-0-000-005.txt").trim())
+    pub static ref BLOCK_TESTNET_4_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-test-0-000-004.txt").trim())
         .expect("Block bytes are in valid hex representation");
-    pub static ref BLOCK_TESTNET_6_BYTES: Vec<u8> = <Vec<u8>>::from_hex(include_str!("block-test-0-000-006.txt").trim())
+    pub static ref BLOCK_TESTNET_5_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-test-0-000-005.txt").trim())
         .expect("Block bytes are in valid hex representation");
-    pub static ref BLOCK_TESTNET_7_BYTES: Vec<u8> = <Vec<u8>>::from_hex(include_str!("block-test-0-000-007.txt").trim())
+    pub static ref BLOCK_TESTNET_6_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-test-0-000-006.txt").trim())
         .expect("Block bytes are in valid hex representation");
-    pub static ref BLOCK_TESTNET_8_BYTES: Vec<u8> = <Vec<u8>>::from_hex(include_str!("block-test-0-000-008.txt").trim())
+    pub static ref BLOCK_TESTNET_7_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-test-0-000-007.txt").trim())
         .expect("Block bytes are in valid hex representation");
-    pub static ref BLOCK_TESTNET_9_BYTES: Vec<u8> = <Vec<u8>>::from_hex(include_str!("block-test-0-000-009.txt").trim())
+    pub static ref BLOCK_TESTNET_8_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-test-0-000-008.txt").trim())
+        .expect("Block bytes are in valid hex representation");
+    pub static ref BLOCK_TESTNET_9_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-test-0-000-009.txt").trim())
         .expect("Block bytes are in valid hex representation");
     // zcash-cli -testnet getblock 10 0 > block-test-0-000-010.txt
     pub static ref BLOCK_TESTNET_10_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("block-test-0-000-010.txt").trim())
-            .expect("Block bytes are in valid hex representation");
+        .expect("Block bytes are in valid hex representation");
 
     // Overwinter transition
     // for i in 207499 207500 207501; do
@@ -239,13 +261,13 @@ lazy_static! {
     // done
     pub static ref BLOCK_TESTNET_207499_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("block-test-0-207-499.txt").trim())
-            .expect("Block bytes are in valid hex representation");
+        .expect("Block bytes are in valid hex representation");
     pub static ref BLOCK_TESTNET_207500_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("block-test-0-207-500.txt").trim())
-            .expect("Block bytes are in valid hex representation");
+        .expect("Block bytes are in valid hex representation");
     pub static ref BLOCK_TESTNET_207501_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("block-test-0-207-501.txt").trim())
-            .expect("Block bytes are in valid hex representation");
+        .expect("Block bytes are in valid hex representation");
 
     // Sapling transition
     // i=279999
@@ -255,13 +277,13 @@ lazy_static! {
     // done
     pub static ref BLOCK_TESTNET_279999_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("block-test-0-279-999.txt").trim())
-            .expect("Block bytes are in valid hex representation");
+        .expect("Block bytes are in valid hex representation");
     pub static ref BLOCK_TESTNET_280000_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("block-test-0-280-000.txt").trim())
-            .expect("Block bytes are in valid hex representation");
+        .expect("Block bytes are in valid hex representation");
     pub static ref BLOCK_TESTNET_280001_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("block-test-0-280-001.txt").trim())
-            .expect("Block bytes are in valid hex representation");
+        .expect("Block bytes are in valid hex representation");
 
     // Blossom transition
     // i=583999
@@ -271,13 +293,13 @@ lazy_static! {
     // done
     pub static ref BLOCK_TESTNET_583999_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("block-test-0-583-999.txt").trim())
-            .expect("Block bytes are in valid hex representation");
+        .expect("Block bytes are in valid hex representation");
     pub static ref BLOCK_TESTNET_584000_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("block-test-0-584-000.txt").trim())
-            .expect("Block bytes are in valid hex representation");
+        .expect("Block bytes are in valid hex representation");
     pub static ref BLOCK_TESTNET_584001_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("block-test-0-584-001.txt").trim())
-            .expect("Block bytes are in valid hex representation");
+        .expect("Block bytes are in valid hex representation");
 
     // Heartwood transition
     // for i in 903799 903800 903801; do
@@ -285,13 +307,13 @@ lazy_static! {
     // done
     pub static ref BLOCK_TESTNET_903799_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("block-test-0-903-799.txt").trim())
-            .expect("Block bytes are in valid hex representation");
+        .expect("Block bytes are in valid hex representation");
     pub static ref BLOCK_TESTNET_903800_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("block-test-0-903-800.txt").trim())
-            .expect("Block bytes are in valid hex representation");
+        .expect("Block bytes are in valid hex representation");
     pub static ref BLOCK_TESTNET_903801_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("block-test-0-903-801.txt").trim())
-            .expect("Block bytes are in valid hex representation");
+        .expect("Block bytes are in valid hex representation");
 
     // Canopy transition
     // for i in 1028499 1028500 1028501; do
@@ -299,20 +321,20 @@ lazy_static! {
     // done
     pub static ref BLOCK_TESTNET_1028499_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("block-test-1-028-499.txt").trim())
-            .expect("Block bytes are in valid hex representation");
+        .expect("Block bytes are in valid hex representation");
     pub static ref BLOCK_TESTNET_1028500_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("block-test-1-028-500.txt").trim())
-            .expect("Block bytes are in valid hex representation");
+        .expect("Block bytes are in valid hex representation");
     pub static ref BLOCK_TESTNET_1028501_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("block-test-1-028-501.txt").trim())
-            .expect("Block bytes are in valid hex representation");
+        .expect("Block bytes are in valid hex representation");
     // One more Canopy block
     // (so that we have at least 3 blocks from Canopy)
     // i=1095000
     // zcash-cli -testnet getblock $i 0 > block-test-$[i/1000000]-0$[i/1000%1000]-00$[i%1000].txt
     pub static ref BLOCK_TESTNET_1095000_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("block-test-1-095-000.txt").trim())
-            .expect("Block bytes are in valid hex representation");
+        .expect("Block bytes are in valid hex representation");
 }
 
 #[cfg(test)]
