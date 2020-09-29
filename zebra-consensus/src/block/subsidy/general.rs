@@ -1,4 +1,4 @@
-//! Block and Miner subsidies, halvings and target space modifiers. - [§7.7][7.7]
+//! Block and Miner subsidies, halvings and target spacing modifiers. - [§7.7][7.7]
 //!
 //! [7.7]: https://zips.z.cash/protocol/protocol.pdf#subsidies
 

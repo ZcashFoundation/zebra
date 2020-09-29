@@ -11,7 +11,6 @@ use zebra_chain::{
 use crate::error::*;
 use crate::BoxError;
 
-use std::convert::TryInto;
 use zebra_chain::parameters::{Network, NetworkUpgrade::*};
 
 use super::subsidy;
@@ -85,11 +84,7 @@ pub fn subsidy_is_correct(network: Network, block: &Block) -> Result<(), BlockEr
         let founders_reward = subsidy::founders_reward::founders_reward(height, network)
             .expect("founders reward should be always a valid value");
 
-        let values = || {
-            outputs
-                .iter()
-                .map(|o| o.value.try_into().expect("value will be a valid amount"))
-        };
+        let values = || outputs.iter().map(|o| o.value);
 
         if values().any(|value: Amount<NonNegative>| value == founders_reward) {
             valid_founders_reward = true;
