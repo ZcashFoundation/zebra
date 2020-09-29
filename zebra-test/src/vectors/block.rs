@@ -3,80 +3,95 @@
 use hex::FromHex;
 use lazy_static::lazy_static;
 
-lazy_static! {
-    // Update this list of test blocks when you add a new block test vector to
-    // this file
-    pub static ref TEST_BLOCKS: Vec<&'static [u8]> = vec![
-        // Mainnet
-        // Genesis
-        &BLOCK_MAINNET_GENESIS_BYTES,
-        // BeforeOverwinter
-        &BLOCK_MAINNET_1_BYTES,
-        &BLOCK_MAINNET_2_BYTES,
-        &BLOCK_MAINNET_3_BYTES,
-        &BLOCK_MAINNET_4_BYTES,
-        &BLOCK_MAINNET_5_BYTES,
-        &BLOCK_MAINNET_6_BYTES,
-        &BLOCK_MAINNET_7_BYTES,
-        &BLOCK_MAINNET_8_BYTES,
-        &BLOCK_MAINNET_9_BYTES,
-        &BLOCK_MAINNET_10_BYTES,
-        &BLOCK_MAINNET_347499_BYTES,
-        // Overwinter
-        &BLOCK_MAINNET_347500_BYTES,
-        &BLOCK_MAINNET_347501_BYTES,
-        &BLOCK_MAINNET_415000_BYTES,
-        &BLOCK_MAINNET_419199_BYTES,
-        // Sapling
-        &BLOCK_MAINNET_419200_BYTES,
-        &BLOCK_MAINNET_419201_BYTES,
-        &BLOCK_MAINNET_434873_BYTES,
-        &BLOCK_MAINNET_653599_BYTES,
-        // Blossom
-        &BLOCK_MAINNET_653600_BYTES,
-        &BLOCK_MAINNET_653601_BYTES,
-        &BLOCK_MAINNET_902999_BYTES,
-        // Heartwood
-        &BLOCK_MAINNET_903000_BYTES,
-        &BLOCK_MAINNET_903001_BYTES,
-        // TODO: Canopy
+use std::collections::BTreeMap;
+use std::iter::FromIterator;
 
-        // Testnet
-        // Genesis
-        &BLOCK_TESTNET_GENESIS_BYTES,
-        // BeforeOverwinter
-        &BLOCK_TESTNET_1_BYTES,
-        &BLOCK_TESTNET_2_BYTES,
-        &BLOCK_TESTNET_3_BYTES,
-        &BLOCK_TESTNET_4_BYTES,
-        &BLOCK_TESTNET_5_BYTES,
-        &BLOCK_TESTNET_6_BYTES,
-        &BLOCK_TESTNET_7_BYTES,
-        &BLOCK_TESTNET_8_BYTES,
-        &BLOCK_TESTNET_9_BYTES,
-        &BLOCK_TESTNET_10_BYTES,
-        &BLOCK_TESTNET_207499_BYTES,
-        // Overwinter
-        &BLOCK_TESTNET_207500_BYTES,
-        &BLOCK_TESTNET_207501_BYTES,
-        &BLOCK_TESTNET_279999_BYTES,
-        // Sapling
-        &BLOCK_TESTNET_280000_BYTES,
-        &BLOCK_TESTNET_280001_BYTES,
-        &BLOCK_TESTNET_583999_BYTES,
-        // Blossom
-        &BLOCK_TESTNET_584000_BYTES,
-        &BLOCK_TESTNET_584001_BYTES,
-        &BLOCK_TESTNET_903799_BYTES,
-        // Heartwood
-        &BLOCK_TESTNET_903800_BYTES,
-        &BLOCK_TESTNET_903801_BYTES,
-        &BLOCK_TESTNET_1028499_BYTES,
-        // Canopy
-        &BLOCK_TESTNET_1028500_BYTES,
-        &BLOCK_TESTNET_1028501_BYTES,
-        &BLOCK_TESTNET_1095000_BYTES,
-    ];
+lazy_static! {
+
+    /// All block test vectors
+    pub static ref TEST_BLOCKS: Vec<&'static [u8]> = MAINNET_BLOCKS.iter().chain(TESTNET_BLOCKS.iter()).map(|(_height, block)| *block).collect();
+
+    // Update these lists of blocks when you add new block test vectors to
+    // this file
+
+    /// Mainnet blocks, indexed by height
+    pub static ref MAINNET_BLOCKS: BTreeMap<u32, &'static [u8]> = BTreeMap::from_iter(
+        [
+            // Genesis
+            (0, BLOCK_MAINNET_GENESIS_BYTES.as_ref()),
+            // BeforeOverwinter
+            (1, BLOCK_MAINNET_1_BYTES.as_ref()),
+            (2, BLOCK_MAINNET_2_BYTES.as_ref()),
+            (3, BLOCK_MAINNET_3_BYTES.as_ref()),
+            (4, BLOCK_MAINNET_4_BYTES.as_ref()),
+            (5, BLOCK_MAINNET_5_BYTES.as_ref()),
+            (6, BLOCK_MAINNET_6_BYTES.as_ref()),
+            (7, BLOCK_MAINNET_7_BYTES.as_ref()),
+            (8, BLOCK_MAINNET_8_BYTES.as_ref()),
+            (9, BLOCK_MAINNET_9_BYTES.as_ref()),
+            (10, BLOCK_MAINNET_10_BYTES.as_ref()),
+            (347_499, BLOCK_MAINNET_347499_BYTES.as_ref()),
+            // Overwinter
+            (347_500, BLOCK_MAINNET_347500_BYTES.as_ref()),
+            (347_501, BLOCK_MAINNET_347501_BYTES.as_ref()),
+            (415_000, BLOCK_MAINNET_415000_BYTES.as_ref()),
+            (419_199, BLOCK_MAINNET_419199_BYTES.as_ref()),
+            // Sapling
+            (419_200, BLOCK_MAINNET_419200_BYTES.as_ref()),
+            (419_201, BLOCK_MAINNET_419201_BYTES.as_ref()),
+            (434_873, BLOCK_MAINNET_434873_BYTES.as_ref()),
+            (653_599, BLOCK_MAINNET_653599_BYTES.as_ref()),
+            // Blossom
+            (653_600, BLOCK_MAINNET_653600_BYTES.as_ref()),
+            (653_601, BLOCK_MAINNET_653601_BYTES.as_ref()),
+            (902_999, BLOCK_MAINNET_902999_BYTES.as_ref()),
+            // Heartwood
+            (903_000, BLOCK_MAINNET_903000_BYTES.as_ref()),
+            (903_001, BLOCK_MAINNET_903001_BYTES.as_ref()),
+            // TODO: Canopy and First Halving, see #1099
+        ].iter().cloned()
+    );
+
+    /// Testnet blocks, indexed by height
+    pub static ref TESTNET_BLOCKS: BTreeMap<u32, &'static [u8]> = BTreeMap::from_iter(
+        [
+            // Genesis
+            (0, BLOCK_TESTNET_GENESIS_BYTES.as_ref()),
+            // BeforeOverwinter
+            (1, BLOCK_TESTNET_1_BYTES.as_ref()),
+            (2, BLOCK_TESTNET_2_BYTES.as_ref()),
+            (3, BLOCK_TESTNET_3_BYTES.as_ref()),
+            (4, BLOCK_TESTNET_4_BYTES.as_ref()),
+            (5, BLOCK_TESTNET_5_BYTES.as_ref()),
+            (6, BLOCK_TESTNET_6_BYTES.as_ref()),
+            (7, BLOCK_TESTNET_7_BYTES.as_ref()),
+            (8, BLOCK_TESTNET_8_BYTES.as_ref()),
+            (9, BLOCK_TESTNET_9_BYTES.as_ref()),
+            (10, BLOCK_TESTNET_10_BYTES.as_ref()),
+            (207_499, BLOCK_TESTNET_207499_BYTES.as_ref()),
+            // Overwinter
+            (207_500, BLOCK_TESTNET_207500_BYTES.as_ref()),
+            (207_501, BLOCK_TESTNET_207501_BYTES.as_ref()),
+            (279_999, BLOCK_TESTNET_279999_BYTES.as_ref()),
+            // Sapling
+            (280_000, BLOCK_TESTNET_280000_BYTES.as_ref()),
+            (280_001, BLOCK_TESTNET_280001_BYTES.as_ref()),
+            (583_999, BLOCK_TESTNET_583999_BYTES.as_ref()),
+            // Blossom
+            (584_000, BLOCK_TESTNET_584000_BYTES.as_ref()),
+            (584_001, BLOCK_TESTNET_584001_BYTES.as_ref()),
+            (903_799, BLOCK_TESTNET_903799_BYTES.as_ref()),
+            // Heartwood
+            (903_800, BLOCK_TESTNET_903800_BYTES.as_ref()),
+            (903_801, BLOCK_TESTNET_903801_BYTES.as_ref()),
+            (1_028_499, BLOCK_TESTNET_1028499_BYTES.as_ref()),
+            // Canopy
+            (1_028_500, BLOCK_TESTNET_1028500_BYTES.as_ref()),
+            (1_028_501, BLOCK_TESTNET_1028501_BYTES.as_ref()),
+            (1_095_000, BLOCK_TESTNET_1095000_BYTES.as_ref()),
+            // TODO: First Halving, see #1104
+        ].iter().cloned()
+    );
 
     // Mainnet
 
@@ -316,6 +331,17 @@ mod test {
             block_count,
             block_set.len(),
             "block test vectors must be unique"
+        );
+    }
+
+    /// Make sure we use all the test vectors in the lists.
+    ///
+    /// We're using lazy_static! and combinators, so it would be easy to make this mistake.
+    #[test]
+    fn block_test_vectors_count() {
+        assert!(
+            TEST_BLOCKS.len() > 50,
+            "there should be a reasonable number of block test vectors"
         );
     }
 }
