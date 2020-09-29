@@ -2,6 +2,7 @@
 
 use std::{collections::HashMap, convert::TryInto, future::Future, sync::Arc};
 
+use tracing::info;
 use zebra_chain::serialization::{ZcashDeserialize, ZcashSerialize};
 use zebra_chain::{
     block::{self, Block},
@@ -94,6 +95,10 @@ impl FinalizedState {
         let height_bytes = height.0.to_be_bytes();
         let hash = block.hash();
 
+        if height.0 % 1000 == 0 {
+            info!("Finalized block at {:?}", height);
+        }
+
         (
             &self.hash_by_height,
             &self.height_by_hash,
@@ -179,10 +184,6 @@ impl FinalizedState {
 
             Ok(Some(tip_height.0 - height.0))
         }
-    }
-
-    pub fn contains(&self, hash: &block::Hash) -> bool {
-        self.height_by_hash.get(&hash.0).is_ok()
     }
 
     pub fn block(

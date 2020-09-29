@@ -14,6 +14,8 @@ mod arbitrary;
 #[cfg(test)]
 mod tests;
 
+use std::fmt;
+
 pub use hash::Hash;
 pub use header::Header;
 pub use height::Height;
@@ -34,6 +36,28 @@ pub struct Block {
     pub header: Header,
     /// The block transactions.
     pub transactions: Vec<std::sync::Arc<Transaction>>,
+}
+
+impl fmt::Display for Block {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut fmter = f.debug_struct("Block");
+        if let Some(height) = self.coinbase_height() {
+            fmter.field("height", &height);
+        }
+
+        fmter.field("hash", &DisplayToDebug(self.hash())).finish()
+    }
+}
+
+struct DisplayToDebug<T>(T);
+
+impl<T> fmt::Debug for DisplayToDebug<T>
+where
+    T: fmt::Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
 }
 
 impl Block {

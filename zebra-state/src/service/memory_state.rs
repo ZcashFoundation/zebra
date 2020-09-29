@@ -10,7 +10,7 @@ use std::{
     sync::Arc,
 };
 
-use tracing::error_span;
+use tracing::{debug, debug_span, instrument, trace};
 use zebra_chain::{
     block::{self, Block},
     primitives::Groth16Proof,
@@ -37,10 +37,13 @@ struct Chain {
 
 impl Chain {
     /// Push a contextually valid non-finalized block into a chain as the new tip.
+    #[instrument(skip(self), fields(%block))]
     pub fn push(&mut self, block: Arc<Block>) {
         let block_height = block
             .coinbase_height()
             .expect("valid non-finalized blocks have a coinbase height");
+
+        trace!(?block_height, "Pushing new block into chain state");
 
         // update cumulative data members
         self.update_chain_state_with(&block);
@@ -48,6 +51,7 @@ impl Chain {
     }
 
     /// Remove the lowest height block of the non-finalized portion of a chain.
+    #[instrument(skip(self))]
     pub fn pop_root(&mut self) -> Arc<Block> {
         let block_height = self.lowest_height();
 
@@ -197,6 +201,7 @@ impl UpdateWith<Arc<Block>> for Chain {
         }
     }
 
+    #[instrument(skip(self), fields(%block))]
     fn revert_chain_state_with(&mut self, block: &Arc<Block>) {
         let block_hash = block.hash();
 
@@ -305,6 +310,7 @@ impl UpdateWith<Vec<transparent::Input>> for Chain {
 }
 
 impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
+    #[instrument(skip(self, joinsplit_data))]
     fn update_chain_state_with(
         &mut self,
         joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
@@ -314,13 +320,16 @@ impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
                 anchor, nullifiers, ..
             } in joinsplit_data.joinsplits()
             {
-                self.sprout_anchors.insert(*anchor);
+                let span = debug_span!("revert_chain_state_with", ?anchor, ?nullifiers);
+                let _entered = span.enter();
+                trace!("Adding sprout nullifiers.");
                 self.sprout_nullifiers.insert(nullifiers[0]);
                 self.sprout_nullifiers.insert(nullifiers[1]);
             }
         }
     }
 
+    #[instrument(skip(self, joinsplit_data))]
     fn revert_chain_state_with(
         &mut self,
         joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
@@ -330,10 +339,9 @@ impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
                 anchor, nullifiers, ..
             } in joinsplit_data.joinsplits()
             {
-                assert!(
-                    self.sprout_anchors.remove(anchor),
-                    "anchor must be present if block was"
-                );
+                let span = debug_span!("revert_chain_state_with", ?anchor, ?nullifiers);
+                let _entered = span.enter();
+                trace!("Removing sprout nullifiers.");
                 assert!(
                     self.sprout_nullifiers.remove(&nullifiers[0]),
                     "nullifiers must be present if block was"
@@ -350,11 +358,7 @@ impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
 impl UpdateWith<Option<transaction::ShieldedData>> for Chain {
     fn update_chain_state_with(&mut self, shielded_data: &Option<transaction::ShieldedData>) {
         if let Some(shielded_data) = shielded_data {
-            for sapling::Spend {
-                anchor, nullifier, ..
-            } in shielded_data.spends()
-            {
-                self.sapling_anchors.insert(*anchor);
+            for sapling::Spend { nullifier, .. } in shielded_data.spends() {
                 self.sapling_nullifiers.insert(*nullifier);
             }
         }
@@ -362,14 +366,7 @@ impl UpdateWith<Option<transaction::ShieldedData>> for Chain {
 
     fn revert_chain_state_with(&mut self, shielded_data: &Option<transaction::ShieldedData>) {
         if let Some(shielded_data) = shielded_data {
-            for sapling::Spend {
-                anchor, nullifier, ..
-            } in shielded_data.spends()
-            {
-                assert!(
-                    self.sapling_anchors.remove(anchor),
-                    "anchor must be present if block was"
-                );
+            for sapling::Spend { nullifier, .. } in shielded_data.spends() {
                 assert!(
                     self.sapling_nullifiers.remove(nullifier),
                     "nullifier must be present if block was"
@@ -564,8 +561,11 @@ impl QueuedBlocks {
             .or_default()
             .insert(new_hash);
         assert!(inserted, "hashes must be unique");
+
+        tracing::trace!(num_blocks = %self.blocks.len(), %parent_hash, ?new_height,  "Finished queueing a new block");
     }
 
+    #[instrument(skip(self))]
     pub fn dequeue_children(&mut self, parent: block::Hash) -> Vec<QueuedBlock> {
         let queued_children = self
             .by_parent
@@ -583,6 +583,8 @@ impl QueuedBlocks {
             let height = queued.block.coinbase_height().unwrap();
             self.by_height.remove(&height);
         }
+
+        tracing::trace!(num_blocks = %self.blocks.len(), "Finished dequeuing blocks waiting for parent hash",);
 
         queued_children
     }

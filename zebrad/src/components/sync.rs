@@ -612,7 +612,7 @@ where
             tracing::trace!(?hash, "requested block");
 
             // This span is used to help diagnose sync warnings
-            let span = tracing::warn_span!("block_fetch_verify", ?hash);
+            let span = tracing::warn_span!("block_fetch_verify", %hash);
             let mut verifier = self.verifier.clone();
             let task = tokio::spawn(
                 async move {

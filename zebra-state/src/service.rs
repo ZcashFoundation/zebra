@@ -64,6 +64,7 @@ impl StateService {
         }
     }
 
+    #[instrument(skip(self, new))]
     fn queue(&mut self, new: QueuedBlock) {
         let parent_hash = new.block.header.previous_block_hash;
 
@@ -88,9 +89,9 @@ impl StateService {
 
     fn validate_and_commit(&mut self, block: Arc<Block>) -> Result<(), CommitError> {
         self.check_contextual_validity(&block)?;
-        let block_hash = block.hash();
+        let parent_hash = block.header.previous_block_hash;
 
-        if self.sled.finalized_tip_hash() == block_hash {
+        if self.sled.finalized_tip_hash() == parent_hash {
             self.mem.commit_new_chain(block);
         } else {
             self.mem.commit_block(block);

@@ -77,6 +77,9 @@ where
 
     fn call(&mut self, block: Arc<Block>) -> Self::Future {
         let height = block.coinbase_height();
+        let span = tracing::info_span!("chain_call", ?height);
+        let _entered = span.enter();
+        tracing::debug!("verifying new block");
 
         // TODO: do we still need this logging?
         // Log an info-level message on unexpected out of order blocks
@@ -111,7 +114,7 @@ where
         // which omitted it by mistake.  So for the purposes of routing requests,
         // we can interpret a missing coinbase height as 0; the checkpoint verifier
         // will reject it.
-        if height.unwrap_or(block::Height(0)) < self.max_checkpoint_height {
+        if height.unwrap_or(block::Height(0)) <= self.max_checkpoint_height {
             self.checkpoint
                 .call(block)
                 .map_err(VerifyChainError::Checkpoint)
