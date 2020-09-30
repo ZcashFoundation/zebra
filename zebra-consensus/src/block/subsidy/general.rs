@@ -12,13 +12,6 @@ use zebra_chain::{
 
 use crate::parameters::subsidy::*;
 
-/// `SlowStartShift()` as described in [protocol specification §7.7][7.7]
-///
-/// [7.7]: https://zips.z.cash/protocol/protocol.pdf#subsidies
-fn slow_start_shift() -> Height {
-    Height(SLOW_START_INTERVAL.0 / 2)
-}
-
 /// The divisor used for halvings.
 ///
 /// `1 << Halving(height)`, as described in [protocol specification §7.7][7.7]
@@ -33,13 +26,13 @@ pub fn halving_divisor(height: Height, network: Network) -> u64 {
         .expect("blossom activation height should be available");
     if height >= blossom_height {
         let scaled_pre_blossom_height =
-            (blossom_height - slow_start_shift()) as u64 * BLOSSOM_POW_TARGET_SPACING_RATIO;
+            (blossom_height - SLOW_START_SHIFT) as u64 * BLOSSOM_POW_TARGET_SPACING_RATIO;
         let post_blossom_height = (height - blossom_height) as u64;
         let halving_shift = (scaled_pre_blossom_height + post_blossom_height)
             / (POST_BLOSSOM_HALVING_INTERVAL.0 as u64);
         1 << halving_shift
     } else {
-        let scaled_pre_blossom_height = (height - slow_start_shift()) as u64;
+        let scaled_pre_blossom_height = (height - SLOW_START_SHIFT) as u64;
         let halving_shift = scaled_pre_blossom_height / (PRE_BLOSSOM_HALVING_INTERVAL.0 as u64);
         1 << halving_shift
     }
