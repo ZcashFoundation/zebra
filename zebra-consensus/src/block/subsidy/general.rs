@@ -326,36 +326,4 @@ mod test {
 
         Ok(())
     }
-
-    #[test]
-    fn subsidy_is_correct_test() -> Result<(), Report> {
-        subsidy_is_correct_for_network(Network::Mainnet)?;
-        subsidy_is_correct_for_network(Network::Testnet)?;
-
-        Ok(())
-    }
-
-    fn subsidy_is_correct_for_network(network: Network) -> Result<(), Report> {
-        use crate::block::check;
-        use zebra_chain::{block::Block, serialization::ZcashDeserializeInto};
-
-        let block_iter = match network {
-            Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
-            Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
-        };
-        for (&height, block) in block_iter {
-            let block = block
-                .zcash_deserialize_into::<Block>()
-                .expect("block is structurally valid");
-
-            // TODO: first halving, second halving, and very large halvings
-            if Height(height) > SLOW_START_INTERVAL
-                && Height(height) < Canopy.activation_height(network).unwrap()
-            {
-                check::subsidy_is_correct(network, &block)
-                    .expect("subsidies should pass for this block");
-            }
-        }
-        Ok(())
-    }
 }
