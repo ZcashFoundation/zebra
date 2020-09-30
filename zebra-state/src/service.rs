@@ -50,8 +50,6 @@ enum ValidateContextError {
 }
 
 impl StateService {
-    const REORG_LIMIT: block::Height = crate::constants::MAX_BLOCK_REORG_HEIGHT;
-
     pub fn new(config: Config, network: Network) -> Self {
         let sled = FinalizedState::new(&config, network);
         let mem = NonFinalizedState::default();
@@ -76,7 +74,7 @@ impl StateService {
 
         self.process_queued(parent_hash);
 
-        while self.mem.best_chain_len() > Self::REORG_LIMIT {
+        while self.mem.best_chain_len() > crate::constants::MAX_BLOCK_REORG_HEIGHT {
             let finalized = self.mem.finalize();
             self.sled
                 .commit_finalized_direct(finalized)

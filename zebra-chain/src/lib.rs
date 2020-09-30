@@ -35,6 +35,7 @@ pub struct LedgerState {
     pub network: parameters::Network,
 }
 
+#[cfg(any(test, feature = "proptest-impl"))]
 impl LedgerState {
     /// Construct a new ledger state for generating arbitrary chains via proptest
     pub fn new(tip_height: block::Height, network: parameters::Network) -> Self {
