@@ -89,6 +89,7 @@ impl Arbitrary for Header {
                     merkle_root: merkle_root_hash,
                     root_bytes,
                     time: Utc.timestamp(timestamp, 0),
+                    // TODO: replace with `ExpandedDifficulty.to_compact` when that method is implemented
                     difficulty_threshold: CompactDifficulty(545259519),
                     nonce,
                     solution,

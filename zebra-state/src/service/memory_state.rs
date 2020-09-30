@@ -612,7 +612,7 @@ impl QueuedBlocks {
 mod tests {
     use transaction::Transaction;
 
-    use std::fmt;
+    use std::{env, fmt, mem};
 
     use zebra_chain::serialization::ZcashDeserializeInto;
     use zebra_chain::{
@@ -731,7 +731,11 @@ mod tests {
     fn forked_equals_pushed() -> Result<()> {
         zebra_test::init();
 
-        proptest!(|((chain, count) in arbitrary_chain_and_count())| {
+        proptest!(ProptestConfig::with_cases(env::var("PROPTEST_CASES")
+                                          .ok()
+                                          .and_then(|v| v.parse().ok())
+                                          .unwrap_or(1)),
+        |((chain, count) in arbitrary_chain_and_count())| {
             let chain = chain.0;
             let fork_tip_hash = chain[count - 1].hash();
             let mut full_chain = Chain::default();
@@ -758,7 +762,11 @@ mod tests {
     fn finalized_equals_pushed() -> Result<()> {
         zebra_test::init();
 
-        proptest!(|((chain, end_count) in arbitrary_chain_and_count())| {
+        proptest!(ProptestConfig::with_cases(env::var("PROPTEST_CASES")
+                                          .ok()
+                                          .and_then(|v| v.parse().ok())
+                                          .unwrap_or(1)),
+        |((chain, end_count) in arbitrary_chain_and_count())| {
             let chain = chain.0;
             let finalized_count = chain.len() - end_count;
             let mut full_chain = Chain::default();
