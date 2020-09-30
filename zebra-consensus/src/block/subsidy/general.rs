@@ -10,7 +10,6 @@ use zebra_chain::{
     parameters::{Network, NetworkUpgrade::*},
 };
 
-use super::founders_reward::founders_reward;
 use crate::parameters::subsidy::*;
 
 /// `SlowStartShift()` as described in [protocol specification §7.7][7.7]
@@ -72,15 +71,20 @@ pub fn block_subsidy(height: Height, network: Network) -> Result<Amount<NonNegat
 /// `MinerSubsidy(height)` as described in [protocol specification §7.7][7.7]
 ///
 /// [7.7]: https://zips.z.cash/protocol/protocol.pdf#subsidies
+///
+/// `non_miner_reward` is the founders reward or funding stream value.
+/// If all the rewards for a block go to the miner, use `None`.
 #[allow(dead_code)]
-pub fn miner_subsidy(height: Height, network: Network) -> Result<Amount<NonNegative>, Error> {
-    let canopy_height = Canopy
-        .activation_height(network)
-        .expect("canopy activation height should be available");
-    if height >= canopy_height {
-        panic!("Can't validate Canopy yet");
+pub fn miner_subsidy(
+    height: Height,
+    network: Network,
+    non_miner_reward: Option<Amount<NonNegative>>,
+) -> Result<Amount<NonNegative>, Error> {
+    if let Some(non_miner_reward) = non_miner_reward {
+        block_subsidy(height, network)? - non_miner_reward
+    } else {
+        block_subsidy(height, network)
     }
-    block_subsidy(height, network)? - founders_reward(height, network)?
 }
 
 #[cfg(test)]
@@ -135,40 +139,43 @@ mod test {
 
     #[test]
     fn miner_subsidy_test() -> Result<(), Report> {
-        let network = Network::Mainnet;
-        let blossom_height = Blossom.activation_height(network).unwrap();
-        let _canopy_height = Canopy.activation_height(network).unwrap();
-
-        // Miner reward before Blossom is 80% of the total block reward
-        // 80*12.5/100 = 10 ZEC
-        assert_eq!(
-            Amount::try_from(1_000_000_000),
-            miner_subsidy((blossom_height - 1).unwrap(), network)
-        );
-
-        // After blossom the total block reward is "halved", miner still get 80%
-        // 80*6.25/100 = 5 ZEC
-        assert_eq!(
-            Amount::try_from(500_000_000),
-            miner_subsidy(blossom_height, network)
-        );
-
-        // TODO: After halving(and Canopy) miner will get 2.5 ZEC per mined block
-        // but we need funding streams code to get this number from miner_subsidy
+        miner_subsidy_for_network(Network::Mainnet)?;
+        miner_subsidy_for_network(Network::Testnet)?;
 
         Ok(())
     }
 
-    #[test]
-    #[should_panic]
-    fn miner_subsidy_canopy_test() {
-        let network = Network::Mainnet;
-        let canopy_height = Canopy.activation_height(network).unwrap();
+    fn miner_subsidy_for_network(network: Network) -> Result<(), Report> {
+        use crate::block::subsidy::founders_reward::founders_reward;
+        let blossom_height = Blossom.activation_height(network).unwrap();
 
+        // Miner reward before Blossom is 80% of the total block reward
+        // 80*12.5/100 = 10 ZEC
+        let founders_amount = founders_reward((blossom_height - 1).unwrap(), network)?;
         assert_eq!(
             Amount::try_from(1_000_000_000),
-            miner_subsidy(canopy_height, network)
-        )
+            miner_subsidy(
+                (blossom_height - 1).unwrap(),
+                network,
+                Some(founders_amount)
+            )
+        );
+
+        // After blossom the total block reward is "halved", miner still get 80%
+        // 80*6.25/100 = 5 ZEC
+        let founders_amount = founders_reward(blossom_height, network)?;
+        assert_eq!(
+            Amount::try_from(500_000_000),
+            miner_subsidy(blossom_height, network, Some(founders_amount))
+        );
+
+        // TODO: After first halving, miner will get 2.5 ZEC per mined block
+        // but we need funding streams code to get this number
+
+        // TODO: After second halving, there will be no funding streams, and
+        // miners will get all the block reward
+
+        Ok(())
     }
 
     #[test]
