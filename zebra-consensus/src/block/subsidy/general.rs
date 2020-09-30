@@ -18,23 +18,28 @@ use crate::parameters::subsidy::*;
 ///
 /// [7.7]: https://zips.z.cash/protocol/protocol.pdf#subsidies
 pub fn halving_divisor(height: Height, network: Network) -> u64 {
-    if height < SLOW_START_INTERVAL {
-        panic!("can't verify before block {}", SLOW_START_INTERVAL.0)
-    }
     let blossom_height = Blossom
         .activation_height(network)
         .expect("blossom activation height should be available");
-    if height >= blossom_height {
-        let scaled_pre_blossom_height =
-            (blossom_height - SLOW_START_SHIFT) as u64 * BLOSSOM_POW_TARGET_SPACING_RATIO;
-        let post_blossom_height = (height - blossom_height) as u64;
-        let halving_shift = (scaled_pre_blossom_height + post_blossom_height)
-            / (POST_BLOSSOM_HALVING_INTERVAL.0 as u64);
-        1 << halving_shift
-    } else {
-        let scaled_pre_blossom_height = (height - SLOW_START_SHIFT) as u64;
-        let halving_shift = scaled_pre_blossom_height / (PRE_BLOSSOM_HALVING_INTERVAL.0 as u64);
-        1 << halving_shift
+
+    match height {
+        height if (height >= SLOW_START_SHIFT && height < blossom_height) => {
+            let scaled_pre_blossom_height = (height - SLOW_START_SHIFT) as u64;
+            let halving_shift = scaled_pre_blossom_height / (PRE_BLOSSOM_HALVING_INTERVAL.0 as u64);
+            1 << halving_shift
+        }
+        height if (height >= blossom_height) => {
+            let scaled_pre_blossom_height =
+                (blossom_height - SLOW_START_SHIFT) as u64 * BLOSSOM_POW_TARGET_SPACING_RATIO;
+            let post_blossom_height = (height - blossom_height) as u64;
+            let halving_shift = (scaled_pre_blossom_height + post_blossom_height)
+                / (POST_BLOSSOM_HALVING_INTERVAL.0 as u64);
+            1 << halving_shift
+        }
+        _ => unreachable!(
+            "unsupported block height: callers should handle blocks below {:?}",
+            SLOW_START_SHIFT
+        ),
     }
 }
 
@@ -42,22 +47,26 @@ pub fn halving_divisor(height: Height, network: Network) -> u64 {
 ///
 /// [7.7]: https://zips.z.cash/protocol/protocol.pdf#subsidies
 pub fn block_subsidy(height: Height, network: Network) -> Result<Amount<NonNegative>, Error> {
-    if height < SLOW_START_INTERVAL {
-        panic!("can't verify before block {}", SLOW_START_INTERVAL.0)
-    }
     let blossom_height = Blossom
         .activation_height(network)
         .expect("blossom activation height should be available");
+    let halving_div = halving_divisor(height, network);
 
-    let hd = halving_divisor(height, network);
-    if height >= blossom_height {
-        let scaled_max_block_subsidy = MAX_BLOCK_SUBSIDY / BLOSSOM_POW_TARGET_SPACING_RATIO;
-        // in future halvings, this calculation might not be exact
-        // in those cases, Amount division follows integer division, which truncates (rounds down) the result
-        Amount::try_from(scaled_max_block_subsidy / hd)
-    } else {
-        // this calculation is exact, because the halving divisor is 1 here
-        Amount::try_from(MAX_BLOCK_SUBSIDY / hd)
+    match height {
+        height if (height >= SLOW_START_INTERVAL && height < blossom_height) => {
+            // this calculation is exact, because the halving divisor is 1 here
+            Amount::try_from(MAX_BLOCK_SUBSIDY / halving_div)
+        }
+        height if (height >= blossom_height) => {
+            let scaled_max_block_subsidy = MAX_BLOCK_SUBSIDY / BLOSSOM_POW_TARGET_SPACING_RATIO;
+            // in future halvings, this calculation might not be exact
+            // in those cases, Amount division follows integer division, which truncates (rounds down) the result
+            Amount::try_from(scaled_max_block_subsidy / halving_div)
+        }
+        _ => unreachable!(
+            "unsupported block height: callers should handle blocks below {:?}",
+            SLOW_START_INTERVAL
+        ),
     }
 }
 

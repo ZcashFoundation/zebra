@@ -7,9 +7,6 @@ pub enum SubsidyError {
     #[error("not a coinbase transaction")]
     NoCoinbase,
 
-    #[error("no canopy block configured")]
-    NoCanopy,
-
     #[error("founders reward output not found")]
     FoundersRewardNotFound,
 }
