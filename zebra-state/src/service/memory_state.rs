@@ -624,9 +624,9 @@ mod tests {
     use self::assert_eq;
     use super::*;
 
-    struct NoDebug<T>(T);
+    struct SummaryDebug<T>(T);
 
-    impl<T> fmt::Debug for NoDebug<Vec<T>> {
+    impl<T> fmt::Debug for SummaryDebug<Vec<T>> {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             write!(f, "{}, len={}", std::any::type_name::<T>(), self.0.len())
         }
