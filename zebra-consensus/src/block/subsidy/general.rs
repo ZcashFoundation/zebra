@@ -8,6 +8,8 @@ use zebra_chain::{
     amount::{Amount, Error, NonNegative},
     block::Height,
     parameters::{Network, NetworkUpgrade::*},
+    transaction::Transaction,
+    transparent,
 };
 
 use crate::parameters::subsidy::*;
@@ -87,6 +89,20 @@ pub fn miner_subsidy(
     } else {
         block_subsidy(height, network)
     }
+}
+
+/// Returns a list of outputs in `Transaction`, which have a value equal to `Amount`.
+pub fn find_output_with_amount(
+    transaction: &Transaction,
+    amount: Amount<NonNegative>,
+) -> Vec<transparent::Output> {
+    // TODO: shielded coinbase - Heartwood
+    transaction
+        .outputs()
+        .iter()
+        .filter(|o| o.value == amount)
+        .cloned()
+        .collect()
 }
 
 #[cfg(test)]

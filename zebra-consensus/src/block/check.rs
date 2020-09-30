@@ -3,7 +3,6 @@
 use chrono::{DateTime, Utc};
 
 use zebra_chain::{
-    amount::{Amount, NonNegative},
     block::{Block, Header},
     work::equihash,
 };
@@ -70,7 +69,6 @@ pub fn subsidy_is_correct(network: Network, block: &Block) -> Result<(), BlockEr
     let halving_div = subsidy::general::halving_divisor(height, network);
 
     let coinbase = block.transactions.get(0).ok_or(SubsidyError::NoCoinbase)?;
-    let outputs = coinbase.outputs();
 
     // TODO: the sum of the coinbase transaction outputs must be less than or equal to the block subsidy plus transaction fees
 
@@ -87,26 +85,22 @@ pub fn subsidy_is_correct(network: Network, block: &Block) -> Result<(), BlockEr
 
         (1, _) => {
             // validate founders reward
-            let mut valid_founders_reward = false;
             let founders_reward = subsidy::founders_reward::founders_reward(height, network)
                 .expect("invalid Amount: founders reward should be valid");
-
-            let values = || outputs.iter().map(|o| o.value);
-            if values().any(|value: Amount<NonNegative>| value == founders_reward) {
-                valid_founders_reward = true;
-            }
-            if !valid_founders_reward {
-                Err(SubsidyError::FoundersRewardNotFound)?;
-            }
+            let matching_values =
+                subsidy::general::find_output_with_amount(coinbase, founders_reward);
 
             // TODO: the exact founders reward value must be sent as a single output to the correct address
+            if !matching_values.is_empty() {
+                Ok(())
+            } else {
+                Err(SubsidyError::FoundersRewardNotFound)?
+            }
         }
 
         (2, _) => unimplemented!("funding stream block subsidy validation is not implemented"),
 
         // Valid halving, with no founders reward or funding streams
-        _ => {}
-    };
-
-    Ok(())
+        _ => Ok(()),
+    }
 }
