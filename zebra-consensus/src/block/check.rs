@@ -75,14 +75,14 @@ pub fn subsidy_is_correct(network: Network, block: &Block) -> Result<(), BlockEr
         .activation_height(network)
         .ok_or(SubsidyError::NoCanopy)?;
     if height >= canopy_height {
-        panic!("Can't validate Canopy yet");
+        unimplemented!("Canopy block subsidy validation is not implemented");
     }
 
     // validate founders reward
     let mut valid_founders_reward = false;
     if height < canopy_height {
         let founders_reward = subsidy::founders_reward::founders_reward(height, network)
-            .expect("founders reward should be always a valid value");
+            .expect("founders reward should be a valid value");
 
         let values = || outputs.iter().map(|o| o.value);
 
