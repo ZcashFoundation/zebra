@@ -1,5 +1,7 @@
 //! Tests for block verification
 
+use crate::parameters::SLOW_START_INTERVAL;
+
 use super::*;
 
 use std::sync::Arc;
@@ -11,7 +13,7 @@ use tower::buffer::Buffer;
 
 use zebra_chain::block::{self, Block};
 use zebra_chain::{
-    parameters::Network,
+    parameters::{Network, NetworkUpgrade},
     serialization::{ZcashDeserialize, ZcashDeserializeInto},
 };
 use zebra_test::transcript::{TransError, Transcript};
@@ -142,4 +144,33 @@ fn time_check_past_block() {
     // fail.
     check::time_is_valid_at(&block.header, now)
         .expect("the header time from a mainnet block should be valid");
+}
+
+#[test]
+fn subsidy_is_correct_test() -> Result<(), Report> {
+    subsidy_is_correct_for_network(Network::Mainnet)?;
+    subsidy_is_correct_for_network(Network::Testnet)?;
+
+    Ok(())
+}
+
+fn subsidy_is_correct_for_network(network: Network) -> Result<(), Report> {
+    let block_iter = match network {
+        Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
+        Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
+    };
+    for (&height, block) in block_iter {
+        let block = block
+            .zcash_deserialize_into::<Block>()
+            .expect("block is structurally valid");
+
+        // TODO: first halving, second halving, third halving, and very large halvings
+        if block::Height(height) > SLOW_START_INTERVAL
+            && block::Height(height) < NetworkUpgrade::Canopy.activation_height(network).unwrap()
+        {
+            check::subsidy_is_correct(network, &block)
+                .expect("subsidies should pass for this block");
+        }
+    }
+    Ok(())
 }

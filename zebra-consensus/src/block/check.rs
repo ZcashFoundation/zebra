@@ -3,15 +3,14 @@
 use chrono::{DateTime, Utc};
 
 use zebra_chain::{
-    amount::{Amount, NonNegative},
     block::{Block, Header},
     work::equihash,
 };
 
-use crate::error::*;
 use crate::BoxError;
+use crate::{error::*, parameters::SLOW_START_INTERVAL};
 
-use zebra_chain::parameters::{Network, NetworkUpgrade::*};
+use zebra_chain::parameters::Network;
 
 use super::subsidy;
 
@@ -67,34 +66,41 @@ pub fn subsidy_is_correct(network: Network, block: &Block) -> Result<(), BlockEr
     let height = block
         .coinbase_height()
         .expect("always called on blocks with a coinbase height");
+    let halving_div = subsidy::general::halving_divisor(height, network);
 
     let coinbase = block.transactions.get(0).ok_or(SubsidyError::NoCoinbase)?;
-    let outputs = coinbase.outputs();
 
-    let canopy_height = Canopy
-        .activation_height(network)
-        .ok_or(SubsidyError::NoCanopy)?;
-    if height >= canopy_height {
-        unimplemented!("Canopy block subsidy validation is not implemented");
-    }
+    // TODO: the sum of the coinbase transaction outputs must be less than or equal to the block subsidy plus transaction fees
 
-    // validate founders reward
-    let mut valid_founders_reward = false;
-    if height < canopy_height {
-        let founders_reward = subsidy::founders_reward::founders_reward(height, network)
-            .expect("founders reward should be a valid value");
+    // Check founders reward and funding streams
+    match (halving_div, height) {
+        (_, height) if (height < SLOW_START_INTERVAL) => unreachable!(
+            "unsupported block height: callers should handle blocks below {:?}",
+            SLOW_START_INTERVAL
+        ),
 
-        let values = || outputs.iter().map(|o| o.value);
+        (halving_div, _) if (halving_div.count_ones() != 1) => unreachable!(
+            "invalid halving divisor: the halving divisor must be a non-zero power of two"
+        ),
 
-        if values().any(|value: Amount<NonNegative>| value == founders_reward) {
-            valid_founders_reward = true;
+        (1, _) => {
+            // validate founders reward
+            let founders_reward = subsidy::founders_reward::founders_reward(height, network)
+                .expect("invalid Amount: founders reward should be valid");
+            let matching_values =
+                subsidy::general::find_output_with_amount(coinbase, founders_reward);
+
+            // TODO: the exact founders reward value must be sent as a single output to the correct address
+            if !matching_values.is_empty() {
+                Ok(())
+            } else {
+                Err(SubsidyError::FoundersRewardNotFound)?
+            }
         }
-    }
-    if !valid_founders_reward {
-        Err(SubsidyError::FoundersRewardNotFound)?
-    } else {
-        // TODO: the exact founders reward value must be sent as a single output to the correct address
-        // TODO: the sum of the coinbase transaction outputs must be less than or equal to the block subsidy plus transaction fees
-        Ok(())
+
+        (2, _) => unimplemented!("funding stream block subsidy validation is not implemented"),
+
+        // Valid halving, with no founders reward or funding streams
+        _ => Ok(()),
     }
 }

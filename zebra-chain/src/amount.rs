@@ -6,7 +6,9 @@
 //! [`Result`](std::result::Result)s.
 
 use std::{
+    cmp::Ordering,
     convert::{TryFrom, TryInto},
+    hash::{Hash, Hasher},
     marker::PhantomData,
     ops::RangeInclusive,
 };
@@ -17,7 +19,7 @@ use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
 type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// A runtime validated type for representing amounts of zatoshis
-#[derive(Debug, Eq, PartialEq, Clone, Copy, Serialize, Deserialize, Hash)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(try_from = "i64")]
 #[serde(bound = "C: Constraint")]
 pub struct Amount<C = NegativeAllowed>(i64, PhantomData<C>);
@@ -191,23 +193,56 @@ where
     }
 }
 
-impl<C> PartialOrd for Amount<C>
+impl<C> Hash for Amount<C>
 where
-    Amount<C>: Eq,
     C: Constraint,
 {
-    fn partial_cmp(&self, other: &Amount<C>) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
+    /// Amounts with the same value are equal, even if they have different constraints
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.hash(state);
     }
 }
 
+impl<C1, C2> PartialEq<Amount<C2>> for Amount<C1>
+where
+    C1: Constraint,
+    C2: Constraint,
+{
+    fn eq(&self, other: &Amount<C2>) -> bool {
+        self.partial_cmp(other) == Some(Ordering::Equal)
+    }
+}
+
+// We can't implement Eq between different amount constraints,
+// because it leads to an unconstrained type parameter error
+impl<C> Eq for Amount<C>
+where
+    Amount<C>: PartialEq,
+    C: Constraint,
+{
+}
+
+impl<C1, C2> PartialOrd<Amount<C2>> for Amount<C1>
+where
+    Amount<C1>: PartialEq<Amount<C2>>,
+    C1: Constraint,
+    C2: Constraint,
+{
+    fn partial_cmp(&self, other: &Amount<C2>) -> Option<Ordering> {
+        Some(self.0.cmp(&other.0))
+    }
+}
+
+// We can't implement Ord between different amount constraints,
+// because it leads to an unconstrained type parameter error
 impl<C> Ord for Amount<C>
 where
     Amount<C>: Eq,
+    Amount<C>: PartialOrd,
     C: Constraint,
 {
-    fn cmp(&self, other: &Amount<C>) -> std::cmp::Ordering {
-        self.0.cmp(&other.0)
+    fn cmp(&self, other: &Amount<C>) -> Ordering {
+        self.partial_cmp(&other).expect("Amount has a total order")
     }
 }
 
@@ -377,6 +412,11 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
+
+    use std::{
+        collections::hash_map::RandomState, collections::HashSet, fmt::Debug, iter::FromIterator,
+    };
+
     use color_eyre::eyre::Result;
 
     #[test]
@@ -550,23 +590,70 @@ mod test {
     }
 
     #[test]
-    fn ordering() -> Result<()> {
+    fn hash() -> Result<()> {
         let one = Amount::<NonNegative>::try_from(1)?;
+        let another_one = Amount::<NonNegative>::try_from(1)?;
         let zero = Amount::<NonNegative>::try_from(0)?;
 
+        let hash_set: HashSet<Amount<NonNegative>, RandomState> =
+            HashSet::from_iter([one].iter().cloned());
+        assert_eq!(hash_set.len(), 1);
+
+        let hash_set: HashSet<Amount<NonNegative>, RandomState> =
+            HashSet::from_iter([one, one].iter().cloned());
+        assert_eq!(hash_set.len(), 1, "Amount hashes are consistent");
+
+        let hash_set: HashSet<Amount<NonNegative>, RandomState> =
+            HashSet::from_iter([one, another_one].iter().cloned());
+        assert_eq!(hash_set.len(), 1, "Amount hashes are by value");
+
+        let hash_set: HashSet<Amount<NonNegative>, RandomState> =
+            HashSet::from_iter([one, zero].iter().cloned());
+        assert_eq!(
+            hash_set.len(),
+            2,
+            "Amount hashes are different for different values"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn ordering_constraints() -> Result<()> {
+        ordering::<NonNegative, NonNegative>()?;
+        ordering::<NonNegative, NegativeAllowed>()?;
+        ordering::<NegativeAllowed, NonNegative>()?;
+        ordering::<NegativeAllowed, NegativeAllowed>()?;
+
+        Ok(())
+    }
+
+    fn ordering<C1, C2>() -> Result<()>
+    where
+        C1: Constraint + Debug,
+        C2: Constraint + Debug,
+    {
+        let zero = Amount::<C1>::try_from(0)?;
+        let one = Amount::<C2>::try_from(1)?;
+        let another_one = Amount::<C1>::try_from(1)?;
+
+        assert_eq!(one, one);
+        assert_eq!(one, another_one, "Amount equality is by value");
+
+        assert_ne!(one, zero);
+        assert_ne!(zero, one);
+
         assert!(one > zero);
-        assert!(one != zero);
         assert!(zero < one);
-        assert!(zero != one);
         assert!(zero <= one);
 
-        let one = Amount::<NegativeAllowed>::try_from(1)?;
-        let zero = Amount::<NegativeAllowed>::try_from(0)?;
         let negative_one = Amount::<NegativeAllowed>::try_from(-1)?;
         let negative_two = Amount::<NegativeAllowed>::try_from(-2)?;
 
+        assert_ne!(negative_one, zero);
+        assert_ne!(negative_one, one);
+
         assert!(negative_one < zero);
-        assert!(negative_one != zero);
         assert!(negative_one <= one);
         assert!(zero > negative_one);
         assert!(zero >= negative_one);

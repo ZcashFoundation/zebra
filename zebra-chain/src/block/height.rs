@@ -1,6 +1,9 @@
 use crate::serialization::SerializationError;
 
-use std::ops::{Add, Sub};
+use std::{
+    convert::TryFrom,
+    ops::{Add, Sub},
+};
 
 /// The height of a block is the length of the chain back to the genesis block.
 ///
@@ -47,19 +50,48 @@ impl Height {
     pub const MAX_AS_U32: u32 = Self::MAX.0;
 }
 
+impl Add<Height> for Height {
+    type Output = Option<Height>;
+
+    fn add(self, rhs: Height) -> Option<Height> {
+        // We know that both values are positive integers. Therefore, the result is
+        // positive, and we can skip the conversions. The checked_add is required,
+        // because the result may overflow.
+        let result = self.0.checked_add(rhs.0)?;
+        match result {
+            h if (Height(h) <= Height::MAX && Height(h) >= Height::MIN) => Some(Height(h)),
+            _ => None,
+        }
+    }
+}
+
 impl Sub<Height> for Height {
     type Output = i32;
 
+    /// Panics if the inputs or result are outside the valid i32 range.
     fn sub(self, rhs: Height) -> i32 {
-        (self.0 as i32) - (rhs.0 as i32)
+        // We construct heights from integers without any checks,
+        // so the inputs or result could be out of range.
+        let lhs = i32::try_from(self.0)
+            .expect("out of range input `self`: inputs should be valid Heights");
+        let rhs =
+            i32::try_from(rhs.0).expect("out of range input `rhs`: inputs should be valid Heights");
+        lhs.checked_sub(rhs)
+            .expect("out of range result: valid input heights should yield a valid result")
     }
 }
+
+// We don't implement Add<u32> or Sub<u32>, because they cause type inference issues for integer constants.
 
 impl Add<i32> for Height {
     type Output = Option<Height>;
 
     fn add(self, rhs: i32) -> Option<Height> {
-        let result = ((self.0 as i32) + rhs) as u32;
+        // Because we construct heights from integers without any checks,
+        // the input values could be outside the valid range for i32.
+        let lhs = i32::try_from(self.0).ok()?;
+        let result = lhs.checked_add(rhs)?;
+        let result = u32::try_from(result).ok()?;
         match result {
             h if (Height(h) <= Height::MAX && Height(h) >= Height::MIN) => Some(Height(h)),
             _ => None,
@@ -71,7 +103,10 @@ impl Sub<i32> for Height {
     type Output = Option<Height>;
 
     fn sub(self, rhs: i32) -> Option<Height> {
-        let result = ((self.0 as i32) - rhs) as u32;
+        // These checks are required, see above for details.
+        let lhs = i32::try_from(self.0).ok()?;
+        let result = lhs.checked_sub(rhs)?;
+        let result = u32::try_from(result).ok()?;
         match result {
             h if (Height(h) <= Height::MAX && Height(h) >= Height::MIN) => Some(Height(h)),
             _ => None,
@@ -94,14 +129,52 @@ impl Arbitrary for Height {
 
 #[test]
 fn operator_tests() {
+    assert_eq!(Some(Height(2)), Height(1) + Height(1));
+    assert_eq!(None, Height::MAX + Height(1));
+    // Bad heights aren't caught at compile-time or runtime, until we add or subtract
+    assert_eq!(None, Height(Height::MAX_AS_U32 + 1) + Height(0));
+    assert_eq!(None, Height(i32::MAX as u32) + Height(0));
+    assert_eq!(None, Height(u32::MAX) + Height(0));
+
     assert_eq!(Some(Height(2)), Height(1) + 1);
     assert_eq!(None, Height::MAX + 1);
+    // Adding negative numbers
+    assert_eq!(Some(Height(1)), Height(2) + -1);
+    assert_eq!(Some(Height(0)), Height(1) + -1);
+    assert_eq!(None, Height(0) + -1);
+    assert_eq!(Some(Height(Height::MAX_AS_U32 - 1)), Height::MAX + -1);
+    // Bad heights aren't caught at compile-time or runtime, until we add or subtract
+    // `+ 0` would also cause an error here, but it triggers a spurious clippy lint
+    assert_eq!(None, Height(Height::MAX_AS_U32 + 1) + 1);
+    assert_eq!(None, Height(i32::MAX as u32) + 1);
+    assert_eq!(None, Height(u32::MAX) + 1);
+    // Adding negative numbers
+    assert_eq!(None, Height(i32::MAX as u32) + -1);
+    assert_eq!(None, Height(u32::MAX) + -1);
 
     assert_eq!(Some(Height(1)), Height(2) - 1);
     assert_eq!(Some(Height(0)), Height(1) - 1);
     assert_eq!(None, Height(0) - 1);
+    assert_eq!(Some(Height(Height::MAX_AS_U32 - 1)), Height::MAX - 1);
+    // Subtracting negative numbers
+    assert_eq!(Some(Height(2)), Height(1) - -1);
+    assert_eq!(Some(Height::MAX), Height(Height::MAX_AS_U32 - 1) - -1);
+    assert_eq!(None, Height::MAX - -1);
+    // Bad heights aren't caught at compile-time or runtime, until we add or subtract
+    assert_eq!(None, Height(i32::MAX as u32) - 1);
+    assert_eq!(None, Height(u32::MAX) - 1);
+    // Subtracting negative numbers
+    assert_eq!(None, Height(Height::MAX_AS_U32 + 1) - -1);
+    assert_eq!(None, Height(i32::MAX as u32) - -1);
+    assert_eq!(None, Height(u32::MAX) - -1);
 
+    // Sub<Height> panics on out of range errors
     assert_eq!(1, Height(2) - Height(1));
     assert_eq!(0, Height(1) - Height(1));
     assert_eq!(-1, Height(0) - Height(1));
+    assert_eq!(-5, Height(2) - Height(7));
+    assert_eq!(Height::MAX_AS_U32 as i32, Height::MAX - Height(0));
+    assert_eq!(1, Height::MAX - Height(Height::MAX_AS_U32 - 1));
+    assert_eq!(-1, Height(Height::MAX_AS_U32 - 1) - Height::MAX);
+    assert_eq!(-(Height::MAX_AS_U32 as i32), Height(0) - Height::MAX);
 }
