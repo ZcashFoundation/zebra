@@ -291,7 +291,6 @@ Push a block into a chain as the new tip
       - Add key: `transaction.hash` and value: `(height, tx_index)` to `tx_by_hash`
       - Add created utxos to `self.created_utxos`
       - Add spent utxos to `self.spent_utxos`
-      - Add anchors to the appropriate `self.<version>_anchors`
       - Add nullifiers to the appropriate `self.<version>_nullifiers`
 
 2. Add block to `self.blocks`
@@ -309,7 +308,6 @@ Remove the lowest height block of the non-finalized portion of a chain.
       - Remove `transaction.hash` from `tx_by_hash`
       - Remove created utxos from `self.created_utxos`
       - Remove spent utxos from `self.spent_utxos`
-      - Remove the anchors from the appropriate `self.<version>_anchors`
       - Remove the nullifiers from the appropriate `self.<version>_nullifiers`
 
 3. Return the block
@@ -340,7 +338,6 @@ Remove the highest height block of the non-finalized portion of a chain.
       - remove `transaction.hash` from `tx_by_hash`
       - Remove created utxos from `self.created_utxos`
       - Remove spent utxos from `self.spent_utxos`
-      - Remove anchors from the appropriate `self.<version>_anchors`
       - Remove the nullifiers from the appropriate `self.<version>_nullifiers`
 
 #### `Ord`
@@ -390,7 +387,70 @@ pub struct NonFinalizedState {
     /// Blocks awaiting their parent blocks for contextual verification.
     contextual_queue: QueuedBlocks,
 }
+```
 
+#### `pub fn finalize(&mut self) -> Arc<Block>`
+
+Finalize the lowest height block in the non-finalized portion of the best
+chain and updates all side chains to match.
+
+1. Extract the best chain from `self.chain_set` into `best_chain`
+
+2. Extract the rest of the chains into a `side_chains` temporary variable, so
+   they can be mutated
+
+3. Remove the lowest height block from the best chain with
+   `let finalized_block = best_chain.pop_root();`
+
+4. Add `best_chain` back to `self.chain_set`
+
+5. For each remaining `chain` in `side_chains`
+    - remove the lowest height block from `chain`
+    - If that block is equal to `finalized_block` add `chain` back to `self.chain_set`
+    - Else, drop `chain`
+
+6. Return `finalized_block`
+
+#### `fn commit_block(&mut self, block: Arc<Block>)`
+
+Commit `block` to the non-finalized state.
+
+1. If the block is a pre-Sapling block, panic.
+
+2. If any chains tip hash equal `block.header.previous_block_hash` remove that chain from `self.chain_set`
+
+3. Else Find the first chain that contains `block.parent` and fork it with
+  `block.parent` as the new tip
+    - `let fork = self.chain_set.iter().find_map(|chain| chain.fork(block.parent));`
+
+4. Else panic, this should be unreachable because `commit_block` is only
+   called when `block` is ready to be committed.
+
+5. Push `block` into `parent_chain`
+
+6. Insert `parent_chain` into `self.chain_set`
+
+### `pub(super) fn commit_new_chain(&mut self, block: Arc<Block>)`
+
+Construct a new chain starting with `block`.
+
+1. Construct a new empty chain
+
+2. `push` `block` into that new chain
+
+3. Insert the new chain into `self.chain_set`
+
+### The `QueuedBlocks` type
+
+The queued blocks type represents the non-finalized blocks that were commited
+before their parent blocks were. It is responsible for tracking which blocks
+are queued by their parent so they can be commited immediately after the
+parent is commited. It also tracks blocks by their height so they can be
+discarded if they ever end up below the reorg limit.
+
+`NonFinalizedState` is defined by the following structure and API:
+
+```rust
 /// A queue of blocks, awaiting the arrival of parent blocks.
 #[derive(Debug, Default)]
 struct QueuedBlocks {
@@ -402,111 +462,6 @@ struct QueuedBlocks {
     by_height: BTreeMap<block::Height, Vec<block::Hash>>,
 }
 ```
-
-#### `pub fn finalize(&mut self) -> Arc<Block>`
-
-Finalize the lowest height block in the non-finalized portion of the best
-chain and updates all side chains to match.
-
-1. Extract the best chain from `self.chains` into `best_chain`
-
-2. Extract the rest of the chains into a `side_chains` temporary variable, so
-   they can be mutated
-
-3. Remove the lowest height block from the best chain with
-   `let block = best_chain.pop_root();`
-
-4. Add `best_chain` back to `self.chains`
-
-5. For each remaining `chain` in `side_chains`
-    - If `chain` starts with `block`, remove `block` and add `chain` back to
-    `self.chains`
-    - Else, drop `chain`
-
-6. calculate the new finalized tip height from the new `best_chain`
-
-7. for each `height` in `self.queued_by_height` where the height is lower than the
-   new reorg limit
-   - for each `hash` in `self.queued_by_height.remove(height)`
-     - Remove the key `hash` from `self.queued_blocks` and store the removed `block`
-     - Find and remove `hash` from `self.queued_by_parent` using `block.parent`'s hash
-
-8. Return `block`
-
-#### `pub fn queue(&mut self, block: QueuedBlock)`
-
-Queue a non-finalized block to be committed to the state.
-
-After queueing a non-finalized block, this method checks whether the newly
-queued block (and any of its descendants) can be committed to the state
-
-1. If the block itself exists in any current chain, it has already been successfully verified:
-  - broadcast `Ok(block.hash())` via `block.rsp_tx`, and return
-
-2. If the parent block exists in any current chain:
-    - Call `let hash = self.commit_block(block)`
-    - Call `self.process_queued(hash)`
-
-3. Else Add `block` to `self.queued_blocks` and related members and return
-
-#### `fn process_queued(&mut self, new_parent: block::Hash)`
-
-1. Create a list of `new_parents` and populate it with `new_parent`
-
-2. While let Some(parent) = new_parents.pop()
-    - for each `hash` in `self.queued_by_parent.remove(&parent.hash)`
-      - lookup the `block` for `hash`
-      - remove `block` from `self.queued_blocks`
-      - remove `hash` from `self.queued_by_height`
-      - let hash = `self.commit_block(block)`;
-      - add `hash` to `new_parents`
-
-### `fn commit_block(&mut self, block: QueuedBlock) -> block::Hash`
-
-#### `fn commit_block(&mut self, block: QueuedBlock)`
-
-Commit `block` to the non-finalized state.
-
-1. If the block is a pre-Sapling block, panic.
-
-2. Search for the first chain where `block.parent` == `chain.tip`. If it exists:
-    - return `self.push_block_on_chain(block, chain)`
-
-3. Find the first chain that contains `block.parent` and fork it with
-  `block.parent` as the new tip
-    - `let fork = self.chains.iter().find_map(|chain| chain.fork(block.parent));`
-
-4. If `fork` is `Some`
-    - call `let hash = self.push_block_on_chain(block, fork)`
-    - add `fork` to `self.chains`
-    - return `hash`
-
-5. Else panic, this should be unreachable because `commit_block` is only
-   called when `block` is ready to be committed.
-
-### `pub(super) fn push_block_on_chain(&mut self, block: QueuedBlock, &mut chain: Chain) -> block::Hash`
-
-Try to commit `block` to `chain`. Must succeed, because
-`push_block_on_chain` is only called when `block` is ready to be committed.
-
-1. push `block` onto `chain`
-
-2. broadcast `result` via `block.rsp_tx`
-
-3. return `block.hash` if `result.is_ok()`
-
-4. Else panic, this should be unreachable because `push_block_on_chain` is only
-   called when `block` is ready to be committed.
-
-### The `QueuedBlocks` type
-
-The queued blocks type represents the non-finalized blocks that were commited
-before their parent blocks were. It is responsible for tracking which blocks
-are queued by their parent so they can be commited immediately after the
-parent is commited. It also tracks blocks by their height so they can be
-discarded if they ever end up below the reorg limit.
-
-`NonFinalizedState` is defined by the following structure and API:
 
 #### `pub fn queue(&mut self, new: QueuedBlock)`
 
@@ -539,7 +494,16 @@ Dequeue the set of blocks waiting on `parent`.
 
 #### `pub fn prune_by_height(&mut self, finalized_height: block::Height)`
 
-TODO
+Prune all queued blocks whose height are less than or equal to
+`finalized_height`.
+
+1. Split the `by_height` list at the finalized height, removing all heights
+   that are below `finalized_height`
+
+2. for each hash in the removed values of `by_height`
+    - remove the corresponding block from `self.blocks`
+    - remove the block's hash from the list of blocks waiting on
+      `block.header.previous_block_hash` from `self.by_parent`
 
 
 ### Summary
@@ -560,37 +524,46 @@ TODO
 ## Committing non-finalized blocks
 
 Given the above structures for manipulating the non-finalized state new
-`non-finalized` blocks are commited in two steps. First we commit the block
-to the in memory state, then we finalize all lowest height blocks that are
-past the reorg limit, finally we process any queued blocks and prune any that
-are now past the reorg limit.
+`non-finalized` blocks are commited as follows:
 
-1. If the block itself exists in the finalized chain, it has already been successfully verified:
+1. If the block itself exists in the finalized chain, it has already been
+   successfully verified:
   - broadcast `Ok(block.hash())` via `block.rsp_tx`, and return
 
-2. Run contextual validation on `block` against the finalized and non
-   finalized state
+2. Add `block` to `self.queued_blocks`
 
-3. If `block.parent` == `finalized_tip.hash`
-    - Construct a new `chain` with `Chain::default`
-    - call `let hash = chain_set.push_block_on_chain(block, chain)`
-    - add `fork` to `chain_set.chains`
-    - return `hash`
+3. If `block.header.previous_block_hash` is not present in the finalized or
+   non-finalized state return early
 
-4. Otherwise, commit or queue the block to the non-finalized state with
-   `chain_set.queue(block);`
+4. Else iteratively attempt to process queued blocks by their parent hash
+   starting with `block.header.previous_block_hash`
 
-5. If the best chain is longer than the reorg limit
-    - Finalize all lowest height blocks in the best chain, and commit them to
-    disk with `CommitFinalizedBlock`:
+5. While there are recently commited parent hashes to process
+    - Dequeue all blocks waiting on `parent` with `let queued_children =
+      self.queued_blocks.dequeue_children(parent);`
+    - for each queued `block`
+      - **Run contextual validation** on `block`
+      - If the block fails contextual validation return the result over the
+        associated channel
+      - Else if the block's previous hash is the finalized tip add to the
+        non-finalized state with `self.mem.commit_new_chain(block)`
+      - Else add the new block to an existing non-finalized chain or new fork
+        with `self.mem.commit_block(block);`
+      - Return `Ok(hash)` over the associated channel to indicate the block
+        was successfully commited
+      - Add `block.hash` to the set of recently commited parent hashes to
+        process
 
-      ```
-      while self.best_chain().len() > reorg_limit {
-        let finalized = chain_set.finalize()?;
-        let request = CommitFinalizedBlock { finalized };
-        sled_state.ready_and().await?.call(request).await?;
-      };
-      ```
+6. While the length of the non-finalized portion of the best chain is greater
+   than the reorg limit
+    - Remove the lowest height block from the non-finalized state with
+      `self.mem.finalize();`
+    - Commit that block to the finalized state with
+      `self.sled.commit_finalized_direct(finalized);`
+
+7. Prune orphaned blocks from `self.queued_blocks` with
+   `self.queued_blocks.prune_by_height(finalized_height);`
+
 
 ## Sled data structures
 [sled]: #sled
