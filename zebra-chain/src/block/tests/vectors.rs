@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::io::{Cursor, Write};
 
 use chrono::{DateTime, Duration, LocalResult, TimeZone, Utc};
@@ -57,21 +58,64 @@ fn deserialize_blockheader() {
 
 #[test]
 fn deserialize_block() {
-    zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
-        .zcash_deserialize_into::<Block>()
-        .expect("block test vector should deserialize");
-    zebra_test::vectors::BLOCK_MAINNET_1_BYTES
-        .zcash_deserialize_into::<Block>()
-        .expect("block test vector should deserialize");
-    // https://explorer.zcha.in/blocks/415000
-    zebra_test::vectors::BLOCK_MAINNET_415000_BYTES
-        .zcash_deserialize_into::<Block>()
-        .expect("block test vector should deserialize");
-    // https://explorer.zcha.in/blocks/434873
     // this one has a bad version field
     zebra_test::vectors::BLOCK_MAINNET_434873_BYTES
         .zcash_deserialize_into::<Block>()
         .expect("block test vector should deserialize");
+
+    for block in zebra_test::vectors::BLOCKS.iter() {
+        block
+            .zcash_deserialize_into::<Block>()
+            .expect("block is structurally valid");
+    }
+}
+
+#[test]
+fn block_test_vectors_unique() {
+    let block_count = zebra_test::vectors::BLOCKS.len();
+    let block_hashes: HashSet<_> = zebra_test::vectors::BLOCKS
+        .iter()
+        .map(|b| {
+            b.zcash_deserialize_into::<Block>()
+                .expect("block is structurally valid")
+                .hash()
+        })
+        .collect();
+
+    // putting the same block in two files is an easy mistake to make
+    assert_eq!(
+        block_count,
+        block_hashes.len(),
+        "block test vectors must be unique"
+    );
+}
+
+#[test]
+fn block_test_vectors_height_mainnet() {
+    block_test_vectors_height(Network::Mainnet);
+}
+
+#[test]
+fn block_test_vectors_height_testnet() {
+    block_test_vectors_height(Network::Testnet);
+}
+
+fn block_test_vectors_height(network: Network) {
+    let block_iter = match network {
+        Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
+        Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
+    };
+
+    for (&height, block) in block_iter {
+        let block = block
+            .zcash_deserialize_into::<Block>()
+            .expect("block is structurally valid");
+        assert_eq!(
+            block.coinbase_height().expect("block height is valid").0,
+            height,
+            "deserialized height must match BTreeMap key height"
+        );
+    }
 }
 
 #[test]

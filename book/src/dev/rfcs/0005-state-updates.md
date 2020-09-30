@@ -347,7 +347,8 @@ Remove the highest height block of the non-finalized portion of a chain.
 
 The `Chain` type implements `Ord` for reorganizing chains. First chains
 are compared by their `partial_cumulative_work`. Ties are then broken by
-comparing `block::Hash`es of the tips of each chain.
+comparing `block::Hash`es of the tips of each chain. (This tie-breaker
+means that all `Chain`s in the `ChainSet` must have at least one block.)
 
 **Note**: Unlike `zcashd`, Zebra does not use block arrival times as a
 tie-breaker for the best tip. Since Zebra downloads blocks in parallel,
@@ -367,11 +368,8 @@ handled by `#[derive(Default)]`.
     `self.<version>_nullifiers`
     - Zero `self.partial_cumulative_work`
 
-**Note:** The chain can be empty if:
-  - after a restart - the non-finalized state is empty
-  - during a fork from the finalized tip - the forked Chain is empty, because
-    all its blocks have been `pop`ped
-
+**Note:** The `ChainState` can be empty after a restart, because the
+non-finalized state is empty.
 
 ### `NonFinalizedState` Type
 [nonfinalizedstate-type]: #nonfinalizedstate-type
@@ -442,10 +440,12 @@ Queue a non-finalized block to be committed to the state.
 After queueing a non-finalized block, this method checks whether the newly
 queued block (and any of its descendants) can be committed to the state
 
-1. Check if the parent block exists in any current chain
+1. If the block itself exists in any current chain, it has already been successfully verified:
+  - broadcast `Ok(block.hash())` via `block.rsp_tx`, and return
 
-2. If it does, call `let ret = self.commit_block(block)`
-    - Call `self.process_queued(new_parents)` if `ret` is `Some`
+2. If the parent block exists in any current chain:
+    - Call `let hash = self.commit_block(block)`
+    - Call `self.process_queued(hash)`
 
 3. Else Add `block` to `self.queued_blocks` and related members and return
 
@@ -458,31 +458,44 @@ queued block (and any of its descendants) can be committed to the state
       - lookup the `block` for `hash`
       - remove `block` from `self.queued_blocks`
       - remove `hash` from `self.queued_by_height`
-      - let result = `self.commit_block(block)`;
-      - add `result` to `new_parents`
+      - let hash = `self.commit_block(block)`;
+      - add `hash` to `new_parents`
 
-### `fn commit_block(&mut self, block: QueuedBlock) -> Option<block::Hash>`
+### `fn commit_block(&mut self, block: QueuedBlock) -> block::Hash`
 
-Try to commit `block` to the non-finalized state. Returns `None` if the block
-cannot be committed due to missing context.
+Try to commit `block` to the non-finalized state. Must succeed, because
+`commit_block` is only called when `block` is ready to be committed.
 
-1. Search for the first chain where `block.parent` == `chain.tip`. If it exists:
-    - push `block` onto that chain
-    - broadcast `result` via `block.rsp_tx`
-    - return Some(block.hash) if `result.is_ok()`
+1. If the block is a pre-Sapling block, panic.
 
-2. Find the first chain that contains `block.parent` and fork it with
+2. Search for the first chain where `block.parent` == `chain.tip`. If it exists:
+    - return `self.push_block_on_chain(block, chain)`
+
+3. Find the first chain that contains `block.parent` and fork it with
   `block.parent` as the new tip
     - `let fork = self.chains.iter().find_map(|chain| chain.fork(block.parent));`
 
-3. If `fork` is `Some`
-    - push `block` onto that chain
+4. If `fork` is `Some`
+    - call `let hash = self.push_block_on_chain(block, fork)`
     - add `fork` to `self.chains`
-    - broadcast `result` via `block.rsp_tx`
-    - return Some(block.hash) if `result.is_ok()`
+    - return `hash`
 
 5. Else panic, this should be unreachable because `commit_block` is only
-   called when it's ready to be committed.
+   called when `block` is ready to be committed.
+   
+### `pub(super) fn push_block_on_chain(&mut self, block: QueuedBlock, &mut chain: Chain) -> block::Hash`
+
+Try to commit `block` to `chain`. Must succeed, because
+`push_block_on_chain` is only called when `block` is ready to be committed.
+
+1. push `block` onto `chain`
+
+2. broadcast `result` via `block.rsp_tx`
+
+3. return `block.hash` if `result.is_ok()`
+
+4. Else panic, this should be unreachable because `push_block_on_chain` is only
+   called when `block` is ready to be committed.
 
 ### Summary
 
@@ -507,20 +520,22 @@ to the in memory state, then we finalize all lowest height blocks that are
 past the reorg limit, finally we process any queued blocks and prune any that
 are now past the reorg limit.
 
-1. Run contextual validation on `block` against the finalized and non
+1. If the block itself exists in the finalized chain, it has already been successfully verified:
+  - broadcast `Ok(block.hash())` via `block.rsp_tx`, and return
+
+2. Run contextual validation on `block` against the finalized and non
    finalized state
 
-2. If `block.parent` == `finalized_tip.hash`
-    - Construct a new `Chain` with `Chain::default`
-    - push `block` onto that chain
+3. If `block.parent` == `finalized_tip.hash`
+    - Construct a new `chain` with `Chain::default`
+    - call `let hash = chain_set.push_block_on_chain(block, chain)`
     - add `fork` to `chain_set.chains`
-    - broadcast `result` via `block.rsp_tx`
-    - return Some(block.hash) if `result.is_ok()`
+    - return `hash`
 
-3. commit or queue the block to the non-finalized state with
+4. Otherwise, commit or queue the block to the non-finalized state with
    `chain_set.queue(block);`
 
-4. If the best chain is longer than the reorg limit
+5. If the best chain is longer than the reorg limit
     - Finalize all lowest height blocks in the best chain, and commit them to
     disk with `CommitFinalizedBlock`:
 
