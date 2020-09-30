@@ -114,7 +114,7 @@ where
         // which omitted it by mistake.  So for the purposes of routing requests,
         // we can interpret a missing coinbase height as 0; the checkpoint verifier
         // will reject it.
-        if height.unwrap_or(block::Height(0)) <= self.max_checkpoint_height {
+        if height.unwrap_or(block::Height(0)) < self.max_checkpoint_height {
             self.checkpoint
                 .call(block)
                 .map_err(VerifyChainError::Checkpoint)
