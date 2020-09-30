@@ -36,7 +36,7 @@ struct StateService {
     /// Holds data relating to non-finalized chain state.
     mem: NonFinalizedState,
     /// Blocks awaiting their parent blocks for contextual verification.
-    contextual_queue: QueuedBlocks,
+    queued_blocks: QueuedBlocks,
 }
 
 #[derive(Debug, Error)]
@@ -55,12 +55,12 @@ impl StateService {
     pub fn new(config: Config, network: Network) -> Self {
         let sled = FinalizedState::new(&config, network);
         let mem = NonFinalizedState::default();
-        let contextual_queue = QueuedBlocks::default();
+        let queued_blocks = QueuedBlocks::default();
 
         Self {
             sled,
             mem,
-            contextual_queue,
+            queued_blocks,
         }
     }
 
@@ -68,7 +68,7 @@ impl StateService {
     fn queue(&mut self, new: QueuedBlock) {
         let parent_hash = new.block.header.previous_block_hash;
 
-        self.contextual_queue.queue(new);
+        self.queued_blocks.queue(new);
 
         if !self.contains(&parent_hash) {
             return;
@@ -83,7 +83,7 @@ impl StateService {
                 .expect("sled would never do us dirty like that");
         }
 
-        self.contextual_queue
+        self.queued_blocks
             .prune_by_height(self.sled.finalized_tip_height());
     }
 
@@ -109,7 +109,7 @@ impl StateService {
         let mut new_parents = vec![new_parent];
 
         while let Some(parent) = new_parents.pop() {
-            let queued_children = self.contextual_queue.dequeue_children(parent);
+            let queued_children = self.queued_blocks.dequeue_children(parent);
 
             for QueuedBlock { block, rsp_tx } in queued_children {
                 let hash = block.hash();

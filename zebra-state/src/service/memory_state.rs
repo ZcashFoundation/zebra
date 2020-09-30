@@ -10,7 +10,7 @@ use std::{
     sync::Arc,
 };
 
-use tracing::{debug, debug_span, instrument, trace};
+use tracing::{debug_span, instrument, trace};
 use zebra_chain::{
     block::{self, Block},
     primitives::Groth16Proof,
@@ -707,15 +707,8 @@ mod tests {
         Ok(())
     }
 
-    fn arbitrary_chain(height: block::Height) -> BoxedStrategy<Vec<Arc<Block>>> {
-        Block::partial_chain_strategy(
-            LedgerState {
-                tip_height: height,
-                is_coinbase: true,
-                network: Network::Mainnet,
-            },
-            100,
-        )
+    fn arbitrary_chain(tip_height: block::Height) -> BoxedStrategy<Vec<Arc<Block>>> {
+        Block::partial_chain_strategy(LedgerState::new(tip_height, Network::Mainnet), 100)
     }
 
     prop_compose! {

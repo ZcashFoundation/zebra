@@ -26,10 +26,24 @@ pub mod work;
 #[derive(Debug, Clone, Copy)]
 #[cfg(any(test, feature = "proptest-impl"))]
 #[non_exhaustive]
+/// The configuration data for proptest when generating arbitrary chains
 pub struct LedgerState {
+    /// The tip height of the block or start of the chain
     pub tip_height: block::Height,
-    pub is_coinbase: bool,
+    is_coinbase: bool,
+    /// The network generate fake blocks for
     pub network: parameters::Network,
+}
+
+impl LedgerState {
+    /// Construct a new ledger state for generating arbitrary chains via proptest
+    pub fn new(tip_height: block::Height, network: parameters::Network) -> Self {
+        Self {
+            tip_height,
+            is_coinbase: true,
+            network,
+        }
+    }
 }
 
 #[cfg(any(test, feature = "proptest-impl"))]
