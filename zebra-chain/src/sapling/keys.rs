@@ -178,7 +178,10 @@ mod sk_hrp {
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-#[cfg_attr(any(test, feature = "proptest-impl"), derive(proptest_derive::Arbitrary))]
+#[cfg_attr(
+    any(test, feature = "proptest-impl"),
+    derive(proptest_derive::Arbitrary)
+)]
 pub struct SpendingKey {
     network: Network,
     bytes: [u8; 32],
@@ -605,7 +608,10 @@ impl PartialEq<[u8; 32]> for IncomingViewingKey {
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
 #[derive(Copy, Clone, Eq, PartialEq)]
-#[cfg_attr(any(test, feature = "proptest-impl"), derive(proptest_derive::Arbitrary))]
+#[cfg_attr(
+    any(test, feature = "proptest-impl"),
+    derive(proptest_derive::Arbitrary)
+)]
 pub struct Diversifier(pub [u8; 11]);
 
 impl fmt::Debug for Diversifier {
