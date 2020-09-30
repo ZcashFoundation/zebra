@@ -119,7 +119,7 @@ where
             // height for parsed blocks when we deserialize them.
             let height = block
                 .coinbase_height()
-                .ok_or_else(|| BlockError::MissingHeight(hash))?;
+                .ok_or(BlockError::MissingHeight(hash))?;
             if height > block::Height::MAX {
                 Err(BlockError::MaxHeight(height, hash, block::Height::MAX))?;
             }
@@ -130,7 +130,7 @@ where
                 .header
                 .difficulty_threshold
                 .to_expanded()
-                .ok_or_else(|| BlockError::InvalidDifficulty(height, hash))?;
+                .ok_or(BlockError::InvalidDifficulty(height, hash))?;
             if hash > difficulty_threshold {
                 Err(BlockError::DifficultyFilter(
                     height,
