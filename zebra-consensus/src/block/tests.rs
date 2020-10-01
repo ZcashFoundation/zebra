@@ -174,3 +174,74 @@ fn subsidy_is_correct_for_network(network: Network) -> Result<(), Report> {
     }
     Ok(())
 }
+
+#[test]
+fn nocoinbase_validation_failure() -> Result<(), Report> {
+    use crate::error::*;
+
+    let network = Network::Mainnet;
+
+    // Get a header form a block in the mainnet that is inside the founders reward period.
+    let block =
+        Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])
+            .expect("block should deserialize");
+    let mut block = Arc::try_unwrap(block).expect("block should unwrap");
+
+    // Remove coinbase transaction
+    block.transactions.remove(0);
+
+    // Validate the block
+    let result = check::subsidy_is_correct(network, &block).unwrap_err();
+    let expected = BlockError::Transaction(TransactionError::Subsidy(SubsidyError::NoCoinbase));
+    assert_eq!(expected, result);
+
+    Ok(())
+}
+
+#[test]
+fn founders_reward_validation_failure() -> Result<(), Report> {
+    use crate::error::*;
+    use zebra_chain::transaction::Transaction;
+
+    let network = Network::Mainnet;
+
+    // Get a header from a block in the mainnet that is inside the founders reward period.
+    let header =
+        block::Header::zcash_deserialize(&zebra_test::vectors::HEADER_MAINNET_415000_BYTES[..])
+            .unwrap();
+
+    // From the same block get the coinbase transaction
+    let block =
+        Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])
+            .expect("block should deserialize");
+
+    // Build the new transaction with modified coinbase outputs
+    let tx = block
+        .transactions
+        .get(0)
+        .map(|transaction| Transaction::V3 {
+            inputs: transaction.inputs().to_vec(),
+            outputs: vec![transaction.outputs()[0].clone()],
+            lock_time: transaction.lock_time(),
+            expiry_height: transaction.expiry_height().unwrap(),
+            joinsplit_data: None,
+        })
+        .unwrap();
+
+    // Build new block
+    let mut transactions: Vec<Arc<zebra_chain::transaction::Transaction>> = Vec::new();
+    transactions.push(Arc::new(tx));
+    let block = Block {
+        header,
+        transactions,
+    };
+
+    // Validate it
+    let result = check::subsidy_is_correct(network, &block).unwrap_err();
+    let expected = BlockError::Transaction(TransactionError::Subsidy(
+        SubsidyError::FoundersRewardNotFound,
+    ));
+    assert_eq!(expected, result);
+
+    Ok(())
+}

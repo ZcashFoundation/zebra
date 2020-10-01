@@ -63,12 +63,10 @@ pub fn time_is_valid_at(header: &Header, now: DateTime<Utc>) -> Result<(), BoxEr
 
 /// [3.9]: https://zips.z.cash/protocol/protocol.pdf#subsidyconcepts
 pub fn subsidy_is_correct(network: Network, block: &Block) -> Result<(), BlockError> {
-    let height = block
-        .coinbase_height()
-        .expect("always called on blocks with a coinbase height");
-    let halving_div = subsidy::general::halving_divisor(height, network);
-
+    let height = block.coinbase_height().ok_or(SubsidyError::NoCoinbase)?;
     let coinbase = block.transactions.get(0).ok_or(SubsidyError::NoCoinbase)?;
+
+    let halving_div = subsidy::general::halving_divisor(height, network);
 
     // TODO: the sum of the coinbase transaction outputs must be less than or equal to the block subsidy plus transaction fees
 
