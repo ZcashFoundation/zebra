@@ -73,34 +73,29 @@ pub fn subsidy_is_correct(network: Network, block: &Block) -> Result<(), BlockEr
     // TODO: the sum of the coinbase transaction outputs must be less than or equal to the block subsidy plus transaction fees
 
     // Check founders reward and funding streams
-    match (halving_div, height) {
-        (_, height) if (height < SLOW_START_INTERVAL) => unreachable!(
+    if height < SLOW_START_INTERVAL {
+        unreachable!(
             "unsupported block height: callers should handle blocks below {:?}",
             SLOW_START_INTERVAL
-        ),
+        )
+    } else if halving_div.count_ones() != 1 {
+        unreachable!("invalid halving divisor: the halving divisor must be a non-zero power of two")
+    } else if halving_div == 1 {
+        // validate founders reward
+        let founders_reward = subsidy::founders_reward::founders_reward(height, network)
+            .expect("invalid Amount: founders reward should be valid");
+        let matching_values = subsidy::general::find_output_with_amount(coinbase, founders_reward);
 
-        (halving_div, _) if (halving_div.count_ones() != 1) => unreachable!(
-            "invalid halving divisor: the halving divisor must be a non-zero power of two"
-        ),
-
-        (1, _) => {
-            // validate founders reward
-            let founders_reward = subsidy::founders_reward::founders_reward(height, network)
-                .expect("invalid Amount: founders reward should be valid");
-            let matching_values =
-                subsidy::general::find_output_with_amount(coinbase, founders_reward);
-
-            // TODO: the exact founders reward value must be sent as a single output to the correct address
-            if !matching_values.is_empty() {
-                Ok(())
-            } else {
-                Err(SubsidyError::FoundersRewardNotFound)?
-            }
+        // TODO: the exact founders reward value must be sent as a single output to the correct address
+        if !matching_values.is_empty() {
+            Ok(())
+        } else {
+            Err(SubsidyError::FoundersRewardNotFound)?
         }
-
-        (2, _) => unimplemented!("funding stream block subsidy validation is not implemented"),
-
+    } else if halving_div == 2 {
+        unimplemented!("funding stream block subsidy validation is not implemented")
+    } else {
         // Valid halving, with no founders reward or funding streams
-        _ => Ok(()),
+        Ok(())
     }
 }
