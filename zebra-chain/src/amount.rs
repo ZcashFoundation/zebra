@@ -256,7 +256,9 @@ impl std::ops::Div<u64> for Amount<NonNegative> {
         let quotient = (self.0 as u64)
             .checked_div(rhs)
             .ok_or(Error::DivideByZero { amount: self.0 })?;
-        Ok(quotient.try_into().expect("division by a positive integer always stays within the constraint"))
+        Ok(quotient
+            .try_into()
+            .expect("division by a positive integer always stays within the constraint"))
     }
 }
 
