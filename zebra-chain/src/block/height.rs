@@ -57,10 +57,13 @@ impl Add<Height> for Height {
         // We know that both values are positive integers. Therefore, the result is
         // positive, and we can skip the conversions. The checked_add is required,
         // because the result may overflow.
-        let result = self.0.checked_add(rhs.0)?;
-        match result {
-            h if (Height(h) <= Height::MAX && Height(h) >= Height::MIN) => Some(Height(h)),
-            _ => None,
+        let height = self.0.checked_add(rhs.0)?;
+        let height = Height(height);
+
+        if height <= Height::MAX && height >= Height::MIN {
+            Some(height)
+        } else {
+            None
         }
     }
 }

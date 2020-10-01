@@ -193,56 +193,37 @@ where
     }
 }
 
-impl<C> Hash for Amount<C>
-where
-    C: Constraint,
-{
+impl<C> Hash for Amount<C> {
     /// Amounts with the same value are equal, even if they have different constraints
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.0.hash(state);
     }
 }
 
-impl<C1, C2> PartialEq<Amount<C2>> for Amount<C1>
-where
-    C1: Constraint,
-    C2: Constraint,
-{
+impl<C1, C2> PartialEq<Amount<C2>> for Amount<C1> {
     fn eq(&self, other: &Amount<C2>) -> bool {
-        self.partial_cmp(other) == Some(Ordering::Equal)
+        self.0.eq(&other.0)
     }
 }
 
-// We can't implement Eq between different amount constraints,
-// because it leads to an unconstrained type parameter error
-impl<C> Eq for Amount<C>
-where
-    Amount<C>: PartialEq,
-    C: Constraint,
-{
-}
+impl Eq for Amount<NegativeAllowed> {}
+impl Eq for Amount<NonNegative> {}
 
-impl<C1, C2> PartialOrd<Amount<C2>> for Amount<C1>
-where
-    Amount<C1>: PartialEq<Amount<C2>>,
-    C1: Constraint,
-    C2: Constraint,
-{
+impl<C1, C2> PartialOrd<Amount<C2>> for Amount<C1> {
     fn partial_cmp(&self, other: &Amount<C2>) -> Option<Ordering> {
         Some(self.0.cmp(&other.0))
     }
 }
 
-// We can't implement Ord between different amount constraints,
-// because it leads to an unconstrained type parameter error
-impl<C> Ord for Amount<C>
-where
-    Amount<C>: Eq,
-    Amount<C>: PartialOrd,
-    C: Constraint,
-{
-    fn cmp(&self, other: &Amount<C>) -> Ordering {
-        self.partial_cmp(&other).expect("Amount has a total order")
+impl Ord for Amount<NegativeAllowed> {
+    fn cmp(&self, other: &Amount<NegativeAllowed>) -> Ordering {
+        self.0.cmp(&other.0)
+    }
+}
+
+impl Ord for Amount<NonNegative> {
+    fn cmp(&self, other: &Amount<NonNegative>) -> Ordering {
+        self.0.cmp(&other.0)
     }
 }
 
@@ -275,9 +256,7 @@ impl std::ops::Div<u64> for Amount<NonNegative> {
         let quotient = (self.0 as u64)
             .checked_div(rhs)
             .ok_or(Error::DivideByZero { amount: self.0 })?;
-        // since this is a division by a positive integer,
-        // the quotient must be within the constrained range
-        Ok(quotient.try_into().unwrap())
+        Ok(quotient.try_into().expect("division by a positive integer always stays within the constraint"))
     }
 }
 
@@ -297,7 +276,7 @@ pub enum Error {
     },
     /// i64 overflow when multiplying i64 non-negative amount {amount} by u64 {multiplier}
     MultiplicationOverflow { amount: i64, multiplier: u64 },
-    /// division by zero is an invalid operation, amount {amount}
+    /// cannot divide amount {amount} by zero
     DivideByZero { amount: i64 },
 }
 
