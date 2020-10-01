@@ -3,8 +3,7 @@
 use hex::FromHex;
 use lazy_static::lazy_static;
 
-use std::collections::BTreeMap;
-use std::iter::FromIterator;
+use std::{collections::BTreeMap, iter::FromIterator};
 
 lazy_static! {
 
@@ -81,6 +80,7 @@ lazy_static! {
             (8, BLOCK_TESTNET_8_BYTES.as_ref()),
             (9, BLOCK_TESTNET_9_BYTES.as_ref()),
             (10, BLOCK_TESTNET_10_BYTES.as_ref()),
+            (141_042, BLOCK_TESTNET_141042_BYTES.as_ref()),
             (207_499, BLOCK_TESTNET_207499_BYTES.as_ref()),
             // Overwinter
             (207_500, BLOCK_TESTNET_207500_BYTES.as_ref()),
@@ -284,6 +284,18 @@ lazy_static! {
     pub static ref BLOCK_TESTNET_10_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("block-test-0-000-010.txt").trim())
         .expect("Block bytes are in valid hex representation");
+    // A large block
+    // i=141042
+    // zcash-cli -testnet getblock $i 0 | xxd -revert -plain > block-test-$[i/1000000]-$[i/1000%1000]-0$[i%1000].bin
+    //
+    // Block 141042 is almost ~2 MB in size (the maximum size for a block),
+    // and contains 1 coinbase reward transaction and 20 transactions.
+    // In each transaction, there is one joinsplit, with 244 inputs and 0 outputs.
+    // https://zcash.readthedocs.io/en/latest/rtd_pages/shield_coinbase.html
+    //
+    // We store large blocks as binary, to reduce disk and network usage.
+    // (git compresses blocks in transit and in its index, so there is not much need for extra compression.)
+    pub static ref BLOCK_TESTNET_141042_BYTES: Vec<u8> = include_bytes!("block-test-0-141-042.bin").to_vec();
 
     // Overwinter transition
     // for i in 207499 207500 207501; do
