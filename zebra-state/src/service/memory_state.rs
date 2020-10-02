@@ -5,7 +5,7 @@
 use std::{
     cmp::Ordering,
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
-    mem,
+    fmt, mem,
     ops::Deref,
     sync::Arc,
 };
@@ -714,9 +714,9 @@ mod tests {
     prop_compose! {
         fn arbitrary_chain_and_count()
             (chain in arbitrary_chain(NetworkUpgrade::Blossom.activation_height(Network::Mainnet).unwrap()))
-            (count in 1..chain.len(), chain in Just(chain)) -> (NoDebug<Vec<Arc<Block>>>, usize)
+            (count in 1..chain.len(), chain in Just(chain)) -> (SummaryDebug<Vec<Arc<Block>>>, usize)
         {
-            (NoDebug(chain), count)
+            (SummaryDebug(chain), count)
         }
     }
 
