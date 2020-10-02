@@ -241,12 +241,21 @@ impl ValueCommitment {
     ///
     /// https://zips.z.cash/protocol/protocol.pdf#concretehomomorphiccommit
     #[allow(non_snake_case)]
-    pub fn new<T>(csprng: &mut T, value: Amount<NonNegative>) -> Self
+    pub fn randomized<T>(csprng: &mut T, value: Amount) -> Self
     where
         T: RngCore + CryptoRng,
     {
-        let v = jubjub::Fr::from(value);
         let rcv = generate_trapdoor(csprng);
+
+        Self::new(rcv, value)
+    }
+
+    /// Generate a new _ValueCommitment_ from an existing _rcv_ on a _value_.
+    ///
+    /// https://zips.z.cash/protocol/protocol.pdf#concretehomomorphiccommit
+    #[allow(non_snake_case)]
+    pub fn new(rcv: jubjub::Fr, value: Amount) -> Self {
+        let v = jubjub::Fr::from(value);
 
         // TODO: These generator points can be generated once somewhere else to
         // avoid having to recompute them on every new commitment.
@@ -259,6 +268,8 @@ impl ValueCommitment {
 
 #[cfg(test)]
 mod tests {
+
+    use std::ops::Neg;
 
     use super::*;
 
@@ -274,5 +285,103 @@ mod tests {
 
             assert_eq!(result, test_vector.output_point);
         }
+    }
+
+    #[test]
+    fn test_add() {
+        let identity = ValueCommitment(jubjub::AffinePoint::identity());
+
+        let g = ValueCommitment(jubjub::AffinePoint::from_raw_unchecked(
+            jubjub::Fq::from_raw([
+                0xe4b3_d35d_f1a7_adfe,
+                0xcaf5_5d1b_29bf_81af,
+                0x8b0f_03dd_d60a_8187,
+                0x62ed_cbb8_bf37_87c8,
+            ]),
+            jubjub::Fq::from_raw([
+                0x0000_0000_0000_000b,
+                0x0000_0000_0000_0000,
+                0x0000_0000_0000_0000,
+                0x0000_0000_0000_0000,
+            ]),
+        ));
+
+        assert_eq!(identity + g, g);
+    }
+
+    #[test]
+    fn test_add_assign() {
+        let mut identity = ValueCommitment(jubjub::AffinePoint::identity());
+
+        let g = ValueCommitment(jubjub::AffinePoint::from_raw_unchecked(
+            jubjub::Fq::from_raw([
+                0xe4b3_d35d_f1a7_adfe,
+                0xcaf5_5d1b_29bf_81af,
+                0x8b0f_03dd_d60a_8187,
+                0x62ed_cbb8_bf37_87c8,
+            ]),
+            jubjub::Fq::from_raw([
+                0x0000_0000_0000_000b,
+                0x0000_0000_0000_0000,
+                0x0000_0000_0000_0000,
+                0x0000_0000_0000_0000,
+            ]),
+        ));
+
+        identity += g;
+        let new_g = identity;
+
+        assert_eq!(new_g, g);
+    }
+
+    #[test]
+    fn test_sub() {
+        let g_point = jubjub::AffinePoint::from_raw_unchecked(
+            jubjub::Fq::from_raw([
+                0xe4b3_d35d_f1a7_adfe,
+                0xcaf5_5d1b_29bf_81af,
+                0x8b0f_03dd_d60a_8187,
+                0x62ed_cbb8_bf37_87c8,
+            ]),
+            jubjub::Fq::from_raw([
+                0x0000_0000_0000_000b,
+                0x0000_0000_0000_0000,
+                0x0000_0000_0000_0000,
+                0x0000_0000_0000_0000,
+            ]),
+        );
+
+        let identity = ValueCommitment(jubjub::AffinePoint::identity());
+
+        let g = ValueCommitment(g_point);
+
+        assert_eq!(identity - g, ValueCommitment(g_point.neg()));
+    }
+
+    #[test]
+    fn test_sub_assign() {
+        let g_point = jubjub::AffinePoint::from_raw_unchecked(
+            jubjub::Fq::from_raw([
+                0xe4b3_d35d_f1a7_adfe,
+                0xcaf5_5d1b_29bf_81af,
+                0x8b0f_03dd_d60a_8187,
+                0x62ed_cbb8_bf37_87c8,
+            ]),
+            jubjub::Fq::from_raw([
+                0x0000_0000_0000_000b,
+                0x0000_0000_0000_0000,
+                0x0000_0000_0000_0000,
+                0x0000_0000_0000_0000,
+            ]),
+        );
+
+        let mut identity = ValueCommitment(jubjub::AffinePoint::identity());
+
+        let g = ValueCommitment(g_point);
+
+        identity -= g;
+        let new_g = identity;
+
+        assert_eq!(new_g, ValueCommitment(g_point.neg()));
     }
 }
