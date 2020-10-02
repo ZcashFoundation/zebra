@@ -3262,6 +3262,7 @@ dependencies = [
  "lazy_static",
  "metrics",
  "once_cell",
+ "proptest",
  "serde",
  "sled",
  "spandoc",

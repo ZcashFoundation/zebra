@@ -10,9 +10,12 @@ pub use address::Address;
 pub use script::Script;
 
 #[cfg(any(test, feature = "proptest-impl"))]
-mod arbitrary;
-#[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
+
+#[cfg(any(test, feature = "proptest-impl"))]
+mod arbitrary;
+#[cfg(test)]
+mod prop;
 
 use crate::{
     amount::{Amount, NonNegative},

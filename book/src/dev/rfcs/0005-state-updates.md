@@ -800,8 +800,10 @@ Returns
 
 Implemented by querying:
 
-- (non-finalized) if any `Chains` contain an `OutPoint` in their `created_utxos` and not their `spent_utxo` get the `transparent::Output` from `OutPoint`'s transaction
-- (finalized) else if `OutPoint` is in `utxos_by_outpoint` return the associated `transparent::Output`.
+- (non-finalized) if any `Chains` contain `OutPoint` in their `created_utxos`
+  get the `transparent::Output` from `OutPoint`'s transaction
+- (finalized) else if `OutPoint` is in `utxos_by_outpoint` return the
+  associated `transparent::Output`.
 - else wait for `OutPoint` to be created as described in [RFC0004]
 
 [RFC0004]: https://zebra.zfnd.org/dev/rfcs/0004-asynchronous-script-verification.html

@@ -1,10 +1,15 @@
+use std::sync::Arc;
+
+use block::Height;
 use chrono::{TimeZone, Utc};
 use futures::future::Either;
 use proptest::{arbitrary::any, array, collection::vec, option, prelude::*};
 
+use crate::LedgerState;
 use crate::{
     amount::Amount,
     block,
+    parameters::NetworkUpgrade,
     primitives::{Bctv14Proof, Groth16Proof, ZkSnarkProof},
     sapling, sprout, transparent,
 };
@@ -13,9 +18,9 @@ use super::{JoinSplitData, LockTime, Memo, ShieldedData, Transaction};
 
 impl Transaction {
     /// Generate a proptest strategy for V1 Transactions
-    pub fn v1_strategy() -> impl Strategy<Value = Self> {
+    pub fn v1_strategy(ledger_state: LedgerState) -> BoxedStrategy<Self> {
         (
-            vec(any::<transparent::Input>(), 0..10),
+            transparent::Input::vec_strategy(ledger_state, 10),
             vec(any::<transparent::Output>(), 0..10),
             any::<LockTime>(),
         )
@@ -28,9 +33,9 @@ impl Transaction {
     }
 
     /// Generate a proptest strategy for V2 Transactions
-    pub fn v2_strategy() -> impl Strategy<Value = Self> {
+    pub fn v2_strategy(ledger_state: LedgerState) -> BoxedStrategy<Self> {
         (
-            vec(any::<transparent::Input>(), 0..10),
+            transparent::Input::vec_strategy(ledger_state, 10),
             vec(any::<transparent::Output>(), 0..10),
             any::<LockTime>(),
             option::of(any::<JoinSplitData<Bctv14Proof>>()),
@@ -47,9 +52,9 @@ impl Transaction {
     }
 
     /// Generate a proptest strategy for V3 Transactions
-    pub fn v3_strategy() -> impl Strategy<Value = Self> {
+    pub fn v3_strategy(ledger_state: LedgerState) -> BoxedStrategy<Self> {
         (
-            vec(any::<transparent::Input>(), 0..10),
+            transparent::Input::vec_strategy(ledger_state, 10),
             vec(any::<transparent::Output>(), 0..10),
             any::<LockTime>(),
             any::<block::Height>(),
@@ -68,9 +73,9 @@ impl Transaction {
     }
 
     /// Generate a proptest strategy for V4 Transactions
-    pub fn v4_strategy() -> impl Strategy<Value = Self> {
+    pub fn v4_strategy(ledger_state: LedgerState) -> BoxedStrategy<Self> {
         (
-            vec(any::<transparent::Input>(), 0..10),
+            transparent::Input::vec_strategy(ledger_state, 10),
             vec(any::<transparent::Output>(), 0..10),
             any::<LockTime>(),
             any::<block::Height>(),
@@ -97,6 +102,25 @@ impl Transaction {
                     joinsplit_data,
                 },
             )
+            .boxed()
+    }
+
+    pub fn vec_strategy(
+        mut ledger_state: LedgerState,
+        len: usize,
+    ) -> BoxedStrategy<Vec<Arc<Self>>> {
+        let coinbase = Transaction::arbitrary_with(ledger_state).prop_map(Arc::new);
+        ledger_state.is_coinbase = false;
+        let remainder = vec(
+            Transaction::arbitrary_with(ledger_state).prop_map(Arc::new),
+            len,
+        );
+
+        (coinbase, remainder)
+            .prop_map(|(first, mut remainder)| {
+                remainder.insert(0, first);
+                remainder
+            })
             .boxed()
     }
 }
@@ -189,16 +213,28 @@ impl Arbitrary for ShieldedData {
 }
 
 impl Arbitrary for Transaction {
-    type Parameters = ();
+    type Parameters = LedgerState;
 
-    fn arbitrary_with(_args: ()) -> Self::Strategy {
-        prop_oneof![
-            Self::v1_strategy(),
-            Self::v2_strategy(),
-            Self::v3_strategy(),
-            Self::v4_strategy()
-        ]
-        .boxed()
+    fn arbitrary_with(ledger_state: Self::Parameters) -> Self::Strategy {
+        let LedgerState {
+            tip_height,
+            network,
+            ..
+        } = ledger_state;
+
+        let height = Height(tip_height.0 + 1);
+        let network_upgrade = NetworkUpgrade::current(network, height);
+
+        match network_upgrade {
+            NetworkUpgrade::Genesis | NetworkUpgrade::BeforeOverwinter => {
+                Self::v1_strategy(ledger_state)
+            }
+            NetworkUpgrade::Overwinter => Self::v2_strategy(ledger_state),
+            NetworkUpgrade::Sapling => Self::v3_strategy(ledger_state),
+            NetworkUpgrade::Blossom | NetworkUpgrade::Heartwood | NetworkUpgrade::Canopy => {
+                Self::v4_strategy(ledger_state)
+            }
+        }
     }
 
     type Strategy = BoxedStrategy<Self>;

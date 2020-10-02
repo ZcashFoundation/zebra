@@ -72,7 +72,6 @@ pub fn init() {
                     })
                 });
             }))
-            .display_env_section(false)
             .panic_message(SkipTestReturnedErrPanicMessages)
             .install()
             .unwrap();

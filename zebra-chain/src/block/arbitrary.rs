@@ -1,13 +1,49 @@
+use std::sync::Arc;
+
 use crate::parameters::Network;
 use crate::work::{difficulty::CompactDifficulty, equihash};
 
 use super::*;
 
+use crate::LedgerState;
 use chrono::{TimeZone, Utc};
 use proptest::{
     arbitrary::{any, Arbitrary},
     prelude::*,
 };
+
+impl Arbitrary for Block {
+    type Parameters = LedgerState;
+
+    fn arbitrary_with(ledger_state: Self::Parameters) -> Self::Strategy {
+        let transactions_strategy = Transaction::vec_strategy(ledger_state, 2);
+
+        (any::<Header>(), transactions_strategy)
+            .prop_map(|(header, transactions)| Self {
+                header,
+                transactions,
+            })
+            .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
+
+impl Block {
+    pub fn partial_chain_strategy(
+        init: LedgerState,
+        count: usize,
+    ) -> BoxedStrategy<Vec<Arc<Self>>> {
+        let mut current = init;
+        let mut vec = Vec::with_capacity(count);
+        for _ in 0..count {
+            vec.push(Block::arbitrary_with(current).prop_map(Arc::new));
+            current.tip_height.0 += 1;
+        }
+
+        vec.boxed()
+    }
+}
 
 impl Arbitrary for RootHash {
     type Parameters = ();
@@ -35,7 +71,6 @@ impl Arbitrary for Header {
             any::<[u8; 32]>(),
             // time is interpreted as u32 in the spec, but rust timestamps are i64
             (0i64..(u32::MAX as i64)),
-            any::<CompactDifficulty>(),
             any::<[u8; 32]>(),
             any::<equihash::Solution>(),
         )
@@ -46,7 +81,6 @@ impl Arbitrary for Header {
                     merkle_root_hash,
                     root_bytes,
                     timestamp,
-                    difficulty_threshold,
                     nonce,
                     solution,
                 )| Header {
@@ -55,7 +89,8 @@ impl Arbitrary for Header {
                     merkle_root: merkle_root_hash,
                     root_bytes,
                     time: Utc.timestamp(timestamp, 0),
-                    difficulty_threshold,
+                    // TODO: replace with `ExpandedDifficulty.to_compact` when that method is implemented
+                    difficulty_threshold: CompactDifficulty(545259519),
                     nonce,
                     solution,
                 },
