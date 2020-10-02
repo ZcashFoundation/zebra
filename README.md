@@ -32,8 +32,8 @@ into several components:
   definitions of core data structures for Zcash, such as blocks, transactions,
   addresses, etc., and related functionality.  It also contains the
   implementation of the consensus-critical serialization formats used in Zcash.
-  The data structures in `zebra-chain` are defined to enforce *structural
-  validity* by making invalid states unrepresentable.  For instance, the
+  The data structures in `zebra-chain` are defined to enforce [*structural
+  validity*](https://zebra.zfnd.org/dev/rfcs/0002-parallel-verification.html#verification-stages) by making invalid states unrepresentable.  For instance, the
   `Transaction` enum has variants for each transaction version, and it's
   impossible to construct a transaction with, e.g., spend or output
   descriptions but no binding signature, or, e.g., a version 2 (Sprout)
