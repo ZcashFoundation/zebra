@@ -13,7 +13,7 @@
 
 use std::fmt;
 
-use byteorder::{ByteOrder, LittleEndian};
+use byteorder::{BigEndian, ByteOrder, LittleEndian};
 use lazy_static::lazy_static;
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
@@ -35,11 +35,18 @@ fn merkle_crh_sprout(left: [u8; 32], right: [u8; 32]) -> [u8; 32] {
     other_block[..32].copy_from_slice(&left[..]);
     other_block[32..].copy_from_slice(&right[..]);
 
-    let mut state = [0u32; 8];
+    // H256: Sha256 initial state
+    // https://github.com/RustCrypto/hashes/blob/master/sha2/src/consts.rs#L170
+    let mut state = [
+        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
+        0x5be0cd19,
+    ];
     sha2::compress256(&mut state, &[GenericArray::clone_from_slice(&other_block)]);
 
+    // Yes, sha256 does big endian here.
+    // https://github.com/RustCrypto/hashes/blob/master/sha2/src/sha256.rs#L40
     let mut derived_bytes = [0u8; 32];
-    LittleEndian::write_u32_into(&state, &mut derived_bytes);
+    BigEndian::write_u32_into(&state, &mut derived_bytes);
 
     derived_bytes
 }
@@ -164,6 +171,7 @@ mod tests {
     use super::*;
 
     // From https://github.com/zcash/zcash/blob/master/src/zcash/IncrementalMerkleTree.cpp#L439
+    // These are the correct-byteorder (little endian)
     const HEX_EMPTY_ROOTS: [[u8; 32]; 66] = [
         [
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -500,9 +508,6 @@ mod tests {
     #[test]
     fn empty_roots() {
         for i in 0..EMPTY_ROOTS.len() {
-            println!("computed    root: {:?}", hex::encode(EMPTY_ROOTS[i]));
-            println!("precomputed root: {:?}", hex::encode(HEX_EMPTY_ROOTS[i]));
-
             assert_eq!(EMPTY_ROOTS[i], HEX_EMPTY_ROOTS[i]);
         }
     }
