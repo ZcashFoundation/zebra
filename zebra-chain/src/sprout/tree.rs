@@ -515,24 +515,26 @@ mod tests {
     #[test]
     fn incremental_roots() {
         // From https://github.com/zcash/zcash/blob/master/src/test/data/merkle_commitments.json
-        // Byte-reversed (?) from those ones because the original test vectors are loaded using uint256S()
+        //
+        // Byte-reversed from those ones because the original test vectors are
+        // loaded using uint256S()
         let commitments = [
-            "bab6e8992959caf0ca94847c36b4e648a7f88a9b9c6a62ea387cf1fb9badfd62",
-            "43c9a4b21555b832a79fc12ce27a97d4f4eca1638e7161a780db1d5ebc35eb68",
-            "fb92a6142315bb3396b693222bf2d0e260b448cda74e189063cf774048456083",
-            "e44a57cd544018937680d385817be3a3e35bb5b87ceeea93d536ea95828a4992",
-            "43f48bfb9ab6f12ef91ce83e8f9190ce5dff2721784c90e08a50a67403367cff",
-            "fce910561c3c7ebf14ed5d712e6838cdc6f1145c87eec256b7181f9df6d0c468",
-            "b1e7016392805b227b11e58ba629f9a6684a0b4c34306e85e47548c43ecd168b",
-            "2d9a49d9425449a449cc62d16febaf9c7f8b32349752ecc39191c36130b4c050",
-            "53969b31a862b893dde857b8b7d4f53ce0e2c21a0f70d48ba1aef3a05fddff70",
-            "17f8fabd440fdf9e2eafd75a3407e8bbde048d2d2232cd803d5763004af61ed8",
-            "9b7805cb5e8ef337c13c73cab58ee719bf33a4a80ecc161bfe714269eca4928b",
-            "a3ebada94d4329899ae136391604799d8cea39c0c331f9aaaa4a1e73ab63e904",
-            "12091a20c9ebe67c2793bb71a6fdddb0ffe3ca781fcf1e192428161f186c3fbe",
-            "e9c65749638df548b8909c0ea1d0f79079a6bb3235c649a8806322c87f968018",
-            "8e8fddf0438a4263bc926fcfa6733dc201633959f294103533a2cb9328bb65c4",
-            "206a202bd08dd31f77afc7114b17850192b83948cff5828df0d638cbe734c884",
+            "62fdad9bfbf17c38ea626a9c9b8af8a748e6b4367c8494caf0ca592999e8b6ba",
+            "68eb35bc5e1ddb80a761718e63a1ecf4d4977ae22cc19fa732b85515b2a4c943",
+            "836045484077cf6390184ea7cd48b460e2d0f22b2293b69633bb152314a692fb",
+            "92498a8295ea36d593eaee7cb8b55be3a3e37b8185d3807693184054cd574ae4",
+            "ff7c360374a6508ae0904c782127ff5dce90918f3ee81cf92ef1b69afb8bf443",
+            "68c4d0f69d1f18b756c2ee875c14f1c6cd38682e715ded14bf7e3c1c5610e9fc",
+            "8b16cd3ec44875e4856e30344c0b4a68a6f929a68be5117b225b80926301e7b1",
+            "50c0b43061c39191c3ec529734328b7f9cafeb6fd162cc49a4495442d9499a2d",
+            "70ffdd5fa0f3aea18bd4700f1ac2e2e03cf5d4b7b857e8dd93b862a8319b9653",
+            "d81ef64a0063573d80cd32222d8d04debbe807345ad7af2e9edf0f44bdfaf817",
+            "8b92a4ec694271fe1b16cc0ea8a433bf19e78eb5ca733cc137f38e5ecb05789b",
+            "04e963ab731e4aaaaaf931c3c039ea8c9d7904163936e19a8929434da9adeba3",
+            "be3f6c181f162824191ecf1f78cae3ffb0ddfda671bb93277ce6ebc9201a0912",
+            "1880967fc8226380a849c63532bba67990f7d0a10e9c90b848f58d634957c6e9",
+            "c465bb2893cba233351094f259396301c23d73a6cf6f92bc63428a43f0dd8f8e",
+            "84c834e7cb38d6f08d82f5cf4839b8920185174b11c7af771fd38dd02b206a20",
         ];
 
         // Calculated by the above implementation for MERKLE_DEPTH = 29 by the
@@ -563,9 +565,6 @@ mod tests {
         for (i, cm) in commitments.iter().enumerate() {
             let mut bytes = [0u8; 32];
             let _ = hex::decode_to_slice(cm, &mut bytes);
-
-            // Byte-reverse
-            bytes.reverse();
 
             leaves.push(NoteCommitment::from(bytes));
 
