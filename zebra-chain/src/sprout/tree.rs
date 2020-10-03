@@ -60,9 +60,7 @@ lazy_static! {
         let mut v = vec![[0u8; 32]];
 
         for d in 0..MERKLE_DEPTH {
-
-            let next = merkle_crh_sprout(v[d], v[d]);
-            v.push(next);
+            v.push(merkle_crh_sprout(v[d], v[d]));
         }
 
         v
@@ -140,7 +138,9 @@ impl From<Vec<NoteCommitment>> for NoteCommitmentTree {
                 } else {
                     right = current_layer.remove(0);
                 }
-                next_layer_up.push(merkle_crh_sprout(left, right));
+                let node = merkle_crh_sprout(left, right);
+
+                next_layer_up.push(node);
             }
 
             height += 1;
@@ -535,24 +535,27 @@ mod tests {
             "206a202bd08dd31f77afc7114b17850192b83948cff5828df0d638cbe734c884",
         ];
 
-        // From https://github.com/zcash/zcash/blob/master/src/test/data/merkle_roots.json
+        // Calculated by the above implementation for MERKLE_DEPTH = 29 by the
+        // same code confirmed to produce the test vectors from
+        // https://github.com/zcash/zcash/blob/master/src/test/data/merkle_roots.json
+        // when MERKLE_DEPTH = 4.
         let roots = [
-            "95bf71d8e803b8601c14b5949d0f92690181154ef9d82eb3e24852266823317a",
-            "73f18d3f9cd11010aa01d4f444039e566f14ef282109df9649b2eb75e7a53ed1",
-            "dcde8a273c9672bee1a894d7f7f4abb81078f52b498e095f2a87d0aec5addf25",
-            "4677d481ec6d1e97969afbc530958d1cbb4f1c047af6fdad4687cd10830e02bd",
-            "74cd9d82de30c4222a06d420b75522ae1273729c1d8419446adf1184df61dc69",
-            "2ff57f5468c6afdad30ec0fb6c2cb67289f12584e2c20c4e0065f66748697d77",
-            "27e4ce010670801911c5765a003b15f75cde31d7378bd36540f593c8a44b3011",
-            "62231ef2ec8c4da461072871ab7bc9de10253fcb40e164ddbad05b47e0b7fb69",
-            "733a4ce688fdf07efb9e9f5a4b2dafff87cfe198fbe1dff71e028ef4cdee1f1b",
-            "df39ed31924facdd69a93db07311d45fceac7a4987c091648044f37e6ecbb0d2",
-            "87795c069bdb55281c666b9cb872d13174334ce135c12823541e9536489a9107",
-            "438c80f532903b283230446514e400c329b29483db4fe9e279fdfc79e8f4347d",
-            "08afb2813eda17e94aba1ab28ec191d4af99283cd4f1c5a04c0c2bc221bc3119",
-            "a8b3ab3284f3288f7caa21bd2b69789a159ab4188b0908825b34723305c1228c",
-            "db9b289e620de7dca2ae8fdac96808752e32e7a2c6d97ce0755dcebaa03123ab",
-            "0bf622cb9f901b7532433ea2e7c1b7632f5935899b62dcf897a71551997dc8cc",
+            "b8e10b6c157be92c43a733e2c9bddb963a2fb9ea80ebcb307acdcc5fc89f1656",
+            "83a7754b8240699dd1b63bf70cf70db28ffeb74ef87ce2f4dd32c28ae5009f4f",
+            "c45297124f50dcd3f78eed017afd1e30764cd74cdf0a57751978270fd0721359",
+            "b61f588fcba9cea79e94376adae1c49583f716d2f20367141f1369a235b95c98",
+            "a3165c1708f0cc028014b9bf925a81c30091091ca587624de853260cd151b524",
+            "6bb8c538c550abdd26baa2a7510a4ae50a03dc00e52818b9db3e4ffaa29c1f41",
+            "e04e4731085ba95e3fa7c8f3d5eb9a56af63363403b783bc68802629c3fe505b",
+            "c3714ab74d8e3984e8b58a2b4806934d20f6e67d7246cf8f5b2762305294a0ea",
+            "63657edeead4bc45610b6d5eb80714a0622aad5788119b7d9961453e3aacda21",
+            "e31b80819221718440c5351525dbb902d60ed16b74865a2528510959a1960077",
+            "872f13df2e12f5503c39100602930b0f91ea360e5905a9f5ceb45d459efc36b2",
+            "bdd7105febb3590832e946aa590d07377d1366cf5e7267507efa399dd0febdbc",
+            "0f45f4adcb846a8bb56833ca0cae96f2fb8747958daa191a46d0f9d93268260a",
+            "41c6e456e2192ab74f72cb27c444a2734ca8ade5a4788c1bc2546118dda01778",
+            "8261355fd9bafc52a08d738fed29a859fbe15f2e74a5353954b150be200d0e16",
+            "90665cb8a43001f0655169952399590cd17f99165587c1dd842eb674fb9f0afe",
         ];
 
         let mut leaves = vec![];
@@ -560,6 +563,10 @@ mod tests {
         for (i, cm) in commitments.iter().enumerate() {
             let mut bytes = [0u8; 32];
             let _ = hex::decode_to_slice(cm, &mut bytes);
+
+            // Byte-reverse
+            bytes.reverse();
+
             leaves.push(NoteCommitment::from(bytes));
 
             let tree = NoteCommitmentTree::from(leaves.clone());
