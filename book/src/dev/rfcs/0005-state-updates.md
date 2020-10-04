@@ -51,7 +51,7 @@ state service.
 * **chain reorganization**: Occurs when a new best chain is found and the
   previous best chain becomes a side chain.
 
-* **reorg limit**: The longest reorganization accepted by Zcashd, 100 blocks.
+* **reorg limit**: The longest reorganization accepted by `zcashd`, 100 blocks.
 
 * **orphaned block**: A block which is no longer included in the best chain.
 
@@ -73,7 +73,7 @@ state service.
 [guide-level-explanation]: #guide-level-explanation
 
 The `zebra-state` crate provides an implementation of the chain state storage
-logic in a zcash consensus node. Its main responsibility is to store chain
+logic in a Zcash consensus node. Its main responsibility is to store chain
 state, validating new blocks against the existing chain state in the process,
 and to allow later querying of said chain state. `zebra-state` provides this
 interface via a `tower::Service` based on the actor model with a
@@ -164,7 +164,7 @@ blocks, but node restarts are relatively infrequent and a short re-sync is
 cheap relative to the cost of additional implementation complexity.
 
 Another downside of this design is that we do not achieve exactly the same
-behavior as Zcashd in the event of a 51% attack: Zcashd limits *each* chain
+behavior as `zcashd` in the event of a 51% attack: `zcashd` limits *each* chain
 reorganization to 100 blocks, but permits multiple reorgs, while Zebra limits
 *all* chain reorgs to 100 blocks. In the event of a successful 51% attack on
 Zcash, this could be resolved by wiping the Sled state and re-syncing the new
@@ -188,7 +188,7 @@ In the first category, our state is presented to the rest of the application
 as a `Buffer`ed `tower::Service`. The `Buffer` wrapper allows shared access
 to a service using an actor model, moving the service to be shared into a
 worker task and passing messages to it over an multi-producer single-consumer
-(mpsc) channel. The worker task recieves messages and makes `Service::call`s.
+(mpsc) channel. The worker task receives messages and makes `Service::call`s.
 The `Service::call` method returns a `Future`, and the service is allowed to
 decide how much work it wants to do synchronously (in `call`) and how much
 work it wants to do asynchronously (in the `Future` it returns).
@@ -198,7 +198,7 @@ linearized sequence of state requests, although the exact ordering is
 unpredictable when there are multiple senders making requests.
 
 In the second category, the Sled API presents itself synchronously, but
-database and tree handles are clonable and can be moved between threads. All
+database and tree handles are cloneable and can be moved between threads. All
 that's required to process some request asynchronously is to clone the
 appropriate handle, move it into an async block, and make the call as part of
 the future. (We might want to use Tokio's blocking API for this, but this is
@@ -245,7 +245,7 @@ chain of blocks rooted at the genesis block. The parent block of the root of
 a `Chain` is the tip of the finalized portion of the chain. As an exception, the finalized
 portion of the chain is initially empty, until the genesis block has been finalized.
 
-The `Chain` type supports serveral operations to manipulate chains, `push`,
+The `Chain` type supports several operations to manipulate chains, `push`,
 `pop_root`, and `fork`. `push` is the most fundamental operation and handles
 contextual validation of chains as they are extended. `pop_root` is provided
 for finalization, and is how we move blocks from the non-finalized portion of
@@ -382,7 +382,7 @@ them to become available.
 `NonFinalizedState` is defined by the following structure and API:
 
 ```rust
-/// The state of the chains in memory, incuding queued blocks.
+/// The state of the chains in memory, including queued blocks.
 #[derive(Debug, Default)]
 pub struct NonFinalizedState {
     /// Verified, non-finalized chains.
@@ -504,7 +504,7 @@ Try to commit `block` to `chain`. Must succeed, because
 - `NonFinalizedState` represents the non-finalized portion of all chains and all
   unverified blocks that are waiting for context to be available.
 
-- `NonFinalizedState::queue` handles queueing and or commiting blocks and
+- `NonFinalizedState::queue` handles queueing and or committing blocks and
   reorganizing chains (via `commit_block`) but not finalizing them
 
 - Finalized blocks are returned from `finalize` and must still be committed
@@ -515,7 +515,7 @@ Try to commit `block` to `chain`. Must succeed, because
 ## Committing non-finalized blocks
 
 Given the above structures for manipulating the non-finalized state new
-`non-finalized` blocks are commited in two steps. First we commit the block
+`non-finalized` blocks are committed in two steps. First we commit the block
 to the in memory state, then we finalize all lowest height blocks that are
 past the reorg limit, finally we process any queued blocks and prune any that
 are now past the reorg limit.
@@ -820,7 +820,7 @@ Implemented by querying:
 
 - the service API is verbose and requires manually unwrapping enums
 
-- We do not handle reorgs the same way zcashd does, and could in theory need
+- We do not handle reorgs the same way `zcashd` does, and could in theory need
   to delete our entire on disk state and resync the chain in some
   pathological reorg cases.
 - testnet rollbacks are infrequent, but possible, due to bugs in testnet
