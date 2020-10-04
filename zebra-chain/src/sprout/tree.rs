@@ -13,7 +13,7 @@
 
 use std::fmt;
 
-use byteorder::{BigEndian, ByteOrder, LittleEndian};
+use byteorder::{BigEndian, ByteOrder};
 use lazy_static::lazy_static;
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
