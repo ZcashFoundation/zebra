@@ -12,7 +12,7 @@
 #![allow(clippy::unit_arg)]
 #![allow(dead_code)]
 
-use std::fmt;
+use std::{collections::VecDeque, fmt};
 
 use byteorder::{BigEndian, ByteOrder};
 use lazy_static::lazy_static;
@@ -126,18 +126,19 @@ impl From<Vec<NoteCommitment>> for NoteCommitmentTree {
 
         let count = values.len() as u32;
         let mut height = 0u8;
-        let mut current_layer: Vec<[u8; 32]> = values.into_iter().map(|cm| cm.into()).collect();
+        let mut current_layer: VecDeque<[u8; 32]> =
+            values.into_iter().map(|cm| cm.into()).collect();
 
         while usize::from(height) < MERKLE_DEPTH {
             let mut next_layer_up = vec![];
 
             while !current_layer.is_empty() {
-                let left = current_layer.remove(0);
+                let left = current_layer.pop_front().unwrap();
                 let right;
                 if current_layer.is_empty() {
                     right = EMPTY_ROOTS[height as usize];
                 } else {
-                    right = current_layer.remove(0);
+                    right = current_layer.pop_front().unwrap();
                 }
                 let node = merkle_crh_sprout(left, right);
 
@@ -145,13 +146,13 @@ impl From<Vec<NoteCommitment>> for NoteCommitmentTree {
             }
 
             height += 1;
-            current_layer = next_layer_up;
+            current_layer = next_layer_up.into();
         }
 
         assert!(current_layer.len() == 1);
 
         NoteCommitmentTree {
-            root: Root(current_layer.remove(0)),
+            root: Root(current_layer.pop_front().unwrap()),
             height,
             count,
         }
