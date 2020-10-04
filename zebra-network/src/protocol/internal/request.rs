@@ -119,7 +119,7 @@ pub enum Request {
     ///
     /// This is intended to be used in Zebra with a single transaction at a time
     /// (set of size 1), but multiple transactions are permitted because this is
-    /// how we interpret advertisements from Zcashd, which sometimes advertises
+    /// how we interpret advertisements from zcashd, which sometimes advertises
     /// multiple transactions at once.
     ///
     /// This is implemented by sending an `inv` message containing the
