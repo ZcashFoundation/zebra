@@ -84,7 +84,6 @@ impl fmt::Debug for Root {
 
 /// Sapling Note Commitment Tree
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 struct NoteCommitmentTree {
     /// The root node of the tree (often used as an anchor).
     root: Root,
