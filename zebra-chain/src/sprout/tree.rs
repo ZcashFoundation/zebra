@@ -10,6 +10,7 @@
 //!
 //! A root of a note commitment tree is associated with each treestate.
 #![allow(clippy::unit_arg)]
+#![allow(dead_code)]
 
 use std::fmt;
 
