@@ -25,7 +25,7 @@ futures = "0.3"
 tokio = { version = "0.2.22", features = ["time", "rt-threaded", "stream", "macros", "tracing", "signal"] }
 tower = "0.3"
 
-color-eyre = { version = "0.5.5", features = ["issue-url"] }
+color-eyre = { version = "0.5.6", features = ["issue-url"] }
 thiserror = "1"
 tracing = "0.1"
 tracing-futures = "0.2"
