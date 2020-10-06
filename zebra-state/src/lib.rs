@@ -12,6 +12,7 @@ mod memory_state;
 mod request;
 mod response;
 mod service;
+mod service_interface;
 mod sled_state;
 mod util;
 
