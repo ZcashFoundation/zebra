@@ -36,7 +36,7 @@ metrics-runtime = "0.13"
 metrics = "0.12"
 dirs = "3.0.1"
 tracing-flame = "0.1.0"
-inferno = { version = "0.10.0", default-features = false }
+inferno = { version = "0.10.1", default-features = false }
 
 [dev-dependencies]
 abscissa_core = { version = "0.5", features = ["testing"] }
