@@ -6,6 +6,8 @@
 [![codecov](https://codecov.io/gh/ZcashFoundation/zebra/branch/main/graph/badge.svg)](https://codecov.io/gh/ZcashFoundation/zebra)
 ![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)
 
+:construction: UNDER CONSTRUCTION :construction: 
+
 Hello! I am Zebra, an ongoing Rust implementation of a Zcash node.
 
 Zebra is a work in progress.  It is developed as a collection of `zebra-*`
