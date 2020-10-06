@@ -5,7 +5,7 @@
 use std::{
     cmp::Ordering,
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
-    fmt, mem,
+    mem,
     ops::Deref,
     sync::Arc,
 };
