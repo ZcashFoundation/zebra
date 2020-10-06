@@ -56,7 +56,7 @@ into several components:
 - [`zebra-script`](https://doc.zebra.zfnd.org/zebra_script/index.html) provides
   script validation.  Currently, this is implemented by linking to the C++
   script verification code from `zcashd`, but in the future we may implement a
-  pure-Rust Script implementation.
+  pure-Rust script implementation.
 
 - [`zebra-consensus`](https://doc.zebra.zfnd.org/zebra_consensus/index.html)
   performs *semantic validation* of blocks and transactions: all consensus
