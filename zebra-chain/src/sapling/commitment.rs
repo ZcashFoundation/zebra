@@ -261,7 +261,6 @@ impl ValueCommitment {
     /// Generate a new _ValueCommitment_.
     ///
     /// https://zips.z.cash/protocol/protocol.pdf#concretehomomorphiccommit
-    #[allow(non_snake_case)]
     pub fn randomized<T>(csprng: &mut T, value: Amount) -> Self
     where
         T: RngCore + CryptoRng,
