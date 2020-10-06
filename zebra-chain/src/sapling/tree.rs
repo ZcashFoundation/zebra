@@ -26,6 +26,8 @@ const MERKLE_DEPTH: usize = 32;
 
 /// MerkleCRH^Sapling Hash Function
 ///
+/// Used to hash incremental Merkle tree hash values for Sapling.
+///
 /// MerkleCRH^Sapling(layer, left, right) := PedersenHash(“Zcash_PH”, l || left || right)
 /// where l = I2LEBSP_6(MerkleDepth^Sapling − 1 − layer) and
 /// left, right, and the output are all technically 255 bits (l_MerkleSapling), not 256.
