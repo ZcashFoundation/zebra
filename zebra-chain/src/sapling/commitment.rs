@@ -221,18 +221,6 @@ impl std::iter::Sum for ValueCommitment {
     }
 }
 
-impl<'a> std::iter::Sum<&'a ValueCommitment> for ValueCommitment {
-    fn sum<I>(iter: I) -> Self
-    where
-        I: Iterator<Item = &'a Self>,
-    {
-        iter.fold(
-            ValueCommitment(jubjub::AffinePoint::identity()),
-            std::ops::Add::add,
-        )
-    }
-}
-
 /// LEBS2OSP256(repr_J(cv))
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#spendencoding
