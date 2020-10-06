@@ -26,6 +26,8 @@ const MERKLE_DEPTH: usize = 29;
 
 /// MerkleCRH^Sprout Hash Function
 ///
+/// Used to hash incremental Merkle tree hash values for Sprout.
+///
 /// MerkleCRH^Sprout(layer, left, right) := SHA256Compress(left || right)
 ///
 /// `layer` is unused for Sprout but used for the Sapling equivalent.
