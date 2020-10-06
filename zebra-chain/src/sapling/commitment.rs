@@ -141,8 +141,7 @@ impl<'a> std::ops::Add<&'a ValueCommitment> for ValueCommitment {
     type Output = Self;
 
     fn add(self, rhs: &'a ValueCommitment) -> Self::Output {
-        let value = self.0.to_extended() + rhs.0.to_extended();
-        ValueCommitment(value.into())
+        self + *rhs
     }
 }
 
