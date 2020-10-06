@@ -59,7 +59,7 @@ into several components:
   pure-Rust script implementation.
 
 - [`zebra-consensus`](https://doc.zebra.zfnd.org/zebra_consensus/index.html)
-  performs *semantic validation* of blocks and transactions: all consensus
+  performs [*semantic validation*](https://zebra.zfnd.org/dev/rfcs/0002-parallel-verification.html#verification-stages) of blocks and transactions: all consensus
   rules that can be checked independently of the chain state, such as
   verification of signatures, proofs, and scripts.  Internally, the library
   uses [`tower-batch`](https://doc.zebra.zfnd.org/tower_batch/index.html) to
@@ -68,7 +68,7 @@ into several components:
 
 - [`zebra-state`](https://doc.zebra.zfnd.org/zebra_state/index.html) is
   responsible for storing, updating, and querying the chain state.  The state
-  service is responsible for *contextual verification*: all consensus rules
+  service is responsible for [*contextual verification*](https://zebra.zfnd.org/dev/rfcs/0002-parallel-verification.html#verification-stages): all consensus rules
   that check whether a new block is a valid extension of an existing chain,
   such as updating the nullifier set or checking that transaction inputs remain
   unspent.
@@ -79,11 +79,11 @@ into several components:
 
 - `zebra-rpc` and `zebra-client` will eventually contain the RPC and wallet
   functionality, but as mentioned above, our goal is to implement replication
-  of chain state first before asking users to entrust it with their funds.
+  of chain state first before asking users to entrust Zebra with their funds.
 
 All of these components can be reused as independent libraries, and all
 communication between stateful components is handled internally by
-[asynchronous RPC](https://docs.rs/tower/) ("microservices in one process").
+[internal asynchronous RPC abstraction](https://docs.rs/tower/) ("microservices in one process").
 
 The [Zebra website](https://zebra.zfnd.org/) contains user documentation, such
 as how to run or configure Zebra, set up metrics integrations, etc., as well as
