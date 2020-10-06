@@ -515,13 +515,8 @@ Prune all queued blocks whose height are less than or equal to
 - `QueuedBlocks` represents all unverified blocks that are waiting for
   context to be available.
 
-<<<<<<< HEAD
 - `finalize` must be called manually after calling `commit_block` to prevent
   chains in `NonFinalizedState` from growing beyond the reorg limit.
-=======
-- `NonFinalizedState::queue` handles queueing and or committing blocks and
-  reorganizing chains (via `commit_block`) but not finalizing them
->>>>>>> main
 
 - Finalized blocks are returned from `finalize` and must still be committed
   to disk afterwards
@@ -529,14 +524,7 @@ Prune all queued blocks whose height are less than or equal to
 ## Committing non-finalized blocks
 
 Given the above structures for manipulating the non-finalized state new
-<<<<<<< HEAD
 `non-finalized` blocks are commited as follows:
-=======
-`non-finalized` blocks are committed in two steps. First we commit the block
-to the in memory state, then we finalize all lowest height blocks that are
-past the reorg limit, finally we process any queued blocks and prune any that
-are now past the reorg limit.
->>>>>>> main
 
 1. If the block itself exists in the finalized chain, it has already been
    successfully verified:
