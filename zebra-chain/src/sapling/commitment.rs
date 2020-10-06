@@ -187,6 +187,14 @@ impl From<ValueCommitment> for [u8; 32] {
     }
 }
 
+impl<'a> std::ops::Sub<&'a ValueCommitment> for ValueCommitment {
+    type Output = Self;
+
+    fn sub(self, rhs: &'a ValueCommitment) -> Self::Output {
+        self - *rhs
+    }
+}
+
 impl std::ops::Sub<ValueCommitment> for ValueCommitment {
     type Output = Self;
 
