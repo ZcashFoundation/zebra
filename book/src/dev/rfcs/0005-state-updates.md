@@ -623,14 +623,9 @@ check that `block`'s parent hash is `null` (all zeroes) and its height is `0`.
 (Due to a [bug in zcashd](https://github.com/ZcashFoundation/zebra/issues/559), genesis block transactions
 are ignored during validation.)
 
-3. If the block is a genesis block, skip any transaction updates.
+4.  Update the `sprout_anchors` and `sapling_anchors` trees with the Sprout and Sapling anchors.
 
-(Due to a [bug in zcashd](https://github.com/ZcashFoundation/zebra/issues/559), genesis block transactions
-are ignored during validation.)
-
-3.  Update the `sprout_anchors` and `sapling_anchors` trees with the Sprout and Sapling anchors.
-
-4. Iterate over the enumerated transactions in the block. For each transaction:
+5. Iterate over the enumerated transactions in the block. For each transaction:
 
    1. Insert `(transaction_hash, block_height || BE32(tx_index))` to
    `tx_by_hash`;
