@@ -5,7 +5,7 @@
 [![](https://github.com/ZcashFoundation/zebra/workflows/CI/badge.svg?branch=main)](https://github.com/ZcashFoundation/zebra/actions?query=workflow%3ACI+branch%3Amain)
 [![codecov](https://codecov.io/gh/ZcashFoundation/zebra/branch/main/graph/badge.svg)](https://codecov.io/gh/ZcashFoundation/zebra)
 ![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)
-
+🚧 UNDER CONSTRUCTION 🚧
 [Zebra](https://zebra.zfnd.org/) is the Zcash Foundation's independent,
 consensus-compatible implementation of the Zcash protocol, currently under
 development.  Please [join us on Discord](https://discord.gg/na6QZNd) if you'd
