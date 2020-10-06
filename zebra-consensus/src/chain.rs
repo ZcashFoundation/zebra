@@ -77,9 +77,6 @@ where
 
     fn call(&mut self, block: Arc<Block>) -> Self::Future {
         let height = block.coinbase_height();
-        let span = tracing::info_span!("chain_call", ?height);
-        let _entered = span.enter();
-        tracing::debug!("verifying new block");
 
         // TODO: do we still need this logging?
         // Log an info-level message on unexpected out of order blocks

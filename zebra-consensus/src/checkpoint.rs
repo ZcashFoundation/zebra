@@ -27,7 +27,6 @@ use thiserror::Error;
 use tokio::sync::oneshot;
 use tower::{Service, ServiceExt};
 
-use tracing::instrument;
 use zebra_chain::{
     block::{self, Block},
     parameters::Network,
@@ -785,7 +784,6 @@ where
         Poll::Ready(Ok(()))
     }
 
-    #[instrument(name = "checkpoint_call", skip(self, block))]
     fn call(&mut self, block: Arc<Block>) -> Self::Future {
         // Immediately reject all incoming blocks that arrive after we've finished.
         if let FinalCheckpoint = self.previous_checkpoint_height() {
