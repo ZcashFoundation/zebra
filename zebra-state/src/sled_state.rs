@@ -63,7 +63,7 @@ impl FinalizedState {
     ///
     /// After queueing a finalized block, this method checks whether the newly
     /// queued block (and any of its descendants) can be committed to the state.
-    pub fn queue(&mut self, queued_block: QueuedBlock) {
+    pub fn queue_and_commit_finalized_blocks(&mut self, queued_block: QueuedBlock) {
         let prev_hash = queued_block.block.header.previous_block_hash;
         self.queued_by_prev_hash.insert(prev_hash, queued_block);
 
@@ -82,11 +82,10 @@ impl FinalizedState {
     }
 
     /// Returns the height of the current finalized tip block.
-    pub fn finalized_tip_height(&self) -> block::Height {
+    pub fn finalized_tip_height(&self) -> Option<block::Height> {
         read_tip(&self.hash_by_height)
             .expect("inability to look up tip is unrecoverable")
             .map(|(height, _)| height)
-            .unwrap_or(block::Height(0))
     }
 
     /// Immediately commit `block` to the finalized state.

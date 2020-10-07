@@ -520,12 +520,14 @@ The state service uses the following entry points:
 
 - `finalize` to prevent chains in `NonFinalizedState` from growing beyond the reorg limit.
 
-- [FinalizedState.commit_finalized_block](#committing-finalized-blocks) on the blocks returned by `finalize`, to commit those finalized blocks to disk.
+- [FinalizedState.queue_and_commit_finalized_blocks](#committing-finalized-blocks) on the blocks returned by `finalize`, to commit those finalized blocks to disk.
 
 ## Committing non-finalized blocks
 
 Given the above structures for manipulating the non-finalized state new
 `non-finalized` blocks are commited as follows:
+
+### `fn queue_and_commit_non_finalized_blocks(&mut self, new: QueuedBlock)`
 
 1. If the block itself exists in the finalized chain, it has already been
    successfully verified:
@@ -622,6 +624,8 @@ response futures, so they may arrive out of order).
 Committing a block to the sled state should be implemented as a wrapper around
 a function also called by [`Request::CommitBlock`](#request-commit-block),
 which should:
+
+### `pub fn queue_and_commit_finalized_blocks(&mut self, queued_block: QueuedBlock)`
 
 1. Obtain the highest entry of `hash_by_height` as `(old_height, old_tip)`.
 Check that `block`'s parent hash is `old_tip` and its height is

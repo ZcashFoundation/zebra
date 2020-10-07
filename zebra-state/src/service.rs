@@ -70,12 +70,12 @@ impl StateService {
     ///
     /// [1]: https://zebra.zfnd.org/dev/rfcs/0005-state-updates.html#committing-non-finalized-blocks
     #[instrument(skip(self, new))]
-    fn queue(&mut self, new: QueuedBlock) {
+    fn queue_and_commit_non_finalized_blocks(&mut self, new: QueuedBlock) {
         let parent_hash = new.block.header.previous_block_hash;
 
         self.queued_blocks.queue(new);
 
-        if !self.contains(&parent_hash) {
+        if !self.can_fork_chain_at(&parent_hash) {
             return;
         }
 
@@ -89,7 +89,9 @@ impl StateService {
         }
 
         self.queued_blocks
-            .prune_by_height(self.sled.finalized_tip_height());
+            .prune_by_height(self.sled.finalized_tip_height().expect(
+            "Finalized state must have at least one block before committing non-finalized state",
+        ));
     }
 
     /// Run contextual validation on `block` and add it to the non-finalized
@@ -107,7 +109,8 @@ impl StateService {
         Ok(())
     }
 
-    fn contains(&self, hash: &block::Hash) -> bool {
+    /// Returns `true` if `hash` is a valid previous block hash for new non-finalized blocks.
+    fn can_fork_chain_at(&self, hash: &block::Hash) -> bool {
         self.mem.any_chain_contains(hash) || &self.sled.finalized_tip_hash() == hash
     }
 
@@ -137,7 +140,13 @@ impl StateService {
     fn check_contextual_validity(&mut self, block: &Block) -> Result<(), ValidateContextError> {
         use ValidateContextError::*;
 
-        if block.coinbase_height().unwrap() <= self.sled.finalized_tip_height() {
+        if block
+            .coinbase_height()
+            .expect("valid blocks have a coinbase height")
+            <= self.sled.finalized_tip_height().expect(
+                "finalized state must contain at least one block to use the non-finalized state",
+            )
+        {
             Err(OrphanedBlock)?;
         }
 
@@ -161,7 +170,7 @@ impl Service<Request> for StateService {
             Request::CommitBlock { block } => {
                 let (rsp_tx, rsp_rx) = oneshot::channel();
 
-                self.queue(QueuedBlock { block, rsp_tx });
+                self.queue_and_commit_non_finalized_blocks(QueuedBlock { block, rsp_tx });
 
                 async move {
                     rsp_rx
@@ -174,7 +183,8 @@ impl Service<Request> for StateService {
             Request::CommitFinalizedBlock { block } => {
                 let (rsp_tx, rsp_rx) = oneshot::channel();
 
-                self.sled.queue(QueuedBlock { block, rsp_tx });
+                self.sled
+                    .queue_and_commit_finalized_blocks(QueuedBlock { block, rsp_tx });
 
                 async move {
                     rsp_rx
