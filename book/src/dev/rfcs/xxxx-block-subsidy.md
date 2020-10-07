@@ -167,14 +167,14 @@ The following consensus rules must be applied to `subsidy_is_correct()`:
 
 *[Pre-Canopy] A coinbase transaction at `height` **MUST** include at least one output that pays exactly `FoundersReward(height)` zatoshi with a standard P2SH script of the form `OP_HASH160 FounderRedeemScriptHash (height) OP_EQUAL` as its scriptPubKey.* https://zips.z.cash/protocol/protocol.pdf#foundersreward
 
-We make use of the founders reward functions here. We get the amount of the reward with `founders_reward(height, network)` and we get the addresses for the reward at height with `founders_reward_address(height, network)`. Next we cab get a list of outputs that match the amount with `find_output_with_amount()` and with it we check if it matches the address.
+We make use of the founders reward functions here. We get the amount of the reward with `founders_reward(height, network)` and the address for the reward at height with `founders_reward_address(height, network)`. Next we get a list of outputs that match the amount with the utility function `find_output_with_amount()`. Finally with this list, we check if any of the output scripts addresses matches our computed address.
 
 ### 2 - Funding stream:
 
 *[Canopy onward]  The coinbase transaction at `height` **MUST**  contain at least one output per funding stream `fs` active at
 height, that pays `fs.Value(height)` zatoshi in the prescribed way to the stream’s recipient address represented by `fs.AddressList` of `fs.AddressIndex(height)`.* https://zips.z.cash/protocol/protocol.pdf#fundingstreams
 
-We make use of the funding streams functions here, similar to founders reward . We get the amount using `funding_stream(height, network)` and then the address with `funding_stream_address(height, network)`. The validation is again the same as with founders reward, we need to look for an output that pays the amount to the address. The same utility function `find_output_with_amount()` can be used here. 
+We make use of the funding streams functions here, similar to founders reward . We get the amount of the reward using `funding_stream(height, network)` and then the address with `funding_stream_address(height, network)`. Next we get a list of outputs that match the amount with the utility function `find_output_with_amount()`. Finally with this list, we check if any of the output scripts matches the address we have computed.
 
 ### 3 - Miner subsidy:
 
