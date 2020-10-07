@@ -88,59 +88,47 @@ To do the calculations and checks the following constants and functions need to 
 The design suggests to implement the parameters needed for funding streams as:
 
 ```
-/// Funding Streams
-// Todo: There is probably a better way to do this ...
-pub mod fs {
-
-    /// The funding stream receivers
-    pub enum Receiver {
-        /// Electric Coin Company
-        ECC,
-        /// ZCash Foundation
-        ZF,
-        /// Major Grants
-        MG,
-    }
-
-    /// For the Mainnet
-    pub mod mainnet {
-        /// Denominator
-        pub const DENOMINATOR: u32 = 100;
-        /// Start height
-        pub const START_HEIGHT: u32 = 1046400;
-        /// End height
-        pub const END_HEIGHT: u32 = 2726400;
-
-        use super::Receiver;
-        /// Numerator based on receiver
-        pub fn numerator(receiver: Receiver) -> u32 {
-            match receiver {
-                Receiver::ECC => 7,
-                Receiver::ZF => 5,
-                Receiver::MG => 8,
-            }
-        }
-    }
-    /// For the Testnet
-    pub mod testnet {
-        /// Denominator
-        pub const DENOMINATOR: u32 = 100;
-        /// Start height
-        pub const START_HEIGHT: u32 = 1028500;
-        /// End height
-        pub const END_HEIGHT: u32 = 2796000;
-
-        use super::Receiver;
-        /// Numerator based on receiver
-        pub fn numerator(receiver: Receiver) -> u32 {
-            match receiver {
-                Receiver::ECC => 7,
-                Receiver::ZF => 5,
-                Receiver::MG => 8,
-            }
-        }
-    }
+/// The funding stream receiver categories
+pub enum FundingStreamsReceivers {
+    /// Electric Coin Company
+    ECC,
+    /// ZCash Foundation
+    ZF,
+    /// Major Grants
+    MG,
 }
+
+/// The numerator for each funding stream receiving category 
+/// as described in [protocol specification §7.9.1][7.9.1].
+/// 
+/// [7.9.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
+const FUNDINGSTREAMS_RECEIVERS_NUMERATORS: &[(i32, FundingStreamsReceivers)] = &[
+    (7, FundingStreamsReceivers::ECC),
+    (5, FundingStreamsReceivers::ZF),
+    (8, FundingStreamsReceivers::MG),
+];
+
+/// Denominator as described in [protocol specification §7.9.1][7.9.1].
+/// 
+/// [7.9.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
+pub const FUNDINGSTREAM_DENOMINATOR: i32 = 100;
+
+/// Height intervals for funding streams on each network.
+pub enum FundingStreamsHeightIntervals {
+    /// For the Mainnet
+    Mainnet,
+    /// For the Testnet
+    Testnet,
+}
+
+/// Start and end Heights for funding streams 
+/// as described in [protocol specification §7.9.1][7.9.1].
+/// 
+/// [7.9.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
+const FUNDINGSTREAMS_HEIGHT_INTERVALS: &[(Height, Height, FundingStreamsHeightIntervals)] = &[
+    (Height(1_046_400), Height(2_726_400), FundingStreamsHeightIntervals::Mainnet),
+    (Height(1_028_500), Height(2_796_000), FundingStreamsHeightIntervals::Testnet),
+];
 ```
 
 ## General subsidy
