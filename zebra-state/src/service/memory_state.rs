@@ -405,7 +405,9 @@ impl Ord for Chain {
 /// The state of the chains in memory, incuding queued blocks.
 #[derive(Default)]
 pub struct NonFinalizedState {
-    /// Verified, non-finalized chains.
+    /// Verified, non-finalized chains, in ascending order.
+    ///
+    /// The best chain is `chain_set.last()` or `chain_set.iter().next_back()`.
     chain_set: BTreeSet<Box<Chain>>,
 }
 
@@ -417,7 +419,7 @@ impl NonFinalizedState {
         let mut chains = chains.into_iter();
 
         // extract best chain
-        let mut best_chain = chains.next().expect("there's at least one chain");
+        let mut best_chain = chains.next_back().expect("there's at least one chain");
         // extract the rest into side_chains so they can be mutated
         let side_chains = chains;
 
@@ -470,7 +472,7 @@ impl NonFinalizedState {
         block::Height(
             self.chain_set
                 .iter()
-                .next()
+                .next_back()
                 .expect("only called after inserting a block")
                 .blocks
                 .len() as u32,
@@ -491,7 +493,7 @@ impl NonFinalizedState {
         let chains = mem::take(&mut self.chain_set);
         let mut chains = chains.into_iter();
 
-        while let Some(chain) = chains.next() {
+        while let Some(chain) = chains.next_back() {
             // if the predicate says we should remove it
             if predicate(&chain) {
                 // add back the remaining chains

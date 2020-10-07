@@ -76,6 +76,7 @@ impl FinalizedState {
         read_tip(&self.hash_by_height)
             .expect("inability to look up tip is unrecoverable")
             .map(|(_, hash)| hash)
+            // if the state is empty, return the genesis previous block hash
             .unwrap_or(block::Hash([0; 32]))
     }
 

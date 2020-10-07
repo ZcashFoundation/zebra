@@ -515,11 +515,12 @@ Prune all queued blocks whose height are less than or equal to
 - `QueuedBlocks` represents all unverified blocks that are waiting for
   context to be available.
 
-- `finalize` must be called manually after calling `commit_block` to prevent
-  chains in `NonFinalizedState` from growing beyond the reorg limit.
+The state service uses the following entry points:
+- `commit_block` when it receives new blocks.
 
-- Finalized blocks are returned from `finalize` and must still be committed
-  to disk afterwards
+- `finalize` to prevent chains in `NonFinalizedState` from growing beyond the reorg limit.
+
+- [FinalizedState.commit_finalized_block](#committing-finalized-blocks) on the blocks returned by `finalize`, to commit those finalized blocks to disk.
 
 ## Committing non-finalized blocks
 

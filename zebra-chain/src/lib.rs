@@ -31,7 +31,7 @@ pub struct LedgerState {
     /// The tip height of the block or start of the chain
     pub tip_height: block::Height,
     is_coinbase: bool,
-    /// The network generate fake blocks for
+    /// The network to generate fake blocks for
     pub network: parameters::Network,
 }
 

@@ -128,7 +128,7 @@ impl StateService {
             Err(OrphanedBlock)?;
         }
 
-        // Draw the rest of the owl
+        // TODO: contextual validation design and implementation
         Ok(())
     }
 }
