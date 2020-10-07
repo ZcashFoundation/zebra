@@ -2,7 +2,7 @@
 
 use std::{collections::HashMap, convert::TryInto, future::Future, sync::Arc};
 
-use tracing::info;
+use tracing::trace;
 use zebra_chain::serialization::{ZcashDeserialize, ZcashSerialize};
 use zebra_chain::{
     block::{self, Block},
@@ -72,6 +72,7 @@ impl FinalizedState {
         }
     }
 
+    /// Returns the hash of the current finalized tip block.
     pub fn finalized_tip_hash(&self) -> block::Hash {
         read_tip(&self.hash_by_height)
             .expect("inability to look up tip is unrecoverable")
@@ -80,6 +81,7 @@ impl FinalizedState {
             .unwrap_or(block::Hash([0; 32]))
     }
 
+    /// Returns the height of the current finalized tip block.
     pub fn finalized_tip_height(&self) -> block::Height {
         read_tip(&self.hash_by_height)
             .expect("inability to look up tip is unrecoverable")
@@ -87,6 +89,7 @@ impl FinalizedState {
             .unwrap_or(block::Height(0))
     }
 
+    /// Immediately commit `block` to the finalized state.
     pub fn commit_finalized_direct(&mut self, block: Arc<Block>) -> Result<block::Hash, BoxError> {
         use sled::Transactional;
 
@@ -96,9 +99,7 @@ impl FinalizedState {
         let height_bytes = height.0.to_be_bytes();
         let hash = block.hash();
 
-        if height.0 % 1000 == 0 {
-            info!("Finalized block at {:?}", height);
-        }
+        trace!(?height, "Finalized block");
 
         (
             &self.hash_by_height,
@@ -130,7 +131,7 @@ impl FinalizedState {
     /// order. This function is called by [`queue`], which ensures order.
     /// It is intentionally not exposed as part of the public API of the
     /// [`FinalizedState`].
-    pub fn commit_finalized(&mut self, queued_block: QueuedBlock) {
+    fn commit_finalized(&mut self, queued_block: QueuedBlock) {
         let QueuedBlock { block, rsp_tx } = queued_block;
         let result = self.commit_finalized_direct(block);
         let _ = rsp_tx.send(result);

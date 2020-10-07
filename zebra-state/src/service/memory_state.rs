@@ -436,8 +436,10 @@ impl NonFinalizedState {
             if chain_start == finalized_block {
                 // add the chain back to `self.chain_set`
                 self.chain_set.insert(chain);
+            } else {
+                // else discard `chain`
+                drop(chain);
             }
-            // else discard `chain`
         }
 
         // return the finalized block
@@ -462,12 +464,15 @@ impl NonFinalizedState {
         self.chain_set.insert(parent_chain);
     }
 
+    /// Commit block to the non-finalized state as a new chain where its parent
+    /// is the finalized tip.
     pub fn commit_new_chain(&mut self, block: Arc<Block>) {
         let mut chain = Chain::default();
         chain.push(block);
         self.chain_set.insert(Box::new(chain));
     }
 
+    /// Returns the length of the non-finalized portion of the current best chain.
     pub fn best_chain_len(&self) -> block::Height {
         block::Height(
             self.chain_set
@@ -479,6 +484,8 @@ impl NonFinalizedState {
         )
     }
 
+    /// Returns `true` if `hash` is contained in the non-finalized portion of any
+    /// known chain.
     pub fn any_chain_contains(&self, hash: &block::Hash) -> bool {
         self.chain_set
             .iter()
@@ -525,6 +532,11 @@ pub struct QueuedBlocks {
 }
 
 impl QueuedBlocks {
+    /// Queue a block for eventual verification and commit.
+    ///
+    /// # Panics
+    ///
+    /// - if a block with the same `block::Hash` has already been queued.
     pub fn queue(&mut self, new: QueuedBlock) {
         let new_hash = new.block.hash();
         let new_height = new
@@ -551,6 +563,8 @@ impl QueuedBlocks {
         tracing::trace!(num_blocks = %self.blocks.len(), %parent_hash, ?new_height,  "Finished queueing a new block");
     }
 
+    /// Dequeue and return all blocks that were waiting for the arrival of
+    /// `parent`.
     #[instrument(skip(self))]
     pub fn dequeue_children(&mut self, parent: block::Hash) -> Vec<QueuedBlock> {
         let queued_children = self
@@ -576,9 +590,15 @@ impl QueuedBlocks {
     }
 
     pub fn prune_by_height(&mut self, finalized_tip_height: block::Height) {
-        // split_off returns the values _above_ the key, so we have to swap
-        // after to get the ones blow the key
-        let mut by_height = self.by_height.split_off(&finalized_tip_height);
+        // split_off returns the values _greater than or equal to_ the key. What
+        // we need is the keys that are less than or equal to
+        // `finalized_tip_height`. To get this we have split at
+        // `finalized_tip_height + 1` and swap the removed portion of the list
+        // with the remainder.
+        let split_height = finalized_tip_height + 1;
+        let split_height =
+            split_height.expect("height after finalized tip won't exceed max height");
+        let mut by_height = self.by_height.split_off(&split_height);
         mem::swap(&mut self.by_height, &mut by_height);
 
         for hash in by_height.into_iter().flat_map(|(_, hashes)| hashes) {

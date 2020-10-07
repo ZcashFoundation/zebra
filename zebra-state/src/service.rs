@@ -62,6 +62,13 @@ impl StateService {
         }
     }
 
+    /// Queue a non finalized block for verification and check if any queued
+    /// blocks are ready to be verified and committed to the state.
+    ///
+    /// This function encodes the logic for [committing non-finalized blocks][1]
+    /// in RFC0005.
+    ///
+    /// [1]: https://zebra.zfnd.org/dev/rfcs/0005-state-updates.html#committing-non-finalized-blocks
     #[instrument(skip(self, new))]
     fn queue(&mut self, new: QueuedBlock) {
         let parent_hash = new.block.header.previous_block_hash;
@@ -78,13 +85,15 @@ impl StateService {
             let finalized = self.mem.finalize();
             self.sled
                 .commit_finalized_direct(finalized)
-                .expect("sled would never do us dirty like that");
+                .expect("expected that sled errors would not occur");
         }
 
         self.queued_blocks
             .prune_by_height(self.sled.finalized_tip_height());
     }
 
+    /// Run contextual validation on `block` and add it to the non-finalized
+    /// state if it is contextually valid.
     fn validate_and_commit(&mut self, block: Arc<Block>) -> Result<(), CommitError> {
         self.check_contextual_validity(&block)?;
         let parent_hash = block.header.previous_block_hash;
@@ -102,6 +111,8 @@ impl StateService {
         self.mem.any_chain_contains(hash) || &self.sled.finalized_tip_hash() == hash
     }
 
+    /// Attempt to validate and commit all queued blocks whose parents have
+    /// recently arrived starting from `new_parent`, in breadth-first ordering.
     #[instrument(skip(self))]
     fn process_queued(&mut self, new_parent: block::Hash) {
         let mut new_parents = vec![new_parent];
@@ -121,6 +132,8 @@ impl StateService {
         }
     }
 
+    /// Check that `block` is contextually valid based on the committed finalized
+    /// and non-finalized state.
     fn check_contextual_validity(&mut self, block: &Block) -> Result<(), ValidateContextError> {
         use ValidateContextError::*;
 
