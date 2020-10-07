@@ -22,7 +22,7 @@ metrics = "0.12"
 tower = { version = "0.3.1", features = ["buffer", "util"] }
 tracing = "0.1"
 tracing-error = "0.1.2"
-thiserror = "1.0.20"
+thiserror = "1.0.21"
 tokio = { version = "0.2.22", features = ["sync"] }
 
 [dev-dependencies]
