@@ -498,21 +498,21 @@ impl NonFinalizedState {
         F: Fn(&Chain) -> bool,
     {
         let chains = mem::take(&mut self.chain_set);
-        let mut chains = chains.into_iter();
+        let mut best_chain_iter = chains.into_iter().rev();
 
-        while let Some(chain) = chains.next_back() {
+        while let Some(next_best_chain) = best_chain_iter.next() {
             // if the predicate says we should remove it
-            if predicate(&chain) {
+            if predicate(&next_best_chain) {
                 // add back the remaining chains
-                for chain in chains {
-                    self.chain_set.insert(chain);
+                for remaining_chain in best_chain_iter {
+                    self.chain_set.insert(remaining_chain);
                 }
 
                 // and return the chain
-                return Some(chain);
+                return Some(next_best_chain);
             } else {
                 // add the chain back to the set and continue
-                self.chain_set.insert(chain);
+                self.chain_set.insert(next_best_chain);
             }
         }
 
