@@ -520,22 +520,32 @@ to the in memory state, then we finalize all lowest height blocks that are
 past the reorg limit, finally we process any queued blocks and prune any that
 are now past the reorg limit.
 
-1. If the block itself exists in the finalized chain, it has already been successfully verified:
-  - broadcast `Ok(block.hash())` via `block.rsp_tx`, and return
+### `pub(super) fn commit_non_finalized_block(&mut self, block: QueuedBlock) -> block::Hash`
 
-2. Run contextual validation on `block` against the finalized and non
+1. If the block itself exists in a non-finalized chain, or the finalized chain,
+   it has already been successfully verified:
+     - broadcast `Ok(block.hash())` via `block.rsp_tx`, and return
+
+2. If the block itself exists in the queue:
+     - Create an extra receiver using `block.rsp_tx.subscribe`, and include that receiver
+       in the response future
+     - Drop the duplicate block
+
+3. Run contextual validation on `block` against the finalized and non
    finalized state
+     - contextual validation will reject blocks that are past the reorg limit,
+       because the finalized block at that height is already known.
 
-3. If `block.parent` == `finalized_tip.hash`
+4. If `block.parent` == `finalized_tip.hash`
     - Construct a new `chain` with `Chain::default`
     - call `let hash = chain_set.push_block_on_chain(block, chain)`
     - add `fork` to `chain_set.chains`
     - return `hash`
 
-4. Otherwise, commit or queue the block to the non-finalized state with
+5. Otherwise, commit or queue the block to the non-finalized state with
    `chain_set.queue(block);`
 
-5. If the best chain is longer than the reorg limit
+6. If the best chain is longer than the reorg limit
     - Finalize all lowest height blocks in the best chain, and commit them to
     disk with `CommitFinalizedBlock`:
 
@@ -603,6 +613,8 @@ response futures, so they may arrive out of order).
 Committing a block to the sled state should be implemented as a wrapper around
 a function also called by [`Request::CommitBlock`](#request-commit-block),
 which should:
+
+### `pub(super) fn commit_finalized_block(&mut self, block: QueuedBlock) -> block::Hash`
 
 1. Obtain the highest entry of `hash_by_height` as `(old_height, old_tip)`.
 Check that `block`'s parent hash is `old_tip` and its height is
