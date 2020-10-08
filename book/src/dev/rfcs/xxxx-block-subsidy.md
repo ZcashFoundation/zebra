@@ -6,9 +6,8 @@
 # Summary
 [summary]: #summary
 
-Block subsidy is the calculation and validation of rules defined in the Zcash protocol that apply to the coinbase transaction of all incoming blocks. The calculation of block subsidy on each block consists of amounts paid to miners and amounts paid to other participants(founders or funding stream receivers), it also specifies the receiver of these rewards.
 
-At any time in the blockchain history specific rules apply to the coinbase transaction. This validation rules and calculations can change at Network Upgrades.
+Zebra manages [semantic verification](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/rfcs/0002-parallel-verification.md#definitions) in the `zebra-consensus` crate, this is done for all incoming blocks. Inside each block the coinbase transaction is special, it holds the subsidy rewards that are paid to different participants(miners, founders, stream receivers). This RFC describes how to implement the needed calculations and verification for block subsidy and miner fees.
 
 # Motivation
 [motivation]: #motivation
@@ -25,6 +24,7 @@ This document motivation is to have a clear roadmap about what is needed, the bi
 - **founders reward**: The portion of the block reward that goes into a pre defined founder address. 
 - **funding streams**:  The portion of the block reward that goes into a pre defined funding stream address.
 - **miner subsidy**: The portion of the block reward that goes into the miner of the block. 
+- **block subsidy**: Miner subsidy plus founders reward or funding stream if any of the 2 are active.
 - **coinbase transaction**: The first transaction in a block where block subsidy is done.
 - **network upgrade**: An intentional consensus rule change undertaken by the community in order to improve the network.
 - **miner fees**: The [transparent value pool](#transparent-value-pool-calculation) for all the transactions in a block.
