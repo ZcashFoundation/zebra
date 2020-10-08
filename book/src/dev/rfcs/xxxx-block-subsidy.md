@@ -100,7 +100,7 @@ pub enum FundingStreamReceiver {
 /// as described in [protocol specification §7.9.1][7.9.1].
 /// 
 /// [7.9.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
-const FUNDING_STREAM_RECEIVER_NUMERATORS: &[(u64, FundingStreamReceiver)] = &[
+const FUNDING_STREAM_RECEIVER_NUMERATORS: &[(FundingStreamReceiver, u64)] = &[
     (FundingStreamReceiver::ElectricCoinCompany, 7),
     (FundingStreamReceiver::ZcashFoundation, 5),
     (FundingStreamReceiver::MajorGrants, 8),
