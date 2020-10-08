@@ -31,7 +31,7 @@ This document motivation is to have a clear roadmap about what is needed, the bi
 # Guide-level explanation
 [guide-level-explanation]: #guide-level-explanation
 
-In Zebra the consensus related code lives in the `zebra-consensus` crate. It is natural to add the block subsidy code here. The following module is suggested to be created by this design:
+In Zebra the consensus related code lives in the `zebra-consensus` crate. The block subsidy checks are implemented in `zebra-consensus`, in the following module:
 
 - `zebra-consensus/src/block/subsidy/subsidy.rs` 
 
@@ -80,8 +80,8 @@ To do the calculations and checks the following constants and functions need to 
 - `POST_BLOSSOM_HALVING_INTERVAL`
 - `FOUNDERS_FRACTION_DIVISOR`
 - `FOUNDER_ADDRESS_CHANGE_INTERVAL`
-- `FOUNDERS_REWARD_ADDRESSES_MAINNET`
-- `FOUNDERS_REWARD_ADDRESSES_TESTNET`
+- `FOUNDER_ADDRESSES_MAINNET`
+- `FOUNDER_ADDRESSES_TESTNET`
 
 ### Funding streams parameter constants
 
@@ -89,29 +89,27 @@ The design suggests to implement the parameters needed for funding streams as:
 
 ```
 /// The funding stream receiver categories
-pub enum FundingStreamsReceivers {
-    /// Electric Coin Company
-    ECC,
-    /// ZCash Foundation
-    ZF,
-    /// Major Grants
-    MG,
+#[allow(missing_docs)]
+pub enum FundingStreamReceiver {
+    ElectricCoinCompany,
+    ZcashFoundation,
+    MajorGrants,
 }
 
 /// The numerator for each funding stream receiving category 
 /// as described in [protocol specification §7.9.1][7.9.1].
 /// 
 /// [7.9.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
-const FUNDINGSTREAMS_RECEIVERS_NUMERATORS: &[(i32, FundingStreamsReceivers)] = &[
-    (7, FundingStreamsReceivers::ECC),
-    (5, FundingStreamsReceivers::ZF),
-    (8, FundingStreamsReceivers::MG),
+const FUNDING_STREAM_RECEIVER_NUMERATORS: &[(u64, FundingStreamReceiver)] = &[
+    (7, FundingStreamReceiver::ElectricCoinCompany),
+    (5, FundingStreamReceiver::ZcashFoundation),
+    (8, FundingStreamReceiver::MajorGrants),
 ];
 
 /// Denominator as described in [protocol specification §7.9.1][7.9.1].
 /// 
 /// [7.9.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
-pub const FUNDINGSTREAM_DENOMINATOR: i32 = 100;
+pub const FUNDING_STREAM_RECEIVER_DENOMINATOR: u64 = 100;
 
 /// Height intervals for funding streams on each network.
 pub enum FundingStreamsHeightIntervals {
@@ -125,11 +123,10 @@ pub enum FundingStreamsHeightIntervals {
 /// as described in [protocol specification §7.9.1][7.9.1].
 /// 
 /// [7.9.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
-const FUNDINGSTREAMS_HEIGHT_INTERVALS: &[(Height, Height, FundingStreamsHeightIntervals)] = &[
-    (Height(1_046_400), Height(2_726_400), FundingStreamsHeightIntervals::Mainnet),
-    (Height(1_028_500), Height(2_796_000), FundingStreamsHeightIntervals::Testnet),
+const FUNDING_STREAM_HEIGHT_INTERVALS: &[(Height, Height, Network)] = &[
+    (Height(1_046_400), Height(2_726_400), Network::Mainnet),
+    (Height(1_028_500), Height(2_796_000), Network::Testnet),
 ];
-```
 
 ## General subsidy
 
@@ -146,7 +143,7 @@ The block subsidy and miner reward among other utility functions are inside the 
 Only functions specific to calculation of founders reward.
 
 - `founders_reward(Height, Network) -> Result<Amount<NonNegative>, Error>` - Founders reward portion for this block or 0.
-- `founders_reward_address(Height, Network) -> Result<String, Error>` - Address of the receiver founder at this block, address is a `String` because it can be a transparent or sapling address(After Heartwood/ZIP-213). 
+- `founders_reward_address(Height, Network) -> Result<zebra_chain::transparent:Address::PayToScriptHash, Error>` - Address of the receiver founder at this block. All specified founders reward addresses are transparent `PayToScriptHash` addresses. (Even after the shielded coinbase changes in ZIP-213, introduced in Heartwood.)
 
 ## Funding streams
 
