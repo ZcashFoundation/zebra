@@ -216,8 +216,6 @@ and after Canopy:
 
 *[Heartwood onward] The consensus rules applied to `valueBalance`, `vShieldedOutput`, and `bindingSig` in non-coinbase transactions MUST also be applied to coinbase transactions.*
 
-All this rules are implemented inside `shielded_coinbase()`.
+https://zips.z.cash/zip-0213#specification
 
-*Zip-213 - Shielded Coinbase* https://zips.z.cash/zip-0213#specification
-
-
+This rules are implemented inside `shielded_coinbase()`.
