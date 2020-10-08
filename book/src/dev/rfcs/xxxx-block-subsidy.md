@@ -49,17 +49,17 @@ Checking functions for blocks are implemented at `zebra-consensus/src/block/chec
 
 It is important to note that the Genesis block, BeforeOverwinter, and Overwinter blocks are verified by the CheckpointVerifier so they are not considered in this design. The following table will show what periods are included and what is not in this proposal:
 
-| Height                                 | Miner    | Founder reward | Funding streams | Shielded Coinbase |
-|----------------------------------------|:--------:|:--------------:|:---------------:|:------------------|             
-| ~Genesis~                              | ~**0%**~ | ~**0%**~       | ~**0%**~        | ~**No**~          |
-| ~Slow Start Shift..Slow Start Interval~| ~80%~    | ~20%~          | ~0%~            | ~No~              |
-| ~Slow Start Interval..Overwinter~      | ~80%~    | ~20%~          | ~0%~            | ~No~              |
-| Overwinter..Sapling                    | 80%      | 20%            | 0%              | No                |
-| Sapling..Blossom                       | 80%      | 20%            | 0%              | No                |
-| Blossom..Heartwood                     | 80%      | 20%            | 0%              | No                |
-| Heartwood..Canopy                      | 80%      | 20%            | 0%              | Yes               |
-| Canopy..Second Halving                 | 80%      | 0%             | 20%             | Yes               |
-| ~Second Halving..~                     | ~100%~   | ~0%~           | ~0%~            | ~Yes~             |
+| Height                                 | Miner    | Founder reward | Funding streams | Shielded Coinbase | Target Spacing |
+|----------------------------------------|----------|----------------|-----------------|-------------------|----------------|             
+| ~Genesis~                              | ~**0%**~ | ~**0%**~       | ~**0%**~        | ~**No**~          | ~**None**~     |
+| ~Slow Start Shift..Slow Start Interval~| ~80%~    | ~20%~          | ~0%~            | ~No~              | ~150 seconds~  |
+| ~Slow Start Interval..Overwinter~      | ~80%~    | ~20%~          | ~0%~            | ~No~              | ~150 seconds~  |
+| Overwinter..Sapling                    | ~80%~    | ~20%~          | ~0%~            | ~No~              | ~150 seconds~  |
+| Sapling..Blossom                       | 80%      | 20%            | 0%              | No                | 150 seconds    |
+| Blossom..Heartwood                     | 80%      | 20%            | 0%              | No                | 75 seconds     |
+| Heartwood..Canopy                      | 80%      | 20%            | 0%              | Yes               | 75 seconds     |
+| Canopy..Second Halving                 | 80%      | 0%             | 20%             | Yes               | 75 seconds     |
+| Second Halving..                       | 100%     | 0%             | 0%              | Yes               | 75 seconds     |
 
 # Reference-level explanation
 [reference-level-explanation]: #reference-level-explanation
