@@ -135,14 +135,14 @@ The block subsidy and miner reward among other utility functions are inside the 
 
 Only functions specific to calculation of founders reward.
 
-- `founders_reward(Height, Network) -> Result<Amount<NonNegative>, Error>` - Founders reward portion for this block or 0.
+- `founders_reward(Height, Network) -> Result<Amount<NonNegative>, Error>` - Founders reward portion for this block.
 - `founders_reward_address(Height, Network) -> Result<zebra_chain::transparent:Address::PayToScriptHash, Error>` - Address of the receiver founder at this block. All specified founders reward addresses are transparent `PayToScriptHash` addresses. (Even after the shielded coinbase changes in ZIP-213, introduced in Heartwood.)
 
 ## Funding streams
 
 Only functions specific to the calculation of funding streams.
 
-- `funding_stream(height, newtork) -> Result<Amount<NonNegative>, Error>` - Funding stream portion for this block or 0.
+- `funding_stream(height, newtork) -> Result<Amount<NonNegative>, Error>` - Funding stream portion for this block.
 - `funding_stream_address(height, network) -> Result<String, Error>` - Address of the funding stream receiver at this block. The same as founders reward the returned address is a `String`.
 
 ## Consensus rules
