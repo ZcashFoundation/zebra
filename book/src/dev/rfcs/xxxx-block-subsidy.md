@@ -66,7 +66,7 @@ It is important to note that the Genesis block, BeforeOverwinter, and Overwinter
 
 Given the module structure proposed above all the block subsidy calculations from the protocol must be implemented. The final goal is to do checks for each incoming block and make sure they pass the consensus rules.
 
-To do the calculations and checks the following constants and functions need to be introduced:
+To do the calculations and checks the following constants, types and functions need to be introduced:
 
 ## Constants
 
@@ -148,7 +148,7 @@ Only functions specific to calculation of founders reward.
 https://zips.z.cash/protocol/canopy.pdf#foundersreward
 
 - `founders_reward(Height, Network) -> Result<Amount<NonNegative>, Error>` - Founders reward portion for this block.
-- `founders_reward_address(Height, Network) -> Result<zebra_chain::transparent:Address::PayToScriptHash, Error>` - Address of the receiver founder at this block. All specified founders reward addresses are transparent `PayToScriptHash` addresses. (Even after the shielded coinbase changes in ZIP-213, introduced in Heartwood.)
+- `founders_reward_address(Height, Network) -> Result<PayToScriptHash, Error>` - Address of the receiver founder at this block. All specified founders reward addresses are transparent `zebra_chain::transparent:Address::PayToScriptHash` addresses. (Even after the shielded coinbase changes in ZIP-213, introduced in Heartwood.)
 
 ## Funding streams
 
@@ -161,7 +161,7 @@ https://zips.z.cash/zip-0207
 https://zips.z.cash/zip-0214
 
 - `funding_stream(height, newtork) -> Result<Amount<NonNegative>, Error>` - Funding stream portion for this block.
-- `funding_stream_address(height, network) -> Result<String, Error>` - Address of the funding stream receiver at this block. The same as founders reward the returned address is a `String`.
+- `funding_stream_address(height, network) -> Result<PayToScriptHash, Error>` - Address of the funding stream receiver at this block. All specified funding streams addresses are transparent `zebra_chain::transparent:Address::PayToScriptHash` addresses. (Even after the shielded coinbase changes in ZIP-213, introduced in Heartwood.)
 
 ## Consensus rules
 
