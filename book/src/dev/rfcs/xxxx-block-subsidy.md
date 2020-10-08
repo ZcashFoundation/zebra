@@ -176,11 +176,11 @@ https://zips.z.cash/zip-0214
 
 ## Consensus rules
 
-All consensus rules for block subsidy are validated in a function inside `zebra-consensus/src/block/check.rs`:
+`zebra-consensus/src/block.rs` will call the following function implemented inside `zebra-consensus/src/block/check.rs`:
 
 `subsidy_is_correct(Network, &Block) -> Result<(), BlockError>`
 
-The following consensus rules must be applied to `subsidy_is_correct()`:
+`subsidy_is_correct()` will call individual functions(also implemented in `zebra-consensus/src/block/check.rs`) to verify the following consensus rules:
 
 ### 1 - Founders reward:
 
