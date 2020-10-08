@@ -5,11 +5,12 @@
 use std::{
     cmp::Ordering,
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
-    fmt,
+    mem,
     ops::Deref,
     sync::Arc,
 };
 
+use tracing::instrument;
 use zebra_chain::{
     block::{self, Block},
     primitives::Groth16Proof,
@@ -18,44 +19,6 @@ use zebra_chain::{
 };
 
 use crate::service::QueuedBlock;
-
-/// The state of the chains in memory, incuding queued blocks.
-#[derive(Default)]
-pub struct NonFinalizedState {
-    /// Verified, non-finalized chains.
-    chain_set: BTreeSet<Chain>,
-    /// Blocks awaiting their parent blocks for contextual verification.
-    contextual_queue: QueuedBlocks,
-}
-
-/// A queue of blocks, awaiting the arrival of parent blocks.
-#[derive(Default)]
-struct QueuedBlocks {
-    /// Blocks awaiting their parent blocks for contextual verification.
-    blocks: HashMap<block::Hash, QueuedBlock>,
-    /// Hashes from `queued_blocks`, indexed by parent hash.
-    by_parent: HashMap<block::Hash, Vec<block::Hash>>,
-    /// Hashes from `queued_blocks`, indexed by block height.
-    by_height: BTreeMap<block::Height, Vec<block::Hash>>,
-}
-
-impl NonFinalizedState {
-    pub fn finalize(&mut self) -> Arc<Block> {
-        todo!()
-    }
-
-    pub fn queue(&mut self, _block: QueuedBlock) {
-        todo!()
-    }
-
-    fn process_queued(&mut self, _new_parent: block::Hash) {
-        todo!()
-    }
-
-    fn commit_block(&mut self, _block: QueuedBlock) -> Option<block::Hash> {
-        todo!()
-    }
-}
 
 #[derive(Default, Clone)]
 struct Chain {
@@ -342,16 +305,13 @@ impl UpdateWith<Vec<transparent::Input>> for Chain {
 }
 
 impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
+    #[instrument(skip(self, joinsplit_data))]
     fn update_chain_state_with(
         &mut self,
         joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
     ) {
         if let Some(joinsplit_data) = joinsplit_data {
-            for sprout::JoinSplit {
-                anchor, nullifiers, ..
-            } in joinsplit_data.joinsplits()
-            {
-                self.sprout_anchors.insert(*anchor);
+            for sprout::JoinSplit { nullifiers, .. } in joinsplit_data.joinsplits() {
                 self.sprout_nullifiers.insert(nullifiers[0]);
                 self.sprout_nullifiers.insert(nullifiers[1]);
             }
@@ -363,14 +323,7 @@ impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
         joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
     ) {
         if let Some(joinsplit_data) = joinsplit_data {
-            for sprout::JoinSplit {
-                anchor, nullifiers, ..
-            } in joinsplit_data.joinsplits()
-            {
-                assert!(
-                    self.sprout_anchors.remove(anchor),
-                    "anchor must be present if block was"
-                );
+            for sprout::JoinSplit { nullifiers, .. } in joinsplit_data.joinsplits() {
                 assert!(
                     self.sprout_nullifiers.remove(&nullifiers[0]),
                     "nullifiers must be present if block was"
@@ -387,11 +340,7 @@ impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
 impl UpdateWith<Option<transaction::ShieldedData>> for Chain {
     fn update_chain_state_with(&mut self, shielded_data: &Option<transaction::ShieldedData>) {
         if let Some(shielded_data) = shielded_data {
-            for sapling::Spend {
-                anchor, nullifier, ..
-            } in shielded_data.spends()
-            {
-                self.sapling_anchors.insert(*anchor);
+            for sapling::Spend { nullifier, .. } in shielded_data.spends() {
                 self.sapling_nullifiers.insert(*nullifier);
             }
         }
@@ -399,14 +348,7 @@ impl UpdateWith<Option<transaction::ShieldedData>> for Chain {
 
     fn revert_chain_state_with(&mut self, shielded_data: &Option<transaction::ShieldedData>) {
         if let Some(shielded_data) = shielded_data {
-            for sapling::Spend {
-                anchor, nullifier, ..
-            } in shielded_data.spends()
-            {
-                assert!(
-                    self.sapling_anchors.remove(anchor),
-                    "anchor must be present if block was"
-                );
+            for sapling::Spend { nullifier, .. } in shielded_data.spends() {
                 assert!(
                     self.sapling_nullifiers.remove(nullifier),
                     "nullifier must be present if block was"
@@ -460,11 +402,223 @@ impl Ord for Chain {
     }
 }
 
+/// The state of the chains in memory, incuding queued blocks.
+#[derive(Default)]
+pub struct NonFinalizedState {
+    /// Verified, non-finalized chains, in ascending order.
+    ///
+    /// The best chain is `chain_set.last()` or `chain_set.iter().next_back()`.
+    chain_set: BTreeSet<Box<Chain>>,
+}
+
+impl NonFinalizedState {
+    /// Finalize the lowest height block in the non-finalized portion of the best
+    /// chain and update all side-chains to match.
+    pub fn finalize(&mut self) -> Arc<Block> {
+        let chains = mem::take(&mut self.chain_set);
+        let mut chains = chains.into_iter();
+
+        // extract best chain
+        let mut best_chain = chains.next_back().expect("there's at least one chain");
+        // extract the rest into side_chains so they can be mutated
+        let side_chains = chains;
+
+        // remove the lowest height block from the best_chain as finalized_block
+        let finalized_block = best_chain.pop_root();
+        // add best_chain back to `self.chain_set`
+        self.chain_set.insert(best_chain);
+
+        // for each remaining chain in side_chains
+        for mut chain in side_chains {
+            // remove the first block from `chain`
+            let chain_start = chain.pop_root();
+            // if block equals finalized_block
+            if chain_start == finalized_block {
+                // add the chain back to `self.chain_set`
+                self.chain_set.insert(chain);
+            } else {
+                // else discard `chain`
+                drop(chain);
+            }
+        }
+
+        // return the finalized block
+        finalized_block
+    }
+
+    /// Commit block to the non-finalize state.
+    pub fn commit_block(&mut self, block: Arc<Block>) {
+        let parent_hash = block.header.previous_block_hash;
+
+        let mut parent_chain = self
+            .take_chain_if(|chain| chain.non_finalized_tip_hash() == parent_hash)
+            .or_else(|| {
+                self.chain_set
+                    .iter()
+                    .find_map(|chain| chain.fork(parent_hash))
+                    .map(Box::new)
+            })
+            .expect("commit_block is only called with blocks that are ready to be commited");
+
+        parent_chain.push(block);
+        self.chain_set.insert(parent_chain);
+    }
+
+    /// Commit block to the non-finalized state as a new chain where its parent
+    /// is the finalized tip.
+    pub fn commit_new_chain(&mut self, block: Arc<Block>) {
+        let mut chain = Chain::default();
+        chain.push(block);
+        self.chain_set.insert(Box::new(chain));
+    }
+
+    /// Returns the length of the non-finalized portion of the current best chain.
+    pub fn best_chain_len(&self) -> block::Height {
+        block::Height(
+            self.chain_set
+                .iter()
+                .next_back()
+                .expect("only called after inserting a block")
+                .blocks
+                .len() as u32,
+        )
+    }
+
+    /// Returns `true` if `hash` is contained in the non-finalized portion of any
+    /// known chain.
+    pub fn any_chain_contains(&self, hash: &block::Hash) -> bool {
+        self.chain_set
+            .iter()
+            .any(|chain| chain.height_by_hash.contains_key(hash))
+    }
+
+    /// Remove and return the first chain satisfying the given predicate.
+    fn take_chain_if<F>(&mut self, predicate: F) -> Option<Box<Chain>>
+    where
+        F: Fn(&Chain) -> bool,
+    {
+        let chains = mem::take(&mut self.chain_set);
+        let mut best_chain_iter = chains.into_iter().rev();
+
+        while let Some(next_best_chain) = best_chain_iter.next() {
+            // if the predicate says we should remove it
+            if predicate(&next_best_chain) {
+                // add back the remaining chains
+                for remaining_chain in best_chain_iter {
+                    self.chain_set.insert(remaining_chain);
+                }
+
+                // and return the chain
+                return Some(next_best_chain);
+            } else {
+                // add the chain back to the set and continue
+                self.chain_set.insert(next_best_chain);
+            }
+        }
+
+        None
+    }
+}
+
+/// A queue of blocks, awaiting the arrival of parent blocks.
+#[derive(Default)]
+pub struct QueuedBlocks {
+    /// Blocks awaiting their parent blocks for contextual verification.
+    blocks: HashMap<block::Hash, QueuedBlock>,
+    /// Hashes from `queued_blocks`, indexed by parent hash.
+    by_parent: HashMap<block::Hash, HashSet<block::Hash>>,
+    /// Hashes from `queued_blocks`, indexed by block height.
+    by_height: BTreeMap<block::Height, HashSet<block::Hash>>,
+}
+
+impl QueuedBlocks {
+    /// Queue a block for eventual verification and commit.
+    ///
+    /// # Panics
+    ///
+    /// - if a block with the same `block::Hash` has already been queued.
+    pub fn queue(&mut self, new: QueuedBlock) {
+        let new_hash = new.block.hash();
+        let new_height = new
+            .block
+            .coinbase_height()
+            .expect("validated non-finalized blocks have a coinbase height");
+        let parent_hash = new.block.header.previous_block_hash;
+
+        let replaced = self.blocks.insert(new_hash, new);
+        assert!(replaced.is_none(), "hashes must be unique");
+        let inserted = self
+            .by_height
+            .entry(new_height)
+            .or_default()
+            .insert(new_hash);
+        assert!(inserted, "hashes must be unique");
+        let inserted = self
+            .by_parent
+            .entry(parent_hash)
+            .or_default()
+            .insert(new_hash);
+        assert!(inserted, "hashes must be unique");
+
+        tracing::trace!(num_blocks = %self.blocks.len(), %parent_hash, ?new_height,  "Finished queueing a new block");
+    }
+
+    /// Dequeue and return all blocks that were waiting for the arrival of
+    /// `parent`.
+    #[instrument(skip(self))]
+    pub fn dequeue_children(&mut self, parent: block::Hash) -> Vec<QueuedBlock> {
+        let queued_children = self
+            .by_parent
+            .remove(&parent)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|hash| {
+                self.blocks
+                    .remove(&hash)
+                    .expect("block is present if its hash is in by_parent")
+            })
+            .collect::<Vec<_>>();
+
+        for queued in &queued_children {
+            let height = queued.block.coinbase_height().unwrap();
+            self.by_height.remove(&height);
+        }
+
+        tracing::trace!(num_blocks = %self.blocks.len(), "Finished dequeuing blocks waiting for parent hash",);
+
+        queued_children
+    }
+
+    /// Remove all queued blocks whose height is less than or equal to the given
+    /// `finalized_tip_height`.
+    pub fn prune_by_height(&mut self, finalized_tip_height: block::Height) {
+        // split_off returns the values _greater than or equal to_ the key. What
+        // we need is the keys that are less than or equal to
+        // `finalized_tip_height`. To get this we have split at
+        // `finalized_tip_height + 1` and swap the removed portion of the list
+        // with the remainder.
+        let split_height = finalized_tip_height + 1;
+        let split_height =
+            split_height.expect("height after finalized tip won't exceed max height");
+        let mut by_height = self.by_height.split_off(&split_height);
+        mem::swap(&mut self.by_height, &mut by_height);
+
+        for hash in by_height.into_iter().flat_map(|(_, hashes)| hashes) {
+            let expired = self.blocks.remove(&hash).expect("block is present");
+            let parent_hash = &expired.block.header.previous_block_hash;
+            self.by_parent
+                .get_mut(parent_hash)
+                .expect("parent is present")
+                .remove(&hash);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use transaction::Transaction;
 
-    use std::{env, mem};
+    use std::{env, fmt, mem};
 
     use zebra_chain::serialization::ZcashDeserializeInto;
     use zebra_chain::{
@@ -475,6 +629,14 @@ mod tests {
 
     use self::assert_eq;
     use super::*;
+
+    struct SummaryDebug<T>(T);
+
+    impl<T> fmt::Debug for SummaryDebug<Vec<T>> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "{}, len={}", std::any::type_name::<T>(), self.0.len())
+        }
+    }
 
     /// Helper trait for constructing "valid" looking chains of blocks
     trait FakeChainHelper {
@@ -551,23 +713,16 @@ mod tests {
         Ok(())
     }
 
-    fn arbitrary_chain(height: block::Height) -> BoxedStrategy<Vec<Arc<Block>>> {
-        Block::partial_chain_strategy(
-            LedgerState {
-                tip_height: height,
-                is_coinbase: true,
-                network: Network::Mainnet,
-            },
-            100,
-        )
+    fn arbitrary_chain(tip_height: block::Height) -> BoxedStrategy<Vec<Arc<Block>>> {
+        Block::partial_chain_strategy(LedgerState::new(tip_height, Network::Mainnet), 100)
     }
 
     prop_compose! {
         fn arbitrary_chain_and_count()
             (chain in arbitrary_chain(NetworkUpgrade::Blossom.activation_height(Network::Mainnet).unwrap()))
-            (count in 1..chain.len(), chain in Just(chain)) -> (NoDebug<Vec<Arc<Block>>>, usize)
+            (count in 1..chain.len(), chain in Just(chain)) -> (SummaryDebug<Vec<Arc<Block>>>, usize)
         {
-            (NoDebug(chain), count)
+            (SummaryDebug(chain), count)
         }
     }
 
@@ -633,13 +788,5 @@ mod tests {
         });
 
         Ok(())
-    }
-}
-
-struct NoDebug<T>(T);
-
-impl<T> fmt::Debug for NoDebug<Vec<T>> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}, len={}", std::any::type_name::<T>(), self.0.len())
     }
 }

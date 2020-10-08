@@ -8,7 +8,6 @@
 
 mod config;
 mod constants;
-mod memory_state;
 mod request;
 mod response;
 mod service;
@@ -19,7 +18,6 @@ mod util;
 #[cfg(test)]
 mod tests;
 
-use memory_state::NonFinalizedState;
 use service::QueuedBlock;
 use sled_state::FinalizedState;
 
