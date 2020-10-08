@@ -26,7 +26,20 @@ This document motivation is to have a clear roadmap about what is needed, the bi
 - **funding streams**:  The portion of the block reward that goes into a pre defined funding stream address.
 - **miner subsidy**: The portion of the block reward that goes into the miner of the block. 
 - **coinbase transaction**: The first transaction in a block where block subsidy is done.
-- **NU**: Network Upgrade.
+- **network upgrade**: An intentional consensus rule change undertaken by the community in order to improve the network.
+- **miner fees**: The [transparent value pool](#transparent-value-pool-calculation) for all the transactions in a block.
+
+### Transparent value pool calculation
+
+There is a "transparent value pool" inside each transaction, containing "funds in motion" (distinct from the actual transparent value pool of UTXOs, being "funds at rest"). Balance of that pool works as follows:
+
+- `tx.vin` adds to the pool.
+- `tx.vout` subtracts from the pool.
+- `vpub_new` values from `tx.vJoinSplit` add to the pool.
+- `vpub_old` values from `tx.vJoinSplit` subtract from the pool.
+- `valueBalance` adds to the pool. It itself is equal to `sum(SaplingSpends) - sum(SaplingOutputs)`, so it has the same functional effect as for transparent and Sprout. 
+
+The balance rule is that this pool must have non-negative value, and its net value is the fee.
 
 # Guide-level explanation
 [guide-level-explanation]: #guide-level-explanation
