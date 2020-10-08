@@ -133,7 +133,7 @@ impl FinalizedState {
     fn commit_finalized(&mut self, queued_block: QueuedBlock) {
         let QueuedBlock { block, rsp_tx } = queued_block;
         let result = self.commit_finalized_direct(block);
-        let _ = rsp_tx.send(result);
+        let _ = rsp_tx.send(result.map_err(Into::into));
     }
 
     // TODO: this impl works only during checkpointing, it needs to be rewritten

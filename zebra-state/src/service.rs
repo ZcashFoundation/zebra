@@ -7,8 +7,7 @@ use std::{
 
 use futures::future::{FutureExt, TryFutureExt};
 use memory_state::{NonFinalizedState, QueuedBlocks};
-use thiserror::Error;
-use tokio::sync::oneshot;
+use tokio::sync::broadcast;
 use tower::{buffer::Buffer, util::BoxService, Service};
 use tracing::instrument;
 use zebra_chain::{
@@ -16,7 +15,10 @@ use zebra_chain::{
     parameters::Network,
 };
 
-use crate::{BoxError, Config, FinalizedState, Request, Response};
+use crate::{
+    BoxError, CloneError, CommitBlockError, Config, FinalizedState, Request, Response,
+    ValidateContextError,
+};
 
 mod memory_state;
 
@@ -27,7 +29,7 @@ pub struct QueuedBlock {
     // TODO: add these parameters when we can compute anchors.
     // sprout_anchor: sprout::tree::Root,
     // sapling_anchor: sapling::tree::Root,
-    pub rsp_tx: oneshot::Sender<Result<block::Hash, BoxError>>,
+    pub rsp_tx: broadcast::Sender<Result<block::Hash, CloneError>>,
 }
 
 struct StateService {
@@ -37,16 +39,6 @@ struct StateService {
     mem: NonFinalizedState,
     /// Blocks awaiting their parent blocks for contextual verification.
     queued_blocks: QueuedBlocks,
-}
-
-#[derive(Debug, Error)]
-#[error("block is not contextually valid")]
-struct CommitError(#[from] ValidateContextError);
-
-#[derive(displaydoc::Display, Debug, Error)]
-enum ValidateContextError {
-    /// block.height is lower than the current finalized height
-    OrphanedBlock,
 }
 
 impl StateService {
@@ -96,7 +88,7 @@ impl StateService {
 
     /// Run contextual validation on `block` and add it to the non-finalized
     /// state if it is contextually valid.
-    fn validate_and_commit(&mut self, block: Arc<Block>) -> Result<(), CommitError> {
+    fn validate_and_commit(&mut self, block: Arc<Block>) -> Result<(), CommitBlockError> {
         self.check_contextual_validity(&block)?;
         let parent_hash = block.header.previous_block_hash;
 
@@ -128,7 +120,7 @@ impl StateService {
                 let result = self
                     .validate_and_commit(block)
                     .map(|()| hash)
-                    .map_err(Into::into);
+                    .map_err(CloneError::from);
                 let _ = rsp_tx.send(result);
                 new_parents.push(hash);
             }
@@ -168,29 +160,33 @@ impl Service<Request> for StateService {
     fn call(&mut self, req: Request) -> Self::Future {
         match req {
             Request::CommitBlock { block } => {
-                let (rsp_tx, rsp_rx) = oneshot::channel();
+                let (rsp_tx, mut rsp_rx) = broadcast::channel(1);
 
                 self.queue_and_commit_non_finalized_blocks(QueuedBlock { block, rsp_tx });
 
                 async move {
                     rsp_rx
+                        .recv()
                         .await
-                        .expect("sender oneshot is not dropped")
+                        .expect("sender is not dropped")
                         .map(Response::Committed)
+                        .map_err(Into::into)
                 }
                 .boxed()
             }
             Request::CommitFinalizedBlock { block } => {
-                let (rsp_tx, rsp_rx) = oneshot::channel();
+                let (rsp_tx, mut rsp_rx) = broadcast::channel(1);
 
                 self.sled
                     .queue_and_commit_finalized_blocks(QueuedBlock { block, rsp_tx });
 
                 async move {
                     rsp_rx
+                        .recv()
                         .await
-                        .expect("sender oneshot is not dropped")
+                        .expect("sender is not dropped")
                         .map(Response::Committed)
+                        .map_err(Into::into)
                 }
                 .boxed()
             }
