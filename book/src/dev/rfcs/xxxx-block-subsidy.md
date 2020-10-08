@@ -47,14 +47,14 @@ In addition to calculations the block subsidy requires constants defined in the 
 
 Checking functions for blocks are implemented at `zebra-consensus/src/block/check.rs` and they are called at `zebra-consensus/src/block.rs`. This follows the already existing structure for block validation in Zebra.
 
-It is important to note that the Genesis block, BeforeOverwinter, and Overwinter blocks are verified by the CheckpointVerifier so they are not considered in this design. The following table will show what periods are included and what is not in this proposal:
+It is important to note that the Genesis block, BeforeOverwinter, and Overwinter blocks up to Sapling are verified by the CheckpointVerifier so they are not considered in this design. The following table will show what periods are included and what is not in this proposal:
 
 | Height                                 | Miner    | Founder reward | Funding streams | Shielded Coinbase | Target Spacing |
 |----------------------------------------|----------|----------------|-----------------|-------------------|----------------|             
 | ~Genesis~                              | ~**0%**~ | ~**0%**~       | ~**0%**~        | ~**No**~          | ~**None**~     |
 | ~Slow Start Shift..Slow Start Interval~| ~80%~    | ~20%~          | ~0%~            | ~No~              | ~150 seconds~  |
 | ~Slow Start Interval..Overwinter~      | ~80%~    | ~20%~          | ~0%~            | ~No~              | ~150 seconds~  |
-| Overwinter..Sapling                    | ~80%~    | ~20%~          | ~0%~            | ~No~              | ~150 seconds~  |
+| ~Overwinter..Sapling~                  | ~80%~    | ~20%~          | ~0%~            | ~No~              | ~150 seconds~  |
 | Sapling..Blossom                       | 80%      | 20%            | 0%              | No                | 150 seconds    |
 | Blossom..Heartwood                     | 80%      | 20%            | 0%              | No                | 75 seconds     |
 | Heartwood..Canopy                      | 80%      | 20%            | 0%              | Yes               | 75 seconds     |
