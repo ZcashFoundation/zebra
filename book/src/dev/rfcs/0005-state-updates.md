@@ -526,54 +526,60 @@ The state service uses the following entry points:
 
 New `non-finalized` blocks are commited as follows:
 
-### `pub(super) fn queue_and_commit_non_finalized_blocks(&mut self, new: QueuedBlock)`
+### `pub(super) fn queue_and_commit_non_finalized_blocks(&mut self, new: Arc<Block>) -> tokio::sync::broadcast::Receiver<block::Hash>`
 
-1. If a duplicate block exists in a non-finalized chain, or the finalized chain,
-   it has already been successfully verified:
-     - broadcast `Ok(block.hash())` via `block.rsp_tx`, and return
-
-2. If a duplicate block exists in the queue:
+1. If a duplicate block exists in the queue:
      - Find the `QueuedBlock` for that existing duplicate block
      - Create an extra receiver for the existing block, using `block.rsp_tx.subscribe`,
      - Drop the newly received duplicate block
-     - Return the extra receiver as the response future for the duplicate block request
+     - Return the extra receiver, so it can be used in the response future for the duplicate block request
 
-3. Add `block` to `self.queued_blocks`
+2. Create a `QueuedBlock` for `block`:
+     - Create a `tokio::sync::broadcast` channel
+     - Use that channel to create a `QueuedBlock` for `block`.
 
-4. If `block.header.previous_block_hash` is not present in the finalized or
+3. If a duplicate block exists in a non-finalized chain, or the finalized chain,
+   it has already been successfully verified:
+     - Broadcast `Ok(block.hash())` via `block.rsp_tx`, and return the receiver for the block's channel
+
+4. Add `block` to `self.queued_blocks`
+
+5. If `block.header.previous_block_hash` is not present in the finalized or
    non-finalized state:
-     - Return the receiver for `block.rsp_tx` as the response future for the block request
+     - Return the receiver for the block's channel
 
-5. Else iteratively attempt to process queued blocks by their parent hash
+6. Else iteratively attempt to process queued blocks by their parent hash
    starting with `block.header.previous_block_hash`
 
-6. While there are recently commited parent hashes to process
+7. While there are recently commited parent hashes to process
     - Dequeue all blocks waiting on `parent` with `let queued_children =
       self.queued_blocks.dequeue_children(parent);`
     - for each queued `block`
       - **Run contextual validation** on `block`
            - contextual validation will reject blocks that are past the reorg limit,
              because the finalized block at that height is already known.
-      - If the block fails contextual validation return the result over the
+      - If the block fails contextual validation send the result to the
         associated channel
       - Else if the block's previous hash is the finalized tip add to the
         non-finalized state with `self.mem.commit_new_chain(block)`
       - Else add the new block to an existing non-finalized chain or new fork
         with `self.mem.commit_block(block);`
-      - Return `Ok(hash)` over the associated channel to indicate the block
+      - Send `Ok(hash)` over the associated channel to indicate the block
         was successfully commited
       - Add `block.hash` to the set of recently commited parent hashes to
         process
 
-7. While the length of the non-finalized portion of the best chain is greater
+8. While the length of the non-finalized portion of the best chain is greater
    than the reorg limit
     - Remove the lowest height block from the non-finalized state with
       `self.mem.finalize();`
     - Commit that block to the finalized state with
       `self.sled.commit_finalized_direct(finalized);`
 
-8. Prune orphaned blocks from `self.queued_blocks` with
+9. Prune orphaned blocks from `self.queued_blocks` with
    `self.queued_blocks.prune_by_height(finalized_height);`
+   
+10. Return the receiver for the block's channel
 
 ## Sled data structures
 [sled]: #sled
