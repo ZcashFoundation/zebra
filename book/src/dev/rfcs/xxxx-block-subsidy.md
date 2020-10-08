@@ -111,14 +111,6 @@ const FUNDING_STREAM_RECEIVER_NUMERATORS: &[(u64, FundingStreamReceiver)] = &[
 /// [7.9.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
 pub const FUNDING_STREAM_RECEIVER_DENOMINATOR: u64 = 100;
 
-/// Height intervals for funding streams on each network.
-pub enum FundingStreamsHeightIntervals {
-    /// For the Mainnet
-    Mainnet,
-    /// For the Testnet
-    Testnet,
-}
-
 /// Start and end Heights for funding streams 
 /// as described in [protocol specification §7.9.1][7.9.1].
 /// 
