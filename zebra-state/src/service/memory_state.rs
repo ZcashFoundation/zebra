@@ -589,6 +589,8 @@ impl QueuedBlocks {
         queued_children
     }
 
+    /// Remove all queued blocks whose height is less than or equal to the given
+    /// `finalized_tip_height`.
     pub fn prune_by_height(&mut self, finalized_tip_height: block::Height) {
         // split_off returns the values _greater than or equal to_ the key. What
         // we need is the keys that are less than or equal to
