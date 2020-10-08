@@ -73,6 +73,7 @@ pub fn init() {
                 });
             }))
             .panic_message(SkipTestReturnedErrPanicMessages)
+            .display_env_section(false)
             .install()
             .unwrap();
     })

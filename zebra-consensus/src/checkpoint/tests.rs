@@ -210,8 +210,6 @@ async fn multi_item_checkpoint_list() -> Result<(), Report> {
 }
 
 #[tokio::test]
-// Temporarily ignore this test, until the state can handle out-of-order blocks
-#[ignore]
 async fn continuous_blockchain_test() -> Result<(), Report> {
     continuous_blockchain(None).await?;
     for height in 0..=10 {
@@ -323,6 +321,11 @@ async fn continuous_blockchain(restart_height: Option<block::Height>) -> Result<
             }
             if height > checkpoint_verifier.checkpoint_list.max_height() {
                 break;
+            }
+
+            if height == block::Height(0) {
+                // don't try to verify the genesis block
+                continue;
             }
 
             /// SPANDOC: Make sure the verifier service is ready for block {?height}

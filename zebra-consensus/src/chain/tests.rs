@@ -1,11 +1,15 @@
 //! Tests for chain verification
 
-use std::{sync::Arc, time::Duration};
+use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
-use color_eyre::eyre::Report;
+use color_eyre::eyre;
+use eyre::{eyre, Report};
+use futures::{stream::FuturesUnordered, StreamExt};
 use once_cell::sync::Lazy;
+use tokio::time::timeout;
 use tower::{layer::Layer, timeout::TimeoutLayer, Service};
 
+use tracing_futures::Instrument;
 use zebra_chain::{
     block::{self, Block},
     parameters::Network,
@@ -250,15 +254,7 @@ async fn verify_fail_add_block_checkpoint() -> Result<(), Report> {
     Ok(())
 }
 
-/*
-// This test is disabled because it doesn't test the right thing:
-// the BlockVerifier and CheckpointVerifier make different requests
-// and produce different transcripts.
-
-
 #[tokio::test]
-// Temporarily ignore this test, until the state can handle out-of-order blocks
-#[ignore]
 async fn continuous_blockchain_test() -> Result<(), Report> {
     continuous_blockchain(None).await?;
     for height in 0..=10 {
@@ -324,7 +320,7 @@ async fn continuous_blockchain(restart_height: Option<block::Height>) -> Result<
                 .ready_and()
                 .map_err(|e| eyre!(e))
                 .await?
-                .call(zs::Request::AddBlock {
+                .call(zs::Request::CommitBlock {
                     block: block.clone(),
                 })
                 .map_err(|e| eyre!(e))
@@ -332,17 +328,22 @@ async fn continuous_blockchain(restart_height: Option<block::Height>) -> Result<
         }
     }
     let initial_tip = restart_height
-        .map(|block::Height(height)| &blockchain[height as usize].0)
-        .cloned();
+        .map(|block::Height(height)| &blockchain[height as usize])
+        .map(|(_, height, hash)| (*height, *hash));
 
-    let block_verifier = crate::block::init(state_service.clone());
-    let mut chain_verifier = super::init_from_verifiers(
-        network,
-        block_verifier,
-        Some(checkpoint_list),
-        state_service.clone(),
+    let block_verifier = crate::block::BlockVerifier::new(state_service.clone());
+    let max_checkpoint_height = checkpoint_list.max_height();
+    let checkpoint = crate::checkpoint::CheckpointVerifier::from_checkpoint_list(
+        checkpoint_list,
         initial_tip,
+        state_service,
     );
+    let mut chain_verifier = crate::chain::ChainVerifier {
+        block: block_verifier,
+        checkpoint,
+        max_checkpoint_height,
+        last_block_height: None,
+    };
 
     let mut handles = FuturesUnordered::new();
 
@@ -371,4 +372,3 @@ async fn continuous_blockchain(restart_height: Option<block::Height>) -> Result<
 
     Ok(())
 }
-*/

@@ -37,10 +37,13 @@ struct Chain {
 
 impl Chain {
     /// Push a contextually valid non-finalized block into a chain as the new tip.
+    #[instrument(skip(self), fields(%block))]
     pub fn push(&mut self, block: Arc<Block>) {
         let block_height = block
             .coinbase_height()
             .expect("valid non-finalized blocks have a coinbase height");
+
+        tracing::trace!(?block_height, "Pushing new block into chain state");
 
         // update cumulative data members
         self.update_chain_state_with(&block);
@@ -48,6 +51,7 @@ impl Chain {
     }
 
     /// Remove the lowest height block of the non-finalized portion of a chain.
+    #[instrument(skip(self))]
     pub fn pop_root(&mut self) -> Arc<Block> {
         let block_height = self.lowest_height();
 
@@ -197,6 +201,7 @@ impl UpdateWith<Arc<Block>> for Chain {
         }
     }
 
+    #[instrument(skip(self), fields(%block))]
     fn revert_chain_state_with(&mut self, block: &Arc<Block>) {
         let block_hash = block.hash();
 
@@ -318,6 +323,7 @@ impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
         }
     }
 
+    #[instrument(skip(self, joinsplit_data))]
     fn revert_chain_state_with(
         &mut self,
         joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,

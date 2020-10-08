@@ -16,14 +16,13 @@ use zebra_chain::{
 };
 use zebra_test::transcript::{TransError, Transcript};
 
-static VALID_BLOCK_TRANSCRIPT: Lazy<Vec<(Arc<Block>, Result<block::Hash, TransError>)>> =
+static INVALID_GENESIS_BLOCK_TRANSCRIPT: Lazy<Vec<(Arc<Block>, Result<block::Hash, TransError>)>> =
     Lazy::new(|| {
         let block: Arc<_> =
             Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
                 .unwrap()
                 .into();
-        let hash = Ok(block.as_ref().into());
-        vec![(block, hash)]
+        vec![(block, Err(TransError::Any))]
     });
 
 static INVALID_TIME_BLOCK_TRANSCRIPT: Lazy<Vec<(Arc<Block>, Result<block::Hash, TransError>)>> =
@@ -100,8 +99,6 @@ static INVALID_COINBASE_TRANSCRIPT: Lazy<Vec<(Arc<Block>, Result<block::Hash, Tr
     });
 
 #[tokio::test]
-// TODO: enable this test after implementing contextual verification
-#[ignore]
 async fn check_transcripts_test() -> Result<(), Report> {
     check_transcripts().await
 }
@@ -116,7 +113,7 @@ async fn check_transcripts() -> Result<(), Report> {
     let block_verifier = Buffer::new(BlockVerifier::new(state_service.clone()), 1);
 
     for transcript_data in &[
-        &VALID_BLOCK_TRANSCRIPT,
+        &INVALID_GENESIS_BLOCK_TRANSCRIPT,
         &INVALID_TIME_BLOCK_TRANSCRIPT,
         &INVALID_HEADER_SOLUTION_TRANSCRIPT,
         &INVALID_COINBASE_TRANSCRIPT,

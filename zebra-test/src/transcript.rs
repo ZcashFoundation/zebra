@@ -48,8 +48,8 @@ impl TransError {
 }
 
 #[derive(Debug, thiserror::Error)]
-#[error("ErrorChecker Error: {0}")]
-struct ErrorCheckerError(Error);
+#[error("ErrorChecker Error")]
+struct ErrorCheckerError(#[source] Error);
 
 pub struct Transcript<R, S, I>
 where
