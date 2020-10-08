@@ -151,6 +151,7 @@ https://zips.z.cash/protocol/canopy.pdf#subsidies
 - `miner_fees(&Block) -> Result<Amount<NonNegative>, Error>` - Total block fees calculated as [Transparent value pool calculation](#transparent-value-pool-calculation) that belongs to the miner.
 - `coinbase_sum_outputs(&Transaction) -> Result<Amount<NonNegative>, Error>` - Sum of all output values in the coinbase transaction.
 - `find_output_with_amount(&Transaction, Amount<NonNegative>) -> Vec<transparent::Output>` - Outputs where value equal to Amount.
+- `shielded_coinbase(Height, Network, &Transaction) -> Result<(), Error>` - Validate shielded coinbase rules.
 
 ## Founders reward
 
@@ -209,6 +210,14 @@ and after Canopy:
 
 ### 4 - Shielded coinbase:
 
+*[Pre-Heartwood] A coinbase transaction MUST NOT have any JoinSplit descriptions, Spend descriptions, or Output descriptions.*
+
+*[Heartwood onward] A coinbase transaction MUST NOT have any JoinSplit descriptions or Spend descriptions.*
+
+*[Heartwood onward] The consensus rules applied to `valueBalance`, `vShieldedOutput`, and `bindingSig` in non-coinbase transactions MUST also be applied to coinbase transactions.*
+
+All this rules are implemented inside `shielded_coinbase()`.
+
 *Zip-213 - Shielded Coinbase* https://zips.z.cash/zip-0213#specification
 
-Pending
+
