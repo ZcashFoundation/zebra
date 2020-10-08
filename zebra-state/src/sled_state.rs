@@ -2,6 +2,7 @@
 
 use std::{collections::HashMap, convert::TryInto, future::Future, sync::Arc};
 
+use tracing::trace;
 use zebra_chain::serialization::{ZcashDeserialize, ZcashSerialize};
 use zebra_chain::{
     block::{self, Block},
@@ -62,33 +63,34 @@ impl FinalizedState {
     ///
     /// After queueing a finalized block, this method checks whether the newly
     /// queued block (and any of its descendants) can be committed to the state.
-    pub fn queue(&mut self, queued_block: QueuedBlock) {
+    pub fn queue_and_commit_finalized_blocks(&mut self, queued_block: QueuedBlock) {
         let prev_hash = queued_block.block.header.previous_block_hash;
         self.queued_by_prev_hash.insert(prev_hash, queued_block);
 
-        // Cloning means the closure doesn't hold a borrow of &self,
-        // conflicting with mutable access in the loop below.
-        let hash_by_height = self.hash_by_height.clone();
-        let tip_hash = || {
-            read_tip(&hash_by_height)
-                .expect("inability to look up tip is unrecoverable")
-                .map(|(_height, hash)| hash)
-                .unwrap_or(block::Hash([0; 32]))
-        };
-
-        while let Some(queued_block) = self.queued_by_prev_hash.remove(&tip_hash()) {
+        while let Some(queued_block) = self.queued_by_prev_hash.remove(&self.finalized_tip_hash()) {
             self.commit_finalized(queued_block)
         }
     }
 
-    /// Commit a finalized block to the state.
-    ///
-    /// It's the caller's responsibility to ensure that blocks are committed in
-    /// order. This function is called by [`process_queue`], which ensures order.
-    /// It is intentionally not exposed as part of the public API of the
-    /// [`FinalizedState`].
-    fn commit_finalized(&mut self, queued_block: QueuedBlock) {
-        let QueuedBlock { block, rsp_tx } = queued_block;
+    /// Returns the hash of the current finalized tip block.
+    pub fn finalized_tip_hash(&self) -> block::Hash {
+        read_tip(&self.hash_by_height)
+            .expect("inability to look up tip is unrecoverable")
+            .map(|(_, hash)| hash)
+            // if the state is empty, return the genesis previous block hash
+            .unwrap_or(block::Hash([0; 32]))
+    }
+
+    /// Returns the height of the current finalized tip block.
+    pub fn finalized_tip_height(&self) -> Option<block::Height> {
+        read_tip(&self.hash_by_height)
+            .expect("inability to look up tip is unrecoverable")
+            .map(|(height, _)| height)
+    }
+
+    /// Immediately commit `block` to the finalized state.
+    pub fn commit_finalized_direct(&mut self, block: Arc<Block>) -> Result<block::Hash, BoxError> {
+        use sled::Transactional;
 
         let height = block
             .coinbase_height()
@@ -96,8 +98,9 @@ impl FinalizedState {
         let height_bytes = height.0.to_be_bytes();
         let hash = block.hash();
 
-        use sled::Transactional;
-        let transaction_result = (
+        trace!(?height, "Finalized block");
+
+        (
             &self.hash_by_height,
             &self.height_by_hash,
             &self.block_by_height,
@@ -116,10 +119,21 @@ impl FinalizedState {
                 block_by_height.insert(&height_bytes, block_bytes)?;
 
                 // for some reason type inference fails here
-                Ok::<_, sled::transaction::ConflictableTransactionError>(())
-            });
+                Ok::<_, sled::transaction::ConflictableTransactionError>(hash)
+            })
+            .map_err(Into::into)
+    }
 
-        let _ = rsp_tx.send(transaction_result.map(|_| hash).map_err(Into::into));
+    /// Commit a finalized block to the state.
+    ///
+    /// It's the caller's responsibility to ensure that blocks are committed in
+    /// order. This function is called by [`queue`], which ensures order.
+    /// It is intentionally not exposed as part of the public API of the
+    /// [`FinalizedState`].
+    fn commit_finalized(&mut self, queued_block: QueuedBlock) {
+        let QueuedBlock { block, rsp_tx } = queued_block;
+        let result = self.commit_finalized_direct(block);
+        let _ = rsp_tx.send(result);
     }
 
     // TODO: this impl works only during checkpointing, it needs to be rewritten

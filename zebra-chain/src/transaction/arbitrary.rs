@@ -105,6 +105,8 @@ impl Transaction {
             .boxed()
     }
 
+    /// Proptest Strategy for creating a Vector of transactions where the first
+    /// transaction is always the only coinbase transaction
     pub fn vec_strategy(
         mut ledger_state: LedgerState,
         len: usize,

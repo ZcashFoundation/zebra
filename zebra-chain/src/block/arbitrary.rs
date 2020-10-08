@@ -30,6 +30,8 @@ impl Arbitrary for Block {
 }
 
 impl Block {
+    /// Returns a strategy for creating Vecs of blocks with increasing height of
+    /// the given length.
     pub fn partial_chain_strategy(
         init: LedgerState,
         count: usize,
