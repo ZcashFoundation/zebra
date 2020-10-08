@@ -12,11 +12,9 @@ Zebra manages [semantic verification](https://github.com/ZcashFoundation/zebra/b
 # Motivation
 [motivation]: #motivation
 
-All incoming blocks must be validated with the protocol rules, there is no way to avoid this logic to be present in any Zcash protocol compatible implementation such as Zebra.
+All incoming blocks must be validated with the protocol specifications, there is no way to avoid this logic to be present in any Zcash protocol compatible implementation such as Zebra.
 
-The amount of rules, calculations, parameters, etc needed to implement the whole Block Subsidy can be overwhelming as each little piece comes together to make a whole. Zebra is in a position where we know all the rules up to the second halving so the implementation can and will be different from `zcashd` but at the end of the day all coinbase transactions will need to be validated as the protocol describes.
-
-This document motivation is to have a clear roadmap about what is needed, the big picture of all components and how they interact together so we can separate a very big task into smaller pieces that we believe will make the implementation easier and better.
+Block subsidy and miner fees are part of the protocol, the semantic verification of them apply to the coinbase transaction and they must be verified in Zebra.
 
 # Definitions
 [definitions]: #definitions
