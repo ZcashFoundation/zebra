@@ -148,7 +148,7 @@ https://zips.z.cash/protocol/canopy.pdf#subsidies
 
 - `block_subsidy(Height, Network) -> Result<Amount<NonNegative>, Error>` - Total block subsidy.
 - `miner_subsidy(Height, Network) -> Result<Amount<NonNegative>, Error>` - Miner portion.
-- `transaction_fees(&Block) -> Result<Amount<NonNegative>, Error>` - Sum of all the transaction fees.
+- `miner_fees(&Block) -> Result<Amount<NonNegative>, Error>` - Total block fees calculated as [Transparent value pool calculation](#transparent-value-pool-calculation) that belongs to the miner.
 - `coinbase_sum_outputs(&Transaction) -> Result<Amount<NonNegative>, Error>` - Sum of all output values in the coinbase transaction.
 - `find_output_with_amount(&Transaction, Amount<NonNegative>) -> Vec<transparent::Output>` - Outputs where value equal to Amount.
 
