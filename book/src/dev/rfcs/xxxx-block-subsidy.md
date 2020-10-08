@@ -127,6 +127,7 @@ const FUNDING_STREAM_HEIGHT_INTERVALS: &[(Height, Height, Network)] = &[
     (Height(1_046_400), Height(2_726_400), Network::Mainnet),
     (Height(1_028_500), Height(2_796_000), Network::Testnet),
 ];
+```
 
 ## General subsidy
 
@@ -175,7 +176,7 @@ We make use of the funding streams functions here, similar to founders reward . 
 
 ### 3 - Miner subsidy:
 
-*The transaction fees are the sum of each transactions inputs, minus its outputs, for all non-coinbase transactions in a block the sum of the coinbase transaction outputs must be less than or equal to the block subsidy plus transaction fees (because miners can destroy coins)* https://github.com/ZcashFoundation/zebra/pull/1051#issuecomment-700325653
+*The total amount of transparent outputs from a coinbase transaction, minus the amount of the `valueBalance` field if present, **MUST NOT** be greater than the amount of miner subsidy plus the total amount of transaction fees paid by transactions in this block.* https://zips.z.cash/protocol/canopy.pdf#txnencodingandconsensus
 
 So the rule is the following before Canopy:
 
