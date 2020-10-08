@@ -101,9 +101,9 @@ pub enum FundingStreamReceiver {
 /// 
 /// [7.9.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
 const FUNDING_STREAM_RECEIVER_NUMERATORS: &[(u64, FundingStreamReceiver)] = &[
-    (7, FundingStreamReceiver::ElectricCoinCompany),
-    (5, FundingStreamReceiver::ZcashFoundation),
-    (8, FundingStreamReceiver::MajorGrants),
+    (FundingStreamReceiver::ElectricCoinCompany, 7),
+    (FundingStreamReceiver::ZcashFoundation, 5),
+    (FundingStreamReceiver::MajorGrants, 8),
 ];
 
 /// Denominator as described in [protocol specification §7.9.1][7.9.1].
@@ -111,13 +111,19 @@ const FUNDING_STREAM_RECEIVER_NUMERATORS: &[(u64, FundingStreamReceiver)] = &[
 /// [7.9.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
 pub const FUNDING_STREAM_RECEIVER_DENOMINATOR: u64 = 100;
 
+#[allow(missing_docs)]
+pub enum FundingStreamRange {
+    StartHeight,
+    EndHeight,
+}
+
 /// Start and end Heights for funding streams 
 /// as described in [protocol specification §7.9.1][7.9.1].
 /// 
 /// [7.9.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
-const FUNDING_STREAM_HEIGHT_INTERVALS: &[(Height, Height, Network)] = &[
-    (Height(1_046_400), Height(2_726_400), Network::Mainnet),
-    (Height(1_028_500), Height(2_796_000), Network::Testnet),
+const FUNDING_STREAM_HEIGHT_RANGES: &[(Network, Height, Height)] = &[
+    (Network::Mainnet, Height(1_046_400), Height(2_726_400)),
+    (Network::Testnet, Height(1_028_500), Height(2_796_000)),
 ];
 ```
 
