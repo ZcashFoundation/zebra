@@ -18,7 +18,7 @@ use color_eyre::eyre::Result;
 use eyre::WrapErr;
 use tempdir::TempDir;
 
-use std::{borrow::Borrow, fs, io::Write, time::Duration};
+use std::{borrow::Borrow, env, fs, io::Write, time::Duration};
 
 use zebra_chain::parameters::Network::{self, *};
 use zebra_test::{command::TestDirExt, prelude::*};
@@ -455,12 +455,20 @@ fn valid_generated_config(command: &str, expected_output: &str) -> Result<()> {
     Ok(())
 }
 
+/// Test if `zebrad` can sync the first checkpoint on mainnet.
+///
+/// If your test environment does not have network access, skip
+/// this test by setting the `ZEBRA_SKIP_NETWORK_TESTS` env var.
 #[test]
 #[ignore]
 fn sync_one_checkpoint_mainnet() -> Result<()> {
     sync_one_checkpoint(Mainnet)
 }
 
+/// Test if `zebrad` can sync the first checkpoint on testnet.
+///
+/// If your test environment does not have network access, skip
+/// this test by setting the `ZEBRA_SKIP_NETWORK_TESTS` env var.
 #[test]
 #[ignore]
 fn sync_one_checkpoint_testnet() -> Result<()> {
@@ -469,6 +477,13 @@ fn sync_one_checkpoint_testnet() -> Result<()> {
 
 fn sync_one_checkpoint(network: Network) -> Result<()> {
     zebra_test::init();
+
+    if env::var_os("ZEBRA_SKIP_NETWORK_TESTS").is_some() {
+        // This message is captured by the test runner, use
+        // `cargo test -- --nocapture` to see it.
+        eprintln!("Skipping network test because '$ZEBRA_SKIP_NETWORK_TESTS' is set.");
+        return Ok(());
+    }
 
     let mut config = persistent_test_config()?;
     // TODO: add a convenience method?
