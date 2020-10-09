@@ -3291,6 +3291,7 @@ dependencies = [
  "proptest",
  "regex",
  "spandoc",
+ "tempdir",
  "thiserror",
  "tokio",
  "tower",

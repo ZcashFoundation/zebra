@@ -44,13 +44,14 @@ fn testdir() -> Result<TempDir> {
 }
 
 /// Extension trait for methods on `tempdir::TempDir` for using it as a test
-/// directory.
-trait TestDirExt
+/// directory for `zebrad`.
+trait ZebradTestDirExt
 where
     Self: Borrow<TempDir> + Sized,
 {
-    /// Spawn the zebrad as a child process in this test directory, potentially
-    /// taking ownership of the tempdir for the duration of the child process.
+    /// Spawn `zebrad` with `args` as a child process in this test directory,
+    /// potentially taking ownership of the tempdir for the duration of the
+    /// child process.
     fn spawn_child(self, args: &[&str]) -> Result<TestChild<Self>>;
 
     /// Add the given config to the test directory and use it for all
@@ -58,7 +59,7 @@ where
     fn with_config(self, config: ZebradConfig) -> Result<Self>;
 }
 
-impl<T> TestDirExt for T
+impl<T> ZebradTestDirExt for T
 where
     Self: Borrow<TempDir> + Sized,
 {
