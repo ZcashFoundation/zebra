@@ -93,6 +93,9 @@ impl CommandExt for Command {
 
 /// Extension trait for methods on `tempdir::TempDir` for using it as a test
 /// directory with an arbitrary command.
+///
+/// This trait is separate from `ZebradTestDirExt`, so that we can test
+/// `zebra_test::command` without running `zebrad`.
 pub trait TestDirExt
 where
     Self: Borrow<TempDir> + Sized,
