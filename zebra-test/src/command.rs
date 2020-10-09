@@ -123,6 +123,7 @@ pub struct TestChild<T> {
 }
 
 impl<T> TestChild<T> {
+    /// Kill the child process.
     #[spandoc::spandoc]
     pub fn kill(&mut self) -> Result<()> {
         /// SPANDOC: Killing child process
@@ -131,6 +132,9 @@ impl<T> TestChild<T> {
         Ok(())
     }
 
+    /// Waits for the child process to exit, then returns its output.
+    ///
+    /// Ignores any configured timeouts.
     #[spandoc::spandoc]
     pub fn wait_with_output(self) -> Result<TestOutput<T>> {
         /// SPANDOC: waiting for command to exit
@@ -146,11 +150,18 @@ impl<T> TestChild<T> {
         })
     }
 
+    /// Set a timeout for `expect_stdout`.
+    ///
+    /// Does not apply to `wait_with_output`.
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.deadline = Some(Instant::now() + timeout);
         self
     }
 
+    /// Checks each line of the child's stdout against `regex`, and returns matching lines.
+    ///
+    /// Kills the child after the configured timeout has elapsed.
+    /// Note: the timeout is only checked after each line.
     #[instrument(skip(self))]
     pub fn expect_stdout(&mut self, regex: &str) -> Result<&mut Self> {
         if self.stdout.is_none() {
@@ -186,7 +197,10 @@ impl<T> TestChild<T> {
             }
         }
 
-        if self.past_deadline() && !self.is_running() {
+        if self.past_deadline() && self.is_running() {
+            // If the process exits between is_running and kill, we will see
+            // spurious errors here. If that happens, ignore "no such process"
+            // errors from kill.
             self.kill()?;
         }
 
