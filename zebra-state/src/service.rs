@@ -229,6 +229,7 @@ impl Service<Request> for StateService {
             Request::AwaitUtxo(outpoint) => {
                 let fut = self.pending_utxos.queue(outpoint);
 
+                // TODO: spawn this in the background
                 if let Some(finalized_utxo) = self.sled.utxo(&outpoint).unwrap() {
                     self.pending_utxos.respond(outpoint, finalized_utxo);
                 } else if let Some(non_finalized_utxo) = self.mem.utxo(&outpoint) {
