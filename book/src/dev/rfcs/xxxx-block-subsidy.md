@@ -173,7 +173,7 @@ https://zips.z.cash/zip-0207
 https://zips.z.cash/zip-0214
 
 - `funding_stream(height, newtork) -> Result<Amount<NonNegative>, Error>` - Funding stream portion for this block.
-- `funding_stream_address(height, network) -> Result<PayToScriptHash, Error>` - Address of the funding stream receiver at this block. All specified funding streams addresses are transparent `zebra_chain::transparent:Address::PayToScriptHash` addresses. (Even after the shielded coinbase changes in ZIP-213, introduced in Heartwood.)
+- `funding_stream_address(height, network) -> Result<FundingStreamAddress, Error>` - Address of the funding stream receiver at this block. The funding streams addresses can be transparent `zebra_chain::transparent:Address::PayToScriptHash` or `zebra_chain::sapling:Address` addresses.
 
 ## Consensus rules
 
