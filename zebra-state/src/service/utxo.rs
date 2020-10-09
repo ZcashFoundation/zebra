@@ -38,6 +38,10 @@ impl PendingUtxos {
     }
 
     pub fn check_block(&mut self, block: &Block) {
+        if self.0.is_empty() {
+            return;
+        }
+
         for transaction in block.transactions.iter() {
             let transaction_hash = transaction.hash();
             for (index, output) in transaction.outputs().iter().enumerate() {
@@ -46,9 +50,7 @@ impl PendingUtxos {
                     index: index as _,
                 };
 
-                if let Some(pending_tx) = self.0.remove(&outpoint) {
-                    let _ = pending_tx.send(output.clone());
-                }
+                self.respond(outpoint, output.clone());
             }
         }
     }

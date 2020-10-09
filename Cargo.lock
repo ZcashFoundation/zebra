@@ -3203,6 +3203,7 @@ dependencies = [
  "tracing-futures",
  "tracing-subscriber 0.2.13",
  "zebra-chain",
+ "zebra-script",
  "zebra-state",
  "zebra-test",
 ]
