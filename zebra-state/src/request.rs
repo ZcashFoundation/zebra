@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use zebra_chain::{
     block::{self, Block},
-    transaction,
+    transaction, transparent,
 };
 
 // Allow *only* this unused import, so that rustdoc link resolution
@@ -107,4 +107,10 @@ pub enum Request {
     /// Note: the [`HashOrHeight`] can be constructed from a [`block::Hash`] or
     /// [`block::Height`] using `.into()`.
     Block(HashOrHeight),
+
+    /// Request a UTXO identified by the given Outpoint
+    AwaitUtxo(
+        /// The outpoint identifying with the requested UTXO
+        transparent::OutPoint,
+    ),
 }

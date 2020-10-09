@@ -518,6 +518,10 @@ impl NonFinalizedState {
 
         None
     }
+
+    pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Output> {
+        todo!()
+    }
 }
 
 /// A queue of blocks, awaiting the arrival of parent blocks.

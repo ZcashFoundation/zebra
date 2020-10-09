@@ -2,6 +2,7 @@ use std::sync::Arc;
 use zebra_chain::{
     block::{self, Block},
     transaction::Transaction,
+    transparent,
 };
 
 // Allow *only* this unused import, so that rustdoc link resolution
@@ -30,4 +31,10 @@ pub enum Response {
 
     /// Response to [`Request::Block`] with the specified block.
     Block(Option<Arc<Block>>),
+
+    /// The response to a `AwaitUtxo` request
+    Utxo(
+        /// The transparent::Output representing the requested UTXO
+        transparent::Output,
+    ),
 }

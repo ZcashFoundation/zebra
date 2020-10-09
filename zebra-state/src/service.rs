@@ -19,6 +19,7 @@ use zebra_chain::{
 use crate::{BoxError, Config, FinalizedState, Request, Response};
 
 mod memory_state;
+mod utxo;
 
 // todo: put this somewhere
 #[derive(Debug)]
@@ -37,6 +38,8 @@ struct StateService {
     mem: NonFinalizedState,
     /// Blocks awaiting their parent blocks for contextual verification.
     queued_blocks: QueuedBlocks,
+    /// The set of outpoints with pending requests for their associated transparent::Output
+    pending_utxos: utxo::PendingUtxos,
 }
 
 #[derive(Debug, Error)]
@@ -54,11 +57,13 @@ impl StateService {
         let sled = FinalizedState::new(&config, network);
         let mem = NonFinalizedState::default();
         let queued_blocks = QueuedBlocks::default();
+        let pending_utxos = utxo::PendingUtxos::default();
 
         Self {
             sled,
             mem,
             queued_blocks,
+            pending_utxos,
         }
     }
 
@@ -162,6 +167,9 @@ impl Service<Request> for StateService {
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        // TODO: limit how often this is triggered
+        self.pending_utxos.prune();
+
         Poll::Ready(Ok(()))
     }
 
@@ -170,6 +178,7 @@ impl Service<Request> for StateService {
             Request::CommitBlock { block } => {
                 let (rsp_tx, rsp_rx) = oneshot::channel();
 
+                self.pending_utxos.check_block(&block);
                 self.queue_and_commit_non_finalized_blocks(QueuedBlock { block, rsp_tx });
 
                 async move {
@@ -216,6 +225,17 @@ impl Service<Request> for StateService {
                     .block(hash_or_height)
                     .map_ok(Response::Block)
                     .boxed()
+            }
+            Request::AwaitUtxo(outpoint) => {
+                let fut = self.pending_utxos.queue(outpoint);
+
+                if let Some(finalized_utxo) = self.sled.utxo(&outpoint).unwrap() {
+                    self.pending_utxos.respond(outpoint, finalized_utxo);
+                } else if let Some(non_finalized_utxo) = self.mem.utxo(&outpoint) {
+                    self.pending_utxos.respond(outpoint, non_finalized_utxo);
+                }
+
+                fut.boxed()
             }
         }
     }
