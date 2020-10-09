@@ -98,7 +98,7 @@ where
             shielded_data,
         } = tx;
 
-        if !tx.is_coinbase() && (!inputs.isEmpty() || !outputs.isEmpty()) {
+        if !tx.is_coinbase() && (!inputs.is_empty() || !outputs.is_empty()) {
             let scripts = inputs
                 .iter()
                 .chain(outputs.iter())
