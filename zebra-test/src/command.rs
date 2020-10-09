@@ -2,16 +2,18 @@ use color_eyre::{
     eyre::{eyre, Context, Report, Result},
     Help, SectionExt,
 };
+use tempdir::TempDir;
 use tracing::instrument;
 
 use std::convert::Infallible as NoDir;
 use std::fmt::Write as _;
 #[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
-use std::path::Path;
 use std::{
+    borrow::Borrow,
     io::{BufRead, BufReader, Lines, Read},
-    process::{Child, ChildStdout, Command, ExitStatus, Output},
+    path::Path,
+    process::{Child, ChildStdout, Command, ExitStatus, Output, Stdio},
     time::{Duration, Instant},
 };
 
@@ -86,6 +88,35 @@ impl CommandExt for Command {
             deadline: None,
             stdout: None,
         })
+    }
+}
+
+/// Extension trait for methods on `tempdir::TempDir` for using it as a test
+/// directory with an arbitrary command.
+pub trait TestDirExt
+where
+    Self: Borrow<TempDir> + Sized,
+{
+    /// Spawn `cmd` with `args` as a child process in this test directory,
+    /// potentially taking ownership of the tempdir for the duration of the
+    /// child process.
+    fn spawn_child_with_command(self, cmd: &str, args: &[&str]) -> Result<TestChild<Self>>;
+}
+
+impl<T> TestDirExt for T
+where
+    Self: Borrow<TempDir> + Sized,
+{
+    fn spawn_child_with_command(self, cmd: &str, args: &[&str]) -> Result<TestChild<Self>> {
+        let tempdir = self.borrow();
+        let mut cmd = test_cmd(cmd, tempdir.path())?;
+
+        Ok(cmd
+            .args(args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn2(self)
+            .unwrap())
     }
 }
 

@@ -21,7 +21,7 @@ use tempdir::TempDir;
 use std::{borrow::Borrow, fs, io::Write, time::Duration};
 
 use zebra_chain::parameters::Network::{self, *};
-use zebra_test::prelude::*;
+use zebra_test::{command::TestDirExt, prelude::*};
 use zebrad::config::ZebradConfig;
 
 fn default_test_config() -> Result<ZebradConfig> {
@@ -61,24 +61,26 @@ where
 
 impl<T> ZebradTestDirExt for T
 where
-    Self: Borrow<TempDir> + Sized,
+    Self: TestDirExt + Borrow<TempDir> + Sized,
 {
     fn spawn_child(self, args: &[&str]) -> Result<TestChild<Self>> {
         let tempdir = self.borrow();
-        let mut cmd = test_cmd(env!("CARGO_BIN_EXE_zebrad"), tempdir.path())?;
-
         let default_config_path = tempdir.path().join("zebrad.toml");
 
         if default_config_path.exists() {
-            cmd.arg("-c").arg(default_config_path);
+            let mut extra_args: Vec<_> = Vec::new();
+            extra_args.push("-c");
+            extra_args.push(
+                default_config_path
+                    .as_path()
+                    .to_str()
+                    .expect("Path is valid Unicode"),
+            );
+            extra_args.extend_from_slice(args);
+            self.spawn_child_with_command(env!("CARGO_BIN_EXE_zebrad"), &extra_args)
+        } else {
+            self.spawn_child_with_command(env!("CARGO_BIN_EXE_zebrad"), args)
         }
-
-        Ok(cmd
-            .args(args)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn2(self)
-            .unwrap())
     }
 
     fn with_config(self, mut config: ZebradConfig) -> Result<Self> {
