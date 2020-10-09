@@ -8,6 +8,7 @@
 
 mod config;
 mod constants;
+mod error;
 mod request;
 mod response;
 mod service;
@@ -22,9 +23,7 @@ use service::QueuedBlock;
 use sled_state::FinalizedState;
 
 pub use config::Config;
+pub use error::{BoxError, CloneError, CommitBlockError, ValidateContextError};
 pub use request::{HashOrHeight, Request};
 pub use response::Response;
 pub use service::init;
-
-/// A boxed [`std::error::Error`].
-pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
