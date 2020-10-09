@@ -13,6 +13,7 @@
 //! transactions, or `mempool::MempoolTransactionVerifier` for mempool transactions.
 
 use std::{
+    convert::TryFrom,
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -27,17 +28,14 @@ use tracing::instrument;
 
 use zebra_chain::{
     parameters::{Network, NetworkUpgrade::Sapling},
-    primitives::{ed25519, groth16, redjubjub},
-    sapling,
-    sighash::HashType,
-    sprout,
+    primitives::{ed25519, redjubjub},
     transaction::{self, HashType, JoinSplitData, ShieldedData, Transaction},
     transparent::{self, Script},
 };
 
 use zebra_state as zs;
 
-use crate::{primitives::redjubjub, BoxError, Config};
+use crate::{primitives::groth16, BoxError, Config};
 
 /// Internal transaction verification service.
 ///
@@ -134,7 +132,7 @@ where
                 sig,
             } = joinsplit_d;
 
-            ed25519::VerificationKey::try_From(pub_key)
+            ed25519::VerificationKey::try_from(pub_key)
                 .and_then(|vk| vk.verify(sig, tx.data_to_be_signed()))
                 .map_err(VerifyTransactionError::Ed25519)
         }
@@ -155,8 +153,8 @@ where
                 // description.
                 spend
                     .rk
-                    .verify(sighash, spend.spend_auth_sig)
-                    .map_err(VerifyTransactionError::Redjubjub);
+                    .verify(sighash.into(), spend.spend_auth_sig)
+                    .map_err(VerifyTransactionError::RedJubjub);
 
                 self.groth16
                     .call(spend.into())
@@ -199,7 +197,7 @@ where
             // https://zips.z.cash/protocol/canopy.pdf#saplingbalance
             let bsk = shielded_data_d.binding_validating_key(value_balance);
             bsk.verify(sighash, &binding_sig)
-                .map_err(VerifyTransactionError::Redjubjub);
+                .map_err(VerifyTransactionError::RedJubjub);
         }
     }
 }
