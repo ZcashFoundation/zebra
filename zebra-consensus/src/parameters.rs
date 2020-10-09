@@ -10,7 +10,7 @@
 //! block header during the Heartwood upgrade.)
 //!
 //! Typically, consensus parameters are accessed via a function that takes a
-//! `Network` and `BlockHeight`.
+//! `Network` and `block::Height`.
 
 pub mod genesis;
 pub mod minimum_difficulty;

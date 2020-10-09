@@ -19,15 +19,17 @@
 //!    * This task runs in the background and continuously queries the network for
 //!    new blocks to be verified and added to the local state
 
-use crate::components::tokio::RuntimeRun;
-use crate::config::ZebradConfig;
-use crate::{components::tokio::TokioComponent, prelude::*};
-
 use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
-use color_eyre::eyre::Report;
-use tower::{buffer::Buffer, service_fn};
+use color_eyre::eyre::{eyre, Report};
+use tokio::sync::oneshot;
+use tower::builder::ServiceBuilder;
 
-mod sync;
+use crate::components::{tokio::RuntimeRun, Inbound};
+use crate::config::ZebradConfig;
+use crate::{
+    components::{tokio::TokioComponent, ChainSync},
+    prelude::*,
+};
 
 /// `start` subcommand
 #[derive(Command, Debug, Options)]
@@ -39,10 +41,13 @@ pub struct StartCmd {
 
 impl StartCmd {
     async fn start(&self) -> Result<(), Report> {
-        info!(?self, "starting to connect to the network");
+        let config = app_config().clone();
+        info!(?config);
 
-        let config = app_config();
-        let state = zebra_state::on_disk::init(config.state.clone(), config.network.network);
+        info!("initializing node state");
+        let state = zebra_state::init(config.state.clone(), config.network.network);
+
+        info!("initializing chain verifier");
         let verifier = zebra_consensus::chain::init(
             config.consensus.clone(),
             config.network.network,
@@ -50,17 +55,24 @@ impl StartCmd {
         )
         .await;
 
-        // The service that our node uses to respond to requests by peers
-        let node = Buffer::new(
-            service_fn(|req| async move {
-                info!(?req);
-                Ok::<zebra_network::Response, Report>(zebra_network::Response::Nil)
-            }),
-            1,
-        );
-        let (peer_set, _address_book) = zebra_network::init(config.network.clone(), node).await;
+        info!("initializing network");
 
-        let mut syncer = sync::Syncer::new(config.network.network, peer_set, state, verifier);
+        // The service that our node uses to respond to requests by peers. The
+        // load_shed middleware ensures that we reduce the size of the peer set
+        // in response to excess load.
+        let (setup_tx, setup_rx) = oneshot::channel();
+        let inbound = ServiceBuilder::new()
+            .load_shed()
+            .buffer(20)
+            .service(Inbound::new(setup_rx, state.clone()));
+
+        let (peer_set, address_book) = zebra_network::init(config.network.clone(), inbound).await;
+        setup_tx
+            .send((peer_set.clone(), address_book))
+            .map_err(|_| eyre!("could not send setup data to inbound service"))?;
+
+        info!("initializing syncer");
+        let mut syncer = ChainSync::new(config.network.network, peer_set, state, verifier);
 
         syncer.sync().await
     }

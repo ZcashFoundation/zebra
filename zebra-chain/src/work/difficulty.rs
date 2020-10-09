@@ -18,8 +18,9 @@ use std::{fmt, ops::Add, ops::AddAssign};
 
 use primitive_types::U256;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
+
 #[cfg(test)]
 mod tests;
 
@@ -52,7 +53,7 @@ mod tests;
 /// multiple equivalent `CompactDifficulty` values, due to redundancy in the
 /// floating-point format.
 #[derive(Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(test, derive(Arbitrary))]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct CompactDifficulty(pub u32);
 
 impl fmt::Debug for CompactDifficulty {
@@ -318,5 +319,46 @@ impl Add for Work {
 impl AddAssign for Work {
     fn add_assign(&mut self, rhs: Work) {
         *self = *self + rhs;
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+/// Partial work used to track relative work in non-finalized chains
+pub struct PartialCumulativeWork(u128);
+
+impl std::ops::Add<Work> for PartialCumulativeWork {
+    type Output = PartialCumulativeWork;
+
+    fn add(self, rhs: Work) -> Self::Output {
+        let result = self
+            .0
+            .checked_add(rhs.0)
+            .expect("Work values do not overflow");
+
+        PartialCumulativeWork(result)
+    }
+}
+
+impl std::ops::AddAssign<Work> for PartialCumulativeWork {
+    fn add_assign(&mut self, rhs: Work) {
+        *self = *self + rhs;
+    }
+}
+
+impl std::ops::Sub<Work> for PartialCumulativeWork {
+    type Output = PartialCumulativeWork;
+
+    fn sub(self, rhs: Work) -> Self::Output {
+        let result = self.0
+            .checked_sub(rhs.0)
+            .expect("PartialCumulativeWork values do not underflow: all subtracted Work values must have been previously added to the PartialCumulativeWork");
+
+        PartialCumulativeWork(result)
+    }
+}
+
+impl std::ops::SubAssign<Work> for PartialCumulativeWork {
+    fn sub_assign(&mut self, rhs: Work) {
+        *self = *self - rhs;
     }
 }

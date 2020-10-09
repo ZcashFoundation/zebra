@@ -1,7 +1,5 @@
-use std::{
-    io::{Cursor, Write},
-    sync::Arc,
-};
+use std::collections::HashSet;
+use std::io::{Cursor, Write};
 
 use chrono::{DateTime, Duration, LocalResult, TimeZone, Utc};
 
@@ -21,7 +19,7 @@ fn blockheaderhash_debug() {
 
     assert_eq!(
         format!("{:?}", hash),
-        "BlockHeaderHash(\"bf46b4b5030752fedac6f884976162bbfb29a9398f104a280b3e34d51b416631\")"
+        "block::Hash(\"bf46b4b5030752fedac6f884976162bbfb29a9398f104a280b3e34d51b416631\")"
     );
 }
 
@@ -33,7 +31,7 @@ fn blockheaderhash_from_blockheader() {
 
     assert_eq!(
         format!("{:?}", hash),
-        "BlockHeaderHash(\"39c92b8c6b582797830827c78d58674c7205fcb21991887c124d1dbe4b97d6d1\")"
+        "block::Hash(\"39c92b8c6b582797830827c78d58674c7205fcb21991887c124d1dbe4b97d6d1\")"
     );
 
     let mut bytes = Cursor::new(Vec::new());
@@ -60,21 +58,64 @@ fn deserialize_blockheader() {
 
 #[test]
 fn deserialize_block() {
-    zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
-        .zcash_deserialize_into::<Block>()
-        .expect("block test vector should deserialize");
-    zebra_test::vectors::BLOCK_MAINNET_1_BYTES
-        .zcash_deserialize_into::<Block>()
-        .expect("block test vector should deserialize");
-    // https://explorer.zcha.in/blocks/415000
-    zebra_test::vectors::BLOCK_MAINNET_415000_BYTES
-        .zcash_deserialize_into::<Block>()
-        .expect("block test vector should deserialize");
-    // https://explorer.zcha.in/blocks/434873
     // this one has a bad version field
     zebra_test::vectors::BLOCK_MAINNET_434873_BYTES
         .zcash_deserialize_into::<Block>()
         .expect("block test vector should deserialize");
+
+    for block in zebra_test::vectors::BLOCKS.iter() {
+        block
+            .zcash_deserialize_into::<Block>()
+            .expect("block is structurally valid");
+    }
+}
+
+#[test]
+fn block_test_vectors_unique() {
+    let block_count = zebra_test::vectors::BLOCKS.len();
+    let block_hashes: HashSet<_> = zebra_test::vectors::BLOCKS
+        .iter()
+        .map(|b| {
+            b.zcash_deserialize_into::<Block>()
+                .expect("block is structurally valid")
+                .hash()
+        })
+        .collect();
+
+    // putting the same block in two files is an easy mistake to make
+    assert_eq!(
+        block_count,
+        block_hashes.len(),
+        "block test vectors must be unique"
+    );
+}
+
+#[test]
+fn block_test_vectors_height_mainnet() {
+    block_test_vectors_height(Network::Mainnet);
+}
+
+#[test]
+fn block_test_vectors_height_testnet() {
+    block_test_vectors_height(Network::Testnet);
+}
+
+fn block_test_vectors_height(network: Network) {
+    let block_iter = match network {
+        Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
+        Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
+    };
+
+    for (&height, block) in block_iter {
+        let block = block
+            .zcash_deserialize_into::<Block>()
+            .expect("block is structurally valid");
+        assert_eq!(
+            block.coinbase_height().expect("block height is valid").0,
+            height,
+            "deserialized height must match BTreeMap key height"
+        );
+    }
 }
 
 #[test]
@@ -143,25 +184,6 @@ fn block_limits_single_tx() {
 
     // Will fail as block overall size is above limit
     Block::zcash_deserialize(&data[..]).expect_err("block should not deserialize");
-}
-
-#[test]
-fn time_check_past_block() {
-    // This block is also verified as part of the BlockVerifier service
-    // tests.
-    let block =
-        Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])
-            .expect("block should deserialize");
-    let now = Utc::now();
-
-    // This check is non-deterministic, but BLOCK_MAINNET_415000 is
-    // a long time in the past. So it's unlikely that the test machine
-    // will have a clock that's far enough in the past for the test to
-    // fail.
-    block
-        .header
-        .is_time_valid_at(now)
-        .expect("the header time from a mainnet block should be valid");
 }
 
 /// Test wrapper for `BlockHeader.is_time_valid_at`.

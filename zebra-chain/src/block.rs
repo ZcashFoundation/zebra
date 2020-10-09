@@ -9,8 +9,12 @@ mod serialize;
 
 pub mod merkle;
 
+#[cfg(any(test, feature = "proptest-impl"))]
+mod arbitrary;
 #[cfg(test)]
 mod tests;
+
+use std::fmt;
 
 pub use hash::Hash;
 pub use header::Header;
@@ -25,17 +29,35 @@ use serde::{Deserialize, Serialize};
 
 use crate::{parameters::Network, transaction::Transaction, transparent};
 
-#[cfg(test)]
-use proptest_derive::Arbitrary;
-
 /// A Zcash block, containing a header and a list of transactions.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(test, derive(Arbitrary))]
 pub struct Block {
     /// The block header, containing block metadata.
     pub header: Header,
     /// The block transactions.
     pub transactions: Vec<std::sync::Arc<Transaction>>,
+}
+
+impl fmt::Display for Block {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut fmter = f.debug_struct("Block");
+        if let Some(height) = self.coinbase_height() {
+            fmter.field("height", &height);
+        }
+
+        fmter.field("hash", &DisplayToDebug(self.hash())).finish()
+    }
+}
+
+struct DisplayToDebug<T>(T);
+
+impl<T> fmt::Debug for DisplayToDebug<T>
+where
+    T: fmt::Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
 }
 
 impl Block {
@@ -50,7 +72,7 @@ impl Block {
             })
     }
 
-    /// Get the hash for the current block
+    /// Compute the hash of this block.
     pub fn hash(&self) -> Hash {
         Hash::from(self)
     }

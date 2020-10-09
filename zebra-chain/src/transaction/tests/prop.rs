@@ -15,6 +15,13 @@ proptest! {
     }
 
     #[test]
+    fn transaction_hash_display_fromstr_roundtrip(hash in any::<Hash>()) {
+        let display = format!("{}", hash);
+        let parsed = display.parse::<Hash>().expect("hash should parse");
+        prop_assert_eq!(hash, parsed);
+    }
+
+    #[test]
     fn locktime_roundtrip(locktime in any::<LockTime>()) {
         let mut bytes = Cursor::new(Vec::new());
         locktime.zcash_serialize(&mut bytes)?;

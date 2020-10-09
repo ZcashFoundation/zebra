@@ -30,6 +30,7 @@ use tracing_futures::Instrument;
 use zebra_chain::{
     block::{self, Block},
     serialization::SerializationError,
+    transaction::{self, Transaction},
 };
 
 use crate::{
@@ -38,50 +39,105 @@ use crate::{
         external::{types::Nonce, InventoryHash, Message},
         internal::{Request, Response},
     },
-    BoxedStdError,
+    BoxError,
 };
 
 use super::{ClientRequest, ErrorSlot, PeerError, SharedPeerError};
 
 pub(super) enum Handler {
     /// Indicates that the handler has finished processing the request.
-    Finished(Result<Response, SharedPeerError>),
+    /// An error here is scoped to the request.
+    Finished(Result<Response, PeerError>),
     Ping(Nonce),
-    GetPeers,
-    GetBlocksByHash {
+    Peers,
+    FindBlocks,
+    FindHeaders,
+    BlocksByHash {
         hashes: HashSet<block::Hash>,
         blocks: Vec<Arc<Block>>,
     },
-    FindBlocks,
+    TransactionsByHash {
+        hashes: HashSet<transaction::Hash>,
+        transactions: Vec<Arc<Transaction>>,
+    },
+    MempoolTransactions,
 }
 
 impl Handler {
     /// Try to handle `msg` as a response to a client request, possibly consuming
     /// it in the process.
     ///
+    /// This function is where we statefully interpret Bitcoin/Zcash messages
+    /// into responses to messages in the internal request/response protocol.
+    /// This conversion is done by a sequence of (request, message) match arms,
+    /// each of which contains the conversion logic for that pair.
+    ///
     /// Taking ownership of the message means that we can pass ownership of its
     /// contents to responses without additional copies.  If the message is not
     /// interpretable as a response, we return ownership to the caller.
+    ///
+    /// Unexpected messages are left unprocessed, and may be rejected later.
     fn process_message(&mut self, msg: Message) -> Option<Message> {
-        // This function is where we statefully interpret Bitcoin/Zcash messages
-        // into responses to messages in the internal request/response protocol.
-        // This conversion is done by a sequence of (request, message) match arms,
-        // each of which contains the conversion logic for that pair.
-        use Handler::*;
         let mut ignored_msg = None;
         // XXX can this be avoided?
-        let tmp_state = std::mem::replace(self, Finished(Ok(Response::Nil)));
+        let tmp_state = std::mem::replace(self, Handler::Finished(Ok(Response::Nil)));
+
         *self = match (tmp_state, msg) {
-            (Ping(req_nonce), Message::Pong(rsp_nonce)) => {
+            (Handler::Ping(req_nonce), Message::Pong(rsp_nonce)) => {
                 if req_nonce == rsp_nonce {
-                    Finished(Ok(Response::Nil))
+                    Handler::Finished(Ok(Response::Nil))
                 } else {
-                    Ping(req_nonce)
+                    Handler::Ping(req_nonce)
                 }
             }
-            (GetPeers, Message::Addr(addrs)) => Finished(Ok(Response::Peers(addrs))),
+            (Handler::Peers, Message::Addr(addrs)) => Handler::Finished(Ok(Response::Peers(addrs))),
             (
-                GetBlocksByHash {
+                Handler::TransactionsByHash {
+                    mut hashes,
+                    mut transactions,
+                },
+                Message::Tx(transaction),
+            ) => {
+                if hashes.remove(&transaction.hash()) {
+                    transactions.push(transaction);
+                } else {
+                    ignored_msg = Some(Message::Tx(transaction));
+                }
+                if hashes.is_empty() {
+                    Handler::Finished(Ok(Response::Transactions(transactions)))
+                } else {
+                    Handler::TransactionsByHash {
+                        hashes,
+                        transactions,
+                    }
+                }
+            }
+            (
+                Handler::TransactionsByHash {
+                    hashes,
+                    transactions,
+                },
+                Message::NotFound(items),
+            ) => {
+                let hash_in_hashes = |item: &InventoryHash| {
+                    if let InventoryHash::Tx(hash) = item {
+                        hashes.contains(hash)
+                    } else {
+                        false
+                    }
+                };
+                if items.iter().all(hash_in_hashes) {
+                    Handler::Finished(Err(PeerError::NotFound(items)))
+                } else {
+                    ignored_msg = Some(Message::NotFound(items));
+                    Handler::TransactionsByHash {
+                        hashes,
+                        transactions,
+                    }
+                }
+            }
+            (
+                Handler::BlocksByHash {
                     mut hashes,
                     mut blocks,
                 },
@@ -89,24 +145,51 @@ impl Handler {
             ) => {
                 if hashes.remove(&block.hash()) {
                     blocks.push(block);
-                    if hashes.is_empty() {
-                        Finished(Ok(Response::Blocks(blocks)))
-                    } else {
-                        GetBlocksByHash { hashes, blocks }
-                    }
                 } else {
-                    Finished(Err(PeerError::WrongBlock.into()))
+                    ignored_msg = Some(Message::Block(block));
+                }
+                if hashes.is_empty() {
+                    Handler::Finished(Ok(Response::Blocks(blocks)))
+                } else {
+                    Handler::BlocksByHash { hashes, blocks }
                 }
             }
-            (FindBlocks, Message::Inv(inv_hashes)) => Finished(Ok(Response::BlockHashes(
-                inv_hashes
-                    .into_iter()
-                    .filter_map(|inv| match inv {
-                        InventoryHash::Block(hash) => Some(hash),
-                        _ => None,
-                    })
-                    .collect(),
-            ))),
+            (Handler::BlocksByHash { hashes, blocks }, Message::NotFound(items)) => {
+                let hash_in_hashes = |item: &InventoryHash| {
+                    if let InventoryHash::Block(hash) = item {
+                        hashes.contains(hash)
+                    } else {
+                        false
+                    }
+                };
+                if items.iter().all(hash_in_hashes) {
+                    Handler::Finished(Err(PeerError::NotFound(items)))
+                } else {
+                    ignored_msg = Some(Message::NotFound(items));
+                    Handler::BlocksByHash { hashes, blocks }
+                }
+            }
+            (Handler::FindBlocks, Message::Inv(items))
+                if items
+                    .iter()
+                    .all(|item| matches!(item, InventoryHash::Block(_))) =>
+            {
+                Handler::Finished(Ok(Response::BlockHashes(
+                    block_hashes(&items[..]).collect(),
+                )))
+            }
+            (Handler::MempoolTransactions, Message::Inv(items))
+                if items
+                    .iter()
+                    .all(|item| matches!(item, InventoryHash::Tx(_))) =>
+            {
+                Handler::Finished(Ok(Response::TransactionHashes(
+                    transaction_hashes(&items[..]).collect(),
+                )))
+            }
+            (Handler::FindHeaders, Message::Headers(headers)) => {
+                Handler::Finished(Ok(Response::BlockHeaders(headers)))
+            }
             // By default, messages are not responses.
             (state, msg) => {
                 trace!(?msg, "did not interpret message as response");
@@ -149,8 +232,8 @@ pub struct Connection<S, Tx> {
 
 impl<S, Tx> Connection<S, Tx>
 where
-    S: Service<Request, Response = Response, Error = BoxedStdError>,
-    S::Error: Into<BoxedStdError>,
+    S: Service<Request, Response = Response, Error = BoxError>,
+    S::Error: Into<BoxError>,
     Tx: Sink<Message, Error = SerializationError> + Unpin,
 {
     /// Consume this `Connection` to form a spawnable future containing its event loop.
@@ -244,7 +327,7 @@ where
                                         tx,
                                         ..
                                     } => {
-                                        let _ = tx.send(response);
+                                        let _ = tx.send(response.map_err(Into::into));
                                         State::AwaitingRequest
                                     }
                                     pending @ State::AwaitingResponse { .. } => pending,
@@ -352,7 +435,7 @@ where
                 .await
                 .map_err(|e| e.into())
                 .map(|()| AwaitingResponse {
-                    handler: Handler::GetPeers,
+                    handler: Handler::Peers,
                     tx,
                     span,
                 }),
@@ -374,8 +457,23 @@ where
                 .await
                 .map_err(|e| e.into())
                 .map(|()| AwaitingResponse {
-                    handler: Handler::GetBlocksByHash {
+                    handler: Handler::BlocksByHash {
                         blocks: Vec::with_capacity(hashes.len()),
+                        hashes,
+                    },
+                    tx,
+                    span,
+                }),
+            (AwaitingRequest, TransactionsByHash(hashes)) => self
+                .peer_tx
+                .send(Message::GetData(
+                    hashes.iter().map(|h| (*h).into()).collect(),
+                ))
+                .await
+                .map_err(|e| e.into())
+                .map(|()| AwaitingResponse {
+                    handler: Handler::TransactionsByHash {
+                        transactions: Vec::with_capacity(hashes.len()),
                         hashes,
                     },
                     tx,
@@ -383,10 +481,7 @@ where
                 }),
             (AwaitingRequest, FindBlocks { known_blocks, stop }) => self
                 .peer_tx
-                .send(Message::GetBlocks {
-                    block_locator_hashes: known_blocks,
-                    hash_stop: stop.unwrap_or(block::Hash([0; 32])),
-                })
+                .send(Message::GetBlocks { known_blocks, stop })
                 .await
                 .map_err(|e| e.into())
                 .map(|()| AwaitingResponse {
@@ -394,6 +489,52 @@ where
                     tx,
                     span,
                 }),
+            (AwaitingRequest, FindHeaders { known_blocks, stop }) => self
+                .peer_tx
+                .send(Message::GetHeaders { known_blocks, stop })
+                .await
+                .map_err(|e| e.into())
+                .map(|()| AwaitingResponse {
+                    handler: Handler::FindHeaders,
+                    tx,
+                    span,
+                }),
+            (AwaitingRequest, MempoolTransactions) => self
+                .peer_tx
+                .send(Message::Mempool)
+                .await
+                .map_err(|e| e.into())
+                .map(|()| AwaitingResponse {
+                    handler: Handler::MempoolTransactions,
+                    tx,
+                    span,
+                }),
+            (AwaitingRequest, PushTransaction(transaction)) => {
+                // Since we're not waiting for further messages, we need to
+                // send a response before dropping tx.
+                let _ = tx.send(Ok(Response::Nil));
+                self.peer_tx
+                    .send(Message::Tx(transaction))
+                    .await
+                    .map_err(|e| e.into())
+                    .map(|()| AwaitingRequest)
+            }
+            (AwaitingRequest, AdvertiseTransactions(hashes)) => {
+                let _ = tx.send(Ok(Response::Nil));
+                self.peer_tx
+                    .send(Message::Inv(hashes.iter().map(|h| (*h).into()).collect()))
+                    .await
+                    .map_err(|e| e.into())
+                    .map(|()| AwaitingRequest)
+            }
+            (AwaitingRequest, AdvertiseBlock(hash)) => {
+                let _ = tx.send(Ok(Response::Nil));
+                self.peer_tx
+                    .send(Message::Inv(vec![hash.into()]))
+                    .await
+                    .map_err(|e| e.into())
+                    .map(|()| AwaitingRequest)
+            }
         } {
             Ok(new_state) => {
                 self.state = new_state;
@@ -407,9 +548,15 @@ where
     // context (namely, the work of processing the inbound msg as a request)
     #[instrument(skip(self))]
     async fn handle_message_as_request(&mut self, msg: Message) {
-        trace!(?msg);
-        // These messages are transport-related, handle them separately:
-        match msg {
+        let req = match msg {
+            Message::Ping(nonce) => {
+                trace!(?nonce, "responding to heartbeat");
+                if let Err(e) = self.peer_tx.send(Message::Pong(nonce)).await {
+                    self.fail_with(e.into());
+                }
+                return;
+            }
+            // These messages shouldn't be sent outside of a handshake.
             Message::Version { .. } => {
                 self.fail_with(PeerError::DuplicateHandshake);
                 return;
@@ -418,46 +565,86 @@ where
                 self.fail_with(PeerError::DuplicateHandshake);
                 return;
             }
-            Message::Ping(nonce) => {
-                trace!(?nonce, "responding to heartbeat");
-                match self.peer_tx.send(Message::Pong(nonce)).await {
-                    Ok(()) => {}
-                    Err(e) => self.fail_with(e.into()),
-                }
+            // These messages should already be handled as a response if they
+            // could be a response, so if we see them here, they were either
+            // sent unsolicited, or we've failed to handle messages correctly.
+            Message::Reject { .. } => {
+                self.fail_with(PeerError::WrongMessage("unsolicited reject message"));
                 return;
             }
-            _ => {}
-        }
-
-        // Per BIP-011, since we don't advertise NODE_BLOOM, we MUST
-        // disconnect from this peer immediately.
-        match msg {
+            Message::NotFound { .. } => {
+                self.fail_with(PeerError::WrongMessage("unsolicited notfound message"));
+                return;
+            }
+            Message::Pong(_) => {
+                self.fail_with(PeerError::WrongMessage("unsolicited pong message"));
+                return;
+            }
+            Message::Block(_) => {
+                self.fail_with(PeerError::WrongMessage("unsolicited block message"));
+                return;
+            }
+            Message::Headers(_) => {
+                self.fail_with(PeerError::WrongMessage("unsolicited headers message"));
+                return;
+            }
+            // These messages should never be sent by peers.
             Message::FilterLoad { .. }
             | Message::FilterAdd { .. }
             | Message::FilterClear { .. } => {
-                self.fail_with(PeerError::UnsupportedMessage);
+                self.fail_with(PeerError::UnsupportedMessage(
+                    "got BIP11 message without advertising NODE_BLOOM",
+                ));
                 return;
             }
-            _ => {}
-        }
-
-        // Interpret `msg` as a request from the remote peer to our node,
-        // and try to construct an appropriate request object.
-        let req = match msg {
+            // Zebra crawls the network proactively, to prevent
+            // peers from inserting data into our address book.
             Message::Addr(_) => {
-                debug!("ignoring unsolicited addr message");
-                None
+                trace!("ignoring unsolicited addr message");
+                return;
             }
-            Message::GetAddr => Some(Request::Peers),
-            _ => {
-                debug!("unhandled message type");
-                None
+            Message::Tx(transaction) => Request::PushTransaction(transaction),
+            Message::Inv(items) => match &items[..] {
+                // We don't expect to be advertised multiple blocks at a time,
+                // so we ignore any advertisements of multiple blocks.
+                [InventoryHash::Block(hash)] => Request::AdvertiseBlock(*hash),
+                [InventoryHash::Tx(_), rest @ ..]
+                    if rest.iter().all(|item| matches!(item, InventoryHash::Tx(_))) =>
+                {
+                    Request::TransactionsByHash(transaction_hashes(&items).collect())
+                }
+                _ => {
+                    self.fail_with(PeerError::WrongMessage("inv with mixed item types"));
+                    return;
+                }
+            },
+            Message::GetData(items) => match &items[..] {
+                [InventoryHash::Block(_), rest @ ..]
+                    if rest
+                        .iter()
+                        .all(|item| matches!(item, InventoryHash::Block(_))) =>
+                {
+                    Request::BlocksByHash(block_hashes(&items).collect())
+                }
+                [InventoryHash::Tx(_), rest @ ..]
+                    if rest.iter().all(|item| matches!(item, InventoryHash::Tx(_))) =>
+                {
+                    Request::TransactionsByHash(transaction_hashes(&items).collect())
+                }
+                _ => {
+                    self.fail_with(PeerError::WrongMessage("getdata with mixed item types"));
+                    return;
+                }
+            },
+            Message::GetAddr => Request::Peers,
+            Message::GetBlocks { known_blocks, stop } => Request::FindBlocks { known_blocks, stop },
+            Message::GetHeaders { known_blocks, stop } => {
+                Request::FindHeaders { known_blocks, stop }
             }
+            Message::Mempool => Request::MempoolTransactions,
         };
 
-        if let Some(req) = req {
-            self.drive_peer_request(req).await
-        }
+        self.drive_peer_request(req).await
     }
 
     /// Given a `req` originating from the peer, drive it to completion and send
@@ -477,6 +664,8 @@ where
         let rsp = match self.svc.call(req).await {
             Err(e) => {
                 if e.is::<Overloaded>() {
+                    tracing::warn!("inbound service is overloaded, closing connection");
+                    metrics::counter!("pool.closed.loadshed", 1);
                     self.fail_with(PeerError::Overloaded);
                 } else {
                     // We could send a reject to the remote peer.
@@ -492,6 +681,14 @@ where
             Response::Peers(addrs) => {
                 if let Err(e) = self.peer_tx.send(Message::Addr(addrs)).await {
                     self.fail_with(e.into());
+                }
+            }
+            Response::Transactions(transactions) => {
+                // Generate one tx message per transaction.
+                for transaction in transactions.into_iter() {
+                    if let Err(e) = self.peer_tx.send(Message::Tx(transaction)).await {
+                        self.fail_with(e.into());
+                    }
                 }
             }
             Response::Blocks(blocks) => {
@@ -511,6 +708,42 @@ where
                     self.fail_with(e.into())
                 }
             }
+            Response::BlockHeaders(headers) => {
+                if let Err(e) = self.peer_tx.send(Message::Headers(headers)).await {
+                    self.fail_with(e.into())
+                }
+            }
+            Response::TransactionHashes(hashes) => {
+                if let Err(e) = self
+                    .peer_tx
+                    .send(Message::Inv(hashes.into_iter().map(Into::into).collect()))
+                    .await
+                {
+                    self.fail_with(e.into())
+                }
+            }
         }
     }
+}
+
+fn transaction_hashes<'a>(
+    items: &'a [InventoryHash],
+) -> impl Iterator<Item = transaction::Hash> + 'a {
+    items.iter().filter_map(|item| {
+        if let InventoryHash::Tx(hash) = item {
+            Some(*hash)
+        } else {
+            None
+        }
+    })
+}
+
+fn block_hashes<'a>(items: &'a [InventoryHash]) -> impl Iterator<Item = block::Hash> + 'a {
+    items.iter().filter_map(|item| {
+        if let InventoryHash::Block(hash) = item {
+            Some(*hash)
+        } else {
+            None
+        }
+    })
 }

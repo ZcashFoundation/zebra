@@ -1,7 +1,10 @@
 //! Miscellaneous test code for Zebra.
-use std::sync::Once;
+use color_eyre::section::PanicMessage;
+use owo_colors::OwoColorize;
 use tracing_error::ErrorLayer;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+
+use std::sync::Once;
 
 pub mod command;
 pub mod prelude;
@@ -69,7 +72,49 @@ pub fn init() {
                     })
                 });
             }))
+            .panic_message(SkipTestReturnedErrPanicMessages)
             .install()
             .unwrap();
     })
+}
+
+struct SkipTestReturnedErrPanicMessages;
+
+impl PanicMessage for SkipTestReturnedErrPanicMessages {
+    fn display(
+        &self,
+        pi: &std::panic::PanicInfo<'_>,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
+        let payload = pi
+            .payload()
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| pi.payload().downcast_ref::<&str>().cloned())
+            .unwrap_or("<non string panic payload>");
+
+        // skip panic output that is clearly from tests that returned an `Err`
+        // and assume that the test handler has already printed the value inside
+        // of the `Err`.
+        if payload.contains("the test returned a termination value with a non-zero status code") {
+            return write!(f, "---- end of test output ----");
+        }
+
+        writeln!(f, "{}", "\nThe application panicked (crashed).".red())?;
+
+        write!(f, "Message:  ")?;
+        writeln!(f, "{}", payload.cyan())?;
+
+        // If known, print panic location.
+        write!(f, "Location: ")?;
+        if let Some(loc) = pi.location() {
+            write!(f, "{}", loc.file().purple())?;
+            write!(f, ":")?;
+            write!(f, "{}", loc.line().purple())?;
+        } else {
+            write!(f, "<unknown>")?;
+        }
+
+        Ok(())
+    }
 }

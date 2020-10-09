@@ -5,6 +5,8 @@ use thiserror::Error;
 use tracing_error::TracedError;
 use zebra_chain::serialization::SerializationError;
 
+use crate::protocol::external::InventoryHash;
+
 /// A wrapper around `Arc<PeerError>` that implements `Error`.
 #[derive(Error, Debug, Clone)]
 #[error(transparent)]
@@ -40,10 +42,12 @@ pub enum PeerError {
     /// to shed load.
     #[error("Internal services over capacity")]
     Overloaded,
-    /// A peer sent us a message we don't support or instructed to
-    /// disconnect from upon receipt.
-    #[error("Remote peer sent an unsupported message type.")]
-    UnsupportedMessage,
+    /// A peer sent us a message we don't support.
+    #[error("Remote peer sent an unsupported message type: {0}")]
+    UnsupportedMessage(&'static str),
+    /// A peer sent us a message we couldn't interpret in context.
+    #[error("Remote peer sent an uninterpretable message: {0}")]
+    WrongMessage(&'static str),
     /// We got a `Reject` message. This does not necessarily mean that
     /// the peer connection is in a bad state, but for the time being
     /// we are considering it a PeerError.
@@ -55,6 +59,9 @@ pub enum PeerError {
     /// The remote peer responded with a block we didn't ask for.
     #[error("Remote peer responded with a block we didn't ask for.")]
     WrongBlock,
+    /// We requested data that the peer couldn't find.
+    #[error("Remote peer could not find items: {0:?}")]
+    NotFound(Vec<InventoryHash>),
 }
 
 #[derive(Default, Clone)]

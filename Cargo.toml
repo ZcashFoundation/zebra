@@ -19,3 +19,6 @@ panic = "abort"
 
 [profile.release]
 panic = "abort"
+
+[patch.crates-io]
+tower = { git = "https://github.com/tower-rs/tower", rev = "ad348d8" }

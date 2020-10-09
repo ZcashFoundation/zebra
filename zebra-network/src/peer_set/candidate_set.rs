@@ -5,7 +5,7 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use tower::{Service, ServiceExt};
 use tracing::Level;
 
-use crate::{types::MetaAddr, AddressBook, BoxedStdError, Request, Response};
+use crate::{types::MetaAddr, AddressBook, BoxError, Request, Response};
 
 /// The `CandidateSet` maintains a pool of candidate peers.
 ///
@@ -84,7 +84,7 @@ pub(super) struct CandidateSet<S> {
 
 impl<S> CandidateSet<S>
 where
-    S: Service<Request, Response = Response, Error = BoxedStdError>,
+    S: Service<Request, Response = Response, Error = BoxError>,
     S::Future: Send + 'static,
 {
     pub fn new(peer_set: Arc<Mutex<AddressBook>>, peer_service: S) -> CandidateSet<S> {
@@ -97,7 +97,7 @@ where
         }
     }
 
-    pub async fn update(&mut self) -> Result<(), BoxedStdError> {
+    pub async fn update(&mut self) -> Result<(), BoxError> {
         // Opportunistically crawl the network on every update call to ensure
         // we're actively fetching peers. Continue independently of whether we
         // actually receive any peers, but always ask the network for more.
@@ -106,7 +106,8 @@ where
         // existing peers, but we don't make too many because update may be
         // called while the peer set is already loaded.
         let mut responses = FuturesUnordered::new();
-        for _ in 0..2usize {
+        // Yes this loops only once (for now), until we add fanout back.
+        for _ in 0..1usize {
             self.peer_service.ready_and().await?;
             responses.push(self.peer_service.call(Request::Peers));
         }

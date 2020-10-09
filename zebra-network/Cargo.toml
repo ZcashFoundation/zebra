@@ -15,17 +15,16 @@ chrono = "0.4"
 hex = "0.4"
 # indexmap has rayon support for parallel iteration,
 # which we don't use, so disable it to drop the dependencies.
-indexmap = { version = "1.5", default-features = false }
+indexmap = { version = "1.6", default-features = false }
 pin-project = "0.4"
 rand = "0.7"
 serde = { version = "1", features = ["serde_derive"] }
 thiserror = "1"
 
 futures = "0.3"
-tokio = { version = "0.2.22", features = ["net", "time", "stream", "tracing"] }
+tokio = { version = "0.2.22", features = ["net", "time", "stream", "tracing", "macros"] }
 tokio-util = { version = "0.2", features = ["codec"] }
-tower = "0.3"
-tower-load = "0.3"
+tower = { version = "0.3", features = ["retry", "discover", "load", "load-shed", "timeout", "util", "buffer"] }
 
 metrics = "0.12"
 tracing = "0.1"

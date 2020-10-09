@@ -2,10 +2,9 @@
 
 use super::*;
 
-use std::ops::Bound::*;
 use std::sync::Arc;
 
-use zebra_chain::parameters::{Network, Network::*, NetworkUpgrade, NetworkUpgrade::*};
+use zebra_chain::parameters::{Network, Network::*, NetworkUpgrade::*};
 use zebra_chain::{
     block::{self, Block},
     serialization::ZcashDeserialize,
@@ -13,7 +12,7 @@ use zebra_chain::{
 
 /// Make a checkpoint list containing only the genesis block
 #[test]
-fn checkpoint_list_genesis() -> Result<(), Error> {
+fn checkpoint_list_genesis() -> Result<(), BoxError> {
     zebra_test::init();
 
     // Parse the genesis block
@@ -36,7 +35,7 @@ fn checkpoint_list_genesis() -> Result<(), Error> {
 
 /// Make a checkpoint list containing multiple blocks
 #[test]
-fn checkpoint_list_multiple() -> Result<(), Error> {
+fn checkpoint_list_multiple() -> Result<(), BoxError> {
     zebra_test::init();
 
     // Parse all the blocks
@@ -65,7 +64,7 @@ fn checkpoint_list_multiple() -> Result<(), Error> {
 
 /// Make sure that an empty checkpoint list fails
 #[test]
-fn checkpoint_list_empty_fail() -> Result<(), Error> {
+fn checkpoint_list_empty_fail() -> Result<(), BoxError> {
     zebra_test::init();
 
     let _ = CheckpointList::from_list(Vec::new()).expect_err("empty checkpoint lists should fail");
@@ -75,7 +74,7 @@ fn checkpoint_list_empty_fail() -> Result<(), Error> {
 
 /// Make sure a checkpoint list that doesn't contain the genesis block fails
 #[test]
-fn checkpoint_list_no_genesis_fail() -> Result<(), Error> {
+fn checkpoint_list_no_genesis_fail() -> Result<(), BoxError> {
     zebra_test::init();
 
     // Parse a non-genesis block
@@ -98,7 +97,7 @@ fn checkpoint_list_no_genesis_fail() -> Result<(), Error> {
 
 /// Make sure a checkpoint list that contains a null hash fails
 #[test]
-fn checkpoint_list_null_hash_fail() -> Result<(), Error> {
+fn checkpoint_list_null_hash_fail() -> Result<(), BoxError> {
     zebra_test::init();
 
     let checkpoint_data = vec![(block::Height(0), block::Hash([0; 32]))];
@@ -114,7 +113,7 @@ fn checkpoint_list_null_hash_fail() -> Result<(), Error> {
 
 /// Make sure a checkpoint list that contains an invalid block height fails
 #[test]
-fn checkpoint_list_bad_height_fail() -> Result<(), Error> {
+fn checkpoint_list_bad_height_fail() -> Result<(), BoxError> {
     zebra_test::init();
 
     let checkpoint_data = vec![(
@@ -142,7 +141,7 @@ fn checkpoint_list_bad_height_fail() -> Result<(), Error> {
 
 /// Make sure that a checkpoint list containing duplicate blocks fails
 #[test]
-fn checkpoint_list_duplicate_blocks_fail() -> Result<(), Error> {
+fn checkpoint_list_duplicate_blocks_fail() -> Result<(), BoxError> {
     zebra_test::init();
 
     // Parse some blocks twice
@@ -170,7 +169,7 @@ fn checkpoint_list_duplicate_blocks_fail() -> Result<(), Error> {
 /// Make sure that a checkpoint list containing duplicate heights
 /// (with different hashes) fails
 #[test]
-fn checkpoint_list_duplicate_heights_fail() -> Result<(), Error> {
+fn checkpoint_list_duplicate_heights_fail() -> Result<(), BoxError> {
     zebra_test::init();
 
     // Parse the genesis block
@@ -198,7 +197,7 @@ fn checkpoint_list_duplicate_heights_fail() -> Result<(), Error> {
 /// Make sure that a checkpoint list containing duplicate hashes
 /// (at different heights) fails
 #[test]
-fn checkpoint_list_duplicate_hashes_fail() -> Result<(), Error> {
+fn checkpoint_list_duplicate_hashes_fail() -> Result<(), BoxError> {
     zebra_test::init();
 
     // Parse the genesis block
@@ -225,7 +224,7 @@ fn checkpoint_list_duplicate_hashes_fail() -> Result<(), Error> {
 
 /// Parse and check the hard-coded Mainnet and Testnet lists
 #[test]
-fn checkpoint_list_load_hard_coded() -> Result<(), Error> {
+fn checkpoint_list_load_hard_coded() -> Result<(), BoxError> {
     zebra_test::init();
 
     let _: CheckpointList = MAINNET_CHECKPOINTS
@@ -242,17 +241,17 @@ fn checkpoint_list_load_hard_coded() -> Result<(), Error> {
 }
 
 #[test]
-fn checkpoint_list_hard_coded_sapling_mainnet() -> Result<(), Error> {
+fn checkpoint_list_hard_coded_sapling_mainnet() -> Result<(), BoxError> {
     checkpoint_list_hard_coded_sapling(Mainnet)
 }
 
 #[test]
-fn checkpoint_list_hard_coded_sapling_testnet() -> Result<(), Error> {
+fn checkpoint_list_hard_coded_sapling_testnet() -> Result<(), BoxError> {
     checkpoint_list_hard_coded_sapling(Testnet)
 }
 
 /// Check that the hard-coded lists cover the Sapling network upgrade
-fn checkpoint_list_hard_coded_sapling(network: Network) -> Result<(), Error> {
+fn checkpoint_list_hard_coded_sapling(network: Network) -> Result<(), BoxError> {
     zebra_test::init();
 
     let sapling_activation = Sapling
@@ -264,87 +263,6 @@ fn checkpoint_list_hard_coded_sapling(network: Network) -> Result<(), Error> {
     assert!(
         list.max_height() >= sapling_activation,
         "Pre-Sapling blocks must be verified by checkpoints"
-    );
-
-    Ok(())
-}
-
-#[test]
-fn checkpoint_list_up_to_mainnet() -> Result<(), Error> {
-    checkpoint_list_up_to(Mainnet, Sapling)?;
-    checkpoint_list_up_to(Mainnet, Blossom)?;
-    checkpoint_list_up_to(Mainnet, Heartwood)?;
-    checkpoint_list_up_to(Mainnet, Canopy)?;
-
-    Ok(())
-}
-
-#[test]
-fn checkpoint_list_up_to_testnet() -> Result<(), Error> {
-    checkpoint_list_up_to(Testnet, Sapling)?;
-    checkpoint_list_up_to(Testnet, Blossom)?;
-    checkpoint_list_up_to(Testnet, Heartwood)?;
-    checkpoint_list_up_to(Testnet, Canopy)?;
-
-    Ok(())
-}
-
-/// Check that CheckpointList::new_up_to works
-fn checkpoint_list_up_to(network: Network, limit: NetworkUpgrade) -> Result<(), Error> {
-    zebra_test::init();
-
-    let sapling_activation = Sapling
-        .activation_height(network)
-        .expect("Unexpected network upgrade info: Sapling must have an activation height");
-
-    let limited_list = CheckpointList::new_up_to(network, limit);
-    let full_list = CheckpointList::new(network);
-
-    assert!(
-        limited_list.max_height() >= sapling_activation,
-        "Pre-Sapling blocks must be verified by checkpoints"
-    );
-
-    if let Some(limit_activation) = limit.activation_height(network) {
-        if limit_activation <= full_list.max_height() {
-            assert!(
-                limited_list.max_height() >= limit_activation,
-                "The 'limit' network upgrade must be verified by checkpoints"
-            );
-
-            let next_checkpoint_after_limit = limited_list
-                .min_height_in_range((Included(limit_activation), Unbounded))
-                .expect("There must be a checkpoint at or after the limit");
-
-            assert_eq!(
-                limited_list
-                    .min_height_in_range((Excluded(next_checkpoint_after_limit), Unbounded)),
-                None,
-                "There must not be multiple checkpoints after the limit"
-            );
-
-            let next_activation = NetworkUpgrade::next(network, limit_activation)
-                .map(|nu| nu.activation_height(network))
-                .flatten();
-            if let Some(next_activation) = next_activation {
-                // We expect that checkpoints happen much more often than network upgrades
-                assert!(
-                    limited_list.max_height() < next_activation,
-                    "The next network upgrade after 'limit' must not be verified by checkpoints"
-                );
-            }
-
-            // We have an effective limit, so skip the "no limit" test
-            return Ok(());
-        }
-    }
-
-    // Either the activation height is unspecified, or it is above the maximum
-    // checkpoint height (in the full checkpoint list)
-    assert_eq!(
-        limited_list.max_height(),
-        full_list.max_height(),
-        "Future network upgrades must not limit checkpoints"
     );
 
     Ok(())

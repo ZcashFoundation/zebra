@@ -2,19 +2,27 @@ use std::env;
 use std::io::ErrorKind;
 
 use proptest::{arbitrary::any, prelude::*, test_runner::Config};
+use zebra_test::prelude::*;
 
-use crate::parameters::Network;
 use crate::serialization::{SerializationError, ZcashDeserializeInto, ZcashSerialize};
+use crate::{block, parameters::Network, LedgerState};
 
 use super::super::{serialize::MAX_BLOCK_BYTES, *};
 
 proptest! {
     #[test]
-    fn blockheaderhash_roundtrip(hash in any::<Hash>()) {
+    fn block_hash_roundtrip(hash in any::<Hash>()) {
         let bytes = hash.zcash_serialize_to_vec()?;
         let other_hash: Hash = bytes.zcash_deserialize_into()?;
 
         prop_assert_eq![hash, other_hash];
+    }
+
+    #[test]
+    fn block_hash_display_fromstr_roundtrip(hash in any::<Hash>()) {
+        let display = format!("{}", hash);
+        let parsed = display.parse::<Hash>().expect("hash should parse");
+        prop_assert_eq!(hash, parsed);
     }
 
     #[test]
@@ -80,4 +88,24 @@ proptest! {
             }
         }
     }
+}
+
+#[test]
+fn blocks_have_coinbase() -> Result<()> {
+    zebra_test::init();
+
+    let strategy = any::<block::Height>()
+        .prop_map(|tip_height| LedgerState {
+            tip_height,
+            is_coinbase: true,
+            network: Network::Mainnet,
+        })
+        .prop_flat_map(Block::arbitrary_with);
+
+    proptest!(|(block in strategy)| {
+        let has_coinbase = block.coinbase_height().is_some();
+        prop_assert!(has_coinbase);
+    });
+
+    Ok(())
 }

@@ -34,9 +34,10 @@
 #![doc(html_logo_url = "https://www.zfnd.org/images/zebra-icon.png")]
 #![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_network")]
 #![deny(missing_docs)]
+#![allow(clippy::try_err)]
 // Tracing causes false positives on this lint:
 // https://github.com/tokio-rs/tracing/issues/553
-#![allow(clippy::cognitive_complexity, clippy::try_err)]
+#![allow(clippy::cognitive_complexity)]
 
 #[macro_use]
 extern crate pin_project;
@@ -52,11 +53,12 @@ extern crate bitflags;
 /// Note: the 'static lifetime bound means that the *type* cannot have any
 /// non-'static lifetimes, (e.g., when a type contains a borrow and is
 /// parameterized by 'a), *not* that the object itself has 'static lifetime.
-pub type BoxedStdError = Box<dyn std::error::Error + Send + Sync + 'static>;
+pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 mod address_book;
 mod config;
 mod constants;
+mod isolated;
 mod meta_addr;
 mod peer;
 mod peer_set;
@@ -67,6 +69,7 @@ mod timestamp_collector;
 pub use crate::{
     address_book::AddressBook,
     config::Config,
+    isolated::connect_isolated,
     peer_set::init,
     policies::{RetryErrors, RetryLimit},
     protocol::internal::{Request, Response},

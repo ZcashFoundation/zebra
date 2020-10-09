@@ -1,7 +1,7 @@
 #![allow(clippy::unit_arg)]
 use std::fmt;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 use serde::{Deserialize, Serialize};
 
@@ -9,21 +9,27 @@ use crate::serialization::{sha256d, SerializationError, ZcashSerialize};
 
 use super::Transaction;
 
-/// A hash of a `Transaction`
+/// A transaction hash.
 ///
-/// TODO: I'm pretty sure this is also a SHA256d hash but I haven't
-/// confirmed it yet.
+/// Note: Zebra displays transaction and block hashes in their actual byte-order,
+/// not in reversed byte-order.
 #[derive(Copy, Clone, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(test, derive(Arbitrary))]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct Hash(pub [u8; 32]);
 
-impl From<Transaction> for Hash {
-    fn from(transaction: Transaction) -> Self {
+impl<'a> From<&'a Transaction> for Hash {
+    fn from(transaction: &'a Transaction) -> Self {
         let mut hash_writer = sha256d::Writer::default();
         transaction
             .zcash_serialize(&mut hash_writer)
             .expect("Transactions must serialize into the hash.");
         Self(hash_writer.finish())
+    }
+}
+
+impl fmt::Display for Hash {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(&hex::encode(&self.0))
     }
 }
 

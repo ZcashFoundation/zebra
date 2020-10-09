@@ -11,12 +11,13 @@ use std::{
     ops::RangeInclusive,
 };
 
-use byteorder::{ByteOrder, LittleEndian};
+use crate::serialization::{ZcashDeserialize, ZcashSerialize};
+use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
 
 type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// A runtime validated type for representing amounts of zatoshis
-#[derive(Debug, Eq, PartialEq, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Eq, PartialEq, Clone, Copy, Serialize, Deserialize, Hash)]
 #[serde(try_from = "i64")]
 #[serde(bound = "C: Constraint")]
 pub struct Amount<C = NegativeAllowed>(i64, PhantomData<C>);
@@ -233,7 +234,7 @@ impl Constraint for NegativeAllowed {
 ///     0..=MAX_MONEY,
 /// );
 /// ```
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct NonNegative {}
 
 impl Constraint for NonNegative {
@@ -262,25 +263,59 @@ pub trait Constraint {
     }
 }
 
+impl ZcashSerialize for Amount<NegativeAllowed> {
+    fn zcash_serialize<W: std::io::Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
+        writer.write_i64::<LittleEndian>(self.0)
+    }
+}
+
+impl ZcashDeserialize for Amount<NegativeAllowed> {
+    fn zcash_deserialize<R: std::io::Read>(
+        mut reader: R,
+    ) -> Result<Self, crate::serialization::SerializationError> {
+        Ok(reader.read_i64::<LittleEndian>()?.try_into()?)
+    }
+}
+
+impl ZcashSerialize for Amount<NonNegative> {
+    fn zcash_serialize<W: std::io::Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
+        let amount = self
+            .0
+            .try_into()
+            .expect("constraint guarantees value is positive");
+
+        writer.write_u64::<LittleEndian>(amount)
+    }
+}
+
+impl ZcashDeserialize for Amount<NonNegative> {
+    fn zcash_deserialize<R: std::io::Read>(
+        mut reader: R,
+    ) -> Result<Self, crate::serialization::SerializationError> {
+        Ok(reader.read_u64::<LittleEndian>()?.try_into()?)
+    }
+}
+
+#[cfg(any(test, feature = "proptest-impl"))]
+use proptest::prelude::*;
+#[cfg(any(test, feature = "proptest-impl"))]
+impl<C> Arbitrary for Amount<C>
+where
+    C: Constraint + std::fmt::Debug,
+{
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        C::valid_range().prop_map(|v| Self(v, PhantomData)).boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
     use color_eyre::eyre::Result;
-    use proptest::prelude::*;
-    use std::fmt;
-
-    impl<C> Arbitrary for Amount<C>
-    where
-        C: Constraint + fmt::Debug,
-    {
-        type Parameters = ();
-
-        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-            C::valid_range().prop_map(|v| Self(v, PhantomData)).boxed()
-        }
-
-        type Strategy = BoxedStrategy<Self>;
-    }
 
     #[test]
     fn test_add_bare() -> Result<()> {

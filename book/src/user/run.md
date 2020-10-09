@@ -10,8 +10,6 @@ structure, and documentation for all of the config options can be found
 [here](https://doc.zebra.zfnd.org/zebrad/config/struct.ZebradConfig.html).
 
 * `zebrad start` starts a full node.
-* `zebrad seed` starts a crawler that can power a DNS seeder, but does not
-  attempt to sync the chain state.
 
 ## Return Codes
 

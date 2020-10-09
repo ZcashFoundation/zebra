@@ -15,7 +15,7 @@ We use several different design patterns to enable this parallelism:
 * We download blocks and start verifying them in parallel,
 * We batch signature and proof verification using verification services, and
 * We defer data dependencies until just before the block is committed to the
-  state (see the detaled design RFCs).
+  state (see the detailed design RFCs).
 
 # Motivation
 [motivation]: #motivation
@@ -51,7 +51,7 @@ Data:
 * **data dependency:** Information contained in the previous block and its
                        chain fork, which is required to verify the current block.
 * **state:** The set of verified blocks. The state might also cache some
-             dependent data, so that we can efficienty verify subsequent blocks.
+             dependent data, so that we can efficiently verify subsequent blocks.
 
 Verification Stages:
 <!-- The verification stages are listed in chronological order -->
@@ -79,7 +79,7 @@ the verification in parallel.
 ## Example: BlockHeight
 [block-height]: #block-height
 
-Here's how Zebra can verify the different `BlockHeight` consensus rules in
+Here's how Zebra can verify the different Block Height consensus rules in
 parallel:
 
 **Structural Verification:**
@@ -93,10 +93,10 @@ parallel:
 
 **Semantic Verification: Deferring a Data Dependency:**
 
-3. Verify other consensus rules that depend on BlockHeight, assuming that the
-   BlockHeight is correct. For example, many consensus rules depend on the
-   current Network Upgrade, which is determined by the BlockHeight. We verify
-   these consensus rules, assuming the BlockHeight and Network Upgrade are
+3. Verify other consensus rules that depend on Block Height, assuming that the
+   Block Height is correct. For example, many consensus rules depend on the
+   current Network Upgrade, which is determined by the Block Height. We verify
+   these consensus rules, assuming the Block Height and Network Upgrade are
    correct.
 
 **Contextual Verification:**
@@ -125,12 +125,12 @@ When designing changes to Zebra verification, use these design patterns:
 
 Keep the data dependencies and checks as simple as possible.
 
-For example, Zebra could defer checking both the BlockHeight and Network Upgrade.
+For example, Zebra could defer checking both the Block Height and Network Upgrade.
 
-But since the Network Upgrade depends on the BlockHeight, we only need to defer
-the BlockHeight check. Then we can use all the fields that depend on the
-BlockHeight, as if it is correct. If the final BlockHeight check fails, we will
-reject the entire block, including all the verification we perfomed using the
+But since the Network Upgrade depends on the Block Height, we only need to defer
+the Block Height check. Then we can use all the fields that depend on the
+Block Height, as if it is correct. If the final Block Height check fails, we will
+reject the entire block, including all the verification we performed using the
 assumed Network Upgrade.
 
 ### Implementation Strategy
@@ -175,7 +175,7 @@ Verification is implemented by the following traits and services:
     data structures from a byte buffer.
 * **Semantic Verification:**
   * `ChainVerifier`: Provides a verifier service that accepts a `Block` request,
-    performs verification on the block, and responds with a `BlockHeaderHash` on
+    performs verification on the block, and responds with a `block::Hash` on
     success.
   * Internally, the `ChainVerifier` selects between a `CheckpointVerifier` for
     blocks that are within the checkpoint range, and a `BlockVerifier` for

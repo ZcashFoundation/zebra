@@ -1,52 +1,107 @@
 //! Acceptance test: runs zebrad as a subprocess and asserts its
 //! output for given argument combinations matches what is expected.
+//!
+//! ### Note on port conflict
+//! If the test child has a cache or port conflict with another test, or a
+//! running zebrad or zcashd, then it will panic. But the acceptance tests
+//! expect it to run until it is killed.
+//!
+//! If these conflicts cause test failures:
+//!   - run the tests in an isolated environment,
+//!   - run zebrad on a custom cache path and port,
+//!   - run zcashd on a custom port.
 
 #![warn(warnings, missing_docs, trivial_casts, unused_qualifications)]
 #![forbid(unsafe_code)]
 
 use color_eyre::eyre::Result;
-use std::{fs, io::Write, path::PathBuf, time::Duration};
+use eyre::WrapErr;
 use tempdir::TempDir;
+
+use std::{borrow::Borrow, fs, io::Write, time::Duration};
 
 use zebra_test::prelude::*;
 use zebrad::config::ZebradConfig;
 
-pub fn tempdir(create_config: bool) -> Result<(PathBuf, impl Drop)> {
-    let dir = TempDir::new("zebrad_tests")?;
+fn default_test_config() -> Result<ZebradConfig> {
+    let mut config = ZebradConfig::default();
+    config.state = zebra_state::Config::ephemeral();
+    config.state.memory_cache_bytes = 256000000;
+    config.network.listen_addr = "127.0.0.1:0".parse()?;
 
-    if create_config {
-        let cache_dir = dir.path().join("state");
-        fs::create_dir(&cache_dir)?;
-
-        let mut config = ZebradConfig::default();
-        config.state.cache_dir = cache_dir;
-        config.state.memory_cache_bytes = 256000000;
-        config.network.listen_addr = "127.0.0.1:0".parse()?;
-
-        fs::File::create(dir.path().join("zebrad.toml"))?
-            .write_all(toml::to_string(&config)?.as_bytes())?;
-    }
-
-    Ok((dir.path().to_path_buf(), dir))
+    Ok(config)
 }
 
-pub fn get_child(args: &[&str], tempdir: &PathBuf) -> Result<TestChild> {
-    let mut cmd = test_cmd(env!("CARGO_BIN_EXE_zebrad"), &tempdir)?;
+fn persistent_test_config() -> Result<ZebradConfig> {
+    let mut config = default_test_config()?;
+    config.state.ephemeral = false;
+    Ok(config)
+}
 
-    Ok(cmd
-        .args(args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn2()
-        .unwrap())
+fn testdir() -> Result<TempDir> {
+    TempDir::new("zebrad_tests").map_err(Into::into)
+}
+
+/// Extension trait for methods on `tempdir::TempDir` for using it as a test
+/// directory.
+trait TestDirExt
+where
+    Self: Borrow<TempDir> + Sized,
+{
+    /// Spawn the zebrad as a child process in this test directory, potentially
+    /// taking ownership of the tempdir for the duration of the child process.
+    fn spawn_child(self, args: &[&str]) -> Result<TestChild<Self>>;
+
+    /// Add the given config to the test directory and use it for all
+    /// subsequently spawned processes.
+    fn with_config(self, config: ZebradConfig) -> Result<Self>;
+}
+
+impl<T> TestDirExt for T
+where
+    Self: Borrow<TempDir> + Sized,
+{
+    fn spawn_child(self, args: &[&str]) -> Result<TestChild<Self>> {
+        let tempdir = self.borrow();
+        let mut cmd = test_cmd(env!("CARGO_BIN_EXE_zebrad"), tempdir.path())?;
+
+        let default_config_path = tempdir.path().join("zebrad.toml");
+
+        if default_config_path.exists() {
+            cmd.arg("-c").arg(default_config_path);
+        }
+
+        Ok(cmd
+            .args(args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn2(self)
+            .unwrap())
+    }
+
+    fn with_config(self, mut config: ZebradConfig) -> Result<Self> {
+        let dir = self.borrow().path();
+
+        if !config.state.ephemeral {
+            let cache_dir = dir.join("state");
+            fs::create_dir(&cache_dir)?;
+            config.state.cache_dir = cache_dir;
+        }
+
+        fs::File::create(dir.join("zebrad.toml"))?
+            .write_all(toml::to_string(&config)?.as_bytes())?;
+
+        Ok(self)
+    }
 }
 
 #[test]
 fn generate_no_args() -> Result<()> {
     zebra_test::init();
-    let (tempdir, _guard) = tempdir(true)?;
+    let child = testdir()?
+        .with_config(default_test_config()?)?
+        .spawn_child(&["generate"])?;
 
-    let child = get_child(&["generate"], &tempdir)?;
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
@@ -56,44 +111,57 @@ fn generate_no_args() -> Result<()> {
     Ok(())
 }
 
+macro_rules! assert_with_context {
+    ($pred:expr, $source:expr) => {
+        if !$pred {
+            use color_eyre::Section as _;
+            use color_eyre::SectionExt as _;
+            use zebra_test::command::ContextFrom as _;
+            let report = color_eyre::eyre::eyre!("failed assertion")
+                .section(stringify!($pred).header("Predicate:"))
+                .context_from($source);
+
+            panic!("Error: {:?}", report);
+        }
+    };
+}
+
 #[test]
 fn generate_args() -> Result<()> {
     zebra_test::init();
-    let (tempdir, _guard) = tempdir(false)?;
+    let testdir = testdir()?;
+    let testdir = &testdir;
 
     // unexpected free argument `argument`
-    let child = get_child(&["generate", "argument"], &tempdir)?;
+    let child = testdir.spawn_child(&["generate", "argument"])?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
     // unrecognized option `-f`
-    let child = get_child(&["generate", "-f"], &tempdir)?;
+    let child = testdir.spawn_child(&["generate", "-f"])?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
     // missing argument to option `-o`
-    let child = get_child(&["generate", "-o"], &tempdir)?;
+    let child = testdir.spawn_child(&["generate", "-o"])?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
     // Add a config file name to tempdir path
-    let mut generated_config_path = tempdir.clone();
-    generated_config_path.push("zebrad.toml");
+    let generated_config_path = testdir.path().join("zebrad.toml");
 
     // Valid
-    let child = get_child(
-        &["generate", "-o", generated_config_path.to_str().unwrap()],
-        &tempdir,
-    )?;
+    let child =
+        testdir.spawn_child(&["generate", "-o", generated_config_path.to_str().unwrap()])?;
 
     let output = child.wait_with_output()?;
-    output.assert_success()?;
+    let output = output.assert_success()?;
 
     // Check if the temp dir still exist
-    assert!(tempdir.exists());
+    assert_with_context!(testdir.path().exists(), &output);
 
     // Check if the file was created
-    assert!(generated_config_path.exists());
+    assert_with_context!(generated_config_path.exists(), &output);
 
     Ok(())
 }
@@ -101,9 +169,9 @@ fn generate_args() -> Result<()> {
 #[test]
 fn help_no_args() -> Result<()> {
     zebra_test::init();
-    let (tempdir, _guard) = tempdir(true)?;
+    let testdir = testdir()?.with_config(default_test_config()?)?;
 
-    let child = get_child(&["help"], &tempdir)?;
+    let child = testdir.spawn_child(&["help"])?;
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
@@ -119,15 +187,16 @@ fn help_no_args() -> Result<()> {
 #[test]
 fn help_args() -> Result<()> {
     zebra_test::init();
-    let (tempdir, _guard) = tempdir(true)?;
+    let testdir = testdir()?;
+    let testdir = &testdir;
 
     // The subcommand "argument" wasn't recognized.
-    let child = get_child(&["help", "argument"], &tempdir)?;
+    let child = testdir.spawn_child(&["help", "argument"])?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
     // option `-f` does not accept an argument
-    let child = get_child(&["help", "-f"], &tempdir)?;
+    let child = testdir.spawn_child(&["help", "-f"])?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
@@ -137,10 +206,10 @@ fn help_args() -> Result<()> {
 #[test]
 fn revhex_args() -> Result<()> {
     zebra_test::init();
-    let (tempdir, _guard) = tempdir(true)?;
+    let testdir = testdir()?.with_config(default_test_config()?)?;
 
     // Valid
-    let child = get_child(&["revhex", "33eeff55"], &tempdir)?;
+    let child = testdir.spawn_child(&["revhex", "33eeff55"])?;
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
@@ -150,56 +219,12 @@ fn revhex_args() -> Result<()> {
 }
 
 #[test]
-fn seed_no_args() -> Result<()> {
-    zebra_test::init();
-    let (tempdir, _guard) = tempdir(true)?;
-
-    let mut child = get_child(&["-v", "seed"], &tempdir)?;
-
-    // Run the program and kill it at 1 second
-    std::thread::sleep(Duration::from_secs(1));
-    child.kill()?;
-
-    let output = child.wait_with_output()?;
-    let output = output.assert_failure()?;
-
-    output.stdout_contains(r"Starting zebrad in seed mode")?;
-
-    // Make sure the command was killed
-    assert!(output.was_killed());
-
-    Ok(())
-}
-
-#[test]
-fn seed_args() -> Result<()> {
-    zebra_test::init();
-    let (tempdir, _guard) = tempdir(true)?;
-
-    // unexpected free argument `argument`
-    let child = get_child(&["seed", "argument"], &tempdir)?;
-    let output = child.wait_with_output()?;
-    output.assert_failure()?;
-
-    // unrecognized option `-f`
-    let child = get_child(&["seed", "-f"], &tempdir)?;
-    let output = child.wait_with_output()?;
-    output.assert_failure()?;
-
-    // unexpected free argument `start`
-    let child = get_child(&["seed", "start"], &tempdir)?;
-    let output = child.wait_with_output()?;
-    output.assert_failure()?;
-
-    Ok(())
-}
-
-#[test]
 fn start_no_args() -> Result<()> {
     zebra_test::init();
-    let (tempdir, _guard) = tempdir(true)?;
+    // start caches state, so run one of the start tests with persistent state
+    let testdir = testdir()?.with_config(persistent_test_config()?)?;
 
-    let mut child = get_child(&["-v", "start"], &tempdir)?;
+    let mut child = testdir.spawn_child(&["-v", "start"])?;
 
     // Run the program and kill it at 1 second
     std::thread::sleep(Duration::from_secs(1));
@@ -208,12 +233,10 @@ fn start_no_args() -> Result<()> {
     let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
 
-    // start is the default mode, so we check for end of line, to distinguish it
-    // from seed
     output.stdout_contains(r"Starting zebrad$")?;
 
     // Make sure the command was killed
-    assert!(output.was_killed());
+    output.assert_was_killed()?;
 
     Ok(())
 }
@@ -221,22 +244,23 @@ fn start_no_args() -> Result<()> {
 #[test]
 fn start_args() -> Result<()> {
     zebra_test::init();
-    let (tempdir, _guard) = tempdir(true)?;
+    let testdir = testdir()?.with_config(default_test_config()?)?;
+    let testdir = &testdir;
 
     // Any free argument is valid
-    let mut child = get_child(&["start", "argument"], &tempdir)?;
+    let mut child = testdir.spawn_child(&["start", "argument"])?;
     // Run the program and kill it at 1 second
     std::thread::sleep(Duration::from_secs(1));
     child.kill()?;
     let output = child.wait_with_output()?;
 
     // Make sure the command was killed
-    assert!(output.was_killed());
+    output.assert_was_killed()?;
 
     output.assert_failure()?;
 
     // unrecognized option `-f`
-    let child = get_child(&["start", "-f"], &tempdir)?;
+    let child = testdir.spawn_child(&["start", "-f"])?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
@@ -244,11 +268,98 @@ fn start_args() -> Result<()> {
 }
 
 #[test]
+fn persistent_mode() -> Result<()> {
+    zebra_test::init();
+    let testdir = testdir()?.with_config(persistent_test_config()?)?;
+    let testdir = &testdir;
+
+    let mut child = testdir.spawn_child(&["-v", "start"])?;
+
+    // Run the program and kill it at 1 second
+    std::thread::sleep(Duration::from_secs(1));
+    child.kill()?;
+    let output = child.wait_with_output()?;
+
+    // Make sure the command was killed
+    output.assert_was_killed()?;
+
+    // Check that we have persistent sled database
+    let cache_dir = testdir.path().join("state");
+    assert_with_context!(cache_dir.read_dir()?.count() > 0, &output);
+
+    Ok(())
+}
+
+#[test]
+fn ephemeral_mode() -> Result<()> {
+    zebra_test::init();
+    let testdir = testdir()?.with_config(default_test_config()?)?;
+    let testdir = &testdir;
+
+    // Any free argument is valid
+    let mut child = testdir.spawn_child(&["start", "argument"])?;
+    // Run the program and kill it at 1 second
+    std::thread::sleep(Duration::from_secs(1));
+    child.kill()?;
+    let output = child.wait_with_output()?;
+
+    // Make sure the command was killed
+    output.assert_was_killed()?;
+
+    let cache_dir = testdir.path().join("state");
+    assert_with_context!(!cache_dir.exists(), &output);
+
+    Ok(())
+}
+
+#[test]
+fn misconfigured_ephemeral_mode() -> Result<()> {
+    zebra_test::init();
+
+    let dir = TempDir::new("zebrad_tests")?;
+    let cache_dir = dir.path().join("state");
+    fs::create_dir(&cache_dir)?;
+
+    // Write a configuration that has both cache_dir and ephemeral options set
+    let mut config = default_test_config()?;
+    // Although cache_dir has a default value, we set it a new temp directory
+    // to test that it is empty later.
+    config.state.cache_dir = cache_dir.clone();
+
+    fs::File::create(dir.path().join("zebrad.toml"))?
+        .write_all(toml::to_string(&config)?.as_bytes())?;
+
+    // Any free argument is valid
+    let mut child = dir
+        .with_config(config)?
+        .spawn_child(&["start", "argument"])?;
+    // Run the program and kill it at 1 second
+    std::thread::sleep(Duration::from_secs(1));
+    child.kill()?;
+    let output = child.wait_with_output()?;
+
+    // Make sure the command was killed
+    output.assert_was_killed()?;
+
+    // Check that ephemeral takes precedence over cache_dir
+    assert_with_context!(
+        cache_dir
+            .read_dir()
+            .expect("cache_dir should still exist")
+            .count()
+            == 0,
+        &output
+    );
+
+    Ok(())
+}
+
+#[test]
 fn app_no_args() -> Result<()> {
     zebra_test::init();
-    let (tempdir, _guard) = tempdir(true)?;
+    let testdir = testdir()?.with_config(default_test_config()?)?;
 
-    let child = get_child(&[], &tempdir)?;
+    let child = testdir.spawn_child(&[])?;
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
@@ -260,9 +371,9 @@ fn app_no_args() -> Result<()> {
 #[test]
 fn version_no_args() -> Result<()> {
     zebra_test::init();
-    let (tempdir, _guard) = tempdir(true)?;
+    let testdir = testdir()?.with_config(default_test_config()?)?;
 
-    let child = get_child(&["version"], &tempdir)?;
+    let child = testdir.spawn_child(&["version"])?;
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
@@ -274,15 +385,16 @@ fn version_no_args() -> Result<()> {
 #[test]
 fn version_args() -> Result<()> {
     zebra_test::init();
-    let (tempdir, _guard) = tempdir(true)?;
+    let testdir = testdir()?.with_config(default_test_config()?)?;
+    let testdir = &testdir;
 
     // unexpected free argument `argument`
-    let child = get_child(&["version", "argument"], &tempdir)?;
+    let child = testdir.spawn_child(&["version", "argument"])?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
     // unrecognized option `-f`
-    let child = get_child(&["version", "-f"], &tempdir)?;
+    let child = testdir.spawn_child(&["version", "-f"])?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
@@ -295,36 +407,30 @@ fn valid_generated_config_test() -> Result<()> {
     // they use the generated config. So parallel execution can cause port and
     // cache conflicts.
     valid_generated_config("start", r"Starting zebrad$")?;
-    valid_generated_config("seed", r"Starting zebrad in seed mode")?;
 
     Ok(())
 }
 
 fn valid_generated_config(command: &str, expected_output: &str) -> Result<()> {
     zebra_test::init();
-    let (tempdir, _guard) = tempdir(false)?;
+    let testdir = testdir()?;
+    let testdir = &testdir;
 
     // Add a config file name to tempdir path
-    let mut generated_config_path = tempdir.clone();
-    generated_config_path.push("zebrad.toml");
+    let generated_config_path = testdir.path().join("zebrad.toml");
 
     // Generate configuration in temp dir path
-    let child = get_child(
-        &["generate", "-o", generated_config_path.to_str().unwrap()],
-        &tempdir,
-    )?;
+    let child =
+        testdir.spawn_child(&["generate", "-o", generated_config_path.to_str().unwrap()])?;
 
     let output = child.wait_with_output()?;
-    output.assert_success()?;
+    let output = output.assert_success()?;
 
     // Check if the file was created
-    assert!(generated_config_path.exists());
+    assert_with_context!(generated_config_path.exists(), &output);
 
     // Run command using temp dir and kill it at 1 second
-    let mut child = get_child(
-        &["-c", generated_config_path.to_str().unwrap(), command],
-        &tempdir,
-    )?;
+    let mut child = testdir.spawn_child(&[command])?;
     std::thread::sleep(Duration::from_secs(1));
     child.kill()?;
 
@@ -333,21 +439,146 @@ fn valid_generated_config(command: &str, expected_output: &str) -> Result<()> {
 
     output.stdout_contains(expected_output)?;
 
-    // If the test child has a cache or port conflict with another test, or a
-    // running zebrad or zcashd, then it will panic. But the acceptance tests
-    // expect it to run until it is killed.
-    //
-    // If these conflicts cause test failures:
-    //   - run the tests in an isolated environment,
-    //   - run zebrad on a custom cache path and port,
-    //   - run zcashd on a custom port.
-    assert!(output.was_killed(), "Expected zebrad with generated config to succeed. Are there other acceptance test, zebrad, or zcashd processes running?");
+    // [Note on port conflict](#Note on port conflict)
+    output.assert_was_killed().wrap_err("Possible port or cache conflict. Are there other acceptance test, zebrad, or zcashd processes running?")?;
 
     // Check if the temp dir still exists
-    assert!(tempdir.exists());
+    assert_with_context!(testdir.path().exists(), &output);
 
     // Check if the created config file still exists
-    assert!(generated_config_path.exists());
+    assert_with_context!(generated_config_path.exists(), &output);
+
+    Ok(())
+}
+
+#[test]
+#[ignore]
+fn sync_one_checkpoint() -> Result<()> {
+    zebra_test::init();
+
+    let mut child = testdir()?
+        .with_config(persistent_test_config()?)?
+        .spawn_child(&["start"])?
+        .with_timeout(Duration::from_secs(20));
+
+    child.expect_stdout("verified checkpoint range")?;
+    child.kill()?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn metrics_endpoint() -> Result<()> {
+    use hyper::{Client, Uri};
+
+    zebra_test::init();
+
+    // [Note on port conflict](#Note on port conflict)
+    let endpoint = "127.0.0.1:50001";
+    let url = "http://127.0.0.1:50001";
+
+    // Write a configuration that has metrics endpoint_addr set
+    let mut config = default_test_config()?;
+    config.metrics.endpoint_addr = Some(endpoint.parse().unwrap());
+
+    let dir = TempDir::new("zebrad_tests")?;
+    fs::File::create(dir.path().join("zebrad.toml"))?
+        .write_all(toml::to_string(&config)?.as_bytes())?;
+
+    let mut child = dir.spawn_child(&["start"])?;
+
+    // Run the program for a second before testing the endpoint
+    std::thread::sleep(Duration::from_secs(1));
+
+    // Create an http client
+    let client = Client::new();
+
+    // Test metrics endpoint
+    let res = client.get(Uri::from_static(url)).await?;
+    assert!(res.status().is_success());
+    let body = hyper::body::to_bytes(res).await?;
+    assert!(std::str::from_utf8(&body)
+        .unwrap()
+        .contains("metrics snapshot"));
+
+    child.kill()?;
+
+    let output = child.wait_with_output()?;
+    let output = output.assert_failure()?;
+
+    // Make sure metrics was started
+    output.stdout_contains(format!(r"Initializing metrics endpoint at {}", endpoint).as_str())?;
+
+    // [Note on port conflict](#Note on port conflict)
+    output
+        .assert_was_killed()
+        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore]
+async fn tracing_endpoint() -> Result<()> {
+    use hyper::{Body, Client, Request, Uri};
+
+    zebra_test::init();
+
+    // [Note on port conflict](#Note on port conflict)
+    let endpoint = "127.0.0.1:50002";
+    let url_default = "http://127.0.0.1:50002";
+    let url_filter = "http://127.0.0.1:50002/filter";
+
+    // Write a configuration that has tracing endpoint_addr option set
+    let mut config = default_test_config()?;
+    config.tracing.endpoint_addr = Some(endpoint.parse().unwrap());
+
+    let dir = TempDir::new("zebrad_tests")?;
+    fs::File::create(dir.path().join("zebrad.toml"))?
+        .write_all(toml::to_string(&config)?.as_bytes())?;
+
+    let mut child = dir.spawn_child(&["start"])?;
+
+    // Run the program for a second before testing the endpoint
+    std::thread::sleep(Duration::from_secs(1));
+
+    // Create an http client
+    let client = Client::new();
+
+    // Test tracing endpoint
+    let res = client.get(Uri::from_static(url_default)).await?;
+    assert!(res.status().is_success());
+    let body = hyper::body::to_bytes(res).await?;
+    assert!(std::str::from_utf8(&body).unwrap().contains(
+        "This HTTP endpoint allows dynamic control of the filter applied to\ntracing events."
+    ));
+
+    // Set a filter and make sure it was changed
+    let request = Request::post(url_filter)
+        .body(Body::from("zebrad=debug"))
+        .unwrap();
+    let _post = client.request(request).await?;
+
+    let tracing_res = client.get(Uri::from_static(url_filter)).await?;
+    assert!(tracing_res.status().is_success());
+    let tracing_body = hyper::body::to_bytes(tracing_res).await?;
+    assert!(std::str::from_utf8(&tracing_body)
+        .unwrap()
+        .contains("zebrad=debug"));
+
+    child.kill()?;
+
+    let output = child.wait_with_output()?;
+    let output = output.assert_failure()?;
+
+    // Make sure tracing endpoint was started
+    output.stdout_contains(format!(r"Initializing tracing endpoint at {}", endpoint).as_str())?;
+    // Todo: Match some trace level messages from output
+
+    // [Note on port conflict](#Note on port conflict)
+    output
+        .assert_was_killed()
+        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
 
     Ok(())
 }

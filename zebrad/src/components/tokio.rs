@@ -71,6 +71,7 @@ mod imp {
         };
     }
 
+    #[instrument]
     async fn sig(kind: SignalKind, name: &'static str) {
         // Create a Future that completes the first
         // time the process receives 'sig'.

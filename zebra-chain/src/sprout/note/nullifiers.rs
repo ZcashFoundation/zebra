@@ -37,7 +37,10 @@ fn prf_nf(a_sk: [u8; 32], rho: [u8; 32]) -> [u8; 32] {
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#sproutkeycomponents
 
 #[derive(Clone, Copy, Debug)]
-#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
+#[cfg_attr(
+    any(test, feature = "proptest-impl"),
+    derive(proptest_derive::Arbitrary)
+)]
 pub struct NullifierSeed(pub(crate) [u8; 32]);
 
 impl AsRef<[u8]> for NullifierSeed {
@@ -59,8 +62,11 @@ impl From<NullifierSeed> for [u8; 32] {
 }
 
 /// A Nullifier for Sprout transactions
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Hash)]
+#[cfg_attr(
+    any(test, feature = "proptest-impl"),
+    derive(proptest_derive::Arbitrary)
+)]
 pub struct Nullifier(pub(crate) [u8; 32]);
 
 impl From<[u8; 32]> for Nullifier {
