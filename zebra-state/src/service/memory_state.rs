@@ -10,7 +10,7 @@ use std::{
     sync::Arc,
 };
 
-use tracing::instrument;
+use tracing::{debug_span, instrument, trace};
 use zebra_chain::{
     block::{self, Block},
     primitives::Groth16Proof,
@@ -37,10 +37,13 @@ struct Chain {
 
 impl Chain {
     /// Push a contextually valid non-finalized block into a chain as the new tip.
+    #[instrument(skip(self), fields(%block))]
     pub fn push(&mut self, block: Arc<Block>) {
         let block_height = block
             .coinbase_height()
             .expect("valid non-finalized blocks have a coinbase height");
+
+        trace!(?block_height, "Pushing new block into chain state");
 
         // update cumulative data members
         self.update_chain_state_with(&block);
@@ -48,6 +51,7 @@ impl Chain {
     }
 
     /// Remove the lowest height block of the non-finalized portion of a chain.
+    #[instrument(skip(self))]
     pub fn pop_root(&mut self) -> Arc<Block> {
         let block_height = self.lowest_height();
 
@@ -197,6 +201,7 @@ impl UpdateWith<Arc<Block>> for Chain {
         }
     }
 
+    #[instrument(skip(self), fields(%block))]
     fn revert_chain_state_with(&mut self, block: &Arc<Block>) {
         let block_hash = block.hash();
 
@@ -312,18 +317,25 @@ impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
     ) {
         if let Some(joinsplit_data) = joinsplit_data {
             for sprout::JoinSplit { nullifiers, .. } in joinsplit_data.joinsplits() {
+                let span = debug_span!("revert_chain_state_with", ?nullifiers);
+                let _entered = span.enter();
+                trace!("Adding sprout nullifiers.");
                 self.sprout_nullifiers.insert(nullifiers[0]);
                 self.sprout_nullifiers.insert(nullifiers[1]);
             }
         }
     }
 
+    #[instrument(skip(self, joinsplit_data))]
     fn revert_chain_state_with(
         &mut self,
         joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
     ) {
         if let Some(joinsplit_data) = joinsplit_data {
             for sprout::JoinSplit { nullifiers, .. } in joinsplit_data.joinsplits() {
+                let span = debug_span!("revert_chain_state_with", ?nullifiers);
+                let _entered = span.enter();
+                trace!("Removing sprout nullifiers.");
                 assert!(
                     self.sprout_nullifiers.remove(&nullifiers[0]),
                     "nullifiers must be present if block was"
