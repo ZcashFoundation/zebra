@@ -12,10 +12,13 @@
 //! This is an internal module. Use `verify::BlockVerifier` for blocks and their
 //! transactions, or `mempool::MempoolTransactionVerifier` for mempool transactions.
 
+use std::future::Future;
 use std::{pin::Pin, sync::Arc};
 
-use std::future::Future;
+use tower::{Service, ServiceExt};
+
 use zebra_chain::{parameters::ConsensusBranchId, transaction::Transaction, transparent};
+use zebra_state as zs;
 
 use crate::BoxError;
 

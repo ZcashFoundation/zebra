@@ -21,9 +21,9 @@ use std::{
 };
 
 use displaydoc::Display;
-use futures::{FutureExt, TryFutureExt};
+use futures::{stream::FuturesUnordered, FutureExt, TryFutureExt};
 use thiserror::Error;
-use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
+use tower::{Service, ServiceExt};
 use tracing::instrument;
 
 use zebra_chain::{
@@ -33,41 +33,59 @@ use zebra_chain::{
     transparent::{self, Script},
 };
 
+use zebra_script;
 use zebra_state as zs;
 
-use crate::{primitives::groth16, BoxError, Config};
+use crate::{primitives::groth16, script, BoxError, Config};
 
 /// Internal transaction verification service.
 ///
 /// After verification, the transaction future completes. State changes are
 /// handled by `BlockVerifier` or `MempoolTransactionVerifier`.
-#[derive(Default)]
-pub(crate) struct TransactionVerifier<S>
+pub(crate) struct TransactionVerifier<ZS>
 where
-    S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
-    S::Future: Send + 'static,
+    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
+    ZS::Future: Send + 'static,
 {
-    script: ScriptVerifier<S>,
-    groth16: groth16::Verifier<S>,
+    script_verifier: script::Verifier<ZS>,
+    spend_verifier: groth16::Verifier,
+    output_verifier: groth16::Verifier,
+    joinsplit_verifier: groth16::Verifier,
 }
 
 #[non_exhaustive]
 #[derive(Debug, Display, Error)]
 pub enum VerifyTransactionError {
+    /// Only V4 and later transactions can be verified.
+    WrongVersion,
     /// Could not verify a transparent script
-    Script(VerifyScriptError),
+    Script(#[from] zebra_script::Error),
     /// Could not verify a Groth16 proof of a JoinSplit/Spend/Output description
-    Groth16(VerifyGroth16Error),
+    // XXX change this when we align groth16 verifier errors with bellman
+    // and add a from annotation when the error type is more precise
+    Groth16(BoxError),
     /// Could not verify a Ed25519 signature with JoinSplitData
-    Ed25519(ed25519::Error),
+    Ed25519(#[from] ed25519::Error),
     /// Could not verify a RedJubjub signature with ShieldedData
-    RedJubjub(redjubjub::Error),
+    RedJubjub(#[from] redjubjub::Error),
 }
 
-impl<S> Service<Arc<Transaction>> for TransactionVerifier<S>
+/// Specifies whether a transaction should be verified as part of a block or as
+/// part of the mempool.
+///
+/// Transaction verification has slightly different consensus rules, depending on
+/// whether the transaction is to be included in a block on in the mempool.
+pub enum Request {
+    /// Verify the supplied transaction as part of a block.
+    Block(Arc<Transaction>),
+    /// Verify the supplied transaction as part of the mempool.
+    Mempool(Arc<Transaction>),
+}
+
+impl<ZS> Service<Request> for TransactionVerifier<ZS>
 where
-    S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
-    S::Future: Send + 'static,
+    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
+    ZS::Future: Send + 'static,
 {
     type Response = transaction::Hash;
     type Error = VerifyTransactionError;
@@ -75,129 +93,128 @@ where
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        match (self.script.poll_ready(cx), self.groth16.poll_ready(cx)) {
-            // First, fail if either service fails.
-            (Poll::Ready(Err(e)), _) => Poll::Ready(Err(VerifyTransactionError::Script(e))),
-            (_, Poll::Ready(Err(e))) => Poll::Ready(Err(VerifyTransactionError::Groth16(e))),
-            // Second, we're unready if either service is unready.
-            (Poll::Pending, _) | (_, Poll::Pending) => Poll::Pending,
-            // Finally, we're ready if both services are ready and OK.
-            (Poll::Ready(Ok(())), Poll::Ready(Ok(()))) => Poll::Ready(Ok(())),
-        }
+        Poll::Ready(Ok(()))
     }
 
     // TODO: break up each chunk into its own method
-    fn call(&mut self, tx: Arc<Transaction>) -> Self::Future {
-        let Transaction::V4 {
-            inputs,
-            outputs,
-            lock_time,
-            expiry_height,
-            value_balance,
-            joinsplit_data,
-            shielded_data,
-        } = tx;
-
-        if !tx.is_coinbase() && (!inputs.is_empty() || !outputs.is_empty()) {
-            let scripts = inputs
-                .iter()
-                .chain(outputs.iter())
-                .filter_map(|input| match input {
-                    transparent::Input::PrevOut { unlock_script, .. } => Some(unlock_script),
-                    transparent::Output { lock_script, .. } => Some(lock_script),
-                    _ => None,
-                })
-                .collect();
-
-            scripts.iter().for_each(|script| {
-                self.script
-                    .call(script)
-                    .map_err(VerifyTransactionError::VerifyScriptError)
-                    .boxed()
-            });
+    fn call(&mut self, req: Request) -> Self::Future {
+        let is_mempool = match req {
+            Request::Block(_) => false,
+            Request::Mempool(_) => true,
+        };
+        if is_mempool {
+            // XXX determine exactly which rules apply to mempool transactions
+            unimplemented!();
         }
 
-        if let Some(joinsplit_d) = joinsplit_data {
-            joinsplit_d.joinsplits().for_each(|joinsplit| {
-                self.joinsplit
-                    .call(joinsplit)
-                    .map_err(VerifyTransactionError::VerifyJoinSplitError)
-                    .boxed()
-            });
+        let tx = match req {
+            Request::Block(tx) => tx,
+            Request::Mempool(tx) => tx,
+        };
 
-            let JoinSplitData {
-                first,
-                rest,
-                pub_key,
-                sig,
-            } = joinsplit_d;
+        match *tx {
+            Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => {
+                async { Err(VerifyTransactionError::WrongVersion) }.boxed()
+            }
+            Transaction::V4 {
+                inputs,
+                outputs,
+                lock_time,
+                expiry_height,
+                value_balance,
+                joinsplit_data,
+                shielded_data,
+            } => async move {
+                // Handle transparent inputs and outputs.
+                // These are left unimplemented!() pending implementation
+                // of the async script RFC.
+                if tx.is_coinbase() {
+                    // do something special for coinbase transactions
+                    unimplemented!();
+                } else {
+                    // otherwise, check no coinbase inputs
+                    // feed all of the inputs to the script verifier
+                    unimplemented!();
+                }
 
-            ed25519::VerificationKey::try_from(pub_key)
-                .and_then(|vk| vk.verify(sig, tx.data_to_be_signed()))
-                .map_err(VerifyTransactionError::Ed25519)
-        }
+                // Contains a set of asynchronous checks, all of which must
+                // resolve to Ok(()) for verification to succeed (in addition to
+                // any other checks)
+                let _async_checks = FuturesUnordered::<
+                    Box<dyn Future<Output = Result<(), VerifyTransactionError>>>,
+                >::new();
 
-        if let Some(shielded_data_d) = shielded_data {
-            let sighash = tx.sighash(
-                Network::Sapling, // TODO: pass this in
-                HashType::ALL,    // TODO: check these
-                None,             // TODO: check these
-            );
+                if let Some(joinsplit_data) = joinsplit_data {
+                    // XXX create a method on JoinSplitData
+                    // that prepares groth16::Items with the correct proofs
+                    // and proof inputs, handling interstitial treestates
+                    // correctly.
 
-            shielded_data_d.spends().for_each(|spend| {
-                // TODO: check that spend.cv and spend.rk are NOT of small
-                // order.
-                // https://zips.z.cash/protocol/canopy.pdf#spenddesc
+                    // Then, pass those items to self.joinsplit to verify them.
 
-                // Verify the spend authorization signature for each Spend
-                // description.
-                spend
-                    .rk
-                    .verify(sighash.into(), spend.spend_auth_sig)
-                    .map_err(VerifyTransactionError::RedJubjub);
+                    // XXX refactor this into a nicely named check function
+                    ed25519::VerificationKey::try_from(joinsplit_data.pub_key)
+                        .and_then(|vk| vk.verify(&joinsplit_data.sig, tx.data_to_be_signed()))
+                        .map_err(VerifyTransactionError::Ed25519)
+                }
 
-                self.groth16
-                    .call(spend.into())
-                    .map_err(VerifyTransactionError::VerifyGroth16Error)
-                    .boxed()
-            });
+                if let Some(shielded_data) = shielded_data {
+                    let sighash = tx.sighash(
+                        Network::Sapling, // TODO: pass this in
+                        HashType::ALL,    // TODO: check these
+                        None,             // TODO: check these
+                    );
 
-            shielded_data_d.outputs().for_each(|output| {
-                // TODO: check that output.cv and output.epk are NOT of small
-                // order.
-                // https://zips.z.cash/protocol/canopy.pdf#outputdesc
+                    shielded_data.spends().for_each(|spend| {
+                        // TODO: check that spend.cv and spend.rk are NOT of small
+                        // order.
+                        // https://zips.z.cash/protocol/canopy.pdf#spenddesc
 
-                self.groth16
-                    .call(output.into())
-                    .map_err(VerifyTransactionError::VerifyGroth16Error)
-                    .boxed()
-            });
+                        // Verify the spend authorization signature for each Spend
+                        // description.
+                        spend
+                            .rk
+                            .verify(sighash.into(), spend.spend_auth_sig)
+                            .map_err(VerifyTransactionError::RedJubjub);
 
-            let ShieldedData {
-                first,
-                rest_spends,
-                rest_outputs,
-                binding_sig,
-            } = shielded_data_d;
+                        // TODO: prepare public inputs for spends, then create
+                        // a groth16::Item and pass to self.spend
+                        unimplemented!()
+                    });
 
-            // Checks the balance.
-            //
-            // The net value of Spend transfers minus Output transfers in a
-            // transaction is called the balancing value, measured in zatoshi as
-            // a signed integer v_balance.
-            //
-            // Consistency of v_balance with the value commitments in Spend
-            // descriptions and Output descriptions is enforced by the binding
-            // signature.
-            //
-            // Instead of generating a key pair at random, we generate it as a
-            // function of the value commitments in the Spend descriptions and
-            // Output descriptions of the transaction, and the balancing value.
-            //
-            // https://zips.z.cash/protocol/canopy.pdf#saplingbalance
-            let bsk = shielded_data_d.binding_validating_key(value_balance);
-            bsk.verify(sighash, &binding_sig)
-                .map_err(VerifyTransactionError::RedJubjub);
+                    shielded_data.outputs().for_each(|output| {
+                        // TODO: check that output.cv and output.epk are NOT of small
+                        // order.
+                        // https://zips.z.cash/protocol/canopy.pdf#outputdesc
+
+                        // TODO: prepare public inputs for outputs, then create
+                        // a groth16::Item and pass to self.output
+                        unimplemented!()
+                    });
+
+                    // Checks the balance.
+                    //
+                    // The net value of Spend transfers minus Output transfers in a
+                    // transaction is called the balancing value, measured in zatoshi as
+                    // a signed integer v_balance.
+                    //
+                    // Consistency of v_balance with the value commitments in Spend
+                    // descriptions and Output descriptions is enforced by the binding
+                    // signature.
+                    //
+                    // Instead of generating a key pair at random, we generate it as a
+                    // function of the value commitments in the Spend descriptions and
+                    // Output descriptions of the transaction, and the balancing value.
+                    //
+                    // https://zips.z.cash/protocol/canopy.pdf#saplingbalance
+                    let bsk = shielded_data.binding_validating_key(value_balance);
+                    bsk.verify(sighash, &shielded_data.binding_sig)
+                        .map_err(VerifyTransactionError::RedJubjub);
+                }
+
+                unimplemented!()
+            }
+            .boxed(),
         }
     }
 }
