@@ -4,6 +4,7 @@ use chrono::{DateTime, Utc};
 
 use zebra_chain::{
     block::{Block, Header},
+    parameters::NetworkUpgrade,
     work::equihash,
 };
 
@@ -67,6 +68,9 @@ pub fn subsidy_is_correct(network: Network, block: &Block) -> Result<(), BlockEr
     let coinbase = block.transactions.get(0).ok_or(SubsidyError::NoCoinbase)?;
 
     let halving_div = subsidy::general::halving_divisor(height, network);
+    let canopy_activation_height = NetworkUpgrade::Canopy
+        .activation_height(network)
+        .expect("Canopy activation height is known");
 
     // TODO: the sum of the coinbase transaction outputs must be less than or equal to the block subsidy plus transaction fees
 
@@ -78,8 +82,8 @@ pub fn subsidy_is_correct(network: Network, block: &Block) -> Result<(), BlockEr
         )
     } else if halving_div.count_ones() != 1 {
         unreachable!("invalid halving divisor: the halving divisor must be a non-zero power of two")
-    } else if halving_div == 1 {
-        // validate founders reward
+    } else if height < canopy_activation_height {
+        // Founders rewards are paid up to Canopy activation, on both mainnet and testnet
         let founders_reward = subsidy::founders_reward::founders_reward(height, network)
             .expect("invalid Amount: founders reward should be valid");
         let matching_values = subsidy::general::find_output_with_amount(coinbase, founders_reward);
@@ -90,10 +94,13 @@ pub fn subsidy_is_correct(network: Network, block: &Block) -> Result<(), BlockEr
         } else {
             Err(SubsidyError::FoundersRewardNotFound)?
         }
-    } else if halving_div == 2 {
+    } else if halving_div < 4 {
+        // Funding streams are paid from Canopy activation to the second halving
+        // Note: Canopy activation is at the first halving on mainnet, but not on testnet
+        // ZIP-1014 only applies to mainnet, ZIP-214 contains the specific rules for testnet
         unimplemented!("funding stream block subsidy validation is not implemented")
     } else {
-        // Valid halving, with no founders reward or funding streams
+        // Future halving, with no founders reward or funding streams
         Ok(())
     }
 }
