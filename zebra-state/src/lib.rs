@@ -8,7 +8,7 @@
 
 mod config;
 mod constants;
-mod memory_state;
+mod error;
 mod request;
 mod response;
 mod service;
@@ -19,14 +19,11 @@ mod util;
 #[cfg(test)]
 mod tests;
 
-use memory_state::MemoryState;
 use service::QueuedBlock;
-use sled_state::SledState;
+use sled_state::FinalizedState;
 
 pub use config::Config;
+pub use error::{BoxError, CloneError, CommitBlockError, ValidateContextError};
 pub use request::{HashOrHeight, Request};
 pub use response::Response;
 pub use service::init;
-
-/// A boxed [`std::error::Error`].
-pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;

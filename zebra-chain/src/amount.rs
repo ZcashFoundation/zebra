@@ -17,7 +17,7 @@ use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
 type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// A runtime validated type for representing amounts of zatoshis
-#[derive(Debug, Eq, PartialEq, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Eq, PartialEq, Clone, Copy, Serialize, Deserialize, Hash)]
 #[serde(try_from = "i64")]
 #[serde(bound = "C: Constraint")]
 pub struct Amount<C = NegativeAllowed>(i64, PhantomData<C>);
@@ -234,7 +234,7 @@ impl Constraint for NegativeAllowed {
 ///     0..=MAX_MONEY,
 /// );
 /// ```
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct NonNegative {}
 
 impl Constraint for NonNegative {
@@ -296,25 +296,26 @@ impl ZcashDeserialize for Amount<NonNegative> {
     }
 }
 
+#[cfg(any(test, feature = "proptest-impl"))]
+use proptest::prelude::*;
+#[cfg(any(test, feature = "proptest-impl"))]
+impl<C> Arbitrary for Amount<C>
+where
+    C: Constraint + std::fmt::Debug,
+{
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        C::valid_range().prop_map(|v| Self(v, PhantomData)).boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
     use color_eyre::eyre::Result;
-    use proptest::prelude::*;
-    use std::fmt;
-
-    impl<C> Arbitrary for Amount<C>
-    where
-        C: Constraint + fmt::Debug,
-    {
-        type Parameters = ();
-
-        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-            C::valid_range().prop_map(|v| Self(v, PhantomData)).boxed()
-        }
-
-        type Strategy = BoxedStrategy<Self>;
-    }
 
     #[test]
     fn test_add_bare() -> Result<()> {

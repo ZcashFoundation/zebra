@@ -6,7 +6,7 @@
 #![doc(html_favicon_url = "https://www.zfnd.org/images/zebra-favicon-128.png")]
 #![doc(html_logo_url = "https://www.zfnd.org/images/zebra-icon.png")]
 #![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_chain")]
-#![deny(missing_docs)]
+// #![deny(missing_docs)]
 #![allow(clippy::try_err)]
 
 #[macro_use]
@@ -22,3 +22,43 @@ pub mod sprout;
 pub mod transaction;
 pub mod transparent;
 pub mod work;
+
+#[derive(Debug, Clone, Copy)]
+#[cfg(any(test, feature = "proptest-impl"))]
+#[non_exhaustive]
+/// The configuration data for proptest when generating arbitrary chains
+pub struct LedgerState {
+    /// The tip height of the block or start of the chain
+    pub tip_height: block::Height,
+    is_coinbase: bool,
+    /// The network to generate fake blocks for
+    pub network: parameters::Network,
+}
+
+#[cfg(any(test, feature = "proptest-impl"))]
+impl LedgerState {
+    /// Construct a new ledger state for generating arbitrary chains via proptest
+    pub fn new(tip_height: block::Height, network: parameters::Network) -> Self {
+        Self {
+            tip_height,
+            is_coinbase: true,
+            network,
+        }
+    }
+}
+
+#[cfg(any(test, feature = "proptest-impl"))]
+impl Default for LedgerState {
+    fn default() -> Self {
+        let network = parameters::Network::Mainnet;
+        let tip_height = parameters::NetworkUpgrade::Sapling
+            .activation_height(network)
+            .unwrap();
+
+        Self {
+            tip_height,
+            is_coinbase: true,
+            network,
+        }
+    }
+}

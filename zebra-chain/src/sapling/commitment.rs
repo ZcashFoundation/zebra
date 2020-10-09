@@ -1,8 +1,6 @@
 //! Note and value commitments.
 
 #[cfg(test)]
-mod arbitrary;
-#[cfg(test)]
 mod test_vectors;
 
 pub mod pedersen_hashes;
@@ -137,6 +135,29 @@ impl NoteCommitment {
 #[derive(Clone, Copy, Deserialize, PartialEq, Serialize)]
 pub struct ValueCommitment(#[serde(with = "serde_helpers::AffinePoint")] pub jubjub::AffinePoint);
 
+impl<'a> std::ops::Add<&'a ValueCommitment> for ValueCommitment {
+    type Output = Self;
+
+    fn add(self, rhs: &'a ValueCommitment) -> Self::Output {
+        self + *rhs
+    }
+}
+
+impl std::ops::Add<ValueCommitment> for ValueCommitment {
+    type Output = Self;
+
+    fn add(self, rhs: ValueCommitment) -> Self::Output {
+        let value = self.0.to_extended() + rhs.0.to_extended();
+        ValueCommitment(value.into())
+    }
+}
+
+impl std::ops::AddAssign<ValueCommitment> for ValueCommitment {
+    fn add_assign(&mut self, rhs: ValueCommitment) {
+        *self = *self + rhs
+    }
+}
+
 impl fmt::Debug for ValueCommitment {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("ValueCommitment")
@@ -161,6 +182,40 @@ impl Eq for ValueCommitment {}
 impl From<ValueCommitment> for [u8; 32] {
     fn from(cm: ValueCommitment) -> [u8; 32] {
         cm.0.to_bytes()
+    }
+}
+
+impl<'a> std::ops::Sub<&'a ValueCommitment> for ValueCommitment {
+    type Output = Self;
+
+    fn sub(self, rhs: &'a ValueCommitment) -> Self::Output {
+        self - *rhs
+    }
+}
+
+impl std::ops::Sub<ValueCommitment> for ValueCommitment {
+    type Output = Self;
+
+    fn sub(self, rhs: ValueCommitment) -> Self::Output {
+        ValueCommitment((self.0.to_extended() - rhs.0.to_extended()).into())
+    }
+}
+
+impl std::ops::SubAssign<ValueCommitment> for ValueCommitment {
+    fn sub_assign(&mut self, rhs: ValueCommitment) {
+        *self = *self - rhs;
+    }
+}
+
+impl std::iter::Sum for ValueCommitment {
+    fn sum<I>(iter: I) -> Self
+    where
+        I: Iterator<Item = Self>,
+    {
+        iter.fold(
+            ValueCommitment(jubjub::AffinePoint::identity()),
+            std::ops::Add::add,
+        )
     }
 }
 
@@ -199,13 +254,21 @@ impl ValueCommitment {
     /// Generate a new _ValueCommitment_.
     ///
     /// https://zips.z.cash/protocol/protocol.pdf#concretehomomorphiccommit
-    #[allow(non_snake_case)]
-    pub fn new<T>(csprng: &mut T, value: Amount<NonNegative>) -> Self
+    pub fn randomized<T>(csprng: &mut T, value: Amount) -> Self
     where
         T: RngCore + CryptoRng,
     {
-        let v = jubjub::Fr::from(value);
         let rcv = generate_trapdoor(csprng);
+
+        Self::new(rcv, value)
+    }
+
+    /// Generate a new _ValueCommitment_ from an existing _rcv_ on a _value_.
+    ///
+    /// https://zips.z.cash/protocol/protocol.pdf#concretehomomorphiccommit
+    #[allow(non_snake_case)]
+    pub fn new(rcv: jubjub::Fr, value: Amount) -> Self {
+        let v = jubjub::Fr::from(value);
 
         // TODO: These generator points can be generated once somewhere else to
         // avoid having to recompute them on every new commitment.
@@ -218,6 +281,8 @@ impl ValueCommitment {
 
 #[cfg(test)]
 mod tests {
+
+    use std::ops::Neg;
 
     use super::*;
 
@@ -233,5 +298,130 @@ mod tests {
 
             assert_eq!(result, test_vector.output_point);
         }
+    }
+
+    #[test]
+    fn add() {
+        let identity = ValueCommitment(jubjub::AffinePoint::identity());
+
+        let g = ValueCommitment(jubjub::AffinePoint::from_raw_unchecked(
+            jubjub::Fq::from_raw([
+                0xe4b3_d35d_f1a7_adfe,
+                0xcaf5_5d1b_29bf_81af,
+                0x8b0f_03dd_d60a_8187,
+                0x62ed_cbb8_bf37_87c8,
+            ]),
+            jubjub::Fq::from_raw([
+                0x0000_0000_0000_000b,
+                0x0000_0000_0000_0000,
+                0x0000_0000_0000_0000,
+                0x0000_0000_0000_0000,
+            ]),
+        ));
+
+        assert_eq!(identity + g, g);
+    }
+
+    #[test]
+    fn add_assign() {
+        let mut identity = ValueCommitment(jubjub::AffinePoint::identity());
+
+        let g = ValueCommitment(jubjub::AffinePoint::from_raw_unchecked(
+            jubjub::Fq::from_raw([
+                0xe4b3_d35d_f1a7_adfe,
+                0xcaf5_5d1b_29bf_81af,
+                0x8b0f_03dd_d60a_8187,
+                0x62ed_cbb8_bf37_87c8,
+            ]),
+            jubjub::Fq::from_raw([
+                0x0000_0000_0000_000b,
+                0x0000_0000_0000_0000,
+                0x0000_0000_0000_0000,
+                0x0000_0000_0000_0000,
+            ]),
+        ));
+
+        identity += g;
+        let new_g = identity;
+
+        assert_eq!(new_g, g);
+    }
+
+    #[test]
+    fn sub() {
+        let g_point = jubjub::AffinePoint::from_raw_unchecked(
+            jubjub::Fq::from_raw([
+                0xe4b3_d35d_f1a7_adfe,
+                0xcaf5_5d1b_29bf_81af,
+                0x8b0f_03dd_d60a_8187,
+                0x62ed_cbb8_bf37_87c8,
+            ]),
+            jubjub::Fq::from_raw([
+                0x0000_0000_0000_000b,
+                0x0000_0000_0000_0000,
+                0x0000_0000_0000_0000,
+                0x0000_0000_0000_0000,
+            ]),
+        );
+
+        let identity = ValueCommitment(jubjub::AffinePoint::identity());
+
+        let g = ValueCommitment(g_point);
+
+        assert_eq!(identity - g, ValueCommitment(g_point.neg()));
+    }
+
+    #[test]
+    fn sub_assign() {
+        let g_point = jubjub::AffinePoint::from_raw_unchecked(
+            jubjub::Fq::from_raw([
+                0xe4b3_d35d_f1a7_adfe,
+                0xcaf5_5d1b_29bf_81af,
+                0x8b0f_03dd_d60a_8187,
+                0x62ed_cbb8_bf37_87c8,
+            ]),
+            jubjub::Fq::from_raw([
+                0x0000_0000_0000_000b,
+                0x0000_0000_0000_0000,
+                0x0000_0000_0000_0000,
+                0x0000_0000_0000_0000,
+            ]),
+        );
+
+        let mut identity = ValueCommitment(jubjub::AffinePoint::identity());
+
+        let g = ValueCommitment(g_point);
+
+        identity -= g;
+        let new_g = identity;
+
+        assert_eq!(new_g, ValueCommitment(g_point.neg()));
+    }
+
+    #[test]
+    fn sum() {
+        let g_point = jubjub::AffinePoint::from_raw_unchecked(
+            jubjub::Fq::from_raw([
+                0xe4b3_d35d_f1a7_adfe,
+                0xcaf5_5d1b_29bf_81af,
+                0x8b0f_03dd_d60a_8187,
+                0x62ed_cbb8_bf37_87c8,
+            ]),
+            jubjub::Fq::from_raw([
+                0x0000_0000_0000_000b,
+                0x0000_0000_0000_0000,
+                0x0000_0000_0000_0000,
+                0x0000_0000_0000_0000,
+            ]),
+        );
+
+        let g = ValueCommitment(g_point);
+        let other_g = ValueCommitment(g_point);
+
+        let sum: ValueCommitment = vec![g, other_g].into_iter().sum();
+
+        let doubled_g = ValueCommitment(g_point.to_extended().double().into());
+
+        assert_eq!(sum, doubled_g);
     }
 }

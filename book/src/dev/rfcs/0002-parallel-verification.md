@@ -15,7 +15,7 @@ We use several different design patterns to enable this parallelism:
 * We download blocks and start verifying them in parallel,
 * We batch signature and proof verification using verification services, and
 * We defer data dependencies until just before the block is committed to the
-  state (see the detaled design RFCs).
+  state (see the detailed design RFCs).
 
 # Motivation
 [motivation]: #motivation
@@ -51,7 +51,7 @@ Data:
 * **data dependency:** Information contained in the previous block and its
                        chain fork, which is required to verify the current block.
 * **state:** The set of verified blocks. The state might also cache some
-             dependent data, so that we can efficienty verify subsequent blocks.
+             dependent data, so that we can efficiently verify subsequent blocks.
 
 Verification Stages:
 <!-- The verification stages are listed in chronological order -->
@@ -130,7 +130,7 @@ For example, Zebra could defer checking both the Block Height and Network Upgrad
 But since the Network Upgrade depends on the Block Height, we only need to defer
 the Block Height check. Then we can use all the fields that depend on the
 Block Height, as if it is correct. If the final Block Height check fails, we will
-reject the entire block, including all the verification we perfomed using the
+reject the entire block, including all the verification we performed using the
 assumed Network Upgrade.
 
 ### Implementation Strategy

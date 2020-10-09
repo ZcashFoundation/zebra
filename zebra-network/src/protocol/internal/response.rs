@@ -1,6 +1,6 @@
 use zebra_chain::{
     block::{self, Block},
-    transaction::Transaction,
+    transaction::{self, Transaction},
 };
 
 use crate::meta_addr::MetaAddr;
@@ -21,6 +21,12 @@ pub enum Response {
     /// A list of block hashes.
     BlockHashes(Vec<block::Hash>),
 
+    /// A list of block headers.
+    BlockHeaders(Vec<block::Header>),
+
     /// A list of transactions.
     Transactions(Vec<Arc<Transaction>>),
+
+    /// A list of transaction hashes.
+    TransactionHashes(Vec<transaction::Hash>),
 }

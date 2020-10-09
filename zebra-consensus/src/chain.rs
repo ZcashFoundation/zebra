@@ -1,12 +1,15 @@
 #[cfg(test)]
 mod tests;
 
+use displaydoc::Display;
+use futures::{FutureExt, TryFutureExt};
 use std::{
     future::Future,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
 };
+use thiserror::Error;
 use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
 use tracing::instrument;
 
@@ -19,7 +22,8 @@ use zebra_state as zs;
 
 use crate::{
     block::BlockVerifier,
-    checkpoint::{CheckpointList, CheckpointVerifier},
+    block::VerifyBlockError,
+    checkpoint::{CheckpointList, CheckpointVerifier, VerifyCheckpointError},
     BoxError, Config,
 };
 
@@ -41,20 +45,29 @@ where
     last_block_height: Option<block::Height>,
 }
 
+#[derive(Debug, Display, Error)]
+pub enum VerifyChainError {
+    /// block could not be checkpointed
+    Checkpoint(VerifyCheckpointError),
+    /// block could not be verified
+    Block(VerifyBlockError),
+}
+
 impl<S> Service<Arc<Block>> for ChainVerifier<S>
 where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
 {
     type Response = block::Hash;
-    type Error = BoxError;
+    type Error = VerifyChainError;
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         match (self.checkpoint.poll_ready(cx), self.block.poll_ready(cx)) {
             // First, fail if either service fails.
-            (Poll::Ready(Err(e)), _) | (_, Poll::Ready(Err(e))) => Poll::Ready(Err(e)),
+            (Poll::Ready(Err(e)), _) => Poll::Ready(Err(VerifyChainError::Checkpoint(e))),
+            (_, Poll::Ready(Err(e))) => Poll::Ready(Err(VerifyChainError::Block(e))),
             // Second, we're unready if either service is unready.
             (Poll::Pending, _) | (_, Poll::Pending) => Poll::Pending,
             // Finally, we're ready if both services are ready and OK.
@@ -64,6 +77,9 @@ where
 
     fn call(&mut self, block: Arc<Block>) -> Self::Future {
         let height = block.coinbase_height();
+        let span = tracing::info_span!("chain_call", ?height);
+        let _entered = span.enter();
+        tracing::debug!("verifying new block");
 
         // TODO: do we still need this logging?
         // Log an info-level message on unexpected out of order blocks
@@ -94,15 +110,26 @@ where
 
         self.last_block_height = height;
 
-        // The only valid block without a coinbase height is the genesis block,
-        // which omitted it by mistake.  So for the purposes of routing requests,
-        // we can interpret a missing coinbase height as 0; the checkpoint verifier
-        // will reject it.
-        if height.unwrap_or(block::Height(0)) < self.max_checkpoint_height {
-            self.checkpoint.call(block)
-        } else {
-            self.block.call(block)
+        if let Some(height) = height {
+            if height <= self.max_checkpoint_height {
+                return self
+                    .checkpoint
+                    .call(block)
+                    .map_err(VerifyChainError::Checkpoint)
+                    .boxed();
+            }
         }
+
+        // For the purposes of routing requests, we can send blocks
+        // with no height to the block verifier, which will reject them.
+        //
+        // We choose the block verifier because it doesn't have any
+        // internal state, so it will always return the same error for a
+        // block with no height.
+        self.block
+            .call(block)
+            .map_err(VerifyChainError::Block)
+            .boxed()
     }
 }
 
@@ -115,7 +142,7 @@ pub async fn init<S>(
     config: Config,
     network: Network,
     mut state_service: S,
-) -> Buffer<BoxService<Arc<Block>, block::Hash, BoxError>, Arc<Block>>
+) -> Buffer<BoxService<Arc<Block>, block::Hash, VerifyChainError>, Arc<Block>>
 where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
@@ -152,6 +179,6 @@ where
             max_checkpoint_height,
             last_block_height: None,
         }),
-        1,
+        3,
     )
 }

@@ -1,6 +1,12 @@
 use crate::serialization::SerializationError;
 
+use std::ops::{Add, Sub};
+
 /// The height of a block is the length of the chain back to the genesis block.
+///
+/// Block heights can't be added, but they can be *subtracted*,
+/// to get a difference of block heights, represented as an `i32`,
+/// and height differences can be added to block heights to get new heights.
 ///
 /// # Invariants
 ///
@@ -41,9 +47,41 @@ impl Height {
     pub const MAX_AS_U32: u32 = Self::MAX.0;
 }
 
-#[cfg(test)]
+impl Sub<Height> for Height {
+    type Output = i32;
+
+    fn sub(self, rhs: Height) -> i32 {
+        (self.0 as i32) - (rhs.0 as i32)
+    }
+}
+
+impl Add<i32> for Height {
+    type Output = Option<Height>;
+
+    fn add(self, rhs: i32) -> Option<Height> {
+        let result = ((self.0 as i32) + rhs) as u32;
+        match result {
+            h if (Height(h) <= Height::MAX && Height(h) >= Height::MIN) => Some(Height(h)),
+            _ => None,
+        }
+    }
+}
+
+impl Sub<i32> for Height {
+    type Output = Option<Height>;
+
+    fn sub(self, rhs: i32) -> Option<Height> {
+        let result = ((self.0 as i32) - rhs) as u32;
+        match result {
+            h if (Height(h) <= Height::MAX && Height(h) >= Height::MIN) => Some(Height(h)),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(any(test, feature = "proptest-impl"))]
 use proptest::prelude::*;
-#[cfg(test)]
+#[cfg(any(test, feature = "proptest-impl"))]
 impl Arbitrary for Height {
     type Parameters = ();
 
@@ -52,4 +90,18 @@ impl Arbitrary for Height {
     }
 
     type Strategy = BoxedStrategy<Self>;
+}
+
+#[test]
+fn operator_tests() {
+    assert_eq!(Some(Height(2)), Height(1) + 1);
+    assert_eq!(None, Height::MAX + 1);
+
+    assert_eq!(Some(Height(1)), Height(2) - 1);
+    assert_eq!(Some(Height(0)), Height(1) - 1);
+    assert_eq!(None, Height(0) - 1);
+
+    assert_eq!(1, Height(2) - Height(1));
+    assert_eq!(0, Height(1) - Height(1));
+    assert_eq!(-1, Height(0) - Height(1));
 }

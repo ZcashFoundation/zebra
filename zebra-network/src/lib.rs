@@ -53,11 +53,12 @@ extern crate bitflags;
 /// Note: the 'static lifetime bound means that the *type* cannot have any
 /// non-'static lifetimes, (e.g., when a type contains a borrow and is
 /// parameterized by 'a), *not* that the object itself has 'static lifetime.
-pub type BoxedStdError = Box<dyn std::error::Error + Send + Sync + 'static>;
+pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 mod address_book;
 mod config;
 mod constants;
+mod isolated;
 mod meta_addr;
 mod peer;
 mod peer_set;
@@ -68,6 +69,7 @@ mod timestamp_collector;
 pub use crate::{
     address_book::AddressBook,
     config::Config,
+    isolated::connect_isolated,
     peer_set::init,
     policies::{RetryErrors, RetryLimit},
     protocol::internal::{Request, Response},

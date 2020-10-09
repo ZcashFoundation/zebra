@@ -88,6 +88,20 @@ pub enum Request {
     FindBlocks {
         /// Hashes of known blocks, ordered from highest height to lowest height.
         known_blocks: Vec<block::Hash>,
+        /// Optionally, the last block hash to request.
+        stop: Option<block::Hash>,
+    },
+
+    /// Request headers of subsequent blocks in the chain, giving hashes of
+    /// known blocks.
+    ///
+    /// # Returns
+    ///
+    /// Returns
+    /// [`Response::BlockHeaders`](super::Response::BlockHeaders).
+    FindHeaders {
+        /// Hashes of known blocks, ordered from highest height to lowest height.
+        known_blocks: Vec<block::Hash>,
         /// Optionally, the last header to request.
         stop: Option<block::Hash>,
     },
@@ -105,7 +119,7 @@ pub enum Request {
     ///
     /// This is intended to be used in Zebra with a single transaction at a time
     /// (set of size 1), but multiple transactions are permitted because this is
-    /// how we interpret advertisements from Zcashd, which sometimes advertises
+    /// how we interpret advertisements from zcashd, which sometimes advertises
     /// multiple transactions at once.
     ///
     /// This is implemented by sending an `inv` message containing the
@@ -137,4 +151,11 @@ pub enum Request {
     ///
     /// Returns [`Response::Nil`](super::Response::Nil).
     AdvertiseBlock(block::Hash),
+
+    /// Request the contents of this node's mempool.
+    ///
+    /// # Returns
+    ///
+    /// Returns [`Response::TransactionHashes`](super::Response::TransactionHashes).
+    MempoolTransactions,
 }

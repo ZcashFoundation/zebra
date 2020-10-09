@@ -9,10 +9,13 @@ mod serialize;
 pub use address::Address;
 pub use script::Script;
 
-#[cfg(test)]
-mod tests;
-#[cfg(test)]
+#[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
+
+#[cfg(any(test, feature = "proptest-impl"))]
+mod arbitrary;
+#[cfg(test)]
+mod prop;
 
 use crate::{
     amount::{Amount, NonNegative},
@@ -40,8 +43,8 @@ impl AsRef<[u8]> for CoinbaseData {
 /// OutPoint
 ///
 /// A particular transaction output reference.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(test, derive(Arbitrary))]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct OutPoint {
     /// References the transaction that contains the UTXO being spent.
     pub hash: transaction::Hash,
@@ -86,8 +89,8 @@ pub enum Input {
 /// I only own one UTXO worth 2 ZEC, I would construct a transaction
 /// that spends my UTXO and sends 1 ZEC to you and 1 ZEC back to me
 /// (just like receiving change).
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(test, derive(Arbitrary))]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct Output {
     /// Transaction value.
     // At https://en.bitcoin.it/wiki/Protocol_documentation#tx, this is an i64.

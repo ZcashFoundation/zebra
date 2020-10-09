@@ -36,7 +36,7 @@ prop_compose! {
 fn equihash_prop_test_solution() -> color_eyre::eyre::Result<()> {
     zebra_test::init();
 
-    for block_bytes in zebra_test::vectors::TEST_BLOCKS.iter() {
+    for block_bytes in zebra_test::vectors::BLOCKS.iter() {
         let block = Block::zcash_deserialize(&block_bytes[..])
             .expect("block test vector should deserialize");
         block.header.solution.check(&block.header)?;
@@ -68,7 +68,7 @@ prop_compose! {
 fn equihash_prop_test_nonce() -> color_eyre::eyre::Result<()> {
     zebra_test::init();
 
-    for block_bytes in zebra_test::vectors::TEST_BLOCKS.iter() {
+    for block_bytes in zebra_test::vectors::BLOCKS.iter() {
         let block = Block::zcash_deserialize(&block_bytes[..])
             .expect("block test vector should deserialize");
         block.header.solution.check(&block.header)?;
@@ -103,7 +103,7 @@ prop_compose! {
 fn equihash_prop_test_input() -> color_eyre::eyre::Result<()> {
     zebra_test::init();
 
-    for block_bytes in zebra_test::vectors::TEST_BLOCKS.iter() {
+    for block_bytes in zebra_test::vectors::BLOCKS.iter() {
         let block = Block::zcash_deserialize(&block_bytes[..])
             .expect("block test vector should deserialize");
         block.header.solution.check(&block.header)?;

@@ -15,10 +15,9 @@ use once_cell::sync::Lazy;
 use rand::thread_rng;
 use redjubjub::{batch, *};
 use tokio::sync::broadcast::{channel, RecvError, Sender};
-use tower::Service;
+use tower::{util::ServiceFn, Service};
 use tower_batch::{Batch, BatchControl};
 use tower_fallback::Fallback;
-use tower_util::ServiceFn;
 
 /// Global batch verification context for RedJubjub signatures.
 ///

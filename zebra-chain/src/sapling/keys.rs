@@ -10,8 +10,6 @@
 #![allow(clippy::unit_arg)]
 
 #[cfg(test)]
-mod arbitrary;
-#[cfg(test)]
 mod test_vectors;
 #[cfg(test)]
 mod tests;
@@ -25,9 +23,6 @@ use std::{
 
 use bech32::{self, FromBase32, ToBase32};
 use rand_core::{CryptoRng, RngCore};
-
-#[cfg(test)]
-use proptest_derive::Arbitrary;
 
 use crate::{
     parameters::Network,
@@ -183,7 +178,10 @@ mod sk_hrp {
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-#[cfg_attr(test, derive(Arbitrary))]
+#[cfg_attr(
+    any(test, feature = "proptest-impl"),
+    derive(proptest_derive::Arbitrary)
+)]
 pub struct SpendingKey {
     network: Network,
     bytes: [u8; 32],
@@ -610,7 +608,10 @@ impl PartialEq<[u8; 32]> for IncomingViewingKey {
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
 #[derive(Copy, Clone, Eq, PartialEq)]
-#[cfg_attr(test, derive(Arbitrary))]
+#[cfg_attr(
+    any(test, feature = "proptest-impl"),
+    derive(proptest_derive::Arbitrary)
+)]
 pub struct Diversifier(pub [u8; 11]);
 
 impl fmt::Debug for Diversifier {
@@ -869,7 +870,9 @@ impl FromStr for FullViewingKey {
 ///
 /// https://zips.z.cash/protocol/canopy.pdf#concretesaplingkeyagreement
 #[derive(Copy, Clone, Deserialize, PartialEq, Serialize)]
-pub struct EphemeralPublicKey(#[serde(with = "serde_helpers::AffinePoint")] jubjub::AffinePoint);
+pub struct EphemeralPublicKey(
+    #[serde(with = "serde_helpers::AffinePoint")] pub jubjub::AffinePoint,
+);
 
 impl fmt::Debug for EphemeralPublicKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

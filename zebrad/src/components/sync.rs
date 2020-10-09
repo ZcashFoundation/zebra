@@ -128,6 +128,12 @@ where
     genesis_hash: block::Hash,
 }
 
+/// Polls the network to determine whether further blocks are available and
+/// downloads them.
+///
+/// This component is used for initial block sync, but the `Inbound` service is
+/// responsible for participating in the gossip protocols used for block
+/// diffusion.
 impl<ZN, ZS, ZV> ChainSync<ZN, ZS, ZV>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = Error> + Send + Clone + 'static,
@@ -606,7 +612,7 @@ where
             tracing::trace!(?hash, "requested block");
 
             // This span is used to help diagnose sync warnings
-            let span = tracing::warn_span!("block_fetch_verify", ?hash);
+            let span = tracing::warn_span!("block_fetch_verify", %hash);
             let mut verifier = self.verifier.clone();
             let task = tokio::spawn(
                 async move {

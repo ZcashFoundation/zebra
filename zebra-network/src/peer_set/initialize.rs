@@ -19,16 +19,12 @@ use tokio::{
     sync::broadcast,
 };
 use tower::{
-    buffer::Buffer,
-    discover::{Change, ServiceStream},
-    layer::Layer,
-    util::BoxService,
-    Service, ServiceExt,
+    buffer::Buffer, discover::Change, layer::Layer, load::peak_ewma::PeakEwmaDiscover,
+    util::BoxService, Service, ServiceExt,
 };
-use tower_load::{peak_ewma::PeakEwmaDiscover, NoInstrument};
 
 use crate::{
-    constants, peer, timestamp_collector::TimestampCollector, AddressBook, BoxedStdError, Config,
+    constants, peer, timestamp_collector::TimestampCollector, AddressBook, BoxError, Config,
     Request, Response,
 };
 
@@ -37,18 +33,37 @@ use zebra_chain::parameters::Network;
 use super::CandidateSet;
 use super::PeerSet;
 
-type PeerChange = Result<Change<SocketAddr, peer::Client>, BoxedStdError>;
+type PeerChange = Result<Change<SocketAddr, peer::Client>, BoxError>;
 
-/// Initialize a peer set with the given `config`, forwarding peer requests to the `inbound_service`.
+/// Initialize a peer set.
+///
+/// The peer set abstracts away peer management to provide a
+/// [`tower::Service`] representing "the network" that load-balances requests
+/// over available peers.  The peer set automatically crawls the network to
+/// find more peer addresses and opportunistically connects to new peers.
+///
+/// Each peer connection's message handling is isolated from other
+/// connections, unlike in `zcashd`.  The peer connection first attempts to
+/// interpret inbound messages as part of a response to a previously-issued
+/// request.  Otherwise, inbound messages are interpreted as requests and sent
+/// to the supplied `inbound_service`.
+///
+/// Wrapping the `inbound_service` in [`tower::load_shed`] middleware will
+/// cause the peer set to shrink when the inbound service is unable to keep up
+/// with the volume of inbound requests.
+///
+/// In addition to returning a service for outbound requests, this method
+/// returns a shared [`AddressBook`] updated with last-seen timestamps for
+/// connected peers.
 pub async fn init<S>(
     config: Config,
     inbound_service: S,
 ) -> (
-    Buffer<BoxService<Request, Response, BoxedStdError>, Request>,
+    Buffer<BoxService<Request, Response, BoxError>, Request>,
     Arc<Mutex<AddressBook>>,
 )
 where
-    S: Service<Request, Response = Response, Error = BoxedStdError> + Clone + Send + 'static,
+    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
     S::Future: Send + 'static,
 {
     let (address_book, timestamp_collector) = TimestampCollector::spawn();
@@ -87,14 +102,12 @@ where
     // Connect the rx end to a PeerSet, wrapping new peers in load instruments.
     let peer_set = PeerSet::new(
         PeakEwmaDiscover::new(
-            ServiceStream::new(
-                // ServiceStream interprets an error as stream termination,
-                // so discard any errored connections...
-                peerset_rx.filter(|result| future::ready(result.is_ok())),
-            ),
+            // Discover interprets an error as stream termination,
+            // so discard any errored connections...
+            peerset_rx.filter(|result| future::ready(result.is_ok())),
             constants::EWMA_DEFAULT_RTT,
             constants::EWMA_DECAY_TIME,
-            NoInstrument,
+            tower::load::CompleteOnResponse::default(),
         ),
         demand_tx.clone(),
         handle_rx,
@@ -169,10 +182,9 @@ async fn add_initial_peers<S>(
     initial_peers: std::collections::HashSet<SocketAddr>,
     connector: S,
     mut tx: mpsc::Sender<PeerChange>,
-) -> Result<(), BoxedStdError>
+) -> Result<(), BoxError>
 where
-    S: Service<SocketAddr, Response = Change<SocketAddr, peer::Client>, Error = BoxedStdError>
-        + Clone,
+    S: Service<SocketAddr, Response = Change<SocketAddr, peer::Client>, Error = BoxError> + Clone,
     S::Future: Send + 'static,
 {
     info!(?initial_peers, "Connecting to initial peer set");
@@ -194,9 +206,9 @@ async fn listen<S>(
     addr: SocketAddr,
     mut handshaker: S,
     tx: mpsc::Sender<PeerChange>,
-) -> Result<(), BoxedStdError>
+) -> Result<(), BoxError>
 where
-    S: Service<(TcpStream, SocketAddr), Response = peer::Client, Error = BoxedStdError> + Clone,
+    S: Service<(TcpStream, SocketAddr), Response = peer::Client, Error = BoxError> + Clone,
     S::Future: Send + 'static,
 {
     let mut listener = TcpListener::bind(addr).await?;
@@ -236,12 +248,11 @@ async fn crawl_and_dial<C, S>(
     mut candidates: CandidateSet<S>,
     mut connector: C,
     mut success_tx: mpsc::Sender<PeerChange>,
-) -> Result<(), BoxedStdError>
+) -> Result<(), BoxError>
 where
-    C: Service<SocketAddr, Response = Change<SocketAddr, peer::Client>, Error = BoxedStdError>
-        + Clone,
+    C: Service<SocketAddr, Response = Change<SocketAddr, peer::Client>, Error = BoxError> + Clone,
     C::Future: Send + 'static,
-    S: Service<Request, Response = Response, Error = BoxedStdError>,
+    S: Service<Request, Response = Response, Error = BoxError>,
     S::Future: Send + 'static,
 {
     use futures::{

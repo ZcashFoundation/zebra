@@ -23,9 +23,11 @@ use std::{
 };
 
 use futures_util::FutureExt;
+use thiserror::Error;
 use tokio::sync::oneshot;
 use tower::{Service, ServiceExt};
 
+use tracing::instrument;
 use zebra_chain::{
     block::{self, Block},
     parameters::Network,
@@ -52,7 +54,7 @@ struct QueuedBlock {
     /// `block`'s cached header hash.
     hash: block::Hash,
     /// The transmitting end of the oneshot channel for this block's result.
-    tx: oneshot::Sender<Result<block::Hash, BoxError>>,
+    tx: oneshot::Sender<Result<block::Hash, VerifyCheckpointError>>,
 }
 
 /// A list of unverified blocks at a particular height.
@@ -173,9 +175,9 @@ where
         list: impl IntoIterator<Item = (block::Height, block::Hash)>,
         initial_tip: Option<(block::Height, block::Hash)>,
         state_service: S,
-    ) -> Result<Self, BoxError> {
+    ) -> Result<Self, VerifyCheckpointError> {
         Ok(Self::from_checkpoint_list(
-            CheckpointList::from_list(list)?,
+            CheckpointList::from_list(list).map_err(VerifyCheckpointError::CheckpointList)?,
             initial_tip,
             state_service,
         ))
@@ -347,9 +349,9 @@ where
     ///  - the block's height is less than or equal to the previously verified
     ///    checkpoint
     ///  - verification has finished
-    fn check_height(&self, height: block::Height) -> Result<(), BoxError> {
+    fn check_height(&self, height: block::Height) -> Result<(), VerifyCheckpointError> {
         if height > self.checkpoint_list.max_height() {
-            Err("block is higher than the maximum checkpoint")?;
+            Err(VerifyCheckpointError::TooHigh)?;
         }
 
         match self.previous_checkpoint_height() {
@@ -359,14 +361,11 @@ where
             InitialTip(previous_height) | PreviousCheckpoint(previous_height)
                 if (height <= previous_height) =>
             {
-                Err(format!(
-                    "Block height has already been verified. {:?}",
-                    height
-                ))?
+                Err(VerifyCheckpointError::Duplicate { height })?
             }
             InitialTip(_) | PreviousCheckpoint(_) => {}
             // We're finished, so no checkpoint height is valid
-            FinalCheckpoint => Err("verification has finished")?,
+            FinalCheckpoint => Err(VerifyCheckpointError::Finished)?,
         };
 
         Ok(())
@@ -401,10 +400,10 @@ where
     ///
     /// Returns an error if the block's height is invalid, see `check_height()`
     /// for details.
-    fn check_block(&self, block: &Block) -> Result<block::Height, BoxError> {
+    fn check_block(&self, block: &Block) -> Result<block::Height, VerifyCheckpointError> {
         let block_height = block
             .coinbase_height()
-            .ok_or("the block does not have a coinbase height")?;
+            .ok_or(VerifyCheckpointError::CoinbaseHeight)?;
         self.check_height(block_height)?;
         Ok(block_height)
     }
@@ -420,7 +419,7 @@ where
     fn queue_block(
         &mut self,
         block: Arc<Block>,
-    ) -> oneshot::Receiver<Result<block::Hash, BoxError>> {
+    ) -> oneshot::Receiver<Result<block::Hash, VerifyCheckpointError>> {
         // Set up a oneshot channel to send results
         let (tx, rx) = oneshot::channel();
 
@@ -451,7 +450,7 @@ where
         for qb in qblocks.iter_mut() {
             if qb.hash == hash {
                 let old_tx = std::mem::replace(&mut qb.tx, tx);
-                let e = "rejected older of duplicate verification requests".into();
+                let e = VerifyCheckpointError::NewerRequest;
                 tracing::trace!(?e);
                 let _ = old_tx.send(Err(e));
                 return rx;
@@ -460,7 +459,7 @@ where
 
         // Memory DoS resistance: limit the queued blocks at each height
         if qblocks.len() >= MAX_QUEUED_BLOCKS_PER_HEIGHT {
-            let e = "too many queued blocks at this height".into();
+            let e = VerifyCheckpointError::QueuedLimit;
             tracing::warn!(?e);
             let _ = tx.send(Err(e));
             return rx;
@@ -530,17 +529,18 @@ where
                     tracing::info!(?height, ?qblock.hash, ?expected_hash,
                                    "Duplicate block at height in CheckpointVerifier");
                     // Reject duplicate blocks at the same height
-                    let _ = qblock.tx.send(Err(
-                        "duplicate valid blocks at this height, only one was chosen".into(),
-                    ));
+                    let _ = qblock
+                        .tx
+                        .send(Err(VerifyCheckpointError::Duplicate { height }));
                 }
             } else {
                 tracing::info!(?height, ?qblock.hash, ?expected_hash,
                                "Bad block hash at height in CheckpointVerifier");
                 // A bad block, that isn't part of the chain.
-                let _ = qblock.tx.send(Err(
-                    "the block hash does not match the chained checkpoint hash".into(),
-                ));
+                let _ = qblock.tx.send(Err(VerifyCheckpointError::UnexpectedHash {
+                    found: qblock.hash,
+                    expected: expected_hash,
+                }));
             }
         }
 
@@ -735,12 +735,37 @@ where
                 .expect("each entry is only removed once");
             for qblock in qblocks.drain(..) {
                 // Sending can fail, but there's nothing we can do about it.
-                let _ = qblock
-                    .tx
-                    .send(Err("checkpoint verifier was dropped".into()));
+                let _ = qblock.tx.send(Err(VerifyCheckpointError::Dropped));
             }
         }
     }
+}
+
+#[derive(Debug, Error)]
+pub enum VerifyCheckpointError {
+    #[error("checkpoint request after checkpointing finished")]
+    Finished,
+    #[error("block is higher than the maximum checkpoint")]
+    TooHigh,
+    #[error("block at {height:?} has already been verified")]
+    Duplicate { height: block::Height },
+    #[error("rejected older of duplicate verification requests")]
+    NewerRequest,
+    #[error("the block does not have a coinbase height")]
+    CoinbaseHeight,
+    #[error("checkpoint verifier was dropped")]
+    Dropped,
+    #[error(transparent)]
+    CommitFinalized(BoxError),
+    #[error(transparent)]
+    CheckpointList(BoxError),
+    #[error("too many queued blocks at this height")]
+    QueuedLimit,
+    #[error("the block hash does not match the chained checkpoint hash, expected {expected:?} found {found:?}")]
+    UnexpectedHash {
+        expected: block::Hash,
+        found: block::Hash,
+    },
 }
 
 /// The CheckpointVerifier service implementation.
@@ -752,7 +777,7 @@ where
     S::Future: Send + 'static,
 {
     type Response = block::Hash;
-    type Error = BoxError;
+    type Error = VerifyCheckpointError;
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
@@ -760,10 +785,11 @@ where
         Poll::Ready(Ok(()))
     }
 
+    #[instrument(name = "checkpoint_call", skip(self, block))]
     fn call(&mut self, block: Arc<Block>) -> Self::Future {
         // Immediately reject all incoming blocks that arrive after we've finished.
         if let FinalCheckpoint = self.previous_checkpoint_height() {
-            return async { Err("checkpoint request after checkpointing finished".into()) }.boxed();
+            return async { Err(VerifyCheckpointError::Finished) }.boxed();
         }
 
         // Queue the block for verification, until we receive all the blocks for
@@ -791,9 +817,11 @@ where
 
             match state_service
                 .ready_and()
-                .await?
+                .await
+                .map_err(VerifyCheckpointError::CommitFinalized)?
                 .call(zs::Request::CommitFinalizedBlock { block })
-                .await?
+                .await
+                .map_err(VerifyCheckpointError::CommitFinalized)?
             {
                 zs::Response::Committed(committed_hash) => {
                     assert_eq!(committed_hash, hash, "state must commit correct hash");
