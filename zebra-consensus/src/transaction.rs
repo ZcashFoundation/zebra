@@ -24,7 +24,6 @@ use displaydoc::Display;
 use futures::{stream::FuturesUnordered, FutureExt, TryFutureExt};
 use thiserror::Error;
 use tower::{Service, ServiceExt};
-use tracing::instrument;
 
 use zebra_chain::{
     parameters::{Network, NetworkUpgrade::Sapling},
@@ -37,6 +36,8 @@ use zebra_script;
 use zebra_state as zs;
 
 use crate::{primitives::groth16, script, BoxError, Config};
+
+mod check;
 
 /// Internal transaction verification service.
 ///
@@ -51,6 +52,7 @@ where
     spend_verifier: groth16::Verifier,
     output_verifier: groth16::Verifier,
     joinsplit_verifier: groth16::Verifier,
+    redjubjub_verifier: crate::primitives::redjubjub::Verifier,
 }
 
 #[non_exhaustive]
@@ -124,97 +126,139 @@ where
                 value_balance,
                 joinsplit_data,
                 shielded_data,
-            } => async move {
-                // Handle transparent inputs and outputs.
-                // These are left unimplemented!() pending implementation
-                // of the async script RFC.
-                if tx.is_coinbase() {
-                    // do something special for coinbase transactions
-                    unimplemented!();
-                } else {
-                    // otherwise, check no coinbase inputs
-                    // feed all of the inputs to the script verifier
-                    unimplemented!();
+            } => {
+                async move {
+                    // Handle transparent inputs and outputs.
+                    // These are left unimplemented!() pending implementation
+                    // of the async script RFC.
+                    if tx.is_coinbase() {
+                        // do something special for coinbase transactions
+                        unimplemented!();
+                    } else {
+                        // otherwise, check no coinbase inputs
+                        // feed all of the inputs to the script verifier
+                        unimplemented!();
+                    }
+
+                    // Contains a set of asynchronous checks, all of which must
+                    // resolve to Ok(()) for verification to succeed (in addition to
+                    // any other checks)
+                    let async_checks = FuturesUnordered::<
+                        Box<dyn Future<Output = Result<(), VerifyTransactionError>>>,
+                    >::new();
+
+                    if let Some(joinsplit_data) = joinsplit_data {
+                        // XXX create a method on JoinSplitData
+                        // that prepares groth16::Items with the correct proofs
+                        // and proof inputs, handling interstitial treestates
+                        // correctly.
+
+                        // Then, pass those items to self.joinsplit to verify them.
+
+                        // XXX refactor this into a nicely named check function
+                        ed25519::VerificationKey::try_from(joinsplit_data.pub_key)
+                            .and_then(|vk| vk.verify(&joinsplit_data.sig, tx.data_to_be_signed()))
+                            .map_err(VerifyTransactionError::Ed25519)
+                    }
+
+                    if let Some(shielded_data) = shielded_data {
+                        let sighash = tx.sighash(
+                            Network::Sapling, // TODO: pass this in
+                            HashType::ALL,    // TODO: check these
+                            None,             // TODO: check these
+                        );
+
+                        shielded_data.spends().for_each(|spend| {
+                            // TODO: check that spend.cv and spend.rk are NOT of small
+                            // order.
+                            // https://zips.z.cash/protocol/canopy.pdf#spenddesc
+
+                            // Queue the validation of the RedJubjub spend
+                            // authorization signature for each Spend
+                            // description while adding the resulting future to
+                            // our collection of async checks that (at a
+                            // minimum) must pass for the transaction to verify.
+                            async_checks.push(self.redjubjub_verifier.call(
+                                (spend.rk.into(), spend.spend_auth_sig, sighash.into()).into(),
+                            ));
+
+                            // TODO: prepare public inputs for spends, then create
+                            // a groth16::Item and pass to self.spend
+
+                            // Queue the verification of the Groth16 spend proof
+                            // for each Spend description while adding the
+                            // resulting future to our collection of async
+                            // checks that (at a minimum) must pass for the
+                            // transaction to verify.
+                            async_checks.push(
+                                self.spend_verifier.call(
+                                    (
+                                        spend.cv,
+                                        spend.anchor,
+                                        spend.nullifier,
+                                        spend.rk,
+                                        spend.zkproof,
+                                    )
+                                        .into(),
+                                ),
+                            );
+                        });
+
+                        shielded_data.outputs().for_each(|output| {
+                            // TODO: check that output.cv and output.epk are NOT of small
+                            // order.
+                            // https://zips.z.cash/protocol/canopy.pdf#outputdesc
+
+                            // TODO: prepare public inputs for outputs, then create
+                            // a groth16::Item and pass to self.output
+
+                            // Queue the verification of the Groth16 output
+                            // proof for each Output description while adding
+                            // the resulting future to our collection of async
+                            // checks that (at a minimum) must pass for the
+                            // transaction to verify.
+                            async_checks.push(
+                                self.output_verifier.call(
+                                    (output.cv, output.cm_u, output.ephemeral_key, output.zkproof)
+                                        .into(),
+                                ),
+                            );
+                        });
+
+                        // Checks the balance.
+                        //
+                        // The net value of Spend transfers minus Output transfers in a
+                        // transaction is called the balancing value, measured in zatoshi as
+                        // a signed integer v_balance.
+                        //
+                        // Consistency of v_balance with the value commitments in Spend
+                        // descriptions and Output descriptions is enforced by the binding
+                        // signature.
+                        //
+                        // Instead of generating a key pair at random, we generate it as a
+                        // function of the value commitments in the Spend descriptions and
+                        // Output descriptions of the transaction, and the balancing value.
+                        //
+                        // https://zips.z.cash/protocol/canopy.pdf#saplingbalance
+                        let bsk = check::balancing_value_balances(shielded_data, value_balance);
+
+                        // Queue the validation of the RedJubjub binding
+                        // signature with the batch verifier service while
+                        // adding the resulting future to our collection of
+                        // async checks that (at a minimum) must pass for the
+                        // transaction to verify.
+                        match bsk {
+                            Ok(bsk) => async_checks.push(self.redjubjub_verifier.call(
+                                (bsk.into(), &shielded_data.binding_sig, sighash.into()).into(),
+                            )),
+                            Err(e) => return Err(VerifyTransactionError::RedJubjub(e)).into(),
+                        }
+                    }
+
+                    unimplemented!()
                 }
-
-                // Contains a set of asynchronous checks, all of which must
-                // resolve to Ok(()) for verification to succeed (in addition to
-                // any other checks)
-                let _async_checks = FuturesUnordered::<
-                    Box<dyn Future<Output = Result<(), VerifyTransactionError>>>,
-                >::new();
-
-                if let Some(joinsplit_data) = joinsplit_data {
-                    // XXX create a method on JoinSplitData
-                    // that prepares groth16::Items with the correct proofs
-                    // and proof inputs, handling interstitial treestates
-                    // correctly.
-
-                    // Then, pass those items to self.joinsplit to verify them.
-
-                    // XXX refactor this into a nicely named check function
-                    ed25519::VerificationKey::try_from(joinsplit_data.pub_key)
-                        .and_then(|vk| vk.verify(&joinsplit_data.sig, tx.data_to_be_signed()))
-                        .map_err(VerifyTransactionError::Ed25519)
-                }
-
-                if let Some(shielded_data) = shielded_data {
-                    let sighash = tx.sighash(
-                        Network::Sapling, // TODO: pass this in
-                        HashType::ALL,    // TODO: check these
-                        None,             // TODO: check these
-                    );
-
-                    shielded_data.spends().for_each(|spend| {
-                        // TODO: check that spend.cv and spend.rk are NOT of small
-                        // order.
-                        // https://zips.z.cash/protocol/canopy.pdf#spenddesc
-
-                        // Verify the spend authorization signature for each Spend
-                        // description.
-                        spend
-                            .rk
-                            .verify(sighash.into(), spend.spend_auth_sig)
-                            .map_err(VerifyTransactionError::RedJubjub);
-
-                        // TODO: prepare public inputs for spends, then create
-                        // a groth16::Item and pass to self.spend
-                        unimplemented!()
-                    });
-
-                    shielded_data.outputs().for_each(|output| {
-                        // TODO: check that output.cv and output.epk are NOT of small
-                        // order.
-                        // https://zips.z.cash/protocol/canopy.pdf#outputdesc
-
-                        // TODO: prepare public inputs for outputs, then create
-                        // a groth16::Item and pass to self.output
-                        unimplemented!()
-                    });
-
-                    // Checks the balance.
-                    //
-                    // The net value of Spend transfers minus Output transfers in a
-                    // transaction is called the balancing value, measured in zatoshi as
-                    // a signed integer v_balance.
-                    //
-                    // Consistency of v_balance with the value commitments in Spend
-                    // descriptions and Output descriptions is enforced by the binding
-                    // signature.
-                    //
-                    // Instead of generating a key pair at random, we generate it as a
-                    // function of the value commitments in the Spend descriptions and
-                    // Output descriptions of the transaction, and the balancing value.
-                    //
-                    // https://zips.z.cash/protocol/canopy.pdf#saplingbalance
-                    let bsk = shielded_data.binding_validating_key(value_balance);
-                    bsk.verify(sighash, &shielded_data.binding_sig)
-                        .map_err(VerifyTransactionError::RedJubjub);
-                }
-
-                unimplemented!()
+                .boxed()
             }
-            .boxed(),
         }
     }
 }

@@ -75,41 +75,6 @@ impl ShieldedData {
     pub fn note_commitments(&self) -> Vec<jubjub::Fq> {
         self.outputs().map(|output| output.cm_u).collect()
     }
-
-    /// Calculate the transaction binding signature validating key.
-    ///
-    /// Getting the binding signature validating key from the Spend and Output
-    /// description value commitments and the balancing value implicitly checks
-    /// that the balancing value is consistent with the value transfered in the
-    /// Spend and Output descriptions but also proves that the signer knew the
-    /// randomness used for the Spend and Output value commitments, which
-    /// prevents replays of Output descriptions.
-    ///
-    /// The net value of Spend transfers minus Output transfers in a transaction
-    /// is called the balancing value, measured in zatoshi as a signed integer
-    /// v_balance.
-    ///
-    /// Consistency of v_balance with the value commitments in Spend
-    /// descriptions and Output descriptions is enforced by the binding
-    /// signature.
-    ///
-    /// Instead of generating a key pair at random, we generate it as a function
-    /// of the value commitments in the Spend descriptions and Output
-    /// descriptions of the transaction, and the balancing value.
-    ///
-    /// https://zips.z.cash/protocol/canopy.pdf#saplingbalance
-    pub fn binding_validating_key(
-        &self,
-        value_balance: Amount,
-    ) -> Result<VerificationKey<Binding>, redjubjub::Error> {
-        let cv_old: ValueCommitment = self.spends().map(|spend| spend.cv).sum();
-        let cv_new: ValueCommitment = self.outputs().map(|output| output.cv).sum();
-        let cv_balance: ValueCommitment = ValueCommitment::new(jubjub::Fr::zero(), value_balance);
-
-        let key_bytes: [u8; 32] = (cv_old - cv_new - cv_balance).into();
-
-        VerificationKey::<Binding>::try_from(key_bytes)
-    }
 }
 
 // Technically, it's possible to construct two equivalent representations
