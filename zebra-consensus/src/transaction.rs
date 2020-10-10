@@ -147,6 +147,12 @@ where
                         Box<dyn Future<Output = Result<(), VerifyTransactionError>>>,
                     >::new();
 
+                    let sighash = tx.sighash(
+                        Network::Sapling, // TODO: pass this in
+                        HashType::ALL,    // TODO: check these
+                        None,             // TODO: check these
+                    );
+
                     if let Some(joinsplit_data) = joinsplit_data {
                         // XXX create a method on JoinSplitData
                         // that prepares groth16::Items with the correct proofs
@@ -156,18 +162,16 @@ where
                         // Then, pass those items to self.joinsplit to verify them.
 
                         // XXX refactor this into a nicely named check function
-                        ed25519::VerificationKey::try_from(joinsplit_data.pub_key)
-                            .and_then(|vk| vk.verify(&joinsplit_data.sig, tx.data_to_be_signed()))
-                            .map_err(VerifyTransactionError::Ed25519)
+                        // ed25519::VerificationKey::try_from(joinsplit_data.pub_key)
+                        //     .and_then(|vk| vk.verify(&joinsplit_data.sig, sighash))
+                        //     .map_err(VerifyTransactionError::Ed25519)
+                        match check::validate_joinsplit_sig(joinsplit_data, sighash.as_bytes()) {
+                            Ok(_) => (),
+                            Err(e) => return Err(VerifyTransactionError::Ed25519(e)).into(),
+                        }
                     }
 
                     if let Some(shielded_data) = shielded_data {
-                        let sighash = tx.sighash(
-                            Network::Sapling, // TODO: pass this in
-                            HashType::ALL,    // TODO: check these
-                            None,             // TODO: check these
-                        );
-
                         shielded_data.spends().for_each(|spend| {
                             // TODO: check that spend.cv and spend.rk are NOT of small
                             // order.
