@@ -68,8 +68,19 @@ impl FinalizedState {
         self.queued_by_prev_hash.insert(prev_hash, queued_block);
 
         while let Some(queued_block) = self.queued_by_prev_hash.remove(&self.finalized_tip_hash()) {
-            self.commit_finalized(queued_block)
+            let height = queued_block
+                .block
+                .coinbase_height()
+                .expect("valid blocks must have a height");
+            self.commit_finalized(queued_block);
+            metrics::counter!("state.committed.block.count", 1);
+            metrics::gauge!("state.committed.block.height", height.0 as _);
         }
+
+        metrics::gauge!(
+            "state.queued.block.count",
+            self.queued_by_prev_hash.len() as _
+        );
     }
 
     /// Returns the hash of the current finalized tip block.
