@@ -726,9 +726,7 @@ where
     }
 }
 
-fn transaction_hashes<'a>(
-    items: &'a [InventoryHash],
-) -> impl Iterator<Item = transaction::Hash> + 'a {
+fn transaction_hashes(items: &'_ [InventoryHash]) -> impl Iterator<Item = transaction::Hash> + '_ {
     items.iter().filter_map(|item| {
         if let InventoryHash::Tx(hash) = item {
             Some(*hash)
@@ -738,7 +736,7 @@ fn transaction_hashes<'a>(
     })
 }
 
-fn block_hashes<'a>(items: &'a [InventoryHash]) -> impl Iterator<Item = block::Hash> + 'a {
+fn block_hashes(items: &'_ [InventoryHash]) -> impl Iterator<Item = block::Hash> + '_ {
     items.iter().filter_map(|item| {
         if let InventoryHash::Block(hash) = item {
             Some(*hash)
