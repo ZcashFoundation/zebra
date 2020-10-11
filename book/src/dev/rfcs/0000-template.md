@@ -42,6 +42,22 @@ This is the technical portion of the RFC. Explain the design in sufficient detai
 
 The section should return to the examples given in the previous section, and explain more fully how the detailed proposal makes those examples work.
 
+## Module Structure
+
+Describe the crate and modules that will implement the feature.
+
+## Test Plan
+
+Explain how the feature will be tested, including:
+* tests for consensus-critical functionality
+* existing test vectors, if available
+* Zcash blockchain block test vectors (specify the network upgrade, feature, or block height and network)
+
+The tests should cover:
+* positive cases: make sure the feature accepts valid inputs 
+* negative cases: make sure the feature rejects invalid inputs
+* edge cases: make sure that boundary conditions are correctly handled
+
 # Drawbacks
 [drawbacks]: #drawbacks
 
@@ -54,7 +70,6 @@ Why should we *not* do this?
 - Is this design a good basis for later designs or implementations?
 - What other designs have been considered and what is the rationale for not choosing them?
 - What is the impact of not doing this?
-
 
 # Prior art
 [prior-art]: #prior-art
