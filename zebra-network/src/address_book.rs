@@ -140,14 +140,14 @@ impl AddressBook {
 
     /// Return an iterator over all peers, ordered from most recently seen to
     /// least recently seen.
-    pub fn peers<'a>(&'a self) -> impl Iterator<Item = MetaAddr> + 'a {
+    pub fn peers(&'_ self) -> impl Iterator<Item = MetaAddr> + '_ {
         let _guard = self.span.enter();
         self.by_time.iter().rev().cloned()
     }
 
     /// Return an iterator over peers known to be disconnected, ordered from most
     /// recently seen to least recently seen.
-    pub fn disconnected_peers<'a>(&'a self) -> impl Iterator<Item = MetaAddr> + 'a {
+    pub fn disconnected_peers(&'_ self) -> impl Iterator<Item = MetaAddr> + '_ {
         let _guard = self.span.enter();
         use std::ops::Bound::{Excluded, Unbounded};
 
@@ -159,7 +159,7 @@ impl AddressBook {
 
     /// Return an iterator over peers that could potentially be connected, ordered from most
     /// recently seen to least recently seen.
-    pub fn potentially_connected_peers<'a>(&'a self) -> impl Iterator<Item = MetaAddr> + 'a {
+    pub fn potentially_connected_peers(&'_ self) -> impl Iterator<Item = MetaAddr> + '_ {
         let _guard = self.span.enter();
         use std::ops::Bound::{Included, Unbounded};
 
@@ -171,7 +171,7 @@ impl AddressBook {
 
     /// Returns an iterator that drains entries from the address book, removing
     /// them in order from most recent to least recent.
-    pub fn drain_newest<'a>(&'a mut self) -> impl Iterator<Item = MetaAddr> + 'a {
+    pub fn drain_newest(&'_ mut self) -> impl Iterator<Item = MetaAddr> + '_ {
         Drain {
             book: self,
             newest_first: true,
@@ -180,7 +180,7 @@ impl AddressBook {
 
     /// Returns an iterator that drains entries from the address book, removing
     /// them in order from least recent to most recent.
-    pub fn drain_oldest<'a>(&'a mut self) -> impl Iterator<Item = MetaAddr> + 'a {
+    pub fn drain_oldest(&'_ mut self) -> impl Iterator<Item = MetaAddr> + '_ {
         Drain {
             book: self,
             newest_first: false,
