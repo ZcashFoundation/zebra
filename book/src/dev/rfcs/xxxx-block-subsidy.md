@@ -63,7 +63,7 @@ It is important to note that all blocks before Sapling are verified by the Check
 | Height                                 | Miner    | Founder reward | Funding streams | Shielded Coinbase | Target Spacing |
 |----------------------------------------|----------|----------------|-----------------|-------------------|----------------|             
 | ~Genesis~                              | ~**0%**~ | ~**0%**~       | ~**0%**~        | ~**No**~          | ~**None**~     |
-| ~Slow Start Shift..Slow Start Interval~| ~80%~    | ~20%~          | ~0%~            | ~No~              | ~150 seconds~  |
+| ~Genesis..Slow Start Interval~         | ~80%~    | ~20%~          | ~0%~            | ~No~              | ~150 seconds~  |
 | ~Slow Start Interval..Overwinter~      | ~80%~    | ~20%~          | ~0%~            | ~No~              | ~150 seconds~  |
 | ~Overwinter..Sapling~                  | ~80%~    | ~20%~          | ~0%~            | ~No~              | ~150 seconds~  |
 | Sapling..Blossom                       | 80%      | 20%            | 0%              | No                | 150 seconds    |
