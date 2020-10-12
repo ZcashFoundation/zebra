@@ -8,6 +8,9 @@ on:
     branches:
       - main
 
+defaults:
+  timeout-minutes: 30
+
 jobs:
 
   coverage:
