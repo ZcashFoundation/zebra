@@ -72,31 +72,6 @@ pub fn equihash_solution_is_valid(header: &Header) -> Result<(), equihash::Error
     header.solution.check(&header)
 }
 
-/// Returns `Ok(())` if `header.time` is less than or equal to
-/// 2 hours in the future, according to the node's local clock (`now`).
-///
-/// This is a non-deterministic rule, as clocks vary over time, and
-/// between different nodes.
-///
-/// "In addition, a full validator MUST NOT accept blocks with nTime
-/// more than two hours in the future according to its clock. This
-/// is not strictly a consensus rule because it is nondeterministic,
-/// and clock time varies between nodes. Also note that a block that
-/// is rejected by this rule at a given point in time may later be
-/// accepted." [§7.5][7.5]
-///
-/// [7.5]: https://zips.z.cash/protocol/protocol.pdf#blockheader
-///
-/// If the header time is invalid, returns an error containing `height` and `hash`.
-pub fn time_is_valid_at(
-    header: &Header,
-    now: DateTime<Utc>,
-    height: &Height,
-    hash: &Hash,
-) -> Result<(), zebra_chain::block::BlockTimeError> {
-    header.time_is_valid_at(now, height, hash)
-}
-
 /// Returns `Ok(())` if the block subsidy and miner fees in `block` are valid for `network`
 ///
 /// [3.9]: https://zips.z.cash/protocol/protocol.pdf#subsidyconcepts
@@ -140,4 +115,29 @@ pub fn subsidy_is_valid(block: &Block, network: Network) -> Result<(), BlockErro
         // Future halving, with no founders reward or funding streams
         Ok(())
     }
+}
+
+/// Returns `Ok(())` if `header.time` is less than or equal to
+/// 2 hours in the future, according to the node's local clock (`now`).
+///
+/// This is a non-deterministic rule, as clocks vary over time, and
+/// between different nodes.
+///
+/// "In addition, a full validator MUST NOT accept blocks with nTime
+/// more than two hours in the future according to its clock. This
+/// is not strictly a consensus rule because it is nondeterministic,
+/// and clock time varies between nodes. Also note that a block that
+/// is rejected by this rule at a given point in time may later be
+/// accepted." [§7.5][7.5]
+///
+/// [7.5]: https://zips.z.cash/protocol/protocol.pdf#blockheader
+///
+/// If the header time is invalid, returns an error containing `height` and `hash`.
+pub fn time_is_valid_at(
+    header: &Header,
+    now: DateTime<Utc>,
+    height: &Height,
+    hash: &Hash,
+) -> Result<(), zebra_chain::block::BlockTimeError> {
+    header.time_is_valid_at(now, height, hash)
 }
