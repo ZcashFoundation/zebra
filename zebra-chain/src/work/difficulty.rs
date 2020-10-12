@@ -213,7 +213,7 @@ impl CompactDifficulty {
             // zcashd rejects zero values, without comparing the hash
             None
         } else {
-            Some(ExpandedDifficulty(result))
+            Some(result.into())
         }
     }
 
@@ -256,7 +256,12 @@ impl ExpandedDifficulty {
     /// Hashes are not used to calculate the difficulties of future blocks, so
     /// users of this module should avoid converting hashes into difficulties.
     fn from_hash(hash: &block::Hash) -> ExpandedDifficulty {
-        ExpandedDifficulty(U256::from_little_endian(&hash.0))
+        U256::from_little_endian(&hash.0).into()
+}
+
+impl From<U256> for ExpandedDifficulty {
+    fn from(value: U256) -> Self {
+        ExpandedDifficulty(value)
     }
 }
 
