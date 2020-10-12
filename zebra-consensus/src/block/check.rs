@@ -94,7 +94,7 @@ pub fn time_is_valid_at(
     height: &Height,
     hash: &Hash,
 ) -> Result<(), zebra_chain::block::BlockTimeError> {
-    header.is_time_valid_at(now, height, hash)
+    header.time_is_valid_at(now, height, hash)
 }
 
 /// Returns `Ok(())` if the block subsidy and miner fees in `block` are valid for `network`

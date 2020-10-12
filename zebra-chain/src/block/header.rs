@@ -83,9 +83,9 @@ pub enum BlockTimeError {
 }
 
 impl Header {
-    /// TODO: Inline this function into zebra_consensus::block::check::is_time_valid_at.
+    /// TODO: Inline this function into zebra_consensus::block::check::time_is_valid_at.
     /// See https://github.com/ZcashFoundation/zebra/issues/1021 for more details.
-    pub fn is_time_valid_at(
+    pub fn time_is_valid_at(
         &self,
         now: DateTime<Utc>,
         height: &Height,

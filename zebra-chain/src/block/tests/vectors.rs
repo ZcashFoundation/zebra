@@ -186,10 +186,10 @@ fn block_limits_single_tx() {
     Block::zcash_deserialize(&data[..]).expect_err("block should not deserialize");
 }
 
-/// Test wrapper for `BlockHeader.is_time_valid_at`.
+/// Test wrapper for `BlockHeader.time_is_valid_at`.
 ///
 /// Generates a block header, sets its `time` to `block_header_time`, then
-/// calls `is_time_valid_at`.
+/// calls `time_is_valid_at`.
 fn node_time_check(
     block_header_time: DateTime<Utc>,
     now: DateTime<Utc>,
@@ -197,7 +197,7 @@ fn node_time_check(
     let mut header = generate::block_header();
     header.time = block_header_time;
     // pass a zero height and hash - they are only used in the returned error
-    header.is_time_valid_at(now, &Height(0), &Hash([0; 32]))
+    header.time_is_valid_at(now, &Height(0), &Hash([0; 32]))
 }
 
 #[test]
