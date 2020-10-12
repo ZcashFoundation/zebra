@@ -130,6 +130,22 @@ async fn check_transcripts() -> Result<(), Report> {
 }
 
 #[test]
+fn coinbase_is_first_for_historical_blocks() -> Result<(), Report> {
+    let block_iter = zebra_test::vectors::BLOCKS.iter();
+
+    for block in block_iter {
+        let block = block
+            .zcash_deserialize_into::<Block>()
+            .expect("block is structurally valid");
+
+        check::coinbase_is_first(&block)
+            .expect("the coinbase in a historical block should be valid");
+    }
+
+    Ok(())
+}
+
+#[test]
 fn equihash_is_valid_for_historical_blocks() -> Result<(), Report> {
     let block_iter = zebra_test::vectors::BLOCKS.iter();
 
