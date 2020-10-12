@@ -201,6 +201,7 @@ fn subsidy_is_valid_for_network(network: Network) -> Result<(), Report> {
         Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
         Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
     };
+
     for (&height, block) in block_iter {
         let block = block
             .zcash_deserialize_into::<Block>()
@@ -218,12 +219,13 @@ fn subsidy_is_valid_for_network(network: Network) -> Result<(), Report> {
 }
 
 #[test]
-fn nocoinbase_validation_failure() -> Result<(), Report> {
+fn coinbase_validation_failure() -> Result<(), Report> {
     use crate::error::*;
 
     let network = Network::Mainnet;
 
-    // Get a header form a block in the mainnet that is inside the founders reward period.
+    // Get a block in the mainnet that is inside the founders reward period,
+    // and delete the coinbase transaction
     let block =
         Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])
             .expect("block should deserialize");
@@ -232,10 +234,58 @@ fn nocoinbase_validation_failure() -> Result<(), Report> {
     // Remove coinbase transaction
     block.transactions.remove(0);
 
-    // Validate the block
+    // Validate the block using coinbase_is_first
+    let result = check::coinbase_is_first(&block).unwrap_err();
+    let expected = BlockError::NoTransactions;
+    assert_eq!(expected, result);
+
+    // Validate the block using subsidy_is_valid
     let result = check::subsidy_is_valid(&block, network).unwrap_err();
     let expected = BlockError::Transaction(TransactionError::Subsidy(SubsidyError::NoCoinbase));
     assert_eq!(expected, result);
+
+    // Get another founders reward block, and delete the coinbase transaction
+    let block =
+        Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_434873_BYTES[..])
+            .expect("block should deserialize");
+    let mut block = Arc::try_unwrap(block).expect("block should unwrap");
+
+    // Remove coinbase transaction
+    block.transactions.remove(0);
+
+    // Validate the block using coinbase_is_first
+    let result = check::coinbase_is_first(&block).unwrap_err();
+    let expected = BlockError::Transaction(TransactionError::CoinbasePosition);
+    assert_eq!(expected, result);
+
+    // Validate the block using subsidy_is_valid
+    let result = check::subsidy_is_valid(&block, network).unwrap_err();
+    let expected = BlockError::Transaction(TransactionError::Subsidy(SubsidyError::NoCoinbase));
+    assert_eq!(expected, result);
+
+    // Get another founders reward block, and duplicate the coinbase transaction
+    let block =
+        Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_434873_BYTES[..])
+            .expect("block should deserialize");
+    let mut block = Arc::try_unwrap(block).expect("block should unwrap");
+
+    // Remove coinbase transaction
+    block.transactions.push(
+        block
+            .transactions
+            .get(0)
+            .expect("block has coinbase")
+            .clone(),
+    );
+
+    // Validate the block using coinbase_is_first
+    let result = check::coinbase_is_first(&block).unwrap_err();
+    let expected = BlockError::Transaction(TransactionError::CoinbaseInputFound);
+    assert_eq!(expected, result);
+
+    // Validate the block using subsidy_is_valid, which does not detect this error
+    check::subsidy_is_valid(&block, network)
+        .expect("subsidy does not check for extra coinbase transactions");
 
     Ok(())
 }
