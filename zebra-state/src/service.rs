@@ -3,6 +3,8 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
+    time::Duration,
+    time::Instant,
 };
 
 use futures::future::{FutureExt, TryFutureExt};
@@ -40,6 +42,8 @@ struct StateService {
     queued_blocks: QueuedBlocks,
     /// The set of outpoints with pending requests for their associated transparent::Output
     pending_utxos: utxo::PendingUtxos,
+    /// Instant tracking the last time `pending_utxos` was pruned
+    last_prune: Instant,
 }
 
 #[derive(Debug, Error)]
@@ -53,6 +57,8 @@ enum ValidateContextError {
 }
 
 impl StateService {
+    const PRUNE_INTERVAL: Duration = Duration::from_secs(30);
+
     pub fn new(config: Config, network: Network) -> Self {
         let sled = FinalizedState::new(&config, network);
         let mem = NonFinalizedState::default();
@@ -64,6 +70,7 @@ impl StateService {
             mem,
             queued_blocks,
             pending_utxos,
+            last_prune: Instant::now(),
         }
     }
 
@@ -167,8 +174,12 @@ impl Service<Request> for StateService {
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        // TODO: limit how often this is triggered
-        self.pending_utxos.prune();
+        let now = Instant::now();
+
+        if self.last_prune + Self::PRUNE_INTERVAL < now {
+            self.pending_utxos.prune();
+            self.last_prune = now;
+        }
 
         Poll::Ready(Ok(()))
     }
