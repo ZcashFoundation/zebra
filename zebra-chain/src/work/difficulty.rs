@@ -13,8 +13,13 @@
 
 use crate::{block, parameters::Network};
 
-use std::cmp::{Ordering, PartialEq, PartialOrd};
-use std::{fmt, ops::Add, ops::AddAssign};
+use std::{
+    cmp::{Ordering, PartialEq, PartialOrd},
+    convert::TryFrom,
+    fmt,
+    ops::Add,
+    ops::AddAssign,
+};
 
 use primitive_types::U256;
 
@@ -271,6 +276,73 @@ impl ExpandedDifficulty {
         };
 
         limit.into()
+    }
+
+    /// Calculate the CompactDifficulty for an expanded difficulty.
+    ///
+    /// See `ToCompact()` in the Zcash Specification, and `GetCompact()`
+    /// in zcashd.
+    ///
+    /// Panics:
+    ///
+    /// If `self` is zero.
+    ///
+    /// `ExpandedDifficulty` values are generated in two ways:
+    ///   * conversion from `CompactDifficulty` values, which rejects zeroes, and
+    ///   * difficulty adjustment calculations, which impose a non-zero minimum
+    ///     `target_difficulty_limit`.
+    ///
+    /// Neither of these methods yield zero values.
+    pub fn to_compact(&self) -> CompactDifficulty {
+        // The zcashd implementation supports negative and zero compact values.
+        // These values are rejected by the protocol rules. Zebra is designed so
+        // that invalid states are not representable. Therefore, this function
+        // does not produce negative compact values, and panics on zero compact
+        // values. (The negative compact value code in zcashd is unused.)
+        assert!(self.0 > 0.into(), "Zero difficulty values are invalid");
+
+        // The constants for this floating-point representation.
+        // Alias the constants here, so the code is easier to read.
+        const UNSIGNED_MANTISSA_MASK: u32 = CompactDifficulty::UNSIGNED_MANTISSA_MASK;
+        const OFFSET: i32 = CompactDifficulty::OFFSET;
+
+        // Calculate the final size, accounting for the sign bit.
+        // This is the size *after* applying the sign bit adjustment in `ToCompact()`.
+        let size = self.0.bits() / 8 + 1;
+
+        // Make sure the mantissa is non-negative, by shifting down values that
+        // would otherwise overflow into the sign bit
+        let mantissa = if self.0 <= UNSIGNED_MANTISSA_MASK.into() {
+            // Value is small, shift up if needed
+            self.0 << (8 * (3 - size))
+        } else {
+            // Value is large, shift down
+            self.0 >> (8 * (size - 3))
+        };
+
+        // This assertion also makes sure that size fits in its 8 bit compact field
+        assert!(
+            size < (31 + OFFSET) as _,
+            format!(
+                "256^size (256^{}) must fit in a u256, after the sign bit adjustment and offset",
+                size
+            )
+        );
+        let size = u32::try_from(size).expect("a 0-6 bit value fits in a u32");
+
+        assert!(
+            mantissa <= UNSIGNED_MANTISSA_MASK.into(),
+            format!("mantissa {:x?} must fit in its compact field", mantissa)
+        );
+        let mantissa = u32::try_from(mantissa).expect("a 0-23 bit value fits in a u32");
+
+        if mantissa > 0 {
+            CompactDifficulty(mantissa + (size << 24))
+        } else {
+            // This check catches invalid mantissas. Overflows and underflows
+            // should also be unreachable, but they aren't caught here.
+            unreachable!("converted CompactDifficulty values must be valid")
+        }
     }
 }
 
