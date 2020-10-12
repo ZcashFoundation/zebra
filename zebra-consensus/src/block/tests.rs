@@ -6,6 +6,7 @@ use super::*;
 
 use std::sync::Arc;
 
+use block::Height;
 use chrono::Utc;
 use color_eyre::eyre::{eyre, Report};
 use once_cell::sync::Lazy;
@@ -140,6 +141,32 @@ fn coinbase_is_first_for_historical_blocks() -> Result<(), Report> {
 
         check::coinbase_is_first(&block)
             .expect("the coinbase in a historical block should be valid");
+    }
+
+    Ok(())
+}
+
+#[test]
+fn difficulty_is_valid_for_historical_blocks() -> Result<(), Report> {
+    difficulty_is_valid_for_network(Network::Mainnet)?;
+    difficulty_is_valid_for_network(Network::Testnet)?;
+
+    Ok(())
+}
+
+fn difficulty_is_valid_for_network(network: Network) -> Result<(), Report> {
+    let block_iter = match network {
+        Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
+        Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
+    };
+
+    for (&height, block) in block_iter {
+        let block = block
+            .zcash_deserialize_into::<Block>()
+            .expect("block is structurally valid");
+
+        check::difficulty_is_valid(&block.header, network, &Height(height), &block.hash())
+            .expect("the difficulty from a historical block should be valid");
     }
 
     Ok(())
