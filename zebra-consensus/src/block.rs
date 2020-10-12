@@ -108,6 +108,10 @@ where
         async move {
             let hash = block.hash();
 
+            // The height is already included in the ChainVerifier span
+            let span = tracing::debug_span!("BlockVerifier.call", ?hash);
+            let _entered = span.enter();
+
             // Check that this block is actually a new block.
             match state_service
                 .ready_and()
@@ -124,8 +128,9 @@ where
                 _ => unreachable!("wrong response to Request::Depth"),
             }
 
-            // These checks only apply to generated blocks. We check the block
-            // height for parsed blocks when we deserialize them.
+            // We repeat the height checks here, to ensure that generated blocks
+            // are valid. (We check the block heights for parsed blocks when we
+            // deserialize them.)
             let height = block
                 .coinbase_height()
                 .ok_or(BlockError::MissingHeight(hash))?;
