@@ -9,12 +9,10 @@ on:
 env:
   PROJECT_ID: zealous-zebra
 
-defaults:
-  timeout-minutes: 30
-
 jobs:
   build:
     name: Google Cloud / Test, Build, and Deploy
+    timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
 

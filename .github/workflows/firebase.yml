@@ -5,13 +5,11 @@ on:
     branches:
       - main
 
-defaults:
-  timeout-minutes: 30
-
 jobs:
 
   build:
     name: Build and Deploy Docs
+    timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
     - name: Checkout the source code
