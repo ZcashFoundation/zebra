@@ -130,6 +130,22 @@ async fn check_transcripts() -> Result<(), Report> {
 }
 
 #[test]
+fn equihash_is_valid_for_historical_blocks() -> Result<(), Report> {
+    let block_iter = zebra_test::vectors::BLOCKS.iter();
+
+    for block in block_iter {
+        let block = block
+            .zcash_deserialize_into::<Block>()
+            .expect("block is structurally valid");
+
+        check::equihash_solution_is_valid(&block.header)
+            .expect("the equihash solution from a historical block should be valid");
+    }
+
+    Ok(())
+}
+
+#[test]
 fn subsidy_is_valid_for_historical_blocks() -> Result<(), Report> {
     subsidy_is_valid_for_network(Network::Mainnet)?;
     subsidy_is_valid_for_network(Network::Testnet)?;
