@@ -7,7 +7,7 @@
 [summary]: #summary
 
 
-Zebra manages [semantic verification](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/rfcs/0002-parallel-verification.md#definitions) in the `zebra-consensus` crate, this is done for all incoming blocks. Inside each block the coinbase transaction is special, it holds the subsidy rewards that are paid to different participants(miners, founders, stream receivers). This RFC describes how to implement the needed calculations and verification for block subsidy and miner fees.
+Zebra manages [semantic verification](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/rfcs/0002-parallel-verification.md#definitions) in the `zebra-consensus` crate, this is done for all incoming blocks. Inside each block the coinbase transaction is special, it holds the subsidy rewards that are paid to different participants(miners, founders, funding stream receivers). This RFC describes how to implement the needed calculations and verification for block subsidy and miner fees.
 
 # Motivation
 [motivation]: #motivation
@@ -23,9 +23,9 @@ Block subsidy and miner fees are part of the protocol, the semantic verification
 - **funding streams**:  The portion of the block reward that goes into a pre defined funding stream address.
 - **miner subsidy**: The portion of the block reward that goes into the miner of the block. 
 - **block subsidy**: Miner subsidy plus founders reward or funding stream if any of the 2 are active.
-- **coinbase transaction**: The first transaction in a block where block subsidy is done.
+- **coinbase transaction**: The first transaction in a block; this is the transaction that handles block subsidy.
 - **network upgrade**: An intentional consensus rule change undertaken by the community in order to improve the network.
-- **miner fees**: The [transparent value pool](#transparent-value-pool-calculation) for all the transactions in a block.
+- **miner fees**: The sum of the extra [transparent value pool](#transparent-value-pool-calculation) amounts, for all the transactions in a block.
 
 ### Transparent value pool calculation
 
@@ -37,7 +37,7 @@ There is a "transparent value pool" inside each transaction, containing "funds i
 - `vpub_old` values from `tx.vJoinSplit` subtract from the pool.
 - `valueBalance` adds to the pool. It itself is equal to `sum(SaplingSpends) - sum(SaplingOutputs)`, so it has the same functional effect as for transparent and Sprout. 
 
-The balance rule is that this pool must have non-negative value, and its net value is the fee.
+The balance rule is that this pool must have non-negative value, and its net value is the miner fee for the transaction.
 
 # Guide-level explanation
 [guide-level-explanation]: #guide-level-explanation
@@ -58,7 +58,7 @@ In addition to calculations the block subsidy requires constants defined in the 
 
 Checking functions for blocks are implemented at `zebra-consensus/src/block/check.rs` and they are called at `zebra-consensus/src/block.rs`. This follows the already existing structure for block validation in Zebra.
 
-It is important to note that the Genesis block, BeforeOverwinter, and Overwinter blocks up to Sapling are verified by the CheckpointVerifier so they are not considered in this design. The following table will show what periods are included and what is not in this proposal:
+It is important to note that all blocks before Sapling are verified by the CheckpointVerifier, so they are not considered in this design. The following table will show what periods are included and what is not in this proposal:
 
 | Height                                 | Miner    | Founder reward | Funding streams | Shielded Coinbase | Target Spacing |
 |----------------------------------------|----------|----------------|-----------------|-------------------|----------------|             
