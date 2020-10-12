@@ -65,7 +65,7 @@ pub enum VerifyBlockError {
         source: equihash::Error,
     },
     #[error(transparent)]
-    Time(BoxError),
+    Time(zebra_chain::block::BlockTimeError),
     #[error("unable to commit block after semantic verification")]
     Commit(#[source] BoxError),
 }
@@ -143,7 +143,8 @@ where
 
             // Field validity and structure checks
             let now = Utc::now();
-            check::time_is_valid_at(&block.header, now).map_err(VerifyBlockError::Time)?;
+            check::time_is_valid_at(&block.header, now, &height, &hash)
+                .map_err(VerifyBlockError::Time)?;
             check::coinbase_is_first(&block)?;
             check::subsidy_is_correct(network, &block)?;
 

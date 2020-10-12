@@ -142,8 +142,15 @@ fn time_check_past_block() {
     // a long time in the past. So it's unlikely that the test machine
     // will have a clock that's far enough in the past for the test to
     // fail.
-    check::time_is_valid_at(&block.header, now)
-        .expect("the header time from a mainnet block should be valid");
+    check::time_is_valid_at(
+        &block.header,
+        now,
+        &block
+            .coinbase_height()
+            .expect("block test vector height should be valid"),
+        &block.hash(),
+    )
+    .expect("the header time from a mainnet block should be valid");
 }
 
 #[test]
