@@ -48,8 +48,7 @@ You may send reports to [our Conduct email](mailto:contact@zfnd.org).
 If you wish to contact specific maintainers directly, the following have made
 themselves available for conduct issues:
 
-- ?
-- ?
+- [moderation@zfnd.org](mailto:moderation@zfnd.org)
 
 
 This Code of Conduct is adapted from the [Contributor Covenant][homepage],
