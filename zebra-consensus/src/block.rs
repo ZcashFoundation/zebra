@@ -109,7 +109,7 @@ where
             let hash = block.hash();
 
             // The height is already included in the ChainVerifier span
-            let span = tracing::debug_span!("BlockVerifier.call", ?hash);
+            let span = tracing::debug_span!("BlockVerifier::call", ?hash);
             let _entered = span.enter();
 
             // Check that this block is actually a new block.

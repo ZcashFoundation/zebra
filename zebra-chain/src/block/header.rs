@@ -68,11 +68,12 @@ pub struct Header {
     pub solution: Solution,
 }
 
-/// TODO: Inline this error into zebra_consensus::error::BlockError.
+/// TODO: Use this error as the source for zebra_consensus::error::BlockError::Time,
+/// and make `BlockError::Time` add additional context.
 /// See https://github.com/ZcashFoundation/zebra/issues/1021 for more details.
 #[derive(Error, Debug)]
 pub enum BlockTimeError {
-    #[error("invalid time {0:?} in block header {1:?} {2:?}: must be less than 2 hours in the future ({3:?}). Hint: check your machine's date, time, and time zone.")]
+    #[error("invalid time {0:?} in block header {1:?} {2:?}: block time is more than 2 hours in the future ({3:?}). Hint: check your machine's date, time, and time zone.")]
     InvalidBlockTime(
         DateTime<Utc>,
         crate::block::Height,
