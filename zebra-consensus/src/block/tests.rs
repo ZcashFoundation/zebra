@@ -130,7 +130,7 @@ async fn check_transcripts() -> Result<(), Report> {
 }
 
 #[test]
-fn subsidy_is_valid_test() -> Result<(), Report> {
+fn subsidy_is_valid_for_historical_blocks() -> Result<(), Report> {
     subsidy_is_valid_for_network(Network::Mainnet)?;
     subsidy_is_valid_for_network(Network::Testnet)?;
 
@@ -154,6 +154,7 @@ fn subsidy_is_valid_for_network(network: Network) -> Result<(), Report> {
             check::subsidy_is_valid(&block, network).expect("subsidies should pass for this block");
         }
     }
+
     Ok(())
 }
 
