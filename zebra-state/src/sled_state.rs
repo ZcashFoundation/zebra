@@ -6,7 +6,7 @@ use tracing::trace;
 use zebra_chain::serialization::{ZcashDeserialize, ZcashSerialize};
 use zebra_chain::{
     block::{self, Block},
-    parameters::Network,
+    parameters::{Network, GENESIS_PREVIOUS_BLOCK_HASH},
 };
 
 use crate::{BoxError, Config, HashOrHeight, QueuedBlock};
@@ -89,7 +89,7 @@ impl FinalizedState {
             .expect("inability to look up tip is unrecoverable")
             .map(|(_, hash)| hash)
             // if the state is empty, return the genesis previous block hash
-            .unwrap_or(block::Hash([0; 32]))
+            .unwrap_or(GENESIS_PREVIOUS_BLOCK_HASH)
     }
 
     /// Returns the height of the current finalized tip block.

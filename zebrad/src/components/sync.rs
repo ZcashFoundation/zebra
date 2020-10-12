@@ -11,9 +11,9 @@ use tracing_futures::Instrument;
 
 use zebra_chain::{
     block::{self, Block},
-    parameters::Network,
+    parameters::{genesis_hash, Network},
 };
-use zebra_consensus::{checkpoint, parameters};
+use zebra_consensus::checkpoint;
 use zebra_network as zn;
 use zebra_state as zs;
 
@@ -162,7 +162,7 @@ where
             verifier,
             prospective_tips: HashSet::new(),
             pending_blocks: Box::pin(FuturesUnordered::new()),
-            genesis_hash: parameters::genesis_hash(chain),
+            genesis_hash: genesis_hash(chain),
         }
     }
 

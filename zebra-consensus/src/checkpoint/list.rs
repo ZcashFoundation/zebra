@@ -8,7 +8,7 @@
 #[cfg(test)]
 mod tests;
 
-use crate::{parameters, BoxError};
+use crate::BoxError;
 
 use std::{
     collections::{BTreeMap, HashSet},
@@ -17,7 +17,7 @@ use std::{
 };
 
 use zebra_chain::block;
-use zebra_chain::parameters::Network;
+use zebra_chain::parameters::{genesis_hash, Network};
 
 const MAINNET_CHECKPOINTS: &str = include_str!("main-checkpoints.txt");
 const TESTNET_CHECKPOINTS: &str = include_str!("test-checkpoints.txt");
@@ -73,7 +73,7 @@ impl CheckpointList {
         };
 
         match checkpoint_list.hash(block::Height(0)) {
-            Some(hash) if hash == parameters::genesis_hash(network) => checkpoint_list,
+            Some(hash) if hash == genesis_hash(network) => checkpoint_list,
             Some(_) => {
                 panic!("The hard-coded genesis checkpoint does not match the network genesis hash")
             }
@@ -102,8 +102,8 @@ impl CheckpointList {
         // Check that the list starts with the correct genesis block
         match checkpoints.iter().next() {
             Some((block::Height(0), hash))
-                if (hash == &parameters::genesis_hash(Network::Mainnet)
-                    || hash == &parameters::genesis_hash(Network::Testnet)) => {}
+                if (hash == &genesis_hash(Network::Mainnet)
+                    || hash == &genesis_hash(Network::Testnet)) => {}
             Some((block::Height(0), _)) => {
                 Err("the genesis checkpoint does not match the Mainnet or Testnet genesis hash")?
             }
