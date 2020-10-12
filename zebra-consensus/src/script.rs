@@ -65,9 +65,7 @@ where
 
         match input {
             transparent::Input::PrevOut { outpoint, .. } => {
-                let output = self
-                    .state
-                    .call(zebra_state::Request::AwaitUtxo(outpoint.clone()));
+                let output = self.state.call(zebra_state::Request::AwaitUtxo(*outpoint));
                 let transaction = req.transaction;
                 let branch_id = self.branch;
                 let input_index = req.input_index;
@@ -88,7 +86,9 @@ where
                 }
                 .boxed()
             }
-            transparent::Input::Coinbase { .. } => todo!(),
+            transparent::Input::Coinbase { .. } => unimplemented!(
+                "Unsure what to do in this case or if we will even encounter it here"
+            ),
         }
     }
 }
