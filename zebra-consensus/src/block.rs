@@ -140,7 +140,7 @@ where
 
             // Do the difficulty checks first, to raise the threshold for
             // attacks that use any other fields.
-            check::difficulty_is_valid(&block.header, &height, &hash)?;
+            check::difficulty_is_valid(&block.header, network, &height, &hash)?;
             check::equihash_solution_is_valid(&block.header)?;
 
             // Since errors cause an early exit, try to do the
