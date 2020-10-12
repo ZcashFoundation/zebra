@@ -175,8 +175,7 @@ fn subsidy_is_valid_for_network(network: Network) -> Result<(), Report> {
         if block::Height(height) > SLOW_START_INTERVAL
             && block::Height(height) < NetworkUpgrade::Canopy.activation_height(network).unwrap()
         {
-            check::subsidy_is_valid(network, &block)
-                .expect("subsidies should pass for this block");
+            check::subsidy_is_valid(&block, network).expect("subsidies should pass for this block");
         }
     }
     Ok(())
@@ -198,7 +197,7 @@ fn nocoinbase_validation_failure() -> Result<(), Report> {
     block.transactions.remove(0);
 
     // Validate the block
-    let result = check::subsidy_is_valid(network, &block).unwrap_err();
+    let result = check::subsidy_is_valid(&block, network).unwrap_err();
     let expected = BlockError::Transaction(TransactionError::Subsidy(SubsidyError::NoCoinbase));
     assert_eq!(expected, result);
 
@@ -244,7 +243,7 @@ fn founders_reward_validation_failure() -> Result<(), Report> {
     };
 
     // Validate it
-    let result = check::subsidy_is_valid(network, &block).unwrap_err();
+    let result = check::subsidy_is_valid(&block, network).unwrap_err();
     let expected = BlockError::Transaction(TransactionError::Subsidy(
         SubsidyError::FoundersRewardNotFound,
     ));
