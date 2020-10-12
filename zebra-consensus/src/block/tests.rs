@@ -230,25 +230,28 @@ fn founders_reward_validation_failure() -> Result<(), Report> {
 }
 
 #[test]
-fn time_check_past_block() {
-    // This block is also verified as part of the BlockVerifier service
-    // tests.
-    let block =
-        Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])
-            .expect("block should deserialize");
+fn time_is_valid_for_historical_blocks() -> Result<(), Report> {
+    let block_iter = zebra_test::vectors::BLOCKS.iter();
     let now = Utc::now();
 
-    // This check is non-deterministic, but BLOCK_MAINNET_415000 is
-    // a long time in the past. So it's unlikely that the test machine
-    // will have a clock that's far enough in the past for the test to
-    // fail.
-    check::time_is_valid_at(
-        &block.header,
-        now,
-        &block
-            .coinbase_height()
-            .expect("block test vector height should be valid"),
-        &block.hash(),
-    )
-    .expect("the header time from a mainnet block should be valid");
+    for block in block_iter {
+        let block = block
+            .zcash_deserialize_into::<Block>()
+            .expect("block is structurally valid");
+
+        // This check is non-deterministic, but the block test vectors are
+        // all in the past. So it's unlikely that the test machine will have
+        // a clock that's far enough in the past for the test to fail.
+        check::time_is_valid_at(
+            &block.header,
+            now,
+            &block
+                .coinbase_height()
+                .expect("block test vector height should be valid"),
+            &block.hash(),
+        )
+        .expect("the header time from a historical block should be valid, based on the test machine's local clock. Hint: check the test machine's time, date, and timezone.");
+    }
+
+    Ok(())
 }
