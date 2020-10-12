@@ -132,9 +132,9 @@ pub enum FundingStreamRange {
 /// as described in [protocol specification §7.9.1][7.9.1].
 /// 
 /// [7.9.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
-const FUNDING_STREAM_HEIGHT_RANGES: &[(Network, Height, Height)] = &[
-    (Network::Mainnet, Height(1_046_400), Height(2_726_400)),
-    (Network::Testnet, Height(1_028_500), Height(2_796_000)),
+const FUNDING_STREAM_HEIGHT_RANGES: &[(Network, Range)] = &[
+    (Network::Mainnet, Height(1_046_400)..Height(2_726_400)),
+    (Network::Testnet, Height(1_028_500)..Height(2_796_000)),
 ];
 ```
 
