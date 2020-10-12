@@ -169,7 +169,7 @@ where
     };
     tracing::info!(?tip, ?max_checkpoint_height, "initializing chain verifier");
 
-    let block = BlockVerifier::new(state_service.clone());
+    let block = BlockVerifier::new(network, state_service.clone());
     let checkpoint = CheckpointVerifier::from_checkpoint_list(list, tip, state_service);
 
     Buffer::new(

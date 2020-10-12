@@ -22,6 +22,7 @@ use tower::{Service, ServiceExt};
 
 use zebra_chain::{
     block::{self, Block},
+    parameters::Network,
     work::equihash,
 };
 use zebra_state as zs;
@@ -30,6 +31,7 @@ use crate::error::*;
 use crate::BoxError;
 
 mod check;
+mod subsidy;
 #[cfg(test)]
 mod tests;
 
@@ -40,6 +42,9 @@ where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
 {
+    /// The network to be verified.
+    network: Network,
+
     /// The underlying state service, possibly wrapped in other services.
     state_service: S,
 }
@@ -70,8 +75,11 @@ where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
 {
-    pub fn new(state_service: S) -> Self {
-        Self { state_service }
+    pub fn new(network: Network, state_service: S) -> Self {
+        Self {
+            network,
+            state_service,
+        }
     }
 }
 
@@ -94,6 +102,7 @@ where
 
     fn call(&mut self, block: Arc<Block>) -> Self::Future {
         let mut state_service = self.state_service.clone();
+        let network = self.network;
 
         // TODO(jlusby): Error = Report, handle errors from state_service.
         async move {
@@ -138,15 +147,16 @@ where
                     difficulty_threshold,
                 ))?;
             }
-            check::is_equihash_solution_valid(&block.header)?;
+            check::equihash_solution_is_valid(&block.header)?;
 
             // Since errors cause an early exit, try to do the
             // quick checks first.
 
             // Field validity and structure checks
             let now = Utc::now();
-            check::is_time_valid_at(&block.header, now).map_err(VerifyBlockError::Time)?;
-            check::is_coinbase_first(&block)?;
+            check::time_is_valid_at(&block.header, now).map_err(VerifyBlockError::Time)?;
+            check::coinbase_is_first(&block)?;
+            check::subsidy_is_correct(network, &block)?;
 
             // TODO: context-free header verification: merkle root
 

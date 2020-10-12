@@ -6,7 +6,9 @@
 //! [`Result`](std::result::Result)s.
 
 use std::{
+    cmp::Ordering,
     convert::{TryFrom, TryInto},
+    hash::{Hash, Hasher},
     marker::PhantomData,
     ops::RangeInclusive,
 };
@@ -17,7 +19,7 @@ use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
 type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// A runtime validated type for representing amounts of zatoshis
-#[derive(Debug, Eq, PartialEq, Clone, Copy, Serialize, Deserialize, Hash)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(try_from = "i64")]
 #[serde(bound = "C: Constraint")]
 pub struct Amount<C = NegativeAllowed>(i64, PhantomData<C>);
@@ -191,6 +193,75 @@ where
     }
 }
 
+impl<C> Hash for Amount<C> {
+    /// Amounts with the same value are equal, even if they have different constraints
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.hash(state);
+    }
+}
+
+impl<C1, C2> PartialEq<Amount<C2>> for Amount<C1> {
+    fn eq(&self, other: &Amount<C2>) -> bool {
+        self.0.eq(&other.0)
+    }
+}
+
+impl Eq for Amount<NegativeAllowed> {}
+impl Eq for Amount<NonNegative> {}
+
+impl<C1, C2> PartialOrd<Amount<C2>> for Amount<C1> {
+    fn partial_cmp(&self, other: &Amount<C2>) -> Option<Ordering> {
+        Some(self.0.cmp(&other.0))
+    }
+}
+
+impl Ord for Amount<NegativeAllowed> {
+    fn cmp(&self, other: &Amount<NegativeAllowed>) -> Ordering {
+        self.0.cmp(&other.0)
+    }
+}
+
+impl Ord for Amount<NonNegative> {
+    fn cmp(&self, other: &Amount<NonNegative>) -> Ordering {
+        self.0.cmp(&other.0)
+    }
+}
+
+impl std::ops::Mul<u64> for Amount<NonNegative> {
+    type Output = Result<Amount<NonNegative>>;
+
+    fn mul(self, rhs: u64) -> Self::Output {
+        let value = (self.0 as u64)
+            .checked_mul(rhs)
+            .ok_or(Error::MultiplicationOverflow {
+                amount: self.0,
+                multiplier: rhs,
+            })?;
+        value.try_into()
+    }
+}
+
+impl std::ops::Mul<Amount<NonNegative>> for u64 {
+    type Output = Result<Amount<NonNegative>>;
+
+    fn mul(self, rhs: Amount<NonNegative>) -> Self::Output {
+        rhs.mul(self)
+    }
+}
+
+impl std::ops::Div<u64> for Amount<NonNegative> {
+    type Output = Result<Amount<NonNegative>>;
+
+    fn div(self, rhs: u64) -> Self::Output {
+        let quotient = (self.0 as u64)
+            .checked_div(rhs)
+            .ok_or(Error::DivideByZero { amount: self.0 })?;
+        Ok(quotient
+            .try_into()
+            .expect("division by a positive integer always stays within the constraint"))
+    }
+}
+
 #[derive(thiserror::Error, Debug, displaydoc::Display, Clone, PartialEq)]
 #[allow(missing_docs)]
 /// Errors that can be returned when validating `Amount`s
@@ -205,6 +276,10 @@ pub enum Error {
         value: u64,
         source: std::num::TryFromIntError,
     },
+    /// i64 overflow when multiplying i64 non-negative amount {amount} by u64 {multiplier}
+    MultiplicationOverflow { amount: i64, multiplier: u64 },
+    /// cannot divide amount {amount} by zero
+    DivideByZero { amount: i64 },
 }
 
 /// Marker type for `Amount` that allows negative values.
@@ -243,8 +318,11 @@ impl Constraint for NonNegative {
     }
 }
 
+/// Number of zatoshis in 1 ZEC
+pub const COIN: i64 = 100_000_000;
+
 /// The maximum zatoshi amount.
-pub const MAX_MONEY: i64 = 21_000_000 * 100_000_000;
+pub const MAX_MONEY: i64 = 21_000_000 * COIN;
 
 /// A trait for defining constraints on `Amount`
 pub trait Constraint {
@@ -315,6 +393,11 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
+
+    use std::{
+        collections::hash_map::RandomState, collections::HashSet, fmt::Debug, iter::FromIterator,
+    };
+
     use color_eyre::eyre::Result;
 
     #[test]
@@ -483,6 +566,80 @@ mod test {
             .expect("NegativeAllowed deserialization should allow negative values");
 
         assert_eq!(amount.0, neg);
+
+        Ok(())
+    }
+
+    #[test]
+    fn hash() -> Result<()> {
+        let one = Amount::<NonNegative>::try_from(1)?;
+        let another_one = Amount::<NonNegative>::try_from(1)?;
+        let zero = Amount::<NonNegative>::try_from(0)?;
+
+        let hash_set: HashSet<Amount<NonNegative>, RandomState> =
+            HashSet::from_iter([one].iter().cloned());
+        assert_eq!(hash_set.len(), 1);
+
+        let hash_set: HashSet<Amount<NonNegative>, RandomState> =
+            HashSet::from_iter([one, one].iter().cloned());
+        assert_eq!(hash_set.len(), 1, "Amount hashes are consistent");
+
+        let hash_set: HashSet<Amount<NonNegative>, RandomState> =
+            HashSet::from_iter([one, another_one].iter().cloned());
+        assert_eq!(hash_set.len(), 1, "Amount hashes are by value");
+
+        let hash_set: HashSet<Amount<NonNegative>, RandomState> =
+            HashSet::from_iter([one, zero].iter().cloned());
+        assert_eq!(
+            hash_set.len(),
+            2,
+            "Amount hashes are different for different values"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn ordering_constraints() -> Result<()> {
+        ordering::<NonNegative, NonNegative>()?;
+        ordering::<NonNegative, NegativeAllowed>()?;
+        ordering::<NegativeAllowed, NonNegative>()?;
+        ordering::<NegativeAllowed, NegativeAllowed>()?;
+
+        Ok(())
+    }
+
+    fn ordering<C1, C2>() -> Result<()>
+    where
+        C1: Constraint + Debug,
+        C2: Constraint + Debug,
+    {
+        let zero = Amount::<C1>::try_from(0)?;
+        let one = Amount::<C2>::try_from(1)?;
+        let another_one = Amount::<C1>::try_from(1)?;
+
+        assert_eq!(one, one);
+        assert_eq!(one, another_one, "Amount equality is by value");
+
+        assert_ne!(one, zero);
+        assert_ne!(zero, one);
+
+        assert!(one > zero);
+        assert!(zero < one);
+        assert!(zero <= one);
+
+        let negative_one = Amount::<NegativeAllowed>::try_from(-1)?;
+        let negative_two = Amount::<NegativeAllowed>::try_from(-2)?;
+
+        assert_ne!(negative_one, zero);
+        assert_ne!(negative_one, one);
+
+        assert!(negative_one < zero);
+        assert!(negative_one <= one);
+        assert!(zero > negative_one);
+        assert!(zero >= negative_one);
+        assert!(negative_two < negative_one);
+        assert!(negative_one > negative_two);
 
         Ok(())
     }

@@ -1,5 +1,7 @@
 //! Tests for block verification
 
+use crate::parameters::SLOW_START_INTERVAL;
+
 use super::*;
 
 use std::sync::Arc;
@@ -11,7 +13,7 @@ use tower::buffer::Buffer;
 
 use zebra_chain::block::{self, Block};
 use zebra_chain::{
-    parameters::Network,
+    parameters::{Network, NetworkUpgrade},
     serialization::{ZcashDeserialize, ZcashDeserializeInto},
 };
 use zebra_test::transcript::{TransError, Transcript};
@@ -113,7 +115,7 @@ async fn check_transcripts() -> Result<(), Report> {
     let network = Network::Mainnet;
     let state_service = zebra_state::init(zebra_state::Config::ephemeral(), network);
 
-    let block_verifier = Buffer::new(BlockVerifier::new(state_service.clone()), 1);
+    let block_verifier = Buffer::new(BlockVerifier::new(network, state_service.clone()), 1);
 
     for transcript_data in &[
         &VALID_BLOCK_TRANSCRIPT,
@@ -140,6 +142,106 @@ fn time_check_past_block() {
     // a long time in the past. So it's unlikely that the test machine
     // will have a clock that's far enough in the past for the test to
     // fail.
-    check::is_time_valid_at(&block.header, now)
+    check::time_is_valid_at(&block.header, now)
         .expect("the header time from a mainnet block should be valid");
+}
+
+#[test]
+fn subsidy_is_correct_test() -> Result<(), Report> {
+    subsidy_is_correct_for_network(Network::Mainnet)?;
+    subsidy_is_correct_for_network(Network::Testnet)?;
+
+    Ok(())
+}
+
+fn subsidy_is_correct_for_network(network: Network) -> Result<(), Report> {
+    let block_iter = match network {
+        Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
+        Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
+    };
+    for (&height, block) in block_iter {
+        let block = block
+            .zcash_deserialize_into::<Block>()
+            .expect("block is structurally valid");
+
+        // TODO: first halving, second halving, third halving, and very large halvings
+        if block::Height(height) > SLOW_START_INTERVAL
+            && block::Height(height) < NetworkUpgrade::Canopy.activation_height(network).unwrap()
+        {
+            check::subsidy_is_correct(network, &block)
+                .expect("subsidies should pass for this block");
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn nocoinbase_validation_failure() -> Result<(), Report> {
+    use crate::error::*;
+
+    let network = Network::Mainnet;
+
+    // Get a header form a block in the mainnet that is inside the founders reward period.
+    let block =
+        Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])
+            .expect("block should deserialize");
+    let mut block = Arc::try_unwrap(block).expect("block should unwrap");
+
+    // Remove coinbase transaction
+    block.transactions.remove(0);
+
+    // Validate the block
+    let result = check::subsidy_is_correct(network, &block).unwrap_err();
+    let expected = BlockError::Transaction(TransactionError::Subsidy(SubsidyError::NoCoinbase));
+    assert_eq!(expected, result);
+
+    Ok(())
+}
+
+#[test]
+fn founders_reward_validation_failure() -> Result<(), Report> {
+    use crate::error::*;
+    use zebra_chain::transaction::Transaction;
+
+    let network = Network::Mainnet;
+
+    // Get a header from a block in the mainnet that is inside the founders reward period.
+    let header =
+        block::Header::zcash_deserialize(&zebra_test::vectors::HEADER_MAINNET_415000_BYTES[..])
+            .unwrap();
+
+    // From the same block get the coinbase transaction
+    let block =
+        Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])
+            .expect("block should deserialize");
+
+    // Build the new transaction with modified coinbase outputs
+    let tx = block
+        .transactions
+        .get(0)
+        .map(|transaction| Transaction::V3 {
+            inputs: transaction.inputs().to_vec(),
+            outputs: vec![transaction.outputs()[0].clone()],
+            lock_time: transaction.lock_time(),
+            expiry_height: transaction.expiry_height().unwrap(),
+            joinsplit_data: None,
+        })
+        .unwrap();
+
+    // Build new block
+    let mut transactions: Vec<Arc<zebra_chain::transaction::Transaction>> = Vec::new();
+    transactions.push(Arc::new(tx));
+    let block = Block {
+        header,
+        transactions,
+    };
+
+    // Validate it
+    let result = check::subsidy_is_correct(network, &block).unwrap_err();
+    let expected = BlockError::Transaction(TransactionError::Subsidy(
+        SubsidyError::FoundersRewardNotFound,
+    ));
+    assert_eq!(expected, result);
+
+    Ok(())
 }
