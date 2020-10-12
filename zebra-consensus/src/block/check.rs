@@ -15,8 +15,8 @@ use zebra_chain::parameters::Network;
 
 use super::subsidy;
 
-/// Check that there is exactly one coinbase transaction in `Block`, and that
-/// the coinbase transaction is the first transaction in the block.
+/// Returns `Ok(())` if there is exactly one coinbase transaction in `Block`,
+/// and that coinbase transaction is the first transaction in the block.
 ///
 /// "The first (and only the first) transaction in a block is a coinbase
 /// transaction, which collects and spends any miner subsidy and transaction
@@ -39,12 +39,12 @@ pub fn coinbase_is_first(block: &Block) -> Result<(), BlockError> {
     Ok(())
 }
 
-/// Returns true if the header is valid based on its `EquihashSolution`
+/// Returns `Ok(())` if the `EquihashSolution` is valid for `header`
 pub fn equihash_solution_is_valid(header: &Header) -> Result<(), equihash::Error> {
     header.solution.check(&header)
 }
 
-/// Check if `header.time` is less than or equal to
+/// Returns `Ok(())` if `header.time` is less than or equal to
 /// 2 hours in the future, according to the node's local clock (`now`).
 ///
 /// This is a non-deterministic rule, as clocks vary over time, and
@@ -62,6 +62,8 @@ pub fn time_is_valid_at(header: &Header, now: DateTime<Utc>) -> Result<(), BoxEr
     header.is_time_valid_at(now)
 }
 
+/// Returns `Ok(())` if the block subsidy and miner fees in `block` are valid for `network`
+///
 /// [3.9]: https://zips.z.cash/protocol/protocol.pdf#subsidyconcepts
 pub fn subsidy_is_correct(network: Network, block: &Block) -> Result<(), BlockError> {
     let height = block.coinbase_height().ok_or(SubsidyError::NoCoinbase)?;

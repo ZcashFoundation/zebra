@@ -32,15 +32,15 @@ impl Solution {
     /// equihash solutions, in bytes
     pub const INPUT_LENGTH: usize = 4 + 32 * 3 + 4 * 2;
 
-    /// Returns true if the header is valid based on its `EquihashSolution`
-    pub fn check(&self, block: &Header) -> Result<(), Error> {
+    /// Returns `Ok(())` if `EquihashSolution` is valid for `header`
+    pub fn check(&self, header: &Header) -> Result<(), Error> {
         let n = 200;
         let k = 9;
-        let nonce = &block.nonce;
+        let nonce = &header.nonce;
         let solution = &self.0;
         let mut input = Vec::new();
 
-        block
+        header
             .zcash_serialize(&mut input)
             .expect("serialization into a vec can't fail");
 
