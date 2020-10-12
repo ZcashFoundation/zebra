@@ -30,11 +30,11 @@ use tower::{Service, ServiceExt};
 use tracing::instrument;
 use zebra_chain::{
     block::{self, Block},
-    parameters::Network,
+    parameters::{Network, GENESIS_PREVIOUS_BLOCK_HASH},
 };
 use zebra_state as zs;
 
-use crate::{parameters, BoxError};
+use crate::BoxError;
 
 pub(crate) mod list;
 mod types;
@@ -568,7 +568,7 @@ where
             // Since genesis blocks are hard-coded in zcashd, and not verified
             // like other blocks, the genesis parent hash is set by the
             // consensus parameters.
-            BeforeGenesis => parameters::GENESIS_PREVIOUS_BLOCK_HASH,
+            BeforeGenesis => GENESIS_PREVIOUS_BLOCK_HASH,
             InitialTip(hash) | PreviousCheckpoint(hash) => hash,
             FinalCheckpoint => return,
         };

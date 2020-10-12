@@ -12,9 +12,11 @@
 //! Typically, consensus parameters are accessed via a function that takes a
 //! `Network` and `block::Height`.
 
+mod genesis;
 mod network;
 mod network_upgrade;
 
+pub use genesis::*;
 pub use network::Network;
 pub use network_upgrade::*;
 

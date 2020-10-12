@@ -1,6 +1,6 @@
 //! Genesis consensus parameters for each Zcash network.
 
-use zebra_chain::{block, parameters::Network};
+use crate::{block, parameters::Network};
 
 /// The previous block hash for the genesis block.
 ///
