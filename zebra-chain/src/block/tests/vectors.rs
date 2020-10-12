@@ -190,10 +190,14 @@ fn block_limits_single_tx() {
 ///
 /// Generates a block header, sets its `time` to `block_header_time`, then
 /// calls `is_time_valid_at`.
-fn node_time_check(block_header_time: DateTime<Utc>, now: DateTime<Utc>) -> Result<(), Error> {
+fn node_time_check(
+    block_header_time: DateTime<Utc>,
+    now: DateTime<Utc>,
+) -> Result<(), BlockTimeError> {
     let mut header = generate::block_header();
     header.time = block_header_time;
-    header.is_time_valid_at(now)
+    // pass a zero height and hash - they are only used in the returned error
+    header.is_time_valid_at(now, &Height(0), &Hash([0; 32]))
 }
 
 #[test]

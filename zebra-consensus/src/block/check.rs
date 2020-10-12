@@ -6,14 +6,11 @@ use zebra_chain::{
     block::Hash,
     block::Height,
     block::{Block, Header},
-    parameters::NetworkUpgrade,
+    parameters::{Network, NetworkUpgrade},
     work::equihash,
 };
 
-use crate::BoxError;
 use crate::{error::*, parameters::SLOW_START_INTERVAL};
-
-use zebra_chain::parameters::Network;
 
 use super::subsidy;
 
@@ -89,8 +86,15 @@ pub fn equihash_solution_is_valid(header: &Header) -> Result<(), equihash::Error
 /// accepted." [§7.5][7.5]
 ///
 /// [7.5]: https://zips.z.cash/protocol/protocol.pdf#blockheader
-pub fn time_is_valid_at(header: &Header, now: DateTime<Utc>) -> Result<(), BoxError> {
-    header.is_time_valid_at(now)
+///
+/// If the header time is invalid, returns an error containing `height` and `hash`.
+pub fn time_is_valid_at(
+    header: &Header,
+    now: DateTime<Utc>,
+    height: &Height,
+    hash: &Hash,
+) -> Result<(), zebra_chain::block::BlockTimeError> {
+    header.is_time_valid_at(now, height, hash)
 }
 
 /// Returns `Ok(())` if the block subsidy and miner fees in `block` are valid for `network`

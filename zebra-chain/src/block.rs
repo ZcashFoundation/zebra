@@ -17,13 +17,10 @@ mod tests;
 use std::fmt;
 
 pub use hash::Hash;
+pub use header::BlockTimeError;
 pub use header::Header;
 pub use height::Height;
 pub use root_hash::RootHash;
-
-/// The error type for Block checks.
-// XXX try to remove this -- block checks should be done in zebra-consensus
-type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 use serde::{Deserialize, Serialize};
 
