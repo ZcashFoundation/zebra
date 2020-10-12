@@ -3,6 +3,8 @@
 use chrono::{DateTime, Utc};
 
 use zebra_chain::{
+    block::Hash,
+    block::Height,
     block::{Block, Header},
     parameters::NetworkUpgrade,
     work::equihash,
@@ -34,6 +36,35 @@ pub fn coinbase_is_first(block: &Block) -> Result<(), BlockError> {
     }
     if rest.any(|tx| tx.contains_coinbase_input()) {
         return Err(TransactionError::CoinbaseInputFound)?;
+    }
+
+    Ok(())
+}
+
+/// Returns `Ok(())` if `hash` passes the difficulty filter and PoW limit,
+/// based on the fields in `header`.
+///
+/// If the block is invalid, returns an error containing `height` and `hash`.
+pub fn difficulty_is_valid(
+    header: &Header,
+    height: &Height,
+    hash: &Hash,
+) -> Result<(), BlockError> {
+    // TODO:
+    //   - PoW limit
+
+    let difficulty_threshold = header
+        .difficulty_threshold
+        .to_expanded()
+        .ok_or(BlockError::InvalidDifficulty(*height, *hash))?;
+
+    // Difficulty filter
+    if hash > &difficulty_threshold {
+        Err(BlockError::DifficultyFilter(
+            *height,
+            *hash,
+            difficulty_threshold,
+        ))?;
     }
 
     Ok(())

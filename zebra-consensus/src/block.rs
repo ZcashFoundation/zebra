@@ -135,18 +135,7 @@ where
 
             // Do the difficulty checks first, to raise the threshold for
             // attacks that use any other fields.
-            let difficulty_threshold = block
-                .header
-                .difficulty_threshold
-                .to_expanded()
-                .ok_or(BlockError::InvalidDifficulty(height, hash))?;
-            if hash > difficulty_threshold {
-                Err(BlockError::DifficultyFilter(
-                    height,
-                    hash,
-                    difficulty_threshold,
-                ))?;
-            }
+            check::difficulty_is_valid(&block.header, &height, &hash)?;
             check::equihash_solution_is_valid(&block.header)?;
 
             // Since errors cause an early exit, try to do the
