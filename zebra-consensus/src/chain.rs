@@ -77,7 +77,7 @@ where
 
     fn call(&mut self, block: Arc<Block>) -> Self::Future {
         let height = block.coinbase_height();
-        let span = tracing::info_span!("chain_call", ?height);
+        let span = tracing::info_span!("ChainVerifier.call", ?height);
         let _entered = span.enter();
         tracing::debug!("verifying new block");
 
