@@ -151,7 +151,7 @@ where
             check::time_is_valid_at(&block.header, now, &height, &hash)
                 .map_err(VerifyBlockError::Time)?;
             check::coinbase_is_first(&block)?;
-            check::subsidy_is_correct(network, &block)?;
+            check::subsidy_is_valid(network, &block)?;
 
             // TODO: context-free header verification: merkle root
 
