@@ -100,7 +100,7 @@ pub fn time_is_valid_at(
 /// Returns `Ok(())` if the block subsidy and miner fees in `block` are valid for `network`
 ///
 /// [3.9]: https://zips.z.cash/protocol/protocol.pdf#subsidyconcepts
-pub fn subsidy_is_valid(network: Network, block: &Block) -> Result<(), BlockError> {
+pub fn subsidy_is_valid(block: &Block, network: Network) -> Result<(), BlockError> {
     let height = block.coinbase_height().ok_or(SubsidyError::NoCoinbase)?;
     let coinbase = block.transactions.get(0).ok_or(SubsidyError::NoCoinbase)?;
 
