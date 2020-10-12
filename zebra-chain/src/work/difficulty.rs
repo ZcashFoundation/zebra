@@ -11,7 +11,7 @@
 //! the actual work represented by the block header hash.
 #![allow(clippy::unit_arg)]
 
-use crate::block;
+use crate::{block, parameters::Network};
 
 use std::cmp::{Ordering, PartialEq, PartialOrd};
 use std::{fmt, ops::Add, ops::AddAssign};
@@ -257,6 +257,21 @@ impl ExpandedDifficulty {
     /// users of this module should avoid converting hashes into difficulties.
     fn from_hash(hash: &block::Hash) -> ExpandedDifficulty {
         U256::from_little_endian(&hash.0).into()
+    }
+
+    /// Returns the easiest target difficulty allowed on `network`.
+    ///
+    /// See `PoWLimit` in the Zcash specification.
+    pub fn target_difficulty_limit(network: Network) -> ExpandedDifficulty {
+        let limit: U256 = match network {
+            /* 2^243 - 1 */
+            Network::Mainnet => (U256::one() << 243) - 1,
+            /* 2^251 - 1 */
+            Network::Testnet => (U256::one() << 251) - 1,
+        };
+
+        limit.into()
+    }
 }
 
 impl From<U256> for ExpandedDifficulty {
@@ -277,6 +292,9 @@ impl PartialEq<block::Hash> for ExpandedDifficulty {
 impl PartialOrd<block::Hash> for ExpandedDifficulty {
     /// `block::Hash`es are compared with `ExpandedDifficulty` thresholds by
     /// converting the hash to a 256-bit integer in little-endian order.
+    ///
+    /// Greater values represent *less* work. This matches the convention in
+    /// zcashd and bitcoin.
     fn partial_cmp(&self, other: &block::Hash) -> Option<Ordering> {
         self.partial_cmp(&ExpandedDifficulty::from_hash(other))
     }

@@ -7,7 +7,7 @@ use zebra_chain::{
     block::Height,
     block::{Block, Header},
     parameters::{Network, NetworkUpgrade},
-    work::equihash,
+    work::{difficulty::ExpandedDifficulty, equihash},
 };
 
 use crate::{error::*, parameters::SLOW_START_INTERVAL};
@@ -38,22 +38,37 @@ pub fn coinbase_is_first(block: &Block) -> Result<(), BlockError> {
     Ok(())
 }
 
-/// Returns `Ok(())` if `hash` passes the difficulty filter and PoW limit,
+/// Returns `Ok(())` if `hash` passes:
+///   - the target difficulty limit for `network` (PoWLimit), and
+///   - the difficulty filter,
 /// based on the fields in `header`.
 ///
 /// If the block is invalid, returns an error containing `height` and `hash`.
 pub fn difficulty_is_valid(
     header: &Header,
+    network: Network,
     height: &Height,
     hash: &Hash,
 ) -> Result<(), BlockError> {
-    // TODO:
-    //   - PoW limit
-
     let difficulty_threshold = header
         .difficulty_threshold
         .to_expanded()
         .ok_or(BlockError::InvalidDifficulty(*height, *hash))?;
+
+    // Note: the comparisons in this function are u256 integer comparisons, like
+    // zcashd and bitcoin. Greater values represent *less* work.
+
+    // The PowLimit check is part of `Threshold()` in the spec, but it doesn't
+    // actually depend on any previous blocks.
+    if difficulty_threshold > ExpandedDifficulty::target_difficulty_limit(network) {
+        Err(BlockError::TargetDifficultyLimit(
+            *height,
+            *hash,
+            difficulty_threshold,
+            network,
+            ExpandedDifficulty::target_difficulty_limit(network),
+        ))?;
+    }
 
     // Difficulty filter
     if hash > &difficulty_threshold {
