@@ -130,30 +130,6 @@ async fn check_transcripts() -> Result<(), Report> {
 }
 
 #[test]
-fn time_check_past_block() {
-    // This block is also verified as part of the BlockVerifier service
-    // tests.
-    let block =
-        Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])
-            .expect("block should deserialize");
-    let now = Utc::now();
-
-    // This check is non-deterministic, but BLOCK_MAINNET_415000 is
-    // a long time in the past. So it's unlikely that the test machine
-    // will have a clock that's far enough in the past for the test to
-    // fail.
-    check::time_is_valid_at(
-        &block.header,
-        now,
-        &block
-            .coinbase_height()
-            .expect("block test vector height should be valid"),
-        &block.hash(),
-    )
-    .expect("the header time from a mainnet block should be valid");
-}
-
-#[test]
 fn subsidy_is_valid_test() -> Result<(), Report> {
     subsidy_is_valid_for_network(Network::Mainnet)?;
     subsidy_is_valid_for_network(Network::Testnet)?;
@@ -250,4 +226,28 @@ fn founders_reward_validation_failure() -> Result<(), Report> {
     assert_eq!(expected, result);
 
     Ok(())
+}
+
+#[test]
+fn time_check_past_block() {
+    // This block is also verified as part of the BlockVerifier service
+    // tests.
+    let block =
+        Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])
+            .expect("block should deserialize");
+    let now = Utc::now();
+
+    // This check is non-deterministic, but BLOCK_MAINNET_415000 is
+    // a long time in the past. So it's unlikely that the test machine
+    // will have a clock that's far enough in the past for the test to
+    // fail.
+    check::time_is_valid_at(
+        &block.header,
+        now,
+        &block
+            .coinbase_height()
+            .expect("block test vector height should be valid"),
+        &block.hash(),
+    )
+    .expect("the header time from a mainnet block should be valid");
 }
