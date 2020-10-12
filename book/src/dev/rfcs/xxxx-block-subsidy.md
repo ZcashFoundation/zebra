@@ -31,11 +31,25 @@ Block subsidy and miner fees are part of the protocol, the semantic verification
 
 There is a "transparent value pool" inside each transaction, containing "funds in motion" (distinct from the actual transparent value pool of UTXOs, being "funds at rest"). Balance of that pool works as follows:
 
-- `tx.vin` adds to the pool.
-- `tx.vout` subtracts from the pool.
-- `vpub_new` values from `tx.vJoinSplit` add to the pool.
-- `vpub_old` values from `tx.vJoinSplit` subtract from the pool.
-- `valueBalance` adds to the pool. It itself is equal to `sum(SaplingSpends) - sum(SaplingOutputs)`, so it has the same functional effect as for transparent and Sprout. 
+Transparent:
+
+- `tx_in` adds to the pool.
+- `tx_out` subtracts from the pool.
+
+https://zips.z.cash/protocol/canopy.pdf#txnencodingandconsensus
+
+Sprout:
+
+- `vpub_new` values from `vJoinSplit` of the transaction add to the pool.
+- `vpub_old` values from `vJoinSplit` of the transaction subtract from the pool.
+
+https://zips.z.cash/protocol/canopy.pdf#joinsplitencodingandconsensus
+
+Sapling:
+
+- `valueBalance` adds to the pool. It itself is equal to `sum(SaplingSpends) - sum(SaplingOutputs)`, so it has the same functional effect as for transparent and Sprout.
+
+https://zips.z.cash/protocol/canopy.pdf#joinsplitencodingandconsensus
 
 The balance rule is that this pool must have non-negative value, and its net value is the miner fee for the transaction.
 
