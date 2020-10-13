@@ -157,11 +157,11 @@ https://zips.z.cash/zip-0214#mainnet-recipient-addresses
 The following constants are needed:
 
 - `FUNDING_STREAM_ECC_ADDRESSES_MAINNET: [&'static str; 48]`
-- `FUNDING_STREAM_ECC_ADDRESSES_MAINNET: [&'static str; 48]`
-- `FUNDING_STREAM_ECC_ADDRESSES_MAINNET: [&'static str; 48]`
+- `FUNDING_STREAM_ZF_ADDRESSES_MAINNET: [&'static str; 48]`
+- `FUNDING_STREAM_MG_ADDRESSES_MAINNET: [&'static str; 48]`
 - `FUNDING_STREAM_ECC_ADDRESSES_TESTNET: [&'static str; 51]`
-- `FUNDING_STREAM_ECC_ADDRESSES_TESTNET: [&'static str; 51]`
-- `FUNDING_STREAM_ECC_ADDRESSES_TESTNET: [&'static str; 51]`
+- `FUNDING_STREAM_ZF_ADDRESSES_TESTNET: [&'static str; 51]`
+- `FUNDING_STREAM_MG_ADDRESSES_TESTNET: [&'static str; 51]`
 
 ## General subsidy
 
