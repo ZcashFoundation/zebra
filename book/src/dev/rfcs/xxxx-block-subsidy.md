@@ -238,7 +238,7 @@ For each network(Mainnet, Testnet), calculation of subsidy amounts need a `Heigh
 
 - Test all subsidy amount functions(`block_subsidy()`, `miner_subsidy()`, `founders_reward()` and `funding_stream()`) against all network upgrade events of each network and make sure they return the expected amounts according to known outputs.
 
-For each network, the address of the Test validation functions(subsidy_is_correct()​) against all the blocks zebra haves available in the test vectors collection for both networks(`zebra_test::vectors::MAINNET_BLOCKS`  and `zebra_test::vectors::TESTNET_BLOCKS`), all blocks should pass validation.reward receiver on each block will depend on the `Height`.
+For each network, the address of the reward receiver on each block will depend on the `Height`.
 
 - Test all subsidy address functions(`founders_reward_address()` and `funding_stream_address()`) against all network upgrade events of each network and make sure they return the expected addresses.
 
