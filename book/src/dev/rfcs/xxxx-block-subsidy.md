@@ -77,9 +77,7 @@ It is important to note that all blocks before Sapling are verified by the Check
 | Height                                 | Miner    | Founder reward | Funding streams | Shielded Coinbase | Target Spacing |
 |----------------------------------------|----------|----------------|-----------------|-------------------|----------------|             
 | ~Genesis~                              | ~**0%**~ | ~**0%**~       | ~**0%**~        | ~**No**~          | ~**None**~     |
-| ~Genesis..Slow Start Interval~         | ~80%~    | ~20%~          | ~0%~            | ~No~              | ~150 seconds~  |
-| ~Slow Start Interval..Overwinter~      | ~80%~    | ~20%~          | ~0%~            | ~No~              | ~150 seconds~  |
-| ~Overwinter..Sapling~                  | ~80%~    | ~20%~          | ~0%~            | ~No~              | ~150 seconds~  |
+| ~(Genesis + 1)..Sapling~         | ~80%~    | ~20%~          | ~0%~            | ~No~              | ~150 seconds~  |
 | Sapling..Blossom                       | 80%      | 20%            | 0%              | No                | 150 seconds    |
 | Blossom..Heartwood                     | 80%      | 20%            | 0%              | No                | 75 seconds     |
 | Heartwood..Canopy                      | 80%      | 20%            | 0%              | Yes               | 75 seconds     |
@@ -146,7 +144,7 @@ pub enum FundingStreamRange {
 /// as described in [protocol specification §7.9.1][7.9.1].
 /// 
 /// [7.9.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
-const FUNDING_STREAM_HEIGHT_RANGES: &[(Network, Range)] = &[
+const FUNDING_STREAM_HEIGHT_RANGES: &[(Network, Range<_>)] = &[
     (Network::Mainnet, Height(1_046_400)..Height(2_726_400)),
     (Network::Testnet, Height(1_028_500)..Height(2_796_000)),
 ];
