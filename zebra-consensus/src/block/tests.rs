@@ -6,20 +6,16 @@ use super::*;
 
 use std::sync::Arc;
 
-use block::Height;
 use chrono::Utc;
 use color_eyre::eyre::{eyre, Report};
 use once_cell::sync::Lazy;
 use tower::buffer::Buffer;
 
 use zebra_chain::{
-    block::{self, Block},
-    work::difficulty::CompactDifficulty,
-    work::difficulty::ExpandedDifficulty,
-};
-use zebra_chain::{
+    block::{self, Block, Height},
     parameters::{Network, NetworkUpgrade},
     serialization::{ZcashDeserialize, ZcashDeserializeInto},
+    work::difficulty::{CompactDifficulty, ExpandedDifficulty},
 };
 use zebra_test::transcript::{TransError, Transcript};
 
