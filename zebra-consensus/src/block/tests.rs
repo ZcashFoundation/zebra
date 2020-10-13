@@ -12,7 +12,11 @@ use color_eyre::eyre::{eyre, Report};
 use once_cell::sync::Lazy;
 use tower::buffer::Buffer;
 
-use zebra_chain::block::{self, Block};
+use zebra_chain::{
+    block::{self, Block},
+    work::difficulty::CompactDifficulty,
+    work::difficulty::ExpandedDifficulty,
+};
 use zebra_chain::{
     parameters::{Network, NetworkUpgrade},
     serialization::{ZcashDeserialize, ZcashDeserializeInto},
@@ -168,6 +172,66 @@ fn difficulty_is_valid_for_network(network: Network) -> Result<(), Report> {
         check::difficulty_is_valid(&block.header, network, &Height(height), &block.hash())
             .expect("the difficulty from a historical block should be valid");
     }
+
+    Ok(())
+}
+
+#[test]
+fn difficulty_validation_failure() -> Result<(), Report> {
+    use crate::error::*;
+
+    // Get a block in the mainnet, and mangle its difficulty field
+    let block =
+        Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])
+            .expect("block should deserialize");
+    let mut block = Arc::try_unwrap(block).expect("block should unwrap");
+    let height = block.coinbase_height().unwrap();
+    let hash = block.hash();
+
+    // Set the difficulty field to an invalid value
+    block.header.difficulty_threshold = CompactDifficulty(u32::MAX);
+
+    // Validate the block
+    let result =
+        check::difficulty_is_valid(&block.header, Network::Mainnet, &height, &hash).unwrap_err();
+    let expected = BlockError::InvalidDifficulty(height, hash);
+    assert_eq!(expected, result);
+
+    // Get a block in the testnet, but tell the validator it's from the mainnet
+    let block =
+        Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_TESTNET_925483_BYTES[..])
+            .expect("block should deserialize");
+    let block = Arc::try_unwrap(block).expect("block should unwrap");
+    let height = block.coinbase_height().unwrap();
+    let hash = block.hash();
+    let difficulty_threshold = block.header.difficulty_threshold.to_expanded().unwrap();
+
+    // Validate the block as if it is a mainnet block
+    let result =
+        check::difficulty_is_valid(&block.header, Network::Mainnet, &height, &hash).unwrap_err();
+    let expected = BlockError::TargetDifficultyLimit(
+        height,
+        hash,
+        difficulty_threshold,
+        Network::Mainnet,
+        ExpandedDifficulty::target_difficulty_limit(Network::Mainnet),
+    );
+    assert_eq!(expected, result);
+
+    // Get a block in the mainnet, but pass an easy hash to the validator
+    let block =
+        Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])
+            .expect("block should deserialize");
+    let block = Arc::try_unwrap(block).expect("block should unwrap");
+    let height = block.coinbase_height().unwrap();
+    let bad_hash = block::Hash([0xff; 32]);
+    let difficulty_threshold = block.header.difficulty_threshold.to_expanded().unwrap();
+
+    // Validate the block
+    let result = check::difficulty_is_valid(&block.header, Network::Mainnet, &height, &bad_hash)
+        .unwrap_err();
+    let expected = BlockError::DifficultyFilter(height, bad_hash, difficulty_threshold);
+    assert_eq!(expected, result);
 
     Ok(())
 }
