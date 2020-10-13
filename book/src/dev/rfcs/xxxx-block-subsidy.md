@@ -231,3 +231,17 @@ and after Canopy:
 https://zips.z.cash/zip-0213#specification
 
 This rules are implemented inside `shielded_coinbase()`.
+
+## Test Plan
+
+For each network(Mainnet, Testnet), calculation of subsidy amounts need a `Height` as input and will output different amounts according to it.
+
+- Test all subsidy amount functions(`block_subsidy()`, `miner_subsidy()`, `founders_reward()` and `funding_stream()`) against all network upgrade events of each network and make sure they return the expected amounts according to known outputs.
+
+For each network, the address of the Test validation functions(subsidy_is_correct()​) against all the blocks zebra haves available in the test vectors collection for both networks(`zebra_test::vectors::MAINNET_BLOCKS`  and `zebra_test::vectors::TESTNET_BLOCKS`), all blocks should pass validation.reward receiver on each block will depend on the `Height`.
+
+- Test all subsidy address functions(`founders_reward_address()` and `funding_stream_address()`) against all network upgrade events of each network and make sure they return the expected addresses.
+
+Validation tests will test the consensus rules using real blocks from `zebra-test` crate. For both networks, blocks for all network upgrades were added to the crate in [#1096](https://github.com/ZcashFoundation/zebra/pull/1096). Blocks containing shielded coinbase were also introduced at [#1116](https://github.com/ZcashFoundation/zebra/pull/1116)
+
+- Test validation functions(`subsidy_is_correct()`) against all the blocks zebra haves available in the test vectors collection for both networks(`zebra_test::vectors::MAINNET_BLOCKS`  and `zebra_test::vectors::TESTNET_BLOCKS`), all blocks should pass validation.
