@@ -77,7 +77,7 @@ It is important to note that all blocks before Sapling are verified by the Check
 | Height                                 | Miner    | Founder reward | Funding streams | Shielded Coinbase | Target Spacing |
 |----------------------------------------|----------|----------------|-----------------|-------------------|----------------|             
 | ~Genesis~                              | ~**0%**~ | ~**0%**~       | ~**0%**~        | ~**No**~          | ~**None**~     |
-| ~(Genesis + 1)..Sapling~         | ~80%~    | ~20%~          | ~0%~            | ~No~              | ~150 seconds~  |
+| ~(Genesis + 1)..Sapling~               | ~80%~    | ~20%~          | ~0%~            | ~No~              | ~150 seconds~  |
 | Sapling..Blossom                       | 80%      | 20%            | 0%              | No                | 150 seconds    |
 | Blossom..Heartwood                     | 80%      | 20%            | 0%              | No                | 75 seconds     |
 | Heartwood..Canopy                      | 80%      | 20%            | 0%              | Yes               | 75 seconds     |
@@ -191,9 +191,9 @@ https://zips.z.cash/zip-0214
 
 `zebra-consensus/src/block.rs` will call the following function implemented inside `zebra-consensus/src/block/check.rs`:
 
-`subsidy_is_correct(Network, &Block) -> Result<(), BlockError>`
+`subsidy_is_valid(Network, &Block) -> Result<(), BlockError>`
 
-`subsidy_is_correct()` will call individual functions(also implemented in `zebra-consensus/src/block/check.rs`) to verify the following consensus rules:
+`subsidy_is_valid()` will call individual functions(also implemented in `zebra-consensus/src/block/check.rs`) to verify the following consensus rules:
 
 ### 1 - Founders reward:
 
@@ -244,4 +244,4 @@ For each network, the address of the reward receiver on each block will depend o
 
 Validation tests will test the consensus rules using real blocks from `zebra-test` crate. For both networks, blocks for all network upgrades were added to the crate in [#1096](https://github.com/ZcashFoundation/zebra/pull/1096). Blocks containing shielded coinbase were also introduced at [#1116](https://github.com/ZcashFoundation/zebra/pull/1116)
 
-- Test validation functions(`subsidy_is_correct()`) against all the blocks zebra haves available in the test vectors collection for both networks(`zebra_test::vectors::MAINNET_BLOCKS`  and `zebra_test::vectors::TESTNET_BLOCKS`), all blocks should pass validation.
+- Test validation functions(`subsidy_is_valid()`) against all the blocks zebra haves available in the test vectors collection for both networks(`zebra_test::vectors::MAINNET_BLOCKS`  and `zebra_test::vectors::TESTNET_BLOCKS`), all blocks should pass validation.
