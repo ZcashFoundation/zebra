@@ -150,6 +150,19 @@ const FUNDING_STREAM_HEIGHT_RANGES: &[(Network, Range<_>)] = &[
 ];
 ```
 
+Each `FundingStreamReceiver` for the mainnet must have 48 payment addresses associated with and 51 for the testnet. 
+
+https://zips.z.cash/zip-0214#mainnet-recipient-addresses
+
+The following constants are needed:
+
+- `FUNDING_STREAM_ECC_ADDRESSES_MAINNET: [&'static str; 48]`
+- `FUNDING_STREAM_ECC_ADDRESSES_MAINNET: [&'static str; 48]`
+- `FUNDING_STREAM_ECC_ADDRESSES_MAINNET: [&'static str; 48]`
+- `FUNDING_STREAM_ECC_ADDRESSES_TESTNET: [&'static str; 51]`
+- `FUNDING_STREAM_ECC_ADDRESSES_TESTNET: [&'static str; 51]`
+- `FUNDING_STREAM_ECC_ADDRESSES_TESTNET: [&'static str; 51]`
+
 ## General subsidy
 
 The block subsidy and miner reward among other utility functions are inside the general subsidy category.
