@@ -24,7 +24,6 @@ use crate::BoxError;
 /// After verification, the script future completes. State changes are handled by
 /// `BlockVerifier` or `MempoolTransactionVerifier`.
 ///
-/// `ScriptVerifier` is not yet implemented.
 pub struct Verifier<ZS> {
     state: ZS,
     branch: ConsensusBranchId,
@@ -123,9 +122,7 @@ mod tests {
             .map(|transaction| {
                 transaction
                     .inputs()
-                    .iter()
-                    .cloned()
-                    .collect::<Vec<transparent::Input>>()
+                    .to_vec()
             })
             .flat_map(|inputs| inputs.into_iter());
 
@@ -165,7 +162,7 @@ mod tests {
                         .transactions
                         .into_iter()
                         .flat_map(|transaction| {
-                            let inds = transaction
+                            transaction
                             .inputs()
                             .iter()
                             .enumerate()
@@ -173,9 +170,6 @@ mod tests {
                                 |(_, input)| !matches!(input, transparent::Input::Coinbase { .. }),
                             )
                             .map(|(ind, _)| ind)
-                            .collect::<Vec<_>>();
-
-                            inds.into_iter()
                                 .map(move |input_index| (input_index, transaction.clone()))
                         })
                         .map(|(input_index, transaction)| super::Request {
