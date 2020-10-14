@@ -85,9 +85,9 @@ where
                 }
                 .boxed()
             }
-            transparent::Input::Coinbase { .. } => unimplemented!(
-                "how should we handle verifying coinbase transactions in the script::Verifier?"
-            ),
+            transparent::Input::Coinbase { .. } => {
+                async { Err("unexpected coinbase input".into()) }.boxed()
+            }
         }
     }
 }
