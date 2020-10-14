@@ -18,7 +18,7 @@ use crate::transaction::VerifyTransactionError;
 /// https://zips.z.cash/protocol/canopy.pdf#sproutnonmalleability
 /// https://zips.z.cash/protocol/canopy.pdf#txnencodingandconsensus
 pub fn validate_joinsplit_sig(
-    joinsplit_data: JoinSplitData<Groth16Proof>,
+    joinsplit_data: &JoinSplitData<Groth16Proof>,
     sighash: &[u8],
 ) -> Result<(), VerifyTransactionError> {
     ed25519::VerificationKey::try_from(joinsplit_data.pub_key)
@@ -49,16 +49,16 @@ pub fn validate_joinsplit_sig(
 ///
 /// https://zips.z.cash/protocol/canopy.pdf#saplingbalance
 pub fn balancing_value_balances(
-    shielded_data: ShieldedData,
+    shielded_data: &ShieldedData,
     value_balance: Amount,
-) -> Result<redjubjub::VerificationKey<Binding>, redjubjub::Error> {
+) -> redjubjub::VerificationKeyBytes<Binding> {
     let cv_old: ValueCommitment = shielded_data.spends().map(|spend| spend.cv).sum();
     let cv_new: ValueCommitment = shielded_data.outputs().map(|output| output.cv).sum();
     let cv_balance: ValueCommitment = ValueCommitment::new(jubjub::Fr::zero(), value_balance);
 
     let key_bytes: [u8; 32] = (cv_old - cv_new - cv_balance).into();
 
-    redjubjub::VerificationKey::<Binding>::try_from(key_bytes)
+    key_bytes.into()
 }
 
 /// Check that at least one of tx_in_count, nShieldedSpend, and nJoinSplit MUST
@@ -116,7 +116,7 @@ pub fn any_coinbase_inputs_no_transparent_outputs(
 ///
 /// https://zips.z.cash/protocol/canopy.pdf#consensusfrombitcoin
 pub fn shielded_balances_match(
-    shielded_data: ShieldedData,
+    shielded_data: &ShieldedData,
     value_balance: Amount,
 ) -> Result<(), VerifyTransactionError> {
     if shielded_data.spends().count() + shielded_data.outputs().count() != 0 {

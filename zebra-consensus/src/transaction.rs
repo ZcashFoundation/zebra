@@ -23,18 +23,17 @@ use displaydoc::Display;
 use futures::{stream::FuturesUnordered, FutureExt};
 use thiserror::Error;
 use tower::Service;
+use tower::ServiceExt;
 
 use zebra_chain::{
-    amount,
     parameters::NetworkUpgrade,
     primitives::{ed25519, redjubjub},
     transaction::{self, HashType, Transaction},
-    transparent::{self, Script},
 };
 
 use zebra_state as zs;
 
-use crate::{primitives::groth16, script, BoxError, Config};
+use crate::{primitives::groth16, script, BoxError};
 
 mod check;
 
@@ -51,7 +50,26 @@ where
     spend_verifier: groth16::Verifier,
     output_verifier: groth16::Verifier,
     joinsplit_verifier: groth16::Verifier,
-    redjubjub_verifier: crate::primitives::redjubjub::Verifier,
+}
+
+impl<ZS> TransactionVerifier<ZS>
+where
+    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
+    ZS::Future: Send + 'static,
+{
+    pub(crate) fn new(
+        script_verifier: script::Verifier<ZS>,
+        spend_verifier: groth16::Verifier,
+        output_verifier: groth16::Verifier,
+        joinsplit_verifier: groth16::Verifier,
+    ) -> Self {
+        Self {
+            script_verifier,
+            spend_verifier,
+            output_verifier,
+            joinsplit_verifier,
+        }
+    }
 }
 
 #[non_exhaustive]
@@ -74,7 +92,18 @@ pub enum VerifyTransactionError {
     /// Could not verify a Ed25519 signature with JoinSplitData
     Ed25519(#[from] ed25519::Error),
     /// Could not verify a RedJubjub signature with ShieldedData
-    RedJubjub(#[from] redjubjub::Error),
+    RedJubjub(redjubjub::Error),
+    /// An error that arises from implementation details of the verification service
+    Internal(BoxError),
+}
+
+impl From<BoxError> for VerifyTransactionError {
+    fn from(err: BoxError) -> Self {
+        match err.downcast::<redjubjub::Error>() {
+            Ok(e) => VerifyTransactionError::RedJubjub(*e),
+            Err(e) => VerifyTransactionError::Internal(e),
+        }
+    }
 }
 
 /// Specifies whether a transaction should be verified as part of a block or as
@@ -105,6 +134,8 @@ where
 
     // TODO: break up each chunk into its own method
     fn call(&mut self, req: Request) -> Self::Future {
+        let mut redjubjub_verifier = crate::primitives::redjubjub::VERIFIER.clone();
+
         let is_mempool = match req {
             Request::Block(_) => false,
             Request::Mempool(_) => true,
@@ -119,20 +150,25 @@ where
             Request::Mempool(tx) => tx,
         };
 
-        match *tx {
-            Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => {
-                async { Err(VerifyTransactionError::WrongVersion) }.boxed()
-            }
-            Transaction::V4 {
-                inputs,
-                outputs,
-                lock_time,
-                expiry_height,
-                value_balance,
-                joinsplit_data,
-                shielded_data,
-            } => {
-                async move {
+        async move {
+            match &*tx {
+                Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => {
+                    Err(VerifyTransactionError::WrongVersion)
+                }
+                Transaction::V4 {
+                    inputs,
+                    outputs,
+                    lock_time,
+                    expiry_height,
+                    value_balance,
+                    joinsplit_data,
+                    shielded_data,
+                } => {
+                    // Contains a set of asynchronous checks, all of which must
+                    // resolve to Ok(()) for verification to succeed (in addition to
+                    // any other checks)
+                    let async_checks = FuturesUnordered::new();
+
                     // Handle transparent inputs and outputs.
                     // These are left unimplemented!() pending implementation
                     // of the async script RFC.
@@ -146,14 +182,7 @@ where
                     }
 
                     check::some_money_is_spent(&tx)?;
-                    check::any_coinbase_inputs_no_transparent_outputs(&tx);
-
-                    // Contains a set of asynchronous checks, all of which must
-                    // resolve to Ok(()) for verification to succeed (in addition to
-                    // any other checks)
-                    let async_checks = FuturesUnordered::<
-                        Box<dyn Future<Output = Result<(), VerifyTransactionError>>>,
-                    >::new();
+                    check::any_coinbase_inputs_no_transparent_outputs(&tx)?;
 
                     let sighash = tx.sighash(
                         NetworkUpgrade::Sapling, // TODO: pass this in
@@ -169,15 +198,12 @@ where
 
                         // Then, pass those items to self.joinsplit to verify them.
 
-                        match check::validate_joinsplit_sig(joinsplit_data, sighash.as_bytes()) {
-                            Ok(_) => (),
-                            Err(e) => return Err(e),
-                        }
+                        check::validate_joinsplit_sig(joinsplit_data, sighash.as_bytes())?;
                     }
                     if let Some(shielded_data) = shielded_data {
-                        check::shielded_balances_match(shielded_data, value_balance)?;
+                        check::shielded_balances_match(&shielded_data, *value_balance)?;
 
-                        shielded_data.spends().for_each(|spend| {
+                        for spend in shielded_data.spends() {
                             // TODO: check that spend.cv and spend.rk are NOT of small
                             // order.
                             // https://zips.z.cash/protocol/canopy.pdf#spenddesc
@@ -187,9 +213,12 @@ where
                             // description while adding the resulting future to
                             // our collection of async checks that (at a
                             // minimum) must pass for the transaction to verify.
-                            async_checks.push(self.redjubjub_verifier.call(
-                                (spend.rk.into(), spend.spend_auth_sig, sighash.into()).into(),
-                            ));
+                            let rsp = redjubjub_verifier
+                                .ready_and()
+                                .await?
+                                .call((spend.rk, spend.spend_auth_sig, &sighash).into());
+
+                            async_checks.push(rsp.boxed());
 
                             // TODO: prepare public inputs for spends, then create
                             // a groth16::Item and pass to self.spend
@@ -199,19 +228,7 @@ where
                             // resulting future to our collection of async
                             // checks that (at a minimum) must pass for the
                             // transaction to verify.
-                            async_checks.push(
-                                self.spend_verifier.call(
-                                    (
-                                        spend.cv,
-                                        spend.anchor,
-                                        spend.nullifier,
-                                        spend.rk,
-                                        spend.zkproof,
-                                    )
-                                        .into(),
-                                ),
-                            );
-                        });
+                        }
 
                         shielded_data.outputs().for_each(|output| {
                             // TODO: check that output.cv and output.epk are NOT of small
@@ -226,12 +243,6 @@ where
                             // the resulting future to our collection of async
                             // checks that (at a minimum) must pass for the
                             // transaction to verify.
-                            async_checks.push(
-                                self.output_verifier.call(
-                                    (output.cv, output.cm_u, output.ephemeral_key, output.zkproof)
-                                        .into(),
-                                ),
-                            );
                         });
 
                         // Checks the balance.
@@ -249,25 +260,25 @@ where
                         // Output descriptions of the transaction, and the balancing value.
                         //
                         // https://zips.z.cash/protocol/canopy.pdf#saplingbalance
-                        let bsk = check::balancing_value_balances(shielded_data, value_balance);
+                        let bsk = check::balancing_value_balances(&shielded_data, *value_balance);
 
                         // Queue the validation of the RedJubjub binding
                         // signature with the batch verifier service while
                         // adding the resulting future to our collection of
                         // async checks that (at a minimum) must pass for the
                         // transaction to verify.
-                        match bsk {
-                            Ok(bsk) => async_checks.push(self.redjubjub_verifier.call(
-                                (bsk.into(), &shielded_data.binding_sig, sighash.into()).into(),
-                            )),
-                            Err(e) => return Err(VerifyTransactionError::RedJubjub(e)).into(),
-                        }
+                        let rsp = redjubjub_verifier
+                            .ready_and()
+                            .await?
+                            .call((bsk, shielded_data.binding_sig, &sighash).into())
+                            .boxed();
+                        async_checks.push(rsp)
                     }
 
                     unimplemented!()
                 }
-                .boxed()
             }
         }
+        .boxed()
     }
 }
