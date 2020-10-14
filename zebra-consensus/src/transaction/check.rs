@@ -1,7 +1,7 @@
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 
 use zebra_chain::{
-    amount::Amount,
+    amount::{self, Amount, NegativeAllowed},
     primitives::{
         ed25519,
         redjubjub::{self, Binding},
@@ -109,5 +109,21 @@ pub fn any_coinbase_inputs_no_transparent_outputs(
             }
         }
         _ => return Err(VerifyTransactionError::WrongVersion),
+    }
+}
+
+/// Check that if there are no Spends or Outputs, that valueBalance is also 0.
+///
+/// https://zips.z.cash/protocol/canopy.pdf#consensusfrombitcoin
+pub fn shielded_balances_match(
+    shielded_data: ShieldedData,
+    value_balance: Amount,
+) -> Result<(), VerifyTransactionError> {
+    if shielded_data.spends().count() + shielded_data.outputs().count() != 0 {
+        return Ok(());
+    } else if i64::from(value_balance) == 0 {
+        return Ok(());
+    } else {
+        return Err(VerifyTransactionError::BadBalance);
     }
 }

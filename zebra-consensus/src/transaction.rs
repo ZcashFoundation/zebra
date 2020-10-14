@@ -25,6 +25,7 @@ use thiserror::Error;
 use tower::Service;
 
 use zebra_chain::{
+    amount,
     parameters::NetworkUpgrade,
     primitives::{ed25519, redjubjub},
     transaction::{self, HashType, Transaction},
@@ -60,6 +61,8 @@ pub enum VerifyTransactionError {
     WrongVersion,
     /// A transaction MUST move money around.
     NoTransfer,
+    /// The balance of money moving around doesn't compute.
+    BadBalance,
     /// Could not verify a transparent script
     Script(#[from] zebra_script::Error),
     /// Could not verify a Groth16 proof of a JoinSplit/Spend/Output description
@@ -164,17 +167,14 @@ where
 
                         // Then, pass those items to self.joinsplit to verify them.
 
-                        // XXX refactor this into a nicely named check function
-                        // ed25519::VerificationKey::try_from(joinsplit_data.pub_key)
-                        //     .and_then(|vk| vk.verify(&joinsplit_data.sig, sighash))
-                        //     .map_err(VerifyTransactionError::Ed25519)
                         match check::validate_joinsplit_sig(joinsplit_data, sighash.as_bytes()) {
                             Ok(_) => (),
                             Err(e) => return Err(e),
                         }
                     }
-
                     if let Some(shielded_data) = shielded_data {
+                        check::shielded_balances_match(shielded_data, value_balance)?;
+
                         shielded_data.spends().for_each(|spend| {
                             // TODO: check that spend.cv and spend.rk are NOT of small
                             // order.

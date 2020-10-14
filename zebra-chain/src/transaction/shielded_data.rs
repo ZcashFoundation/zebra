@@ -1,11 +1,8 @@
-use std::convert::TryFrom;
-
 use futures::future::Either;
 
 use crate::{
-    amount::Amount,
-    primitives::redjubjub::{Binding, Signature, VerificationKey},
-    sapling::{Nullifier, Output, Spend, ValueCommitment},
+    primitives::redjubjub::{Binding, Signature},
+    sapling::{Nullifier, Output, Spend},
     serialization::serde_helpers,
 };
 
