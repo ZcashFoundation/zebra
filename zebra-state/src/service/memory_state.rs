@@ -524,6 +524,8 @@ impl NonFinalizedState {
         None
     }
 
+    /// Returns the `transparent::Output` pointed to by the given
+    /// `transparent::OutPoint` if it is present.
     pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Output> {
         for chain in self.chain_set.iter().rev() {
             if let Some(output) = chain.created_utxos.get(outpoint) {

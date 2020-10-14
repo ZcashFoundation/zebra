@@ -23,7 +23,6 @@ use crate::BoxError;
 ///
 /// After verification, the script future completes. State changes are handled by
 /// `BlockVerifier` or `MempoolTransactionVerifier`.
-///
 pub struct Verifier<ZS> {
     state: ZS,
     branch: ConsensusBranchId,
@@ -90,97 +89,5 @@ where
                 "how should we handle verifying coinbase transactions in the script::Verifier?"
             ),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::sync::Arc;
-
-    use color_eyre::Report;
-
-    use zebra_chain::{
-        block::Block, parameters::Network, parameters::NetworkUpgrade,
-        serialization::ZcashDeserializeInto, transparent,
-    };
-    use zebra_test::transcript::{TransError, Transcript};
-
-    #[tokio::test]
-    async fn happy_path() -> Result<(), Report> {
-        happy_path_test().await
-    }
-
-    #[spandoc::spandoc]
-    async fn happy_path_test() -> Result<(), Report> {
-        zebra_test::init();
-        let mut inputs = zebra_test::vectors::MAINNET_BLOCKS
-            .range(1..10)
-            .flat_map(|(_, block_bytes)| {
-                let block: Block = block_bytes.zcash_deserialize_into().unwrap();
-                block.transactions.into_iter()
-            })
-            .map(|transaction| {
-                transaction
-                    .inputs()
-                    .to_vec()
-            })
-            .flat_map(|inputs| inputs.into_iter());
-
-        assert!(inputs.any(|input| matches!(input, transparent::Input::PrevOut { .. })));
-
-        let state_setup_transcript =
-            zebra_test::vectors::MAINNET_BLOCKS
-                .range(0..=10)
-                .map(|(_, block_bytes)| {
-                    let block: Arc<Block> = block_bytes.zcash_deserialize_into().unwrap();
-                    let hash = block.hash();
-
-                    let request = zebra_state::Request::CommitFinalizedBlock { block };
-                    let response = Ok::<_, TransError>(zebra_state::Response::Committed(hash));
-
-                    (request, response)
-                });
-        let state_setup_transcript = Transcript::from(state_setup_transcript);
-
-        let config = zebra_state::Config::ephemeral();
-        let network = Network::Mainnet;
-
-        let state = zebra_state::init(config, network);
-
-        /// SPANDOC: Setup the state by commiting all the necessary context
-        state_setup_transcript.check(state.clone()).await?;
-
-        let branch = NetworkUpgrade::Overwinter.branch_id().unwrap();
-        let script_service = super::Verifier::new(state, branch);
-        let script_transcript =
-            zebra_test::vectors::MAINNET_BLOCKS
-                .range(1..10)
-                .flat_map(|(_, block_bytes)| {
-                    let block: Block = block_bytes.zcash_deserialize_into().unwrap();
-
-                    block
-                        .transactions
-                        .into_iter()
-                        .flat_map(|transaction| {
-                            transaction
-                            .inputs()
-                            .iter()
-                            .enumerate()
-                            .filter(
-                                |(_, input)| !matches!(input, transparent::Input::Coinbase { .. }),
-                            )
-                            .map(|(ind, _)| ind)
-                                .map(move |input_index| (input_index, transaction.clone()))
-                        })
-                        .map(|(input_index, transaction)| super::Request {
-                            input_index,
-                            transaction,
-                        })
-                        .map(|request| (request, Ok::<_, TransError>(())))
-                });
-        let script_transcript = Transcript::from(script_transcript);
-        script_transcript.check(script_service).await?;
-
-        Ok(())
     }
 }

@@ -9,6 +9,8 @@ use zebra_chain::{block::Block, transparent};
 pub struct PendingUtxos(HashMap<transparent::OutPoint, broadcast::Sender<transparent::Output>>);
 
 impl PendingUtxos {
+    /// Returns a future that will resolve to the `transparent::Output` pointed
+    /// to by the given `transparent::OutPoint` when it is available.
     pub fn queue(
         &mut self,
         outpoint: transparent::OutPoint,
@@ -31,12 +33,16 @@ impl PendingUtxos {
         }
     }
 
+    /// Notify all utxo requests waiting for the `transparent::Output` pointed to
+    /// by the given `transparent::OutPoint` that the `Output` has arrived.
     pub fn respond(&mut self, outpoint: transparent::OutPoint, output: transparent::Output) {
         if let Some(sender) = self.0.remove(&outpoint) {
             let _ = sender.send(output);
         }
     }
 
+    /// For each notifies waiting utxo requests for each `transparent::Output` in
+    /// `block` that the output has arrived.
     pub fn check_block(&mut self, block: &Block) {
         if self.0.is_empty() {
             return;
@@ -55,6 +61,8 @@ impl PendingUtxos {
         }
     }
 
+    /// Scan the set of waiting utxo requests for channels where all recievers
+    /// have been dropped and remove the corresponding sender.
     pub fn prune(&mut self) {
         self.0.retain(|_, chan| chan.receiver_count() > 0);
     }

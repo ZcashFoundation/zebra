@@ -46,7 +46,10 @@ pub struct FinalizedState {
     // sapling_anchors: sled::Tree,
 }
 
+/// Helper trait for inserting (Key, Value) pairs into sled when both the key and
+/// value implement ZcashSerialize.
 trait SledSerialize {
+    /// Serialize and insert the given key and value into a sled tree.
     fn zs_insert<K, V>(
         &self,
         key: &K,
@@ -57,7 +60,11 @@ trait SledSerialize {
         V: ZcashSerialize;
 }
 
+/// Helper trait for retrieving values from sled trees when the key and value
+/// implement ZcashSerialize/ZcashDeserialize.
 trait SledDeserialize {
+    /// Serialize the given key and use that to get and deserialize the
+    /// corresponding value from a sled tree, if it is present.
     fn zs_get<K, V>(&self, key: &K) -> Result<Option<V>, BoxError>
     where
         K: ZcashSerialize,
@@ -296,6 +303,8 @@ impl FinalizedState {
         }
     }
 
+    /// Returns the `transparent::Output` pointed to by the given
+    /// `transparent::OutPoint` if it is present.
     pub fn utxo(
         &self,
         outpoint: &transparent::OutPoint,
