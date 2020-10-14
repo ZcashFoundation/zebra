@@ -23,9 +23,6 @@ use std::{
 
 use primitive_types::U256;
 
-#[cfg(any(test, feature = "proptest-impl"))]
-use proptest_derive::Arbitrary;
-
 #[cfg(test)]
 mod tests;
 
@@ -58,7 +55,6 @@ mod tests;
 /// multiple equivalent `CompactDifficulty` values, due to redundancy in the
 /// floating-point format.
 #[derive(Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct CompactDifficulty(pub u32);
 
 impl fmt::Debug for CompactDifficulty {
@@ -79,13 +75,18 @@ impl fmt::Debug for CompactDifficulty {
 /// The precise bit pattern of an `ExpandedDifficulty` value is
 /// consensus-critical, because it is compared with the `block::Hash`.
 ///
-/// Note that each `CompactDifficulty` value represents a range of
-/// `ExpandedDifficulty` values, because the precision of the
-/// floating-point format requires rounding on conversion.
+/// Note that each `CompactDifficulty` value can be converted from a
+/// range of `ExpandedDifficulty` values, because the precision of
+/// the floating-point format requires rounding on conversion.
 ///
 /// Therefore, consensus-critical code must perform the specified
 /// conversions to `CompactDifficulty`, even if the original
 /// `ExpandedDifficulty` values are known.
+///
+/// Callers should avoid constructing `ExpandedDifficulty` zero
+/// values, because they are rejected by the consensus rules.
+//
+// TODO: Use NonZeroU256, when available
 #[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
 pub struct ExpandedDifficulty(U256);
 
@@ -260,7 +261,7 @@ impl ExpandedDifficulty {
     ///
     /// Hashes are not used to calculate the difficulties of future blocks, so
     /// users of this module should avoid converting hashes into difficulties.
-    fn from_hash(hash: &block::Hash) -> ExpandedDifficulty {
+    pub(super) fn from_hash(hash: &block::Hash) -> ExpandedDifficulty {
         U256::from_little_endian(&hash.0).into()
     }
 
