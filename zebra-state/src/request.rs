@@ -109,8 +109,5 @@ pub enum Request {
     Block(HashOrHeight),
 
     /// Request a UTXO identified by the given Outpoint
-    AwaitUtxo(
-        /// The outpoint identifying with the requested UTXO
-        transparent::OutPoint,
-    ),
+    AwaitUtxo(transparent::OutPoint),
 }

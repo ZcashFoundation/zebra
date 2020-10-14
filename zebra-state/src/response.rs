@@ -33,8 +33,5 @@ pub enum Response {
     Block(Option<Arc<Block>>),
 
     /// The response to a `AwaitUtxo` request
-    Utxo(
-        /// The transparent::Output representing the requested UTXO
-        transparent::Output,
-    ),
+    Utxo(transparent::Output),
 }
