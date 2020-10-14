@@ -1,0 +1,28 @@
+# Service file to run zebrad by systemd.
+# Setup (Ubuntu/Debian) instructions:
+# 1- Build the zebrad binary:
+# cargo build -p zebrad --release
+# 2- Copy/Move the built zebrad binary into your system binaries path:
+# sudo cp target/release/zebrad /usr/bin
+# 3- Replace AssertPathExists and ExecStart with the location of your binary if needed.
+# 4- Place this file in systemd system folder, with the other systemd files:
+# cp zebrad/systemd/zebrad.service /lib/systemd/system/ 
+# 5- Start zebrad from systemd for the first time:
+# systemctl start zebrad.service
+# 6- Check status:
+# systemctl status zebrad.service
+# 7- Uninstall:
+# systemctl stop zebrad.service
+# rm /lib/systemd/system/zebrad.service
+[Unit]
+AssertPathExists=/usr/bin/zebrad
+
+[Service]
+ExecStart=/usr/bin/zebrad start
+Restart=always
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+Alias=zebrad
+WantedBy=default.target
