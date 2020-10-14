@@ -3,6 +3,8 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
+    time::Duration,
+    time::Instant,
 };
 
 use futures::future::{FutureExt, TryFutureExt};
@@ -21,6 +23,7 @@ use crate::{
 };
 
 mod memory_state;
+mod utxo;
 
 // todo: put this somewhere
 #[derive(Debug)]
@@ -39,18 +42,27 @@ struct StateService {
     mem: NonFinalizedState,
     /// Blocks awaiting their parent blocks for contextual verification.
     queued_blocks: QueuedBlocks,
+    /// The set of outpoints with pending requests for their associated transparent::Output
+    pending_utxos: utxo::PendingUtxos,
+    /// Instant tracking the last time `pending_utxos` was pruned
+    last_prune: Instant,
 }
 
 impl StateService {
+    const PRUNE_INTERVAL: Duration = Duration::from_secs(30);
+
     pub fn new(config: Config, network: Network) -> Self {
         let sled = FinalizedState::new(&config, network);
         let mem = NonFinalizedState::default();
         let queued_blocks = QueuedBlocks::default();
+        let pending_utxos = utxo::PendingUtxos::default();
 
         Self {
             sled,
             mem,
             queued_blocks,
+            pending_utxos,
+            last_prune: Instant::now(),
         }
     }
 
@@ -154,6 +166,13 @@ impl Service<Request> for StateService {
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        let now = Instant::now();
+
+        if self.last_prune + Self::PRUNE_INTERVAL < now {
+            self.pending_utxos.prune();
+            self.last_prune = now;
+        }
+
         Poll::Ready(Ok(()))
     }
 
@@ -162,6 +181,7 @@ impl Service<Request> for StateService {
             Request::CommitBlock { block } => {
                 let (rsp_tx, mut rsp_rx) = broadcast::channel(1);
 
+                self.pending_utxos.check_block(&block);
                 self.queue_and_commit_non_finalized_blocks(QueuedBlock { block, rsp_tx });
 
                 async move {
@@ -177,6 +197,7 @@ impl Service<Request> for StateService {
             Request::CommitFinalizedBlock { block } => {
                 let (rsp_tx, mut rsp_rx) = broadcast::channel(1);
 
+                self.pending_utxos.check_block(&block);
                 self.sled
                     .queue_and_commit_finalized_blocks(QueuedBlock { block, rsp_tx });
 
@@ -212,6 +233,17 @@ impl Service<Request> for StateService {
                     .block(hash_or_height)
                     .map_ok(Response::Block)
                     .boxed()
+            }
+            Request::AwaitUtxo(outpoint) => {
+                let fut = self.pending_utxos.queue(outpoint);
+
+                if let Some(finalized_utxo) = self.sled.utxo(&outpoint).unwrap() {
+                    self.pending_utxos.respond(outpoint, finalized_utxo);
+                } else if let Some(non_finalized_utxo) = self.mem.utxo(&outpoint) {
+                    self.pending_utxos.respond(outpoint, non_finalized_utxo);
+                }
+
+                fut.boxed()
             }
         }
     }

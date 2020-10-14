@@ -26,7 +26,7 @@ struct Chain {
     height_by_hash: HashMap<block::Hash, block::Height>,
     tx_by_hash: HashMap<transaction::Hash, (block::Height, usize)>,
 
-    created_utxos: HashSet<transparent::OutPoint>,
+    created_utxos: HashMap<transparent::OutPoint, transparent::Output>,
     spent_utxos: HashSet<transparent::OutPoint>,
     sprout_anchors: HashSet<sprout::tree::Root>,
     sapling_anchors: HashSet<sapling::tree::Root>,
@@ -258,11 +258,14 @@ impl UpdateWith<(transaction::Hash, &Vec<transparent::Output>)> for Chain {
         &mut self,
         (transaction_hash, outputs): &(transaction::Hash, &Vec<transparent::Output>),
     ) {
-        for (utxo_index, _) in outputs.iter().enumerate() {
-            self.created_utxos.insert(transparent::OutPoint {
-                hash: *transaction_hash,
-                index: utxo_index as u32,
-            });
+        for (utxo_index, output) in outputs.iter().enumerate() {
+            self.created_utxos.insert(
+                transparent::OutPoint {
+                    hash: *transaction_hash,
+                    index: utxo_index as u32,
+                },
+                output.clone(),
+            );
         }
     }
 
@@ -272,10 +275,12 @@ impl UpdateWith<(transaction::Hash, &Vec<transparent::Output>)> for Chain {
     ) {
         for (utxo_index, _) in outputs.iter().enumerate() {
             assert!(
-                self.created_utxos.remove(&transparent::OutPoint {
-                    hash: *transaction_hash,
-                    index: utxo_index as u32,
-                }),
+                self.created_utxos
+                    .remove(&transparent::OutPoint {
+                        hash: *transaction_hash,
+                        index: utxo_index as u32,
+                    })
+                    .is_some(),
                 "created_utxos must be present if block was"
             );
         }
@@ -525,6 +530,18 @@ impl NonFinalizedState {
             } else {
                 // add the chain back to the set and continue
                 self.chain_set.insert(next_best_chain);
+            }
+        }
+
+        None
+    }
+
+    /// Returns the `transparent::Output` pointed to by the given
+    /// `transparent::OutPoint` if it is present.
+    pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Output> {
+        for chain in self.chain_set.iter().rev() {
+            if let Some(output) = chain.created_utxos.get(outpoint) {
+                return Some(output.clone());
             }
         }
 

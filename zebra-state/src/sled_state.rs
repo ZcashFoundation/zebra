@@ -3,10 +3,13 @@
 use std::{collections::HashMap, convert::TryInto, future::Future, sync::Arc};
 
 use tracing::trace;
-use zebra_chain::serialization::{ZcashDeserialize, ZcashSerialize};
 use zebra_chain::{
     block::{self, Block},
     parameters::{Network, GENESIS_PREVIOUS_BLOCK_HASH},
+};
+use zebra_chain::{
+    serialization::{ZcashDeserialize, ZcashSerialize},
+    transparent,
 };
 
 use crate::{BoxError, Config, HashOrHeight, QueuedBlock};
@@ -36,11 +39,81 @@ pub struct FinalizedState {
     height_by_hash: sled::Tree,
     block_by_height: sled::Tree,
     // tx_by_hash: sled::Tree,
-    // utxo_by_outpoint: sled::Tree,
+    utxo_by_outpoint: sled::Tree,
     // sprout_nullifiers: sled::Tree,
     // sapling_nullifiers: sled::Tree,
     // sprout_anchors: sled::Tree,
     // sapling_anchors: sled::Tree,
+}
+
+/// Helper trait for inserting (Key, Value) pairs into sled when both the key and
+/// value implement ZcashSerialize.
+trait SledSerialize {
+    /// Serialize and insert the given key and value into a sled tree.
+    fn zs_insert<K, V>(
+        &self,
+        key: &K,
+        value: &V,
+    ) -> Result<(), sled::transaction::UnabortableTransactionError>
+    where
+        K: ZcashSerialize,
+        V: ZcashSerialize;
+}
+
+/// Helper trait for retrieving values from sled trees when the key and value
+/// implement ZcashSerialize/ZcashDeserialize.
+trait SledDeserialize {
+    /// Serialize the given key and use that to get and deserialize the
+    /// corresponding value from a sled tree, if it is present.
+    fn zs_get<K, V>(&self, key: &K) -> Result<Option<V>, BoxError>
+    where
+        K: ZcashSerialize,
+        V: ZcashDeserialize;
+}
+
+impl SledSerialize for sled::transaction::TransactionalTree {
+    fn zs_insert<K, V>(
+        &self,
+        key: &K,
+        value: &V,
+    ) -> Result<(), sled::transaction::UnabortableTransactionError>
+    where
+        K: ZcashSerialize,
+        V: ZcashSerialize,
+    {
+        let key_bytes = key
+            .zcash_serialize_to_vec()
+            .expect("serializing into a vec won't fail");
+
+        let value_bytes = value
+            .zcash_serialize_to_vec()
+            .expect("serializing into a vec won't fail");
+
+        self.insert(key_bytes, value_bytes)?;
+
+        Ok(())
+    }
+}
+
+impl SledDeserialize for sled::Tree {
+    fn zs_get<K, V>(&self, key: &K) -> Result<Option<V>, BoxError>
+    where
+        K: ZcashSerialize,
+        V: ZcashDeserialize,
+    {
+        let key_bytes = key
+            .zcash_serialize_to_vec()
+            .expect("serializing into a vec won't fail");
+
+        let value_bytes = self.get(&key_bytes)?;
+
+        let value = value_bytes
+            .as_deref()
+            .map(ZcashDeserialize::zcash_deserialize)
+            .transpose()?;
+
+        Ok(value)
+    }
 }
 
 impl FinalizedState {
@@ -53,7 +126,7 @@ impl FinalizedState {
             height_by_hash: db.open_tree(b"height_by_hash").unwrap(),
             block_by_height: db.open_tree(b"block_by_height").unwrap(),
             // tx_by_hash: db.open_tree(b"tx_by_hash").unwrap(),
-            // utxo_by_outpoint: db.open_tree(b"utxo_by_outpoint").unwrap(),
+            utxo_by_outpoint: db.open_tree(b"utxo_by_outpoint").unwrap(),
             // sprout_nullifiers: db.open_tree(b"sprout_nullifiers").unwrap(),
             // sapling_nullifiers: db.open_tree(b"sapling_nullifiers").unwrap(),
         }
@@ -115,23 +188,41 @@ impl FinalizedState {
             &self.hash_by_height,
             &self.height_by_hash,
             &self.block_by_height,
+            &self.utxo_by_outpoint,
         )
-            .transaction(move |(hash_by_height, height_by_hash, block_by_height)| {
-                // TODO: do serialization above
-                // for some reason this wouldn't move into the closure (??)
-                let block_bytes = block
-                    .zcash_serialize_to_vec()
-                    .expect("zcash_serialize_to_vec has wrong return type");
+            .transaction(
+                move |(hash_by_height, height_by_hash, block_by_height, utxo_by_outpoint)| {
+                    // TODO: do serialization above
+                    // for some reason this wouldn't move into the closure (??)
+                    let block_bytes = block
+                        .zcash_serialize_to_vec()
+                        .expect("zcash_serialize_to_vec has wrong return type");
 
-                // TODO: check highest entry of hash_by_height as in RFC
+                    // TODO: check highest entry of hash_by_height as in RFC
 
-                hash_by_height.insert(&height_bytes, &hash.0)?;
-                height_by_hash.insert(&hash.0, &height_bytes)?;
-                block_by_height.insert(&height_bytes, block_bytes)?;
+                    hash_by_height.insert(&height_bytes, &hash.0)?;
+                    height_by_hash.insert(&hash.0, &height_bytes)?;
+                    block_by_height.insert(&height_bytes, block_bytes)?;
+                    // tx_by_hash
 
-                // for some reason type inference fails here
-                Ok::<_, sled::transaction::ConflictableTransactionError>(hash)
-            })
+                    for transaction in block.transactions.iter() {
+                        let transaction_hash = transaction.hash();
+                        for (index, output) in transaction.outputs().iter().enumerate() {
+                            let outpoint = transparent::OutPoint {
+                                hash: transaction_hash,
+                                index: index as _,
+                            };
+
+                            utxo_by_outpoint.zs_insert(&outpoint, output)?;
+                        }
+                    }
+                    // sprout_nullifiers
+                    // sapling_nullifiers
+
+                    // for some reason type inference fails here
+                    Ok::<_, sled::transaction::ConflictableTransactionError>(hash)
+                },
+            )
             .map_err(Into::into)
     }
 
@@ -221,6 +312,15 @@ impl FinalizedState {
                 None => Ok(None),
             }
         }
+    }
+
+    /// Returns the `transparent::Output` pointed to by the given
+    /// `transparent::OutPoint` if it is present.
+    pub fn utxo(
+        &self,
+        outpoint: &transparent::OutPoint,
+    ) -> Result<Option<transparent::Output>, BoxError> {
+        self.utxo_by_outpoint.zs_get(outpoint)
     }
 }
 
