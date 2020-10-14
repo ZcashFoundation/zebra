@@ -55,6 +55,8 @@ pub enum VerifyTransactionError {
     NoTransfer,
     /// The balance of money moving around doesn't compute.
     BadBalance,
+    /// Violation of coinbase rules.
+    Coinbase,
     /// Could not verify a transparent script
     Script(#[from] zebra_script::Error),
     /// Could not verify a Groth16 proof of a JoinSplit/Spend/Output description
@@ -148,6 +150,7 @@ where
                     #[allow(clippy::if_same_then_else)] // delete when filled in
                     if tx.is_coinbase() {
                         // do something special for coinbase transactions
+                        check::coinbase_tx_does_not_spend_shielded(&tx)?;
                     } else {
                         // otherwise, check no coinbase inputs
                         // feed all of the inputs to the script verifier
