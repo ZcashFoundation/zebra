@@ -53,7 +53,7 @@ pub enum BlockError {
     #[error("invalid difficulty threshold in block header {0:?} {1:?}")]
     InvalidDifficulty(zebra_chain::block::Height, zebra_chain::block::Hash),
 
-    #[error("block {0:?} failed the difficulty limit: the difficulty threshold {2:?} must be at least as difficult as the {3:?} difficulty limit {4:?}, block hash {1:?}")]
+    #[error("block {0:?} has difficulty threshold {2:?} that is below the {3:?} difficulty limit {4:?}")]
     TargetDifficultyLimit(
         zebra_chain::block::Height,
         zebra_chain::block::Hash,
