@@ -245,6 +245,38 @@ https://zips.z.cash/zip-0213#specification
 
 This rules are implemented inside `shielded_coinbase()`.
 
+### Validation errors
+
+A `SubsidyError` type will be created to handle validation of the above consensus rules:
+
+```
+pub enum SubsidyError {
+    #[error("not a coinbase transaction")]
+    NoCoinbase,
+
+    #[error("founders reward amount not found")]
+    FoundersRewardAmountNotFound,
+    
+    #[error("founders reward address not found")]
+    FoundersRewardAddressNotFound,
+    
+    #[error("founding stream amount not found")]
+    FundingStreamAmountNotFound,
+    
+    #[error("founding stream address not found")]
+    FundingStreamAddressNotFound,
+    
+    #[error("the sum of outputs is greater than calculated subsidies and transaction fees.")]
+    MinerSubsidyRuleBroken,
+    
+    #[error("invalid shielded descriptions found.")]
+    ShieldedDescriptionsInvalid,
+
+    #[error("broken rule in shielded transaction inside coinbase.")]
+    ShieldedRuleBroken,
+}
+```
+
 ## Test Plan
 
 For each network(Mainnet, Testnet), calculation of subsidy amounts need a `Height` as input and will output different amounts according to it.
@@ -258,3 +290,7 @@ For each network, the address of the reward receiver on each block will depend o
 Validation tests will test the consensus rules using real blocks from `zebra-test` crate. For both networks, blocks for all network upgrades were added to the crate in [#1096](https://github.com/ZcashFoundation/zebra/pull/1096). Blocks containing shielded coinbase were also introduced at [#1116](https://github.com/ZcashFoundation/zebra/pull/1116)
 
 - Test validation functions(`subsidy_is_valid()`) against all the blocks zebra haves available in the test vectors collection for both networks(`zebra_test::vectors::MAINNET_BLOCKS`  and `zebra_test::vectors::TESTNET_BLOCKS`), all blocks should pass validation.
+
+The validation errors at `SubsidyError` must be tested at least once.
+
+- Create tests to trigger each error from `SubsidyError`.
