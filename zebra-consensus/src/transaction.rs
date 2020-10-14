@@ -13,7 +13,6 @@
 //! transactions, or `mempool::MempoolTransactionVerifier` for mempool transactions.
 
 use std::{
-    convert::TryFrom,
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -21,18 +20,17 @@ use std::{
 };
 
 use displaydoc::Display;
-use futures::{stream::FuturesUnordered, FutureExt, TryFutureExt};
+use futures::{stream::FuturesUnordered, FutureExt};
 use thiserror::Error;
-use tower::{Service, ServiceExt};
+use tower::Service;
 
 use zebra_chain::{
-    parameters::{Network, NetworkUpgrade::Sapling},
+    parameters::NetworkUpgrade,
     primitives::{ed25519, redjubjub},
-    transaction::{self, HashType, JoinSplitData, ShieldedData, Transaction},
+    transaction::{self, HashType, Transaction},
     transparent::{self, Script},
 };
 
-use zebra_script;
 use zebra_state as zs;
 
 use crate::{primitives::groth16, script, BoxError, Config};
@@ -60,6 +58,8 @@ where
 pub enum VerifyTransactionError {
     /// Only V4 and later transactions can be verified.
     WrongVersion,
+    /// A transaction MUST move money around.
+    NoTransfer,
     /// Could not verify a transparent script
     Script(#[from] zebra_script::Error),
     /// Could not verify a Groth16 proof of a JoinSplit/Spend/Output description
@@ -140,6 +140,9 @@ where
                         unimplemented!();
                     }
 
+                    check::some_money_is_spent(&tx)?;
+                    check::any_coinbase_inputs_no_transparent_outputs(&tx);
+
                     // Contains a set of asynchronous checks, all of which must
                     // resolve to Ok(()) for verification to succeed (in addition to
                     // any other checks)
@@ -148,9 +151,9 @@ where
                     >::new();
 
                     let sighash = tx.sighash(
-                        Network::Sapling, // TODO: pass this in
-                        HashType::ALL,    // TODO: check these
-                        None,             // TODO: check these
+                        NetworkUpgrade::Sapling, // TODO: pass this in
+                        HashType::ALL,           // TODO: check these
+                        None,                    // TODO: check these
                     );
 
                     if let Some(joinsplit_data) = joinsplit_data {
@@ -167,7 +170,7 @@ where
                         //     .map_err(VerifyTransactionError::Ed25519)
                         match check::validate_joinsplit_sig(joinsplit_data, sighash.as_bytes()) {
                             Ok(_) => (),
-                            Err(e) => return Err(VerifyTransactionError::Ed25519(e)).into(),
+                            Err(e) => return Err(e),
                         }
                     }
 

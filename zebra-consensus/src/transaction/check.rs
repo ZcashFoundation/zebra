@@ -8,7 +8,7 @@ use zebra_chain::{
         Groth16Proof,
     },
     sapling::ValueCommitment,
-    transaction::{JoinSplitData, ShieldedData},
+    transaction::{JoinSplitData, ShieldedData, Transaction},
 };
 
 use crate::transaction::VerifyTransactionError;
@@ -59,4 +59,55 @@ pub fn balancing_value_balances(
     let key_bytes: [u8; 32] = (cv_old - cv_new - cv_balance).into();
 
     redjubjub::VerificationKey::<Binding>::try_from(key_bytes)
+}
+
+/// Check that at least one of tx_in_count, nShieldedSpend, and nJoinSplit MUST
+/// be non-zero.
+///
+/// https://zips.z.cash/protocol/canopy.pdf#txnencodingandconsensus
+pub fn some_money_is_spent(tx: &Transaction) -> Result<(), VerifyTransactionError> {
+    match tx {
+        Transaction::V4 {
+            inputs,
+            joinsplit_data: Some(joinsplit_data),
+            shielded_data: Some(shielded_data),
+            ..
+        } => {
+            if inputs.len() > 0
+                || joinsplit_data.joinsplits().count() > 0
+                || shielded_data.spends().count() > 0
+            {
+                return Ok(());
+            } else {
+                return Err(VerifyTransactionError::NoTransfer);
+            }
+        }
+        _ => return Err(VerifyTransactionError::WrongVersion),
+    }
+}
+
+/// Check that a transaction with one or more transparent inputs from coinbase
+/// transactions has no transparent outputs.
+///
+/// Note that inputs from coinbase transactions include Founders’ Reward
+/// outputs.
+///
+/// https://zips.z.cash/protocol/canopy.pdf#consensusfrombitcoin
+pub fn any_coinbase_inputs_no_transparent_outputs(
+    tx: &Transaction,
+) -> Result<(), VerifyTransactionError> {
+    match tx {
+        Transaction::V4 {
+            inputs, outputs, ..
+        } => {
+            if !tx.contains_coinbase_input() {
+                return Ok(());
+            } else if outputs.len() == 0 {
+                return Ok(());
+            } else {
+                return Err(VerifyTransactionError::NoTransfer);
+            }
+        }
+        _ => return Err(VerifyTransactionError::WrongVersion),
+    }
 }
