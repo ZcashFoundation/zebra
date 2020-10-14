@@ -53,7 +53,7 @@ pub enum BlockError {
     #[error("invalid difficulty threshold in block header {0:?} {1:?}")]
     InvalidDifficulty(zebra_chain::block::Height, zebra_chain::block::Hash),
 
-    #[error("block {0:?} has difficulty threshold {2:?} that is below the {3:?} difficulty limit {4:?}")]
+    #[error("block {0:?} has a difficulty threshold {2:?} that is easier than the {3:?} difficulty limit {4:?}, hash: {1:?}")]
     TargetDifficultyLimit(
         zebra_chain::block::Height,
         zebra_chain::block::Hash,
@@ -62,7 +62,7 @@ pub enum BlockError {
         zebra_chain::work::difficulty::ExpandedDifficulty,
     ),
 
-    #[error("block {0:?} failed the difficulty filter: hash {1:?} must be at least as difficult as the difficulty threshold {2:?}")]
+    #[error("block {0:?} has a hash {1:?} that is easier than the difficulty threshold {2:?}")]
     DifficultyFilter(
         zebra_chain::block::Height,
         zebra_chain::block::Hash,
