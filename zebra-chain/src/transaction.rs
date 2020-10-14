@@ -1,5 +1,7 @@
 //! Transactions and transaction-related structures.
 
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 
 mod hash;
@@ -185,5 +187,20 @@ impl Transaction {
         input: Option<(u32, transparent::Output)>,
     ) -> blake2b_simd::Hash {
         sighash::SigHasher::new(self, hash_type, network_upgrade, input).sighash()
+    }
+}
+
+impl fmt::Display for Transaction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let hash = self.hash();
+
+        let name = match self {
+            Transaction::V1 { .. } => "Transaction::V1",
+            Transaction::V2 { .. } => "Transaction::V2",
+            Transaction::V3 { .. } => "Transaction::V3",
+            Transaction::V4 { .. } => "Transaction::V4",
+        };
+
+        write!(f, "{} {{ hash: {}, .. }}", name, hash)
     }
 }

@@ -41,33 +41,30 @@ mod check;
 ///
 /// After verification, the transaction future completes. State changes are
 /// handled by `BlockVerifier` or `MempoolTransactionVerifier`.
-pub(crate) struct TransactionVerifier<ZS>
-where
-    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
-    ZS::Future: Send + 'static,
-{
+#[derive(Debug, Clone)]
+pub struct Verifier<ZS> {
     script_verifier: script::Verifier<ZS>,
-    spend_verifier: groth16::Verifier,
-    output_verifier: groth16::Verifier,
-    joinsplit_verifier: groth16::Verifier,
+    // spend_verifier: groth16::Verifier,
+    // output_verifier: groth16::Verifier,
+    // joinsplit_verifier: groth16::Verifier,
 }
 
-impl<ZS> TransactionVerifier<ZS>
+impl<ZS> Verifier<ZS>
 where
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send + 'static,
 {
     pub(crate) fn new(
         script_verifier: script::Verifier<ZS>,
-        spend_verifier: groth16::Verifier,
-        output_verifier: groth16::Verifier,
-        joinsplit_verifier: groth16::Verifier,
+        // spend_verifier: groth16::Verifier,
+        // output_verifier: groth16::Verifier,
+        // joinsplit_verifier: groth16::Verifier,
     ) -> Self {
         Self {
             script_verifier,
-            spend_verifier,
-            output_verifier,
-            joinsplit_verifier,
+            // spend_verifier,
+            // output_verifier,
+            // joinsplit_verifier,
         }
     }
 }
@@ -75,15 +72,15 @@ where
 #[non_exhaustive]
 #[derive(Debug, Display, Error)]
 pub enum VerifyTransactionError {
-    /// Only V4 and later transactions can be verified.
-    WrongVersion,
-    /// A transaction MUST move money around.
+    /// {0} version is older than the minimum transaction version: V4
+    WrongVersion(String),
+    /// transaction transfers no money
     NoTransfer,
-    /// The balance of money moving around doesn't compute.
+    /// transaction balance is invalid
     BadBalance,
-    /// Violation of coinbase rules.
+    /// transaction violates of coinbase rules
     Coinbase,
-    /// Could not verify a transparent script
+    /// transaction contains an invalid script
     Script(#[from] zebra_script::Error),
     /// Could not verify a Groth16 proof of a JoinSplit/Spend/Output description
     // XXX change this when we align groth16 verifier errors with bellman
@@ -93,7 +90,7 @@ pub enum VerifyTransactionError {
     Ed25519(#[from] ed25519::Error),
     /// Could not verify a RedJubjub signature with ShieldedData
     RedJubjub(redjubjub::Error),
-    /// An error that arises from implementation details of the verification service
+    /// encountered an error that arises from implementation details of the verification service
     Internal(BoxError),
 }
 
@@ -118,7 +115,7 @@ pub enum Request {
     Mempool(Arc<Transaction>),
 }
 
-impl<ZS> Service<Request> for TransactionVerifier<ZS>
+impl<ZS> Service<Request> for Verifier<ZS>
 where
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send + 'static,
@@ -135,6 +132,7 @@ where
     // TODO: break up each chunk into its own method
     fn call(&mut self, req: Request) -> Self::Future {
         let mut redjubjub_verifier = crate::primitives::redjubjub::VERIFIER.clone();
+        let mut script_verifier = self.script_verifier.clone();
 
         let is_mempool = match req {
             Request::Block(_) => false,
@@ -153,7 +151,7 @@ where
         async move {
             match &*tx {
                 Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => {
-                    Err(VerifyTransactionError::WrongVersion)
+                    Err(VerifyTransactionError::WrongVersion(tx.to_string()))
                 }
                 Transaction::V4 {
                     inputs,
@@ -167,7 +165,7 @@ where
                     // Contains a set of asynchronous checks, all of which must
                     // resolve to Ok(()) for verification to succeed (in addition to
                     // any other checks)
-                    let async_checks = FuturesUnordered::new();
+                    let mut async_checks = FuturesUnordered::new();
 
                     // Handle transparent inputs and outputs.
                     // These are left unimplemented!() pending implementation
@@ -178,7 +176,14 @@ where
                     } else {
                         // otherwise, check no coinbase inputs
                         // feed all of the inputs to the script verifier
-                        unimplemented!();
+                        for input_index in 0..inputs.len() {
+                            let rsp = script_verifier.ready_and().await?.call(script::Request {
+                                transaction: tx.clone(),
+                                input_index,
+                            });
+
+                            async_checks.push(rsp);
+                        }
                     }
 
                     check::some_money_is_spent(&tx)?;
@@ -275,7 +280,12 @@ where
                         async_checks.push(rsp)
                     }
 
-                    unimplemented!()
+                    use futures::StreamExt;
+                    while let Some(result) = async_checks.next().await {
+                        result?;
+                    }
+
+                    Ok(tx.hash())
                 }
             }
         }

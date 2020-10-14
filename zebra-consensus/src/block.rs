@@ -16,6 +16,7 @@ use std::{
 };
 
 use chrono::Utc;
+use futures::stream::FuturesUnordered;
 use futures_util::FutureExt;
 use thiserror::Error;
 use tower::{Service, ServiceExt};
@@ -23,12 +24,17 @@ use tower::{Service, ServiceExt};
 use zebra_chain::{
     block::{self, Block},
     parameters::Network,
+    parameters::NetworkUpgrade,
+    transaction::Transaction,
     work::equihash,
 };
 use zebra_state as zs;
 
-use crate::error::*;
-use crate::BoxError;
+use crate::{
+    error::*,
+    transaction::{self, VerifyTransactionError},
+};
+use crate::{script, BoxError};
 
 mod check;
 mod subsidy;
@@ -37,16 +43,15 @@ mod tests;
 
 /// A service that verifies blocks.
 #[derive(Debug)]
-pub struct BlockVerifier<S>
-where
-    S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
-    S::Future: Send + 'static,
-{
+pub struct BlockVerifier<S> {
     /// The network to be verified.
     network: Network,
 
     /// The underlying state service, possibly wrapped in other services.
     state_service: S,
+
+    /// The transaction verification service
+    transaction_verifier: transaction::Verifier<S>,
 }
 
 #[non_exhaustive]
@@ -68,6 +73,8 @@ pub enum VerifyBlockError {
     Time(zebra_chain::block::BlockTimeError),
     #[error("unable to commit block after semantic verification")]
     Commit(#[source] BoxError),
+    #[error("invalid transaction")]
+    Transaction(#[source] VerifyTransactionError),
 }
 
 impl<S> BlockVerifier<S>
@@ -76,9 +83,14 @@ where
     S::Future: Send + 'static,
 {
     pub fn new(network: Network, state_service: S) -> Self {
+        let branch = NetworkUpgrade::Sapling.branch_id().unwrap();
+        let script_verifier = script::Verifier::new(state_service.clone(), branch);
+        let transaction_verifier = transaction::Verifier::new(script_verifier);
+
         Self {
             network,
             state_service,
+            transaction_verifier,
         }
     }
 }
@@ -102,6 +114,7 @@ where
 
     fn call(&mut self, block: Arc<Block>) -> Self::Future {
         let mut state_service = self.state_service.clone();
+        let mut transaction_verifier = self.transaction_verifier.clone();
         let network = self.network;
 
         // TODO(jlusby): Error = Report, handle errors from state_service.
@@ -158,6 +171,23 @@ where
             tracing::trace!("verified block");
             metrics::gauge!("block.verified.block.height", height.0 as _);
             metrics::counter!("block.verified.block.count", 1);
+
+            let mut async_checks = FuturesUnordered::new();
+
+            for transaction in &block.transactions {
+                let req = transaction::Request::Block(transaction.clone());
+                let rsp = transaction_verifier
+                    .ready_and()
+                    .await
+                    .expect("transaction verifier is always ready")
+                    .call(req);
+                async_checks.push(rsp);
+            }
+
+            use futures::StreamExt;
+            while let Some(result) = async_checks.next().await {
+                result.map_err(VerifyBlockError::Transaction)?;
+            }
 
             // Finally, submit the block for contextual verification.
             match state_service

@@ -69,20 +69,26 @@ pub fn some_money_is_spent(tx: &Transaction) -> Result<(), VerifyTransactionErro
     match tx {
         Transaction::V4 {
             inputs,
-            joinsplit_data: Some(joinsplit_data),
-            shielded_data: Some(shielded_data),
+            joinsplit_data,
+            shielded_data,
             ..
         } => {
             if inputs.len() > 0
-                || joinsplit_data.joinsplits().count() > 0
-                || shielded_data.spends().count() > 0
+                || joinsplit_data
+                    .as_ref()
+                    .map(|data| data.joinsplits().count() > 0)
+                    .unwrap_or(true)
+                || shielded_data
+                    .as_ref()
+                    .map(|data| data.spends().count() > 0)
+                    .unwrap_or(true)
             {
                 return Ok(());
             } else {
                 return Err(VerifyTransactionError::NoTransfer);
             }
         }
-        _ => return Err(VerifyTransactionError::WrongVersion),
+        _ => return Err(VerifyTransactionError::WrongVersion(tx.to_string())),
     }
 }
 
@@ -108,7 +114,7 @@ pub fn any_coinbase_inputs_no_transparent_outputs(
                 return Err(VerifyTransactionError::NoTransfer);
             }
         }
-        _ => return Err(VerifyTransactionError::WrongVersion),
+        _ => return Err(VerifyTransactionError::WrongVersion(tx.to_string())),
     }
 }
 
@@ -134,20 +140,26 @@ pub fn shielded_balances_match(
 pub fn coinbase_tx_does_not_spend_shielded(tx: &Transaction) -> Result<(), VerifyTransactionError> {
     match tx {
         Transaction::V4 {
-            joinsplit_data: Some(joinsplit_data),
-            shielded_data: Some(shielded_data),
+            joinsplit_data,
+            shielded_data,
             ..
         } => {
             if !tx.is_coinbase() {
                 return Ok(());
-            } else if joinsplit_data.joinsplits().count() == 0
-                && shielded_data.spends().count() == 0
+            } else if joinsplit_data
+                .as_ref()
+                .map(|data| data.joinsplits().count() == 0)
+                .unwrap_or(true)
+                && shielded_data
+                    .as_ref()
+                    .map(|data| data.spends().count() == 0)
+                    .unwrap_or(true)
             {
                 return Ok(());
             } else {
                 return Err(VerifyTransactionError::Coinbase);
             }
         }
-        _ => return Err(VerifyTransactionError::WrongVersion),
+        _ => return Err(VerifyTransactionError::WrongVersion(tx.to_string())),
     }
 }

@@ -26,6 +26,7 @@ use crate::BoxError;
 ///
 /// After verification, the script future completes. State changes are handled by
 /// `BlockVerifier` or `MempoolTransactionVerifier`.
+#[derive(Debug, Clone)]
 pub struct Verifier<ZS> {
     state: ZS,
     branch: ConsensusBranchId,
@@ -38,9 +39,9 @@ impl<ZS> Verifier<ZS> {
 }
 
 #[derive(Debug)]
-struct Request {
-    transaction: Arc<Transaction>,
-    input_index: usize,
+pub struct Request {
+    pub transaction: Arc<Transaction>,
+    pub input_index: usize,
 }
 
 impl<ZS> tower::Service<Request> for Verifier<ZS>

@@ -14,7 +14,7 @@
 #![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_consensus")]
 // Re-enable this after cleaning the API surface.
 //#![deny(missing_docs)]
-#![allow(clippy::try_err)]
+#![allow(clippy::try_err, unused_imports, dead_code, unused_variables)]
 
 pub mod block;
 pub mod chain;
