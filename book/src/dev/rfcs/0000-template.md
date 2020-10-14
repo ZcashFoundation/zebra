@@ -52,10 +52,17 @@ Explain how the feature will be tested, including:
 * tests for consensus-critical functionality
 * existing test vectors, if available
 * Zcash blockchain block test vectors (specify the network upgrade, feature, or block height and network)
+* property testing or fuzzing
 
 The tests should cover:
-* positive cases: make sure the feature accepts valid inputs 
+* positive cases: make sure the feature accepts valid inputs
+  * using block test vectors for each network upgrade provides some coverage of valid inputs
 * negative cases: make sure the feature rejects invalid inputs
+  * make sure there is a test case for each error condition in the code
+  * if there are lots of potential errors, prioritise:
+    * consensus-critical errors
+    * security-critical errors, and
+    * likely errors
 * edge cases: make sure that boundary conditions are correctly handled
 
 # Drawbacks
