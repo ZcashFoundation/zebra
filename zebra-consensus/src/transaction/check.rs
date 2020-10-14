@@ -127,3 +127,27 @@ pub fn shielded_balances_match(
         return Err(VerifyTransactionError::BadBalance);
     }
 }
+
+/// Check that a coinbase tx does not have any JoinSplit or Spend descriptions.
+///
+/// https://zips.z.cash/protocol/canopy.pdf#consensusfrombitcoin
+pub fn coinbase_tx_does_not_spend_shielded(tx: &Transaction) -> Result<(), VerifyTransactionError> {
+    match tx {
+        Transaction::V4 {
+            joinsplit_data: Some(joinsplit_data),
+            shielded_data: Some(shielded_data),
+            ..
+        } => {
+            if !tx.is_coinbase() {
+                return Ok(());
+            } else if joinsplit_data.joinsplits().count() == 0
+                && shielded_data.spends().count() == 0
+            {
+                return Ok(());
+            } else {
+                return Err(VerifyTransactionError::Coinbase);
+            }
+        }
+        _ => return Err(VerifyTransactionError::WrongVersion),
+    }
+}
