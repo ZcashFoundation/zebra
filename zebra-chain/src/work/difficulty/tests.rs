@@ -13,28 +13,6 @@ const SIGN_BIT: u32 = CompactDifficulty::SIGN_BIT;
 const UNSIGNED_MANTISSA_MASK: u32 = CompactDifficulty::UNSIGNED_MANTISSA_MASK;
 const OFFSET: i32 = CompactDifficulty::OFFSET;
 
-impl Arbitrary for ExpandedDifficulty {
-    type Parameters = ();
-
-    fn arbitrary_with(_args: ()) -> Self::Strategy {
-        (any::<[u8; 32]>())
-            .prop_map(|v| ExpandedDifficulty(U256::from_little_endian(&v)))
-            .boxed()
-    }
-
-    type Strategy = BoxedStrategy<Self>;
-}
-
-impl Arbitrary for Work {
-    type Parameters = ();
-
-    fn arbitrary_with(_args: ()) -> Self::Strategy {
-        (any::<u128>()).prop_map(Work).boxed()
-    }
-
-    type Strategy = BoxedStrategy<Self>;
-}
-
 /// Test debug formatting.
 #[test]
 fn debug_format() {
