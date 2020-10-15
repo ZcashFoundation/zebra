@@ -236,10 +236,10 @@ impl CompactDifficulty {
         // `((2^256 - expanded - 1) / (expanded + 1)) + 1`, or
         let result = (!expanded.0 / (expanded.0 + 1)) + 1;
         if result <= u128::MAX.into() {
-            return Some(Work(result.as_u128()));
+            Work(result.as_u128()).into()
+        } else {
+            None
         }
-
-        None
     }
 }
 
@@ -316,14 +316,15 @@ impl PartialOrd<ExpandedDifficulty> for block::Hash {
         use Ordering::*;
 
         // Use the base implementation, but reverse the order.
-        match other.partial_cmp(self) {
-            Some(Less) => Some(Greater),
-            Some(Greater) => Some(Less),
-            Some(Equal) => Some(Equal),
-            None => unreachable!(
-                "Unexpected incomparable values: difficulties and hashes have a total order."
-            ),
+        match other
+            .partial_cmp(self)
+            .expect("difficulties and hashes have a total order")
+        {
+            Less => Greater,
+            Greater => Less,
+            Equal => Equal,
         }
+        .into()
     }
 }
 
