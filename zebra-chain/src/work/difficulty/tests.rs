@@ -216,19 +216,7 @@ fn block_difficulty() -> Result<(), Report> {
     zebra_test::init();
 
     let mut blockchain = Vec::new();
-    for b in &[
-        &zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..],
-        &zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..],
-        &zebra_test::vectors::BLOCK_MAINNET_2_BYTES[..],
-        &zebra_test::vectors::BLOCK_MAINNET_3_BYTES[..],
-        &zebra_test::vectors::BLOCK_MAINNET_4_BYTES[..],
-        &zebra_test::vectors::BLOCK_MAINNET_5_BYTES[..],
-        &zebra_test::vectors::BLOCK_MAINNET_6_BYTES[..],
-        &zebra_test::vectors::BLOCK_MAINNET_7_BYTES[..],
-        &zebra_test::vectors::BLOCK_MAINNET_8_BYTES[..],
-        &zebra_test::vectors::BLOCK_MAINNET_9_BYTES[..],
-        &zebra_test::vectors::BLOCK_MAINNET_10_BYTES[..],
-    ] {
+    for b in zebra_test::vectors::BLOCKS.iter() {
         let block = Arc::<Block>::zcash_deserialize(*b)?;
         let hash = block.hash();
         blockchain.push((block.clone(), block.coinbase_height().unwrap(), hash));
@@ -244,14 +232,14 @@ fn block_difficulty() -> Result<(), Report> {
     let mut cumulative_work = Work::default();
     let mut previous_cumulative_work = Work::default();
     for (block, height, hash) in blockchain {
-        /// SPANDOC: Calculate the threshold for mainnet block {?height}
+        /// SPANDOC: Calculate the threshold for block {?height}
         let threshold = block
             .header
             .difficulty_threshold
             .to_expanded()
             .expect("Chain blocks have valid difficulty thresholds.");
 
-        /// SPANDOC: Check the difficulty for mainnet block {?height, ?threshold, ?hash}
+        /// SPANDOC: Check the difficulty for block {?height, ?threshold, ?hash}
         {
             assert!(hash <= threshold);
             // also check the comparison operators work
@@ -260,7 +248,7 @@ fn block_difficulty() -> Result<(), Report> {
             assert!(hash < diff_max);
         }
 
-        /// SPANDOC: Check the work for mainnet block {?height}
+        /// SPANDOC: Check the work for block {?height}
         {
             let work = block
                 .header
@@ -279,15 +267,6 @@ fn block_difficulty() -> Result<(), Report> {
 
             previous_cumulative_work = cumulative_work;
         }
-
-        /// SPANDOC: Calculate the work for mainnet block {?height}
-        let _work = block
-            .header
-            .difficulty_threshold
-            .to_work()
-            .expect("Chain blocks have valid work.");
-
-        // TODO: check work comparison operators and cumulative work addition
     }
 
     Ok(())
