@@ -266,13 +266,13 @@ pub enum SubsidyError {
     #[error("founding stream address not found")]
     FundingStreamAddressNotFound,
     
-    #[error("the sum of outputs is greater than calculated subsidies and transaction fees.")]
+    #[error("the sum of outputs is greater than calculated subsidies and transaction fees")]
     MinerSubsidyRuleBroken,
     
-    #[error("invalid shielded descriptions found.")]
+    #[error("invalid shielded descriptions found")]
     ShieldedDescriptionsInvalid,
 
-    #[error("broken rule in shielded transaction inside coinbase.")]
+    #[error("broken rule in shielded transaction inside coinbase")]
     ShieldedRuleBroken,
 }
 ```
