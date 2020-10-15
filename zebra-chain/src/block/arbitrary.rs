@@ -73,6 +73,7 @@ impl Arbitrary for Header {
             any::<[u8; 32]>(),
             // time is interpreted as u32 in the spec, but rust timestamps are i64
             (0i64..(u32::MAX as i64)),
+            any::<CompactDifficulty>(),
             any::<[u8; 32]>(),
             any::<equihash::Solution>(),
         )
@@ -80,19 +81,19 @@ impl Arbitrary for Header {
                 |(
                     version,
                     previous_block_hash,
-                    merkle_root_hash,
+                    merkle_root,
                     root_bytes,
                     timestamp,
+                    difficulty_threshold,
                     nonce,
                     solution,
                 )| Header {
                     version,
                     previous_block_hash,
-                    merkle_root: merkle_root_hash,
+                    merkle_root,
                     root_bytes,
                     time: Utc.timestamp(timestamp, 0),
-                    // TODO: replace with `ExpandedDifficulty.to_compact` when that method is implemented
-                    difficulty_threshold: CompactDifficulty(545259519),
+                    difficulty_threshold,
                     nonce,
                     solution,
                 },
