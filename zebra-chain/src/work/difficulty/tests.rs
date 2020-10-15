@@ -99,11 +99,20 @@ fn compact_extremes() {
     let expanded_one = Some(ExpandedDifficulty(U256::one()));
     let work_one = None;
 
-    let one = CompactDifficulty(OFFSET as u32 * (1 << PRECISION) + 1);
-    assert_eq!(one.to_expanded(), expanded_one);
-    assert_eq!(one.to_work(), work_one);
-    let another_one = CompactDifficulty((1 << PRECISION) + (1 << 16));
+    let canonical_one = CompactDifficulty((1 << PRECISION) + (1 << 16));
+    assert_eq!(canonical_one.to_expanded(), expanded_one);
+    assert_eq!(
+        canonical_one.to_expanded().unwrap().to_compact(),
+        canonical_one
+    );
+    assert_eq!(canonical_one.to_work(), work_one);
+
+    let another_one = CompactDifficulty(OFFSET as u32 * (1 << PRECISION) + 1);
     assert_eq!(another_one.to_expanded(), expanded_one);
+    assert_eq!(
+        another_one.to_expanded().unwrap().to_compact(),
+        canonical_one
+    );
     assert_eq!(another_one.to_work(), work_one);
 
     // Maximum mantissa
@@ -112,6 +121,7 @@ fn compact_extremes() {
 
     let mant = CompactDifficulty(OFFSET as u32 * (1 << PRECISION) + UNSIGNED_MANTISSA_MASK);
     assert_eq!(mant.to_expanded(), expanded_mant);
+    assert_eq!(mant.to_expanded().unwrap().to_compact(), mant);
     assert_eq!(mant.to_work(), work_mant);
 
     // Maximum valid exponent
@@ -122,9 +132,21 @@ fn compact_extremes() {
         ((U256::MAX - u256_exp) / (u256_exp + 1) + 1).as_u128(),
     ));
 
-    let exp = CompactDifficulty((31 + OFFSET as u32) * (1 << PRECISION) + 1);
-    assert_eq!(exp.to_expanded(), expanded_exp);
-    assert_eq!(exp.to_work(), work_exp);
+    let canonical_exp =
+        CompactDifficulty(((31 + OFFSET - 2) as u32) * (1 << PRECISION) + (1 << 16));
+    let another_exp = CompactDifficulty((31 + OFFSET as u32) * (1 << PRECISION) + 1);
+    assert_eq!(canonical_exp.to_expanded(), expanded_exp);
+    assert_eq!(another_exp.to_expanded(), expanded_exp);
+    assert_eq!(
+        canonical_exp.to_expanded().unwrap().to_compact(),
+        canonical_exp
+    );
+    assert_eq!(
+        another_exp.to_expanded().unwrap().to_compact(),
+        canonical_exp
+    );
+    assert_eq!(canonical_exp.to_work(), work_exp);
+    assert_eq!(another_exp.to_work(), work_exp);
 
     // Maximum valid mantissa and exponent
     let exponent: U256 = (29 * 8).into();
@@ -134,6 +156,7 @@ fn compact_extremes() {
 
     let me = CompactDifficulty((31 + 1) * (1 << PRECISION) + UNSIGNED_MANTISSA_MASK);
     assert_eq!(me.to_expanded(), expanded_me);
+    assert_eq!(me.to_expanded().unwrap().to_compact(), me);
     assert_eq!(me.to_work(), work_me);
 
     // Maximum value, at least according to the spec
@@ -157,6 +180,10 @@ fn compact_extremes() {
     let expanded_btc_main = Some(ExpandedDifficulty(u256_btc_main));
     let work_btc_main = Some(Work(0x100010001));
     assert_eq!(difficulty_btc_main.to_expanded(), expanded_btc_main);
+    assert_eq!(
+        difficulty_btc_main.to_expanded().unwrap().to_compact(),
+        difficulty_btc_main
+    );
     assert_eq!(difficulty_btc_main.to_work(), work_btc_main);
 
     // The minimum difficulty in bitcoin regtest
@@ -166,6 +193,10 @@ fn compact_extremes() {
     let expanded_btc_reg = Some(ExpandedDifficulty(u256_btc_reg));
     let work_btc_reg = Some(Work(0x2));
     assert_eq!(difficulty_btc_reg.to_expanded(), expanded_btc_reg);
+    assert_eq!(
+        difficulty_btc_reg.to_expanded().unwrap().to_compact(),
+        difficulty_btc_reg
+    );
     assert_eq!(difficulty_btc_reg.to_work(), work_btc_reg);
 }
 
@@ -199,10 +230,15 @@ fn compact_bitcoin_test_vectors() {
             let compact = CompactDifficulty(compact);
             let actual_expanded = compact.to_expanded();
             let actual_work = compact.to_work();
+            let canonical_compact = actual_expanded.map(|e| e.to_compact());
+            let round_trip_expanded = canonical_compact.map(|c| c.to_expanded());
 
-            /// SPANDOC: Test that compact produces the expected expanded and work {?compact, ?expected_expanded, ?actual_expanded, ?expected_work, ?actual_work}
+            /// SPANDOC: Test that compact produces the expected expanded and work {?compact, ?expected_expanded, ?actual_expanded, ?expected_work, ?actual_work, ?canonical_compact, ?round_trip_expanded}
             {
                 assert_eq!(actual_expanded, expected_expanded);
+                if expected_expanded.is_some() {
+                    assert_eq!(round_trip_expanded.unwrap(), actual_expanded);
+                }
                 assert_eq!(actual_work, expected_work);
             }
         }
