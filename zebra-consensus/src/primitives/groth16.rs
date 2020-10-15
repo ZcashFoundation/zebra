@@ -5,7 +5,6 @@ use std::{
     task::{Context, Poll},
 };
 
-use jubjub;
 
 use tower::Service;
 
