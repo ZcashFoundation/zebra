@@ -88,7 +88,7 @@ impl fmt::Debug for CompactDifficulty {
 //
 // TODO: Use NonZeroU256, when available
 #[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
-pub struct ExpandedDifficulty(U256);
+pub struct ExpandedDifficulty(pub(super) U256);
 
 impl fmt::Debug for ExpandedDifficulty {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -117,7 +117,7 @@ impl fmt::Debug for ExpandedDifficulty {
 /// and Bitcoin adds around 2^91 work per year. (Each extra bit represents twice
 /// as much work.)
 #[derive(Clone, Copy, Default, Eq, PartialEq, Ord, PartialOrd)]
-pub struct Work(u128);
+pub struct Work(pub(super) u128);
 
 impl fmt::Debug for Work {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
