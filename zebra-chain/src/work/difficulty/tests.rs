@@ -284,6 +284,14 @@ fn block_difficulty() -> Result<(), Report> {
             assert!(hash < diff_max);
         }
 
+        /// SPANDOC: Check compact round-trip for block {?height}
+        {
+            let canonical_compact = threshold.to_compact();
+
+            assert_eq!(block.header.difficulty_threshold,
+                       canonical_compact);
+        }
+
         /// SPANDOC: Check the work for block {?height}
         {
             let work = block
@@ -291,6 +299,7 @@ fn block_difficulty() -> Result<(), Report> {
                 .difficulty_threshold
                 .to_work()
                 .expect("Chain blocks have valid work.");
+
             // also check the comparison operators work
             assert!(work > work_zero);
             assert!(work < work_max);
