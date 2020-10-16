@@ -208,21 +208,6 @@ fn help_args() -> Result<()> {
 }
 
 #[test]
-fn revhex_args() -> Result<()> {
-    zebra_test::init();
-    let testdir = testdir()?.with_config(default_test_config()?)?;
-
-    // Valid
-    let child = testdir.spawn_child(&["revhex", "33eeff55"])?;
-    let output = child.wait_with_output()?;
-    let output = output.assert_success()?;
-
-    output.stdout_equals("55ffee33\n")?;
-
-    Ok(())
-}
-
-#[test]
 fn start_no_args() -> Result<()> {
     zebra_test::init();
     // start caches state, so run one of the start tests with persistent state
