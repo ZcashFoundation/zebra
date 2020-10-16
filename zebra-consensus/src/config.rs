@@ -1,5 +1,3 @@
-//! Configuration for zebra-consensus
-
 use serde::{Deserialize, Serialize};
 
 /// Consensus configuration.

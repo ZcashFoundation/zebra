@@ -37,20 +37,20 @@
 //#![deny(missing_docs)]
 #![allow(clippy::try_err)]
 
-pub mod block;
-pub mod chain;
-pub mod checkpoint;
-pub mod config;
-pub mod error;
-pub mod mempool;
-pub mod parameters;
-pub mod script;
-
+mod block;
+mod checkpoint;
+mod config;
+mod parameters;
 #[allow(dead_code)] // Remove this once transaction verification is implemented
 mod primitives;
+mod script;
 mod transaction;
 
-pub use crate::config::Config;
+pub mod chain;
+pub mod error;
+
+pub use checkpoint::MAX_CHECKPOINT_HEIGHT_GAP;
+pub use config::Config;
 
 /// A boxed [`std::error::Error`].
 pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;

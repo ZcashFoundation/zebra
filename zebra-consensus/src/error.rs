@@ -1,4 +1,9 @@
-//! Consensus validation errors
+//! Errors that can occur when checking consensus rules.
+//!
+//! Each error variant corresponds to a consensus rule, so enumerating
+//! all possible verification failures enumerates the consensus rules we
+//! implement, and ensures that we don't reject blocks or transactions
+//! for a non-enumerated reason.
 
 use thiserror::Error;
 

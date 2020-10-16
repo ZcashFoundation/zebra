@@ -13,13 +13,12 @@ use zebra_chain::{
     block::{self, Block},
     parameters::{genesis_hash, Network},
 };
-use zebra_consensus::checkpoint;
 use zebra_network as zn;
 use zebra_state as zs;
 
 /// Controls the number of peers used for each ObtainTips and ExtendTips request.
-// XXX in the future, we may not be able to access the checkpoint module.
-const FANOUT: usize = checkpoint::MAX_QUEUED_BLOCKS_PER_HEIGHT;
+const FANOUT: usize = 4;
+
 /// Controls how many times we will retry each block download.
 ///
 /// If all the retries fail, then the syncer will reset, and start downloading
@@ -40,7 +39,7 @@ const BLOCK_DOWNLOAD_RETRY_LIMIT: usize = 5;
 ///
 /// Some checkpoints contain larger blocks, so the maximum checkpoint gap can
 /// represent multiple gigabytes of data.
-const LOOKAHEAD_LIMIT: usize = checkpoint::MAX_CHECKPOINT_HEIGHT_GAP * 2;
+const LOOKAHEAD_LIMIT: usize = zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP * 2;
 
 /// Controls how long we wait for a tips response to return.
 ///
