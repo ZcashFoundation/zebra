@@ -48,9 +48,9 @@ where
 #[derive(Debug, Display, Error)]
 pub enum VerifyChainError {
     /// block could not be checkpointed
-    Checkpoint(VerifyCheckpointError),
+    Checkpoint(#[source] VerifyCheckpointError),
     /// block could not be verified
-    Block(VerifyBlockError),
+    Block(#[source] VerifyBlockError),
 }
 
 impl<S> Service<Arc<Block>> for ChainVerifier<S>
