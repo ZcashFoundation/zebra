@@ -3186,6 +3186,7 @@ dependencies = [
  "displaydoc",
  "futures",
  "futures-util",
+ "jubjub 0.5.1",
  "metrics",
  "once_cell",
  "rand 0.7.3",

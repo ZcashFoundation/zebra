@@ -8,6 +8,8 @@ edition = "2018"
 [dependencies]
 chrono = "0.4.19"
 color-eyre = "0.5"
+displaydoc = "0.1.7"
+jubjub = "0.5.1"
 once_cell = "1.4"
 rand = "0.7"
 redjubjub = "0.2"
@@ -28,7 +30,6 @@ tower-batch = { path = "../tower-batch/" }
 zebra-chain = { path = "../zebra-chain" }
 zebra-state = { path = "../zebra-state" }
 zebra-script = { path = "../zebra-script" }
-displaydoc = "0.1.7"
 
 [dev-dependencies]
 rand = "0.7"
