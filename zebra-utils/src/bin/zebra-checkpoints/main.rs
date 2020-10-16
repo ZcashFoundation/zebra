@@ -152,7 +152,7 @@ fn main() -> Result<()> {
         // check if checkpoint
         if height == block::Height(0)
             || cumulative_bytes >= MAX_CHECKPOINT_BYTE_COUNT
-            || height_gap.0 >= zebra_consensus::checkpoint::MAX_CHECKPOINT_HEIGHT_GAP as u32
+            || height_gap.0 >= zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP as u32
         {
             // print to output
             println!("{} {}", height.0, &hex::encode(hash.0),);

@@ -1,12 +1,11 @@
-//! Block verification for Zebra.
+//! Consensus-based block verification.
 //!
-//! Verification occurs in multiple stages:
-//!   - getting blocks (disk- or network-bound)
-//!   - context-free verification of signatures, proofs, and scripts (CPU-bound)
-//!   - context-dependent verification of the chain state (depends on previous blocks)
+//! In contrast to checkpoint verification, which only checks hardcoded
+//! hashes, block verification checks all Zcash consensus rules.
 //!
-//! Verification is provided via a `tower::Service`, to support backpressure and batch
-//! verification.
+//! The block verifier performs all of the semantic validation checks.
+//! If accepted, the block is sent to the state service for contextual
+//! verification, where it may be accepted or rejected.
 
 use std::{
     future::Future,
@@ -40,16 +39,12 @@ mod subsidy;
 #[cfg(test)]
 mod tests;
 
-/// A service that verifies blocks.
+/// Asynchronous block verification.
 #[derive(Debug)]
 pub struct BlockVerifier<S> {
     /// The network to be verified.
     network: Network,
-
-    /// The underlying state service, possibly wrapped in other services.
     state_service: S,
-
-    /// The transaction verification service
     transaction_verifier: transaction::Verifier<S>,
 }
 

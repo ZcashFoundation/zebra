@@ -1,17 +1,3 @@
-//! Script verification for Zebra.
-//!
-//! Verification occurs in multiple stages:
-//!   - getting transactions from blocks or the mempool (disk- or network-bound)
-//!   - context-free verification of scripts, signatures, and proofs (CPU-bound)
-//!   - context-dependent verification of transactions against the chain state
-//!     (awaits an up-to-date chain)
-//!
-//! Verification is provided via a `tower::Service`, to support backpressure and batch
-//! verification.
-//!
-//! This is an internal module. Use `verify::BlockVerifier` for blocks and their
-//! transactions, or `mempool::MempoolTransactionVerifier` for mempool transactions.
-
 use std::{pin::Pin, sync::Arc};
 
 use std::future::Future;
@@ -19,10 +5,17 @@ use zebra_chain::{parameters::ConsensusBranchId, transaction::Transaction, trans
 
 use crate::BoxError;
 
-/// Internal script verification service.
+/// Asynchronous script verification.
 ///
-/// After verification, the script future completes. State changes are handled by
-/// `BlockVerifier` or `MempoolTransactionVerifier`.
+/// The verifier asynchronously requests the UTXO a transaction attempts
+/// to use as an input, and verifies the script as soon as it becomes
+/// available.  This allows script verification to be performed
+/// asynchronously, rather than requiring that the entire chain up to
+/// the previous block is ready.
+///
+/// The asynchronous script verification design is documented in [RFC4].
+///
+/// [RFC4]: https://zebra.zfnd.org/dev/rfcs/0004-asynchronous-script-verification.html
 #[derive(Debug, Clone)]
 pub struct Verifier<ZS> {
     state: ZS,
@@ -35,6 +28,13 @@ impl<ZS> Verifier<ZS> {
     }
 }
 
+/// A script verification request.
+///
+/// Ideally, this would supply only an `Outpoint` and the unlock script,
+/// rather than the entire `Transaction`, but we call a C++
+/// implementation, and its FFI requires the entire transaction.
+/// At some future point, we could investigate reducing the size of the
+/// request.
 #[derive(Debug)]
 pub struct Request {
     pub transaction: Arc<Transaction>,

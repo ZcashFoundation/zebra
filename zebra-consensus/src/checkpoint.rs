@@ -1,17 +1,17 @@
-//! Checkpoint-based block verification for Zebra.
+//! Checkpoint-based block verification.
 //!
-//! Checkpoint-based verification uses a list of checkpoint hashes to speed up the
-//! initial chain sync for Zebra. This list is distributed with Zebra.
+//! Checkpoint-based verification uses a list of checkpoint hashes to
+//! speed up the initial chain sync for Zebra. This list is distributed
+//! with Zebra.
 //!
-//! The CheckpointVerifier queues pending blocks. Once there is a chain from the
-//! previous checkpoint to a target checkpoint, it verifies all the blocks in
-//! that chain.
+//! The checkpoint verifier queues pending blocks.  Once there is a
+//! chain from the previous checkpoint to a target checkpoint, it
+//! verifies all the blocks in that chain, and sends accepted blocks to
+//! the state service as finalized chain state, skipping contextual
+//! verification checks.
 //!
-//! Verification starts at the first checkpoint, which is the genesis block for the
-//! configured network.
-//!
-//! Verification is provided via a `tower::Service`, to support backpressure and batch
-//! verification.
+//! Verification starts at the first checkpoint, which is the genesis
+//! block for the configured network.
 
 use std::{
     collections::BTreeMap,
