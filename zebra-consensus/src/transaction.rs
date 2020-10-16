@@ -53,6 +53,8 @@ pub enum VerifyTransactionError {
     WrongVersion,
     /// A transaction MUST move money around.
     NoTransfer,
+    /// The balance of money moving around doesn't compute.
+    BadBalance,
     /// Could not verify a transparent script
     Script(#[from] zebra_script::Error),
     /// Could not verify a Groth16 proof of a JoinSplit/Spend/Output description
@@ -180,6 +182,7 @@ where
                     }
 
                     if let Some(shielded_data) = shielded_data {
+                        check::shielded_balances_match(&shielded_data, *value_balance)?;
                         for spend in shielded_data.spends() {
                             // TODO: check that spend.cv and spend.rk are NOT of small
                             // order.
