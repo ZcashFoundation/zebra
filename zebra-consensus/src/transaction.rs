@@ -41,11 +41,8 @@ use crate::{script, BoxError};
 ///
 /// After verification, the transaction future completes. State changes are
 /// handled by `BlockVerifier` or `MempoolTransactionVerifier`.
-pub struct Verifier<ZS>
-where
-    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
-    ZS::Future: Send + 'static,
-{
+#[derive(Debug, Clone)]
+pub struct Verifier<ZS> {
     script_verifier: script::Verifier<ZS>,
     // spend_verifier: groth16::Verifier,
     // output_verifier: groth16::Verifier,
@@ -134,13 +131,14 @@ where
         };
 
         let mut redjubjub_verifier = crate::primitives::redjubjub::VERIFIER.clone();
+        let mut script_verifier = self.script_verifier.clone();
         async move {
             match &*tx {
                 Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => {
                     Err(VerifyTransactionError::WrongVersion)
                 }
                 Transaction::V4 {
-                    // inputs,
+                    inputs,
                     // outputs,
                     // lock_time,
                     // expiry_height,
@@ -162,6 +160,14 @@ where
                     } else {
                         // otherwise, check no coinbase inputs
                         // feed all of the inputs to the script verifier
+                        for input_index in 0..inputs.len() {
+                            let rsp = script_verifier.ready_and().await?.call(script::Request {
+                                transaction: tx.clone(),
+                                input_index,
+                            });
+
+                            async_checks.push(rsp);
+                        }
                     }
 
                     let sighash = tx.sighash(
