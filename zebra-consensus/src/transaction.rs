@@ -17,11 +17,14 @@ use zebra_chain::{
     parameters::NetworkUpgrade,
     primitives::{ed25519, redjubjub},
     transaction::{self, HashType, Transaction},
+    transparent::{self, Script},
 };
 
 use zebra_state as zs;
 
 use crate::{script, BoxError};
+
+mod check;
 
 /// Asynchronous transaction verification.
 #[derive(Debug, Clone)]
@@ -48,6 +51,8 @@ where
 pub enum VerifyTransactionError {
     /// Only V4 and later transactions can be verified.
     WrongVersion,
+    /// A transaction MUST move money around.
+    NoTransfer,
     /// Could not verify a transparent script
     Script(#[from] zebra_script::Error),
     /// Could not verify a Groth16 proof of a JoinSplit/Spend/Output description
@@ -154,13 +159,16 @@ where
                         }
                     }
 
+                    check::some_money_is_spent(&tx)?;
+                    check::any_coinbase_inputs_no_transparent_outputs(&tx)?;
+
                     let sighash = tx.sighash(
                         NetworkUpgrade::Sapling, // TODO: pass this in
                         HashType::ALL,           // TODO: check these
                         None,                    // TODO: check these
                     );
 
-                    if let Some(_joinsplit_data) = joinsplit_data {
+                    if let Some(joinsplit_data) = joinsplit_data {
                         // XXX create a method on JoinSplitData
                         // that prepares groth16::Items with the correct proofs
                         // and proof inputs, handling interstitial treestates
@@ -168,10 +176,7 @@ where
 
                         // Then, pass those items to self.joinsplit to verify them.
 
-                        // XXX refactor this into a nicely named check function
-                        // ed25519::VerificationKey::try_from(joinsplit_data.pub_key)
-                        //     .and_then(|vk| vk.verify(&joinsplit_data.sig, sighash))
-                        //     .map_err(VerifyTransactionError::Ed25519)
+                        check::validate_joinsplit_sig(joinsplit_data, sighash.as_bytes())?;
                     }
 
                     if let Some(shielded_data) = shielded_data {
