@@ -76,6 +76,7 @@ impl From<BoxError> for VerifyTransactionError {
 ///
 /// Transaction verification has slightly different consensus rules, depending on
 /// whether the transaction is to be included in a block on in the mempool.
+#[allow(dead_code)]
 pub enum Request {
     /// Verify the supplied transaction as part of a block.
     Block(Arc<Transaction>),
