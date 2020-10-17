@@ -15,14 +15,17 @@ use zebra_chain::{
 use crate::block::subsidy::general::{block_subsidy, halving_divisor};
 use crate::parameters::subsidy::{
     BLOSSOM_POW_TARGET_SPACING_RATIO, FOUNDERS_FRACTION_DIVISOR, FOUNDERS_REWARD_ADDRESSES_MAINNET,
-    FOUNDER_ADDRESS_CHANGE_INTERVAL,
+    FOUNDERS_REWARD_ADDRESSES_TESTNET, FOUNDER_ADDRESS_CHANGE_INTERVAL,
 };
 
 /// `FoundersReward(height)` as described in [protocol specification §7.7][7.7]
 ///
 /// [7.7]: https://zips.z.cash/protocol/protocol.pdf#subsidies
 pub fn founders_reward(height: Height, network: Network) -> Result<Amount<NonNegative>, Error> {
-    if halving_divisor(height, network) == 1 {
+    let canopy_height = Canopy
+        .activation_height(network)
+        .expect("canopy activation height should be available");
+    if halving_divisor(height, network) == 1 && height < canopy_height {
         // this calculation is exact, because the block subsidy is divisible by
         // the FOUNDERS_FRACTION_DIVISOR until long after the first halving
         block_subsidy(height, network)? / FOUNDERS_FRACTION_DIVISOR
@@ -55,7 +58,12 @@ pub fn founders_reward_address(height: Height, network: Network) -> Result<Strin
     }
 
     let address_index = 1 + (adjusted_height.0 / FOUNDER_ADDRESS_CHANGE_INTERVAL as u32);
-    Ok(FOUNDERS_REWARD_ADDRESSES_MAINNET[(address_index - 1) as usize].to_string())
+
+    let mut addresses = FOUNDERS_REWARD_ADDRESSES_MAINNET;
+    if network == Network::Testnet {
+        addresses = FOUNDERS_REWARD_ADDRESSES_TESTNET;
+    }
+    Ok(addresses[(address_index - 1) as usize].to_string())
 }
 
 /// Returns a list of outputs in `Transaction`, which have a script address equal to `String`.
@@ -91,11 +99,18 @@ pub fn find_output_with_address(transaction: &Transaction, address: &str) -> Vec
 mod test {
     use super::*;
     use color_eyre::Report;
+
     #[test]
     fn test_founders_reward() -> Result<(), Report> {
         zebra_test::init();
 
-        let network = Network::Mainnet;
+        founders_reward_for_network(Network::Mainnet)?;
+        founders_reward_for_network(Network::Testnet)?;
+
+        Ok(())
+    }
+
+    fn founders_reward_for_network(network: Network) -> Result<(), Report> {
         let blossom_height = Blossom.activation_height(network).unwrap();
         let canopy_height = Canopy.activation_height(network).unwrap();
 
@@ -123,7 +138,24 @@ mod test {
 
     #[test]
     fn test_founders_address() -> Result<(), Report> {
-        let network = Network::Mainnet;
+        founders_address_for_network(Network::Mainnet)?;
+        founders_address_for_network(Network::Testnet)?;
+
+        Ok(())
+    }
+
+    fn founders_address_for_network(network: Network) -> Result<(), Report> {
+        // First address change after blossom for the 2 networks.
+        // Todo: explain this better and make sure it is working propertly.
+        // after blossom there is still time left for the next change in
+        // founder address but the remaining is calculated with the new formula.
+        let mut addresses = FOUNDERS_REWARD_ADDRESSES_MAINNET;
+        let mut first_change_after_blossom = 656_866;
+
+        if network == Network::Testnet {
+            addresses = FOUNDERS_REWARD_ADDRESSES_TESTNET;
+            first_change_after_blossom = 584_794;
+        }
 
         let blossom_height = Blossom.activation_height(network).unwrap();
         let canopy_height = Canopy.activation_height(network).unwrap();
@@ -135,27 +167,23 @@ mod test {
         for n in (1..blossom_height.0).step_by(FOUNDER_ADDRESS_CHANGE_INTERVAL as usize) {
             assert_eq!(
                 founders_reward_address(Height(n), network)?,
-                FOUNDERS_REWARD_ADDRESSES_MAINNET[index as usize].to_string()
+                addresses[index as usize].to_string()
             );
             index += 1;
         }
 
-        // after blossom the first change happening at block 656_866 in the mainnet
-        // Todo: explain this better - after blossom there is still time left for the next change in
-        // founder address but the remaining is calculated with the new formula.
-        let first_change_after_blossom_mainnet = 656_866;
         assert_eq!(
-            founders_reward_address(Height(first_change_after_blossom_mainnet), network)?,
-            FOUNDERS_REWARD_ADDRESSES_MAINNET[index as usize].to_string()
+            founders_reward_address(Height(first_change_after_blossom), network)?,
+            addresses[index as usize].to_string()
         );
 
         // after the first change after blossom the addresses changes at FOUNDER_ADDRESS_CHANGE_INTERVAL * 2
-        for n in (first_change_after_blossom_mainnet..canopy_height.0)
+        for n in (first_change_after_blossom..canopy_height.0)
             .step_by((FOUNDER_ADDRESS_CHANGE_INTERVAL * 2) as usize)
         {
             assert_eq!(
                 founders_reward_address(Height(n), network)?,
-                FOUNDERS_REWARD_ADDRESSES_MAINNET[index as usize].to_string()
+                addresses[index as usize].to_string()
             );
             index += 1;
         }
