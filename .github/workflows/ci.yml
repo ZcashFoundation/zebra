@@ -81,9 +81,28 @@ jobs:
           args: --verbose --release
 
   clippy:
-    name: Clippy
+    name: Clippy (stable)
     timeout-minutes: 30
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          components: clippy
+          override: true
+      - name: Run clippy
+        uses: actions-rs/clippy-check@v1
+        with:
+          name: Clippy (stable)
+          token: ${{ secrets.GITHUB_TOKEN }}
+          args: --all-features --all-targets -- -D warnings
+
+  clippy-nightly:
+    name: Clippy (nightly)
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
@@ -91,11 +110,13 @@ jobs:
           toolchain: nightly
           components: clippy
           override: true
-      - name: Run clippy
+      - name: Run Clippy (nightly)
         uses: actions-rs/clippy-check@v1
+        continue-on-error: true
         with:
+          name: Clippy (nightly)
           token: ${{ secrets.GITHUB_TOKEN }}
-          args: --all-features --all-targets -- -D warnings
+          args: --all-features --all-targets
 
   fmt:
     name: Rustfmt
