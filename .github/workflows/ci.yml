@@ -22,9 +22,13 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: fetch
-      - name: install LLVM on Windows
+      - name: Install LLVM on Windows
         if: matrix.os == 'windows-latest'
         run: choco install llvm -y
+      - name: Skip network tests on Ubuntu
+        # Ubuntu runners don't have network or DNS configured during test steps
+        if: matrix.os == 'ubuntu-latest'
+        run: echo "ZEBRA_SKIP_NETWORK_TESTS=1" >> $GITHUB_ENV
       - name: Run tests
         env:
           RUST_BACKTRACE: full
@@ -67,7 +71,7 @@ jobs:
         with:
           toolchain: stable
           override: true
-      - name: install LLVM on Windows
+      - name: Install LLVM on Windows
         if: matrix.os == 'windows-latest'
         run: choco install llvm -y
       - name: cargo fetch
