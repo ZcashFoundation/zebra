@@ -781,7 +781,7 @@ Implemented by querying:
 - (non-finalized) the `hash_by_height` map in the best chain
 - (finalized) the `hash_by_height` tree.
 
-### `Request::Transaction(TransactionHash)`
+### `Request::Transaction(transaction::Hash)`
 [request-transaction]: #request-transaction
 
 Returns

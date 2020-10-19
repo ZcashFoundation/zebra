@@ -39,7 +39,7 @@ impl fmt::Debug for Hash {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut reversed_bytes = self.0;
         reversed_bytes.reverse();
-        f.debug_tuple("TransactionHash")
+        f.debug_tuple("transaction::Hash")
             .field(&hex::encode(reversed_bytes))
             .finish()
     }
@@ -70,7 +70,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             format!("{:?}", hash),
-            r#"TransactionHash("3166411bd5343e0b284a108f39a929fbbb62619784f8c6dafe520703b5b446bf")"#
+            r#"transaction::Hash("3166411bd5343e0b284a108f39a929fbbb62619784f8c6dafe520703b5b446bf")"#
         );
     }
 }
