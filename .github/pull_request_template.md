@@ -45,6 +45,7 @@ Add or skip tasks as needed.
 - [ ] Pull Request
   - The pull request is complete: code, documentation, and tests
   - The PR contains changes to related code (unrelated changes can be split into another PR)
+  - The PR does everything listed in the tickets that it closes
   - Any follow-up tasks are listed in a GitHub issue
 
 - [ ] Code
@@ -61,8 +62,7 @@ Add or skip tasks as needed.
 
 - [ ] Tests
   - The tests make sure the code implements the Zcash consensus rules
-  - Consensus rules have success and failure tests
+  - Consensus rules have success tests, failure tests, and property tests
   - Edge cases and errors have tests
   - The consensus rules are tested on the block lists in `zebra_test::vectors`
   - Tests cover mainnet and testnet
-
