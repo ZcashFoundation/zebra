@@ -11,8 +11,8 @@ use super::Transaction;
 
 /// A transaction hash.
 ///
-/// Note: Zebra displays transaction and block hashes in their actual byte-order,
-/// not in reversed byte-order.
+/// Note: Zebra displays transaction and block hashes in big-endian byte-order,
+/// following the u256 convention set by Bitcoin and zcashd.
 #[derive(Copy, Clone, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct Hash(pub [u8; 32]);
