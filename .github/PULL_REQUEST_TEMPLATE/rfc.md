@@ -29,3 +29,13 @@ XXXX-my-feature with the filename of the RFC
 
 -->
 [Rendered](https://github.com/ZcashFoundation/zebra/blob/my-branch-name/book/src/dev/rfcs/XXXX-my-feature.md).
+
+## Zebra Team Approval
+
+Everyone on the Zebra team should review design RFCs:
+
+- [ ] @dconnolly 
+- [ ] @hdevalence 
+- [ ] @oxarbitrage 
+- [ ] @teor2345 
+- [ ] @yaahc 
