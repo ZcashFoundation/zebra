@@ -460,7 +460,6 @@ fn valid_generated_config(command: &str, expected_output: &str) -> Result<()> {
 /// If your test environment does not have network access, skip
 /// this test by setting the `ZEBRA_SKIP_NETWORK_TESTS` env var.
 #[test]
-#[ignore]
 fn sync_one_checkpoint_mainnet() -> Result<()> {
     sync_one_checkpoint(Mainnet)
 }
@@ -470,7 +469,6 @@ fn sync_one_checkpoint_mainnet() -> Result<()> {
 /// If your test environment does not have network access, skip
 /// this test by setting the `ZEBRA_SKIP_NETWORK_TESTS` env var.
 #[test]
-#[ignore]
 fn sync_one_checkpoint_testnet() -> Result<()> {
     sync_one_checkpoint(Testnet)
 }
