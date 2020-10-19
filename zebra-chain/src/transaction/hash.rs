@@ -65,12 +65,12 @@ mod tests {
 
     #[test]
     fn transactionhash_from_str() {
-        let hash: Hash = "bf46b4b5030752fedac6f884976162bbfb29a9398f104a280b3e34d51b416631"
+        let hash: Hash = "3166411bd5343e0b284a108f39a929fbbb62619784f8c6dafe520703b5b446bf"
             .parse()
             .unwrap();
         assert_eq!(
             format!("{:?}", hash),
-            r#"TransactionHash("bf46b4b5030752fedac6f884976162bbfb29a9398f104a280b3e34d51b416631")"#
+            r#"TransactionHash("3166411bd5343e0b284a108f39a929fbbb62619784f8c6dafe520703b5b446bf")"#
         );
     }
 }
