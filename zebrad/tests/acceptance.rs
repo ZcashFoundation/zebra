@@ -482,7 +482,11 @@ fn sync_one_checkpoint_testnet() -> Result<()> {
 /// Test if `zebrad` can sync the second checkpoint on mainnet.
 ///
 /// The second checkpoint contains a large number of blocks.
+/// This test might fail or timeout on slow or unreliable networks,
+/// so we don't run it by default. It also takes a lot longer than
+/// our 10 second target time for default tests.
 #[test]
+#[ignore]
 fn sync_two_checkpoints_mainnet() -> Result<()> {
     sync_until(
         "verified checkpoint range block_count=2000",
@@ -493,8 +497,10 @@ fn sync_two_checkpoints_mainnet() -> Result<()> {
 
 /// Test if `zebrad` can sync the second checkpoint on testnet.
 ///
-/// The second checkpoint contains a large number of blocks.
+/// This test does not run by default, see `sync_two_checkpoints_mainnet`
+/// for details.
 #[test]
+#[ignore]
 fn sync_two_checkpoints_testnet() -> Result<()> {
     sync_until(
         "verified checkpoint range block_count=2000",
