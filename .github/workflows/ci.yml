@@ -25,9 +25,10 @@ jobs:
       - name: Install LLVM on Windows
         if: matrix.os == 'windows-latest'
         run: choco install llvm -y
-      - name: Skip network tests on Ubuntu
+      - name: Skip network tests on Ubuntu and Windows
         # Ubuntu runners don't have network or DNS configured during test steps
-        if: matrix.os == 'ubuntu-latest'
+        # Windows runners have an unreliable network
+        if: matrix.os == 'ubuntu-latest' || matrix.os == 'windows-latest'
         run: echo "ZEBRA_SKIP_NETWORK_TESTS=1" >> $GITHUB_ENV
       - name: Run tests
         env:
