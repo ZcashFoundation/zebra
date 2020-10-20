@@ -101,9 +101,6 @@ pub fn subsidy_is_valid(block: &Block, network: Network) -> Result<(), BlockErro
     let coinbase = block.transactions.get(0).ok_or(SubsidyError::NoCoinbase)?;
 
     let halving_div = subsidy::general::halving_divisor(height, network);
-    let canopy_activation_height = NetworkUpgrade::Canopy
-        .activation_height(network)
-        .expect("Canopy activation height is known");
 
     // TODO: the sum of the coinbase transaction outputs must be less than or equal to the block subsidy plus transaction fees
 
@@ -115,7 +112,7 @@ pub fn subsidy_is_valid(block: &Block, network: Network) -> Result<(), BlockErro
         )
     } else if halving_div.count_ones() != 1 {
         unreachable!("invalid halving divisor: the halving divisor must be a non-zero power of two")
-    } else if height < canopy_activation_height {
+    } else if subsidy::founders_reward::founders_reward_active(height, network) {
         // Founders rewards are paid up to Canopy activation, on both mainnet and testnet
         let founders_reward = subsidy::founders_reward::founders_reward(height, network)
             .expect("invalid Amount: founders reward should be valid");

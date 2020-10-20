@@ -18,14 +18,20 @@ use zebra_chain::{
 use crate::block::subsidy::general::{block_subsidy, halving_divisor};
 use crate::parameters::subsidy::*;
 
+/// Returns `true` if we are in the founders reward period of the blockchain.
+pub fn founders_reward_active(height: Height, network: Network) -> bool {
+    let canopy_activation_height = Canopy
+        .activation_height(network)
+        .expect("Canopy activation height is known");
+
+    height < canopy_activation_height
+}
+
 /// `FoundersReward(height)` as described in [protocol specification §7.7][7.7]
 ///
 /// [7.7]: https://zips.z.cash/protocol/protocol.pdf#subsidies
 pub fn founders_reward(height: Height, network: Network) -> Result<Amount<NonNegative>, Error> {
-    let canopy_height = Canopy
-        .activation_height(network)
-        .expect("canopy activation height should be available");
-    if halving_divisor(height, network) == 1 && height < canopy_height {
+    if halving_divisor(height, network) == 1 && founders_reward_active(height, network) {
         // this calculation is exact, because the block subsidy is divisible by
         // the FOUNDERS_FRACTION_DIVISOR until long after the first halving
         block_subsidy(height, network)? / FOUNDERS_FRACTION_DIVISOR
@@ -52,11 +58,8 @@ pub fn founders_reward_address(height: Height, network: Network) -> Result<Addre
     let blossom_height = Blossom
         .activation_height(network)
         .expect("blossom activation height should be available");
-    let canopy_height = Canopy
-        .activation_height(network)
-        .expect("canopy activation height should be available");
 
-    if height >= canopy_height {
+    if !founders_reward_active(height, network) {
         panic!("no address returned after canopy");
     }
 
@@ -100,6 +103,24 @@ pub fn find_output_with_address(
 mod test {
     use super::*;
     use color_eyre::Report;
+
+    #[test]
+    fn test_founders_reward_active() -> Result<(), Report> {
+        founders_reward_active_for_network(Network::Mainnet)?;
+        founders_reward_active_for_network(Network::Testnet)?;
+
+        Ok(())
+    }
+
+    fn founders_reward_active_for_network(network: Network) -> Result<(), Report> {
+        let blossom_height = Blossom.activation_height(network).unwrap();
+        let canopy_height = Canopy.activation_height(network).unwrap();
+
+        assert_eq!(founders_reward_active(blossom_height, network), true);
+        assert_eq!(founders_reward_active(canopy_height, network), false);
+
+        Ok(())
+    }
 
     #[test]
     fn test_founders_reward() -> Result<(), Report> {
