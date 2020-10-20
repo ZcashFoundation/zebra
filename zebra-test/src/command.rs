@@ -231,7 +231,7 @@ impl<T> TestChild<T> {
             }
         }
 
-        if self.past_deadline() && self.is_running() {
+        if self.is_running() {
             // If the process exits between is_running and kill, we will see
             // spurious errors here. If that happens, ignore "no such process"
             // errors from kill.
