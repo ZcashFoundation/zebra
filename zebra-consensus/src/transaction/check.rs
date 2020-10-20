@@ -1,13 +1,8 @@
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 
 use zebra_chain::{
-    amount::{self, Amount, NegativeAllowed},
-    primitives::{
-        ed25519,
-        redjubjub::{self, Binding},
-        Groth16Proof,
-    },
-    sapling::ValueCommitment,
+    amount::Amount,
+    primitives::{ed25519, Groth16Proof},
     transaction::{JoinSplitData, ShieldedData, Transaction},
 };
 
@@ -38,16 +33,16 @@ pub fn some_money_is_spent(tx: &Transaction) -> Result<(), VerifyTransactionErro
             shielded_data: Some(shielded_data),
             ..
         } => {
-            if inputs.len() > 0
+            if !inputs.is_empty()
                 || joinsplit_data.joinsplits().count() > 0
                 || shielded_data.spends().count() > 0
             {
-                return Ok(());
+                Ok(())
             } else {
-                return Err(VerifyTransactionError::NoTransfer);
+                Err(VerifyTransactionError::NoTransfer)
             }
         }
-        _ => return Err(VerifyTransactionError::WrongVersion),
+        _ => Err(VerifyTransactionError::WrongVersion),
     }
 }
 
@@ -62,18 +57,14 @@ pub fn any_coinbase_inputs_no_transparent_outputs(
     tx: &Transaction,
 ) -> Result<(), VerifyTransactionError> {
     match tx {
-        Transaction::V4 {
-            inputs, outputs, ..
-        } => {
-            if !tx.contains_coinbase_input() {
-                return Ok(());
-            } else if outputs.len() == 0 {
-                return Ok(());
+        Transaction::V4 { outputs, .. } => {
+            if !tx.contains_coinbase_input() || !outputs.is_empty() {
+                Ok(())
             } else {
-                return Err(VerifyTransactionError::NoTransfer);
+                Err(VerifyTransactionError::NoTransfer)
             }
         }
-        _ => return Err(VerifyTransactionError::WrongVersion),
+        _ => Err(VerifyTransactionError::WrongVersion),
     }
 }
 
@@ -84,12 +75,12 @@ pub fn shielded_balances_match(
     shielded_data: &ShieldedData,
     value_balance: Amount,
 ) -> Result<(), VerifyTransactionError> {
-    if shielded_data.spends().count() + shielded_data.outputs().count() != 0 {
-        return Ok(());
-    } else if i64::from(value_balance) == 0 {
-        return Ok(());
+    if (shielded_data.spends().count() + shielded_data.outputs().count() != 0)
+        || i64::from(value_balance) == 0
+    {
+        Ok(())
     } else {
-        return Err(VerifyTransactionError::BadBalance);
+        Err(VerifyTransactionError::BadBalance)
     }
 }
 
@@ -103,16 +94,14 @@ pub fn coinbase_tx_does_not_spend_shielded(tx: &Transaction) -> Result<(), Verif
             shielded_data: Some(shielded_data),
             ..
         } => {
-            if !tx.is_coinbase() {
-                return Ok(());
-            } else if joinsplit_data.joinsplits().count() == 0
-                && shielded_data.spends().count() == 0
+            if !tx.is_coinbase()
+                || (joinsplit_data.joinsplits().count() == 0 && shielded_data.spends().count() == 0)
             {
-                return Ok(());
+                Ok(())
             } else {
-                return Err(VerifyTransactionError::Coinbase);
+                Err(VerifyTransactionError::Coinbase)
             }
         }
-        _ => return Err(VerifyTransactionError::WrongVersion),
+        _ => Err(VerifyTransactionError::WrongVersion),
     }
 }
