@@ -479,6 +479,30 @@ fn sync_one_checkpoint_testnet() -> Result<()> {
     )
 }
 
+/// Test if `zebrad` can sync the second checkpoint on mainnet.
+///
+/// The second checkpoint contains a large number of blocks.
+#[test]
+fn sync_two_checkpoints_mainnet() -> Result<()> {
+    sync_until(
+        "verified checkpoint range block_count=2000",
+        Mainnet,
+        Duration::from_secs(120),
+    )
+}
+
+/// Test if `zebrad` can sync the second checkpoint on testnet.
+///
+/// The second checkpoint contains a large number of blocks.
+#[test]
+fn sync_two_checkpoints_testnet() -> Result<()> {
+    sync_until(
+        "verified checkpoint range block_count=2000",
+        Testnet,
+        Duration::from_secs(120),
+    )
+}
+
 /// Sync `network` until `zebrad` outputs `regex`.
 /// Returns an error if `timeout` elapses before `regex` is output.
 ///
