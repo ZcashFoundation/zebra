@@ -102,6 +102,24 @@ pub fn find_output_with_amount(
         .collect()
 }
 
+/// Validate shielded consensus rules as described in [ZIP-213][ZIP-213]
+///
+/// [ZIP-213]: https://zips.z.cash/zip-0213#specification
+pub fn shielded_coinbase(height: Height, network: Network, transaction: &Transaction) -> bool {
+    let heartwood_height = Heartwood
+        .activation_height(network)
+        .expect("heartwood activation height should be available");
+
+    if height < heartwood_height {
+        if !transaction.joinsplits() && transaction.shields().is_none() {
+            return true;
+        }
+    } else if !transaction.joinsplits() {
+        return true;
+    }
+    false
+}
+
 #[cfg(test)]
 mod test {
     use super::*;

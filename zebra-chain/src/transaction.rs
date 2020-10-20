@@ -185,4 +185,27 @@ impl Transaction {
     ) -> blake2b_simd::Hash {
         sighash::SigHasher::new(self, hash_type, network_upgrade, input).sighash()
     }
+
+    /// Access the joinsplits of this transaction, regardless of version.
+    // Todo: signature haves to be like:
+    // pub fn joinsplits<P: ZkSnarkProof>(&self) -> Option<JoinSplitData<P>> {
+    // but i was not able to make that work yet
+    pub fn joinsplits(&self) -> bool {
+        match self {
+            Transaction::V1 { .. } => false,
+            Transaction::V2 { joinsplit_data, .. } => joinsplit_data.is_some(),
+            Transaction::V3 { joinsplit_data, .. } => joinsplit_data.is_some(),
+            Transaction::V4 { joinsplit_data, .. } => joinsplit_data.is_some(),
+        }
+    }
+    /// Access the shielded data of this transaction.
+    /// Only V4 transactions will return Some() if any shielded data is present.
+    pub fn shields(&self) -> Option<ShieldedData> {
+        match self {
+            Transaction::V1 { .. } => None,
+            Transaction::V2 { .. } => None,
+            Transaction::V3 { .. } => None,
+            Transaction::V4 { shielded_data, .. } => shielded_data.clone(),
+        }
+    }
 }
