@@ -17,7 +17,6 @@ use zebra_chain::{
     parameters::NetworkUpgrade,
     primitives::{ed25519, redjubjub},
     transaction::{self, HashType, Transaction},
-    transparent::{self, Script},
 };
 
 use zebra_state as zs;
