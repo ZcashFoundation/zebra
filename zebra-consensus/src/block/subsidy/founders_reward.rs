@@ -3,13 +3,14 @@
 //! [7.7]: https://zips.z.cash/protocol/protocol.pdf#subsidies
 
 use std::convert::TryFrom;
+use std::str::FromStr;
 
 use zebra_chain::{
     amount::{Amount, Error, NonNegative},
     block::Height,
     parameters::{Network, NetworkUpgrade::*},
     transaction::Transaction,
-    transparent::{Address, Output},
+    transparent::{Address, Output, ScriptForNetwork},
 };
 
 use crate::block::subsidy::general::{block_subsidy, halving_divisor};
@@ -37,7 +38,7 @@ pub fn founders_reward(height: Height, network: Network) -> Result<Amount<NonNeg
 /// Get the founders reward t-address for the specified block height as described in [protocol specification §7.8][7.8]
 ///
 /// [7.8]: https://zips.z.cash/protocol/canopy.pdf#foundersreward
-pub fn founders_reward_address(height: Height, network: Network) -> Result<String, Error> {
+pub fn founders_reward_address(height: Height, network: Network) -> Result<Address, Error> {
     let blossom_height = Blossom
         .activation_height(network)
         .expect("blossom activation height should be available");
@@ -63,34 +64,24 @@ pub fn founders_reward_address(height: Height, network: Network) -> Result<Strin
     if network == Network::Testnet {
         addresses = FOUNDERS_REWARD_ADDRESSES_TESTNET;
     }
-    Ok(addresses[(address_index - 1) as usize].to_string())
+
+    let address: Address = Address::from_str(addresses[(address_index - 1) as usize])
+        .expect("we should get a taddress here");
+    Ok(address)
 }
 
 /// Returns a list of outputs in `Transaction`, which have a script address equal to `String`.
-pub fn find_output_with_address(transaction: &Transaction, address: &str) -> Vec<Output> {
-    let calculated_addr: Address = address.parse().unwrap();
-
-    // For debugging
-    println!("Looking for founders reward address in new coinbase transaction:");
-    for (output_number, o) in transaction.outputs().iter().enumerate() {
-        let lock_script = o.lock_script.clone();
-
-        // For one of the coinbase outputs the address we get from the lock_script should be one of
-        // the ones in the FOUNDERS_REWARD_ADDRESSES_MAINNET array, not happening.
-        let output_address: Address = Address::from(lock_script);
-
-        println!(
-            "Output: {} Calculated address: {} Output address: {}",
-            output_number, calculated_addr, output_address
-        );
-        println!();
-    }
-
-    // never matching
+pub fn find_output_with_address(
+    transaction: &Transaction,
+    address: Address,
+    network: Network,
+) -> Vec<Output> {
     transaction
         .outputs()
         .iter()
-        .filter(|o| Address::from(o.lock_script.clone()) == calculated_addr)
+        .filter(|o| {
+            o.lock_script.clone().to_address(network) == address
+        })
         .cloned()
         .collect()
 }
@@ -167,14 +158,14 @@ mod test {
         for n in (1..blossom_height.0).step_by(FOUNDER_ADDRESS_CHANGE_INTERVAL as usize) {
             assert_eq!(
                 founders_reward_address(Height(n), network)?,
-                addresses[index as usize].to_string()
+                Address::from_str(addresses[index as usize]).expect("an address")
             );
             index += 1;
         }
 
         assert_eq!(
             founders_reward_address(Height(first_change_after_blossom), network)?,
-            addresses[index as usize].to_string()
+            Address::from_str(addresses[index as usize]).expect("an address")
         );
 
         // after the first change after blossom the addresses changes at FOUNDER_ADDRESS_CHANGE_INTERVAL * 2
@@ -183,7 +174,7 @@ mod test {
         {
             assert_eq!(
                 founders_reward_address(Height(n), network)?,
-                addresses[index as usize].to_string()
+                Address::from_str(addresses[index as usize]).expect("an address")
             );
             index += 1;
         }

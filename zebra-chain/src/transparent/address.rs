@@ -14,7 +14,7 @@ use crate::{
     serialization::{SerializationError, ZcashDeserialize, ZcashSerialize},
 };
 
-use super::Script;
+use super::{Script, ScriptForNetwork};
 
 /// Magic numbers used to identify what networks Transparent Addresses
 /// are associated with.
@@ -58,6 +58,21 @@ pub enum Address {
         /// hash of a SHA-256 hash of a compressed ECDSA key encoding.
         pub_key_hash: [u8; 20],
     },
+}
+
+/// Minimal subset of script opcodes.
+/// Ported from https://github.com/zcash/librustzcash/blob/master/zcash_primitives/src/legacy.rs#L10
+enum OpCode {
+    // stack ops
+    Dup = 0x76,
+
+    // bit logic
+    Equal = 0x87,
+    EqualVerify = 0x88,
+
+    // crypto
+    Hash160 = 0xa9,
+    CheckSig = 0xac,
 }
 
 impl fmt::Debug for Address {
@@ -174,10 +189,34 @@ trait ToAddressWithNetwork {
 }
 
 impl ToAddressWithNetwork for Script {
+    // https://github.com/zcash/librustzcash/blob/master/zcash_primitives/src/legacy.rs#L43
     fn to_address(&self, network: Network) -> Address {
-        Address::PayToScriptHash {
-            network,
-            script_hash: Address::hash_payload(&self.0[..]),
+        if self.0.len() == 25
+            && self.0[0..3] == [OpCode::Dup as u8, OpCode::Hash160 as u8, 0x14]
+            && self.0[23..25] == [OpCode::EqualVerify as u8, OpCode::CheckSig as u8]
+        {
+            let mut script_hash = [0; 20];
+            script_hash.copy_from_slice(&self.0[3..23]);
+
+            Address::PayToScriptHash {
+                network,
+                script_hash,
+            }
+        } else if self.0.len() == 23
+            && self.0[0..2] == [OpCode::Hash160 as u8, 0x14]
+            && self.0[22] == OpCode::Equal as u8
+        {
+            let mut script_hash = [0; 20];
+            script_hash.copy_from_slice(&self.0[2..22]);
+            Address::PayToScriptHash {
+                network,
+                script_hash,
+            }
+        } else {
+            Address::PayToScriptHash {
+                network,
+                script_hash: Address::hash_payload(&self.0[..]),
+            }
         }
     }
 }

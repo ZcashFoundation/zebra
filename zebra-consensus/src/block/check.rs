@@ -125,11 +125,17 @@ pub fn subsidy_is_valid(block: &Block, network: Network) -> Result<(), BlockErro
         let founders_reward_address =
             subsidy::founders_reward::founders_reward_address(height, network)
                 .expect("we should have an address");
-        let _matching_address =
-            subsidy::founders_reward::find_output_with_address(coinbase, &founders_reward_address);
+        let matching_address = subsidy::founders_reward::find_output_with_address(
+            coinbase,
+            founders_reward_address,
+            network,
+        );
 
         // TODO: the exact founders reward value must be sent as a single output to the correct address
-        if !matching_values.is_empty() {
+        if !matching_values.is_empty()
+            && !matching_address.is_empty()
+            && matching_values == matching_address
+        {
             Ok(())
         } else {
             Err(SubsidyError::FoundersRewardNotFound)?
