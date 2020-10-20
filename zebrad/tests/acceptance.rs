@@ -457,23 +457,34 @@ fn valid_generated_config(command: &str, expected_output: &str) -> Result<()> {
 
 /// Test if `zebrad` can sync the first checkpoint on mainnet.
 ///
-/// If your test environment does not have network access, skip
-/// this test by setting the `ZEBRA_SKIP_NETWORK_TESTS` env var.
+/// The first checkpoint contains a single genesis block.
 #[test]
 fn sync_one_checkpoint_mainnet() -> Result<()> {
-    sync_one_checkpoint(Mainnet)
+    sync_until(
+        "verified checkpoint range",
+        Mainnet,
+        Duration::from_secs(20),
+    )
 }
 
 /// Test if `zebrad` can sync the first checkpoint on testnet.
 ///
-/// If your test environment does not have network access, skip
-/// this test by setting the `ZEBRA_SKIP_NETWORK_TESTS` env var.
+/// The first checkpoint contains a single genesis block.
 #[test]
 fn sync_one_checkpoint_testnet() -> Result<()> {
-    sync_one_checkpoint(Testnet)
+    sync_until(
+        "verified checkpoint range",
+        Testnet,
+        Duration::from_secs(20),
+    )
 }
 
-fn sync_one_checkpoint(network: Network) -> Result<()> {
+/// Sync `network` until `zebrad` outputs `regex`.
+/// Returns an error if `timeout` elapses before `regex` is output.
+///
+/// If your test environment does not have network access, skip
+/// this test by setting the `ZEBRA_SKIP_NETWORK_TESTS` env var.
+fn sync_until(regex: &str, network: Network, timeout: Duration) -> Result<()> {
     zebra_test::init();
 
     if env::var_os("ZEBRA_SKIP_NETWORK_TESTS").is_some() {
@@ -483,6 +494,7 @@ fn sync_one_checkpoint(network: Network) -> Result<()> {
         return Ok(());
     }
 
+    // Use a persistent state, so we can handle large syncs
     let mut config = persistent_test_config()?;
     // TODO: add a convenience method?
     config.network.network = network;
@@ -490,11 +502,11 @@ fn sync_one_checkpoint(network: Network) -> Result<()> {
     let mut child = testdir()?
         .with_config(config)?
         .spawn_child(&["start"])?
-        .with_timeout(Duration::from_secs(20));
+        .with_timeout(timeout);
 
     // TODO: is there a way to check for testnet or mainnet here?
     // For example: "network=Mainnet" or "network=Testnet"
-    child.expect_stdout("verified checkpoint range")?;
+    child.expect_stdout(regex)?;
     child.kill()?;
 
     Ok(())
