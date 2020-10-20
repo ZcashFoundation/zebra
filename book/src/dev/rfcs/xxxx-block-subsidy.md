@@ -102,9 +102,9 @@ To do the calculations and checks the following constants, types and functions n
 - `PRE_BLOSSOM_HALVING_INTERVAL: Height`
 - `POST_BLOSSOM_HALVING_INTERVAL: Height`
 - `FOUNDERS_FRACTION_DIVISOR: u64`
-- `FOUNDER_ADDRESS_CHANGE_INTERVAL: u64`
-- `FOUNDER_ADDRESSES_MAINNET: [&'static str; 48]`
-- `FOUNDER_ADDRESSES_TESTNET: [&'static str; 48]`
+- `FOUNDERS_ADDRESS_COUNT: u32`
+- `FOUNDER_ADDRESSES_MAINNET: [&str; 48]`
+- `FOUNDER_ADDRESSES_TESTNET: [&str; 48]`
 
 ### Funding streams parameter constants
 
@@ -156,12 +156,12 @@ https://zips.z.cash/zip-0214#mainnet-recipient-addresses
 
 The following constants are needed:
 
-- `FUNDING_STREAM_ECC_ADDRESSES_MAINNET: [&'static str; 48]`
-- `FUNDING_STREAM_ZF_ADDRESSES_MAINNET: [&'static str; 48]`
-- `FUNDING_STREAM_MG_ADDRESSES_MAINNET: [&'static str; 48]`
-- `FUNDING_STREAM_ECC_ADDRESSES_TESTNET: [&'static str; 51]`
-- `FUNDING_STREAM_ZF_ADDRESSES_TESTNET: [&'static str; 51]`
-- `FUNDING_STREAM_MG_ADDRESSES_TESTNET: [&'static str; 51]`
+- `FUNDING_STREAM_ECC_ADDRESSES_MAINNET: [&str; 48]`
+- `FUNDING_STREAM_ZF_ADDRESSES_MAINNET: [&str; 48]`
+- `FUNDING_STREAM_MG_ADDRESSES_MAINNET: [&str; 48]`
+- `FUNDING_STREAM_ECC_ADDRESSES_TESTNET: [&str; 51]`
+- `FUNDING_STREAM_ZF_ADDRESSES_TESTNET: [&str; 51]`
+- `FUNDING_STREAM_MG_ADDRESSES_TESTNET: [&str; 51]`
 
 ## General subsidy
 
@@ -185,7 +185,9 @@ Only functions specific to calculation of founders reward.
 https://zips.z.cash/protocol/canopy.pdf#foundersreward
 
 - `founders_reward(Height, Network) -> Result<Amount<NonNegative>, Error>` - Founders reward portion for this block.
+- `founders_address_change_interval() -> Height` - Calculates the founders reward change interval. `FounderAddressChangeInterval` in the protocol specs. 
 - `founders_reward_address(Height, Network) -> Result<PayToScriptHash, Error>` - Address of the receiver founder at this block. All specified founders reward addresses are transparent `zebra_chain::transparent:Address::PayToScriptHash` addresses. (Even after the shielded coinbase changes in ZIP-213, introduced in Heartwood.)
+- `find_output_with_address(&Transaction, Address)` - Outputs where `lock_script` equal to `Address`.
 
 ## Funding streams
 
