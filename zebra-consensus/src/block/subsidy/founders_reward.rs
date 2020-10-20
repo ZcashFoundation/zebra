@@ -2,6 +2,8 @@
 //!
 //! [7.7]: https://zips.z.cash/protocol/protocol.pdf#subsidies
 
+use num_integer::div_ceil;
+
 use std::convert::TryFrom;
 use std::str::FromStr;
 
@@ -14,10 +16,7 @@ use zebra_chain::{
 };
 
 use crate::block::subsidy::general::{block_subsidy, halving_divisor};
-use crate::parameters::subsidy::{
-    BLOSSOM_POW_TARGET_SPACING_RATIO, FOUNDERS_FRACTION_DIVISOR, FOUNDERS_REWARD_ADDRESSES_MAINNET,
-    FOUNDERS_REWARD_ADDRESSES_TESTNET, FOUNDER_ADDRESS_CHANGE_INTERVAL,
-};
+use crate::parameters::subsidy::*;
 
 /// `FoundersReward(height)` as described in [protocol specification §7.7][7.7]
 ///
@@ -33,6 +32,17 @@ pub fn founders_reward(height: Height, network: Network) -> Result<Amount<NonNeg
     } else {
         Amount::try_from(0)
     }
+}
+
+/// Function `FounderAddressChangeInterval` as specified in [protocol specification §7.8][7.8]
+///
+/// [7.8]: https://zips.z.cash/protocol/canopy.pdf#foundersreward
+pub fn founders_address_change_interval() -> Height {
+    let interval = div_ceil(
+        SLOW_START_SHIFT.0 + PRE_BLOSSOM_HALVING_INTERVAL.0,
+        FOUNDERS_ADDRESS_COUNT,
+    );
+    Height(interval)
 }
 
 /// Get the founders reward t-address for the specified block height as described in [protocol specification §7.8][7.8]
@@ -58,7 +68,7 @@ pub fn founders_reward_address(height: Height, network: Network) -> Result<Addre
         );
     }
 
-    let address_index = 1 + (adjusted_height.0 / FOUNDER_ADDRESS_CHANGE_INTERVAL as u32);
+    let address_index = 1 + (adjusted_height.0 / founders_address_change_interval().0);
 
     let mut addresses = FOUNDERS_REWARD_ADDRESSES_MAINNET;
     if network == Network::Testnet {
@@ -155,7 +165,7 @@ mod test {
         let mut index = 0;
 
         // from genesis to blossom the founder reward address changes at FOUNDER_ADDRESS_CHANGE_INTERVAL
-        for n in (1..blossom_height.0).step_by(FOUNDER_ADDRESS_CHANGE_INTERVAL as usize) {
+        for n in (1..blossom_height.0).step_by(founders_address_change_interval().0 as usize) {
             assert_eq!(
                 founders_reward_address(Height(n), network)?,
                 Address::from_str(addresses[index as usize]).expect("an address")
@@ -170,7 +180,7 @@ mod test {
 
         // after the first change after blossom the addresses changes at FOUNDER_ADDRESS_CHANGE_INTERVAL * 2
         for n in (first_change_after_blossom..canopy_height.0)
-            .step_by((FOUNDER_ADDRESS_CHANGE_INTERVAL * 2) as usize)
+            .step_by((founders_address_change_interval().0 * 2) as usize)
         {
             assert_eq!(
                 founders_reward_address(Height(n), network)?,
@@ -178,6 +188,37 @@ mod test {
             );
             index += 1;
         }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_founders_address_count() -> Result<(), Report> {
+        assert_eq!(
+            FOUNDERS_REWARD_ADDRESSES_MAINNET.len() as u32,
+            FOUNDERS_ADDRESS_COUNT
+        );
+        assert_eq!(
+            FOUNDERS_REWARD_ADDRESSES_TESTNET.len() as u32,
+            FOUNDERS_ADDRESS_COUNT
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_founders_address_ceiling() -> Result<(), Report> {
+        // Test proves why `div_ceil` needs to be used.
+        // `truncate(n/d) + 1` is 1 more than `ceiling(n/d)` when `n/d` is an integer.
+        // Suppose `SLOW_START_SHIFT.0 + PRE_BLOSSOM_HALVING_INTERVAL.0 = 480_000` instead
+        // of current protocol defined value of `850_000`.
+        let numerator = 480_000;
+
+        // `truncate(n) + 1` will output the wrong result
+        assert_eq!((numerator / FOUNDERS_ADDRESS_COUNT) + 1, 10001);
+
+        // `div_ceil` will output the right thing
+        assert_eq!(div_ceil(numerator, FOUNDERS_ADDRESS_COUNT), 10000);
 
         Ok(())
     }

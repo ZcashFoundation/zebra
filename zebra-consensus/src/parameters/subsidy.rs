@@ -42,17 +42,8 @@ pub const POST_BLOSSOM_HALVING_INTERVAL: Height =
 /// Usage: founders_reward = block_subsidy / FOUNDERS_FRACTION_DIVISOR
 pub const FOUNDERS_FRACTION_DIVISOR: u64 = 5;
 
-/// Function `FounderAddressChangeInterval` as specified in [protocol specification §7.8][7.8]
-///
-/// Rust trucates the division down, to get ceiling effect we sum 1 to the end of the calculation.
-/// We use the main network lenght as both networks are the same in size.
-///
-/// [7.8]: https://zips.z.cash/protocol/canopy.pdf#foundersreward
-
-pub const FOUNDER_ADDRESS_CHANGE_INTERVAL: u64 =
-    ((SLOW_START_SHIFT.0 + PRE_BLOSSOM_HALVING_INTERVAL.0)
-        / FOUNDERS_REWARD_ADDRESSES_MAINNET.len() as u32) as u64
-        + 1;
+/// The number of founders reward address intervals, for both mainnet and testnet.
+pub const FOUNDERS_ADDRESS_COUNT: u32 = 48;
 
 /// Mainnet founder adress list as specified in [protocol specification §7.8][7.8]
 ///

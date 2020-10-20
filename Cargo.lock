@@ -4016,6 +4016,7 @@ dependencies = [
  "futures-util",
  "jubjub 0.6.0",
  "metrics",
+ "num-integer",
  "once_cell",
  "pairing",
  "rand 0.7.3",
