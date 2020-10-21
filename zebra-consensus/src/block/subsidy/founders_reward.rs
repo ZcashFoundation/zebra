@@ -60,7 +60,7 @@ pub fn founders_reward_address(height: Height, network: Network) -> Result<Addre
         .expect("blossom activation height should be available");
 
     if !founders_reward_active(height, network) {
-        panic!("no address returned after canopy");
+        panic!("founders reward address lookup on invalid block: block is after canopy activation");
     }
 
     let mut adjusted_height = height;

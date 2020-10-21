@@ -118,7 +118,6 @@ pub fn subsidy_is_valid(block: &Block, network: Network) -> Result<(), BlockErro
             .expect("invalid Amount: founders reward should be valid");
         let matching_values = subsidy::general::find_output_with_amount(coinbase, founders_reward);
 
-        // TODO: no validation yet, just calling founders reward address functions
         let founders_reward_address =
             subsidy::founders_reward::founders_reward_address(height, network)
                 .expect("we should have an address");
@@ -128,7 +127,6 @@ pub fn subsidy_is_valid(block: &Block, network: Network) -> Result<(), BlockErro
             network,
         );
 
-        // TODO: the exact founders reward value must be sent as a single output to the correct address
         if !matching_values.is_empty()
             && !matching_address.is_empty()
             && matching_values == matching_address
