@@ -92,24 +92,6 @@ impl fmt::Display for Address {
     }
 }
 
-impl From<Script> for Address {
-    fn from(script: Script) -> Self {
-        Address::PayToScriptHash {
-            network: Network::Mainnet,
-            script_hash: Self::hash_payload(&script.0[..]),
-        }
-    }
-}
-
-impl From<PublicKey> for Address {
-    fn from(pub_key: PublicKey) -> Self {
-        Address::PayToPublicKeyHash {
-            network: Network::Mainnet,
-            pub_key_hash: Self::hash_payload(&pub_key.serialize()[..]),
-        }
-    }
-}
-
 impl std::str::FromStr for Address {
     type Err = SerializationError;
 
@@ -186,6 +168,29 @@ impl ZcashDeserialize for Address {
     }
 }
 
+trait ToAddressWithNetwork {
+    /// Convert `self` to an `Address`, given the current `network`.
+    fn to_address(&self, network: Network) -> Address;
+}
+
+impl ToAddressWithNetwork for Script {
+    fn to_address(&self, network: Network) -> Address {
+        Address::PayToScriptHash {
+            network,
+            script_hash: Address::hash_payload(&self.0[..]),
+        }
+    }
+}
+
+impl ToAddressWithNetwork for PublicKey {
+    fn to_address(&self, network: Network) -> Address {
+        Address::PayToPublicKeyHash {
+            network,
+            pub_key_hash: Address::hash_payload(&self.serialize()[..]),
+        }
+    }
+}
+
 impl Address {
     /// A hash of a transparent address payload, as used in
     /// transparent pay-to-script-hash and pay-to-publickey-hash
@@ -251,25 +256,47 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pubkey() {
+    fn pubkey_mainnet() {
         let pub_key = PublicKey::from_slice(&[
             3, 23, 183, 225, 206, 31, 159, 148, 195, 42, 67, 115, 146, 41, 248, 140, 11, 3, 51, 41,
             111, 180, 110, 143, 114, 134, 88, 73, 198, 174, 52, 184, 78,
         ])
         .expect("A PublicKey from slice");
 
-        let t_addr = Address::from(pub_key);
+        let t_addr = pub_key.to_address(Network::Mainnet);
 
         assert_eq!(format!("{}", t_addr), "t1bmMa1wJDFdbc2TiURQP5BbBz6jHjUBuHq");
     }
 
     #[test]
-    fn empty_script() {
+    fn pubkey_testnet() {
+        let pub_key = PublicKey::from_slice(&[
+            3, 23, 183, 225, 206, 31, 159, 148, 195, 42, 67, 115, 146, 41, 248, 140, 11, 3, 51, 41,
+            111, 180, 110, 143, 114, 134, 88, 73, 198, 174, 52, 184, 78,
+        ])
+        .expect("A PublicKey from slice");
+
+        let t_addr = pub_key.to_address(Network::Testnet);
+
+        assert_eq!(format!("{}", t_addr), "tmTc6trRhbv96kGfA99i7vrFwb5p7BVFwc3");
+    }
+
+    #[test]
+    fn empty_script_mainnet() {
         let script = Script(vec![0; 20]);
 
-        let t_addr = Address::from(script);
+        let t_addr = script.to_address(Network::Mainnet);
 
         assert_eq!(format!("{}", t_addr), "t3Y5pHwfgHbS6pDjj1HLuMFxhFFip1fcJ6g");
+    }
+
+    #[test]
+    fn empty_script_testnet() {
+        let script = Script(vec![0; 20]);
+
+        let t_addr = script.to_address(Network::Testnet);
+
+        assert_eq!(format!("{}", t_addr), "t2L51LcmpA43UMvKTw2Lwtt9LMjwyqU2V1P");
     }
 
     #[test]
