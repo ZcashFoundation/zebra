@@ -15,7 +15,7 @@ use zebra_chain::{
     transparent::{Address, Output, ScriptForNetwork},
 };
 
-use crate::block::subsidy::general::{block_subsidy, halving_divisor};
+use crate::block::subsidy::general::block_subsidy;
 use crate::parameters::subsidy::*;
 
 /// Returns `true` if we are in the founders reward period of the blockchain.
@@ -31,7 +31,7 @@ pub fn founders_reward_active(height: Height, network: Network) -> bool {
 ///
 /// [7.7]: https://zips.z.cash/protocol/protocol.pdf#subsidies
 pub fn founders_reward(height: Height, network: Network) -> Result<Amount<NonNegative>, Error> {
-    if halving_divisor(height, network) == 1 && founders_reward_active(height, network) {
+    if founders_reward_active(height, network) {
         // this calculation is exact, because the block subsidy is divisible by
         // the FOUNDERS_FRACTION_DIVISOR until long after the first halving
         block_subsidy(height, network)? / FOUNDERS_FRACTION_DIVISOR
