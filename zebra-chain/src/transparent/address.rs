@@ -95,7 +95,7 @@ impl fmt::Display for Address {
 impl From<(Script, Network)> for Address {
     fn from((script, network): (Script, Network)) -> Self {
         Address::PayToScriptHash {
-            network: network,
+            network,
             script_hash: Self::hash_payload(&script.0[..]),
         }
     }
@@ -104,7 +104,7 @@ impl From<(Script, Network)> for Address {
 impl From<(PublicKey, Network)> for Address {
     fn from((pub_key, network): (PublicKey, Network)) -> Self {
         Address::PayToPublicKeyHash {
-            network: network,
+            network,
             pub_key_hash: Self::hash_payload(&pub_key.serialize()[..]),
         }
     }
