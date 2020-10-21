@@ -24,20 +24,6 @@ use std::os::unix::process::ExitStatusExt;
 
 mod args;
 
-/// Returns the hexadecimal-encoded string `s` in byte-reversed order.
-pub fn byte_reverse_hex(s: &str) -> String {
-    String::from_utf8(
-        s.as_bytes()
-            .chunks(2)
-            .rev()
-            .map(|c| c.iter())
-            .flatten()
-            .cloned()
-            .collect::<Vec<u8>>(),
-    )
-    .expect("input should be ascii")
-}
-
 /// We limit the memory usage for each checkpoint, based on the cumulative size of
 /// the serialized blocks in the chain. Deserialized blocks are larger, because
 /// they contain pointers and non-compact integers. But they should be within a
@@ -139,7 +125,7 @@ fn main() -> Result<()> {
         let v: Value = serde_json::from_str(&output)?;
 
         // get the values we are interested in
-        let hash: block::Hash = v["hash"].as_str().map(byte_reverse_hex).unwrap().parse()?;
+        let hash: block::Hash = v["hash"].as_str().unwrap().parse()?;
         let height = block::Height(v["height"].as_u64().unwrap() as u32);
         assert!(height <= block::Height::MAX);
         assert_eq!(x, height.0);
@@ -155,7 +141,7 @@ fn main() -> Result<()> {
             || height_gap.0 >= zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP as u32
         {
             // print to output
-            println!("{} {}", height.0, &hex::encode(hash.0),);
+            println!("{} {}", height.0, hash);
 
             // reset counters
             cumulative_bytes = 0;

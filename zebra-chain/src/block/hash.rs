@@ -16,22 +16,26 @@ use super::Header;
 /// block header includes the Merkle root of the transaction Merkle tree, it
 /// binds the entire contents of the block and is used to identify entire blocks.
 ///
-/// Note: Zebra displays transaction and block hashes in their actual byte-order,
-/// not in reversed byte-order.
+/// Note: Zebra displays transaction and block hashes in big-endian byte-order,
+/// following the u256 convention set by Bitcoin and zcashd.
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct Hash(pub [u8; 32]);
 
 impl fmt::Display for Hash {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str(&hex::encode(&self.0))
+        let mut reversed_bytes = self.0;
+        reversed_bytes.reverse();
+        f.write_str(&hex::encode(&reversed_bytes))
     }
 }
 
 impl fmt::Debug for Hash {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut reversed_bytes = self.0;
+        reversed_bytes.reverse();
         f.debug_tuple("block::Hash")
-            .field(&hex::encode(&self.0))
+            .field(&hex::encode(&reversed_bytes))
             .finish()
     }
 }
@@ -66,6 +70,7 @@ impl std::str::FromStr for Hash {
         if hex::decode_to_slice(s, &mut bytes[..]).is_err() {
             Err(SerializationError::Parse("hex decoding error"))
         } else {
+            bytes.reverse();
             Ok(Hash(bytes))
         }
     }

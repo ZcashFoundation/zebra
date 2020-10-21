@@ -20,7 +20,7 @@ fn librustzcash_tx_hash() {
 
     // TxID taken from comment in zebra_test::vectors
     let hash = tx.hash();
-    let expected = "3956b54c11736f4ac5e2c474029cba8f5b83dca2e38f355337e20ce37fbdf064"
+    let expected = "64f0bd7fe30ce23753358fe3a2dc835b8fba9c0274c4e2c54a6f73114cb55639"
         .parse::<Hash>()
         .expect("hash should parse correctly");
 

@@ -11,10 +11,10 @@ pub const GENESIS_PREVIOUS_BLOCK_HASH: block::Hash = block::Hash([0; 32]);
 /// Returns the hash for the genesis block in `network`.
 pub fn genesis_hash(network: Network) -> block::Hash {
     match network {
-        // zcash-cli getblockhash 0 | zebrad revhex
-        Network::Mainnet => "08ce3d9731b000c08338455c8a4a6bd05da16e26b11daa1b917184ece80f0400",
-        // zcash-cli -testnet getblockhash 0 | zebrad revhex
-        Network::Testnet => "382c4a332661c7ed0671f32a34d724619f086c61873bce7c99859dd9920aa605",
+        // zcash-cli getblockhash 0
+        Network::Mainnet => "00040fe8ec8471911baa1db1266ea15dd06b4a8a5c453883c000b031973dce08",
+        // zcash-cli -testnet getblockhash 0
+        Network::Testnet => "05a60a92d99d85997cce3b87616c089f6124d7342af37106edc76126334a2c38",
     }
     .parse()
     .expect("hard-coded hash parses")

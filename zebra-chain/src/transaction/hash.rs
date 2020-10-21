@@ -11,8 +11,8 @@ use super::Transaction;
 
 /// A transaction hash.
 ///
-/// Note: Zebra displays transaction and block hashes in their actual byte-order,
-/// not in reversed byte-order.
+/// Note: Zebra displays transaction and block hashes in big-endian byte-order,
+/// following the u256 convention set by Bitcoin and zcashd.
 #[derive(Copy, Clone, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct Hash(pub [u8; 32]);
@@ -29,14 +29,18 @@ impl<'a> From<&'a Transaction> for Hash {
 
 impl fmt::Display for Hash {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str(&hex::encode(&self.0))
+        let mut reversed_bytes = self.0;
+        reversed_bytes.reverse();
+        f.write_str(&hex::encode(&reversed_bytes))
     }
 }
 
 impl fmt::Debug for Hash {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple("TransactionHash")
-            .field(&hex::encode(&self.0))
+        let mut reversed_bytes = self.0;
+        reversed_bytes.reverse();
+        f.debug_tuple("transaction::Hash")
+            .field(&hex::encode(reversed_bytes))
             .finish()
     }
 }
@@ -49,6 +53,7 @@ impl std::str::FromStr for Hash {
         if hex::decode_to_slice(s, &mut bytes[..]).is_err() {
             Err(SerializationError::Parse("hex decoding error"))
         } else {
+            bytes.reverse();
             Ok(Hash(bytes))
         }
     }
@@ -60,12 +65,12 @@ mod tests {
 
     #[test]
     fn transactionhash_from_str() {
-        let hash: Hash = "bf46b4b5030752fedac6f884976162bbfb29a9398f104a280b3e34d51b416631"
+        let hash: Hash = "3166411bd5343e0b284a108f39a929fbbb62619784f8c6dafe520703b5b446bf"
             .parse()
             .unwrap();
         assert_eq!(
             format!("{:?}", hash),
-            r#"TransactionHash("bf46b4b5030752fedac6f884976162bbfb29a9398f104a280b3e34d51b416631")"#
+            r#"transaction::Hash("3166411bd5343e0b284a108f39a929fbbb62619784f8c6dafe520703b5b446bf")"#
         );
     }
 }
