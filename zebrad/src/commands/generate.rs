@@ -19,23 +19,23 @@ impl Runnable for GenerateCmd {
 #
 # This file can be used as a skeleton for custom configs.
 #
-# This file is generated using zebrad's current defaults. If you want zebrad
-# to automatically use any newer defaults, set the config options you want to
-# keep, and delete the rest.
+# Unspecified fields use default values. Optional fields are Some(field) if the
+# field is present and None if it is absent.
 #
-# The config format is documented here:
+# This file is generated as an example using zebrad's current defaults.
+# You should set only the config options you want to keep, and delete the rest.
+# Only a subset of fields are present in the skeleton, since optional values
+# whose default is None are omitted.
+#
+# The config format (including a complete list of sections and fields) is
+# documented here:
 # https://doc.zebra.zfnd.org/zebrad/config/struct.ZebradConfig.html
-
-# Usage:
-#     zebrad generate -o myzebrad.toml
-#     zebrad -c myzebrad.toml start
 #
-#     zebrad generate -o zebrad.toml
-#     zebrad start
+# zebrad attempts to load configs in the following order:
 #
-# If there is no -c flag on the command line, zebrad looks for zebrad.toml in
-# the user's preference directory. If that file does not exist, zebrad uses the default
-# config.
+# 1. The -c flag on the command line, e.g., `zebrad -c myconfig.toml start`;
+# 2. The file `zebrad.toml` in the users's preference directory (platform-dependent);
+# 3. The default config.
 
 "
         .to_owned();
