@@ -92,24 +92,6 @@ impl fmt::Display for Address {
     }
 }
 
-impl From<(Script, Network)> for Address {
-    fn from((script, network): (Script, Network)) -> Self {
-        Address::PayToScriptHash {
-            network,
-            script_hash: Self::hash_payload(&script.0[..]),
-        }
-    }
-}
-
-impl From<(PublicKey, Network)> for Address {
-    fn from((pub_key, network): (PublicKey, Network)) -> Self {
-        Address::PayToPublicKeyHash {
-            network,
-            pub_key_hash: Self::hash_payload(&pub_key.serialize()[..]),
-        }
-    }
-}
-
 impl std::str::FromStr for Address {
     type Err = SerializationError;
 
@@ -186,6 +168,29 @@ impl ZcashDeserialize for Address {
     }
 }
 
+trait ToAddressWithNetwork {
+    /// Convert `self` to an `Address`, given the current `network`.
+    fn to_address(&self, network: Network) -> Address;
+}
+
+impl ToAddressWithNetwork for Script {
+    fn to_address(&self, network: Network) -> Address {
+        Address::PayToScriptHash {
+            network,
+            script_hash: Address::hash_payload(&self.0[..]),
+        }
+    }
+}
+
+impl ToAddressWithNetwork for PublicKey {
+    fn to_address(&self, network: Network) -> Address {
+        Address::PayToPublicKeyHash {
+            network,
+            pub_key_hash: Address::hash_payload(&self.serialize()[..]),
+        }
+    }
+}
+
 impl Address {
     /// A hash of a transparent address payload, as used in
     /// transparent pay-to-script-hash and pay-to-publickey-hash
@@ -258,7 +263,7 @@ mod tests {
         ])
         .expect("A PublicKey from slice");
 
-        let t_addr = Address::from((pub_key, Network::Mainnet));
+        let t_addr = pub_key.to_address(Network::Mainnet);
 
         assert_eq!(format!("{}", t_addr), "t1bmMa1wJDFdbc2TiURQP5BbBz6jHjUBuHq");
     }
@@ -271,7 +276,7 @@ mod tests {
         ])
         .expect("A PublicKey from slice");
 
-        let t_addr = Address::from((pub_key, Network::Testnet));
+        let t_addr = pub_key.to_address(Network::Testnet);
 
         assert_eq!(format!("{}", t_addr), "tmTc6trRhbv96kGfA99i7vrFwb5p7BVFwc3");
     }
@@ -280,7 +285,7 @@ mod tests {
     fn empty_script_mainnet() {
         let script = Script(vec![0; 20]);
 
-        let t_addr = Address::from((script, Network::Mainnet));
+        let t_addr = script.to_address(Network::Mainnet);
 
         assert_eq!(format!("{}", t_addr), "t3Y5pHwfgHbS6pDjj1HLuMFxhFFip1fcJ6g");
     }
@@ -289,7 +294,7 @@ mod tests {
     fn empty_script_testnet() {
         let script = Script(vec![0; 20]);
 
-        let t_addr = Address::from((script, Network::Testnet));
+        let t_addr = script.to_address(Network::Testnet);
 
         assert_eq!(format!("{}", t_addr), "t2L51LcmpA43UMvKTw2Lwtt9LMjwyqU2V1P");
     }
