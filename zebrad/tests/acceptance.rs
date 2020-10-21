@@ -488,8 +488,10 @@ fn sync_one_checkpoint_testnet() -> Result<()> {
 #[test]
 #[ignore]
 fn sync_two_checkpoints_mainnet() -> Result<()> {
+    // We can't say "block_count=2000" here, because Zebra can verify
+    // multiple checkpoints at the same time.
     sync_until(
-        "verified checkpoint range block_count=2000",
+        "verified checkpoint range block_count=[^0]",
         Mainnet,
         Duration::from_secs(120),
     )
@@ -503,7 +505,7 @@ fn sync_two_checkpoints_mainnet() -> Result<()> {
 #[ignore]
 fn sync_two_checkpoints_testnet() -> Result<()> {
     sync_until(
-        "verified checkpoint range block_count=2000",
+        "verified checkpoint range block_count=[^0]",
         Testnet,
         Duration::from_secs(120),
     )
