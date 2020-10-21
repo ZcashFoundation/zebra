@@ -71,15 +71,14 @@ pub fn founders_reward_address(height: Height, network: Network) -> Result<Addre
         );
     }
 
-    let address_index = 1 + (adjusted_height.0 / founders_address_change_interval().0);
+    let address_index = (adjusted_height.0 / founders_address_change_interval().0) as usize;
+    let addresses = match network {
+        Network::Mainnet => FOUNDERS_REWARD_ADDRESSES_MAINNET,
+        Network::Testnet => FOUNDERS_REWARD_ADDRESSES_TESTNET,
+    };
+    let address: Address =
+        Address::from_str(addresses[address_index]).expect("we should get a taddress here");
 
-    let mut addresses = FOUNDERS_REWARD_ADDRESSES_MAINNET;
-    if network == Network::Testnet {
-        addresses = FOUNDERS_REWARD_ADDRESSES_TESTNET;
-    }
-
-    let address: Address = Address::from_str(addresses[(address_index - 1) as usize])
-        .expect("we should get a taddress here");
     Ok(address)
 }
 
