@@ -92,19 +92,19 @@ impl fmt::Display for Address {
     }
 }
 
-impl From<Script> for Address {
-    fn from(script: Script) -> Self {
+impl From<(Script, Network)> for Address {
+    fn from((script, network): (Script, Network)) -> Self {
         Address::PayToScriptHash {
-            network: Network::Mainnet,
+            network: network,
             script_hash: Self::hash_payload(&script.0[..]),
         }
     }
 }
 
-impl From<PublicKey> for Address {
-    fn from(pub_key: PublicKey) -> Self {
+impl From<(PublicKey, Network)> for Address {
+    fn from((pub_key, network): (PublicKey, Network)) -> Self {
         Address::PayToPublicKeyHash {
-            network: Network::Mainnet,
+            network: network,
             pub_key_hash: Self::hash_payload(&pub_key.serialize()[..]),
         }
     }
@@ -251,25 +251,47 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pubkey() {
+    fn pubkey_mainnet() {
         let pub_key = PublicKey::from_slice(&[
             3, 23, 183, 225, 206, 31, 159, 148, 195, 42, 67, 115, 146, 41, 248, 140, 11, 3, 51, 41,
             111, 180, 110, 143, 114, 134, 88, 73, 198, 174, 52, 184, 78,
         ])
         .expect("A PublicKey from slice");
 
-        let t_addr = Address::from(pub_key);
+        let t_addr = Address::from((pub_key, Network::Mainnet));
 
         assert_eq!(format!("{}", t_addr), "t1bmMa1wJDFdbc2TiURQP5BbBz6jHjUBuHq");
     }
 
     #[test]
-    fn empty_script() {
+    fn pubkey_testnet() {
+        let pub_key = PublicKey::from_slice(&[
+            3, 23, 183, 225, 206, 31, 159, 148, 195, 42, 67, 115, 146, 41, 248, 140, 11, 3, 51, 41,
+            111, 180, 110, 143, 114, 134, 88, 73, 198, 174, 52, 184, 78,
+        ])
+        .expect("A PublicKey from slice");
+
+        let t_addr = Address::from((pub_key, Network::Testnet));
+
+        assert_eq!(format!("{}", t_addr), "tmTc6trRhbv96kGfA99i7vrFwb5p7BVFwc3");
+    }
+
+    #[test]
+    fn empty_script_mainnet() {
         let script = Script(vec![0; 20]);
 
-        let t_addr = Address::from(script);
+        let t_addr = Address::from((script, Network::Mainnet));
 
         assert_eq!(format!("{}", t_addr), "t3Y5pHwfgHbS6pDjj1HLuMFxhFFip1fcJ6g");
+    }
+
+    #[test]
+    fn empty_script_testnet() {
+        let script = Script(vec![0; 20]);
+
+        let t_addr = Address::from((script, Network::Testnet));
+
+        assert_eq!(format!("{}", t_addr), "t2L51LcmpA43UMvKTw2Lwtt9LMjwyqU2V1P");
     }
 
     #[test]
