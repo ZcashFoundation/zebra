@@ -168,18 +168,26 @@ where
         // due to protocol limitations
         self.request_genesis().await?;
 
+        // Distinguishes a restart from a start, so we don't delay when starting
+        // the sync process, but we can keep restart logic in one place.
+        let mut started_once = false;
+
         'sync: loop {
-            // Wipe state from prevous iterations.
-            self.prospective_tips = HashSet::new();
-            self.downloads.cancel_all();
-            self.update_metrics();
+            if started_once {
+                tracing::info!(timeout = ?SYNC_RESTART_TIMEOUT, "waiting to restart sync");
+                self.prospective_tips = HashSet::new();
+                self.downloads.cancel_all();
+                self.update_metrics();
+                delay_for(SYNC_RESTART_TIMEOUT).await;
+            } else {
+                started_once = true;
+            }
 
             tracing::info!("starting sync, obtaining new tips");
-            if self.obtain_tips().await.is_err() || self.prospective_tips.is_empty() {
-                tracing::warn!("failed to obtain tips, waiting to restart sync");
-                delay_for(SYNC_RESTART_TIMEOUT).await;
+            if let Err(e) = self.obtain_tips().await {
+                tracing::warn!(?e);
                 continue 'sync;
-            };
+            }
             self.update_metrics();
 
             while !self.prospective_tips.is_empty() {
@@ -190,8 +198,7 @@ where
                             tracing::trace!(?hash, "verified and committed block to state");
                         }
                         Err(e) => {
-                            tracing::warn!(?e, "waiting to restart sync");
-                            delay_for(SYNC_RESTART_TIMEOUT).await;
+                            tracing::warn!(?e);
                             continue 'sync;
                         }
                     }
@@ -223,8 +230,7 @@ where
                             tracing::trace!(?hash, "verified and committed block to state");
                         }
                         Err(e) => {
-                            tracing::warn!(?e, "waiting to restart sync");
-                            delay_for(SYNC_RESTART_TIMEOUT).await;
+                            tracing::warn!(?e);
                             continue 'sync;
                         }
                     }
@@ -239,12 +245,14 @@ where
                     "extending tips",
                 );
 
-                let _ = self.extend_tips().await;
+                if let Err(e) = self.extend_tips().await {
+                    tracing::warn!(?e);
+                    continue 'sync;
+                }
                 self.update_metrics();
             }
 
-            tracing::info!("exhausted tips, waiting to restart sync");
-            delay_for(SYNC_RESTART_TIMEOUT).await;
+            tracing::info!("exhausted prospective tip set");
         }
     }
 
@@ -479,7 +487,7 @@ where
                     }
                     Ok(_) => unreachable!("network returned wrong response"),
                     // We ignore this error because we made multiple fanout requests.
-                    Err(e) => tracing::debug!("{:?}", e),
+                    Err(e) => tracing::debug!(?e),
                 }
             }
         }
