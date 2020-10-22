@@ -492,15 +492,7 @@ where
         );
 
         let is_checkpoint = self.checkpoint_list.contains(height);
-        tracing::trace!(?height, ?hash, ?is_checkpoint, "Queued block");
-
-        // TODO(teor):
-        //   - Remove this log once the CheckpointVerifier is working?
-        //   - Modify the default filter or add another log, so users see
-        //     regular download progress info (vs verification info)
-        if is_checkpoint {
-            tracing::info!(?height, ?hash, ?is_checkpoint, "Queued checkpoint block");
-        }
+        tracing::debug!(?height, ?hash, ?is_checkpoint, "queued block");
 
         rx
     }
@@ -801,7 +793,7 @@ where
         Poll::Ready(Ok(()))
     }
 
-    #[instrument(name = "checkpoint_call", skip(self, block))]
+    #[instrument(name = "checkpoint", skip(self, block))]
     fn call(&mut self, block: Arc<Block>) -> Self::Future {
         // Immediately reject all incoming blocks that arrive after we've finished.
         if let FinalCheckpoint = self.previous_checkpoint_height() {
