@@ -27,11 +27,6 @@ use crate::{
     BoxError, Config,
 };
 
-/// The maximum expected gap between blocks.
-///
-/// Used to identify unexpected out of order blocks.
-const MAX_EXPECTED_BLOCK_GAP: u32 = 100_000;
-
 /// The chain verifier routes requests to either the checkpoint verifier or the
 /// block verifier, depending on the maximum checkpoint height.
 struct ChainVerifier<S>
@@ -42,7 +37,6 @@ where
     block: BlockVerifier<S>,
     checkpoint: CheckpointVerifier<S>,
     max_checkpoint_height: block::Height,
-    last_block_height: Option<block::Height>,
 }
 
 #[derive(Debug, Display, Error)]
@@ -76,60 +70,20 @@ where
     }
 
     fn call(&mut self, block: Arc<Block>) -> Self::Future {
-        let height = block.coinbase_height();
-        let span = tracing::info_span!("ChainVerifier::call", ?height);
-        let _entered = span.enter();
-        tracing::debug!("verifying new block");
-
-        // TODO: do we still need this logging?
-        // Log an info-level message on unexpected out of order blocks
-        let is_unexpected_gap = match (height, self.last_block_height) {
-            (Some(block::Height(height)), Some(block::Height(last_block_height)))
-                if (height > last_block_height + MAX_EXPECTED_BLOCK_GAP)
-                    || (height + MAX_EXPECTED_BLOCK_GAP < last_block_height) =>
-            {
-                self.last_block_height = Some(block::Height(height));
-                true
-            }
-            (Some(height), _) => {
-                self.last_block_height = Some(height);
-                false
-            }
-            // The other cases are covered by the verifiers
-            _ => false,
-        };
-        // Log a message on unexpected out of order blocks.
-        //
-        // The sync service rejects most of these blocks, but we
-        // still want to know if a large number get through.
-        if is_unexpected_gap {
-            tracing::debug!(
-                "large block height gap: this block or the previous block is out of order"
-            );
+        match block.coinbase_height() {
+            Some(height) if height <= self.max_checkpoint_height => self
+                .checkpoint
+                .call(block)
+                .map_err(VerifyChainError::Checkpoint)
+                .boxed(),
+            // This also covers blocks with no height, which the block verifier
+            // will reject immediately.
+            _ => self
+                .block
+                .call(block)
+                .map_err(VerifyChainError::Block)
+                .boxed(),
         }
-
-        self.last_block_height = height;
-
-        if let Some(height) = height {
-            if height <= self.max_checkpoint_height {
-                return self
-                    .checkpoint
-                    .call(block)
-                    .map_err(VerifyChainError::Checkpoint)
-                    .boxed();
-            }
-        }
-
-        // For the purposes of routing requests, we can send blocks
-        // with no height to the block verifier, which will reject them.
-        //
-        // We choose the block verifier because it doesn't have any
-        // internal state, so it will always return the same error for a
-        // block with no height.
-        self.block
-            .call(block)
-            .map_err(VerifyChainError::Block)
-            .boxed()
     }
 }
 
@@ -177,7 +131,6 @@ where
             block,
             checkpoint,
             max_checkpoint_height,
-            last_block_height: None,
         }),
         3,
     )
