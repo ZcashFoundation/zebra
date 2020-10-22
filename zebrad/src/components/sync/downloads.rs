@@ -110,7 +110,7 @@ where
     /// only if the network service fails. It returns immediately after queuing
     /// the request.
     #[instrument(skip(self))]
-    pub async fn queue_download(&mut self, hash: block::Hash) -> Result<(), BoxError> {
+    pub async fn download_and_verify(&mut self, hash: block::Hash) -> Result<(), BoxError> {
         if self.cancel_handles.contains_key(&hash) {
             tracing::debug!("skipping hash already queued for download");
             return Ok(());
@@ -134,7 +134,6 @@ where
         // This oneshot is used to signal cancellation to the download task.
         let (cancel_tx, mut cancel_rx) = oneshot::channel::<()>();
 
-        let span = tracing::warn_span!("block_fetch_verify", ?hash);
         let mut verifier = self.verifier.clone();
         let task = tokio::spawn(
             async move {
@@ -170,7 +169,7 @@ where
 
                 verification
             }
-            .instrument(span)
+            .in_current_span()
             // Tack the hash onto the error so we can remove the cancel handle
             // on failure as well as on success.
             .map_err(move |e| (e, hash)),
