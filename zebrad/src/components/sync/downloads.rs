@@ -111,6 +111,11 @@ where
     /// the request.
     #[instrument(skip(self))]
     pub async fn queue_download(&mut self, hash: block::Hash) -> Result<(), BoxError> {
+        if self.cancel_handles.contains_key(&hash) {
+            tracing::debug!("skipping hash already queued for download");
+            return Ok(());
+        }
+
         // We construct the block requests sequentially, waiting for the peer
         // set to be ready to process each request. This ensures that we start
         // block downloads in the order we want them (though they may resolve
@@ -171,20 +176,28 @@ where
             .map_err(move |e| (e, hash)),
         );
 
-        self.cancel_handles.insert(hash, cancel_tx);
         self.pending.push(task);
+        // XXX replace with expect_none when stable
+        assert!(
+            self.cancel_handles.insert(hash, cancel_tx).is_none(),
+            "blocks are only queued once"
+        );
 
         Ok(())
     }
 
     /// Cancel all running tasks and reset the downloader state.
     pub fn cancel_all(&mut self) {
+        // Replace the pending task list with an empty one and drop it.
+        let _ = std::mem::take(&mut self.pending);
         // Signal cancellation to all running tasks.
+        // Since we already dropped the JoinHandles above, they should
+        // fail silently.
         for (_hash, cancel) in self.cancel_handles.drain() {
             let _ = cancel.send(());
         }
-        // Replace the pending task list with an empty one and drop it.
-        let _ = std::mem::take(&mut self.pending);
+        assert!(self.pending.is_empty());
+        assert!(self.cancel_handles.is_empty());
     }
 
     /// Get the number of currently in-flight download tasks.
