@@ -17,8 +17,6 @@ use std::{
     cmp::{Ordering, PartialEq, PartialOrd},
     convert::TryFrom,
     fmt,
-    ops::Add,
-    ops::AddAssign,
 };
 
 use primitive_types::U256;
@@ -401,27 +399,23 @@ impl PartialOrd<ExpandedDifficulty> for block::Hash {
     }
 }
 
-impl Add for Work {
-    type Output = Self;
+impl std::ops::Add for Work {
+    type Output = PartialCumulativeWork;
 
-    fn add(self, rhs: Work) -> Self {
-        let result = self
-            .0
-            .checked_add(rhs.0)
-            .expect("Work values do not overflow");
-        Work(result)
-    }
-}
-
-impl AddAssign for Work {
-    fn add_assign(&mut self, rhs: Work) {
-        *self = *self + rhs;
+    fn add(self, rhs: Work) -> PartialCumulativeWork {
+        PartialCumulativeWork::from(self) + rhs
     }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 /// Partial work used to track relative work in non-finalized chains
 pub struct PartialCumulativeWork(u128);
+
+impl From<Work> for PartialCumulativeWork {
+    fn from(work: Work) -> Self {
+        PartialCumulativeWork(work.0)
+    }
+}
 
 impl std::ops::Add<Work> for PartialCumulativeWork {
     type Output = PartialCumulativeWork;

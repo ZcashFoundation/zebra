@@ -201,19 +201,35 @@ proptest! {
         let work2 = compact2.to_work();
 
         if let (Some(work1), Some(work2)) = (work1, work2) {
-            let work_limit = Work(u128::MAX/2);
-            if work1 < work_limit && work2 < work_limit {
-                let work_total = work1 + work2;
-                prop_assert!(work_total >= work1);
-                prop_assert!(work_total >= work2);
-            } else if work1 < work_limit {
-                let work_total = work1 + work1;
-                prop_assert!(work_total >= work1);
-            } else if work2 < work_limit {
-                let work_total = work2 + work2;
-                prop_assert!(work_total >= work2);
-            }
-        }
-   }
+            let work_max = PartialCumulativeWork::from(Work(u128::MAX));
 
+            // If the sum won't panic
+            if work_max - work1 <= PartialCumulativeWork::from(work2) {
+                let work_total = work1 + work2;
+                prop_assert!(work_total >= PartialCumulativeWork::from(work1));
+                prop_assert!(work_total >= PartialCumulativeWork::from(work2));
+            }
+
+
+    /// Check that the work values for two random ExpandedDifficulties add
+    /// correctly.
+    #[test]
+    fn prop_work(work1 in any::<Work>(), work2 in any::<Work>()) {
+        // If the sum won't panic
+        if work1.0.checked_add(work2.0).is_some() {
+            let work_total = work1 + work2;
+            prop_assert!(work_total >= PartialCumulativeWork::from(work1));
+            prop_assert!(work_total >= PartialCumulativeWork::from(work2));
+        }
+
+        if work1.0.checked_add(work1.0).is_some() {
+            let work_total = work1 + work1;
+            prop_assert!(work_total >= PartialCumulativeWork::from(work1));
+        }
+
+        if work2.0.checked_add(work2.0).is_some() {
+            let work_total = work2 + work2;
+            prop_assert!(work_total >= PartialCumulativeWork::from(work2));
+        }
+    }
 }

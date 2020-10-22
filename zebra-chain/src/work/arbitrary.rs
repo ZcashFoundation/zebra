@@ -69,7 +69,15 @@ impl Arbitrary for Work {
         // In the Zcash protocol, a Work is converted from an ExpandedDifficulty.
         // But some randomised difficulties are impractically large, and will
         // never appear in any real-world block. So we just use a random Work value.
-        (any::<u128>()).prop_map(Work).boxed()
+        (any::<u128>())
+            .prop_filter_map("zero Work values are invalid", |w| {
+                if w == 0 {
+                    None
+                } else {
+                    Work(w).into()
+                }
+            })
+            .boxed()
     }
 
     type Strategy = BoxedStrategy<Self>;
@@ -83,7 +91,7 @@ impl Arbitrary for PartialCumulativeWork {
         // But our Work values are randomised, rather than being derived from real-world
         // difficulties. So we don't need to sum multiple Work values here.
         (any::<Work>())
-            .prop_map(|w| PartialCumulativeWork::default() + w)
+            .prop_map(PartialCumulativeWork::from)
             .boxed()
     }
 

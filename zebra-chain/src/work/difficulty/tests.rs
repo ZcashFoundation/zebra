@@ -262,11 +262,11 @@ fn block_difficulty() -> Result<(), Report> {
     let diff_one = ExpandedDifficulty(U256::one());
     let diff_max = ExpandedDifficulty(U256::MAX);
 
-    let work_zero = Work(0);
-    let work_max = Work(u128::MAX);
+    let work_zero = PartialCumulativeWork(0);
+    let work_max = PartialCumulativeWork(u128::MAX);
 
-    let mut cumulative_work = Work::default();
-    let mut previous_cumulative_work = Work::default();
+    let mut cumulative_work = PartialCumulativeWork::default();
+    let mut previous_cumulative_work = PartialCumulativeWork::default();
     for (block, height, hash) in blockchain {
         /// SPANDOC: Calculate the threshold for block {?height}
         let threshold = block
@@ -301,8 +301,8 @@ fn block_difficulty() -> Result<(), Report> {
                 .expect("Chain blocks have valid work.");
 
             // also check the comparison operators work
-            assert!(work > work_zero);
-            assert!(work < work_max);
+            assert!(PartialCumulativeWork::from(work) > work_zero);
+            assert!(PartialCumulativeWork::from(work) < work_max);
 
             cumulative_work += work;
             assert!(cumulative_work > work_zero);
