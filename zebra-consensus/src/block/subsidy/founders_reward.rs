@@ -15,7 +15,7 @@ use zebra_chain::{
     transparent::{address::ToAddressWithNetwork, Address, Output},
 };
 
-use crate::block::subsidy::general::block_subsidy;
+use crate::block::subsidy::general::{block_subsidy, halving_divisor};
 use crate::parameters::subsidy::*;
 
 /// Returns `true` if we are in the founders reward period of the blockchain.
@@ -24,7 +24,7 @@ pub fn founders_reward_active(height: Height, network: Network) -> bool {
         .activation_height(network)
         .expect("Canopy activation height is known");
 
-    height < canopy_activation_height
+    height < canopy_activation_height && halving_divisor(height, network) == 1
 }
 
 /// `FoundersReward(height)` as described in [protocol specification §7.7][7.7]
@@ -182,8 +182,10 @@ mod test {
         // the index in the founders reward address array that will be active at height
         let mut index = 0;
 
-        // from genesis to blossom the founder reward address changes at FOUNDER_ADDRESS_CHANGE_INTERVAL
-        for n in (1..blossom_height.0).step_by(founders_address_change_interval().0 as usize) {
+        // from SLOW_START_SHIFT to blossom the founder reward address changes at FOUNDER_ADDRESS_CHANGE_INTERVAL
+        for n in (SLOW_START_SHIFT.0..blossom_height.0)
+            .step_by(founders_address_change_interval().0 as usize)
+        {
             assert_eq!(
                 founders_reward_address(Height(n), network)?,
                 Address::from_str(addresses[index as usize]).expect("an address")
