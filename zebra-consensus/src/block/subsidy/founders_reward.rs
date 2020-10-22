@@ -12,7 +12,7 @@ use zebra_chain::{
     block::Height,
     parameters::{Network, NetworkUpgrade::*},
     transaction::Transaction,
-    transparent::{Address, Output, ScriptForNetwork},
+    transparent::{address::ToAddressWithNetwork, Address, Output},
 };
 
 use crate::block::subsidy::general::block_subsidy;
@@ -91,9 +91,7 @@ pub fn find_output_with_address(
     transaction
         .outputs()
         .iter()
-        .filter(|o| {
-            o.lock_script.clone().to_address(network) == address
-        })
+        .filter(|o| o.lock_script.to_address(network) == address)
         .cloned()
         .collect()
 }

@@ -1,7 +1,7 @@
 //! Transparent-related (Bitcoin-inherited) functionality.
 #![allow(clippy::unit_arg)]
 
-mod address;
+pub mod address;
 mod keys;
 mod script;
 mod serialize;
@@ -19,9 +19,7 @@ mod prop;
 
 use crate::{
     amount::{Amount, NonNegative},
-    block,
-    parameters::Network,
-    transaction,
+    block, transaction,
 };
 
 /// Arbitrary data inserted by miners into a coinbase transaction.
@@ -114,10 +112,4 @@ pub struct Output {
 
     /// The lock script defines the conditions under which this output can be spent.
     pub lock_script: Script,
-}
-
-/// Custom type that holds a script and the network it belongs to.
-pub struct ScriptForNetwork {
-    pub script: Script,
-    pub network: Network,
 }

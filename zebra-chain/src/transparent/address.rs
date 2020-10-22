@@ -14,7 +14,7 @@ use crate::{
     serialization::{SerializationError, ZcashDeserialize, ZcashSerialize},
 };
 
-use super::{Script, ScriptForNetwork};
+use super::Script;
 
 /// Magic numbers used to identify what networks Transparent Addresses
 /// are associated with.
@@ -183,7 +183,7 @@ impl ZcashDeserialize for Address {
     }
 }
 
-trait ToAddressWithNetwork {
+pub trait ToAddressWithNetwork {
     /// Convert `self` to an `Address`, given the current `network`.
     fn to_address(&self, network: Network) -> Address;
 }
