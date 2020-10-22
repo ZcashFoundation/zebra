@@ -37,7 +37,8 @@ jobs:
         with:
           command: test
           args: --verbose --all
-      - name: Run zebrad sync tests
+      # Explicitly run any tests that are usually #[ignored]
+      - name: Run zebrad large sync tests
         env:
           RUST_BACKTRACE: full
         uses: actions-rs/cargo@v1
