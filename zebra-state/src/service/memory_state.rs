@@ -641,6 +641,11 @@ impl QueuedBlocks {
                 .remove(&hash);
         }
     }
+
+    /// Return the queued block if it has already been registered
+    pub fn get(&self, hash: &block::Hash) -> Option<&QueuedBlock> {
+        self.blocks.get(&hash)
+    }
 }
 
 #[cfg(test)]

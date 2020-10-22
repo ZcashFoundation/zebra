@@ -73,14 +73,30 @@ impl StateService {
     /// in RFC0005.
     ///
     /// [1]: https://zebra.zfnd.org/dev/rfcs/0005-state-updates.html#committing-non-finalized-blocks
-    #[instrument(skip(self, new))]
-    fn queue_and_commit_non_finalized_blocks(&mut self, new: QueuedBlock) {
-        let parent_hash = new.block.header.previous_block_hash;
+    #[instrument(skip(self, block))]
+    fn queue_and_commit_non_finalized_blocks(
+        &mut self,
+        block: Arc<Block>,
+    ) -> broadcast::Receiver<Result<block::Hash, CloneError>> {
+        let hash = block.hash();
+        let parent_hash = block.header.previous_block_hash;
 
-        self.queued_blocks.queue(new);
+        if self.contains(&block) {
+            let (rsp_tx, rsp_rx) = broadcast::channel(1);
+            let _ = rsp_tx.send(Ok(hash));
+            return rsp_rx;
+        }
+
+        let rsp_rx = if let Some(queued_block) = self.queued_blocks.get(&hash) {
+            queued_block.rsp_tx.subscribe()
+        } else {
+            let (rsp_tx, rsp_rx) = broadcast::channel(1);
+            self.queued_blocks.queue(QueuedBlock { block, rsp_tx });
+            rsp_rx
+        };
 
         if !self.can_fork_chain_at(&parent_hash) {
-            return;
+            return rsp_rx;
         }
 
         self.process_queued(parent_hash);
@@ -96,6 +112,8 @@ impl StateService {
             .prune_by_height(self.sled.finalized_tip_height().expect(
             "Finalized state must have at least one block before committing non-finalized state",
         ));
+
+        rsp_rx
     }
 
     /// Run contextual validation on `block` and add it to the non-finalized
@@ -116,6 +134,17 @@ impl StateService {
     /// Returns `true` if `hash` is a valid previous block hash for new non-finalized blocks.
     fn can_fork_chain_at(&self, hash: &block::Hash) -> bool {
         self.mem.any_chain_contains(hash) || &self.sled.finalized_tip_hash() == hash
+    }
+
+    /// Returns true if the given hash has been committed to either the finalized
+    /// or non-finalized state.
+    fn contains(&self, block: &Block) -> bool {
+        let hash = block.hash();
+        let height = block
+            .coinbase_height()
+            .expect("coinbase heights should be valid");
+
+        self.mem.any_chain_contains(&hash) || self.sled.get_hash(height) == Some(hash)
     }
 
     /// Attempt to validate and commit all queued blocks whose parents have
@@ -179,10 +208,8 @@ impl Service<Request> for StateService {
     fn call(&mut self, req: Request) -> Self::Future {
         match req {
             Request::CommitBlock { block } => {
-                let (rsp_tx, mut rsp_rx) = broadcast::channel(1);
-
                 self.pending_utxos.check_block(&block);
-                self.queue_and_commit_non_finalized_blocks(QueuedBlock { block, rsp_tx });
+                let mut rsp_rx = self.queue_and_commit_non_finalized_blocks(block);
 
                 async move {
                     rsp_rx

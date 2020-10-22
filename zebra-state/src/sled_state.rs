@@ -289,6 +289,13 @@ impl FinalizedState {
         }
     }
 
+    pub fn get_hash(&self, height: block::Height) -> Option<block::Hash> {
+        self.hash_by_height
+            .get(&height.0.to_be_bytes())
+            .expect("sled errors aren't handled")
+            .map(|bytes| block::Hash(bytes.as_ref().try_into().unwrap()))
+    }
+
     pub fn block(
         &self,
         hash_or_height: HashOrHeight,
