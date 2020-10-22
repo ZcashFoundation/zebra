@@ -506,7 +506,7 @@ where
         // So we just download and verify the genesis block here.
         while !self.state_contains(self.genesis_hash).await? {
             self.downloads
-                .queue_download(self.genesis_hash)
+                .download_and_verify(self.genesis_hash)
                 .await
                 .map_err(|e| eyre!(e))?;
             match self.downloads.next().await.expect("downloads is nonempty") {
@@ -531,7 +531,7 @@ where
             }
 
             self.downloads
-                .queue_download(hash)
+                .download_and_verify(hash)
                 .await
                 .map_err(|e| eyre!(e))?;
         }
