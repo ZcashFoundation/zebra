@@ -10,7 +10,7 @@ use std::{
 use futures::future::{FutureExt, TryFutureExt};
 use memory_state::{NonFinalizedState, QueuedBlocks};
 use tokio::sync::broadcast;
-use tower::{buffer::Buffer, util::BoxService, Service};
+use tower::{util::BoxService, Service};
 use tracing::instrument;
 use zebra_chain::{
     block::{self, Block},
@@ -253,13 +253,10 @@ impl Service<Request> for StateService {
 ///
 /// Each `network` has its own separate sled database.
 ///
-/// The resulting service is clonable, to provide shared access to a common chain
-/// state. It's possible to construct multiple state services in the same
-/// application (as long as they, e.g., use different storage locations), but
-/// doing so is probably not what you want.
-pub fn init(
-    config: Config,
-    network: Network,
-) -> Buffer<BoxService<Request, Response, BoxError>, Request> {
-    Buffer::new(BoxService::new(StateService::new(config, network)), 3)
+/// To share access to the state, wrap the returned service in a `Buffer`. It's
+/// possible to construct multiple state services in the same application (as
+/// long as they, e.g., use different storage locations), but doing so is
+/// probably not what you want.
+pub fn init(config: Config, network: Network) -> BoxService<Request, Response, BoxError> {
+    BoxService::new(StateService::new(config, network))
 }
