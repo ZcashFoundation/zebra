@@ -45,13 +45,9 @@ const BLOCK_DOWNLOAD_RETRY_LIMIT: usize = 2;
 const LOOKAHEAD_LIMIT: usize = zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP * 2;
 
 /// Controls how long we wait for a tips response to return.
-///
-/// The network layer also imposes a timeout on requests.
 const TIPS_RESPONSE_TIMEOUT: Duration = Duration::from_secs(6);
 
 /// Controls how long we wait for a block download request to complete.
-///
-/// The network layer also imposes a timeout on requests.
 const BLOCK_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// The maximum amount of time that Zebra should take to download a checkpoint
