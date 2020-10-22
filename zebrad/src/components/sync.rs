@@ -368,8 +368,14 @@ where
 
         tracing::debug!(?self.prospective_tips);
 
-        self.request_blocks(download_set.into_iter().collect())
-            .await?;
+        // Check that the new tips we got are actually unknown.
+        for hash in &download_set {
+            tracing::debug!(?hash, "checking if state contains hash");
+            if self.state_contains(*hash).await? {
+                return Err(eyre!("queued download of hash behind our chain tip"));
+            }
+        }
+        self.request_blocks(download_set).await?;
 
         Ok(())
     }
@@ -488,8 +494,7 @@ where
             }
         }
 
-        self.request_blocks(download_set.into_iter().collect())
-            .await?;
+        self.request_blocks(download_set).await?;
 
         Ok(())
     }
@@ -521,16 +526,9 @@ where
     }
 
     /// Queue download and verify tasks for each block that isn't currently known to our node
-    async fn request_blocks(&mut self, hashes: Vec<block::Hash>) -> Result<(), Report> {
+    async fn request_blocks(&mut self, hashes: HashSet<block::Hash>) -> Result<(), Report> {
         tracing::debug!(hashes.len = hashes.len(), "requesting blocks");
         for hash in hashes.into_iter() {
-            // If we've queued the download of a hash behind our current chain tip,
-            // we've been given bad responses by our peers.  Abort the sync and restart.
-            tracing::debug!(?hash, "checking if state contains hash");
-            if self.state_contains(hash).await? {
-                return Err(eyre!("queued download of hash behind our chain tip"));
-            }
-
             self.downloads
                 .download_and_verify(hash)
                 .await
