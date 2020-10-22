@@ -526,6 +526,7 @@ where
         for hash in hashes.into_iter() {
             // If we've queued the download of a hash behind our current chain tip,
             // we've been given bad responses by our peers.  Abort the sync and restart.
+            tracing::debug!(?hash, "checking if state contains hash");
             if self.state_contains(hash).await? {
                 return Err(eyre!("queued download of hash behind our chain tip"));
             }
