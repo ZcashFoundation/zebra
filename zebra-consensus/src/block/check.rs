@@ -127,14 +127,17 @@ pub fn subsidy_is_valid(block: &Block, network: Network) -> Result<(), BlockErro
             network,
         );
 
-        if !matching_values.is_empty()
-            && !matching_address.is_empty()
-            && matching_values == matching_address
-        {
-            Ok(())
-        } else {
-            Err(SubsidyError::FoundersRewardNotFound)?
+        if matching_values.is_empty() {
+            return Err(SubsidyError::FoundersRewardAmountNotFound)?;
         }
+        if matching_address.is_empty() {
+            return Err(SubsidyError::FoundersRewardAddressNotFound)?;
+        }
+        if matching_values != matching_address {
+            return Err(SubsidyError::FoundersRewardDifferentOutput)?;
+        }
+
+        Ok(())
     } else if halving_div < 4 {
         // Funding streams are paid from Canopy activation to the second halving
         // Note: Canopy activation is at the first halving on mainnet, but not on testnet

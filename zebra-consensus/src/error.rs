@@ -16,8 +16,14 @@ pub enum SubsidyError {
     #[error("no coinbase transaction in block")]
     NoCoinbase,
 
-    #[error("founders reward output not found")]
-    FoundersRewardNotFound,
+    #[error("founders reward amount not found in output")]
+    FoundersRewardAmountNotFound,
+
+    #[error("founders reward address not found in output")]
+    FoundersRewardAddressNotFound,
+
+    #[error("founders reward amount and address found but they are not in the same output")]
+    FoundersRewardDifferentOutput,
 }
 
 #[derive(Error, Debug, PartialEq)]

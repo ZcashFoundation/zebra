@@ -379,7 +379,8 @@ fn founders_reward_validation_failure() -> Result<(), Report> {
         Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])
             .expect("block should deserialize");
 
-    // Build the new transaction with modified coinbase outputs
+    // Build the new transaction with modified coinbase outputs.
+    // Here we are keeping only the first output which is not the founders reward payment.
     let tx = block
         .transactions
         .get(0)
@@ -402,9 +403,15 @@ fn founders_reward_validation_failure() -> Result<(), Report> {
     // Validate it
     let result = check::subsidy_is_valid(&block, network).unwrap_err();
     let expected = BlockError::Transaction(TransactionError::Subsidy(
-        SubsidyError::FoundersRewardNotFound,
+        SubsidyError::FoundersRewardAmountNotFound,
     ));
     assert_eq!(expected, result);
+
+    // Todo: Using the second output, which haves the correct amount, modify the lock_script
+    // and trigger SubsidyError::FoundersRewardAddressNotFound
+
+    // Todo: Using the 2 outputs, exchange the lock_script between them
+    // and trigger SubsidyError::FoundersRewardDifferentOutput
 
     Ok(())
 }
