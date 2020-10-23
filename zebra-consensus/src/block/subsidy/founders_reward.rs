@@ -24,6 +24,9 @@ pub fn founders_reward_active(height: Height, network: Network) -> bool {
         .activation_height(network)
         .expect("Canopy activation height is known");
 
+    // The Zcash Specification and ZIPs explain the end of the founders reward in different ways,
+    // because some were written before the set of Canopy network upgrade ZIPs was decided.
+    // These are the canonical checks recommended by `zcashd` developers.
     height < canopy_activation_height && halving_divisor(height, network) == 1
 }
 

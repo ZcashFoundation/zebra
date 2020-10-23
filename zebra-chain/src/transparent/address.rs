@@ -189,7 +189,9 @@ pub trait ToAddressWithNetwork {
 }
 
 impl ToAddressWithNetwork for Script {
-    // https://github.com/zcash/librustzcash/blob/master/zcash_primitives/src/legacy.rs#L43
+    /// Return the `Address` that `self` contains, using the same minimal algorithm as `zcashd`.
+    ///
+    /// See https://github.com/zcash/librustzcash/blob/master/zcash_primitives/src/legacy.rs#L43
     fn to_address(&self, network: Network) -> Address {
         if self.0.len() == 25
             && self.0[0..3] == [OpCode::Dup as u8, OpCode::Hash160 as u8, 0x14]
