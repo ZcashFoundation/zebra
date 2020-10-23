@@ -38,6 +38,11 @@ pub struct Config {
     ///
     /// [`cache_dir`]: struct.Config.html#structfield.cache_dir
     pub ephemeral: bool,
+
+    /// Commit blocks to the finalized state up to this height, then exit Zebra.
+    ///
+    /// If `None`, continue syncing indefinitely.
+    pub debug_stop_at_height: Option<u32>,
 }
 
 impl Config {
@@ -79,6 +84,7 @@ impl Default for Config {
             cache_dir,
             memory_cache_bytes: 512 * 1024 * 1024,
             ephemeral: false,
+            debug_stop_at_height: None,
         }
     }
 }
