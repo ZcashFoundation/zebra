@@ -46,8 +46,6 @@ struct StateService {
     pending_utxos: utxo::PendingUtxos,
     /// Instant tracking the last time `pending_utxos` was pruned
     last_prune: Instant,
-    /// If set, stop after this height is reached.
-    debug_stop_at_height: Option<block::Height>,
 }
 
 impl StateService {
@@ -65,7 +63,6 @@ impl StateService {
             queued_blocks,
             pending_utxos,
             last_prune: Instant::now(),
-            debug_stop_at_height: config.debug_stop_at_height,
         }
     }
 
@@ -138,10 +135,6 @@ impl StateService {
                     .map_err(CloneError::from);
                 let _ = rsp_tx.send(result);
                 new_parents.push(hash);
-                if self.debug_stop_at_height == block.coinbase_height() {
-                    tracing::info!("reached stop height, shutting down");
-                    std::process::exit(0)
-                }
             }
         }
     }

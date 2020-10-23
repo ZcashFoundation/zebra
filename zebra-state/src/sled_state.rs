@@ -186,7 +186,7 @@ impl FinalizedState {
 
         trace!(?height, "Finalized block");
 
-        (
+        let rsp = (
             &self.hash_by_height,
             &self.height_by_hash,
             &self.block_by_height,
@@ -225,7 +225,14 @@ impl FinalizedState {
                     Ok::<_, sled::transaction::ConflictableTransactionError>(hash)
                 },
             )
-            .map_err(Into::into)
+            .map_err(Into::into);
+
+        if self.debug_stop_at_height == Some(height) {
+            tracing::info!("reached stop height, shutting down");
+            std::process::exit(0);
+        }
+
+        rsp
     }
 
     /// Commit a finalized block to the state.
@@ -236,13 +243,8 @@ impl FinalizedState {
     /// [`FinalizedState`].
     fn commit_finalized(&mut self, queued_block: QueuedBlock) {
         let QueuedBlock { block, rsp_tx } = queued_block;
-        let result = self.commit_finalized_direct(block.clone());
+        let result = self.commit_finalized_direct(block);
         let _ = rsp_tx.send(result.map_err(Into::into));
-
-        if self.debug_stop_at_height == block.coinbase_height() {
-            tracing::info!("reached stop height, shutting down");
-            std::process::exit(0);
-        }
     }
 
     // TODO: this impl works only during checkpointing, it needs to be rewritten
