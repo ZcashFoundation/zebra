@@ -278,6 +278,16 @@ pub enum SubsidyError {
     ShieldedRuleBroken,
 }
 ```
+## Implementation Plan
+
+1. Founders Reward Amounts
+2. Founders Reward Addresses
+3. Funding Streams Amounts (defer Shielded Coinbase)
+4. Funding Streams Addresses 
+5. Miner Subsidy Amounts (defer Shielded Coinbase)
+6. Shielded Coinbase for Funding Streams and Miner Subsidy
+
+Each stage should have code, unit tests, block test vector tests, and property tests, before moving on to the next stage. (A stage can be implemented in multiple PRs.)
 
 ## Test Plan
 
@@ -296,3 +306,6 @@ Validation tests will test the consensus rules using real blocks from `zebra-tes
 The validation errors at `SubsidyError` must be tested at least once.
 
 - Create tests to trigger each error from `SubsidyError`.
+
+- Create a property test for each consensus rule, which makes sure that the rule is satisfied by arbitrary (randomised) blocks and transactions
+  - Create or update `Arbitrary` trait implementations for blocks and transactions, as needed
