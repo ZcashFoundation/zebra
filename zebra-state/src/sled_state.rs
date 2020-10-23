@@ -289,6 +289,7 @@ impl FinalizedState {
         }
     }
 
+    /// Returns the finalized hash for a given `block::Height` if it is present.
     pub fn get_hash(&self, height: block::Height) -> Option<block::Hash> {
         self.hash_by_height
             .get(&height.0.to_be_bytes())
