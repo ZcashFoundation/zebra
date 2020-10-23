@@ -138,7 +138,7 @@ impl StateService {
 
     /// Returns true if the given hash has been committed to either the finalized
     /// or non-finalized state.
-    fn contains(&self, block: &Block) -> bool {
+    fn contains_committed_block(&self, block: &Block) -> bool {
         let hash = block.hash();
         let height = block
             .coinbase_height()
