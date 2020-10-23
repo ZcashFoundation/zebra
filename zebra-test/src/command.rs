@@ -149,7 +149,7 @@ impl TestStatus {
 
 #[derive(Debug)]
 pub struct TestChild<T> {
-    dir: T,
+    pub dir: T,
     pub cmd: String,
     pub child: Child,
     pub stdout: Option<Lines<BufReader<ChildStdout>>>,
