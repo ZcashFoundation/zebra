@@ -239,7 +239,8 @@ impl<T> TestChild<T> {
         }
 
         let report = eyre!("stdout of command did not contain any matches for the given regex")
-            .context_from(self);
+            .context_from(self)
+            .with_section(|| format!("{:?}", regex).header("Match Regex:"));
 
         Err(report)
     }
@@ -296,6 +297,7 @@ impl<T> TestOutput<T> {
             "stdout of command did not contain any matches for the given regex"
         ))
         .context_from(self)
+        .with_section(|| format!("{:?}", regex).header("Match Regex:"))
     }
 
     #[instrument(skip(self))]
@@ -306,7 +308,9 @@ impl<T> TestOutput<T> {
             return Ok(self);
         }
 
-        Err(eyre!("stdout of command is not equal the given string")).context_from(self)
+        Err(eyre!("stdout of command is not equal the given string"))
+            .context_from(self)
+            .with_section(|| format!("{:?}", s).header("Match String:"))
     }
 
     #[instrument(skip(self))]
@@ -318,7 +322,9 @@ impl<T> TestOutput<T> {
             return Ok(self);
         }
 
-        Err(eyre!("stdout of command is not equal to the given regex")).context_from(self)
+        Err(eyre!("stdout of command is not equal to the given regex"))
+            .context_from(self)
+            .with_section(|| format!("{:?}", regex).header("Match Regex:"))
     }
 
     /// Returns Ok if the program was killed, Err(Report) if exit was by another
