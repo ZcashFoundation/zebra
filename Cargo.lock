@@ -988,6 +988,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "generator"
+version = "0.6.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8cdc09201b2e8ca1b19290cf7e65de2246b8e91fb6874279722189c4de7b94dc"
+dependencies = [
+ "cc",
+ "libc",
+ "log",
+ "rustc_version",
+ "winapi 0.3.9",
+]
+
+[[package]]
 name = "generic-array"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1372,6 +1385,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4fabed175da42fed1fa0746b0ea71f412aa9d35e76e95e59b192c64b9dc2bf8b"
 dependencies = [
  "cfg-if",
+]
+
+[[package]]
+name = "loom"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a0e8460f2f2121162705187214720353c517b97bdfb3494c0b1e33d83ebe4bed"
+dependencies = [
+ "cfg-if",
+ "generator",
+ "scoped-tls",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -2213,6 +2239,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3e75f6a532d0fd9f7f13144f392b6ad56a32696bfcd9c78f797f16bbb6f072d6"
 
 [[package]]
+name = "rustc_version"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "138e3e0acb6c9fb258b19b67cb8abd63c00679d2851805ea151465464fe9030a"
+dependencies = [
+ "semver",
+]
+
+[[package]]
 name = "rusty-fork"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2229,6 +2264,12 @@ name = "ryu"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "71d301d4193d031abdd79ff7e3dd721168a9572ef3fe51a1517aba235bd8f86e"
+
+[[package]]
+name = "scoped-tls"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ea6a9290e3c9cf0f18145ef7ffa62d68ee0bf5fcd651017e586dc7fd5da448c2"
 
 [[package]]
 name = "scopeguard"
@@ -2361,11 +2402,12 @@ dependencies = [
 
 [[package]]
 name = "sharded-slab"
-version = "0.0.9"
+version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06d5a3f5166fb5b42a5439f2eee8b9de149e235961e3eb21c5808fc3ea17ff3e"
+checksum = "7b4921be914e16899a80adefb821f8ddb7974e3f1250223575a44ed994882127"
 dependencies = [
  "lazy_static",
+ "loom",
 ]
 
 [[package]]
@@ -2836,7 +2878,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4d7c0b83d4a500748fa5879461652b361edf5c9d51ede2a2ac03875ca185e24"
 dependencies = [
  "tracing",
- "tracing-subscriber 0.2.13",
+ "tracing-subscriber 0.2.14",
 ]
 
 [[package]]
@@ -2847,7 +2889,7 @@ checksum = "bd520fe41c667b437952383f3a1ec14f1fa45d653f719a77eedd6e6a02d8fa54"
 dependencies = [
  "lazy_static",
  "tracing",
- "tracing-subscriber 0.2.13",
+ "tracing-subscriber 0.2.14",
 ]
 
 [[package]]
@@ -2900,9 +2942,9 @@ dependencies = [
 
 [[package]]
 name = "tracing-subscriber"
-version = "0.2.13"
+version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ef0a5e15477aa303afbfac3a44cba9b6430fdaad52423b1e6c0dbbe28c3eedd"
+checksum = "2810660b9d5b18895d140caba6401765749a6a162e5d0736cfc44ea50db9d79d"
 dependencies = [
  "ansi_term 0.12.1",
  "chrono",
@@ -3202,7 +3244,7 @@ dependencies = [
  "tracing",
  "tracing-error",
  "tracing-futures",
- "tracing-subscriber 0.2.13",
+ "tracing-subscriber 0.2.14",
  "zebra-chain",
  "zebra-script",
  "zebra-state",
@@ -3299,7 +3341,7 @@ dependencies = [
  "tower",
  "tracing",
  "tracing-error",
- "tracing-subscriber 0.2.13",
+ "tracing-subscriber 0.2.14",
 ]
 
 [[package]]
@@ -3311,7 +3353,7 @@ dependencies = [
  "serde_json",
  "structopt",
  "tracing-error",
- "tracing-subscriber 0.2.13",
+ "tracing-subscriber 0.2.14",
  "zebra-chain",
  "zebra-consensus",
 ]
@@ -3342,7 +3384,7 @@ dependencies = [
  "tracing-error",
  "tracing-flame",
  "tracing-futures",
- "tracing-subscriber 0.2.13",
+ "tracing-subscriber 0.2.14",
  "zebra-chain",
  "zebra-consensus",
  "zebra-network",
