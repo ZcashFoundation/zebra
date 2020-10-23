@@ -81,7 +81,7 @@ impl StateService {
         let hash = block.hash();
         let parent_hash = block.header.previous_block_hash;
 
-        if self.contains(&block) {
+        if self.contains_committed_block(&block) {
             let (rsp_tx, rsp_rx) = broadcast::channel(1);
             let _ = rsp_tx.send(Ok(hash));
             return rsp_rx;
