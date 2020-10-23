@@ -67,7 +67,7 @@ impl From<NullifierSeed> for [u8; 32] {
     any(test, feature = "proptest-impl"),
     derive(proptest_derive::Arbitrary)
 )]
-pub struct Nullifier(pub(crate) [u8; 32]);
+pub struct Nullifier(pub [u8; 32]);
 
 impl From<[u8; 32]> for Nullifier {
     fn from(bytes: [u8; 32]) -> Self {

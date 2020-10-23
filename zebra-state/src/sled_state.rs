@@ -41,8 +41,8 @@ pub struct FinalizedState {
     block_by_height: sled::Tree,
     tx_by_hash: sled::Tree,
     utxo_by_outpoint: sled::Tree,
-    // sprout_nullifiers: sled::Tree,
-    // sapling_nullifiers: sled::Tree,
+    sprout_nullifiers: sled::Tree,
+    sapling_nullifiers: sled::Tree,
     // sprout_anchors: sled::Tree,
     // sapling_anchors: sled::Tree,
     /// Commit blocks to the finalized state up to this height, then exit Zebra.
@@ -69,8 +69,8 @@ impl FinalizedState {
             block_by_height: db.open_tree(b"block_by_height").unwrap(),
             tx_by_hash: db.open_tree(b"tx_by_hash").unwrap(),
             utxo_by_outpoint: db.open_tree(b"utxo_by_outpoint").unwrap(),
-            // sprout_nullifiers: db.open_tree(b"sprout_nullifiers").unwrap(),
-            // sapling_nullifiers: db.open_tree(b"sapling_nullifiers").unwrap(),
+            sprout_nullifiers: db.open_tree(b"sprout_nullifiers").unwrap(),
+            sapling_nullifiers: db.open_tree(b"sapling_nullifiers").unwrap(),
             debug_stop_at_height: config.debug_stop_at_height.map(block::Height),
         };
 
@@ -97,8 +97,8 @@ impl FinalizedState {
         total_flushed += self.block_by_height.flush()?;
         total_flushed += self.tx_by_hash.flush()?;
         total_flushed += self.utxo_by_outpoint.flush()?;
-        // total_flushed += self.sprout_nullifiers.flush()?;
-        // total_flushed += self.sapling_nullifiers.flush()?;
+        total_flushed += self.sprout_nullifiers.flush()?;
+        total_flushed += self.sapling_nullifiers.flush()?;
 
         Ok(total_flushed)
     }
@@ -221,6 +221,8 @@ impl FinalizedState {
             &self.block_by_height,
             &self.utxo_by_outpoint,
             &self.tx_by_hash,
+            &self.sprout_nullifiers,
+            &self.sapling_nullifiers,
         )
             .transaction(
                 move |(
@@ -229,6 +231,8 @@ impl FinalizedState {
                     block_by_height,
                     utxo_by_outpoint,
                     tx_by_hash,
+                    sprout_nullifiers,
+                    sapling_nullifiers,
                 )| {
                     // TODO: check highest entry of hash_by_height as in RFC
 
@@ -248,9 +252,14 @@ impl FinalizedState {
 
                             utxo_by_outpoint.zs_insert(outpoint, output)?;
                         }
+
+                        for sprout_nullifier in transaction.sprout_nullifiers() {
+                            sprout_nullifiers.zs_insert(sprout_nullifier, ())?;
+                        }
+                        for sapling_nullifier in transaction.sapling_nullifiers() {
+                            sapling_nullifiers.zs_insert(sapling_nullifier, ())?;
+                        }
                     }
-                    // sprout_nullifiers
-                    // sapling_nullifiers
 
                     // for some reason type inference fails here
                     Ok::<_, sled::transaction::ConflictableTransactionError>(hash)
