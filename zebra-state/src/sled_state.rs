@@ -44,6 +44,7 @@ pub struct FinalizedState {
     // sapling_nullifiers: sled::Tree,
     // sprout_anchors: sled::Tree,
     // sapling_anchors: sled::Tree,
+    debug_stop_at_height: Option<block::Height>,
 }
 
 /// Helper trait for inserting (Key, Value) pairs into sled when both the key and
@@ -129,6 +130,7 @@ impl FinalizedState {
             utxo_by_outpoint: db.open_tree(b"utxo_by_outpoint").unwrap(),
             // sprout_nullifiers: db.open_tree(b"sprout_nullifiers").unwrap(),
             // sapling_nullifiers: db.open_tree(b"sapling_nullifiers").unwrap(),
+            debug_stop_at_height: config.debug_stop_at_height,
         }
     }
 
@@ -234,8 +236,13 @@ impl FinalizedState {
     /// [`FinalizedState`].
     fn commit_finalized(&mut self, queued_block: QueuedBlock) {
         let QueuedBlock { block, rsp_tx } = queued_block;
-        let result = self.commit_finalized_direct(block);
+        let result = self.commit_finalized_direct(block.clone());
         let _ = rsp_tx.send(result.map_err(Into::into));
+
+        if self.debug_stop_at_height == block.coinbase_height() {
+            tracing::info!("reached stop height, shutting down");
+            std::process::exit(0);
+        }
     }
 
     // TODO: this impl works only during checkpointing, it needs to be rewritten

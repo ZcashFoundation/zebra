@@ -1,6 +1,8 @@
-use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use zebra_chain::parameters::Network;
+
+use serde::{Deserialize, Serialize};
+
+use zebra_chain::{block, parameters::Network};
 
 /// Configuration for the state service.
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -38,6 +40,11 @@ pub struct Config {
     ///
     /// [`cache_dir`]: struct.Config.html#structfield.cache_dir
     pub ephemeral: bool,
+
+    /// If present, Zebra will shut down at the given block height.
+    ///
+    /// This is useful for debugging.
+    pub debug_stop_at_height: Option<block::Height>,
 }
 
 impl Config {
@@ -79,6 +86,7 @@ impl Default for Config {
             cache_dir,
             memory_cache_bytes: 512 * 1024 * 1024,
             ephemeral: false,
+            debug_stop_at_height: None,
         }
     }
 }
