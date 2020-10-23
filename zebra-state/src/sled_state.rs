@@ -1,6 +1,6 @@
 //! The primary implementation of the `zebra_state::Service` built upon sled
 
-use std::{collections::HashMap, convert::TryInto, future::Future, sync::Arc};
+use std::{collections::HashMap, convert::TryInto,  sync::Arc};
 
 use tracing::trace;
 use zebra_chain::{
@@ -158,7 +158,7 @@ impl FinalizedState {
 
     /// Returns the hash of the current finalized tip block.
     pub fn finalized_tip_hash(&self) -> block::Hash {
-        read_tip(&self.hash_by_height)
+        self.tip()
             .expect("inability to look up tip is unrecoverable")
             .map(|(_, hash)| hash)
             // if the state is empty, return the genesis previous block hash
@@ -167,7 +167,7 @@ impl FinalizedState {
 
     /// Returns the height of the current finalized tip block.
     pub fn finalized_tip_height(&self) -> Option<block::Height> {
-        read_tip(&self.hash_by_height)
+        self.tip()
             .expect("inability to look up tip is unrecoverable")
             .map(|(height, _)| height)
     }
@@ -239,78 +239,60 @@ impl FinalizedState {
     }
 
     // TODO: this impl works only during checkpointing, it needs to be rewritten
-    pub fn block_locator(&self) -> impl Future<Output = Result<Vec<block::Hash>, BoxError>> {
-        let hash_by_height = self.hash_by_height.clone();
+    pub fn block_locator(&self) -> Result<Vec<block::Hash>, BoxError> {
+        let (tip_height, _) = match self.tip()? {
+            Some(height) => height,
+            None => return Ok(Vec::new()),
+        };
 
-        let tip = self.tip();
-
-        async move {
-            let (tip_height, _) = match tip.await? {
-                Some(height) => height,
-                None => return Ok(Vec::new()),
-            };
-
-            let heights = crate::util::block_locator_heights(tip_height);
-            let mut hashes = Vec::with_capacity(heights.len());
-            for height in heights {
-                if let Some(bytes) = hash_by_height.get(&height.0.to_be_bytes())? {
-                    let hash = block::Hash(bytes.as_ref().try_into().unwrap());
-                    hashes.push(hash)
-                }
+        let heights = crate::util::block_locator_heights(tip_height);
+        let mut hashes = Vec::with_capacity(heights.len());
+        for height in heights {
+            if let Some(bytes) = self.hash_by_height.get(&height.0.to_be_bytes())? {
+                let hash = block::Hash(bytes.as_ref().try_into().unwrap());
+                hashes.push(hash)
             }
-            Ok(hashes)
         }
+        Ok(hashes)
     }
 
-    pub fn tip(
-        &self,
-    ) -> impl Future<Output = Result<Option<(block::Height, block::Hash)>, BoxError>> {
-        let hash_by_height = self.hash_by_height.clone();
-        async move { read_tip(&hash_by_height) }
+    pub fn tip(&self) -> Result<Option<(block::Height, block::Hash)>, BoxError> {
+        Ok(self.hash_by_height.iter().rev().next().transpose()?.map(
+            |(height_bytes, hash_bytes)| {
+                let height = block::Height(u32::from_be_bytes(
+                    height_bytes.as_ref().try_into().unwrap(),
+                ));
+                let hash = block::Hash(hash_bytes.as_ref().try_into().unwrap());
+                (height, hash)
+            },
+        ))
     }
 
-    pub fn depth(&self, hash: block::Hash) -> impl Future<Output = Result<Option<u32>, BoxError>> {
-        let height_by_hash = self.height_by_hash.clone();
+    pub fn depth(&self, hash: block::Hash) -> Result<Option<u32>, BoxError> {
+        let height = match self.height_by_hash.get(&hash.0)? {
+            Some(bytes) => block::Height(u32::from_be_bytes(bytes.as_ref().try_into().unwrap())),
+            None => return Ok(None),
+        };
 
-        // TODO: this impl works only during checkpointing, it needs to be rewritten
-        let tip = self.tip();
+        let (tip_height, _) = self.tip()?.expect("tip must exist");
 
-        async move {
-            let height = match height_by_hash.get(&hash.0)? {
+        Ok(Some(tip_height.0 - height.0))
+    }
+
+    pub fn block(&self, hash_or_height: HashOrHeight) -> Result<Option<Arc<Block>>, BoxError> {
+        let height = match hash_or_height {
+            HashOrHeight::Height(height) => height,
+            HashOrHeight::Hash(hash) => match self.height_by_hash.get(&hash.0)? {
                 Some(bytes) => {
                     block::Height(u32::from_be_bytes(bytes.as_ref().try_into().unwrap()))
                 }
                 None => return Ok(None),
-            };
+            },
+        };
 
-            let (tip_height, _) = tip.await?.expect("tip must exist");
-
-            Ok(Some(tip_height.0 - height.0))
-        }
-    }
-
-    pub fn block(
-        &self,
-        hash_or_height: HashOrHeight,
-    ) -> impl Future<Output = Result<Option<Arc<Block>>, BoxError>> {
-        let height_by_hash = self.height_by_hash.clone();
-        let block_by_height = self.block_by_height.clone();
-
-        async move {
-            let height = match hash_or_height {
-                HashOrHeight::Height(height) => height,
-                HashOrHeight::Hash(hash) => match height_by_hash.get(&hash.0)? {
-                    Some(bytes) => {
-                        block::Height(u32::from_be_bytes(bytes.as_ref().try_into().unwrap()))
-                    }
-                    None => return Ok(None),
-                },
-            };
-
-            match block_by_height.get(&height.0.to_be_bytes())? {
-                Some(bytes) => Ok(Some(Arc::<Block>::zcash_deserialize(bytes.as_ref())?)),
-                None => Ok(None),
-            }
+        match self.block_by_height.get(&height.0.to_be_bytes())? {
+            Some(bytes) => Ok(Some(Arc::<Block>::zcash_deserialize(bytes.as_ref())?)),
+            None => Ok(None),
         }
     }
 
@@ -322,20 +304,4 @@ impl FinalizedState {
     ) -> Result<Option<transparent::Output>, BoxError> {
         self.utxo_by_outpoint.zs_get(outpoint)
     }
-}
-
-// Split into a helper function to be called synchronously or asynchronously.
-fn read_tip(hash_by_height: &sled::Tree) -> Result<Option<(block::Height, block::Hash)>, BoxError> {
-    Ok(hash_by_height
-        .iter()
-        .rev()
-        .next()
-        .transpose()?
-        .map(|(height_bytes, hash_bytes)| {
-            let height = block::Height(u32::from_be_bytes(
-                height_bytes.as_ref().try_into().unwrap(),
-            ));
-            let hash = block::Hash(hash_bytes.as_ref().try_into().unwrap());
-            (height, hash)
-        }))
 }
