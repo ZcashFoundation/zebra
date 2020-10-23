@@ -4,6 +4,8 @@ Zebra has support for Prometheus, configured using the [`MetricsSection`][metric
 
 This requires supporting infrastructure to collect and visualize metrics, for example:
 
+1. Install Prometheus and Grafana via Docker
+
 ```
 # create a storage volume for grafana (once)
 sudo docker volume create grafana-storage
@@ -18,5 +20,19 @@ sudo docker -d run --network host -e GF_SERVER_HTTP_PORT=3030 -e GF_SERVER_HTTP_
 ```
 
 Now the grafana dashboard is available at [http://localhost:3030](http://localhost:3030) ; the default username and password is `admin`/`admin`.
+Prometheus scrapes Zebra on `localhost:9999`, and provides the results on `locahost:9090`.
+
+2. Configure Grafana with a Prometheus HTTP Data Source, using Zebra's `metrics.endpoint_addr`.
+
+In zebrad.toml:
+```
+[metrics]
+endpoint_addr = "127.0.0.1:9999"
+```
+
+In the grafana dashboard:
+1. Create a new Prometheus Data Source
+2. Enter the HTTP URL: `127.0.0.1:9090`
+3. Save the configuration
 
 [metrics_section]: https://doc.zebra.zfnd.org/zebrad/config/struct.MetricsSection.html
