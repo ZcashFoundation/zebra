@@ -370,17 +370,18 @@ fn coinbase_validation_failure() -> Result<(), Report> {
 fn founders_reward_validation_failure() -> Result<(), Report> {
     zebra_test::init();
     use crate::error::*;
-    use zebra_chain::transaction::Transaction;
-
+    use zebra_chain::{transaction::Transaction, transparent::Script};
     let network = Network::Mainnet;
 
     // Get a block in the mainnet that is inside the founders reward period.
     let block =
         Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])
             .expect("block should deserialize");
+    let header = block.header;
 
-    // Build the new transaction with modified coinbase outputs.
-    // Here we are keeping only the first output which is not the founders reward payment.
+    // Tests consist on building a block with modified outputs of the coinbase transaction.
+    // Case 1: Keep only the first output which is not the output with the founders reward payment
+    // and trigger SubsidyError::FoundersRewardAmountNotFound
     let tx = block
         .transactions
         .get(0)
@@ -393,25 +394,86 @@ fn founders_reward_validation_failure() -> Result<(), Report> {
         })
         .unwrap();
 
-    // Build new block
-    let transactions: Vec<Arc<zebra_chain::transaction::Transaction>> = vec![Arc::new(tx)];
-    let block = Block {
-        header: block.header,
+    // Build modified block
+    let mut transactions: Vec<Arc<zebra_chain::transaction::Transaction>> = Vec::new();
+    transactions.push(Arc::new(tx));
+    let block_case1 = Block {
+        header,
         transactions,
     };
 
-    // Validate it
-    let result = check::subsidy_is_valid(&block, network).unwrap_err();
+    // Trigger FoundersRewardAmountNotFound
+    let result = check::subsidy_is_valid(&block_case1, network).unwrap_err();
     let expected = BlockError::Transaction(TransactionError::Subsidy(
         SubsidyError::FoundersRewardAmountNotFound,
     ));
     assert_eq!(expected, result);
 
-    // Todo: Using the second output, which haves the correct amount, modify the lock_script
-    // and trigger SubsidyError::FoundersRewardAddressNotFound
+    // Case 2: Using the second output, which haves the correct amount, modify the lock_script
+    // of it to an empty script and trigger SubsidyError::FoundersRewardAddressNotFound
+    let mut output1 = block.transactions.get(0).unwrap().outputs()[1].clone();
+    output1.lock_script = Script(vec![0; 20]);
 
-    // Todo: Using the 2 outputs, exchange the lock_script between them
+    let tx = block
+        .transactions
+        .get(0)
+        .map(|transaction| Transaction::V3 {
+            inputs: transaction.inputs().to_vec(),
+            outputs: vec![output1],
+            lock_time: transaction.lock_time(),
+            expiry_height: transaction.expiry_height().unwrap(),
+            joinsplit_data: None,
+        })
+        .unwrap();
+
+    // Build new block
+    let mut transactions: Vec<Arc<zebra_chain::transaction::Transaction>> = Vec::new();
+    transactions.push(Arc::new(tx));
+    let block_case2 = Block {
+        header,
+        transactions,
+    };
+
+    // Trigger FoundersRewardAddressNotFound
+    let result = check::subsidy_is_valid(&block_case2, network).unwrap_err();
+    let expected = BlockError::Transaction(TransactionError::Subsidy(
+        SubsidyError::FoundersRewardAddressNotFound,
+    ));
+    assert_eq!(expected, result);
+
+    // Case 3: Using the 2 outputs, swap the lock_script between them
     // and trigger SubsidyError::FoundersRewardDifferentOutput
+    let mut output0 = block.transactions.get(0).unwrap().outputs()[0].clone();
+    let mut output1 = block.transactions.get(0).unwrap().outputs()[1].clone();
+
+    output0.lock_script = output1.lock_script.clone();
+    output1.lock_script = output0.lock_script.clone();
+    let tx = block
+        .transactions
+        .get(0)
+        .map(|transaction| Transaction::V3 {
+            inputs: transaction.inputs().to_vec(),
+            outputs: vec![output0, output1],
+            lock_time: transaction.lock_time(),
+            expiry_height: transaction.expiry_height().unwrap(),
+            joinsplit_data: None,
+        })
+        .unwrap();
+
+    // Build new block
+    let mut transactions: Vec<Arc<zebra_chain::transaction::Transaction>> = Vec::new();
+    transactions.push(Arc::new(tx));
+    let block_case3 = Block {
+        header,
+        transactions,
+    };
+
+    // Trigger FoundersRewardDifferentOutput
+    let result = check::subsidy_is_valid(&block_case3, network).unwrap_err();
+    let expected = BlockError::Transaction(TransactionError::Subsidy(
+        SubsidyError::FoundersRewardDifferentOutput,
+    ));
+    assert_eq!(expected, result);
 
     Ok(())
 }
