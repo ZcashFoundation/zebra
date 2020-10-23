@@ -65,13 +65,13 @@ impl ShieldedData {
 
     /// Collect the [`Nullifier`]s for this transaction, if it contains
     /// [`Spend`]s.
-    pub fn nullifiers(&self) -> Vec<Nullifier> {
-        self.spends().map(|spend| spend.nullifier).collect()
+    pub fn nullifiers(&self) -> impl Iterator<Item = &Nullifier> {
+        self.spends().map(|spend| &spend.nullifier)
     }
 
     /// Collect the cm_u's for this transaction, if it contains [`Output`]s.
-    pub fn note_commitments(&self) -> Vec<jubjub::Fq> {
-        self.outputs().map(|output| output.cm_u).collect()
+    pub fn note_commitments(&self) -> impl Iterator<Item = &jubjub::Fq> {
+        self.outputs().map(|output| &output.cm_u)
     }
 
     /// Calculate the Spend/Output binding verification key.

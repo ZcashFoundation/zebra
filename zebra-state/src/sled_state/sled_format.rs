@@ -4,8 +4,9 @@ use std::{convert::TryInto, sync::Arc};
 use zebra_chain::{
     block,
     block::Block,
+    sapling,
     serialization::{ZcashDeserialize, ZcashSerialize},
-    transaction,
+    sprout, transaction,
     transaction::Transaction,
     transparent,
 };
@@ -86,6 +87,42 @@ impl IntoSled for block::Hash {
     }
     fn into_ivec(self) -> sled::IVec {
         self.as_bytes().as_ref().into()
+    }
+}
+
+impl IntoSled for &sprout::Nullifier {
+    type Bytes = [u8; 32];
+
+    fn as_bytes(&self) -> Self::Bytes {
+        self.0
+    }
+
+    fn into_ivec(self) -> sled::IVec {
+        self.as_bytes().as_ref().into()
+    }
+}
+
+impl IntoSled for &sapling::Nullifier {
+    type Bytes = [u8; 32];
+
+    fn as_bytes(&self) -> Self::Bytes {
+        self.0
+    }
+
+    fn into_ivec(self) -> sled::IVec {
+        self.as_bytes().as_ref().into()
+    }
+}
+
+impl IntoSled for () {
+    type Bytes = [u8; 0];
+
+    fn as_bytes(&self) -> Self::Bytes {
+        []
+    }
+
+    fn into_ivec(self) -> sled::IVec {
+        sled::IVec::default()
     }
 }
 

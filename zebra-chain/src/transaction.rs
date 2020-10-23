@@ -27,7 +27,7 @@ use crate::{
     block,
     parameters::NetworkUpgrade,
     primitives::{Bctv14Proof, Groth16Proof},
-    transparent,
+    sapling, sprout, transparent,
 };
 
 /// A Zcash transaction.
@@ -144,6 +144,53 @@ impl Transaction {
             Transaction::V2 { .. } => None,
             Transaction::V3 { expiry_height, .. } => Some(*expiry_height),
             Transaction::V4 { expiry_height, .. } => Some(*expiry_height),
+        }
+    }
+
+    /// Access the sprout::Nullifiers in this transaction, regardless of version.
+    pub fn sprout_nullifiers(&self) -> Box<dyn Iterator<Item = &sprout::Nullifier> + '_> {
+        // This function returns a boxed iterator because the different
+        // transaction variants end up having different iterator types
+        match self {
+            // JoinSplits with Bctv14 Proofs
+            Transaction::V2 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            }
+            | Transaction::V3 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => Box::new(
+                joinsplit_data
+                    .joinsplits()
+                    .flat_map(|joinsplit| joinsplit.nullifiers.iter()),
+            ),
+            // JoinSplits with Groth Proofs
+            Transaction::V4 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => Box::new(
+                joinsplit_data
+                    .joinsplits()
+                    .flat_map(|joinsplit| joinsplit.nullifiers.iter()),
+            ),
+            // No JoinSplits
+            _ => Box::new(std::iter::empty()),
+        }
+    }
+
+    /// Access the sapling::Nullifiers in this transaction, regardless of version.
+    pub fn sapling_nullifiers(&self) -> Box<dyn Iterator<Item = &sapling::Nullifier> + '_> {
+        // This function returns a boxed iterator because the different
+        // transaction variants end up having different iterator types
+        match self {
+            // JoinSplits with Groth Proofs
+            Transaction::V4 {
+                shielded_data: Some(shielded_data),
+                ..
+            } => Box::new(shielded_data.nullifiers()),
+            // No JoinSplits
+            _ => Box::new(std::iter::empty()),
         }
     }
 
