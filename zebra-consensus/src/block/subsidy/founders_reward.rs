@@ -225,21 +225,4 @@ mod test {
 
         Ok(())
     }
-
-    #[test]
-    fn test_founders_address_ceiling() -> Result<(), Report> {
-        // Test proves why `div_ceil` needs to be used.
-        // `truncate(n/d) + 1` is 1 more than `ceiling(n/d)` when `n/d` is an integer.
-        // Suppose `SLOW_START_SHIFT.0 + PRE_BLOSSOM_HALVING_INTERVAL.0 = 480_000` instead
-        // of current protocol defined value of `850_000`.
-        let numerator = 480_000;
-
-        // `truncate(n) + 1` will output the wrong result
-        assert_eq!((numerator / FOUNDERS_ADDRESS_COUNT) + 1, 10001);
-
-        // `div_ceil` will output the right thing
-        assert_eq!(div_ceil(numerator, FOUNDERS_ADDRESS_COUNT), 10000);
-
-        Ok(())
-    }
 }
