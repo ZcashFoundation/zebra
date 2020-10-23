@@ -130,7 +130,7 @@ impl StateService {
             for QueuedBlock { block, rsp_tx } in queued_children {
                 let hash = block.hash();
                 let result = self
-                    .validate_and_commit(block.clone())
+                    .validate_and_commit(block)
                     .map(|()| hash)
                     .map_err(CloneError::from);
                 let _ = rsp_tx.send(result);
