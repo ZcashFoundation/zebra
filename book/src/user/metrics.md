@@ -11,10 +11,10 @@ sudo docker volume create grafana-storage
 sudo docker volume create prometheus-storage
 
 # run prometheus with the included config
-sudo docker run --network host -v prometheus-storage:/prometheus -v /path/to/zebra/prometheus.yaml:/etc/prometheus/prometheus.yml  prom/prometheus
+sudo docker -d run --network host -v prometheus-storage:/prometheus -v /path/to/zebra/prometheus.yaml:/etc/prometheus/prometheus.yml  prom/prometheus
 
 # run grafana
-sudo docker run -d --network host -e GF_SERVER_HTTP_PORT=3030 -v grafana-storage:/var/lib/grafana grafana/grafana
+sudo docker -d run --network host -e GF_SERVER_HTTP_PORT=3030 -e GF_SERVER_HTTP_ADDR=localhost -v grafana-storage:/var/lib/grafana grafana/grafana
 ```
 
 Now the grafana dashboard is available at [http://localhost:3030](http://localhost:3030) ; the default username and password is `admin`/`admin`.
