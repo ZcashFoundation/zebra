@@ -1,6 +1,6 @@
 //! The primary implementation of the `zebra_state::Service` built upon sled
 
-use std::{collections::HashMap, convert::TryInto,  sync::Arc};
+use std::{collections::HashMap, convert::TryInto, sync::Arc};
 
 use tracing::trace;
 use zebra_chain::{
