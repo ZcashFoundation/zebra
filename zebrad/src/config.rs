@@ -34,6 +34,9 @@ pub struct ZebradConfig {
 
     /// Tracing configuration
     pub tracing: TracingSection,
+
+    /// Sync configuration
+    pub sync: SyncSection,
 }
 
 /// Tracing configuration section.
@@ -119,6 +122,27 @@ impl Default for MetricsSection {
     fn default() -> Self {
         Self {
             endpoint_addr: None,
+        }
+    }
+}
+
+/// Sync configuration section.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct SyncSection {
+    /// The maximum number of concurrent block requests during sync.
+    ///
+    /// This is set to a high value by default, so that the concurrency limit is
+    /// based only on the number of available peers. However, on a slow network,
+    /// making too many concurrent block requests can overwhelm the connection.
+    /// Lowering this value may help on slow or unreliable networks.
+    pub max_concurrent_block_requests: usize,
+}
+
+impl Default for SyncSection {
+    fn default() -> Self {
+        Self {
+            max_concurrent_block_requests: 1_000,
         }
     }
 }

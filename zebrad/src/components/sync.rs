@@ -7,15 +7,18 @@ use futures::{
 };
 use tokio::time::delay_for;
 use tower::{
-    builder::ServiceBuilder, hedge::Hedge, retry::Retry, timeout::Timeout, Service, ServiceExt,
+    builder::ServiceBuilder, hedge::Hedge, limit::ConcurrencyLimit, retry::Retry, timeout::Timeout,
+    Service, ServiceExt,
 };
 
 use zebra_chain::{
     block::{self, Block},
-    parameters::{genesis_hash, Network},
+    parameters::genesis_hash,
 };
 use zebra_network as zn;
 use zebra_state as zs;
+
+use crate::config::ZebradConfig;
 
 mod downloads;
 use downloads::{AlwaysHedge, Downloads};
@@ -103,8 +106,14 @@ where
     state: ZS,
     prospective_tips: HashSet<CheckedTip>,
     genesis_hash: block::Hash,
-    downloads:
-        Pin<Box<Downloads<Hedge<Retry<zn::RetryLimit, Timeout<ZN>>, AlwaysHedge>, Timeout<ZV>>>>,
+    downloads: Pin<
+        Box<
+            Downloads<
+                Hedge<ConcurrencyLimit<Retry<zn::RetryLimit, Timeout<ZN>>>, AlwaysHedge>,
+                Timeout<ZV>,
+            >,
+        >,
+    >,
 }
 
 /// Polls the network to determine whether further blocks are available and
@@ -127,7 +136,7 @@ where
     ///  - peers: the zebra-network peers to contact for downloads
     ///  - state: the zebra-state that stores the chain
     ///  - verifier: the zebra-consensus verifier that checks the chain
-    pub fn new(chain: Network, peers: ZN, state: ZS, verifier: ZV) -> Self {
+    pub fn new(config: &ZebradConfig, peers: ZN, state: ZS, verifier: ZV) -> Self {
         let tip_network = Timeout::new(peers.clone(), TIPS_RESPONSE_TIMEOUT);
         // The Hedge middleware is the outermost layer, hedging requests
         // between two retry-wrapped networks.  The innermost timeout
@@ -138,6 +147,7 @@ where
         // ServiceBuilder::new().hedge(...).retry(...)...
         let block_network = Hedge::new(
             ServiceBuilder::new()
+                .concurrency_limit(config.sync.max_concurrent_block_requests)
                 .retry(zn::RetryLimit::new(BLOCK_DOWNLOAD_RETRY_LIMIT))
                 .timeout(BLOCK_DOWNLOAD_TIMEOUT)
                 .service(peers),
@@ -154,7 +164,7 @@ where
                 Timeout::new(verifier, BLOCK_VERIFY_TIMEOUT),
             )),
             prospective_tips: HashSet::new(),
-            genesis_hash: genesis_hash(chain),
+            genesis_hash: genesis_hash(config.network.network),
         }
     }
 
