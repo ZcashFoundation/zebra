@@ -111,12 +111,13 @@ pub fn shielded_coinbase(height: Height, network: Network, transaction: &Transac
         .expect("heartwood activation height should be available");
 
     if height < heartwood_height {
-        if !transaction.joinsplits() && transaction.shields().is_none() {
+        if transaction.joinsplits().is_none() && transaction.shields().is_none() {
             return true;
         }
-    } else if !transaction.joinsplits() {
+    } else if transaction.joinsplits().is_none() {
         return true;
     }
+
     false
 }
 

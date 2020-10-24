@@ -1,5 +1,7 @@
 //! Transactions and transaction-related structures.
 
+use futures::future::Either;
+
 use serde::{Deserialize, Serialize};
 
 mod hash;
@@ -187,15 +189,23 @@ impl Transaction {
     }
 
     /// Access the joinsplits of this transaction, regardless of version.
-    // Todo: signature haves to be like:
-    // pub fn joinsplits<P: ZkSnarkProof>(&self) -> Option<JoinSplitData<P>> {
-    // but i was not able to make that work yet
-    pub fn joinsplits(&self) -> bool {
+    pub fn joinsplits(
+        &self,
+    ) -> Option<Either<&JoinSplitData<Bctv14Proof>, &JoinSplitData<Groth16Proof>>> {
         match self {
-            Transaction::V1 { .. } => false,
-            Transaction::V2 { joinsplit_data, .. } => joinsplit_data.is_some(),
-            Transaction::V3 { joinsplit_data, .. } => joinsplit_data.is_some(),
-            Transaction::V4 { joinsplit_data, .. } => joinsplit_data.is_some(),
+            Transaction::V1 { .. } => None,
+            Transaction::V2 { joinsplit_data, .. } => match joinsplit_data {
+                Some(joinsplit) => Some(Either::Left(joinsplit)),
+                _ => None,
+            },
+            Transaction::V3 { joinsplit_data, .. } => match joinsplit_data {
+                Some(joinsplit) => Some(Either::Left(joinsplit)),
+                _ => None,
+            },
+            Transaction::V4 { joinsplit_data, .. } => match joinsplit_data {
+                Some(joinsplit) => Some(Either::Right(joinsplit)),
+                _ => None,
+            },
         }
     }
     /// Access the shielded data of this transaction.
