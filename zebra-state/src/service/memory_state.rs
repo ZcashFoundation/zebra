@@ -643,8 +643,8 @@ impl QueuedBlocks {
     }
 
     /// Return the queued block if it has already been registered
-    pub fn get(&self, hash: &block::Hash) -> Option<&QueuedBlock> {
-        self.blocks.get(&hash)
+    pub fn get_mut(&mut self, hash: &block::Hash) -> Option<&mut QueuedBlock> {
+        self.blocks.get_mut(&hash)
     }
 }
 

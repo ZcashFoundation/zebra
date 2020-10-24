@@ -9,7 +9,7 @@ use std::{
 
 use futures::future::{FutureExt, TryFutureExt};
 use memory_state::{NonFinalizedState, QueuedBlocks};
-use tokio::sync::broadcast;
+use tokio::sync::oneshot;
 use tower::{buffer::Buffer, util::BoxService, Service};
 use tracing::instrument;
 use zebra_chain::{
@@ -18,8 +18,7 @@ use zebra_chain::{
 };
 
 use crate::{
-    BoxError, CloneError, CommitBlockError, Config, FinalizedState, Request, Response,
-    ValidateContextError,
+    BoxError, CommitBlockError, Config, FinalizedState, Request, Response, ValidateContextError,
 };
 
 mod memory_state;
@@ -32,7 +31,7 @@ pub struct QueuedBlock {
     // TODO: add these parameters when we can compute anchors.
     // sprout_anchor: sprout::tree::Root,
     // sapling_anchor: sapling::tree::Root,
-    pub rsp_tx: broadcast::Sender<Result<block::Hash, CloneError>>,
+    pub rsp_tx: oneshot::Sender<Result<block::Hash, BoxError>>,
 }
 
 struct StateService {
@@ -77,20 +76,23 @@ impl StateService {
     fn queue_and_commit_non_finalized_blocks(
         &mut self,
         block: Arc<Block>,
-    ) -> broadcast::Receiver<Result<block::Hash, CloneError>> {
+    ) -> oneshot::Receiver<Result<block::Hash, BoxError>> {
         let hash = block.hash();
         let parent_hash = block.header.previous_block_hash;
 
         if self.contains_committed_block(&block) {
-            let (rsp_tx, rsp_rx) = broadcast::channel(1);
-            let _ = rsp_tx.send(Ok(hash));
+            let (rsp_tx, rsp_rx) = oneshot::channel();
+            let _ = rsp_tx.send(Err("duplicate block".into()));
             return rsp_rx;
         }
 
-        let rsp_rx = if let Some(queued_block) = self.queued_blocks.get(&hash) {
-            queued_block.rsp_tx.subscribe()
+        let rsp_rx = if let Some(queued_block) = self.queued_blocks.get_mut(&hash) {
+            let (mut rsp_tx, rsp_rx) = oneshot::channel();
+            std::mem::swap(&mut queued_block.rsp_tx, &mut rsp_tx);
+            let _ = rsp_tx.send(Err("duplicate block".into()));
+            rsp_rx
         } else {
-            let (rsp_tx, rsp_rx) = broadcast::channel(1);
+            let (rsp_tx, rsp_rx) = oneshot::channel();
             self.queued_blocks.queue(QueuedBlock { block, rsp_tx });
             rsp_rx
         };
@@ -161,7 +163,7 @@ impl StateService {
                 let result = self
                     .validate_and_commit(block)
                     .map(|()| hash)
-                    .map_err(CloneError::from);
+                    .map_err(BoxError::from);
                 let _ = rsp_tx.send(result);
                 new_parents.push(hash);
             }
@@ -209,11 +211,10 @@ impl Service<Request> for StateService {
         match req {
             Request::CommitBlock { block } => {
                 self.pending_utxos.check_block(&block);
-                let mut rsp_rx = self.queue_and_commit_non_finalized_blocks(block);
+                let rsp_rx = self.queue_and_commit_non_finalized_blocks(block);
 
                 async move {
                     rsp_rx
-                        .recv()
                         .await
                         .expect("sender is not dropped")
                         .map(Response::Committed)
@@ -222,7 +223,7 @@ impl Service<Request> for StateService {
                 .boxed()
             }
             Request::CommitFinalizedBlock { block } => {
-                let (rsp_tx, mut rsp_rx) = broadcast::channel(1);
+                let (rsp_tx, rsp_rx) = oneshot::channel();
 
                 self.pending_utxos.check_block(&block);
                 self.sled
@@ -230,7 +231,6 @@ impl Service<Request> for StateService {
 
                 async move {
                     rsp_rx
-                        .recv()
                         .await
                         .expect("sender is not dropped")
                         .map(Response::Committed)
