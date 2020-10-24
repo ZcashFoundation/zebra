@@ -75,7 +75,7 @@ impl StartCmd {
             .map_err(|_| eyre!("could not send setup data to inbound service"))?;
 
         info!("initializing syncer");
-        let mut syncer = ChainSync::new(config.network.network, peer_set, state, verifier);
+        let mut syncer = ChainSync::new(&config, peer_set, state, verifier);
 
         syncer.sync().await
     }
