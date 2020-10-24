@@ -210,12 +210,10 @@ impl Transaction {
     }
     /// Access the shielded data of this transaction.
     /// Only V4 transactions will return Some() if any shielded data is present.
-    pub fn shields(&self) -> Option<ShieldedData> {
+    pub fn shielded_data(&self) -> Option<&ShieldedData> {
         match self {
-            Transaction::V1 { .. } => None,
-            Transaction::V2 { .. } => None,
-            Transaction::V3 { .. } => None,
-            Transaction::V4 { shielded_data, .. } => shielded_data.clone(),
+            Transaction::V4 { shielded_data, .. } => shielded_data.as_ref(),
+            _ => None,
         }
     }
 }
