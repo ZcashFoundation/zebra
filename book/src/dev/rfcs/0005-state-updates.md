@@ -526,22 +526,26 @@ The state service uses the following entry points:
 
 New `non-finalized` blocks are commited as follows:
 
-### `pub(super) fn queue_and_commit_non_finalized_blocks(&mut self, new: Arc<Block>) -> tokio::sync::broadcast::Receiver<block::Hash>`
+### `pub(super) fn queue_and_commit_non_finalized_blocks(&mut self, new: Arc<Block>) -> tokio::sync::oneshot::Receiver<block::Hash>`
 
 1. If a duplicate block exists in a non-finalized chain, or the finalized chain,
    it has already been successfully verified:
-     - create a new broadcast channel
-     - immediately send `Ok(block.hash())` drop the sender
+     - create a new oneshot channel
+     - immediately send `Err(DuplicateBlock)` drop the sender
      - return the reciever
 
 2. If a duplicate block exists in the queue:
      - Find the `QueuedBlock` for that existing duplicate block
-     - Create an extra receiver for the existing block, using `block.rsp_tx.subscribe`,
+     - create a new channel for the new request
+     - replace the old sender in `queued_block` with the new sender
+     - send `Err(DuplicateBlock)` through the old sender channel
+     - continue to use the new receiver
 
 3. Else create a `QueuedBlock` for `block`:
-     - Create a `tokio::sync::broadcast` channel
+     - Create a `tokio::sync::oneshot` channel
      - Use that channel to create a `QueuedBlock` for `block`
      - Add `block` to `self.queued_blocks`
+     - continue to use the new receiver
 
 4. If `block.header.previous_block_hash` is not present in the finalized or
    non-finalized state:
