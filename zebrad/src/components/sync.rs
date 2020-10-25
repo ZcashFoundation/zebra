@@ -143,6 +143,11 @@ where
         // layer is relatively unimportant, because slow requests will
         // probably be pre-emptively hedged.
         //
+        // The Hedge goes outside the Retry, because the Retry layer
+        // abstracts away spurious failures from individual peers
+        // making a less-fallible network service, and the Hedge layer
+        // tries to reduce latency of that less-fallible service.
+        //
         // XXX add ServiceBuilder::hedge() so this becomes
         // ServiceBuilder::new().hedge(...).retry(...)...
         let block_network = Hedge::new(
