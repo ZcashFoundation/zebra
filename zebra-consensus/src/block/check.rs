@@ -100,10 +100,7 @@ pub fn subsidy_is_valid(block: &Block, network: Network) -> Result<(), BlockErro
         .expect("Canopy activation height is known");
 
     // Validate shielded coinbase
-    let shielded_validation = subsidy::general::shielded_coinbase(height, network, coinbase);
-    if !shielded_validation {
-        panic!("Failed validating shielded coinbase");
-    }
+    subsidy::general::shielded_coinbase(height, network, coinbase)?;
 
     // TODO: the sum of the coinbase transaction outputs must be less than or equal to the block subsidy plus transaction fees
 

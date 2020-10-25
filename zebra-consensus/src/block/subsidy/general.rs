@@ -12,7 +12,7 @@ use zebra_chain::{
     transparent,
 };
 
-use crate::parameters::subsidy::*;
+use crate::{error::SubsidyError, parameters::subsidy::*};
 
 /// The divisor used for halvings.
 ///
@@ -105,20 +105,24 @@ pub fn find_output_with_amount(
 /// Validate shielded consensus rules as described in [ZIP-213][ZIP-213]
 ///
 /// [ZIP-213]: https://zips.z.cash/zip-0213#specification
-pub fn shielded_coinbase(height: Height, network: Network, transaction: &Transaction) -> bool {
+pub fn shielded_coinbase(
+    height: Height,
+    network: Network,
+    transaction: &Transaction,
+) -> Result<(), SubsidyError> {
     let heartwood_height = Heartwood
         .activation_height(network)
         .expect("heartwood activation height should be available");
 
     if height < heartwood_height {
         if transaction.joinsplits().is_none() && transaction.shielded_data().is_none() {
-            return true;
+            return Ok(());
         }
     } else if transaction.joinsplits().is_none() {
-        return true;
+        return Ok(());
     }
 
-    false
+    Err(SubsidyError::ShieldedCoinbaseFailed)
 }
 
 #[cfg(test)]

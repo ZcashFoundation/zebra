@@ -9,6 +9,9 @@ pub enum SubsidyError {
 
     #[error("founders reward output not found")]
     FoundersRewardNotFound,
+
+    #[error("shielded coinbase validation failed")]
+    ShieldedCoinbaseFailed,
 }
 
 #[derive(Error, Debug, PartialEq)]
