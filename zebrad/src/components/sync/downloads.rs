@@ -5,6 +5,7 @@ use std::{
     task::{Context, Poll},
 };
 
+use color_eyre::eyre::{eyre, Report};
 use futures::{
     future::TryFutureExt,
     ready,
@@ -110,10 +111,9 @@ where
     /// only if the network service fails. It returns immediately after queuing
     /// the request.
     #[instrument(skip(self))]
-    pub async fn download_and_verify(&mut self, hash: block::Hash) -> Result<(), BoxError> {
+    pub async fn download_and_verify(&mut self, hash: block::Hash) -> Result<(), Report> {
         if self.cancel_handles.contains_key(&hash) {
-            tracing::debug!("skipping hash already queued for download");
-            return Ok(());
+            return Err(eyre!("duplicate hash queued for download"));
         }
 
         // We construct the block requests sequentially, waiting for the peer
@@ -127,7 +127,8 @@ where
         let block_req = self
             .network
             .ready_and()
-            .await?
+            .await
+            .map_err(|e| eyre!(e))?
             .call(zn::Request::BlocksByHash(std::iter::once(hash).collect()));
         tracing::debug!("requested block");
 
