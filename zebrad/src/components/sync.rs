@@ -544,10 +544,7 @@ where
     async fn request_blocks(&mut self, hashes: HashSet<block::Hash>) -> Result<(), Report> {
         tracing::debug!(hashes.len = hashes.len(), "requesting blocks");
         for hash in hashes.into_iter() {
-            self.downloads
-                .download_and_verify(hash)
-                .await
-                .map_err(|e| eyre!(e))?;
+            self.downloads.download_and_verify(hash).await?;
         }
 
         Ok(())
