@@ -17,7 +17,7 @@ state.  This includes:
 appropriate side-channel protections;
 - an RPC endpoint for `zebrad` that allows access to the client component;
 - Rust library code that implements basic wallet functionality;
-- a `zebracli` binary that wraps the wallet library and RPC queries in a command-line interface.
+- a `zebra-cli` binary that wraps the wallet library and RPC queries in a command-line interface.
 
 Client functionality is restricted to transparent and Sapling shielded
 transactions; Sprout shielded transactions are not supported. (Users should
@@ -77,7 +77,7 @@ or multi-threaded.
 [guide-level-explanation]: #guide-level-explanation
 
 There are two main parts of this functionality. The first is a `Client`
-component running as part of `zebrad`, and the second is a `zebracli`
+component running as part of `zebrad`, and the second is a `zebra-cli`
 command-line tool.
 
 The `Client` component is responsible for blockchain scanning. It maintains
@@ -101,12 +101,12 @@ potential side-channels.
 
 [pingreject]: https://eprint.iacr.org/2020/220.pdf
 
-The second part is the `zebracli` command-line tool, which provides basic
+The second part is the `zebra-cli` command-line tool, which provides basic
 wallet functionality. This tool manages spending keys and addresses, and
 communicates with the `Client` component in `zebrad` to provide basic wallet
-functionality. Specifically, `zebracli` uses a distinct RPC endpoint to load
+functionality. Specifically, `zebra-cli` uses a distinct RPC endpoint to load
 viewing keys into `zebrad` and to query the results of block chain scanning.
-`zebracli` can then use the results of those queries to generate transactions
+`zebra-cli` can then use the results of those queries to generate transactions
 and submit them to the network using `zebrad`.
 
 This design upholds the principle of least authority by separating key
@@ -121,21 +121,80 @@ possible with this design.
 # Reference-level explanation
 [reference-level-explanation]: #reference-level-explanation
 
+## State notifications
 
-zebra-client
-- client component
-    - (keeps track of where it’s scanned to)
-    - (zebra-client, in side zebrad, runs in its own separate task, in case it crashes, it’s not noticeable)
-    - (the scanning executes independently (but in the same process) of the normal node operation)
-- zebra-cli talks to this subcomponent which is in a running zebrad
-    - (can use servo/bincode + servo/ipc-channel to communicate with zebrad)
+We want a way to subscribe to updates from the state system via a channel. For
+the purposes of this RFC, these changes are in-flight, but in the future, these
+could be used for a push-based RPC mechanism.
+
+Subscribers can subscribe to all state change notifications as they come in.
+
+Currently the `zebra_state::init()` method returns a `BoxService` that allows you to
+make requests to the chain state. Instead, we would return a `(BoxService,
+StateNotifications)` tuple, where `StateNotifications` is a new structure initially
+defined as:
+
+  ```
+  #[non_exhaustive]
+  pub struct StateNotifications {
+    pub new_blocks: tokio::sync::watch::Receiver<Arc<Block>>,
+  }
+```
+
+Instead of making repeated polling requests to a state service to look for any
+new blocks, this channel will push new blocks to a consumer as they come in,
+for the consumer to use or discard at their discretion. This will be used by
+the client component described below. This will also be needed for gossiping
+blocks to other peers, as they are validated.
+
+## Online client component
+
+This component maintains its own sled tree. See RFC#0005
+
+```
+```
+
+This component runs inside zebrad. After incoming viewing keys are registered,
+it holds onto them in order to do blockchain scanning. The component keeps track
+of where it’s scanned to (TODO: per key?). Runs in its own separate task, in
+case it crashes, it’s not noticeable, and executes independently (but in the
+same process) of the normal node operation.
+
+
+In the case of the client component that needs to do blockchain scanning and
+trial decryption, every valid block with non-coinbase transactions will need to
+be checked and its transactions trial-decrypted with registerd incoming viewing
+keys to see if any notes have been received by the key's owner and if any notes
+have already been spent elsewhere.
+
+
+## RPC's
+A specific set of _privileged_ RPC endpoints:
+- Allows registering of incoming viewing keys with zebrad in order to do
+  blockchain scanning
+- Allows querying of the results of that scanning, to get wallet balance, etc
+- Not authenticated to start (see 'Future possibilities')
+- Users can control access by controlling access to the privileged endpoint (ie
+  via a firewall)
+
+Support for sending tx's via _non-privileged_ RPC endpoints, or via Stolon:
+  - sendTransaction: once you author a transcation you can gossip it via any
+    Zcash node, not just a specific instance of zebrad
+
+## Wallet functionality
+- Holds on to your spending keys so you can author transactions
+- Uses RPC methods to query the online client component inside zebrad about
+  wallet balances
+
+## CLI binary
+- zebra-cli talks to the subcomponent running in zebrad
+    - (can use servo/bincode to communicate with zebrad)
+    - via the privileged (and possibly the unprivileged) RPC endpoints
 
 ## Task isolation in Tokio
-
+- TODO: fill in
 - cooperative multitasking is fine, IF you cooperate
 - lots of tasks
-
-
 
 <!-- This is the technical portion of the RFC. Explain the design in sufficient detail that: -->
 
@@ -198,7 +257,7 @@ Supporting a wallet assumes risk.  Effort required to implement wallet functiona
     - We can't send money with zebra alone.
     - rely on third party wallet software to send funds with zebra
         - we need to provide basic functionality within zebra's trust boundary, rather than forcing users to additionally trust 3p software
-        - there are great 3p wallets, we want to integrate with them, just don't want to rely on them 
+        - there are great 3p wallets, we want to integrate with them, just don't want to rely on them
 
 - What about the light client protocol?
     - does not address this use case, has different trust model (private lookup, no scanning)
@@ -223,17 +282,19 @@ Supporting a wallet assumes risk.  Effort required to implement wallet functiona
 [future-possibilities]: #future-possibilities
 
 - split `Client` component into subprocess
-    - this helps somewhat but the benefit is reduced by memory safety
+    - this helps somewhat but the benefit is reduced by our prexisting memory safety, thanks to Rust
     - not meaningful without other isolation (need to restrict `zebrad` from accessing viewing keys on disk, etc)
+    - instead of process isolation, maybe you actually want the Light Client
+Protocol, or something similar?
 
-- hardware wallet integration for `zebracli`
-    - having `zebracli` allows us to do this
+- hardware wallet integration for `zebra-cli`
+    - having `zebra-cli` allows us to do this
     - much higher security ROI than subprocess
     - very cool future feature
 
-- authenticate queries for a particular viewing key by proving knowledge of
-the viewing key (requires crypto). this could allow public access to the
-client endpoint
+- authenticate queries for a particular viewing key by proving knowledge of the
+viewing key (requires crypto). this could allow public access to the client
+endpoint
 
 <!-- Think about what the natural extension and evolution of your proposal would -->
 <!-- be and how it would affect Zebra and Zcash as a whole. Try to use this -->
