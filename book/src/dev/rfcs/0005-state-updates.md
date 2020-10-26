@@ -430,7 +430,7 @@ Commit `block` to the non-finalized state.
 
 6. Insert `parent_chain` into `self.chain_set`
 
-### `pub(super) fn commit_new_chain(&mut self, block: Arc<Block>)`
+#### `pub(super) fn commit_new_chain(&mut self, block: Arc<Block>)`
 
 Construct a new chain starting with `block`.
 
