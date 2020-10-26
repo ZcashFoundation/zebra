@@ -79,7 +79,14 @@ pub const MAX_QUEUED_BLOCKS_PER_HEIGHT: usize = 4;
 
 /// We limit the maximum number of blocks in each checkpoint. Each block uses a
 /// constant amount of memory for the supporting data structures and futures.
-pub const MAX_CHECKPOINT_HEIGHT_GAP: usize = 2_000;
+///
+/// We choose a checkpoint gap that allows us to verify one checkpoint for
+/// every `ObtainTips` or `ExtendTips` response.
+///
+/// `zcashd`'s maximum `FindBlocks` response size is 500 hashes. `zebrad` uses
+/// 1 hash to verify the tip, and discards 1-2 hashes to work around `zcashd`
+/// bugs. So the most efficient gap is slightly less than 500 blocks.
+pub const MAX_CHECKPOINT_HEIGHT_GAP: usize = 400;
 
 /// A checkpointing block verifier.
 ///
