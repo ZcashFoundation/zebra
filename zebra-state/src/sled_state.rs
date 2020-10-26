@@ -293,7 +293,7 @@ impl FinalizedState {
     pub fn get_hash(&self, height: block::Height) -> Option<block::Hash> {
         self.hash_by_height
             .get(&height.0.to_be_bytes())
-            .expect("sled errors aren't handled")
+            .expect("expected that sled errors would not occur")
             .map(|bytes| block::Hash(bytes.as_ref().try_into().unwrap()))
     }
 
