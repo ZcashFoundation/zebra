@@ -25,10 +25,10 @@ use std::os::unix::process::ExitStatusExt;
 mod args;
 
 /// We limit the memory usage for each checkpoint, based on the cumulative size of
-/// the serialized blocks in the chain. Deserialized blocks are larger, because
-/// they contain pointers and non-compact integers. But they should be within a
-/// constant factor of the serialized size.
-const MAX_CHECKPOINT_BYTE_COUNT: u64 = 256 * 1024 * 1024;
+/// the serialized blocks in the chain. Deserialized blocks are slightly larger
+/// than serialized blocks, but they should be within a constant factor of the
+/// serialized size.
+const MAX_CHECKPOINT_BYTE_COUNT: u64 = 32 * 1024 * 1024;
 
 /// Initialise tracing using its defaults.
 fn init_tracing() {
