@@ -580,11 +580,11 @@ fn sync_large_checkpoints_mainnet() -> Result<()> {
 
 /// Test if `zebrad` can sync some larger checkpoints on testnet.
 ///
-/// This test does not run by default, see `sync_larger_checkpoints_mainnet`
+/// This test does not run by default, see `sync_large_checkpoints_mainnet`
 /// for details.
 #[test]
 #[ignore]
-fn sync_larger_checkpoints_testnet() -> Result<()> {
+fn sync_large_checkpoints_testnet() -> Result<()> {
     sync_until(
         LARGE_CHECKPOINT_TEST_HEIGHT,
         Testnet,
