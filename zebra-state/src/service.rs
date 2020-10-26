@@ -9,7 +9,7 @@ use std::{
 
 use futures::future::FutureExt;
 use memory_state::{NonFinalizedState, QueuedBlocks};
-use tokio::sync::broadcast;
+use tokio::sync::oneshot;
 use tower::{util::BoxService, Service};
 use tracing::instrument;
 use zebra_chain::{
@@ -18,8 +18,7 @@ use zebra_chain::{
 };
 
 use crate::{
-    BoxError, CloneError, CommitBlockError, Config, FinalizedState, Request, Response,
-    ValidateContextError,
+    BoxError, CommitBlockError, Config, FinalizedState, Request, Response, ValidateContextError,
 };
 
 mod memory_state;
@@ -32,7 +31,7 @@ pub struct QueuedBlock {
     // TODO: add these parameters when we can compute anchors.
     // sprout_anchor: sprout::tree::Root,
     // sapling_anchor: sapling::tree::Root,
-    pub rsp_tx: broadcast::Sender<Result<block::Hash, CloneError>>,
+    pub rsp_tx: oneshot::Sender<Result<block::Hash, BoxError>>,
 }
 
 struct StateService {
@@ -73,14 +72,38 @@ impl StateService {
     /// in RFC0005.
     ///
     /// [1]: https://zebra.zfnd.org/dev/rfcs/0005-state-updates.html#committing-non-finalized-blocks
-    #[instrument(skip(self, new))]
-    fn queue_and_commit_non_finalized_blocks(&mut self, new: QueuedBlock) {
-        let parent_hash = new.block.header.previous_block_hash;
+    #[instrument(skip(self, block))]
+    fn queue_and_commit_non_finalized_blocks(
+        &mut self,
+        block: Arc<Block>,
+    ) -> oneshot::Receiver<Result<block::Hash, BoxError>> {
+        let hash = block.hash();
+        let parent_hash = block.header.previous_block_hash;
 
-        self.queued_blocks.queue(new);
+        if self.contains_committed_block(&block) {
+            let (rsp_tx, rsp_rx) = oneshot::channel();
+            let _ = rsp_tx.send(Err("duplicate block".into()));
+            return rsp_rx;
+        }
+
+        // The queue of blocks maintained by this service acts as a pipeline for
+        // blocks waiting for contextual verification. We lazily flush the
+        // pipeline here by handling duplicate requests to verify an existing
+        // queued block. We handle those duplicate requests by replacing the old
+        // channel with the new one and sending an error over the old channel.
+        let rsp_rx = if let Some(queued_block) = self.queued_blocks.get_mut(&hash) {
+            let (mut rsp_tx, rsp_rx) = oneshot::channel();
+            std::mem::swap(&mut queued_block.rsp_tx, &mut rsp_tx);
+            let _ = rsp_tx.send(Err("duplicate block".into()));
+            rsp_rx
+        } else {
+            let (rsp_tx, rsp_rx) = oneshot::channel();
+            self.queued_blocks.queue(QueuedBlock { block, rsp_tx });
+            rsp_rx
+        };
 
         if !self.can_fork_chain_at(&parent_hash) {
-            return;
+            return rsp_rx;
         }
 
         self.process_queued(parent_hash);
@@ -96,6 +119,8 @@ impl StateService {
             .prune_by_height(self.sled.finalized_tip_height().expect(
             "Finalized state must have at least one block before committing non-finalized state",
         ));
+
+        rsp_rx
     }
 
     /// Run contextual validation on `block` and add it to the non-finalized
@@ -118,6 +143,17 @@ impl StateService {
         self.mem.any_chain_contains(hash) || &self.sled.finalized_tip_hash() == hash
     }
 
+    /// Returns true if the given hash has been committed to either the finalized
+    /// or non-finalized state.
+    fn contains_committed_block(&self, block: &Block) -> bool {
+        let hash = block.hash();
+        let height = block
+            .coinbase_height()
+            .expect("coinbase heights should be valid");
+
+        self.mem.any_chain_contains(&hash) || self.sled.get_hash(height) == Some(hash)
+    }
+
     /// Attempt to validate and commit all queued blocks whose parents have
     /// recently arrived starting from `new_parent`, in breadth-first ordering.
     #[instrument(skip(self))]
@@ -132,7 +168,7 @@ impl StateService {
                 let result = self
                     .validate_and_commit(block)
                     .map(|()| hash)
-                    .map_err(CloneError::from);
+                    .map_err(BoxError::from);
                 let _ = rsp_tx.send(result);
                 new_parents.push(hash);
             }
@@ -179,14 +215,11 @@ impl Service<Request> for StateService {
     fn call(&mut self, req: Request) -> Self::Future {
         match req {
             Request::CommitBlock { block } => {
-                let (rsp_tx, mut rsp_rx) = broadcast::channel(1);
-
                 self.pending_utxos.check_block(&block);
-                self.queue_and_commit_non_finalized_blocks(QueuedBlock { block, rsp_tx });
+                let rsp_rx = self.queue_and_commit_non_finalized_blocks(block);
 
                 async move {
                     rsp_rx
-                        .recv()
                         .await
                         .expect("sender is not dropped")
                         .map(Response::Committed)
@@ -195,7 +228,7 @@ impl Service<Request> for StateService {
                 .boxed()
             }
             Request::CommitFinalizedBlock { block } => {
-                let (rsp_tx, mut rsp_rx) = broadcast::channel(1);
+                let (rsp_tx, rsp_rx) = oneshot::channel();
 
                 self.pending_utxos.check_block(&block);
                 self.sled
@@ -203,7 +236,6 @@ impl Service<Request> for StateService {
 
                 async move {
                     rsp_rx
-                        .recv()
                         .await
                         .expect("sender is not dropped")
                         .map(Response::Committed)

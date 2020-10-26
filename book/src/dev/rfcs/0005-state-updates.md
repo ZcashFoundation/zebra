@@ -526,32 +526,35 @@ The state service uses the following entry points:
 
 New `non-finalized` blocks are commited as follows:
 
-#### `pub(super) fn queue_and_commit_non_finalized_blocks(&mut self, new: Arc<Block>) -> tokio::sync::broadcast::Receiver<block::Hash>`
+### `pub(super) fn queue_and_commit_non_finalized_blocks(&mut self, new: Arc<Block>) -> tokio::sync::oneshot::Receiver<block::Hash>`
 
-1. If a duplicate block exists in the queue:
-     - Find the `QueuedBlock` for that existing duplicate block
-     - Create an extra receiver for the existing block, using `block.rsp_tx.subscribe`,
-     - Drop the newly received duplicate block
-     - Return the extra receiver, so it can be used in the response future for the duplicate block request
-
-2. Create a `QueuedBlock` for `block`:
-     - Create a `tokio::sync::broadcast` channel
-     - Use that channel to create a `QueuedBlock` for `block`.
-
-3. If a duplicate block exists in a non-finalized chain, or the finalized chain,
+1. If a duplicate block hash exists in a non-finalized chain, or the finalized chain,
    it has already been successfully verified:
-     - Broadcast `Ok(block.hash())` via `block.rsp_tx`, and return the receiver for the block's channel
+     - create a new oneshot channel
+     - immediately send `Err(DuplicateBlockHash)` drop the sender
+     - return the reciever
 
-4. Add `block` to `self.queued_blocks`
+2. If a duplicate block hash exists in the queue:
+     - Find the `QueuedBlock` for that existing duplicate block
+     - create a new channel for the new request
+     - replace the old sender in `queued_block` with the new sender
+     - send `Err(DuplicateBlockHash)` through the old sender channel
+     - continue to use the new receiver
 
-5. If `block.header.previous_block_hash` is not present in the finalized or
+3. Else create a `QueuedBlock` for `block`:
+     - Create a `tokio::sync::oneshot` channel
+     - Use that channel to create a `QueuedBlock` for `block`
+     - Add `block` to `self.queued_blocks`
+     - continue to use the new receiver
+
+4. If `block.header.previous_block_hash` is not present in the finalized or
    non-finalized state:
      - Return the receiver for the block's channel
 
-6. Else iteratively attempt to process queued blocks by their parent hash
+5. Else iteratively attempt to process queued blocks by their parent hash
    starting with `block.header.previous_block_hash`
 
-7. While there are recently commited parent hashes to process
+6. While there are recently commited parent hashes to process
     - Dequeue all blocks waiting on `parent` with `let queued_children =
       self.queued_blocks.dequeue_children(parent);`
     - for each queued `block`
@@ -569,17 +572,17 @@ New `non-finalized` blocks are commited as follows:
       - Add `block.hash` to the set of recently commited parent hashes to
         process
 
-8. While the length of the non-finalized portion of the best chain is greater
+7. While the length of the non-finalized portion of the best chain is greater
    than the reorg limit
     - Remove the lowest height block from the non-finalized state with
       `self.mem.finalize();`
     - Commit that block to the finalized state with
       `self.sled.commit_finalized_direct(finalized);`
 
-9. Prune orphaned blocks from `self.queued_blocks` with
+8. Prune orphaned blocks from `self.queued_blocks` with
    `self.queued_blocks.prune_by_height(finalized_height);`
-   
-10. Return the receiver for the block's channel
+
+9. Return the receiver for the block's channel
 
 ## Sled data structures
 [sled]: #sled

@@ -641,6 +641,11 @@ impl QueuedBlocks {
                 .remove(&hash);
         }
     }
+
+    /// Return the queued block if it has already been registered
+    pub fn get_mut(&mut self, hash: &block::Hash) -> Option<&mut QueuedBlock> {
+        self.blocks.get_mut(&hash)
+    }
 }
 
 #[cfg(test)]
