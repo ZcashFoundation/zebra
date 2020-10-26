@@ -179,6 +179,7 @@ where
                 result.map_err(VerifyBlockError::Transaction)?;
             }
             
+            // Update the metrics after all the validation is finished
             tracing::trace!("verified block");
             metrics::gauge!("block.verified.block.height", height.0 as _);
             metrics::counter!("block.verified.block.count", 1);
