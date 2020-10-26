@@ -86,6 +86,11 @@ impl StateService {
             return rsp_rx;
         }
 
+        // The queue of blocks maintained by this service acts as a pipeline for
+        // blocks waiting for contextual verification. We lazily flush the
+        // pipeline here by handling duplicate requests to verify an existing
+        // queued block. We handle those duplicate requests by replacing the old
+        // channel with the new one and sending an error over the old channel.
         let rsp_rx = if let Some(queued_block) = self.queued_blocks.get_mut(&hash) {
             let (mut rsp_tx, rsp_rx) = oneshot::channel();
             std::mem::swap(&mut queued_block.rsp_tx, &mut rsp_tx);
