@@ -17,3 +17,4 @@ tracing-subscriber = { version = "0.2.14", features = ["tracing-log"] }
 
 zebra-chain = { path = "../zebra-chain" }
 zebra-consensus = { path = "../zebra-consensus" }
+zebra-state = { path = "../zebra-state" }
