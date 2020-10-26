@@ -528,17 +528,17 @@ New `non-finalized` blocks are commited as follows:
 
 ### `pub(super) fn queue_and_commit_non_finalized_blocks(&mut self, new: Arc<Block>) -> tokio::sync::oneshot::Receiver<block::Hash>`
 
-1. If a duplicate block exists in a non-finalized chain, or the finalized chain,
+1. If a duplicate block hash exists in a non-finalized chain, or the finalized chain,
    it has already been successfully verified:
      - create a new oneshot channel
-     - immediately send `Err(DuplicateBlock)` drop the sender
+     - immediately send `Err(DuplicateBlockHash)` drop the sender
      - return the reciever
 
-2. If a duplicate block exists in the queue:
+2. If a duplicate block hash exists in the queue:
      - Find the `QueuedBlock` for that existing duplicate block
      - create a new channel for the new request
      - replace the old sender in `queued_block` with the new sender
-     - send `Err(DuplicateBlock)` through the old sender channel
+     - send `Err(DuplicateBlockHash)` through the old sender channel
      - continue to use the new receiver
 
 3. Else create a `QueuedBlock` for `block`:
