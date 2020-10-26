@@ -3314,6 +3314,7 @@ dependencies = [
  "tracing-subscriber 0.2.13",
  "zebra-chain",
  "zebra-consensus",
+ "zebra-state",
 ]
 
 [[package]]
