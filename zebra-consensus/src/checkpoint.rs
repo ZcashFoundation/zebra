@@ -79,7 +79,14 @@ pub const MAX_QUEUED_BLOCKS_PER_HEIGHT: usize = 4;
 
 /// We limit the maximum number of blocks in each checkpoint. Each block uses a
 /// constant amount of memory for the supporting data structures and futures.
-pub const MAX_CHECKPOINT_HEIGHT_GAP: usize = 2_000;
+///
+/// We choose a checkpoint gap that allows us to verify one checkpoint for
+/// every `ObtainTips` or `ExtendTips` response.
+///
+/// `zcashd`'s maximum `FindBlocks` response size is 500 hashes. `zebrad` uses
+/// 1 hash to verify the tip, and discards 1-2 hashes to work around `zcashd`
+/// bugs. So the most efficient gap is slightly less than 500 blocks.
+pub const MAX_CHECKPOINT_HEIGHT_GAP: usize = 400;
 
 /// A checkpointing block verifier.
 ///
@@ -492,15 +499,7 @@ where
         );
 
         let is_checkpoint = self.checkpoint_list.contains(height);
-        tracing::trace!(?height, ?hash, ?is_checkpoint, "Queued block");
-
-        // TODO(teor):
-        //   - Remove this log once the CheckpointVerifier is working?
-        //   - Modify the default filter or add another log, so users see
-        //     regular download progress info (vs verification info)
-        if is_checkpoint {
-            tracing::info!(?height, ?hash, ?is_checkpoint, "Queued checkpoint block");
-        }
+        tracing::debug!(?height, ?hash, ?is_checkpoint, "queued block");
 
         rx
     }
@@ -801,7 +800,7 @@ where
         Poll::Ready(Ok(()))
     }
 
-    #[instrument(name = "checkpoint_call", skip(self, block))]
+    #[instrument(name = "checkpoint", skip(self, block))]
     fn call(&mut self, block: Arc<Block>) -> Self::Future {
         // Immediately reject all incoming blocks that arrive after we've finished.
         if let FinalCheckpoint = self.previous_checkpoint_height() {

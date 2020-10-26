@@ -16,26 +16,27 @@ abscissa_core = "0.5"
 gumdrop = "0.7"
 serde = { version = "1", features = ["serde_derive"] }
 toml = "0.5"
-
 chrono = "0.4"
 rand = "0.7"
 
 hyper = "0.13.8"
 futures = "0.3"
 tokio = { version = "0.2.22", features = ["time", "rt-threaded", "stream", "macros", "tracing", "signal"] }
-tower = "0.3"
+tower = { version = "0.3", features = ["hedge", "limit"] }
+pin-project = "0.4.23"
 
 color-eyre = { version = "0.5.6", features = ["issue-url"] }
 thiserror = "1"
+
 tracing = "0.1"
 tracing-futures = "0.2"
-tracing-subscriber = { version = "0.2.13", features = ["tracing-log"] }
+tracing-flame = "0.1.0"
+tracing-subscriber = { version = "0.2.14", features = ["tracing-log"] }
 tracing-error = "0.1.2"
-
 metrics-runtime = "0.13"
 metrics = "0.12"
+
 dirs = "3.0.1"
-tracing-flame = "0.1.0"
 inferno = { version = "0.10.1", default-features = false }
 
 [dev-dependencies]

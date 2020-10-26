@@ -25,14 +25,10 @@ use std::os::unix::process::ExitStatusExt;
 mod args;
 
 /// We limit the memory usage for each checkpoint, based on the cumulative size of
-/// the serialized blocks in the chain. Deserialized blocks are larger, because
-/// they contain pointers and non-compact integers. But they should be within a
-/// constant factor of the serialized size.
-const MAX_CHECKPOINT_BYTE_COUNT: u64 = 256 * 1024 * 1024;
-
-/// Checkpoints must be on the main chain, so we skip blocks that are within the
-/// zcashd reorg limit.
-const BLOCK_REORG_LIMIT: block::Height = block::Height(100);
+/// the serialized blocks in the chain. Deserialized blocks are slightly larger
+/// than serialized blocks, but they should be within a constant factor of the
+/// serialized size.
+const MAX_CHECKPOINT_BYTE_COUNT: u64 = 32 * 1024 * 1024;
 
 /// Initialise tracing using its defaults.
 fn init_tracing() {
@@ -89,9 +85,11 @@ fn main() -> Result<()> {
     // calculate the maximum height
     let height_limit: block::Height = cmd_output(&mut cmd)?.trim().parse()?;
     assert!(height_limit <= block::Height::MAX);
+    // Checkpoints must be on the main chain, so we skip blocks that are within the
+    // Zcash reorg limit.
     let height_limit = height_limit
         .0
-        .checked_sub(BLOCK_REORG_LIMIT.0)
+        .checked_sub(zebra_state::MAX_BLOCK_REORG_HEIGHT.0)
         .map(block::Height)
         .expect("zcashd has some mature blocks: wait for zcashd to sync more blocks");
 

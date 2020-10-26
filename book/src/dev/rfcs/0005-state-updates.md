@@ -430,7 +430,7 @@ Commit `block` to the non-finalized state.
 
 6. Insert `parent_chain` into `self.chain_set`
 
-### `pub(super) fn commit_new_chain(&mut self, block: Arc<Block>)`
+#### `pub(super) fn commit_new_chain(&mut self, block: Arc<Block>)`
 
 Construct a new chain starting with `block`.
 
@@ -641,7 +641,7 @@ Committing a block to the sled state should be implemented as a wrapper around
 a function also called by [`Request::CommitBlock`](#request-commit-block),
 which should:
 
-### `pub(super) fn queue_and_commit_finalized_blocks(&mut self, queued_block: QueuedBlock)`
+#### `pub(super) fn queue_and_commit_finalized_blocks(&mut self, queued_block: QueuedBlock)`
 
 1. Obtain the highest entry of `hash_by_height` as `(old_height, old_tip)`.
 Check that `block`'s parent hash is `old_tip` and its height is
@@ -723,7 +723,7 @@ CommitBlock {
 ```
 
 Performs contextual validation of the given block, committing it to the state
-if successful. Returns `Response::Added(BlockHeaderHash)` with the hash of
+if successful. Returns `Response::Added(block::Hash)` with the hash of
 the newly committed block or an error.
 
 ### `Request::CommitFinalizedBlock`
@@ -764,8 +764,7 @@ Returns `Response::Tip(block::Hash)` with the current best chain tip.
 Implemented by querying:
 
 - (non-finalized) the highest height block in the best chain
-if the `non-finalized` state is empty
-- (finalized) the highest height block in the `hash_by_height` tree
+- (finalized) the highest height block in the `hash_by_height` tree, if the `non-finalized` state is empty
 
 ### `Request::BlockLocator`
 [request-block-locator]: #request-block-locator
@@ -801,12 +800,11 @@ Implemented by querying:
   transaction) of each chain starting with the best chain, and then find
   block that chain's `blocks` (to get the block containing the transaction
   data)
-if the transaction is not in any non-finalized chain:
 - (finalized) the `tx_by_hash` tree (to get the block that contains the
   transaction) and then `block_by_height` tree (to get the block containing
-  the transaction data).
+  the transaction data), if the transaction is not in any non-finalized chain
 
-### `Request::Block(BlockHeaderHash)`
+### `Request::Block(block::Hash)`
 [request-block]: #request-block
 
 Returns
@@ -821,10 +819,8 @@ Implemented by querying:
 
 - (non-finalized) the `height_by_hash` of each chain starting with the best
   chain, then find block that chain's `blocks` (to get the block data)
-if the block is not in any non-finalized chain:
 - (finalized) the `height_by_hash` tree (to get the block height) and then
-    the `block_by_height` tree (to get the block data).
-
+    the `block_by_height` tree (to get the block data), if the block is not in any non-finalized chain
 
 ### `Request::AwaitUtxo(OutPoint)`
 

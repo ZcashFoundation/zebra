@@ -7,10 +7,10 @@ use std::{
     time::Instant,
 };
 
-use futures::future::{FutureExt, TryFutureExt};
+use futures::future::FutureExt;
 use memory_state::{NonFinalizedState, QueuedBlocks};
 use tokio::sync::oneshot;
-use tower::{buffer::Buffer, util::BoxService, Service};
+use tower::{util::BoxService, Service};
 use tracing::instrument;
 use zebra_chain::{
     block::{self, Block},
@@ -240,26 +240,24 @@ impl Service<Request> for StateService {
             }
             Request::Depth(hash) => {
                 // todo: handle in memory and sled
-                self.sled.depth(hash).map_ok(Response::Depth).boxed()
+                let rsp = self.sled.depth(hash).map(Response::Depth);
+                async move { rsp }.boxed()
             }
             Request::Tip => {
                 // todo: handle in memory and sled
-                self.sled.tip().map_ok(Response::Tip).boxed()
+                let rsp = self.sled.tip().map(Response::Tip);
+                async move { rsp }.boxed()
             }
             Request::BlockLocator => {
                 // todo: handle in memory and sled
-                self.sled
-                    .block_locator()
-                    .map_ok(Response::BlockLocator)
-                    .boxed()
+                let rsp = self.sled.block_locator().map(Response::BlockLocator);
+                async move { rsp }.boxed()
             }
             Request::Transaction(_) => unimplemented!(),
             Request::Block(hash_or_height) => {
                 //todo: handle in memory and sled
-                self.sled
-                    .block(hash_or_height)
-                    .map_ok(Response::Block)
-                    .boxed()
+                let rsp = self.sled.block(hash_or_height).map(Response::Block);
+                async move { rsp }.boxed()
             }
             Request::AwaitUtxo(outpoint) => {
                 let fut = self.pending_utxos.queue(outpoint);
@@ -280,13 +278,10 @@ impl Service<Request> for StateService {
 ///
 /// Each `network` has its own separate sled database.
 ///
-/// The resulting service is clonable, to provide shared access to a common chain
-/// state. It's possible to construct multiple state services in the same
-/// application (as long as they, e.g., use different storage locations), but
-/// doing so is probably not what you want.
-pub fn init(
-    config: Config,
-    network: Network,
-) -> Buffer<BoxService<Request, Response, BoxError>, Request> {
-    Buffer::new(BoxService::new(StateService::new(config, network)), 3)
+/// To share access to the state, wrap the returned service in a `Buffer`. It's
+/// possible to construct multiple state services in the same application (as
+/// long as they, e.g., use different storage locations), but doing so is
+/// probably not what you want.
+pub fn init(config: Config, network: Network) -> BoxService<Request, Response, BoxError> {
+    BoxService::new(StateService::new(config, network))
 }

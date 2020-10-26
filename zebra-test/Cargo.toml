@@ -14,7 +14,7 @@ tower = { version = "0.3.1", features = ["util"] }
 futures = "0.3.6"
 color-eyre = "0.5.6"
 tracing = "0.1.21"
-tracing-subscriber = "0.2.13"
+tracing-subscriber = "0.2.14"
 tracing-error = "0.1.2"
 spandoc = "0.2.0"
 regex = "1.4.1"
