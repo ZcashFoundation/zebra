@@ -720,7 +720,7 @@ CommitBlock {
 ```
 
 Performs contextual validation of the given block, committing it to the state
-if successful. Returns `Response::Added(BlockHeaderHash)` with the hash of
+if successful. Returns `Response::Added(block::Hash)` with the hash of
 the newly committed block or an error.
 
 ### `Request::CommitFinalizedBlock`
@@ -801,7 +801,7 @@ Implemented by querying:
   transaction) and then `block_by_height` tree (to get the block containing
   the transaction data), if the transaction is not in any non-finalized chain
 
-### `Request::Block(BlockHeaderHash)`
+### `Request::Block(block::Hash)`
 [request-block]: #request-block
 
 Returns
