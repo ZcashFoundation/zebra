@@ -149,10 +149,21 @@ blocks to other peers, as they are validated.
 
 ## Online client component
 
-This component maintains its own sled tree. See RFC#0005
+This component maintains its own Sled tree. See RFC#0005 for more details on Sled.
 
-```
-```
+We use the following Sled trees:
+
+| Tree                  |                  Keys |                              Values |
+|-----------------------|-----------------------|-------------------------------------|
+| `viewing_keys`        | `IncomingViewingKey`  | `String`                            |
+| `height_by_key`       | `IncomingViewingKey`  | `BE32(height)`                      |
+| `received_set_by_key` | `IncomingViewingKey`  | ?                                   |
+| `spend_set_by_key`    | `IncomingViewingKey`  | ?                                   |
+| `nullifier_map_by_key`| `IncomingViewingKey`  | ?                                   |
+
+See https://zips.z.cash/protocol/protocol.pdf#saplingscan
+
+Zcash structures are encoded using `ZcashSerialize`/`ZcashDeserialize`.
 
 This component runs inside zebrad. After incoming viewing keys are registered,
 it holds onto them in order to do blockchain scanning. The component keeps track
