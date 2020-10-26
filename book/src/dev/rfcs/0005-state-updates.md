@@ -526,7 +526,7 @@ The state service uses the following entry points:
 
 New `non-finalized` blocks are commited as follows:
 
-### `pub(super) fn queue_and_commit_non_finalized_blocks(&mut self, new: Arc<Block>) -> tokio::sync::broadcast::Receiver<block::Hash>`
+#### `pub(super) fn queue_and_commit_non_finalized_blocks(&mut self, new: Arc<Block>) -> tokio::sync::broadcast::Receiver<block::Hash>`
 
 1. If a duplicate block exists in the queue:
      - Find the `QueuedBlock` for that existing duplicate block
@@ -638,7 +638,7 @@ Committing a block to the sled state should be implemented as a wrapper around
 a function also called by [`Request::CommitBlock`](#request-commit-block),
 which should:
 
-### `pub(super) fn queue_and_commit_finalized_blocks(&mut self, queued_block: QueuedBlock)`
+#### `pub(super) fn queue_and_commit_finalized_blocks(&mut self, queued_block: QueuedBlock)`
 
 1. Obtain the highest entry of `hash_by_height` as `(old_height, old_tip)`.
 Check that `block`'s parent hash is `old_tip` and its height is
