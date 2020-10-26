@@ -761,8 +761,7 @@ Returns `Response::Tip(block::Hash)` with the current best chain tip.
 Implemented by querying:
 
 - (non-finalized) the highest height block in the best chain
-if the `non-finalized` state is empty
-- (finalized) the highest height block in the `hash_by_height` tree
+- (finalized) the highest height block in the `hash_by_height` tree, if the `non-finalized` state is empty
 
 ### `Request::BlockLocator`
 [request-block-locator]: #request-block-locator
@@ -798,10 +797,9 @@ Implemented by querying:
   transaction) of each chain starting with the best chain, and then find
   block that chain's `blocks` (to get the block containing the transaction
   data)
-if the transaction is not in any non-finalized chain:
 - (finalized) the `tx_by_hash` tree (to get the block that contains the
   transaction) and then `block_by_height` tree (to get the block containing
-  the transaction data).
+  the transaction data), if the transaction is not in any non-finalized chain
 
 ### `Request::Block(BlockHeaderHash)`
 [request-block]: #request-block
@@ -818,10 +816,8 @@ Implemented by querying:
 
 - (non-finalized) the `height_by_hash` of each chain starting with the best
   chain, then find block that chain's `blocks` (to get the block data)
-if the block is not in any non-finalized chain:
 - (finalized) the `height_by_hash` tree (to get the block height) and then
-    the `block_by_height` tree (to get the block data).
-
+    the `block_by_height` tree (to get the block data), if the block is not in any non-finalized chain
 
 ### `Request::AwaitUtxo(OutPoint)`
 
