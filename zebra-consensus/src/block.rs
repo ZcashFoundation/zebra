@@ -178,6 +178,7 @@ where
             while let Some(result) = async_checks.next().await {
                 result.map_err(VerifyBlockError::Transaction)?;
             }
+
             // Update the metrics after all the validation is finished
             tracing::trace!("verified block");
             metrics::gauge!("block.verified.block.height", height.0 as _);
