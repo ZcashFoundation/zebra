@@ -200,9 +200,15 @@ Supporting a wallet assumes risk.  Effort required to implement wallet functiona
         - we need to provide basic functionality within zebra's trust boundary, rather than forcing users to additionally trust 3p software
         - there are great 3p wallets, we want to integrate with them, just don't want to rely on them 
 
-- light client protocol 
+- What about the light client protocol?
     - does not address this use case, has different trust model (private lookup, no scanning)
-    - 
+    - we want our first client that interacts with zebrad to not have a long
+      startup time, which a lightclient implementation would require
+    - zebra-cli should be within the same trust and privacy boundary as the
+      zebrad node it is interacting with
+    - light client protocol as currently implemented requires stack assumptions
+      such as protobufs and a hardcoded lightserver to talk to
+
 
 # Unresolved questions
 [unresolved-questions]: #unresolved-questions
