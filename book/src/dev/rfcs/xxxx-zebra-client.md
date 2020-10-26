@@ -16,7 +16,8 @@ state.  This includes:
 - a client component for `zebrad` that handles block chain scanning, with
 appropriate side-channel protections;
 - an RPC endpoint for `zebrad` that allows access to the client component;
-- a `zebracli` binary that wraps basic wallet functionality and RPC queries in a command-line interface.
+- Rust library code that implements basic wallet functionality;
+- a `zebracli` binary that wraps the wallet library and RPC queries in a command-line interface.
 
 Client functionality is restricted to transparent and Sapling shielded
 transactions; Sprout shielded transactions are not supported. (Users should
