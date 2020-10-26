@@ -267,3 +267,40 @@ fn checkpoint_list_hard_coded_sapling(network: Network) -> Result<(), BoxError> 
 
     Ok(())
 }
+
+#[test]
+fn checkpoint_list_hard_coded_max_gap_mainnet() -> Result<(), BoxError> {
+    checkpoint_list_hard_coded_max_gap(Mainnet)
+}
+
+#[test]
+fn checkpoint_list_hard_coded_max_gap_testnet() -> Result<(), BoxError> {
+    checkpoint_list_hard_coded_max_gap(Testnet)
+}
+
+/// Check that the hard-coded checkpoints are within `MAX_CHECKPOINT_HEIGHT_GAP`.
+///
+/// We can't test the block byte limit, because we don't have access to the entire
+/// blockchain in the tests. But that's ok, because the byte limit only impacts
+/// performance.
+fn checkpoint_list_hard_coded_max_gap(network: Network) -> Result<(), BoxError> {
+    zebra_test::init();
+
+    let list = CheckpointList::new(network);
+    let mut heights = list.0.keys();
+
+    // Check that we start at the genesis height
+    let mut previous_height = block::Height(0);
+    assert_eq!(heights.next(), Some(&previous_height));
+
+    for height in heights {
+        let height_limit = (previous_height + (crate::MAX_CHECKPOINT_HEIGHT_GAP as i32)).unwrap();
+        assert!(
+            height <= &height_limit,
+            "Checkpoint gaps must be within MAX_CHECKPOINT_HEIGHT_GAP"
+        );
+        previous_height = *height;
+    }
+
+    Ok(())
+}
