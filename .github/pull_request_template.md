@@ -52,25 +52,25 @@ Add or skip tasks as needed.
 **Does this pull request improve Zebra?**
 
 - [ ] Pull Request
-  - The pull request is complete: code, documentation, and tests
+  - **Is the pull request complete: code, documentation, and tests?**
   - The PR contains changes to related code (unrelated changes can be split into another PR)
   - The PR does everything listed in the tickets that it closes, or the designs that it finishes
   - Any follow-up tasks are listed in a GitHub issue
 
 - [ ] Code
-  - The code implements the specifications or design documents
+  - **Does the code implement the specifications or design documents?**
   - Changes from the specifications or design documents are explained in comments
   - The code is readable, and does not appear to have any bugs
   - Any known issues or limitations are documented
 
 - [ ] Documentation
-  - Docs summarise how the code should be used
+  - **Do the docs summarise how the code should be used?**
   - Docs reference specifications or design documents
   - New public code has doc comments: `#![deny(missing_docs)]`
   - Complex private code has doc comments
 
 - [ ] Tests
-  - The tests make sure the code implements the Zcash consensus rules
+  - **Do the tests make sure the code implements the Zcash consensus rules?**
   - Consensus rules have success tests, failure tests, and property tests
   - Edge cases and errors have tests
   - The consensus rules are tested on the block lists in `zebra_test::vectors`
