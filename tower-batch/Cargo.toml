@@ -8,7 +8,7 @@ edition = "2018"
 [dependencies]
 tokio = { version = "0.2.22", features = ["time", "sync", "stream", "tracing"] }
 tower = { version = "0.3", features = ["util", "buffer"] }
-futures-core = "0.3.6"
+futures-core = "0.3.7"
 pin-project = "0.4.27"
 tracing = "0.1.21"
 tracing-futures = "0.2.4"
