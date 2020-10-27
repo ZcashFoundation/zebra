@@ -41,7 +41,7 @@ This is a flexible checklist for the reviewer to fill in.
 
 Developers:
 Add extra tasks to the review using list items.
-Skip review tasks using ~~strikethrough~~.
+Skip review tasks using ~~strikethrough~~, or just delete them.
 If you want this pull request to have a specific reviewer, tag them in the list of reviewers.
 
 Reviewer:
