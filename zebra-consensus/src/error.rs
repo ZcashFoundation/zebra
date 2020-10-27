@@ -7,6 +7,10 @@
 
 use thiserror::Error;
 
+use zebra_chain::primitives::ed25519;
+
+use crate::BoxError;
+
 #[derive(Error, Debug, PartialEq)]
 pub enum SubsidyError {
     #[error("no coinbase transaction in block")]
@@ -24,8 +28,45 @@ pub enum TransactionError {
     #[error("coinbase input found in non-coinbase transaction")]
     CoinbaseInputFound,
 
+    #[error("coinbase transaction MUST NOT have any JoinSplit descriptions or Spend descriptions")]
+    CoinbaseHasJoinSplitOrSpend,
+
     #[error("coinbase transaction failed subsidy validation")]
     Subsidy(#[from] SubsidyError),
+
+    #[error("transaction version number MUST be >= 4")]
+    WrongVersion,
+
+    #[error("at least one of tx_in_count, nShieldedSpend, and nJoinSplit MUST be nonzero")]
+    NoTransfer,
+
+    #[error("if there are no Spends or Outputs, the value balance MUST be 0.")]
+    BadBalance,
+
+    /// Could not verify a transparent script
+    Script(#[from] zebra_script::Error),
+
+    // XXX change this when we align groth16 verifier errors with bellman
+    // and add a from annotation when the error type is more precise
+    #[error("spend proof MUST be valid given a primary input formed from the other fields except spendAuthSig")]
+    Groth16(BoxError),
+
+    #[error(
+        "joinSplitSig MUST represent a valid signature under joinSplitPubKey of dataToBeSigned"
+    )]
+    Ed25519(#[from] ed25519::Error),
+
+    #[error("bindingSig MUST represent a valid signature under the transaction binding validating key bvk of SigHash")]
+    RedJubjub(redjubjub::Error),
+}
+
+impl From<BoxError> for TransactionError {
+    fn from(err: BoxError) -> Self {
+        match err.downcast::<redjubjub::Error>() {
+            Ok(e) => TransactionError::RedJubjub(*e),
+            Err(e) => TransactionError::Internal(e),
+        }
+    }
 }
 
 impl From<SubsidyError> for BlockError {

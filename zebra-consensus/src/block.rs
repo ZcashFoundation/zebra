@@ -28,10 +28,7 @@ use zebra_chain::{
 };
 use zebra_state as zs;
 
-use crate::{
-    error::*,
-    transaction::{self, VerifyTransactionError},
-};
+use crate::{error::*, transaction};
 use crate::{script, BoxError};
 
 mod check;
@@ -48,27 +45,33 @@ pub struct BlockVerifier<S> {
     transaction_verifier: transaction::Verifier<S>,
 }
 
+// TODO: dedupe with crate::error::BlockError
 #[non_exhaustive]
 #[derive(Debug, Error)]
 pub enum VerifyBlockError {
     #[error("unable to verify depth for block {hash} from chain state during block verification")]
     Depth { source: BoxError, hash: block::Hash },
+
     #[error(transparent)]
     Block {
         #[from]
         source: BlockError,
     },
+
     #[error(transparent)]
     Equihash {
         #[from]
         source: equihash::Error,
     },
+
     #[error(transparent)]
     Time(zebra_chain::block::BlockTimeError),
+
     #[error("unable to commit block after semantic verification")]
     Commit(#[source] BoxError),
+
     #[error("invalid transaction")]
-    Transaction(#[source] VerifyTransactionError),
+    Transaction(#[source] TransactionError),
 }
 
 impl<S> BlockVerifier<S>

@@ -10,18 +10,17 @@ use futures::{
     stream::{FuturesUnordered, StreamExt},
     FutureExt,
 };
-use thiserror::Error;
+
 use tower::{Service, ServiceExt};
 
 use zebra_chain::{
     parameters::NetworkUpgrade,
-    primitives::{ed25519, redjubjub},
     transaction::{self, HashType, Transaction},
 };
 
 use zebra_state as zs;
 
-use crate::{script, BoxError};
+use crate::{error::TransactionError, script, BoxError};
 
 mod check;
 
@@ -45,40 +44,6 @@ where
     }
 }
 
-#[non_exhaustive]
-#[derive(Debug, Display, Error)]
-pub enum VerifyTransactionError {
-    /// Only V4 and later transactions can be verified.
-    WrongVersion,
-    /// A transaction MUST move money around.
-    NoTransfer,
-    /// The balance of money moving around doesn't compute.
-    BadBalance,
-    /// Violation of coinbase rules.
-    Coinbase,
-    /// Could not verify a transparent script
-    Script(#[from] zebra_script::Error),
-    /// Could not verify a Groth16 proof of a JoinSplit/Spend/Output description
-    // XXX change this when we align groth16 verifier errors with bellman
-    // and add a from annotation when the error type is more precise
-    Groth16(BoxError),
-    /// Could not verify a Ed25519 signature with JoinSplitData
-    Ed25519(#[from] ed25519::Error),
-    /// Could not verify a RedJubjub signature with ShieldedData
-    RedJubjub(redjubjub::Error),
-    /// An error that arises from implementation details of the verification service
-    Internal(BoxError),
-}
-
-impl From<BoxError> for VerifyTransactionError {
-    fn from(err: BoxError) -> Self {
-        match err.downcast::<redjubjub::Error>() {
-            Ok(e) => VerifyTransactionError::RedJubjub(*e),
-            Err(e) => VerifyTransactionError::Internal(e),
-        }
-    }
-}
-
 /// Specifies whether a transaction should be verified as part of a block or as
 /// part of the mempool.
 ///
@@ -98,7 +63,7 @@ where
     ZS::Future: Send + 'static,
 {
     type Response = transaction::Hash;
-    type Error = VerifyTransactionError;
+    type Error = TransactionError;
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
@@ -127,7 +92,7 @@ where
         async move {
             match &*tx {
                 Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => {
-                    Err(VerifyTransactionError::WrongVersion)
+                    Err(TransactionError::WrongVersion)
                 }
                 Transaction::V4 {
                     inputs,

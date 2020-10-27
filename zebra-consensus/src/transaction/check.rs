@@ -6,7 +6,7 @@ use zebra_chain::{
     transaction::{JoinSplitData, ShieldedData, Transaction},
 };
 
-use crate::transaction::VerifyTransactionError;
+use crate::error::TransactionError;
 
 /// Validate the JoinSplit binding signature.
 ///
@@ -15,17 +15,17 @@ use crate::transaction::VerifyTransactionError;
 pub fn validate_joinsplit_sig(
     joinsplit_data: &JoinSplitData<Groth16Proof>,
     sighash: &[u8],
-) -> Result<(), VerifyTransactionError> {
+) -> Result<(), TransactionError> {
     ed25519::VerificationKey::try_from(joinsplit_data.pub_key)
         .and_then(|vk| vk.verify(&joinsplit_data.sig, sighash))
-        .map_err(VerifyTransactionError::Ed25519)
+        .map_err(TransactionError::Ed25519)
 }
 
 /// Check that at least one of tx_in_count, nShieldedSpend, and nJoinSplit MUST
 /// be non-zero.
 ///
 /// https://zips.z.cash/protocol/canopy.pdf#txnencodingandconsensus
-pub fn some_money_is_spent(tx: &Transaction) -> Result<(), VerifyTransactionError> {
+pub fn some_money_is_spent(tx: &Transaction) -> Result<(), TransactionError> {
     match tx {
         Transaction::V4 {
             inputs,
@@ -39,10 +39,10 @@ pub fn some_money_is_spent(tx: &Transaction) -> Result<(), VerifyTransactionErro
             {
                 Ok(())
             } else {
-                Err(VerifyTransactionError::NoTransfer)
+                Err(TransactionError::NoTransfer)
             }
         }
-        _ => Err(VerifyTransactionError::WrongVersion),
+        _ => Err(TransactionError::WrongVersion),
     }
 }
 
@@ -55,16 +55,16 @@ pub fn some_money_is_spent(tx: &Transaction) -> Result<(), VerifyTransactionErro
 /// https://zips.z.cash/protocol/canopy.pdf#consensusfrombitcoin
 pub fn any_coinbase_inputs_no_transparent_outputs(
     tx: &Transaction,
-) -> Result<(), VerifyTransactionError> {
+) -> Result<(), TransactionError> {
     match tx {
         Transaction::V4 { outputs, .. } => {
             if !tx.contains_coinbase_input() || !outputs.is_empty() {
                 Ok(())
             } else {
-                Err(VerifyTransactionError::NoTransfer)
+                Err(TransactionError::NoTransfer)
             }
         }
-        _ => Err(VerifyTransactionError::WrongVersion),
+        _ => Err(TransactionError::WrongVersion),
     }
 }
 
@@ -74,20 +74,20 @@ pub fn any_coinbase_inputs_no_transparent_outputs(
 pub fn shielded_balances_match(
     shielded_data: &ShieldedData,
     value_balance: Amount,
-) -> Result<(), VerifyTransactionError> {
+) -> Result<(), TransactionError> {
     if (shielded_data.spends().count() + shielded_data.outputs().count() != 0)
         || i64::from(value_balance) == 0
     {
         Ok(())
     } else {
-        Err(VerifyTransactionError::BadBalance)
+        Err(TransactionError::BadBalance)
     }
 }
 
 /// Check that a coinbase tx does not have any JoinSplit or Spend descriptions.
 ///
 /// https://zips.z.cash/protocol/canopy.pdf#consensusfrombitcoin
-pub fn coinbase_tx_does_not_spend_shielded(tx: &Transaction) -> Result<(), VerifyTransactionError> {
+pub fn coinbase_tx_does_not_spend_shielded(tx: &Transaction) -> Result<(), TransactionError> {
     match tx {
         Transaction::V4 {
             joinsplit_data: Some(joinsplit_data),
@@ -99,9 +99,9 @@ pub fn coinbase_tx_does_not_spend_shielded(tx: &Transaction) -> Result<(), Verif
             {
                 Ok(())
             } else {
-                Err(VerifyTransactionError::Coinbase)
+                Err(TransactionError::CoinbaseHasJoinSplitOrSpend)
             }
         }
-        _ => Err(VerifyTransactionError::WrongVersion),
+        _ => Err(TransactionError::WrongVersion),
     }
 }
