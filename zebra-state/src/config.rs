@@ -61,7 +61,12 @@ impl Config {
         if self.ephemeral {
             config.temporary(self.ephemeral)
         } else {
-            let path = self.cache_dir.join(net_dir).join("state");
+            let path = self
+                .cache_dir
+                .join("state")
+                .join(format!("v{}", crate::constants::SLED_FORMAT_VERSION))
+                .join(net_dir);
+
             config.path(path)
         }
     }
