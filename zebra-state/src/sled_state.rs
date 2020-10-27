@@ -1,6 +1,6 @@
 //! The primary implementation of the `zebra_state::Service` built upon sled
 
-use std::{collections::HashMap, convert::TryInto, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
 use tracing::trace;
 use zebra_chain::transparent;
@@ -13,7 +13,7 @@ use crate::{BoxError, Config, HashOrHeight, QueuedBlock};
 
 mod sled_format;
 
-use sled_format::{SledDeserialize, SledSerialize};
+use sled_format::{FromSled, SledDeserialize, SledSerialize};
 
 /// The finalized part of the chain state, stored in sled.
 ///
@@ -294,9 +294,10 @@ impl FinalizedState {
 
         let heights = crate::util::block_locator_heights(tip_height);
         let mut hashes = Vec::with_capacity(heights.len());
+
         for height in heights {
             if let Some(hash) = self.hash_by_height.zs_get(&height)? {
-                hashes.push(hash)
+                hashes.push(hash);
             }
         }
 
@@ -304,15 +305,16 @@ impl FinalizedState {
     }
 
     pub fn tip(&self) -> Result<Option<(block::Height, block::Hash)>, BoxError> {
-        Ok(self.hash_by_height.iter().rev().next().transpose()?.map(
-            |(height_bytes, hash_bytes)| {
-                let height = block::Height(u32::from_be_bytes(
-                    height_bytes.as_ref().try_into().unwrap(),
-                ));
-                let hash = block::Hash(hash_bytes.as_ref().try_into().unwrap());
-                (height, hash)
-            },
-        ))
+        if let Some((height_bytes, hash_bytes)) =
+            self.hash_by_height.iter().rev().next().transpose()?
+        {
+            let height = block::Height::from_ivec(height_bytes)?;
+            let hash = block::Hash::from_ivec(hash_bytes)?;
+
+            Ok(Some((height, hash)))
+        } else {
+            Ok(None)
+        }
     }
 
     pub fn depth(&self, hash: block::Hash) -> Result<Option<u32>, BoxError> {
@@ -335,10 +337,7 @@ impl FinalizedState {
             },
         };
 
-        match self.block_by_height.zs_get(&height)? {
-            Some(block) => Ok(Some(block)),
-            None => Ok(None),
-        }
+        Ok(self.block_by_height.zs_get(&height)?)
     }
 
     /// Returns the `transparent::Output` pointed to by the given
