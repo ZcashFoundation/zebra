@@ -13,7 +13,7 @@ use crate::{BoxError, Config, HashOrHeight, QueuedBlock};
 
 mod sled_format;
 
-use sled_format::{FromSled, SledDeserialize, SledSerialize};
+use sled_format::{FromSled, IntoSled, SledDeserialize, SledSerialize};
 
 /// The finalized part of the chain state, stored in sled.
 ///
@@ -236,23 +236,40 @@ impl FinalizedState {
                 )| {
                     // TODO: check highest entry of hash_by_height as in RFC
 
+                    // Index the block
                     hash_by_height.zs_insert(height, hash)?;
                     height_by_hash.zs_insert(hash, height)?;
                     block_by_height.zs_insert(height, &*block)?;
 
+                    // TODO: sprout and sapling anchors (per block)
+
+                    // Index each transaction
                     for transaction in block.transactions.iter() {
                         let transaction_hash = transaction.hash();
                         tx_by_hash.zs_insert(transaction_hash, transaction)?;
 
+                        // Mark all transparent inputs as spent
+                        for input in transaction.inputs() {
+                            match input {
+                                transparent::Input::PrevOut { outpoint, .. } => {
+                                    utxo_by_outpoint.remove(outpoint.as_bytes())?;
+                                }
+                                // Coinbase inputs represent new coins,
+                                // so there are no UTXOs to mark as spent.
+                                transparent::Input::Coinbase { .. } => {}
+                            }
+                        }
+
+                        // Index all new transparent outputs
                         for (index, output) in transaction.outputs().iter().enumerate() {
                             let outpoint = transparent::OutPoint {
                                 hash: transaction_hash,
                                 index: index as _,
                             };
-
                             utxo_by_outpoint.zs_insert(outpoint, output)?;
                         }
 
+                        // Mark sprout and sapling nullifiers as spent
                         for sprout_nullifier in transaction.sprout_nullifiers() {
                             sprout_nullifiers.zs_insert(sprout_nullifier, ())?;
                         }
