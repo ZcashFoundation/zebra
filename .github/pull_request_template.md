@@ -9,9 +9,11 @@ Contributors guide: https://zebra.zfnd.org/CONTRIBUTING.html
 ## Motivation
 
 <!--
-Explain the context and why you're making that change. What is the problem
-you're trying to solve? In some cases there is not a problem and this can be
-thought of as being the motivation for your change.
+Explain the context and why you're making that change.
+What is the problem you're trying to solve?
+If there's no specific problem, what is the motivation for your change?
+
+If you are implementing a design RFC, list the specific sections or functions here.
 -->
 
 ## Solution
@@ -52,7 +54,7 @@ Add or skip tasks as needed.
 - [ ] Pull Request
   - The pull request is complete: code, documentation, and tests
   - The PR contains changes to related code (unrelated changes can be split into another PR)
-  - The PR does everything listed in the tickets that it closes
+  - The PR does everything listed in the tickets that it closes, or the designs that it finishes
   - Any follow-up tasks are listed in a GitHub issue
 
 - [ ] Code
