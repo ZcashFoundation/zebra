@@ -44,6 +44,8 @@ pub struct FinalizedState {
     // sapling_nullifiers: sled::Tree,
     // sprout_anchors: sled::Tree,
     // sapling_anchors: sled::Tree,
+    /// Commit blocks to the finalized state up to this height, then exit Zebra.
+    debug_stop_at_height: Option<block::Height>,
 }
 
 /// Helper trait for inserting (Key, Value) pairs into sled when both the key and
@@ -116,11 +118,20 @@ impl SledDeserialize for sled::Tree {
     }
 }
 
+/// Where is the stop check being performed?
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+enum StopCheckContext {
+    /// Checking when the state is loaded
+    OnLoad,
+    /// Checking when a block is committed
+    OnCommit,
+}
+
 impl FinalizedState {
     pub fn new(config: &Config, network: Network) -> Self {
         let db = config.sled_config(network).open().unwrap();
 
-        Self {
+        let new_state = Self {
             queued_by_prev_hash: HashMap::new(),
             hash_by_height: db.open_tree(b"hash_by_height").unwrap(),
             height_by_hash: db.open_tree(b"height_by_hash").unwrap(),
@@ -129,7 +140,97 @@ impl FinalizedState {
             utxo_by_outpoint: db.open_tree(b"utxo_by_outpoint").unwrap(),
             // sprout_nullifiers: db.open_tree(b"sprout_nullifiers").unwrap(),
             // sapling_nullifiers: db.open_tree(b"sapling_nullifiers").unwrap(),
+            debug_stop_at_height: config.debug_stop_at_height.map(block::Height),
+        };
+
+        if let Some(tip_height) = new_state.finalized_tip_height() {
+            new_state.stop_if_at_height_limit(
+                StopCheckContext::OnLoad,
+                tip_height,
+                new_state.finalized_tip_hash(),
+            );
         }
+
+        new_state
+    }
+
+    /// Synchronously flushes all dirty IO buffers and calls fsync.
+    ///
+    /// Returns the number of bytes flushed during this call.
+    /// See sled's `Tree.flush` for more details.
+    pub fn flush(&self) -> sled::Result<usize> {
+        let mut total_flushed = 0;
+
+        total_flushed += self.hash_by_height.flush()?;
+        total_flushed += self.height_by_hash.flush()?;
+        total_flushed += self.block_by_height.flush()?;
+        // total_flushed += self.tx_by_hash.flush()?;
+        total_flushed += self.utxo_by_outpoint.flush()?;
+        // total_flushed += self.sprout_nullifiers.flush()?;
+        // total_flushed += self.sapling_nullifiers.flush()?;
+
+        Ok(total_flushed)
+    }
+
+    /// If `block_height` is greater than or equal to the configured stop height,
+    /// stop the process.
+    ///
+    /// Flushes sled trees before exiting.
+    ///
+    /// `called_from` and `block_hash` are used for assertions and logging.
+    fn stop_if_at_height_limit(
+        &self,
+        called_from: StopCheckContext,
+        block_height: block::Height,
+        block_hash: block::Hash,
+    ) {
+        let debug_stop_at_height = match self.debug_stop_at_height {
+            Some(debug_stop_at_height) => debug_stop_at_height,
+            None => return,
+        };
+
+        if block_height < debug_stop_at_height {
+            return;
+        }
+
+        // this error is expected on load, but unexpected on commit
+        if block_height > debug_stop_at_height {
+            if called_from == StopCheckContext::OnLoad {
+                tracing::error!(
+                    ?debug_stop_at_height,
+                    ?called_from,
+                    ?block_height,
+                    ?block_hash,
+                    "previous state height is greater than the stop height",
+                );
+            } else {
+                unreachable!("committed blocks must be committed in order");
+            }
+        }
+
+        // Don't sync when the trees have just been opened
+        if called_from == StopCheckContext::OnCommit {
+            if let Err(e) = self.flush() {
+                tracing::error!(
+                    ?e,
+                    ?debug_stop_at_height,
+                    ?called_from,
+                    ?block_height,
+                    ?block_hash,
+                    "error flushing sled state before stopping"
+                );
+            }
+        }
+
+        tracing::info!(
+            ?debug_stop_at_height,
+            ?called_from,
+            ?block_height,
+            ?block_hash,
+            "stopping at configured height"
+        );
+
+        std::process::exit(0);
     }
 
     /// Queue a finalized block to be committed to the state.
@@ -184,7 +285,7 @@ impl FinalizedState {
 
         trace!(?height, "Finalized block");
 
-        (
+        let result = (
             &self.hash_by_height,
             &self.height_by_hash,
             &self.block_by_height,
@@ -222,8 +323,13 @@ impl FinalizedState {
                     // for some reason type inference fails here
                     Ok::<_, sled::transaction::ConflictableTransactionError>(hash)
                 },
-            )
-            .map_err(Into::into)
+            );
+
+        if result.is_ok() {
+            self.stop_if_at_height_limit(StopCheckContext::OnCommit, height, hash);
+        }
+
+        result.map_err(Into::into)
     }
 
     /// Commit a finalized block to the state.

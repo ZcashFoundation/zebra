@@ -37,6 +37,14 @@ jobs:
         with:
           command: test
           args: --verbose --all
+      # Explicitly run any tests that are usually #[ignored]
+      - name: Run zebrad large sync tests
+        env:
+          RUST_BACKTRACE: full
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --verbose --manifest-path zebrad/Cargo.toml -- --ignored
 
   build-chain-no-features:
     name: Build zebra-chain w/o features on ubuntu-latest

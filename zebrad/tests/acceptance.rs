@@ -13,6 +13,7 @@
 
 #![warn(warnings, missing_docs, trivial_casts, unused_qualifications)]
 #![forbid(unsafe_code)]
+#![allow(clippy::try_err)]
 
 use color_eyre::eyre::Result;
 use eyre::WrapErr;
@@ -20,7 +21,10 @@ use tempdir::TempDir;
 
 use std::{borrow::Borrow, env, fs, io::Write, time::Duration};
 
-use zebra_chain::parameters::Network::{self, *};
+use zebra_chain::{
+    block::Height,
+    parameters::Network::{self, *},
+};
 use zebra_test::{command::TestDirExt, prelude::*};
 use zebrad::config::ZebradConfig;
 
@@ -57,6 +61,10 @@ where
     /// Add the given config to the test directory and use it for all
     /// subsequently spawned processes.
     fn with_config(self, config: ZebradConfig) -> Result<Self>;
+
+    /// Overwrite any existing config the test directory and use it for all
+    /// subsequently spawned processes.
+    fn replace_config(self, config: ZebradConfig) -> Result<Self>;
 }
 
 impl<T> ZebradTestDirExt for T
@@ -94,6 +102,31 @@ where
 
         fs::File::create(dir.join("zebrad.toml"))?
             .write_all(toml::to_string(&config)?.as_bytes())?;
+
+        Ok(self)
+    }
+
+    fn replace_config(self, mut config: ZebradConfig) -> Result<Self> {
+        let dir = self.borrow().path();
+
+        if !config.state.ephemeral {
+            let cache_dir = dir.join("state");
+
+            // Create dir, ignoring existing directories
+            match fs::create_dir(&cache_dir) {
+                Ok(_) => {}
+                Err(e) if (e.kind() == std::io::ErrorKind::AlreadyExists) => {}
+                Err(e) => Err(e)?,
+            };
+
+            config.state.cache_dir = cache_dir;
+        }
+
+        let config_file = dir.join("zebrad.toml");
+
+        // Remove any existing config before writing a new one
+        let _ = fs::remove_file(config_file.clone());
+        fs::File::create(config_file)?.write_all(toml::to_string(&config)?.as_bytes())?;
 
         Ok(self)
     }
@@ -440,16 +473,29 @@ fn valid_generated_config(command: &str, expected_output: &str) -> Result<()> {
     Ok(())
 }
 
+const LARGE_CHECKPOINT_TEST_HEIGHT: Height =
+    Height((zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP * 2) as u32);
+
+const STOP_AT_HEIGHT_REGEX: &str = "stopping at configured height";
+
+const STOP_ON_LOAD_TIMEOUT: Duration = Duration::from_secs(5);
+// usually it's much shorter than this
+const SMALL_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(30);
+const LARGE_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(180);
+
 /// Test if `zebrad` can sync the first checkpoint on mainnet.
 ///
 /// The first checkpoint contains a single genesis block.
 #[test]
 fn sync_one_checkpoint_mainnet() -> Result<()> {
     sync_until(
-        "verified checkpoint range",
+        Height(0),
         Mainnet,
-        Duration::from_secs(20),
+        STOP_AT_HEIGHT_REGEX,
+        SMALL_CHECKPOINT_TIMEOUT,
+        None,
     )
+    .map(|_tempdir| ())
 }
 
 /// Test if `zebrad` can sync the first checkpoint on testnet.
@@ -458,73 +504,131 @@ fn sync_one_checkpoint_mainnet() -> Result<()> {
 #[test]
 fn sync_one_checkpoint_testnet() -> Result<()> {
     sync_until(
-        "verified checkpoint range",
+        Height(0),
         Testnet,
-        Duration::from_secs(20),
+        STOP_AT_HEIGHT_REGEX,
+        SMALL_CHECKPOINT_TIMEOUT,
+        None,
     )
+    .map(|_tempdir| ())
 }
 
-/// Test if `zebrad` can sync the second checkpoint on mainnet.
+/// Test if `zebrad` can sync the first checkpoint, restart, and stop on load.
+#[test]
+fn restart_stop_at_height() -> Result<()> {
+    let reuse_tempdir = sync_until(
+        Height(0),
+        Mainnet,
+        STOP_AT_HEIGHT_REGEX,
+        SMALL_CHECKPOINT_TIMEOUT,
+        None,
+    )?;
+    // if stopping corrupts the sled database, zebrad might hang here
+    // if stopping does not sync the sled database, the logs will contain OnCommit
+    sync_until(
+        Height(0),
+        Mainnet,
+        "called_from=OnLoad",
+        STOP_ON_LOAD_TIMEOUT,
+        Some(reuse_tempdir),
+    )?;
+
+    Ok(())
+}
+
+/// Test if `zebrad` can sync some larger checkpoints on mainnet.
 ///
-/// The second checkpoint contains a large number of blocks.
 /// This test might fail or timeout on slow or unreliable networks,
 /// so we don't run it by default. It also takes a lot longer than
 /// our 10 second target time for default tests.
 #[test]
 #[ignore]
-fn sync_two_checkpoints_mainnet() -> Result<()> {
-    sync_until(
-        "verified checkpoint range block_count=2000",
+fn sync_large_checkpoints_mainnet() -> Result<()> {
+    let reuse_tempdir = sync_until(
+        LARGE_CHECKPOINT_TEST_HEIGHT,
         Mainnet,
-        Duration::from_secs(120),
-    )
+        STOP_AT_HEIGHT_REGEX,
+        LARGE_CHECKPOINT_TIMEOUT,
+        None,
+    )?;
+    // if this sync fails, see the failure notes in `restart_stop_at_height`
+    sync_until(
+        (LARGE_CHECKPOINT_TEST_HEIGHT - 1).unwrap(),
+        Mainnet,
+        "previous state height is greater than the stop height",
+        STOP_ON_LOAD_TIMEOUT,
+        Some(reuse_tempdir),
+    )?;
+
+    Ok(())
 }
 
-/// Test if `zebrad` can sync the second checkpoint on testnet.
+/// Test if `zebrad` can sync some larger checkpoints on testnet.
 ///
-/// This test does not run by default, see `sync_two_checkpoints_mainnet`
+/// This test does not run by default, see `sync_large_checkpoints_mainnet`
 /// for details.
 #[test]
 #[ignore]
-fn sync_two_checkpoints_testnet() -> Result<()> {
+fn sync_large_checkpoints_testnet() -> Result<()> {
     sync_until(
-        "verified checkpoint range block_count=2000",
+        LARGE_CHECKPOINT_TEST_HEIGHT,
         Testnet,
-        Duration::from_secs(120),
+        STOP_AT_HEIGHT_REGEX,
+        LARGE_CHECKPOINT_TIMEOUT,
+        None,
     )
+    .map(|_tempdir| ())
 }
 
-/// Sync `network` until `zebrad` outputs `regex`.
-/// Returns an error if `timeout` elapses before `regex` is output.
+/// Sync `network` until `zebrad` reaches `height`, and ensure that
+/// the output contains `stop_regex`. If `reuse_tempdir` is supplied,
+/// use it as the test's temporary directory.
+///
+/// If `stop_regex` is encountered before the process exits, kills the
+/// process, and mark the test as successful, even if `height` has not
+/// been reached.
+///
+/// On success, returns the associated `TempDir`. Returns an error if
+/// the child exits or `timeout` elapses before `regex` is found.
 ///
 /// If your test environment does not have network access, skip
 /// this test by setting the `ZEBRA_SKIP_NETWORK_TESTS` env var.
-fn sync_until(regex: &str, network: Network, timeout: Duration) -> Result<()> {
+fn sync_until(
+    height: Height,
+    network: Network,
+    stop_regex: &str,
+    timeout: Duration,
+    reuse_tempdir: Option<TempDir>,
+) -> Result<TempDir> {
     zebra_test::init();
 
     if env::var_os("ZEBRA_SKIP_NETWORK_TESTS").is_some() {
         // This message is captured by the test runner, use
         // `cargo test -- --nocapture` to see it.
         eprintln!("Skipping network test because '$ZEBRA_SKIP_NETWORK_TESTS' is set.");
-        return Ok(());
+        return Ok(testdir()?);
     }
 
     // Use a persistent state, so we can handle large syncs
     let mut config = persistent_test_config()?;
-    // TODO: add a convenience method?
+    // TODO: add convenience methods?
     config.network.network = network;
+    config.state.debug_stop_at_height = Some(height.0);
 
-    let mut child = testdir()?
-        .with_config(config)?
-        .spawn_child(&["start"])?
-        .with_timeout(timeout);
+    let tempdir = if let Some(reuse_tempdir) = reuse_tempdir {
+        reuse_tempdir.replace_config(config)?
+    } else {
+        testdir()?.with_config(config)?
+    };
+
+    let mut child = tempdir.spawn_child(&["start"])?.with_timeout(timeout);
 
     // TODO: is there a way to check for testnet or mainnet here?
     // For example: "network=Mainnet" or "network=Testnet"
-    child.expect_stdout(regex)?;
+    child.expect_stdout(stop_regex)?;
     child.kill()?;
 
-    Ok(())
+    Ok(child.dir)
 }
 
 #[tokio::test]
