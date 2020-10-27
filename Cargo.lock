@@ -3352,7 +3352,7 @@ dependencies = [
  "bech32",
  "bincode",
  "bitflags",
- "bitvec 0.17.4",
+ "bitvec 0.18.4",
  "blake2b_simd",
  "blake2s_simd",
  "bs58",
