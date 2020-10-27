@@ -600,7 +600,7 @@ We use the following Sled trees:
 | `hash_by_height`     | `BE32(height)`        | `block::Hash`                       |
 | `height_by_hash`     | `block::Hash`         | `BE32(height)`                      |
 | `block_by_height`    | `BE32(height)`        | `Block`                             |
-| `tx_by_hash`         | `transaction::Hash`   | `(BE32(height), BE32(tx_index))`    |
+| `tx_by_hash`         | `transaction::Hash`   | `(BE32(height) \|\| BE32(tx_index))`|
 | `utxo_by_outpoint`   | `OutPoint`            | `TransparentOutput`                 |
 | `sprout_nullifiers`  | `sprout::Nullifier`   | `()`                                |
 | `sapling_nullifiers` | `sapling::Nullifier`  | `()`                                |
@@ -672,7 +672,7 @@ check that `block`'s parent hash is `null` (all zeroes) and its height is `0`.
 
 5. Iterate over the enumerated transactions in the block. For each transaction:
 
-   1. Insert `(transaction_hash, block_height || BE32(tx_index))` to
+   1. Insert `(transaction_hash, BE32(block_height) || BE32(tx_index))` to
    `tx_by_hash`;
 
    2. For each `TransparentInput::PrevOut { outpoint, .. }` in the
