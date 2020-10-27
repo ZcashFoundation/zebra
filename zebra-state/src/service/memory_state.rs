@@ -76,7 +76,7 @@ impl Chain {
             .expect("only called while blocks is populated")
     }
 
-    /// Fork a chain at the block with the givin hash, if it is part of this
+    /// Fork a chain at the block with the given hash, if it is part of this
     /// chain.
     pub fn fork(&self, fork_tip: block::Hash) -> Option<Self> {
         if !self.height_by_hash.contains_key(&fork_tip) {
