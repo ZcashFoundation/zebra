@@ -121,7 +121,7 @@ jobs:
         with:
           name: Clippy (nightly)
           token: ${{ secrets.GITHUB_TOKEN }}
-          args: --all-features --all-targets
+          args: --all-features --all-targets -- -W clippy::all
 
   fmt:
     name: Rustfmt
