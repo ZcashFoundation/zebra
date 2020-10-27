@@ -559,8 +559,9 @@ New `non-finalized` blocks are commited as follows:
       self.queued_blocks.dequeue_children(parent);`
     - for each queued `block`
       - **Run contextual validation** on `block`
-           - contextual validation will reject blocks that are past the reorg limit,
-             because the finalized block at that height is already known.
+           - contextual validation should check that the block height is
+             equal to the previous block height plus 1. This check will
+             reject blocks with invalid heights.
       - If the block fails contextual validation send the result to the
         associated channel
       - Else if the block's previous hash is the finalized tip add to the
