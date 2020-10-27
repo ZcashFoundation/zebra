@@ -613,9 +613,14 @@ Zcash structures are encoded using `ZcashSerialize`/`ZcashDeserialize`.
 
 ### Notes on Sled trees
 
-- The `hash_by_height` and `height_by_hash` trees provide the bijection between
+- The `hash_by_height` and `height_by_hash` trees provide a bijection between
   block heights and block hashes.  (Since the Sled state only stores finalized
-  state, this is actually a bijection).
+  state, they are actually a bijection).
+  
+- The `block_by_height` tree provides a bijection between block heights and block
+  data. There is no corresponding `height_by_block` tree: instead, hash the block,
+  and use `height_by_hash`. (Since the Sled state only stores finalized state,
+  they are actually a bijection).
 
 - Blocks are stored by height, not by hash.  This has the downside that looking
   up a block by hash requires an extra level of indirection.  The upside is
