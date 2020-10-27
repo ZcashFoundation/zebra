@@ -114,7 +114,7 @@ The design suggests to implement the parameters needed for funding streams as:
 /// The funding stream receiver categories
 #[allow(missing_docs)]
 pub enum FundingStreamReceiver {
-    ElectricCoinCompany,
+    BootstrapProject,
     ZcashFoundation,
     MajorGrants,
 }
@@ -124,7 +124,7 @@ pub enum FundingStreamReceiver {
 /// 
 /// [7.9.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
 const FUNDING_STREAM_RECEIVER_NUMERATORS: &[(FundingStreamReceiver, u64)] = &[
-    (FundingStreamReceiver::ElectricCoinCompany, 7),
+    (FundingStreamReceiver::BootstrapProject, 7),
     (FundingStreamReceiver::ZcashFoundation, 5),
     (FundingStreamReceiver::MajorGrants, 8),
 ];
@@ -156,10 +156,10 @@ https://zips.z.cash/zip-0214#mainnet-recipient-addresses
 
 The following constants are needed:
 
-- `FUNDING_STREAM_ECC_ADDRESSES_MAINNET: [&str; 48]`
+- `FUNDING_STREAM_BP_ADDRESSES_MAINNET: [&str; 48]`
 - `FUNDING_STREAM_ZF_ADDRESSES_MAINNET: [&str; 48]`
 - `FUNDING_STREAM_MG_ADDRESSES_MAINNET: [&str; 48]`
-- `FUNDING_STREAM_ECC_ADDRESSES_TESTNET: [&str; 51]`
+- `FUNDING_STREAM_BP_ADDRESSES_TESTNET: [&str; 51]`
 - `FUNDING_STREAM_ZF_ADDRESSES_TESTNET: [&str; 51]`
 - `FUNDING_STREAM_MG_ADDRESSES_TESTNET: [&str; 51]`
 
