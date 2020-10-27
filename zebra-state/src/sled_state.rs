@@ -243,6 +243,12 @@ impl FinalizedState {
 
                     // TODO: sprout and sapling anchors (per block)
 
+                    // Consensus-critical bug in zcashd: transactions in the
+                    // genesis block are ignored.
+                    if block.header.previous_block_hash == block::Hash([0; 32]) {
+                        return Ok(hash);
+                    }
+
                     // Index each transaction
                     for transaction in block.transactions.iter() {
                         let transaction_hash = transaction.hash();
