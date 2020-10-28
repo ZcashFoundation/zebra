@@ -45,7 +45,7 @@ pub fn founders_reward(height: Height, network: Network) -> Result<Amount<NonNeg
 
 /// Function `FounderAddressChangeInterval` as specified in [protocol specification §7.8][7.8]
 ///
-/// [7.8]: https://zips.z.cash/protocol/canopy.pdf#foundersreward
+/// [7.8]: https://zips.z.cash/protocol/protocol.pdf#foundersreward
 pub fn founders_address_change_interval() -> Height {
     let interval = div_ceil(
         SLOW_START_SHIFT.0 + PRE_BLOSSOM_HALVING_INTERVAL.0,
@@ -56,7 +56,7 @@ pub fn founders_address_change_interval() -> Height {
 
 /// Get the founders reward t-address for the specified block height as described in [protocol specification §7.8][7.8]
 ///
-/// [7.8]: https://zips.z.cash/protocol/canopy.pdf#foundersreward
+/// [7.8]: https://zips.z.cash/protocol/protocol.pdf#foundersreward
 pub fn founders_reward_address(height: Height, network: Network) -> Result<Address, Error> {
     let blossom_height = Blossom
         .activation_height(network)

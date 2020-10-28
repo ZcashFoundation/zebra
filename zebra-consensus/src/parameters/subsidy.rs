@@ -47,7 +47,7 @@ pub const FOUNDERS_ADDRESS_COUNT: u32 = 48;
 
 /// Mainnet founder adress list as specified in [protocol specification §7.8][7.8]
 ///
-/// [7.8]: https://zips.z.cash/protocol/canopy.pdf#foundersreward
+/// [7.8]: https://zips.z.cash/protocol/protocol.pdf#foundersreward
 pub const FOUNDERS_REWARD_ADDRESSES_MAINNET: [&str; 48] = [
     "t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd",
     "t3cL9AucCajm3HXDhb5jBnJK2vapVoXsop3",
@@ -101,7 +101,7 @@ pub const FOUNDERS_REWARD_ADDRESSES_MAINNET: [&str; 48] = [
 
 /// Testnet founder adress list as specified in [protocol specification §7.8][7.8]
 ///
-/// [7.8]: https://zips.z.cash/protocol/canopy.pdf#foundersreward
+/// [7.8]: https://zips.z.cash/protocol/protocol.pdf#foundersreward
 pub const FOUNDERS_REWARD_ADDRESSES_TESTNET: [&str; 48] = [
     "t2UNzUUx8mWBCRYPRezvA363EYXyEpHokyi",
     "t2N9PH9Wk9xjqYg9iin1Ua3aekJqfAtE543",
