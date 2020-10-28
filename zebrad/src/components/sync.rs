@@ -528,6 +528,7 @@ where
         //
         // So we just download and verify the genesis block here.
         while !self.state_contains(self.genesis_hash).await? {
+            tracing::info!("starting genesis block download and verify");
             self.downloads
                 .download_and_verify(self.genesis_hash)
                 .await
