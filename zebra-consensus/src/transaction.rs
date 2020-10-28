@@ -178,7 +178,7 @@ where
                         for spend in shielded_data.spends() {
                             // TODO: check that spend.cv and spend.rk are NOT of small
                             // order.
-                            // https://zips.z.cash/protocol/canopy.pdf#spenddesc
+                            // https://zips.z.cash/protocol/protocol.pdf#spenddesc
 
                             // Queue the validation of the RedJubjub spend
                             // authorization signature for each Spend
@@ -205,7 +205,7 @@ where
                         shielded_data.outputs().for_each(|_output| {
                             // TODO: check that output.cv and output.epk are NOT of small
                             // order.
-                            // https://zips.z.cash/protocol/canopy.pdf#outputdesc
+                            // https://zips.z.cash/protocol/protocol.pdf#outputdesc
 
                             // TODO: prepare public inputs for outputs, then create
                             // a groth16::Item and pass to self.output

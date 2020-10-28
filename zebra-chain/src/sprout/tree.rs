@@ -57,7 +57,7 @@ fn merkle_crh_sprout(left: [u8; 32], right: [u8; 32]) -> [u8; 32] {
 lazy_static! {
     /// Sprout note commitment trees have a max depth of 29.
     ///
-    /// https://zips.z.cash/protocol/canopy.pdf#constants
+    /// https://zips.z.cash/protocol/protocol.pdf#constants
     static ref EMPTY_ROOTS: Vec<[u8; 32]> = {
         // Uncommitted^Sprout = = [0]^l_MerkleSprout
         let mut v = vec![[0u8; 32]];
