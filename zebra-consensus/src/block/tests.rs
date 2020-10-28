@@ -360,12 +360,7 @@ fn founders_reward_validation_failure() -> Result<(), Report> {
 
     let network = Network::Mainnet;
 
-    // Get a header from a block in the mainnet that is inside the founders reward period.
-    let header =
-        block::Header::zcash_deserialize(&zebra_test::vectors::HEADER_MAINNET_415000_BYTES[..])
-            .unwrap();
-
-    // From the same block get the coinbase transaction
+    // Get a block in the mainnet that is inside the founders reward period.
     let block =
         Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_415000_BYTES[..])
             .expect("block should deserialize");
@@ -387,7 +382,7 @@ fn founders_reward_validation_failure() -> Result<(), Report> {
     let mut transactions: Vec<Arc<zebra_chain::transaction::Transaction>> = Vec::new();
     transactions.push(Arc::new(tx));
     let block = Block {
-        header,
+        header: block.header,
         transactions,
     };
 
