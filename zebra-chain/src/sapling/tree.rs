@@ -47,7 +47,7 @@ fn merkle_crh_sapling(layer: u8, left: [u8; 32], right: [u8; 32]) -> [u8; 32] {
 lazy_static! {
     /// Sapling note commitment trees have a max depth of 32.
     ///
-    /// https://zips.z.cash/protocol/canopy.pdf#constants
+    /// https://zips.z.cash/protocol/protocol.pdf#constants
     static ref EMPTY_ROOTS: Vec<[u8; 32]> = {
         // Uncommitted^Sapling = I2LEBSP_l_MerkleSapling(1)
         let mut v = vec![jubjub::Fq::one().to_bytes()];

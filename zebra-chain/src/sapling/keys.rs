@@ -868,7 +868,7 @@ impl FromStr for FullViewingKey {
 
 /// An ephemeral public key for Sapling key agreement.
 ///
-/// https://zips.z.cash/protocol/canopy.pdf#concretesaplingkeyagreement
+/// https://zips.z.cash/protocol/protocol.pdf#concretesaplingkeyagreement
 #[derive(Copy, Clone, Deserialize, PartialEq, Serialize)]
 pub struct EphemeralPublicKey(
     #[serde(with = "serde_helpers::AffinePoint")] pub jubjub::AffinePoint,

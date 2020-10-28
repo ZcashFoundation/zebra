@@ -95,7 +95,7 @@ impl ShieldedData {
     /// of the value commitments in the Spend descriptions and Output
     /// descriptions of the transaction, and the balancing value.
     ///
-    /// https://zips.z.cash/protocol/canopy.pdf#saplingbalance
+    /// https://zips.z.cash/protocol/protocol.pdf#saplingbalance
     pub fn binding_verification_key(
         &self,
         value_balance: Amount,
