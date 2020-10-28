@@ -135,6 +135,7 @@ where
 #[test]
 fn generate_no_args() -> Result<()> {
     zebra_test::init();
+
     let child = testdir()?
         .with_config(default_test_config()?)?
         .spawn_child(&["generate"])?;
@@ -166,6 +167,7 @@ macro_rules! assert_with_context {
 #[test]
 fn generate_args() -> Result<()> {
     zebra_test::init();
+
     let testdir = testdir()?;
     let testdir = &testdir;
 
@@ -206,6 +208,7 @@ fn generate_args() -> Result<()> {
 #[test]
 fn help_no_args() -> Result<()> {
     zebra_test::init();
+
     let testdir = testdir()?.with_config(default_test_config()?)?;
 
     let child = testdir.spawn_child(&["help"])?;
@@ -224,6 +227,7 @@ fn help_no_args() -> Result<()> {
 #[test]
 fn help_args() -> Result<()> {
     zebra_test::init();
+
     let testdir = testdir()?;
     let testdir = &testdir;
 
@@ -243,6 +247,7 @@ fn help_args() -> Result<()> {
 #[test]
 fn start_no_args() -> Result<()> {
     zebra_test::init();
+
     // start caches state, so run one of the start tests with persistent state
     let testdir = testdir()?.with_config(persistent_test_config()?)?;
 
@@ -266,6 +271,7 @@ fn start_no_args() -> Result<()> {
 #[test]
 fn start_args() -> Result<()> {
     zebra_test::init();
+
     let testdir = testdir()?.with_config(default_test_config()?)?;
     let testdir = &testdir;
 
@@ -292,6 +298,7 @@ fn start_args() -> Result<()> {
 #[test]
 fn persistent_mode() -> Result<()> {
     zebra_test::init();
+
     let testdir = testdir()?.with_config(persistent_test_config()?)?;
     let testdir = &testdir;
 
@@ -315,6 +322,7 @@ fn persistent_mode() -> Result<()> {
 #[test]
 fn ephemeral_mode() -> Result<()> {
     zebra_test::init();
+
     let testdir = testdir()?.with_config(default_test_config()?)?;
     let testdir = &testdir;
 
@@ -379,6 +387,7 @@ fn misconfigured_ephemeral_mode() -> Result<()> {
 #[test]
 fn app_no_args() -> Result<()> {
     zebra_test::init();
+
     let testdir = testdir()?.with_config(default_test_config()?)?;
 
     let child = testdir.spawn_child(&[])?;
@@ -393,6 +402,7 @@ fn app_no_args() -> Result<()> {
 #[test]
 fn version_no_args() -> Result<()> {
     zebra_test::init();
+
     let testdir = testdir()?.with_config(default_test_config()?)?;
 
     let child = testdir.spawn_child(&["version"])?;
@@ -407,6 +417,7 @@ fn version_no_args() -> Result<()> {
 #[test]
 fn version_args() -> Result<()> {
     zebra_test::init();
+
     let testdir = testdir()?.with_config(default_test_config()?)?;
     let testdir = &testdir;
 
@@ -435,6 +446,7 @@ fn valid_generated_config_test() -> Result<()> {
 
 fn valid_generated_config(command: &str, expected_output: &str) -> Result<()> {
     zebra_test::init();
+
     let testdir = testdir()?;
     let testdir = &testdir;
 
@@ -488,6 +500,8 @@ const LARGE_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(180);
 /// The first checkpoint contains a single genesis block.
 #[test]
 fn sync_one_checkpoint_mainnet() -> Result<()> {
+    zebra_test::init();
+
     sync_until(
         Height(0),
         Mainnet,
@@ -503,6 +517,8 @@ fn sync_one_checkpoint_mainnet() -> Result<()> {
 /// The first checkpoint contains a single genesis block.
 #[test]
 fn sync_one_checkpoint_testnet() -> Result<()> {
+    zebra_test::init();
+
     sync_until(
         Height(0),
         Testnet,
@@ -516,6 +532,8 @@ fn sync_one_checkpoint_testnet() -> Result<()> {
 /// Test if `zebrad` can sync the first checkpoint, restart, and stop on load.
 #[test]
 fn restart_stop_at_height() -> Result<()> {
+    zebra_test::init();
+
     let reuse_tempdir = sync_until(
         Height(0),
         Mainnet,
@@ -544,6 +562,8 @@ fn restart_stop_at_height() -> Result<()> {
 #[test]
 #[ignore]
 fn sync_large_checkpoints_mainnet() -> Result<()> {
+    zebra_test::init();
+
     let reuse_tempdir = sync_until(
         LARGE_CHECKPOINT_TEST_HEIGHT,
         Mainnet,
@@ -570,6 +590,8 @@ fn sync_large_checkpoints_mainnet() -> Result<()> {
 #[test]
 #[ignore]
 fn sync_large_checkpoints_testnet() -> Result<()> {
+    zebra_test::init();
+
     sync_until(
         LARGE_CHECKPOINT_TEST_HEIGHT,
         Testnet,
