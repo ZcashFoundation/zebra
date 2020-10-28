@@ -18,14 +18,17 @@
 #![allow(clippy::field_reassign_with_default)]
 
 use color_eyre::eyre::Result;
-use eyre::WrapErr;
+use eyre::{eyre, WrapErr};
 use tempdir::TempDir;
 
-use std::{borrow::Borrow, env, fs, io::Write, time::Duration};
+use std::{borrow::Borrow, env, fs, io::Write, path::Path, time::Duration};
 
 use zebra_chain::{
     block::Height,
-    parameters::Network::{self, *},
+    parameters::{
+        Network::{self, *},
+        NetworkUpgrade,
+    },
 };
 use zebra_test::{command::TestDirExt, prelude::*};
 use zebrad::config::ZebradConfig;
@@ -611,9 +614,10 @@ fn sync_until(
     network: Network,
     stop_regex: &str,
     timeout: Duration,
-    reuse_tempdir: Option<TempDir>,
+    reuse_tempdir: impl Into<Option<TempDir>>,
 ) -> Result<TempDir> {
     zebra_test::init();
+    let reuse_tempdir = reuse_tempdir.into();
 
     if env::var_os("ZEBRA_SKIP_NETWORK_TESTS").is_some() {
         // This message is captured by the test runner, use
@@ -642,6 +646,58 @@ fn sync_until(
     child.kill()?;
 
     Ok(child.dir)
+}
+
+#[test]
+#[ignore]
+fn sync_to_sapling() -> Result<()> {
+    let mut testdir = testdir()?;
+    let backup_dir = dirs::cache_dir()
+        .ok_or_else(|| eyre!("no cache dir found"))?
+        .join("sapling_backup");
+
+    if !backup_dir.exists() {
+        testdir = create_sapling_backup(testdir, &backup_dir)?;
+    }
+
+    for entry in std::fs::read_dir(backup_dir)? {
+        let entry = entry?;
+        std::process::Command::new("cp")
+            .arg("-r")
+            .arg(entry.path())
+            .arg(testdir.path())
+            .status2()?
+            .assert_success()?;
+    }
+
+    let height = LARGE_CHECKPOINT_TEST_HEIGHT;
+    let network = Mainnet;
+    let timeout = Duration::from_secs(60);
+
+    println!("Running real sync");
+    sync_until(height, network, STOP_AT_HEIGHT_REGEX, timeout, testdir)?;
+
+    Ok(())
+}
+
+fn create_sapling_backup(testdir: TempDir, dest: &Path) -> Result<TempDir> {
+    println!("Creating backup database");
+    // 1 hour
+    let timeout = Duration::from_secs(60 * 60);
+    let network = Mainnet;
+    let height = NetworkUpgrade::Sapling.activation_height(network).unwrap();
+
+    let tempdir = sync_until(height, network, STOP_AT_HEIGHT_REGEX, timeout, testdir)?;
+    let path = tempdir.path();
+
+    std::process::Command::new("cp")
+        .arg("-r")
+        .arg(path)
+        .arg(dest)
+        .status2()?
+        .assert_success()?;
+
+    Ok(tempdir)
 }
 
 #[tokio::test]
