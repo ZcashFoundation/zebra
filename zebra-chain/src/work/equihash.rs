@@ -29,7 +29,10 @@ pub struct Solution(#[serde(with = "serde_helpers::BigArray")] pub [u8; SOLUTION
 
 impl Solution {
     /// The length of the portion of the header used as input when verifying
-    /// equihash solutions, in bytes
+    /// equihash solutions, in bytes.
+    ///
+    /// Excludes the 32-byte nonce, which is passed as a separate argument
+    /// to the verification function.
     pub const INPUT_LENGTH: usize = 4 + 32 * 3 + 4 * 2;
 
     /// Returns `Ok(())` if `EquihashSolution` is valid for `header`
