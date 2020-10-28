@@ -33,6 +33,8 @@ mod test {
     use zebra_chain::parameters::NetworkUpgrade::*;
     #[test]
     fn test_founders_reward() -> Result<(), Report> {
+        zebra_test::init();
+
         let network = Network::Mainnet;
         let blossom_height = Blossom.activation_height(network).unwrap();
         let canopy_height = Canopy.activation_height(network).unwrap();
