@@ -240,7 +240,7 @@ impl CompactDifficulty {
         // `((2^256 - expanded - 1) / (expanded + 1)) + 1`, or
         let result = (!expanded.0 / (expanded.0 + 1)) + 1;
         if result <= u128::MAX.into() {
-            Work(result.as_u128()).into()
+            Some(Work(result.as_u128()))
         } else {
             None
         }
