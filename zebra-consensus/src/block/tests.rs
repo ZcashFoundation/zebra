@@ -15,7 +15,7 @@ use zebra_chain::{
     block::{self, Block, Height},
     parameters::{Network, NetworkUpgrade},
     serialization::{ZcashDeserialize, ZcashDeserializeInto},
-    work::difficulty::{CompactDifficulty, ExpandedDifficulty},
+    work::difficulty::{ExpandedDifficulty, INVALID_COMPACT_DIFFICULTY},
 };
 use zebra_test::transcript::{TransError, Transcript};
 
@@ -185,7 +185,7 @@ fn difficulty_validation_failure() -> Result<(), Report> {
     let hash = block.hash();
 
     // Set the difficulty field to an invalid value
-    block.header.difficulty_threshold = CompactDifficulty(u32::MAX);
+    block.header.difficulty_threshold = INVALID_COMPACT_DIFFICULTY;
 
     // Validate the block
     let result =

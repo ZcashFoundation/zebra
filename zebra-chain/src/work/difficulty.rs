@@ -21,6 +21,8 @@ use std::{
 
 use primitive_types::U256;
 
+#[cfg(any(test, feature = "proptest-impl"))]
+mod arbitrary;
 #[cfg(test)]
 mod tests;
 
@@ -53,7 +55,7 @@ mod tests;
 /// multiple equivalent `CompactDifficulty` values, due to redundancy in the
 /// floating-point format.
 #[derive(Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
-pub struct CompactDifficulty(pub u32);
+pub struct CompactDifficulty(pub(crate) u32);
 
 impl fmt::Debug for CompactDifficulty {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -63,6 +65,9 @@ impl fmt::Debug for CompactDifficulty {
             .finish()
     }
 }
+
+/// An invalid CompactDifficulty value, for testing.
+pub const INVALID_COMPACT_DIFFICULTY: CompactDifficulty = CompactDifficulty(u32::MAX);
 
 /// A 256-bit unsigned "expanded difficulty" value.
 ///
@@ -82,11 +87,12 @@ impl fmt::Debug for CompactDifficulty {
 /// `ExpandedDifficulty` values are known.
 ///
 /// Callers should avoid constructing `ExpandedDifficulty` zero
-/// values, because they are rejected by the consensus rules.
+/// values, because they are rejected by the consensus rules,
+/// and cause some conversion functions to panic.
 //
 // TODO: Use NonZeroU256, when available
 #[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
-pub struct ExpandedDifficulty(pub(super) U256);
+pub struct ExpandedDifficulty(U256);
 
 impl fmt::Debug for ExpandedDifficulty {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -115,7 +121,7 @@ impl fmt::Debug for ExpandedDifficulty {
 /// and Bitcoin adds around 2^91 work per year. (Each extra bit represents twice
 /// as much work.)
 #[derive(Clone, Copy, Default, Eq, PartialEq, Ord, PartialOrd)]
-pub struct Work(pub(super) u128);
+pub struct Work(u128);
 
 impl fmt::Debug for Work {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
