@@ -19,7 +19,7 @@ static BLOCK_LOCATOR_CASES: &[(u32, u32)] = &[
 #[test]
 fn test_block_locator_heights() {
     zebra_test::init();
-    
+
     for (height, min_height) in BLOCK_LOCATOR_CASES.iter().cloned() {
         let locator = util::block_locator_heights(block::Height(height));
 
