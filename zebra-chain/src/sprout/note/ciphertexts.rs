@@ -60,6 +60,7 @@ proptest! {
 
     #[test]
     fn encrypted_ciphertext_roundtrip(ec in any::<EncryptedNote>()) {
+        zebra_test::init();
 
         let mut data = Vec::new();
 

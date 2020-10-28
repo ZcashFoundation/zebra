@@ -257,6 +257,8 @@ mod tests {
 
     #[test]
     fn pubkey_mainnet() {
+        zebra_test::init();
+
         let pub_key = PublicKey::from_slice(&[
             3, 23, 183, 225, 206, 31, 159, 148, 195, 42, 67, 115, 146, 41, 248, 140, 11, 3, 51, 41,
             111, 180, 110, 143, 114, 134, 88, 73, 198, 174, 52, 184, 78,
@@ -270,6 +272,8 @@ mod tests {
 
     #[test]
     fn pubkey_testnet() {
+        zebra_test::init();
+
         let pub_key = PublicKey::from_slice(&[
             3, 23, 183, 225, 206, 31, 159, 148, 195, 42, 67, 115, 146, 41, 248, 140, 11, 3, 51, 41,
             111, 180, 110, 143, 114, 134, 88, 73, 198, 174, 52, 184, 78,
@@ -283,6 +287,8 @@ mod tests {
 
     #[test]
     fn empty_script_mainnet() {
+        zebra_test::init();
+
         let script = Script(vec![0; 20]);
 
         let t_addr = script.to_address(Network::Mainnet);
@@ -292,6 +298,8 @@ mod tests {
 
     #[test]
     fn empty_script_testnet() {
+        zebra_test::init();
+
         let script = Script(vec![0; 20]);
 
         let t_addr = script.to_address(Network::Testnet);
@@ -301,6 +309,8 @@ mod tests {
 
     #[test]
     fn from_string() {
+        zebra_test::init();
+
         let t_addr: Address = "t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd".parse().unwrap();
 
         assert_eq!(format!("{}", t_addr), "t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd");
@@ -308,6 +318,8 @@ mod tests {
 
     #[test]
     fn debug() {
+        zebra_test::init();
+
         let t_addr: Address = "t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd".parse().unwrap();
 
         assert_eq!(
@@ -322,6 +334,7 @@ proptest! {
 
     #[test]
     fn transparent_address_roundtrip(taddr in any::<Address>()) {
+        zebra_test::init();
 
         let mut data = Vec::new();
 

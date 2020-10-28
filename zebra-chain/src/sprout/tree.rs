@@ -176,6 +176,8 @@ mod tests {
 
     #[test]
     fn empty_roots() {
+        zebra_test::init();
+
         // From https://github.com/zcash/zcash/blob/master/src/zcash/IncrementalMerkleTree.cpp#L439
         let hex_empty_roots = [
             "0000000000000000000000000000000000000000000000000000000000000000",
@@ -217,6 +219,8 @@ mod tests {
 
     #[test]
     fn incremental_roots() {
+        zebra_test::init();
+
         // From https://github.com/zcash/zcash/blob/master/src/test/data/merkle_commitments.json
         //
         // Byte-reversed from those ones because the original test vectors are

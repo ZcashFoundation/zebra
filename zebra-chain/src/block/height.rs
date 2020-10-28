@@ -132,6 +132,8 @@ impl Arbitrary for Height {
 
 #[test]
 fn operator_tests() {
+    zebra_test::init();
+
     assert_eq!(Some(Height(2)), Height(1) + Height(1));
     assert_eq!(None, Height::MAX + Height(1));
     // Bad heights aren't caught at compile-time or runtime, until we add or subtract

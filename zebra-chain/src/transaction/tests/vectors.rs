@@ -4,6 +4,8 @@ use crate::serialization::{ZcashDeserialize, ZcashSerialize};
 
 #[test]
 fn librustzcash_tx_deserialize_and_round_trip() {
+    zebra_test::init();
+
     let tx = Transaction::zcash_deserialize(&zebra_test::vectors::GENERIC_TESTNET_TX[..])
         .expect("transaction test vector from librustzcash should deserialize");
 
@@ -15,6 +17,8 @@ fn librustzcash_tx_deserialize_and_round_trip() {
 
 #[test]
 fn librustzcash_tx_hash() {
+    zebra_test::init();
+
     let tx = Transaction::zcash_deserialize(&zebra_test::vectors::GENERIC_TESTNET_TX[..])
         .expect("transaction test vector from librustzcash should deserialize");
 
@@ -29,6 +33,8 @@ fn librustzcash_tx_hash() {
 
 #[test]
 fn zip143_deserialize_and_round_trip() {
+    zebra_test::init();
+
     let tx1 = Transaction::zcash_deserialize(&zebra_test::vectors::ZIP143_1[..])
         .expect("transaction test vector from ZIP143 should deserialize");
 
@@ -50,6 +56,8 @@ fn zip143_deserialize_and_round_trip() {
 
 #[test]
 fn zip243_deserialize_and_round_trip() {
+    zebra_test::init();
+
     let tx1 = Transaction::zcash_deserialize(&zebra_test::vectors::ZIP243_1[..])
         .expect("transaction test vector from ZIP243 should deserialize");
 
