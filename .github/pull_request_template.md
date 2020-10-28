@@ -60,7 +60,7 @@ Add or skip tasks as needed.
 - [ ] Code
   - **Does the code implement the specifications or design documents?**
   - Changes from the specifications or design documents are explained in comments
-  - The code is readable, and does not appear to have any bugs
+  - The code is readable and maintainable
   - Any known issues or limitations are documented
 
 - [ ] Documentation
