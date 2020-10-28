@@ -632,7 +632,6 @@ mod test {
         C1: Constraint + Debug,
         C2: Constraint + Debug,
     {
-        zebra_test::init();
         let zero = Amount::<C1>::try_from(0)?;
         let one = Amount::<C2>::try_from(1)?;
         let another_one = Amount::<C1>::try_from(1)?;
