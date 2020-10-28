@@ -6,7 +6,7 @@
 # Summary
 [summary]: #summary
 
-The Bitcoin network protocol used by Zcash allows nodes to download blocks from other peers. This RFC describes how we achieve finding and download this data asynchronously.
+The Bitcoin network protocol used by Zcash allows nodes to download blocks from other peers. This RFC describes how we find and download this data asynchronously.
 
 # Motivation
 [motivation]: #motivation
