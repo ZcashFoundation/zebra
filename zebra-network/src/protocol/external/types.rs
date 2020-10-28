@@ -122,6 +122,8 @@ mod proptest {
 
     #[test]
     fn magic_debug() {
+        zebra_test::init();
+
         assert_eq!(format!("{:?}", magics::MAINNET), "Magic(\"24e92764\")");
         assert_eq!(format!("{:?}", magics::TESTNET), "Magic(\"fa1af9bf\")");
     }
@@ -130,6 +132,8 @@ mod proptest {
 
         #[test]
         fn proptest_magic_from_array(data in any::<[u8; 4]>()) {
+            zebra_test::init();
+
             assert_eq!(format!("{:?}", Magic(data)), format!("Magic({:x?})", hex::encode(data)));
         }
     }
@@ -152,6 +156,8 @@ mod test {
     /// Test the min_for_upgrade and current_min functions for `network` with
     /// extreme values.
     fn version_extremes(network: Network) {
+        zebra_test::init();
+
         assert_eq!(
             Version::current_min(network, block::Height(0)),
             Version::min_for_upgrade(network, BeforeOverwinter),
@@ -178,6 +184,8 @@ mod test {
     /// Check that the min_for_upgrade and current_min functions
     /// are consistent for `network`.
     fn version_consistent(network: Network) {
+        zebra_test::init();
+
         let highest_network_upgrade = NetworkUpgrade::current(network, block::Height::MAX);
         assert!(highest_network_upgrade == Canopy || highest_network_upgrade == Heartwood,
                 "expected coverage of all network upgrades: add the new network upgrade to the list in this test");
