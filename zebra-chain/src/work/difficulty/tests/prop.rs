@@ -8,7 +8,7 @@ use crate::block;
 use super::super::*;
 
 proptest! {
-    /// Check Expanded, Compact, Work, and PartialCumulativeWork conversions.
+    /// Check Expanded, Compact, and Work conversions.
     ///
     /// Make sure the conversions don't panic, and that they round-trip and compare
     /// correctly.
@@ -28,9 +28,6 @@ proptest! {
         let expanded_trunc = compact.to_expanded();
         let work = compact.to_work();
 
-        let work_zero = Work(0);
-        let work_max = Work(u128::MAX);
-
         if let Some(expanded_trunc) = expanded_trunc {
             // zero compact values are invalid, and return None on conversion
             prop_assert!(expanded_trunc > hash_zero);
@@ -49,23 +46,32 @@ proptest! {
 
             // Some impossibly hard compact values are not valid work values in Zebra
             if let Some(work) = work {
-                prop_assert!(work > work_zero);
-                // similarly, the maximum compact value has less precision than work
-                prop_assert!(work < work_max);
-
-                let partial_work = PartialCumulativeWork::from(work);
-                prop_assert!(partial_work > PartialCumulativeWork::from(work_zero));
-                prop_assert!(partial_work < PartialCumulativeWork::from(work_max));
-
-                // Now try adding zero to convert to PartialCumulativeWork
-                prop_assert!(partial_work > work_zero + work_zero);
-                prop_assert!(partial_work < work_max + work_zero);
-
                 // roundtrip
                 let work_trip = compact_trip.to_work().expect("roundtrip work is valid if work is valid");
                 prop_assert_eq!(work, work_trip);
             }
         }
+    }
+
+    /// Check Work and PartialCumulativeWork conversions.
+    ///
+    /// Make sure the conversions don't panic, and that they compare correctly.
+    #[test]
+    fn prop_work_conversion(work in any::<Work>()) {
+        let work_zero = Work(0);
+        let work_max = Work(u128::MAX);
+
+        prop_assert!(work > work_zero);
+        // similarly, the maximum compact value has less precision than work
+        prop_assert!(work < work_max);
+
+        let partial_work = PartialCumulativeWork::from(work);
+        prop_assert!(partial_work > PartialCumulativeWork::from(work_zero));
+        prop_assert!(partial_work < PartialCumulativeWork::from(work_max));
+
+        // Now try adding zero to convert to PartialCumulativeWork
+        prop_assert!(partial_work > work_zero + work_zero);
+        prop_assert!(partial_work < work_max + work_zero);
     }
 
     /// Check that a random ExpandedDifficulty compares correctly with fixed block::Hash
@@ -142,24 +148,37 @@ proptest! {
         let work1 = compact1.to_work();
         let work2 = compact2.to_work();
 
+        match expanded1_seed.cmp(&expanded2_seed) {
+            Ordering::Greater => {
+                // seed to compact truncation can turn expanded and work inequalities into equalities
+                prop_assert!(expanded1_trunc >= expanded2_trunc);
+            }
+            Ordering::Equal => {
+                prop_assert!(compact1 == compact2);
+                prop_assert!(expanded1_trunc == expanded2_trunc);
+            }
+            Ordering::Less => {
+                prop_assert!(expanded1_trunc <= expanded2_trunc);
+            }
+        }
+
+        if expanded1_trunc == expanded2_trunc {
+            prop_assert!(compact1 == compact2);
+        }
+
         // Skip impossibly hard work values
         prop_assume!(work1.is_some());
         prop_assume!(work2.is_some());
 
         match expanded1_seed.cmp(&expanded2_seed) {
             Ordering::Greater => {
-                // seed to compact truncation can turn expanded and work inequalities into equalities
-                prop_assert!(expanded1_trunc >= expanded2_trunc);
                 // work comparisons are reversed, because conversion involves division
                 prop_assert!(work1 <= work2);
             }
             Ordering::Equal => {
-                prop_assert!(compact1 == compact2);
-                prop_assert!(expanded1_trunc == expanded2_trunc);
                 prop_assert!(work1 == work2);
             }
             Ordering::Less => {
-                prop_assert!(expanded1_trunc <= expanded2_trunc);
                 prop_assert!(work1 >= work2);
             }
         }
@@ -170,11 +189,10 @@ proptest! {
                 prop_assert!(work1 <= work2);
             }
             Ordering::Equal => {
-                prop_assert!(compact1 == compact2);
                 prop_assert!(work1 == work2);
             }
             Ordering::Less => {
-            prop_assert!(work1 >= work2);
+                prop_assert!(work1 >= work2);
             }
         }
     }
