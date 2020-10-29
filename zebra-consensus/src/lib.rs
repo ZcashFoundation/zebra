@@ -45,7 +45,6 @@ mod parameters;
 #[allow(dead_code)] // Remove this once transaction verification is implemented
 mod primitives;
 mod script;
-#[allow(dead_code)] // Remove this once transaction verification is implemented
 mod transaction;
 
 pub mod chain;
