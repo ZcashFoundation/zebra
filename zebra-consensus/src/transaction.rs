@@ -5,7 +5,6 @@ use std::{
     task::{Context, Poll},
 };
 
-use displaydoc::Display;
 use futures::{
     stream::{FuturesUnordered, StreamExt},
     FutureExt,
