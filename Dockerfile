@@ -19,9 +19,17 @@ RUN rustc -V; cargo -V; rustup -V; cargo test --all && cargo build --release
 
 
 FROM debian:buster-slim
+
 COPY --from=builder /zebra/target/release/zebrad /
-RUN printf "[consensus]\ncheckpoint_sync = true\n" >> /zebrad.toml
-RUN printf "[state]\ncache_dir = '/zebrad-cache'\n" >> /zebrad.toml
-RUN printf "[tracing]\nendpoint_addr = '0.0.0.0:3000'\n" >> /zebrad.toml
+
+RUN printf "[consensus]\n" >> /zebrad.toml
+RUN printf "checkpoint_sync = true\n" >> /zebrad.toml
+RUN printf "[state]\n" >> /zebrad.toml
+RUN printf "cache_dir = '/zebrad-cache'\n" >> /zebrad.toml
+RUN printf "memory_cache_bytes = 52428800\n" >> /zebrad.toml
+RUN printf "[tracing]\n" >> /zebrad.toml
+RUN printf "endpoint_addr = '0.0.0.0:3000'\n" >> /zebrad.toml
+
 EXPOSE 3000 8233 18233
+
 CMD [ "/zebrad", "-c", "/zebrad.toml", "start" ]
