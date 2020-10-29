@@ -663,12 +663,13 @@ check that `block`'s parent hash is `null` (all zeroes) and its height is `0`.
     - `(height, hash)` into `hash_by_height`;
     - `(height, block)` into `block_by_height`.
 
-3. If the block is a genesis block, skip any transaction updates.
+3.  Update the `sprout_anchors` and `sapling_anchors` trees with the Sprout and
+    Sapling anchors.
+
+4. If the block is a genesis block, skip any transaction updates.
 
     (Due to a [bug in zcashd](https://github.com/ZcashFoundation/zebra/issues/559),
     genesis block transactions are ignored during validation.)
-
-4.  Update the `sprout_anchors` and `sapling_anchors` trees with the Sprout and Sapling anchors.
 
 5. Iterate over the enumerated transactions in the block. For each transaction:
 
@@ -694,6 +695,10 @@ Sapling note commitment trees that have already been calculated for the last
 transaction(s) in the block that have `JoinSplit`s in the Sprout case and/or
 `Spend`/`Output` descriptions in the Sapling case. These should be passed as
 fields in the `Commit*Block` requests.
+
+Due to the coinbase maturity rules, the Sprout root is the empty root
+for the first 100 blocks. (These rules are already implemented in contextual
+validation and the anchor calculations.)
 
 [`JoinSplit`]: https://doc.zebra.zfnd.org/zebra_chain/transaction/struct.JoinSplit.html
 [`Spend`]: https://doc.zebra.zfnd.org/zebra_chain/transaction/struct.Spend.html
