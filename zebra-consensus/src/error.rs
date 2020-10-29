@@ -43,13 +43,13 @@ pub enum TransactionError {
     #[error("if there are no Spends or Outputs, the value balance MUST be 0.")]
     BadBalance,
 
-    /// Could not verify a transparent script
+    #[error("could not verify a transparent script")]
     Script(#[from] zebra_script::Error),
 
     // XXX change this when we align groth16 verifier errors with bellman
     // and add a from annotation when the error type is more precise
     #[error("spend proof MUST be valid given a primary input formed from the other fields except spendAuthSig")]
-    Groth16(BoxError),
+    Groth16,
 
     #[error(
         "joinSplitSig MUST represent a valid signature under joinSplitPubKey of dataToBeSigned"
@@ -64,7 +64,7 @@ impl From<BoxError> for TransactionError {
     fn from(err: BoxError) -> Self {
         match err.downcast::<redjubjub::Error>() {
             Ok(e) => TransactionError::RedJubjub(*e),
-            Err(e) => TransactionError::Internal(e),
+            Err(e) => panic!(e),
         }
     }
 }
