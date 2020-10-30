@@ -672,7 +672,7 @@ fn create_cached_database_height(network: Network, height: Height) -> Result<()>
     let mut child = dir
         .spawn_child(&["start"])?
         .with_timeout(timeout)
-        .bypass_test_stdout(true);
+        .bypass_test_capture(true);
 
     let network = format!("network: {},", network);
     child.expect_stdout(&network)?;
