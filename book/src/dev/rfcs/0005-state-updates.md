@@ -39,9 +39,10 @@ state service.
 * **chain state**: The state of the ledger after application of a particular
   sequence of blocks (state transitions).
 
-* **difficulty**: The cumulative proof-of-work from genesis to the chain tip.
+* **cumulative difficulty**: The cumulative proof-of-work from genesis to the
+  chain tip.
 
-* **best chain**: The chain with the greatest difficulty. This chain
+* **best chain**: The chain with the greatest cumulative difficulty. This chain
   represents the consensus state of the Zcash network and transactions.
 
 * **side chain**: A chain which is not contained in the best chain.
