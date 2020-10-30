@@ -18,10 +18,10 @@
 #![allow(clippy::field_reassign_with_default)]
 
 use color_eyre::eyre::Result;
-use eyre::{eyre, WrapErr};
+use eyre::WrapErr;
 use tempdir::TempDir;
 
-use std::{borrow::Borrow, env, fs, io::Write, path::Path, time::Duration};
+use std::{env, fs, io::Write, path::Path, path::PathBuf, time::Duration};
 
 use zebra_chain::{
     block::Height,
@@ -55,7 +55,7 @@ fn testdir() -> Result<TempDir> {
 /// directory for `zebrad`.
 trait ZebradTestDirExt
 where
-    Self: Borrow<TempDir> + Sized,
+    Self: AsRef<Path> + Sized,
 {
     /// Spawn `zebrad` with `args` as a child process in this test directory,
     /// potentially taking ownership of the tempdir for the duration of the
@@ -73,11 +73,11 @@ where
 
 impl<T> ZebradTestDirExt for T
 where
-    Self: TestDirExt + Borrow<TempDir> + Sized,
+    Self: TestDirExt + AsRef<Path> + Sized,
 {
     fn spawn_child(self, args: &[&str]) -> Result<TestChild<Self>> {
-        let tempdir = self.borrow();
-        let default_config_path = tempdir.path().join("zebrad.toml");
+        let path = self.as_ref();
+        let default_config_path = path.join("zebrad.toml");
 
         if default_config_path.exists() {
             let mut extra_args: Vec<_> = Vec::new();
@@ -96,7 +96,7 @@ where
     }
 
     fn with_config(self, mut config: ZebradConfig) -> Result<Self> {
-        let dir = self.borrow().path();
+        let dir = self.as_ref();
 
         if !config.state.ephemeral {
             let cache_dir = dir.join("state");
@@ -111,7 +111,7 @@ where
     }
 
     fn replace_config(self, mut config: ZebradConfig) -> Result<Self> {
-        let dir = self.borrow().path();
+        let dir = self.as_ref();
 
         if !config.state.ephemeral {
             let cache_dir = dir.join("state");
@@ -648,56 +648,78 @@ fn sync_until(
     Ok(child.dir)
 }
 
-#[test]
-#[ignore]
-fn sync_to_sapling() -> Result<()> {
-    let mut testdir = testdir()?;
-    let backup_dir = dirs::cache_dir()
-        .ok_or_else(|| eyre!("no cache dir found"))?
-        .join("sapling_backup");
+fn cached_sapling_test_config() -> Result<ZebradConfig> {
+    let mut config = persistent_test_config()?;
+    config.consensus.checkpoint_sync = true;
+    config.state.cache_dir = "/zebrad-cache".into();
+    config.state.memory_cache_bytes = 52428800;
+    config.tracing.endpoint_addr = Some("0.0.0.0:3000".parse().unwrap());
+    Ok(config)
+}
 
-    if !backup_dir.exists() {
-        testdir = create_sapling_backup(testdir, &backup_dir)?;
-    }
+fn create_cached_database_height(network: Network, height: Height) -> Result<()> {
+    println!("Creating cached database");
+    // 8 hours
+    let timeout = Duration::from_secs(60 * 60 * 8);
 
-    for entry in std::fs::read_dir(backup_dir)? {
-        let entry = entry?;
-        std::process::Command::new("cp")
-            .arg("-r")
-            .arg(entry.path())
-            .arg(testdir.path())
-            .status2()?
-            .assert_success()?;
-    }
+    // Use a persistent state, so we can handle large syncs
+    let mut config = cached_sapling_test_config()?;
+    // TODO: add convenience methods?
+    config.network.network = network;
+    config.state.debug_stop_at_height = Some(height.0);
+    let dir = PathBuf::from("/");
+    fs::File::create(dir.join("zebrad.toml"))?.write_all(toml::to_string(&config)?.as_bytes())?;
 
-    let height = LARGE_CHECKPOINT_TEST_HEIGHT;
-    let network = Mainnet;
-    let timeout = Duration::from_secs(60);
+    let mut child = dir.spawn_child(&["start"])?.with_timeout(timeout);
 
-    println!("Running real sync");
-    sync_until(height, network, STOP_AT_HEIGHT_REGEX, timeout, testdir)?;
+    // TODO: is there a way to check for testnet or mainnet here?
+    // For example: "network=Mainnet" or "network=Testnet"
+    child.expect_stdout("network: Mainnet,")?;
+    child.expect_stdout(STOP_AT_HEIGHT_REGEX)?;
+    child.kill()?;
 
     Ok(())
 }
 
-fn create_sapling_backup(testdir: TempDir, dest: &Path) -> Result<TempDir> {
-    println!("Creating backup database");
-    // 1 hour
-    let timeout = Duration::from_secs(60 * 60);
-    let network = Mainnet;
+fn create_cached_database(network: Network) -> Result<()> {
     let height = NetworkUpgrade::Sapling.activation_height(network).unwrap();
+    create_cached_database_height(network, height)
+}
 
-    let tempdir = sync_until(height, network, STOP_AT_HEIGHT_REGEX, timeout, testdir)?;
-    let path = tempdir.path();
+fn sync_past_sapling(network: Network) -> Result<()> {
+    let height = NetworkUpgrade::Sapling.activation_height(network).unwrap() + 1000;
+    create_cached_database_height(network, height.unwrap())
+}
 
-    std::process::Command::new("cp")
-        .arg("-r")
-        .arg(path)
-        .arg(dest)
-        .status2()?
-        .assert_success()?;
+#[test]
+#[ignore]
+fn create_mainnet_cache() {
+    zebra_test::init();
+    let network = Mainnet;
+    create_cached_database(network).unwrap();
+}
+#[test]
+#[ignore]
+fn create_testnet_cache() {
+    zebra_test::init();
+    let network = Testnet;
+    create_cached_database(network).unwrap();
+}
 
-    Ok(tempdir)
+#[test]
+#[ignore]
+fn sync_past_sapling_mainnet() {
+    zebra_test::init();
+    let network = Mainnet;
+    sync_past_sapling(network).unwrap();
+}
+
+#[test]
+#[ignore]
+fn sync_past_sapling_testnet() {
+    zebra_test::init();
+    let network = Testnet;
+    sync_past_sapling(network).unwrap();
 }
 
 #[tokio::test]

@@ -2,16 +2,16 @@ use color_eyre::{
     eyre::{eyre, Context, Report, Result},
     Help, SectionExt,
 };
-use tempdir::TempDir;
 use tracing::instrument;
 
-use std::convert::Infallible as NoDir;
-use std::fmt::Write as _;
-#[cfg(unix)]
-use std::os::unix::process::ExitStatusExt;
+use std::{convert::Infallible as NoDir, io::BufRead};
 use std::{
-    borrow::Borrow,
-    io::{BufRead, BufReader, Lines, Read},
+    fmt::Write as _,
+    io::{BufReader, Lines},
+};
+#[cfg(unix)]
+use std::{io::Read, os::unix::process::ExitStatusExt};
+use std::{
     path::Path,
     process::{Child, ChildStdout, Command, ExitStatus, Output, Stdio},
     time::{Duration, Instant},
@@ -98,7 +98,7 @@ impl CommandExt for Command {
 /// `zebra_test::command` without running `zebrad`.
 pub trait TestDirExt
 where
-    Self: Borrow<TempDir> + Sized,
+    Self: AsRef<Path> + Sized,
 {
     /// Spawn `cmd` with `args` as a child process in this test directory,
     /// potentially taking ownership of the tempdir for the duration of the
@@ -108,11 +108,10 @@ where
 
 impl<T> TestDirExt for T
 where
-    Self: Borrow<TempDir> + Sized,
+    Self: AsRef<Path> + Sized,
 {
     fn spawn_child_with_command(self, cmd: &str, args: &[&str]) -> Result<TestChild<Self>> {
-        let tempdir = self.borrow();
-        let mut cmd = test_cmd(cmd, tempdir.path())?;
+        let mut cmd = test_cmd(cmd, self.as_ref())?;
 
         Ok(cmd
             .args(args)
