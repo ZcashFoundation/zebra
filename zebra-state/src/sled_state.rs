@@ -314,6 +314,7 @@ impl FinalizedState {
         let _ = rsp_tx.send(result.map_err(Into::into));
     }
 
+    /// Returns the tip height and hash if there is one.
     pub fn tip(&self) -> Option<(block::Height, block::Hash)> {
         if let Some((height_bytes, hash_bytes)) = self
             .hash_by_height
@@ -332,10 +333,12 @@ impl FinalizedState {
         }
     }
 
+    /// Returns the height of the given block if it exists.
     pub fn height(&self, hash: block::Hash) -> Option<block::Height> {
         self.height_by_hash.zs_get(&hash)
     }
 
+    /// Returns the given block if it exists.
     pub fn block(&self, hash_or_height: HashOrHeight) -> Option<Arc<Block>> {
         let height = hash_or_height.unwrap_height(|hash| self.height_by_hash.zs_get(&hash))?;
 
@@ -353,6 +356,7 @@ impl FinalizedState {
         self.hash_by_height.zs_get(&height)
     }
 
+    /// Returns the given transaction if it exists.
     pub fn transaction(&self, hash: transaction::Hash) -> Option<Arc<Transaction>> {
         self.tx_by_hash
             .zs_get(&hash)
