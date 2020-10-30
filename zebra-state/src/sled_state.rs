@@ -1,6 +1,6 @@
 //! The primary implementation of the `zebra_state::Service` built upon sled
 
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, convert::TryInto, sync::Arc};
 
 use tracing::trace;
 use zebra_chain::transparent;
@@ -14,6 +14,8 @@ use crate::{BoxError, Config, HashOrHeight, QueuedBlock};
 mod sled_format;
 
 use sled_format::{FromSled, IntoSled, SledDeserialize, SledSerialize};
+
+use self::sled_format::TransactionLocation;
 
 /// The finalized part of the chain state, stored in sled.
 ///
@@ -250,9 +252,15 @@ impl FinalizedState {
                     }
 
                     // Index each transaction
-                    for transaction in block.transactions.iter() {
+                    for (transaction_index, transaction) in block.transactions.iter().enumerate() {
                         let transaction_hash = transaction.hash();
-                        tx_by_hash.zs_insert(transaction_hash, transaction)?;
+                        let transaction_location = TransactionLocation {
+                            height,
+                            index: transaction_index
+                                .try_into()
+                                .expect("no more than 4 billion transactions per block"),
+                        };
+                        tx_by_hash.zs_insert(transaction_hash, transaction_location)?;
 
                         // Mark all transparent inputs as spent
                         for input in transaction.inputs() {

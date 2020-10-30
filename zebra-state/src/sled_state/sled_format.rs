@@ -6,12 +6,15 @@ use zebra_chain::{
     block::Block,
     sapling,
     serialization::{ZcashDeserialize, ZcashSerialize},
-    sprout, transaction,
-    transaction::Transaction,
-    transparent,
+    sprout, transaction, transparent,
 };
 
 use crate::BoxError;
+
+pub struct TransactionLocation {
+    pub height: block::Height,
+    pub index: u32,
+}
 
 // Helper trait for defining the exact format used to interact with sled per
 // type.
@@ -54,16 +57,42 @@ impl FromSled for Arc<Block> {
     }
 }
 
-impl IntoSled for &Arc<Transaction> {
-    type Bytes = Vec<u8>;
+impl IntoSled for TransactionLocation {
+    type Bytes = [u8; 8];
 
     fn as_bytes(&self) -> Self::Bytes {
-        self.zcash_serialize_to_vec()
-            .expect("serialization to vec doesn't fail")
+        let height_bytes = self.height.0.to_be_bytes();
+        let index_bytes = self.index.to_be_bytes();
+
+        let mut bytes = [0; 8];
+
+        bytes[0..4].copy_from_slice(&height_bytes);
+        bytes[4..8].copy_from_slice(&index_bytes);
+
+        bytes
     }
 
     fn into_ivec(self) -> sled::IVec {
-        self.as_bytes().into()
+        self.as_bytes().as_ref().into()
+    }
+}
+
+impl FromSled for TransactionLocation {
+    fn from_ivec(sled_bytes: sled::IVec) -> Result<Self, BoxError> {
+        let height = {
+            let mut bytes = [0; 4];
+            bytes.copy_from_slice(&sled_bytes[0..4]);
+            let height = u32::from_be_bytes(bytes);
+            block::Height(height)
+        };
+
+        let index = {
+            let mut bytes = [0; 4];
+            bytes.copy_from_slice(&sled_bytes[4..8]);
+            u32::from_be_bytes(bytes)
+        };
+
+        Ok(TransactionLocation { height, index })
     }
 }
 
