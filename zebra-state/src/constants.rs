@@ -14,4 +14,4 @@ pub const MIN_TRASPARENT_COINBASE_MATURITY: block::Height = block::Height(100);
 pub const MAX_BLOCK_REORG_HEIGHT: block::Height =
     block::Height(MIN_TRASPARENT_COINBASE_MATURITY.0 - 1);
 
-pub const SLED_FORMAT_VERSION: u32 = 0;
+pub const SLED_FORMAT_VERSION: u32 = 1;
