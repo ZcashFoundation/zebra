@@ -31,7 +31,7 @@ use zebrad::config::ZebradConfig;
 fn default_test_config() -> Result<ZebradConfig> {
     let mut config = ZebradConfig::default();
     config.state = zebra_state::Config::ephemeral();
-    config.state.memory_cache_bytes = 256000000;
+    config.state.memory_cache_bytes /= 2;
     config.network.listen_addr = "127.0.0.1:0".parse()?;
 
     Ok(config)
