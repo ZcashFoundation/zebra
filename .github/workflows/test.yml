@@ -54,7 +54,6 @@ jobs:
     #     --source-ranges 0.0.0.0/0 \
     #     --description="Allow incoming Zcash traffic from anywhere" \
 
-
     # Creates Compute Engine virtual machine instance running test container image
     - name: Create instance running test container image
       run: |
@@ -70,3 +69,4 @@ jobs:
           --service-account cos-vm@zealous-zebra.iam.gserviceaccount.com \
           --scopes cloud-platform \
           --tags zebrad \
+          --zone us-central1-a \
