@@ -7,6 +7,7 @@ use zebra_chain::transparent;
 use zebra_chain::{
     block::{self, Block},
     parameters::{Network, GENESIS_PREVIOUS_BLOCK_HASH},
+    transaction::{self, Transaction},
 };
 
 use crate::{BoxError, Config, HashOrHeight, QueuedBlock};
@@ -193,7 +194,6 @@ impl FinalizedState {
     /// Returns the hash of the current finalized tip block.
     pub fn finalized_tip_hash(&self) -> block::Hash {
         self.tip()
-            .expect("inability to look up tip is unrecoverable")
             .map(|(_, hash)| hash)
             // if the state is empty, return the genesis previous block hash
             .unwrap_or(GENESIS_PREVIOUS_BLOCK_HASH)
@@ -201,9 +201,7 @@ impl FinalizedState {
 
     /// Returns the height of the current finalized tip block.
     pub fn finalized_tip_height(&self) -> Option<block::Height> {
-        self.tip()
-            .expect("inability to look up tip is unrecoverable")
-            .map(|(height, _)| height)
+        self.tip().map(|(height, _)| height)
     }
 
     /// Immediately commit `block` to the finalized state.
@@ -316,74 +314,54 @@ impl FinalizedState {
         let _ = rsp_tx.send(result.map_err(Into::into));
     }
 
-    // TODO: this impl works only during checkpointing, it needs to be rewritten
-    pub fn block_locator(&self) -> Result<Vec<block::Hash>, BoxError> {
-        let (tip_height, _) = match self.tip()? {
-            Some(height) => height,
-            None => return Ok(Vec::new()),
-        };
-
-        let heights = crate::util::block_locator_heights(tip_height);
-        let mut hashes = Vec::with_capacity(heights.len());
-
-        for height in heights {
-            if let Some(hash) = self.hash_by_height.zs_get(&height)? {
-                hashes.push(hash);
-            }
-        }
-
-        Ok(hashes)
-    }
-
-    pub fn tip(&self) -> Result<Option<(block::Height, block::Hash)>, BoxError> {
-        if let Some((height_bytes, hash_bytes)) =
-            self.hash_by_height.iter().rev().next().transpose()?
+    pub fn tip(&self) -> Option<(block::Height, block::Hash)> {
+        if let Some((height_bytes, hash_bytes)) = self
+            .hash_by_height
+            .iter()
+            .rev()
+            .next()
+            .transpose()
+            .expect("expected that sled errors would not occur")
         {
-            let height = block::Height::from_ivec(height_bytes)?;
-            let hash = block::Hash::from_ivec(hash_bytes)?;
+            let height = block::Height::from_ivec(height_bytes);
+            let hash = block::Hash::from_ivec(hash_bytes);
 
-            Ok(Some((height, hash)))
+            Some((height, hash))
         } else {
-            Ok(None)
+            None
         }
     }
 
-    pub fn depth(&self, hash: block::Hash) -> Result<Option<u32>, BoxError> {
-        let height: block::Height = match self.height_by_hash.zs_get(&hash)? {
-            Some(height) => height,
-            None => return Ok(None),
-        };
-
-        let (tip_height, _) = self.tip()?.expect("tip must exist");
-
-        Ok(Some(tip_height.0 - height.0))
+    pub fn height(&self, hash: block::Hash) -> Option<block::Height> {
+        self.height_by_hash.zs_get(&hash)
     }
 
-    pub fn block(&self, hash_or_height: HashOrHeight) -> Result<Option<Arc<Block>>, BoxError> {
-        let height = match hash_or_height {
-            HashOrHeight::Height(height) => height,
-            HashOrHeight::Hash(hash) => match self.height_by_hash.zs_get(&hash)? {
-                Some(height) => height,
-                None => return Ok(None),
-            },
-        };
+    pub fn block(&self, hash_or_height: HashOrHeight) -> Option<Arc<Block>> {
+        let height = hash_or_height.unwrap_height(|hash| self.height_by_hash.zs_get(&hash))?;
 
-        Ok(self.block_by_height.zs_get(&height)?)
+        self.block_by_height.zs_get(&height)
     }
 
     /// Returns the `transparent::Output` pointed to by the given
     /// `transparent::OutPoint` if it is present.
-    pub fn utxo(
-        &self,
-        outpoint: &transparent::OutPoint,
-    ) -> Result<Option<transparent::Output>, BoxError> {
+    pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Output> {
         self.utxo_by_outpoint.zs_get(outpoint)
     }
 
     /// Returns the finalized hash for a given `block::Height` if it is present.
-    pub fn get_hash(&self, height: block::Height) -> Option<block::Hash> {
-        self.hash_by_height
-            .zs_get(&height)
-            .expect("expected that sled errors would not occur")
+    pub fn hash(&self, height: block::Height) -> Option<block::Hash> {
+        self.hash_by_height.zs_get(&height)
+    }
+
+    pub fn transaction(&self, hash: transaction::Hash) -> Option<Arc<Transaction>> {
+        self.tx_by_hash
+            .zs_get(&hash)
+            .map(|TransactionLocation { index, height }| {
+                let block = self
+                    .block(height.into())
+                    .expect("block will exist if TransactionLocation does");
+
+                block.transactions[index as usize].clone()
+            })
     }
 }
