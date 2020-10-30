@@ -652,7 +652,6 @@ fn cached_sapling_test_config() -> Result<ZebradConfig> {
     config.consensus.checkpoint_sync = true;
     config.state.cache_dir = "/zebrad-cache".into();
     config.state.memory_cache_bytes = 52428800;
-    config.tracing.endpoint_addr = Some("0.0.0.0:3000".parse().unwrap());
     Ok(config)
 }
 
@@ -666,15 +665,17 @@ fn create_cached_database_height(network: Network, height: Height) -> Result<()>
     // TODO: add convenience methods?
     config.network.network = network;
     config.state.debug_stop_at_height = Some(height.0);
-    let dir = PathBuf::from("/");
+    let dir = PathBuf::from("/zebrad-cache");
 
     fs::File::create(dir.join("zebrad.toml"))?.write_all(toml::to_string(&config)?.as_bytes())?;
 
-    let mut child = dir.spawn_child(&["start"])?.with_timeout(timeout);
+    let mut child = dir
+        .spawn_child(&["start"])?
+        .with_timeout(timeout)
+        .bypass_test_stdout(true);
 
-    // TODO: is there a way to check for testnet or mainnet here?
-    // For example: "network=Mainnet" or "network=Testnet"
-    child.expect_stdout("network: Mainnet,")?;
+    let network = format!("network: {},", network);
+    child.expect_stdout(&network)?;
     child.expect_stdout(STOP_AT_HEIGHT_REGEX)?;
     child.kill()?;
 

@@ -1,3 +1,5 @@
+use std::fmt;
+
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
@@ -9,6 +11,15 @@ pub enum Network {
     Mainnet,
     /// The testnet.
     Testnet,
+}
+
+impl fmt::Display for Network {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Network::Mainnet => f.write_str("Mainnet"),
+            Network::Testnet => f.write_str("Testnet"),
+        }
+    }
 }
 
 impl Network {

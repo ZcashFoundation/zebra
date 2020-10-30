@@ -86,6 +86,7 @@ impl CommandExt for Command {
             dir,
             deadline: None,
             stdout: None,
+            bypass_test_stdout: false,
         })
     }
 }
@@ -152,6 +153,7 @@ pub struct TestChild<T> {
     pub child: Child,
     pub stdout: Option<Lines<BufReader<ChildStdout>>>,
     pub deadline: Option<Instant>,
+    bypass_test_stdout: bool,
 }
 
 impl<T> TestChild<T> {
@@ -190,6 +192,13 @@ impl<T> TestChild<T> {
         self
     }
 
+    /// Configures testrunner to forward stdout to the true stdout rather than
+    /// fakestdout used by cargo tests.
+    pub fn bypass_test_stdout(mut self, cond: bool) -> Self {
+        self.bypass_test_stdout = cond;
+        self
+    }
+
     /// Checks each line of the child's stdout against `regex`, and returns matching lines.
     ///
     /// Kills the child after the configured timeout has elapsed.
@@ -221,7 +230,13 @@ impl<T> TestChild<T> {
             // since we're about to discard this line write it to stdout so our
             // test runner can capture it and display if the test fails, may
             // cause weird reordering for stdout / stderr
-            println!("{}", line);
+            if !self.bypass_test_stdout {
+                println!("{}", line);
+            } else {
+                use std::io::Write;
+                #[allow(clippy::explicit_write)]
+                writeln!(std::io::stdout(), "{}", line).unwrap();
+            }
 
             if re.is_match(&line) {
                 self.stdout = Some(lines);
