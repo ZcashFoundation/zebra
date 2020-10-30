@@ -45,7 +45,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --verbose --manifest-path zebrad/Cargo.toml sync_large_checkpoints_mainnet sync_large_checkpoints_testnet -- --ignored
+          args: --verbose --manifest-path zebrad/Cargo.toml sync_large_checkpoints_ -- --ignored
       - name: Run zebrad tracing test
         env:
           RUST_BACKTRACE: full
