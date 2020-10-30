@@ -41,7 +41,7 @@ jobs:
       # Tagging w/ the commit SHA blocks the :latest tag on GCR
       run: |
         gcloud builds submit \
-          --config cloudbuild.yaml \
+          --config cloudbuild-cd.yaml \
           --substitutions SHORT_SHA="$SHORT_SHA",BRANCH_NAME="$BRANCH_NAME"
 
     # Create instance template from container image

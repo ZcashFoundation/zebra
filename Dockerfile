@@ -18,7 +18,16 @@ COPY . .
 RUN rustc -V; cargo -V; rustup -V; cargo test --all && cargo build --release
 
 
-FROM debian:buster-slim
+FROM debian:buster-slim AS zebra-tests
+
+COPY --from=builder /zebra/target/debug/deps/acceptance-* /acceptance
+
+EXPOSE 8233 18233
+
+CMD [ "/acceptance", "-Z",  "unstable-options",  "--include-ignored" ]
+
+
+FROM debian:buster-slim AS zebrad-release
 
 COPY --from=builder /zebra/target/release/zebrad /
 
