@@ -614,10 +614,9 @@ fn sync_until(
     network: Network,
     stop_regex: &str,
     timeout: Duration,
-    reuse_tempdir: impl Into<Option<TempDir>>,
+    reuse_tempdir: Option<TempDir>,
 ) -> Result<TempDir> {
     zebra_test::init();
-    let reuse_tempdir = reuse_tempdir.into();
 
     if env::var_os("ZEBRA_SKIP_NETWORK_TESTS").is_some() {
         // This message is captured by the test runner, use
@@ -668,6 +667,7 @@ fn create_cached_database_height(network: Network, height: Height) -> Result<()>
     config.network.network = network;
     config.state.debug_stop_at_height = Some(height.0);
     let dir = PathBuf::from("/");
+
     fs::File::create(dir.join("zebrad.toml"))?.write_all(toml::to_string(&config)?.as_bytes())?;
 
     let mut child = dir.spawn_child(&["start"])?.with_timeout(timeout);
