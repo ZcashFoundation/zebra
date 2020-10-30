@@ -24,7 +24,7 @@ pub enum HashOrHeight {
 impl HashOrHeight {
     /// Unwrap the inner height or attempt to retrieve the height for a given
     /// hash if one exists.
-    pub fn unwrap_height<F>(self, op: F) -> Option<block::Height>
+    pub fn height_or_else<F>(self, op: F) -> Option<block::Height>
     where
         F: FnOnce(block::Hash) -> Option<block::Height>,
     {

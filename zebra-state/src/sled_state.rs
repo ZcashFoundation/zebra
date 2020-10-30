@@ -337,7 +337,7 @@ impl FinalizedState {
 
     /// Returns the given block if it exists.
     pub fn block(&self, hash_or_height: HashOrHeight) -> Option<Arc<Block>> {
-        let height = hash_or_height.unwrap_height(|hash| self.height_by_hash.zs_get(&hash))?;
+        let height = hash_or_height.height_or_else(|hash| self.height_by_hash.zs_get(&hash))?;
 
         self.block_by_height.zs_get(&height)
     }

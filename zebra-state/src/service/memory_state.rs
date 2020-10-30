@@ -553,7 +553,7 @@ impl NonFinalizedState {
     pub fn block(&self, hash_or_height: HashOrHeight) -> Option<Arc<Block>> {
         let best_chain = self.best_chain()?;
         let height =
-            hash_or_height.unwrap_height(|hash| best_chain.height_by_hash.get(&hash).cloned())?;
+            hash_or_height.height_or_else(|hash| best_chain.height_by_hash.get(&hash).cloned())?;
 
         best_chain.blocks.get(&height).cloned()
     }
