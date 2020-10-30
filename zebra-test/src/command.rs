@@ -86,7 +86,7 @@ impl CommandExt for Command {
             dir,
             deadline: None,
             stdout: None,
-            bypass_test_stdout: false,
+            bypass_test_capture: false,
         })
     }
 }
@@ -153,7 +153,7 @@ pub struct TestChild<T> {
     pub child: Child,
     pub stdout: Option<Lines<BufReader<ChildStdout>>>,
     pub deadline: Option<Instant>,
-    bypass_test_stdout: bool,
+    bypass_test_capture: bool,
 }
 
 impl<T> TestChild<T> {
@@ -194,8 +194,8 @@ impl<T> TestChild<T> {
 
     /// Configures testrunner to forward stdout to the true stdout rather than
     /// fakestdout used by cargo tests.
-    pub fn bypass_test_stdout(mut self, cond: bool) -> Self {
-        self.bypass_test_stdout = cond;
+    pub fn bypass_test_capture(mut self, cond: bool) -> Self {
+        self.bypass_test_capture = cond;
         self
     }
 
@@ -230,7 +230,7 @@ impl<T> TestChild<T> {
             // since we're about to discard this line write it to stdout so our
             // test runner can capture it and display if the test fails, may
             // cause weird reordering for stdout / stderr
-            if !self.bypass_test_stdout {
+            if !self.bypass_test_capture {
                 println!("{}", line);
             } else {
                 use std::io::Write;
