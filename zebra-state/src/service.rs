@@ -198,6 +198,7 @@ impl StateService {
         Ok(())
     }
 
+    /// Create a block locator for the current best chain.
     fn block_locator(&self) -> Option<Vec<block::Hash>> {
         let tip_height = self.tip()?.0;
 
@@ -213,10 +214,12 @@ impl StateService {
         Some(hashes)
     }
 
+    /// Return the tip of the current best chain.
     pub fn tip(&self) -> Option<(block::Height, block::Hash)> {
         self.mem.tip().or_else(|| self.sled.tip())
     }
 
+    /// Return the depth of block `hash` in the current best chain.
     pub fn depth(&self, hash: block::Hash) -> Option<u32> {
         let tip = self.tip()?.0;
         let height = self.mem.height(hash).or_else(|| self.sled.height(hash))?;
@@ -224,22 +227,28 @@ impl StateService {
         Some(tip.0 - height.0)
     }
 
+    /// Return the block identified by either its `height` or `hash` if it exists
+    /// in the current best chain.
     pub fn block(&self, hash_or_height: HashOrHeight) -> Option<Arc<Block>> {
         self.mem
             .block(hash_or_height)
             .or_else(|| self.sled.block(hash_or_height))
     }
 
+    /// Return the transaction identified by `hash` if it exists in the current
+    /// best chain.
     pub fn transaction(&self, hash: transaction::Hash) -> Option<Arc<Transaction>> {
         self.mem
             .transaction(hash)
             .or_else(|| self.sled.transaction(hash))
     }
 
+    /// Return the hash for the block at `height` in the current best chain.
     pub fn hash(&self, height: block::Height) -> Option<block::Hash> {
         self.mem.hash(height).or_else(|| self.sled.hash(height))
     }
 
+    /// Return the utxo pointed to by `outpoint` if it exists in any chain.
     pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Output> {
         self.mem.utxo(outpoint).or_else(|| self.sled.utxo(outpoint))
     }

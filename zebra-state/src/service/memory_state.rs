@@ -579,6 +579,7 @@ impl NonFinalizedState {
         Some(height)
     }
 
+    /// Returns the given transaction if it exists in the best chain.
     pub fn transaction(&self, hash: transaction::Hash) -> Option<Arc<Transaction>> {
         let best_chain = self.best_chain()?;
         best_chain.tx_by_hash.get(&hash).map(|(height, index)| {
@@ -587,6 +588,7 @@ impl NonFinalizedState {
         })
     }
 
+    /// Return the non-finalized portion of the current best chain
     fn best_chain(&self) -> Option<&Chain> {
         self.chain_set
             .iter()
