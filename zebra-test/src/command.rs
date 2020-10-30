@@ -6,9 +6,10 @@ use tracing::instrument;
 
 #[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
-use std::{convert::Infallible as NoDir, io::BufRead};
 use std::{
+    convert::Infallible as NoDir,
     fmt::Write as _,
+    io::BufRead,
     io::{BufReader, Lines, Read},
     path::Path,
     process::{Child, ChildStdout, Command, ExitStatus, Output, Stdio},
