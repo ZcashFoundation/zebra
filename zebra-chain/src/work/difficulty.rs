@@ -13,14 +13,16 @@
 
 use crate::{block, parameters::Network};
 
-use std::cmp::{Ordering, PartialEq, PartialOrd};
-use std::{fmt, ops::Add, ops::AddAssign};
+use std::{
+    cmp::{Ordering, PartialEq, PartialOrd},
+    convert::TryFrom,
+    fmt,
+};
 
 use primitive_types::U256;
 
 #[cfg(any(test, feature = "proptest-impl"))]
-use proptest_derive::Arbitrary;
-
+mod arbitrary;
 #[cfg(test)]
 mod tests;
 
@@ -53,8 +55,7 @@ mod tests;
 /// multiple equivalent `CompactDifficulty` values, due to redundancy in the
 /// floating-point format.
 #[derive(Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
-pub struct CompactDifficulty(pub u32);
+pub struct CompactDifficulty(pub(crate) u32);
 
 impl fmt::Debug for CompactDifficulty {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -65,6 +66,9 @@ impl fmt::Debug for CompactDifficulty {
     }
 }
 
+/// An invalid CompactDifficulty value, for testing.
+pub const INVALID_COMPACT_DIFFICULTY: CompactDifficulty = CompactDifficulty(u32::MAX);
+
 /// A 256-bit unsigned "expanded difficulty" value.
 ///
 /// Used as a target threshold for the difficulty of a `block::Hash`.
@@ -74,13 +78,19 @@ impl fmt::Debug for CompactDifficulty {
 /// The precise bit pattern of an `ExpandedDifficulty` value is
 /// consensus-critical, because it is compared with the `block::Hash`.
 ///
-/// Note that each `CompactDifficulty` value represents a range of
-/// `ExpandedDifficulty` values, because the precision of the
-/// floating-point format requires rounding on conversion.
+/// Note that each `CompactDifficulty` value can be converted from a
+/// range of `ExpandedDifficulty` values, because the precision of
+/// the floating-point format requires rounding on conversion.
 ///
 /// Therefore, consensus-critical code must perform the specified
 /// conversions to `CompactDifficulty`, even if the original
 /// `ExpandedDifficulty` values are known.
+///
+/// Callers should avoid constructing `ExpandedDifficulty` zero
+/// values, because they are rejected by the consensus rules,
+/// and cause some conversion functions to panic.
+//
+// TODO: Use NonZeroU256, when available
 #[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
 pub struct ExpandedDifficulty(U256);
 
@@ -236,7 +246,7 @@ impl CompactDifficulty {
         // `((2^256 - expanded - 1) / (expanded + 1)) + 1`, or
         let result = (!expanded.0 / (expanded.0 + 1)) + 1;
         if result <= u128::MAX.into() {
-            Work(result.as_u128()).into()
+            Some(Work(result.as_u128()))
         } else {
             None
         }
@@ -255,7 +265,7 @@ impl ExpandedDifficulty {
     ///
     /// Hashes are not used to calculate the difficulties of future blocks, so
     /// users of this module should avoid converting hashes into difficulties.
-    fn from_hash(hash: &block::Hash) -> ExpandedDifficulty {
+    pub(super) fn from_hash(hash: &block::Hash) -> ExpandedDifficulty {
         U256::from_little_endian(&hash.0).into()
     }
 
@@ -271,6 +281,73 @@ impl ExpandedDifficulty {
         };
 
         limit.into()
+    }
+
+    /// Calculate the CompactDifficulty for an expanded difficulty.
+    ///
+    /// See `ToCompact()` in the Zcash Specification, and `GetCompact()`
+    /// in zcashd.
+    ///
+    /// Panics:
+    ///
+    /// If `self` is zero.
+    ///
+    /// `ExpandedDifficulty` values are generated in two ways:
+    ///   * conversion from `CompactDifficulty` values, which rejects zeroes, and
+    ///   * difficulty adjustment calculations, which impose a non-zero minimum
+    ///     `target_difficulty_limit`.
+    ///
+    /// Neither of these methods yield zero values.
+    pub fn to_compact(&self) -> CompactDifficulty {
+        // The zcashd implementation supports negative and zero compact values.
+        // These values are rejected by the protocol rules. Zebra is designed so
+        // that invalid states are not representable. Therefore, this function
+        // does not produce negative compact values, and panics on zero compact
+        // values. (The negative compact value code in zcashd is unused.)
+        assert!(self.0 > 0.into(), "Zero difficulty values are invalid");
+
+        // The constants for this floating-point representation.
+        // Alias the constants here, so the code is easier to read.
+        const UNSIGNED_MANTISSA_MASK: u32 = CompactDifficulty::UNSIGNED_MANTISSA_MASK;
+        const OFFSET: i32 = CompactDifficulty::OFFSET;
+
+        // Calculate the final size, accounting for the sign bit.
+        // This is the size *after* applying the sign bit adjustment in `ToCompact()`.
+        let size = self.0.bits() / 8 + 1;
+
+        // Make sure the mantissa is non-negative, by shifting down values that
+        // would otherwise overflow into the sign bit
+        let mantissa = if self.0 <= UNSIGNED_MANTISSA_MASK.into() {
+            // Value is small, shift up if needed
+            self.0 << (8 * (3 - size))
+        } else {
+            // Value is large, shift down
+            self.0 >> (8 * (size - 3))
+        };
+
+        // This assertion also makes sure that size fits in its 8 bit compact field
+        assert!(
+            size < (31 + OFFSET) as _,
+            format!(
+                "256^size (256^{}) must fit in a u256, after the sign bit adjustment and offset",
+                size
+            )
+        );
+        let size = u32::try_from(size).expect("a 0-6 bit value fits in a u32");
+
+        assert!(
+            mantissa <= UNSIGNED_MANTISSA_MASK.into(),
+            format!("mantissa {:x?} must fit in its compact field", mantissa)
+        );
+        let mantissa = u32::try_from(mantissa).expect("a 0-23 bit value fits in a u32");
+
+        if mantissa > 0 {
+            CompactDifficulty(mantissa + (size << 24))
+        } else {
+            // This check catches invalid mantissas. Overflows and underflows
+            // should also be unreachable, but they aren't caught here.
+            unreachable!("converted CompactDifficulty values must be valid")
+        }
     }
 }
 
@@ -328,27 +405,23 @@ impl PartialOrd<ExpandedDifficulty> for block::Hash {
     }
 }
 
-impl Add for Work {
-    type Output = Self;
+impl std::ops::Add for Work {
+    type Output = PartialCumulativeWork;
 
-    fn add(self, rhs: Work) -> Self {
-        let result = self
-            .0
-            .checked_add(rhs.0)
-            .expect("Work values do not overflow");
-        Work(result)
-    }
-}
-
-impl AddAssign for Work {
-    fn add_assign(&mut self, rhs: Work) {
-        *self = *self + rhs;
+    fn add(self, rhs: Work) -> PartialCumulativeWork {
+        PartialCumulativeWork::from(self) + rhs
     }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 /// Partial work used to track relative work in non-finalized chains
 pub struct PartialCumulativeWork(u128);
+
+impl From<Work> for PartialCumulativeWork {
+    fn from(work: Work) -> Self {
+        PartialCumulativeWork(work.0)
+    }
+}
 
 impl std::ops::Add<Work> for PartialCumulativeWork {
     type Output = PartialCumulativeWork;

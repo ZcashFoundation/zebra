@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 8e9b7658e31f20a01083e3b065f8ca0cdc98fedaf3058405e9e9fb59fd90b570 # shrinks to expanded_seed = block::Hash("0000000000000000000000000000000000000000000000000000000000000000")
