@@ -18,9 +18,8 @@ impl Arbitrary for CompactDifficulty {
                 // In the Zcash protocol, a CompactDifficulty is generated using the difficulty
                 // adjustment functions. Instead of using those functions, we make a random
                 // ExpandedDifficulty, then convert it to a CompactDifficulty.
-                ExpandedDifficulty::from_hash(&block::Hash(bytes))
-                    .to_compact()
-                    .into()
+                Some(ExpandedDifficulty::from_hash(&block::Hash(bytes))
+                    .to_compact())
             })
             .boxed()
     }
@@ -58,7 +57,7 @@ impl Arbitrary for Work {
                 if w == 0 {
                     None
                 } else {
-                    Work(w).into()
+                    Some(Work(w))
                 }
             })
             .boxed()
