@@ -35,17 +35,10 @@ const FANOUT: usize = 4;
 /// We also hedge requests, so we may retry up to twice this many times.
 const BLOCK_DOWNLOAD_RETRY_LIMIT: usize = 2;
 
-/// Controls how far ahead of the chain tip the syncer tries to download before
-/// waiting for queued verifications to complete.
-///
-/// Increasing this limit increases the buffer size, so it reduces the impact of
-/// missing a block on the critical path. The block size limit is 2MB, so in
-/// theory, this could represent multiple gigabytes of data, if we downloaded
-/// arbitrary blocks. However, because we randomly load balance outbound
-/// requests, and separate block download from obtaining block hashes, an
-/// adversary would have to control a significant fraction of our peers to lead
-/// us astray.
-const LOOKAHEAD_LIMIT: usize = zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP * 2;
+/// A lower bound on the user-specified lookahead limit, set to two
+/// checkpoint intervals so that we're sure that the lookahead limit
+/// always contains at least one complete checkpoint interval.
+const MIN_LOOKAHEAD_LIMIT: usize = zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP * 2;
 
 /// Controls how long we wait for a tips response to return.
 const TIPS_RESPONSE_TIMEOUT: Duration = Duration::from_secs(6);
@@ -63,7 +56,7 @@ const MAX_CHECKPOINT_DOWNLOAD_SECONDS: u64 = 300;
 /// Controls how long we wait for a block verify task to complete.
 ///
 /// This timeout makes sure that the syncer and verifiers do not deadlock.
-/// When the `LOOKAHEAD_LIMIT` is reached, the syncer waits for blocks to verify
+/// When the lookahead limit is reached, the syncer waits for blocks to verify
 /// (or fail). If the verifiers are also waiting for more blocks from the syncer,
 /// then without a timeout, Zebra would deadlock.
 const BLOCK_VERIFY_TIMEOUT: Duration = Duration::from_secs(MAX_CHECKPOINT_DOWNLOAD_SECONDS);
@@ -106,6 +99,7 @@ where
     state: ZS,
     prospective_tips: HashSet<CheckedTip>,
     genesis_hash: block::Hash,
+    lookahead_limit: usize,
     downloads: Pin<
         Box<
             Downloads<
@@ -173,6 +167,7 @@ where
             )),
             prospective_tips: HashSet::new(),
             genesis_hash: genesis_hash(config.network.network),
+            lookahead_limit: std::cmp::max(config.sync.lookahead_limit, MIN_LOOKAHEAD_LIMIT),
         }
     }
 
@@ -223,19 +218,19 @@ where
                 //
                 // Starting to wait is interesting, but logging each wait can be
                 // very verbose.
-                if self.downloads.in_flight() > LOOKAHEAD_LIMIT {
+                if self.downloads.in_flight() > self.lookahead_limit {
                     tracing::info!(
                         tips.len = self.prospective_tips.len(),
                         in_flight = self.downloads.in_flight(),
-                        lookahead_limit = LOOKAHEAD_LIMIT,
+                        lookahead_limit = self.lookahead_limit,
                         "waiting for pending blocks",
                     );
                 }
-                while self.downloads.in_flight() > LOOKAHEAD_LIMIT {
+                while self.downloads.in_flight() > self.lookahead_limit {
                     tracing::trace!(
                         tips.len = self.prospective_tips.len(),
                         in_flight = self.downloads.in_flight(),
-                        lookahead_limit = LOOKAHEAD_LIMIT,
+                        lookahead_limit = self.lookahead_limit,
                         "waiting for pending blocks",
                     );
 
@@ -255,7 +250,7 @@ where
                 tracing::info!(
                     tips.len = self.prospective_tips.len(),
                     in_flight = self.downloads.in_flight(),
-                    lookahead_limit = LOOKAHEAD_LIMIT,
+                    lookahead_limit = self.lookahead_limit,
                     "extending tips",
                 );
 

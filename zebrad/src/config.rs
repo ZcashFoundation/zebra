@@ -137,12 +137,28 @@ pub struct SyncSection {
     /// making too many concurrent block requests can overwhelm the connection.
     /// Lowering this value may help on slow or unreliable networks.
     pub max_concurrent_block_requests: usize,
+
+    /// Controls how far ahead of the chain tip the syncer tries to
+    /// download before waiting for queued verifications to complete.
+    ///
+    /// Increasing this limit increases the buffer size, so it reduces
+    /// the impact of an individual block request failing.  The block
+    /// size limit is 2MB, so in theory, this could represent multiple
+    /// gigabytes of data, if we downloaded arbitrary blocks. However,
+    /// because we randomly load balance outbound requests, and separate
+    /// block download from obtaining block hashes, an adversary would
+    /// have to control a significant fraction of our peers to lead us
+    /// astray.
+    ///
+    /// This value is clamped to an implementation-defined lower bound.
+    pub lookahead_limit: usize,
 }
 
 impl Default for SyncSection {
     fn default() -> Self {
         Self {
             max_concurrent_block_requests: 1_000,
+            lookahead_limit: 2_000,
         }
     }
 }
