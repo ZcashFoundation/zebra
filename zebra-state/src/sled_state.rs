@@ -316,21 +316,18 @@ impl FinalizedState {
 
     /// Returns the tip height and hash if there is one.
     pub fn tip(&self) -> Option<(block::Height, block::Hash)> {
-        if let Some((height_bytes, hash_bytes)) = self
-            .hash_by_height
+        self.hash_by_height
             .iter()
             .rev()
             .next()
             .transpose()
             .expect("expected that sled errors would not occur")
-        {
-            let height = block::Height::from_ivec(height_bytes);
-            let hash = block::Hash::from_ivec(hash_bytes);
+            .map(|(height_bytes, hash_bytes)| {
+                let height = block::Height::from_ivec(height_bytes);
+                let hash = block::Hash::from_ivec(hash_bytes);
 
-            Some((height, hash))
-        } else {
-            None
-        }
+                (height, hash)
+            })
     }
 
     /// Returns the height of the given block if it exists.
