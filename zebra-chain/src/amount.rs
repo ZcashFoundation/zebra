@@ -609,6 +609,7 @@ mod test {
         Ok(())
     }
 
+    #[allow(clippy::eq_op)]
     fn ordering<C1, C2>() -> Result<()>
     where
         C1: Constraint + Debug,
