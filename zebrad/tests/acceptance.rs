@@ -696,8 +696,8 @@ fn sync_past_sapling(network: Network) -> Result<()> {
 // traditional CI, and they depend on persistent state that cannot be made
 // available in github actions or google cloud build. Instead we run these tests
 // directly in a vm we spin up on google compute engine, where we can mount
-// drives populated by the first two tests and then use those to more quickly
-// run the second two tests.
+// drives populated by the first two tests, snapshot those drives, and then use
+// those to more quickly run the second two tests.
 
 // Create a cached copy of the mainnet database up to the sapling activation
 // height.
