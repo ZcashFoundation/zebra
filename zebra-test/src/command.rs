@@ -4,14 +4,12 @@ use color_eyre::{
 };
 use tracing::instrument;
 
+#[cfg(unix)]
+use std::os::unix::process::ExitStatusExt;
 use std::{convert::Infallible as NoDir, io::BufRead};
 use std::{
     fmt::Write as _,
-    io::{BufReader, Lines},
-};
-#[cfg(unix)]
-use std::{io::Read, os::unix::process::ExitStatusExt};
-use std::{
+    io::{BufReader, Lines, Read},
     path::Path,
     process::{Child, ChildStdout, Command, ExitStatus, Output, Stdio},
     time::{Duration, Instant},
