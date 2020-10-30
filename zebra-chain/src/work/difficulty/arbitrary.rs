@@ -18,8 +18,7 @@ impl Arbitrary for CompactDifficulty {
                 // In the Zcash protocol, a CompactDifficulty is generated using the difficulty
                 // adjustment functions. Instead of using those functions, we make a random
                 // ExpandedDifficulty, then convert it to a CompactDifficulty.
-                Some(ExpandedDifficulty::from_hash(&block::Hash(bytes))
-                    .to_compact())
+                Some(ExpandedDifficulty::from_hash(&block::Hash(bytes)).to_compact())
             })
             .boxed()
     }
