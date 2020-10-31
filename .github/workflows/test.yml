@@ -4,8 +4,8 @@ on:
   push:
     branches:
       - main
-      - test
-      - cloudbuild
+      #- test
+      #- cloudbuild
 
 env:
   PROJECT_ID: zealous-zebra
