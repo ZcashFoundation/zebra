@@ -62,6 +62,7 @@ jobs:
           --container-mount-disk mount-path="/zebrad-cache",name=zebrad-cache-$SHORT_SHA \
           --create-disk name=zebrad-cache-$SHORT_SHA,size=100GB,type=pd-balanced,auto-delete=no \
           --machine-type n2-standard-4 \
+          --boot-disk-size 20GB \
           --service-account cos-vm@zealous-zebra.iam.gserviceaccount.com \
           --scopes cloud-platform \
           --tags zebrad \
@@ -70,4 +71,7 @@ jobs:
     - name: Run tests
       run: |
         gcloud compute ssh "zebra-tests-$BRANCH_NAME-$SHORT_SHA" --zone us-central1-a \
-          --command "docker run gcr.io/$PROJECT_ID/$REPOSITORY/tests/$BRANCH_NAME:$SHORT_SHA"
+          --command "\
+          docker-credential-gcr configure-docker; \
+          docker run gcr.io/$PROJECT_ID/$REPOSITORY/tests/$BRANCH_NAME:$SHORT_SHA; \
+          "
