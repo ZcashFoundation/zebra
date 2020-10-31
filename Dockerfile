@@ -20,11 +20,14 @@ RUN rustc -V; cargo -V; rustup -V; cargo test --all && cargo build --release
 
 FROM debian:buster-slim AS zebra-tests
 
-COPY --from=builder /zebra/target/debug/deps/*-*[^.*] /
+RUN mkdir /zebra
+WORKDIR /zebra
+COPY --from=builder /zebra/target/debug/zebrad /zebra/target/debug/zebrad
+COPY --from=builder /zebra/target/debug/deps/*-*[^.*] /zebra/target/debug/deps/
 
 EXPOSE 8233 18233
 
-CMD $(find / -type f -perm 755 ! -name '*.dylib' | grep acceptance) -Z unstable-options --include-ignored
+CMD $(find /zebra/target/debug/deps -type f -perm 755 ! -name '*.dylib' | grep acceptance) -Z unstable-options --include-ignored
 
 
 FROM debian:buster-slim AS zebrad-release
