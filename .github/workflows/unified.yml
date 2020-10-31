@@ -45,7 +45,7 @@ jobs:
           --substitutions SHORT_SHA="$SHORT_SHA",BRANCH_NAME="$BRANCH_NAME"
 
   test:
-    name: Run stateful integration tests
+    name: Run integration tests
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 30
