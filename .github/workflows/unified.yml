@@ -1,0 +1,182 @@
+name: Unified Google Cloud
+
+on:
+  push:
+    branches:
+      - main
+      - test
+      - cloudbuild
+
+env:
+  PROJECT_ID: zealous-zebra
+
+jobs:
+
+  build:
+    name: Build images
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Set project and image names
+      run: |
+        BRANCH_NAME=$(expr $GITHUB_REF : '.*/\(.*\)') && \
+        BRANCH_NAME=${BRANCH_NAME,,} && \
+        REPOSITORY=${GITHUB_REPOSITORY,,} && \
+        echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV && \
+        echo "SHORT_SHA=$(git rev-parse --short=7 $GITHUB_SHA)" >> $GITHUB_ENV && \
+        echo "REPOSITORY=$REPOSITORY" >> $GITHUB_ENV
+
+    # Setup gcloud CLI
+    - name: Set up gcloud SDK environment
+      uses: GoogleCloudPlatform/github-actions/setup-gcloud@master
+      with:
+        version: '295.0.0'
+        project_id: ${{ env.PROJECT_ID }}
+        service_account_key: ${{ secrets.GCLOUD_AUTH }}
+
+    # Build and push image to Google Container Registry
+    - name: Build
+      # Tagging w/ the commit SHA blocks the :latest tag on GCR
+      run: |
+        gcloud builds submit \
+          --config cloudbuild-unifed.yaml \
+          --substitutions SHORT_SHA="$SHORT_SHA",BRANCH_NAME="$BRANCH_NAME"
+
+  test:
+    name: Run stateful integration tests
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Set project and image names
+        run: |
+          BRANCH_NAME=$(expr $GITHUB_REF : '.*/\(.*\)') && \
+          BRANCH_NAME=${BRANCH_NAME,,} && \
+          REPOSITORY=${GITHUB_REPOSITORY,,} && \
+          echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV && \
+          echo "SHORT_SHA=$(git rev-parse --short=7 $GITHUB_SHA)" >> $GITHUB_ENV && \
+          echo "REPOSITORY=$REPOSITORY" >> $GITHUB_ENV
+
+      # Setup gcloud CLI
+      - name: Set up gcloud SDK environment
+        uses: GoogleCloudPlatform/github-actions/setup-gcloud@master
+        with:
+          version: '295.0.0'
+          project_id: ${{ env.PROJECT_ID }}
+          service_account_key: ${{ secrets.GCLOUD_AUTH }}
+
+      # Run once: create firewall rule to allow incoming traffic to the nodes
+      # - name: Create Zcash incoming traffic firewall rule
+      #   run: |
+      #     gcloud compute firewall-rules create "allow-zcash" \
+      #     --target-tags zebrad \
+      #     --allow tcp:8233,tcp:18233 \
+      #     --source-ranges 0.0.0.0/0 \
+      #     --description="Allow incoming Zcash traffic from anywhere" \
+
+      # Creates Compute Engine virtual machine instance running test container image
+      - name: Create instance with test container image
+        run: |
+          gcloud compute instances create-with-container "zebra-tests-$BRANCH_NAME-$SHORT_SHA" \
+          --container-image "gcr.io/$PROJECT_ID/$REPOSITORY/tests/$BRANCH_NAME:$SHORT_SHA" \
+          --container-mount-disk mount-path="/zebrad-cache",name=zebrad-cache-$SHORT_SHA \
+          --create-disk name=zebrad-cache-$SHORT_SHA,size=100GB,type=pd-balanced,auto-delete=no \
+          --machine-type n2-standard-4 \
+          --boot-disk-size 20GB \
+          --service-account cos-vm@zealous-zebra.iam.gserviceaccount.com \
+          --scopes cloud-platform \
+          --tags zebrad \
+          --zone us-central1-a \
+
+      - name: Run tests
+        run: |
+          gcloud compute ssh "zebra-tests-$BRANCH_NAME-$SHORT_SHA" --zone us-central1-a \
+          --command "docker-credential-gcr configure-docker; \
+          docker run gcr.io/$PROJECT_ID/$REPOSITORY/tests/$BRANCH_NAME:$SHORT_SHA"
+
+  deploy:
+    name: Deploy mainnet nodes
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Set project and image names
+        run: |
+          BRANCH_NAME=$(expr $GITHUB_REF : '.*/\(.*\)') && \
+          BRANCH_NAME=${BRANCH_NAME,,} && \
+          REPOSITORY=${GITHUB_REPOSITORY,,} && \
+          echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV && \
+          echo "SHORT_SHA=$(git rev-parse --short=7 $GITHUB_SHA)" >> $GITHUB_ENV && \
+          echo "REPOSITORY=$REPOSITORY" >> $GITHUB_ENV
+
+      # Setup gcloud CLI
+      - name: Set up gcloud SDK environment
+        uses: GoogleCloudPlatform/github-actions/setup-gcloud@master
+        with:
+          version: '295.0.0'
+          project_id: ${{ env.PROJECT_ID }}
+          service_account_key: ${{ secrets.GCLOUD_AUTH }}
+
+      # Run once: create firewall rule to allow incoming traffic to the nodes
+      # - name: Create Zcash incoming traffic firewall rule
+      #   run: |
+      #     gcloud compute firewall-rules create "allow-zcash" \
+      #     --target-tags zebrad \
+      #     --allow tcp:8233,tcp:18233 \
+      #     --source-ranges 0.0.0.0/0 \
+      #     --description="Allow incoming Zcash traffic from anywhere" \
+
+      # Create instance template from container image
+      - name: Create instance template
+        run: |
+          gcloud compute instance-templates create-with-container "zebrad-$BRANCH_NAME-$SHORT_SHA" \
+          --container-image "gcr.io/$PROJECT_ID/$REPOSITORY/$BRANCH_NAME:$SHORT_SHA" \
+          --machine-type n2-standard-4 \
+          --create-disk name=zebrad-cache-$SHORT_SHA,size=100GB,type=pd-balanced,auto-delete=no \
+          --container-mount-disk mount-path="/zebrad-cache",name=zebrad-cache-$SHORT_SHA \
+          --service-account cos-vm@zealous-zebra.iam.gserviceaccount.com \
+          --scopes cloud-platform \
+          --tags zebrad \
+
+      # Run once: create firewall rule to allow healthchecks
+      # - name: Create healthcheck firewall rule
+      #   run: |
+      #     gcloud compute firewall-rules create "allow-tracing-health-check" \
+      #     --target-tags zebrad \
+      #     --allow tcp:3000 \
+      #     --source-ranges 130.211.0.0/22,35.191.0.0/16 \
+      #     --description="Allow HTTP requests to our tracing endpoint from Google's probes" \
+
+      # Check if our destination instance group exists already
+      - name: Check if instance group exists
+        id: does-group-exist
+        continue-on-error: true
+        run: |
+          gcloud compute instance-groups list | grep "zebrad-$BRANCH_NAME"
+
+      # Deploy new managed instance group using the new instance template
+      - name: Create managed instance group
+        if: steps.does-group-exist.outcome == 'failure'
+        run: |
+          gcloud compute instance-groups managed create \
+          "zebrad-$BRANCH_NAME" \
+          --template "zebrad-$BRANCH_NAME-$SHORT_SHA" \
+          --health-check zebrad-tracing-filter \
+          --initial-delay 30 \
+          --region us-central1 \
+          --size 2
+
+      # Rolls out update to existing group using the new instance template
+      - name: Update managed instance group
+        if: steps.does-group-exist.outcome == 'success'
+        run: |
+          gcloud compute instance-groups managed rolling-action start-update \
+          "zebrad-$BRANCH_NAME" \
+          --version template="zebrad-$BRANCH_NAME-$SHORT_SHA" \
+          --region us-central1 \
