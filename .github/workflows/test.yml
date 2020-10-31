@@ -59,10 +59,6 @@ jobs:
       run: |
         gcloud compute instances create-with-container "zebra-tests-$BRANCH_NAME-$SHORT_SHA" \
           --container-image "gcr.io/$PROJECT_ID/$REPOSITORY/tests/$BRANCH_NAME:$SHORT_SHA" \
-          # --container-command "/acceptance" \
-          # --container-arg="-Z" \
-          # --container-arg="unstable-options" \
-          # --container-arg="--include-ignored" \
           --container-mount-disk mount-path="/zebrad-cache",name=zebrad-cache-$SHORT_SHA \
           --create-disk name=zebrad-cache-$SHORT_SHA,size=100GB,type=pd-balanced,auto-delete=no \
           --machine-type n2-standard-4 \
