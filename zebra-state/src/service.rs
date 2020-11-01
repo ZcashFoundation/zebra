@@ -15,10 +15,14 @@ use tracing::instrument;
 use zebra_chain::{
     block::{self, Block},
     parameters::Network,
+    transaction,
+    transaction::Transaction,
+    transparent,
 };
 
 use crate::{
-    BoxError, CommitBlockError, Config, FinalizedState, Request, Response, ValidateContextError,
+    request::HashOrHeight, BoxError, CommitBlockError, Config, FinalizedState, Request, Response,
+    ValidateContextError,
 };
 
 mod memory_state;
@@ -151,7 +155,7 @@ impl StateService {
             .coinbase_height()
             .expect("coinbase heights should be valid");
 
-        self.mem.any_chain_contains(&hash) || self.sled.get_hash(height) == Some(hash)
+        self.mem.any_chain_contains(&hash) || self.sled.hash(height) == Some(hash)
     }
 
     /// Attempt to validate and commit all queued blocks whose parents have
@@ -192,6 +196,61 @@ impl StateService {
 
         // TODO: contextual validation design and implementation
         Ok(())
+    }
+
+    /// Create a block locator for the current best chain.
+    fn block_locator(&self) -> Option<Vec<block::Hash>> {
+        let tip_height = self.tip()?.0;
+
+        let heights = crate::util::block_locator_heights(tip_height);
+        let mut hashes = Vec::with_capacity(heights.len());
+
+        for height in heights {
+            if let Some(hash) = self.hash(height) {
+                hashes.push(hash);
+            }
+        }
+
+        Some(hashes)
+    }
+
+    /// Return the tip of the current best chain.
+    pub fn tip(&self) -> Option<(block::Height, block::Hash)> {
+        self.mem.tip().or_else(|| self.sled.tip())
+    }
+
+    /// Return the depth of block `hash` in the current best chain.
+    pub fn depth(&self, hash: block::Hash) -> Option<u32> {
+        let tip = self.tip()?.0;
+        let height = self.mem.height(hash).or_else(|| self.sled.height(hash))?;
+
+        Some(tip.0 - height.0)
+    }
+
+    /// Return the block identified by either its `height` or `hash` if it exists
+    /// in the current best chain.
+    pub fn block(&self, hash_or_height: HashOrHeight) -> Option<Arc<Block>> {
+        self.mem
+            .block(hash_or_height)
+            .or_else(|| self.sled.block(hash_or_height))
+    }
+
+    /// Return the transaction identified by `hash` if it exists in the current
+    /// best chain.
+    pub fn transaction(&self, hash: transaction::Hash) -> Option<Arc<Transaction>> {
+        self.mem
+            .transaction(hash)
+            .or_else(|| self.sled.transaction(hash))
+    }
+
+    /// Return the hash for the block at `height` in the current best chain.
+    pub fn hash(&self, height: block::Height) -> Option<block::Hash> {
+        self.mem.hash(height).or_else(|| self.sled.hash(height))
+    }
+
+    /// Return the utxo pointed to by `outpoint` if it exists in any chain.
+    pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Output> {
+        self.mem.utxo(outpoint).or_else(|| self.sled.utxo(outpoint))
     }
 }
 
@@ -244,33 +303,30 @@ impl Service<Request> for StateService {
                 .boxed()
             }
             Request::Depth(hash) => {
-                // todo: handle in memory and sled
-                let rsp = self.sled.depth(hash).map(Response::Depth);
+                let rsp = Ok(self.depth(hash)).map(Response::Depth);
                 async move { rsp }.boxed()
             }
             Request::Tip => {
-                // todo: handle in memory and sled
-                let rsp = self.sled.tip().map(Response::Tip);
+                let rsp = Ok(self.tip()).map(Response::Tip);
                 async move { rsp }.boxed()
             }
             Request::BlockLocator => {
-                // todo: handle in memory and sled
-                let rsp = self.sled.block_locator().map(Response::BlockLocator);
+                let rsp = Ok(self.block_locator().unwrap_or_default()).map(Response::BlockLocator);
                 async move { rsp }.boxed()
             }
-            Request::Transaction(_) => unimplemented!(),
+            Request::Transaction(hash) => {
+                let rsp = Ok(self.transaction(hash)).map(Response::Transaction);
+                async move { rsp }.boxed()
+            }
             Request::Block(hash_or_height) => {
-                //todo: handle in memory and sled
-                let rsp = self.sled.block(hash_or_height).map(Response::Block);
+                let rsp = Ok(self.block(hash_or_height)).map(Response::Block);
                 async move { rsp }.boxed()
             }
             Request::AwaitUtxo(outpoint) => {
                 let fut = self.pending_utxos.queue(outpoint);
 
-                if let Some(finalized_utxo) = self.sled.utxo(&outpoint).unwrap() {
-                    self.pending_utxos.respond(outpoint, finalized_utxo);
-                } else if let Some(non_finalized_utxo) = self.mem.utxo(&outpoint) {
-                    self.pending_utxos.respond(outpoint, non_finalized_utxo);
+                if let Some(utxo) = self.utxo(&outpoint) {
+                    self.pending_utxos.respond(outpoint, utxo);
                 }
 
                 fut.boxed()

@@ -13,12 +13,26 @@ use crate::Response;
 ///
 /// This enum implements `From` for [`block::Hash`] and [`block::Height`],
 /// so it can be created using `hash.into()` or `height.into()`.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum HashOrHeight {
     /// A block identified by hash.
     Hash(block::Hash),
     /// A block identified by height.
     Height(block::Height),
+}
+
+impl HashOrHeight {
+    /// Unwrap the inner height or attempt to retrieve the height for a given
+    /// hash if one exists.
+    pub fn height_or_else<F>(self, op: F) -> Option<block::Height>
+    where
+        F: FnOnce(block::Hash) -> Option<block::Height>,
+    {
+        match self {
+            HashOrHeight::Hash(hash) => op(hash),
+            HashOrHeight::Height(height) => Some(height),
+        }
+    }
 }
 
 impl From<block::Hash> for HashOrHeight {

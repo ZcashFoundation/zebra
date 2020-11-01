@@ -9,8 +9,6 @@ use zebra_chain::{
     sprout, transaction, transparent,
 };
 
-use crate::BoxError;
-
 pub struct TransactionLocation {
     pub height: block::Height,
     pub index: u32,
@@ -31,10 +29,16 @@ pub trait IntoSled {
     fn into_ivec(self) -> sled::IVec;
 }
 
-// Helper type for retrieving types from sled with the correct format
+/// Helper type for retrieving types from sled with the correct format.
+///
+/// The ivec should be correctly encoded by IntoSled.
 pub trait FromSled: Sized {
-    // function to convert the sled bytes back into the deserialized type
-    fn from_ivec(bytes: sled::IVec) -> Result<Self, BoxError>;
+    /// Function to convert the sled bytes back into the deserialized type.
+    ///
+    /// # Panics
+    ///
+    /// - if the input data doesn't deserialize correctly
+    fn from_ivec(bytes: sled::IVec) -> Self;
 }
 
 impl IntoSled for &Block {
@@ -51,9 +55,9 @@ impl IntoSled for &Block {
 }
 
 impl FromSled for Arc<Block> {
-    fn from_ivec(bytes: sled::IVec) -> Result<Self, BoxError> {
-        let block = Arc::<Block>::zcash_deserialize(bytes.as_ref())?;
-        Ok(block)
+    fn from_ivec(bytes: sled::IVec) -> Self {
+        Arc::<Block>::zcash_deserialize(bytes.as_ref())
+            .expect("deserialization format should match the serialization format used by IntoSled")
     }
 }
 
@@ -78,7 +82,7 @@ impl IntoSled for TransactionLocation {
 }
 
 impl FromSled for TransactionLocation {
-    fn from_ivec(sled_bytes: sled::IVec) -> Result<Self, BoxError> {
+    fn from_ivec(sled_bytes: sled::IVec) -> Self {
         let height = {
             let mut bytes = [0; 4];
             bytes.copy_from_slice(&sled_bytes[0..4]);
@@ -92,7 +96,7 @@ impl FromSled for TransactionLocation {
             u32::from_be_bytes(bytes)
         };
 
-        Ok(TransactionLocation { height, index })
+        TransactionLocation { height, index }
     }
 }
 
@@ -156,9 +160,9 @@ impl IntoSled for () {
 }
 
 impl FromSled for block::Hash {
-    fn from_ivec(bytes: sled::IVec) -> Result<Self, BoxError> {
+    fn from_ivec(bytes: sled::IVec) -> Self {
         let array = bytes.as_ref().try_into().unwrap();
-        Ok(Self(array))
+        Self(array)
     }
 }
 
@@ -174,9 +178,9 @@ impl IntoSled for block::Height {
 }
 
 impl FromSled for block::Height {
-    fn from_ivec(bytes: sled::IVec) -> Result<Self, BoxError> {
+    fn from_ivec(bytes: sled::IVec) -> Self {
         let array = bytes.as_ref().try_into().unwrap();
-        Ok(block::Height(u32::from_be_bytes(array)))
+        block::Height(u32::from_be_bytes(array))
     }
 }
 
@@ -194,8 +198,9 @@ impl IntoSled for &transparent::Output {
 }
 
 impl FromSled for transparent::Output {
-    fn from_ivec(bytes: sled::IVec) -> Result<Self, BoxError> {
-        Self::zcash_deserialize(&*bytes).map_err(Into::into)
+    fn from_ivec(bytes: sled::IVec) -> Self {
+        Self::zcash_deserialize(&*bytes)
+            .expect("deserialization format should match the serialization format used by IntoSled")
     }
 }
 
@@ -248,24 +253,24 @@ impl SledSerialize for sled::transaction::TransactionalTree {
 pub trait SledDeserialize {
     /// Serialize the given key and use that to get and deserialize the
     /// corresponding value from a sled tree, if it is present.
-    fn zs_get<K, V>(&self, key: &K) -> Result<Option<V>, BoxError>
+    fn zs_get<K, V>(&self, key: &K) -> Option<V>
     where
         K: IntoSled,
         V: FromSled;
 }
 
 impl SledDeserialize for sled::Tree {
-    fn zs_get<K, V>(&self, key: &K) -> Result<Option<V>, BoxError>
+    fn zs_get<K, V>(&self, key: &K) -> Option<V>
     where
         K: IntoSled,
         V: FromSled,
     {
         let key_bytes = key.as_bytes();
 
-        let value_bytes = self.get(key_bytes)?;
+        let value_bytes = self
+            .get(key_bytes)
+            .expect("expected that sled errors would not occur");
 
-        let value = value_bytes.map(V::from_ivec).transpose()?;
-
-        Ok(value)
+        value_bytes.map(V::from_ivec)
     }
 }
