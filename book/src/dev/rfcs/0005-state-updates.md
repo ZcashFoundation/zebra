@@ -34,15 +34,18 @@ state service.
 
 * **block chain**: A sequence of valid blocks linked by inclusion of the
   previous block hash in the subsequent block. Chains are rooted at the
-  *genesis* block and extend to a *tip*.
+  genesis block and extend to a **tip**.
 
 * **chain state**: The state of the ledger after application of a particular
   sequence of blocks (state transitions).
 
-* **cumulative difficulty**: The cumulative proof-of-work from genesis to the
-  chain tip.
+* **block work**: The approximate amount of work required for a miner to generate
+  a block. Numerically higher work values are harder to satisfy.
 
-* **best chain**: The chain with the greatest cumulative difficulty. This chain
+* **cumulative work**: The sum of the **block work** of all blocks in a chain, from
+  genesis to the chain tip.
+
+* **best chain**: The chain with the greatest **cumulative work**. This chain
   represents the consensus state of the Zcash network and transactions.
 
 * **side chain**: A chain which is not contained in the best chain.
