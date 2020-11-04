@@ -40,7 +40,9 @@ state service.
   sequence of blocks (state transitions).
 
 * **block work**: The approximate amount of work required for a miner to generate
-  a block. Numerically higher work values are harder to satisfy.
+  a block hash that passes the difficulty filter. The number of block header
+  attempts and the mining time are proportional to the work value. Numerically
+  higher work values represent longer processing times.
 
 * **cumulative work**: The sum of the **block work** of all blocks in a chain, from
   genesis to the chain tip.
