@@ -78,3 +78,28 @@ State:
   chain is usually 100 blocks (the reorg limit) above the finalized tip. But it can
   be lower during the initial sync, and after a chain reorganization, if the new
   best chain is at a lower height.
+
+# Guide-level explanation
+[guide-level-explanation]: #guide-level-explanation
+
+The difficulty threshold for the next block is calculated using the difficulty
+thresholds and times of recent blocks. Zcash uses the most recent 28 blocks in
+the **relevant chain** in its difficulty adjustment calculations.
+
+## The relevant chain
+[relevant-chain]: #relevant-chain
+
+The relevant chain can be retrieved from the state service [RFC5] as follows:
+* if the previous block is the finalized tip:
+  * get recent blocks from the finalized state
+* if the previous block is in the non-finalized state:
+  * get recent blocks from the relevant chain, then
+  * get recent blocks from the finalized state, if required
+
+The relevant chain can start at any non-finalized block. If the next block is
+valid, it becomes the new tip of the relevant chain.
+
+In particular, if the previous block is not a chain tip, the relevant chain
+becomes a new chain fork.
+
+[RFC5]: ./0005-state-updates.md
