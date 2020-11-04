@@ -617,7 +617,7 @@ Zcash structures are encoded using `ZcashSerialize`/`ZcashDeserialize`.
 - The `hash_by_height` and `height_by_hash` trees provide a bijection between
   block heights and block hashes.  (Since the Sled state only stores finalized
   state, they are actually a bijection).
-  
+
 - The `block_by_height` tree provides a bijection between block heights and block
   data. There is no corresponding `height_by_block` tree: instead, hash the block,
   and use `height_by_hash`. (Since the Sled state only stores finalized state,
@@ -668,7 +668,7 @@ check that `block`'s parent hash is `null` (all zeroes) and its height is `0`.
 
     (Due to a [bug in zcashd](https://github.com/ZcashFoundation/zebra/issues/559),
     genesis block anchors and transactions are ignored during validation.)
-    
+
 4.  Update the `sprout_anchors` and `sapling_anchors` trees with the Sprout and
     Sapling anchors.
 
