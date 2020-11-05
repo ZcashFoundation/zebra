@@ -245,7 +245,7 @@ impl SledSerialize for sled::transaction::TransactionalTree {
         let value_bytes = value.into_ivec();
         let previous = self.insert(key_bytes, value_bytes)?;
 
-        assert!(previous.is_none(), format!("state insertion error: duplicate key {:?} when inserting value {:?}", key, value));
+        assert!(previous.is_none());
 
         Ok(())
     }
