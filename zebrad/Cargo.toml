@@ -31,7 +31,7 @@ thiserror = "1"
 tracing = "0.1"
 tracing-futures = "0.2"
 tracing-flame = "0.1.0"
-tracing-subscriber = { version = "0.2.14", features = ["tracing-log"] }
+tracing-subscriber = { version = "0.2.15", features = ["tracing-log"] }
 tracing-error = "0.1.2"
 metrics-runtime = "0.13"
 metrics = "0.12"
