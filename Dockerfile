@@ -27,8 +27,6 @@ COPY --from=builder /zebra/target/debug/deps/*-*[^.*] /zebra/target/debug/deps/
 
 EXPOSE 8233 18233
 
-CMD $(find /zebra/target/debug/deps -type f -perm 755 ! -name '*.dylib' | grep acceptance) -Z unstable-options --include-ignored
-
 
 FROM debian:buster-slim AS zebrad-release
 
