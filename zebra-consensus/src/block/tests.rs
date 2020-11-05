@@ -234,7 +234,8 @@ fn difficulty_validation_failure() -> Result<(), Report> {
     // Validate the block
     let result = check::difficulty_is_valid(&block.header, Network::Mainnet, &height, &bad_hash)
         .unwrap_err();
-    let expected = BlockError::DifficultyFilter(height, bad_hash, difficulty_threshold);
+    let expected =
+        BlockError::DifficultyFilter(height, bad_hash, difficulty_threshold, Network::Mainnet);
     assert_eq!(expected, result);
 
     Ok(())

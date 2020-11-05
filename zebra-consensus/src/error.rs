@@ -108,10 +108,13 @@ pub enum BlockError {
         zebra_chain::work::difficulty::ExpandedDifficulty,
     ),
 
-    #[error("block {0:?} has a hash {1:?} that is easier than the difficulty threshold {2:?}")]
+    #[error(
+        "block {0:?} on {3:?} has a hash {1:?} that is easier than its difficulty threshold {2:?}"
+    )]
     DifficultyFilter(
         zebra_chain::block::Height,
         zebra_chain::block::Hash,
         zebra_chain::work::difficulty::ExpandedDifficulty,
+        zebra_chain::parameters::Network,
     ),
 }
