@@ -61,11 +61,11 @@ Difficulty:
 * **mean target difficulty**: The arithmetic mean of the difficulty thresholds
   of the blocks in the averaging window.
 
-**median timespan**: The average number of seconds taken to generate the blocks
+* **median timespan**: The average number of seconds taken to generate the blocks
   in the averaging window. Calculated using the difference of median block spans
   in and after the averaging window, then damped and bounded.
 
-**target timespan**: The target spacing for an averaging window's worth of
+* **target timespan**: The target spacing for an averaging window's worth of
   blocks.
 
 Consensus:
