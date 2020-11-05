@@ -18,7 +18,7 @@ COPY . .
 RUN rustc -V; cargo -V; rustup -V; cargo test --all && cargo build --release
 
 
-FROM debian:buster-slim AS zebra-tests
+FROM debian:buster AS zebra-tests
 
 RUN mkdir /zebra
 WORKDIR /zebra
