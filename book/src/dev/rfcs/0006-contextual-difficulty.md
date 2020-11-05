@@ -120,7 +120,13 @@ TODO:
   - check how zcashd implements signed median time differences
   - open a ticket to update the Zcash spec
 
-## The relevant chain
+## State service interface changes
+[state-service-interface]: #state-service-interface
+
+Contextual validation accesses recent blocks. So we modify the the internal state
+service interface to provide an abstraction for accessing recent blocks.
+
+### The relevant chain
 [relevant-chain]: #relevant-chain
 
 The relevant chain can be retrieved from the state service [RFC5] as follows:
@@ -138,7 +144,28 @@ becomes a new chain fork.
 
 [RFC5]: ./0005-state-updates.md
 
-## Mean target difficulty
+## Contextual validation design
+[contextual-validation-design]: #contextual-validation-design
+
+Contextual validation is performed synchronously by the state service, as soon
+as the state has:
+* received the semantically valid next block (via `CommitBlock`), and
+* committed the previous block.
+
+There are two different difficulty contextual validation checks:
+* the difficulty threshold in the block matches the adjusted difficulty from
+  previous blocks, and
+* the block passes the difficulty filter.
+
+These checks are implemented as follows:
+
+### Difficulty adjustment
+[difficulty-adjustment]: #difficulty-adjustment
+
+The block difficulty threshold is adjusted by scaling the mean target difficulty
+by the median timespan.
+
+#### Mean target difficulty
 [mean-target-difficulty]: #mean-target-difficulty
 
 The mean target difficulty is the arithmetic mean of the difficulty
@@ -152,7 +179,7 @@ TODO:
     (as well as after the division)
   - open a ticket to update the Zcash spec
 
-## Median timespan
+#### Median timespan
 [median-timespan]: #median-timespan
 
 The average number of seconds taken to generate the 17 blocks in the averaging
@@ -172,7 +199,7 @@ TODO: open a Zcash spec clarification ticket
 The median timespan is damped by the `PoWDampingFactor`, and bounded by
 `PoWMaxAdjustDown` and `PoWMaxAdjustUp`.
 
-## Block difficulty threshold
+#### Block difficulty threshold
 [block-difficulty-threshold]: #block-difficulty-threshold
 
 The block difficulty threshold for the next block is calculated by scaling the
@@ -182,21 +209,31 @@ timespan.
 The block difficulty is limited by the `PoWLimit`, a per-network easiest block
 difficulty.
 
-## Test network minimum difficulty blocks
+### Difficulty filter
+[difficulty-filter]: #difficulty-filter
+
+The difficulty filter consists of two alternative checks:
+* the hash difficulty is less than or equal to the difficulty threshold
+  (lower values are harder to generate), or
+* the block is a testnet minimum difficulty block.
+
+The default difficulty filter is a context-free check. The testnet minimum
+difficulty filter uses the time from the previous block.
+
+#### Test network minimum difficulty blocks
 [test-net-min-difficulty]: #test-net-min-difficulty
 
-Starting from testnet block 299188, the difficulty filter on testnet is modified
-as follows:
-
-A block passes the difficulty filter if:
-* the hash difficulty is less than or equal to the difficulty threshold, or
+Blocks pass the testnet minimum difficulty filter if:
+* the block is a testnet block,
+* the block's height is 299188 or greater,
 * the time gap from the previous block is at least 6 times the target spacing,
-  and the hash difficulty is less than or equal to the testnet `PoWLimit`
-  [ZIP-208].
+  and
+* the block hash is less than or equal to the testnet `PoWLimit` [ZIP-208].
 
-The value of the difficulty threshold in the block header is used to calculate
-the difficulty adjustments for subsequent blocks. These calculations remain the
-same, even if the relevant chain contains minimum-difficulty blocks.
+The minimum difficulty filter does not change how subsequent block difficulties are
+calculated. The value of the difficulty threshold in the block header is used to
+calculate the difficulty adjustments for subsequent blocks, even if that value was
+ignored by the minimum difficulty filter.
 
 [ZIP-208]: https://zips.z.cash/zip-0208#minimum-difficulty-blocks-on-the-test-network
 
