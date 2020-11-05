@@ -23,8 +23,8 @@ FROM debian:buster-slim AS zebra-tests
 RUN mkdir /zebra
 WORKDIR /zebra
 COPY --from=builder /zebra/target/debug/zebrad /zebra/target/debug/zebrad
-COPY --from=builder /zebra/target/debug/deps/*-*[^.*] /zebra/target/debug/deps/
-
+RUN find /zebra/target/debug/deps -type f -perm 755 ! -name '*.dylib' | rename --n -v 's/-.+$//'
+COPY --from=builder /zebra/target/debug/deps/[a-z0-9]* /zebra/target/debug/deps/
 EXPOSE 8233 18233
 
 

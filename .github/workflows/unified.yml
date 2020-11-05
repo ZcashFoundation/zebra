@@ -93,7 +93,7 @@ jobs:
       - name: Run tests
         run: |
           gcloud compute ssh "zebra-tests-$BRANCH_NAME-$SHORT_SHA" --zone us-central1-a \
-          --command "docker-credential-gcr configure-docker; docker run gcr.io/$PROJECT_ID/$REPOSITORY/tests/$BRANCH_NAME:$SHORT_SHA /bin/bash $(find /zebra/target/debug/deps -type f -perm 755 ! -name '*.dylib' | grep acceptance) -Z unstable-options --include-ignored"
+          --command "docker-credential-gcr configure-docker; docker run gcr.io/$PROJECT_ID/$REPOSITORY/tests/$BRANCH_NAME:$SHORT_SHA /bin/bash -c '/target/debug/deps/acceptance -Z unstable-options --include-ignored'
 
   deploy:
     name: Deploy mainnet nodes
