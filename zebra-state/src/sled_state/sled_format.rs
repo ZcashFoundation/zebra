@@ -302,6 +302,9 @@ mod tests {
         T::from_ivec(bytes)
     }
 
+    /// The round trip test covers types that are used as value field in a sled
+    /// Tree. Only these types are ever deserialized, and so they're the only
+    /// ones that implement both `IntoSled` and `FromSled`.
     fn assert_round_trip<T>(input: T)
     where
         T: IntoSled + FromSled + Clone + PartialEq + std::fmt::Debug,
@@ -311,6 +314,12 @@ mod tests {
         assert_eq!(before, after);
     }
 
+    /// This test asserts that types that are used as sled keys behave correctly.
+    /// Any type that implements `IntoIVec` can be used as a sled key. The value
+    /// is serialized via `IntoSled::into_ivec` when the `key`, `value` pair is
+    /// inserted into the sled tree. The `as_bytes` impl on the other hand is
+    /// called for most other operations when comparing a key against existing
+    /// keys in the sled database, such as `contains`.
     fn assert_as_bytes_matches_ivec<T>(input: T)
     where
         T: IntoSled + Clone,
