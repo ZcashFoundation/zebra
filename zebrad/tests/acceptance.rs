@@ -500,7 +500,6 @@ const LARGE_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(180);
 /// The first checkpoint contains a single genesis block.
 #[test]
 fn sync_one_checkpoint_mainnet() -> Result<()> {
-
     sync_until(
         Height(0),
         Mainnet,
@@ -516,7 +515,6 @@ fn sync_one_checkpoint_mainnet() -> Result<()> {
 /// The first checkpoint contains a single genesis block.
 #[test]
 fn sync_one_checkpoint_testnet() -> Result<()> {
-
     sync_until(
         Height(0),
         Testnet,
@@ -530,7 +528,6 @@ fn sync_one_checkpoint_testnet() -> Result<()> {
 /// Test if `zebrad` can sync the first checkpoint, restart, and stop on load.
 #[test]
 fn restart_stop_at_height() -> Result<()> {
-
     let reuse_tempdir = sync_until(
         Height(0),
         Mainnet,
@@ -585,7 +582,6 @@ fn sync_large_checkpoints_mainnet() -> Result<()> {
 #[test]
 #[ignore]
 fn sync_large_checkpoints_testnet() -> Result<()> {
-
     sync_until(
         LARGE_CHECKPOINT_TEST_HEIGHT,
         Testnet,
