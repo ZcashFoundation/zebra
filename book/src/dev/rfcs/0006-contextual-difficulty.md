@@ -110,7 +110,8 @@ based on the difference between the **median timespan** and the
 **target timespan**.
 
 Since contextual validation is only used for post-Sapling blocks, we can assume
-that there will be at least 28 blocks in any relevant chain.
+that there will be at least 28 blocks in any relevant chain on mainnet and
+testnet.
 
 Difficulty threshold calculations are performed using unsigned 256-bit integers.
 Time calculations are performed using unsigned 32-bit integers.
