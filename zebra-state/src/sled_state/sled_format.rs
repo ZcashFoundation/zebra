@@ -243,7 +243,10 @@ impl SledSerialize for sled::transaction::TransactionalTree {
     {
         let key_bytes = key.into_ivec();
         let value_bytes = value.into_ivec();
-        self.insert(key_bytes, value_bytes)?;
+        let previous = self.insert(key_bytes, value_bytes)?;
+
+        assert!(previous.is_none());
+
         Ok(())
     }
 }
