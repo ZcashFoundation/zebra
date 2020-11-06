@@ -49,6 +49,7 @@ impl QueuedBlocks {
         assert!(inserted, "hashes must be unique");
 
         tracing::trace!(num_blocks = %self.blocks.len(), %parent_hash, ?new_height,  "Finished queueing a new block");
+        self.update_metrics();
     }
 
     /// Dequeue and return all blocks that were waiting for the arrival of
@@ -73,6 +74,7 @@ impl QueuedBlocks {
         }
 
         tracing::trace!(num_blocks = %self.blocks.len(), "Finished dequeuing blocks waiting for parent hash",);
+        self.update_metrics();
 
         queued_children
     }
@@ -99,10 +101,24 @@ impl QueuedBlocks {
                 .expect("parent is present")
                 .remove(&hash);
         }
+
+        tracing::trace!(num_blocks = %self.blocks.len(), "Finished pruning blocks at or beneath the finalized tip height",);
+        self.update_metrics();
     }
 
     /// Return the queued block if it has already been registered
     pub fn get_mut(&mut self, hash: &block::Hash) -> Option<&mut QueuedBlock> {
         self.blocks.get_mut(&hash)
+    }
+
+    /// Update metrics after the queue is modified
+    fn update_metrics(&self) {
+        if let Some(max_height) = self.by_height.keys().next_back() {
+            metrics::gauge!("state.memory.queued.max.height", max_height.0 as i64);
+        } else {
+            // use -1 as a sentinel value for "None", because 0 is a valid height
+            metrics::gauge!("state.memory.queued.max.height", -1);
+        }
+        metrics::gauge!("state.memory.queued.block.count", self.blocks.len() as _);
     }
 }
