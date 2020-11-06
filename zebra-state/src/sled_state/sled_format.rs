@@ -241,11 +241,18 @@ impl SledSerialize for sled::transaction::TransactionalTree {
         K: IntoSled,
         V: IntoSled,
     {
+        use std::any::type_name;
+
         let key_bytes = key.into_ivec();
         let value_bytes = value.into_ivec();
         let previous = self.insert(key_bytes, value_bytes)?;
 
-        assert!(previous.is_none());
+        assert!(
+            previous.is_none(),
+            "previous value was not none when inserting into ({}, {}) sled Tree",
+            type_name::<K>(),
+            type_name::<V>()
+        );
 
         Ok(())
     }
