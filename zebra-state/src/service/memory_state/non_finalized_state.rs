@@ -282,4 +282,32 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    // This test gives full coverage for `take_chain_if`
+    fn commit_block_extending_best_chain_doesnt_drop_worst_chains() -> Result<()> {
+        zebra_test::init();
+
+        let block2: Arc<Block> =
+            zebra_test::vectors::BLOCK_MAINNET_419201_BYTES.zcash_deserialize_into()?;
+        let block1: Arc<Block> =
+            zebra_test::vectors::BLOCK_MAINNET_419200_BYTES.zcash_deserialize_into()?;
+        // Create a random block which will have a much worse difficulty hash
+        // than an intentionally mined block from the mainnet
+        let child1 = block1.make_fake_child();
+        let child2 = block2.make_fake_child();
+
+        let mut state = NonFinalizedState::default();
+        assert_eq!(0, state.chain_set.len());
+        state.commit_new_chain(block1);
+        assert_eq!(1, state.chain_set.len());
+        state.commit_block(block2);
+        assert_eq!(1, state.chain_set.len());
+        state.commit_block(child1);
+        assert_eq!(2, state.chain_set.len());
+        state.commit_block(child2);
+        assert_eq!(2, state.chain_set.len());
+
+        Ok(())
+    }
 }
