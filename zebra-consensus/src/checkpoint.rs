@@ -391,6 +391,14 @@ where
 
     /// Increase the current checkpoint height to `verified_height`,
     fn update_progress(&mut self, verified_height: block::Height) {
+        if let Some(max_height) = self.queued.keys().next_back() {
+            metrics::gauge!("checkpoint.queued.max.height", max_height.0 as i64);
+        } else {
+            // use -1 as a sentinel value for "None", because 0 is a valid height
+            metrics::gauge!("checkpoint.queued.max.height", -1);
+        }
+        metrics::gauge!("checkpoint.queued_slots", self.queued.len() as i64);
+
         // Ignore blocks that are below the previous checkpoint, or otherwise
         // have invalid heights.
         //
@@ -821,8 +829,6 @@ where
         // We don't retry with a smaller range on failure, because failures
         // should be rare.
         self.process_checkpoint_range();
-
-        metrics::gauge!("checkpoint.queued_slots", self.queued.len() as i64);
 
         let mut state_service = self.state_service.clone();
         async move {
