@@ -493,13 +493,11 @@ impl NonFinalizedState {
     }
 
     /// Returns the length of the non-finalized portion of the current best chain.
-    pub fn best_chain_len(&self) -> block::Height {
-        block::Height(
-            self.best_chain()
-                .expect("only called after inserting a block")
-                .blocks
-                .len() as u32,
-        )
+    pub fn best_chain_len(&self) -> u32 {
+        self.best_chain()
+            .expect("only called after inserting a block")
+            .blocks
+            .len() as u32
     }
 
     /// Returns `true` if `hash` is contained in the non-finalized portion of any
