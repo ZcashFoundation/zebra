@@ -124,11 +124,12 @@ pub enum Request {
 ```
 
 `zebra-state` breaks down its requests into two categories and provides
-different guarantees for each category: requests that modify the state, and requests that
-do not. Requests that update the state are guaranteed to run sequentially and
-will never race against each other. Requests that read state are done
-asynchronously and are guaranteed to read at least the state present at the
-time the request was processed by the service, or a later state present at the time the request future is executed. The state service avoids
+different guarantees for each category: requests that modify the state, and
+requests that do not. Requests that update the state are guaranteed to run
+sequentially and will never race against each other. Requests that read state
+are done asynchronously and are guaranteed to read at least the state present
+at the time the request was processed by the service, or a later state
+present at the time the request future is executed. The state service avoids
 race conditions between the read state and the written state by doing all
 contextual verification internally.
 
@@ -231,7 +232,7 @@ time the request was processed, or a later state.
 At a high level, the in-memory data structures store a collection of chains,
 each rooted at the highest finalized block. Each chain consists of a map from
 heights to blocks. Chains are stored using an ordered map from cumulative work to
-chains, so that the map ordering is the ordering of best to worst chains.
+chains, so that the map ordering is the ordering of worst to best chains.
 
 ### The `Chain` type
 [chain-type]: #chain-type
@@ -343,10 +344,10 @@ Remove the highest height block of the non-finalized portion of a chain.
 
 #### `Ord`
 
-The `Chain` type implements `Ord` for reorganizing chains. First chains
-are compared by their `partial_cumulative_work`. Ties are then broken by
-comparing `block::Hash`es of the tips of each chain. (This tie-breaker
-means that all `Chain`s in the `ChainSet` must have at least one block.)
+The `Chain` type implements `Ord` for reorganizing chains. First chains are
+compared by their `partial_cumulative_work`. Ties are then broken by
+comparing `block::Hash`es of the tips of each chain. (This tie-breaker means
+that all `Chain`s in the `NonFinalizedState` must have at least one block.)
 
 **Note**: Unlike `zcashd`, Zebra does not use block arrival times as a
 tie-breaker for the best tip. Since Zebra downloads blocks in parallel,
@@ -617,7 +618,7 @@ Zcash structures are encoded using `ZcashSerialize`/`ZcashDeserialize`.
 - The `hash_by_height` and `height_by_hash` trees provide a bijection between
   block heights and block hashes.  (Since the Sled state only stores finalized
   state, they are actually a bijection).
-  
+
 - The `block_by_height` tree provides a bijection between block heights and block
   data. There is no corresponding `height_by_block` tree: instead, hash the block,
   and use `height_by_hash`. (Since the Sled state only stores finalized state,
@@ -668,7 +669,7 @@ check that `block`'s parent hash is `null` (all zeroes) and its height is `0`.
 
     (Due to a [bug in zcashd](https://github.com/ZcashFoundation/zebra/issues/559),
     genesis block anchors and transactions are ignored during validation.)
-    
+
 4.  Update the `sprout_anchors` and `sapling_anchors` trees with the Sprout and
     Sapling anchors.
 
