@@ -404,11 +404,11 @@ chain and updates all side chains to match.
 3. Remove the lowest height block from the best chain with
    `let finalized_block = best_chain.pop_root();`
 
-4. Add `best_chain` back to `self.chain_set`
+4. Add `best_chain` back to `self.chain_set` if it is not empty
 
 5. For each remaining `chain` in `side_chains`
     - remove the lowest height block from `chain`
-    - If that block is equal to `finalized_block` add `chain` back to `self.chain_set`
+    - If that block is equal to `finalized_block` and `chain` is not empty add `chain` back to `self.chain_set`
     - Else, drop `chain`
 
 6. Return `finalized_block`

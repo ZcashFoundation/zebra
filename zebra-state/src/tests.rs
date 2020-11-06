@@ -1,6 +1,43 @@
-use zebra_chain::block;
+use std::{mem, sync::Arc};
+
+use zebra_chain::{
+    block::{self, Block},
+    transaction::Transaction,
+    transparent,
+};
 
 use super::*;
+
+/// Helper trait for constructing "valid" looking chains of blocks
+pub trait FakeChainHelper {
+    fn make_fake_child(&self) -> Arc<Block>;
+}
+
+impl FakeChainHelper for Block {
+    fn make_fake_child(&self) -> Arc<Block> {
+        let parent_hash = self.hash();
+        let mut child = Block::clone(self);
+        let mut transactions = mem::take(&mut child.transactions);
+        let mut tx = transactions.remove(0);
+
+        let input = match Arc::make_mut(&mut tx) {
+            Transaction::V1 { inputs, .. } => &mut inputs[0],
+            Transaction::V2 { inputs, .. } => &mut inputs[0],
+            Transaction::V3 { inputs, .. } => &mut inputs[0],
+            Transaction::V4 { inputs, .. } => &mut inputs[0],
+        };
+
+        match input {
+            transparent::Input::Coinbase { height, .. } => height.0 += 1,
+            _ => panic!("block must have a coinbase height to create a child"),
+        }
+
+        child.transactions.push(tx);
+        child.header.previous_block_hash = parent_hash;
+
+        Arc::new(child)
+    }
+}
 
 /// Block heights, and the expected minimum block locator height
 static BLOCK_LOCATOR_CASES: &[(u32, u32)] = &[
