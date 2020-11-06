@@ -80,7 +80,7 @@ pub enum BlockError {
     #[error("block contains invalid transactions")]
     Transaction(#[from] TransactionError),
 
-    #[error("block haves no transactions")]
+    #[error("block has no transactions")]
     NoTransactions,
 
     #[error("block {0:?} is already in the chain at depth {1:?}")]
