@@ -117,6 +117,10 @@ impl Chain {
             .next_back()
             .expect("only called while blocks is populated")
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.blocks.is_empty()
+    }
 }
 
 /// Helper trait to organize inverse operations done on the `Chain` type. Used to
@@ -414,9 +418,7 @@ impl Ord for Chain {
 
 #[cfg(test)]
 mod tests {
-    use transaction::Transaction;
-
-    use std::{env, fmt, mem};
+    use std::{env, fmt};
 
     use zebra_chain::serialization::ZcashDeserializeInto;
     use zebra_chain::{
@@ -424,6 +426,8 @@ mod tests {
         LedgerState,
     };
     use zebra_test::prelude::*;
+
+    use crate::tests::FakeChainHelper;
 
     use self::assert_eq;
     use super::*;
@@ -433,37 +437,6 @@ mod tests {
     impl<T> fmt::Debug for SummaryDebug<Vec<T>> {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             write!(f, "{}, len={}", std::any::type_name::<T>(), self.0.len())
-        }
-    }
-
-    /// Helper trait for constructing "valid" looking chains of blocks
-    trait FakeChainHelper {
-        fn make_fake_child(&self) -> Arc<Block>;
-    }
-
-    impl FakeChainHelper for Block {
-        fn make_fake_child(&self) -> Arc<Block> {
-            let parent_hash = self.hash();
-            let mut child = Block::clone(self);
-            let mut transactions = mem::take(&mut child.transactions);
-            let mut tx = transactions.remove(0);
-
-            let input = match Arc::make_mut(&mut tx) {
-                Transaction::V1 { inputs, .. } => &mut inputs[0],
-                Transaction::V2 { inputs, .. } => &mut inputs[0],
-                Transaction::V3 { inputs, .. } => &mut inputs[0],
-                Transaction::V4 { inputs, .. } => &mut inputs[0],
-            };
-
-            match input {
-                transparent::Input::Coinbase { height, .. } => height.0 += 1,
-                _ => panic!("block must have a coinbase height to create a child"),
-            }
-
-            child.transactions.push(tx);
-            child.header.previous_block_hash = parent_hash;
-
-            Arc::new(child)
         }
     }
 
@@ -507,6 +480,25 @@ mod tests {
         }
 
         assert_eq!(100, chain.blocks.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn bigger_is_greater() -> Result<()> {
+        zebra_test::init();
+        let block: Arc<Block> =
+            zebra_test::vectors::BLOCK_MAINNET_434873_BYTES.zcash_deserialize_into()?;
+
+        let mut lesser_chain = Chain::default();
+        lesser_chain.push(block.clone());
+
+        let fake_child = block.make_fake_child();
+        let mut bigger_chain = Chain::default();
+        bigger_chain.push(block);
+        bigger_chain.push(fake_child);
+
+        assert!(bigger_chain > lesser_chain);
 
         Ok(())
     }

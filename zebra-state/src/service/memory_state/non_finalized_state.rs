@@ -33,15 +33,18 @@ impl NonFinalizedState {
 
         // remove the lowest height block from the best_chain as finalized_block
         let finalized_block = best_chain.pop_root();
+
         // add best_chain back to `self.chain_set`
-        self.chain_set.insert(best_chain);
+        if !best_chain.is_empty() {
+            self.chain_set.insert(best_chain);
+        }
 
         // for each remaining chain in side_chains
         for mut chain in side_chains {
             // remove the first block from `chain`
             let chain_start = chain.pop_root();
             // if block equals finalized_block
-            if chain_start == finalized_block {
+            if !chain.is_empty() && chain_start == finalized_block {
                 // add the chain back to `self.chain_set`
                 self.chain_set.insert(chain);
             } else {
@@ -180,5 +183,68 @@ impl NonFinalizedState {
             .iter()
             .next_back()
             .map(|box_chain| box_chain.deref())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use zebra_chain::serialization::ZcashDeserializeInto;
+    use zebra_test::prelude::*;
+
+    use crate::tests::FakeChainHelper;
+
+    use self::assert_eq;
+    use super::*;
+
+    #[test]
+    fn best_chain_wins() -> Result<()> {
+        zebra_test::init();
+
+        let block2: Arc<Block> =
+            zebra_test::vectors::BLOCK_MAINNET_419201_BYTES.zcash_deserialize_into()?;
+        let block1: Arc<Block> =
+            zebra_test::vectors::BLOCK_MAINNET_419200_BYTES.zcash_deserialize_into()?;
+        // Create a random block which will have a much worse difficulty hash
+        // than an intentionally mined block from the mainnet
+        let child = block1.make_fake_child();
+
+        let expected_hash = block2.hash();
+
+        let mut state = NonFinalizedState::default();
+        state.commit_new_chain(block2);
+        state.commit_new_chain(child);
+
+        let best_chain = state.best_chain().unwrap();
+        assert!(best_chain.height_by_hash.contains_key(&expected_hash));
+
+        Ok(())
+    }
+
+    #[test]
+    fn finalize_pops_from_best_chain() -> Result<()> {
+        zebra_test::init();
+
+        let block2: Arc<Block> =
+            zebra_test::vectors::BLOCK_MAINNET_419201_BYTES.zcash_deserialize_into()?;
+        let block1: Arc<Block> =
+            zebra_test::vectors::BLOCK_MAINNET_419200_BYTES.zcash_deserialize_into()?;
+        // Create a random block which will have a much worse difficulty hash
+        // than an intentionally mined block from the mainnet
+        let child = block1.make_fake_child();
+
+        let mut state = NonFinalizedState::default();
+        state.commit_new_chain(block1.clone());
+        state.commit_block(block2.clone());
+        state.commit_block(child);
+
+        let finalized = state.finalize();
+        assert_eq!(block1, finalized);
+
+        let finalized = state.finalize();
+        assert_eq!(block2, finalized);
+
+        assert!(state.best_chain().is_none());
+
+        Ok(())
     }
 }

@@ -403,11 +403,11 @@ chain and updates all side chains to match.
 3. Remove the lowest height block from the best chain with
    `let finalized_block = best_chain.pop_root();`
 
-4. Add `best_chain` back to `self.chain_set`
+4. Add `best_chain` back to `self.chain_set` if it is not empty
 
 5. For each remaining `chain` in `side_chains`
     - remove the lowest height block from `chain`
-    - If that block is equal to `finalized_block` add `chain` back to `self.chain_set`
+    - If that block is equal to `finalized_block` and `chain` is not empty add `chain` back to `self.chain_set`
     - Else, drop `chain`
 
 6. Return `finalized_block`
@@ -617,7 +617,7 @@ Zcash structures are encoded using `ZcashSerialize`/`ZcashDeserialize`.
 - The `hash_by_height` and `height_by_hash` trees provide a bijection between
   block heights and block hashes.  (Since the Sled state only stores finalized
   state, they are actually a bijection).
-  
+
 - The `block_by_height` tree provides a bijection between block heights and block
   data. There is no corresponding `height_by_block` tree: instead, hash the block,
   and use `height_by_hash`. (Since the Sled state only stores finalized state,
@@ -668,7 +668,7 @@ check that `block`'s parent hash is `null` (all zeroes) and its height is `0`.
 
     (Due to a [bug in zcashd](https://github.com/ZcashFoundation/zebra/issues/559),
     genesis block anchors and transactions are ignored during validation.)
-    
+
 4.  Update the `sprout_anchors` and `sapling_anchors` trees with the Sprout and
     Sapling anchors.
 
