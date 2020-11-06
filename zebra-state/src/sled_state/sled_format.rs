@@ -1,5 +1,5 @@
 //! Module defining exactly how to move types in and out of sled
-use std::{convert::TryInto, sync::Arc};
+use std::{convert::TryInto, fmt::Debug, sync::Arc};
 
 use zebra_chain::{
     block,
@@ -27,7 +27,37 @@ pub trait IntoSled {
     fn as_bytes(&self) -> Self::Bytes;
 
     // function to convert the current type into its sled format
-    fn into_ivec(self) -> sled::IVec;
+    fn into_ivec(&self) -> sled::IVec;
+}
+
+impl<'a, T> IntoSled for &'a T
+where
+    T: IntoSled,
+{
+    type Bytes = T::Bytes;
+
+    fn as_bytes(&self) -> Self::Bytes {
+        T::as_bytes(*self)
+    }
+
+    fn into_ivec(&self) -> sled::IVec {
+        T::into_ivec(*self)
+    }
+}
+
+impl<T> IntoSled for Arc<T>
+where
+    T: IntoSled,
+{
+    type Bytes = T::Bytes;
+
+    fn as_bytes(&self) -> Self::Bytes {
+        T::as_bytes(&*self)
+    }
+
+    fn into_ivec(&self) -> sled::IVec {
+        T::into_ivec(&*self)
+    }
 }
 
 /// Helper type for retrieving types from sled with the correct format.
@@ -42,7 +72,16 @@ pub trait FromSled: Sized {
     fn from_ivec(bytes: sled::IVec) -> Self;
 }
 
-impl IntoSled for &Block {
+impl<T> FromSled for Arc<T>
+where
+    T: FromSled,
+{
+    fn from_ivec(bytes: sled::IVec) -> Self {
+        Arc::new(T::from_ivec(bytes))
+    }
+}
+
+impl IntoSled for Block {
     type Bytes = Vec<u8>;
 
     fn as_bytes(&self) -> Self::Bytes {
@@ -50,14 +89,14 @@ impl IntoSled for &Block {
             .expect("serialization to vec doesn't fail")
     }
 
-    fn into_ivec(self) -> sled::IVec {
+    fn into_ivec(&self) -> sled::IVec {
         self.as_bytes().into()
     }
 }
 
-impl FromSled for Arc<Block> {
+impl FromSled for Block {
     fn from_ivec(bytes: sled::IVec) -> Self {
-        Arc::<Block>::zcash_deserialize(bytes.as_ref())
+        Block::zcash_deserialize(bytes.as_ref())
             .expect("deserialization format should match the serialization format used by IntoSled")
     }
 }
@@ -77,7 +116,7 @@ impl IntoSled for TransactionLocation {
         bytes
     }
 
-    fn into_ivec(self) -> sled::IVec {
+    fn into_ivec(&self) -> sled::IVec {
         self.as_bytes().as_ref().into()
     }
 }
@@ -108,7 +147,7 @@ impl IntoSled for transaction::Hash {
         self.0
     }
 
-    fn into_ivec(self) -> sled::IVec {
+    fn into_ivec(&self) -> sled::IVec {
         self.as_bytes().as_ref().into()
     }
 }
@@ -119,7 +158,7 @@ impl IntoSled for block::Hash {
     fn as_bytes(&self) -> Self::Bytes {
         self.0
     }
-    fn into_ivec(self) -> sled::IVec {
+    fn into_ivec(&self) -> sled::IVec {
         self.as_bytes().as_ref().into()
     }
 }
@@ -131,26 +170,26 @@ impl FromSled for block::Hash {
     }
 }
 
-impl IntoSled for &sprout::Nullifier {
+impl IntoSled for sprout::Nullifier {
     type Bytes = [u8; 32];
 
     fn as_bytes(&self) -> Self::Bytes {
         self.0
     }
 
-    fn into_ivec(self) -> sled::IVec {
+    fn into_ivec(&self) -> sled::IVec {
         self.as_bytes().as_ref().into()
     }
 }
 
-impl IntoSled for &sapling::Nullifier {
+impl IntoSled for sapling::Nullifier {
     type Bytes = [u8; 32];
 
     fn as_bytes(&self) -> Self::Bytes {
         self.0
     }
 
-    fn into_ivec(self) -> sled::IVec {
+    fn into_ivec(&self) -> sled::IVec {
         self.as_bytes().as_ref().into()
     }
 }
@@ -162,7 +201,7 @@ impl IntoSled for () {
         []
     }
 
-    fn into_ivec(self) -> sled::IVec {
+    fn into_ivec(&self) -> sled::IVec {
         sled::IVec::default()
     }
 }
@@ -173,7 +212,7 @@ impl IntoSled for block::Height {
     fn as_bytes(&self) -> Self::Bytes {
         self.0.to_be_bytes()
     }
-    fn into_ivec(self) -> sled::IVec {
+    fn into_ivec(&self) -> sled::IVec {
         self.as_bytes().as_ref().into()
     }
 }
@@ -185,7 +224,7 @@ impl FromSled for block::Height {
     }
 }
 
-impl IntoSled for &transparent::Output {
+impl IntoSled for transparent::Output {
     type Bytes = Vec<u8>;
 
     fn as_bytes(&self) -> Self::Bytes {
@@ -193,7 +232,7 @@ impl IntoSled for &transparent::Output {
             .expect("serialization to vec doesn't fail")
     }
 
-    fn into_ivec(self) -> sled::IVec {
+    fn into_ivec(&self) -> sled::IVec {
         self.as_bytes().into()
     }
 }
@@ -213,7 +252,7 @@ impl IntoSled for transparent::OutPoint {
             .expect("serialization to vec doesn't fail")
     }
 
-    fn into_ivec(self) -> sled::IVec {
+    fn into_ivec(&self) -> sled::IVec {
         self.as_bytes().into()
     }
 }
@@ -228,7 +267,7 @@ pub trait SledSerialize {
         value: V,
     ) -> Result<(), sled::transaction::UnabortableTransactionError>
     where
-        K: IntoSled,
+        K: IntoSled + Debug,
         V: IntoSled;
 }
 
@@ -239,7 +278,7 @@ impl SledSerialize for sled::transaction::TransactionalTree {
         value: V,
     ) -> Result<(), sled::transaction::UnabortableTransactionError>
     where
-        K: IntoSled,
+        K: IntoSled + Debug,
         V: IntoSled,
     {
         use std::any::type_name;
@@ -250,7 +289,8 @@ impl SledSerialize for sled::transaction::TransactionalTree {
 
         assert!(
             previous.is_none(),
-            "previous value was not none when inserting into ({}, {}) sled Tree",
+            "duplicate key: previous value for key {:?} was not none when inserting into ({}, {}) sled Tree",
+            key,
             type_name::<K>(),
             type_name::<V>()
         );
@@ -372,10 +412,10 @@ mod tests {
     fn roundtrip_transparent_output() {
         zebra_test::init();
 
-        proptest!(|(block in any::<transparent::Output>())| {
-            let bytes = block.into_ivec();
+        proptest!(|(output in any::<transparent::Output>())| {
+            let bytes = output.into_ivec();
             let deserialized: transparent::Output = FromSled::from_ivec(bytes);
-            assert_eq!(block, deserialized);
+            assert_eq!(output, deserialized);
         });
     }
 
@@ -400,13 +440,13 @@ mod tests {
     #[test]
     fn key_matches_ivec_sprout_nullifier() {
         zebra_test::init();
-        proptest!(|(val in any::<sprout::Nullifier>())| assert_as_bytes_matches_ivec(&val));
+        proptest!(|(val in any::<sprout::Nullifier>())| assert_as_bytes_matches_ivec(val));
     }
 
     #[test]
     fn key_matches_ivec_sapling_nullifier() {
         zebra_test::init();
-        proptest!(|(val in any::<sapling::Nullifier>())| assert_as_bytes_matches_ivec(&val));
+        proptest!(|(val in any::<sapling::Nullifier>())| assert_as_bytes_matches_ivec(val));
     }
 
     #[test]
@@ -418,7 +458,7 @@ mod tests {
     #[test]
     fn key_matches_ivec_transparent_output() {
         zebra_test::init();
-        proptest!(|(val in any::<transparent::Output>())| assert_as_bytes_matches_ivec(&val));
+        proptest!(|(val in any::<transparent::Output>())| assert_as_bytes_matches_ivec(val));
     }
 
     #[test]

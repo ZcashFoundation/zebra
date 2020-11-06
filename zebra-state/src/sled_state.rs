@@ -239,7 +239,7 @@ impl FinalizedState {
                     // Index the block
                     hash_by_height.zs_insert(height, hash)?;
                     height_by_hash.zs_insert(hash, height)?;
-                    block_by_height.zs_insert(height, &*block)?;
+                    block_by_height.zs_insert(height, &block)?;
 
                     // TODO: sprout and sapling anchors (per block)
 
