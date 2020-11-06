@@ -369,7 +369,10 @@ where
     ///  - verification has finished
     fn check_height(&self, height: block::Height) -> Result<(), VerifyCheckpointError> {
         if height > self.checkpoint_list.max_height() {
-            Err(VerifyCheckpointError::TooHigh)?;
+            Err(VerifyCheckpointError::TooHigh {
+                height,
+                max_height: self.checkpoint_list.max_height(),
+            })?;
         }
 
         match self.previous_checkpoint_height() {
@@ -379,7 +382,13 @@ where
             InitialTip(previous_height) | PreviousCheckpoint(previous_height)
                 if (height <= previous_height) =>
             {
-                Err(VerifyCheckpointError::Duplicate { height })?
+                let e = Err(VerifyCheckpointError::AlreadyVerified {
+                    height,
+                    verified_height: previous_height,
+                });
+                // TODO: reduce to trace level once the AlreadyVerified bug is fixed
+                tracing::info!(?e);
+                e?;
             }
             InitialTip(_) | PreviousCheckpoint(_) => {}
             // We're finished, so no checkpoint height is valid
@@ -421,7 +430,7 @@ where
     fn check_block(&self, block: &Block) -> Result<block::Height, VerifyCheckpointError> {
         let block_height = block
             .coinbase_height()
-            .ok_or(VerifyCheckpointError::CoinbaseHeight)?;
+            .ok_or(VerifyCheckpointError::CoinbaseHeight { hash: block.hash() })?;
         self.check_height(block_height)?;
         Ok(block_height)
     }
@@ -468,7 +477,7 @@ where
         for qb in qblocks.iter_mut() {
             if qb.hash == hash {
                 let old_tx = std::mem::replace(&mut qb.tx, tx);
-                let e = VerifyCheckpointError::NewerRequest;
+                let e = VerifyCheckpointError::NewerRequest { height, hash };
                 tracing::trace!(?e);
                 let _ = old_tx.send(Err(e));
                 return rx;
@@ -535,9 +544,9 @@ where
         // Find a queued block at this height, which is part of the hash chain.
         //
         // There are two possible outcomes here:
-        //   - at least one block matches the chain (the common case)
-        //     (if there are duplicate blocks, one succeeds, and the others fail)
+        //   - one of the blocks matches the chain (the common case)
         //   - no blocks match the chain, verification has failed for this range
+        // If there are any side-chain blocks, they fail validation.
         let mut valid_qblock = None;
         for qblock in qblocks.drain(..) {
             if qblock.hash == expected_hash {
@@ -545,21 +554,18 @@ where
                     // The first valid block at the current height
                     valid_qblock = Some(qblock);
                 } else {
-                    tracing::info!(?height, ?qblock.hash, ?expected_hash,
-                                   "Duplicate block at height in CheckpointVerifier");
-                    // Reject duplicate blocks at the same height
-                    let _ = qblock
-                        .tx
-                        .send(Err(VerifyCheckpointError::Duplicate { height }));
+                    unreachable!("unexpected duplicate block {:?} {:?}: duplicate blocks should be rejected before being queued",
+                                 height, qblock.hash);
                 }
             } else {
                 tracing::info!(?height, ?qblock.hash, ?expected_hash,
-                               "Bad block hash at height in CheckpointVerifier");
-                // A bad block, that isn't part of the chain.
-                let _ = qblock.tx.send(Err(VerifyCheckpointError::UnexpectedHash {
-                    found: qblock.hash,
-                    expected: expected_hash,
-                }));
+                               "Side chain hash at height in CheckpointVerifier");
+                let _ = qblock
+                    .tx
+                    .send(Err(VerifyCheckpointError::UnexpectedSideChain {
+                        found: qblock.hash,
+                        expected: expected_hash,
+                    }));
             }
         }
 
@@ -760,14 +766,23 @@ where
 pub enum VerifyCheckpointError {
     #[error("checkpoint request after checkpointing finished")]
     Finished,
-    #[error("block is higher than the maximum checkpoint")]
-    TooHigh,
-    #[error("block at {height:?} has already been verified")]
-    Duplicate { height: block::Height },
-    #[error("rejected older of duplicate verification requests")]
-    NewerRequest,
-    #[error("the block does not have a coinbase height")]
-    CoinbaseHeight,
+    #[error("block at {height:?} is higher than the maximum checkpoint {max_height:?}")]
+    TooHigh {
+        height: block::Height,
+        max_height: block::Height,
+    },
+    #[error("block {height:?} is less than or equal to the verified tip {verified_height:?}")]
+    AlreadyVerified {
+        height: block::Height,
+        verified_height: block::Height,
+    },
+    #[error("rejected older of duplicate verification requests for block at {height:?} {hash:?}")]
+    NewerRequest {
+        height: block::Height,
+        hash: block::Hash,
+    },
+    #[error("the block {hash:?} does not have a coinbase height")]
+    CoinbaseHeight { hash: block::Hash },
     #[error("checkpoint verifier was dropped")]
     Dropped,
     #[error(transparent)]
@@ -777,7 +792,7 @@ pub enum VerifyCheckpointError {
     #[error("too many queued blocks at this height")]
     QueuedLimit,
     #[error("the block hash does not match the chained checkpoint hash, expected {expected:?} found {found:?}")]
-    UnexpectedHash {
+    UnexpectedSideChain {
         expected: block::Hash,
         found: block::Hash,
     },
