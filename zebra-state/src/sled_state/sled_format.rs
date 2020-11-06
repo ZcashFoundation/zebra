@@ -330,7 +330,6 @@ impl SledDeserialize for sled::Tree {
 mod tests {
     use super::*;
     use proptest::{arbitrary::any, prelude::*};
-    use std::ops::Deref;
 
     impl Arbitrary for TransactionLocation {
         type Parameters = ();
@@ -352,9 +351,6 @@ mod tests {
         T::from_ivec(bytes)
     }
 
-    /// The round trip test covers types that are used as value field in a sled
-    /// Tree. Only these types are ever deserialized, and so they're the only
-    /// ones that implement both `IntoSled` and `FromSled`.
     fn assert_round_trip<T>(input: T)
     where
         T: IntoSled + FromSled + Clone + PartialEq + std::fmt::Debug,
@@ -362,6 +358,52 @@ mod tests {
         let before = input.clone();
         let after = round_trip(input);
         assert_eq!(before, after);
+    }
+
+    fn round_trip_ref<T>(input: &T) -> T
+    where
+        T: IntoSled + FromSled,
+    {
+        let bytes = input.into_ivec();
+        T::from_ivec(bytes)
+    }
+
+    fn assert_round_trip_ref<T>(input: &T)
+    where
+        T: IntoSled + FromSled + Clone + PartialEq + std::fmt::Debug,
+    {
+        let before = input;
+        let after = round_trip_ref(input);
+        assert_eq!(before, &after);
+    }
+
+    fn round_trip_arc<T>(input: Arc<T>) -> T
+    where
+        T: IntoSled + FromSled,
+    {
+        let bytes = input.into_ivec();
+        T::from_ivec(bytes)
+    }
+
+    fn assert_round_trip_arc<T>(input: Arc<T>)
+    where
+        T: IntoSled + FromSled + Clone + PartialEq + std::fmt::Debug,
+    {
+        let before = input.clone();
+        let after = round_trip_arc(input);
+        assert_eq!(*before, after);
+    }
+
+    /// The round trip test covers types that are used as value field in a sled
+    /// Tree. Only these types are ever deserialized, and so they're the only
+    /// ones that implement both `IntoSled` and `FromSled`.
+    fn assert_value_properties<T>(input: T)
+    where
+        T: IntoSled + FromSled + Clone + PartialEq + std::fmt::Debug,
+    {
+        assert_round_trip_ref(&input);
+        assert_round_trip_arc(Arc::new(input.clone()));
+        assert_round_trip(input);
     }
 
     /// This test asserts that types that are used as sled keys behave correctly.
@@ -382,41 +424,33 @@ mod tests {
     #[test]
     fn roundtrip_transaction_location() {
         zebra_test::init();
-        proptest!(|(val in any::<TransactionLocation>())| assert_round_trip(val));
+        proptest!(|(val in any::<TransactionLocation>())| assert_value_properties(val));
     }
 
     #[test]
     fn roundtrip_block_hash() {
         zebra_test::init();
-        proptest!(|(val in any::<block::Hash>())| assert_round_trip(val));
+        proptest!(|(val in any::<block::Hash>())| assert_value_properties(val));
     }
 
     #[test]
     fn roundtrip_block_height() {
         zebra_test::init();
-        proptest!(|(val in any::<block::Height>())| assert_round_trip(val));
+        proptest!(|(val in any::<block::Height>())| assert_value_properties(val));
     }
 
     #[test]
     fn roundtrip_block() {
         zebra_test::init();
 
-        proptest!(|(block in any::<Block>())| {
-            let bytes = block.into_ivec();
-            let deserialized: Arc<Block> = FromSled::from_ivec(bytes);
-            assert_eq!(&block, deserialized.deref());
-        });
+        proptest!(|(val in any::<Block>())| assert_value_properties(val));
     }
 
     #[test]
     fn roundtrip_transparent_output() {
         zebra_test::init();
 
-        proptest!(|(output in any::<transparent::Output>())| {
-            let bytes = output.into_ivec();
-            let deserialized: transparent::Output = FromSled::from_ivec(bytes);
-            assert_eq!(output, deserialized);
-        });
+        proptest!(|(val in any::<transparent::Output>())| assert_value_properties(val));
     }
 
     #[test]
