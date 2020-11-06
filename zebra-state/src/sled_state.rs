@@ -38,6 +38,7 @@ use self::sled_format::TransactionLocation;
 pub struct FinalizedState {
     /// Queued blocks that arrived out of order, indexed by their parent block hash.
     queued_by_prev_hash: HashMap<block::Hash, QueuedBlock>,
+    max_queued_height: Option<block::Height>,
 
     hash_by_height: sled::Tree,
     height_by_hash: sled::Tree,
@@ -67,6 +68,7 @@ impl FinalizedState {
 
         let new_state = Self {
             queued_by_prev_hash: HashMap::new(),
+            max_queued_height: None,
             hash_by_height: db.open_tree(b"hash_by_height").unwrap(),
             height_by_hash: db.open_tree(b"height_by_hash").unwrap(),
             block_by_height: db.open_tree(b"block_by_height").unwrap(),
@@ -173,6 +175,7 @@ impl FinalizedState {
     /// queued block (and any of its descendants) can be committed to the state.
     pub fn queue_and_commit_finalized_blocks(&mut self, queued_block: QueuedBlock) {
         let prev_hash = queued_block.block.header.previous_block_hash;
+        let height = queued_block.block.coinbase_height().unwrap();
         self.queued_by_prev_hash.insert(prev_hash, queued_block);
 
         while let Some(queued_block) = self.queued_by_prev_hash.remove(&self.finalized_tip_hash()) {
@@ -181,12 +184,29 @@ impl FinalizedState {
                 .coinbase_height()
                 .expect("valid blocks must have a height");
             self.commit_finalized(queued_block);
-            metrics::counter!("state.committed.block.count", 1);
-            metrics::gauge!("state.committed.block.height", height.0 as _);
+            metrics::counter!("state.finalized.committed.block.count", 1);
+            metrics::gauge!("state.finalized.committed.block.height", height.0 as _);
+        }
+
+        if self.queued_by_prev_hash.is_empty() {
+            self.max_queued_height = None;
+            // use -1 as a sentinel value for "None", because 0 is a valid height
+            metrics::gauge!("state.finalized.queued.max.height", -1,);
+        } else {
+            self.max_queued_height = self
+                .max_queued_height
+                .filter(|old_max| old_max > &height)
+                .or(Some(height));
+            metrics::gauge!(
+                "state.finalized.queued.max.height",
+                self.max_queued_height
+                    .expect("previous statement ensures that height is valid")
+                    .0 as _,
+            );
         }
 
         metrics::gauge!(
-            "state.queued.block.count",
+            "state.finalized.queued.block.count",
             self.queued_by_prev_hash.len() as _
         );
     }
