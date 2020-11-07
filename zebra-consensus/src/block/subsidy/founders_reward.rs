@@ -85,8 +85,8 @@ pub fn founders_reward_address(height: Height, network: Network) -> Result<Addre
 
     Ok(address)
 }
-/// Given a founders reward address and a lock script from an output make sure the script
-/// is well formed as described in [protocol specification §7.8][7.8]
+/// Given a founders reward address, create a script and check if it is the same
+/// as the given lock_script as described in [protocol specification §7.8][7.8]
 ///
 /// [7.8]: https://zips.z.cash/protocol/protocol.pdf#foundersreward.
 pub fn check_script_form(lock_script: Script, address: Address) -> bool {
