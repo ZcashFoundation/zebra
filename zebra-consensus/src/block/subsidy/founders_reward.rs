@@ -93,25 +93,12 @@ pub fn check_script_form(lock_script: Script, address: Address) -> bool {
     let mut address_hash = address
         .zcash_serialize_to_vec()
         .expect("we should get address bytes here");
-    let mut lock_script_hash = lock_script.0;
 
-    // Make sure the lock script haves the start and end we need.
-    if !(lock_script_hash[0] == OpCode::Hash160 as u8
-        && lock_script_hash[lock_script_hash.len() - 1] == OpCode::Equal as u8)
-    {
-        return false;
-    }
-
-    // Remove prefix from lock_script.
-    let prefix_len = 2;
-    lock_script_hash = address_hash[prefix_len..address_hash.len() - prefix_len].to_vec();
-
-    // Remove prefix from given address.
-    address_hash = address_hash[prefix_len..address_hash.len() - prefix_len].to_vec();
-
-    // To be valid the bytes in the center of the lock_script hash from output should be the
-    // same as the ones in the center of the given address hash.
-    if lock_script_hash == address_hash {
+    address_hash = address_hash[2..22].to_vec();
+    address_hash.insert(0, 0x14 as u8);
+    address_hash.insert(0, OpCode::Hash160 as u8);
+    address_hash.insert(address_hash.len(), OpCode::Equal as u8);
+    if lock_script.0.len() == address_hash.len() && lock_script == Script(address_hash) {
         return true;
     }
     false
