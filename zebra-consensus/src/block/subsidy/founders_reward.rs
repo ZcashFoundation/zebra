@@ -11,8 +11,9 @@ use zebra_chain::{
     amount::{Amount, Error, NonNegative},
     block::Height,
     parameters::{Network, NetworkUpgrade::*},
+    serialization::ZcashSerialize,
     transaction::Transaction,
-    transparent::{address::ToAddressWithNetwork, Address, Output},
+    transparent::{Address, OpCode, Output, Script},
 };
 
 use crate::block::subsidy::general::{block_subsidy, halving_divisor};
@@ -84,17 +85,44 @@ pub fn founders_reward_address(height: Height, network: Network) -> Result<Addre
 
     Ok(address)
 }
+/// Given a founders reward address and a lock script from an output make sure the script
+/// is well formed as described in [protocol specification §7.8][7.8]
+///
+/// [7.8]: https://zips.z.cash/protocol/protocol.pdf#foundersreward.
+pub fn check_script_form(lock_script: Script, address: Address) -> bool {
+    let mut address_hash = address
+        .zcash_serialize_to_vec()
+        .expect("we should get address bytes here");
+    let mut lock_script_hash = lock_script.0;
+
+    // Make sure the lock script haves the start and end we need.
+    if !(lock_script_hash[0] == OpCode::Hash160 as u8
+        && lock_script_hash[lock_script_hash.len() - 1] == OpCode::Equal as u8)
+    {
+        return false;
+    }
+
+    // Remove prefix from lock_script.
+    let prefix_len = 2;
+    lock_script_hash = address_hash[prefix_len..address_hash.len() - prefix_len].to_vec();
+
+    // Remove prefix from given address.
+    address_hash = address_hash[prefix_len..address_hash.len() - prefix_len].to_vec();
+
+    // To be valid the bytes in the center of the lock_script hash from output should be the
+    // same as the ones in the center of the given address hash.
+    if lock_script_hash == address_hash {
+        return true;
+    }
+    return false;
+}
 
 /// Returns a list of outputs in `Transaction`, which have a script address equal to `String`.
-pub fn find_output_with_address(
-    transaction: &Transaction,
-    address: Address,
-    network: Network,
-) -> Vec<Output> {
+pub fn find_output_with_address(transaction: &Transaction, address: Address) -> Vec<Output> {
     transaction
         .outputs()
         .iter()
-        .filter(|o| o.lock_script.to_address(network) == address)
+        .filter(|o| check_script_form(o.lock_script.clone(), address))
         .cloned()
         .collect()
 }

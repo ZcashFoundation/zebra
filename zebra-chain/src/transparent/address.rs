@@ -62,7 +62,7 @@ pub enum Address {
 
 /// Minimal subset of script opcodes.
 /// Ported from https://github.com/zcash/librustzcash/blob/master/zcash_primitives/src/legacy.rs#L10
-enum OpCode {
+pub enum OpCode {
     // stack ops
     Dup = 0x76,
 
@@ -183,42 +183,16 @@ impl ZcashDeserialize for Address {
     }
 }
 
-pub trait ToAddressWithNetwork {
+trait ToAddressWithNetwork {
     /// Convert `self` to an `Address`, given the current `network`.
     fn to_address(&self, network: Network) -> Address;
 }
 
 impl ToAddressWithNetwork for Script {
-    /// Return the `Address` that `self` contains, using the same minimal algorithm as `zcashd`.
-    ///
-    /// See https://github.com/zcash/librustzcash/blob/master/zcash_primitives/src/legacy.rs#L43
     fn to_address(&self, network: Network) -> Address {
-        if self.0.len() == 25
-            && self.0[0..3] == [OpCode::Dup as u8, OpCode::Hash160 as u8, 0x14]
-            && self.0[23..25] == [OpCode::EqualVerify as u8, OpCode::CheckSig as u8]
-        {
-            let mut script_hash = [0; 20];
-            script_hash.copy_from_slice(&self.0[3..23]);
-
-            Address::PayToScriptHash {
-                network,
-                script_hash,
-            }
-        } else if self.0.len() == 23
-            && self.0[0..2] == [OpCode::Hash160 as u8, 0x14]
-            && self.0[22] == OpCode::Equal as u8
-        {
-            let mut script_hash = [0; 20];
-            script_hash.copy_from_slice(&self.0[2..22]);
-            Address::PayToScriptHash {
-                network,
-                script_hash,
-            }
-        } else {
-            Address::PayToScriptHash {
-                network,
-                script_hash: Address::hash_payload(&self.0[..]),
-            }
+        Address::PayToScriptHash {
+            network,
+            script_hash: Address::hash_payload(&self.0[..]),
         }
     }
 }

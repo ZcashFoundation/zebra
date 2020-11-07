@@ -7,6 +7,7 @@ mod script;
 mod serialize;
 
 pub use address::Address;
+pub use address::OpCode;
 pub use script::Script;
 
 #[cfg(any(test, feature = "proptest-impl"))]
