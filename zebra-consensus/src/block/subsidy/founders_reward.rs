@@ -114,7 +114,7 @@ pub fn check_script_form(lock_script: Script, address: Address) -> bool {
     if lock_script_hash == address_hash {
         return true;
     }
-    return false;
+    false
 }
 
 /// Returns a list of outputs in `Transaction`, which have a script address equal to `String`.
