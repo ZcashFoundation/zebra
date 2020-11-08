@@ -1,4 +1,4 @@
-name: Unified Google Cloud
+name: CD
 
 on:
   push:
@@ -40,7 +40,7 @@ jobs:
       # Tagging w/ the commit SHA blocks the :latest tag on GCR
       run: |
         gcloud builds submit \
-          --config cloudbuild-unifed.yaml \
+          --config cloudbuild.yaml \
           --substitutions SHORT_SHA="$SHORT_SHA",BRANCH_NAME="$BRANCH_NAME"
 
   test:
