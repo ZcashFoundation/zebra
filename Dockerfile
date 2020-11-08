@@ -1,3 +1,4 @@
+# Builder image
 FROM rust:buster as builder
 
 RUN apt-get update && \
@@ -16,18 +17,20 @@ COPY . .
 RUN cargo fetch --verbose
 COPY . .
 RUN rustc -V; cargo -V; rustup -V; cargo test --all && cargo build --release
+RUN find /zebra/target/debug/deps -type f -perm 755 ! -name '*.dylib' ! -name '*.so' | sed -e 'p;s/-.*//' | xargs -n2 mv
 
 
+# Test binaries image
 FROM debian:buster AS zebra-tests
 
 RUN mkdir /zebra
 WORKDIR /zebra
 COPY --from=builder /zebra/target/debug/zebrad /zebra/target/debug/zebrad
-RUN /bin/bash -c "find /zebra/target/debug/deps -type f -perm 755 ! -name '*.dylib' ! -name '*.so' | sed -e 'p;s/-.*//' | xargs -n2 mv"
 COPY --from=builder /zebra/target/debug/deps/[a-z0-9_]* /zebra/target/debug/deps/
 EXPOSE 8233 18233
 
 
+# Runner image
 FROM debian:buster-slim AS zebrad-release
 
 COPY --from=builder /zebra/target/release/zebrad /
