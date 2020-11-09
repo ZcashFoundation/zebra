@@ -82,6 +82,7 @@ jobs:
         run: |
           gcloud compute instances create-with-container "zebra-tests-$BRANCH_NAME-$SHORT_SHA" \
           --container-image "gcr.io/$PROJECT_ID/$REPOSITORY/tests/$BRANCH_NAME:$SHORT_SHA" \
+          --container-mount-disk mount-path="/zebrad-cache",name=zebrad-cache-$SHORT_SHA \
           --create-disk device-name=zebrad-cache-$SHORT_SHA,image=zebrad-cache-mainnet-height-1018849 \
           --service-account cos-vm@zealous-zebra.iam.gserviceaccount.com \
           --scopes cloud-platform \
@@ -93,7 +94,7 @@ jobs:
         run: |
           gcloud compute ssh "zebra-tests-$BRANCH_NAME-$SHORT_SHA" --zone us-central1-a \
           --command "docker-credential-gcr configure-docker; docker run gcr.io/$PROJECT_ID/$REPOSITORY/tests/$BRANCH_NAME:$SHORT_SHA /bin/bash -c '/zebra/target/debug/deps/acceptance -Z unstable-options --include-ignored'"
-          # --container-mount-disk mount-path="/zebrad-cache",name=zebrad-cache-$SHORT_SHA
+
   deploy:
     name: Deploy mainnet nodes
     needs: build
