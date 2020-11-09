@@ -93,7 +93,14 @@ jobs:
       - name: Run acceptance tests
         run: |
           gcloud compute ssh "zebra-tests-$BRANCH_NAME-$SHORT_SHA" --zone us-central1-a \
-          --command "docker-credential-gcr configure-docker; docker run gcr.io/$PROJECT_ID/$REPOSITORY/tests/$BRANCH_NAME:$SHORT_SHA /bin/bash -c '/zebra/target/debug/deps/acceptance -Z unstable-options --include-ignored'"
+          --command "docker-credential-gcr configure-docker; docker run --mount type=bind,src=/mnt/disks/gce-containers-mounts/gce-persistent-disks/zebrad-cache-$SHORT_SHA,dst=/zebrad-cache gcr.io/$PROJECT_ID/$REPOSITORY/tests/$BRANCH_NAME:$SHORT_SHA /bin/bash -c '/zebra/target/debug/deps/acceptance -Z unstable-options --include-ignored'"
+
+      # Clean up
+      - name: Delete test instance
+        # Always run even if the earlier step fails
+        if: true
+        run: |
+          gcloud compute instances delete "zebra-tests-$BRANCH_NAME-$SHORT_SHA" --delete-disks all --zone us-central1-a
 
   deploy:
     name: Deploy mainnet nodes
