@@ -38,7 +38,7 @@ use self::sled_format::TransactionLocation;
 pub struct FinalizedState {
     /// Queued blocks that arrived out of order, indexed by their parent block hash.
     queued_by_prev_hash: HashMap<block::Hash, QueuedBlock>,
-    max_queued_height: Option<block::Height>,
+    max_queued_height: i32,
 
     hash_by_height: sled::Tree,
     height_by_hash: sled::Tree,
@@ -68,7 +68,7 @@ impl FinalizedState {
 
         let new_state = Self {
             queued_by_prev_hash: HashMap::new(),
-            max_queued_height: None,
+            max_queued_height: -1,
             hash_by_height: db.open_tree(b"hash_by_height").unwrap(),
             height_by_hash: db.open_tree(b"height_by_hash").unwrap(),
             block_by_height: db.open_tree(b"block_by_height").unwrap(),
@@ -189,21 +189,13 @@ impl FinalizedState {
         }
 
         if self.queued_by_prev_hash.is_empty() {
-            self.max_queued_height = None;
             // use -1 as a sentinel value for "None", because 0 is a valid height
-            metrics::gauge!("state.finalized.queued.max.height", -1,);
+            self.max_queued_height = -1;
         } else {
-            self.max_queued_height = self
-                .max_queued_height
-                .filter(|old_max| old_max > &height)
-                .or(Some(height));
-            metrics::gauge!(
-                "state.finalized.queued.max.height",
-                self.max_queued_height
-                    .expect("previous statement ensures that height is valid")
-                    .0 as _,
-            );
+            self.max_queued_height = std::cmp::max(self.max_queued_height, height.0);
         }
+
+        metrics::gauge!("state.finalized.queued.max.height", self.max_queued_height);
 
         metrics::gauge!(
             "state.finalized.queued.block.count",
