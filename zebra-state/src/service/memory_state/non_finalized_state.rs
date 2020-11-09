@@ -93,6 +93,7 @@ impl NonFinalizedState {
     pub fn any_chain_contains(&self, hash: &block::Hash) -> bool {
         self.chain_set
             .iter()
+            .rev()
             .any(|chain| chain.height_by_hash.contains_key(hash))
     }
 
