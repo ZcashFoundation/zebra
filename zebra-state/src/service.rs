@@ -254,7 +254,9 @@ impl StateService {
     }
 
     /// Return an iterator over the relevant chain of the block identified by
-    /// `hash_or_height`.
+    /// `hash_or_height`. Heights iterate over the best chain. Hashes iterate
+    /// over the chain containing the hash, which can be the best chain or a
+    /// side chain. 
     #[allow(dead_code)]
     pub fn chain(&self, hash_or_height: HashOrHeight) -> Iter<'_> {
         Iter {
