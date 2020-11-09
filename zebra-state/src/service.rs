@@ -252,6 +252,87 @@ impl StateService {
     pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Output> {
         self.mem.utxo(outpoint).or_else(|| self.sled.utxo(outpoint))
     }
+
+    /// Return an iterator over the relevant chain of the block identified by
+    /// `hash_or_height`.
+    #[allow(dead_code)]
+    pub fn chain(&self, hash_or_height: HashOrHeight) -> Iter<'_> {
+        Iter {
+            service: self,
+            state: State::NonFinalized(hash_or_height),
+        }
+    }
+}
+
+struct Iter<'a> {
+    service: &'a StateService,
+    state: State,
+}
+
+enum State {
+    NonFinalized(HashOrHeight),
+    Finalized(block::Height),
+    Finished,
+}
+
+impl<'a> Iter<'a> {
+    fn next_non_finalized_block(&mut self) -> Option<Arc<Block>> {
+        let Iter { service, state } = self;
+
+        let hash_or_height = match state {
+            State::NonFinalized(hash_or_height) => hash_or_height,
+            State::Finalized(_) | State::Finished => unreachable!(),
+        };
+
+        if let Some(block) = service.mem.block(*hash_or_height) {
+            let hash = block.header.previous_block_hash;
+            self.state = State::NonFinalized(hash.into());
+            Some(block)
+        } else {
+            None
+        }
+    }
+
+    fn next_finalized_block(&mut self) -> Option<Arc<Block>> {
+        let Iter { service, state } = self;
+
+        let hash_or_height = match *state {
+            State::Finalized(height) => height.into(),
+            State::NonFinalized(hash_or_height) => hash_or_height,
+            State::Finished => unreachable!(),
+        };
+
+        if let Some(block) = service.sled.block(hash_or_height) {
+            let height = block
+                .coinbase_height()
+                .expect("valid blocks have a coinbase height");
+
+            if let Some(next_height) = height - 1 {
+                self.state = State::Finalized(next_height);
+            } else {
+                self.state = State::Finished;
+            }
+
+            Some(block)
+        } else {
+            self.state = State::Finished;
+            None
+        }
+    }
+}
+
+impl<'a> Iterator for Iter<'a> {
+    type Item = Arc<Block>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.state {
+            State::NonFinalized(_) => self
+                .next_non_finalized_block()
+                .or_else(|| self.next_finalized_block()),
+            State::Finalized(_) => self.next_finalized_block(),
+            State::Finished => None,
+        }
+    }
 }
 
 impl Service<Request> for StateService {
