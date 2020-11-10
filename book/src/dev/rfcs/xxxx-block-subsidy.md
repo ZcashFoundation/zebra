@@ -95,6 +95,8 @@ To do the calculations and checks the following constants, types and functions n
 
 ## Constants
 
+### General
+
 - `SLOW_START_INTERVAL: Height`
 - `SLOW_START_SHIFT: Height`
 - `MAX_BLOCK_SUBSIDY: u64`
@@ -103,12 +105,15 @@ To do the calculations and checks the following constants, types and functions n
 - `BLOSSOM_POW_TARGET_SPACING_RATIO: u64`
 - `PRE_BLOSSOM_HALVING_INTERVAL: Height`
 - `POST_BLOSSOM_HALVING_INTERVAL: Height`
+
+### Founders Rewards
+
 - `FOUNDERS_FRACTION_DIVISOR: u64`
 - `FOUNDERS_ADDRESS_COUNT: u32`
 - `FOUNDER_ADDRESSES_MAINNET: [&str; 48]`
 - `FOUNDER_ADDRESSES_TESTNET: [&str; 48]`
 
-### Funding streams parameter constants
+### Funding streams
 
 The design suggests to implement the parameters needed for funding streams as:
 
