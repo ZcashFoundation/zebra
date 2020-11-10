@@ -292,7 +292,7 @@ mod tests {
             zebra_test::vectors::BLOCK_MAINNET_419201_BYTES.zcash_deserialize_into()?;
         let block1: Arc<Block> =
             zebra_test::vectors::BLOCK_MAINNET_419200_BYTES.zcash_deserialize_into()?;
-        // Create a random block which will have a much worse difficulty hash
+        // Create a random block which will have a much worse difficulty threshold
         // than an intentionally mined block from the mainnet
         let child1 = block1.make_fake_child();
         let child2 = block2.make_fake_child();
