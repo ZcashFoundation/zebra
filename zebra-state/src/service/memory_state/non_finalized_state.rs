@@ -180,7 +180,7 @@ impl NonFinalizedState {
         Some(height)
     }
 
-    /// Returns the depth of `hash` in any chain.
+    /// Returns the height of `hash` in any chain.
     pub fn height_by_hash(&self, hash: block::Hash) -> Option<block::Height> {
         for chain in self.chain_set.iter().rev() {
             if let Some(height) = chain.height_by_hash.get(&hash) {
