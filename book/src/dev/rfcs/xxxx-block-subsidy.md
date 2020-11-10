@@ -100,8 +100,6 @@ To do the calculations and checks the following constants, types and functions n
 - `SLOW_START_INTERVAL: Height`
 - `SLOW_START_SHIFT: Height`
 - `MAX_BLOCK_SUBSIDY: u64`
-- `PRE_BLOSSOM_POW_TARGET_SPACING: Duration`
-- `POST_BLOSSOM_POW_TARGET_SPACING: Duration`
 - `BLOSSOM_POW_TARGET_SPACING_RATIO: u64`
 - `PRE_BLOSSOM_HALVING_INTERVAL: Height`
 - `POST_BLOSSOM_HALVING_INTERVAL: Height`
