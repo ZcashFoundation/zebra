@@ -36,7 +36,7 @@ fn debug_format() {
     );
     assert_eq!(
         format!("{:?}", ExpandedDifficulty(U256::one())),
-        "ExpandedDifficulty(\"0100000000000000000000000000000000000000000000000000000000000000\")"
+        "ExpandedDifficulty(\"0000000000000000000000000000000000000000000000000000000000000001\")"
     );
     assert_eq!(
         format!("{:?}", ExpandedDifficulty(U256::MAX)),
@@ -44,6 +44,7 @@ fn debug_format() {
     );
 
     assert_eq!(format!("{:?}", Work(0)), "Work(0x0, 0, -inf)");
+    assert_eq!(format!("{:?}", Work(1)), "Work(0x1, 1, 0.00000)");
     assert_eq!(
         format!("{:?}", Work(u8::MAX as u128)),
         "Work(0xff, 255, 7.99435)"

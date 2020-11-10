@@ -98,7 +98,7 @@ impl fmt::Debug for ExpandedDifficulty {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut buf = [0; 32];
         // Use the same byte order as block::Hash
-        self.0.to_little_endian(&mut buf);
+        self.0.to_big_endian(&mut buf);
         f.debug_tuple("ExpandedDifficulty")
             .field(&hex::encode(&buf))
             .finish()
