@@ -99,9 +99,7 @@ jobs:
         continue-on-error: true
         run: |
           gcloud compute ssh "zebra-tests-$BRANCH_NAME-$SHORT_SHA" --zone us-central1-a \
-          --command " \
-          docker-credential-gcr configure-docker; \
-          docker ps --all --quiet --filter name=$SHORT_SHA;"
+          --command "docker-credential-gcr configure-docker; docker ps --all --quiet --filter name=$SHORT_SHA"
 
       # Clean up
       - name: Delete test instance
