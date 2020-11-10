@@ -222,7 +222,7 @@ height, that pays `fs.Value(height)` zatoshi in the prescribed way to the stream
 
 We make use of the funding streams functions here, similar to founders reward . We get the amount of the reward using `funding_stream(height, network)` and then the address with `funding_stream_address(height, network)`. Next we get a list of outputs that match the amount with the utility function `find_output_with_amount()`. Finally with this list, we check if any of the output scripts matches the address we have computed.
 
-### 4 - Shielded coinbase:
+### 3 - Shielded coinbase:
 
 *[Pre-Heartwood] A coinbase transaction MUST NOT have any JoinSplit descriptions, Spend descriptions, or Output descriptions.*
 
