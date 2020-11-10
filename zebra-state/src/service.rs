@@ -248,6 +248,11 @@ impl StateService {
         self.mem.hash(height).or_else(|| self.sled.hash(height))
     }
 
+    /// Return the hash for the block at `height` in the current best chain.
+    pub fn height(&self, hash: block::Hash) -> Option<block::Height> {
+        self.mem.height(hash).or_else(|| self.sled.height(hash))
+    }
+
     /// Return the utxo pointed to by `outpoint` if it exists in any chain.
     pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Output> {
         self.mem.utxo(outpoint).or_else(|| self.sled.utxo(outpoint))
@@ -336,9 +341,28 @@ impl Iterator for Iter<'_> {
             IterState::Finished => None,
         }
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.len();
+        (len, Some(len))
+    }
 }
 
 impl std::iter::FusedIterator for Iter<'_> {}
+
+impl ExactSizeIterator for Iter<'_> {
+    fn len(&self) -> usize {
+        match self.state {
+            IterState::NonFinalized(hash) => self
+                .service
+                .height(hash)
+                .map(|height| (height.0 + 1) as _)
+                .unwrap_or(0),
+            IterState::Finalized(height) => (height.0 + 1) as _,
+            IterState::Finished => 0,
+        }
+    }
+}
 
 impl Service<Request> for StateService {
     type Response = Response;
