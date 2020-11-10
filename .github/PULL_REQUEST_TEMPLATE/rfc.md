@@ -21,7 +21,7 @@ Please copy the RFC summary over here.
 
 ### More information
 
-Feature Name: `my_feature`
+Feature Name: `my-feature`
 
 Start Date: YYYY-MM-DD
 
