@@ -1,9 +1,8 @@
 ---
-name: RFC Template
-about: A design RFC for Zebra
-title: ''
-labels: C-design
-assignees: ''
+Title: RFC Template
+About: A design RFC for Zebra
+Labels: C-design
+Assignees: ''
 
 ---
 
@@ -15,10 +14,22 @@ The RFC process is documented in CONTRIBUTING.md.
 Please see the checklist there: https://zebra.zfnd.org/CONTRIBUTING.html
 -->
 
+
+### Summary
+
+Please copy the RFC summary over here. 
+
+### More information
+
 Feature Name: `my_feature`
+
 Start Date: YYYY-MM-DD
+
 Design PR: [ZcashFoundation/zebra#0000](https://github.com/ZcashFoundation/zebra/pull/0000)
+
 Zebra Issue: [ZcashFoundation/zebra#0000](https://github.com/ZcashFoundation/zebra/pull/0000)
+
+### Document
 
 <!--
 Fill this in, replacing:
@@ -32,7 +43,7 @@ XXXX-my-feature with the filename of the RFC
 
 ## Zebra Team Approval
 
-Everyone on the Zebra team should review design RFCs:
+Everyone on the Zebra team should review design RFCs:my_feature
 
 - [ ] @dconnolly 
 - [ ] @hdevalence 
