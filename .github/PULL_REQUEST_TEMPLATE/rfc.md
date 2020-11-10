@@ -43,7 +43,7 @@ XXXX-my-feature with the filename of the RFC
 
 ## Zebra Team Approval
 
-Everyone on the Zebra team should review design RFCs:my_feature
+Everyone on the Zebra team should review design RFCs:
 
 - [ ] @dconnolly 
 - [ ] @hdevalence 
