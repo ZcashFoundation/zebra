@@ -278,7 +278,7 @@ enum IterState {
     Finished,
 }
 
-impl<'a> Iter<'a> {
+impl Iter<'_> {
     fn next_non_finalized_block(&mut self) -> Option<Arc<Block>> {
         let Iter { service, state } = self;
 
@@ -324,7 +324,7 @@ impl<'a> Iter<'a> {
     }
 }
 
-impl<'a> Iterator for Iter<'a> {
+impl Iterator for Iter<'_> {
     type Item = Arc<Block>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -337,6 +337,8 @@ impl<'a> Iterator for Iter<'a> {
         }
     }
 }
+
+impl std::iter::FusedIterator for Iter<'_> {}
 
 impl Service<Request> for StateService {
     type Response = Response;
