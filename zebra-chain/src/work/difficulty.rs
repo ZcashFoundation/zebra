@@ -239,17 +239,57 @@ impl CompactDifficulty {
     /// [Zcash Specification]: https://zips.z.cash/protocol/protocol.pdf#workdef
     pub fn to_work(&self) -> Option<Work> {
         let expanded = self.to_expanded()?;
+        Work::try_from(expanded).ok()
+    }
+}
 
+impl TryFrom<ExpandedDifficulty> for Work {
+    type Error = ();
+
+    fn try_from(expanded: ExpandedDifficulty) -> Result<Self, Self::Error> {
         // We need to compute `2^256 / (expanded + 1)`, but we can't represent
         // 2^256, as it's too large for a u256. However, as 2^256 is at least as
         // large as `expanded + 1`, it is equal to
         // `((2^256 - expanded - 1) / (expanded + 1)) + 1`, or
         let result = (!expanded.0 / (expanded.0 + 1)) + 1;
         if result <= u128::MAX.into() {
-            Some(Work(result.as_u128()))
+            Ok(Work(result.as_u128()))
         } else {
-            None
+            Err(())
         }
+    }
+}
+
+impl TryFrom<u128> for Work {
+    type Error = ();
+
+    fn try_from(value: u128) -> Result<Self, Self::Error> {
+        if value == 0 {
+            Err(())
+        } else {
+            Ok(Work(value))
+        }
+    }
+}
+
+impl From<ExpandedDifficulty> for CompactDifficulty {
+    fn from(value: ExpandedDifficulty) -> Self {
+        value.to_compact()
+    }
+}
+
+impl From<Work> for CompactDifficulty {
+    fn from(value: Work) -> Self {
+        let expanded = ExpandedDifficulty::from(value);
+        Self::from(expanded)
+    }
+}
+
+impl From<Work> for ExpandedDifficulty {
+    fn from(value: Work) -> Self {
+        let work: U256 = value.0.into();
+        let expanded = (!work + 1) / work;
+        ExpandedDifficulty(expanded)
     }
 }
 
