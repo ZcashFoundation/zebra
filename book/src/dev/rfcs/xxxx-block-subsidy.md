@@ -53,7 +53,7 @@ https://zips.z.cash/protocol/canopy.pdf#joinsplitencodingandconsensus
 
 The balance rule is that this pool must have non-negative value, and its net value is the miner fee for the transaction.
 
-**Note:** To compute the transparent value pool we need blockchain state. The `tx_in` is always a reference to a previous transaction output, this is different from Sprout and Sapling pools where everything we need is in the same transaction. The details about how this is going to be implemented are outside of the scope of this RFC and they will not be described.
+**Note:** To compute the transparent value pool we need blockchain state. The `tx_in` is always a reference to a previous transaction output, this is different from Sprout and Sapling pools where everything we need is in the same transaction. The details about how this is going to be implemented are outside of the scope of this RFC. They will be documented in a separate contextual validation RFC.
 
 # Guide-level explanation
 [guide-level-explanation]: #guide-level-explanation
@@ -89,7 +89,7 @@ It is important to note that all blocks before Sapling are verified by the Check
 # Reference-level explanation
 [reference-level-explanation]: #reference-level-explanation
 
-Given the module structure proposed above all the block subsidy calculations from the protocol must be implemented. The final goal is to do checks for each incoming block and make sure they pass the consensus rules.
+Given the module structure proposed above, the block subsidy calculations from the protocol must be implemented. The final goal is to do semantic validation for each incoming block and make sure they pass the consensus rules.
 
 To do the calculations and checks the following constants, types and functions need to be introduced:
 
@@ -114,7 +114,6 @@ The design suggests to implement the parameters needed for funding streams as:
 
 ```
 /// The funding stream receiver categories
-#[allow(missing_docs)]
 pub enum FundingStreamReceiver {
     BootstrapProject,
     ZcashFoundation,
@@ -136,11 +135,6 @@ const FUNDING_STREAM_RECEIVER_NUMERATORS: &[(FundingStreamReceiver, u64)] = &[
 /// [7.9.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
 pub const FUNDING_STREAM_RECEIVER_DENOMINATOR: u64 = 100;
 
-#[allow(missing_docs)]
-pub enum FundingStreamRange {
-    StartHeight,
-    EndHeight,
-}
 
 /// Start and end Heights for funding streams 
 /// as described in [protocol specification §7.9.1][7.9.1].
@@ -167,7 +161,7 @@ The following constants are needed:
 
 ## General subsidy
 
-The block subsidy and miner reward among other utility functions are inside the general subsidy category.
+The block subsidy and other utility functions are inside the general subsidy category.
 
 https://zips.z.cash/protocol/canopy.pdf#subsidyconcepts
 
@@ -175,8 +169,6 @@ https://zips.z.cash/protocol/canopy.pdf#subsidies
 
 - `block_subsidy(Height, Network) -> Result<Amount<NonNegative>, Error>` - Total block subsidy.
 - `miner_subsidy(Height, Network) -> Result<Amount<NonNegative>, Error>` - Miner portion.
-- `miner_fees(&Block) -> Result<Amount<NonNegative>, Error>` - Total block fees calculated as [Transparent value pool calculation](#transparent-value-pool-calculation) that belongs to the miner.
-- `coinbase_sum_outputs(&Transaction) -> Result<Amount<NonNegative>, Error>` - Sum of all output values in the coinbase transaction.
 - `find_output_with_amount(&Transaction, Amount<NonNegative>) -> Vec<transparent::Output>` - Outputs where value equal to Amount.
 - `shielded_coinbase(Height, Network, &Transaction) -> Result<(), Error>` - Validate shielded coinbase rules.
 
@@ -225,18 +217,6 @@ height, that pays `fs.Value(height)` zatoshi in the prescribed way to the stream
 
 We make use of the funding streams functions here, similar to founders reward . We get the amount of the reward using `funding_stream(height, network)` and then the address with `funding_stream_address(height, network)`. Next we get a list of outputs that match the amount with the utility function `find_output_with_amount()`. Finally with this list, we check if any of the output scripts matches the address we have computed.
 
-### 3 - Miner subsidy:
-
-*The total amount of transparent outputs from a coinbase transaction, minus the amount of the `valueBalance` field if present, **MUST NOT** be greater than the amount of miner subsidy plus the total amount of transaction fees paid by transactions in this block.* https://zips.z.cash/protocol/canopy.pdf#txnencodingandconsensus
-
-So the rule is the following before Canopy:
-
-`coinbase_sum_outputs() <= miner_subsidy() + founders_reward() + transaction_fees()` 
-
-and after Canopy:
-
-`coinbase_sum_outputs() <= miner_subsidy() + funding_stream() + transaction_fees()`
-
 ### 4 - Shielded coinbase:
 
 *[Pre-Heartwood] A coinbase transaction MUST NOT have any JoinSplit descriptions, Spend descriptions, or Output descriptions.*
@@ -264,14 +244,11 @@ pub enum SubsidyError {
     #[error("founders reward address not found")]
     FoundersRewardAddressNotFound,
     
-    #[error("founding stream amount not found")]
+    #[error("funding stream amount not found")]
     FundingStreamAmountNotFound,
     
-    #[error("founding stream address not found")]
+    #[error("funding stream address not found")]
     FundingStreamAddressNotFound,
-    
-    #[error("the sum of outputs is greater than calculated subsidies and transaction fees")]
-    MinerSubsidyRuleBroken,
     
     #[error("invalid shielded descriptions found")]
     ShieldedDescriptionsInvalid,
@@ -286,8 +263,11 @@ pub enum SubsidyError {
 2. Founders Reward Addresses
 3. Funding Streams Amounts (defer Shielded Coinbase)
 4. Funding Streams Addresses 
-5. Miner Subsidy Amounts (defer Shielded Coinbase)
-6. Shielded Coinbase for Funding Streams and Miner Subsidy
+5. Shielded Coinbase for Funding Streams
+
+The following contextual validation checks are out of scope for this RFC:
+* Miner Subsidy Amounts
+* Shielded Coinbase for Miner Subsidy
 
 Each stage should have code, unit tests, block test vector tests, and property tests, before moving on to the next stage. (A stage can be implemented in multiple PRs.)
 
@@ -295,7 +275,7 @@ Each stage should have code, unit tests, block test vector tests, and property t
 
 For each network(Mainnet, Testnet), calculation of subsidy amounts need a `Height` as input and will output different amounts according to it.
 
-- Test all subsidy amount functions(`block_subsidy()`, `miner_subsidy()`, `founders_reward()` and `funding_stream()`) against all network upgrade events of each network and make sure they return the expected amounts according to known outputs.
+- Test all subsidy amount functions(`block_subsidy()`, `founders_reward()` and `funding_stream()`) against all network upgrade events of each network and make sure they return the expected amounts according to known outputs.
 
 For each network, the address of the reward receiver on each block will depend on the `Height`.
 
