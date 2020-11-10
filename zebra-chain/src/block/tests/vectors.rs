@@ -11,6 +11,8 @@ use super::generate; // XXX this should be rewritten as strategies
 
 #[test]
 fn blockheaderhash_debug() {
+    zebra_test::init();
+
     let preimage = b"foo bar baz";
     let mut sha_writer = sha256d::Writer::default();
     let _ = sha_writer.write_all(preimage);
@@ -25,6 +27,8 @@ fn blockheaderhash_debug() {
 
 #[test]
 fn blockheaderhash_from_blockheader() {
+    zebra_test::init();
+
     let blockheader = generate::block_header();
 
     let hash = Hash::from(&blockheader);
@@ -69,6 +73,8 @@ fn deserialize_blockheader() {
 
 #[test]
 fn deserialize_block() {
+    zebra_test::init();
+
     // this one has a bad version field
     zebra_test::vectors::BLOCK_MAINNET_434873_BYTES
         .zcash_deserialize_into::<Block>()
@@ -83,6 +89,8 @@ fn deserialize_block() {
 
 #[test]
 fn block_test_vectors_unique() {
+    zebra_test::init();
+
     let block_count = zebra_test::vectors::BLOCKS.len();
     let block_hashes: HashSet<_> = zebra_test::vectors::BLOCKS
         .iter()
@@ -103,11 +111,15 @@ fn block_test_vectors_unique() {
 
 #[test]
 fn block_test_vectors_height_mainnet() {
+    zebra_test::init();
+
     block_test_vectors_height(Network::Mainnet);
 }
 
 #[test]
 fn block_test_vectors_height_testnet() {
+    zebra_test::init();
+
     block_test_vectors_height(Network::Testnet);
 }
 
@@ -131,6 +143,8 @@ fn block_test_vectors_height(network: Network) {
 
 #[test]
 fn block_limits_multi_tx() {
+    zebra_test::init();
+
     // Test multiple small transactions to fill a block max size
 
     // Create a block just below the limit
@@ -166,6 +180,8 @@ fn block_limits_multi_tx() {
 
 #[test]
 fn block_limits_single_tx() {
+    zebra_test::init();
+
     // Test block limit with a big single transaction
 
     // Create a block just below the limit
@@ -213,6 +229,8 @@ fn node_time_check(
 
 #[test]
 fn time_check_now() {
+    zebra_test::init();
+
     // These checks are deteministic, because all the times are offset
     // from the current time.
     let now = Utc::now();
@@ -273,6 +291,8 @@ static BLOCK_HEADER_INVALID_TIMESTAMPS: &[i64] = &[
 
 #[test]
 fn time_check_fixed() {
+    zebra_test::init();
+
     // These checks are non-deterministic, but the times are all in the
     // distant past or far future. So it's unlikely that the test
     // machine will have a clock that makes these tests fail.

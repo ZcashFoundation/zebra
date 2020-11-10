@@ -92,6 +92,8 @@ mod tests {
     // XXX remove this test and replace it with a proptest instance.
     #[test]
     fn sanitize_truncates_timestamps() {
+        zebra_test::init();
+
         let entry = MetaAddr {
             services: PeerServices::default(),
             addr: "127.0.0.1:8233".parse().unwrap(),

@@ -588,6 +588,8 @@ mod test {
     /// Make sure the timeout values are consistent with each other.
     #[test]
     fn ensure_timeouts_consistent() {
+        zebra_test::init();
+
         let max_download_retry_time =
             BLOCK_DOWNLOAD_TIMEOUT.as_secs() * (BLOCK_DOWNLOAD_RETRY_LIMIT as u64);
         assert!(

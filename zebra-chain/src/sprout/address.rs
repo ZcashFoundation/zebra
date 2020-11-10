@@ -138,6 +138,8 @@ mod tests {
 
     #[test]
     fn from_string_debug() {
+        zebra_test::init();
+
         let string = "zcU1Cd6zYyZCd2VJF8yKgmzjxdiiU1rgTTjEwoN1CGUWCziPkUTXUjXmX7TMqdMNsTfuiGN1jQoVN4kGxUR4sAPN4XZ7pxb";
         let zc_addr = string.parse::<SproutShieldedAddress>().unwrap();
 
@@ -150,6 +152,7 @@ proptest! {
 
     #[test]
     fn zcash_de_serialize_roundtrip(zaddr in any::<SproutShieldedAddress>()) {
+        zebra_test::init();
 
         let mut data = Vec::new();
 
@@ -163,6 +166,7 @@ proptest! {
 
     #[test]
     fn zcash_base58check_roundtrip(zaddr in any::<SproutShieldedAddress>()) {
+        zebra_test::init();
 
         let string = zaddr.to_string();
 

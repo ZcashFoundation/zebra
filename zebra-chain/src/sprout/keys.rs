@@ -344,6 +344,8 @@ mod tests {
     #[test]
     // TODO: test vectors, not just random data
     fn derive_keys() {
+        zebra_test::init();
+
         let spending_key = SpendingKey::new(&mut OsRng);
 
         let receiving_key = ReceivingKey::from(spending_key);
@@ -357,6 +359,7 @@ proptest! {
 
     #[test]
     fn spending_key_roundtrip(sk in any::<SpendingKey>()) {
+        zebra_test::init();
 
         let mut data = Vec::new();
 
@@ -370,6 +373,7 @@ proptest! {
 
     #[test]
     fn spending_key_string_roundtrip(sk in any::<SpendingKey>()) {
+        zebra_test::init();
 
         let string = sk.to_string();
 
@@ -381,6 +385,7 @@ proptest! {
 
     #[test]
     fn incoming_viewing_key_roundtrip(ivk in any::<IncomingViewingKey>()) {
+        zebra_test::init();
 
         let mut data = Vec::new();
 
@@ -394,6 +399,7 @@ proptest! {
 
     #[test]
     fn incoming_viewing_key_string_roundtrip(ivk in any::<IncomingViewingKey>()) {
+        zebra_test::init();
 
         let string = ivk.to_string();
 

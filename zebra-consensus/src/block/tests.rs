@@ -135,6 +135,8 @@ async fn check_transcripts() -> Result<(), Report> {
 
 #[test]
 fn coinbase_is_first_for_historical_blocks() -> Result<(), Report> {
+    zebra_test::init();
+
     let block_iter = zebra_test::vectors::BLOCKS.iter();
 
     for block in block_iter {
@@ -151,6 +153,8 @@ fn coinbase_is_first_for_historical_blocks() -> Result<(), Report> {
 
 #[test]
 fn difficulty_is_valid_for_historical_blocks() -> Result<(), Report> {
+    zebra_test::init();
+
     difficulty_is_valid_for_network(Network::Mainnet)?;
     difficulty_is_valid_for_network(Network::Testnet)?;
 
@@ -177,6 +181,7 @@ fn difficulty_is_valid_for_network(network: Network) -> Result<(), Report> {
 
 #[test]
 fn difficulty_validation_failure() -> Result<(), Report> {
+    zebra_test::init();
     use crate::error::*;
 
     // Get a block in the mainnet, and mangle its difficulty field
@@ -237,6 +242,8 @@ fn difficulty_validation_failure() -> Result<(), Report> {
 
 #[test]
 fn equihash_is_valid_for_historical_blocks() -> Result<(), Report> {
+    zebra_test::init();
+
     let block_iter = zebra_test::vectors::BLOCKS.iter();
 
     for block in block_iter {
@@ -253,6 +260,8 @@ fn equihash_is_valid_for_historical_blocks() -> Result<(), Report> {
 
 #[test]
 fn subsidy_is_valid_for_historical_blocks() -> Result<(), Report> {
+    zebra_test::init();
+
     subsidy_is_valid_for_network(Network::Mainnet)?;
     subsidy_is_valid_for_network(Network::Testnet)?;
 
@@ -283,6 +292,7 @@ fn subsidy_is_valid_for_network(network: Network) -> Result<(), Report> {
 
 #[test]
 fn coinbase_validation_failure() -> Result<(), Report> {
+    zebra_test::init();
     use crate::error::*;
 
     let network = Network::Mainnet;
@@ -355,6 +365,7 @@ fn coinbase_validation_failure() -> Result<(), Report> {
 
 #[test]
 fn founders_reward_validation_failure() -> Result<(), Report> {
+    zebra_test::init();
     use crate::error::*;
     use zebra_chain::transaction::Transaction;
 
@@ -398,6 +409,8 @@ fn founders_reward_validation_failure() -> Result<(), Report> {
 
 #[test]
 fn time_is_valid_for_historical_blocks() -> Result<(), Report> {
+    zebra_test::init();
+
     let block_iter = zebra_test::vectors::BLOCKS.iter();
     let now = Utc::now();
 

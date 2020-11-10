@@ -19,6 +19,7 @@ fn minimum_difficulty_testnet() {
 
 /// Test MinimumDifficulty
 fn minimum_difficulty(network: Network) {
+    zebra_test::init();
     use block::Height;
     use MinimumDifficulty::*;
 

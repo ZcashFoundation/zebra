@@ -37,6 +37,8 @@ mod tests {
 
     #[test]
     fn derive_for_each_test_vector() {
+        zebra_test::init();
+
         for test_vector in test_vectors::TEST_VECTORS.iter() {
             let spending_key = SpendingKey::from(test_vector.sk);
 
@@ -76,6 +78,8 @@ proptest! {
 
     #[test]
     fn string_roundtrips(spending_key in any::<SpendingKey>()) {
+        zebra_test::init();
+
         let sk_string = spending_key.to_string();
         let spending_key_2: SpendingKey = sk_string.parse().unwrap();
         prop_assert_eq![spending_key, spending_key_2];

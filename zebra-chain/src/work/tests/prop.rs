@@ -9,6 +9,8 @@ use super::super::*;
 
 #[test]
 fn equihash_solution_roundtrip() {
+    zebra_test::init();
+
     proptest!(|(solution in any::<equihash::Solution>())| {
             let data = solution
                 .zcash_serialize_to_vec()

@@ -119,6 +119,8 @@ mod tests {
 
     #[test]
     fn from_str_display() {
+        zebra_test::init();
+
         let zs_addr: Address =
             "zs1qqqqqqqqqqqqqqqqqrjq05nyfku05msvu49mawhg6kr0wwljahypwyk2h88z6975u563j8nfaxd"
                 .parse()
@@ -132,6 +134,8 @@ mod tests {
 
     #[test]
     fn derive_keys_and_addresses() {
+        zebra_test::init();
+
         let spending_key = keys::SpendingKey::new(&mut OsRng);
 
         let spend_authorizing_key = keys::SpendAuthorizingKey::from(spending_key);
@@ -158,6 +162,7 @@ proptest! {
 
     #[test]
     fn sapling_address_roundtrip(zaddr in any::<Address>()) {
+        zebra_test::init();
 
         let string = zaddr.to_string();
 
