@@ -50,11 +50,13 @@ impl NonFinalizedState {
             }
         }
 
+        self.update_metrics_for_chains();
+
         // return the finalized block
         finalized_block
     }
 
-    /// Commit block to the non-finalize state.
+    /// Commit block to the non-finalized state.
     pub fn commit_block(&mut self, block: Arc<Block>) {
         let parent_hash = block.header.previous_block_hash;
 
@@ -68,16 +70,18 @@ impl NonFinalizedState {
             })
             .expect("commit_block is only called with blocks that are ready to be commited");
 
-        parent_chain.push(block);
+        parent_chain.push(block.clone());
         self.chain_set.insert(parent_chain);
+        self.update_metrics_for_committed_block(block);
     }
 
     /// Commit block to the non-finalized state as a new chain where its parent
     /// is the finalized tip.
     pub fn commit_new_chain(&mut self, block: Arc<Block>) {
         let mut chain = Chain::default();
-        chain.push(block);
+        chain.push(block.clone());
         self.chain_set.insert(Box::new(chain));
+        self.update_metrics_for_committed_block(block);
     }
 
     /// Returns the length of the non-finalized portion of the current best chain.
@@ -181,5 +185,35 @@ impl NonFinalizedState {
             .iter()
             .next_back()
             .map(|box_chain| box_chain.deref())
+    }
+
+    /// Update the metrics after `block` is committed
+    fn update_metrics_for_committed_block(&self, block: Arc<Block>) {
+        let height = block.coinbase_height().unwrap();
+
+        metrics::counter!("state.memory.committed.block.count", 1);
+        metrics::gauge!("state.memory.committed.block.height", height.0 as _);
+
+        if self
+            .best_chain()
+            .unwrap()
+            .blocks
+            .iter()
+            .next_back()
+            .unwrap()
+            .1
+            == &block
+        {
+            metrics::counter!("state.memory.best.committed.block.count", 1);
+            metrics::gauge!("state.memory.best.committed.block.height", height.0 as _);
+        }
+
+        self.update_metrics_for_chains();
+    }
+
+    /// Update the metrics after `self.chain_set` is modified
+    fn update_metrics_for_chains(&self) {
+        metrics::gauge!("state.memory.chain.count", self.chain_set.len() as _);
+        metrics::gauge!("state.memory.best.chain.length", self.best_chain_len() as _);
     }
 }
