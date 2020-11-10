@@ -1,4 +1,8 @@
 //! Miscellaneous test code for Zebra.
+
+// Each lazy_static variable uses additional recursion
+#![recursion_limit = "256"]
+
 use color_eyre::section::PanicMessage;
 use owo_colors::OwoColorize;
 use tracing_error::ErrorLayer;
