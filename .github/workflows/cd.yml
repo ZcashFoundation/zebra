@@ -81,8 +81,13 @@ jobs:
       - name: Create instance with test container image
         run: |
           gcloud compute instances create-with-container "zebra-tests-$BRANCH_NAME-$SHORT_SHA" \
+          --container-arg="-Z unstable-options --include-ignored" \
+          --container-command /zebra/target/debug/deps/acceptance \
           --container-image "gcr.io/$PROJECT_ID/$REPOSITORY/tests/$BRANCH_NAME:$SHORT_SHA" \
           --container-mount-disk mount-path="/zebrad-cache",name=zebrad-cache-$SHORT_SHA \
+          --container-restart-policy="never" \
+          --container-stdin \
+          --container-tty \
           --create-disk name=zebrad-cache-$SHORT_SHA,image=zebrad-cache-mainnet-height-1018849 \
           --service-account cos-vm@zealous-zebra.iam.gserviceaccount.com \
           --scopes cloud-platform \
@@ -91,9 +96,13 @@ jobs:
 
       # Runs particular test(s) w/ test state disks mounted
       - name: Run acceptance tests
+        continue-on-error: true
         run: |
           gcloud compute ssh "zebra-tests-$BRANCH_NAME-$SHORT_SHA" --zone us-central1-a \
-          --command "docker-credential-gcr configure-docker; docker run --mount type=bind,src=/mnt/disks/gce-containers-mounts/gce-persistent-disks/zebrad-cache-$SHORT_SHA,dst=/zebrad-cache gcr.io/$PROJECT_ID/$REPOSITORY/tests/$BRANCH_NAME:$SHORT_SHA /bin/bash -c '/zebra/target/debug/deps/acceptance -Z unstable-options --include-ignored'"
+          --command " \
+          docker-credential-gcr configure-docker; \
+          docker start -a $(docker ps --quiet --filter name=$SHORT_SHA); \
+          "
 
       # Clean up
       - name: Delete test instance
