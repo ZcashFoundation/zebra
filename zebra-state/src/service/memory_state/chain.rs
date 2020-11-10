@@ -485,18 +485,18 @@ mod tests {
     }
 
     #[test]
-    fn superchain_is_greater_than_subchain() -> Result<()> {
+    fn ord_matches_work() -> Result<()> {
         zebra_test::init();
-        let block: Arc<Block> =
-            zebra_test::vectors::BLOCK_MAINNET_434873_BYTES.zcash_deserialize_into()?;
+        let less_block = zebra_test::vectors::BLOCK_MAINNET_434873_BYTES
+            .zcash_deserialize_into::<Arc<Block>>()?
+            .set_work(1);
+        let more_block = less_block.clone().set_work(10);
 
         let mut lesser_chain = Chain::default();
-        lesser_chain.push(block.clone());
+        lesser_chain.push(less_block);
 
-        let fake_child = block.make_fake_child();
         let mut bigger_chain = Chain::default();
-        bigger_chain.push(block);
-        bigger_chain.push(fake_child);
+        bigger_chain.push(more_block);
 
         assert!(bigger_chain > lesser_chain);
 
