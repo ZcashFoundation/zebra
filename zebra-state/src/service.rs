@@ -248,9 +248,11 @@ impl StateService {
         self.mem.hash(height).or_else(|| self.sled.hash(height))
     }
 
-    /// Return the hash for the block at `height` in the current best chain.
-    pub fn height(&self, hash: block::Hash) -> Option<block::Height> {
-        self.mem.height(hash).or_else(|| self.sled.height(hash))
+    /// Return the height for the block at `hash` in any chain.
+    pub fn height_by_hash(&self, hash: block::Hash) -> Option<block::Height> {
+        self.mem
+            .height_by_hash(hash)
+            .or_else(|| self.sled.height(hash))
     }
 
     /// Return the utxo pointed to by `outpoint` if it exists in any chain.
@@ -355,7 +357,7 @@ impl ExactSizeIterator for Iter<'_> {
         match self.state {
             IterState::NonFinalized(hash) => self
                 .service
-                .height(hash)
+                .height_by_hash(hash)
                 .map(|height| (height.0 + 1) as _)
                 .unwrap_or(0),
             IterState::Finalized(height) => (height.0 + 1) as _,

@@ -180,6 +180,17 @@ impl NonFinalizedState {
         Some(height)
     }
 
+    /// Returns the depth of `hash` in any chain.
+    pub fn height_by_hash(&self, hash: block::Hash) -> Option<block::Height> {
+        for chain in self.chain_set.iter().rev() {
+            if let Some(height) = chain.height_by_hash.get(&hash) {
+                return Some(*height);
+            }
+        }
+
+        None
+    }
+
     /// Returns the given transaction if it exists in the best chain.
     pub fn transaction(&self, hash: transaction::Hash) -> Option<Arc<Transaction>> {
         let best_chain = self.best_chain()?;
