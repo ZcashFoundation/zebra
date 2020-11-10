@@ -109,7 +109,7 @@ impl QueuedBlocks {
                     .expect("parent is present");
                 assert!(
                     removed.contains(&hash),
-                    "hash msut be present in parent hash list"
+                    "hash must be present in parent hash list"
                 );
             } else {
                 assert!(
