@@ -96,10 +96,27 @@ impl QueuedBlocks {
         for hash in by_height.into_iter().flat_map(|(_, hashes)| hashes) {
             let expired = self.blocks.remove(&hash).expect("block is present");
             let parent_hash = &expired.block.header.previous_block_hash;
-            self.by_parent
+
+            let parent_list = self
+                .by_parent
                 .get_mut(parent_hash)
-                .expect("parent is present")
-                .remove(&hash);
+                .expect("parent is present");
+
+            if parent_list.len() == 1 {
+                let removed = self
+                    .by_parent
+                    .remove(parent_hash)
+                    .expect("parent is present");
+                assert!(
+                    removed.contains(&hash),
+                    "hash msut be present in parent hash list"
+                );
+            } else {
+                assert!(
+                    parent_list.remove(&hash),
+                    "hash must be present in parent hash list"
+                );
+            }
         }
 
         tracing::trace!(num_blocks = %self.blocks.len(), "Finished pruning blocks at or beneath the finalized tip height",);
@@ -212,6 +229,45 @@ mod tests {
         assert_eq!(0, queue.blocks.len());
         assert_eq!(0, queue.by_parent.len());
         assert_eq!(0, queue.by_height.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn prune_removes_right_children() -> Result<()> {
+        zebra_test::init();
+
+        let block1: Arc<Block> =
+            zebra_test::vectors::BLOCK_MAINNET_419200_BYTES.zcash_deserialize_into()?;
+        let child1: Arc<Block> =
+            zebra_test::vectors::BLOCK_MAINNET_419201_BYTES.zcash_deserialize_into()?;
+        let child2 = block1.make_fake_child();
+
+        let mut queue = QueuedBlocks::default();
+        queue.queue(block1.clone().into_queued());
+        queue.queue(child1.clone().into_queued());
+        queue.queue(child2.clone().into_queued());
+        assert_eq!(3, queue.blocks.len());
+        assert_eq!(2, queue.by_parent.len());
+        assert_eq!(2, queue.by_height.len());
+
+        // Pruning the first height removes only block1
+        queue.prune_by_height(block1.coinbase_height().unwrap());
+        assert_eq!(2, queue.blocks.len());
+        assert_eq!(1, queue.by_parent.len());
+        assert_eq!(1, queue.by_height.len());
+        assert!(queue.get_mut(&block1.hash()).is_none());
+        assert!(queue.get_mut(&child1.hash()).is_some());
+        assert!(queue.get_mut(&child2.hash()).is_some());
+
+        // Dequeueing the children of the first block removes both of the other
+        // blocks, and empties all lists
+        queue.prune_by_height(child1.coinbase_height().unwrap());
+        assert_eq!(0, queue.blocks.len());
+        assert_eq!(0, queue.by_parent.len());
+        assert_eq!(0, queue.by_height.len());
+        assert!(queue.get_mut(&child1.hash()).is_none());
+        assert!(queue.get_mut(&child2.hash()).is_none());
 
         Ok(())
     }
