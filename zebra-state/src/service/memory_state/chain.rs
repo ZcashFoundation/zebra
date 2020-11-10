@@ -485,7 +485,7 @@ mod tests {
     }
 
     #[test]
-    fn bigger_is_greater() -> Result<()> {
+    fn superchain_is_greater_than_subchain() -> Result<()> {
         zebra_test::init();
         let block: Arc<Block> =
             zebra_test::vectors::BLOCK_MAINNET_434873_BYTES.zcash_deserialize_into()?;
