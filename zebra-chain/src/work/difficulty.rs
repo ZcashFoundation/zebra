@@ -280,7 +280,16 @@ impl ExpandedDifficulty {
             Network::Testnet => (U256::one() << 251) - 1,
         };
 
-        limit.into()
+        // `zcashd` converts the PoWLimit into a compact representation before
+        // using it to perform difficulty filter checks.
+        //
+        // The Zcash specification converts to compact for the default difficulty
+        // filter, but not for testnet minimum difficulty blocks. (ZIP 205 and
+        // ZIP 208 don't specify this conversion either.) See #1277 for details.
+        ExpandedDifficulty(limit)
+            .to_compact()
+            .to_expanded()
+            .expect("difficulty limits are valid expanded values")
     }
 
     /// Calculate the CompactDifficulty for an expanded difficulty.

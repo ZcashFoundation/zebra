@@ -318,6 +318,44 @@ fn block_difficulty() -> Result<(), Report> {
     Ok(())
 }
 
+/// Test that the genesis block threshold is PowLimit
+#[test]
+fn genesis_block_difficulty() -> Result<(), Report> {
+    genesis_block_difficulty_for_network(Network::Mainnet)?;
+    genesis_block_difficulty_for_network(Network::Testnet)?;
+
+    Ok(())
+}
+
+#[spandoc::spandoc]
+fn genesis_block_difficulty_for_network(network: Network) -> Result<(), Report> {
+    zebra_test::init();
+
+    let block = match network {
+        Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.get(&0),
+        Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.get(&0),
+    };
+
+    let block = block.expect("test vectors contain the genesis block");
+    let block = Block::zcash_deserialize(&block[..]).expect("block test vector should deserialize");
+    let hash = block.hash();
+
+    /// SPANDOC: Calculate the threshold for the genesis block {?network}
+    let threshold = block
+        .header
+        .difficulty_threshold
+        .to_expanded()
+        .expect("Chain blocks have valid difficulty thresholds.");
+
+    /// SPANDOC: Check the genesis PoWLimit {?network, ?threshold, ?hash}
+    {
+        assert_eq!(threshold, ExpandedDifficulty::target_difficulty_limit(network),
+                   "genesis block difficulty thresholds must be equal to the PoWLimit");
+    }
+
+    Ok(())
+}
+
 /// Test ExpandedDifficulty ordering
 #[test]
 #[spandoc::spandoc]
