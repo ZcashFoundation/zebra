@@ -46,6 +46,7 @@ lazy_static! {
             // Sapling
             (419_200, BLOCK_MAINNET_419200_BYTES.as_ref()),
             (419_201, BLOCK_MAINNET_419201_BYTES.as_ref()),
+            // A bad version field
             (434_873, BLOCK_MAINNET_434873_BYTES.as_ref()),
             (653_599, BLOCK_MAINNET_653599_BYTES.as_ref()),
             // Blossom
@@ -55,6 +56,7 @@ lazy_static! {
             // Heartwood
             (903_000, BLOCK_MAINNET_903000_BYTES.as_ref()),
             (903_001, BLOCK_MAINNET_903001_BYTES.as_ref()),
+            // Shielded coinbase x3
             (949_496, BLOCK_MAINNET_949496_BYTES.as_ref()),
             (975_066, BLOCK_MAINNET_975066_BYTES.as_ref()),
             (982_681, BLOCK_MAINNET_982681_BYTES.as_ref()),
@@ -80,6 +82,7 @@ lazy_static! {
             (8, BLOCK_TESTNET_8_BYTES.as_ref()),
             (9, BLOCK_TESTNET_9_BYTES.as_ref()),
             (10, BLOCK_TESTNET_10_BYTES.as_ref()),
+            // A large block
             (141_042, BLOCK_TESTNET_141042_BYTES.as_ref()),
             (207_499, BLOCK_TESTNET_207499_BYTES.as_ref()),
             // Overwinter
@@ -89,6 +92,14 @@ lazy_static! {
             // Sapling
             (280_000, BLOCK_TESTNET_280000_BYTES.as_ref()),
             (280_001, BLOCK_TESTNET_280001_BYTES.as_ref()),
+            (299_187, BLOCK_TESTNET_299187_BYTES.as_ref()),
+            // Minimum-difficulty blocks x2
+            // See zebra_chain's MINIMUM_DIFFICULTY_HEIGHTS for a full list
+            (299_188, BLOCK_TESTNET_299188_BYTES.as_ref()),
+            (299_189, BLOCK_TESTNET_299189_BYTES.as_ref()),
+            (299_201, BLOCK_TESTNET_299201_BYTES.as_ref()),
+            // Minimum-difficulty block
+            (299_202, BLOCK_TESTNET_299202_BYTES.as_ref()),
             (583_999, BLOCK_TESTNET_583999_BYTES.as_ref()),
             // Blossom
             (584_000, BLOCK_TESTNET_584000_BYTES.as_ref()),
@@ -97,6 +108,7 @@ lazy_static! {
             // Heartwood
             (903_800, BLOCK_TESTNET_903800_BYTES.as_ref()),
             (903_801, BLOCK_TESTNET_903801_BYTES.as_ref()),
+            // Shielded coinbase x2
             (914_678, BLOCK_TESTNET_914678_BYTES.as_ref()),
             (925_483, BLOCK_TESTNET_925483_BYTES.as_ref()),
             (1_028_499, BLOCK_TESTNET_1028499_BYTES.as_ref()),
@@ -104,6 +116,7 @@ lazy_static! {
             (1_028_500, BLOCK_TESTNET_1028500_BYTES.as_ref()),
             (1_028_501, BLOCK_TESTNET_1028501_BYTES.as_ref()),
             (1_095_000, BLOCK_TESTNET_1095000_BYTES.as_ref()),
+            // Shielded coinbase
             (1_101_629, BLOCK_TESTNET_1101629_BYTES.as_ref()),
             // TODO: First Halving, see #1104
         ].iter().cloned()
@@ -327,6 +340,28 @@ lazy_static! {
         <Vec<u8>>::from_hex(include_str!("block-test-0-280-001.txt").trim())
         .expect("Block bytes are in valid hex representation");
 
+    // The first minimum difficulty blocks 299188, 299189, 299202 and their previous blocks for context
+    // (pre-Blossom minimum difficulty)
+    //
+    // for i in 299187 299188 299189 299201 299202; do
+    //     zcash-cli -testnet getblock $i 0 > block-test-$[i/1000000]-$[i/1000%1000]-$[i%1000].txt
+    // done
+    pub static ref BLOCK_TESTNET_299187_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-test-0-299-187.txt").trim())
+        .expect("Block bytes are in valid hex representation");
+    pub static ref BLOCK_TESTNET_299188_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-test-0-299-188.txt").trim())
+        .expect("Block bytes are in valid hex representation");
+    pub static ref BLOCK_TESTNET_299189_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-test-0-299-189.txt").trim())
+        .expect("Block bytes are in valid hex representation");
+    pub static ref BLOCK_TESTNET_299201_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-test-0-299-201.txt").trim())
+        .expect("Block bytes are in valid hex representation");
+    pub static ref BLOCK_TESTNET_299202_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-test-0-299-202.txt").trim())
+        .expect("Block bytes are in valid hex representation");
+
     // Blossom transition
     // i=583999
     // zcash-cli -testnet getblock $i 0 > block-test-$[i/1000000]-$[i/1000%1000]-$[i%1000].txt
@@ -336,6 +371,7 @@ lazy_static! {
     pub static ref BLOCK_TESTNET_583999_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("block-test-0-583-999.txt").trim())
         .expect("Block bytes are in valid hex representation");
+    // The first post-Blossom minimum difficulty block is the activation block
     pub static ref BLOCK_TESTNET_584000_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("block-test-0-584-000.txt").trim())
         .expect("Block bytes are in valid hex representation");
