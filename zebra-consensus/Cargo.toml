@@ -16,7 +16,7 @@ redjubjub = "0.2"
 serde = { version = "1", features = ["serde_derive"] }
 
 futures = "0.3.7"
-futures-util = "0.3.6"
+futures-util = "0.3.8"
 metrics = "0.12"
 thiserror = "1.0.22"
 tokio = { version = "0.2.22", features = ["time", "sync", "stream", "tracing"] }
