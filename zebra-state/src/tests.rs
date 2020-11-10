@@ -1,9 +1,10 @@
-use std::{mem, sync::Arc};
+use std::{convert::TryFrom, mem, sync::Arc};
 
 use zebra_chain::{
     block::{self, Block},
     transaction::Transaction,
     transparent,
+    work::difficulty::Work,
 };
 
 use super::*;
@@ -11,9 +12,11 @@ use super::*;
 /// Helper trait for constructing "valid" looking chains of blocks
 pub trait FakeChainHelper {
     fn make_fake_child(&self) -> Arc<Block>;
+
+    fn set_work(self, work: u128) -> Arc<Block>;
 }
 
-impl FakeChainHelper for Block {
+impl FakeChainHelper for Arc<Block> {
     fn make_fake_child(&self) -> Arc<Block> {
         let parent_hash = self.hash();
         let mut child = Block::clone(self);
@@ -36,6 +39,13 @@ impl FakeChainHelper for Block {
         child.header.previous_block_hash = parent_hash;
 
         Arc::new(child)
+    }
+
+    fn set_work(mut self, work: u128) -> Arc<Block> {
+        let work = Work::try_from(work).expect("tests should only pass in valid work values");
+        let block = Arc::make_mut(&mut self);
+        block.header.difficulty_threshold = work.into();
+        self
     }
 }
 

@@ -200,13 +200,10 @@ mod tests {
     fn best_chain_wins() -> Result<()> {
         zebra_test::init();
 
-        let block2: Arc<Block> =
-            zebra_test::vectors::BLOCK_MAINNET_419201_BYTES.zcash_deserialize_into()?;
         let block1: Arc<Block> =
             zebra_test::vectors::BLOCK_MAINNET_419200_BYTES.zcash_deserialize_into()?;
-        // Create a random block which will have a much worse difficulty threshold
-        // than an intentionally mined block from the mainnet
-        let child = block1.make_fake_child();
+        let block2 = block1.make_fake_child().set_work(10);
+        let child = block1.make_fake_child().set_work(1);
 
         let expected_hash = block2.hash();
 
@@ -224,13 +221,10 @@ mod tests {
     fn finalize_pops_from_best_chain() -> Result<()> {
         zebra_test::init();
 
-        let block2: Arc<Block> =
-            zebra_test::vectors::BLOCK_MAINNET_419201_BYTES.zcash_deserialize_into()?;
         let block1: Arc<Block> =
             zebra_test::vectors::BLOCK_MAINNET_419200_BYTES.zcash_deserialize_into()?;
-        // Create a random block which will have a much worse difficulty threshold
-        // than an intentionally mined block from the mainnet
-        let child = block1.make_fake_child();
+        let block2 = block1.make_fake_child().set_work(10);
+        let child = block1.make_fake_child().set_work(1);
 
         let mut state = NonFinalizedState::default();
         state.commit_new_chain(block1.clone());
@@ -253,14 +247,11 @@ mod tests {
     fn commit_block_extending_best_chain_doesnt_drop_worst_chains() -> Result<()> {
         zebra_test::init();
 
-        let block2: Arc<Block> =
-            zebra_test::vectors::BLOCK_MAINNET_419201_BYTES.zcash_deserialize_into()?;
         let block1: Arc<Block> =
             zebra_test::vectors::BLOCK_MAINNET_419200_BYTES.zcash_deserialize_into()?;
-        // Create a random block which will have a much worse difficulty threshold
-        // than an intentionally mined block from the mainnet
-        let child1 = block1.make_fake_child();
-        let child2 = block2.make_fake_child();
+        let block2 = block1.make_fake_child().set_work(10);
+        let child1 = block1.make_fake_child().set_work(1);
+        let child2 = block2.make_fake_child().set_work(1);
 
         let mut state = NonFinalizedState::default();
         assert_eq!(0, state.chain_set.len());
@@ -272,6 +263,81 @@ mod tests {
         assert_eq!(2, state.chain_set.len());
         state.commit_block(child2);
         assert_eq!(2, state.chain_set.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn shorter_chain_can_be_best_chain() -> Result<()> {
+        zebra_test::init();
+
+        let block1: Arc<Block> =
+            zebra_test::vectors::BLOCK_MAINNET_419200_BYTES.zcash_deserialize_into()?;
+
+        let long_chain_block1 = block1.make_fake_child().set_work(1);
+        let long_chain_block2 = long_chain_block1.make_fake_child().set_work(1);
+
+        let short_chain_block = block1.make_fake_child().set_work(3);
+
+        let mut state = NonFinalizedState::default();
+        state.commit_new_chain(block1);
+        state.commit_block(long_chain_block1);
+        state.commit_block(long_chain_block2);
+        state.commit_block(short_chain_block);
+        assert_eq!(2, state.chain_set.len());
+
+        assert_eq!(2, state.best_chain_len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn longer_chain_with_more_work_wins() -> Result<()> {
+        zebra_test::init();
+
+        let block1: Arc<Block> =
+            zebra_test::vectors::BLOCK_MAINNET_419200_BYTES.zcash_deserialize_into()?;
+
+        let long_chain_block1 = block1.make_fake_child().set_work(1);
+        let long_chain_block2 = long_chain_block1.make_fake_child().set_work(1);
+        let long_chain_block3 = long_chain_block2.make_fake_child().set_work(1);
+        let long_chain_block4 = long_chain_block3.make_fake_child().set_work(1);
+
+        let short_chain_block = block1.make_fake_child().set_work(3);
+
+        let mut state = NonFinalizedState::default();
+        state.commit_new_chain(block1);
+        state.commit_block(long_chain_block1);
+        state.commit_block(long_chain_block2);
+        state.commit_block(long_chain_block3);
+        state.commit_block(long_chain_block4);
+        state.commit_block(short_chain_block);
+        assert_eq!(2, state.chain_set.len());
+
+        assert_eq!(5, state.best_chain_len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn equal_length_goes_to_more_work() -> Result<()> {
+        zebra_test::init();
+
+        let block1: Arc<Block> =
+            zebra_test::vectors::BLOCK_MAINNET_419200_BYTES.zcash_deserialize_into()?;
+
+        let less_work_child = block1.make_fake_child().set_work(1);
+        let more_work_child = block1.make_fake_child().set_work(3);
+        let expected_hash = more_work_child.hash();
+
+        let mut state = NonFinalizedState::default();
+        state.commit_new_chain(block1);
+        state.commit_block(less_work_child);
+        state.commit_block(more_work_child);
+        assert_eq!(2, state.chain_set.len());
+
+        let tip_hash = state.tip().unwrap().1;
+        assert_eq!(expected_hash, tip_hash);
 
         Ok(())
     }
