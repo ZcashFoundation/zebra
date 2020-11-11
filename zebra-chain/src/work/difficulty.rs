@@ -260,36 +260,9 @@ impl TryFrom<ExpandedDifficulty> for Work {
     }
 }
 
-impl TryFrom<u128> for Work {
-    type Error = ();
-
-    fn try_from(value: u128) -> Result<Self, Self::Error> {
-        if value == 0 {
-            Err(())
-        } else {
-            Ok(Work(value))
-        }
-    }
-}
-
 impl From<ExpandedDifficulty> for CompactDifficulty {
     fn from(value: ExpandedDifficulty) -> Self {
         value.to_compact()
-    }
-}
-
-impl From<Work> for CompactDifficulty {
-    fn from(value: Work) -> Self {
-        let expanded = ExpandedDifficulty::from(value);
-        Self::from(expanded)
-    }
-}
-
-impl From<Work> for ExpandedDifficulty {
-    fn from(value: Work) -> Self {
-        let work: U256 = value.0.into();
-        let expanded = (!work + 1) / work;
-        ExpandedDifficulty(expanded)
     }
 }
 

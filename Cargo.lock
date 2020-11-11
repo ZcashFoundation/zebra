@@ -3458,6 +3458,7 @@ dependencies = [
  "lazy_static",
  "metrics",
  "once_cell",
+ "primitive-types",
  "proptest",
  "serde",
  "sled",
