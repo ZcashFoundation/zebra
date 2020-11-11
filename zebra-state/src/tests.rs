@@ -44,8 +44,15 @@ impl FakeChainHelper for Arc<Block> {
 
     fn set_work(mut self, work: u128) -> Arc<Block> {
         use primitive_types::U256;
-
         let work: U256 = work.into();
+
+        // Work is calculated from expanded difficulty with the equation `work = 2^256 / (expanded + 1)`
+        // By balancing the equation we get `expanded = (2^256 / work) - 1`
+        // `2^256` is too large to represent, so we instead use the following equivalent equations
+        // `expanded = (2^256 / work) - (work / work)`
+        // `expanded = (2^256 - work) / work`
+        // `expanded = ((2^256 - 1) - work + 1) / work`
+        // `(2^256 - 1 - work)` is equivalent to `!work` when work is a U256
         let expanded = (!work + 1) / work;
         let expanded = ExpandedDifficulty::from(expanded);
 
