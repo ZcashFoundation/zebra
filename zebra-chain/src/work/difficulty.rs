@@ -123,6 +123,12 @@ impl fmt::Debug for ExpandedDifficulty {
 #[derive(Clone, Copy, Default, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Work(u128);
 
+impl From<Work> for u128 {
+    fn from(work: Work) -> Self {
+        work.0
+    }
+}
+
 impl fmt::Debug for Work {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         // There isn't a standard way to represent alternate formats for the
