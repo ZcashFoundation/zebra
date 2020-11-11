@@ -1,4 +1,4 @@
-use std::{mem, sync::Arc};
+use std::{convert::TryFrom, mem, sync::Arc};
 
 use primitive_types::U256;
 use zebra_chain::{
@@ -6,6 +6,7 @@ use zebra_chain::{
     transaction::Transaction,
     transparent,
     work::difficulty::ExpandedDifficulty,
+    work::difficulty::Work,
 };
 
 use super::*;
@@ -76,6 +77,22 @@ static BLOCK_LOCATOR_CASES: &[(u32, u32)] = &[
     (1000, 901),
     (10000, 9901),
 ];
+
+use proptest::prelude::*;
+
+#[test]
+fn round_trip_work_expanded() {
+    zebra_test::init();
+
+    proptest!(|(work in 1..std::u128::MAX)| {
+        let work: U256 = work.into();
+        let expanded = work_to_expanded(work);
+        let work_after = Work::try_from(expanded).unwrap();
+        let work_after = u128::from(work_after);
+        let work_after = U256::from(work_after);
+        prop_assert_eq!(work, work_after);
+    });
+}
 
 /// Check that the block locator heights are sensible.
 #[test]
