@@ -97,8 +97,7 @@ jobs:
       - name: Run acceptance tests
         continue-on-error: true
         run: |
-          gcloud compute ssh "zebra-tests-$BRANCH_NAME-$SHORT_SHA" --zone us-central1-a \
-          --command 'CONTAINER_ID=$(docker ps -q -a --filter name=zebra-tests); docker exec $CONTAINER_ID /zebra/target/debug/deps/acceptance -Z unstable-options --include-ignored'
+          gcloud compute ssh "zebra-tests-$BRANCH_NAME-$SHORT_SHA" --zone us-central1-a --command "docker exec \$(docker ps -q -a --filter name=zebra-tests) /zebra/target/debug/deps/acceptance -Z unstable-options --include-ignored"
 
       # Clean up
       - name: Delete test instance
