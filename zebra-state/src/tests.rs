@@ -1,11 +1,11 @@
-use std::{convert::TryFrom, mem, sync::Arc};
+use std::{mem, sync::Arc};
 
+use primitive_types::U256;
 use zebra_chain::{
     block::{self, Block},
     transaction::Transaction,
     transparent,
     work::difficulty::ExpandedDifficulty,
-    work::difficulty::Work,
 };
 
 use super::*;
@@ -43,23 +43,25 @@ impl FakeChainHelper for Arc<Block> {
     }
 
     fn set_work(mut self, work: u128) -> Arc<Block> {
-        use primitive_types::U256;
         let work: U256 = work.into();
-
-        // Work is calculated from expanded difficulty with the equation `work = 2^256 / (expanded + 1)`
-        // By balancing the equation we get `expanded = (2^256 / work) - 1`
-        // `2^256` is too large to represent, so we instead use the following equivalent equations
-        // `expanded = (2^256 / work) - (work / work)`
-        // `expanded = (2^256 - work) / work`
-        // `expanded = ((2^256 - 1) - work + 1) / work`
-        // `(2^256 - 1 - work)` is equivalent to `!work` when work is a U256
-        let expanded = (!work + 1) / work;
-        let expanded = ExpandedDifficulty::from(expanded);
+        let expanded = work_to_expanded(work);
 
         let block = Arc::make_mut(&mut self);
         block.header.difficulty_threshold = expanded.into();
         self
     }
+}
+
+fn work_to_expanded(work: U256) -> ExpandedDifficulty {
+    // Work is calculated from expanded difficulty with the equation `work = 2^256 / (expanded + 1)`
+    // By balancing the equation we get `expanded = (2^256 / work) - 1`
+    // `2^256` is too large to represent, so we instead use the following equivalent equations
+    // `expanded = (2^256 / work) - (work / work)`
+    // `expanded = (2^256 - work) / work`
+    // `expanded = ((2^256 - 1) - work + 1) / work`
+    // `(2^256 - 1 - work)` is equivalent to `!work` when work is a U256
+    let expanded = (!work + 1) / work;
+    ExpandedDifficulty::from(expanded)
 }
 
 /// Block heights, and the expected minimum block locator height
