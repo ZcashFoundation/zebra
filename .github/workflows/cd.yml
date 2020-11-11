@@ -99,15 +99,15 @@ jobs:
         run: |
           gcloud compute ssh "zebra-tests-$BRANCH_NAME-$SHORT_SHA" --zone us-central1-a \
           --command "docker-credential-gcr configure-docker; \
-          CONTAINER_ID=$(docker ps --quiet --all --filter name=$SHORT_SHA); \
-          docker exec -it $CONTAINER_ID /zebra/target/debug/deps/acceptance -Z unstable-options --included-ignored"
+          docker exec -it $(docker ps -q -a --filter name=$SHORT_SHA) \
+          /zebra/target/debug/deps/acceptance -Z unstable-options --included-ignored"
 
       # Clean up
-      - name: Delete test instance
-        # Always run even if the earlier step fails
-        if: true
-        run: |
-          gcloud compute instances delete "zebra-tests-$BRANCH_NAME-$SHORT_SHA" --delete-disks all --zone us-central1-a
+      # - name: Delete test instance
+      #   # Always run even if the earlier step fails
+      #   if: true
+      #   run: |
+      #     gcloud compute instances delete "zebra-tests-$BRANCH_NAME-$SHORT_SHA" --delete-disks all --zone us-central1-a
 
   deploy:
     name: Deploy mainnet nodes
