@@ -4,6 +4,7 @@ use zebra_chain::{
     block::{self, Block},
     transaction::Transaction,
     transparent,
+    work::difficulty::ExpandedDifficulty,
     work::difficulty::Work,
 };
 
@@ -42,9 +43,14 @@ impl FakeChainHelper for Arc<Block> {
     }
 
     fn set_work(mut self, work: u128) -> Arc<Block> {
-        let work = Work::try_from(work).expect("tests should only pass in valid work values");
+        use primitive_types::U256;
+
+        let work: U256 = work.into();
+        let expanded = (!work + 1) / work;
+        let expanded = ExpandedDifficulty::from(expanded);
+
         let block = Arc::make_mut(&mut self);
-        block.header.difficulty_threshold = work.into();
+        block.header.difficulty_threshold = expanded.into();
         self
     }
 }
