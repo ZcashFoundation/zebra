@@ -79,12 +79,19 @@ impl FinalizedState {
 
         if let Some(tip_height) = new_state.finalized_tip_height() {
             let tip_hash = new_state.finalized_tip_hash();
-            if new_state.is_at_height_limit(tip_height, tip_hash) {
-                tracing::error!(
-                    ?tip_height,
-                    ?tip_hash,
-                    "previous state height is greater than the stop height",
-                );
+            if new_state.is_at_stop_height(tip_height, tip_hash) {
+                let debug_stop_at_height = self
+                    .debug_stop_at_height
+                    .expect("true from `is_at_stop_height` implies `debug_stop_at_height` is Some");
+
+                if tip_height > debug_stop_at_height {
+                    tracing::error!(
+                        ?debug_stop_at_height,
+                        ?tip_height,
+                        ?tip_hash,
+                        "previous state height is greater than the stop height",
+                    );
+                }
 
                 std::process::exit(0);
             }
@@ -117,7 +124,7 @@ impl FinalizedState {
     /// Flushes sled trees before exiting.
     ///
     /// `called_from` and `block_hash` are used for assertions and logging.
-    fn is_at_height_limit(&self, block_height: block::Height, block_hash: block::Hash) -> bool {
+    fn is_at_stop_height(&self, block_height: block::Height, block_hash: block::Hash) -> bool {
         let debug_stop_at_height = match self.debug_stop_at_height {
             Some(debug_stop_at_height) => debug_stop_at_height,
             None => return false,
@@ -265,7 +272,7 @@ impl FinalizedState {
                 },
             );
 
-        if result.is_ok() && self.is_at_height_limit(height, hash) {
+        if result.is_ok() && self.is_at_stop_height(height, hash) {
             // Don't sync when the trees have just been opened
             if let Err(e) = self.flush() {
                 tracing::error!(
