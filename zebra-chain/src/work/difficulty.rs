@@ -123,9 +123,9 @@ impl fmt::Debug for ExpandedDifficulty {
 #[derive(Clone, Copy, Default, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Work(u128);
 
-impl From<Work> for u128 {
-    fn from(work: Work) -> Self {
-        work.0
+impl Work {
+    pub fn as_u128(self) -> u128 {
+        self.0
     }
 }
 

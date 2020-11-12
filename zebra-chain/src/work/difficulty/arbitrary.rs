@@ -51,15 +51,7 @@ impl Arbitrary for Work {
         // In the Zcash protocol, a Work is converted from an ExpandedDifficulty.
         // But some randomised difficulties are impractically large, and will
         // never appear in any real-world block. So we just use a random Work value.
-        (any::<u128>())
-            .prop_filter_map("zero Work values are invalid", |w| {
-                if w == 0 {
-                    None
-                } else {
-                    Some(Work(w))
-                }
-            })
-            .boxed()
+        (1..std::u128::MAX).prop_map(Work).boxed()
     }
 
     type Strategy = BoxedStrategy<Self>;

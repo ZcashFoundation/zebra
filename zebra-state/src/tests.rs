@@ -84,11 +84,11 @@ use proptest::prelude::*;
 fn round_trip_work_expanded() {
     zebra_test::init();
 
-    proptest!(|(work in 1..std::u128::MAX)| {
-        let work: U256 = work.into();
+    proptest!(|(work in any::<Work>())| {
+        let work: U256 = work.as_u128().into();
         let expanded = work_to_expanded(work);
         let work_after = Work::try_from(expanded).unwrap();
-        let work_after = u128::from(work_after);
+        let work_after = work_after.as_u128();
         let work_after = U256::from(work_after);
         prop_assert_eq!(work, work_after);
     });
