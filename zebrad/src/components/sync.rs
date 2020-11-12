@@ -191,7 +191,7 @@ where
 
             tracing::info!("starting sync, obtaining new tips");
             if let Err(e) = self.obtain_tips().await {
-                tracing::warn!(?e);
+                tracing::warn!(?e, "error obtaining tips");
                 continue 'sync;
             }
             self.update_metrics();
@@ -204,7 +204,7 @@ where
                             tracing::trace!(?hash, "verified and committed block to state");
                         }
                         Err(e) => {
-                            tracing::warn!(?e);
+                            tracing::warn!(?e, "error downloading and verifying block");
                             continue 'sync;
                         }
                     }
@@ -236,7 +236,7 @@ where
                             tracing::trace!(?hash, "verified and committed block to state");
                         }
                         Err(e) => {
-                            tracing::warn!(?e);
+                            tracing::warn!(?e, "error downloading and verifying block");
                             continue 'sync;
                         }
                     }
@@ -252,7 +252,7 @@ where
                 );
 
                 if let Err(e) = self.extend_tips().await {
-                    tracing::warn!(?e);
+                    tracing::warn!(?e, "error extending tips");
                     continue 'sync;
                 }
                 self.update_metrics();
