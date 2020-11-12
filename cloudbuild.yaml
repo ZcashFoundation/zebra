@@ -1,8 +1,12 @@
 steps:
 - name: 'gcr.io/cloud-builders/docker'
-  args: ['build', '-t', 'gcr.io/$PROJECT_ID/zcashfoundation/zebra/$BRANCH_NAME:$SHORT_SHA', '.']
+  args: ['build', '--target', 'zebra-tests', '-t', 'gcr.io/$PROJECT_ID/zcashfoundation/zebra/tests/$BRANCH_NAME:$SHORT_SHA', '.']
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['build', '--target', 'zebrad-release', '-t', 'gcr.io/$PROJECT_ID/zcashfoundation/zebra/$BRANCH_NAME:$SHORT_SHA', '.']
 
-images: ['gcr.io/$PROJECT_ID/zcashfoundation/zebra/$BRANCH_NAME:$SHORT_SHA']
+images:
+- 'gcr.io/$PROJECT_ID/zcashfoundation/zebra/tests/$BRANCH_NAME:$SHORT_SHA'
+- 'gcr.io/$PROJECT_ID/zcashfoundation/zebra/$BRANCH_NAME:$SHORT_SHA'
 
 options:
     machineType: 'N1_HIGHCPU_32'
