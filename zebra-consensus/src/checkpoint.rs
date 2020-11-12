@@ -454,12 +454,7 @@ where
         let height = match self.check_block(&block) {
             Ok(height) => height,
             Err(error) => {
-                // Block errors happen frequently on mainnet, due to bad peers.
-                tracing::trace!(?error);
-
-                // Sending might fail, depending on what the caller does with rx,
-                // but there's nothing we can do about it.
-                let _ = tx.send(Err(error));
+                tx.send(Err(error)).expect("rx has not been dropped yet");
                 return rx;
             }
         };
@@ -474,11 +469,12 @@ where
 
         let hash = block.hash();
 
+        // Replace older requests by newer ones by swapping the oneshot.
         for qb in qblocks.iter_mut() {
             if qb.hash == hash {
-                let old_tx = std::mem::replace(&mut qb.tx, tx);
                 let e = VerifyCheckpointError::NewerRequest { height, hash };
-                tracing::trace!(?e);
+                tracing::trace!(?e, "failing older of duplicate requests");
+                let old_tx = std::mem::replace(&mut qb.tx, tx);
                 let _ = old_tx.send(Err(e));
                 return rx;
             }
