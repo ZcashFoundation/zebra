@@ -114,11 +114,18 @@ that there will be at least 28 blocks in any relevant chain on mainnet and
 testnet.
 
 Difficulty threshold calculations are performed using unsigned 256-bit integers.
-Time calculations are performed using unsigned 32-bit integers.
+In the Zcash specification, time values are 32-bit integers. But the difficulty
+adjustment calculations include time subtractions which could overflow an
+unsigned type, so they are performed using signed 64-bit integers in `zcashd`.
 
-TODO:
-  - check how zcashd implements signed median time differences
-  - open a ticket to update the Zcash spec
+Zebra is free to implement its calculations in any way that produces equivalent
+results. Using `u256` difficulty, `u32` unsigned times, and `i64` signed time
+differences will allow us to write simple Rust code which produces the correct
+results. (It is theoretically possible for the time gap between blocks to be
+larger than `2^31 - 1`, because those times are provided by miners. Even if the
+median time gap is that large, the bounds and minimum difficulty in Zcash's
+difficulty adjustment algorithm will preserve a reasonable difficulty
+threshold.)
 
 ## State service interface changes
 [state-service-interface]: #state-service-interface
@@ -177,10 +184,13 @@ chain.
 Zcash uses block difficulty thresholds in its difficulty adjustment calculations.
 (Block hashes are not used for difficulty adjustment.)
 
-TODO:
-  - check if zcashd truncates the MeanTarget before dividing by
-    AveragingWindowTimespan (as well as after the division), and
-  - open a ticket to update the Zcash spec
+Note that `zcashd` truncates the `MeanTarget` after the mean calculation, and
+after dividing by `AveragingWindowTimespan`. But as long as there is no overflow,
+this is [equivalent to the single truncation of the final result] in the Zcash
+specification. However, Zebra should follow the order of operations in `zcashd`,
+because repeated divisions can't overflow.
+
+[equivalent to the single truncation of the final result]: https://math.stackexchange.com/questions/147771/rewriting-repeated-integer-division-with-multiplication
 
 #### Median timespan
 [median-timespan]: #median-timespan
@@ -196,8 +206,6 @@ Calculated using the difference of the median timespans for:
 (The median timespan is known as the `ActualTimespan` in the Zcash specification,
 but this terminology is confusing, because it is a difference of medians, rather
 than any "actual" elapsed time.)
-
-TODO: open a Zcash spec clarification ticket
 
 The median timespan is damped by the `PoWDampingFactor`, and bounded by
 `PoWMaxAdjustDown` and `PoWMaxAdjustUp`.
