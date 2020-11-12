@@ -97,7 +97,7 @@ jobs:
         continue-on-error: true
         run: |
           gcloud compute ssh "zebra-tests-$BRANCH_NAME-$SHORT_SHA" --zone us-central1-a \
-          --command "until [[ -n \$(docker ps --all -q --filter name=zebra-test) ]]; do echo 'waiting for zebra-test'; sleep 0.1; done; docker attach \$(docker ps -q -a --filter name=zebra-test)"
+          --command "until [[ -n \$(docker ps --all -q --filter name=zebra-test) ]]; do echo 'waiting for zebra-test'; sleep 1; done; docker attach \$(docker ps -q -a --filter name=zebra-test)"
 
       # Clean up
       - name: Delete test instance
