@@ -182,47 +182,34 @@ mod test {
     }
 
     fn founders_address_for_network(network: Network) -> Result<(), Report> {
-        // First address change after blossom for the 2 networks.
-        // Todo: explain this better and make sure it is working propertly.
-        // after blossom there is still time left for the next change in
-        // founder address but the remaining is calculated with the new formula.
-        let mut addresses = FOUNDERS_REWARD_ADDRESSES_MAINNET;
-        let mut first_change_after_blossom = 656_866;
+        // Test if all the founders addresses are paid in the entire period
+        // where rewards are active.
+        let mut populated_addresses: Vec<Address> = Vec::new();
+        let mut hardcoded_addresses = FOUNDERS_REWARD_ADDRESSES_MAINNET;
 
         if network == Network::Testnet {
-            addresses = FOUNDERS_REWARD_ADDRESSES_TESTNET;
-            first_change_after_blossom = 584_794;
+            hardcoded_addresses = FOUNDERS_REWARD_ADDRESSES_TESTNET;
         }
 
-        let blossom_height = Blossom.activation_height(network).unwrap();
-        let canopy_height = Canopy.activation_height(network).unwrap();
+        // After blossom, founders addresses will change at a greater interval but we should catch
+        // all the changes if we increment by founders_address_change_interval() for
+        // the entire period where founders reward are paid.
+        let mut increment = SLOW_START_SHIFT.0;
+        while founders_reward_active(Height(increment), network) {
+            let founder_address = founders_reward_address(Height(increment), network)?;
+            if !populated_addresses.contains(&founder_address) {
+                populated_addresses.push(founder_address);
+            }
+            increment = increment + founders_address_change_interval().0;
+        }
 
-        // the index in the founders reward address array that will be active at height
+        //assert_eq!(populated_addresses.len(), hardcoded_addresses.len());
+
         let mut index = 0;
-
-        // from SLOW_START_SHIFT to blossom the founder reward address changes at FOUNDER_ADDRESS_CHANGE_INTERVAL
-        for n in (SLOW_START_SHIFT.0..blossom_height.0)
-            .step_by(founders_address_change_interval().0 as usize)
-        {
+        for addr in populated_addresses {
             assert_eq!(
-                founders_reward_address(Height(n), network)?,
-                Address::from_str(addresses[index as usize]).expect("an address")
-            );
-            index += 1;
-        }
-
-        assert_eq!(
-            founders_reward_address(Height(first_change_after_blossom), network)?,
-            Address::from_str(addresses[index as usize]).expect("an address")
-        );
-
-        // after the first change after blossom the addresses changes at FOUNDER_ADDRESS_CHANGE_INTERVAL * 2
-        for n in (first_change_after_blossom..canopy_height.0)
-            .step_by((founders_address_change_interval().0 * 2) as usize)
-        {
-            assert_eq!(
-                founders_reward_address(Height(n), network)?,
-                Address::from_str(addresses[index as usize]).expect("an address")
+                addr,
+                Address::from_str(hardcoded_addresses[index as usize]).expect("an address")
             );
             index += 1;
         }
