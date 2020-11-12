@@ -77,7 +77,7 @@ jobs:
       #     --source-ranges 0.0.0.0/0 \
       #     --description="Allow incoming Zcash traffic from anywhere" \
 
-      # Creates Compute Engine virtual machine instance w/ test container image and test disks
+      # Creates Compute Engine virtual machine instance w/ test container and disks
       - name: Create instance with test container image
         run: |
           gcloud compute instances create-with-container "zebra-tests-$BRANCH_NAME-$SHORT_SHA" \
@@ -92,9 +92,8 @@ jobs:
           --tags zebrad \
           --zone us-central1-a
 
-      # Runs particular test(s) w/ test state disks mounted
+      # Wait for acceptance test container is up and stream its results
       - name: Run acceptance tests
-        continue-on-error: true
         run: |
           gcloud compute ssh "zebra-tests-$BRANCH_NAME-$SHORT_SHA" --zone us-central1-a \
           --command "until [[ -n \$(docker ps --all -q --filter name=zebra-test) ]]; do echo 'waiting for zebra-test'; sleep 1; done; docker attach \$(docker ps -q -a --filter name=zebra-test)"
@@ -102,7 +101,7 @@ jobs:
       # Clean up
       - name: Delete test instance
         # Always run even if the earlier step fails
-        if: true
+        if: ${{ always() }}
         run: |
           gcloud compute instances delete "zebra-tests-$BRANCH_NAME-$SHORT_SHA" --delete-disks all --zone us-central1-a
 
