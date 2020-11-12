@@ -26,6 +26,8 @@ use crate::{
 };
 
 mod memory_state;
+#[cfg(test)]
+mod tests;
 mod utxo;
 
 // todo: put this somewhere

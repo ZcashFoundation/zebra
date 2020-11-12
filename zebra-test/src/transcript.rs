@@ -51,6 +51,7 @@ impl TransError {
 #[error("ErrorChecker Error: {0}")]
 struct ErrorCheckerError(Error);
 
+#[must_use]
 pub struct Transcript<R, S, I>
 where
     I: Iterator<Item = (R, Result<S, TransError>)>,
