@@ -52,15 +52,6 @@ pub struct FinalizedState {
     debug_stop_at_height: Option<block::Height>,
 }
 
-/// Where is the stop check being performed?
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-enum StopCheckContext {
-    /// Checking when the state is loaded
-    OnLoad,
-    /// Checking when a block is committed
-    OnCommit,
-}
-
 impl FinalizedState {
     pub fn new(config: &Config, network: Network) -> Self {
         let db = config.sled_config(network).open().unwrap();
