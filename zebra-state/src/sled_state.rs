@@ -125,6 +125,7 @@ impl FinalizedState {
     /// Flushes sled trees before exiting.
     ///
     /// `called_from` and `block_hash` are used for assertions and logging.
+    #[track_caller]
     fn is_at_stop_height(&self, block_height: block::Height, block_hash: block::Hash) -> bool {
         let debug_stop_at_height = match self.debug_stop_at_height {
             Some(debug_stop_at_height) => debug_stop_at_height,
@@ -135,10 +136,13 @@ impl FinalizedState {
             return false;
         }
 
+        let caller = std::panic::Location::caller();
+
         tracing::info!(
             ?debug_stop_at_height,
             ?block_height,
             ?block_hash,
+            ?caller,
             "stopping at configured height"
         );
 
