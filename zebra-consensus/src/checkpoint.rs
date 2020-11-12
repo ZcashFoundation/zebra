@@ -98,8 +98,6 @@ where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
 {
-    // Inputs
-    //
     /// The checkpoint list for this verifier.
     checkpoint_list: CheckpointList,
 
@@ -109,8 +107,6 @@ where
     /// The underlying state service, possibly wrapped in other services.
     state_service: S,
 
-    // Queued Blocks
-    //
     /// A queue of unverified blocks.
     ///
     /// Contains a list of unverified blocks at each block height. In most cases,
@@ -127,9 +123,6 @@ where
     verifier_progress: Progress<block::Height>,
 }
 
-/// The CheckpointVerifier implementation.
-///
-/// Contains non-service utility functions for CheckpointVerifiers.
 impl<S> CheckpointVerifier<S>
 where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
@@ -386,8 +379,7 @@ where
                     height,
                     verified_height: previous_height,
                 });
-                // TODO: reduce to trace level once the AlreadyVerified bug is fixed
-                tracing::info!(?e);
+                tracing::trace!(?e);
                 e?;
             }
             InitialTip(_) | PreviousCheckpoint(_) => {}
@@ -580,7 +572,7 @@ where
         valid_qblock
     }
 
-    /// Check all the blocks in the current checkpoint range.
+    /// Try to verify from the previous checkpoint to a target checkpoint.
     ///
     /// Send `Ok` for the blocks that are in the chain, and `Err` for side-chain
     /// blocks.
@@ -830,34 +822,43 @@ where
             return async { Err(VerifyCheckpointError::Finished) }.boxed();
         }
 
-        // Queue the block for verification, until we receive all the blocks for
-        // the current checkpoint range.
         let rx = self.queue_block(block.clone());
-
-        // Try to verify from the previous checkpoint to a target checkpoint.
-        //
-        // If there are multiple checkpoints in the target range, and one of
-        // the ranges is invalid, we'll try again with a smaller target range
-        // on the next call(). Failures always reject a block, so we know
-        // there will be at least one more call().
-        //
-        // We don't retry with a smaller range on failure, because failures
-        // should be rare.
         self.process_checkpoint_range();
 
+        metrics::gauge!("checkpoint.queued_slots", self.queued.len() as i64);
+
+        // Because the checkpoint verifier duplicates state from the state
+        // service (it tracks which checkpoints have been verified), we must
+        // commit blocks transactionally on a per-checkpoint basis. Otherwise,
+        // the checkpoint verifier's state could desync from the underlying
+        // state service. Among other problems, this could cause the checkpoint
+        // verifier to reject blocks not already in the state as
+        // already-verified.
+        //
+        // To commit blocks transactionally on a per-checkpoint basis, we must
+        // commit all verified blocks in a checkpoint range, regardless of
+        // whether or not the response futures for each block were dropped.
+        //
+        // We accomplish this by spawning a new task containing the
+        // commit-if-verified logic. This task will always execute, except if
+        // the program is interrupted, in which case there is no longer a
+        // checkpoint verifier to keep in sync with the state.
         let mut state_service = self.state_service.clone();
-        async move {
+        let commit_finalized_block = tokio::spawn(async move {
             let hash = rx
                 .await
                 .expect("CheckpointVerifier does not leave dangling receivers")?;
 
+            // Once we get a verified hash, we must commit it to the chain state
+            // as a finalized block, or exit the program, so .expect rather than
+            // propagate errors from the state service.
             match state_service
                 .ready_and()
                 .await
-                .map_err(VerifyCheckpointError::CommitFinalized)?
+                .expect("Verified checkpoints must be committed transactionally")
                 .call(zs::Request::CommitFinalizedBlock { block })
                 .await
-                .map_err(VerifyCheckpointError::CommitFinalized)?
+                .expect("Verified checkpoints must be committed transactionally")
             {
                 zs::Response::Committed(committed_hash) => {
                     assert_eq!(committed_hash, hash, "state must commit correct hash");
@@ -865,6 +866,12 @@ where
                 }
                 _ => unreachable!("wrong response for CommitFinalizedBlock"),
             }
+        });
+
+        async move {
+            commit_finalized_block
+                .await
+                .expect("commit_finalized_block should not panic")
         }
         .boxed()
     }
