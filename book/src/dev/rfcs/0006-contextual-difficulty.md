@@ -199,7 +199,7 @@ a testnet block's time gap exceeds the minimum difficulty gap.
 - [x] Explaining how Zebra programmers should *think* about the feature, and how it should impact the way they use Zebra.
   - [ ] It should explain the impact as concretely as possible.
 - [ ] Explaining the feature largely in terms of examples.
-- [ ] If applicable, provide sample error messages, deprecation warnings, migration guidance, or test strategies.
+- [ ] If applicable, provide sample error messages, ~deprecation warnings, migration guidance,~ or test strategies.
 
 # Reference-level explanation
 [reference-level-explanation]: #reference-level-explanation
@@ -218,15 +218,21 @@ panic if this assumption does not hold at runtime.)
 For debugging purposes, the candidate block's height, hash, and network should be
 included in a span that is active for the entire contextual validation function.
 
-## Data types
-[data-types]: #data-types
+## Fundamental data types
+[fundamental-data-types]: #fundamental-data-types
 
 Zebra is free to implement its difficulty calculations in any way that produces
 equivalent results to `zcashd` and the Zcash specification.
 
+In Zcash block headers, difficulty thresholds are stored as a "compact" `nBits`
+value, which uses a custom 32-bit floating-point encoding. Zebra calls this type
+`CompactDifficulty`.
+
 In Zcash, difficulty threshold calculations are performed using unsigned 256-bit
 integers. Rust has no standard `u256` type, but there are a number of crates
-available which implement the required operations on 256-bit integers.
+available which implement the required operations on 256-bit integers. Zebra
+abstracts over the alternative `u256` implementations using its
+`ExpandedDifficulty` type.
 
 In Zcash, time values are 32-bit integers. But the difficulty adjustment
 calculations include time subtractions which could overflow an unsigned type, so
@@ -234,7 +240,7 @@ they are performed using signed 64-bit integers in `zcashd`.
 
 Zebra parses the `header.time` field into a `DateTime<Utc>`. Conveniently, the
 `chrono::DateTime<_>::timestamp()` function returns `i64` values. So Zebra can do
-its signed time calculations using `i64` values.
+its signed time calculations using `i64` values internally.
 
 Note: `i32` is an unsuitable type for signed time calculations. It is
 theoretically possible for the time gap between blocks to be larger than
@@ -272,17 +278,24 @@ assert that the relevant chain is at least 28 blocks long, before starting
 contextual validation.
 
 ```rust
+impl StateService {
     /// Return an iterator over the relevant chain of the block identified by
     /// `hash`.
     ///
     /// The block identified by `hash` is included in the chain of blocks yielded
     /// by the iterator.
     pub fn chain(&self, hash: block::Hash) -> Iter<'_> { ... }
+}
 
-    impl Iterator for Iter<'_>  { ... }
-    impl ExactSizeIterator for Iter<'_> { ... }
-    impl FusedIterator for Iter<'_> {}
+impl Iterator for Iter<'_>  {
+    type Item = Arc<Block>;
+    ...
+}
+impl ExactSizeIterator for Iter<'_> { ... }
+impl FusedIterator for Iter<'_> {}
 ```
+
+`chain` and `Iter` are implemented in the existing `zebra_state::service` module.
 
 For further details, see [PR 1271].
 
@@ -295,33 +308,101 @@ The difficulty adjustment check calculates the correct difficulty threshold
 value for a candidate block, and ensures that the block's
 `difficulty_threshold` field is equal to that value.
 
-The difficulty adjustment check is implemented as a function which takes a
-candidate block's `difficulty_threshold`, `height`, and `network`, and a
-`context`. The context is a slice of 28 block `(time, difficulty_threshold)`
-pairs from the relevant chain.
+### Context data type
+[context-data-type]: #context-data-type
 
-We avoid passing the entire `Block` and `Iter` to the validation function for
-a few reasons:
-* using specific types makes it easier to call the function with the correct data,
-* limiting the arguments to required data makes it easier to test the function,
-  and
-* in the future, we want to validate difficulty adjustment as part of gossiped
-  header verification, when we haven't yet downloaded the full block
-  (see [Issue 1166]).
+The difficulty adjustment functions use a context consisting of the difficulties
+and times from the previous 28 blocks in the relevant chain.
+
+These functions also use the candidate block's `height` and `network`.
+
+To make these functions more ergonomic, we create a `DifficultyAdjustment`
+type, and implement the difficulty adjustment calculations as methods on that
+type.
 
 ```rust
-/// Validate the `difficulty_threshold` from a candidate block, based on that
-/// block's `time`, `network` and `height`, and some `context` data from recent
-/// blocks.
+struct DifficultyAdjustment {
+    candidate_time: DateTime<Utc>,
+    candidate_height: block::Height,
+    network: Network,
+    relevant_difficulty_thresholds: [CompactDifficulty; 28],
+    relevant_times: [DateTime<Utc>; 28],
+}
+```
+
+We implement some initialiser methods on `DifficultyAdjustment` for convenience.
+We might want to validate downloaded headers in future, so we include a
+`new_from_header` initialiser.
+
+```rust
+/// Initialise and return a new `DifficultyAdjustment` using a `candidate_block`,
+/// `network`, and a `context`.
 ///
-/// The `context` contains the `difficulty_threshold`s and `time`s from the
-/// previous `PoWAveragingWindow + PoWMedianBlockSpan` blocks in the relevant
-/// chain, in reverse height order, starting with the parent block.
+/// The `context` contains the previous
+/// `PoWAveragingWindow + PoWMedianBlockSpan` (28) `difficulty_threshold`s and
+/// `time`s from the relevant chain for `candidate_block`, in reverse height
+/// order, starting with the previous block.
+///
+/// Note that the `time`s might not be in reverse chronological order, because
+/// block times are supplied by miners.
+///
+/// Panics:
+/// If the `context` contains fewer than 28 items.
+pub fn new_from_block<C>(candidate_block: &Block
+                         network: Network,
+                         context: C)
+                         -> DifficultyAdjustment
+    where
+        C: IntoIterator<Item = (CompactDifficulty, DateTime<Utc>)>,
+    { ... }
+
+/// Initialise and return a new `DifficultyAdjustment` using a
+/// `candidate_header`, `previous_block_height`, `network`, and a `context`.
+///
+/// Designed for use when validating block headers, where the full block has not
+/// been downloaded yet.
+///
+/// See `new_from_block` for detailed information about the `context`.
+///
+/// Panics:
+/// If the context contains fewer than 28 items.
+pub fn new_from_header<C>(candidate_header: &block::Header
+                          previous_block_height: block::Height,
+                          network: Network,
+                          context: C)
+                          -> DifficultyAdjustment
+    where
+        C: IntoIterator<Item = (CompactDifficulty, DateTime<Utc>)>,
+    { ... }
+
+/// Initialise and return a new `DifficultyAdjustment` using its fields.
+///
+/// Designed for use in tests.
+///
+/// See `new_from_block` for details.
+fn new_from_fields(candidate_time: DateTime<Utc>,
+                   candidate_height: block::Height,
+                   network: Network,
+                   context: &[(CompactDifficulty, DateTime<Utc>); 28])
+                   -> DifficultyAdjustment { ... }
+```
+
+`DifficultyAdjustment` is located in a new
+`zebra_chain::work::difficulty::adjustment` module.
+
+### Difficulty adjustment check implementation
+[difficulty-adjustment-check-implementation]: #difficulty-adjustment-check-implementation
+
+The difficulty adjustment check ensures that the
+`candidate_difficulty_threshold` is equal to the `difficulty_threshold` value
+calculated using `DifficultyAdjustment::adjusted_difficulty_threshold`.
+
+We implement this function:
+```rust
+/// Validate the `difficulty_threshold` from a candidate block's header, based
+/// on a `difficulty_adjustment` for that block.
 pub fn difficulty_threshold_is_valid(difficulty_threshold: CompactDifficulty,
-                                     time: DateTime<Utc>,
-                                     network: Network,
-                                     height: block::Height,
-                                     context: &[(CompactDifficulty, DateTime<Utc>); 28])
+                                     difficulty_adjustment: DifficultyAdjustment,
                                      -> Result<(), BlockError> { ... }
 ```
 
@@ -346,18 +427,18 @@ In Zebra, contextual validation starts after Sapling activation, so we can assum
 that the relevant chain contains at least 17 blocks. Therefore, the `PoWLimit`
 case of `MeanTarget()` in the Zcash specification is unreachable.
 
+We implement this method on `DifficultyAdjustment`:
 ```rust
-/// Calculate the arithmetic mean of `averaging_window_thresholds`: the
-/// `difficulty_threshold`s from the previous `PoWAveragingWindow` blocks in the
-/// relevant chain.
+/// Calculate the arithmetic mean of the averaging window thresholds: the
+/// expanded `difficulty_threshold`s from the previous `PoWAveragingWindow` (17)
+/// blocks in the relevant chain.
 ///
 /// Implements `MeanTarget` from the Zcash specification.
-fn mean_target_difficulty(averaging_window_thresholds: &[ExpandedDifficulty; 17])
-                          -> ExpandedDifficulty { ... }
+fn mean_target_difficulty(&self) -> ExpandedDifficulty { ... }
 ```
 
-`mean_target_difficulty` is located in the existing
-`zebra_consensus::work::difficulty` module.
+`mean_target_difficulty` is located in a new
+`zebra_chain::work::difficulty::adjustment` module.
 
 ### Median timespan calculation
 [median-timespan-calculation]: #median-timespan-calculation
@@ -383,42 +464,38 @@ that the relevant chain contains at least 28 blocks. Therefore:
   `height` in the Zcash specification are implicitly handled by indexing into
   the `timespan_times` slice.
 
-Zebra calculates the median timespan using the following functions:
+Zebra implements the median timespan using the following methods on
+`DifficultyAdjustment`:
 ```rust
-/// Calculate the damped and bounded median of `timespan_times`: the `time`s
-/// from the previous `PoWAveragingWindow + PoWMedianBlockSpan` blocks in the
-/// relevant chain. Uses the candidate block's `height' and `network` to
-/// calculate the `AveragingWindowTimespan` for that block.
+/// Calculate the median timespan. The median timespan is the difference of
+/// medians of the timespan times, which are the `time`s from the previous
+/// `PoWAveragingWindow + PoWMedianBlockSpan` (28) blocks in the relevant chain.
 ///
-/// The times in `timespan_times` must be supplied in reverse height order,
-/// starting with the parent block. This might not be the same as chronological
-/// order, because block times are supplied by miners.
+/// Uses the candidate block's `height' and `network` to calculate the
+/// `AveragingWindowTimespan` for that block.
 ///
 /// The median timespan is damped by the `PoWDampingFactor`, and bounded by
 /// `PoWMaxAdjustDown` and `PoWMaxAdjustUp`.
 ///
 /// Implements `ActualTimespanBounded` from the Zcash specification.
 ///
-/// Note: This calculation only uses a `PoWMedianBlockSpan` of times at the
-/// start and end of `timespan_times`. The `timespan_times[11..=16]` in the
-/// middle of the slice are ignored.
-fn median_timespan_bounded(height: block::Height,
-                           network: Network,
-                           timespan_times: &[DateTime<Utc>; 28])
-                           -> DateTime<Utc> { ... }
+/// Note: This calculation only uses `PoWMedianBlockSpan` (11) times at the
+/// start and end of the timespan times. timespan times `[11..=16]` are ignored.
+fn median_timespan_bounded(&self) -> DateTime<Utc> { ... }
 
-/// Calculate the median of `median_block_span_times`: the `time`s from a span of
-/// `PoWMedianBlockSpan` blocks in the relevant chain.
+/// Calculate the median of the `median_block_span_times`: the `time`s from a
+/// slice of `PoWMedianBlockSpan` (11) blocks in the relevant chain.
 ///
 /// Implements `MedianTime` from the Zcash specification.
 fn median_time(median_block_span_times: &[DateTime<Utc>; 11])
                -> DateTime<Utc> { ... }
 ```
 
-`median_timespan_bounded` and `median_time` are located in the existing
-`zebra_consensus::work::difficulty` module.
+`median_timespan_bounded` and `median_time` are located in a new
+`zebra_chain::work::difficulty::adjustment` module.
 
-Zebra calculates the `AveragingWindowTimespan` using the following functions:
+Zebra implements the `AveragingWindowTimespan` using the foollowing methods on
+`NetworkUpgrade`:
 ```rust
 impl NetworkUpgrade {
     /// Returns the `AveragingWindowTimespan` for the network upgrade.
@@ -480,31 +557,28 @@ In Zcash, the testnet minimum difficulty rule starts at block 299188, and in
 Zebra, contextual validation starts after Sapling activation. So we can assume
 that there is always a previous block.
 
+We implement this method on `DifficultyAdjustment`:
 ```rust
-/// Returns true if the gap between the candidate block's `time` and the previous
-/// block's `previous_time` is greater than the testnet minimum difficulty time
-/// gap for `network` and `height`.
+/// Returns true if the gap between the `candidate_time` and the previous block's
+/// `time` is greater than the testnet minimum difficulty time gap. The time gap
+/// depends on the `network` and `candidate_height`.
 ///
-/// Returns false for `Mainnet`, when the `height` is below the testnet minimum
-/// difficulty start height, and when the time gap is too small.
+/// Returns false for `Mainnet`, when the `candidate_height` is below the testnet
+/// minimum difficulty start height, and when the time gap is too small.
 ///
-/// `time` can be less than, equal to, or greater than `previous_time`, because
-/// block times are provided by miners.
+/// `candidate_time` can be less than, equal to, or greater than the previous
+/// block's `time`, because block times are provided by miners.
 ///
 /// Implements the testnet minimum difficulty adjustment from ZIPs 205 and 208.
 ///
 /// Spec Note: Some parts of ZIPs 205 and 208 previously specified an incorrect
 /// check for the time gap. This function implements the correct "greater than"
 /// check.
-fn is_testnet_min_difficulty_block(time: DateTime<Utc>,
-                                   network: Network,
-                                   height: block::Height,
-                                   previous_time: DateTime<Utc>)
-                                   -> bool { ... }
+fn candidate_is_testnet_min_difficulty_block(&self) -> bool { ... }
 ```
 
-`is_testnet_min_difficulty_block` is located in the existing
-`zebra_consensus::work::difficulty` module.
+`candidate_is_testnet_min_difficulty_block` is located in a new
+`zebra_chain::work::difficulty::adjustment` module.
 
 ### Block difficulty threshold calculation
 [block-difficulty-threshold-calculation]: #block-difficulty-threshold-calculation
@@ -558,38 +632,33 @@ could overflow.
 #### Block difficulty threshold implementation
 [block-difficulty-threshold-implementation]: #block-difficulty-threshold-implementation
 
+We implement these methods on `DifficultyAdjustment`:
 ```rust
-/// Calculate the `difficulty_threshold` for a candidate block, based on that
-/// block's `time`, `network` and `height`, and some `context` data from recent
-/// blocks.
+/// Calculate the `difficulty_threshold` for a candidate block, based on the
+/// `candidate_time`, `candidate_height`, `network`, and the
+/// `difficulty_threshold`s and `time`s from the previous
+/// `PoWAveragingWindow + PoWMedianBlockSpan` (28) blocks in the relevant chain.
 ///
-/// The `context` contains the `difficulty_threshold`s and `time`s from the
-/// previous `PoWAveragingWindow + PoWMedianBlockSpan` blocks in the relevant
-/// chain, in reverse height order, starting with the parent block.
-///
-/// Implements `ThresholdBits` from the Zcash specification, including  the
-/// testnet minimum difficulty adjustment from ZIPs 205 and 208.
-pub fn difficulty_threshold_from_context(time: DateTime<Utc>,
-                                         network: Network,
-                                         height: block::Height,
-                                         context: &[(CompactDifficulty, DateTime<Utc>); 28])
-                                         -> CompactDifficulty { ... }
+/// Implements `ThresholdBits` from the Zcash specification, and the testnet
+/// minimum difficulty adjustment from ZIPs 205 and 208.
+pub fn adjusted_difficulty_threshold(&self) -> CompactDifficulty { ... }
 
-/// Calculate the `difficulty_threshold` for a candidate block, based on that
-/// block's `network` and `height`, and some `context` data from recent blocks.
+/// Calculate the `difficulty_threshold` for a candidate block, based on the
+/// `candidate_height`, `network`, and the relevant `difficulty_threshold`s and
+/// `time`s.
 ///
-/// See `difficulty_threshold_from_context` for details.
+/// See `adjusted_difficulty_threshold` for details.
 ///
-/// Implements `ThresholdBits` from the Zcash specification. (Excluding the
+/// Implements `ThresholdBits` from the Zcash specification. (Which excludes the
 /// testnet minimum difficulty adjustment.)
-fn difficulty_threshold_bits(network: Network,
-                             height: block::Height,
-                             context: &[(CompactDifficulty, DateTime<Utc>); 28])
-                             -> CompactDifficulty { ... }
+fn threshold_bits(network: Network,
+                  height: block::Height,
+                  context: &[(CompactDifficulty, DateTime<Utc>); 28])
+                  -> CompactDifficulty { ... }
 ```
 
-`difficulty_threshold_from_context` and `difficulty_threshold_bits` are located
-in the existing `zebra_consensus::work::difficulty` module.
+`adjusted_difficulty_threshold` and `threshold_bits` are located in a new
+`zebra_chain::work::difficulty::adjustment` module.
 
 ## Remaining TODOs for Reference-level explanation
 
@@ -599,17 +668,20 @@ This is the technical portion of the RFC. Explain the design in sufficient detai
 - It is reasonably clear how the feature would be:
   - [x] implemented,
   - [ ] tested,
-  - [ ] monitored, and
-  - [ ] maintained.
-- [ ] Corner cases are dissected by example.
+  - ~monitored, and~
+  - ~maintained.~
+- [x] Corner cases are dissected
+  - [ ] by example.
 
 - [ ] The section should return to the examples given in the previous section, and explain more fully how the detailed proposal makes those examples work.
 
 ## Module Structure
+[module-structure]: #module-structure
 
 - [ ] ~Describe~ Summarise the crate and modules that will implement the feature.
 
 ## Test Plan
+[test-plan]: #test-plan
 
 Explain how the feature will be tested, including:
 - [ ] tests for consensus-critical functionality
@@ -631,9 +703,10 @@ The tests should cover:
 # Drawbacks
 [drawbacks]: #drawbacks
 
-- [ ] Why should we *not* do this?
+Why should we *not* do this?
 
 ## Alternate consensus parameters
+[alternate-consensus-parameters]: #alternate-consensus-parameters
 
 Any alternate consensus parameters or `regtest` mode would have to respect the constraints set by this design.
 
@@ -647,63 +720,94 @@ In particular:
 # Rationale and alternatives
 [rationale-and-alternatives]: #rationale-and-alternatives
 
-- [ ] What makes this design a good design?
-- [ ] Is this design a good basis for later designs or implementations?
-- [ ] What other designs have been considered and what is the rationale for not choosing them?
-- [ ] What is the impact of not doing this?
+## What makes this design a good design?
+[good-design]: #good-design
 
-Zebra could accept invalid, low-difficulty blocks from arbitrary miners. That would be a security issue.
+This design re-uses existing Zebra code, and follows typical Zebra and Rust design patterns.
+
+## Is this design a good basis for later designs or implementations?
+[good-basis]: #good-basis
+
+The design enables access to recent blocks for contextual validation using a generic
+iterator function.
+
+The design includes specific methods for header-only validation.
+
+## What other designs have been considered and what is the rationale for not choosing them?
+[alternate-designs]: #alternate-designs
+
+A previous version of the RFC did not have the `DifficultyAdjustment` struct and
+methods. That design was easy to misuse, because each function had a complicated
+argument list.
+
+## What is the impact of not doing this?
+[no-action]: #no-action
+
+Zebra could accept invalid, low-difficulty blocks from arbitrary miners. That
+would be a security issue.
 
 # Prior art
 [prior-art]: #prior-art
 
 Discuss prior art, both the good and the bad, in relation to this proposal.
-A few examples of what this can include are:
 
-- [ ] zcashd
-- [ ] Zcash specification
-- [ ] Bitcoin?
+## zcashd
+[zcashd]: #zcashd
 
-Note that while precedent set by other projects is some motivation, it does not on its own motivate an RFC.
-Please also take into consideration that Zebra sometimes intentionally diverges from common Zcash features and designs.
+See the reference-level explanation for prior art and deliberate divergences.
+
+## Zcash specification
+[zcash-spec]: #zcash-spec
+
+See the reference-level explanation for prior art and deliberate divergences.
+
+## Bitcoin
+[bitcoin]: #bitcoin
+
+- [ ] TODO: Bitcoin
 
 # Unresolved questions
 [unresolved-questions]: #unresolved-questions
 
-- [ ] What parts of the design do you expect to resolve through the RFC process before this gets merged?
+- [x] What parts of the design do you expect to resolve through the RFC process before this gets merged?
+  - [x] The detailed API for difficulty adjustment checks
 - [ ] What parts of the design do you expect to resolve through the implementation of this feature before stabilization?
+  - [ ] Guide-level examples
+  - [ ] Reference-level examples
+  - [ ] Corner case examples
+  - [ ] Testing
 - [ ] What related issues do you consider out of scope for this RFC that could be addressed in the future independently of the solution that comes out of this RFC?
+  - Monitoring and maintainence.
 
 # Future possibilities
 [future-possibilities]: #future-possibilities
 
-- [ ] Relevant chain iterator as a general basis for contextual validation
-- [ ] `difficulty_threshold_is_valid` as a basis for header-only validation
-- [ ] Talk about other future possibilities (if there are any)
+## Re-using the relevant chain API in other contextual checks
+[relevant-chain-api-reuse]: #relevant-chain-api-reuse
+
+The relevant chain iterator can be re-used to implement other contextual
+validation checks.
+
+For example, responding to peer requests for block locators, which means
+implementing relevant chain hash queries as a `StateService` request
+
+## Header-only difficulty adjustment validation
+[header-only-validation]: #header-only-validation
+
+Implementing header-only difficulty adjustment validation as a `StateService` request.
 
 ## Caching difficulty calculations
+[caching-calculations]: #caching-calculations
 
 Difficulty calculations use `u256` could be a bit expensive, particularly if we
-get a flood of low-difficulty blocks. To reduce the impact of this kind of DoS, we could
-cache the value returned by `difficulty_threshold_bits` for each block in the
-non-finalized state, and the finalized tip.
+get a flood of low-difficulty blocks. To reduce the impact of this kind of DoS,
+we could cache the value returned by `threshold_bits` for each block in the
+non-finalized state, and for the finalized tip. This value could be used to
+quickly calculate the difficulties for any child blocks of these blocks.
 
-## Future possibilities template text
+There's no need to persist this cache, or pre-fill it. (Minimum-difficulty
+Testnet blocks don't call `threshold_bits`, and some side-chain blocks will
+never have a next block.)
 
-Think about what the natural extension and evolution of your proposal would
-be and how it would affect Zebra and Zcash as a whole. Try to use this
-section as a tool to more fully consider all possible
-interactions with the project and cryptocurrency ecosystem in your proposal.
-Also consider how the this all fits into the roadmap for the project
-and of the relevant sub-team.
-
-This is also a good place to "dump ideas", if they are out of scope for the
-RFC you are writing but otherwise related.
-
-If you have tried and cannot think of any future possibilities,
-you may simply state that you cannot think of anything.
-
-Note that having something written down in the future-possibilities section
-is not a reason to accept the current or a future RFC; such notes should be
-in the section on motivation or rationale in this or subsequent RFCs.
-The section merely provides additional information.
+This caching is only worth implementing if these calculations show up in `zebrad`
+profiles.
