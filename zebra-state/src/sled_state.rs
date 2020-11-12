@@ -38,7 +38,7 @@ use self::sled_format::TransactionLocation;
 pub struct FinalizedState {
     /// Queued blocks that arrived out of order, indexed by their parent block hash.
     queued_by_prev_hash: HashMap<block::Hash, QueuedBlock>,
-    max_queued_height: i32,
+    max_queued_height: i64,
 
     hash_by_height: sled::Tree,
     height_by_hash: sled::Tree,
@@ -192,7 +192,7 @@ impl FinalizedState {
             // use -1 as a sentinel value for "None", because 0 is a valid height
             self.max_queued_height = -1;
         } else {
-            self.max_queued_height = std::cmp::max(self.max_queued_height, height.0);
+            self.max_queued_height = std::cmp::max(self.max_queued_height, height.0 as _);
         }
 
         metrics::gauge!("state.finalized.queued.max.height", self.max_queued_height);
