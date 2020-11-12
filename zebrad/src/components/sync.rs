@@ -142,9 +142,6 @@ where
         // making a less-fallible network service, and the Hedge layer
         // tries to reduce latency of that less-fallible service.
         //
-        // We hedge every request. If we don't have any recent timings,
-        // Hedge issues a second request with no delay.
-        //
         // XXX add ServiceBuilder::hedge() so this becomes
         // ServiceBuilder::new().hedge(...).retry(...)...
         let block_network = Hedge::new(
@@ -154,7 +151,7 @@ where
                 .timeout(BLOCK_DOWNLOAD_TIMEOUT)
                 .service(peers),
             AlwaysHedge,
-            0,
+            20,
             0.95,
             2 * SYNC_RESTART_TIMEOUT,
         );
