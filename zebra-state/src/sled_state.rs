@@ -69,11 +69,12 @@ impl FinalizedState {
         };
 
         if let Some(tip_height) = new_state.finalized_tip_height() {
-            let tip_hash = new_state.finalized_tip_hash();
-            if new_state.is_at_stop_height(tip_height, tip_hash) {
+            if new_state.is_at_stop_height(tip_height) {
                 let debug_stop_at_height = new_state
                     .debug_stop_at_height
                     .expect("true from `is_at_stop_height` implies `debug_stop_at_height` is Some");
+
+                let tip_hash = new_state.finalized_tip_hash();
 
                 if tip_height > debug_stop_at_height {
                     tracing::error!(
@@ -83,6 +84,13 @@ impl FinalizedState {
                         "previous state height is greater than the stop height",
                     );
                 }
+
+                tracing::info!(
+                    ?debug_stop_at_height,
+                    ?tip_height,
+                    ?tip_hash,
+                    "state is already at the configured height"
+                );
 
                 // There's no need to sync before exit, because the trees have just been opened
                 std::process::exit(0);
@@ -116,8 +124,7 @@ impl FinalizedState {
     /// Flushes sled trees before exiting.
     ///
     /// `called_from` and `block_hash` are used for assertions and logging.
-    #[track_caller]
-    fn is_at_stop_height(&self, block_height: block::Height, block_hash: block::Hash) -> bool {
+    fn is_at_stop_height(&self, block_height: block::Height) -> bool {
         let debug_stop_at_height = match self.debug_stop_at_height {
             Some(debug_stop_at_height) => debug_stop_at_height,
             None => return false,
@@ -126,16 +133,6 @@ impl FinalizedState {
         if block_height < debug_stop_at_height {
             return false;
         }
-
-        let caller = std::panic::Location::caller();
-
-        tracing::info!(
-            ?debug_stop_at_height,
-            ?block_height,
-            ?block_hash,
-            ?caller,
-            "stopping at configured height"
-        );
 
         true
     }
@@ -268,7 +265,7 @@ impl FinalizedState {
                 },
             );
 
-        if result.is_ok() && self.is_at_stop_height(height, hash) {
+        if result.is_ok() && self.is_at_stop_height(height) {
             if let Err(e) = self.flush() {
                 tracing::error!(
                     ?e,
@@ -277,6 +274,8 @@ impl FinalizedState {
                     "error flushing sled state before stopping"
                 );
             }
+
+            tracing::info!(?height, ?hash, "stopping at configured height");
 
             std::process::exit(0);
         }
