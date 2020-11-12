@@ -78,11 +78,16 @@ impl FinalizedState {
         };
 
         if let Some(tip_height) = new_state.finalized_tip_height() {
-            new_state.stop_if_at_height_limit(
-                StopCheckContext::OnLoad,
-                tip_height,
-                new_state.finalized_tip_hash(),
-            );
+            let tip_hash = new_state.finalized_tip_hash();
+            if new_state.is_at_height_limit(tip_height, tip_hash) {
+                tracing::error!(
+                    ?tip_height,
+                    ?tip_hash,
+                    "previous state height is greater than the stop height",
+                );
+
+                std::process::exit(0);
+            }
         }
 
         new_state
@@ -112,59 +117,24 @@ impl FinalizedState {
     /// Flushes sled trees before exiting.
     ///
     /// `called_from` and `block_hash` are used for assertions and logging.
-    fn stop_if_at_height_limit(
-        &self,
-        called_from: StopCheckContext,
-        block_height: block::Height,
-        block_hash: block::Hash,
-    ) {
+    fn is_at_height_limit(&self, block_height: block::Height, block_hash: block::Hash) -> bool {
         let debug_stop_at_height = match self.debug_stop_at_height {
             Some(debug_stop_at_height) => debug_stop_at_height,
-            None => return,
+            None => return false,
         };
 
         if block_height < debug_stop_at_height {
-            return;
-        }
-
-        // this error is expected on load, but unexpected on commit
-        if block_height > debug_stop_at_height {
-            if called_from == StopCheckContext::OnLoad {
-                tracing::error!(
-                    ?debug_stop_at_height,
-                    ?called_from,
-                    ?block_height,
-                    ?block_hash,
-                    "previous state height is greater than the stop height",
-                );
-            } else {
-                unreachable!("committed blocks must be committed in order");
-            }
-        }
-
-        // Don't sync when the trees have just been opened
-        if called_from == StopCheckContext::OnCommit {
-            if let Err(e) = self.flush() {
-                tracing::error!(
-                    ?e,
-                    ?debug_stop_at_height,
-                    ?called_from,
-                    ?block_height,
-                    ?block_hash,
-                    "error flushing sled state before stopping"
-                );
-            }
+            return false;
         }
 
         tracing::info!(
             ?debug_stop_at_height,
-            ?called_from,
             ?block_height,
             ?block_hash,
             "stopping at configured height"
         );
 
-        std::process::exit(0);
+        true
     }
 
     /// Queue a finalized block to be committed to the state.
@@ -295,8 +265,18 @@ impl FinalizedState {
                 },
             );
 
-        if result.is_ok() {
-            self.stop_if_at_height_limit(StopCheckContext::OnCommit, height, hash);
+        if result.is_ok() && self.is_at_height_limit(height, hash) {
+            // Don't sync when the trees have just been opened
+            if let Err(e) = self.flush() {
+                tracing::error!(
+                    ?e,
+                    ?height,
+                    ?hash,
+                    "error flushing sled state before stopping"
+                );
+            }
+
+            std::process::exit(0);
         }
 
         result.map_err(Into::into)
