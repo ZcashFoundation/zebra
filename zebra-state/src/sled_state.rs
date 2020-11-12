@@ -80,7 +80,7 @@ impl FinalizedState {
         if let Some(tip_height) = new_state.finalized_tip_height() {
             let tip_hash = new_state.finalized_tip_hash();
             if new_state.is_at_stop_height(tip_height, tip_hash) {
-                let debug_stop_at_height = self
+                let debug_stop_at_height = new_state
                     .debug_stop_at_height
                     .expect("true from `is_at_stop_height` implies `debug_stop_at_height` is Some");
 
@@ -93,6 +93,7 @@ impl FinalizedState {
                     );
                 }
 
+                // There's no need to sync before exit, because the trees have just been opened
                 std::process::exit(0);
             }
         }
@@ -273,7 +274,6 @@ impl FinalizedState {
             );
 
         if result.is_ok() && self.is_at_stop_height(height, hash) {
-            // Don't sync when the trees have just been opened
             if let Err(e) = self.flush() {
                 tracing::error!(
                     ?e,
