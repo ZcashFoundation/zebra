@@ -123,7 +123,7 @@ TODO:
 ## State service interface changes
 [state-service-interface]: #state-service-interface
 
-Contextual validation accesses recent blocks. So we modify the the internal state
+Contextual validation accesses recent blocks. So we modify the internal state
 service interface to provide an abstraction for accessing recent blocks.
 
 ### The relevant chain
@@ -136,8 +136,8 @@ The relevant chain can be retrieved from the state service [RFC5] as follows:
   * get recent blocks from the relevant chain, then
   * get recent blocks from the finalized state, if required
 
-The relevant chain can start at any non-finalized block. If the next block is
-valid, it becomes the new tip of the relevant chain.
+The relevant chain can start at any non-finalized block, or at the finalized tip.
+If the next block is valid, it becomes the new tip of the relevant chain.
 
 In particular, if the previous block is not a chain tip, the relevant chain
 becomes a new chain fork.
@@ -152,12 +152,11 @@ as the state has:
 * received the semantically valid next block (via `CommitBlock`), and
 * committed the previous block.
 
-There are two different difficulty contextual validation checks:
+Contextual difficulty validation consists of the following check:
 * the difficulty threshold in the block matches the adjusted difficulty from
-  previous blocks, and
-* the block passes the difficulty filter.
+  previous blocks.
 
-These checks are implemented as follows:
+This check is implemented as follows:
 
 ### Difficulty adjustment
 [difficulty-adjustment]: #difficulty-adjustment
@@ -165,18 +164,22 @@ These checks are implemented as follows:
 The block difficulty threshold is adjusted by scaling the mean target difficulty
 by the median timespan.
 
+On testnet, if a long time has elapsed since the previous block, the difficulty
+adjustment is modified to allow minimum-difficulty blocks.
+
 #### Mean target difficulty
 [mean-target-difficulty]: #mean-target-difficulty
 
 The mean target difficulty is the arithmetic mean of the difficulty
-thresholds of the 17 most recent blocks in the relevant chain.
+thresholds of the `PoWAveragingWindow` (17) most recent blocks in the relevant
+chain.
 
 Zcash uses block difficulty thresholds in its difficulty adjustment calculations.
 (Block hashes are not used for difficulty adjustment.)
 
 TODO:
-  - check if zcashd truncates the MeanTarget before dividing by AveragingWindowTimespan,
-    (as well as after the division)
+  - check if zcashd truncates the MeanTarget before dividing by
+    AveragingWindowTimespan (as well as after the division), and
   - open a ticket to update the Zcash spec
 
 #### Median timespan
@@ -186,13 +189,13 @@ The average number of seconds taken to generate the 17 blocks in the averaging
 window.
 
 Calculated using the difference of the median timespans for:
-* the relevant tip: the 11 most recent blocks, and
-* the 11 blocks after the 17-block averaging window: blocks 18-28 behind the
-  relevant tip.
+* the relevant tip: the `PoWMedianBlockSpan` (11) most recent blocks, and
+* the 11 blocks after the 17-block averaging window: that is, blocks 18-28 behind
+  the relevant tip.
 
 (The median timespan is known as the `ActualTimespan` in the Zcash specification,
 but this terminology is confusing, because it is a difference of medians, rather
-than an "actual" elapsed time.)
+than any "actual" elapsed time.)
 
 TODO: open a Zcash spec clarification ticket
 
@@ -206,36 +209,42 @@ The block difficulty threshold for the next block is calculated by scaling the
 mean target difficulty by the ratio between the median timespan and the target
 timespan.
 
-The block difficulty is limited by the `PoWLimit`, a per-network easiest block
-difficulty.
-
-### Difficulty filter
-[difficulty-filter]: #difficulty-filter
-
-The difficulty filter consists of two alternative checks:
-* the hash difficulty is less than or equal to the difficulty threshold
-  (lower values are harder to generate), or
-* the block is a testnet minimum difficulty block.
-
-The default difficulty filter is a context-free check. The testnet minimum
-difficulty filter uses the time from the previous block.
+The block difficulty is also limited by `ToCompact(PoWLimit(network))`, a
+per-network easiest block difficulty.
 
 #### Test network minimum difficulty blocks
 [test-net-min-difficulty]: #test-net-min-difficulty
 
-Blocks pass the testnet minimum difficulty filter if:
+A block is a testnet minimum difficulty block if:
 * the block is a testnet block,
-* the block's height is 299188 or greater,
-* the time gap from the previous block is at least 6 times the target spacing,
-  and
-* the block hash is less than or equal to the testnet `PoWLimit` [ZIP-208].
+* the block's height is 299188 or greater, and
+* the time gap from the previous block is greater than the testnet minimum
+  difficulty gap, which is 6 times the target spacing for the block's height.
 
-The minimum difficulty filter does not change how subsequent block difficulties are
-calculated. The value of the difficulty threshold in the block header is used to
-calculate the difficulty adjustments for subsequent blocks, even if that value was
-ignored by the minimum difficulty filter.
+The difficulty adjustment is modified for testnet minimum difficulty blocks as
+follows:
+* the difficulty threshold in the block header is set to the testnet minimum
+  difficulty threshold, `ToCompact(PoWLimit(network))`.
+
+Since the new difficulty changes the block header, testnet blocks can only
+satisfy one of the alternate difficulty adjustment rules:
+* if the time gap is less than or equal to the testnet minimum difficulty gap:
+  the difficulty threshold is calculated using the default difficulty adjustment
+  rule,
+* if the time gap is greater than the testnet minimum difficulty gap:
+  the difficulty threshold is the testnet minimum difficulty threshold.
+
+See [ZIP-208] for details.
+
+Note: There were several errors in the specification of testnet minimum
+difficulty adjustment in ZIPs 205 and 208. The time gap, minimum difficulty
+threshold value, the modification of the `difficulty` (`nBits`) field, and its
+use in future difficulty adjustments were all incorrect. These errors are fixed
+in [ZIP PR 417] and [ZIP commit 806076c].
 
 [ZIP-208]: https://zips.z.cash/zip-0208#minimum-difficulty-blocks-on-the-test-network
+[ZIP PR 417]: https://github.com/zcash/zips/pull/417
+[ZIP commit 806076c]: https://github.com/zcash/zips/commit/806076c48c9834fd9941b940a32310d737975a3a
 
 # ----- TODO: Write the rest of the design -----
 
