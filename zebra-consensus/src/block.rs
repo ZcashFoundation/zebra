@@ -138,9 +138,6 @@ where
                 _ => unreachable!("wrong response to Request::Depth"),
             }
 
-            // We repeat the height checks here, to ensure that generated blocks
-            // are valid. (We check the block heights for parsed blocks when we
-            // deserialize them.)
             let height = block
                 .coinbase_height()
                 .ok_or(BlockError::MissingHeight(hash))?;
