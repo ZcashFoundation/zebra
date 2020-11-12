@@ -86,8 +86,6 @@ jobs:
           --container-image "gcr.io/$PROJECT_ID/$REPOSITORY/tests/$BRANCH_NAME:$SHORT_SHA" \
           --container-mount-disk mount-path='/zebrad-cache',name=zebrad-cache-$SHORT_SHA \
           --container-restart-policy='never' \
-          --container-stdin \
-          --container-tty \
           --create-disk name=zebrad-cache-$SHORT_SHA,image=zebrad-cache-mainnet-height-1018849 \
           --service-account cos-vm@zealous-zebra.iam.gserviceaccount.com \
           --scopes cloud-platform \
