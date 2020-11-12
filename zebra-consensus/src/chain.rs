@@ -87,10 +87,18 @@ where
     }
 }
 
-/// Return a block verification service, using `config`, `network` and
-/// `state_service`.
+/// Initialize a block verification service.
+///
+/// The consensus configuration is specified by `config`, and the Zcash network
+/// to verify blocks for is specified by `network`.
+///
+/// The block verification service asynchronously performs semantic verification
+/// checks. Blocks that pass semantic verification are submitted to the supplied
+/// `state_service` for contextual verification before being committed to the chain.
 ///
 /// This function should only be called once for a particular state service.
+///
+/// Dropped requests are cancelled on a best-effort basis, but may continue to be processed.
 #[instrument(skip(state_service))]
 pub async fn init<S>(
     config: Config,

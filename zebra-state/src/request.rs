@@ -53,11 +53,18 @@ pub enum Request {
     /// Performs contextual validation of the given block, committing it to the
     /// state if successful.
     ///
-    /// Returns [`Response::Committed`] with the hash of the newly
-    /// committed block, or an error.
+    /// It is the caller's responsibility to perform semantic validation. This
+    /// request can be made out-of-order; the state service will queue it until
+    /// its parent is ready.
     ///
-    /// This request can be made out-of-order; the state service will buffer it
-    /// until its parent is ready.
+    /// Returns [`Response::Committed`] with the hash of the block when it is
+    /// committed to the state, or an error if the block fails contextual
+    /// validation or has already been committed to the state.
+    ///
+    /// This request cannot be cancelled once submitted; dropping the response
+    /// future will have no effect on whether it is eventually processed. A
+    /// request to commit a block which has been queued internally but not yet
+    /// committed will fail the older request and replace it with the newer request.
     CommitBlock {
         /// The block to commit to the state.
         block: Arc<Block>,
@@ -66,15 +73,20 @@ pub enum Request {
         // sapling_anchor: sapling::tree::Root,
     },
 
-    /// Commit a finalized block to the state, skipping contextual validation.
+    /// Commit a finalized block to the state, skipping all validation.
+    ///
     /// This is exposed for use in checkpointing, which produces finalized
-    /// blocks.
+    /// blocks. It is the caller's responsibility to ensure that the block is
+    /// valid and final. This request can be made out-of-order; the state service
+    /// will queue it until its parent is ready.
     ///
-    /// Returns [`Response::Committed`] with the hash of the newly
-    /// committed block, or an error.
+    /// Returns [`Response::Committed`] with the hash of the newly committed
+    /// block, or an error.
     ///
-    /// This request can be made out-of-order; the state service will buffer it
-    /// until its parent is ready.
+    /// This request cannot be cancelled once submitted; dropping the response
+    /// future will have no effect on whether it is eventually processed.
+    /// Duplicate requests should not be made, because it is the caller's
+    /// responsibility to ensure that each block is valid and final.
     CommitFinalizedBlock {
         /// The block to commit to the state.
         block: Arc<Block>,
@@ -124,8 +136,14 @@ pub enum Request {
     /// [`block::Height`] using `.into()`.
     Block(HashOrHeight),
 
-    /// Request a UTXO identified by the given Outpoint in any chain.
+    /// Request a UTXO identified by the given Outpoint, waiting until it becomes
+    /// available if it is unknown.
     ///
-    /// Returns UTXOs fron any chain, including side-chains.
+    /// This request is purely informational, and there are no guarantees about
+    /// whether the UTXO remains unspent or is on the best chain. Its purpose is
+    /// to allow asynchronous script verification.
+    ///
+    /// Code making this request should apply a timeout layer to the service to
+    /// handle missing UTXOs.
     AwaitUtxo(transparent::OutPoint),
 }
