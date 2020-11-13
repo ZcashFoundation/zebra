@@ -2,7 +2,6 @@
 
 use std::{collections::HashMap, convert::TryInto, sync::Arc};
 
-use tracing::trace;
 use zebra_chain::transparent;
 use zebra_chain::{
     block::{self, Block},
@@ -191,7 +190,7 @@ impl FinalizedState {
             .expect("finalized blocks are valid and have a coinbase height");
         let hash = block.hash();
 
-        trace!(?height, ?hash, "Finalized block");
+        block_precommit_metrics(&hash, height, &block);
 
         // Assert that callers (including unit tests) get the chain order correct
         if self.block_by_height.is_empty() {
@@ -380,4 +379,63 @@ impl FinalizedState {
                 block.transactions[index as usize].clone()
             })
     }
+}
+
+fn block_precommit_metrics(hash: &block::Hash, height: block::Height, block: &Block) {
+    let transaction_count = block.transactions.len();
+    let transparent_prevout_count = block
+        .transactions
+        .iter()
+        .flat_map(|t| t.inputs().iter())
+        .count()
+        // Each block has a single coinbase input which is not a previous output.
+        - 1;
+    let transparent_newout_count = block
+        .transactions
+        .iter()
+        .flat_map(|t| t.outputs().iter())
+        .count();
+
+    let sprout_nullifier_count = block
+        .transactions
+        .iter()
+        .flat_map(|t| t.sprout_nullifiers())
+        .count();
+
+    let sapling_nullifier_count = block
+        .transactions
+        .iter()
+        .flat_map(|t| t.sapling_nullifiers())
+        .count();
+
+    tracing::debug!(
+        ?hash,
+        ?height,
+        transaction_count,
+        transparent_prevout_count,
+        transparent_newout_count,
+        sprout_nullifier_count,
+        sapling_nullifier_count,
+        "preparing to commit finalized block"
+    );
+    metrics::counter!(
+        "state.finalized.cumulative.transactions",
+        transaction_count as u64
+    );
+    metrics::counter!(
+        "state.finalized.cumulative.transparent_prevouts",
+        transparent_prevout_count as u64
+    );
+    metrics::counter!(
+        "state.finalized.cumulative.transparent_newouts",
+        transparent_newout_count as u64
+    );
+    metrics::counter!(
+        "state.finalized.cumulative.sprout_nullifiers",
+        sprout_nullifier_count as u64
+    );
+    metrics::counter!(
+        "state.finalized.cumulative.sapling_nullifiers",
+        sapling_nullifier_count as u64
+    );
 }
