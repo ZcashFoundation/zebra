@@ -214,9 +214,14 @@ where
                         Ok(hash) => {
                             tracing::trace!(?hash, "verified and committed block to state");
                         }
+
                         Err(e) => {
-                            tracing::warn!(?e, "error downloading and verifying block");
-                            continue 'sync;
+                            if format!("{:?}", e).contains("AlreadyVerified {") {
+                                tracing::info!(error = ?e, "error seems like it might be already verified, this is probably fine i guess?")
+                            } else {
+                                tracing::warn!(?e, "error downloading and verifying block");
+                                continue 'sync;
+                            }
                         }
                     }
                     self.update_metrics();
