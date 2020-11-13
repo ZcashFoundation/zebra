@@ -21,7 +21,13 @@ pub struct TokioComponent {
 impl TokioComponent {
     pub fn new() -> Result<Self, FrameworkError> {
         Ok(Self {
-            rt: Some(Runtime::new().unwrap()),
+            rt: Some(
+                tokio::runtime::Builder::new()
+                    .enable_all()
+                    .threaded_scheduler()
+                    .build()
+                    .unwrap(),
+            ),
         })
     }
 }
