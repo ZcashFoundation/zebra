@@ -1,8 +1,9 @@
 ---
-Title: RFC Template
-About: A design RFC for Zebra
-Labels: C-design
-Assignees: ''
+name: RFC Template
+about: A design RFC for Zebra
+title: ''
+labels: C-design
+assignees: ''
 
 ---
 
