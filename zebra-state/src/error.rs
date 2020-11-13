@@ -38,4 +38,8 @@ pub enum ValidateContextError {
     /// block.height is lower than the current finalized height
     #[non_exhaustive]
     OrphanedBlock,
+
+    /// block.height is not one greater than its parent block's height
+    #[non_exhaustive]
+    NonSequentialBlock,
 }
