@@ -43,10 +43,12 @@ This is the technical portion of the RFC. Explain the design in sufficient detai
 The section should return to the examples given in the previous section, and explain more fully how the detailed proposal makes those examples work.
 
 ## Module Structure
+[module-structure]: #module-structure
 
 Describe the crate and modules that will implement the feature.
 
 ## Test Plan
+[test-plan]: #test-plan
 
 Explain how the feature will be tested, including:
 * tests for consensus-critical functionality
