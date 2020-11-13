@@ -1,9 +1,13 @@
+//! Consensus critical contextual checks
+
 use zebra_chain::block::{self, Block};
 
 use crate::ValidateContextError;
 
 use super::StateService;
 
+/// Returns `ValidateContextError::OrphanedBlock` if the height of the given
+/// block is less than or equal to the finalized tip height.
 pub(super) fn block_is_not_orphaned(
     service: &StateService,
     block: &Block,
@@ -21,6 +25,8 @@ pub(super) fn block_is_not_orphaned(
     }
 }
 
+/// Returns `ValidateContextError::NonSequentialBlock` if the block height isn't
+/// equal to the parent_height+1.
 pub(super) fn height_one_more_than_parent_height(
     parent_height: block::Height,
     block: &Block,
