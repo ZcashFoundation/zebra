@@ -183,14 +183,17 @@ impl StateService {
     /// Check that `block` is contextually valid based on the committed finalized
     /// and non-finalized state.
     fn check_contextual_validity(&mut self, block: &Block) -> Result<(), ValidateContextError> {
+        let finalized_tip_height = self.sled.finalized_tip_height().expect(
+            "finalized state must contain at least one block to use the non-finalized state",
+        );
+        check::block_is_not_orphaned(finalized_tip_height, block)?;
+
         let parent_block = self
             .block(block.hash().into())
             .expect("the parent's presence has already been checked");
         let parent_height = parent_block
             .coinbase_height()
             .expect("valid blocks have a coinbase height");
-
-        check::block_is_not_orphaned(self, block)?;
         check::height_one_more_than_parent_height(parent_height, block)?;
 
         // TODO: contextual validation design and implementation
