@@ -539,7 +539,7 @@ fn restart_stop_at_height() -> Result<()> {
     sync_until(
         Height(0),
         Mainnet,
-        "called_from=OnLoad",
+        "state is already at the configured height",
         STOP_ON_LOAD_TIMEOUT,
         Some(reuse_tempdir),
     )?;
