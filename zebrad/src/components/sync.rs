@@ -169,7 +169,7 @@ where
     }
 
     #[instrument(skip(self))]
-    pub async fn sync(&mut self) -> Result<(), Report> {
+    pub async fn sync(mut self) -> Result<(), Report> {
         // We can't download the genesis block using our normal algorithm,
         // due to protocol limitations
         self.request_genesis().await?;
