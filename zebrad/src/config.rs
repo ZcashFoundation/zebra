@@ -157,7 +157,7 @@ pub struct SyncSection {
 impl Default for SyncSection {
     fn default() -> Self {
         Self {
-            max_concurrent_block_requests: 1_000,
+            max_concurrent_block_requests: 50,
             lookahead_limit: 2_000,
         }
     }
