@@ -153,6 +153,27 @@ impl FinalizedState {
                 .block
                 .coinbase_height()
                 .expect("valid blocks must have a height");
+
+            if prev_hash == block::Hash([0; 32]) {
+                assert_eq!(
+                    1,
+                    self.block_by_height.len(),
+                    "cannot commit genesis block to a populated state"
+                );
+                assert_eq!(
+                    block::Height(0),
+                    height,
+                    "cannot commit genesis: invalid height"
+                );
+            } else {
+                assert_eq!(
+                    self.finalized_tip_height()
+                        .expect("state must have a genesis block committed")
+                        + 1,
+                    Some(height)
+                );
+            }
+
             self.commit_finalized(queued_block);
             metrics::counter!("state.finalized.committed.block.count", 1);
             metrics::gauge!("state.finalized.committed.block.height", height.0 as _);
@@ -216,8 +237,6 @@ impl FinalizedState {
                     sprout_nullifiers,
                     sapling_nullifiers,
                 )| {
-                    // TODO: check highest entry of hash_by_height as in RFC
-
                     // Index the block
                     hash_by_height.zs_insert(height, hash)?;
                     height_by_hash.zs_insert(hash, height)?;
