@@ -44,7 +44,7 @@ mod tests;
 
 pub(crate) use list::CheckpointList;
 use types::{Progress, Progress::*};
-use types::{Target, Target::*};
+use types::{TargetHeight, TargetHeight::*};
 
 /// An unverified block, which is in the queue for checkpoint verification.
 #[derive(Debug)]
@@ -262,7 +262,7 @@ where
     /// `height` increases as checkpoints are verified.
     ///
     /// If verification has finished, returns `FinishedVerifying`.
-    fn target_checkpoint_height(&self) -> Target<block::Height> {
+    fn target_checkpoint_height(&self) -> TargetHeight {
         // Find the height we want to start searching at
         let start_height = match self.previous_checkpoint_height() {
             // Check if we have the genesis block as a special case, to simplify the loop
