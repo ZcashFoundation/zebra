@@ -40,7 +40,10 @@ jobs:
       run: |
         gcloud builds submit \
           --config cloudbuild.yaml \
-          --substitutions SHORT_SHA="$SHORT_SHA",BRANCH_NAME="$BRANCH_NAME"
+          --substitutions SHORT_SHA="$SHORT_SHA",\
+          BRANCH_NAME="$BRANCH_NAME",\
+          _CHECKPOINT_SYNC="${{ github.event.inputs.checkpoint_sync }}",\
+          _NETWORK="${{ github.event.inputs.network }}"
 
     # Run once: create firewall rule to allow incoming traffic to the node
     # - name: Create Zcash incoming traffic firewall rule
