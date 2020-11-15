@@ -732,6 +732,21 @@ must also be performed synchronously.
 The relevant chain for a block starts at its previous block, and follows the
 chain of previous blocks back to the genesis block.
 
+### Relevant chain iterator
+[relevant-chain-iterator]: #relevant-chain-iterator
+
+The relevant chain can be retrieved from the state service as follows:
+* if the previous block is the finalized tip:
+  * get recent blocks from the finalized state
+* if the previous block is in the non-finalized state:
+  * get recent blocks from the relevant chain, then
+  * get recent blocks from the finalized state, if required
+
+The relevant chain can start at any non-finalized block, or at the finalized tip.
+
+### Relevant chain implementation
+[relevant-chain-implementation]: #relevant-chain-implementation
+
 The relevant chain is implemented as a `StateService` iterator, which returns
 `Arc<Block>`s.
 

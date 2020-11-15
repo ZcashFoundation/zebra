@@ -145,7 +145,9 @@ multiple chains. Past the reorganization limit, Zebra commits a single chain to
 the finalized state.
 
 The relevant chain can start at any block in the non-finalized state, or at the
-finalized tip.
+finalized tip. See [RFC5] for details.
+
+[RFC5]: ./0005-state-updates.md
 
 ## Contextual validation design
 [contextual-validation-design]: #contextual-validation-design
@@ -264,20 +266,6 @@ theoretically possible for the time gap between blocks to be larger than
 gap is that large, the bounds and minimum difficulty in Zcash's difficulty
 adjustment algorithm will preserve a reasonable difficulty threshold. So Zebra
 must support this edge case.
-
-## Relevant chain iterator
-[relevant-chain-iterator]: #relevant-chain-iterator
-
-The relevant chain can be retrieved from the state service [RFC5] as follows:
-* if the previous block is the finalized tip:
-  * get recent blocks from the finalized state
-* if the previous block is in the non-finalized state:
-  * get recent blocks from the relevant chain, then
-  * get recent blocks from the finalized state, if required
-
-The relevant chain can start at any non-finalized block, or at the finalized tip.
-
-[RFC5]: ./0005-state-updates.md
 
 ## Difficulty adjustment check
 [difficulty-adjustment-check]: #difficulty-adjustment-check
