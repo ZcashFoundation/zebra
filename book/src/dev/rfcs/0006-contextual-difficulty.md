@@ -390,6 +390,21 @@ fn new_from_fields(candidate_time: DateTime<Utc>,
 `DifficultyAdjustment` is located in a new
 `zebra_chain::work::difficulty::adjustment` module.
 
+#### Memory usage note
+
+Copying `CompactDifficulty` values into the `DifficultyAdjustment` struct uses
+less memory than borrowing those values. `CompactDifficulty` values are 32 bits,
+but pointers are 64-bit on most modern machines. (And since they all come from
+different blocks, we need a pointer to each individual value.)
+
+Borrowing `DateTime<Utc>` values might use slightly less memory than copying
+them - but that depends on the exact way that Rust stores associated types
+derived from a generic argument.
+
+In any case, the overall size of each `DifficultyAdjustment` is only a few
+hundred bytes. If it turns up in profiles, we can look at borrowing the block
+header data.
+
 ### Difficulty adjustment check implementation
 [difficulty-adjustment-check-implementation]: #difficulty-adjustment-check-implementation
 
