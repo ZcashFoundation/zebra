@@ -342,9 +342,6 @@ pub fn new_from_header<C>(candidate_header: &block::Header
     { ... }
 ```
 
-`AdjustedDifficulty` is located in a new
-`zebra_chain::work::difficulty::adjustment` module.
-
 #### Memory usage note
 
 Copying `CompactDifficulty` values into the `AdjustedDifficulty` struct uses
@@ -376,9 +373,6 @@ pub fn difficulty_threshold_is_valid(difficulty_threshold: CompactDifficulty,
                                      -> Result<(), BlockError> { ... }
 ```
 
-`difficulty_threshold_is_valid` is located in the existing
-`zebra_consensus::block::check` module.
-
 [Issue 1166]: https://github.com/ZcashFoundation/zebra/issues/1166
 
 ### Mean target difficulty calculation
@@ -406,9 +400,6 @@ We implement this method on `AdjustedDifficulty`:
 /// Implements `MeanTarget` from the Zcash specification.
 fn mean_target_difficulty(&self) -> ExpandedDifficulty { ... }
 ```
-
-`mean_target_difficulty` is located in a new
-`zebra_chain::work::difficulty::adjustment` module.
 
 ### Median timespan calculation
 [median-timespan-calculation]: #median-timespan-calculation
@@ -461,9 +452,6 @@ fn median_time(median_block_span_times: &[DateTime<Utc>; 11])
                -> DateTime<Utc> { ... }
 ```
 
-`median_timespan_bounded` and `median_time` are located in a new
-`zebra_chain::work::difficulty::adjustment` module.
-
 Zebra implements the `AveragingWindowTimespan` using the foollowing methods on
 `NetworkUpgrade`:
 ```rust
@@ -477,9 +465,6 @@ impl NetworkUpgrade {
                                                 -> Duration { ... }
 }
 ```
-
-`averaging_window_timespan` and `averaging_window_timespan_for_height` are
-located in the existing `zebra_chain::parameters::network_upgrade` module.
 
 ### Test network minimum difficulty calculation
 [test-net-min-difficulty-calculation]: #test-net-min-difficulty-calculation
@@ -546,9 +531,6 @@ We implement this method on `AdjustedDifficulty`:
 /// check.
 fn candidate_is_testnet_min_difficulty_block(&self) -> bool { ... }
 ```
-
-`candidate_is_testnet_min_difficulty_block` is located in a new
-`zebra_chain::work::difficulty::adjustment` module.
 
 ### Block difficulty threshold calculation
 [block-difficulty-threshold-calculation]: #block-difficulty-threshold-calculation
@@ -627,9 +609,6 @@ fn threshold_bits(network: Network,
                   -> CompactDifficulty { ... }
 ```
 
-`adjusted_difficulty_threshold` and `threshold_bits` are located in a new
-`zebra_chain::work::difficulty::adjustment` module.
-
 ## Remaining TODOs for Reference-level explanation
 
 This is the technical portion of the RFC. Explain the design in sufficient detail that:
@@ -648,7 +627,15 @@ This is the technical portion of the RFC. Explain the design in sufficient detai
 ## Module Structure
 [module-structure]: #module-structure
 
-- [ ] ~Describe~ Summarise the crate and modules that will implement the feature.
+The structs and functions in this RFC are implemented in a new
+`zebra_state::service::check::difficulty` module.
+
+This module has two entry points:
+* `DifficultyAdjustment::new_from_block`
+* `difficulty_threshold_is_valid`
+
+These entry points are both called from
+`StateService::check_contextual_validity`.
 
 ## Test Plan
 [test-plan]: #test-plan
