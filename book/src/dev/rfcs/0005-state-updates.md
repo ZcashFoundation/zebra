@@ -75,6 +75,11 @@ state service.
   be lower during the initial sync, and after a chain reorganization, if the new
   best chain is at a lower height.
 
+* **relevant chain**: The relevant chain for a block starts at the previous
+  block, and extends back to genesis.
+
+* **relevant tip**: The tip of the relevant chain.
+
 # Guide-level explanation
 [guide-level-explanation]: #guide-level-explanation
 
@@ -717,6 +722,44 @@ These updates can be performed in a batch or without necessarily iterating
 over all transactions, if the data is available by other means; they're
 specified this way for clarity.
 
+## Accessing previous blocks for contextual validation
+[previous-block-context]: #previous-block-context
+
+The state service performs contextual validation of blocks received via the
+`CommitBlock` request. Since `CommitBlock` is synchronous, contextual validation
+must also be performed synchronously.
+
+The relevant chain for a block starts at its previous block, and follows the
+chain of previous blocks back to the genesis block.
+
+The relevant chain is implemented as a `StateService` iterator, which returns
+`Arc<Block>`s.
+
+The chain iterator implements `ExactSizeIterator`, so Zebra can efficiently
+assert that the relevant chain contains enough blocks to perform each contextual
+validation check.
+
+```rust
+impl StateService {
+    /// Return an iterator over the relevant chain of the block identified by
+    /// `hash`.
+    ///
+    /// The block identified by `hash` is included in the chain of blocks yielded
+    /// by the iterator.
+    pub fn chain(&self, hash: block::Hash) -> Iter<'_> { ... }
+}
+
+impl Iterator for Iter<'_>  {
+    type Item = Arc<Block>;
+    ...
+}
+impl ExactSizeIterator for Iter<'_> { ... }
+impl FusedIterator for Iter<'_> {}
+```
+
+For further details, see [PR 1271].
+
+[PR 1271]: https://github.com/ZcashFoundation/zebra/pull/1271
 
 ## Request / Response API
 [request-response]: #request-response

@@ -279,40 +279,6 @@ The relevant chain can start at any non-finalized block, or at the finalized tip
 
 [RFC5]: ./0005-state-updates.md
 
-### Relevant chain implementation
-[relevant-chain-implementation]: #relevant-chain-implementation
-
-The relevant chain is implemented as a `StateService` iterator, which returns
-`Arc<Block>`s.
-
-The chain iterator implements `ExactSizeIterator`, so Zebra can efficiently
-assert that the relevant chain is at least 28 blocks long, before starting
-contextual validation.
-
-```rust
-impl StateService {
-    /// Return an iterator over the relevant chain of the block identified by
-    /// `hash`.
-    ///
-    /// The block identified by `hash` is included in the chain of blocks yielded
-    /// by the iterator.
-    pub fn chain(&self, hash: block::Hash) -> Iter<'_> { ... }
-}
-
-impl Iterator for Iter<'_>  {
-    type Item = Arc<Block>;
-    ...
-}
-impl ExactSizeIterator for Iter<'_> { ... }
-impl FusedIterator for Iter<'_> {}
-```
-
-`chain` and `Iter` are implemented in the existing `zebra_state::service` module.
-
-For further details, see [PR 1271].
-
-[PR 1271]: https://github.com/ZcashFoundation/zebra/pull/1271
-
 ## Difficulty adjustment check
 [difficulty-adjustment-check]: #difficulty-adjustment-check
 
