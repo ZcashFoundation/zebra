@@ -42,8 +42,7 @@ Difficulty:
 
 * **difficulty filter**: A block passes the difficulty filter if the hash
   difficulty is less than or equal to the difficulty threshold (based on the
-  block's difficulty field). On testnet, if a long time elapses between blocks,
-  the difficulty filter also allows minimum-difficulty blocks.
+  block's difficulty field).
 
 * **block work**: The approximate amount of work required for a miner to generate
   a block hash that passes the difficulty filter. The number of block header
@@ -57,6 +56,9 @@ Difficulty:
 
 * **target spacing**: 150 seconds per block before Blossom activation, 75 seconds
   per block from Blossom activation onwards.
+
+* **adjusted difficulty**: After each block is mined, the difficulty threshold of
+  the next block is adjusted, to keep the block gap close to the target spacing.
 
 * **mean target difficulty**: The arithmetic mean of the difficulty thresholds
   of the blocks in the averaging window.
@@ -101,13 +103,30 @@ State:
 # Guide-level explanation
 [guide-level-explanation]: #guide-level-explanation
 
-The difficulty threshold for the next block is calculated using the difficulty
+Zcash's difficulty consensus rules are similar to Bitcoin.
+
+Each block contains a **difficulty threshold** in its header. The hash of the
+block header must be less than this **difficulty threshold**. (When interpreted
+as a 256-bit integer in big-endian byte order.) This context-free semantic
+verification check is performed by the `BlockVerifier`.
+
+After each block, the difficulty threshold is adjusted so that the block gap is
+close to the target spacing. On average, harder blocks take longer to mine, and
+easier blocks take less time.
+
+The **adjusted difficulty** for the next block is calculated using the difficulty
 thresholds and times of recent blocks. Zcash uses the most recent 28 blocks in
 the **relevant chain** in its difficulty adjustment calculations.
 
 The difficulty adjustment calculations adjust the **mean target difficulty**,
 based on the difference between the **median timespan** and the
-**target timespan**.
+**target timespan**. If the median timespan is less than the target timespan, the
+next block is harder to mine.
+
+The `StateService` calculates the adjusted difficulty using the context from the
+**relevant chain**. The difficulty contextual verification check ensures that the
+**difficulty threshold** of the next block is equal to the **adjusted difficulty**
+for its relevant chain.
 
 ## State service interface changes
 [state-service-interface]: #state-service-interface
@@ -136,9 +155,9 @@ as the state has:
 * received the semantically valid next block (via `CommitBlock`), and
 * committed the previous block.
 
-Contextual difficulty validation consists of the following check:
-* the difficulty threshold in the block matches the adjusted difficulty from
-  previous blocks.
+The difficulty adjustment check calculates the correct adjusted difficulty
+threshold value for a candidate block, and ensures that the block's
+`difficulty_threshold` field is equal to that value.
 
 This check is implemented as follows:
 
