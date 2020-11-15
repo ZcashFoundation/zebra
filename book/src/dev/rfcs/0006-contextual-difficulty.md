@@ -215,13 +215,6 @@ The result of this calculation is limited by `ToCompact(PoWLimit(network))`, a
 per-network minimum block difficulty. This minimum difficulty is also used when
 a testnet block's time gap exceeds the minimum difficulty gap.
 
-## Remaining TODOs for Guide-level explanation
-
-- [x] Explaining how Zebra programmers should *think* about the feature, and how it should impact the way they use Zebra.
-  - [ ] It should explain the impact as concretely as possible.
-- [ ] Explaining the feature largely in terms of examples.
-- [ ] If applicable, provide sample error messages, ~deprecation warnings, migration guidance,~ or test strategies.
-
 # Reference-level explanation
 [reference-level-explanation]: #reference-level-explanation
 
@@ -628,21 +621,6 @@ and use repeated divisions, because that can't overflow. See the relevant
 [equivalent to the single truncation of the final result]: https://math.stackexchange.com/questions/147771/rewriting-repeated-integer-division-with-multiplication
 [comment in the zcashd souce code]: https://github.com/zcash/zcash/pull/4860/files
 
-## Remaining TODOs for Reference-level explanation
-
-This is the technical portion of the RFC. Explain the design in sufficient detail that:
-
-- [x] Its interaction with other features is clear.
-- It is reasonably clear how the feature would be:
-  - [x] implemented,
-  - [ ] tested,
-  - ~monitored, and~
-  - ~maintained.~
-- [x] Corner cases are dissected
-  - [ ] by example.
-
-- [ ] The section should return to the examples given in the previous section, and explain more fully how the detailed proposal makes those examples work.
-
 ## Module Structure
 [module-structure]: #module-structure
 
@@ -667,13 +645,13 @@ Explain how the feature will be tested, including:
 
 The tests should cover:
 - [ ] positive cases: make sure the feature accepts valid inputs
-  - using block test vectors for each network upgrade provides some coverage of valid inputs
+    - using block test vectors for each network upgrade provides some coverage of valid inputs
 - [ ] negative cases: make sure the feature rejects invalid inputs
-  - make sure there is a test case for each error condition in the code
-  - if there are lots of potential errors, prioritise:
-    - consensus-critical errors
-    - security-critical errors, and
-    - likely errors
+    - make sure there is a test case for each error condition in the code
+    - if there are lots of potential errors, prioritise:
+        - consensus-critical errors
+        - security-critical errors, and
+        - likely errors
 - [ ] edge cases: make sure that boundary conditions are correctly handled
 
 # Drawbacks
@@ -745,15 +723,14 @@ See the reference-level explanation for prior art and deliberate divergences.
 # Unresolved questions
 [unresolved-questions]: #unresolved-questions
 
-- [x] What parts of the design do you expect to resolve through the RFC process before this gets merged?
-  - [x] The detailed API for difficulty adjustment checks
-- [ ] What parts of the design do you expect to resolve through the implementation of this feature before stabilization?
-  - [ ] Guide-level examples
-  - [ ] Reference-level examples
-  - [ ] Corner case examples
-  - [ ] Testing
-- [ ] What related issues do you consider out of scope for this RFC that could be addressed in the future independently of the solution that comes out of this RFC?
-  - Monitoring and maintainence.
+- What parts of the design do you expect to resolve through the implementation of this feature before stabilization?
+  - Guide-level examples
+  - Reference-level examples
+  - Corner case examples
+  - Testing
+
+- What related issues do you consider out of scope for this RFC that could be addressed in the future independently of the solution that comes out of this RFC?
+  - Monitoring and maintainence
 
 # Future possibilities
 [future-possibilities]: #future-possibilities
