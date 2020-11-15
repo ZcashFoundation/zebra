@@ -367,9 +367,13 @@ calculated using `AdjustedDifficulty::adjusted_difficulty_threshold`.
 We implement this function:
 ```rust
 /// Validate the `difficulty_threshold` from a candidate block's header, based
-/// on a `difficulty_adjustment` for that block.
+/// on an `expected_difficulty` for that block.
+///
+/// Uses `expected_difficulty` to calculate the expected `ToCompact(Threshold())`
+/// value, then compares that value to the `difficulty_threshold`. Returns
+/// `Ok(())` if the values are equal.
 pub fn difficulty_threshold_is_valid(difficulty_threshold: CompactDifficulty,
-                                     difficulty_adjustment: AdjustedDifficulty,
+                                     expected_difficulty: AdjustedDifficulty,
                                      -> Result<(), BlockError> { ... }
 ```
 
