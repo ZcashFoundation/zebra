@@ -1,4 +1,4 @@
-name: Deploy a zebrad node
+name: Manual Deploy
 
 on:
   workflow_dispatch:
@@ -14,6 +14,7 @@ env:
 jobs:
 
   deploy:
+    name: Deploy one zebrad node
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
@@ -54,7 +55,7 @@ jobs:
     # Creates Compute Engine virtual machine instance w/ zebrad container and disks
     - name: Create instance running zebrad container image
       run: |
-        gcloud compute instances create-with-container "zebra-$BRANCH_NAME-$SHORT_SHA" \
+        gcloud compute instances create-with-container "zebrad-$BRANCH_NAME-$SHORT_SHA" \
         --container-image "gcr.io/$PROJECT_ID/$REPOSITORY/$BRANCH_NAME:$SHORT_SHA" \
         --container-mount-disk mount-path='/zebrad-cache',name=zebrad-cache-$SHORT_SHA \
         --create-disk name=zebrad-cache-$SHORT_SHA,size=100GB,type=pd-balanced,auto-delete=no \
