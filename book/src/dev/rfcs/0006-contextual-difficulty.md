@@ -446,7 +446,7 @@ fn median_time(median_block_span_times: &[DateTime<Utc>; 11])
                -> DateTime<Utc> { ... }
 ```
 
-Zebra implements the `AveragingWindowTimespan` using the foollowing methods on
+Zebra implements the `AveragingWindowTimespan` using the following methods on
 `NetworkUpgrade`:
 ```rust
 impl NetworkUpgrade {
