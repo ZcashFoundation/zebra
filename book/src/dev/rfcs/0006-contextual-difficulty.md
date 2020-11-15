@@ -496,11 +496,17 @@ satisfy one of the alternate difficulty adjustment rules:
 
 See [ZIP-208] for details.
 
-Note: There were several errors in the specification of testnet minimum
-difficulty adjustment in ZIPs 205 and 208. The time gap, minimum difficulty
-threshold value, the modification of the `difficulty_threshold` (`nBits`) field,
-and its use in future difficulty adjustments were all incorrect. These errors are
-fixed in [ZIP PR 417] and [ZIP commit 806076c].
+Note: some older versions of ZIPs 205 and 208 incorrectly said that:
+* the time gap threshold uses an "at least" check (it is strictly greater than),
+* the minimum difficulty threshold value was `PoWLimit`
+  (it is `ToCompact(PoWLimit)`),
+* the `difficulty_threshold` (`nBits`) field is not modified in testnet minimum
+  difficulty blocks (the field is modified), and
+* the testnet minimum difficulty value is not used to calculate future difficulty
+  adjustments (the modified value is used in future adjustments).
+
+ZIP 205 and 208 were fixed on 14 November 2020, see [ZIP PR 417] and
+[ZIP commit 806076c] for details.
 
 [ZIP-208]: https://zips.z.cash/zip-0208#minimum-difficulty-blocks-on-the-test-network
 [ZIP PR 417]: https://github.com/zcash/zips/pull/417
