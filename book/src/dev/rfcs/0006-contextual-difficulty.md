@@ -382,15 +382,6 @@ The mean target difficulty is the arithmetic mean of the difficulty
 thresholds of the `PoWAveragingWindow` (17) most recent blocks in the relevant
 chain.
 
-Since the `PoWLimit`s are `2^251 − 1` for Testnet, and `2^243 − 1` for mainnet,
-the sum of these difficulty thresholds will be less than or equal to
-`(2^251 − 1)*17 = 2^255 + 2^251 - 17`. Therefore, this calculation can not
-overflow a `u256` value.
-
-In Zebra, contextual validation starts after Sapling activation, so we can assume
-that the relevant chain contains at least 17 blocks. Therefore, the `PoWLimit`
-case of `MeanTarget()` in the Zcash specification is unreachable.
-
 We implement this method on `AdjustedDifficulty`:
 ```rust
 /// Calculate the arithmetic mean of the averaging window thresholds: the
@@ -400,6 +391,17 @@ We implement this method on `AdjustedDifficulty`:
 /// Implements `MeanTarget` from the Zcash specification.
 fn mean_target_difficulty(&self) -> ExpandedDifficulty { ... }
 ```
+
+#### Implementation notes
+
+Since the `PoWLimit`s are `2^251 − 1` for Testnet, and `2^243 − 1` for mainnet,
+the sum of these difficulty thresholds will be less than or equal to
+`(2^251 − 1)*17 = 2^255 + 2^251 - 17`. Therefore, this calculation can not
+overflow a `u256` value. So the function is infalliable.
+
+In Zebra, contextual validation starts after Sapling activation, so we can assume
+that the relevant chain contains at least 17 blocks. Therefore, the `PoWLimit`
+case of `MeanTarget()` in the Zcash specification is unreachable.
 
 ### Median timespan calculation
 [median-timespan-calculation]: #median-timespan-calculation
@@ -412,18 +414,6 @@ The median timespan is the difference of the median times for:
 (The median timespan is known as the `ActualTimespan` in the Zcash specification,
 but this terminology is confusing, because it is a difference of medians, rather
 than any "actual" elapsed time.)
-
-In Zebra, contextual validation starts after Sapling activation, so we can assume
-that the relevant chain contains at least 28 blocks. Therefore:
-* `max(0, height − PoWMedianBlockSpan)` in the `MedianTime()` calculation
-   simplifies to `height − PoWMedianBlockSpan`,
-* there is always an odd number of blocks in `MedianTime()`, so the median is
-  always the exact middle of the sequence,
-* we only need the candidate block's network upgrade to determine the
-  `AveragingWindowTimespan`, so we don't need the block's network, and
-* we don't need to know the block's height, because all the other uses of
-  `height` in the Zcash specification are implicitly handled by indexing into
-  the `timespan_times` slice.
 
 Zebra implements the median timespan using the following methods on
 `AdjustedDifficulty`:
@@ -465,6 +455,17 @@ impl NetworkUpgrade {
                                                 -> Duration { ... }
 }
 ```
+
+#### Implementation notes
+
+In Zebra, contextual validation starts after Sapling activation, so we can assume
+that the relevant chain contains at least 28 blocks. Therefore:
+* `max(0, height − PoWMedianBlockSpan)` in the `MedianTime()` calculation
+   simplifies to `height − PoWMedianBlockSpan`, and
+* there is always an odd number of blocks in `MedianTime()`, so the median is
+  always the exact middle of the sequence.
+
+Therefore, the function is infalliable.
 
 ### Test network minimum difficulty calculation
 [test-net-min-difficulty-calculation]: #test-net-min-difficulty-calculation
@@ -508,10 +509,6 @@ The testnet minimum difficulty calculation uses the existing
 `NetworkUpgrade::minimum_difficulty_spacing_for_height` function to calculate the
 minimum difficulty gap.
 
-In Zcash, the testnet minimum difficulty rule starts at block 299188, and in
-Zebra, contextual validation starts after Sapling activation. So we can assume
-that there is always a previous block.
-
 We implement this method on `AdjustedDifficulty`:
 ```rust
 /// Returns true if the gap between the `candidate_time` and the previous block's
@@ -532,6 +529,14 @@ We implement this method on `AdjustedDifficulty`:
 fn candidate_is_testnet_min_difficulty_block(&self) -> bool { ... }
 ```
 
+#### Implementation notes
+
+In Zcash, the testnet minimum difficulty rule starts at block 299188, and in
+Zebra, contextual validation starts after Sapling activation. So we can assume
+that there is always a previous block.
+
+Therefore, this function is infalliable.
+
 ### Block difficulty threshold calculation
 [block-difficulty-threshold-calculation]: #block-difficulty-threshold-calculation
 
@@ -548,38 +553,6 @@ minimum difficulty gap. We use the existing
 
 In Zebra, contextual validation starts after Sapling activation, so the genesis
 case of `Threshold()` in the Zcash specification is unreachable.
-
-Note that `zcashd` truncates the `MeanTarget` after the mean calculation, and
-after dividing by `AveragingWindowTimespan`. But as long as there is no overflow,
-this is [equivalent to the single truncation of the final result] in the Zcash
-specification. However, Zebra should follow the order of operations in `zcashd`,
-and use repeated divisions, because that can't overflow.
-
-[equivalent to the single truncation of the final result]: https://math.stackexchange.com/questions/147771/rewriting-repeated-integer-division-with-multiplication
-
-#### Avoiding overflow in the block difficulty threshold calculation
-[block-difficulty-threshold-overflow]: #block-difficulty-threshold-overflow
-
-Since:
-* the `PoWLimit`s are `2^251 − 1` for Testnet, and `2^243 − 1` for mainnet,
-* the `ActualTimespanBounded` can be at most `MaxActualTimespan`, which is
-  `floor(PoWAveragingWindow * PoWTargetSpacing * (1 + PoWMaxAdjustDown))` or
-  `floor(17 * 150 * (1 + 32/100)) =  3366`,
-* `AveragingWindowTimespan` is at most `17 * 150 = 2250`, and
-* `MeanTarget` is at most `PoWLimit`, ...
-
-The maximum scaled value inside the `Threshold()` calculation is:
-* `floor(PoWLimit / 2250) * 3366`, which equals
-* `floor((2^251 − 1) / 2250) * 3366`, which equals
-* `(2^251 − 1) * 132/100`,
-* which is less than `2^252`.
-
-Therefore, this calculation can not overflow a `u256` value. (And even if it did
-overflow, it would be constrained to a valid value by the `PoWLimit` minimum.)
-
-Note that the multiplication by `ActualTimespanBounded` must happen after the
-division by `AveragingWindowTimespan`. Performing the multiplication first
-could overflow.
 
 #### Block difficulty threshold implementation
 [block-difficulty-threshold-implementation]: #block-difficulty-threshold-implementation
@@ -608,6 +581,41 @@ fn threshold_bits(network: Network,
                   context: &[(CompactDifficulty, DateTime<Utc>); 28])
                   -> CompactDifficulty { ... }
 ```
+
+#### Implementation notes
+
+Since:
+* the `PoWLimit`s are `2^251 − 1` for Testnet, and `2^243 − 1` for mainnet,
+* the `ActualTimespanBounded` can be at most `MaxActualTimespan`, which is
+  `floor(PoWAveragingWindow * PoWTargetSpacing * (1 + PoWMaxAdjustDown))` or
+  `floor(17 * 150 * (1 + 32/100)) =  3366`,
+* `AveragingWindowTimespan` is at most `17 * 150 = 2250`, and
+* `MeanTarget` is at most `PoWLimit`, ...
+
+The maximum scaled value inside the `Threshold()` calculation is:
+* `floor(PoWLimit / 2250) * 3366`, which equals
+* `floor((2^251 − 1) / 2250) * 3366`, which equals
+* `(2^251 − 1) * 132/100`,
+* which is less than `2^252`.
+
+Therefore, this calculation can not overflow a `u256` value. (And even if it did
+overflow, it would be constrained to a valid value by the `PoWLimit` minimum.)
+
+Note that the multiplication by `ActualTimespanBounded` must happen after the
+division by `AveragingWindowTimespan`. Performing the multiplication first
+could overflow.
+
+If implemented in this way, the function is infalliable.
+
+`zcashd` truncates the `MeanTarget` after the mean calculation, and
+after dividing by `AveragingWindowTimespan`. But as long as there is no overflow,
+this is [equivalent to the single truncation of the final result] in the Zcash
+specification. However, Zebra should follow the order of operations in `zcashd`,
+and use repeated divisions, because that can't overflow. See the relevant
+[comment in the zcashd souce code].
+
+[equivalent to the single truncation of the final result]: https://math.stackexchange.com/questions/147771/rewriting-repeated-integer-division-with-multiplication
+[comment in the zcashd souce code]: https://github.com/zcash/zcash/pull/4860/files
 
 ## Remaining TODOs for Reference-level explanation
 
