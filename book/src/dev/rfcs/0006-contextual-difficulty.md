@@ -569,26 +569,27 @@ case of `Threshold()` in the Zcash specification is unreachable.
 
 We implement these methods on `AdjustedDifficulty`:
 ```rust
-/// Calculate the `difficulty_threshold` for a candidate block, based on the
-/// `candidate_time`, `candidate_height`, `network`, and the
+/// Calculate the expected `difficulty_threshold` for a candidate block, based
+/// on the `candidate_time`, `candidate_height`, `network`, and the
 /// `difficulty_threshold`s and `time`s from the previous
 /// `PoWAveragingWindow + PoWMedianBlockSpan` (28) blocks in the relevant chain.
 ///
 /// Implements `ThresholdBits` from the Zcash specification, and the testnet
 /// minimum difficulty adjustment from ZIPs 205 and 208.
-pub fn adjusted_difficulty_threshold(&self) -> CompactDifficulty { ... }
+pub fn expected_difficulty_threshold(&self) -> CompactDifficulty { ... }
 
 /// Calculate the `difficulty_threshold` for a candidate block, based on the
 /// `candidate_height`, `network`, and the relevant `difficulty_threshold`s and
 /// `time`s.
 ///
-/// See `adjusted_difficulty_threshold` for details.
+/// See `expected_difficulty_threshold` for details.
 ///
 /// Implements `ThresholdBits` from the Zcash specification. (Which excludes the
 /// testnet minimum difficulty adjustment.)
 fn threshold_bits(network: Network,
                   height: block::Height,
-                  context: &[(CompactDifficulty, DateTime<Utc>); 28])
+                  relevant_difficulty_thresholds: &[CompactDifficulty; 28],
+                  relevant_times: &[DateTime<Utc>; 28],
                   -> CompactDifficulty { ... }
 ```
 
