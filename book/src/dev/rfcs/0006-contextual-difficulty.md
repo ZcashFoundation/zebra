@@ -294,12 +294,12 @@ and times from the previous 28 blocks in the relevant chain.
 
 These functions also use the candidate block's `height` and `network`.
 
-To make these functions more ergonomic, we create a `DifficultyAdjustment`
+To make these functions more ergonomic, we create a `AdjustedDifficulty`
 type, and implement the difficulty adjustment calculations as methods on that
 type.
 
 ```rust
-struct DifficultyAdjustment {
+struct AdjustedDifficulty {
     candidate_time: DateTime<Utc>,
     candidate_height: block::Height,
     network: Network,
@@ -308,12 +308,12 @@ struct DifficultyAdjustment {
 }
 ```
 
-We implement some initialiser methods on `DifficultyAdjustment` for convenience.
+We implement some initialiser methods on `AdjustedDifficulty` for convenience.
 We might want to validate downloaded headers in future, so we include a
 `new_from_header` initialiser.
 
 ```rust
-/// Initialise and return a new `DifficultyAdjustment` using a `candidate_block`,
+/// Initialise and return a new `AdjustedDifficulty` using a `candidate_block`,
 /// `network`, and a `context`.
 ///
 /// The `context` contains the previous
@@ -329,12 +329,12 @@ We might want to validate downloaded headers in future, so we include a
 pub fn new_from_block<C>(candidate_block: &Block
                          network: Network,
                          context: C)
-                         -> DifficultyAdjustment
+                         -> AdjustedDifficulty
     where
         C: IntoIterator<Item = (CompactDifficulty, DateTime<Utc>)>,
     { ... }
 
-/// Initialise and return a new `DifficultyAdjustment` using a
+/// Initialise and return a new `AdjustedDifficulty` using a
 /// `candidate_header`, `previous_block_height`, `network`, and a `context`.
 ///
 /// Designed for use when validating block headers, where the full block has not
@@ -348,12 +348,12 @@ pub fn new_from_header<C>(candidate_header: &block::Header
                           previous_block_height: block::Height,
                           network: Network,
                           context: C)
-                          -> DifficultyAdjustment
+                          -> AdjustedDifficulty
     where
         C: IntoIterator<Item = (CompactDifficulty, DateTime<Utc>)>,
     { ... }
 
-/// Initialise and return a new `DifficultyAdjustment` using its fields.
+/// Initialise and return a new `AdjustedDifficulty` using its fields.
 ///
 /// Designed for use in tests.
 ///
@@ -362,15 +362,15 @@ fn new_from_fields(candidate_time: DateTime<Utc>,
                    candidate_height: block::Height,
                    network: Network,
                    context: &[(CompactDifficulty, DateTime<Utc>); 28])
-                   -> DifficultyAdjustment { ... }
+                   -> AdjustedDifficulty { ... }
 ```
 
-`DifficultyAdjustment` is located in a new
+`AdjustedDifficulty` is located in a new
 `zebra_chain::work::difficulty::adjustment` module.
 
 #### Memory usage note
 
-Copying `CompactDifficulty` values into the `DifficultyAdjustment` struct uses
+Copying `CompactDifficulty` values into the `AdjustedDifficulty` struct uses
 less memory than borrowing those values. `CompactDifficulty` values are 32 bits,
 but pointers are 64-bit on most modern machines. (And since they all come from
 different blocks, we need a pointer to each individual value.)
@@ -379,7 +379,7 @@ Borrowing `DateTime<Utc>` values might use slightly less memory than copying
 them - but that depends on the exact way that Rust stores associated types
 derived from a generic argument.
 
-In any case, the overall size of each `DifficultyAdjustment` is only a few
+In any case, the overall size of each `AdjustedDifficulty` is only a few
 hundred bytes. If it turns up in profiles, we can look at borrowing the block
 header data.
 
@@ -388,14 +388,14 @@ header data.
 
 The difficulty adjustment check ensures that the
 `candidate_difficulty_threshold` is equal to the `difficulty_threshold` value
-calculated using `DifficultyAdjustment::adjusted_difficulty_threshold`.
+calculated using `AdjustedDifficulty::adjusted_difficulty_threshold`.
 
 We implement this function:
 ```rust
 /// Validate the `difficulty_threshold` from a candidate block's header, based
 /// on a `difficulty_adjustment` for that block.
 pub fn difficulty_threshold_is_valid(difficulty_threshold: CompactDifficulty,
-                                     difficulty_adjustment: DifficultyAdjustment,
+                                     difficulty_adjustment: AdjustedDifficulty,
                                      -> Result<(), BlockError> { ... }
 ```
 
@@ -420,7 +420,7 @@ In Zebra, contextual validation starts after Sapling activation, so we can assum
 that the relevant chain contains at least 17 blocks. Therefore, the `PoWLimit`
 case of `MeanTarget()` in the Zcash specification is unreachable.
 
-We implement this method on `DifficultyAdjustment`:
+We implement this method on `AdjustedDifficulty`:
 ```rust
 /// Calculate the arithmetic mean of the averaging window thresholds: the
 /// expanded `difficulty_threshold`s from the previous `PoWAveragingWindow` (17)
@@ -458,7 +458,7 @@ that the relevant chain contains at least 28 blocks. Therefore:
   the `timespan_times` slice.
 
 Zebra implements the median timespan using the following methods on
-`DifficultyAdjustment`:
+`AdjustedDifficulty`:
 ```rust
 /// Calculate the median timespan. The median timespan is the difference of
 /// medians of the timespan times, which are the `time`s from the previous
@@ -550,7 +550,7 @@ In Zcash, the testnet minimum difficulty rule starts at block 299188, and in
 Zebra, contextual validation starts after Sapling activation. So we can assume
 that there is always a previous block.
 
-We implement this method on `DifficultyAdjustment`:
+We implement this method on `AdjustedDifficulty`:
 ```rust
 /// Returns true if the gap between the `candidate_time` and the previous block's
 /// `time` is greater than the testnet minimum difficulty time gap. The time gap
@@ -625,7 +625,7 @@ could overflow.
 #### Block difficulty threshold implementation
 [block-difficulty-threshold-implementation]: #block-difficulty-threshold-implementation
 
-We implement these methods on `DifficultyAdjustment`:
+We implement these methods on `AdjustedDifficulty`:
 ```rust
 /// Calculate the `difficulty_threshold` for a candidate block, based on the
 /// `candidate_time`, `candidate_height`, `network`, and the
@@ -729,7 +729,7 @@ The design includes specific methods for header-only validation.
 ## What other designs have been considered and what is the rationale for not choosing them?
 [alternate-designs]: #alternate-designs
 
-A previous version of the RFC did not have the `DifficultyAdjustment` struct and
+A previous version of the RFC did not have the `AdjustedDifficulty` struct and
 methods. That design was easy to misuse, because each function had a complicated
 argument list.
 
