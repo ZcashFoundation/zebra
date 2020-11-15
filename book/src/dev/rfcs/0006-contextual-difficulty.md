@@ -235,6 +235,8 @@ panic if this assumption does not hold at runtime.)
 Zebra is free to implement its difficulty calculations in any way that produces
 equivalent results to `zcashd` and the Zcash specification.
 
+### Difficulty
+
 In Zcash block headers, difficulty thresholds are stored as a "compact" `nBits`
 value, which uses a custom 32-bit floating-point encoding. Zebra calls this type
 `CompactDifficulty`.
@@ -244,6 +246,8 @@ integers. Rust has no standard `u256` type, but there are a number of crates
 available which implement the required operations on 256-bit integers. Zebra
 abstracts over the chosen `u256` implementation using its `ExpandedDifficulty`
 type.
+
+### Time
 
 In Zcash, time values are unsigned 32-bit integers. But the difficulty adjustment
 calculations include time subtractions which could overflow an unsigned type, so
@@ -259,6 +263,18 @@ theoretically possible for the time gap between blocks to be larger than
 gap is that large, the bounds and minimum difficulty in Zcash's difficulty
 adjustment algorithm will preserve a reasonable difficulty threshold. So Zebra
 must support this edge case.
+
+### Consensus-Critical Operations
+
+The order of operations and overflow semantics for 256-bit integers can be
+consensus-critical.
+
+For example:
+  - dividing before multiplying discards lower-order bits, but
+  - multiplying before dividing can cause overflow.
+
+Zebra's implementation should try to match zcashd's order of operations and
+overflow handling as closely as possible.
 
 ## Difficulty adjustment check
 [difficulty-adjustment-check]: #difficulty-adjustment-check
