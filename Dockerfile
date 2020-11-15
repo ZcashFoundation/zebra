@@ -35,13 +35,13 @@ FROM debian:buster-slim AS zebrad-release
 
 COPY --from=builder /zebra/target/release/zebrad /
 
-ARG checkpoint_sync=true
-ARG network=Mainnet
+ARG CHECKPOINT_SYNC=true
+ARG NETWORK=Mainnet
 
 RUN printf "[consensus]\n" >> /zebrad.toml
-RUN printf "checkpoint_sync = ${checkpoint_sync}\n" >> /zebrad.toml
+RUN printf "checkpoint_sync = ${CHECKPOINT_SYNC}\n" >> /zebrad.toml
 RUN printf "[network]\n" >> /zebrad.toml
-RUN printf "network = '${network}'\n" >> /zebrad.toml
+RUN printf "network = '${NETWORK}'\n" >> /zebrad.toml
 RUN printf "[state]\n" >> /zebrad.toml
 RUN printf "cache_dir = '/zebrad-cache'\n" >> /zebrad.toml
 RUN printf "memory_cache_bytes = 52428800\n" >> /zebrad.toml
