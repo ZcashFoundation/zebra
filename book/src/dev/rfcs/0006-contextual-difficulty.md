@@ -234,9 +234,6 @@ In Zebra, contextual validation starts after Sapling activation, so we can assum
 that the relevant chain contains at least 28 blocks on Mainnet and Testnet. (And
 panic if this assumption does not hold at runtime.)
 
-For debugging purposes, the candidate block's height, hash, and network should be
-included in a span that is active for the entire contextual validation function.
-
 ## Fundamental data types
 [fundamental-data-types]: #fundamental-data-types
 
@@ -250,10 +247,10 @@ value, which uses a custom 32-bit floating-point encoding. Zebra calls this type
 In Zcash, difficulty threshold calculations are performed using unsigned 256-bit
 integers. Rust has no standard `u256` type, but there are a number of crates
 available which implement the required operations on 256-bit integers. Zebra
-abstracts over the alternative `u256` implementations using its
-`ExpandedDifficulty` type.
+abstracts over the chosen `u256` implementation using its `ExpandedDifficulty`
+type.
 
-In Zcash, time values are 32-bit integers. But the difficulty adjustment
+In Zcash, time values are unsigned 32-bit integers. But the difficulty adjustment
 calculations include time subtractions which could overflow an unsigned type, so
 they are performed using signed 64-bit integers in `zcashd`.
 
@@ -263,7 +260,7 @@ its signed time calculations using `i64` values internally.
 
 Note: `i32` is an unsuitable type for signed time calculations. It is
 theoretically possible for the time gap between blocks to be larger than
-`2^31 - 1`, because those times are provided by miners. Even if the median time
+`i32::MAX`, because those times are provided by miners. Even if the median time
 gap is that large, the bounds and minimum difficulty in Zcash's difficulty
 adjustment algorithm will preserve a reasonable difficulty threshold. So Zebra
 must support this edge case.
@@ -279,10 +276,6 @@ The relevant chain can be retrieved from the state service [RFC5] as follows:
   * get recent blocks from the finalized state, if required
 
 The relevant chain can start at any non-finalized block, or at the finalized tip.
-If the next block is valid, it becomes the new tip of the relevant chain.
-
-In particular, if the previous block is not a chain tip, the relevant chain
-becomes a new chain fork.
 
 [RFC5]: ./0005-state-updates.md
 
