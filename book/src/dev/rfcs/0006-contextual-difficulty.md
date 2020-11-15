@@ -665,27 +665,20 @@ Why should we *not* do this?
 Any alternate consensus parameters or `regtest` mode would have to respect the constraints set by this design.
 
 In particular:
-  * the `PoWLimit` must be less than `(2^256 - 1) / PoWAveragingWindow` to avoid overflow,
+  * the `PoWLimit` must be less than or equal to
+    `(2^256 - 1) / PoWAveragingWindow` (approximately `2^251`) to avoid overflow,
   * the `PoWAveragingWindow` and `PoWMedianBlockSpan` are fixed by function argument types
-    (at least until Rust gets generic slice lengths), and
+    (at least until Rust gets stable const generics), and
   * the design eliminates a significant number of edge cases by assuming that difficulty adjustments aren't
     validated for the first `PoWAveragingWindow + PoWMedianBlockSpan` (28) blocks in the chain.
 
 # Rationale and alternatives
 [rationale-and-alternatives]: #rationale-and-alternatives
 
-## What makes this design a good design?
-[good-design]: #good-design
-
-This design re-uses existing Zebra code, and follows typical Zebra and Rust design patterns.
-
 ## Is this design a good basis for later designs or implementations?
 [good-basis]: #good-basis
 
-The design enables access to recent blocks for contextual validation using a generic
-iterator function.
-
-The design includes specific methods for header-only validation.
+The design includes specific methods for a future header-only validation design.
 
 ## What other designs have been considered and what is the rationale for not choosing them?
 [alternate-designs]: #alternate-designs
@@ -703,22 +696,9 @@ would be a security issue.
 # Prior art
 [prior-art]: #prior-art
 
-Discuss prior art, both the good and the bad, in relation to this proposal.
-
-## zcashd
-[zcashd]: #zcashd
-
-See the reference-level explanation for prior art and deliberate divergences.
-
-## Zcash specification
-[zcash-spec]: #zcash-spec
-
-See the reference-level explanation for prior art and deliberate divergences.
-
-## Bitcoin
-[bitcoin]: #bitcoin
-
-- [ ] TODO: Bitcoin
+* `zcashd`
+* the Zcash specification
+* Bitcoin
 
 # Unresolved questions
 [unresolved-questions]: #unresolved-questions
