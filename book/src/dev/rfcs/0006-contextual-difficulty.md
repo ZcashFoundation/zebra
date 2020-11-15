@@ -352,17 +352,6 @@ pub fn new_from_header<C>(candidate_header: &block::Header
     where
         C: IntoIterator<Item = (CompactDifficulty, DateTime<Utc>)>,
     { ... }
-
-/// Initialise and return a new `AdjustedDifficulty` using its fields.
-///
-/// Designed for use in tests.
-///
-/// See `new_from_block` for details.
-fn new_from_fields(candidate_time: DateTime<Utc>,
-                   candidate_height: block::Height,
-                   network: Network,
-                   context: &[(CompactDifficulty, DateTime<Utc>); 28])
-                   -> AdjustedDifficulty { ... }
 ```
 
 `AdjustedDifficulty` is located in a new
