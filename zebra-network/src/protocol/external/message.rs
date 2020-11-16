@@ -121,20 +121,15 @@ pub enum Message {
         data: Option<[u8; 32]>,
     },
 
-    /// An `addr` message.
-    ///
-    /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#addr)
-    Addr(Vec<MetaAddr>),
-
     /// A `getaddr` message.
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#getaddr)
     GetAddr,
 
-    /// A `block` message.
+    /// An `addr` message.
     ///
-    /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#block)
-    Block(Arc<Block>),
+    /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#addr)
+    Addr(Vec<MetaAddr>),
 
     /// A `getblocks` message.
     ///
@@ -155,16 +150,14 @@ pub enum Message {
         stop: Option<block::Hash>,
     },
 
-    /// A `headers` message.
+    /// An `inv` message.
     ///
-    /// Returns block headers in response to a getheaders packet.
+    /// Allows a node to advertise its knowledge of one or more
+    /// objects. It can be received unsolicited, or in reply to
+    /// `getblocks`.
     ///
-    /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#headers)
-    // Note that the block headers in this packet include a
-    // transaction count (a var_int, so there can be more than 81
-    // bytes per header) as opposed to the block headers that are
-    // hashed by miners.
-    Headers(Vec<block::Header>),
+    /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#inv)
+    Inv(Vec<InventoryHash>),
 
     /// A `getheaders` message.
     ///
@@ -173,7 +166,7 @@ pub enum Message {
     /// of its best chain and determine the blocks following the intersection
     /// point.
     ///
-    /// The peer responds with an `headers` packet with the hashes of subsequent blocks.
+    /// The peer responds with an `headers` packet with the headers of subsequent blocks.
     /// If supplied, the `stop` parameter specifies the last header to request.
     /// Otherwise, the maximum number of block headers (160) are sent.
     ///
@@ -185,14 +178,16 @@ pub enum Message {
         stop: Option<block::Hash>,
     },
 
-    /// An `inv` message.
+    /// A `headers` message.
     ///
-    /// Allows a node to advertise its knowledge of one or more
-    /// objects. It can be received unsolicited, or in reply to
-    /// `getblocks`.
+    /// Returns block headers in response to a getheaders packet.
     ///
-    /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#inv)
-    Inv(Vec<InventoryHash>),
+    /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#headers)
+    // Note that the block headers in this packet include a
+    // transaction count (a var_int, so there can be more than 81
+    // bytes per header) as opposed to the block headers that are
+    // hashed by miners.
+    Headers(Vec<block::Header>),
 
     /// A `getdata` message.
     ///
@@ -203,16 +198,21 @@ pub enum Message {
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#getdata)
     GetData(Vec<InventoryHash>),
 
-    /// A `notfound` message.
+    /// A `block` message.
     ///
-    /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#notfound)
-    // See note above on `Inventory`.
-    NotFound(Vec<InventoryHash>),
+    /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#block)
+    Block(Arc<Block>),
 
     /// A `tx` message.
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#tx)
     Tx(Arc<Transaction>),
+
+    /// A `notfound` message.
+    ///
+    /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#notfound)
+    // See note above on `Inventory`.
+    NotFound(Vec<InventoryHash>),
 
     /// A `mempool` message.
     ///
