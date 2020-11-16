@@ -175,7 +175,7 @@ mod test {
 
     #[test]
     // TODO: Ignored because we loop through all the founders reward period block by block.
-    //#[ignore]
+    #[ignore]
     fn test_founders_address() -> Result<(), Report> {
         founders_address_for_network(Network::Mainnet)?;
         founders_address_for_network(Network::Testnet)?;
