@@ -148,11 +148,45 @@ impl FinalizedState {
         let height = queued_block.block.coinbase_height().unwrap();
         self.queued_by_prev_hash.insert(prev_hash, queued_block);
 
-        while let Some(queued_block) = self.queued_by_prev_hash.remove(&self.finalized_tip_hash()) {
+        loop {
+            let finalized_tip_hash = self.finalized_tip_hash();
+            let queued_block =
+                if let Some(queued_block) = self.queued_by_prev_hash.remove(&finalized_tip_hash) {
+                    queued_block
+                } else {
+                    break;
+                };
+
             let height = queued_block
                 .block
                 .coinbase_height()
                 .expect("valid blocks must have a height");
+
+            if self.block_by_height.is_empty() {
+                assert_eq!(
+                    block::Hash([0; 32]),
+                    prev_hash,
+                    "the first block added to an empty state must be a genesis block"
+                );
+                assert_eq!(
+                    block::Height(0),
+                    height,
+                    "cannot commit genesis: invalid height"
+                );
+            } else {
+                assert_eq!(
+                    self.finalized_tip_height()
+                        .expect("state must have a genesis block committed")
+                        + 1,
+                    Some(height)
+                );
+
+                assert_eq!(
+                    finalized_tip_hash,
+                    queued_block.block.header.previous_block_hash
+                );
+            }
+
             self.commit_finalized(queued_block);
             metrics::counter!("state.finalized.committed.block.count", 1);
             metrics::gauge!("state.finalized.committed.block.height", height.0 as _);
@@ -216,8 +250,6 @@ impl FinalizedState {
                     sprout_nullifiers,
                     sapling_nullifiers,
                 )| {
-                    // TODO: check highest entry of hash_by_height as in RFC
-
                     // Index the block
                     hash_by_height.zs_insert(height, hash)?;
                     height_by_hash.zs_insert(hash, height)?;
