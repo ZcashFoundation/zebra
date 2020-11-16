@@ -5,6 +5,8 @@
 #![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_state")]
 #![warn(missing_docs)]
 #![allow(clippy::try_err)]
+#![allow(clippy::unknown_clippy_lints)]
+#![allow(clippy::field_reassign_with_default)]
 
 mod config;
 mod constants;
