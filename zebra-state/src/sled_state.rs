@@ -154,11 +154,11 @@ impl FinalizedState {
                 .coinbase_height()
                 .expect("valid blocks must have a height");
 
-            if prev_hash == block::Hash([0; 32]) {
+            if self.block_by_height.is_empty() {
                 assert_eq!(
-                    1,
-                    self.block_by_height.len(),
-                    "cannot commit genesis block to a populated state"
+                    block::Hash([0; 32]),
+                    prev_hash,
+                    "the first block added to an empty state must be a genesis block"
                 );
                 assert_eq!(
                     block::Height(0),
