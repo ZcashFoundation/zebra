@@ -190,9 +190,10 @@ impl StateService {
         );
         check::block_is_not_orphaned(finalized_tip_height, block)?;
 
-        let parent_block = self
-            .block(block.hash().into())
-            .expect("the parent's presence has already been checked");
+        let mut relevant_chain = self.chain(block.header.previous_block_hash);
+        let parent_block = relevant_chain
+            .next()
+            .expect("state must contain parent block to do contextual validation");
         let parent_height = parent_block
             .coinbase_height()
             .expect("valid blocks have a coinbase height");
@@ -201,7 +202,8 @@ impl StateService {
         // should be impossible by design, so no handleable error is thrown
         assert_eq!(parent_hash, block.header.previous_block_hash);
 
-        // TODO: contextual validation design and implementation
+        // TODO: validate difficulty adjustment
+        // TODO: other contextual validation design and implelentation
         Ok(())
     }
 
@@ -272,7 +274,6 @@ impl StateService {
     ///
     /// The block identified by `hash` is included in the chain of blocks yielded
     /// by the iterator.
-    #[allow(dead_code)]
     pub fn chain(&self, hash: block::Hash) -> Iter<'_> {
         Iter {
             service: self,
