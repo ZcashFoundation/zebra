@@ -50,6 +50,8 @@ struct StateService {
     queued_blocks: QueuedBlocks,
     /// The set of outpoints with pending requests for their associated transparent::Output
     pending_utxos: utxo::PendingUtxos,
+    /// The configured Zcash network
+    network: Network,
     /// Instant tracking the last time `pending_utxos` was pruned
     last_prune: Instant,
 }
@@ -68,6 +70,7 @@ impl StateService {
             mem,
             queued_blocks,
             pending_utxos,
+            network,
             last_prune: Instant::now(),
         }
     }
@@ -185,6 +188,15 @@ impl StateService {
     /// Check that `block` is contextually valid based on the committed finalized
     /// and non-finalized state.
     fn check_contextual_validity(&mut self, block: &Block) -> Result<(), ValidateContextError> {
+        let height = block
+            .coinbase_height()
+            .expect("semantically valid blocks have a coinbase height");
+        let hash = block.hash();
+
+        let span = tracing::info_span!("StateService::check_contextual_validity",
+                                             ?height, network = ?self.network, ?hash);
+        let _entered = span.enter();
+
         let finalized_tip_height = self.sled.finalized_tip_height().expect(
             "finalized state must contain at least one block to use the non-finalized state",
         );
