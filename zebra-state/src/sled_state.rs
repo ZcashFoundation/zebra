@@ -181,7 +181,10 @@ impl FinalizedState {
                     Some(height)
                 );
 
-                assert_eq!(finalized_tip_hash, prev_hash);
+                assert_eq!(
+                    finalized_tip_hash,
+                    queued_block.block.header.previous_block_hash
+                );
             }
 
             self.commit_finalized(queued_block);
