@@ -174,6 +174,8 @@ mod test {
     }
 
     #[test]
+    // TODO: Ignored because we loop through all the founders reward period block by block.
+    //#[ignore]
     fn test_founders_address() -> Result<(), Report> {
         founders_address_for_network(Network::Mainnet)?;
         founders_address_for_network(Network::Testnet)?;
@@ -185,33 +187,31 @@ mod test {
         // Test if all the founders addresses are paid in the entire period
         // where rewards are active.
         let mut populated_addresses: Vec<Address> = Vec::new();
-        let mut hardcoded_addresses = FOUNDERS_REWARD_ADDRESSES_MAINNET;
+        let mut hardcoded_addresses = FOUNDERS_REWARD_ADDRESSES_MAINNET.to_vec();
 
         if network == Network::Testnet {
-            hardcoded_addresses = FOUNDERS_REWARD_ADDRESSES_TESTNET;
+            // The last two addresses are not used, because Canopy activated before
+            // the halving on testnet.
+            hardcoded_addresses = FOUNDERS_REWARD_ADDRESSES_TESTNET[0..46].to_vec();
         }
 
-        // After blossom, founders addresses will change at a greater interval but we should catch
-        // all the changes if we increment by founders_address_change_interval() for
-        // the entire period where founders reward are paid.
+        // We test the entire founders reward period block by block, this takes some time.
         let mut increment = SLOW_START_SHIFT.0;
         while founders_reward_active(Height(increment), network) {
             let founder_address = founders_reward_address(Height(increment), network)?;
             if !populated_addresses.contains(&founder_address) {
                 populated_addresses.push(founder_address);
             }
-            increment = increment + founders_address_change_interval().0;
+            increment += 1;
         }
 
-        //assert_eq!(populated_addresses.len(), hardcoded_addresses.len());
+        assert_eq!(populated_addresses.len(), hardcoded_addresses.len());
 
-        let mut index = 0;
-        for addr in populated_addresses {
+        for (index, addr) in populated_addresses.into_iter().enumerate() {
             assert_eq!(
                 addr,
                 Address::from_str(hardcoded_addresses[index as usize]).expect("an address")
             );
-            index += 1;
         }
 
         Ok(())
