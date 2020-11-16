@@ -14,6 +14,8 @@
 #![warn(warnings, missing_docs, trivial_casts, unused_qualifications)]
 #![forbid(unsafe_code)]
 #![allow(clippy::try_err)]
+#![allow(clippy::unknown_clippy_lints)]
+#![allow(clippy::field_reassign_with_default)]
 
 use color_eyre::eyre::Result;
 use eyre::WrapErr;
