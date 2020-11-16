@@ -177,6 +177,8 @@ mod test {
     // TODO: Ignored because we loop through all the founders reward period block by block.
     #[ignore]
     fn test_founders_address() -> Result<(), Report> {
+        zebra_test::init();
+
         founders_address_for_network(Network::Mainnet)?;
         founders_address_for_network(Network::Testnet)?;
 
@@ -219,6 +221,8 @@ mod test {
 
     #[test]
     fn test_founders_address_count() -> Result<(), Report> {
+        zebra_test::init();
+
         assert_eq!(
             FOUNDERS_REWARD_ADDRESSES_MAINNET.len() as u32,
             FOUNDERS_ADDRESS_COUNT
