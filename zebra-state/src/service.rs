@@ -252,9 +252,121 @@ impl StateService {
         self.mem.hash(height).or_else(|| self.sled.hash(height))
     }
 
+    /// Return the height for the block at `hash` in any chain.
+    pub fn height_by_hash(&self, hash: block::Hash) -> Option<block::Height> {
+        self.mem
+            .height_by_hash(hash)
+            .or_else(|| self.sled.height(hash))
+    }
+
     /// Return the utxo pointed to by `outpoint` if it exists in any chain.
     pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Output> {
         self.mem.utxo(outpoint).or_else(|| self.sled.utxo(outpoint))
+    }
+
+    /// Return an iterator over the relevant chain of the block identified by
+    /// `hash`.
+    ///
+    /// The block identified by `hash` is included in the chain of blocks yielded
+    /// by the iterator.
+    #[allow(dead_code)]
+    pub fn chain(&self, hash: block::Hash) -> Iter<'_> {
+        Iter {
+            service: self,
+            state: IterState::NonFinalized(hash),
+        }
+    }
+}
+
+struct Iter<'a> {
+    service: &'a StateService,
+    state: IterState,
+}
+
+enum IterState {
+    NonFinalized(block::Hash),
+    Finalized(block::Height),
+    Finished,
+}
+
+impl Iter<'_> {
+    fn next_non_finalized_block(&mut self) -> Option<Arc<Block>> {
+        let Iter { service, state } = self;
+
+        let hash = match state {
+            IterState::NonFinalized(hash) => *hash,
+            IterState::Finalized(_) | IterState::Finished => unreachable!(),
+        };
+
+        if let Some(block) = service.mem.block_by_hash(hash) {
+            let hash = block.header.previous_block_hash;
+            self.state = IterState::NonFinalized(hash);
+            Some(block)
+        } else {
+            None
+        }
+    }
+
+    fn next_finalized_block(&mut self) -> Option<Arc<Block>> {
+        let Iter { service, state } = self;
+
+        let hash_or_height: HashOrHeight = match *state {
+            IterState::Finalized(height) => height.into(),
+            IterState::NonFinalized(hash) => hash.into(),
+            IterState::Finished => unreachable!(),
+        };
+
+        if let Some(block) = service.sled.block(hash_or_height) {
+            let height = block
+                .coinbase_height()
+                .expect("valid blocks have a coinbase height");
+
+            if let Some(next_height) = height - 1 {
+                self.state = IterState::Finalized(next_height);
+            } else {
+                self.state = IterState::Finished;
+            }
+
+            Some(block)
+        } else {
+            self.state = IterState::Finished;
+            None
+        }
+    }
+}
+
+impl Iterator for Iter<'_> {
+    type Item = Arc<Block>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.state {
+            IterState::NonFinalized(_) => self
+                .next_non_finalized_block()
+                .or_else(|| self.next_finalized_block()),
+            IterState::Finalized(_) => self.next_finalized_block(),
+            IterState::Finished => None,
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.len();
+        (len, Some(len))
+    }
+}
+
+impl std::iter::FusedIterator for Iter<'_> {}
+
+impl ExactSizeIterator for Iter<'_> {
+    fn len(&self) -> usize {
+        match self.state {
+            IterState::NonFinalized(hash) => self
+                .service
+                .height_by_hash(hash)
+                .map(|height| (height.0 + 1) as _)
+                .unwrap_or(0),
+            IterState::Finalized(height) => (height.0 + 1) as _,
+            IterState::Finished => 0,
+        }
     }
 }
 

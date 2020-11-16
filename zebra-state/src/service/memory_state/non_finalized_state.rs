@@ -143,6 +143,21 @@ impl NonFinalizedState {
         None
     }
 
+    /// Returns the `block` with the given hash in the any chain.
+    pub fn block_by_hash(&self, hash: block::Hash) -> Option<Arc<Block>> {
+        for chain in self.chain_set.iter().rev() {
+            if let Some(block) = chain
+                .height_by_hash
+                .get(&hash)
+                .and_then(|height| chain.blocks.get(height))
+            {
+                return Some(block.clone());
+            }
+        }
+
+        None
+    }
+
     /// Returns the `block` at a given height or hash in the best chain.
     pub fn block(&self, hash_or_height: HashOrHeight) -> Option<Arc<Block>> {
         let best_chain = self.best_chain()?;
@@ -171,6 +186,17 @@ impl NonFinalizedState {
         let best_chain = self.best_chain()?;
         let height = *best_chain.height_by_hash.get(&hash)?;
         Some(height)
+    }
+
+    /// Returns the height of `hash` in any chain.
+    pub fn height_by_hash(&self, hash: block::Hash) -> Option<block::Height> {
+        for chain in self.chain_set.iter().rev() {
+            if let Some(height) = chain.height_by_hash.get(&hash) {
+                return Some(*height);
+            }
+        }
+
+        None
     }
 
     /// Returns the given transaction if it exists in the best chain.
