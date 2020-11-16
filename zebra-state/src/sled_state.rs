@@ -148,7 +148,15 @@ impl FinalizedState {
         let height = queued_block.block.coinbase_height().unwrap();
         self.queued_by_prev_hash.insert(prev_hash, queued_block);
 
-        while let Some(queued_block) = self.queued_by_prev_hash.remove(&self.finalized_tip_hash()) {
+        loop {
+            let finalized_tip_hash = self.finalized_tip_hash();
+            let queued_block =
+                if let Some(queued_block) = self.queued_by_prev_hash.remove(&finalized_tip_hash) {
+                    queued_block
+                } else {
+                    break;
+                };
+
             let height = queued_block
                 .block
                 .coinbase_height()
@@ -172,6 +180,8 @@ impl FinalizedState {
                         + 1,
                     Some(height)
                 );
+
+                assert_eq!(finalized_tip_hash, prev_hash);
             }
 
             self.commit_finalized(queued_block);

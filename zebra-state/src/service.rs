@@ -194,7 +194,10 @@ impl StateService {
         let parent_height = parent_block
             .coinbase_height()
             .expect("valid blocks have a coinbase height");
+        let parent_hash = parent_block.hash();
         check::height_one_more_than_parent_height(parent_height, block)?;
+        // should be impossible by design, so no handleable error is thrown
+        assert_eq!(parent_hash, block.header.previous_block_hash);
 
         // TODO: contextual validation design and implementation
         Ok(())
