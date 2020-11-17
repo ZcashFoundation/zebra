@@ -46,7 +46,7 @@ pub struct QueuedBlock {
 
 struct StateService {
     /// Holds data relating to finalized chain state.
-    sled: FinalizedState,
+    disk: FinalizedState,
     /// Holds data relating to non-finalized chain state.
     mem: NonFinalizedState,
     /// Blocks awaiting their parent blocks for contextual verification.
@@ -63,13 +63,13 @@ impl StateService {
     const PRUNE_INTERVAL: Duration = Duration::from_secs(30);
 
     pub fn new(config: Config, network: Network) -> Self {
-        let sled = FinalizedState::new(&config, network);
+        let disk = FinalizedState::new(&config, network);
         let mem = NonFinalizedState::default();
         let queued_blocks = QueuedBlocks::default();
         let pending_utxos = utxo::PendingUtxos::default();
 
         Self {
-            sled,
+            disk,
             mem,
             queued_blocks,
             pending_utxos,
@@ -121,13 +121,13 @@ impl StateService {
 
         while self.mem.best_chain_len() > crate::constants::MAX_BLOCK_REORG_HEIGHT {
             let finalized = self.mem.finalize();
-            self.sled
+            self.disk
                 .commit_finalized_direct(finalized)
-                .expect("expected that sled errors would not occur");
+                .expect("expected that disk errors would not occur");
         }
 
         self.queued_blocks
-            .prune_by_height(self.sled.finalized_tip_height().expect(
+            .prune_by_height(self.disk.finalized_tip_height().expect(
             "Finalized state must have at least one block before committing non-finalized state",
         ));
 
@@ -140,7 +140,7 @@ impl StateService {
         self.check_contextual_validity(&block)?;
         let parent_hash = block.header.previous_block_hash;
 
-        if self.sled.finalized_tip_hash() == parent_hash {
+        if self.disk.finalized_tip_hash() == parent_hash {
             self.mem.commit_new_chain(block);
         } else {
             self.mem.commit_block(block);
@@ -151,7 +151,7 @@ impl StateService {
 
     /// Returns `true` if `hash` is a valid previous block hash for new non-finalized blocks.
     fn can_fork_chain_at(&self, hash: &block::Hash) -> bool {
-        self.mem.any_chain_contains(hash) || &self.sled.finalized_tip_hash() == hash
+        self.mem.any_chain_contains(hash) || &self.disk.finalized_tip_hash() == hash
     }
 
     /// Returns true if the given hash has been committed to either the finalized
@@ -162,7 +162,7 @@ impl StateService {
             .coinbase_height()
             .expect("coinbase heights should be valid");
 
-        self.mem.any_chain_contains(&hash) || self.sled.hash(height) == Some(hash)
+        self.mem.any_chain_contains(&hash) || self.disk.hash(height) == Some(hash)
     }
 
     /// Attempt to validate and commit all queued blocks whose parents have
@@ -192,7 +192,7 @@ impl StateService {
         check::block_is_contextually_valid(
             block,
             self.network,
-            self.sled.finalized_tip_height(),
+            self.disk.finalized_tip_height(),
             self.chain(block.header.previous_block_hash),
         )?;
 
@@ -217,13 +217,13 @@ impl StateService {
 
     /// Return the tip of the current best chain.
     pub fn tip(&self) -> Option<(block::Height, block::Hash)> {
-        self.mem.tip().or_else(|| self.sled.tip())
+        self.mem.tip().or_else(|| self.disk.tip())
     }
 
     /// Return the depth of block `hash` in the current best chain.
     pub fn depth(&self, hash: block::Hash) -> Option<u32> {
         let tip = self.tip()?.0;
-        let height = self.mem.height(hash).or_else(|| self.sled.height(hash))?;
+        let height = self.mem.height(hash).or_else(|| self.disk.height(hash))?;
 
         Some(tip.0 - height.0)
     }
@@ -233,7 +233,7 @@ impl StateService {
     pub fn block(&self, hash_or_height: HashOrHeight) -> Option<Arc<Block>> {
         self.mem
             .block(hash_or_height)
-            .or_else(|| self.sled.block(hash_or_height))
+            .or_else(|| self.disk.block(hash_or_height))
     }
 
     /// Return the transaction identified by `hash` if it exists in the current
@@ -241,24 +241,24 @@ impl StateService {
     pub fn transaction(&self, hash: transaction::Hash) -> Option<Arc<Transaction>> {
         self.mem
             .transaction(hash)
-            .or_else(|| self.sled.transaction(hash))
+            .or_else(|| self.disk.transaction(hash))
     }
 
     /// Return the hash for the block at `height` in the current best chain.
     pub fn hash(&self, height: block::Height) -> Option<block::Hash> {
-        self.mem.hash(height).or_else(|| self.sled.hash(height))
+        self.mem.hash(height).or_else(|| self.disk.hash(height))
     }
 
     /// Return the height for the block at `hash` in any chain.
     pub fn height_by_hash(&self, hash: block::Hash) -> Option<block::Height> {
         self.mem
             .height_by_hash(hash)
-            .or_else(|| self.sled.height(hash))
+            .or_else(|| self.disk.height(hash))
     }
 
     /// Return the utxo pointed to by `outpoint` if it exists in any chain.
     pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Output> {
-        self.mem.utxo(outpoint).or_else(|| self.sled.utxo(outpoint))
+        self.mem.utxo(outpoint).or_else(|| self.disk.utxo(outpoint))
     }
 
     /// Return an iterator over the relevant chain of the block identified by
@@ -312,7 +312,7 @@ impl Iter<'_> {
             IterState::Finished => unreachable!(),
         };
 
-        if let Some(block) = service.sled.block(hash_or_height) {
+        if let Some(block) = service.disk.block(hash_or_height) {
             let height = block
                 .coinbase_height()
                 .expect("valid blocks have a coinbase height");
@@ -402,7 +402,7 @@ impl Service<Request> for StateService {
                 let (rsp_tx, rsp_rx) = oneshot::channel();
 
                 self.pending_utxos.check_block(&block);
-                self.sled
+                self.disk
                     .queue_and_commit_finalized_blocks(QueuedBlock { block, rsp_tx });
 
                 async move {
@@ -449,7 +449,7 @@ impl Service<Request> for StateService {
 
 /// Initialize a state service from the provided [`Config`].
 ///
-/// Each `network` has its own separate sled database.
+/// Each `network` has its own separate on-disk database.
 ///
 /// To share access to the state, wrap the returned service in a `Buffer`. It's
 /// possible to construct multiple state services in the same application (as
