@@ -29,4 +29,4 @@ jobs:
           version: '0.16.0'
           timeout: 600
       - name: Upload coverage report to Codecov
-        uses: codecov/codecov-action@v1.0.14
+        uses: codecov/codecov-action@v1.0.15
