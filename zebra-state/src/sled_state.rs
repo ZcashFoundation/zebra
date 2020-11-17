@@ -148,45 +148,7 @@ impl FinalizedState {
         let height = queued_block.block.coinbase_height().unwrap();
         self.queued_by_prev_hash.insert(prev_hash, queued_block);
 
-        loop {
-            let finalized_tip_hash = self.finalized_tip_hash();
-            let queued_block =
-                if let Some(queued_block) = self.queued_by_prev_hash.remove(&finalized_tip_hash) {
-                    queued_block
-                } else {
-                    break;
-                };
-
-            let height = queued_block
-                .block
-                .coinbase_height()
-                .expect("valid blocks must have a height");
-
-            if self.block_by_height.is_empty() {
-                assert_eq!(
-                    block::Hash([0; 32]),
-                    prev_hash,
-                    "the first block added to an empty state must be a genesis block"
-                );
-                assert_eq!(
-                    block::Height(0),
-                    height,
-                    "cannot commit genesis: invalid height"
-                );
-            } else {
-                assert_eq!(
-                    self.finalized_tip_height()
-                        .expect("state must have a genesis block committed")
-                        + 1,
-                    Some(height)
-                );
-
-                assert_eq!(
-                    finalized_tip_hash,
-                    queued_block.block.header.previous_block_hash
-                );
-            }
-
+        while let Some(queued_block) = self.queued_by_prev_hash.remove(&self.finalized_tip_hash()) {
             self.commit_finalized(queued_block);
             metrics::counter!("state.finalized.committed.block.count", 1);
             metrics::gauge!("state.finalized.committed.block.height", height.0 as _);
@@ -229,7 +191,35 @@ impl FinalizedState {
             .expect("finalized blocks are valid and have a coinbase height");
         let hash = block.hash();
 
-        trace!(?height, "Finalized block");
+        trace!(?height, ?hash, "Finalized block");
+
+        // Assert that callers (including unit tests) get the chain order correct
+        if self.block_by_height.is_empty() {
+            assert_eq!(
+                block::Hash([0; 32]),
+                block.header.previous_block_hash,
+                "the first block added to an empty state must be a genesis block"
+            );
+            assert_eq!(
+                block::Height(0),
+                height,
+                "cannot commit genesis: invalid height"
+            );
+        } else {
+            assert_eq!(
+                self.finalized_tip_height()
+                    .expect("state must have a genesis block committed")
+                    + 1,
+                Some(height),
+                "committed block height must be 1 more than the finalized tip height"
+            );
+
+            assert_eq!(
+                self.finalized_tip_hash(),
+                block.header.previous_block_hash,
+                "committed block must be a child of the finalized tip"
+            );
+        }
 
         let result = (
             &self.hash_by_height,
