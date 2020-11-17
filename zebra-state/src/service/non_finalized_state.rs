@@ -1,3 +1,12 @@
+//! Non-finalized chain state management as defined by [RFC0005]
+//!
+//! [RFC0005]: https://zebra.zfnd.org/dev/rfcs/0005-state-updates.html
+
+mod chain;
+mod queued_blocks;
+
+pub use queued_blocks::QueuedBlocks;
+
 use std::{collections::BTreeSet, mem, ops::Deref, sync::Arc};
 
 use zebra_chain::{
@@ -8,7 +17,7 @@ use zebra_chain::{
 
 use crate::request::HashOrHeight;
 
-use super::Chain;
+use self::chain::Chain;
 
 /// The state of the chains in memory, incuding queued blocks.
 #[derive(Default)]

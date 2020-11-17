@@ -14,15 +14,11 @@ mod error;
 mod request;
 mod response;
 mod service;
-mod sled_state;
 mod util;
 
 // TODO: move these to integration tests.
 #[cfg(test)]
 mod tests;
-
-use service::QueuedBlock;
-use sled_state::FinalizedState;
 
 pub use config::Config;
 pub use constants::MAX_BLOCK_REORG_HEIGHT;
