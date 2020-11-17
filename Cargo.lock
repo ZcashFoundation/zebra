@@ -1477,6 +1477,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "librocksdb-sys"
+version = "6.11.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eb5b56f651c204634b936be2f92dbb42c36867e00ff7fe2405591f3b9fa66f09"
+dependencies = [
+ "bindgen",
+ "cc",
+ "glob",
+ "libc",
+]
+
+[[package]]
 name = "linked-hash-map"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2365,6 +2377,16 @@ dependencies = [
  "block-buffer 0.7.3",
  "digest 0.8.1",
  "opaque-debug 0.2.3",
+]
+
+[[package]]
+name = "rocksdb"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "23d83c02c429044d58474eaf5ae31e062d0de894e21125b47437ec0edc1397e6"
+dependencies = [
+ "libc",
+ "librocksdb-sys",
 ]
 
 [[package]]
@@ -3480,6 +3502,7 @@ dependencies = [
  "once_cell",
  "primitive-types",
  "proptest",
+ "rocksdb",
  "serde",
  "sled",
  "spandoc",

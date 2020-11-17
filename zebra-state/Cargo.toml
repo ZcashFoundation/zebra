@@ -25,6 +25,7 @@ tracing-error = "0.1.2"
 thiserror = "1.0.22"
 tokio = { version = "0.2.22", features = ["sync"] }
 displaydoc = "0.1.7"
+rocksdb = "0.15.0"
 
 [dev-dependencies]
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }

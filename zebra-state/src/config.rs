@@ -55,20 +55,29 @@ pub struct Config {
 }
 
 impl Config {
-    /// Generate the appropriate `sled::Config` for `network`, based on the
-    /// provided `zebra_state::Config`.
-    pub(crate) fn sled_config(&self, network: Network) -> sled::Config {
+    pub(crate) fn open_db(&self, network: Network) -> rocksdb::DB {
         let net_dir = match network {
             Network::Mainnet => "mainnet",
             Network::Testnet => "testnet",
         };
 
-        let config = sled::Config::default()
-            .cache_capacity(self.memory_cache_bytes)
-            .mode(sled::Mode::LowSpace);
+        let mut opts = rocksdb::Options::default();
+
+        let cfs = vec![
+            rocksdb::ColumnFamilyDescriptor::new("hash_by_height", opts.clone()),
+            rocksdb::ColumnFamilyDescriptor::new("height_by_hash", opts.clone()),
+            rocksdb::ColumnFamilyDescriptor::new("block_by_height", opts.clone()),
+            rocksdb::ColumnFamilyDescriptor::new("tx_by_hash", opts.clone()),
+            rocksdb::ColumnFamilyDescriptor::new("utxo_by_outpoint", opts.clone()),
+            rocksdb::ColumnFamilyDescriptor::new("sprout_nullifiers", opts.clone()),
+            rocksdb::ColumnFamilyDescriptor::new("sapling_nullifiers", opts.clone()),
+        ];
+
+        opts.create_if_missing(true);
+        opts.create_missing_column_families(true);
 
         if self.ephemeral {
-            config.temporary(self.ephemeral)
+            todo!();
         } else {
             let path = self
                 .cache_dir
@@ -76,7 +85,7 @@ impl Config {
                 .join(format!("v{}", crate::constants::SLED_FORMAT_VERSION))
                 .join(net_dir);
 
-            config.path(path)
+            rocksdb::DB::open_cf_descriptors(&opts, path, cfs).unwrap()
         }
     }
 
