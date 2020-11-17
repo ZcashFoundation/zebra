@@ -185,37 +185,16 @@ impl StateService {
         }
     }
 
-    /// Check that `block` is contextually valid based on the committed finalized
-    /// and non-finalized state.
+    /// Check that `block` is contextually valid for the configured network,
+    /// based on the committed finalized and non-finalized state.
     fn check_contextual_validity(&mut self, block: &Block) -> Result<(), ValidateContextError> {
-        let height = block
-            .coinbase_height()
-            .expect("semantically valid blocks have a coinbase height");
-        let hash = block.hash();
+        check::block_is_contextually_valid(
+            block,
+            self.network,
+            self.sled.finalized_tip_height(),
+            self.chain(block.header.previous_block_hash),
+        )?;
 
-        let span = tracing::info_span!("StateService::check_contextual_validity",
-                                             ?height, network = ?self.network, ?hash);
-        let _entered = span.enter();
-
-        let finalized_tip_height = self.sled.finalized_tip_height().expect(
-            "finalized state must contain at least one block to use the non-finalized state",
-        );
-        check::block_is_not_orphaned(finalized_tip_height, block)?;
-
-        let mut relevant_chain = self.chain(block.header.previous_block_hash);
-        let parent_block = relevant_chain
-            .next()
-            .expect("state must contain parent block to do contextual validation");
-        let parent_height = parent_block
-            .coinbase_height()
-            .expect("valid blocks have a coinbase height");
-        let parent_hash = parent_block.hash();
-        check::height_one_more_than_parent_height(parent_height, block)?;
-        // should be impossible by design, so no handleable error is thrown
-        assert_eq!(parent_hash, block.header.previous_block_hash);
-
-        // TODO: validate difficulty adjustment
-        // TODO: other contextual validation design and implelentation
         Ok(())
     }
 
