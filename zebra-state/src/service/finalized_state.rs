@@ -1,5 +1,7 @@
 //! The primary implementation of the `zebra_state::Service` built upon sled
 
+mod sled_format;
+
 use std::{collections::HashMap, convert::TryInto, sync::Arc};
 
 use zebra_chain::transparent;
@@ -9,13 +11,11 @@ use zebra_chain::{
     transaction::{self, Transaction},
 };
 
-use crate::{BoxError, Config, HashOrHeight, QueuedBlock};
+use crate::{BoxError, Config, HashOrHeight};
 
-mod sled_format;
+use self::sled_format::{FromSled, IntoSled, SledDeserialize, SledSerialize, TransactionLocation};
 
-use sled_format::{FromSled, IntoSled, SledDeserialize, SledSerialize};
-
-use self::sled_format::TransactionLocation;
+use super::QueuedBlock;
 
 /// The finalized part of the chain state, stored in sled.
 ///

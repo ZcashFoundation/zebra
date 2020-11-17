@@ -8,7 +8,7 @@ use std::{
 };
 
 use futures::future::FutureExt;
-use memory_state::{NonFinalizedState, QueuedBlocks};
+use non_finalized_state::{NonFinalizedState, QueuedBlocks};
 use tokio::sync::oneshot;
 use tower::{util::BoxService, Service};
 use tracing::instrument;
@@ -21,12 +21,15 @@ use zebra_chain::{
 };
 
 use crate::{
-    request::HashOrHeight, BoxError, CommitBlockError, Config, FinalizedState, Request, Response,
+    request::HashOrHeight, BoxError, CommitBlockError, Config, Request, Response,
     ValidateContextError,
 };
 
+use self::finalized_state::FinalizedState;
+
 mod check;
-mod memory_state;
+mod finalized_state;
+mod non_finalized_state;
 #[cfg(test)]
 mod tests;
 mod utxo;
