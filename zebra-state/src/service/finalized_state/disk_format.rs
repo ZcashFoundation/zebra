@@ -15,24 +15,24 @@ pub struct TransactionLocation {
     pub index: u32,
 }
 
-// Helper trait for defining the exact format used to interact with sled per
+// Helper trait for defining the exact format used to interact with disk per
 // type.
-pub trait IntoSled {
+pub trait IntoDisk {
     // The type used to compare a value as a key to other keys stored in a
-    // sled::Tree
+    // database
     type Bytes: AsRef<[u8]>;
 
-    // function to convert the current type to its sled format in `zs_get()`
+    // function to convert the current type to its disk format in `zs_get()`
     // without necessarily allocating a new IVec
     fn as_bytes(&self) -> Self::Bytes;
 
-    // function to convert the current type into its sled format
+    // function to convert the current type into its disk format
     fn into_ivec(&self) -> sled::IVec;
 }
 
-impl<'a, T> IntoSled for &'a T
+impl<'a, T> IntoDisk for &'a T
 where
-    T: IntoSled,
+    T: IntoDisk,
 {
     type Bytes = T::Bytes;
 
@@ -45,9 +45,9 @@ where
     }
 }
 
-impl<T> IntoSled for Arc<T>
+impl<T> IntoDisk for Arc<T>
 where
-    T: IntoSled,
+    T: IntoDisk,
 {
     type Bytes = T::Bytes;
 
@@ -60,11 +60,11 @@ where
     }
 }
 
-/// Helper type for retrieving types from sled with the correct format.
+/// Helper type for retrieving types from the disk with the correct format.
 ///
-/// The ivec should be correctly encoded by IntoSled.
-pub trait FromSled: Sized {
-    /// Function to convert the sled bytes back into the deserialized type.
+/// The ivec should be correctly encoded by IntoDisk.
+pub trait FromDisk: Sized {
+    /// Function to convert the disk bytes back into the deserialized type.
     ///
     /// # Panics
     ///
@@ -72,16 +72,16 @@ pub trait FromSled: Sized {
     fn from_ivec(bytes: sled::IVec) -> Self;
 }
 
-impl<T> FromSled for Arc<T>
+impl<T> FromDisk for Arc<T>
 where
-    T: FromSled,
+    T: FromDisk,
 {
     fn from_ivec(bytes: sled::IVec) -> Self {
         Arc::new(T::from_ivec(bytes))
     }
 }
 
-impl IntoSled for Block {
+impl IntoDisk for Block {
     type Bytes = Vec<u8>;
 
     fn as_bytes(&self) -> Self::Bytes {
@@ -94,14 +94,14 @@ impl IntoSled for Block {
     }
 }
 
-impl FromSled for Block {
+impl FromDisk for Block {
     fn from_ivec(bytes: sled::IVec) -> Self {
         Block::zcash_deserialize(bytes.as_ref())
             .expect("deserialization format should match the serialization format used by IntoSled")
     }
 }
 
-impl IntoSled for TransactionLocation {
+impl IntoDisk for TransactionLocation {
     type Bytes = [u8; 8];
 
     fn as_bytes(&self) -> Self::Bytes {
@@ -121,7 +121,7 @@ impl IntoSled for TransactionLocation {
     }
 }
 
-impl FromSled for TransactionLocation {
+impl FromDisk for TransactionLocation {
     fn from_ivec(sled_bytes: sled::IVec) -> Self {
         let height = {
             let mut bytes = [0; 4];
@@ -140,7 +140,7 @@ impl FromSled for TransactionLocation {
     }
 }
 
-impl IntoSled for transaction::Hash {
+impl IntoDisk for transaction::Hash {
     type Bytes = [u8; 32];
 
     fn as_bytes(&self) -> Self::Bytes {
@@ -152,7 +152,7 @@ impl IntoSled for transaction::Hash {
     }
 }
 
-impl IntoSled for block::Hash {
+impl IntoDisk for block::Hash {
     type Bytes = [u8; 32];
 
     fn as_bytes(&self) -> Self::Bytes {
@@ -163,14 +163,14 @@ impl IntoSled for block::Hash {
     }
 }
 
-impl FromSled for block::Hash {
+impl FromDisk for block::Hash {
     fn from_ivec(bytes: sled::IVec) -> Self {
         let array = bytes.as_ref().try_into().unwrap();
         Self(array)
     }
 }
 
-impl IntoSled for sprout::Nullifier {
+impl IntoDisk for sprout::Nullifier {
     type Bytes = [u8; 32];
 
     fn as_bytes(&self) -> Self::Bytes {
@@ -182,7 +182,7 @@ impl IntoSled for sprout::Nullifier {
     }
 }
 
-impl IntoSled for sapling::Nullifier {
+impl IntoDisk for sapling::Nullifier {
     type Bytes = [u8; 32];
 
     fn as_bytes(&self) -> Self::Bytes {
@@ -194,7 +194,7 @@ impl IntoSled for sapling::Nullifier {
     }
 }
 
-impl IntoSled for () {
+impl IntoDisk for () {
     type Bytes = [u8; 0];
 
     fn as_bytes(&self) -> Self::Bytes {
@@ -206,7 +206,7 @@ impl IntoSled for () {
     }
 }
 
-impl IntoSled for block::Height {
+impl IntoDisk for block::Height {
     type Bytes = [u8; 4];
 
     fn as_bytes(&self) -> Self::Bytes {
@@ -217,14 +217,14 @@ impl IntoSled for block::Height {
     }
 }
 
-impl FromSled for block::Height {
+impl FromDisk for block::Height {
     fn from_ivec(bytes: sled::IVec) -> Self {
         let array = bytes.as_ref().try_into().unwrap();
         block::Height(u32::from_be_bytes(array))
     }
 }
 
-impl IntoSled for transparent::Output {
+impl IntoDisk for transparent::Output {
     type Bytes = Vec<u8>;
 
     fn as_bytes(&self) -> Self::Bytes {
@@ -237,14 +237,14 @@ impl IntoSled for transparent::Output {
     }
 }
 
-impl FromSled for transparent::Output {
+impl FromDisk for transparent::Output {
     fn from_ivec(bytes: sled::IVec) -> Self {
         Self::zcash_deserialize(&*bytes)
             .expect("deserialization format should match the serialization format used by IntoSled")
     }
 }
 
-impl IntoSled for transparent::OutPoint {
+impl IntoDisk for transparent::OutPoint {
     type Bytes = Vec<u8>;
 
     fn as_bytes(&self) -> Self::Bytes {
@@ -259,7 +259,7 @@ impl IntoSled for transparent::OutPoint {
 
 /// Helper trait for inserting (Key, Value) pairs into sled with a consistently
 /// defined format
-pub trait SledSerialize {
+pub trait DiskSerialize {
     /// Serialize and insert the given key and value into a sled tree.
     fn zs_insert<K, V>(
         &self,
@@ -267,19 +267,19 @@ pub trait SledSerialize {
         value: V,
     ) -> Result<(), sled::transaction::UnabortableTransactionError>
     where
-        K: IntoSled + Debug,
-        V: IntoSled;
+        K: IntoDisk + Debug,
+        V: IntoDisk;
 }
 
-impl SledSerialize for sled::transaction::TransactionalTree {
+impl DiskSerialize for sled::transaction::TransactionalTree {
     fn zs_insert<K, V>(
         &self,
         key: K,
         value: V,
     ) -> Result<(), sled::transaction::UnabortableTransactionError>
     where
-        K: IntoSled + Debug,
-        V: IntoSled,
+        K: IntoDisk + Debug,
+        V: IntoDisk,
     {
         use std::any::type_name;
 
@@ -301,20 +301,20 @@ impl SledSerialize for sled::transaction::TransactionalTree {
 
 /// Helper trait for retrieving values from sled trees with a consistently
 /// defined format
-pub trait SledDeserialize {
+pub trait DiskDeserialize {
     /// Serialize the given key and use that to get and deserialize the
     /// corresponding value from a sled tree, if it is present.
     fn zs_get<K, V>(&self, key: &K) -> Option<V>
     where
-        K: IntoSled,
-        V: FromSled;
+        K: IntoDisk,
+        V: FromDisk;
 }
 
-impl SledDeserialize for sled::Tree {
+impl DiskDeserialize for sled::Tree {
     fn zs_get<K, V>(&self, key: &K) -> Option<V>
     where
-        K: IntoSled,
-        V: FromSled,
+        K: IntoDisk,
+        V: FromDisk,
     {
         let key_bytes = key.as_bytes();
 
@@ -345,7 +345,7 @@ mod tests {
 
     fn round_trip<T>(input: T) -> T
     where
-        T: IntoSled + FromSled,
+        T: IntoDisk + FromDisk,
     {
         let bytes = input.into_ivec();
         T::from_ivec(bytes)
@@ -353,7 +353,7 @@ mod tests {
 
     fn assert_round_trip<T>(input: T)
     where
-        T: IntoSled + FromSled + Clone + PartialEq + std::fmt::Debug,
+        T: IntoDisk + FromDisk + Clone + PartialEq + std::fmt::Debug,
     {
         let before = input.clone();
         let after = round_trip(input);
@@ -362,7 +362,7 @@ mod tests {
 
     fn round_trip_ref<T>(input: &T) -> T
     where
-        T: IntoSled + FromSled,
+        T: IntoDisk + FromDisk,
     {
         let bytes = input.into_ivec();
         T::from_ivec(bytes)
@@ -370,7 +370,7 @@ mod tests {
 
     fn assert_round_trip_ref<T>(input: &T)
     where
-        T: IntoSled + FromSled + Clone + PartialEq + std::fmt::Debug,
+        T: IntoDisk + FromDisk + Clone + PartialEq + std::fmt::Debug,
     {
         let before = input;
         let after = round_trip_ref(input);
@@ -379,7 +379,7 @@ mod tests {
 
     fn round_trip_arc<T>(input: Arc<T>) -> T
     where
-        T: IntoSled + FromSled,
+        T: IntoDisk + FromDisk,
     {
         let bytes = input.into_ivec();
         T::from_ivec(bytes)
@@ -387,7 +387,7 @@ mod tests {
 
     fn assert_round_trip_arc<T>(input: Arc<T>)
     where
-        T: IntoSled + FromSled + Clone + PartialEq + std::fmt::Debug,
+        T: IntoDisk + FromDisk + Clone + PartialEq + std::fmt::Debug,
     {
         let before = input.clone();
         let after = round_trip_arc(input);
@@ -399,7 +399,7 @@ mod tests {
     /// ones that implement both `IntoSled` and `FromSled`.
     fn assert_value_properties<T>(input: T)
     where
-        T: IntoSled + FromSled + Clone + PartialEq + std::fmt::Debug,
+        T: IntoDisk + FromDisk + Clone + PartialEq + std::fmt::Debug,
     {
         assert_round_trip_ref(&input);
         assert_round_trip_arc(Arc::new(input.clone()));
@@ -414,7 +414,7 @@ mod tests {
     /// keys in the sled database, such as `contains`.
     fn assert_as_bytes_matches_ivec<T>(input: T)
     where
-        T: IntoSled + Clone,
+        T: IntoDisk + Clone,
     {
         let before = input.clone();
         let ivec = input.into_ivec();

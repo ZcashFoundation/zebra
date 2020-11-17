@@ -1,6 +1,6 @@
 //! The primary implementation of the `zebra_state::Service` built upon sled
 
-mod sled_format;
+mod disk_format;
 
 use std::{collections::HashMap, convert::TryInto, sync::Arc};
 
@@ -13,7 +13,7 @@ use zebra_chain::{
 
 use crate::{BoxError, Config, HashOrHeight};
 
-use self::sled_format::{FromSled, IntoSled, SledDeserialize, SledSerialize, TransactionLocation};
+use self::disk_format::{DiskDeserialize, DiskSerialize, FromDisk, IntoDisk, TransactionLocation};
 
 use super::QueuedBlock;
 
