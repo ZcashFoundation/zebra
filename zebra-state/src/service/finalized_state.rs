@@ -163,7 +163,7 @@ impl FinalizedState {
         let hash = block.hash();
 
         block_precommit_metrics(&hash, height, &block);
-        tracing::trace!(?height, ?hash, "Finalized block");
+        tracing::info!(?height, ?hash, "Finalized block");
 
         let hash_by_height = self.db.cf_handle("hash_by_height").unwrap();
         let height_by_hash = self.db.cf_handle("height_by_hash").unwrap();
@@ -201,62 +201,67 @@ impl FinalizedState {
             );
         }
 
-        let mut batch = rocksdb::WriteBatch::default();
+        let prepare_commit = || -> rocksdb::WriteBatch {
+            let mut batch = rocksdb::WriteBatch::default();
 
-        // Index the block
-        batch.zs_insert(hash_by_height, height, hash);
-        batch.zs_insert(height_by_hash, hash, height);
-        batch.zs_insert(block_by_height, height, &block);
+            // Index the block
+            batch.zs_insert(hash_by_height, height, hash);
+            batch.zs_insert(height_by_hash, hash, height);
+            batch.zs_insert(block_by_height, height, &block);
 
-        // TODO: sprout and sapling anchors (per block)
+            // TODO: sprout and sapling anchors (per block)
 
-        // Consensus-critical bug in zcashd: transactions in the
-        // genesis block are ignored.
-        if block.header.previous_block_hash == block::Hash([0; 32]) {
-            let result = self.db.write(batch).map(|()| hash);
-            return result.map_err(Into::into);
-        }
+            // Consensus-critical bug in zcashd: transactions in the
+            // genesis block are ignored.
+            if block.header.previous_block_hash == block::Hash([0; 32]) {
+                return batch;
+            }
 
-        // Index each transaction
-        for (transaction_index, transaction) in block.transactions.iter().enumerate() {
-            let transaction_hash = transaction.hash();
-            let transaction_location = TransactionLocation {
-                height,
-                index: transaction_index
-                    .try_into()
-                    .expect("no more than 4 billion transactions per block"),
-            };
-            batch.zs_insert(tx_by_hash, transaction_hash, transaction_location);
+            // Index each transaction
+            for (transaction_index, transaction) in block.transactions.iter().enumerate() {
+                let transaction_hash = transaction.hash();
+                let transaction_location = TransactionLocation {
+                    height,
+                    index: transaction_index
+                        .try_into()
+                        .expect("no more than 4 billion transactions per block"),
+                };
+                batch.zs_insert(tx_by_hash, transaction_hash, transaction_location);
 
-            // Mark all transparent inputs as spent
-            for input in transaction.inputs() {
-                match input {
-                    transparent::Input::PrevOut { outpoint, .. } => {
-                        batch.delete_cf(utxo_by_outpoint, outpoint.as_bytes());
+                // Mark all transparent inputs as spent
+                for input in transaction.inputs() {
+                    match input {
+                        transparent::Input::PrevOut { outpoint, .. } => {
+                            batch.delete_cf(utxo_by_outpoint, outpoint.as_bytes());
+                        }
+                        // Coinbase inputs represent new coins,
+                        // so there are no UTXOs to mark as spent.
+                        transparent::Input::Coinbase { .. } => {}
                     }
-                    // Coinbase inputs represent new coins,
-                    // so there are no UTXOs to mark as spent.
-                    transparent::Input::Coinbase { .. } => {}
+                }
+
+                // Index all new transparent outputs
+                for (index, output) in transaction.outputs().iter().enumerate() {
+                    let outpoint = transparent::OutPoint {
+                        hash: transaction_hash,
+                        index: index as _,
+                    };
+                    batch.zs_insert(utxo_by_outpoint, outpoint, output);
+                }
+
+                // Mark sprout and sapling nullifiers as spent
+                for sprout_nullifier in transaction.sprout_nullifiers() {
+                    batch.zs_insert(sprout_nullifiers, sprout_nullifier, ());
+                }
+                for sapling_nullifier in transaction.sapling_nullifiers() {
+                    batch.zs_insert(sapling_nullifiers, sapling_nullifier, ());
                 }
             }
 
-            // Index all new transparent outputs
-            for (index, output) in transaction.outputs().iter().enumerate() {
-                let outpoint = transparent::OutPoint {
-                    hash: transaction_hash,
-                    index: index as _,
-                };
-                batch.zs_insert(utxo_by_outpoint, outpoint, output);
-            }
+            batch
+        };
 
-            // Mark sprout and sapling nullifiers as spent
-            for sprout_nullifier in transaction.sprout_nullifiers() {
-                batch.zs_insert(sprout_nullifiers, sprout_nullifier, ());
-            }
-            for sapling_nullifier in transaction.sapling_nullifiers() {
-                batch.zs_insert(sapling_nullifiers, sapling_nullifier, ());
-            }
-        }
+        let batch = prepare_commit();
 
         let result = self.db.write(batch).map(|()| hash);
 
