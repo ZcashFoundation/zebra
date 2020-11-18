@@ -323,7 +323,7 @@ We might want to validate downloaded headers in future, so we include a
 ///
 /// Panics:
 /// If the `context` contains fewer than 28 items.
-pub fn new_from_block<C>(candidate_block: &Block
+pub fn new_from_block<C>(candidate_block: &Block,
                          network: Network,
                          context: C)
                          -> AdjustedDifficulty
@@ -341,7 +341,7 @@ pub fn new_from_block<C>(candidate_block: &Block
 ///
 /// Panics:
 /// If the context contains fewer than 28 items.
-pub fn new_from_header<C>(candidate_header: &block::Header
+pub fn new_from_header<C>(candidate_header: &block::Header,
                           previous_block_height: block::Height,
                           network: Network,
                           context: C)
