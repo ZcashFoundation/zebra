@@ -169,7 +169,7 @@ This check is implemented as follows:
 The block difficulty threshold is adjusted by scaling the mean target difficulty
 by the median timespan.
 
-On testnet, if a long time has elapsed since the previous block, the difficulty
+On Testnet, if a long time has elapsed since the previous block, the difficulty
 adjustment is modified to allow minimum-difficulty blocks.
 
 #### Mean target difficulty
@@ -200,9 +200,9 @@ The median timespan is damped by the `PoWDampingFactor`, and bounded by
 #### Test network minimum difficulty blocks
 [test-net-min-difficulty]: #test-net-min-difficulty
 
-If there is a large gap after a testnet block, the next block becomes a minimum
+If there is a large gap after a Testnet block, the next block becomes a minimum
 difficulty block. Testnet minimum difficulty blocks have their
-`difficulty_threshold` set to the minimum difficulty for testnet.
+`difficulty_threshold` set to the minimum difficulty for Testnet.
 
 #### Block difficulty threshold
 [block-difficulty-threshold]: #block-difficulty-threshold
@@ -213,7 +213,7 @@ window timespan.
 
 The result of this calculation is limited by `ToCompact(PoWLimit(network))`, a
 per-network minimum block difficulty. This minimum difficulty is also used when
-a testnet block's time gap exceeds the minimum difficulty gap.
+a Testnet block's time gap exceeds the minimum difficulty gap.
 
 # Reference-level explanation
 [reference-level-explanation]: #reference-level-explanation
@@ -408,7 +408,7 @@ fn mean_target_difficulty(&self) -> ExpandedDifficulty { ... }
 
 #### Implementation notes
 
-Since the `PoWLimit`s are `2^251 − 1` for Testnet, and `2^243 − 1` for mainnet,
+Since the `PoWLimit`s are `2^251 − 1` for Testnet, and `2^243 − 1` for Mainnet,
 the sum of these difficulty thresholds will be less than or equal to
 `(2^251 − 1)*17 = 2^255 + 2^251 - 17`. Therefore, this calculation can not
 overflow a `u256` value. So the function is infalliable.
@@ -484,25 +484,25 @@ Therefore, the function is infalliable.
 ### Test network minimum difficulty calculation
 [test-net-min-difficulty-calculation]: #test-net-min-difficulty-calculation
 
-A block is a testnet minimum difficulty block if:
-* the block is a testnet block,
+A block is a Testnet minimum difficulty block if:
+* the block is a Testnet block,
 * the block's height is 299188 or greater, and
-* the time gap from the previous block is greater than the testnet minimum
+* the time gap from the previous block is greater than the Testnet minimum
   difficulty gap, which is 6 times the target spacing for the block's height.
   (The target spacing was halved from the Blossom network upgrade onwards.)
 
-The difficulty adjustment is modified for testnet minimum difficulty blocks as
+The difficulty adjustment is modified for Testnet minimum difficulty blocks as
 follows:
-* the difficulty threshold in the block header is set to the testnet minimum
+* the difficulty threshold in the block header is set to the Testnet minimum
   difficulty threshold, `ToCompact(PoWLimit(network))`.
 
-Since the new difficulty changes the block header, testnet blocks can only
+Since the new difficulty changes the block header, Testnet blocks can only
 satisfy one of the alternate difficulty adjustment rules:
-* if the time gap is less than or equal to the testnet minimum difficulty gap:
+* if the time gap is less than or equal to the Testnet minimum difficulty gap:
   the difficulty threshold is calculated using the default difficulty adjustment
   rule,
-* if the time gap is greater than the testnet minimum difficulty gap:
-  the difficulty threshold is the testnet minimum difficulty threshold.
+* if the time gap is greater than the Testnet minimum difficulty gap:
+  the difficulty threshold is the Testnet minimum difficulty threshold.
 
 See [ZIP-208] for details.
 
@@ -510,9 +510,9 @@ Note: some older versions of ZIPs 205 and 208 incorrectly said that:
 * the time gap threshold uses an "at least" check (it is strictly greater than),
 * the minimum difficulty threshold value was `PoWLimit`
   (it is `ToCompact(PoWLimit)`),
-* the `difficulty_threshold` (`nBits`) field is not modified in testnet minimum
+* the `difficulty_threshold` (`nBits`) field is not modified in Testnet minimum
   difficulty blocks (the field is modified), and
-* the testnet minimum difficulty value is not used to calculate future difficulty
+* the Testnet minimum difficulty value is not used to calculate future difficulty
   adjustments (the modified value is used in future adjustments).
 
 ZIP 205 and 208 were fixed on 14 November 2020, see [ZIP PR 417] and
@@ -525,23 +525,22 @@ ZIP 205 and 208 were fixed on 14 November 2020, see [ZIP PR 417] and
 #### Test network minimum difficulty implementation
 [test-net-min-difficulty-implementation]: #test-net-min-difficulty-implementation
 
-The testnet minimum difficulty calculation uses the existing
+The Testnet minimum difficulty calculation uses the existing
 `NetworkUpgrade::minimum_difficulty_spacing_for_height` function to calculate the
 minimum difficulty gap.
 
 We implement this method on `AdjustedDifficulty`:
 ```rust
 /// Returns true if the gap between the `candidate_time` and the previous block's
-/// `time` is greater than the testnet minimum difficulty time gap. The time gap
+/// `time` is greater than the Testnet minimum difficulty time gap. The time gap
 /// depends on the `network` and `candidate_height`.
 ///
-/// Returns false for `Mainnet`, when the `candidate_height` is below the testnet
 /// minimum difficulty start height, and when the time gap is too small.
 ///
 /// `candidate_time` can be less than, equal to, or greater than the previous
 /// block's `time`, because block times are provided by miners.
 ///
-/// Implements the testnet minimum difficulty adjustment from ZIPs 205 and 208.
+/// Implements the Testnet minimum difficulty adjustment from ZIPs 205 and 208.
 ///
 /// Spec Note: Some parts of ZIPs 205 and 208 previously specified an incorrect
 /// check for the time gap. This function implements the correct "greater than"
@@ -551,7 +550,7 @@ fn candidate_is_testnet_min_difficulty_block(&self) -> bool { ... }
 
 #### Implementation notes
 
-In Zcash, the testnet minimum difficulty rule starts at block 299188, and in
+In Zcash, the Testnet minimum difficulty rule starts at block 299188, and in
 Zebra, contextual validation starts after Sapling activation. So we can assume
 that there is always a previous block.
 
@@ -566,7 +565,7 @@ window timespan.
 
 The result of the scaled threshold calculation is limited by
 `ToCompact(PoWLimit(network))`, a per-network minimum block difficulty. This
-minimum difficulty is also used when a testnet block's time gap exceeds the
+minimum difficulty is also used when a Testnet block's time gap exceeds the
 minimum difficulty gap. We use the existing
 `ExpandedDifficulty::target_difficulty_limit` function to calculate the value of
 `ToCompact(PoWLimit(network))`.
@@ -584,7 +583,7 @@ We implement these methods on `AdjustedDifficulty`:
 /// `difficulty_threshold`s and `time`s from the previous
 /// `PoWAveragingWindow + PoWMedianBlockSpan` (28) blocks in the relevant chain.
 ///
-/// Implements `ThresholdBits` from the Zcash specification, and the testnet
+/// Implements `ThresholdBits` from the Zcash specification, and the Testnet
 /// minimum difficulty adjustment from ZIPs 205 and 208.
 pub fn expected_difficulty_threshold(&self) -> CompactDifficulty { ... }
 
@@ -595,14 +594,14 @@ pub fn expected_difficulty_threshold(&self) -> CompactDifficulty { ... }
 /// See `expected_difficulty_threshold` for details.
 ///
 /// Implements `ThresholdBits` from the Zcash specification. (Which excludes the
-/// testnet minimum difficulty adjustment.)
+/// Testnet minimum difficulty adjustment.)
 fn threshold_bits(&self) -> CompactDifficulty { ... }
 ```
 
 #### Implementation notes
 
 Since:
-* the `PoWLimit`s are `2^251 − 1` for Testnet, and `2^243 − 1` for mainnet,
+* the `PoWLimit`s are `2^251 − 1` for Testnet, and `2^243 − 1` for Mainnet,
 * the `ActualTimespanBounded` can be at most `MaxActualTimespan`, which is
   `floor(PoWAveragingWindow * PoWTargetSpacing * (1 + PoWMaxAdjustDown))` or
   `floor(17 * 150 * (1 + 32/100)) =  3366`,
