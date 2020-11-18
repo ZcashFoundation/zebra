@@ -296,6 +296,7 @@ type, and implement the difficulty adjustment calculations as methods on that
 type.
 
 ```rust
+/// Contains the context needed to calculate the adjusted difficulty for a block. 
 struct AdjustedDifficulty {
     candidate_time: DateTime<Utc>,
     candidate_height: block::Height,
