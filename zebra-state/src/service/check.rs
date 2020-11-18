@@ -113,10 +113,17 @@ fn height_one_more_than_parent_height(
 /// value, then compares that value to the `difficulty_threshold`.
 /// Returns `Ok(())` if the values are equal.
 fn difficulty_threshold_is_valid(
-    _difficulty_threshold: CompactDifficulty,
-    _expected_difficulty: AdjustedDifficulty,
+    difficulty_threshold: CompactDifficulty,
+    expected_difficulty: AdjustedDifficulty,
 ) -> Result<(), ValidateContextError> {
-    Ok(())
+    // TODO: return an error on failure, after the calculation is implemented
+    #[allow(clippy::if_same_then_else)]
+    if difficulty_threshold == expected_difficulty.expected_difficulty_threshold() {
+        Ok(())
+    } else {
+        // This is the error case
+        Ok(())
+    }
 }
 
 #[cfg(test)]

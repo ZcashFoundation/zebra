@@ -17,6 +17,8 @@ use std::{
     cmp::{Ordering, PartialEq, PartialOrd},
     convert::TryFrom,
     fmt,
+    iter::Sum,
+    ops::Add,
 };
 
 use primitive_types::U256;
@@ -382,6 +384,18 @@ impl ExpandedDifficulty {
 impl From<U256> for ExpandedDifficulty {
     fn from(value: U256) -> Self {
         ExpandedDifficulty(value)
+    }
+}
+
+impl From<ExpandedDifficulty> for U256 {
+    fn from(value: ExpandedDifficulty) -> Self {
+        value.0
+    }
+}
+
+impl Sum<ExpandedDifficulty> for ExpandedDifficulty {
+    fn sum<I: Iterator<Item = ExpandedDifficulty>>(iter: I) -> Self {
+        iter.map(|d| d.0).fold(U256::zero(), Add::add).into()
     }
 }
 
