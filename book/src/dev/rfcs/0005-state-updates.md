@@ -156,7 +156,7 @@ state data at the finality boundary provided by the reorg limit.
 
 State data from blocks *above* the reorg limit (*non-finalized state*) is
 stored in-memory and handles multiple chains. State data from blocks *below*
-the reorg limit (*finalized state*) is stored persistently using `sled` and
+the reorg limit (*finalized state*) is stored persistently using `rocksdb` and
 only tracks a single chain. This allows a simplification of our state
 handling, because only finalized data is persistent and the logic for
 finalized data handles less invariants.
@@ -169,7 +169,7 @@ Another downside of this design is that we do not achieve exactly the same
 behavior as `zcashd` in the event of a 51% attack: `zcashd` limits *each* chain
 reorganization to 100 blocks, but permits multiple reorgs, while Zebra limits
 *all* chain reorgs to 100 blocks. In the event of a successful 51% attack on
-Zcash, this could be resolved by wiping the Sled state and re-syncing the new
+Zcash, this could be resolved by wiping the rocksdb state and re-syncing the new
 chain, but in this scenario there are worse problems.
 
 ## Service Interface
@@ -180,11 +180,11 @@ Determining what guarantees the state service can and should provide to the
 rest of the application requires considering two sets of behaviors:
 
 1. behaviors related to the state's external API (a `Buffer`ed `tower::Service`);
-2. behaviors related to the state's internal implementation (using `sled`).
+2. behaviors related to the state's internal implementation (using `rocksdb`).
 
 Making this distinction helps us to ensure we don't accidentally leak
 "internal" behaviors into "external" behaviors, which would violate
-encapsulation and make it more difficult to replace `sled`.
+encapsulation and make it more difficult to replace `rocksdb`.
 
 In the first category, our state is presented to the rest of the application
 as a `Buffer`ed `tower::Service`. The `Buffer` wrapper allows shared access
@@ -199,19 +199,19 @@ This means that our external API ensures that the state service sees a
 linearized sequence of state requests, although the exact ordering is
 unpredictable when there are multiple senders making requests.
 
-In the second category, the Sled API presents itself synchronously, but
+In the second category, the rocksdb API presents itself synchronously, but
 database and tree handles are cloneable and can be moved between threads. All
 that's required to process some request asynchronously is to clone the
 appropriate handle, move it into an async block, and make the call as part of
 the future. (We might want to use Tokio's blocking API for this, but this is
 an implementation detail).
 
-Because the state service has exclusive access to the sled database, and the
+Because the state service has exclusive access to the rocksdb database, and the
 state service sees a linearized sequence of state requests, we have an easy
-way to opt in to asynchronous database access. We can perform sled operations
+way to opt in to asynchronous database access. We can perform rocksdb operations
 synchronously in the `Service::call`, waiting for them to complete, and be
-sure that all future requests will see the resulting sled state. Or, we can
-perform sled operations asynchronously in the future returned by
+sure that all future requests will see the resulting rocksdb state. Or, we can
+perform rocksdb operations asynchronously in the future returned by
 `Service::call`.
 
 If we perform all *writes* synchronously and allow reads to be either
@@ -221,10 +221,10 @@ time the request was processed, or a later state.
 
 ### Summary
 
-- **Sled reads** may be done synchronously (in `call`) or asynchronously (in
+- **rocksdb reads** may be done synchronously (in `call`) or asynchronously (in
   the `Future`), depending on the context;
 
-- **Sled writes** must be done synchronously (in `call`)
+- **rocksdb writes** must be done synchronously (in `call`)
 
 ## In-memory data structures
 [in-memory]: #in-memory
@@ -580,22 +580,22 @@ New `non-finalized` blocks are commited as follows:
     - Remove the lowest height block from the non-finalized state with
       `self.mem.finalize();`
     - Commit that block to the finalized state with
-      `self.sled.commit_finalized_direct(finalized);`
+      `self.disk.commit_finalized_direct(finalized);`
 
 8. Prune orphaned blocks from `self.queued_blocks` with
    `self.queued_blocks.prune_by_height(finalized_height);`
 
 9. Return the receiver for the block's channel
 
-## Sled data structures
-[sled]: #sled
+## rocksdb data structures
+[rocksdb]: #rocksdb
 
-Sled provides a persistent, thread-safe `BTreeMap<&[u8], &[u8]>`. Each map is
+rocksdb provides a persistent, thread-safe `BTreeMap<&[u8], &[u8]>`. Each map is
 a distinct "tree". Keys are sorted using lex order on byte strings, so
 integer values should be stored using big-endian encoding (so that the lex
 order on byte strings is the numeric ordering).
 
-We use the following Sled trees:
+We use the following rocksdb column families:
 
 | Tree                 |                  Keys |                              Values |
 |----------------------|-----------------------|-------------------------------------|
@@ -613,16 +613,16 @@ Zcash structures are encoded using `ZcashSerialize`/`ZcashDeserialize`.
 
 **Note:** We do not store the cumulative work for the finalized chain, because the finalized work is equal for all non-finalized chains. So the additional non-finalized work can be used to calculate the relative chain order, and choose the best chain.
 
-### Notes on Sled trees
+### Notes on rocksdb column families
 
-- The `hash_by_height` and `height_by_hash` trees provide a bijection between
-  block heights and block hashes.  (Since the Sled state only stores finalized
+- The `hash_by_height` and `height_by_hash` column families provide a bijection between
+  block heights and block hashes.  (Since the rocksdb state only stores finalized
   state, they are actually a bijection).
 
-- The `block_by_height` tree provides a bijection between block heights and block
-  data. There is no corresponding `height_by_block` tree: instead, hash the block,
-  and use `height_by_hash`. (Since the Sled state only stores finalized state,
-  they are actually a bijection).
+- The `block_by_height` column family provides a bijection between block
+  heights and block data. There is no corresponding `height_by_block` column
+  family: instead, hash the block, and use `height_by_hash`. (Since the
+  rocksdb state only stores finalized state, they are actually a bijection).
 
 - Blocks are stored by height, not by hash.  This has the downside that looking
   up a block by hash requires an extra level of indirection.  The upside is
@@ -630,7 +630,7 @@ Zcash structures are encoded using `ZcashSerialize`/`ZcashDeserialize`.
   common access patterns, such as helping a client sync the chain or doing
   analysis, access blocks in (potentially sparse) height order.  In addition,
   the fact that we commit blocks in order means we're writing only to the end
-  of the Sled tree, which may help save space.
+  of the rocksdb column family, which may help save space.
 
 - Transaction references are stored as a `(height, index)` pair referencing the
   height of the transaction's parent block and the transaction's index in that
@@ -645,7 +645,7 @@ commit any queued children.  (Although the checkpointer generates verified
 blocks in order when it completes a checkpoint, the blocks are committed in the
 response futures, so they may arrive out of order).
 
-Committing a block to the sled state should be implemented as a wrapper around
+Committing a block to the rocksdb state should be implemented as a wrapper around
 a function also called by [`Request::CommitBlock`](#request-commit-block),
 which should:
 
@@ -754,7 +754,7 @@ CommitFinalizedBlock {
 }
 ```
 
-Commits a finalized block to the sled state, skipping contextual validation.
+Commits a finalized block to the rocksdb state, skipping contextual validation.
 This is exposed for use in checkpointing, which produces in-order finalized
 blocks. Returns `Response::Added(block::Hash)` with the hash of the
 committed block if successful.

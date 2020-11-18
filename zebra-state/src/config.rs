@@ -30,18 +30,6 @@ pub struct Config {
     /// | Other   | `std::env::current_dir()/cache`                 |                                    |
     pub cache_dir: PathBuf,
 
-    /// Controls the size of the database cache, in bytes.
-    ///
-    /// This corresponds to `sled`'s [`cache_capacity`][cc] parameter.
-    /// Note that the behavior of this parameter is [somewhat
-    /// unintuitive][gh], measuring the on-disk size of the cached data,
-    /// not the in-memory size, which may be much larger, especially for
-    /// smaller keys and values.
-    ///
-    /// [cc]: https://docs.rs/sled/0.34.4/sled/struct.Config.html#method.cache_capacity
-    /// [gh]: https://github.com/spacejam/sled/issues/986#issuecomment-592950100
-    pub memory_cache_bytes: u64,
-
     /// Whether to use an ephemeral database.
     ///
     /// Ephemeral databases are stored in memory on Linux, and in a temporary directory on other OSes.
@@ -113,7 +101,7 @@ impl Config {
         } else {
             self.cache_dir
                 .join("state")
-                .join(format!("v{}", crate::constants::SLED_FORMAT_VERSION))
+                .join(format!("v{}", crate::constants::DATABASE_FORMAT_VERSION))
                 .join(net_dir)
         };
 
@@ -136,7 +124,6 @@ impl Default for Config {
 
         Self {
             cache_dir,
-            memory_cache_bytes: 50_000_000,
             ephemeral: false,
             debug_stop_at_height: None,
         }

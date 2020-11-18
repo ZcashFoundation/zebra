@@ -313,7 +313,7 @@ fn persistent_mode() -> Result<()> {
     // Make sure the command was killed
     output.assert_was_killed()?;
 
-    // Check that we have persistent sled database
+    // Check that we have persistent rocksdb database
     let cache_dir = testdir.path().join("state");
     assert_with_context!(cache_dir.read_dir()?.count() > 0, &output);
 
@@ -536,8 +536,8 @@ fn restart_stop_at_height() -> Result<()> {
         SMALL_CHECKPOINT_TIMEOUT,
         None,
     )?;
-    // if stopping corrupts the sled database, zebrad might hang here
-    // if stopping does not sync the sled database, the logs will contain OnCommit
+    // if stopping corrupts the rocksdb database, zebrad might hang here
+    // if stopping does not sync the rocksdb database, the logs will contain OnCommit
     sync_until(
         Height(0),
         Mainnet,

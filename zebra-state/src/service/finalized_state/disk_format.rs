@@ -1,4 +1,4 @@
-//! Module defining exactly how to move types in and out of sled
+//! Module defining exactly how to move types in and out of rocksdb
 use std::{convert::TryInto, fmt::Debug, sync::Arc};
 
 use zebra_chain::{
@@ -82,7 +82,7 @@ impl IntoDisk for Block {
 impl FromDisk for Block {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
         Block::zcash_deserialize(bytes.as_ref())
-            .expect("deserialization format should match the serialization format used by IntoSled")
+            .expect("deserialization format should match the serialization format used by IntoDisk")
     }
 }
 
@@ -103,18 +103,18 @@ impl IntoDisk for TransactionLocation {
 }
 
 impl FromDisk for TransactionLocation {
-    fn from_bytes(sled_bytes: impl AsRef<[u8]>) -> Self {
-        let sled_bytes = sled_bytes.as_ref();
+    fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
+        let disk_bytes = disk_bytes.as_ref();
         let height = {
             let mut bytes = [0; 4];
-            bytes.copy_from_slice(&sled_bytes[0..4]);
+            bytes.copy_from_slice(&disk_bytes[0..4]);
             let height = u32::from_be_bytes(bytes);
             block::Height(height)
         };
 
         let index = {
             let mut bytes = [0; 4];
-            bytes.copy_from_slice(&sled_bytes[4..8]);
+            bytes.copy_from_slice(&disk_bytes[4..8]);
             u32::from_be_bytes(bytes)
         };
 
@@ -196,7 +196,7 @@ impl IntoDisk for transparent::Output {
 impl FromDisk for transparent::Output {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
         Self::zcash_deserialize(bytes.as_ref())
-            .expect("deserialization format should match the serialization format used by IntoSled")
+            .expect("deserialization format should match the serialization format used by IntoDisk")
     }
 }
 
@@ -209,10 +209,10 @@ impl IntoDisk for transparent::OutPoint {
     }
 }
 
-/// Helper trait for inserting (Key, Value) pairs into sled with a consistently
+/// Helper trait for inserting (Key, Value) pairs into rocksdb with a consistently
 /// defined format
 pub trait DiskSerialize {
-    /// Serialize and insert the given key and value into a sled tree.
+    /// Serialize and insert the given key and value into a rocksdb column family.
     fn zs_insert<K, V>(&mut self, cf: &rocksdb::ColumnFamily, key: K, value: V)
     where
         K: IntoDisk + Debug,
@@ -231,11 +231,11 @@ impl DiskSerialize for rocksdb::WriteBatch {
     }
 }
 
-/// Helper trait for retrieving values from sled trees with a consistently
+/// Helper trait for retrieving values from rocksdb column familys with a consistently
 /// defined format
 pub trait DiskDeserialize {
     /// Serialize the given key and use that to get and deserialize the
-    /// corresponding value from a sled tree, if it is present.
+    /// corresponding value from a rocksdb column family, if it is present.
     fn zs_get<K, V>(&self, cf: &rocksdb::ColumnFamily, key: &K) -> Option<V>
     where
         K: IntoDisk,
@@ -252,7 +252,7 @@ impl DiskDeserialize for rocksdb::DB {
 
         let value_bytes = self
             .get_pinned_cf(cf, key_bytes)
-            .expect("expected that sled errors would not occur");
+            .expect("expected that disk errors would not occur");
 
         value_bytes.map(V::from_bytes)
     }
@@ -326,9 +326,9 @@ mod tests {
         assert_eq!(*before, after);
     }
 
-    /// The round trip test covers types that are used as value field in a sled
-    /// Tree. Only these types are ever deserialized, and so they're the only
-    /// ones that implement both `IntoSled` and `FromSled`.
+    /// The round trip test covers types that are used as value field in a rocksdb
+    /// column family. Only these types are ever deserialized, and so they're the only
+    /// ones that implement both `IntoDisk` and `FromDisk`.
     fn assert_value_properties<T>(input: T)
     where
         T: IntoDisk + FromDisk + Clone + PartialEq + std::fmt::Debug,
@@ -338,12 +338,12 @@ mod tests {
         assert_round_trip(input);
     }
 
-    /// This test asserts that types that are used as sled keys behave correctly.
-    /// Any type that implements `IntoIVec` can be used as a sled key. The value
-    /// is serialized via `IntoSled::into_ivec` when the `key`, `value` pair is
-    /// inserted into the sled tree. The `as_bytes` impl on the other hand is
+    /// This test asserts that types that are used as rocksdb keys behave correctly.
+    /// Any type that implements `IntoIVec` can be used as a rocksdb key. The value
+    /// is serialized via `IntoDisk::into_ivec` when the `key`, `value` pair is
+    /// inserted into the rocksdb column family. The `as_bytes` impl on the other hand is
     /// called for most other operations when comparing a key against existing
-    /// keys in the sled database, such as `contains`.
+    /// keys in the rocksdb database, such as `contains`.
     fn assert_as_bytes_matches_ivec<T>(input: T)
     where
         T: IntoDisk + Clone,
