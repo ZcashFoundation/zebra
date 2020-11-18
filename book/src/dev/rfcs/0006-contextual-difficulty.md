@@ -596,11 +596,7 @@ pub fn expected_difficulty_threshold(&self) -> CompactDifficulty { ... }
 ///
 /// Implements `ThresholdBits` from the Zcash specification. (Which excludes the
 /// testnet minimum difficulty adjustment.)
-fn threshold_bits(network: Network,
-                  height: block::Height,
-                  relevant_difficulty_thresholds: &[CompactDifficulty; 28],
-                  relevant_times: &[DateTime<Utc>; 28])
-                  -> CompactDifficulty { ... }
+fn threshold_bits(&self) -> CompactDifficulty { ... }
 ```
 
 #### Implementation notes
