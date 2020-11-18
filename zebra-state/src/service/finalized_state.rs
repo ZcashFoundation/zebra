@@ -1,6 +1,7 @@
 //! The primary implementation of the `zebra_state::Service` built upon rocksdb
 
 mod disk_format;
+mod iter;
 
 use std::{collections::HashMap, convert::TryInto, sync::Arc};
 
@@ -14,6 +15,7 @@ use zebra_chain::{
 use crate::{BoxError, Config, FinalizedBlock, HashOrHeight};
 
 use self::disk_format::{DiskDeserialize, DiskSerialize, FromDisk, IntoDisk, TransactionLocation};
+use self::iter::Iter;
 
 use super::QueuedFinalized;
 
@@ -272,6 +274,30 @@ impl FinalizedState {
         let (finalized, rsp_tx) = queued_block;
         let result = self.commit_finalized_direct(finalized);
         let _ = rsp_tx.send(result.map_err(Into::into));
+    }
+
+    /// Return an iterator over the relevant chain of the block identified by
+    /// `hash_or_height`. If `hash_or_height` is `None`, returns an empty
+    /// iterator.
+    ///
+    /// The block identified by `hash_or_height` is included in the chain of
+    /// blocks yielded by the iterator.
+    ///
+    /// Use `.into()` to convert a `block::Hash` or `block::Height` into a
+    /// `HashOrHeight`.
+    pub fn chain(&self, hash_or_height: Option<HashOrHeight>) -> Iter<'_> {
+        use HashOrHeight::*;
+
+        let height = match hash_or_height {
+            Some(Hash(hash)) => self.height(hash),
+            Some(Height(height)) => Some(height),
+            None => None,
+        };
+
+        Iter {
+            finalized_state: self,
+            height,
+        }
     }
 
     /// Returns the tip height and hash if there is one.
