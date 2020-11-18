@@ -1,4 +1,4 @@
-//! The primary implementation of the `zebra_state::Service` built upon sled
+//! The primary implementation of the `zebra_state::Service` built upon rocksdb
 
 mod disk_format;
 
@@ -28,7 +28,7 @@ use super::QueuedBlock;
 /// implemented as ordinary methods on the [`FinalizedState`]. The asynchronous
 /// methods are not implemented using `async fn`, but using normal methods that
 /// return `impl Future<Output = ...>`. This allows them to move data (e.g.,
-/// clones of handles for [`sled::Tree`]s) into the futures they return.
+/// clones of handles for the database) into the futures they return.
 ///
 /// This means that the returned futures have a `'static` lifetime and don't
 /// borrow any resources from the [`FinalizedState`], and the actual database work is
@@ -40,6 +40,7 @@ pub struct FinalizedState {
     max_queued_height: i64,
 
     db: rocksdb::DB,
+    temporary: bool,
     /// Commit blocks to the finalized state up to this height, then exit Zebra.
     debug_stop_at_height: Option<block::Height>,
 }
@@ -52,6 +53,7 @@ impl FinalizedState {
             queued_by_prev_hash: HashMap::new(),
             max_queued_height: -1,
             db,
+            temporary: config.ephemeral,
             debug_stop_at_height: config.debug_stop_at_height.map(block::Height),
         };
 
@@ -87,20 +89,8 @@ impl FinalizedState {
         new_state
     }
 
-    /// Synchronously flushes all dirty IO buffers and calls fsync.
-    ///
-    /// Returns the number of bytes flushed during this call.
-    /// See sled's `Tree.flush` for more details.
-    pub fn flush(&self) -> sled::Result<usize> {
-        todo!()
-    }
-
-    /// If `block_height` is greater than or equal to the configured stop height,
-    /// stop the process.
-    ///
-    /// Flushes sled trees before exiting.
-    ///
-    /// `called_from` and `block_hash` are used for assertions and logging.
+    /// Stop the process if `block_height` is greater than or equal to the
+    /// configured stop height.
     fn is_at_stop_height(&self, block_height: block::Height) -> bool {
         let debug_stop_at_height = match self.debug_stop_at_height {
             Some(debug_stop_at_height) => debug_stop_at_height,
@@ -271,15 +261,6 @@ impl FinalizedState {
         let result = self.db.write(batch).map(|()| hash);
 
         if result.is_ok() && self.is_at_stop_height(height) {
-            if let Err(e) = self.flush() {
-                tracing::error!(
-                    ?e,
-                    ?height,
-                    ?hash,
-                    "error flushing sled state before stopping"
-                );
-            }
-
             tracing::info!(?height, ?hash, "stopping at configured height");
 
             std::process::exit(0);
@@ -354,6 +335,16 @@ impl FinalizedState {
 
                 block.transactions[index as usize].clone()
             })
+    }
+}
+
+impl Drop for FinalizedState {
+    fn drop(&mut self) {
+        if self.temporary {
+            let path = self.db.path();
+            tracing::debug!("removing temporary database files {:?}", path);
+            let _res = std::fs::remove_dir_all(path);
+        }
     }
 }
 

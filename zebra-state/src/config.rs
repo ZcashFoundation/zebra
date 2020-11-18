@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::{
+    path::PathBuf,
+    sync::atomic::{AtomicUsize, Ordering},
+};
 use zebra_chain::parameters::Network;
 
 /// Configuration for the state service.
@@ -54,6 +57,35 @@ pub struct Config {
     pub debug_stop_at_height: Option<u32>,
 }
 
+fn gen_temp_path() -> PathBuf {
+    use std::time::SystemTime;
+
+    static SALT_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+    let seed = SALT_COUNTER.fetch_add(1, Ordering::SeqCst) as u128;
+
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos()
+        << 48;
+
+    #[cfg(not(miri))]
+    let pid = u128::from(std::process::id());
+
+    #[cfg(miri)]
+    let pid = 0;
+
+    let salt = (pid << 16) + now + seed;
+
+    if cfg!(target_os = "linux") {
+        // use shared memory for temporary linux files
+        format!("/dev/shm/pagecache.tmp.{}", salt).into()
+    } else {
+        std::env::temp_dir().join(format!("pagecache.tmp.{}", salt))
+    }
+}
+
 impl Config {
     pub(crate) fn open_db(&self, network: Network) -> rocksdb::DB {
         let net_dir = match network {
@@ -76,17 +108,16 @@ impl Config {
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
 
-        if self.ephemeral {
-            todo!();
+        let path = if self.ephemeral {
+            gen_temp_path()
         } else {
-            let path = self
-                .cache_dir
+            self.cache_dir
                 .join("state")
                 .join(format!("v{}", crate::constants::SLED_FORMAT_VERSION))
-                .join(net_dir);
+                .join(net_dir)
+        };
 
-            rocksdb::DB::open_cf_descriptors(&opts, path, cfs).unwrap()
-        }
+        rocksdb::DB::open_cf_descriptors(&opts, path, cfs).unwrap()
     }
 
     /// Construct a config for an ephemeral in memory database
