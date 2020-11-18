@@ -28,7 +28,7 @@ use crate::{
 
 use self::finalized_state::FinalizedState;
 
-mod check;
+pub(crate) mod check;
 mod finalized_state;
 mod non_finalized_state;
 #[cfg(test)]

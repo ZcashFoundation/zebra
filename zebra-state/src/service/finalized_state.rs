@@ -12,7 +12,7 @@ use zebra_chain::{
     transaction::{self, Transaction},
 };
 
-use crate::{BoxError, Config, FinalizedBlock, HashOrHeight};
+use crate::{service::check, BoxError, Config, FinalizedBlock, HashOrHeight, PreparedBlock};
 
 use self::disk_format::{DiskDeserialize, DiskSerialize, FromDisk, IntoDisk, TransactionLocation};
 use self::iter::Iter;
@@ -27,8 +27,12 @@ pub struct FinalizedState {
 
     db: rocksdb::DB,
     ephemeral: bool,
+    network: Network,
+
     /// Commit blocks to the finalized state up to this height, then exit Zebra.
     debug_stop_at_height: Option<block::Height>,
+    /// If true, do additional contextual verification checks for debugging.
+    debug_contextual_verify: bool,
 }
 
 impl FinalizedState {
@@ -40,7 +44,9 @@ impl FinalizedState {
             max_queued_height: -1,
             db,
             ephemeral: config.ephemeral,
+            network,
             debug_stop_at_height: config.debug_stop_at_height.map(block::Height),
+            debug_contextual_verify: config.debug_contextual_verify,
         };
 
         if let Some(tip_height) = new_state.finalized_tip_height() {
@@ -272,8 +278,38 @@ impl FinalizedState {
     /// [`FinalizedState`].
     fn commit_finalized(&mut self, queued_block: QueuedFinalized) {
         let (finalized, rsp_tx) = queued_block;
+        self.check_contextual_validity(&finalized);
         let result = self.commit_finalized_direct(finalized);
         let _ = rsp_tx.send(result.map_err(Into::into));
+    }
+
+    /// Check that `finalized_block` is contextually valid for the configured network,
+    /// based on the committed finalized state.
+    ///
+    /// Only used for debugging.
+    /// Contextual verification is only performed if `debug_contextual_verify` is true.
+    ///
+    /// Panics if contextual verification fails.
+    fn check_contextual_validity(&mut self, finalized_block: &FinalizedBlock) {
+        if self.debug_contextual_verify {
+            let finalized_tip_height = self.finalized_tip_height();
+            let relevant_chain = self.chain(finalized_tip_height.map(Into::into));
+
+            check::block_is_contextually_valid(
+                // Fake a prepared block
+                &PreparedBlock {
+                    block: finalized_block.block.clone(),
+                    hash: finalized_block.hash,
+                    height: finalized_block.height,
+                    // TODO: fill in `new_outputs`, or make `block_is_contextually_valid` take a `Block`
+                    new_outputs: HashMap::new(),
+                },
+                self.network,
+                finalized_tip_height,
+                relevant_chain,
+            )
+            .expect("block dequeued after CommitFinalized is contextually valid");
+        }
     }
 
     /// Return an iterator over the relevant chain of the block identified by

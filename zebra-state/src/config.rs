@@ -43,6 +43,12 @@ pub struct Config {
     ///
     /// Set to `None` by default: Zebra continues syncing indefinitely.
     pub debug_stop_at_height: Option<u32>,
+
+    /// Run each contextual verification check on all the blocks it supports.
+    ///
+    /// Set to `false` by default: Zebra runs contextual verification only on
+    /// post-checkpoint blocks.
+    pub debug_contextual_verify: bool,
 }
 
 fn gen_temp_path(prefix: &str) -> PathBuf {
@@ -107,6 +113,7 @@ impl Default for Config {
             cache_dir,
             ephemeral: false,
             debug_stop_at_height: None,
+            debug_contextual_verify: false,
         }
     }
 }
