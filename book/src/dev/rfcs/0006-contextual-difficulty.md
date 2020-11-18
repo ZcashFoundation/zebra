@@ -383,7 +383,7 @@ We implement this function:
 /// `Ok(())` if the values are equal.
 pub fn difficulty_threshold_is_valid(difficulty_threshold: CompactDifficulty,
                                      expected_difficulty: AdjustedDifficulty)
-                                     -> Result<(), BlockError> { ... }
+                                     -> Result<(), ValidateContextError> { ... }
 ```
 
 [Issue 1166]: https://github.com/ZcashFoundation/zebra/issues/1166
