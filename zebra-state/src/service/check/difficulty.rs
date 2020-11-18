@@ -1,10 +1,14 @@
 //! Block difficulty adjustment calculations for contextual validation.
 
 use chrono::{DateTime, Utc};
+use primitive_types::U256;
 
 use std::convert::TryInto;
 
-use zebra_chain::{block, block::Block, parameters::Network, work::difficulty::CompactDifficulty};
+use zebra_chain::{
+    block, block::Block, parameters::Network, work::difficulty::CompactDifficulty,
+    work::difficulty::ExpandedDifficulty,
+};
 
 /// The averaging window for difficulty threshold arithmetic mean calculations.
 ///
@@ -123,5 +127,64 @@ impl AdjustedDifficulty {
             relevant_difficulty_thresholds,
             relevant_times,
         }
+    }
+
+    /// Calculate the expected `difficulty_threshold` for a candidate block, based
+    /// on the `candidate_time`, `candidate_height`, `network`, and the
+    /// `difficulty_threshold`s and `time`s from the previous
+    /// `PoWAveragingWindow + PoWMedianBlockSpan` (28) blocks in the relevant chain.
+    ///
+    /// Implements `ThresholdBits` from the Zcash specification, and the Testnet
+    /// minimum difficulty adjustment from ZIPs 205 and 208.
+    pub fn expected_difficulty_threshold(&self) -> CompactDifficulty {
+        // TODO: Testnet minimum difficulty
+        self.threshold_bits()
+    }
+
+    /// Calculate the `difficulty_threshold` for a candidate block, based on the
+    /// `candidate_height`, `network`, and the relevant `difficulty_threshold`s and
+    /// `time`s.
+    ///
+    /// See `expected_difficulty_threshold` for details.
+    ///
+    /// Implements `ThresholdBits` from the Zcash specification. (Which excludes the
+    /// Testnet minimum difficulty adjustment.)
+    fn threshold_bits(&self) -> CompactDifficulty {
+        let mean_target = self.mean_target_difficulty();
+
+        // TODO: calculate the actual value
+        mean_target.to_compact()
+    }
+
+    /// Calculate the arithmetic mean of the averaging window thresholds: the
+    /// expanded `difficulty_threshold`s from the previous `PoWAveragingWindow` (17)
+    /// blocks in the relevant chain.
+    ///
+    /// Implements `MeanTarget` from the Zcash specification.
+    fn mean_target_difficulty(&self) -> ExpandedDifficulty {
+        // In Zebra, contextual validation starts after Sapling activation, so we
+        // can assume that the relevant chain contains at least 17 blocks.
+        // Therefore, the `PoWLimit` case of `MeanTarget()` from the Zcash
+        // specification is unreachable.
+
+        let averaging_window_thresholds =
+            &self.relevant_difficulty_thresholds[0..POW_AVERAGING_WINDOW];
+
+        // Since the PoWLimits are `2^251 − 1` for Testnet, and `2^243 − 1` for
+        // Mainnet, the sum of 17 `ExpandedDifficulty` will be less than or equal
+        // to: `(2^251 − 1) * 17 = 2^255 + 2^251 - 17`. Therefore, the sum can
+        // not overflow a u256 value.
+        let total: ExpandedDifficulty = averaging_window_thresholds
+            .iter()
+            .map(|compact| {
+                compact
+                    .to_expanded()
+                    .expect("difficulty thresholds in previously verified blocks are valid")
+            })
+            .sum();
+        let total: U256 = total.into();
+        let divisor: U256 = POW_AVERAGING_WINDOW.into();
+
+        (total / divisor).into()
     }
 }
