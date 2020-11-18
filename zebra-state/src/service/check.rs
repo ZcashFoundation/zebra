@@ -14,6 +14,8 @@ use super::check;
 ///
 /// The relevant chain is an iterator over the ancestors of `block`, starting
 /// with its parent block.
+///
+/// Panics if the finalized state is empty.
 #[tracing::instrument(
     name = "contextual_validation",
     fields(?network),
@@ -30,7 +32,7 @@ where
     C::Item: AsRef<Block>,
 {
     let finalized_tip_height = finalized_tip_height
-        .expect("finalized state must contain at least one block to use the non-finalized state");
+        .expect("finalized state must contain at least one block to do contextual validation");
     check::block_is_not_orphaned(finalized_tip_height, prepared.height)?;
 
     let mut relevant_chain = relevant_chain.into_iter();
