@@ -287,14 +287,19 @@ impl FinalizedState {
     /// based on the committed finalized state.
     ///
     /// Only used for debugging.
-    /// Contextual verification is only performed if `debug_contextual_verify` is true.
+    /// Contextual verification is only performed if `debug_contextual_verify` is true,
+    /// and there is at least one block in the finalized state.
     ///
     /// Panics if contextual verification fails.
     fn check_contextual_validity(&mut self, finalized_block: &FinalizedBlock) {
         if self.debug_contextual_verify {
             let finalized_tip_height = self.finalized_tip_height();
-            let relevant_chain = self.chain(finalized_tip_height.map(Into::into));
+            // Skip contextual verification if the finalized state is empty
+            if finalized_tip_height.is_none() {
+                return;
+            }
 
+            let relevant_chain = self.chain(finalized_tip_height.map(Into::into));
             check::block_is_contextually_valid(
                 // Fake a prepared block
                 &PreparedBlock {
