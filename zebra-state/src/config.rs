@@ -41,7 +41,7 @@ pub struct Config {
 
     /// Commit blocks to the finalized state up to this height, then exit Zebra.
     ///
-    /// If `None`, continue syncing indefinitely.
+    /// Set to `None` by default: Zebra continues syncing indefinitely.
     pub debug_stop_at_height: Option<u32>,
 }
 
