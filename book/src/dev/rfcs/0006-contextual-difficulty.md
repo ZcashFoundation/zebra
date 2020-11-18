@@ -382,7 +382,7 @@ We implement this function:
 /// value, then compares that value to the `difficulty_threshold`. Returns
 /// `Ok(())` if the values are equal.
 pub fn difficulty_threshold_is_valid(difficulty_threshold: CompactDifficulty,
-                                     expected_difficulty: AdjustedDifficulty,
+                                     expected_difficulty: AdjustedDifficulty)
                                      -> Result<(), BlockError> { ... }
 ```
 
@@ -598,7 +598,7 @@ pub fn expected_difficulty_threshold(&self) -> CompactDifficulty { ... }
 fn threshold_bits(network: Network,
                   height: block::Height,
                   relevant_difficulty_thresholds: &[CompactDifficulty; 28],
-                  relevant_times: &[DateTime<Utc>; 28],
+                  relevant_times: &[DateTime<Utc>; 28])
                   -> CompactDifficulty { ... }
 ```
 
