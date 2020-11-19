@@ -328,6 +328,10 @@ impl FinalizedState {
     }
 }
 
+// Drop isn't guaranteed to run, such as when we panic, or if someone stored
+// their FinalizedState in a static, but it should be fine if we don't clean
+// this up since the files are placed in the os temp dir and should be cleaned
+// up automatically eventually.
 impl Drop for FinalizedState {
     fn drop(&mut self) {
         if self.ephemeral {
