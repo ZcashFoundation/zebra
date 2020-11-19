@@ -456,7 +456,7 @@ Zebra implements the median timespan using the following methods on
 ///
 /// Note: This calculation only uses `PoWMedianBlockSpan` (11) times at the
 /// start and end of the timespan times. timespan times `[11..=16]` are ignored.
-fn median_timespan_bounded(&self) -> DateTime<Utc> { ... }
+fn median_timespan_bounded(&self) -> Duration { ... }
 
 /// Calculate the median of the `median_block_span_times`: the `time`s from a
 /// slice of `PoWMedianBlockSpan` (11) blocks in the relevant chain.
