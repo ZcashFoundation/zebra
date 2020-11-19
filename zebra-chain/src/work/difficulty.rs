@@ -19,6 +19,8 @@ use std::{
     fmt,
     iter::Sum,
     ops::Add,
+    ops::Div,
+    ops::Mul,
 };
 
 use primitive_types::U256;
@@ -396,6 +398,29 @@ impl From<ExpandedDifficulty> for U256 {
 impl Sum<ExpandedDifficulty> for ExpandedDifficulty {
     fn sum<I: Iterator<Item = ExpandedDifficulty>>(iter: I) -> Self {
         iter.map(|d| d.0).fold(U256::zero(), Add::add).into()
+    }
+}
+
+impl<T> Div<T> for ExpandedDifficulty
+where
+    T: Into<U256>,
+{
+    type Output = ExpandedDifficulty;
+
+    fn div(self, rhs: T) -> Self::Output {
+        ExpandedDifficulty(self.0 / rhs)
+    }
+}
+
+impl<T> Mul<T> for ExpandedDifficulty
+where
+    U256: Mul<T>,
+    <U256 as Mul<T>>::Output: Into<U256>,
+{
+    type Output = ExpandedDifficulty;
+
+    fn mul(self, rhs: T) -> ExpandedDifficulty {
+        ExpandedDifficulty((self.0 * rhs).into())
     }
 }
 
