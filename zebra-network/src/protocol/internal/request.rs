@@ -152,7 +152,7 @@ pub enum Request {
     ///
     /// This is implemented by sending an `inv` message containing the
     /// block hash, allowing the remote peer to choose whether to download
-    /// it. Remote peers who choose to download the transaction will generate a
+    /// it. Remote peers who choose to download the block will generate a
     /// [`Request::BlocksByHash`] against the "inbound" service passed to
     /// [`zebra_network::init`].
     ///
