@@ -22,3 +22,7 @@ panic = "abort"
 
 [patch.crates-io]
 tower = { git = "https://github.com/tower-rs/tower", rev = "5e1e07744820028877654c336a3b9fe057bf46f1" }
+hyper = { git = "https://github.com/hyperium/hyper/", rev = "ed2b22a7f66899d338691552fbcb6c0f2f4e06b9" }
+metrics = { git = "https://github.com/ZcashFoundation/metrics", rev = "971133128e5aebe3ad177acffc6154449736cfa2" }
+metrics-exporter-prometheus = { git = "https://github.com/ZcashFoundation/metrics", rev = "971133128e5aebe3ad177acffc6154449736cfa2" }
+
