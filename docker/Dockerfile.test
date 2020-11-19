@@ -15,8 +15,6 @@ RUN rustc -V; cargo -V; rustup -V
 EXPOSE 8233 18233
 
 COPY . .
-RUN cargo test --all --no-run
-RUN find /zebra/target/debug/deps -type f -perm 755 ! -name '*.dylib' ! -name '*.so' | sed -e 'p;s/-.*//' | xargs -n2 mv
 
 # Filtering to only run integration tests requires nightly for now
-CMD cargo +nightly test --test '*' --no-fail-fast -- -Zunstable-options --include-ignored
+CMD cargo +nightly test --all --test '*' --no-fail-fast -- -Zunstable-options --include-ignored

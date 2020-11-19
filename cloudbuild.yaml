@@ -1,13 +1,6 @@
 steps:
 - name: 'gcr.io/cloud-builders/docker'
   args: ['build',
-         '--target',
-         'zebra-tests',
-         '-t',
-         'gcr.io/$PROJECT_ID/zcashfoundation/zebra/tests/$BRANCH_NAME:$SHORT_SHA',
-         '.']
-- name: 'gcr.io/cloud-builders/docker'
-  args: ['build',
          '--build-arg',
          'checkpoint_sync=${_CHECKPOINT_SYNC}',
          '--build-arg',
@@ -16,10 +9,11 @@ steps:
          'zebrad-release',
          '-t',
          'gcr.io/$PROJECT_ID/zcashfoundation/zebra/$BRANCH_NAME:$SHORT_SHA',
+         '-f',
+         'docker/Dockerfile.build',
          '.']
 
 images:
-- 'gcr.io/$PROJECT_ID/zcashfoundation/zebra/tests/$BRANCH_NAME:$SHORT_SHA'
 - 'gcr.io/$PROJECT_ID/zcashfoundation/zebra/$BRANCH_NAME:$SHORT_SHA'
 
 options:

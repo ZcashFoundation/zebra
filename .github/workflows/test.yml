@@ -1,0 +1,73 @@
+name: Test
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+env:
+  PROJECT_ID: zealous-zebra
+  ZONE: europe-west1-b
+
+jobs:
+
+  test:
+    name: Run all tests
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Set project and image names
+        run: |
+          BRANCH_NAME=$(expr $GITHUB_REF : '.*/\(.*\)') && \
+          BRANCH_NAME=${BRANCH_NAME,,} && \
+          REPOSITORY=${GITHUB_REPOSITORY,,} && \
+          echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV && \
+          echo "SHORT_SHA=$(git rev-parse --short=7 $GITHUB_SHA)" >> $GITHUB_ENV && \
+          echo "REPOSITORY=$REPOSITORY" >> $GITHUB_ENV
+
+      # Setup gcloud CLI
+      - name: Set up gcloud
+        uses: GoogleCloudPlatform/github-actions/setup-gcloud@master
+        with:
+          version: '295.0.0'
+          project_id: ${{ env.PROJECT_ID }}
+          service_account_key: ${{ secrets.GCLOUD_AUTH }}
+
+      # Run once: create firewall rule to allow incoming traffic to the nodes
+      # - name: Create Zcash incoming traffic firewall rule
+      #   run: |
+      #     gcloud compute firewall-rules create "allow-zcash" \
+      #     --target-tags zebrad \
+      #     --allow tcp:8233,tcp:18233 \
+      #     --source-ranges 0.0.0.0/0 \
+      #     --description="Allow incoming Zcash traffic from anywhere" \
+
+      # Creates Compute Engine virtual machine instance w/ disks
+      - name: Create instance
+        run: |
+          gcloud compute instances create "zebrad-tests-$BRANCH_NAME-$SHORT_SHA" \
+          --boot-disk-size 100GB \
+          --boot-disk-type pd-ssd \
+          --image-family cos-stable \
+          --machine-type n2d-standard-16 \
+          --service-account cos-vm@zealous-zebra.iam.gserviceaccount.com \
+          --scopes cloud-platform \
+          --tags zebrad \
+          --zone "$ZONE"
+
+      # Build and run test container
+      - name: Run all tests
+        run: |
+          gcloud compute ssh "zebrad-tests-$BRANCH_NAME-$SHORT_SHA" --zone "$ZONE" \
+          --command "git clone -b test https://github.com/ZcashFoundation/zebra.git; cd zebra/; docker build -f docker/Dockerfile.test -t zebrad-test .; docker run -i zebrad-test"
+
+      # Clean up
+      - name: Delete test instance
+        # Always run even if the earlier step fails
+        if: ${{ always() }}
+        run: |
+          gcloud compute instances delete "zebrad-tests-$BRANCH_NAME-$SHORT_SHA" --delete-disks all --zone "$ZONE"
