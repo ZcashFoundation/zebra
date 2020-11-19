@@ -147,7 +147,6 @@ impl FinalizedState {
         let hash = block.hash();
 
         block_precommit_metrics(&hash, height, &block);
-        tracing::trace!(?height, ?hash, "Finalized block");
 
         let hash_by_height = self.db.cf_handle("hash_by_height").unwrap();
         let height_by_hash = self.db.cf_handle("height_by_hash").unwrap();
