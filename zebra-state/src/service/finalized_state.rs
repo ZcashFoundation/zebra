@@ -184,6 +184,8 @@ impl FinalizedState {
             );
         }
 
+        // We use a closure so we can use an early return for control flow in
+        // the genesis case
         let prepare_commit = || -> rocksdb::WriteBatch {
             let mut batch = rocksdb::WriteBatch::default();
 
