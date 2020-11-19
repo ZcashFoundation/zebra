@@ -199,13 +199,6 @@ This means that our external API ensures that the state service sees a
 linearized sequence of state requests, although the exact ordering is
 unpredictable when there are multiple senders making requests.
 
-In the second category, the rocksdb API presents itself synchronously, but
-database and tree handles are cloneable and can be moved between threads. All
-that's required to process some request asynchronously is to clone the
-appropriate handle, move it into an async block, and make the call as part of
-the future. (We might want to use Tokio's blocking API for this, but this is
-an implementation detail).
-
 Because the state service has exclusive access to the rocksdb database, and the
 state service sees a linearized sequence of state requests, we have an easy
 way to opt in to asynchronous database access. We can perform rocksdb operations
