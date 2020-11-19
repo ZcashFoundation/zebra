@@ -18,22 +18,6 @@ use self::disk_format::{DiskDeserialize, DiskSerialize, FromDisk, IntoDisk, Tran
 use super::QueuedBlock;
 
 /// The finalized part of the chain state, stored in the db.
-///
-/// This structure has two categories of methods:
-///
-/// - *synchronous* methods that perform writes to the db state;
-/// - *asynchronous* methods that perform reads.
-///
-/// For more on this distinction, see RFC5. The synchronous methods are
-/// implemented as ordinary methods on the [`FinalizedState`]. The asynchronous
-/// methods are not implemented using `async fn`, but using normal methods that
-/// return `impl Future<Output = ...>`. This allows them to move data (e.g.,
-/// clones of handles for the database) into the futures they return.
-///
-/// This means that the returned futures have a `'static` lifetime and don't
-/// borrow any resources from the [`FinalizedState`], and the actual database work is
-/// performed asynchronously when the returned future is polled, not while it is
-/// created.  This is analogous to the way [`tower::Service::call`] works.
 pub struct FinalizedState {
     /// Queued blocks that arrived out of order, indexed by their parent block hash.
     queued_by_prev_hash: HashMap<block::Hash, QueuedBlock>,
