@@ -5,6 +5,7 @@ use std::borrow::Borrow;
 use zebra_chain::{
     block::{self, Block},
     parameters::Network,
+    parameters::POW_AVERAGING_WINDOW,
     work::difficulty::CompactDifficulty,
 };
 
@@ -13,7 +14,7 @@ use crate::{PreparedBlock, ValidateContextError};
 use super::check;
 
 pub mod difficulty;
-use difficulty::{AdjustedDifficulty, POW_AVERAGING_WINDOW, POW_MEDIAN_BLOCK_SPAN};
+use difficulty::{AdjustedDifficulty, POW_MEDIAN_BLOCK_SPAN};
 
 /// Check that `block` is contextually valid for `network`, based on the
 /// `finalized_tip_height` and `relevant_chain`.

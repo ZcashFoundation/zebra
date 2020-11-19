@@ -104,6 +104,11 @@ const PRE_BLOSSOM_POW_TARGET_SPACING: i64 = 150;
 /// The target block spacing after Blossom activation.
 const POST_BLOSSOM_POW_TARGET_SPACING: i64 = 75;
 
+/// The averaging window for difficulty threshold arithmetic mean calculations.
+///
+/// `PoWAveragingWindow` in the Zcash specification.
+pub const POW_AVERAGING_WINDOW: usize = 17;
+
 /// The multiplier used to derive the testnet minimum difficulty block time gap
 /// threshold.
 ///
@@ -222,6 +227,23 @@ impl NetworkUpgrade {
                 Some(network_upgrade.target_spacing() * TESTNET_MINIMUM_DIFFICULTY_GAP_MULTIPLIER)
             }
         }
+    }
+
+    /// Returns the averaging window timespan for the network upgrade.
+    ///
+    /// `AveragingWindowTimespan` from the Zcash specification.
+    pub fn averaging_window_timespan(&self) -> Duration {
+        self.target_spacing() * POW_AVERAGING_WINDOW as _
+    }
+
+    /// Returns the averaging window timespan for `network` and `height`.
+    ///
+    /// See `averaging_window_timespan` for details.
+    pub fn averaging_window_timespan_for_height(
+        network: Network,
+        height: block::Height,
+    ) -> Duration {
+        NetworkUpgrade::current(network, height).averaging_window_timespan()
     }
 }
 
