@@ -341,21 +341,6 @@ mod tests {
         assert_round_trip(input);
     }
 
-    /// This test asserts that types that are used as rocksdb keys behave correctly.
-    /// Any type that implements `IntoIVec` can be used as a rocksdb key. The value
-    /// is serialized via `IntoDisk::into_ivec` when the `key`, `value` pair is
-    /// inserted into the rocksdb column family. The `as_bytes` impl on the other hand is
-    /// called for most other operations when comparing a key against existing
-    /// keys in the rocksdb database, such as `contains`.
-    fn assert_as_bytes_matches_ivec<T>(input: T)
-    where
-        T: IntoDisk + Clone,
-    {
-        let before = input.clone();
-        let ivec = input.as_bytes();
-        assert_eq!(before.as_bytes().as_ref(), ivec.as_ref());
-    }
-
     #[test]
     fn roundtrip_transaction_location() {
         zebra_test::init();
@@ -386,53 +371,5 @@ mod tests {
         zebra_test::init();
 
         proptest!(|(val in any::<transparent::Output>())| assert_value_properties(val));
-    }
-
-    #[test]
-    fn key_matches_ivec_transaction_location() {
-        zebra_test::init();
-        proptest!(|(val in any::<TransactionLocation>())| assert_as_bytes_matches_ivec(val));
-    }
-
-    #[test]
-    fn key_matches_ivec_trans_hash() {
-        zebra_test::init();
-        proptest!(|(val in any::<transaction::Hash>())| assert_as_bytes_matches_ivec(val));
-    }
-
-    #[test]
-    fn key_matches_ivec_block_hash() {
-        zebra_test::init();
-        proptest!(|(val in any::<block::Hash>())| assert_as_bytes_matches_ivec(val));
-    }
-
-    #[test]
-    fn key_matches_ivec_sprout_nullifier() {
-        zebra_test::init();
-        proptest!(|(val in any::<sprout::Nullifier>())| assert_as_bytes_matches_ivec(val));
-    }
-
-    #[test]
-    fn key_matches_ivec_sapling_nullifier() {
-        zebra_test::init();
-        proptest!(|(val in any::<sapling::Nullifier>())| assert_as_bytes_matches_ivec(val));
-    }
-
-    #[test]
-    fn key_matches_ivec_block_height() {
-        zebra_test::init();
-        proptest!(|(val in any::<block::Height>())| assert_as_bytes_matches_ivec(val));
-    }
-
-    #[test]
-    fn key_matches_ivec_transparent_output() {
-        zebra_test::init();
-        proptest!(|(val in any::<transparent::Output>())| assert_as_bytes_matches_ivec(val));
-    }
-
-    #[test]
-    fn key_matches_ivec_transparent_outpoint() {
-        zebra_test::init();
-        proptest!(|(val in any::<transparent::OutPoint>())| assert_as_bytes_matches_ivec(val));
     }
 }
