@@ -296,13 +296,23 @@ type, and implement the difficulty adjustment calculations as methods on that
 type.
 
 ```rust
+/// The averaging window for difficulty threshold arithmetic mean calculations.                               
+///                                                                                                           
+/// `PoWAveragingWindow` in the Zcash specification.                                                          
+pub const POW_AVERAGING_WINDOW: usize = 17;
+
+/// The median block span for time median calculations.                                                       
+///                                                                                                           
+/// `PoWMedianBlockSpan` in the Zcash specification.                                                          
+pub const POW_MEDIAN_BLOCK_SPAN: usize = 11;
+
 /// Contains the context needed to calculate the adjusted difficulty for a block. 
 struct AdjustedDifficulty {
     candidate_time: DateTime<Utc>,
     candidate_height: block::Height,
     network: Network,
-    relevant_difficulty_thresholds: [CompactDifficulty; 28],
-    relevant_times: [DateTime<Utc>; 28],
+    relevant_difficulty_thresholds: [CompactDifficulty; POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN],
+    relevant_times: [DateTime<Utc>; POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN],
 }
 ```
 
@@ -452,7 +462,7 @@ fn median_timespan_bounded(&self) -> DateTime<Utc> { ... }
 /// slice of `PoWMedianBlockSpan` (11) blocks in the relevant chain.
 ///
 /// Implements `MedianTime` from the Zcash specification.
-fn median_time(mut median_block_span_times: [DateTime<Utc>; 11])
+fn median_time(mut median_block_span_times: [DateTime<Utc>; POW_MEDIAN_BLOCK_SPAN])
                -> DateTime<Utc> { ... }
 ```
 
