@@ -35,14 +35,15 @@ pub(super) struct AdjustedDifficulty {
     /// The `header.difficulty_threshold`s from the previous
     /// `PoWAveragingWindow + PoWMedianBlockSpan` (28) blocks, in reverse height
     /// order.
-    relevant_difficulty_thresholds: [CompactDifficulty; 28],
+    relevant_difficulty_thresholds:
+        [CompactDifficulty; POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN],
     /// The `header.time`s from the previous
     /// `PoWAveragingWindow + PoWMedianBlockSpan` (28) blocks, in reverse height
     /// order.
     ///
     /// Only the first and last `PoWMedianBlockSpan` times are used. Times
     /// `11..=16` are ignored.
-    relevant_times: [DateTime<Utc>; 28],
+    relevant_times: [DateTime<Utc>; POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN],
 }
 
 impl AdjustedDifficulty {
@@ -216,7 +217,9 @@ impl AdjustedDifficulty {
     /// slice of `PoWMedianBlockSpan` (11) blocks in the relevant chain.
     ///
     /// Implements `MedianTime` from the Zcash specification.
-    fn median_time(mut median_block_span_times: [DateTime<Utc>; 11]) -> DateTime<Utc> {
+    fn median_time(
+        mut median_block_span_times: [DateTime<Utc>; POW_MEDIAN_BLOCK_SPAN],
+    ) -> DateTime<Utc> {
         median_block_span_times.sort_unstable();
         median_block_span_times[POW_MEDIAN_BLOCK_SPAN / 2]
     }
