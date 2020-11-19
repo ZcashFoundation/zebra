@@ -549,24 +549,29 @@ The Testnet minimum difficulty calculation uses the existing
 `NetworkUpgrade::minimum_difficulty_spacing_for_height` function to calculate the
 minimum difficulty gap.
 
-We implement this method on `AdjustedDifficulty`:
+We implement this method on `NetworkUpgrade`:
 ```rust
-/// Returns true if the gap between the `candidate_time` and the previous block's
-/// `time` is greater than the Testnet minimum difficulty time gap. This time gap
-/// depends on the `network` and `candidate_height`.
-///
-/// Returns false on Mainnet, when `candidate_height` is less than the
-/// minimum difficulty start height, and when the time gap is too small.
-///
-/// `candidate_time` can be less than, equal to, or greater than the previous
-/// block's `time`, because block times are provided by miners.
-///
-/// Implements the Testnet minimum difficulty adjustment from ZIPs 205 and 208.
-///
-/// Spec Note: Some parts of ZIPs 205 and 208 previously specified an incorrect
-/// check for the time gap. This function implements the correct "greater than"
-/// check.
-fn candidate_is_testnet_min_difficulty_block(&self) -> bool { ... }
+/// Returns true if the gap between `block_time` and `previous_block_time` is                             
+/// greater than the Testnet minimum difficulty time gap. This time gap                                   
+/// depends on the `network` and `block_height`.                                                          
+///                                                                                                       
+/// Returns false on Mainnet, when `block_height` is less than the minimum                                
+/// difficulty start height, and when the time gap is too small.                                          
+///                                                                                                       
+/// `block_time` can be less than, equal to, or greater than                                              
+/// `previous_block_time`, because block times are provided by miners.                                    
+///                                                                                                       
+/// Implements the Testnet minimum difficulty adjustment from ZIPs 205 and 208.                           
+///                                                                                                       
+/// Spec Note: Some parts of ZIPs 205 and 208 previously specified an incorrect                           
+/// check for the time gap. This function implements the correct "greater than"                           
+/// check.                                                                                                
+pub fn is_testnet_min_difficulty_block(
+    network: Network,
+    block_height: block::Height,
+    block_time: DateTime<Utc>,
+    previous_block_time: DateTime<Utc>,
+) -> bool { ... }
 ```
 
 #### Implementation notes
