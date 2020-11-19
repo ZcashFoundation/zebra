@@ -8,7 +8,7 @@ use crate::parameters::{Network, Network::*};
 use std::collections::{BTreeMap, HashMap};
 use std::ops::Bound::*;
 
-use chrono::Duration;
+use chrono::{DateTime, Duration, Utc};
 
 /// A Zcash network upgrade.
 ///
@@ -226,6 +226,37 @@ impl NetworkUpgrade {
                 let network_upgrade = NetworkUpgrade::current(network, height);
                 Some(network_upgrade.target_spacing() * TESTNET_MINIMUM_DIFFICULTY_GAP_MULTIPLIER)
             }
+        }
+    }
+
+    /// Returns true if the gap between `block_time` and `previous_block_time` is
+    /// greater than the Testnet minimum difficulty time gap. This time gap
+    /// depends on the `network` and `block_height`.
+    ///
+    /// Returns false on Mainnet, when `block_height` is less than the minimum
+    /// difficulty start height, and when the time gap is too small.
+    ///
+    /// `block_time` can be less than, equal to, or greater than
+    /// `previous_block_time`, because block times are provided by miners.
+    ///
+    /// Implements the Testnet minimum difficulty adjustment from ZIPs 205 and 208.
+    ///
+    /// Spec Note: Some parts of ZIPs 205 and 208 previously specified an incorrect
+    /// check for the time gap. This function implements the correct "greater than"
+    /// check.
+    pub fn is_testnet_min_difficulty_block(
+        network: Network,
+        block_height: block::Height,
+        block_time: DateTime<Utc>,
+        previous_block_time: DateTime<Utc>,
+    ) -> bool {
+        let block_time_gap = block_time - previous_block_time;
+        if let Some(min_difficulty_gap) =
+            NetworkUpgrade::minimum_difficulty_spacing_for_height(network, block_height)
+        {
+            block_time_gap > min_difficulty_gap
+        } else {
+            false
         }
     }
 
