@@ -1,24 +1,35 @@
 //! Block difficulty adjustment calculations for contextual validation.
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use primitive_types::U256;
 
-use std::convert::TryInto;
+use std::{cmp::max, cmp::min, convert::TryInto};
 
 use zebra_chain::{
-    block, block::Block, parameters::Network, work::difficulty::CompactDifficulty,
+    block, block::Block, parameters::Network, parameters::NetworkUpgrade,
+    parameters::POW_AVERAGING_WINDOW, work::difficulty::CompactDifficulty,
     work::difficulty::ExpandedDifficulty,
 };
-
-/// The averaging window for difficulty threshold arithmetic mean calculations.
-///
-/// `PoWAveragingWindow` in the Zcash specification.
-pub const POW_AVERAGING_WINDOW: usize = 17;
 
 /// The median block span for time median calculations.
 ///
 /// `PoWMedianBlockSpan` in the Zcash specification.
 pub const POW_MEDIAN_BLOCK_SPAN: usize = 11;
+
+/// The damping factor for median timespan variance.
+///
+/// `PoWDampingFactor` in the Zcash specification.
+pub const POW_DAMPING_FACTOR: i32 = 4;
+
+/// The maximum upward adjustment percentage for median timespan variance.
+///
+/// `PoWMaxAdjustUp * 100` in the Zcash specification.
+pub const POW_MAX_ADJUST_UP_PERCENT: i32 = 16;
+
+/// The maximum downward adjustment percentage for median timespan variance.
+///
+/// `PoWMaxAdjustDown * 100` in the Zcash specification.
+pub const POW_MAX_ADJUST_DOWN_PERCENT: i32 = 32;
 
 /// Contains the context needed to calculate the adjusted difficulty for a block.
 #[allow(dead_code)]
@@ -204,13 +215,45 @@ impl AdjustedDifficulty {
     ///
     /// Note: This calculation only uses `PoWMedianBlockSpan` (11) times at the
     /// start and end of the timespan times. timespan times `[11..=16]` are ignored.
-    fn median_timespan_bounded(&self) -> DateTime<Utc> {
+    fn median_timespan_bounded(&self) -> Duration {
         let newer_times: [DateTime<Utc>; POW_MEDIAN_BLOCK_SPAN] = self.relevant_times
             [0..POW_MEDIAN_BLOCK_SPAN]
             .try_into()
             .expect("relevant times is the correct length");
-        // TODO: do the actual calculation
-        AdjustedDifficulty::median_time(newer_times)
+        let newer_median = AdjustedDifficulty::median_time(newer_times);
+
+        let older_times: [DateTime<Utc>; POW_MEDIAN_BLOCK_SPAN] = self.relevant_times
+            [POW_AVERAGING_WINDOW..]
+            .try_into()
+            .expect("relevant times is the correct length");
+        let older_median = AdjustedDifficulty::median_time(older_times);
+
+        // `ActualTimespan` in the Zcash specification
+        let median_timespan = newer_median - older_median;
+
+        let averaging_window_timespan = NetworkUpgrade::averaging_window_timespan_for_height(
+            self.network,
+            self.candidate_height,
+        );
+        // This value is exact, but we need to truncate its nanoseconds component
+        let damped_variance = (median_timespan - averaging_window_timespan) / POW_DAMPING_FACTOR;
+        // num_seconds truncates negative values towards zero, matching the Zcash specification
+        let damped_variance = Duration::seconds(damped_variance.num_seconds());
+
+        // `ActualTimespanDamped` in the Zcash specification
+        let median_timespan_damped = averaging_window_timespan + damped_variance;
+
+        // `MinActualTimespan` and `MaxActualTimespan` in the Zcash spec
+        let min_median_timespan =
+            averaging_window_timespan * (100 - POW_MAX_ADJUST_UP_PERCENT) / 100;
+        let max_median_timespan =
+            averaging_window_timespan * (100 + POW_MAX_ADJUST_DOWN_PERCENT) / 100;
+
+        // `ActualTimespanBounded` in the Zcash specification
+        max(
+            min_median_timespan,
+            min(max_median_timespan, median_timespan_damped),
+        )
     }
 
     /// Calculate the median of the `median_block_span_times`: the `time`s from a
