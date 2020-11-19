@@ -552,9 +552,10 @@ minimum difficulty gap.
 We implement this method on `AdjustedDifficulty`:
 ```rust
 /// Returns true if the gap between the `candidate_time` and the previous block's
-/// `time` is greater than the Testnet minimum difficulty time gap. The time gap
+/// `time` is greater than the Testnet minimum difficulty time gap. This time gap
 /// depends on the `network` and `candidate_height`.
 ///
+/// Returns false on Mainnet, when `candidate_height` is less than the
 /// minimum difficulty start height, and when the time gap is too small.
 ///
 /// `candidate_time` can be less than, equal to, or greater than the previous
