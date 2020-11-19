@@ -1,8 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::{
-    path::PathBuf,
-    sync::atomic::{AtomicUsize, Ordering},
-};
+use std::path::PathBuf;
 use zebra_chain::parameters::Network;
 
 /// Configuration for the state service.
@@ -46,6 +43,7 @@ pub struct Config {
 }
 
 fn gen_temp_path() -> PathBuf {
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::SystemTime;
 
     static SALT_COUNTER: AtomicUsize = AtomicUsize::new(0);
