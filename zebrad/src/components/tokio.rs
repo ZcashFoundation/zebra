@@ -22,9 +22,8 @@ impl TokioComponent {
     pub fn new() -> Result<Self, FrameworkError> {
         Ok(Self {
             rt: Some(
-                tokio::runtime::Builder::new()
+                tokio::runtime::Builder::new_multi_thread()
                     .enable_all()
-                    .threaded_scheduler()
                     .build()
                     .unwrap(),
             ),

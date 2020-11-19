@@ -89,6 +89,7 @@ pub mod error;
 pub mod future;
 mod layer;
 mod message;
+mod semaphore;
 mod service;
 mod worker;
 

@@ -5,7 +5,7 @@ use futures::{
     future::FutureExt,
     stream::{FuturesUnordered, StreamExt},
 };
-use tokio::time::delay_for;
+use tokio::time::sleep;
 use tower::{
     builder::ServiceBuilder, hedge::Hedge, limit::ConcurrencyLimit, retry::Retry, timeout::Timeout,
     Service, ServiceExt,
@@ -153,7 +153,7 @@ where
         // due to protocol limitations
         self.request_genesis().await?;
 
-        // Distinguishes a restart from a start, so we don't delay when starting
+        // Distinguishes a restart from a start, so we don't sleep when starting
         // the sync process, but we can keep restart logic in one place.
         let mut started_once = false;
 
@@ -163,7 +163,7 @@ where
                 self.prospective_tips = HashSet::new();
                 self.downloads.cancel_all();
                 self.update_metrics();
-                delay_for(SYNC_RESTART_TIMEOUT).await;
+                sleep(SYNC_RESTART_TIMEOUT).await;
             } else {
                 started_once = true;
             }

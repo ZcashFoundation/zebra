@@ -1,18 +1,20 @@
+use std::sync::{Arc, Mutex};
+
+use futures::future::TryFutureExt;
+use pin_project::pin_project;
+use tokio::{
+    stream::StreamExt,
+    sync::mpsc,
+    time::{sleep, Sleep},
+};
+use tower::{Service, ServiceExt};
+use tracing_futures::Instrument;
+
 use super::{
     error::{Closed, ServiceError},
     message::{self, Message},
     BatchControl,
 };
-use futures::future::TryFutureExt;
-use pin_project::pin_project;
-use std::sync::{Arc, Mutex};
-use tokio::{
-    stream::StreamExt,
-    sync::mpsc,
-    time::{delay_for, Delay},
-};
-use tower::{Service, ServiceExt};
-use tracing_futures::Instrument;
 
 /// Task that handles processing the buffer. This type should not be used
 /// directly, instead `Buffer` requires an `Executor` that can accept this task.
@@ -28,7 +30,7 @@ where
     T: Service<BatchControl<Request>>,
     T::Error: Into<crate::BoxError>,
 {
-    rx: mpsc::Receiver<Message<Request, T::Future>>,
+    rx: mpsc::UnboundedReceiver<Message<Request, T::Future>>,
     service: T,
     failed: Option<ServiceError>,
     handle: Handle,
@@ -49,7 +51,7 @@ where
 {
     pub(crate) fn new(
         service: T,
-        rx: mpsc::Receiver<Message<Request, T::Future>>,
+        rx: mpsc::UnboundedReceiver<Message<Request, T::Future>>,
         max_items: usize,
         max_latency: std::time::Duration,
     ) -> (Handle, Worker<T, Request>) {
@@ -103,12 +105,11 @@ where
     }
 
     pub async fn run(mut self) {
-        use futures::future::Either::{Left, Right};
         // The timer is started when the first entry of a new batch is
         // submitted, so that the batch latency of all entries is at most
         // self.max_latency. However, we don't keep the timer running unless
         // there is a pending request to prevent wakeups on idle services.
-        let mut timer: Option<Delay> = None;
+        let mut timer: Option<Sleep> = None;
         let mut pending_items = 0usize;
         loop {
             match timer {
@@ -120,40 +121,42 @@ where
                             // Apply the provided span to request processing
                             .instrument(span)
                             .await;
-                        timer = Some(delay_for(self.max_latency));
+                        timer = Some(sleep(self.max_latency));
                         pending_items = 1;
                     }
                     // No more messages, ever.
                     None => return,
                 },
-                Some(delay) => {
+                Some(mut sleep) => {
                     // Wait on either a new message or the batch timer.
-                    match futures::future::select(self.rx.next(), delay).await {
-                        Left((Some(msg), delay)) => {
-                            let span = msg.span;
-                            self.process_req(msg.request, msg.tx)
-                                // Apply the provided span to request processing.
-                                .instrument(span)
-                                .await;
-                            pending_items += 1;
-                            // Check whether we have too many pending items.
-                            if pending_items >= self.max_items {
-                                // XXX(hdevalence): what span should instrument this?
-                                self.flush_service().await;
-                                // Now we have an empty batch.
-                                timer = None;
-                                pending_items = 0;
-                            } else {
-                                // The timer is still running, set it back!
-                                timer = Some(delay);
+                    tokio::select! {
+                        maybe_msg = self.rx.recv() => match maybe_msg {
+                            Some(msg) => {
+                                let span = msg.span;
+                                self.process_req(msg.request, msg.tx)
+                                    // Apply the provided span to request processing.
+                                    .instrument(span)
+                                    .await;
+                                pending_items += 1;
+                                // Check whether we have too many pending items.
+                                if pending_items >= self.max_items {
+                                    // XXX(hdevalence): what span should instrument this?
+                                    self.flush_service().await;
+                                    // Now we have an empty batch.
+                                    timer = None;
+                                    pending_items = 0;
+                                } else {
+                                    // The timer is still running, set it back!
+                                    timer = Some(sleep);
+                                }
                             }
-                        }
-                        // No more messages, ever.
-                        Left((None, _delay)) => {
-                            return;
-                        }
-                        // The batch timer elapsed.
-                        Right(((), _next)) => {
+                            None => {
+                                // No more messages, ever.
+                                return;
+                            }
+                        },
+                        () = &mut sleep => {
+                            // The batch timer elapsed.
                             // XXX(hdevalence): what span should instrument this?
                             self.flush_service().await;
                             timer = None;

@@ -104,11 +104,10 @@ impl Builder {
 
 // ======== Encoding =========
 
-impl Encoder for Codec {
-    type Item = Message;
+impl Encoder<Message> for Codec {
     type Error = Error;
 
-    fn encode(&mut self, item: Self::Item, dst: &mut BytesMut) -> Result<(), Self::Error> {
+    fn encode(&mut self, item: Message, dst: &mut BytesMut) -> Result<(), Self::Error> {
         use Error::Parse;
         // XXX(HACK): this is inefficient and does an extra allocation.
         // instead, we should have a size estimator for the message, reserve
@@ -587,7 +586,7 @@ mod tests {
         let services = PeerServices::NODE_NETWORK;
         let timestamp = Utc.timestamp(1_568_000_000, 0);
 
-        let mut rt = Runtime::new().unwrap();
+        let rt = Runtime::new().unwrap();
 
         let v = Message::Version {
             version: crate::constants::CURRENT_VERSION,
@@ -634,7 +633,7 @@ mod tests {
     fn filterload_message_round_trip() {
         zebra_test::init();
 
-        let mut rt = Runtime::new().unwrap();
+        let rt = Runtime::new().unwrap();
 
         let v = Message::FilterLoad {
             filter: Filter(vec![0; 35999]),
@@ -670,7 +669,7 @@ mod tests {
     fn filterload_message_too_large_round_trip() {
         zebra_test::init();
 
-        let mut rt = Runtime::new().unwrap();
+        let rt = Runtime::new().unwrap();
 
         let v = Message::FilterLoad {
             filter: Filter(vec![0; 40000]),
@@ -706,7 +705,7 @@ mod tests {
         use zebra_chain::serialization::ZcashDeserializeInto;
         zebra_test::init();
 
-        let mut rt = Runtime::new().unwrap();
+        let rt = Runtime::new().unwrap();
 
         // make tests with a Tx message
         let tx = zebra_test::vectors::DUMMY_TX1
