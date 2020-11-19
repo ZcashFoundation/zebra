@@ -12,12 +12,21 @@ use futures::{
 use tokio::sync::oneshot;
 use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
 
+use zebra_chain as zc;
+use zebra_consensus as zcon;
 use zebra_network as zn;
 use zebra_network::AddressBook;
 use zebra_state as zs;
 
+mod downloads;
+use downloads::Downloads;
+
 type Outbound = Buffer<BoxService<zn::Request, zn::Response, zn::BoxError>, zn::Request>;
 type State = Buffer<BoxService<zs::Request, zs::Response, zs::BoxError>, zs::Request>;
+type Verifier = Buffer<
+    BoxService<Arc<zc::block::Block>, zc::block::Hash, zcon::chain::VerifyChainError>,
+    Arc<zc::block::Block>,
+>;
 
 pub type SetupData = (Outbound, Arc<Mutex<AddressBook>>);
 
@@ -52,15 +61,23 @@ pub struct Inbound {
     outbound: Option<Outbound>,
     address_book: Option<Arc<Mutex<zn::AddressBook>>>,
     state: State,
+    verifier: Verifier,
+    downloads: Option<Downloads<Outbound, Verifier, State>>,
 }
 
 impl Inbound {
-    pub fn new(network_setup: oneshot::Receiver<SetupData>, state: State) -> Self {
+    pub fn new(
+        network_setup: oneshot::Receiver<SetupData>,
+        state: State,
+        verifier: Verifier,
+    ) -> Self {
         Self {
             network_setup: Some(network_setup),
             outbound: None,
             address_book: None,
             state,
+            verifier,
+            downloads: None,
         }
     }
 }
@@ -85,6 +102,11 @@ impl Service<zn::Request> for Inbound {
                     self.outbound = Some(outbound);
                     self.address_book = Some(address_book);
                     self.network_setup = None;
+                    self.downloads = Some(Downloads::new(
+                        self.outbound.clone().unwrap(),
+                        self.verifier.clone(),
+                        self.state.clone(),
+                    ));
                 }
                 Err(TryRecvError::Empty) => {
                     self.network_setup = Some(rx);
@@ -98,6 +120,10 @@ impl Service<zn::Request> for Inbound {
                 }
             };
         }
+
+        // Clean up completed download tasks
+        while let Poll::Ready(Some(_)) = self.downloads.unwrap().poll_next(cx) {}
+
         // Now report readiness based on readiness of the inner services, if they're available.
         // XXX do we want to propagate backpressure from the network here?
         match (
@@ -171,9 +197,25 @@ impl Service<zn::Request> for Inbound {
                 debug!("ignoring unimplemented request");
                 async { Ok(zn::Response::Nil) }.boxed()
             }
-            zn::Request::AdvertiseBlock(_block) => {
-                debug!("ignoring unimplemented request");
-                async { Ok(zn::Response::Nil) }.boxed()
+            zn::Request::AdvertiseBlock(hash) => {
+                // this sucks
+                let mut downloads = self.downloads.take().unwrap();
+                self.downloads = Some(Downloads::new(
+                    self.outbound.as_ref().unwrap().clone(),
+                    self.verifier.clone(),
+                    self.state.clone(),
+                ));
+
+                async move {
+                    if downloads.download_and_verify(hash).await? {
+                        tracing::info!(?hash, "queued download and verification of gossiped block");
+                    } else {
+                        tracing::debug!(?hash, "gossiped block already queued or verified");
+                    }
+
+                    Ok(zn::Response::Nil)
+                }
+                .boxed()
             }
             zn::Request::MempoolTransactions => {
                 debug!("ignoring unimplemented request");
