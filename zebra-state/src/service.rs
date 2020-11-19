@@ -6,7 +6,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use check::difficulty::{POW_AVERAGING_WINDOW, POW_MEDIAN_BLOCK_SPAN};
+use check::difficulty::POW_MEDIAN_BLOCK_SPAN;
 use futures::future::FutureExt;
 use non_finalized_state::{NonFinalizedState, QueuedBlocks};
 use tokio::sync::oneshot;
@@ -15,6 +15,7 @@ use tracing::instrument;
 use zebra_chain::{
     block::{self, Block},
     parameters::Network,
+    parameters::POW_AVERAGING_WINDOW,
     transaction,
     transaction::Transaction,
     transparent,
