@@ -201,9 +201,10 @@ impl AdjustedDifficulty {
         (total / divisor).into()
     }
 
-    /// Calculate the median timespan. The median timespan is the difference of
-    /// medians of the timespan times, which are the `time`s from the previous
-    /// `PoWAveragingWindow + PoWMedianBlockSpan` (28) blocks in the relevant chain.
+    /// Calculate the bounded median timespan. The median timespan is the
+    /// difference of medians of the timespan times, which are the `time`s from
+    /// the previous `PoWAveragingWindow + PoWMedianBlockSpan` (28) blocks in the
+    /// relevant chain.
     ///
     /// Uses the candidate block's `height' and `network` to calculate the
     /// `AveragingWindowTimespan` for that block.
@@ -216,27 +217,13 @@ impl AdjustedDifficulty {
     /// Note: This calculation only uses `PoWMedianBlockSpan` (11) times at the
     /// start and end of the timespan times. timespan times `[11..=16]` are ignored.
     fn median_timespan_bounded(&self) -> Duration {
-        let newer_times: [DateTime<Utc>; POW_MEDIAN_BLOCK_SPAN] = self.relevant_times
-            [0..POW_MEDIAN_BLOCK_SPAN]
-            .try_into()
-            .expect("relevant times is the correct length");
-        let newer_median = AdjustedDifficulty::median_time(newer_times);
-
-        let older_times: [DateTime<Utc>; POW_MEDIAN_BLOCK_SPAN] = self.relevant_times
-            [POW_AVERAGING_WINDOW..]
-            .try_into()
-            .expect("relevant times is the correct length");
-        let older_median = AdjustedDifficulty::median_time(older_times);
-
-        // `ActualTimespan` in the Zcash specification
-        let median_timespan = newer_median - older_median;
-
         let averaging_window_timespan = NetworkUpgrade::averaging_window_timespan_for_height(
             self.network,
             self.candidate_height,
         );
         // This value is exact, but we need to truncate its nanoseconds component
-        let damped_variance = (median_timespan - averaging_window_timespan) / POW_DAMPING_FACTOR;
+        let damped_variance =
+            (self.median_timespan() - averaging_window_timespan) / POW_DAMPING_FACTOR;
         // num_seconds truncates negative values towards zero, matching the Zcash specification
         let damped_variance = Duration::seconds(damped_variance.num_seconds());
 
@@ -254,6 +241,30 @@ impl AdjustedDifficulty {
             min_median_timespan,
             min(max_median_timespan, median_timespan_damped),
         )
+    }
+
+    /// Calculate the median timespan. The median timespan is the difference of
+    /// medians of the timespan times, which are the `time`s from the previous
+    /// `PoWAveragingWindow + PoWMedianBlockSpan` (28) blocks in the relevant chain.
+    ///
+    /// Implements `ActualTimespan` from the Zcash specification.
+    ///
+    /// See `median_timespan_bounded` for details.
+    fn median_timespan(&self) -> Duration {
+        let newer_times: [DateTime<Utc>; POW_MEDIAN_BLOCK_SPAN] = self.relevant_times
+            [0..POW_MEDIAN_BLOCK_SPAN]
+            .try_into()
+            .expect("relevant times is the correct length");
+        let newer_median = AdjustedDifficulty::median_time(newer_times);
+
+        let older_times: [DateTime<Utc>; POW_MEDIAN_BLOCK_SPAN] = self.relevant_times
+            [POW_AVERAGING_WINDOW..]
+            .try_into()
+            .expect("relevant times is the correct length");
+        let older_median = AdjustedDifficulty::median_time(older_times);
+
+        // `ActualTimespan` in the Zcash specification
+        newer_median - older_median
     }
 
     /// Calculate the median of the `median_block_span_times`: the `time`s from a
