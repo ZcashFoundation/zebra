@@ -452,7 +452,7 @@ fn median_timespan_bounded(&self) -> DateTime<Utc> { ... }
 /// slice of `PoWMedianBlockSpan` (11) blocks in the relevant chain.
 ///
 /// Implements `MedianTime` from the Zcash specification.
-fn median_time(median_block_span_times: &[DateTime<Utc>; 11])
+fn median_time(mut median_block_span_times: [DateTime<Utc>; 11])
                -> DateTime<Utc> { ... }
 ```
 
