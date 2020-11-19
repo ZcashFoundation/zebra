@@ -493,7 +493,7 @@ const STOP_AT_HEIGHT_REGEX: &str = "stopping at configured height";
 
 const STOP_ON_LOAD_TIMEOUT: Duration = Duration::from_secs(5);
 // usually it's much shorter than this
-const SMALL_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(120);
+const SMALL_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(30);
 const LARGE_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(180);
 
 /// Test if `zebrad` can sync the first checkpoint on mainnet.
