@@ -10,7 +10,7 @@ use color_eyre::{eyre::eyre, Report};
 use ed25519_zebra::*;
 use futures::stream::{FuturesUnordered, StreamExt};
 use rand::thread_rng;
-use tokio::sync::broadcast::{channel, RecvError, Sender};
+use tokio::sync::broadcast::{channel, error::RecvError, Sender};
 use tower::{Service, ServiceExt};
 use tower_batch::{Batch, BatchControl};
 use tower_fallback::Fallback;

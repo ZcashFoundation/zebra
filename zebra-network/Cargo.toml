@@ -10,7 +10,7 @@ edition = "2018"
 [dependencies]
 bitflags = "1.2"
 byteorder = "1.3"
-bytes = "0.5"
+bytes = "0.6"
 chrono = "0.4"
 hex = "0.4"
 # indexmap has rayon support for parallel iteration,
@@ -22,9 +22,9 @@ serde = { version = "1", features = ["serde_derive"] }
 thiserror = "1"
 
 futures = "0.3"
-tokio = { version = "0.2.22", features = ["net", "time", "stream", "tracing", "macros"] }
-tokio-util = { version = "0.2", features = ["codec"] }
-tower = { version = "0.3", features = ["retry", "discover", "load", "load-shed", "timeout", "util", "buffer"] }
+tokio = { version = "0.3", features = ["net", "time", "stream", "tracing", "macros"] }
+tokio-util = { version = "0.5", features = ["codec"] }
+tower = { version = "0.4", features = ["retry", "discover", "load", "load-shed", "timeout", "util", "buffer"] }
 
 metrics = "0.12"
 tracing = "0.1"

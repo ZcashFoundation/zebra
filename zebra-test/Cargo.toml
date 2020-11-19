@@ -10,7 +10,7 @@ edition = "2018"
 [dependencies]
 hex = "0.4.2"
 lazy_static = "1.4.0"
-tower = { version = "0.3.1", features = ["util"] }
+tower = { version = "0.4", features = ["util"] }
 futures = "0.3.7"
 color-eyre = "0.5.7"
 tracing = "0.1.21"
@@ -25,4 +25,4 @@ proptest = "0.10.1"
 tempdir = "0.3.7"
 
 [dev-dependencies]
-tokio = { version = "0.2", features = ["full"] }
+tokio = { version = "0.3", features = ["full"] }

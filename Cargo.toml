@@ -21,4 +21,4 @@ panic = "abort"
 panic = "abort"
 
 [patch.crates-io]
-tower = { git = "https://github.com/tower-rs/tower", rev = "1a84543" }
+tower = { git = "https://github.com/tower-rs/tower", rev = "5e1e07744820028877654c336a3b9fe057bf46f1" }

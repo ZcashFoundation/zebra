@@ -1,8 +1,7 @@
 //! Inventory Registry Implementation
 //!
 //! [RFC]: https://zebra.zfnd.org/dev/rfcs/0003-inventory-tracking.html
-use crate::{protocol::external::InventoryHash, BoxError};
-use futures::Stream;
+
 use std::{
     collections::{HashMap, HashSet},
     net::SocketAddr,
@@ -10,17 +9,20 @@ use std::{
     task::{Context, Poll},
     time::Duration,
 };
+
+use futures::{Stream, StreamExt};
 use tokio::{
     sync::broadcast,
     time::{self, Interval},
 };
+
+use crate::{protocol::external::InventoryHash, BoxError};
 
 /// An Inventory Registry for tracking recent inventory advertisements by peer.
 ///
 /// For more details please refer to the [RFC].
 ///
 /// [RFC]: https://zebra.zfnd.org/dev/rfcs/0003-inventory-tracking.html
-#[derive(Debug)]
 pub struct InventoryRegistry {
     /// Map tracking the inventory advertisements from the current interval
     /// period
@@ -28,9 +30,24 @@ pub struct InventoryRegistry {
     /// Map tracking inventory advertisements from the previous interval period
     prev: HashMap<InventoryHash, HashSet<SocketAddr>>,
     /// Stream of incoming inventory hashes to register
-    inv_stream: broadcast::Receiver<(InventoryHash, SocketAddr)>,
+    inv_stream: Pin<
+        Box<
+            dyn Stream<Item = Result<(InventoryHash, SocketAddr), broadcast::error::RecvError>>
+                + Send
+                + 'static,
+        >,
+    >,
     /// Interval tracking how frequently we should rotate our maps
     interval: Interval,
+}
+
+impl std::fmt::Debug for InventoryRegistry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InventoryRegistry")
+            .field("current", &self.current)
+            .field("prev", &self.prev)
+            .finish()
+    }
 }
 
 impl InventoryRegistry {
@@ -39,7 +56,7 @@ impl InventoryRegistry {
         Self {
             current: Default::default(),
             prev: Default::default(),
-            inv_stream,
+            inv_stream: inv_stream.into_stream().boxed(),
             interval: time::interval(Duration::from_secs(75)),
         }
     }
@@ -60,7 +77,7 @@ impl InventoryRegistry {
     /// - rotates HashMaps based on interval events
     /// - drains the inv_stream channel and registers all advertised inventory
     pub fn poll_inventory(&mut self, cx: &mut Context<'_>) -> Result<(), BoxError> {
-        while let Poll::Ready(_) = self.interval.poll_tick(cx) {
+        while let Poll::Ready(_) = Pin::new(&mut self.interval).poll_next(cx) {
             self.rotate();
         }
 
@@ -80,7 +97,7 @@ impl InventoryRegistry {
         // rather than propagating it through the peer set's Service::poll_ready
         // implementation, where reporting a failure means reporting a permanent
         // failure of the peer set.
-        use broadcast::RecvError;
+        use broadcast::error::RecvError;
         while let Poll::Ready(Some(channel_result)) = Pin::new(&mut self.inv_stream).poll_next(cx) {
             match channel_result {
                 Ok((hash, addr)) => self.register(hash, addr),

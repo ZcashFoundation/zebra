@@ -93,7 +93,7 @@ mod tests {
         use futures::stream::StreamExt;
         use tokio_util::codec::Framed;
 
-        let mut listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let listen_addr = listener.local_addr().unwrap();
 
         let conn = tokio::net::TcpStream::connect(listen_addr).await.unwrap();
