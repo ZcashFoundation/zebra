@@ -15,7 +15,6 @@ dirs = "3.0.1"
 hex = "0.4.2"
 lazy_static = "1.4.0"
 serde = { version = "1", features = ["serde_derive"] }
-sled = "0.34.5"
 
 futures = "0.3.7"
 metrics = "0.12"
@@ -25,6 +24,7 @@ tracing-error = "0.1.2"
 thiserror = "1.0.22"
 tokio = { version = "0.2.22", features = ["sync"] }
 displaydoc = "0.1.7"
+rocksdb = "0.15.0"
 
 [dev-dependencies]
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }

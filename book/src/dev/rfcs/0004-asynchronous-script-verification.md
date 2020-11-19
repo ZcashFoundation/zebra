@@ -97,11 +97,11 @@ with a timeout error. Currently, we outsource script verification to
 Implementing the state request correctly requires considering two sets of behaviors:
 
 1. behaviors related to the state's external API (a `Buffer`ed `tower::Service`);
-2. behaviors related to the state's internal implementation (using `sled`).
+2. behaviors related to the state's internal implementation (using `rocksdb`).
 
 Making this distinction helps us to ensure we don't accidentally leak
 "internal" behaviors into "external" behaviors, which would violate
-encapsulation and make it more difficult to replace `sled`.
+encapsulation and make it more difficult to replace `rocksdb`.
 
 In the first category, our state is presented to the rest of the application
 as a `Buffer`ed `tower::Service`. The `Buffer` wrapper allows shared access
@@ -116,19 +116,12 @@ This means that our external API ensures that the state service sees a
 linearized sequence of state requests, although the exact ordering is
 unpredictable when there are multiple senders making requests.
 
-In the second category, the Sled API presents itself synchronously, but
-database and tree handles are clonable and can be moved between threads. All
-that's required to process some request asynchronously is to clone the
-appropriate handle, move it into an async block, and make the call as part of
-the future. (We might want to use Tokio's blocking API for this, but that's a
-side detail).
-
-Because the state service has exclusive access to the sled database, and the
+Because the state service has exclusive access to the rocksdb database, and the
 state service sees a linearized sequence of state requests, we have an easy
-way to opt in to asynchronous database access. We can perform sled operations
+way to opt in to asynchronous database access. We can perform rocksdb operations
 synchronously in the `Service::call`, waiting for them to complete, and be
-sure that all future requests will see the resulting sled state. Or, we can
-perform sled operations asynchronously in the future returned by
+sure that all future requests will see the resulting rocksdb state. Or, we can
+perform rocksdb operations asynchronously in the future returned by
 `Service::call`.
 
 If we perform all *writes* synchronously and allow reads to be either
@@ -139,7 +132,7 @@ time the request was processed, or a later state.
 Now, returning to the UTXO lookup problem, we can map out the possible states
 with this restriction in mind. This description assumes that UTXO storage is
 split into disjoint sets, one in-memory (e.g., blocks after the reorg limit)
-and the other in sled (e.g., blocks after the reorg limit). The details of
+and the other in rocksdb (e.g., blocks after the reorg limit). The details of
 this storage are not important for this design, only that the two sets are
 disjoint.
 
@@ -147,14 +140,14 @@ When the state service processes a `Request::AwaitUtxo(OutPoint)` referencing
 some UTXO `u`, there are three disjoint possibilities:
 
 1. `u` is already contained in an in-memory block storage;
-2. `u` is already contained in the sled UTXO set;
+2. `u` is already contained in the rocksdb UTXO set;
 3. `u` is not yet known to the state service.
 
 In case 3, we need to queue `u` and scan all *future* blocks to see whether
 they contain `u`. However, if we have a mechanism to queue `u`, we can
 perform check 2 asynchronously, because restricting to synchronous writes
 means that any async read will return the current or later state. If `u` was
-in the sled UTXO set when the request was processed, the only way that an
+in the rocksdb UTXO set when the request was processed, the only way that an
 async read would not return `u` is if the UTXO were spent, in which case the
 service is not required to return a response.
 
@@ -184,12 +177,12 @@ The state service should maintain an `Arc<Mutex<PendingUtxos>>`, used as follows
 
 1. In `Service::call(Request::AwaitUtxo(u))`, the service should:
   - call `PendingUtxos::queue(u)` to get a future `f` to return to the caller;
-  spawn a task that does a sled lookup for `u`, calling `PendingUtxos::respond(u, output)` if present;
+  spawn a task that does a rocksdb lookup for `u`, calling `PendingUtxos::respond(u, output)` if present;
   - check the in-memory storage for `u`, calling `PendingUtxos::respond(u, output)` if present;
   - return `f` to the caller (it may already be ready).
   The common case is that `u` references an old UTXO, so spawning the lookup
   task first means that we don't wait to check in-memory storage for `u`
-  before starting the sled lookup.
+  before starting the rocksdb lookup.
 
 2. In `Service::call(Request::CommitBlock(block, ..))`, the service should:
   - call `PendingUtxos::check_block(block.as_ref())`;
