@@ -52,7 +52,8 @@ jobs:
           --boot-disk-size 100GB \
           --boot-disk-type pd-ssd \
           --image-family cos-stable \
-          --machine-type n2d-standard-16 \
+          --image-project cos-cloud \
+          --machine-type n2-standard-16 \
           --service-account cos-vm@zealous-zebra.iam.gserviceaccount.com \
           --scopes cloud-platform \
           --tags zebrad \
