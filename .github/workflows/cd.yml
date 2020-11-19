@@ -8,6 +8,7 @@ on:
 
 env:
   PROJECT_ID: zealous-zebra
+  REGION: us-east1
   ZONE: us-east1-b
 
 
@@ -116,7 +117,7 @@ jobs:
           --template "zebrad-$BRANCH_NAME-$SHORT_SHA" \
           --health-check zebrad-tracing-filter \
           --initial-delay 30 \
-          --region "$ZONE" \
+          --region "$REGION" \
           --size 2
 
       # Rolls out update to existing group using the new instance template
@@ -126,4 +127,4 @@ jobs:
           gcloud compute instance-groups managed rolling-action start-update \
           "zebrad-$BRANCH_NAME" \
           --version template="zebrad-$BRANCH_NAME-$SHORT_SHA" \
-          --region "$ZONE"
+          --region "$REGION"
