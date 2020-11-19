@@ -24,7 +24,7 @@ pub struct FinalizedState {
     max_queued_height: i64,
 
     db: rocksdb::DB,
-    temporary: bool,
+    ephemeral: bool,
     /// Commit blocks to the finalized state up to this height, then exit Zebra.
     debug_stop_at_height: Option<block::Height>,
 }
@@ -37,7 +37,7 @@ impl FinalizedState {
             queued_by_prev_hash: HashMap::new(),
             max_queued_height: -1,
             db,
-            temporary: config.ephemeral,
+            ephemeral: config.ephemeral,
             debug_stop_at_height: config.debug_stop_at_height.map(block::Height),
         };
 
@@ -329,7 +329,7 @@ impl FinalizedState {
 
 impl Drop for FinalizedState {
     fn drop(&mut self) {
-        if self.temporary {
+        if self.ephemeral {
             let path = self.db.path();
             tracing::debug!("removing temporary database files {:?}", path);
             let _res = std::fs::remove_dir_all(path);
