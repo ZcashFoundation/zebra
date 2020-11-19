@@ -250,6 +250,9 @@ impl DiskDeserialize for rocksdb::DB {
     {
         let key_bytes = key.as_bytes();
 
+        // We use `get_pinned_cf` to avoid taking ownership of the serialized
+        // format because we're going to deserialize it anyways, which avoids an
+        // extra copy
         let value_bytes = self
             .get_pinned_cf(cf, key_bytes)
             .expect("expected that disk errors would not occur");
