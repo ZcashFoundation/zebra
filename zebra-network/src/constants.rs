@@ -67,7 +67,7 @@ pub const USER_AGENT: &str = "/🦓Zebra🦓:3.0.0-alpha.0/";
 ///
 /// The current protocol version typically changes before Mainnet and Testnet
 /// network upgrades.
-pub const CURRENT_VERSION: Version = Version(170_012);
+pub const CURRENT_VERSION: Version = Version(170_013);
 
 /// The most recent bilateral consensus upgrade implemented by this crate.
 ///
@@ -76,7 +76,7 @@ pub const CURRENT_VERSION: Version = Version(170_012);
 //
 // TODO: replace with NetworkUpgrade::current(network, height).
 //       See the detailed comment in handshake.rs, where this constant is used.
-pub const MIN_NETWORK_UPGRADE: NetworkUpgrade = NetworkUpgrade::Heartwood;
+pub const MIN_NETWORK_UPGRADE: NetworkUpgrade = NetworkUpgrade::Canopy;
 
 /// The default RTT estimate for peer responses.
 ///
