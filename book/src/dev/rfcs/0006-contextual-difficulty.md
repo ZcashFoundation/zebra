@@ -442,9 +442,10 @@ than any "actual" elapsed time.)
 Zebra implements the median timespan using the following methods on
 `AdjustedDifficulty`:
 ```rust
-/// Calculate the median timespan. The median timespan is the difference of
-/// medians of the timespan times, which are the `time`s from the previous
-/// `PoWAveragingWindow + PoWMedianBlockSpan` (28) blocks in the relevant chain.
+/// Calculate the bounded median timespan. The median timespan is the
+/// difference of medians of the timespan times, which are the `time`s from
+/// the previous `PoWAveragingWindow + PoWMedianBlockSpan` (28) blocks in the
+/// relevant chain.
 ///
 /// Uses the candidate block's `height' and `network` to calculate the
 /// `AveragingWindowTimespan` for that block.
@@ -457,6 +458,15 @@ Zebra implements the median timespan using the following methods on
 /// Note: This calculation only uses `PoWMedianBlockSpan` (11) times at the
 /// start and end of the timespan times. timespan times `[11..=16]` are ignored.
 fn median_timespan_bounded(&self) -> Duration { ... }
+
+/// Calculate the median timespan. The median timespan is the difference of
+/// medians of the timespan times, which are the `time`s from the previous
+/// `PoWAveragingWindow + PoWMedianBlockSpan` (28) blocks in the relevant chain.
+///
+/// Implements `ActualTimespan` from the Zcash specification.
+///
+/// See `median_timespan_bounded` for details.
+fn median_timespan(&self) -> Duration { ... }
 
 /// Calculate the median of the `median_block_span_times`: the `time`s from a
 /// slice of `PoWMedianBlockSpan` (11) blocks in the relevant chain.
