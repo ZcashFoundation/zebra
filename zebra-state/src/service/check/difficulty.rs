@@ -151,6 +151,7 @@ impl AdjustedDifficulty {
     /// Testnet minimum difficulty adjustment.)
     fn threshold_bits(&self) -> CompactDifficulty {
         let mean_target = self.mean_target_difficulty();
+        let _median_timespan = self.median_timespan_bounded();
 
         // TODO: calculate the actual value
         mean_target.to_compact()
@@ -186,5 +187,37 @@ impl AdjustedDifficulty {
         let divisor: U256 = POW_AVERAGING_WINDOW.into();
 
         (total / divisor).into()
+    }
+
+    /// Calculate the median timespan. The median timespan is the difference of
+    /// medians of the timespan times, which are the `time`s from the previous
+    /// `PoWAveragingWindow + PoWMedianBlockSpan` (28) blocks in the relevant chain.
+    ///
+    /// Uses the candidate block's `height' and `network` to calculate the
+    /// `AveragingWindowTimespan` for that block.
+    ///
+    /// The median timespan is damped by the `PoWDampingFactor`, and bounded by
+    /// `PoWMaxAdjustDown` and `PoWMaxAdjustUp`.
+    ///
+    /// Implements `ActualTimespanBounded` from the Zcash specification.
+    ///
+    /// Note: This calculation only uses `PoWMedianBlockSpan` (11) times at the
+    /// start and end of the timespan times. timespan times `[11..=16]` are ignored.
+    fn median_timespan_bounded(&self) -> DateTime<Utc> {
+        let newer_times: [DateTime<Utc>; POW_MEDIAN_BLOCK_SPAN] = self.relevant_times
+            [0..POW_MEDIAN_BLOCK_SPAN]
+            .try_into()
+            .expect("relevant times is the correct length");
+        // TODO: do the actual calculation
+        AdjustedDifficulty::median_time(newer_times)
+    }
+
+    /// Calculate the median of the `median_block_span_times`: the `time`s from a
+    /// slice of `PoWMedianBlockSpan` (11) blocks in the relevant chain.
+    ///
+    /// Implements `MedianTime` from the Zcash specification.
+    fn median_time(mut median_block_span_times: [DateTime<Utc>; 11]) -> DateTime<Utc> {
+        median_block_span_times.sort_unstable();
+        median_block_span_times[POW_MEDIAN_BLOCK_SPAN / 2]
     }
 }
