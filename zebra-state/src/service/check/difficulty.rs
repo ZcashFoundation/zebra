@@ -32,7 +32,6 @@ pub const POW_MAX_ADJUST_UP_PERCENT: i32 = 16;
 pub const POW_MAX_ADJUST_DOWN_PERCENT: i32 = 32;
 
 /// Contains the context needed to calculate the adjusted difficulty for a block.
-#[allow(dead_code)]
 pub(super) struct AdjustedDifficulty {
     /// The `header.time` field from the candidate block
     candidate_time: DateTime<Utc>,
@@ -149,8 +148,21 @@ impl AdjustedDifficulty {
     /// Implements `ThresholdBits` from the Zcash specification, and the Testnet
     /// minimum difficulty adjustment from ZIPs 205 and 208.
     pub fn expected_difficulty_threshold(&self) -> CompactDifficulty {
-        // TODO: Testnet minimum difficulty
-        self.threshold_bits()
+        if NetworkUpgrade::is_testnet_min_difficulty_block(
+            self.network,
+            self.candidate_height,
+            self.candidate_time,
+            self.relevant_times[0],
+        ) {
+            assert_eq!(
+                self.network,
+                Network::Testnet,
+                "invalid network: the minimum difficulty rule only applies on testnet"
+            );
+            ExpandedDifficulty::target_difficulty_limit(self.network).to_compact()
+        } else {
+            self.threshold_bits()
+        }
     }
 
     /// Calculate the `difficulty_threshold` for a candidate block, based on the
