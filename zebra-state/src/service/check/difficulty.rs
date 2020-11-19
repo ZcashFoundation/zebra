@@ -162,11 +162,19 @@ impl AdjustedDifficulty {
     /// Implements `ThresholdBits` from the Zcash specification. (Which excludes the
     /// Testnet minimum difficulty adjustment.)
     fn threshold_bits(&self) -> CompactDifficulty {
-        let mean_target = self.mean_target_difficulty();
-        let _median_timespan = self.median_timespan_bounded();
+        let averaging_window_timespan = NetworkUpgrade::averaging_window_timespan_for_height(
+            self.network,
+            self.candidate_height,
+        );
 
-        // TODO: calculate the actual value
-        mean_target.to_compact()
+        let threshold = (self.mean_target_difficulty() / averaging_window_timespan.num_seconds())
+            * self.median_timespan_bounded().num_seconds();
+        let threshold = min(
+            ExpandedDifficulty::target_difficulty_limit(self.network),
+            threshold,
+        );
+
+        threshold.to_compact()
     }
 
     /// Calculate the arithmetic mean of the averaging window thresholds: the
