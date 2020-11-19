@@ -14,6 +14,8 @@
 #![warn(warnings, missing_docs, trivial_casts, unused_qualifications)]
 #![forbid(unsafe_code)]
 #![allow(clippy::try_err)]
+#![allow(clippy::unknown_clippy_lints)]
+#![allow(clippy::field_reassign_with_default)]
 
 use color_eyre::eyre::Result;
 use eyre::WrapErr;
@@ -31,7 +33,6 @@ use zebrad::config::ZebradConfig;
 fn default_test_config() -> Result<ZebradConfig> {
     let mut config = ZebradConfig::default();
     config.state = zebra_state::Config::ephemeral();
-    config.state.memory_cache_bytes = 256000000;
     config.network.listen_addr = "127.0.0.1:0".parse()?;
 
     Ok(config)
@@ -135,6 +136,7 @@ where
 #[test]
 fn generate_no_args() -> Result<()> {
     zebra_test::init();
+
     let child = testdir()?
         .with_config(default_test_config()?)?
         .spawn_child(&["generate"])?;
@@ -166,6 +168,7 @@ macro_rules! assert_with_context {
 #[test]
 fn generate_args() -> Result<()> {
     zebra_test::init();
+
     let testdir = testdir()?;
     let testdir = &testdir;
 
@@ -206,6 +209,7 @@ fn generate_args() -> Result<()> {
 #[test]
 fn help_no_args() -> Result<()> {
     zebra_test::init();
+
     let testdir = testdir()?.with_config(default_test_config()?)?;
 
     let child = testdir.spawn_child(&["help"])?;
@@ -224,6 +228,7 @@ fn help_no_args() -> Result<()> {
 #[test]
 fn help_args() -> Result<()> {
     zebra_test::init();
+
     let testdir = testdir()?;
     let testdir = &testdir;
 
@@ -243,6 +248,7 @@ fn help_args() -> Result<()> {
 #[test]
 fn start_no_args() -> Result<()> {
     zebra_test::init();
+
     // start caches state, so run one of the start tests with persistent state
     let testdir = testdir()?.with_config(persistent_test_config()?)?;
 
@@ -266,6 +272,7 @@ fn start_no_args() -> Result<()> {
 #[test]
 fn start_args() -> Result<()> {
     zebra_test::init();
+
     let testdir = testdir()?.with_config(default_test_config()?)?;
     let testdir = &testdir;
 
@@ -292,6 +299,7 @@ fn start_args() -> Result<()> {
 #[test]
 fn persistent_mode() -> Result<()> {
     zebra_test::init();
+
     let testdir = testdir()?.with_config(persistent_test_config()?)?;
     let testdir = &testdir;
 
@@ -305,7 +313,7 @@ fn persistent_mode() -> Result<()> {
     // Make sure the command was killed
     output.assert_was_killed()?;
 
-    // Check that we have persistent sled database
+    // Check that we have persistent rocksdb database
     let cache_dir = testdir.path().join("state");
     assert_with_context!(cache_dir.read_dir()?.count() > 0, &output);
 
@@ -315,6 +323,7 @@ fn persistent_mode() -> Result<()> {
 #[test]
 fn ephemeral_mode() -> Result<()> {
     zebra_test::init();
+
     let testdir = testdir()?.with_config(default_test_config()?)?;
     let testdir = &testdir;
 
@@ -379,6 +388,7 @@ fn misconfigured_ephemeral_mode() -> Result<()> {
 #[test]
 fn app_no_args() -> Result<()> {
     zebra_test::init();
+
     let testdir = testdir()?.with_config(default_test_config()?)?;
 
     let child = testdir.spawn_child(&[])?;
@@ -393,6 +403,7 @@ fn app_no_args() -> Result<()> {
 #[test]
 fn version_no_args() -> Result<()> {
     zebra_test::init();
+
     let testdir = testdir()?.with_config(default_test_config()?)?;
 
     let child = testdir.spawn_child(&["version"])?;
@@ -407,6 +418,7 @@ fn version_no_args() -> Result<()> {
 #[test]
 fn version_args() -> Result<()> {
     zebra_test::init();
+
     let testdir = testdir()?.with_config(default_test_config()?)?;
     let testdir = &testdir;
 
@@ -435,6 +447,7 @@ fn valid_generated_config_test() -> Result<()> {
 
 fn valid_generated_config(command: &str, expected_output: &str) -> Result<()> {
     zebra_test::init();
+
     let testdir = testdir()?;
     let testdir = &testdir;
 
@@ -523,12 +536,12 @@ fn restart_stop_at_height() -> Result<()> {
         SMALL_CHECKPOINT_TIMEOUT,
         None,
     )?;
-    // if stopping corrupts the sled database, zebrad might hang here
-    // if stopping does not sync the sled database, the logs will contain OnCommit
+    // if stopping corrupts the rocksdb database, zebrad might hang here
+    // if stopping does not sync the rocksdb database, the logs will contain OnCommit
     sync_until(
         Height(0),
         Mainnet,
-        "called_from=OnLoad",
+        "state is already at the configured height",
         STOP_ON_LOAD_TIMEOUT,
         Some(reuse_tempdir),
     )?;

@@ -113,6 +113,8 @@ mod tests {
     /// relies on.
     #[test]
     fn ensure_live_peer_duration_value_matches_others() {
+        zebra_test::init();
+
         let constructed_live_peer_duration =
             HEARTBEAT_INTERVAL + REQUEST_TIMEOUT + REQUEST_TIMEOUT + REQUEST_TIMEOUT;
 
@@ -122,6 +124,8 @@ mod tests {
     /// Make sure that the timeout values are consistent with each other.
     #[test]
     fn ensure_timeouts_consistent() {
+        zebra_test::init();
+
         assert!(HANDSHAKE_TIMEOUT <= REQUEST_TIMEOUT,
                 "Handshakes are requests, so the handshake timeout can't be longer than the timeout for all requests.");
         // This check is particularly important on testnet, which has a small

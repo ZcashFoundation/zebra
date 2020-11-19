@@ -8,7 +8,7 @@ use std::{
 };
 
 use futures::future::FutureExt;
-use memory_state::{NonFinalizedState, QueuedBlocks};
+use non_finalized_state::{NonFinalizedState, QueuedBlocks};
 use tokio::sync::oneshot;
 use tower::{util::BoxService, Service};
 use tracing::instrument;
@@ -21,11 +21,17 @@ use zebra_chain::{
 };
 
 use crate::{
-    request::HashOrHeight, BoxError, CommitBlockError, Config, FinalizedState, Request, Response,
+    request::HashOrHeight, BoxError, CommitBlockError, Config, Request, Response,
     ValidateContextError,
 };
 
-mod memory_state;
+use self::finalized_state::FinalizedState;
+
+mod check;
+mod finalized_state;
+mod non_finalized_state;
+#[cfg(test)]
+mod tests;
 mod utxo;
 
 // todo: put this somewhere
@@ -40,13 +46,15 @@ pub struct QueuedBlock {
 
 struct StateService {
     /// Holds data relating to finalized chain state.
-    sled: FinalizedState,
+    disk: FinalizedState,
     /// Holds data relating to non-finalized chain state.
     mem: NonFinalizedState,
     /// Blocks awaiting their parent blocks for contextual verification.
     queued_blocks: QueuedBlocks,
     /// The set of outpoints with pending requests for their associated transparent::Output
     pending_utxos: utxo::PendingUtxos,
+    /// The configured Zcash network
+    network: Network,
     /// Instant tracking the last time `pending_utxos` was pruned
     last_prune: Instant,
 }
@@ -55,16 +63,17 @@ impl StateService {
     const PRUNE_INTERVAL: Duration = Duration::from_secs(30);
 
     pub fn new(config: Config, network: Network) -> Self {
-        let sled = FinalizedState::new(&config, network);
+        let disk = FinalizedState::new(&config, network);
         let mem = NonFinalizedState::default();
         let queued_blocks = QueuedBlocks::default();
         let pending_utxos = utxo::PendingUtxos::default();
 
         Self {
-            sled,
+            disk,
             mem,
             queued_blocks,
             pending_utxos,
+            network,
             last_prune: Instant::now(),
         }
     }
@@ -86,19 +95,17 @@ impl StateService {
 
         if self.contains_committed_block(&block) {
             let (rsp_tx, rsp_rx) = oneshot::channel();
-            let _ = rsp_tx.send(Err("duplicate block".into()));
+            let _ = rsp_tx.send(Err("block is already committed to the state".into()));
             return rsp_rx;
         }
 
-        // The queue of blocks maintained by this service acts as a pipeline for
-        // blocks waiting for contextual verification. We lazily flush the
-        // pipeline here by handling duplicate requests to verify an existing
-        // queued block. We handle those duplicate requests by replacing the old
-        // channel with the new one and sending an error over the old channel.
+        // Request::CommitBlock contract: a request to commit a block which has
+        // been queued but not yet committed to the state fails the older
+        // request and replaces it with the newer request.
         let rsp_rx = if let Some(queued_block) = self.queued_blocks.get_mut(&hash) {
             let (mut rsp_tx, rsp_rx) = oneshot::channel();
             std::mem::swap(&mut queued_block.rsp_tx, &mut rsp_tx);
-            let _ = rsp_tx.send(Err("duplicate block".into()));
+            let _ = rsp_tx.send(Err("replaced by newer request".into()));
             rsp_rx
         } else {
             let (rsp_tx, rsp_rx) = oneshot::channel();
@@ -114,13 +121,13 @@ impl StateService {
 
         while self.mem.best_chain_len() > crate::constants::MAX_BLOCK_REORG_HEIGHT {
             let finalized = self.mem.finalize();
-            self.sled
+            self.disk
                 .commit_finalized_direct(finalized)
-                .expect("expected that sled errors would not occur");
+                .expect("expected that disk errors would not occur");
         }
 
         self.queued_blocks
-            .prune_by_height(self.sled.finalized_tip_height().expect(
+            .prune_by_height(self.disk.finalized_tip_height().expect(
             "Finalized state must have at least one block before committing non-finalized state",
         ));
 
@@ -133,7 +140,7 @@ impl StateService {
         self.check_contextual_validity(&block)?;
         let parent_hash = block.header.previous_block_hash;
 
-        if self.sled.finalized_tip_hash() == parent_hash {
+        if self.disk.finalized_tip_hash() == parent_hash {
             self.mem.commit_new_chain(block);
         } else {
             self.mem.commit_block(block);
@@ -144,7 +151,7 @@ impl StateService {
 
     /// Returns `true` if `hash` is a valid previous block hash for new non-finalized blocks.
     fn can_fork_chain_at(&self, hash: &block::Hash) -> bool {
-        self.mem.any_chain_contains(hash) || &self.sled.finalized_tip_hash() == hash
+        self.mem.any_chain_contains(hash) || &self.disk.finalized_tip_hash() == hash
     }
 
     /// Returns true if the given hash has been committed to either the finalized
@@ -155,7 +162,7 @@ impl StateService {
             .coinbase_height()
             .expect("coinbase heights should be valid");
 
-        self.mem.any_chain_contains(&hash) || self.sled.hash(height) == Some(hash)
+        self.mem.any_chain_contains(&hash) || self.disk.hash(height) == Some(hash)
     }
 
     /// Attempt to validate and commit all queued blocks whose parents have
@@ -179,22 +186,16 @@ impl StateService {
         }
     }
 
-    /// Check that `block` is contextually valid based on the committed finalized
-    /// and non-finalized state.
+    /// Check that `block` is contextually valid for the configured network,
+    /// based on the committed finalized and non-finalized state.
     fn check_contextual_validity(&mut self, block: &Block) -> Result<(), ValidateContextError> {
-        use ValidateContextError::*;
+        check::block_is_contextually_valid(
+            block,
+            self.network,
+            self.disk.finalized_tip_height(),
+            self.chain(block.header.previous_block_hash),
+        )?;
 
-        if block
-            .coinbase_height()
-            .expect("valid blocks have a coinbase height")
-            <= self.sled.finalized_tip_height().expect(
-                "finalized state must contain at least one block to use the non-finalized state",
-            )
-        {
-            Err(OrphanedBlock)?;
-        }
-
-        // TODO: contextual validation design and implementation
         Ok(())
     }
 
@@ -216,13 +217,13 @@ impl StateService {
 
     /// Return the tip of the current best chain.
     pub fn tip(&self) -> Option<(block::Height, block::Hash)> {
-        self.mem.tip().or_else(|| self.sled.tip())
+        self.mem.tip().or_else(|| self.disk.tip())
     }
 
     /// Return the depth of block `hash` in the current best chain.
     pub fn depth(&self, hash: block::Hash) -> Option<u32> {
         let tip = self.tip()?.0;
-        let height = self.mem.height(hash).or_else(|| self.sled.height(hash))?;
+        let height = self.mem.height(hash).or_else(|| self.disk.height(hash))?;
 
         Some(tip.0 - height.0)
     }
@@ -232,7 +233,7 @@ impl StateService {
     pub fn block(&self, hash_or_height: HashOrHeight) -> Option<Arc<Block>> {
         self.mem
             .block(hash_or_height)
-            .or_else(|| self.sled.block(hash_or_height))
+            .or_else(|| self.disk.block(hash_or_height))
     }
 
     /// Return the transaction identified by `hash` if it exists in the current
@@ -240,17 +241,128 @@ impl StateService {
     pub fn transaction(&self, hash: transaction::Hash) -> Option<Arc<Transaction>> {
         self.mem
             .transaction(hash)
-            .or_else(|| self.sled.transaction(hash))
+            .or_else(|| self.disk.transaction(hash))
     }
 
     /// Return the hash for the block at `height` in the current best chain.
     pub fn hash(&self, height: block::Height) -> Option<block::Hash> {
-        self.mem.hash(height).or_else(|| self.sled.hash(height))
+        self.mem.hash(height).or_else(|| self.disk.hash(height))
+    }
+
+    /// Return the height for the block at `hash` in any chain.
+    pub fn height_by_hash(&self, hash: block::Hash) -> Option<block::Height> {
+        self.mem
+            .height_by_hash(hash)
+            .or_else(|| self.disk.height(hash))
     }
 
     /// Return the utxo pointed to by `outpoint` if it exists in any chain.
     pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Output> {
-        self.mem.utxo(outpoint).or_else(|| self.sled.utxo(outpoint))
+        self.mem.utxo(outpoint).or_else(|| self.disk.utxo(outpoint))
+    }
+
+    /// Return an iterator over the relevant chain of the block identified by
+    /// `hash`.
+    ///
+    /// The block identified by `hash` is included in the chain of blocks yielded
+    /// by the iterator.
+    pub fn chain(&self, hash: block::Hash) -> Iter<'_> {
+        Iter {
+            service: self,
+            state: IterState::NonFinalized(hash),
+        }
+    }
+}
+
+struct Iter<'a> {
+    service: &'a StateService,
+    state: IterState,
+}
+
+enum IterState {
+    NonFinalized(block::Hash),
+    Finalized(block::Height),
+    Finished,
+}
+
+impl Iter<'_> {
+    fn next_non_finalized_block(&mut self) -> Option<Arc<Block>> {
+        let Iter { service, state } = self;
+
+        let hash = match state {
+            IterState::NonFinalized(hash) => *hash,
+            IterState::Finalized(_) | IterState::Finished => unreachable!(),
+        };
+
+        if let Some(block) = service.mem.block_by_hash(hash) {
+            let hash = block.header.previous_block_hash;
+            self.state = IterState::NonFinalized(hash);
+            Some(block)
+        } else {
+            None
+        }
+    }
+
+    fn next_finalized_block(&mut self) -> Option<Arc<Block>> {
+        let Iter { service, state } = self;
+
+        let hash_or_height: HashOrHeight = match *state {
+            IterState::Finalized(height) => height.into(),
+            IterState::NonFinalized(hash) => hash.into(),
+            IterState::Finished => unreachable!(),
+        };
+
+        if let Some(block) = service.disk.block(hash_or_height) {
+            let height = block
+                .coinbase_height()
+                .expect("valid blocks have a coinbase height");
+
+            if let Some(next_height) = height - 1 {
+                self.state = IterState::Finalized(next_height);
+            } else {
+                self.state = IterState::Finished;
+            }
+
+            Some(block)
+        } else {
+            self.state = IterState::Finished;
+            None
+        }
+    }
+}
+
+impl Iterator for Iter<'_> {
+    type Item = Arc<Block>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.state {
+            IterState::NonFinalized(_) => self
+                .next_non_finalized_block()
+                .or_else(|| self.next_finalized_block()),
+            IterState::Finalized(_) => self.next_finalized_block(),
+            IterState::Finished => None,
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.len();
+        (len, Some(len))
+    }
+}
+
+impl std::iter::FusedIterator for Iter<'_> {}
+
+impl ExactSizeIterator for Iter<'_> {
+    fn len(&self) -> usize {
+        match self.state {
+            IterState::NonFinalized(hash) => self
+                .service
+                .height_by_hash(hash)
+                .map(|height| (height.0 + 1) as _)
+                .unwrap_or(0),
+            IterState::Finalized(height) => (height.0 + 1) as _,
+            IterState::Finished => 0,
+        }
     }
 }
 
@@ -290,7 +402,7 @@ impl Service<Request> for StateService {
                 let (rsp_tx, rsp_rx) = oneshot::channel();
 
                 self.pending_utxos.check_block(&block);
-                self.sled
+                self.disk
                     .queue_and_commit_finalized_blocks(QueuedBlock { block, rsp_tx });
 
                 async move {
@@ -337,7 +449,7 @@ impl Service<Request> for StateService {
 
 /// Initialize a state service from the provided [`Config`].
 ///
-/// Each `network` has its own separate sled database.
+/// Each `network` has its own separate on-disk database.
 ///
 /// To share access to the state, wrap the returned service in a `Buffer`. It's
 /// possible to construct multiple state services in the same application (as

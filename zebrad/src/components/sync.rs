@@ -46,21 +46,6 @@ const TIPS_RESPONSE_TIMEOUT: Duration = Duration::from_secs(6);
 /// Controls how long we wait for a block download request to complete.
 const BLOCK_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(20);
 
-/// The maximum amount of time that Zebra should take to download a checkpoint
-/// full of blocks. Based on the current `MAX_CHECKPOINT_BYTE_SIZE`.
-///
-/// We assume that Zebra nodes have at least 10 Mbps bandwidth, and allow some
-/// extra time for request latency.
-const MAX_CHECKPOINT_DOWNLOAD_SECONDS: u64 = 300;
-
-/// Controls how long we wait for a block verify task to complete.
-///
-/// This timeout makes sure that the syncer and verifiers do not deadlock.
-/// When the lookahead limit is reached, the syncer waits for blocks to verify
-/// (or fail). If the verifiers are also waiting for more blocks from the syncer,
-/// then without a timeout, Zebra would deadlock.
-const BLOCK_VERIFY_TIMEOUT: Duration = Duration::from_secs(MAX_CHECKPOINT_DOWNLOAD_SECONDS);
-
 /// Controls how long we wait to restart syncing after finishing a sync run.
 ///
 /// This timeout should be long enough to:
@@ -102,10 +87,7 @@ where
     lookahead_limit: usize,
     downloads: Pin<
         Box<
-            Downloads<
-                Hedge<ConcurrencyLimit<Retry<zn::RetryLimit, Timeout<ZN>>>, AlwaysHedge>,
-                Timeout<ZV>,
-            >,
+            Downloads<Hedge<ConcurrencyLimit<Retry<zn::RetryLimit, Timeout<ZN>>>, AlwaysHedge>, ZV>,
         >,
     >,
 }
@@ -142,9 +124,6 @@ where
         // making a less-fallible network service, and the Hedge layer
         // tries to reduce latency of that less-fallible service.
         //
-        // We hedge every request. If we don't have any recent timings,
-        // Hedge issues a second request with no delay.
-        //
         // XXX add ServiceBuilder::hedge() so this becomes
         // ServiceBuilder::new().hedge(...).retry(...)...
         let block_network = Hedge::new(
@@ -154,17 +133,14 @@ where
                 .timeout(BLOCK_DOWNLOAD_TIMEOUT)
                 .service(peers),
             AlwaysHedge,
-            0,
+            20,
             0.95,
             2 * SYNC_RESTART_TIMEOUT,
         );
         Self {
             tip_network,
             state,
-            downloads: Box::pin(Downloads::new(
-                block_network,
-                Timeout::new(verifier, BLOCK_VERIFY_TIMEOUT),
-            )),
+            downloads: Box::pin(Downloads::new(block_network, verifier)),
             prospective_tips: HashSet::new(),
             genesis_hash: genesis_hash(config.network.network),
             lookahead_limit: std::cmp::max(config.sync.lookahead_limit, MIN_LOOKAHEAD_LIMIT),
@@ -172,7 +148,7 @@ where
     }
 
     #[instrument(skip(self))]
-    pub async fn sync(&mut self) -> Result<(), Report> {
+    pub async fn sync(mut self) -> Result<(), Report> {
         // We can't download the genesis block using our normal algorithm,
         // due to protocol limitations
         self.request_genesis().await?;
@@ -194,7 +170,7 @@ where
 
             tracing::info!("starting sync, obtaining new tips");
             if let Err(e) = self.obtain_tips().await {
-                tracing::warn!(?e);
+                tracing::warn!(?e, "error obtaining tips");
                 continue 'sync;
             }
             self.update_metrics();
@@ -207,8 +183,12 @@ where
                             tracing::trace!(?hash, "verified and committed block to state");
                         }
                         Err(e) => {
-                            tracing::warn!(?e);
-                            continue 'sync;
+                            if format!("{:?}", e).contains("AlreadyVerified {") {
+                                tracing::debug!(error = ?e, "block was already verified, possibly from a previous sync run, continuing");
+                            } else {
+                                tracing::warn!(?e, "error downloading and verifying block");
+                                continue 'sync;
+                            }
                         }
                     }
                 }
@@ -238,9 +218,14 @@ where
                         Ok(hash) => {
                             tracing::trace!(?hash, "verified and committed block to state");
                         }
+
                         Err(e) => {
-                            tracing::warn!(?e);
-                            continue 'sync;
+                            if format!("{:?}", e).contains("AlreadyVerified {") {
+                                tracing::debug!(error = ?e, "block was already verified, possibly from a previous sync run, continuing");
+                            } else {
+                                tracing::warn!(?e, "error downloading and verifying block");
+                                continue 'sync;
+                            }
                         }
                     }
                     self.update_metrics();
@@ -255,7 +240,7 @@ where
                 );
 
                 if let Err(e) = self.extend_tips().await {
-                    tracing::warn!(?e);
+                    tracing::warn!(?e, "error extending tips");
                     continue 'sync;
                 }
                 self.update_metrics();
@@ -588,20 +573,11 @@ mod test {
     /// Make sure the timeout values are consistent with each other.
     #[test]
     fn ensure_timeouts_consistent() {
-        let max_download_retry_time =
-            BLOCK_DOWNLOAD_TIMEOUT.as_secs() * (BLOCK_DOWNLOAD_RETRY_LIMIT as u64);
-        assert!(
-            max_download_retry_time < BLOCK_VERIFY_TIMEOUT.as_secs(),
-            "Verify timeout should allow for previous block download retries"
-        );
+        zebra_test::init();
+
         assert!(
             BLOCK_DOWNLOAD_TIMEOUT.as_secs() * 2 < SYNC_RESTART_TIMEOUT.as_secs(),
             "Sync restart should allow for pending and buffered requests to complete"
-        );
-
-        assert!(
-            SYNC_RESTART_TIMEOUT < BLOCK_VERIFY_TIMEOUT,
-            "Verify timeout should allow for a sync restart"
         );
     }
 }

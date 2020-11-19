@@ -53,11 +53,18 @@ pub enum Request {
     /// Performs contextual validation of the given block, committing it to the
     /// state if successful.
     ///
-    /// Returns [`Response::Committed`] with the hash of the newly
-    /// committed block, or an error.
+    /// It is the caller's responsibility to perform semantic validation. This
+    /// request can be made out-of-order; the state service will queue it until
+    /// its parent is ready.
     ///
-    /// This request can be made out-of-order; the state service will buffer it
-    /// until its parent is ready.
+    /// Returns [`Response::Committed`] with the hash of the block when it is
+    /// committed to the state, or an error if the block fails contextual
+    /// validation or has already been committed to the state.
+    ///
+    /// This request cannot be cancelled once submitted; dropping the response
+    /// future will have no effect on whether it is eventually processed. A
+    /// request to commit a block which has been queued internally but not yet
+    /// committed will fail the older request and replace it with the newer request.
     CommitBlock {
         /// The block to commit to the state.
         block: Arc<Block>,
@@ -66,15 +73,20 @@ pub enum Request {
         // sapling_anchor: sapling::tree::Root,
     },
 
-    /// Commit a finalized block to the state, skipping contextual validation.
+    /// Commit a finalized block to the state, skipping all validation.
+    ///
     /// This is exposed for use in checkpointing, which produces finalized
-    /// blocks.
+    /// blocks. It is the caller's responsibility to ensure that the block is
+    /// valid and final. This request can be made out-of-order; the state service
+    /// will queue it until its parent is ready.
     ///
-    /// Returns [`Response::Committed`] with the hash of the newly
-    /// committed block, or an error.
+    /// Returns [`Response::Committed`] with the hash of the newly committed
+    /// block, or an error.
     ///
-    /// This request can be made out-of-order; the state service will buffer it
-    /// until its parent is ready.
+    /// This request cannot be cancelled once submitted; dropping the response
+    /// future will have no effect on whether it is eventually processed.
+    /// Duplicate requests should not be made, because it is the caller's
+    /// responsibility to ensure that each block is valid and final.
     CommitFinalizedBlock {
         /// The block to commit to the state.
         block: Arc<Block>,
@@ -83,45 +95,55 @@ pub enum Request {
         // sapling_anchor: sapling::tree::Root,
     },
 
-    /// Computes the depth in the best chain of the block identified by the given hash.
+    /// Computes the depth in the current best chain of the block identified by the given hash.
     ///
     /// Returns
     ///
-    /// * [`Response::Depth(Some(depth))`](Response::Depth) if the block is in the main chain;
+    /// * [`Response::Depth(Some(depth))`](Response::Depth) if the block is in the best chain;
     /// * [`Response::Depth(None)`](Response::Depth) otherwise.
     Depth(block::Hash),
 
     /// Returns [`Response::Tip`] with the current best chain tip.
     Tip,
 
-    /// Computes a block locator object based on the current chain state.
+    /// Computes a block locator object based on the current best chain.
     ///
     /// Returns [`Response::BlockLocator`] with hashes starting
-    /// from the current chain tip and reaching backwards towards the genesis
-    /// block. The first hash is the current chain tip. The last hash is the tip
-    /// of the finalized portion of the state. If the state is empty, the block
-    /// locator is also empty.
+    /// from the best chain tip, and following the chain of previous
+    /// hashes. The first hash is the best chain tip. The last hash is
+    /// the tip of the finalized portion of the state. Block locators
+    /// are not continuous - some intermediate hashes might be skipped.
+    ///
+    /// If the state is empty, the block locator is also empty.
     BlockLocator,
 
-    /// Looks up a transaction by hash.
+    /// Looks up a transaction by hash in the current best chain.
     ///
     /// Returns
     ///
-    /// * [`Response::Transaction(Some(Arc<Transaction>))`](Response::Transaction) if the transaction is known;
+    /// * [`Response::Transaction(Some(Arc<Transaction>))`](Response::Transaction) if the transaction is in the best chain;
     /// * [`Response::Transaction(None)`](Response::Transaction) otherwise.
     Transaction(transaction::Hash),
 
-    /// Looks up a block by hash or height.
+    /// Looks up a block by hash or height in the current best chain.
     ///
     /// Returns
     ///
-    /// * [`Response::Block(Some(Arc<Block>))`](Response::Block) if the block is known;
-    /// * [`Response::Block(None)`](Response::Transaction) otherwise.
+    /// * [`Response::Block(Some(Arc<Block>))`](Response::Block) if the block is in the best chain;
+    /// * [`Response::Block(None)`](Response::Block) otherwise.
     ///
     /// Note: the [`HashOrHeight`] can be constructed from a [`block::Hash`] or
     /// [`block::Height`] using `.into()`.
     Block(HashOrHeight),
 
-    /// Request a UTXO identified by the given Outpoint
+    /// Request a UTXO identified by the given Outpoint, waiting until it becomes
+    /// available if it is unknown.
+    ///
+    /// This request is purely informational, and there are no guarantees about
+    /// whether the UTXO remains unspent or is on the best chain. Its purpose is
+    /// to allow asynchronous script verification.
+    ///
+    /// Code making this request should apply a timeout layer to the service to
+    /// handle missing UTXOs.
     AwaitUtxo(transparent::OutPoint),
 }

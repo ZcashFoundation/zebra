@@ -80,7 +80,7 @@ pub enum BlockError {
     #[error("block contains invalid transactions")]
     Transaction(#[from] TransactionError),
 
-    #[error("block haves no transactions")]
+    #[error("block has no transactions")]
     NoTransactions,
 
     #[error("block {0:?} is already in the chain at depth {1:?}")]
@@ -108,10 +108,13 @@ pub enum BlockError {
         zebra_chain::work::difficulty::ExpandedDifficulty,
     ),
 
-    #[error("block {0:?} has a hash {1:?} that is easier than the difficulty threshold {2:?}")]
+    #[error(
+        "block {0:?} on {3:?} has a hash {1:?} that is easier than its difficulty threshold {2:?}"
+    )]
     DifficultyFilter(
         zebra_chain::block::Height,
         zebra_chain::block::Hash,
         zebra_chain::work::difficulty::ExpandedDifficulty,
+        zebra_chain::parameters::Network,
     ),
 }

@@ -44,7 +44,7 @@ mod tests;
 
 pub(crate) use list::CheckpointList;
 use types::{Progress, Progress::*};
-use types::{Target, Target::*};
+use types::{TargetHeight, TargetHeight::*};
 
 /// An unverified block, which is in the queue for checkpoint verification.
 #[derive(Debug)]
@@ -98,8 +98,6 @@ where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
 {
-    // Inputs
-    //
     /// The checkpoint list for this verifier.
     checkpoint_list: CheckpointList,
 
@@ -109,8 +107,6 @@ where
     /// The underlying state service, possibly wrapped in other services.
     state_service: S,
 
-    // Queued Blocks
-    //
     /// A queue of unverified blocks.
     ///
     /// Contains a list of unverified blocks at each block height. In most cases,
@@ -127,9 +123,6 @@ where
     verifier_progress: Progress<block::Height>,
 }
 
-/// The CheckpointVerifier implementation.
-///
-/// Contains non-service utility functions for CheckpointVerifiers.
 impl<S> CheckpointVerifier<S>
 where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
@@ -262,7 +255,7 @@ where
     /// `height` increases as checkpoints are verified.
     ///
     /// If verification has finished, returns `FinishedVerifying`.
-    fn target_checkpoint_height(&self) -> Target<block::Height> {
+    fn target_checkpoint_height(&self) -> TargetHeight {
         // Find the height we want to start searching at
         let start_height = match self.previous_checkpoint_height() {
             // Check if we have the genesis block as a special case, to simplify the loop
@@ -369,7 +362,10 @@ where
     ///  - verification has finished
     fn check_height(&self, height: block::Height) -> Result<(), VerifyCheckpointError> {
         if height > self.checkpoint_list.max_height() {
-            Err(VerifyCheckpointError::TooHigh)?;
+            Err(VerifyCheckpointError::TooHigh {
+                height,
+                max_height: self.checkpoint_list.max_height(),
+            })?;
         }
 
         match self.previous_checkpoint_height() {
@@ -379,7 +375,12 @@ where
             InitialTip(previous_height) | PreviousCheckpoint(previous_height)
                 if (height <= previous_height) =>
             {
-                Err(VerifyCheckpointError::Duplicate { height })?
+                let e = Err(VerifyCheckpointError::AlreadyVerified {
+                    height,
+                    verified_height: previous_height,
+                });
+                tracing::trace!(?e);
+                e?;
             }
             InitialTip(_) | PreviousCheckpoint(_) => {}
             // We're finished, so no checkpoint height is valid
@@ -391,6 +392,14 @@ where
 
     /// Increase the current checkpoint height to `verified_height`,
     fn update_progress(&mut self, verified_height: block::Height) {
+        if let Some(max_height) = self.queued.keys().next_back() {
+            metrics::gauge!("checkpoint.queued.max.height", max_height.0 as i64);
+        } else {
+            // use -1 as a sentinel value for "None", because 0 is a valid height
+            metrics::gauge!("checkpoint.queued.max.height", -1);
+        }
+        metrics::gauge!("checkpoint.queued_slots", self.queued.len() as i64);
+
         // Ignore blocks that are below the previous checkpoint, or otherwise
         // have invalid heights.
         //
@@ -421,7 +430,7 @@ where
     fn check_block(&self, block: &Block) -> Result<block::Height, VerifyCheckpointError> {
         let block_height = block
             .coinbase_height()
-            .ok_or(VerifyCheckpointError::CoinbaseHeight)?;
+            .ok_or(VerifyCheckpointError::CoinbaseHeight { hash: block.hash() })?;
         self.check_height(block_height)?;
         Ok(block_height)
     }
@@ -445,12 +454,7 @@ where
         let height = match self.check_block(&block) {
             Ok(height) => height,
             Err(error) => {
-                // Block errors happen frequently on mainnet, due to bad peers.
-                tracing::trace!(?error);
-
-                // Sending might fail, depending on what the caller does with rx,
-                // but there's nothing we can do about it.
-                let _ = tx.send(Err(error));
+                tx.send(Err(error)).expect("rx has not been dropped yet");
                 return rx;
             }
         };
@@ -465,11 +469,12 @@ where
 
         let hash = block.hash();
 
+        // Replace older requests by newer ones by swapping the oneshot.
         for qb in qblocks.iter_mut() {
             if qb.hash == hash {
+                let e = VerifyCheckpointError::NewerRequest { height, hash };
+                tracing::trace!(?e, "failing older of duplicate requests");
                 let old_tx = std::mem::replace(&mut qb.tx, tx);
-                let e = VerifyCheckpointError::NewerRequest;
-                tracing::trace!(?e);
                 let _ = old_tx.send(Err(e));
                 return rx;
             }
@@ -535,9 +540,9 @@ where
         // Find a queued block at this height, which is part of the hash chain.
         //
         // There are two possible outcomes here:
-        //   - at least one block matches the chain (the common case)
-        //     (if there are duplicate blocks, one succeeds, and the others fail)
+        //   - one of the blocks matches the chain (the common case)
         //   - no blocks match the chain, verification has failed for this range
+        // If there are any side-chain blocks, they fail validation.
         let mut valid_qblock = None;
         for qblock in qblocks.drain(..) {
             if qblock.hash == expected_hash {
@@ -545,28 +550,25 @@ where
                     // The first valid block at the current height
                     valid_qblock = Some(qblock);
                 } else {
-                    tracing::info!(?height, ?qblock.hash, ?expected_hash,
-                                   "Duplicate block at height in CheckpointVerifier");
-                    // Reject duplicate blocks at the same height
-                    let _ = qblock
-                        .tx
-                        .send(Err(VerifyCheckpointError::Duplicate { height }));
+                    unreachable!("unexpected duplicate block {:?} {:?}: duplicate blocks should be rejected before being queued",
+                                 height, qblock.hash);
                 }
             } else {
                 tracing::info!(?height, ?qblock.hash, ?expected_hash,
-                               "Bad block hash at height in CheckpointVerifier");
-                // A bad block, that isn't part of the chain.
-                let _ = qblock.tx.send(Err(VerifyCheckpointError::UnexpectedHash {
-                    found: qblock.hash,
-                    expected: expected_hash,
-                }));
+                               "Side chain hash at height in CheckpointVerifier");
+                let _ = qblock
+                    .tx
+                    .send(Err(VerifyCheckpointError::UnexpectedSideChain {
+                        found: qblock.hash,
+                        expected: expected_hash,
+                    }));
             }
         }
 
         valid_qblock
     }
 
-    /// Check all the blocks in the current checkpoint range.
+    /// Try to verify from the previous checkpoint to a target checkpoint.
     ///
     /// Send `Ok` for the blocks that are in the chain, and `Err` for side-chain
     /// blocks.
@@ -760,14 +762,23 @@ where
 pub enum VerifyCheckpointError {
     #[error("checkpoint request after checkpointing finished")]
     Finished,
-    #[error("block is higher than the maximum checkpoint")]
-    TooHigh,
-    #[error("block at {height:?} has already been verified")]
-    Duplicate { height: block::Height },
-    #[error("rejected older of duplicate verification requests")]
-    NewerRequest,
-    #[error("the block does not have a coinbase height")]
-    CoinbaseHeight,
+    #[error("block at {height:?} is higher than the maximum checkpoint {max_height:?}")]
+    TooHigh {
+        height: block::Height,
+        max_height: block::Height,
+    },
+    #[error("block {height:?} is less than or equal to the verified tip {verified_height:?}")]
+    AlreadyVerified {
+        height: block::Height,
+        verified_height: block::Height,
+    },
+    #[error("rejected older of duplicate verification requests for block at {height:?} {hash:?}")]
+    NewerRequest {
+        height: block::Height,
+        hash: block::Hash,
+    },
+    #[error("the block {hash:?} does not have a coinbase height")]
+    CoinbaseHeight { hash: block::Hash },
     #[error("checkpoint verifier was dropped")]
     Dropped,
     #[error(transparent)]
@@ -777,7 +788,7 @@ pub enum VerifyCheckpointError {
     #[error("too many queued blocks at this height")]
     QueuedLimit,
     #[error("the block hash does not match the chained checkpoint hash, expected {expected:?} found {found:?}")]
-    UnexpectedHash {
+    UnexpectedSideChain {
         expected: block::Hash,
         found: block::Hash,
     },
@@ -807,36 +818,43 @@ where
             return async { Err(VerifyCheckpointError::Finished) }.boxed();
         }
 
-        // Queue the block for verification, until we receive all the blocks for
-        // the current checkpoint range.
         let rx = self.queue_block(block.clone());
-
-        // Try to verify from the previous checkpoint to a target checkpoint.
-        //
-        // If there are multiple checkpoints in the target range, and one of
-        // the ranges is invalid, we'll try again with a smaller target range
-        // on the next call(). Failures always reject a block, so we know
-        // there will be at least one more call().
-        //
-        // We don't retry with a smaller range on failure, because failures
-        // should be rare.
         self.process_checkpoint_range();
 
         metrics::gauge!("checkpoint.queued_slots", self.queued.len() as i64);
 
+        // Because the checkpoint verifier duplicates state from the state
+        // service (it tracks which checkpoints have been verified), we must
+        // commit blocks transactionally on a per-checkpoint basis. Otherwise,
+        // the checkpoint verifier's state could desync from the underlying
+        // state service. Among other problems, this could cause the checkpoint
+        // verifier to reject blocks not already in the state as
+        // already-verified.
+        //
+        // To commit blocks transactionally on a per-checkpoint basis, we must
+        // commit all verified blocks in a checkpoint range, regardless of
+        // whether or not the response futures for each block were dropped.
+        //
+        // We accomplish this by spawning a new task containing the
+        // commit-if-verified logic. This task will always execute, except if
+        // the program is interrupted, in which case there is no longer a
+        // checkpoint verifier to keep in sync with the state.
         let mut state_service = self.state_service.clone();
-        async move {
+        let commit_finalized_block = tokio::spawn(async move {
             let hash = rx
                 .await
                 .expect("CheckpointVerifier does not leave dangling receivers")?;
 
+            // Once we get a verified hash, we must commit it to the chain state
+            // as a finalized block, or exit the program, so .expect rather than
+            // propagate errors from the state service.
             match state_service
                 .ready_and()
                 .await
-                .map_err(VerifyCheckpointError::CommitFinalized)?
+                .expect("Verified checkpoints must be committed transactionally")
                 .call(zs::Request::CommitFinalizedBlock { block })
                 .await
-                .map_err(VerifyCheckpointError::CommitFinalized)?
+                .expect("Verified checkpoints must be committed transactionally")
             {
                 zs::Response::Committed(committed_hash) => {
                     assert_eq!(committed_hash, hash, "state must commit correct hash");
@@ -844,6 +862,12 @@ where
                 }
                 _ => unreachable!("wrong response for CommitFinalizedBlock"),
             }
+        });
+
+        async move {
+            commit_finalized_block
+                .await
+                .expect("commit_finalized_block should not panic")
         }
         .boxed()
     }

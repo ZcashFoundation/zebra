@@ -89,7 +89,7 @@ fn main() -> Result<()> {
     // Zcash reorg limit.
     let height_limit = height_limit
         .0
-        .checked_sub(zebra_state::MAX_BLOCK_REORG_HEIGHT.0)
+        .checked_sub(zebra_state::MAX_BLOCK_REORG_HEIGHT)
         .map(block::Height)
         .expect("zcashd has some mature blocks: wait for zcashd to sync more blocks");
 

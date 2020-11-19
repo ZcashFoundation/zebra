@@ -403,6 +403,7 @@ mod test {
     #[test]
     fn test_add_bare() -> Result<()> {
         zebra_test::init();
+
         let one: Amount = 1.try_into()?;
         let neg_one: Amount = (-1).try_into()?;
 
@@ -417,6 +418,7 @@ mod test {
     #[test]
     fn test_add_opt_lhs() -> Result<()> {
         zebra_test::init();
+
         let one: Amount = 1.try_into()?;
         let one = Ok(one);
         let neg_one: Amount = (-1).try_into()?;
@@ -432,6 +434,7 @@ mod test {
     #[test]
     fn test_add_opt_rhs() -> Result<()> {
         zebra_test::init();
+
         let one: Amount = 1.try_into()?;
         let neg_one: Amount = (-1).try_into()?;
         let neg_one = Ok(neg_one);
@@ -447,6 +450,7 @@ mod test {
     #[test]
     fn test_add_opt_both() -> Result<()> {
         zebra_test::init();
+
         let one: Amount = 1.try_into()?;
         let one = Ok(one);
         let neg_one: Amount = (-1).try_into()?;
@@ -463,6 +467,7 @@ mod test {
     #[test]
     fn test_add_assign() -> Result<()> {
         zebra_test::init();
+
         let one: Amount = 1.try_into()?;
         let neg_one: Amount = (-1).try_into()?;
         let mut neg_one = Ok(neg_one);
@@ -479,6 +484,7 @@ mod test {
     #[test]
     fn test_sub_bare() -> Result<()> {
         zebra_test::init();
+
         let one: Amount = 1.try_into()?;
         let zero: Amount = 0.try_into()?;
 
@@ -493,6 +499,7 @@ mod test {
     #[test]
     fn test_sub_opt_lhs() -> Result<()> {
         zebra_test::init();
+
         let one: Amount = 1.try_into()?;
         let one = Ok(one);
         let zero: Amount = 0.try_into()?;
@@ -508,6 +515,7 @@ mod test {
     #[test]
     fn test_sub_opt_rhs() -> Result<()> {
         zebra_test::init();
+
         let one: Amount = 1.try_into()?;
         let zero: Amount = 0.try_into()?;
         let zero = Ok(zero);
@@ -523,6 +531,7 @@ mod test {
     #[test]
     fn test_sub_assign() -> Result<()> {
         zebra_test::init();
+
         let one: Amount = 1.try_into()?;
         let zero: Amount = 0.try_into()?;
         let mut zero = Ok(zero);
@@ -538,6 +547,8 @@ mod test {
 
     #[test]
     fn add_with_diff_constraints() -> Result<()> {
+        zebra_test::init();
+
         let one = Amount::<NonNegative>::try_from(1)?;
         let zero = Amount::<NegativeAllowed>::try_from(0)?;
 
@@ -549,6 +560,8 @@ mod test {
 
     #[test]
     fn deserialize_checks_bounds() -> Result<()> {
+        zebra_test::init();
+
         let big = MAX_MONEY * 2;
         let neg = -10;
 
@@ -572,6 +585,8 @@ mod test {
 
     #[test]
     fn hash() -> Result<()> {
+        zebra_test::init();
+
         let one = Amount::<NonNegative>::try_from(1)?;
         let another_one = Amount::<NonNegative>::try_from(1)?;
         let zero = Amount::<NonNegative>::try_from(0)?;
@@ -601,6 +616,8 @@ mod test {
 
     #[test]
     fn ordering_constraints() -> Result<()> {
+        zebra_test::init();
+
         ordering::<NonNegative, NonNegative>()?;
         ordering::<NonNegative, NegativeAllowed>()?;
         ordering::<NegativeAllowed, NonNegative>()?;

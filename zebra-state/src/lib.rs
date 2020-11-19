@@ -5,6 +5,8 @@
 #![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_state")]
 #![warn(missing_docs)]
 #![allow(clippy::try_err)]
+#![allow(clippy::unknown_clippy_lints)]
+#![allow(clippy::field_reassign_with_default)]
 
 mod config;
 mod constants;
@@ -12,15 +14,11 @@ mod error;
 mod request;
 mod response;
 mod service;
-mod sled_state;
 mod util;
 
 // TODO: move these to integration tests.
 #[cfg(test)]
 mod tests;
-
-use service::QueuedBlock;
-use sled_state::FinalizedState;
 
 pub use config::Config;
 pub use constants::MAX_BLOCK_REORG_HEIGHT;

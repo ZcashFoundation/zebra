@@ -161,6 +161,8 @@ mod tests {
 
     #[test]
     fn empty_roots() {
+        zebra_test::init();
+
         // From https://github.com/zcash/librustzcash/blob/master/zcash_primitives/src/merkle_tree.rs#L512
         const HEX_EMPTY_ROOTS: [&str; 33] = [
             "0100000000000000000000000000000000000000000000000000000000000000",
@@ -205,6 +207,7 @@ mod tests {
 
     #[test]
     fn incremental_roots() {
+        zebra_test::init();
         // From https://github.com/zcash/zcash/blob/master/src/test/data/merkle_commitments_sapling.json
         // Byte-reversed from those ones because the original test vectors are loaded using uint256S()
         let commitments = [

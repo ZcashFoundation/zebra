@@ -98,7 +98,7 @@ impl fmt::Debug for ExpandedDifficulty {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut buf = [0; 32];
         // Use the same byte order as block::Hash
-        self.0.to_little_endian(&mut buf);
+        self.0.to_big_endian(&mut buf);
         f.debug_tuple("ExpandedDifficulty")
             .field(&hex::encode(&buf))
             .finish()
@@ -122,6 +122,12 @@ impl fmt::Debug for ExpandedDifficulty {
 /// as much work.)
 #[derive(Clone, Copy, Default, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Work(u128);
+
+impl Work {
+    pub fn as_u128(self) -> u128 {
+        self.0
+    }
+}
 
 impl fmt::Debug for Work {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -239,17 +245,30 @@ impl CompactDifficulty {
     /// [Zcash Specification]: https://zips.z.cash/protocol/protocol.pdf#workdef
     pub fn to_work(&self) -> Option<Work> {
         let expanded = self.to_expanded()?;
+        Work::try_from(expanded).ok()
+    }
+}
 
+impl TryFrom<ExpandedDifficulty> for Work {
+    type Error = ();
+
+    fn try_from(expanded: ExpandedDifficulty) -> Result<Self, Self::Error> {
         // We need to compute `2^256 / (expanded + 1)`, but we can't represent
         // 2^256, as it's too large for a u256. However, as 2^256 is at least as
         // large as `expanded + 1`, it is equal to
         // `((2^256 - expanded - 1) / (expanded + 1)) + 1`, or
         let result = (!expanded.0 / (expanded.0 + 1)) + 1;
         if result <= u128::MAX.into() {
-            Some(Work(result.as_u128()))
+            Ok(Work(result.as_u128()))
         } else {
-            None
+            Err(())
         }
+    }
+}
+
+impl From<ExpandedDifficulty> for CompactDifficulty {
+    fn from(value: ExpandedDifficulty) -> Self {
+        value.to_compact()
     }
 }
 
@@ -280,7 +299,16 @@ impl ExpandedDifficulty {
             Network::Testnet => (U256::one() << 251) - 1,
         };
 
-        limit.into()
+        // `zcashd` converts the PoWLimit into a compact representation before
+        // using it to perform difficulty filter checks.
+        //
+        // The Zcash specification converts to compact for the default difficulty
+        // filter, but not for testnet minimum difficulty blocks. (ZIP 205 and
+        // ZIP 208 don't specify this conversion either.) See #1277 for details.
+        ExpandedDifficulty(limit)
+            .to_compact()
+            .to_expanded()
+            .expect("difficulty limits are valid expanded values")
     }
 
     /// Calculate the CompactDifficulty for an expanded difficulty.

@@ -140,6 +140,7 @@ where
             async move {
                 let rsp = tokio::select! {
                     _ = &mut cancel_rx => {
+                        tracing::trace!("task cancelled prior to download completion");
                         metrics::counter!("sync.cancelled.download.count", 1);
                         return Err("canceled block_fetch_verify".into())
                     }
@@ -159,6 +160,7 @@ where
                 let rsp = verifier.ready_and().await?.call(block);
                 let verification = tokio::select! {
                     _ = &mut cancel_rx => {
+                        tracing::trace!("task cancelled prior to verification");
                         metrics::counter!("sync.cancelled.verify.count", 1);
                         return Err("canceled block_fetch_verify".into())
                     }

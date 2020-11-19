@@ -582,6 +582,7 @@ mod tests {
 
     #[test]
     fn version_message_round_trip() {
+        zebra_test::init();
         use std::net::{IpAddr, Ipv4Addr, SocketAddr};
         let services = PeerServices::NODE_NETWORK;
         let timestamp = Utc.timestamp(1_568_000_000, 0);
@@ -631,6 +632,8 @@ mod tests {
 
     #[test]
     fn filterload_message_round_trip() {
+        zebra_test::init();
+
         let mut rt = Runtime::new().unwrap();
 
         let v = Message::FilterLoad {
@@ -665,6 +668,8 @@ mod tests {
 
     #[test]
     fn filterload_message_too_large_round_trip() {
+        zebra_test::init();
+
         let mut rt = Runtime::new().unwrap();
 
         let v = Message::FilterLoad {

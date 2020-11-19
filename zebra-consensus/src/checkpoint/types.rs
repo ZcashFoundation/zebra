@@ -5,7 +5,7 @@ use std::cmp::Ordering;
 use zebra_chain::block;
 
 use Progress::*;
-use Target::*;
+use TargetHeight::*;
 
 /// A `CheckpointVerifier`'s current progress verifying the chain.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -62,16 +62,17 @@ impl PartialOrd for Progress<block::Height> {
     }
 }
 
-/// A `CheckpointVerifier`'s target checkpoint, based on the current queue.
+/// A `CheckpointVerifier`'s target checkpoint height, based on the current
+/// queue.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Target<HeightOrHash> {
+pub enum TargetHeight {
     /// We need more blocks before we can choose a target checkpoint.
     WaitingForBlocks,
     /// We want to verify this checkpoint.
     ///
     /// The target checkpoint can be multiple checkpoints ahead of the previous
     /// checkpoint.
-    Checkpoint(HeightOrHash),
+    Checkpoint(block::Height),
     /// We have finished verifying, there will be no more targets.
     FinishedVerifying,
 }
@@ -79,7 +80,7 @@ pub enum Target<HeightOrHash> {
 /// Block height target, in chain order.
 ///
 /// `WaitingForBlocks` is incomparable with itself and `Checkpoint(_)`.
-impl PartialOrd for Target<block::Height> {
+impl PartialOrd for TargetHeight {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         match (self, other) {
             // FinishedVerifying is the final state

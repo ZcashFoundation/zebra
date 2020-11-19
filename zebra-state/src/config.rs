@@ -27,18 +27,6 @@ pub struct Config {
     /// | Other   | `std::env::current_dir()/cache`                 |                                    |
     pub cache_dir: PathBuf,
 
-    /// Controls the size of the database cache, in bytes.
-    ///
-    /// This corresponds to `sled`'s [`cache_capacity`][cc] parameter.
-    /// Note that the behavior of this parameter is [somewhat
-    /// unintuitive][gh], measuring the on-disk size of the cached data,
-    /// not the in-memory size, which may be much larger, especially for
-    /// smaller keys and values.
-    ///
-    /// [cc]: https://docs.rs/sled/0.34.4/sled/struct.Config.html#method.cache_capacity
-    /// [gh]: https://github.com/spacejam/sled/issues/986#issuecomment-592950100
-    pub memory_cache_bytes: u64,
-
     /// Whether to use an ephemeral database.
     ///
     /// Ephemeral databases are stored in memory on Linux, and in a temporary directory on other OSes.
@@ -54,30 +42,68 @@ pub struct Config {
     pub debug_stop_at_height: Option<u32>,
 }
 
+fn gen_temp_path() -> PathBuf {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::SystemTime;
+
+    static SALT_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+    let seed = SALT_COUNTER.fetch_add(1, Ordering::SeqCst) as u128;
+
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos()
+        << 48;
+
+    #[cfg(not(miri))]
+    let pid = u128::from(std::process::id());
+
+    #[cfg(miri)]
+    let pid = 0;
+
+    let salt = (pid << 16) + now + seed;
+
+    if cfg!(target_os = "linux") {
+        // use shared memory for temporary linux files
+        format!("/dev/shm/pagecache.tmp.{}", salt).into()
+    } else {
+        std::env::temp_dir().join(format!("pagecache.tmp.{}", salt))
+    }
+}
+
 impl Config {
-    /// Generate the appropriate `sled::Config` for `network`, based on the
-    /// provided `zebra_state::Config`.
-    pub(crate) fn sled_config(&self, network: Network) -> sled::Config {
+    pub(crate) fn open_db(&self, network: Network) -> rocksdb::DB {
         let net_dir = match network {
             Network::Mainnet => "mainnet",
             Network::Testnet => "testnet",
         };
 
-        let config = sled::Config::default()
-            .cache_capacity(self.memory_cache_bytes)
-            .mode(sled::Mode::LowSpace);
+        let mut opts = rocksdb::Options::default();
 
-        if self.ephemeral {
-            config.temporary(self.ephemeral)
+        let cfs = vec![
+            rocksdb::ColumnFamilyDescriptor::new("hash_by_height", opts.clone()),
+            rocksdb::ColumnFamilyDescriptor::new("height_by_hash", opts.clone()),
+            rocksdb::ColumnFamilyDescriptor::new("block_by_height", opts.clone()),
+            rocksdb::ColumnFamilyDescriptor::new("tx_by_hash", opts.clone()),
+            rocksdb::ColumnFamilyDescriptor::new("utxo_by_outpoint", opts.clone()),
+            rocksdb::ColumnFamilyDescriptor::new("sprout_nullifiers", opts.clone()),
+            rocksdb::ColumnFamilyDescriptor::new("sapling_nullifiers", opts.clone()),
+        ];
+
+        opts.create_if_missing(true);
+        opts.create_missing_column_families(true);
+
+        let path = if self.ephemeral {
+            gen_temp_path()
         } else {
-            let path = self
-                .cache_dir
+            self.cache_dir
                 .join("state")
-                .join(format!("v{}", crate::constants::SLED_FORMAT_VERSION))
-                .join(net_dir);
+                .join(format!("v{}", crate::constants::DATABASE_FORMAT_VERSION))
+                .join(net_dir)
+        };
 
-            config.path(path)
-        }
+        rocksdb::DB::open_cf_descriptors(&opts, path, cfs).unwrap()
     }
 
     /// Construct a config for an ephemeral in memory database
@@ -96,7 +122,6 @@ impl Default for Config {
 
         Self {
             cache_dir,
-            memory_cache_bytes: 50_000_000,
             ephemeral: false,
             debug_stop_at_height: None,
         }

@@ -14,6 +14,18 @@ use super::super::types::Nonce;
 /// possible [`Response`s](super::Response) it can generate; it is fine (and
 /// recommended!) to match on the expected responses and treat the others as
 /// `unreachable!()`, since their return indicates a bug in the network code.
+///
+/// # Cancellations
+///
+/// The peer set handles cancelled requests (i.e., requests where the future
+/// returned by `Service::call` is dropped before it resolves) on a best-effort
+/// basis. Requests are routed to a particular peer connection, and then
+/// translated into Zcash protocol messages and sent over the network. If a
+/// request is cancelled after it is submitted but before it is processed by a
+/// peer connection, no messages will be sent. Otherwise, if it is cancelled
+/// while waiting for a response, the peer connection resets its state and makes
+/// a best-effort attempt to ignore any messages responsive to the cancelled
+/// request, subject to limitations in the underlying Zcash protocol.
 #[derive(Clone, Debug)]
 pub enum Request {
     /// Requests additional peers from the server.

@@ -60,6 +60,8 @@ mod tests {
 
     #[test]
     fn sha256d_checksum() {
+        zebra_test::init();
+
         // https://en.bitcoin.it/wiki/Protocol_documentation#Hashes
         let input = b"hello";
         let checksum = Checksum::from(&input[..]);
@@ -69,6 +71,8 @@ mod tests {
 
     #[test]
     fn sha256d_checksum_debug() {
+        zebra_test::init();
+
         let input = b"hello";
         let checksum = Checksum::from(&input[..]);
 

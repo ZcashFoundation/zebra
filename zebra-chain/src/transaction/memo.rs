@@ -50,6 +50,8 @@ impl fmt::Debug for Memo {
 
 #[test]
 fn memo_fmt() {
+    zebra_test::init();
+
     let memo = Memo(Box::new(
         *b"thiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiis \
            iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiis \
@@ -74,6 +76,8 @@ fn memo_fmt() {
 
 #[test]
 fn memo_from_string() {
+    zebra_test::init();
+
     let memo = Memo::try_from("foo bar baz".as_ref()).unwrap();
 
     let mut bytes = [0; 512];

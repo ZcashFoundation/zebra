@@ -8,6 +8,8 @@ use crate::parameters::{Network, Network::*};
 use std::collections::{BTreeMap, HashMap};
 use std::ops::Bound::*;
 
+use chrono::Duration;
+
 /// A Zcash network upgrade.
 ///
 /// Network upgrades can change the Zcash network protocol or consensus rules in
@@ -96,6 +98,23 @@ pub(crate) const CONSENSUS_BRANCH_IDS: &[(NetworkUpgrade, ConsensusBranchId)] = 
     (Canopy, ConsensusBranchId(0xe9ff75a6)),
 ];
 
+/// The target block spacing before Blossom.
+const PRE_BLOSSOM_POW_TARGET_SPACING: i64 = 150;
+
+/// The target block spacing after Blossom activation.
+const POST_BLOSSOM_POW_TARGET_SPACING: i64 = 75;
+
+/// The multiplier used to derive the testnet minimum difficulty block time gap
+/// threshold.
+///
+/// Based on https://zips.z.cash/zip-0208#minimum-difficulty-blocks-on-the-test-network
+const TESTNET_MINIMUM_DIFFICULTY_GAP_MULTIPLIER: i32 = 6;
+
+/// The start height for the testnet minimum difficulty consensus rule.
+///
+/// Based on https://zips.z.cash/zip-0208#minimum-difficulty-blocks-on-the-test-network
+const TESTNET_MINIMUM_DIFFICULTY_START_HEIGHT: block::Height = block::Height(299_188);
+
 impl NetworkUpgrade {
     /// Returns a BTreeMap of activation heights and network upgrades for
     /// `network`.
@@ -162,6 +181,47 @@ impl NetworkUpgrade {
     /// Returns None if this network upgrade has no consensus branch id.
     pub fn branch_id(&self) -> Option<ConsensusBranchId> {
         NetworkUpgrade::branch_id_list().get(&self).cloned()
+    }
+
+    /// Returns the target block spacing for the network upgrade.
+    ///
+    /// Based on `PRE_BLOSSOM_POW_TARGET_SPACING` and
+    /// `POST_BLOSSOM_POW_TARGET_SPACING` from the Zcash specification.
+    pub fn target_spacing(&self) -> Duration {
+        let spacing_seconds = match self {
+            Genesis | BeforeOverwinter | Overwinter | Sapling => PRE_BLOSSOM_POW_TARGET_SPACING,
+            Blossom | Heartwood | Canopy => POST_BLOSSOM_POW_TARGET_SPACING,
+        };
+
+        Duration::seconds(spacing_seconds)
+    }
+
+    /// Returns the target block spacing for `network` and `height`.
+    ///
+    /// See `target_spacing` for details.
+    pub fn target_spacing_for_height(network: Network, height: block::Height) -> Duration {
+        NetworkUpgrade::current(network, height).target_spacing()
+    }
+
+    /// Returns the minimum difficulty block spacing for `network` and `height`.
+    /// Returns `None` if the testnet minimum difficulty consensus rule is not active.
+    ///
+    /// Based on https://zips.z.cash/zip-0208#minimum-difficulty-blocks-on-the-test-network
+    ///
+    /// `zcashd` requires a gap that's strictly greater than 6 times the target
+    /// threshold, but ZIP-205 and ZIP-208 are ambiguous. See bug #1276.
+    pub fn minimum_difficulty_spacing_for_height(
+        network: Network,
+        height: block::Height,
+    ) -> Option<Duration> {
+        match (network, height) {
+            (Network::Testnet, height) if height < TESTNET_MINIMUM_DIFFICULTY_START_HEIGHT => None,
+            (Network::Mainnet, _) => None,
+            (Network::Testnet, _) => {
+                let network_upgrade = NetworkUpgrade::current(network, height);
+                Some(network_upgrade.target_spacing() * TESTNET_MINIMUM_DIFFICULTY_GAP_MULTIPLIER)
+            }
+        }
     }
 }
 

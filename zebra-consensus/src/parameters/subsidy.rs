@@ -1,7 +1,5 @@
 //! Constants for Block Subsidy, Funding Streams, and Founders’ Reward
 
-use std::time::Duration;
-
 use zebra_chain::{amount::COIN, block::Height};
 
 /// An initial period from Genesis to this Height where the block subsidy is gradually incremented. [What is slow-start mining][slow-mining]
@@ -22,15 +20,11 @@ pub const SLOW_START_SHIFT: Height = Height(SLOW_START_INTERVAL.0 / 2);
 /// This calculation is exact, because COIN is divisible by 2, and the division is done last.
 pub const MAX_BLOCK_SUBSIDY: u64 = ((25 * COIN) / 2) as u64;
 
-/// The blocktime before Blossom, used to calculate ratio.
-pub const PRE_BLOSSOM_POW_TARGET_SPACING: Duration = Duration::from_secs(150);
-
-/// The blocktime after Blossom, used to calculate ratio.
-pub const POST_BLOSSOM_POW_TARGET_SPACING: Duration = Duration::from_secs(75);
-
 /// Used as a multiplier to get the new halving interval after Blossom.
-pub const BLOSSOM_POW_TARGET_SPACING_RATIO: u64 =
-    PRE_BLOSSOM_POW_TARGET_SPACING.as_secs() / POST_BLOSSOM_POW_TARGET_SPACING.as_secs();
+///
+/// Calculated as `PRE_BLOSSOM_POW_TARGET_SPACING / POST_BLOSSOM_POW_TARGET_SPACING`
+/// in the Zcash specification.
+pub const BLOSSOM_POW_TARGET_SPACING_RATIO: u64 = 2;
 
 /// Halving is at about every 4 years, before Blossom block time is 150 seconds.
 ///

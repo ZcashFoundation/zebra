@@ -15,10 +15,22 @@ The RFC process is documented in CONTRIBUTING.md.
 Please see the checklist there: https://zebra.zfnd.org/CONTRIBUTING.html
 -->
 
+
+### Summary
+
+Please copy the RFC summary over here. 
+
+### More information
+
 Feature Name: `my_feature`
+
 Start Date: YYYY-MM-DD
+
 Design PR: [ZcashFoundation/zebra#0000](https://github.com/ZcashFoundation/zebra/pull/0000)
-Zebra Issue: [ZcashFoundation/zebra#0000](https://github.com/ZcashFoundation/zebra/pull/0000)
+
+Zebra Issue: [ZcashFoundation/zebra#0000](https://github.com/ZcashFoundation/zebra/issues/0000)
+
+### Document
 
 <!--
 Fill this in, replacing:

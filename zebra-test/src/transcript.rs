@@ -51,6 +51,7 @@ impl TransError {
 #[error("ErrorChecker Error: {0}")]
 struct ErrorCheckerError(Error);
 
+#[must_use]
 pub struct Transcript<R, S, I>
 where
     I: Iterator<Item = (R, Result<S, TransError>)>,
@@ -58,12 +59,14 @@ where
     messages: I,
 }
 
-impl<R, S, I> From<I> for Transcript<R, S, I>
+impl<R, S, I> From<I> for Transcript<R, S, I::IntoIter>
 where
-    I: Iterator<Item = (R, Result<S, TransError>)>,
+    I: IntoIterator<Item = (R, Result<S, TransError>)>,
 {
     fn from(messages: I) -> Self {
-        Self { messages }
+        Self {
+            messages: messages.into_iter(),
+        }
     }
 }
 
