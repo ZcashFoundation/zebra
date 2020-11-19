@@ -42,4 +42,8 @@ pub enum ValidateContextError {
     /// block.height is not one greater than its parent block's height
     #[non_exhaustive]
     NonSequentialBlock,
+
+    /// block.header.difficulty_threshold is not equal to the adjusted difficulty for the block
+    #[non_exhaustive]
+    InvalidDifficultyThreshold,
 }

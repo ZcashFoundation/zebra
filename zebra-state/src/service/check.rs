@@ -110,20 +110,18 @@ fn height_one_more_than_parent_height(
 /// Validate the `difficulty_threshold` from a candidate block's header, based
 /// on an `expected_difficulty` for that block.
 ///
-/// Uses `expected_difficulty` to calculate the expected `ToCompact(Threshold())`
-/// value, then compares that value to the `difficulty_threshold`.
-/// Returns `Ok(())` if the values are equal.
+/// Uses `expected_difficulty` to calculate the expected difficulty value, then
+/// compares that value to the `difficulty_threshold`.
+///
+/// The check passes if the values are equal.
 fn difficulty_threshold_is_valid(
     difficulty_threshold: CompactDifficulty,
     expected_difficulty: AdjustedDifficulty,
 ) -> Result<(), ValidateContextError> {
-    // TODO: return an error on failure, after the calculation is implemented
-    #[allow(clippy::if_same_then_else)]
     if difficulty_threshold == expected_difficulty.expected_difficulty_threshold() {
         Ok(())
     } else {
-        // This is the error case
-        Ok(())
+        Err(ValidateContextError::InvalidDifficultyThreshold)
     }
 }
 
