@@ -43,8 +43,11 @@ pub enum TransactionError {
     #[error("transaction version number MUST be >= 4")]
     WrongVersion,
 
-    #[error("at least one of tx_in_count, nShieldedSpend, and nJoinSplit MUST be nonzero")]
-    NoTransfer,
+    #[error("must have at least one input: transparent, shielded spend, or joinsplit")]
+    NoInputs,
+
+    #[error("must have at least one output: transparent, shielded output, or joinsplit")]
+    NoOutputs,
 
     #[error("if there are no Spends or Outputs, the value balance MUST be 0.")]
     BadBalance,

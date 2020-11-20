@@ -25,28 +25,52 @@ pub fn validate_joinsplit_sig(
         .map_err(TransactionError::Ed25519)
 }
 
-/// Check that at least one of tx_in_count, nShieldedSpend, and nJoinSplit MUST
-/// be non-zero.
+/// Checks that the transaction has inputs and outputs.
+///
+/// More specifically:
+///
+/// * at least one of tx_in_count, nShieldedSpend, and nJoinSplit MUST be non-zero.
+/// * at least one of tx_out_count, nShieldedOutput, and nJoinSplit MUST be non-zero.
 ///
 /// https://zips.z.cash/protocol/canopy.pdf#txnencodingandconsensus
-pub fn some_money_is_spent(tx: &Transaction) -> Result<(), TransactionError> {
+pub fn has_inputs_and_outputs(tx: &Transaction) -> Result<(), TransactionError> {
+    // The consensus rule is written in terms of numbers, but our transactions
+    // hold enum'd data. Mixing pattern matching and numerical checks is risky,
+    // so convert everything to counts and sum up.
     match tx {
         Transaction::V4 {
             inputs,
-            joinsplit_data: Some(joinsplit_data),
-            shielded_data: Some(shielded_data),
+            outputs,
+            joinsplit_data,
+            shielded_data,
             ..
         } => {
-            if !inputs.is_empty()
-                || joinsplit_data.joinsplits().count() > 0
-                || shielded_data.spends().count() > 0
-            {
-                Ok(())
+            let tx_in_count = inputs.len();
+            let tx_out_count = outputs.len();
+            let n_joinsplit = joinsplit_data
+                .as_ref()
+                .map(|d| d.joinsplits().count())
+                .unwrap_or(0);
+            let n_shielded_spend = shielded_data
+                .as_ref()
+                .map(|d| d.spends().count())
+                .unwrap_or(0);
+            let n_shielded_output = shielded_data
+                .as_ref()
+                .map(|d| d.outputs().count())
+                .unwrap_or(0);
+
+            if tx_in_count + n_shielded_spend + n_joinsplit == 0 {
+                Err(TransactionError::NoInputs)
+            } else if tx_out_count + n_shielded_output + n_joinsplit == 0 {
+                Err(TransactionError::NoOutputs)
             } else {
-                Err(TransactionError::NoTransfer)
+                Ok(())
             }
         }
-        _ => Err(TransactionError::WrongVersion),
+        Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => {
+            unreachable!("tx version is checked first")
+        }
     }
 }
 

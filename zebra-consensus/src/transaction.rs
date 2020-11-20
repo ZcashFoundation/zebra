@@ -130,7 +130,7 @@ where
                         }
                     }
 
-                    check::some_money_is_spent(&tx)?;
+                    check::has_inputs_and_outputs(&tx)?;
                     check::any_coinbase_inputs_no_transparent_outputs(&tx)?;
 
                     let sighash = tx.sighash(
