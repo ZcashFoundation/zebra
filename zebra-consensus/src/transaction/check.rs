@@ -74,28 +74,6 @@ pub fn has_inputs_and_outputs(tx: &Transaction) -> Result<(), TransactionError> 
     }
 }
 
-/// Check that a transaction with one or more transparent inputs from coinbase
-/// transactions has no transparent outputs.
-///
-/// Note that inputs from coinbase transactions include Founders’ Reward
-/// outputs.
-///
-/// https://zips.z.cash/protocol/canopy.pdf#consensusfrombitcoin
-pub fn any_coinbase_inputs_no_transparent_outputs(
-    tx: &Transaction,
-) -> Result<(), TransactionError> {
-    match tx {
-        Transaction::V4 { outputs, .. } => {
-            if !tx.contains_coinbase_input() || !outputs.is_empty() {
-                Ok(())
-            } else {
-                Err(TransactionError::NoTransfer)
-            }
-        }
-        _ => Err(TransactionError::WrongVersion),
-    }
-}
-
 /// Check that if there are no Spends or Outputs, that valueBalance is also 0.
 ///
 /// https://zips.z.cash/protocol/canopy.pdf#consensusfrombitcoin
