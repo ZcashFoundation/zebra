@@ -19,10 +19,20 @@ use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
 type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// A runtime validated type for representing amounts of zatoshis
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Clone, Copy, Serialize, Deserialize)]
 #[serde(try_from = "i64")]
 #[serde(bound = "C: Constraint")]
 pub struct Amount<C = NegativeAllowed>(i64, PhantomData<C>);
+
+// in a world where specialization existed
+// https://github.com/rust-lang/rust/issues/31844
+// we could do much better here
+// for now, drop the constraint
+impl<C> std::fmt::Debug for Amount<C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("Amount").field(&self.0).finish()
+    }
+}
 
 impl<C> Amount<C> {
     /// Convert this amount to a different Amount type if it satisfies the new constraint
