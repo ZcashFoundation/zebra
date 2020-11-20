@@ -37,6 +37,9 @@ impl PendingUtxos {
     /// by the given `transparent::OutPoint` that the `Output` has arrived.
     pub fn respond(&mut self, outpoint: transparent::OutPoint, output: transparent::Output) {
         if let Some(sender) = self.0.remove(&outpoint) {
+            // Adding the outpoint as a field lets us crossreference
+            // with the trace of the verification that made the request.
+            tracing::trace!(?outpoint, "found pending UTXO");
             let _ = sender.send(output);
         }
     }
@@ -48,6 +51,7 @@ impl PendingUtxos {
             return;
         }
 
+        tracing::trace!("scanning new block for pending UTXOs");
         for transaction in block.transactions.iter() {
             let transaction_hash = transaction.hash();
             for (index, output) in transaction.outputs().iter().enumerate() {
