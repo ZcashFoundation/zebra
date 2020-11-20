@@ -23,7 +23,7 @@ use crate::{
 };
 
 /// Arbitrary data inserted by miners into a coinbase transaction.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct CoinbaseData(
     /// Invariant: this vec, together with the coinbase height, must be less than
     /// 100 bytes. We enforce this by only constructing CoinbaseData fields by
@@ -37,6 +37,20 @@ pub struct CoinbaseData(
 impl AsRef<[u8]> for CoinbaseData {
     fn as_ref(&self) -> &[u8] {
         self.0.as_ref()
+    }
+}
+
+impl std::fmt::Debug for CoinbaseData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let escaped = String::from_utf8(
+            self.0
+                .iter()
+                .cloned()
+                .flat_map(std::ascii::escape_default)
+                .collect(),
+        )
+        .expect("ascii::escape_default produces utf8");
+        f.debug_tuple("CoinbaseData").field(&escaped).finish()
     }
 }
 
