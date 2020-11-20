@@ -120,10 +120,9 @@ where
 
         // TODO(jlusby): Error = Report, handle errors from state_service.
         async move {
-            tracing::trace!("beginning block verification");
-
             let hash = block.hash();
             // Check that this block is actually a new block.
+            tracing::trace!("checking that block is not already in state");
             match state_service
                 .ready_and()
                 .await
@@ -139,6 +138,7 @@ where
                 _ => unreachable!("wrong response to Request::Depth"),
             }
 
+            tracing::trace!("performing block checks");
             let height = block
                 .coinbase_height()
                 .ok_or(BlockError::MissingHeight(hash))?;
@@ -174,9 +174,11 @@ where
                     .call(req);
                 async_checks.push(rsp);
             }
+            tracing::trace!(len = async_checks.len(), "built async tx checks");
 
             use futures::StreamExt;
             while let Some(result) = async_checks.next().await {
+                tracing::trace!(?result, remaining = async_checks.len());
                 result.map_err(VerifyBlockError::Transaction)?;
             }
 
