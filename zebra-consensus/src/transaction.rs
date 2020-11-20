@@ -116,7 +116,7 @@ where
                     #[allow(clippy::if_same_then_else)] // delete when filled in
                     if tx.is_coinbase() {
                         // do something special for coinbase transactions
-                        check::coinbase_tx_does_not_spend_shielded(&tx)?;
+                        check::coinbase_tx_no_joinsplit_or_spend(&tx)?;
                     } else {
                         // otherwise, check no coinbase inputs
                         // feed all of the inputs to the script verifier

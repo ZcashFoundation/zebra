@@ -28,8 +28,14 @@ pub enum TransactionError {
     #[error("coinbase input found in non-coinbase transaction")]
     CoinbaseInputFound,
 
-    #[error("coinbase transaction MUST NOT have any JoinSplit descriptions or Spend descriptions")]
-    CoinbaseHasJoinSplitOrSpend,
+    #[error("coinbase transaction MUST NOT have any JoinSplit descriptions")]
+    CoinbaseHasJoinSplit,
+
+    #[error("coinbase transaction MUST NOT have any Spend descriptions")]
+    CoinbaseHasSpend,
+
+    #[error("coinbase transaction MUST NOT have any Output descriptions pre-Heartwood")]
+    CoinbaseHasOutputPreHeartwood,
 
     #[error("coinbase transaction failed subsidy validation")]
     Subsidy(#[from] SubsidyError),

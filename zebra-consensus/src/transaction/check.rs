@@ -1,3 +1,7 @@
+//! Transaction checks.
+//!
+//! Code in this file can freely assume that no pre-V4 transactions are present.
+
 use std::convert::TryFrom;
 
 use zebra_chain::{
@@ -86,22 +90,30 @@ pub fn shielded_balances_match(
 
 /// Check that a coinbase tx does not have any JoinSplit or Spend descriptions.
 ///
-/// https://zips.z.cash/protocol/canopy.pdf#consensusfrombitcoin
-pub fn coinbase_tx_does_not_spend_shielded(tx: &Transaction) -> Result<(), TransactionError> {
-    match tx {
-        Transaction::V4 {
-            joinsplit_data: Some(joinsplit_data),
-            shielded_data: Some(shielded_data),
-            ..
-        } => {
-            if !tx.is_coinbase()
-                || (joinsplit_data.joinsplits().count() == 0 && shielded_data.spends().count() == 0)
-            {
-                Ok(())
-            } else {
-                Err(TransactionError::CoinbaseHasJoinSplitOrSpend)
+/// https://zips.z.cash/protocol/canopy.pdf#txnencodingandconsensus
+pub fn coinbase_tx_no_joinsplit_or_spend(tx: &Transaction) -> Result<(), TransactionError> {
+    if tx.is_coinbase() {
+        match tx {
+            // Check if there is any JoinSplitData.
+            Transaction::V4 {
+                joinsplit_data: Some(_),
+                ..
+            } => Err(TransactionError::CoinbaseHasJoinSplit),
+
+            // The ShieldedData contains both Spends and Outputs, and Outputs
+            // are allowed post-Heartwood, so we have to count Spends.
+            Transaction::V4 {
+                shielded_data: Some(shielded_data),
+                ..
+            } if shielded_data.spends().count() > 0 => Err(TransactionError::CoinbaseHasSpend),
+
+            Transaction::V4 { .. } => Ok(()),
+
+            Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => {
+                unreachable!("tx version is checked first")
             }
         }
-        _ => Err(TransactionError::WrongVersion),
+    } else {
+        Ok(())
     }
 }
