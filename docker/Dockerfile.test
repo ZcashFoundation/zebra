@@ -1,4 +1,4 @@
-FROM rustlang/rust:nightly
+FROM rust:buster
 
 RUN apt-get update && \
 	apt-get install -y --no-install-recommends \
@@ -16,5 +16,4 @@ EXPOSE 8233 18233
 
 COPY . .
 
-# Filtering to only run integration tests requires nightly for now
-CMD cargo +nightly test --all --no-fail-fast -- -Zunstable-options --include-ignored
+CMD cargo test --workspace --no-fail-fast -- -Zunstable-options --include-ignored
