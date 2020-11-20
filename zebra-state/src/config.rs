@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use tempdir::TempDir;
 use zebra_chain::parameters::Network;
 
 /// Configuration for the state service.
@@ -29,7 +30,9 @@ pub struct Config {
 
     /// Whether to use an ephemeral database.
     ///
-    /// Ephemeral databases are stored in memory on Linux, and in a temporary directory on other OSes.
+    /// Ephemeral databases are stored in a temporary directory.
+    /// They are deleted when Zebra exits successfully.
+    /// (If Zebra panics or crashes, the ephemeral database won't be deleted.)
     ///
     /// Set to `false` by default. If this is set to `true`, [`cache_dir`] is ignored.
     ///
@@ -42,34 +45,10 @@ pub struct Config {
     pub debug_stop_at_height: Option<u32>,
 }
 
-fn gen_temp_path() -> PathBuf {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::time::SystemTime;
-
-    static SALT_COUNTER: AtomicUsize = AtomicUsize::new(0);
-
-    let seed = SALT_COUNTER.fetch_add(1, Ordering::SeqCst) as u128;
-
-    let now = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos()
-        << 48;
-
-    #[cfg(not(miri))]
-    let pid = u128::from(std::process::id());
-
-    #[cfg(miri)]
-    let pid = 0;
-
-    let salt = (pid << 16) + now + seed;
-
-    if cfg!(target_os = "linux") {
-        // use shared memory for temporary linux files
-        format!("/dev/shm/pagecache.tmp.{}", salt).into()
-    } else {
-        std::env::temp_dir().join(format!("pagecache.tmp.{}", salt))
-    }
+fn gen_temp_path(prefix: &str) -> PathBuf {
+    TempDir::new(prefix)
+        .expect("temporary directory is created successfully")
+        .into_path()
 }
 
 impl Config {
@@ -95,7 +74,11 @@ impl Config {
         opts.create_missing_column_families(true);
 
         let path = if self.ephemeral {
-            gen_temp_path()
+            gen_temp_path(&format!(
+                "zebra-state-v{}-{}",
+                crate::constants::DATABASE_FORMAT_VERSION,
+                net_dir
+            ))
         } else {
             self.cache_dir
                 .join("state")

@@ -25,6 +25,7 @@ thiserror = "1.0.22"
 tokio = { version = "0.2.22", features = ["sync"] }
 displaydoc = "0.1.7"
 rocksdb = "0.15.0"
+tempdir = "0.3.7"
 
 [dev-dependencies]
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
