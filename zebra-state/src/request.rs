@@ -195,4 +195,11 @@ pub enum Request {
     /// Code making this request should apply a timeout layer to the service to
     /// handle missing UTXOs.
     AwaitUtxo(transparent::OutPoint),
+
+    /// Find intersection of provided and best chain and returns block hashes ahead.
+    ///
+    /// Returns
+    ///
+    /// [`Response::Hashes(Vec<block::Hash>)`](Response::Hashes) with max of 500 block hashes.
+    GetHashes(Vec<block::Hash>, Option<block::Hash>),
 }

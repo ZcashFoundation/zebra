@@ -270,6 +270,94 @@ impl StateService {
             state: IterState::NonFinalized(hash),
         }
     }
+
+    /// Return an iterator over the finalized blocks of the chain
+    /// starting(and descending) from the block identified by `height`.
+    ///
+    /// The block identified by `height` is included in the chain of blocks yielded
+    /// by the iterator.
+    pub fn chain_finalized(&self, height: block::Height) -> Iter<'_> {
+        Iter {
+            service: self,
+            state: IterState::Finalized(height),
+        }
+    }
+
+    /// Return a list of blocks ahead given a list of blocks.
+    /// 1. Make sure we have the list of blocks provided in our chain.
+    /// 2. Get a max of 500 hashes ahead of the provided tip.
+    pub fn find_chain_hashes(
+        &self,
+        block_locator: Vec<block::Hash>,
+        stop: Option<block::Hash>,
+    ) -> Option<Vec<block::Hash>> {
+        let locator_tip_hash = block_locator.first()?;
+        let locator_tip_height = self.height_by_hash(*locator_tip_hash)?;
+        let chain = self.chain_finalized(locator_tip_height);
+
+        tracing::info!(
+            "REQUESTED TIP: {:?} {:?}",
+            locator_tip_height,
+            locator_tip_hash
+        );
+
+        // Block locator are not continuous but we need to make sure all the blocks
+        // provided are in our chain and in the right order.
+        let mut collect_block_locator: Vec<block::Hash> = Vec::new();
+        let mut index = 0;
+        for block in chain {
+            // We get out of the loop as soon as we collect a vector of equal
+            // lenght of the provided.
+            if collect_block_locator.len() == block_locator.len() {
+                break;
+            }
+
+            if block.hash() == block_locator[index] {
+                collect_block_locator.push(block.hash());
+                index += 1
+            }
+        }
+
+        // If the 2 vectors are not equal we cant continue.
+        if collect_block_locator != block_locator {
+            return None;
+        }
+
+        // The number of next hashes to return.
+        let max_results = 500;
+
+        // Compute a new tip, make sure it is below our chain tip.
+        let (chain_tip_height, ..) = self.tip().expect("tip must always be available?");
+        let new_tip = block::Height(std::cmp::min(
+            locator_tip_height.0 + max_results,
+            chain_tip_height.0,
+        ));
+
+        // Get a new chain starting at the new "requested" tip.
+        let new_chain = self.chain_finalized(new_tip);
+
+        let mut res: Vec<block::Hash> = Vec::new();
+        for block in new_chain {
+            // If we get the requested tip we are over
+            if block.hash() == *locator_tip_hash {
+                break;
+            }
+
+            // Check the stop parameter
+            if stop.is_some() && stop.unwrap() == block.hash() {
+                break;
+            }
+
+            // Insert in reverse order
+            res.insert(0, block.hash());
+            tracing::info!(
+                "RESPONSE: {:?} {:?}",
+                self.height_by_hash(block.hash())?,
+                block.hash()
+            );
+        }
+        Some(res)
+    }
 }
 
 struct Iter<'a> {
@@ -451,6 +539,10 @@ impl Service<Request> for StateService {
                 }
 
                 fut.boxed()
+            }
+            Request::GetHashes(hashes, stop) => {
+                let res = self.find_chain_hashes(hashes, stop);
+                async move { Ok(Response::Hashes(res)) }.boxed()
             }
         }
     }

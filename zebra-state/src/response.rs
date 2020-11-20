@@ -32,6 +32,9 @@ pub enum Response {
     /// Response to [`Request::Block`] with the specified block.
     Block(Option<Arc<Block>>),
 
-    /// The response to a `AwaitUtxo` request
+    /// The response to a `AwaitUtxo` request.
     Utxo(transparent::Output),
+
+    /// The response to `GetHashes` request.
+    Hashes(Option<Vec<block::Hash>>),
 }
