@@ -132,10 +132,10 @@ impl Default for MetricsSection {
 pub struct SyncSection {
     /// The maximum number of concurrent block requests during sync.
     ///
-    /// This is set to a high value by default, so that the concurrency limit is
-    /// based only on the number of available peers. However, on a slow network,
-    /// making too many concurrent block requests can overwhelm the connection.
-    /// Lowering this value may help on slow or unreliable networks.
+    /// This is set to a low value by default, to avoid task and
+    /// network contention. Increasing this value may improve
+    /// performance on machines with many cores and a fast network
+    /// connection.
     pub max_concurrent_block_requests: usize,
 
     /// Controls how far ahead of the chain tip the syncer tries to
