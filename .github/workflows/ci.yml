@@ -6,7 +6,8 @@ jobs:
 
   test:
     name: Test on ${{ matrix.os }}
-    timeout-minutes: 30
+    # The large timeout is to accommodate Windows builds
+    timeout-minutes: 45
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -37,7 +38,7 @@ jobs:
         with:
           command: test
           args: --verbose --all
-      # Explicitly run any tests that are usually #[ignored]
+      # Explicitly run any tests that are usually #[ignored], modulo ZEBRA_SKIP_NETWORK_TESTS
       - name: Run zebrad large sync tests
         env:
           RUST_BACKTRACE: full
