@@ -19,6 +19,7 @@ use futures::stream::FuturesUnordered;
 use futures_util::FutureExt;
 use thiserror::Error;
 use tower::{Service, ServiceExt};
+use tracing::Instrument;
 
 use zebra_chain::{
     block::{self, Block},
@@ -114,14 +115,14 @@ where
         let mut transaction_verifier = self.transaction_verifier.clone();
         let network = self.network;
 
+        // We don't include the block hash, because it's likely already in a parent span
+        let span = tracing::debug_span!("block", height = ?block.coinbase_height());
+
         // TODO(jlusby): Error = Report, handle errors from state_service.
         async move {
+            tracing::trace!("beginning block verification");
+
             let hash = block.hash();
-
-            // The height is already included in the ChainVerifier span
-            let span = tracing::debug_span!("BlockVerifier::call", ?hash);
-            let _entered = span.enter();
-
             // Check that this block is actually a new block.
             match state_service
                 .ready_and()
@@ -200,6 +201,7 @@ where
                 _ => unreachable!("wrong response for CommitBlock"),
             }
         }
+        .instrument(span)
         .boxed()
     }
 }
