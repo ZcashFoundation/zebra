@@ -383,13 +383,7 @@ impl Service<Request> for StateService {
         Poll::Ready(Ok(()))
     }
 
-    // Because the request might have a verbose debug output (e.g.,
-    // an entire block), include it only in a second trace-level span.
-    // For some reason putting them in this order causes the info-level
-    // span to be entered first.
-    #[allow(unused_braces)] // fixes a spurious warning from the proc macro
-    #[instrument(name = "state_trace", level = "trace", skip(self))]
-    #[instrument(name = "state", level = "info", skip(self, req))]
+    #[instrument(name = "state", skip(self, req))]
     fn call(&mut self, req: Request) -> Self::Future {
         match req {
             Request::CommitBlock { block } => {
