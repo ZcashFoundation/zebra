@@ -393,6 +393,8 @@ impl Service<Request> for StateService {
     fn call(&mut self, req: Request) -> Self::Future {
         match req {
             Request::CommitBlock { block } => {
+                metrics::counter!("state.requests", 1, "type" => "commit_block");
+
                 self.pending_utxos.check_block(&block);
                 let rsp_rx = self.queue_and_commit_non_finalized_blocks(block);
 
@@ -406,6 +408,8 @@ impl Service<Request> for StateService {
                 .boxed()
             }
             Request::CommitFinalizedBlock { block } => {
+                metrics::counter!("state.requests", 1, "type" => "commit_finalized_block");
+
                 let (rsp_tx, rsp_rx) = oneshot::channel();
 
                 self.pending_utxos.check_block(&block);
@@ -422,26 +426,33 @@ impl Service<Request> for StateService {
                 .boxed()
             }
             Request::Depth(hash) => {
+                metrics::counter!("state.requests", 1, "type" => "depth");
                 let rsp = Ok(self.depth(hash)).map(Response::Depth);
                 async move { rsp }.boxed()
             }
             Request::Tip => {
+                metrics::counter!("state.requests", 1, "type" => "tip");
                 let rsp = Ok(self.tip()).map(Response::Tip);
                 async move { rsp }.boxed()
             }
             Request::BlockLocator => {
+                metrics::counter!("state.requests", 1, "type" => "block_locator");
                 let rsp = Ok(self.block_locator().unwrap_or_default()).map(Response::BlockLocator);
                 async move { rsp }.boxed()
             }
             Request::Transaction(hash) => {
+                metrics::counter!("state.requests", 1, "type" => "transaction");
                 let rsp = Ok(self.transaction(hash)).map(Response::Transaction);
                 async move { rsp }.boxed()
             }
             Request::Block(hash_or_height) => {
+                metrics::counter!("state.requests", 1, "type" => "block");
                 let rsp = Ok(self.block(hash_or_height)).map(Response::Block);
                 async move { rsp }.boxed()
             }
             Request::AwaitUtxo(outpoint) => {
+                metrics::counter!("state.requests", 1, "type" => "await_utxo");
+
                 let fut = self.pending_utxos.queue(outpoint);
 
                 if let Some(utxo) = self.utxo(&outpoint) {
