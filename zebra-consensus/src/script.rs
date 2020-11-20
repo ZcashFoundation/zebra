@@ -1,6 +1,7 @@
-use std::{pin::Pin, sync::Arc};
+use std::{future::Future, pin::Pin, sync::Arc};
 
-use std::future::Future;
+use tracing::Instrument;
+
 use zebra_chain::{parameters::ConsensusBranchId, transaction::Transaction, transparent};
 
 use crate::BoxError;
@@ -65,25 +66,33 @@ where
 
         match input {
             transparent::Input::PrevOut { outpoint, .. } => {
-                let output = self.state.call(zebra_state::Request::AwaitUtxo(*outpoint));
+                let outpoint = *outpoint;
                 let transaction = req.transaction;
                 let branch_id = self.branch;
                 let input_index = req.input_index;
 
+                let span = tracing::trace_span!("script", ?outpoint);
+                let output =
+                    span.in_scope(|| self.state.call(zebra_state::Request::AwaitUtxo(outpoint)));
+
                 async move {
+                    tracing::trace!("awaiting outpoint lookup");
                     let previous_output = match output.await? {
                         zebra_state::Response::Utxo(output) => output,
                         _ => unreachable!("AwaitUtxo always responds with Utxo"),
                     };
+                    tracing::trace!(?previous_output, "got UTXO");
 
                     zebra_script::is_valid(
                         transaction,
                         branch_id,
                         (input_index as u32, previous_output),
                     )?;
+                    tracing::trace!("script verification succeeded");
 
                     Ok(())
                 }
+                .instrument(span)
                 .boxed()
             }
             transparent::Input::Coinbase { .. } => {
