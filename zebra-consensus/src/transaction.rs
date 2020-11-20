@@ -9,8 +9,8 @@ use futures::{
     stream::{FuturesUnordered, StreamExt},
     FutureExt,
 };
-
 use tower::{Service, ServiceExt};
+use tracing::Instrument;
 
 use zebra_chain::{
     parameters::NetworkUpgrade,
@@ -88,7 +88,9 @@ where
 
         let mut redjubjub_verifier = crate::primitives::redjubjub::VERIFIER.clone();
         let mut script_verifier = self.script_verifier.clone();
+        let span = tracing::debug_span!("tx", hash = ?tx.hash());
         async move {
+            tracing::trace!(?tx);
             match &*tx {
                 Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => {
                     Err(TransactionError::WrongVersion)
@@ -210,6 +212,7 @@ where
                 }
             }
         }
+        .instrument(span)
         .boxed()
     }
 }
