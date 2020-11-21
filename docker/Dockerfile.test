@@ -16,4 +16,6 @@ EXPOSE 8233 18233
 
 COPY . .
 
+RUN cargo test --all --no-run
+
 CMD cargo test --workspace --no-fail-fast -- -Zunstable-options --include-ignored
