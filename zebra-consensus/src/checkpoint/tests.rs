@@ -213,9 +213,9 @@ async fn multi_item_checkpoint_list() -> Result<(), Report> {
     Ok(())
 }
 
-#[tokio::test]
 // Temporarily ignore this test, until the state can handle out-of-order blocks
-#[ignore]
+// #[tokio::test]
+#[allow(dead_code)]
 async fn continuous_blockchain_test() -> Result<(), Report> {
     continuous_blockchain(None).await?;
     for height in 0..=10 {
@@ -225,6 +225,8 @@ async fn continuous_blockchain_test() -> Result<(), Report> {
 }
 
 /// Test a continuous blockchain, restarting verification at `restart_height`.
+// TODO: does this duplicate the test code commented out in src/chain/tests.rs?
+#[allow(dead_code)]
 #[spandoc::spandoc]
 async fn continuous_blockchain(restart_height: Option<block::Height>) -> Result<(), Report> {
     zebra_test::init();
