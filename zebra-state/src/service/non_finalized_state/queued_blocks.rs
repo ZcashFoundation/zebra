@@ -4,7 +4,7 @@ use std::{
 };
 
 use tracing::instrument;
-use zebra_chain::block;
+use zebra_chain::{block, transparent};
 
 use crate::service::QueuedBlock;
 
@@ -17,6 +17,8 @@ pub struct QueuedBlocks {
     by_parent: HashMap<block::Hash, HashSet<block::Hash>>,
     /// Hashes from `queued_blocks`, indexed by block height.
     by_height: BTreeMap<block::Height, HashSet<block::Hash>>,
+    /// Known UTXOs.
+    known_utxos: HashMap<transparent::OutPoint, transparent::Output>,
 }
 
 impl QueuedBlocks {
@@ -32,6 +34,21 @@ impl QueuedBlocks {
             .coinbase_height()
             .expect("validated non-finalized blocks have a coinbase height");
         let parent_hash = new.block.header.previous_block_hash;
+
+        // XXX QueuedBlock should include this data
+        let prev_utxo_count = self.known_utxos.len();
+        for transaction in &new.block.transactions {
+            let hash = transaction.hash();
+            for (index, output) in transaction.outputs().iter().cloned().enumerate() {
+                let index = index as u32;
+                self.known_utxos
+                    .insert(transparent::OutPoint { hash, index }, output);
+            }
+        }
+        tracing::trace!(
+            known_utxos = self.known_utxos.len(),
+            new = self.known_utxos.len() - prev_utxo_count
+        );
 
         let replaced = self.blocks.insert(new_hash, new);
         assert!(replaced.is_none(), "hashes must be unique");
@@ -62,9 +79,26 @@ impl QueuedBlocks {
             .unwrap_or_default()
             .into_iter()
             .map(|hash| {
-                self.blocks
+                let queued = self
+                    .blocks
                     .remove(&hash)
-                    .expect("block is present if its hash is in by_parent")
+                    .expect("block is present if its hash is in by_parent");
+
+                let prev_utxo_count = self.known_utxos.len();
+                for transaction in &queued.block.transactions {
+                    let hash = transaction.hash();
+                    for (index, _output) in transaction.outputs().iter().cloned().enumerate() {
+                        let index = index as u32;
+                        self.known_utxos
+                            .remove(&transparent::OutPoint { hash, index });
+                    }
+                }
+                tracing::trace!(
+                    known_utxos = self.known_utxos.len(),
+                    removed = prev_utxo_count - self.known_utxos.len()
+                );
+
+                queued
             })
             .collect::<Vec<_>>();
 
@@ -141,6 +175,11 @@ impl QueuedBlocks {
             metrics::gauge!("state.memory.queued.max.height", -1);
         }
         metrics::gauge!("state.memory.queued.block.count", self.blocks.len() as _);
+    }
+
+    /// Try to look up this UTXO in any queued block.
+    pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Output> {
+        self.known_utxos.get(outpoint).cloned()
     }
 }
 
