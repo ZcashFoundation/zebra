@@ -167,21 +167,21 @@ impl StateService {
 
     /// Attempt to validate and commit all queued blocks whose parents have
     /// recently arrived starting from `new_parent`, in breadth-first ordering.
-    #[instrument(skip(self))]
     fn process_queued(&mut self, new_parent: block::Hash) {
         let mut new_parents = vec![new_parent];
 
-        while let Some(parent) = new_parents.pop() {
-            let queued_children = self.queued_blocks.dequeue_children(parent);
+        while let Some(parent_hash) = new_parents.pop() {
+            let queued_children = self.queued_blocks.dequeue_children(parent_hash);
 
             for QueuedBlock { block, rsp_tx } in queued_children {
-                let hash = block.hash();
+                let child_hash = block.hash();
+                tracing::trace!(?child_hash, "validating queued child");
                 let result = self
                     .validate_and_commit(block)
-                    .map(|()| hash)
+                    .map(|()| child_hash)
                     .map_err(BoxError::from);
                 let _ = rsp_tx.send(result);
-                new_parents.push(hash);
+                new_parents.push(child_hash);
             }
         }
     }
