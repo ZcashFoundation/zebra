@@ -1,4 +1,4 @@
-use std::{convert::TryFrom, mem, sync::Arc};
+use std::{collections::HashMap, convert::TryFrom, mem, sync::Arc};
 
 use primitive_types::U256;
 use zebra_chain::{
@@ -10,6 +10,35 @@ use zebra_chain::{
 };
 
 use super::*;
+
+/// Mocks computation done during semantic validation
+pub trait Prepare {
+    fn prepare(self) -> PreparedBlock;
+}
+
+impl Prepare for Arc<Block> {
+    fn prepare(self) -> PreparedBlock {
+        let block = self;
+        let hash = block.hash();
+        let height = block.coinbase_height().unwrap();
+
+        let mut new_outputs = HashMap::new();
+        for transaction in &block.transactions {
+            let hash = transaction.hash();
+            for (index, output) in transaction.outputs().iter().cloned().enumerate() {
+                let index = index as u32;
+                new_outputs.insert(transparent::OutPoint { hash, index }, output);
+            }
+        }
+
+        PreparedBlock {
+            block,
+            hash,
+            height,
+            new_outputs,
+        }
+    }
+}
 
 /// Helper trait for constructing "valid" looking chains of blocks
 pub trait FakeChainHelper {

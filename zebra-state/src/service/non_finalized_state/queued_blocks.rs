@@ -28,27 +28,14 @@ impl QueuedBlocks {
     ///
     /// - if a block with the same `block::Hash` has already been queued.
     pub fn queue(&mut self, new: QueuedBlock) {
-        let new_hash = new.block.hash();
-        let new_height = new
-            .block
-            .coinbase_height()
-            .expect("validated non-finalized blocks have a coinbase height");
-        let parent_hash = new.block.header.previous_block_hash;
+        let new_hash = new.0.hash;
+        let new_height = new.0.height;
+        let parent_hash = new.0.block.header.previous_block_hash;
 
-        // XXX QueuedBlock should include this data
-        let prev_utxo_count = self.known_utxos.len();
-        for transaction in &new.block.transactions {
-            let hash = transaction.hash();
-            for (index, output) in transaction.outputs().iter().cloned().enumerate() {
-                let index = index as u32;
-                self.known_utxos
-                    .insert(transparent::OutPoint { hash, index }, output);
-            }
+        // Track known UTXOs in queued blocks.
+        for (outpoint, output) in new.0.new_outputs.iter() {
+            self.known_utxos.insert(*outpoint, output.clone());
         }
-        tracing::trace!(
-            known_utxos = self.known_utxos.len(),
-            new = self.known_utxos.len() - prev_utxo_count
-        );
 
         let replaced = self.blocks.insert(new_hash, new);
         assert!(replaced.is_none(), "hashes must be unique");
@@ -83,28 +70,15 @@ impl QueuedBlocks {
                     .blocks
                     .remove(&hash)
                     .expect("block is present if its hash is in by_parent");
-
-                let prev_utxo_count = self.known_utxos.len();
-                for transaction in &queued.block.transactions {
-                    let hash = transaction.hash();
-                    for (index, _output) in transaction.outputs().iter().cloned().enumerate() {
-                        let index = index as u32;
-                        self.known_utxos
-                            .remove(&transparent::OutPoint { hash, index });
-                    }
-                }
-                tracing::trace!(
-                    known_utxos = self.known_utxos.len(),
-                    removed = prev_utxo_count - self.known_utxos.len()
-                );
-
                 queued
             })
             .collect::<Vec<_>>();
 
         for queued in &queued_children {
-            let height = queued.block.coinbase_height().unwrap();
-            self.by_height.remove(&height);
+            self.by_height.remove(&queued.0.height);
+            for outpoint in queued.0.new_outputs.keys() {
+                self.known_utxos.remove(outpoint);
+            }
         }
 
         tracing::trace!(
@@ -133,7 +107,7 @@ impl QueuedBlocks {
 
         for hash in by_height.into_iter().flat_map(|(_, hashes)| hashes) {
             let expired = self.blocks.remove(&hash).expect("block is present");
-            let parent_hash = &expired.block.header.previous_block_hash;
+            let parent_hash = &expired.0.block.header.previous_block_hash;
 
             let parent_list = self
                 .by_parent
@@ -191,7 +165,7 @@ mod tests {
     use zebra_chain::{block::Block, serialization::ZcashDeserializeInto};
     use zebra_test::prelude::*;
 
-    use crate::tests::FakeChainHelper;
+    use crate::tests::{FakeChainHelper, Prepare};
 
     use self::assert_eq;
     use super::*;
@@ -204,11 +178,7 @@ mod tests {
     impl IntoQueued for Arc<Block> {
         fn into_queued(self) -> QueuedBlock {
             let (rsp_tx, _) = oneshot::channel();
-
-            QueuedBlock {
-                block: self,
-                rsp_tx,
-            }
+            (self.prepare(), rsp_tx)
         }
     }
 
@@ -253,22 +223,22 @@ mod tests {
         // Dequeueing the first block removes 1 block from each list
         let children = queue.dequeue_children(parent);
         assert_eq!(1, children.len());
-        assert_eq!(block1, children[0].block);
+        assert_eq!(block1, children[0].0.block);
         assert_eq!(2, queue.blocks.len());
         assert_eq!(1, queue.by_parent.len());
         assert_eq!(1, queue.by_height.len());
 
         // Dequeueing the children of the first block removes both of the other
         // blocks, and empties all lists
-        let parent = children[0].block.hash();
+        let parent = children[0].0.block.hash();
         let children = queue.dequeue_children(parent);
         assert_eq!(2, children.len());
         assert!(children
             .iter()
-            .any(|QueuedBlock { block, .. }| block == &child1));
+            .any(|(block, _)| block.hash == child1.hash()));
         assert!(children
             .iter()
-            .any(|QueuedBlock { block, .. }| block == &child2));
+            .any(|(block, _)| block.hash == child2.hash()));
         assert_eq!(0, queue.blocks.len());
         assert_eq!(0, queue.by_parent.len());
         assert_eq!(0, queue.by_height.len());

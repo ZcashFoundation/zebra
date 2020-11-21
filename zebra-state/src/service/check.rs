@@ -5,7 +5,7 @@ use zebra_chain::{
     parameters::Network,
 };
 
-use crate::ValidateContextError;
+use crate::{PreparedBlock, ValidateContextError};
 
 use super::check;
 
@@ -14,8 +14,13 @@ use super::check;
 ///
 /// The relevant chain is an iterator over the ancestors of `block`, starting
 /// with its parent block.
+#[tracing::instrument(
+    name = "contextual_validation",
+    fields(?network),
+    skip(prepared, network, finalized_tip_height, relevant_chain)
+)]
 pub(crate) fn block_is_contextually_valid<C>(
-    block: &Block,
+    prepared: &PreparedBlock,
     network: Network,
     finalized_tip_height: Option<block::Height>,
     relevant_chain: C,
@@ -24,22 +29,9 @@ where
     C: IntoIterator,
     C::Item: AsRef<Block>,
 {
-    let height = block
-        .coinbase_height()
-        .expect("semantically valid blocks have a coinbase height");
-    let hash = block.hash();
-
-    let span = tracing::info_span!(
-        "StateService::check_contextual_validity",
-        ?height,
-        ?network,
-        ?hash
-    );
-    let _entered = span.enter();
-
     let finalized_tip_height = finalized_tip_height
         .expect("finalized state must contain at least one block to use the non-finalized state");
-    check::block_is_not_orphaned(finalized_tip_height, block)?;
+    check::block_is_not_orphaned(finalized_tip_height, prepared.height)?;
 
     let mut relevant_chain = relevant_chain.into_iter();
     let parent_block = relevant_chain
@@ -49,7 +41,7 @@ where
     let parent_height = parent_block
         .coinbase_height()
         .expect("valid blocks have a coinbase height");
-    check::height_one_more_than_parent_height(parent_height, block)?;
+    check::height_one_more_than_parent_height(parent_height, prepared.height)?;
 
     // TODO: validate difficulty adjustment
     // TODO: other contextual validation design and implelentation
@@ -60,13 +52,9 @@ where
 /// block is less than or equal to the finalized tip height.
 pub(super) fn block_is_not_orphaned(
     finalized_tip_height: block::Height,
-    block: &Block,
+    height: block::Height,
 ) -> Result<(), ValidateContextError> {
-    if block
-        .coinbase_height()
-        .expect("valid blocks have a coinbase height")
-        <= finalized_tip_height
-    {
+    if height <= finalized_tip_height {
         Err(ValidateContextError::OrphanedBlock)
     } else {
         Ok(())
@@ -77,12 +65,8 @@ pub(super) fn block_is_not_orphaned(
 /// equal to the parent_height+1.
 pub(super) fn height_one_more_than_parent_height(
     parent_height: block::Height,
-    block: &Block,
+    height: block::Height,
 ) -> Result<(), ValidateContextError> {
-    let height = block
-        .coinbase_height()
-        .expect("valid blocks have a coinbase height");
-
     if parent_height + 1 != Some(height) {
         Err(ValidateContextError::NonSequentialBlock)
     } else {
@@ -102,16 +86,18 @@ mod tests {
     fn test_orphan_consensus_check() {
         zebra_test::init();
 
-        let block = zebra_test::vectors::BLOCK_MAINNET_347499_BYTES
+        let height = zebra_test::vectors::BLOCK_MAINNET_347499_BYTES
             .zcash_deserialize_into::<Arc<Block>>()
+            .unwrap()
+            .coinbase_height()
             .unwrap();
 
-        block_is_not_orphaned(block::Height(0), &block).expect("tip is lower so it should be fine");
-        block_is_not_orphaned(block::Height(347498), &block)
+        block_is_not_orphaned(block::Height(0), height).expect("tip is lower so it should be fine");
+        block_is_not_orphaned(block::Height(347498), height)
             .expect("tip is lower so it should be fine");
-        block_is_not_orphaned(block::Height(347499), &block)
+        block_is_not_orphaned(block::Height(347499), height)
             .expect_err("tip is equal so it should error");
-        block_is_not_orphaned(block::Height(500000), &block)
+        block_is_not_orphaned(block::Height(500000), height)
             .expect_err("tip is higher so it should error");
     }
 
@@ -119,21 +105,23 @@ mod tests {
     fn test_sequential_height_check() {
         zebra_test::init();
 
-        let block = zebra_test::vectors::BLOCK_MAINNET_347499_BYTES
+        let height = zebra_test::vectors::BLOCK_MAINNET_347499_BYTES
             .zcash_deserialize_into::<Arc<Block>>()
+            .unwrap()
+            .coinbase_height()
             .unwrap();
 
-        height_one_more_than_parent_height(block::Height(0), &block)
+        height_one_more_than_parent_height(block::Height(0), height)
             .expect_err("block is much lower, should panic");
-        height_one_more_than_parent_height(block::Height(347497), &block)
+        height_one_more_than_parent_height(block::Height(347497), height)
             .expect_err("parent height is 2 less, should panic");
-        height_one_more_than_parent_height(block::Height(347498), &block)
+        height_one_more_than_parent_height(block::Height(347498), height)
             .expect("parent height is 1 less, should be good");
-        height_one_more_than_parent_height(block::Height(347499), &block)
+        height_one_more_than_parent_height(block::Height(347499), height)
             .expect_err("parent height is equal, should panic");
-        height_one_more_than_parent_height(block::Height(347500), &block)
+        height_one_more_than_parent_height(block::Height(347500), height)
             .expect_err("parent height is way more, should panic");
-        height_one_more_than_parent_height(block::Height(500000), &block)
+        height_one_more_than_parent_height(block::Height(500000), height)
             .expect_err("parent height is way more, should panic");
     }
 }

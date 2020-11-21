@@ -1,4 +1,5 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
+
 use zebra_chain::{
     block::{self, Block},
     transaction, transparent,
@@ -47,6 +48,66 @@ impl From<block::Height> for HashOrHeight {
     }
 }
 
+/// A block which has undergone semantic validation and has been prepared for
+/// contextual validation.
+///
+/// It is the constructor's responsibility to perform semantic validation and to
+/// ensure that all fields are consistent.
+///
+/// This structure contains data from contextual validation, which is computed in
+/// the *service caller*'s task, not inside the service call itself. This allows
+/// moving work out of the single-threaded state service.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PreparedBlock {
+    /// The block to commit to the state.
+    pub block: Arc<Block>,
+    /// The hash of the block.
+    pub hash: block::Hash,
+    /// The height of the block.
+    pub height: block::Height,
+    /// New transparent outputs created in this block, indexed by
+    /// [`Outpoint`](transparent::Outpoint).
+    ///
+    /// Note: although these transparent outputs are newly created, they may not
+    /// be unspent, since a later transaction in a block can spend outputs of an
+    /// earlier transaction.
+    pub new_outputs: HashMap<transparent::OutPoint, transparent::Output>,
+    // TODO: add these parameters when we can compute anchors.
+    // sprout_anchor: sprout::tree::Root,
+    // sapling_anchor: sapling::tree::Root,
+}
+
+/// A finalized block, ready to be committed directly to the finalized state with
+/// no checks.
+///
+/// This is exposed for use in checkpointing.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FinalizedBlock {
+    // These are pub(crate) so we can add whatever db-format-dependent
+    // precomputation we want here without leaking internal details.
+    pub(crate) block: Arc<Block>,
+    pub(crate) hash: block::Hash,
+    pub(crate) height: block::Height,
+}
+
+// Doing precomputation in this From impl means that it will be done in
+// the *service caller*'s task, not inside the service call itself.
+// This allows moving work out of the single-threaded state service.
+impl From<Arc<Block>> for FinalizedBlock {
+    fn from(block: Arc<Block>) -> Self {
+        let height = block
+            .coinbase_height()
+            .expect("finalized blocks must have a valid coinbase height");
+        let hash = block.hash();
+
+        Self {
+            block,
+            height,
+            hash,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// A query about or modification to the chain state.
 pub enum Request {
@@ -65,13 +126,7 @@ pub enum Request {
     /// future will have no effect on whether it is eventually processed. A
     /// request to commit a block which has been queued internally but not yet
     /// committed will fail the older request and replace it with the newer request.
-    CommitBlock {
-        /// The block to commit to the state.
-        block: Arc<Block>,
-        // TODO: add these parameters when we can compute anchors.
-        // sprout_anchor: sprout::tree::Root,
-        // sapling_anchor: sapling::tree::Root,
-    },
+    CommitBlock(PreparedBlock),
 
     /// Commit a finalized block to the state, skipping all validation.
     ///
@@ -87,13 +142,7 @@ pub enum Request {
     /// future will have no effect on whether it is eventually processed.
     /// Duplicate requests should not be made, because it is the caller's
     /// responsibility to ensure that each block is valid and final.
-    CommitFinalizedBlock {
-        /// The block to commit to the state.
-        block: Arc<Block>,
-        // TODO: add these parameters when we can compute anchors.
-        // sprout_anchor: sprout::tree::Root,
-        // sapling_anchor: sapling::tree::Root,
-    },
+    CommitFinalizedBlock(FinalizedBlock),
 
     /// Computes the depth in the current best chain of the block identified by the given hash.
     ///
@@ -140,8 +189,8 @@ pub enum Request {
     /// available if it is unknown.
     ///
     /// This request is purely informational, and there are no guarantees about
-    /// whether the UTXO remains unspent or is on the best chain. Its purpose is
-    /// to allow asynchronous script verification.
+    /// whether the UTXO remains unspent or is on the best chain, or any chain.
+    /// Its purpose is to allow asynchronous script verification.
     ///
     /// Code making this request should apply a timeout layer to the service to
     /// handle missing UTXOs.

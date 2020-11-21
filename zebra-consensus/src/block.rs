@@ -193,11 +193,19 @@ where
             metrics::counter!("block.verified.block.count", 1);
 
             // Finally, submit the block for contextual verification.
+            let new_outputs = Arc::try_unwrap(known_utxos)
+                .expect("all verification tasks using known_utxos are complete");
+            let prepared_block = zs::PreparedBlock {
+                block,
+                hash,
+                height,
+                new_outputs,
+            };
             match state_service
                 .ready_and()
                 .await
                 .map_err(VerifyBlockError::Commit)?
-                .call(zs::Request::CommitBlock { block })
+                .call(zs::Request::CommitBlock(prepared_block))
                 .await
                 .map_err(VerifyBlockError::Commit)?
             {

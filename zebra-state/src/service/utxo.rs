@@ -35,7 +35,7 @@ impl PendingUtxos {
 
     /// Notify all utxo requests waiting for the `transparent::Output` pointed to
     /// by the given `transparent::OutPoint` that the `Output` has arrived.
-    pub fn respond(&mut self, outpoint: transparent::OutPoint, output: transparent::Output) {
+    pub fn respond(&mut self, outpoint: &transparent::OutPoint, output: transparent::Output) {
         if let Some(sender) = self.0.remove(&outpoint) {
             // Adding the outpoint as a field lets us crossreference
             // with the trace of the verification that made the request.
@@ -44,9 +44,16 @@ impl PendingUtxos {
         }
     }
 
-    /// For each notifies waiting utxo requests for each `transparent::Output` in
-    /// `block` that the output has arrived.
-    pub fn check_block(&mut self, block: &Block) {
+    /// Check the list of pending UTXO requests against the supplied UTXO index.
+    pub fn check_against(&mut self, utxos: &HashMap<transparent::OutPoint, transparent::Output>) {
+        for (outpoint, output) in utxos.iter() {
+            self.respond(outpoint, output.clone());
+        }
+    }
+
+    /// Scan through unindexed transactions in the given `block`
+    /// to determine whether it contains any requested UTXOs.
+    pub fn scan_block(&mut self, block: &Block) {
         if self.0.is_empty() {
             return;
         }
@@ -60,7 +67,7 @@ impl PendingUtxos {
                     index: index as _,
                 };
 
-                self.respond(outpoint, output.clone());
+                self.respond(&outpoint, output.clone());
             }
         }
     }
