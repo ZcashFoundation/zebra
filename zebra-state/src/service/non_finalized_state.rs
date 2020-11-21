@@ -15,7 +15,7 @@ use zebra_chain::{
     transparent,
 };
 
-use crate::request::HashOrHeight;
+use crate::{FinalizedBlock, HashOrHeight, PreparedBlock};
 
 use self::chain::Chain;
 
@@ -31,7 +31,7 @@ pub struct NonFinalizedState {
 impl NonFinalizedState {
     /// Finalize the lowest height block in the non-finalized portion of the best
     /// chain and update all side-chains to match.
-    pub fn finalize(&mut self) -> Arc<Block> {
+    pub fn finalize(&mut self) -> FinalizedBlock {
         let chains = mem::take(&mut self.chain_set);
         let mut chains = chains.into_iter();
 
@@ -40,8 +40,8 @@ impl NonFinalizedState {
         // extract the rest into side_chains so they can be mutated
         let side_chains = chains;
 
-        // remove the lowest height block from the best_chain as finalized_block
-        let finalized_block = best_chain.pop_root();
+        // remove the lowest height block from the best_chain to be finalized
+        let finalizing = best_chain.pop_root();
 
         // add best_chain back to `self.chain_set`
         if !best_chain.is_empty() {
@@ -53,7 +53,7 @@ impl NonFinalizedState {
             // remove the first block from `chain`
             let chain_start = chain.pop_root();
             // if block equals finalized_block
-            if !chain.is_empty() && chain_start == finalized_block {
+            if !chain.is_empty() && chain_start.hash == finalizing.hash {
                 // add the chain back to `self.chain_set`
                 self.chain_set.insert(chain);
             } else {
@@ -64,13 +64,17 @@ impl NonFinalizedState {
 
         self.update_metrics_for_chains();
 
-        // return the finalized block
-        finalized_block
+        // Construct a finalized block.
+        FinalizedBlock {
+            block: finalizing.block,
+            hash: finalizing.hash,
+            height: finalizing.height,
+        }
     }
 
     /// Commit block to the non-finalized state.
-    pub fn commit_block(&mut self, block: Arc<Block>) {
-        let parent_hash = block.header.previous_block_hash;
+    pub fn commit_block(&mut self, prepared: PreparedBlock) {
+        let parent_hash = prepared.block.header.previous_block_hash;
 
         let mut parent_chain = self
             .take_chain_if(|chain| chain.non_finalized_tip_hash() == parent_hash)
@@ -82,18 +86,20 @@ impl NonFinalizedState {
             })
             .expect("commit_block is only called with blocks that are ready to be commited");
 
-        parent_chain.push(block.clone());
+        let (height, hash) = (prepared.height, prepared.hash);
+        parent_chain.push(prepared);
         self.chain_set.insert(parent_chain);
-        self.update_metrics_for_committed_block(block);
+        self.update_metrics_for_committed_block(height, hash);
     }
 
     /// Commit block to the non-finalized state as a new chain where its parent
     /// is the finalized tip.
-    pub fn commit_new_chain(&mut self, block: Arc<Block>) {
+    pub fn commit_new_chain(&mut self, prepared: PreparedBlock) {
         let mut chain = Chain::default();
-        chain.push(block.clone());
+        let (height, hash) = (prepared.height, prepared.hash);
+        chain.push(prepared);
         self.chain_set.insert(Box::new(chain));
-        self.update_metrics_for_committed_block(block);
+        self.update_metrics_for_committed_block(height, hash);
     }
 
     /// Returns the length of the non-finalized portion of the current best chain.
@@ -155,12 +161,12 @@ impl NonFinalizedState {
     /// Returns the `block` with the given hash in the any chain.
     pub fn block_by_hash(&self, hash: block::Hash) -> Option<Arc<Block>> {
         for chain in self.chain_set.iter().rev() {
-            if let Some(block) = chain
+            if let Some(prepared) = chain
                 .height_by_hash
                 .get(&hash)
                 .and_then(|height| chain.blocks.get(height))
             {
-                return Some(block.clone());
+                return Some(prepared.block.clone());
             }
         }
 
@@ -173,7 +179,10 @@ impl NonFinalizedState {
         let height =
             hash_or_height.height_or_else(|hash| best_chain.height_by_hash.get(&hash).cloned())?;
 
-        best_chain.blocks.get(&height).cloned()
+        best_chain
+            .blocks
+            .get(&height)
+            .map(|prepared| prepared.block.clone())
     }
 
     /// Returns the hash for a given `block::Height` if it is present in the best chain.
@@ -211,10 +220,10 @@ impl NonFinalizedState {
     /// Returns the given transaction if it exists in the best chain.
     pub fn transaction(&self, hash: transaction::Hash) -> Option<Arc<Transaction>> {
         let best_chain = self.best_chain()?;
-        best_chain.tx_by_hash.get(&hash).map(|(height, index)| {
-            let block = &best_chain.blocks[height];
-            block.transactions[*index].clone()
-        })
+        best_chain
+            .tx_by_hash
+            .get(&hash)
+            .map(|(height, index)| best_chain.blocks[height].block.transactions[*index].clone())
     }
 
     /// Return the non-finalized portion of the current best chain
@@ -226,9 +235,7 @@ impl NonFinalizedState {
     }
 
     /// Update the metrics after `block` is committed
-    fn update_metrics_for_committed_block(&self, block: Arc<Block>) {
-        let height = block.coinbase_height().unwrap();
-
+    fn update_metrics_for_committed_block(&self, height: block::Height, hash: block::Hash) {
         metrics::counter!("state.memory.committed.block.count", 1);
         metrics::gauge!("state.memory.committed.block.height", height.0 as _);
 
@@ -240,7 +247,8 @@ impl NonFinalizedState {
             .next_back()
             .unwrap()
             .1
-            == &block
+            .hash
+            == hash
         {
             metrics::counter!("state.memory.best.committed.block.count", 1);
             metrics::gauge!("state.memory.best.committed.block.height", height.0 as _);
@@ -261,7 +269,7 @@ mod tests {
     use zebra_chain::serialization::ZcashDeserializeInto;
     use zebra_test::prelude::*;
 
-    use crate::tests::FakeChainHelper;
+    use crate::tests::{FakeChainHelper, Prepare};
 
     use self::assert_eq;
     use super::*;
@@ -278,8 +286,8 @@ mod tests {
         let expected_hash = block2.hash();
 
         let mut state = NonFinalizedState::default();
-        state.commit_new_chain(block2);
-        state.commit_new_chain(child);
+        state.commit_new_chain(block2.prepare());
+        state.commit_new_chain(child.prepare());
 
         let best_chain = state.best_chain().unwrap();
         assert!(best_chain.height_by_hash.contains_key(&expected_hash));
@@ -297,15 +305,15 @@ mod tests {
         let child = block1.make_fake_child().set_work(1);
 
         let mut state = NonFinalizedState::default();
-        state.commit_new_chain(block1.clone());
-        state.commit_block(block2.clone());
-        state.commit_block(child);
+        state.commit_new_chain(block1.clone().prepare());
+        state.commit_block(block2.clone().prepare());
+        state.commit_block(child.prepare());
 
         let finalized = state.finalize();
-        assert_eq!(block1, finalized);
+        assert_eq!(block1, finalized.block);
 
         let finalized = state.finalize();
-        assert_eq!(block2, finalized);
+        assert_eq!(block2, finalized.block);
 
         assert!(state.best_chain().is_none());
 
@@ -325,13 +333,13 @@ mod tests {
 
         let mut state = NonFinalizedState::default();
         assert_eq!(0, state.chain_set.len());
-        state.commit_new_chain(block1);
+        state.commit_new_chain(block1.prepare());
         assert_eq!(1, state.chain_set.len());
-        state.commit_block(block2);
+        state.commit_block(block2.prepare());
         assert_eq!(1, state.chain_set.len());
-        state.commit_block(child1);
+        state.commit_block(child1.prepare());
         assert_eq!(2, state.chain_set.len());
-        state.commit_block(child2);
+        state.commit_block(child2.prepare());
         assert_eq!(2, state.chain_set.len());
 
         Ok(())
@@ -350,10 +358,10 @@ mod tests {
         let short_chain_block = block1.make_fake_child().set_work(3);
 
         let mut state = NonFinalizedState::default();
-        state.commit_new_chain(block1);
-        state.commit_block(long_chain_block1);
-        state.commit_block(long_chain_block2);
-        state.commit_block(short_chain_block);
+        state.commit_new_chain(block1.prepare());
+        state.commit_block(long_chain_block1.prepare());
+        state.commit_block(long_chain_block2.prepare());
+        state.commit_block(short_chain_block.prepare());
         assert_eq!(2, state.chain_set.len());
 
         assert_eq!(2, state.best_chain_len());
@@ -376,12 +384,12 @@ mod tests {
         let short_chain_block = block1.make_fake_child().set_work(3);
 
         let mut state = NonFinalizedState::default();
-        state.commit_new_chain(block1);
-        state.commit_block(long_chain_block1);
-        state.commit_block(long_chain_block2);
-        state.commit_block(long_chain_block3);
-        state.commit_block(long_chain_block4);
-        state.commit_block(short_chain_block);
+        state.commit_new_chain(block1.prepare());
+        state.commit_block(long_chain_block1.prepare());
+        state.commit_block(long_chain_block2.prepare());
+        state.commit_block(long_chain_block3.prepare());
+        state.commit_block(long_chain_block4.prepare());
+        state.commit_block(short_chain_block.prepare());
         assert_eq!(2, state.chain_set.len());
 
         assert_eq!(5, state.best_chain_len());
@@ -401,9 +409,9 @@ mod tests {
         let expected_hash = more_work_child.hash();
 
         let mut state = NonFinalizedState::default();
-        state.commit_new_chain(block1);
-        state.commit_block(less_work_child);
-        state.commit_block(more_work_child);
+        state.commit_new_chain(block1.prepare());
+        state.commit_block(less_work_child.prepare());
+        state.commit_block(more_work_child.prepare());
         assert_eq!(2, state.chain_set.len());
 
         let tip_hash = state.tip().unwrap().1;

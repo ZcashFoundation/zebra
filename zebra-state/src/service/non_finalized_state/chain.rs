@@ -2,20 +2,19 @@ use std::{
     cmp::Ordering,
     collections::{BTreeMap, HashMap, HashSet},
     ops::Deref,
-    sync::Arc,
 };
 
 use tracing::{debug_span, instrument, trace};
 use zebra_chain::{
-    block::{self, Block},
-    primitives::Groth16Proof,
-    sapling, sprout, transaction, transparent,
+    block, primitives::Groth16Proof, sapling, sprout, transaction, transparent,
     work::difficulty::PartialCumulativeWork,
 };
 
+use crate::PreparedBlock;
+
 #[derive(Default, Clone)]
 pub struct Chain {
-    pub blocks: BTreeMap<block::Height, Arc<Block>>,
+    pub blocks: BTreeMap<block::Height, PreparedBlock>,
     pub height_by_hash: HashMap<block::Hash, block::Height>,
     pub tx_by_hash: HashMap<transaction::Hash, (block::Height, usize)>,
 
@@ -30,20 +29,17 @@ pub struct Chain {
 
 impl Chain {
     /// Push a contextually valid non-finalized block into a chain as the new tip.
-    #[instrument(skip(self), fields(%block))]
-    pub fn push(&mut self, block: Arc<Block>) {
-        let block_height = block
-            .coinbase_height()
-            .expect("valid non-finalized blocks have a coinbase height");
+    #[instrument(skip(self, block), fields(block = %block.block))]
+    pub fn push(&mut self, block: PreparedBlock) {
         // update cumulative data members
         self.update_chain_state_with(&block);
-        self.blocks.insert(block_height, block);
+        self.blocks.insert(block.height, block);
         trace!("pushed block onto chain");
     }
 
     /// Remove the lowest height block of the non-finalized portion of a chain.
     #[instrument(skip(self))]
-    pub fn pop_root(&mut self) -> Arc<Block> {
+    pub fn pop_root(&mut self) -> PreparedBlock {
         let block_height = self.lowest_height();
 
         // remove the lowest height block from self.blocks
@@ -55,7 +51,7 @@ impl Chain {
         // update cumulative data members
         self.revert_chain_state_with(&block);
 
-        // return the block
+        // return the prepared block
         block
     }
 
@@ -88,7 +84,7 @@ impl Chain {
             .values()
             .next_back()
             .expect("only called while blocks is populated")
-            .hash()
+            .hash
     }
 
     /// Remove the highest height block of the non-finalized portion of a chain.
@@ -138,15 +134,12 @@ trait UpdateWith<T> {
     fn revert_chain_state_with(&mut self, _: &T);
 }
 
-impl UpdateWith<Arc<Block>> for Chain {
-    fn update_chain_state_with(&mut self, block: &Arc<Block>) {
-        let block_height = block
-            .coinbase_height()
-            .expect("valid non-finalized blocks have a coinbase height");
-        let block_hash = block.hash();
+impl UpdateWith<PreparedBlock> for Chain {
+    fn update_chain_state_with(&mut self, prepared: &PreparedBlock) {
+        let (block, hash, height) = (prepared.block.as_ref(), prepared.hash, prepared.height);
 
         // add hash to height_by_hash
-        let prior_height = self.height_by_hash.insert(block_hash, block_height);
+        let prior_height = self.height_by_hash.insert(hash, height);
         assert!(
             prior_height.is_none(),
             "block heights must be unique within a single chain"
@@ -179,7 +172,7 @@ impl UpdateWith<Arc<Block>> for Chain {
             let transaction_hash = transaction.hash();
             let prior_pair = self
                 .tx_by_hash
-                .insert(transaction_hash, (block_height, transaction_index));
+                .insert(transaction_hash, (height, transaction_index));
             assert!(
                 prior_pair.is_none(),
                 "transactions must be unique within a single chain"
@@ -196,13 +189,13 @@ impl UpdateWith<Arc<Block>> for Chain {
         }
     }
 
-    #[instrument(skip(self), fields(%block))]
-    fn revert_chain_state_with(&mut self, block: &Arc<Block>) {
-        let block_hash = block.hash();
+    #[instrument(skip(self, prepared), fields(block = %prepared.block))]
+    fn revert_chain_state_with(&mut self, prepared: &PreparedBlock) {
+        let (block, hash) = (prepared.block.as_ref(), prepared.hash);
 
         // remove the blocks hash from `height_by_hash`
         assert!(
-            self.height_by_hash.remove(&block_hash).is_some(),
+            self.height_by_hash.remove(&hash).is_some(),
             "hash must be present if block was"
         );
 
@@ -395,14 +388,14 @@ impl Ord for Chain {
                 .values()
                 .last()
                 .expect("always at least 1 element")
-                .hash();
+                .hash;
 
             let other_hash = other
                 .blocks
                 .values()
                 .last()
                 .expect("always at least 1 element")
-                .hash();
+                .hash;
 
             // This comparison is a tie-breaker within the local node, so it does not need to
             // be consistent with the ordering on `ExpandedDifficulty` and `block::Hash`.
@@ -416,16 +409,17 @@ impl Ord for Chain {
 
 #[cfg(test)]
 mod tests {
-    use std::{env, fmt};
+    use std::{env, fmt, sync::Arc};
 
     use zebra_chain::serialization::ZcashDeserializeInto;
     use zebra_chain::{
+        block::Block,
         parameters::{Network, NetworkUpgrade},
         LedgerState,
     };
     use zebra_test::prelude::*;
 
-    use crate::tests::FakeChainHelper;
+    use crate::tests::{FakeChainHelper, Prepare};
 
     use self::assert_eq;
     use super::*;
@@ -447,10 +441,11 @@ mod tests {
     #[test]
     fn construct_single() -> Result<()> {
         zebra_test::init();
-        let block = zebra_test::vectors::BLOCK_MAINNET_434873_BYTES.zcash_deserialize_into()?;
+        let block: Arc<Block> =
+            zebra_test::vectors::BLOCK_MAINNET_434873_BYTES.zcash_deserialize_into()?;
 
         let mut chain = Chain::default();
-        chain.push(block);
+        chain.push(block.prepare());
 
         assert_eq!(1, chain.blocks.len());
 
@@ -474,7 +469,7 @@ mod tests {
         let mut chain = Chain::default();
 
         for block in blocks {
-            chain.push(block);
+            chain.push(block.prepare());
         }
 
         assert_eq!(100, chain.blocks.len());
@@ -491,10 +486,10 @@ mod tests {
         let more_block = less_block.clone().set_work(10);
 
         let mut lesser_chain = Chain::default();
-        lesser_chain.push(less_block);
+        lesser_chain.push(less_block.prepare());
 
         let mut bigger_chain = Chain::default();
-        bigger_chain.push(more_block);
+        bigger_chain.push(more_block.prepare());
 
         assert!(bigger_chain > lesser_chain);
 
@@ -529,11 +524,11 @@ mod tests {
             let mut partial_chain = Chain::default();
 
             for block in chain.iter().take(count) {
-                partial_chain.push(block.clone());
+                partial_chain.push(block.clone().prepare());
             }
 
             for block in chain {
-                full_chain.push(block);
+                full_chain.push(block.prepare());
             }
 
             let forked = full_chain.fork(fork_tip_hash).expect("hash is present");
@@ -560,11 +555,11 @@ mod tests {
             let mut partial_chain = Chain::default();
 
             for block in chain.iter().skip(finalized_count) {
-                partial_chain.push(block.clone());
+                partial_chain.push(block.clone().prepare());
             }
 
             for block in chain {
-                full_chain.push(block);
+                full_chain.push(block.prepare());
             }
 
             for _ in 0..finalized_count {

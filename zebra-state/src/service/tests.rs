@@ -17,7 +17,7 @@ async fn populated_state(
 ) -> BoxService<Request, Response, BoxError> {
     let requests = blocks
         .into_iter()
-        .map(|block| Request::CommitFinalizedBlock { block });
+        .map(|block| Request::CommitFinalizedBlock(block.into()));
 
     let config = Config::ephemeral();
     let network = Network::Mainnet;

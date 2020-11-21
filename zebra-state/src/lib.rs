@@ -23,6 +23,6 @@ mod tests;
 pub use config::Config;
 pub use constants::MAX_BLOCK_REORG_HEIGHT;
 pub use error::{BoxError, CloneError, CommitBlockError, ValidateContextError};
-pub use request::{HashOrHeight, Request};
+pub use request::{FinalizedBlock, HashOrHeight, PreparedBlock, Request};
 pub use response::Response;
 pub use service::init;

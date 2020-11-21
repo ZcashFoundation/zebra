@@ -852,7 +852,7 @@ where
                 .ready_and()
                 .await
                 .expect("Verified checkpoints must be committed transactionally")
-                .call(zs::Request::CommitFinalizedBlock { block })
+                .call(zs::Request::CommitFinalizedBlock(block.into()))
                 .await
                 .expect("Verified checkpoints must be committed transactionally")
             {

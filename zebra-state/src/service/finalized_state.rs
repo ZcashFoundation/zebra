@@ -11,16 +11,16 @@ use zebra_chain::{
     transaction::{self, Transaction},
 };
 
-use crate::{BoxError, Config, HashOrHeight};
+use crate::{BoxError, Config, FinalizedBlock, HashOrHeight};
 
 use self::disk_format::{DiskDeserialize, DiskSerialize, FromDisk, IntoDisk, TransactionLocation};
 
-use super::QueuedBlock;
+use super::QueuedFinalized;
 
 /// The finalized part of the chain state, stored in the db.
 pub struct FinalizedState {
     /// Queued blocks that arrived out of order, indexed by their parent block hash.
-    queued_by_prev_hash: HashMap<block::Hash, QueuedBlock>,
+    queued_by_prev_hash: HashMap<block::Hash, QueuedFinalized>,
     max_queued_height: i64,
 
     db: rocksdb::DB,
@@ -92,10 +92,10 @@ impl FinalizedState {
     ///
     /// After queueing a finalized block, this method checks whether the newly
     /// queued block (and any of its descendants) can be committed to the state.
-    pub fn queue_and_commit_finalized(&mut self, queued_block: QueuedBlock) {
-        let prev_hash = queued_block.block.header.previous_block_hash;
-        let height = queued_block.block.coinbase_height().unwrap();
-        self.queued_by_prev_hash.insert(prev_hash, queued_block);
+    pub fn queue_and_commit_finalized(&mut self, queued: QueuedFinalized) {
+        let prev_hash = queued.0.block.header.previous_block_hash;
+        let height = queued.0.height;
+        self.queued_by_prev_hash.insert(prev_hash, queued);
 
         while let Some(queued_block) = self.queued_by_prev_hash.remove(&self.finalized_tip_hash()) {
             self.commit_finalized(queued_block);
@@ -111,7 +111,6 @@ impl FinalizedState {
         }
 
         metrics::gauge!("state.finalized.queued.max.height", self.max_queued_height);
-
         metrics::gauge!(
             "state.finalized.queued.block.count",
             self.queued_by_prev_hash.len() as _
@@ -139,14 +138,18 @@ impl FinalizedState {
             .valid()
     }
 
-    /// Immediately commit `block` to the finalized state.
-    pub fn commit_finalized_direct(&mut self, block: Arc<Block>) -> Result<block::Hash, BoxError> {
-        let height = block
-            .coinbase_height()
-            .expect("finalized blocks are valid and have a coinbase height");
-        let hash = block.hash();
+    /// Immediately commit `finalized` to the finalized state.
+    pub fn commit_finalized_direct(
+        &mut self,
+        finalized: FinalizedBlock,
+    ) -> Result<block::Hash, BoxError> {
+        block_precommit_metrics(&finalized);
 
-        block_precommit_metrics(&hash, height, &block);
+        let FinalizedBlock {
+            block,
+            hash,
+            height,
+        } = finalized;
 
         let hash_by_height = self.db.cf_handle("hash_by_height").unwrap();
         let height_by_hash = self.db.cf_handle("height_by_hash").unwrap();
@@ -265,9 +268,9 @@ impl FinalizedState {
     /// order. This function is called by [`queue`], which ensures order.
     /// It is intentionally not exposed as part of the public API of the
     /// [`FinalizedState`].
-    fn commit_finalized(&mut self, queued_block: QueuedBlock) {
-        let QueuedBlock { block, rsp_tx } = queued_block;
-        let result = self.commit_finalized_direct(block);
+    fn commit_finalized(&mut self, queued_block: QueuedFinalized) {
+        let (finalized, rsp_tx) = queued_block;
+        let result = self.commit_finalized_direct(finalized);
         let _ = rsp_tx.send(result.map_err(Into::into));
     }
 
@@ -342,7 +345,9 @@ impl Drop for FinalizedState {
     }
 }
 
-fn block_precommit_metrics(hash: &block::Hash, height: block::Height, block: &Block) {
+fn block_precommit_metrics(finalized: &FinalizedBlock) {
+    let (hash, height, block) = (finalized.hash, finalized.height, finalized.block.as_ref());
+
     let transaction_count = block.transactions.len();
     let transparent_prevout_count = block
         .transactions

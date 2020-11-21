@@ -320,9 +320,9 @@ async fn continuous_blockchain(restart_height: Option<block::Height>) -> Result<
 
                     /// SPANDOC: Add block to the state {?height}
                     ready_state_service
-                        .call(zebra_state::Request::CommitFinalizedBlock {
-                            block: block.clone(),
-                        })
+                        .call(zebra_state::Request::CommitFinalizedBlock(
+                            block.clone().into(),
+                        ))
                         .await
                         .map_err(|e| eyre!(e))?;
                 }

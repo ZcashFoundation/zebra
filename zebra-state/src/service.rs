@@ -3,8 +3,7 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
-    time::Duration,
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use futures::future::FutureExt;
@@ -21,8 +20,8 @@ use zebra_chain::{
 };
 
 use crate::{
-    request::HashOrHeight, BoxError, CommitBlockError, Config, Request, Response,
-    ValidateContextError,
+    request::HashOrHeight, BoxError, CommitBlockError, Config, FinalizedBlock, PreparedBlock,
+    Request, Response, ValidateContextError,
 };
 
 use self::finalized_state::FinalizedState;
@@ -34,15 +33,14 @@ mod non_finalized_state;
 mod tests;
 mod utxo;
 
-// todo: put this somewhere
-#[derive(Debug)]
-pub struct QueuedBlock {
-    pub block: Arc<Block>,
-    // TODO: add these parameters when we can compute anchors.
-    // sprout_anchor: sprout::tree::Root,
-    // sapling_anchor: sapling::tree::Root,
-    pub rsp_tx: oneshot::Sender<Result<block::Hash, BoxError>>,
-}
+pub type QueuedBlock = (
+    PreparedBlock,
+    oneshot::Sender<Result<block::Hash, BoxError>>,
+);
+pub type QueuedFinalized = (
+    FinalizedBlock,
+    oneshot::Sender<Result<block::Hash, BoxError>>,
+);
 
 struct StateService {
     /// Holds data relating to finalized chain state.
@@ -85,15 +83,15 @@ impl StateService {
     /// in RFC0005.
     ///
     /// [1]: https://zebra.zfnd.org/dev/rfcs/0005-state-updates.html#committing-non-finalized-blocks
-    #[instrument(skip(self, block))]
+    #[instrument(skip(self, prepared))]
     fn queue_and_commit_non_finalized(
         &mut self,
-        block: Arc<Block>,
+        prepared: PreparedBlock,
     ) -> oneshot::Receiver<Result<block::Hash, BoxError>> {
-        let hash = block.hash();
-        let parent_hash = block.header.previous_block_hash;
+        let parent_hash = prepared.block.header.previous_block_hash;
 
-        if self.contains_committed_block(&block) {
+        if self.mem.any_chain_contains(&prepared.hash) || self.disk.hash(prepared.height).is_some()
+        {
             let (rsp_tx, rsp_rx) = oneshot::channel();
             let _ = rsp_tx.send(Err("block is already committed to the state".into()));
             return rsp_rx;
@@ -102,15 +100,15 @@ impl StateService {
         // Request::CommitBlock contract: a request to commit a block which has
         // been queued but not yet committed to the state fails the older
         // request and replaces it with the newer request.
-        let rsp_rx = if let Some(queued_block) = self.queued_blocks.get_mut(&hash) {
+        let rsp_rx = if let Some((_, old_rsp_tx)) = self.queued_blocks.get_mut(&prepared.hash) {
             tracing::debug!("replacing older queued request with new request");
             let (mut rsp_tx, rsp_rx) = oneshot::channel();
-            std::mem::swap(&mut queued_block.rsp_tx, &mut rsp_tx);
+            std::mem::swap(old_rsp_tx, &mut rsp_tx);
             let _ = rsp_tx.send(Err("replaced by newer request".into()));
             rsp_rx
         } else {
             let (rsp_tx, rsp_rx) = oneshot::channel();
-            self.queued_blocks.queue(QueuedBlock { block, rsp_tx });
+            self.queued_blocks.queue((prepared, rsp_tx));
             rsp_rx
         };
 
@@ -138,16 +136,16 @@ impl StateService {
         rsp_rx
     }
 
-    /// Run contextual validation on `block` and add it to the non-finalized
-    /// state if it is contextually valid.
-    fn validate_and_commit(&mut self, block: Arc<Block>) -> Result<(), CommitBlockError> {
-        self.check_contextual_validity(&block)?;
-        let parent_hash = block.header.previous_block_hash;
+    /// Run contextual validation on the prepared block and add it to the
+    /// non-finalized state if it is contextually valid.
+    fn validate_and_commit(&mut self, prepared: PreparedBlock) -> Result<(), CommitBlockError> {
+        self.check_contextual_validity(&prepared)?;
+        let parent_hash = prepared.block.header.previous_block_hash;
 
         if self.disk.finalized_tip_hash() == parent_hash {
-            self.mem.commit_new_chain(block);
+            self.mem.commit_new_chain(prepared);
         } else {
-            self.mem.commit_block(block);
+            self.mem.commit_block(prepared);
         }
 
         Ok(())
@@ -158,17 +156,6 @@ impl StateService {
         self.mem.any_chain_contains(hash) || &self.disk.finalized_tip_hash() == hash
     }
 
-    /// Returns true if the given hash has been committed to either the finalized
-    /// or non-finalized state.
-    fn contains_committed_block(&self, block: &Block) -> bool {
-        let hash = block.hash();
-        let height = block
-            .coinbase_height()
-            .expect("coinbase heights should be valid");
-
-        self.mem.any_chain_contains(&hash) || self.disk.hash(height) == Some(hash)
-    }
-
     /// Attempt to validate and commit all queued blocks whose parents have
     /// recently arrived starting from `new_parent`, in breadth-first ordering.
     fn process_queued(&mut self, new_parent: block::Hash) {
@@ -177,11 +164,11 @@ impl StateService {
         while let Some(parent_hash) = new_parents.pop() {
             let queued_children = self.queued_blocks.dequeue_children(parent_hash);
 
-            for QueuedBlock { block, rsp_tx } in queued_children {
-                let child_hash = block.hash();
+            for (child, rsp_tx) in queued_children {
+                let child_hash = child.hash.clone();
                 tracing::trace!(?child_hash, "validating queued child");
                 let result = self
-                    .validate_and_commit(block)
+                    .validate_and_commit(child)
                     .map(|()| child_hash)
                     .map_err(BoxError::from);
                 let _ = rsp_tx.send(result);
@@ -190,14 +177,17 @@ impl StateService {
         }
     }
 
-    /// Check that `block` is contextually valid for the configured network,
-    /// based on the committed finalized and non-finalized state.
-    fn check_contextual_validity(&mut self, block: &Block) -> Result<(), ValidateContextError> {
+    /// Check that the prepared block is contextually valid for the configured
+    /// network, based on the committed finalized and non-finalized state.
+    fn check_contextual_validity(
+        &mut self,
+        prepared: &PreparedBlock,
+    ) -> Result<(), ValidateContextError> {
         check::block_is_contextually_valid(
-            block,
+            prepared,
             self.network,
             self.disk.finalized_tip_height(),
-            self.chain(block.header.previous_block_hash),
+            self.chain(prepared.block.header.previous_block_hash),
         )?;
 
         Ok(())
@@ -393,11 +383,11 @@ impl Service<Request> for StateService {
     #[instrument(name = "state", skip(self, req))]
     fn call(&mut self, req: Request) -> Self::Future {
         match req {
-            Request::CommitBlock { block } => {
+            Request::CommitBlock(prepared) => {
                 metrics::counter!("state.requests", 1, "type" => "commit_block");
 
-                self.pending_utxos.check_block(&block);
-                let rsp_rx = self.queue_and_commit_non_finalized(block);
+                self.pending_utxos.check_against(&prepared.new_outputs);
+                let rsp_rx = self.queue_and_commit_non_finalized(prepared);
 
                 async move {
                     rsp_rx
@@ -408,14 +398,13 @@ impl Service<Request> for StateService {
                 }
                 .boxed()
             }
-            Request::CommitFinalizedBlock { block } => {
+            Request::CommitFinalizedBlock(finalized) => {
                 metrics::counter!("state.requests", 1, "type" => "commit_finalized_block");
 
                 let (rsp_tx, rsp_rx) = oneshot::channel();
 
-                self.pending_utxos.check_block(&block);
-                self.disk
-                    .queue_and_commit_finalized(QueuedBlock { block, rsp_tx });
+                self.pending_utxos.scan_block(&finalized.block);
+                self.disk.queue_and_commit_finalized((finalized, rsp_tx));
 
                 async move {
                     rsp_rx
@@ -457,7 +446,7 @@ impl Service<Request> for StateService {
                 let fut = self.pending_utxos.queue(outpoint);
 
                 if let Some(utxo) = self.utxo(&outpoint) {
-                    self.pending_utxos.respond(outpoint, utxo);
+                    self.pending_utxos.respond(&outpoint, utxo);
                 }
 
                 fut.boxed()
