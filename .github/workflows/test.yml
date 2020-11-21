@@ -63,7 +63,7 @@ jobs:
       - name: Run all tests
         run: |
           gcloud compute ssh "zebrad-tests-$BRANCH_NAME-$SHORT_SHA" --zone "$ZONE" \
-          --command "git clone -b $BRANCH_NAME https://github.com/ZcashFoundation/zebra.git; cd zebra/; docker build -f docker/Dockerfile.test -t zebrad-test .; docker run -i zebrad-test cargo test --workspace --no-fail-fast -- -Zunstable-options --include-ignored --skip kill_on_timeout"
+          --command "git clone -b $BRANCH_NAME https://github.com/ZcashFoundation/zebra.git; cd zebra/; docker build -f docker/Dockerfile.test -t zebrad-test .; docker run -i zebrad-test cargo test --workspace --no-fail-fast -- -Zunstable-options --include-ignored"
 
       # Clean up
       - name: Delete test instance
