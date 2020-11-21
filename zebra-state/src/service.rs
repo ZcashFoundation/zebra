@@ -262,7 +262,10 @@ impl StateService {
 
     /// Return the utxo pointed to by `outpoint` if it exists in any chain.
     pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Output> {
-        self.mem.utxo(outpoint).or_else(|| self.disk.utxo(outpoint))
+        self.mem
+            .utxo(outpoint)
+            .or_else(|| self.disk.utxo(outpoint))
+            .or_else(|| self.queued_blocks.utxo(outpoint))
     }
 
     /// Return an iterator over the relevant chain of the block identified by
