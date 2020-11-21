@@ -95,8 +95,9 @@ fn finish_before_timeout_output_single_line() -> Result<()> {
 /// is killed after the timeout.
 ///
 /// This test fails due to bugs in TestDirExt, see #1140 for details.
-#[test]
-#[ignore]
+//#[test]
+//#[ignore]
+#[allow(dead_code)]
 fn kill_on_timeout_continuous_output_no_newlines() -> Result<()> {
     zebra_test::init();
 
@@ -146,8 +147,9 @@ fn finish_before_timeout_short_output_no_newlines() -> Result<()> {
 /// Test if the timeout works for a process that produces no output.
 ///
 /// This test fails due to bugs in TestDirExt, see #1140 for details.
-#[test]
-#[ignore]
+// #[test]
+// #[ignore]
+#[allow(dead_code)]
 fn kill_on_timeout_no_output() -> Result<()> {
     zebra_test::init();
 
