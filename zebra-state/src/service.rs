@@ -83,11 +83,12 @@ impl StateService {
     /// in RFC0005.
     ///
     /// [1]: https://zebra.zfnd.org/dev/rfcs/0005-state-updates.html#committing-non-finalized-blocks
-    #[instrument(skip(self, prepared))]
+    #[instrument(level = "debug", skip(self, prepared))]
     fn queue_and_commit_non_finalized(
         &mut self,
         prepared: PreparedBlock,
     ) -> oneshot::Receiver<Result<block::Hash, BoxError>> {
+        tracing::debug!(block = %prepared.block, "queueing block for contextual verification");
         let parent_hash = prepared.block.header.previous_block_hash;
 
         if self.mem.any_chain_contains(&prepared.hash) || self.disk.hash(prepared.height).is_some()

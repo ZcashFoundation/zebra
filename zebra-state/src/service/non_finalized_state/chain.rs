@@ -29,16 +29,16 @@ pub struct Chain {
 
 impl Chain {
     /// Push a contextually valid non-finalized block into a chain as the new tip.
-    #[instrument(skip(self, block), fields(block = %block.block))]
+    #[instrument(level = "debug", skip(self, block), fields(block = %block.block))]
     pub fn push(&mut self, block: PreparedBlock) {
         // update cumulative data members
         self.update_chain_state_with(&block);
+        tracing::info!(block = %block.block, "adding block to chain");
         self.blocks.insert(block.height, block);
-        trace!("pushed block onto chain");
     }
 
     /// Remove the lowest height block of the non-finalized portion of a chain.
-    #[instrument(skip(self))]
+    #[instrument(level = "debug", skip(self))]
     pub fn pop_root(&mut self) -> PreparedBlock {
         let block_height = self.lowest_height();
 
