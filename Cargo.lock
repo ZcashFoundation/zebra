@@ -2744,7 +2744,7 @@ dependencies = [
 [[package]]
 name = "tower"
 version = "0.4.0"
-source = "git+https://github.com/tower-rs/tower?rev=5e1e07744820028877654c336a3b9fe057bf46f1#5e1e07744820028877654c336a3b9fe057bf46f1"
+source = "git+https://github.com/tower-rs/tower?rev=d4d1c67c6a0e4213a52abcc2b9df6cc58276ee39#d4d1c67c6a0e4213a52abcc2b9df6cc58276ee39"
 dependencies = [
  "futures-core",
  "futures-util",
@@ -2789,7 +2789,7 @@ dependencies = [
 [[package]]
 name = "tower-layer"
 version = "0.3.0"
-source = "git+https://github.com/tower-rs/tower?rev=5e1e07744820028877654c336a3b9fe057bf46f1#5e1e07744820028877654c336a3b9fe057bf46f1"
+source = "git+https://github.com/tower-rs/tower?rev=d4d1c67c6a0e4213a52abcc2b9df6cc58276ee39#d4d1c67c6a0e4213a52abcc2b9df6cc58276ee39"
 
 [[package]]
 name = "tower-service"

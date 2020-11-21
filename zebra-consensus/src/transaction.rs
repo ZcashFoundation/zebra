@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -15,6 +16,7 @@ use tracing::Instrument;
 use zebra_chain::{
     parameters::NetworkUpgrade,
     transaction::{self, HashType, Transaction},
+    transparent,
 };
 
 use zebra_state as zs;
@@ -51,9 +53,17 @@ where
 #[allow(dead_code)]
 pub enum Request {
     /// Verify the supplied transaction as part of a block.
-    Block(Arc<Transaction>),
+    Block {
+        transaction: Arc<Transaction>,
+        /// Additional UTXOs which are known at the time of verification.
+        known_utxos: Arc<HashMap<transparent::OutPoint, transparent::Output>>,
+    },
     /// Verify the supplied transaction as part of the mempool.
-    Mempool(Arc<Transaction>),
+    Mempool {
+        transaction: Arc<Transaction>,
+        /// Additional UTXOs which are known at the time of verification.
+        known_utxos: Arc<HashMap<transparent::OutPoint, transparent::Output>>,
+    },
 }
 
 impl<ZS> Service<Request> for Verifier<ZS>
@@ -73,17 +83,23 @@ where
     // TODO: break up each chunk into its own method
     fn call(&mut self, req: Request) -> Self::Future {
         let is_mempool = match req {
-            Request::Block(_) => false,
-            Request::Mempool(_) => true,
+            Request::Block { .. } => false,
+            Request::Mempool { .. } => true,
         };
         if is_mempool {
             // XXX determine exactly which rules apply to mempool transactions
             unimplemented!();
         }
 
-        let tx = match req {
-            Request::Block(tx) => tx,
-            Request::Mempool(tx) => tx,
+        let (tx, known_utxos) = match req {
+            Request::Block {
+                transaction,
+                known_utxos,
+            } => (transaction, known_utxos),
+            Request::Mempool {
+                transaction,
+                known_utxos,
+            } => (transaction, known_utxos),
         };
 
         let mut redjubjub_verifier = crate::primitives::redjubjub::VERIFIER.clone();
@@ -122,6 +138,7 @@ where
                         // feed all of the inputs to the script verifier
                         for input_index in 0..inputs.len() {
                             let rsp = script_verifier.ready_and().await?.call(script::Request {
+                                known_utxos: known_utxos.clone(),
                                 transaction: tx.clone(),
                                 input_index,
                             });
