@@ -35,12 +35,10 @@ impl Chain {
         let block_height = block
             .coinbase_height()
             .expect("valid non-finalized blocks have a coinbase height");
-
-        trace!(?block_height, "Pushing new block into chain state");
-
         // update cumulative data members
         self.update_chain_state_with(&block);
         self.blocks.insert(block_height, block);
+        trace!("pushed block onto chain");
     }
 
     /// Remove the lowest height block of the non-finalized portion of a chain.

@@ -48,17 +48,17 @@ impl QueuedBlocks {
             .insert(new_hash);
         assert!(inserted, "hashes must be unique");
 
-        tracing::trace!(num_blocks = %self.blocks.len(), %parent_hash, ?new_height,  "Finished queueing a new block");
+        tracing::trace!(%parent_hash, queued = %self.blocks.len(), "queued block");
         self.update_metrics();
     }
 
     /// Dequeue and return all blocks that were waiting for the arrival of
     /// `parent`.
-    #[instrument(skip(self))]
-    pub fn dequeue_children(&mut self, parent: block::Hash) -> Vec<QueuedBlock> {
+    #[instrument(skip(self), fields(%parent_hash))]
+    pub fn dequeue_children(&mut self, parent_hash: block::Hash) -> Vec<QueuedBlock> {
         let queued_children = self
             .by_parent
-            .remove(&parent)
+            .remove(&parent_hash)
             .unwrap_or_default()
             .into_iter()
             .map(|hash| {
@@ -73,7 +73,11 @@ impl QueuedBlocks {
             self.by_height.remove(&height);
         }
 
-        tracing::trace!(num_blocks = %self.blocks.len(), "Finished dequeuing blocks waiting for parent hash",);
+        tracing::trace!(
+            dequeued = queued_children.len(),
+            remaining = self.blocks.len(),
+            "dequeued blocks"
+        );
         self.update_metrics();
 
         queued_children
