@@ -222,6 +222,7 @@ where
                     // Finally, wait for all asynchronous checks to complete
                     // successfully, or fail verification if they error.
                     while let Some(check) = async_checks.next().await {
+                        tracing::trace!(?check, remaining = async_checks.len());
                         check?;
                     }
 
