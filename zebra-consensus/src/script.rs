@@ -1,4 +1,4 @@
-use std::{future::Future, pin::Pin, sync::Arc};
+use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc};
 
 use tracing::Instrument;
 
@@ -40,6 +40,7 @@ impl<ZS> Verifier<ZS> {
 pub struct Request {
     pub transaction: Arc<Transaction>,
     pub input_index: usize,
+    pub known_utxos: Arc<HashMap<transparent::OutPoint, transparent::Output>>,
 }
 
 impl<ZS> tower::Service<Request> for Verifier<ZS>
@@ -62,32 +63,35 @@ where
     fn call(&mut self, req: Request) -> Self::Future {
         use futures_util::FutureExt;
 
-        let input = &req.transaction.inputs()[req.input_index];
+        let Request {
+            transaction,
+            input_index,
+            known_utxos,
+        } = req;
+        let input = &transaction.inputs()[input_index];
 
         match input {
             transparent::Input::PrevOut { outpoint, .. } => {
                 let outpoint = *outpoint;
-                let transaction = req.transaction;
                 let branch_id = self.branch;
-                let input_index = req.input_index;
 
                 let span = tracing::trace_span!("script", ?outpoint);
-                let output =
+                let query =
                     span.in_scope(|| self.state.call(zebra_state::Request::AwaitUtxo(outpoint)));
 
                 async move {
                     tracing::trace!("awaiting outpoint lookup");
-                    let previous_output = match output.await? {
-                        zebra_state::Response::Utxo(output) => output,
-                        _ => unreachable!("AwaitUtxo always responds with Utxo"),
+                    let output = if let Some(output) = known_utxos.get(&outpoint) {
+                        tracing::trace!("UXTO in known_utxos, discarding query");
+                        output.clone()
+                    } else if let zebra_state::Response::Utxo(output) = query.await? {
+                        output
+                    } else {
+                        unreachable!("AwaitUtxo always responds with Utxo")
                     };
-                    tracing::trace!(?previous_output, "got UTXO");
+                    tracing::trace!(?output, "got UTXO");
 
-                    zebra_script::is_valid(
-                        transaction,
-                        branch_id,
-                        (input_index as u32, previous_output),
-                    )?;
+                    zebra_script::is_valid(transaction, branch_id, (input_index as u32, output))?;
                     tracing::trace!("script verification succeeded");
 
                     Ok(())

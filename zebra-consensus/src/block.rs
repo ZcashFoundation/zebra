@@ -8,6 +8,7 @@
 //! verification, where it may be accepted or rejected.
 
 use std::{
+    collections::HashMap,
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -25,6 +26,7 @@ use zebra_chain::{
     block::{self, Block},
     parameters::Network,
     parameters::NetworkUpgrade,
+    transparent,
     work::equihash,
 };
 use zebra_state as zs;
@@ -165,13 +167,16 @@ where
 
             let mut async_checks = FuturesUnordered::new();
 
+            let known_utxos = known_utxos(&block);
             for transaction in &block.transactions {
-                let req = transaction::Request::Block(transaction.clone());
                 let rsp = transaction_verifier
                     .ready_and()
                     .await
                     .expect("transaction verifier is always ready")
-                    .call(req);
+                    .call(transaction::Request::Block {
+                        transaction: transaction.clone(),
+                        known_utxos: known_utxos.clone(),
+                    });
                 async_checks.push(rsp);
             }
             tracing::trace!(len = async_checks.len(), "built async tx checks");
@@ -206,4 +211,17 @@ where
         .instrument(span)
         .boxed()
     }
+}
+
+fn known_utxos(block: &Block) -> Arc<HashMap<transparent::OutPoint, transparent::Output>> {
+    let mut map = HashMap::default();
+    for transaction in &block.transactions {
+        let hash = transaction.hash();
+        for (index, output) in transaction.outputs().iter().cloned().enumerate() {
+            let index = index as u32;
+            map.insert(transparent::OutPoint { hash, index }, output);
+        }
+    }
+
+    Arc::new(map)
 }
