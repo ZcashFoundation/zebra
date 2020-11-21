@@ -86,7 +86,7 @@ impl StateService {
     ///
     /// [1]: https://zebra.zfnd.org/dev/rfcs/0005-state-updates.html#committing-non-finalized-blocks
     #[instrument(skip(self, block))]
-    fn queue_and_commit_non_finalized_blocks(
+    fn queue_and_commit_non_finalized(
         &mut self,
         block: Arc<Block>,
     ) -> oneshot::Receiver<Result<block::Hash, BoxError>> {
@@ -390,7 +390,7 @@ impl Service<Request> for StateService {
                 metrics::counter!("state.requests", 1, "type" => "commit_block");
 
                 self.pending_utxos.check_block(&block);
-                let rsp_rx = self.queue_and_commit_non_finalized_blocks(block);
+                let rsp_rx = self.queue_and_commit_non_finalized(block);
 
                 async move {
                     rsp_rx
@@ -408,7 +408,7 @@ impl Service<Request> for StateService {
 
                 self.pending_utxos.check_block(&block);
                 self.disk
-                    .queue_and_commit_finalized_blocks(QueuedBlock { block, rsp_tx });
+                    .queue_and_commit_finalized(QueuedBlock { block, rsp_tx });
 
                 async move {
                     rsp_rx

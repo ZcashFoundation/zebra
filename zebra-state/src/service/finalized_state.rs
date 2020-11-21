@@ -92,7 +92,7 @@ impl FinalizedState {
     ///
     /// After queueing a finalized block, this method checks whether the newly
     /// queued block (and any of its descendants) can be committed to the state.
-    pub fn queue_and_commit_finalized_blocks(&mut self, queued_block: QueuedBlock) {
+    pub fn queue_and_commit_finalized(&mut self, queued_block: QueuedBlock) {
         let prev_hash = queued_block.block.header.previous_block_hash;
         let height = queued_block.block.coinbase_height().unwrap();
         self.queued_by_prev_hash.insert(prev_hash, queued_block);

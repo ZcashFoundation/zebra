@@ -88,7 +88,7 @@ where
 
         let mut redjubjub_verifier = crate::primitives::redjubjub::VERIFIER.clone();
         let mut script_verifier = self.script_verifier.clone();
-        let span = tracing::debug_span!("tx", hash = ?tx.hash());
+        let span = tracing::debug_span!("tx", hash = %tx.hash());
         async move {
             tracing::trace!(?tx);
             match &*tx {
