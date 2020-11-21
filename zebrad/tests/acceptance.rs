@@ -651,7 +651,6 @@ fn cached_sapling_test_config() -> Result<ZebradConfig> {
     let mut config = persistent_test_config()?;
     config.consensus.checkpoint_sync = true;
     config.state.cache_dir = "/zebrad-cache".into();
-    config.state.memory_cache_bytes = 52428800;
     Ok(config)
 }
 
