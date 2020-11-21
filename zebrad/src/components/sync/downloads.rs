@@ -110,7 +110,7 @@ where
     /// This method waits for the network to become ready, and returns an error
     /// only if the network service fails. It returns immediately after queuing
     /// the request.
-    #[instrument(skip(self), fields(%hash))]
+    #[instrument(level = "debug", skip(self), fields(%hash))]
     pub async fn download_and_verify(&mut self, hash: block::Hash) -> Result<(), Report> {
         if self.cancel_handles.contains_key(&hash) {
             return Err(eyre!("duplicate hash queued for download"));
