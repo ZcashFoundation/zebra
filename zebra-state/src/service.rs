@@ -103,6 +103,7 @@ impl StateService {
         // been queued but not yet committed to the state fails the older
         // request and replaces it with the newer request.
         let rsp_rx = if let Some(queued_block) = self.queued_blocks.get_mut(&hash) {
+            tracing::debug!("replacing older queued request with new request");
             let (mut rsp_tx, rsp_rx) = oneshot::channel();
             std::mem::swap(&mut queued_block.rsp_tx, &mut rsp_tx);
             let _ = rsp_tx.send(Err("replaced by newer request".into()));
@@ -114,12 +115,14 @@ impl StateService {
         };
 
         if !self.can_fork_chain_at(&parent_hash) {
+            tracing::trace!("unready to verify, returning early");
             return rsp_rx;
         }
 
         self.process_queued(parent_hash);
 
         while self.mem.best_chain_len() > crate::constants::MAX_BLOCK_REORG_HEIGHT {
+            tracing::trace!("finalizing block past the reorg limit");
             let finalized = self.mem.finalize();
             self.disk
                 .commit_finalized_direct(finalized)
@@ -131,6 +134,7 @@ impl StateService {
             "Finalized state must have at least one block before committing non-finalized state",
         ));
 
+        tracing::trace!("finished processing queued block");
         rsp_rx
     }
 
