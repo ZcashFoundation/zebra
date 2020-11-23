@@ -21,7 +21,7 @@ use zebra_chain::{
 
 use crate::{
     request::HashOrHeight, BoxError, CommitBlockError, Config, FinalizedBlock, PreparedBlock,
-    Request, Response, ValidateContextError,
+    Request, Response, Utxo, ValidateContextError,
 };
 
 use self::finalized_state::FinalizedState;
@@ -251,12 +251,12 @@ impl StateService {
             .or_else(|| self.disk.height(hash))
     }
 
-    /// Return the utxo pointed to by `outpoint` if it exists in any chain.
-    pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Output> {
+    /// Return the [`Utxo`] pointed to by `outpoint` if it exists in any chain.
+    pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<Utxo> {
         self.mem
             .utxo(outpoint)
-            .or_else(|| self.disk.utxo(outpoint))
             .or_else(|| self.queued_blocks.utxo(outpoint))
+            .or_else(|| self.disk.utxo(outpoint))
     }
 
     /// Return an iterator over the relevant chain of the block identified by
@@ -404,7 +404,7 @@ impl Service<Request> for StateService {
 
                 let (rsp_tx, rsp_rx) = oneshot::channel();
 
-                self.pending_utxos.scan_block(&finalized.block);
+                self.pending_utxos.check_against(&finalized.new_outputs);
                 self.disk.queue_and_commit_finalized((finalized, rsp_tx));
 
                 async move {

@@ -36,4 +36,5 @@ spandoc = "0.2"
 tempdir = "0.3.7"
 tokio = { version = "0.3", features = ["full"] }
 proptest = "0.10.1"
+proptest-derive = "0.2"
 primitive-types = "0.7.3"

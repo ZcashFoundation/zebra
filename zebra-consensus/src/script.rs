@@ -3,6 +3,7 @@ use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc};
 use tracing::Instrument;
 
 use zebra_chain::{parameters::ConsensusBranchId, transaction::Transaction, transparent};
+use zebra_state::Utxo;
 
 use crate::BoxError;
 
@@ -40,7 +41,7 @@ impl<ZS> Verifier<ZS> {
 pub struct Request {
     pub transaction: Arc<Transaction>,
     pub input_index: usize,
-    pub known_utxos: Arc<HashMap<transparent::OutPoint, transparent::Output>>,
+    pub known_utxos: Arc<HashMap<transparent::OutPoint, Utxo>>,
 }
 
 impl<ZS> tower::Service<Request> for Verifier<ZS>
@@ -81,17 +82,21 @@ where
 
                 async move {
                     tracing::trace!("awaiting outpoint lookup");
-                    let output = if let Some(output) = known_utxos.get(&outpoint) {
+                    let utxo = if let Some(output) = known_utxos.get(&outpoint) {
                         tracing::trace!("UXTO in known_utxos, discarding query");
                         output.clone()
-                    } else if let zebra_state::Response::Utxo(output) = query.await? {
-                        output
+                    } else if let zebra_state::Response::Utxo(utxo) = query.await? {
+                        utxo
                     } else {
                         unreachable!("AwaitUtxo always responds with Utxo")
                     };
-                    tracing::trace!(?output, "got UTXO");
+                    tracing::trace!(?utxo, "got UTXO");
 
-                    zebra_script::is_valid(transaction, branch_id, (input_index as u32, output))?;
+                    zebra_script::is_valid(
+                        transaction,
+                        branch_id,
+                        (input_index as u32, utxo.output),
+                    )?;
                     tracing::trace!("script verification succeeded");
 
                     Ok(())

@@ -15,7 +15,7 @@ use zebra_chain::{
     transparent,
 };
 
-use crate::{FinalizedBlock, HashOrHeight, PreparedBlock};
+use crate::{FinalizedBlock, HashOrHeight, PreparedBlock, Utxo};
 
 use self::chain::Chain;
 
@@ -64,12 +64,7 @@ impl NonFinalizedState {
 
         self.update_metrics_for_chains();
 
-        // Construct a finalized block.
-        FinalizedBlock {
-            block: finalizing.block,
-            hash: finalizing.hash,
-            height: finalizing.height,
-        }
+        finalizing.into()
     }
 
     /// Commit block to the non-finalized state.
@@ -148,7 +143,7 @@ impl NonFinalizedState {
 
     /// Returns the `transparent::Output` pointed to by the given
     /// `transparent::OutPoint` if it is present.
-    pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Output> {
+    pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<Utxo> {
         for chain in self.chain_set.iter().rev() {
             if let Some(output) = chain.created_utxos.get(outpoint) {
                 return Some(output.clone());

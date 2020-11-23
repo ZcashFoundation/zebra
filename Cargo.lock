@@ -3263,6 +3263,7 @@ dependencies = [
  "once_cell",
  "primitive-types",
  "proptest",
+ "proptest-derive",
  "rocksdb",
  "serde",
  "spandoc",
