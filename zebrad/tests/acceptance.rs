@@ -13,7 +13,7 @@
 
 #![warn(warnings, missing_docs, trivial_casts, unused_qualifications)]
 #![forbid(unsafe_code)]
-#![allow(clippy::dead_code)]
+#![allow(dead_code)]
 #![allow(clippy::field_reassign_with_default)]
 #![allow(clippy::try_err)]
 #![allow(clippy::unknown_clippy_lints)]
