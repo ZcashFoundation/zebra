@@ -92,12 +92,19 @@ where
                     };
                     tracing::trace!(?utxo, "got UTXO");
 
-                    zebra_script::is_valid(
-                        transaction,
-                        branch_id,
-                        (input_index as u32, utxo.output),
-                    )?;
-                    tracing::trace!("script verification succeeded");
+                    if transaction.inputs().len() < 20 {
+                        zebra_script::is_valid(
+                            transaction,
+                            branch_id,
+                            (input_index as u32, utxo.output),
+                        )?;
+                        tracing::trace!("script verification succeeded");
+                    } else {
+                        tracing::debug!(
+                            inputs.len = transaction.inputs().len(),
+                            "skipping verification of script with many inputs to avoid quadratic work until we fix zebra_script/zcash_script interface"
+                        );
+                    }
 
                     Ok(())
                 }
