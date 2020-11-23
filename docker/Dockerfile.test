@@ -7,7 +7,7 @@ RUN apt-get update && \
 RUN mkdir /zebra
 WORKDIR /zebra
 
-ENV RUST_BACKTRACE 1
+ENV RUST_BACKTRACE full
 ENV CARGO_HOME /zebra/.cargo/
 
 RUN rustc -V; cargo -V; rustup -V
