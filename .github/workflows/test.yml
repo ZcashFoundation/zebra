@@ -52,8 +52,8 @@ jobs:
           --boot-disk-size 100GB \
           --boot-disk-type pd-ssd \
           --container-image rust:buster \
-          --container-mount-disk mount-path='/zebrad-cache',name=zebrad-cache-mainnet-sapling-activation \
-          --create-disk name=zebrad-cache-mainnet-sapling-activation,image=zebrad-cache-062a5ae-mainnet-height-419200 \
+          --container-mount-disk mount-path='/zebrad-cache',name="zebrad-cache-$SHORT_SHA-mainnet-419200" \
+          --create-disk name="zebrad-cache-$SHORT_SHA-mainnet-419200",image=zebrad-cache-062a5ae-mainnet-height-419200 \
           --machine-type n2-standard-4 \
           --service-account cos-vm@zealous-zebra.iam.gserviceaccount.com \
           --scopes cloud-platform \
