@@ -111,9 +111,6 @@ where
                     let mut async_checks = FuturesUnordered::new();
 
                     // Handle transparent inputs and outputs.
-                    // These are left unimplemented!() pending implementation
-                    // of the async script RFC.
-                    #[allow(clippy::if_same_then_else)] // delete when filled in
                     if tx.is_coinbase() {
                         // do something special for coinbase transactions
                         check::coinbase_tx_no_joinsplit_or_spend(&tx)?;
