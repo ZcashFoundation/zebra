@@ -56,13 +56,13 @@ pub enum Request {
     Block {
         transaction: Arc<Transaction>,
         /// Additional UTXOs which are known at the time of verification.
-        known_utxos: Arc<HashMap<transparent::OutPoint, transparent::Output>>,
+        known_utxos: Arc<HashMap<transparent::OutPoint, zs::Utxo>>,
     },
     /// Verify the supplied transaction as part of the mempool.
     Mempool {
         transaction: Arc<Transaction>,
         /// Additional UTXOs which are known at the time of verification.
-        known_utxos: Arc<HashMap<transparent::OutPoint, transparent::Output>>,
+        known_utxos: Arc<HashMap<transparent::OutPoint, zs::Utxo>>,
     },
 }
 

@@ -167,7 +167,7 @@ where
 
             let mut async_checks = FuturesUnordered::new();
 
-            let known_utxos = known_utxos(&block);
+            let known_utxos = new_outputs(&block);
             for transaction in &block.transactions {
                 let rsp = transaction_verifier
                     .ready_and()
@@ -221,15 +221,24 @@ where
     }
 }
 
-fn known_utxos(block: &Block) -> Arc<HashMap<transparent::OutPoint, transparent::Output>> {
-    let mut map = HashMap::default();
+fn new_outputs(block: &Block) -> Arc<HashMap<transparent::OutPoint, zs::Utxo>> {
+    let mut new_outputs = HashMap::default();
+    let height = block.coinbase_height().expect("block has coinbase height");
     for transaction in &block.transactions {
         let hash = transaction.hash();
+        let from_coinbase = transaction.is_coinbase();
         for (index, output) in transaction.outputs().iter().cloned().enumerate() {
             let index = index as u32;
-            map.insert(transparent::OutPoint { hash, index }, output);
+            new_outputs.insert(
+                transparent::OutPoint { hash, index },
+                zs::Utxo {
+                    output,
+                    height,
+                    from_coinbase,
+                },
+            );
         }
     }
 
-    Arc::new(map)
+    Arc::new(new_outputs)
 }

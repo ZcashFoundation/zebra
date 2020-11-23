@@ -1,12 +1,14 @@
-#![allow(dead_code)]
-use crate::{BoxError, Response};
 use std::collections::HashMap;
 use std::future::Future;
+
 use tokio::sync::broadcast;
-use zebra_chain::{block::Block, transparent};
+
+use zebra_chain::transparent;
+
+use crate::{BoxError, Response, Utxo};
 
 #[derive(Debug, Default)]
-pub struct PendingUtxos(HashMap<transparent::OutPoint, broadcast::Sender<transparent::Output>>);
+pub struct PendingUtxos(HashMap<transparent::OutPoint, broadcast::Sender<Utxo>>);
 
 impl PendingUtxos {
     /// Returns a future that will resolve to the `transparent::Output` pointed
@@ -33,41 +35,23 @@ impl PendingUtxos {
         }
     }
 
-    /// Notify all utxo requests waiting for the `transparent::Output` pointed to
-    /// by the given `transparent::OutPoint` that the `Output` has arrived.
-    pub fn respond(&mut self, outpoint: &transparent::OutPoint, output: transparent::Output) {
-        if let Some(sender) = self.0.remove(&outpoint) {
+    /// Notify all requests waiting for the [`Utxo`] pointed to by the given
+    /// [`transparent::OutPoint`] that the [`Utxo`] has arrived.
+    pub fn respond(&mut self, outpoint: &transparent::OutPoint, utxo: Utxo) {
+        if let Some(sender) = self.0.remove(outpoint) {
             // Adding the outpoint as a field lets us crossreference
             // with the trace of the verification that made the request.
             tracing::trace!(?outpoint, "found pending UTXO");
-            let _ = sender.send(output);
+            let _ = sender.send(utxo);
         }
     }
 
     /// Check the list of pending UTXO requests against the supplied UTXO index.
-    pub fn check_against(&mut self, utxos: &HashMap<transparent::OutPoint, transparent::Output>) {
-        for (outpoint, output) in utxos.iter() {
-            self.respond(outpoint, output.clone());
-        }
-    }
-
-    /// Scan through unindexed transactions in the given `block`
-    /// to determine whether it contains any requested UTXOs.
-    pub fn scan_block(&mut self, block: &Block) {
-        if self.0.is_empty() {
-            return;
-        }
-
-        tracing::trace!("scanning new block for pending UTXOs");
-        for transaction in block.transactions.iter() {
-            let transaction_hash = transaction.hash();
-            for (index, output) in transaction.outputs().iter().enumerate() {
-                let outpoint = transparent::OutPoint {
-                    hash: transaction_hash,
-                    index: index as _,
-                };
-
-                self.respond(&outpoint, output.clone());
+    pub fn check_against(&mut self, utxos: &HashMap<transparent::OutPoint, Utxo>) {
+        for (outpoint, utxo) in utxos.iter() {
+            if let Some(sender) = self.0.remove(outpoint) {
+                tracing::trace!(?outpoint, "found pending UTXO");
+                let _ = sender.send(utxo.clone());
             }
         }
     }
