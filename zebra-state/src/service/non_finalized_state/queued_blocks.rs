@@ -66,8 +66,7 @@ impl QueuedBlocks {
             .unwrap_or_default()
             .into_iter()
             .map(|hash| {
-                self
-                    .blocks
+                self.blocks
                     .remove(&hash)
                     .expect("block is present if its hash is in by_parent")
             })
