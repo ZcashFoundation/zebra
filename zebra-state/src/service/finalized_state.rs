@@ -338,8 +338,18 @@ impl FinalizedState {
         if self.ephemeral {
             let path = self.db.path();
             tracing::debug!("removing temporary database files {:?}", path);
-            let _res = rocksdb::DB::destroy(&rocksdb::Options::default(), path);
-            // make sure we deleted everything
+            // We'd like to use `rocksdb::Env::mem_env` for ephemeral databases,
+            // but the Zcash blockchain might not fit in memory. So we just
+            // delete the database files instead.
+            //
+            // We'd like to call `DB::destroy` here, but calling destroy on a
+            // live DB is undefined behaviour:
+            // https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ#basic-readwrite
+            //
+            // So we assume that all the database files are under `path`, and
+            // delete them using standard filesystem APIs. Deleting open files
+            // might cause errors on non-Unix platforms, so we ignore the result.
+            // (The OS will delete them eventually anyway.)
             let _res = std::fs::remove_dir_all(path);
         }
     }
