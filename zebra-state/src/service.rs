@@ -166,7 +166,7 @@ impl StateService {
             let queued_children = self.queued_blocks.dequeue_children(parent_hash);
 
             for (child, rsp_tx) in queued_children {
-                let child_hash = child.hash.clone();
+                let child_hash = child.hash;
                 tracing::trace!(?child_hash, "validating queued child");
                 let result = self
                     .validate_and_commit(child)
