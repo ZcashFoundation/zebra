@@ -6,6 +6,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use check::difficulty::{POW_AVERAGING_WINDOW, POW_MEDIAN_BLOCK_SPAN};
 use futures::future::FutureExt;
 use non_finalized_state::{NonFinalizedState, QueuedBlocks};
 use tokio::sync::oneshot;
@@ -184,11 +185,15 @@ impl StateService {
         &mut self,
         prepared: &PreparedBlock,
     ) -> Result<(), ValidateContextError> {
+        let relevant_chain = self.chain(prepared.block.header.previous_block_hash);
+        assert!(relevant_chain.len() >= POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN,
+                "contextual validation requires at least 28 (POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN) blocks");
+
         check::block_is_contextually_valid(
             prepared,
             self.network,
             self.disk.finalized_tip_height(),
-            self.chain(prepared.block.header.previous_block_hash),
+            relevant_chain,
         )?;
 
         Ok(())
