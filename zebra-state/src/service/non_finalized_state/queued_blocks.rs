@@ -66,11 +66,10 @@ impl QueuedBlocks {
             .unwrap_or_default()
             .into_iter()
             .map(|hash| {
-                let queued = self
+                self
                     .blocks
                     .remove(&hash)
-                    .expect("block is present if its hash is in by_parent");
-                queued
+                    .expect("block is present if its hash is in by_parent")
             })
             .collect::<Vec<_>>();
 
