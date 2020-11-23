@@ -13,9 +13,10 @@
 
 #![warn(warnings, missing_docs, trivial_casts, unused_qualifications)]
 #![forbid(unsafe_code)]
+#![allow(clippy::dead_code)]
+#![allow(clippy::field_reassign_with_default)]
 #![allow(clippy::try_err)]
 #![allow(clippy::unknown_clippy_lints)]
-#![allow(clippy::field_reassign_with_default)]
 
 use color_eyre::eyre::Result;
 use eyre::WrapErr;
@@ -698,28 +699,27 @@ fn sync_past_sapling(network: Network) -> Result<()> {
 // drives populated by the first two tests, snapshot those drives, and then use
 // those to more quickly run the second two tests.
 
-// Create a cached copy of the mainnet database up to the sapling activation
-// height.
-#[test]
-#[ignore]
-fn create_mainnet_cache() {
+// Sync up to the sapling activation height on mainnet and stop.
+#[cfg_attr(feature = "test_sync_to_sapling_mainnet", test)]
+fn sync_to_sapling_mainnet() {
     zebra_test::init();
     let network = Mainnet;
     create_cached_database(network).unwrap();
 }
-// Create a cached copy of the testnet database up to the sapling activation
-// height.
-#[test]
-#[ignore]
-fn create_testnet_cache() {
+// Sync to the sapling activation height testnet and stop.
+#[cfg_attr(feature = "test_sync_to_sapling_testnet", test)]
+fn sync_to_sapling_testnet() {
     zebra_test::init();
     let network = Testnet;
     create_cached_database(network).unwrap();
 }
 
 /// Test syncing 1200 blocks (3 checkpoints) past the last checkpoint on mainnet.
-#[test]
-#[ignore]
+///
+/// This assumes that the config'd state is already synced at or near Sapling
+/// activation on mainnet. If the state has already synced past Sapling
+/// activation by 1200 blocks, it will fail.
+#[cfg_attr(feature = "test_sync_past_sapling_mainnet", test)]
 fn sync_past_sapling_mainnet() {
     zebra_test::init();
     let network = Mainnet;
@@ -727,8 +727,11 @@ fn sync_past_sapling_mainnet() {
 }
 
 /// Test syncing 1200 blocks (3 checkpoints) past the last checkpoint on testnet.
-#[test]
-#[ignore]
+///
+/// This assumes that the config'd state is already synced at or near Sapling
+/// activation on testnet. If the state has already synced past Sapling
+/// activation by 1200 blocks, it will fail.
+#[cfg_attr(feature = "test_sync_past_sapling_testnet", test)]
 fn sync_past_sapling_testnet() {
     zebra_test::init();
     let network = Testnet;

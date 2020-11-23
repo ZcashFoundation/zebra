@@ -44,3 +44,9 @@ abscissa_core = { version = "0.5", features = ["testing"] }
 once_cell = "1.5"
 tempdir = "0.3.7"
 zebra-test = { path = "../zebra-test" }
+
+[features]
+test_sync_to_sapling_mainnet = []
+test_sync_to_sapling_testnet = []
+test_sync_past_sapling_mainnet = []
+test_sync_past_sapling_testnet = []
