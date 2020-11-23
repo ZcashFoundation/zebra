@@ -24,14 +24,14 @@ use crate::{
     Request, Response, Utxo, ValidateContextError,
 };
 
-use self::finalized_state::FinalizedState;
-
 mod check;
 mod finalized_state;
 mod non_finalized_state;
+mod pending_utxos;
 #[cfg(test)]
 mod tests;
-mod utxo;
+
+use self::{finalized_state::FinalizedState, pending_utxos::PendingUtxos};
 
 pub type QueuedBlock = (
     PreparedBlock,
@@ -50,7 +50,7 @@ struct StateService {
     /// Blocks awaiting their parent blocks for contextual verification.
     queued_blocks: QueuedBlocks,
     /// The set of outpoints with pending requests for their associated transparent::Output
-    pending_utxos: utxo::PendingUtxos,
+    pending_utxos: PendingUtxos,
     /// The configured Zcash network
     network: Network,
     /// Instant tracking the last time `pending_utxos` was pruned
@@ -64,7 +64,7 @@ impl StateService {
         let disk = FinalizedState::new(&config, network);
         let mem = NonFinalizedState::default();
         let queued_blocks = QueuedBlocks::default();
-        let pending_utxos = utxo::PendingUtxos::default();
+        let pending_utxos = PendingUtxos::default();
 
         Self {
             disk,
