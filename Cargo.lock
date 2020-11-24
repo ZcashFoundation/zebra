@@ -488,9 +488,9 @@ dependencies = [
 
 [[package]]
 name = "color-eyre"
-version = "0.5.7"
+version = "0.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "86bc0bb03923141924d5b713a4acd7607c790f3fbc769abe63fe3f38bb268112"
+checksum = "8fb57305b07ffcc1a4d08808f1f2200647c8e3d91a4c83d2810ae20c997274e0"
 dependencies = [
  "backtrace",
  "color-spantrace",
@@ -2811,13 +2811,13 @@ dependencies = [
 
 [[package]]
 name = "tracing"
-version = "0.1.21"
+version = "0.1.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b0987850db3733619253fe60e17cb59b82d37c7e6c0236bb81e4d6b87c879f27"
+checksum = "9f47026cdc4080c07e49b37087de021820269d996f581aac150ef9e5583eefe3"
 dependencies = [
- "cfg-if 0.1.10",
+ "cfg-if 1.0.0",
  "log",
- "pin-project-lite 0.1.11",
+ "pin-project-lite 0.2.0",
  "tracing-attributes",
  "tracing-core",
 ]
@@ -3263,6 +3263,7 @@ dependencies = [
  "once_cell",
  "primitive-types",
  "proptest",
+ "proptest-derive",
  "rocksdb",
  "serde",
  "spandoc",

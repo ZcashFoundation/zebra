@@ -48,7 +48,7 @@ bitflags = "1.2.1"
 bincode = "1"
 color-eyre = "0.5"
 spandoc = "0.2"
-tracing = "0.1.21"
+tracing = "0.1.22"
 proptest = "0.10"
 proptest-derive = "0.2"
 

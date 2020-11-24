@@ -132,7 +132,9 @@ pub fn subsidy_is_valid(block: &Block, network: Network) -> Result<(), BlockErro
         // Funding streams are paid from Canopy activation to the second halving
         // Note: Canopy activation is at the first halving on mainnet, but not on testnet
         // ZIP-1014 only applies to mainnet, ZIP-214 contains the specific rules for testnet
-        unimplemented!("funding stream block subsidy validation is not implemented")
+        tracing::trace!("funding stream block subsidy validation is not implemented");
+        // Return ok for now
+        Ok(())
     } else {
         // Future halving, with no founders reward or funding streams
         Ok(())

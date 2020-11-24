@@ -11,7 +11,7 @@ use zebra_chain::{
     transaction::{self, Transaction},
 };
 
-use crate::{BoxError, Config, FinalizedBlock, HashOrHeight};
+use crate::{BoxError, Config, FinalizedBlock, HashOrHeight, Utxo};
 
 use self::disk_format::{DiskDeserialize, DiskSerialize, FromDisk, IntoDisk, TransactionLocation};
 
@@ -149,6 +149,7 @@ impl FinalizedState {
             block,
             hash,
             height,
+            new_outputs,
         } = finalized;
 
         let hash_by_height = self.db.cf_handle("hash_by_height").unwrap();
@@ -205,7 +206,13 @@ impl FinalizedState {
                 return batch;
             }
 
-            // Index each transaction
+            // Index all new transparent outputs
+            for (outpoint, utxo) in new_outputs.into_iter() {
+                batch.zs_insert(utxo_by_outpoint, outpoint, utxo);
+            }
+
+            // Index each transaction, spent inputs, nullifiers
+            // TODO: move computation into FinalizedBlock as with transparent outputs
             for (transaction_index, transaction) in block.transactions.iter().enumerate() {
                 let transaction_hash = transaction.hash();
                 let transaction_location = TransactionLocation {
@@ -226,15 +233,6 @@ impl FinalizedState {
                         // so there are no UTXOs to mark as spent.
                         transparent::Input::Coinbase { .. } => {}
                     }
-                }
-
-                // Index all new transparent outputs
-                for (index, output) in transaction.outputs().iter().enumerate() {
-                    let outpoint = transparent::OutPoint {
-                        hash: transaction_hash,
-                        index: index as _,
-                    };
-                    batch.zs_insert(utxo_by_outpoint, outpoint, output);
                 }
 
                 // Mark sprout and sapling nullifiers as spent
@@ -305,7 +303,7 @@ impl FinalizedState {
 
     /// Returns the `transparent::Output` pointed to by the given
     /// `transparent::OutPoint` if it is present.
-    pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Output> {
+    pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<Utxo> {
         let utxo_by_outpoint = self.db.cf_handle("utxo_by_outpoint").unwrap();
         self.db.zs_get(utxo_by_outpoint, outpoint)
     }

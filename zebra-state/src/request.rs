@@ -5,6 +5,8 @@ use zebra_chain::{
     transaction, transparent,
 };
 
+use crate::Utxo;
+
 // Allow *only* this unused import, so that rustdoc link resolution
 // will work with inline links.
 #[allow(unused_imports)]
@@ -71,7 +73,7 @@ pub struct PreparedBlock {
     /// Note: although these transparent outputs are newly created, they may not
     /// be unspent, since a later transaction in a block can spend outputs of an
     /// earlier transaction.
-    pub new_outputs: HashMap<transparent::OutPoint, transparent::Output>,
+    pub new_outputs: HashMap<transparent::OutPoint, Utxo>,
     // TODO: add these parameters when we can compute anchors.
     // sprout_anchor: sprout::tree::Root,
     // sapling_anchor: sapling::tree::Root,
@@ -88,6 +90,13 @@ pub struct FinalizedBlock {
     pub(crate) block: Arc<Block>,
     pub(crate) hash: block::Hash,
     pub(crate) height: block::Height,
+    /// New transparent outputs created in this block, indexed by
+    /// [`Outpoint`](transparent::Outpoint).
+    ///
+    /// Note: although these transparent outputs are newly created, they may not
+    /// be unspent, since a later transaction in a block can spend outputs of an
+    /// earlier transaction.
+    pub(crate) new_outputs: HashMap<transparent::OutPoint, Utxo>,
 }
 
 // Doing precomputation in this From impl means that it will be done in
@@ -100,10 +109,45 @@ impl From<Arc<Block>> for FinalizedBlock {
             .expect("finalized blocks must have a valid coinbase height");
         let hash = block.hash();
 
+        let mut new_outputs = HashMap::default();
+        for transaction in &block.transactions {
+            let hash = transaction.hash();
+            let from_coinbase = transaction.is_coinbase();
+            for (index, output) in transaction.outputs().iter().cloned().enumerate() {
+                let index = index as u32;
+                new_outputs.insert(
+                    transparent::OutPoint { hash, index },
+                    Utxo {
+                        output,
+                        height,
+                        from_coinbase,
+                    },
+                );
+            }
+        }
+
         Self {
             block,
             height,
             hash,
+            new_outputs,
+        }
+    }
+}
+
+impl From<PreparedBlock> for FinalizedBlock {
+    fn from(prepared: PreparedBlock) -> Self {
+        let PreparedBlock {
+            block,
+            height,
+            hash,
+            new_outputs,
+        } = prepared;
+        Self {
+            block,
+            height,
+            hash,
+            new_outputs,
         }
     }
 }

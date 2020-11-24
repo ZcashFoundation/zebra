@@ -2,16 +2,15 @@ use color_eyre::{
     eyre::{eyre, Context, Report, Result},
     Help, SectionExt,
 };
-use tempdir::TempDir;
 use tracing::instrument;
 
-use std::convert::Infallible as NoDir;
-use std::fmt::Write as _;
 #[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
 use std::{
-    borrow::Borrow,
-    io::{BufRead, BufReader, Lines, Read},
+    convert::Infallible as NoDir,
+    fmt::Write as _,
+    io::BufRead,
+    io::{BufReader, Lines, Read},
     path::Path,
     process::{Child, ChildStdout, Command, ExitStatus, Output, Stdio},
     time::{Duration, Instant},
@@ -87,6 +86,7 @@ impl CommandExt for Command {
             dir,
             deadline: None,
             stdout: None,
+            bypass_test_capture: false,
         })
     }
 }
@@ -98,7 +98,7 @@ impl CommandExt for Command {
 /// `zebra_test::command` without running `zebrad`.
 pub trait TestDirExt
 where
-    Self: Borrow<TempDir> + Sized,
+    Self: AsRef<Path> + Sized,
 {
     /// Spawn `cmd` with `args` as a child process in this test directory,
     /// potentially taking ownership of the tempdir for the duration of the
@@ -108,11 +108,10 @@ where
 
 impl<T> TestDirExt for T
 where
-    Self: Borrow<TempDir> + Sized,
+    Self: AsRef<Path> + Sized,
 {
     fn spawn_child_with_command(self, cmd: &str, args: &[&str]) -> Result<TestChild<Self>> {
-        let tempdir = self.borrow();
-        let mut cmd = test_cmd(cmd, tempdir.path())?;
+        let mut cmd = test_cmd(cmd, self.as_ref())?;
 
         Ok(cmd
             .args(args)
@@ -154,6 +153,7 @@ pub struct TestChild<T> {
     pub child: Child,
     pub stdout: Option<Lines<BufReader<ChildStdout>>>,
     pub deadline: Option<Instant>,
+    bypass_test_capture: bool,
 }
 
 impl<T> TestChild<T> {
@@ -192,6 +192,13 @@ impl<T> TestChild<T> {
         self
     }
 
+    /// Configures testrunner to forward stdout to the true stdout rather than
+    /// fakestdout used by cargo tests.
+    pub fn bypass_test_capture(mut self, cond: bool) -> Self {
+        self.bypass_test_capture = cond;
+        self
+    }
+
     /// Checks each line of the child's stdout against `regex`, and returns matching lines.
     ///
     /// Kills the child after the configured timeout has elapsed.
@@ -223,7 +230,13 @@ impl<T> TestChild<T> {
             // since we're about to discard this line write it to stdout so our
             // test runner can capture it and display if the test fails, may
             // cause weird reordering for stdout / stderr
-            println!("{}", line);
+            if !self.bypass_test_capture {
+                println!("{}", line);
+            } else {
+                use std::io::Write;
+                #[allow(clippy::explicit_write)]
+                writeln!(std::io::stdout(), "{}", line).unwrap();
+            }
 
             if re.is_match(&line) {
                 self.stdout = Some(lines);

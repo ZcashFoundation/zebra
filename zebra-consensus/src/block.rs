@@ -25,7 +25,6 @@ use tracing::Instrument;
 use zebra_chain::{
     block::{self, Block},
     parameters::Network,
-    parameters::NetworkUpgrade,
     transparent,
     work::equihash,
 };
@@ -83,9 +82,8 @@ where
     S::Future: Send + 'static,
 {
     pub fn new(network: Network, state_service: S) -> Self {
-        let branch = NetworkUpgrade::Sapling.branch_id().unwrap();
-        let script_verifier = script::Verifier::new(state_service.clone(), branch);
-        let transaction_verifier = transaction::Verifier::new(script_verifier);
+        let transaction_verifier =
+            transaction::Verifier::new(network, script::Verifier::new(state_service.clone()));
 
         Self {
             network,
@@ -167,7 +165,7 @@ where
 
             let mut async_checks = FuturesUnordered::new();
 
-            let known_utxos = known_utxos(&block);
+            let known_utxos = new_outputs(&block);
             for transaction in &block.transactions {
                 let rsp = transaction_verifier
                     .ready_and()
@@ -176,6 +174,7 @@ where
                     .call(transaction::Request::Block {
                         transaction: transaction.clone(),
                         known_utxos: known_utxos.clone(),
+                        height,
                     });
                 async_checks.push(rsp);
             }
@@ -221,15 +220,24 @@ where
     }
 }
 
-fn known_utxos(block: &Block) -> Arc<HashMap<transparent::OutPoint, transparent::Output>> {
-    let mut map = HashMap::default();
+fn new_outputs(block: &Block) -> Arc<HashMap<transparent::OutPoint, zs::Utxo>> {
+    let mut new_outputs = HashMap::default();
+    let height = block.coinbase_height().expect("block has coinbase height");
     for transaction in &block.transactions {
         let hash = transaction.hash();
+        let from_coinbase = transaction.is_coinbase();
         for (index, output) in transaction.outputs().iter().cloned().enumerate() {
             let index = index as u32;
-            map.insert(transparent::OutPoint { hash, index }, output);
+            new_outputs.insert(
+                transparent::OutPoint { hash, index },
+                zs::Utxo {
+                    output,
+                    height,
+                    from_coinbase,
+                },
+            );
         }
     }
 
-    Arc::new(map)
+    Arc::new(new_outputs)
 }

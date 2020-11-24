@@ -5,9 +5,11 @@ use zebra_chain::{
     block,
     block::Block,
     sapling,
-    serialization::{ZcashDeserialize, ZcashSerialize},
+    serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
     sprout, transaction, transparent,
 };
+
+use crate::Utxo;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TransactionLocation {
@@ -184,19 +186,33 @@ impl FromDisk for block::Height {
     }
 }
 
-impl IntoDisk for transparent::Output {
+impl IntoDisk for Utxo {
     type Bytes = Vec<u8>;
 
     fn as_bytes(&self) -> Self::Bytes {
-        self.zcash_serialize_to_vec()
-            .expect("serialization to vec doesn't fail")
+        let mut bytes = vec![0; 5];
+        bytes[0..4].copy_from_slice(&self.height.0.to_be_bytes());
+        bytes[4] = self.from_coinbase as u8;
+        self.output
+            .zcash_serialize(&mut bytes)
+            .expect("serialization to vec doesn't fail");
+        bytes
     }
 }
 
-impl FromDisk for transparent::Output {
+impl FromDisk for Utxo {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        Self::zcash_deserialize(bytes.as_ref())
-            .expect("deserialization format should match the serialization format used by IntoDisk")
+        let (meta_bytes, output_bytes) = bytes.as_ref().split_at(5);
+        let height = block::Height(u32::from_be_bytes(meta_bytes[0..4].try_into().unwrap()));
+        let from_coinbase = meta_bytes[4] == 1u8;
+        let output = output_bytes
+            .zcash_deserialize_into()
+            .expect("db has serialized data");
+        Self {
+            output,
+            height,
+            from_coinbase,
+        }
     }
 }
 
@@ -370,6 +386,6 @@ mod tests {
     fn roundtrip_transparent_output() {
         zebra_test::init();
 
-        proptest!(|(val in any::<transparent::Output>())| assert_value_properties(val));
+        proptest!(|(val in any::<Utxo>())| assert_value_properties(val));
     }
 }

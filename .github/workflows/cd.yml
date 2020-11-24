@@ -85,7 +85,7 @@ jobs:
         run: |
           gcloud compute instance-templates create-with-container "zebrad-$BRANCH_NAME-$SHORT_SHA" \
           --container-image "gcr.io/$PROJECT_ID/$REPOSITORY/$BRANCH_NAME:$SHORT_SHA" \
-          --create-disk name=zebrad-cache-$SHORT_SHA,size=100GB,type=pd-balanced,auto-delete=no \
+          --create-disk name=zebrad-cache-$SHORT_SHA,size=100GB,type=pd-balanced \
           --container-mount-disk mount-path="/zebrad-cache",name=zebrad-cache-$SHORT_SHA \
           --machine-type n2d-standard-4 \
           --service-account cos-vm@zealous-zebra.iam.gserviceaccount.com \

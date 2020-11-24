@@ -21,17 +21,17 @@ use zebra_chain::{
 
 use crate::{
     request::HashOrHeight, BoxError, CommitBlockError, Config, FinalizedBlock, PreparedBlock,
-    Request, Response, ValidateContextError,
+    Request, Response, Utxo, ValidateContextError,
 };
-
-use self::finalized_state::FinalizedState;
 
 mod check;
 mod finalized_state;
 mod non_finalized_state;
+mod pending_utxos;
 #[cfg(test)]
 mod tests;
-mod utxo;
+
+use self::{finalized_state::FinalizedState, pending_utxos::PendingUtxos};
 
 pub type QueuedBlock = (
     PreparedBlock,
@@ -50,7 +50,7 @@ struct StateService {
     /// Blocks awaiting their parent blocks for contextual verification.
     queued_blocks: QueuedBlocks,
     /// The set of outpoints with pending requests for their associated transparent::Output
-    pending_utxos: utxo::PendingUtxos,
+    pending_utxos: PendingUtxos,
     /// The configured Zcash network
     network: Network,
     /// Instant tracking the last time `pending_utxos` was pruned
@@ -64,7 +64,7 @@ impl StateService {
         let disk = FinalizedState::new(&config, network);
         let mem = NonFinalizedState::default();
         let queued_blocks = QueuedBlocks::default();
-        let pending_utxos = utxo::PendingUtxos::default();
+        let pending_utxos = PendingUtxos::default();
 
         Self {
             disk,
@@ -251,12 +251,12 @@ impl StateService {
             .or_else(|| self.disk.height(hash))
     }
 
-    /// Return the utxo pointed to by `outpoint` if it exists in any chain.
-    pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Output> {
+    /// Return the [`Utxo`] pointed to by `outpoint` if it exists in any chain.
+    pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<Utxo> {
         self.mem
             .utxo(outpoint)
-            .or_else(|| self.disk.utxo(outpoint))
             .or_else(|| self.queued_blocks.utxo(outpoint))
+            .or_else(|| self.disk.utxo(outpoint))
     }
 
     /// Return an iterator over the relevant chain of the block identified by
@@ -502,7 +502,7 @@ impl Service<Request> for StateService {
 
                 let (rsp_tx, rsp_rx) = oneshot::channel();
 
-                self.pending_utxos.scan_block(&finalized.block);
+                self.pending_utxos.check_against(&finalized.new_outputs);
                 self.disk.queue_and_commit_finalized((finalized, rsp_tx));
 
                 async move {

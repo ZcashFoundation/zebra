@@ -8,7 +8,7 @@ use zebra_chain::{
 };
 use zebra_test::{prelude::*, transcript::Transcript};
 
-use crate::{init, BoxError, Config, Request, Response};
+use crate::{init, BoxError, Config, Request, Response, Utxo};
 
 const LAST_BLOCK_HEIGHT: u32 = 10;
 
@@ -80,16 +80,19 @@ async fn test_populated_state_responds_correctly(
                     Ok(Response::Transaction(Some(transaction.clone()))),
                 ));
 
-                for (index, output) in transaction.outputs().iter().enumerate() {
+                let from_coinbase = transaction.is_coinbase();
+                for (index, output) in transaction.outputs().iter().cloned().enumerate() {
                     let outpoint = transparent::OutPoint {
                         hash: transaction_hash,
                         index: index as _,
                     };
+                    let utxo = Utxo {
+                        output,
+                        height,
+                        from_coinbase,
+                    };
 
-                    transcript.push((
-                        Request::AwaitUtxo(outpoint),
-                        Ok(Response::Utxo(output.clone())),
-                    ));
+                    transcript.push((Request::AwaitUtxo(outpoint), Ok(Response::Utxo(utxo))));
                 }
             }
         }

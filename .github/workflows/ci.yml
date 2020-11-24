@@ -45,7 +45,14 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --verbose --manifest-path zebrad/Cargo.toml -- --ignored
+          args: --verbose --manifest-path zebrad/Cargo.toml sync_large_checkpoints_ -- --ignored
+      - name: Run zebrad tracing test
+        env:
+          RUST_BACKTRACE: full
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --verbose --manifest-path zebrad/Cargo.toml tracing_endpoint -- --ignored
 
   build-chain-no-features:
     name: Build zebra-chain w/o features on ubuntu-latest
@@ -111,26 +118,6 @@ jobs:
           name: Clippy (stable)
           token: ${{ secrets.GITHUB_TOKEN }}
           args: --all-features --all-targets -- -D warnings
-
-  clippy-nightly:
-    name: Clippy (nightly)
-    timeout-minutes: 30
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: nightly
-          components: clippy
-          override: true
-      - name: Run Clippy (nightly)
-        uses: actions-rs/clippy-check@v1
-        continue-on-error: true
-        with:
-          name: Clippy (nightly)
-          token: ${{ secrets.GITHUB_TOKEN }}
-          args: --all-features --all-targets -- -W clippy::all
 
   fmt:
     name: Rustfmt

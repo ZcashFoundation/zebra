@@ -1,4 +1,4 @@
-use std::{collections::HashMap, convert::TryFrom, mem, sync::Arc};
+use std::{convert::TryFrom, mem, sync::Arc};
 
 use primitive_types::U256;
 use zebra_chain::{
@@ -21,15 +21,7 @@ impl Prepare for Arc<Block> {
         let block = self;
         let hash = block.hash();
         let height = block.coinbase_height().unwrap();
-
-        let mut new_outputs = HashMap::new();
-        for transaction in &block.transactions {
-            let hash = transaction.hash();
-            for (index, output) in transaction.outputs().iter().cloned().enumerate() {
-                let index = index as u32;
-                new_outputs.insert(transparent::OutPoint { hash, index }, output);
-            }
-        }
+        let new_outputs = crate::utxo::new_outputs(&block);
 
         PreparedBlock {
             block,

@@ -11,4 +11,5 @@ pub const MIN_TRASPARENT_COINBASE_MATURITY: u32 = 100;
 /// coinbase transactions.
 pub const MAX_BLOCK_REORG_HEIGHT: u32 = MIN_TRASPARENT_COINBASE_MATURITY - 1;
 
-pub const DATABASE_FORMAT_VERSION: u32 = 2;
+/// The database format version, incremented each time the database format changes.
+pub const DATABASE_FORMAT_VERSION: u32 = 3;

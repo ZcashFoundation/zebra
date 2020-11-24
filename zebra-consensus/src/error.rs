@@ -67,13 +67,20 @@ pub enum TransactionError {
 
     #[error("bindingSig MUST represent a valid signature under the transaction binding validating key bvk of SigHash")]
     RedJubjub(redjubjub::Error),
+
+    // temporary error type until #1186 is fixed
+    #[error("Downcast from BoxError to redjubjub::Error failed")]
+    InternalDowncastError(String),
 }
 
 impl From<BoxError> for TransactionError {
     fn from(err: BoxError) -> Self {
         match err.downcast::<redjubjub::Error>() {
             Ok(e) => TransactionError::RedJubjub(*e),
-            Err(e) => panic!(e),
+            Err(e) => TransactionError::InternalDowncastError(format!(
+                "downcast to redjubjub::Error failed, original error: {:?}",
+                e
+            )),
         }
     }
 }

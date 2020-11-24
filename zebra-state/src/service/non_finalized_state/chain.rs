@@ -10,7 +10,7 @@ use zebra_chain::{
     work::difficulty::PartialCumulativeWork,
 };
 
-use crate::PreparedBlock;
+use crate::{PreparedBlock, Utxo};
 
 #[derive(Default, Clone)]
 pub struct Chain {
@@ -18,7 +18,7 @@ pub struct Chain {
     pub height_by_hash: HashMap<block::Hash, block::Height>,
     pub tx_by_hash: HashMap<transaction::Hash, (block::Height, usize)>,
 
-    pub created_utxos: HashMap<transparent::OutPoint, transparent::Output>,
+    pub created_utxos: HashMap<transparent::OutPoint, Utxo>,
     spent_utxos: HashSet<transparent::OutPoint>,
     sprout_anchors: HashSet<sprout::tree::Root>,
     sapling_anchors: HashSet<sapling::tree::Root>,
@@ -155,14 +155,13 @@ impl UpdateWith<PreparedBlock> for Chain {
 
         // for each transaction in block
         for (transaction_index, transaction) in block.transactions.iter().enumerate() {
-            let (inputs, outputs, shielded_data, joinsplit_data) = match transaction.deref() {
+            let (inputs, shielded_data, joinsplit_data) = match transaction.deref() {
                 transaction::Transaction::V4 {
                     inputs,
-                    outputs,
                     shielded_data,
                     joinsplit_data,
                     ..
-                } => (inputs, outputs, shielded_data, joinsplit_data),
+                } => (inputs, shielded_data, joinsplit_data),
                 _ => unreachable!(
                     "older transaction versions only exist in finalized blocks pre sapling",
                 ),
@@ -179,7 +178,7 @@ impl UpdateWith<PreparedBlock> for Chain {
             );
 
             // add the utxos this produced
-            self.update_chain_state_with(&(transaction_hash, outputs));
+            self.update_chain_state_with(&prepared.new_outputs);
             // add the utxos this consumed
             self.update_chain_state_with(inputs);
             // add sprout anchor and nullifiers
@@ -209,14 +208,13 @@ impl UpdateWith<PreparedBlock> for Chain {
 
         // for each transaction in block
         for transaction in &block.transactions {
-            let (inputs, outputs, shielded_data, joinsplit_data) = match transaction.deref() {
+            let (inputs, shielded_data, joinsplit_data) = match transaction.deref() {
                 transaction::Transaction::V4 {
                     inputs,
-                    outputs,
                     shielded_data,
                     joinsplit_data,
                     ..
-                } => (inputs, outputs, shielded_data, joinsplit_data),
+                } => (inputs, shielded_data, joinsplit_data),
                 _ => unreachable!(
                     "older transaction versions only exist in finalized blocks pre sapling",
                 ),
@@ -230,7 +228,7 @@ impl UpdateWith<PreparedBlock> for Chain {
             );
 
             // remove the utxos this produced
-            self.revert_chain_state_with(&(transaction_hash, outputs));
+            self.revert_chain_state_with(&prepared.new_outputs);
             // remove the utxos this consumed
             self.revert_chain_state_with(inputs);
             // remove sprout anchor and nullifiers
@@ -241,37 +239,15 @@ impl UpdateWith<PreparedBlock> for Chain {
     }
 }
 
-impl UpdateWith<(transaction::Hash, &Vec<transparent::Output>)> for Chain {
-    fn update_chain_state_with(
-        &mut self,
-        (transaction_hash, outputs): &(transaction::Hash, &Vec<transparent::Output>),
-    ) {
-        for (utxo_index, output) in outputs.iter().enumerate() {
-            self.created_utxos.insert(
-                transparent::OutPoint {
-                    hash: *transaction_hash,
-                    index: utxo_index as u32,
-                },
-                output.clone(),
-            );
-        }
+impl UpdateWith<HashMap<transparent::OutPoint, Utxo>> for Chain {
+    fn update_chain_state_with(&mut self, utxos: &HashMap<transparent::OutPoint, Utxo>) {
+        self.created_utxos
+            .extend(utxos.iter().map(|(k, v)| (*k, v.clone())));
     }
 
-    fn revert_chain_state_with(
-        &mut self,
-        (transaction_hash, outputs): &(transaction::Hash, &Vec<transparent::Output>),
-    ) {
-        for (utxo_index, _) in outputs.iter().enumerate() {
-            assert!(
-                self.created_utxos
-                    .remove(&transparent::OutPoint {
-                        hash: *transaction_hash,
-                        index: utxo_index as u32,
-                    })
-                    .is_some(),
-                "created_utxos must be present if block was"
-            );
-        }
+    fn revert_chain_state_with(&mut self, utxos: &HashMap<transparent::OutPoint, Utxo>) {
+        self.created_utxos
+            .retain(|outpoint, _| !utxos.contains_key(outpoint));
     }
 }
 

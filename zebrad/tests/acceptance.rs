@@ -13,19 +13,23 @@
 
 #![warn(warnings, missing_docs, trivial_casts, unused_qualifications)]
 #![forbid(unsafe_code)]
+#![allow(dead_code)]
+#![allow(clippy::field_reassign_with_default)]
 #![allow(clippy::try_err)]
 #![allow(clippy::unknown_clippy_lints)]
-#![allow(clippy::field_reassign_with_default)]
 
 use color_eyre::eyre::Result;
 use eyre::WrapErr;
 use tempdir::TempDir;
 
-use std::{borrow::Borrow, env, fs, io::Write, time::Duration};
+use std::{env, fs, io::Write, path::Path, path::PathBuf, time::Duration};
 
 use zebra_chain::{
     block::Height,
-    parameters::Network::{self, *},
+    parameters::{
+        Network::{self, *},
+        NetworkUpgrade,
+    },
 };
 use zebra_test::{command::TestDirExt, prelude::*};
 use zebrad::config::ZebradConfig;
@@ -52,7 +56,7 @@ fn testdir() -> Result<TempDir> {
 /// directory for `zebrad`.
 trait ZebradTestDirExt
 where
-    Self: Borrow<TempDir> + Sized,
+    Self: AsRef<Path> + Sized,
 {
     /// Spawn `zebrad` with `args` as a child process in this test directory,
     /// potentially taking ownership of the tempdir for the duration of the
@@ -70,11 +74,11 @@ where
 
 impl<T> ZebradTestDirExt for T
 where
-    Self: TestDirExt + Borrow<TempDir> + Sized,
+    Self: TestDirExt + AsRef<Path> + Sized,
 {
     fn spawn_child(self, args: &[&str]) -> Result<TestChild<Self>> {
-        let tempdir = self.borrow();
-        let default_config_path = tempdir.path().join("zebrad.toml");
+        let path = self.as_ref();
+        let default_config_path = path.join("zebrad.toml");
 
         if default_config_path.exists() {
             let mut extra_args: Vec<_> = Vec::new();
@@ -93,7 +97,7 @@ where
     }
 
     fn with_config(self, mut config: ZebradConfig) -> Result<Self> {
-        let dir = self.borrow().path();
+        let dir = self.as_ref();
 
         if !config.state.ephemeral {
             let cache_dir = dir.join("state");
@@ -108,7 +112,7 @@ where
     }
 
     fn replace_config(self, mut config: ZebradConfig) -> Result<Self> {
-        let dir = self.borrow().path();
+        let dir = self.as_ref();
 
         if !config.state.ephemeral {
             let cache_dir = dir.join("state");
@@ -642,6 +646,96 @@ fn sync_until(
     child.kill()?;
 
     Ok(child.dir)
+}
+
+fn cached_sapling_test_config() -> Result<ZebradConfig> {
+    let mut config = persistent_test_config()?;
+    config.consensus.checkpoint_sync = true;
+    config.state.cache_dir = "/zebrad-cache".into();
+    Ok(config)
+}
+
+fn create_cached_database_height(network: Network, height: Height) -> Result<()> {
+    println!("Creating cached database");
+    // 8 hours
+    let timeout = Duration::from_secs(60 * 60 * 8);
+
+    // Use a persistent state, so we can handle large syncs
+    let mut config = cached_sapling_test_config()?;
+    // TODO: add convenience methods?
+    config.network.network = network;
+    config.state.debug_stop_at_height = Some(height.0);
+    let dir = PathBuf::from("/zebrad-cache");
+
+    fs::File::create(dir.join("zebrad.toml"))?.write_all(toml::to_string(&config)?.as_bytes())?;
+
+    let mut child = dir
+        .spawn_child(&["start"])?
+        .with_timeout(timeout)
+        .bypass_test_capture(true);
+
+    let network = format!("network: {},", network);
+    child.expect_stdout(&network)?;
+    child.expect_stdout(STOP_AT_HEIGHT_REGEX)?;
+    child.kill()?;
+
+    Ok(())
+}
+
+fn create_cached_database(network: Network) -> Result<()> {
+    let height = NetworkUpgrade::Sapling.activation_height(network).unwrap();
+    create_cached_database_height(network, height)
+}
+
+fn sync_past_sapling(network: Network) -> Result<()> {
+    let height = NetworkUpgrade::Sapling.activation_height(network).unwrap() + 1200;
+    create_cached_database_height(network, height.unwrap())
+}
+
+// These tests are ignored because they're too long running to run during our
+// traditional CI, and they depend on persistent state that cannot be made
+// available in github actions or google cloud build. Instead we run these tests
+// directly in a vm we spin up on google compute engine, where we can mount
+// drives populated by the first two tests, snapshot those drives, and then use
+// those to more quickly run the second two tests.
+
+// Sync up to the sapling activation height on mainnet and stop.
+#[cfg_attr(feature = "test_sync_to_sapling_mainnet", test)]
+fn sync_to_sapling_mainnet() {
+    zebra_test::init();
+    let network = Mainnet;
+    create_cached_database(network).unwrap();
+}
+// Sync to the sapling activation height testnet and stop.
+#[cfg_attr(feature = "test_sync_to_sapling_testnet", test)]
+fn sync_to_sapling_testnet() {
+    zebra_test::init();
+    let network = Testnet;
+    create_cached_database(network).unwrap();
+}
+
+/// Test syncing 1200 blocks (3 checkpoints) past the last checkpoint on mainnet.
+///
+/// This assumes that the config'd state is already synced at or near Sapling
+/// activation on mainnet. If the state has already synced past Sapling
+/// activation by 1200 blocks, it will fail.
+#[cfg_attr(feature = "test_sync_past_sapling_mainnet", test)]
+fn sync_past_sapling_mainnet() {
+    zebra_test::init();
+    let network = Mainnet;
+    sync_past_sapling(network).unwrap();
+}
+
+/// Test syncing 1200 blocks (3 checkpoints) past the last checkpoint on testnet.
+///
+/// This assumes that the config'd state is already synced at or near Sapling
+/// activation on testnet. If the state has already synced past Sapling
+/// activation by 1200 blocks, it will fail.
+#[cfg_attr(feature = "test_sync_past_sapling_testnet", test)]
+fn sync_past_sapling_testnet() {
+    zebra_test::init();
+    let network = Testnet;
+    sync_past_sapling(network).unwrap();
 }
 
 #[tokio::test]
