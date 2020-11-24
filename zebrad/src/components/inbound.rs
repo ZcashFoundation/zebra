@@ -12,21 +12,19 @@ use futures::{
 use tokio::sync::oneshot;
 use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
 
-use zebra_chain as zc;
-use zebra_consensus as zcon;
 use zebra_network as zn;
-use zebra_network::AddressBook;
 use zebra_state as zs;
+
+use zebra_chain::block::{self, Block};
+use zebra_consensus::chain::VerifyChainError;
+use zebra_network::AddressBook;
 
 mod downloads;
 use downloads::Downloads;
 
 type Outbound = Buffer<BoxService<zn::Request, zn::Response, zn::BoxError>, zn::Request>;
 type State = Buffer<BoxService<zs::Request, zs::Response, zs::BoxError>, zs::Request>;
-type Verifier = Buffer<
-    BoxService<Arc<zc::block::Block>, zc::block::Hash, zcon::chain::VerifyChainError>,
-    Arc<zc::block::Block>,
->;
+type Verifier = Buffer<BoxService<Arc<Block>, block::Hash, VerifyChainError>, Arc<Block>>;
 
 pub type SetupData = (Outbound, Arc<Mutex<AddressBook>>);
 
