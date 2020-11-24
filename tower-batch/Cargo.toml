@@ -6,7 +6,7 @@ license = "MIT"
 edition = "2018"
 
 [dependencies]
-tokio = { version = "0.3", features = ["time", "sync", "stream", "tracing"] }
+tokio = { version = "0.3", features = ["time", "sync", "stream", "tracing", "macros"] }
 tower = { version = "0.4", features = ["util", "buffer"] }
 futures-core = "0.3.6"
 pin-project = "0.4.27"
