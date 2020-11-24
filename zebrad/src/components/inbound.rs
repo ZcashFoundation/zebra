@@ -156,12 +156,12 @@ impl Service<zn::Request> for Inbound {
                 async { Ok(zn::Response::Nil) }.boxed()
             }
             zn::Request::FindBlocks { known_blocks, stop } => {
-                let request = zs::Request::GetHashes(known_blocks, stop);
+                let request = zs::Request::FindBlockHashes { known_blocks, stop };
                 let mut state = self.state.clone();
                 async move {
                     let fut = state.ready_and().await?.call(request).await?;
                     match fut {
-                        zs::Response::Hashes(Some(hashes)) => Ok(zn::Response::BlockHashes(hashes)),
+                        zs::Response::BlockHashes(hashes) => Ok(zn::Response::BlockHashes(hashes)),
                         _ => Ok(zn::Response::Nil),
                     }
                 }
