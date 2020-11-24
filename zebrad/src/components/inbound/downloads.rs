@@ -108,21 +108,23 @@ where
     #[instrument(skip(self))]
     pub fn download_and_verify(&mut self, hash: block::Hash) -> bool {
         if self.cancel_handles.contains_key(&hash) {
+            tracing::debug!("hash already queued for download");
             return false;
         }
 
         // This oneshot is used to signal cancellation to the download task.
         let (cancel_tx, mut cancel_rx) = oneshot::channel::<()>();
 
-        let mut state = self.state.clone();
-        let mut network = self.network.clone();
-        let mut verifier = self.verifier.clone();
+        let state = self.state.clone();
+        let network = self.network.clone();
+        let verifier = self.verifier.clone();
 
         let fut = async move {
             // Check if the block is already in the state.
             match state.oneshot(zs::Request::Depth(hash.into())).await {
                 Ok(zs::Response::Depth(None)) => Ok(()),
                 Ok(zs::Response::Depth(Some(_))) => Err("already present".into()),
+                Ok(_) => unreachable!("wrong response"),
                 Err(e) => Err(e),
             }?;
 
@@ -142,8 +144,8 @@ where
             verifier.oneshot(block).await
         }
         .map_ok(|hash| {
-            tracing::info!(?hash, "verified advertised block");
             metrics::counter!("gossip.verified.block.count", 1);
+            hash
         })
         // Tack the hash onto the error so we can remove the cancel handle
         // on failure as well as on success.
@@ -155,6 +157,7 @@ where
                 _ = &mut cancel_rx => {
                     tracing::trace!("task cancelled prior to completion");
                     metrics::counter!("gossip.cancelled.count", 1);
+                    Err(("canceled".into(), hash))
                 }
                 verification = fut => verification,
             }
@@ -167,6 +170,7 @@ where
             "blocks are only queued once"
         );
 
+        tracing::debug!("queued hash for download");
         true
     }
 }
