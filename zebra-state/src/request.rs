@@ -196,10 +196,17 @@ pub enum Request {
     /// handle missing UTXOs.
     AwaitUtxo(transparent::OutPoint),
 
-    /// Find intersection of provided and best chain and returns block hashes ahead.
+    /// Finds the intersection of the block hashes provided by a peer, and the local best chain.
+    /// Returns a list of block hashes, starting at the child of the intersection, and extending towards the tip.
     ///
     /// Returns
     ///
-    /// [`Response::Hashes(Vec<block::Hash>)`](Response::Hashes) with max of 500 block hashes.
-    GetHashes(Vec<block::Hash>, Option<block::Hash>),
+    /// [`Response::BlockHashes(Vec<block::Hash>)`](Response::Hashes) with max of 500 block hashes.
+    /// See https://en.bitcoin.it/wiki/Protocol_documentation#getblocks
+    FindBlockHashes {
+        /// Hashes of known blocks, ordered from highest height to lowest height.
+        known_blocks: Vec<block::Hash>,
+        /// Optionally, the last block hash to request.
+        stop: Option<block::Hash>,
+    },
 }

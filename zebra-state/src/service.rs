@@ -283,13 +283,17 @@ impl StateService {
         }
     }
 
-    /// Return a list of blocks ahead given a list of blocks.
+    /// Return a list of block hashes in the best chain, following the first matching hash in `known_blocks`.
     ///
-    /// 1. Make sure we have the list of blocks provided in our chain.
-    /// 2. Get a max of 500 hashes ahead of the provided tip.
+    /// Starts from the first matching hash in the best chain, ignoring all other hashes in `known_blocks`.
+    /// Only matches and returns hashes from the best chain, including non-finalized blocks.
+    /// Stops the list of hashes after:
+    ///   * adding the non-finalized best tip,
+    ///   * adding the stop hash to the list, if it is in the best chain, or
+    ///   * adding 500 hashes to the list.
     pub fn find_chain_hashes(
         &self,
-        block_locator: Vec<block::Hash>,
+        known_blocks: Vec<block::Hash>,
         stop: Option<block::Hash>,
     ) -> Option<Vec<block::Hash>> {
         let locator_tip_hash = block_locator.first()?;
@@ -324,8 +328,7 @@ impl StateService {
             return None;
         }
 
-        // The number of next hashes to return.
-        let max_results = 500;
+        const MAX_FIND_BLOCK_HASHES_RESULTS: usize = 500;
 
         // Compute a new tip, make sure it is below our chain tip.
         let (chain_tip_height, ..) = self.tip().expect("tip must always be available?");

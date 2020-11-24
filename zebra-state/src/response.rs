@@ -35,6 +35,6 @@ pub enum Response {
     /// The response to a `AwaitUtxo` request.
     Utxo(transparent::Output),
 
-    /// The response to a `GetHashes` request.
-    Hashes(Option<Vec<block::Hash>>),
+    /// The response to a `FindBlockHashes` request.
+    BlockHashes(Vec<block::Hash>),
 }
