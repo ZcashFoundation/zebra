@@ -284,7 +284,6 @@ impl StateService {
         known_blocks: Vec<block::Hash>,
         stop: Option<block::Hash>,
     ) -> Vec<block::Hash> {
-        // Vector of responses
         let mut res: Vec<block::Hash> = Vec::new();
 
         // Known blocks can't be empty
@@ -353,19 +352,20 @@ impl StateService {
                 break;
             }
 
+            res.push(block.hash());
+
             // Check the stop parameter
-            if stop.is_some() && stop.unwrap() == block.hash() {
+            if stop == Some(block.hash()) {
                 break;
             }
 
-            // Insert in reverse order
-            res.insert(0, block.hash());
             tracing::info!(
                 "RESPONSE: {:?} {:?}",
                 self.height_by_hash(block.hash()).expect("a height"),
                 block.hash()
             );
         }
+        res.reverse();
         res
     }
 }
