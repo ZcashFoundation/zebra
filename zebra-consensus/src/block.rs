@@ -25,7 +25,6 @@ use tracing::Instrument;
 use zebra_chain::{
     block::{self, Block},
     parameters::Network,
-    parameters::NetworkUpgrade,
     transparent,
     work::equihash,
 };
@@ -83,9 +82,8 @@ where
     S::Future: Send + 'static,
 {
     pub fn new(network: Network, state_service: S) -> Self {
-        let branch = NetworkUpgrade::Sapling.branch_id().unwrap();
-        let script_verifier = script::Verifier::new(state_service.clone(), branch);
-        let transaction_verifier = transaction::Verifier::new(script_verifier);
+        let transaction_verifier =
+            transaction::Verifier::new(network, script::Verifier::new(state_service.clone()));
 
         Self {
             network,
@@ -176,6 +174,7 @@ where
                     .call(transaction::Request::Block {
                         transaction: transaction.clone(),
                         known_utxos: known_utxos.clone(),
+                        height,
                     });
                 async_checks.push(rsp);
             }

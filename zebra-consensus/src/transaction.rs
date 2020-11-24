@@ -14,7 +14,8 @@ use tower::{Service, ServiceExt};
 use tracing::Instrument;
 
 use zebra_chain::{
-    parameters::NetworkUpgrade,
+    block,
+    parameters::{Network, NetworkUpgrade},
     transaction::{self, HashType, Transaction},
     transparent,
 };
@@ -28,6 +29,7 @@ mod check;
 /// Asynchronous transaction verification.
 #[derive(Debug, Clone)]
 pub struct Verifier<ZS> {
+    network: Network,
     script_verifier: script::Verifier<ZS>,
     // spend_verifier: groth16::Verifier,
     // output_verifier: groth16::Verifier,
@@ -40,8 +42,11 @@ where
     ZS::Future: Send + 'static,
 {
     // XXX: how should this struct be constructed?
-    pub fn new(script_verifier: script::Verifier<ZS>) -> Self {
-        Self { script_verifier }
+    pub fn new(network: Network, script_verifier: script::Verifier<ZS>) -> Self {
+        Self {
+            network,
+            script_verifier,
+        }
     }
 }
 
@@ -54,15 +59,22 @@ where
 pub enum Request {
     /// Verify the supplied transaction as part of a block.
     Block {
+        /// The transaction itself.
         transaction: Arc<Transaction>,
         /// Additional UTXOs which are known at the time of verification.
         known_utxos: Arc<HashMap<transparent::OutPoint, zs::Utxo>>,
+        /// The height of the block containing this transaction, used to
+        /// determine the applicable network upgrade.
+        height: block::Height,
     },
     /// Verify the supplied transaction as part of the mempool.
     Mempool {
+        /// The transaction itself.
         transaction: Arc<Transaction>,
         /// Additional UTXOs which are known at the time of verification.
         known_utxos: Arc<HashMap<transparent::OutPoint, zs::Utxo>>,
+        /// The active NU in the context of this verification.
+        upgrade: NetworkUpgrade,
     },
 }
 
@@ -91,15 +103,20 @@ where
             unimplemented!();
         }
 
-        let (tx, known_utxos) = match req {
+        let (tx, known_utxos, upgrade) = match req {
             Request::Block {
                 transaction,
                 known_utxos,
-            } => (transaction, known_utxos),
+                height,
+            } => {
+                let upgrade = NetworkUpgrade::current(self.network, height);
+                (transaction, known_utxos, upgrade)
+            }
             Request::Mempool {
                 transaction,
                 known_utxos,
-            } => (transaction, known_utxos),
+                upgrade,
+            } => (transaction, known_utxos, upgrade),
         };
 
         let mut redjubjub_verifier = crate::primitives::redjubjub::VERIFIER.clone();
@@ -135,6 +152,7 @@ where
                         // feed all of the inputs to the script verifier
                         for input_index in 0..inputs.len() {
                             let rsp = script_verifier.ready_and().await?.call(script::Request {
+                                upgrade,
                                 known_utxos: known_utxos.clone(),
                                 transaction: tx.clone(),
                                 input_index,
@@ -146,10 +164,11 @@ where
 
                     check::has_inputs_and_outputs(&tx)?;
 
+                    // TODO: rework this code
                     let sighash = tx.sighash(
-                        NetworkUpgrade::Sapling, // TODO: pass this in
-                        HashType::ALL,           // TODO: check these
-                        None,                    // TODO: check these
+                        upgrade,
+                        HashType::ALL, // TODO: check these
+                        None,          // TODO: check these
                     );
 
                     if let Some(joinsplit_data) = joinsplit_data {
