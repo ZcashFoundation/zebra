@@ -4,7 +4,7 @@
 
 In the first alpha release, we want Zebra to participate in the network and replicate the Zcash chain state. We also want to validate proof of work and the transaction merkle tree, and serve blocks to peers.
 
-### System Requirements
+### System Requirements
 
 _TBD_
 
@@ -12,11 +12,11 @@ _TBD_
 
 _TBD_
 
-### Supported Platforms
+### Supported Platforms
 
 _TBD_
 
-### Go/No-Go Criteria
+### Go/No-Go Criteria
 
 - Zebrad Functionality
     - [ ] zebrad can sync to mainnet tip
