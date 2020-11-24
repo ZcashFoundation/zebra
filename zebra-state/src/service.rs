@@ -271,18 +271,6 @@ impl StateService {
         }
     }
 
-    /// Return an iterator over the finalized blocks of the chain
-    /// starting (and descending) from the block identified by `height`.
-    ///
-    /// The block identified by `height` is included in the chain of blocks yielded
-    /// by the iterator.
-    pub fn chain_finalized(&self, height: block::Height) -> Iter<'_> {
-        Iter {
-            service: self,
-            state: IterState::Finalized(height),
-        }
-    }
-
     /// Return a list of block hashes in the best chain, following the first matching hash in `known_blocks`.
     ///
     /// Starts from the first matching hash in the best chain, ignoring all other hashes in `known_blocks`.
@@ -296,11 +284,28 @@ impl StateService {
         known_blocks: Vec<block::Hash>,
         stop: Option<block::Hash>,
     ) -> Vec<block::Hash> {
-        let locator_tip_hash = known_blocks.first().expect("we should have a tip hash");
+        // Vector of responses
+        let mut res: Vec<block::Hash> = Vec::new();
+
+        // Known blocks can't be empty
+        if known_blocks.is_empty() {
+            return res;
+        }
+
+        // Get chain tip
+        let (chain_tip_height, ..) = self.tip().expect("tip must always be available");
+
+        // Get requested tip
+        let locator_tip_hash = known_blocks.first().expect("we must have a tip hash");
         let locator_tip_height = self
             .height_by_hash(*locator_tip_hash)
-            .expect("tip hash should be converted to height without problems");
-        let chain = self.chain_finalized(locator_tip_height);
+            .expect("tip hash must have a height");
+        let chain = self.chain(*locator_tip_hash);
+
+        // Requested tip must be below our chain tip
+        if locator_tip_height >= chain_tip_height {
+            return res;
+        }
 
         tracing::info!(
             "REQUESTED TIP: {:?} {:?}",
@@ -325,9 +330,6 @@ impl StateService {
             }
         }
 
-        // Vector of responses
-        let mut res: Vec<block::Hash> = Vec::new();
-
         // If the 2 vectors are not equal we cant continue.
         if collect_block_locator != known_blocks {
             return res;
@@ -336,14 +338,14 @@ impl StateService {
         const MAX_FIND_BLOCK_HASHES_RESULTS: usize = 500;
 
         // Compute a new tip, make sure it is below our chain tip.
-        let (chain_tip_height, ..) = self.tip().expect("tip must always be available?");
-        let new_tip = block::Height(std::cmp::min(
+        let new_tip_height = block::Height(std::cmp::min(
             locator_tip_height.0 + MAX_FIND_BLOCK_HASHES_RESULTS as u32,
             chain_tip_height.0,
         ));
+        let new_tip_hash = self.hash(new_tip_height).expect("new tip must have a hash");
 
         // Get a new chain starting at the new "requested" tip.
-        let new_chain = self.chain_finalized(new_tip);
+        let new_chain = self.chain(new_tip_hash);
 
         for block in new_chain {
             // If we get the requested tip we are over
