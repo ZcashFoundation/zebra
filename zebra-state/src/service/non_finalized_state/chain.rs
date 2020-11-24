@@ -33,7 +33,7 @@ impl Chain {
     pub fn push(&mut self, block: PreparedBlock) {
         // update cumulative data members
         self.update_chain_state_with(&block);
-        tracing::debug!(block = %block.block, "adding block to chain");
+        tracing::info!(block = %block.block, "adding block to chain");
         self.blocks.insert(block.height, block);
     }
 
