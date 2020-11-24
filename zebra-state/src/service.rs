@@ -272,7 +272,7 @@ impl StateService {
     }
 
     /// Return an iterator over the finalized blocks of the chain
-    /// starting(and descending) from the block identified by `height`.
+    /// starting (and descending) from the block identified by `height`.
     ///
     /// The block identified by `height` is included in the chain of blocks yielded
     /// by the iterator.
@@ -284,6 +284,7 @@ impl StateService {
     }
 
     /// Return a list of blocks ahead given a list of blocks.
+    ///
     /// 1. Make sure we have the list of blocks provided in our chain.
     /// 2. Get a max of 500 hashes ahead of the provided tip.
     pub fn find_chain_hashes(
