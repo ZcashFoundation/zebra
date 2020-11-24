@@ -6,13 +6,16 @@ use std::{
     task::{Context, Poll},
 };
 
+#[allow(unused_imports)]
 use futures::{
     stream::{FuturesUnordered, StreamExt},
     FutureExt,
 };
+#[allow(unused_imports)]
 use tower::{Service, ServiceExt};
 use tracing::Instrument;
 
+#[allow(unused_imports)]
 use zebra_chain::{
     parameters::NetworkUpgrade,
     transaction::{self, HashType, Transaction},
@@ -91,6 +94,7 @@ where
             unimplemented!();
         }
 
+        #[allow(unused_variables)]
         let (tx, known_utxos) = match req {
             Request::Block {
                 transaction,
@@ -102,7 +106,9 @@ where
             } => (transaction, known_utxos),
         };
 
+        #[allow(unused_variables, unused_mut)]
         let mut redjubjub_verifier = crate::primitives::redjubjub::VERIFIER.clone();
+        #[allow(unused_variables, unused_mut)]
         let mut script_verifier = self.script_verifier.clone();
         let span = tracing::debug_span!("tx", hash = %tx.hash());
         async move {
@@ -112,6 +118,7 @@ where
                     tracing::debug!(?tx, "got transaction with wrong version");
                     Err(TransactionError::WrongVersion)
                 }
+                #[allow(unused_variables)]
                 Transaction::V4 {
                     inputs,
                     // outputs,
@@ -124,7 +131,9 @@ where
                 } => {
                     // A set of asynchronous checks which must all succeed.
                     // We finish by waiting on these below.
+                    /* #1367: temporarily disable this code, because the hard-coded Sapling value stops us validating post-Blossom blocks
                     let mut async_checks = FuturesUnordered::new();
+                    */
 
                     // Handle transparent inputs and outputs.
                     if tx.is_coinbase() {
@@ -133,6 +142,7 @@ where
                     } else {
                         // otherwise, check no coinbase inputs
                         // feed all of the inputs to the script verifier
+                        /* #1367: temporarily disable this code, because the hard-coded Sapling value stops us validating post-Blossom blocks
                         for input_index in 0..inputs.len() {
                             let rsp = script_verifier.ready_and().await?.call(script::Request {
                                 known_utxos: known_utxos.clone(),
@@ -142,10 +152,12 @@ where
 
                             async_checks.push(rsp);
                         }
+                        */
                     }
 
                     check::has_inputs_and_outputs(&tx)?;
 
+                    /* #1367: temporarily disable this code, because the hard-coded Sapling value stops us validating post-Blossom blocks
                     let sighash = tx.sighash(
                         NetworkUpgrade::Sapling, // TODO: pass this in
                         HashType::ALL,           // TODO: check these
@@ -162,9 +174,11 @@ where
 
                         check::validate_joinsplit_sig(joinsplit_data, sighash.as_bytes())?;
                     }
+                    */
 
                     if let Some(shielded_data) = shielded_data {
                         check::shielded_balances_match(&shielded_data, *value_balance)?;
+                        /* #1367: temporarily disable this code, because the hard-coded Sapling value stops us validating post-Blossom blocks
                         for spend in shielded_data.spends() {
                             // TODO: check that spend.cv and spend.rk are NOT of small
                             // order.
@@ -175,13 +189,14 @@ where
                             // description while adding the resulting future to
                             // our collection of async checks that (at a
                             // minimum) must pass for the transaction to verify.
+                            /* #1367: temporarily disable this code, because the hard-coded Sapling value stops us validating post-Blossom blocks
                             let rsp = redjubjub_verifier
                                 .ready_and()
                                 .await?
                                 .call((spend.rk, spend.spend_auth_sig, &sighash).into());
 
                             async_checks.push(rsp.boxed());
-
+                            */
                             // TODO: prepare public inputs for spends, then create
                             // a groth16::Item and pass to self.spend
 
@@ -206,7 +221,6 @@ where
                             // checks that (at a minimum) must pass for the
                             // transaction to verify.
                         });
-
                         let bvk = shielded_data.binding_verification_key(*value_balance);
                         let rsp = redjubjub_verifier
                             .ready_and()
@@ -214,14 +228,17 @@ where
                             .call((bvk, shielded_data.binding_sig, &sighash).into())
                             .boxed();
                         async_checks.push(rsp);
+                        */
                     }
 
                     // Finally, wait for all asynchronous checks to complete
                     // successfully, or fail verification if they error.
+                    /* #1367: temporarily disable this code, because the hard-coded Sapling value stops us validating post-Blossom blocks
                     while let Some(check) = async_checks.next().await {
                         tracing::trace!(?check, remaining = async_checks.len());
                         check?;
                     }
+                    */
 
                     Ok(tx.hash())
                 }

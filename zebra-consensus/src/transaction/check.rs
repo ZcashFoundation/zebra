@@ -16,6 +16,7 @@ use crate::error::TransactionError;
 ///
 /// https://zips.z.cash/protocol/canopy.pdf#sproutnonmalleability
 /// https://zips.z.cash/protocol/canopy.pdf#txnencodingandconsensus
+#[allow(dead_code)]
 pub fn validate_joinsplit_sig(
     joinsplit_data: &JoinSplitData<Groth16Proof>,
     sighash: &[u8],
