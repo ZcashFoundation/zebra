@@ -62,7 +62,7 @@ pub struct Inbound {
     address_book: Option<Arc<Mutex<zn::AddressBook>>>,
     state: State,
     verifier: Verifier,
-    downloads: Option<Downloads<Outbound, Verifier, State>>,
+    downloads: Option<Pin<Box<Downloads<Outbound, Verifier, State>>>>,
 }
 
 impl Inbound {
@@ -102,11 +102,11 @@ impl Service<zn::Request> for Inbound {
                     self.outbound = Some(outbound);
                     self.address_book = Some(address_book);
                     self.network_setup = None;
-                    self.downloads = Some(Downloads::new(
+                    self.downloads = Some(Box::pin(Downloads::new(
                         self.outbound.clone().unwrap(),
                         self.verifier.clone(),
                         self.state.clone(),
-                    ));
+                    )));
                 }
                 Err(TryRecvError::Empty) => {
                     self.network_setup = Some(rx);
@@ -123,8 +123,7 @@ impl Service<zn::Request> for Inbound {
 
         // Clean up completed download tasks
         if let Some(downloads) = self.downloads.as_mut() {
-            let downloads = Pin::new(downloads);
-            while let Poll::Ready(Some(_)) = downloads.poll_next(cx) {}
+            while let Poll::Ready(Some(_)) = downloads.as_mut().poll_next(cx) {}
         }
 
         // Now report readiness based on readiness of the inner services, if they're available.
