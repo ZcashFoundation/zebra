@@ -229,7 +229,7 @@ where
     }
 
     fn remove(&mut self, key: &D::Key) {
-        if let Some(_) = self.take_ready_service(key) {
+        if self.take_ready_service(key).is_some() {
         } else if let Some(handle) = self.cancel_handles.remove(key) {
             let _ = handle.send(());
         }
