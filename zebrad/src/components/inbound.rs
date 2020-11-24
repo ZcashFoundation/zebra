@@ -122,7 +122,9 @@ impl Service<zn::Request> for Inbound {
         }
 
         // Clean up completed download tasks
-        while let Poll::Ready(Some(_)) = self.downloads.unwrap().poll_next(cx) {}
+        if let Some(downloads) = self.downloads.as_mut() {
+            while let Poll::Ready(Some(_)) = Pin::new(downloads).poll_next(cx) {}
+        }
 
         // Now report readiness based on readiness of the inner services, if they're available.
         // XXX do we want to propagate backpressure from the network here?
