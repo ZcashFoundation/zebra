@@ -123,7 +123,8 @@ impl Service<zn::Request> for Inbound {
 
         // Clean up completed download tasks
         if let Some(downloads) = self.downloads.as_mut() {
-            while let Poll::Ready(Some(_)) = Pin::new(downloads).poll_next(cx) {}
+            let downloads = Pin::new(downloads);
+            while let Poll::Ready(Some(_)) = downloads.poll_next(cx) {}
         }
 
         // Now report readiness based on readiness of the inner services, if they're available.
@@ -200,24 +201,10 @@ impl Service<zn::Request> for Inbound {
                 async { Ok(zn::Response::Nil) }.boxed()
             }
             zn::Request::AdvertiseBlock(hash) => {
-                // this sucks
-                let mut downloads = self.downloads.take().unwrap();
-                self.downloads = Some(Downloads::new(
-                    self.outbound.as_ref().unwrap().clone(),
-                    self.verifier.clone(),
-                    self.state.clone(),
-                ));
-
-                async move {
-                    if downloads.download_and_verify(hash).await? {
-                        tracing::info!(?hash, "queued download and verification of gossiped block");
-                    } else {
-                        tracing::debug!(?hash, "gossiped block already queued or verified");
-                    }
-
-                    Ok(zn::Response::Nil)
+                if let Some(downloads) = self.downloads.as_mut() {
+                    downloads.download_and_verify(hash);
                 }
-                .boxed()
+                async { Ok(zn::Response::Nil) }.boxed()
             }
             zn::Request::MempoolTransactions => {
                 debug!("ignoring unimplemented request");
