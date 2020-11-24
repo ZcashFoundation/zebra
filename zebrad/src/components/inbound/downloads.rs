@@ -5,7 +5,6 @@ use std::{
     task::{Context, Poll},
 };
 
-use color_eyre::eyre::{eyre, Report};
 use futures::{
     future::TryFutureExt,
     ready,
@@ -27,11 +26,11 @@ type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 #[derive(Debug)]
 pub struct Downloads<ZN, ZV, ZS>
 where
-    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + 'static,
+    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
     ZN::Future: Send,
     ZV: Service<Arc<Block>, Response = block::Hash, Error = BoxError> + Send + Clone + 'static,
     ZV::Future: Send,
-    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + 'static,
+    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send,
 {
     network: ZN,
@@ -44,11 +43,11 @@ where
 
 impl<ZN, ZV, ZS> Stream for Downloads<ZN, ZV, ZS>
 where
-    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + 'static,
+    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
     ZN::Future: Send,
     ZV: Service<Arc<Block>, Response = block::Hash, Error = BoxError> + Send + Clone + 'static,
     ZV::Future: Send,
-    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + 'static,
+    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send,
 {
     type Item = Result<block::Hash, BoxError>;
