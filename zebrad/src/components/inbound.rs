@@ -7,7 +7,7 @@ use std::{
 
 use futures::{
     future::{FutureExt, TryFutureExt},
-    stream::TryStreamExt,
+    stream::{Stream, TryStreamExt},
 };
 use tokio::sync::oneshot;
 use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
