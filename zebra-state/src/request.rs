@@ -74,6 +74,8 @@ pub struct PreparedBlock {
     /// be unspent, since a later transaction in a block can spend outputs of an
     /// earlier transaction.
     pub new_outputs: HashMap<transparent::OutPoint, Utxo>,
+    /// A precomputed list of the hashes of the transactions in this block.
+    pub transaction_hashes: Vec<transaction::Hash>,
     // TODO: add these parameters when we can compute anchors.
     // sprout_anchor: sprout::tree::Root,
     // sapling_anchor: sapling::tree::Root,
@@ -97,6 +99,8 @@ pub struct FinalizedBlock {
     /// be unspent, since a later transaction in a block can spend outputs of an
     /// earlier transaction.
     pub(crate) new_outputs: HashMap<transparent::OutPoint, Utxo>,
+    /// A precomputed list of the hashes of the transactions in this block.
+    pub(crate) transaction_hashes: Vec<transaction::Hash>,
 }
 
 // Doing precomputation in this From impl means that it will be done in
@@ -108,10 +112,19 @@ impl From<Arc<Block>> for FinalizedBlock {
             .coinbase_height()
             .expect("finalized blocks must have a valid coinbase height");
         let hash = block.hash();
+        let transaction_hashes = block
+            .transactions
+            .iter()
+            .map(|tx| tx.hash())
+            .collect::<Vec<_>>();
 
         let mut new_outputs = HashMap::default();
-        for transaction in &block.transactions {
-            let hash = transaction.hash();
+
+        for (transaction, hash) in block
+            .transactions
+            .iter()
+            .zip(transaction_hashes.iter().cloned())
+        {
             let from_coinbase = transaction.is_coinbase();
             for (index, output) in transaction.outputs().iter().cloned().enumerate() {
                 let index = index as u32;
@@ -131,6 +144,7 @@ impl From<Arc<Block>> for FinalizedBlock {
             height,
             hash,
             new_outputs,
+            transaction_hashes,
         }
     }
 }
@@ -142,12 +156,14 @@ impl From<PreparedBlock> for FinalizedBlock {
             height,
             hash,
             new_outputs,
+            transaction_hashes,
         } = prepared;
         Self {
             block,
             height,
             hash,
             new_outputs,
+            transaction_hashes,
         }
     }
 }

@@ -3,10 +3,9 @@
 use chrono::{DateTime, Utc};
 
 use zebra_chain::{
-    block::Hash,
-    block::Height,
-    block::{Block, Header},
+    block::{Block, Hash, Header, Height},
     parameters::{Network, NetworkUpgrade},
+    transaction,
     work::{difficulty::ExpandedDifficulty, equihash},
 };
 
@@ -164,4 +163,22 @@ pub fn time_is_valid_at(
     hash: &Hash,
 ) -> Result<(), zebra_chain::block::BlockTimeError> {
     header.time_is_valid_at(now, height, hash)
+}
+
+/// Check Merkle root validity.
+///
+/// `transaction_hashes` is a precomputed list of transaction hashes.
+pub fn merkle_root_validity(
+    block: &Block,
+    transaction_hashes: &[transaction::Hash],
+) -> Result<(), BlockError> {
+    let merkle_root = transaction_hashes.iter().cloned().collect();
+    if block.header.merkle_root == merkle_root {
+        Ok(())
+    } else {
+        Err(BlockError::BadMerkleRoot {
+            actual: merkle_root,
+            expected: block.header.merkle_root,
+        })
+    }
 }

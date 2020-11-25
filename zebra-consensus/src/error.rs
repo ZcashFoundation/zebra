@@ -7,7 +7,7 @@
 
 use thiserror::Error;
 
-use zebra_chain::primitives::ed25519;
+use zebra_chain::{block, primitives::ed25519};
 
 use crate::BoxError;
 
@@ -98,6 +98,12 @@ pub enum BlockError {
 
     #[error("block has no transactions")]
     NoTransactions,
+
+    #[error("block has mismatched merkle root")]
+    BadMerkleRoot {
+        actual: block::merkle::Root,
+        expected: block::merkle::Root,
+    },
 
     #[error("block {0:?} is already in the chain at depth {1:?}")]
     AlreadyInChain(zebra_chain::block::Hash, u32),

@@ -136,7 +136,12 @@ trait UpdateWith<T> {
 
 impl UpdateWith<PreparedBlock> for Chain {
     fn update_chain_state_with(&mut self, prepared: &PreparedBlock) {
-        let (block, hash, height) = (prepared.block.as_ref(), prepared.hash, prepared.height);
+        let (block, hash, height, transaction_hashes) = (
+            prepared.block.as_ref(),
+            prepared.hash,
+            prepared.height,
+            &prepared.transaction_hashes,
+        );
 
         // add hash to height_by_hash
         let prior_height = self.height_by_hash.insert(hash, height);
@@ -154,7 +159,12 @@ impl UpdateWith<PreparedBlock> for Chain {
         self.partial_cumulative_work += block_work;
 
         // for each transaction in block
-        for (transaction_index, transaction) in block.transactions.iter().enumerate() {
+        for (transaction_index, (transaction, transaction_hash)) in block
+            .transactions
+            .iter()
+            .zip(transaction_hashes.iter().cloned())
+            .enumerate()
+        {
             let (inputs, shielded_data, joinsplit_data) = match transaction.deref() {
                 transaction::Transaction::V4 {
                     inputs,
@@ -168,7 +178,6 @@ impl UpdateWith<PreparedBlock> for Chain {
             };
 
             // add key `transaction.hash` and value `(height, tx_index)` to `tx_by_hash`
-            let transaction_hash = transaction.hash();
             let prior_pair = self
                 .tx_by_hash
                 .insert(transaction_hash, (height, transaction_index));
@@ -190,7 +199,11 @@ impl UpdateWith<PreparedBlock> for Chain {
 
     #[instrument(skip(self, prepared), fields(block = %prepared.block))]
     fn revert_chain_state_with(&mut self, prepared: &PreparedBlock) {
-        let (block, hash) = (prepared.block.as_ref(), prepared.hash);
+        let (block, hash, transaction_hashes) = (
+            prepared.block.as_ref(),
+            prepared.hash,
+            &prepared.transaction_hashes,
+        );
 
         // remove the blocks hash from `height_by_hash`
         assert!(
@@ -207,7 +220,9 @@ impl UpdateWith<PreparedBlock> for Chain {
         self.partial_cumulative_work -= block_work;
 
         // for each transaction in block
-        for transaction in &block.transactions {
+        for (transaction, transaction_hash) in
+            block.transactions.iter().zip(transaction_hashes.iter())
+        {
             let (inputs, shielded_data, joinsplit_data) = match transaction.deref() {
                 transaction::Transaction::V4 {
                     inputs,
@@ -221,9 +236,8 @@ impl UpdateWith<PreparedBlock> for Chain {
             };
 
             // remove `transaction.hash` from `tx_by_hash`
-            let transaction_hash = transaction.hash();
             assert!(
-                self.tx_by_hash.remove(&transaction_hash).is_some(),
+                self.tx_by_hash.remove(transaction_hash).is_some(),
                 "transactions must be present if block was"
             );
 

@@ -25,12 +25,12 @@ use tracing::Instrument;
 use zebra_chain::{
     block::{self, Block},
     parameters::Network,
-    transparent,
+    transaction, transparent,
     work::equihash,
 };
 use zebra_state as zs;
 
-use crate::{error::*, transaction};
+use crate::{error::*, transaction as tx};
 use crate::{script, BoxError};
 
 mod check;
@@ -44,7 +44,7 @@ pub struct BlockVerifier<S> {
     /// The network to be verified.
     network: Network,
     state_service: S,
-    transaction_verifier: transaction::Verifier<S>,
+    transaction_verifier: tx::Verifier<S>,
 }
 
 // TODO: dedupe with crate::error::BlockError
@@ -83,7 +83,7 @@ where
 {
     pub fn new(network: Network, state_service: S) -> Self {
         let transaction_verifier =
-            transaction::Verifier::new(network, script::Verifier::new(state_service.clone()));
+            tx::Verifier::new(network, script::Verifier::new(state_service.clone()));
 
         Self {
             network,
@@ -161,17 +161,24 @@ where
             check::coinbase_is_first(&block)?;
             check::subsidy_is_valid(&block, network)?;
 
-            // TODO: context-free header verification: merkle root
+            // Precomputing this avoids duplicating transaction hash computations.
+            let transaction_hashes = block
+                .transactions
+                .iter()
+                .map(|t| t.hash())
+                .collect::<Vec<_>>();
+
+            check::merkle_root_validity(&block, &transaction_hashes)?;
 
             let mut async_checks = FuturesUnordered::new();
 
-            let known_utxos = new_outputs(&block);
+            let known_utxos = new_outputs(&block, &transaction_hashes);
             for transaction in &block.transactions {
                 let rsp = transaction_verifier
                     .ready_and()
                     .await
                     .expect("transaction verifier is always ready")
-                    .call(transaction::Request::Block {
+                    .call(tx::Request::Block {
                         transaction: transaction.clone(),
                         known_utxos: known_utxos.clone(),
                         height,
@@ -199,6 +206,7 @@ where
                 hash,
                 height,
                 new_outputs,
+                transaction_hashes,
             };
             match state_service
                 .ready_and()
@@ -220,11 +228,19 @@ where
     }
 }
 
-fn new_outputs(block: &Block) -> Arc<HashMap<transparent::OutPoint, zs::Utxo>> {
+/// Compute an index of newly created transparent outputs, given a block and a
+/// list of precomputed transaction hashes.
+fn new_outputs(
+    block: &Block,
+    transaction_hashes: &[transaction::Hash],
+) -> Arc<HashMap<transparent::OutPoint, zs::Utxo>> {
     let mut new_outputs = HashMap::default();
     let height = block.coinbase_height().expect("block has coinbase height");
-    for transaction in &block.transactions {
-        let hash = transaction.hash();
+    for (transaction, hash) in block
+        .transactions
+        .iter()
+        .zip(transaction_hashes.iter().cloned())
+    {
         let from_coinbase = transaction.is_coinbase();
         for (index, output) in transaction.outputs().iter().cloned().enumerate() {
             let index = index as u32;
