@@ -13,7 +13,7 @@ use tower::{util::BoxService, Service};
 use tracing::instrument;
 use zebra_chain::{
     block::{self, Block},
-    parameters::Network,
+    parameters::{genesis_hash, Network},
     transaction,
     transaction::Transaction,
     transparent,
@@ -302,45 +302,26 @@ impl StateService {
         }
         let chain_tip_height = chain_tip.unwrap().0;
 
-        // Get requested tip
-        let locator_tip_hash = known_blocks.first().expect("we must have a tip hash");
-        let locator_tip_height = self
-            .height_by_hash(*locator_tip_hash)
-            .expect("tip hash must have a height");
-        let chain = self.chain(*locator_tip_hash);
-
-        // Requested tip must be below our chain tip
-        if locator_tip_height >= chain_tip_height {
-            return res;
+        // Get requested tip:
+        // Use the genesis hash if locator is empty or if no hash in the
+        // locator is present in our best chain.
+        let mut locator_tip_hash = genesis_hash(self.network);
+        let mut locator_tip_height = block::Height(1);
+        if !known_blocks.is_empty() {
+            for hash in known_blocks {
+                let height_hash = self.height_by_hash(hash);
+                if height_hash.is_some() {
+                    locator_tip_hash = hash;
+                    locator_tip_height = height_hash.unwrap();
+                    break;
+                }
+            }
         }
-
         tracing::info!(
             "REQUESTED TIP: {:?} {:?}",
             locator_tip_height,
             locator_tip_hash
         );
-
-        // Block locator are not continuous but we need to make sure all the blocks
-        // provided are in our chain and in the right order.
-        let mut collect_block_locator: Vec<block::Hash> = Vec::new();
-        let mut index = 0;
-        for block in chain {
-            // We get out of the loop as soon as we collect a vector of equal
-            // lenght of the provided.
-            if collect_block_locator.len() == known_blocks.len() {
-                break;
-            }
-
-            if block.hash() == known_blocks[index] {
-                collect_block_locator.push(block.hash());
-                index += 1
-            }
-        }
-
-        // If the 2 vectors are not equal we cant continue.
-        if collect_block_locator != known_blocks {
-            return res;
-        }
 
         const MAX_FIND_BLOCK_HASHES_RESULTS: usize = 500;
 
@@ -356,7 +337,7 @@ impl StateService {
 
         for block in new_chain {
             // If we get the requested tip we are over
-            if block.hash() == *locator_tip_hash {
+            if block.hash() == locator_tip_hash {
                 break;
             }
 
