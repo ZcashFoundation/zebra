@@ -1,4 +1,5 @@
 use abscissa_core::{Component, FrameworkError, FrameworkErrorKind, Shutdown};
+
 use tracing_error::ErrorLayer;
 use tracing_subscriber::{
     fmt::Formatter, layer::SubscriberExt, reload::Handle, util::SubscriberInitExt, EnvFilter,
@@ -21,6 +22,12 @@ impl Tracing {
         let filter = config.filter.unwrap_or_else(|| "".to_string());
         let flame_root = &config.flamegraph;
 
+        // Install a new OpenTelemetry trace pipeline
+        let (tracer, _uninstall) = opentelemetry_otlp::new_pipeline().install()?;
+
+        // Create a tracing layer with the configured tracer
+        let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
+
         // Construct a tracing subscriber with the supplied filter and enable reloading.
         let builder = FmtSubscriber::builder()
             .with_ansi(config.use_color)
@@ -28,7 +35,7 @@ impl Tracing {
             .with_filter_reloading();
         let filter_handle = builder.reload_handle();
 
-        let subscriber = builder.finish().with(ErrorLayer::default());
+        let subscriber = builder.finish().with(ErrorLayer::default()).with(telemetry);
 
         let flamegrapher = if let Some(path) = flame_root {
             let (flamelayer, flamegrapher) = flame::layer(path);
