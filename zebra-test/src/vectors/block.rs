@@ -37,6 +37,7 @@ lazy_static! {
             (8, BLOCK_MAINNET_8_BYTES.as_ref()),
             (9, BLOCK_MAINNET_9_BYTES.as_ref()),
             (10, BLOCK_MAINNET_10_BYTES.as_ref()),
+            (202, BLOCK_MAINNET_202_BYTES.as_ref()),
             (347_499, BLOCK_MAINNET_347499_BYTES.as_ref()),
             // Overwinter
             (347_500, BLOCK_MAINNET_347500_BYTES.as_ref()),
@@ -161,6 +162,9 @@ lazy_static! {
     // zcash-cli getblock 10 0 > block-main-0-000-010.txt
     pub static ref BLOCK_MAINNET_10_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("block-main-0-000-010.txt").trim())
+            .expect("Block bytes are in valid hex representation");
+    pub static ref BLOCK_MAINNET_202_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-main-0-000-202.txt").trim())
             .expect("Block bytes are in valid hex representation");
 
     // Overwinter transition
