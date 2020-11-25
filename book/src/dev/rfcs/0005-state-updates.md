@@ -527,7 +527,7 @@ New `non-finalized` blocks are commited as follows:
    it has already been successfully verified:
      - create a new oneshot channel
      - immediately send `Err(DuplicateBlockHash)` drop the sender
-     - return the reciever
+     - return the receiver
 
 2. If a duplicate block hash exists in the queue:
      - Find the `QueuedBlock` for that existing duplicate block
