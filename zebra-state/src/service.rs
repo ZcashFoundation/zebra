@@ -293,8 +293,14 @@ impl StateService {
             return res;
         }
 
-        // Get chain tip
-        let (chain_tip_height, ..) = self.tip().expect("tip must always be available");
+        // Get chain tip:
+        // We can get a block locator request before we have downloaded the genesis block,
+        // if this is the case we return an empty response.
+        let chain_tip = self.tip();
+        if chain_tip.is_none() {
+            return res;
+        }
+        let chain_tip_height = chain_tip.unwrap().0;
 
         // Get requested tip
         let locator_tip_hash = known_blocks.first().expect("we must have a tip hash");
