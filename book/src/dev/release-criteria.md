@@ -94,7 +94,6 @@ _TBD_
         - [ ] Property tests pass reliably
         - [ ] Acceptance tests pass reliably
 - Network Readiness
-    - [ ] `zebrad` can interact with other nodes
     - [ ] We have a mechanism to deal with misbehaving `zebrad` nodes
 - Implementation and Launch
     - [ ] All release blocker bugs have been fixed
