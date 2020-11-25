@@ -104,7 +104,7 @@ where
     /// Queue a block for download and verification.
     ///
     /// Returns true if the block was newly queued, and false if it was already queued.
-    #[instrument(skip(self))]
+    #[instrument(skip(self, hash), fields(hash = %hash))]
     pub fn download_and_verify(&mut self, hash: block::Hash) -> bool {
         if self.cancel_handles.contains_key(&hash) {
             tracing::debug!("hash already queued for download");

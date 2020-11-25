@@ -86,7 +86,6 @@ impl Service<zn::Request> for Inbound {
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
-    #[instrument(skip(self, cx))]
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         // Check whether the network setup is finished, but don't wait for it to
         // become ready before reporting readiness. We expect to get it "soon",
@@ -139,7 +138,7 @@ impl Service<zn::Request> for Inbound {
         }
     }
 
-    #[instrument(skip(self))]
+    #[instrument(name = "inbound", skip(self, req))]
     fn call(&mut self, req: zn::Request) -> Self::Future {
         match req {
             zn::Request::Peers => match self.address_book.as_ref() {
