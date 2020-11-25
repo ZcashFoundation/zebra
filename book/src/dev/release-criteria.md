@@ -6,15 +6,26 @@ In the first alpha release, we want Zebra to participate in the network and repl
 
 ### System Requirements
 
-_TBD_
+Our CI tests that Zebra builds, passes its tests, and syncs to tip on the following configurations:
+* Ubuntu Linux ...
+
+Our CI tests that Zebra builds and passes its tests on the following configurations:
+* recent macOS ...
+* recent Windows ...
 
 ### Build Requirements
 
-_TBD_
+Our CI builds Zebra with:
+* Rust stable
+* recent llvm
+* recent clang
+* recent libclang
 
 ### Supported Platforms
 
-_TBD_
+While Zebra is still in alpha, we don't guarantee support for any particular platforms.
+
+But you'll probably get the best results with a recent Ubuntu Linux, or the other platforms that our CI runs on.
 
 ### Go/No-Go Criteria
 
@@ -31,7 +42,7 @@ _TBD_
     - [ ] zebrad can validate the transaction merkle tree
     - [ ] zebrad can serve blocks to peers
 - Zebrad Performance
-    - [ ] _TBD_
+    - [ ] zebrad functionality works on platforms that meet its system requirements
 - Testing
     - [ ] CI Passes
         - [ ] Unit tests pass reliably
@@ -46,7 +57,7 @@ _TBD_
     - [ ] Known issues are clearly documented
     - [ ] Users can access the documentation to deploy zebrad nodes
 - User Experience
-    - [ ] Build completes in a reasonable amount of time _(?)_
+    - [ ] Build completes within 20 minutes in Zebra's CI
     - [ ] zebrad executes normally
         - [ ] without any of the "usual" errors
         - [ ] without any severe warnings
