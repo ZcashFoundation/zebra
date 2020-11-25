@@ -29,45 +29,45 @@ But you'll probably get the best results with a recent Ubuntu Linux, or the othe
 
 ### Go/No-Go Criteria
 
-- Zebrad Functionality
-    - [ ] zebrad can sync to mainnet tip
+- `zebrad` Functionality
+    - [ ] `zebrad` can sync to mainnet tip
         - [ ] under perfect network conditions (within 2 - 3 hours)
         - [ ] under reasonable network conditions (in under 5 hours)
         - [ ] under sub-optimal network conditions (?)
-    - [ ] zebrad can keep up with the mainnet tip after the initial sync
+    - [ ] `zebrad` can keep up with the mainnet tip after the initial sync
         - [ ] under perfect network conditions
         - [ ] under reasonable network conditions
         - [ ] under sub-optimal network conditions
-    - [ ] zebrad can validate proof of work
-    - [ ] zebrad can validate the transaction merkle tree
-    - [ ] zebrad can serve blocks to peers
-- Zebrad Performance
-    - [ ] zebrad functionality works on platforms that meet its system requirements
+    - [ ] `zebrad` can validate proof of work
+    - [ ] `zebrad` can validate the transaction merkle tree
+    - [ ] `zebrad` can serve blocks to peers
+- `zebrad` Performance
+    - [ ] `zebrad` functionality works on platforms that meet its system requirements
 - Testing
     - [ ] CI Passes
         - [ ] Unit tests pass reliably
         - [ ] Property tests pass reliably
         - [ ] Acceptance tests pass reliably
 - Network Readiness
-    - [ ] zebrad can interact with other nodes
-    - [ ] We have a mechanism to deal with misbehaving zebrad nodes
+    - [ ] `zebrad` can interact with other nodes
+    - [ ] We have a mechanism to deal with misbehaving `zebrad` nodes
 - Implementation and Launch
     - [ ] All blocker bugs have been fixed
     - [ ] Release notes are available
     - [ ] Known issues are clearly documented
-    - [ ] Users can access the documentation to deploy zebrad nodes
+    - [ ] Users can access the documentation to deploy `zebrad` nodes
 - User Experience
     - [ ] Build completes within 20 minutes in Zebra's CI
-    - [ ] zebrad executes normally
+    - [ ] `zebrad` executes normally
         - [ ] without any of the "usual" errors
         - [ ] without any severe warnings
-    - [ ] Users can access resources to troubleshoot zebrad malfunction
+    - [ ] Users can access resources to troubleshoot `zebrad` malfunction
 - Support
-    - [ ] we have a clearly documented mechanism for users to report issues with zebrad
+    - [ ] we have a clearly documented mechanism for users to report issues with `zebrad`
     - [ ] we have the ability to reproduce reported issues
-    - [ ] zebrad reports sufficient information to allow us to troubleshoot reported issues
+    - [ ] `zebrad` reports sufficient information to allow us to troubleshoot reported issues
 
-## Future Releases
+## Future Releases
 
 ### System Requirements
 
@@ -83,18 +83,18 @@ _TBD_
 
 ### Go/No-Go Criteria
 
-- Zebrad Functionality
-    - [ ] zebrad can sync to mainnet tip
+- `zebrad` Functionality
+    - [ ] `zebrad` can sync to mainnet tip
         - [ ] under excellent network conditions (within 2 - 5 hours)
         - reasonable and sub-optimal network conditions are not yet supported
-    - [ ] zebrad can stay within a few blocks of the mainnet tip after the initial sync
+    - [ ] `zebrad` can stay within a few blocks of the mainnet tip after the initial sync
         - [ ] under excellent network conditions
         - reasonable and sub-optimal network conditions are not yet supported
-    - [ ] zebrad can validate proof of work
-    - [ ] zebrad can validate the transaction merkle tree
-    - [ ] zebrad can serve blocks to peers
-- Zebrad Performance
-    - [ ] zebrad functionality works on platforms that meet its system requirements
+    - [ ] `zebrad` can validate proof of work
+    - [ ] `zebrad` can validate the transaction merkle tree
+    - [ ] `zebrad` can serve blocks to peers
+- `zebrad` Performance
+    - [ ] `zebrad` functionality works on platforms that meet its system requirements
 - Testing
     - [ ] CI Passes
         - [ ] Unit tests pass reliably
@@ -104,15 +104,15 @@ _TBD_
     - [ ] All release blocker bugs have been fixed
     - [ ] Release notes are available
     - [ ] Known issues are clearly documented
-    - [ ] Users can access the documentation to deploy zebrad nodes
+    - [ ] Users can access the documentation to deploy `zebrad` nodes
 - User Experience
     - [ ] Build completes within 20 minutes in Zebra's CI
-    - [ ] zebrad executes normally
-        - [ ] zebrad's default logging works reasonably well in a terminal
+    - [ ] `zebrad` executes normally
+        - [ ] `zebrad`'s default logging works reasonably well in a terminal
         - [ ] panics, error logs, and warning logs are rare
         - [ ] known panics, errors and warnings have open tickets
-    - [ ] Users can access resources to troubleshoot zebrad malfunction
+    - [ ] Users can access resources to troubleshoot `zebrad` malfunction
 - Support
-    - [ ] we have a clearly documented mechanism for users to report issues with zebrad
+    - [ ] we have a clearly documented mechanism for users to report issues with `zebrad`
     - [ ] we have the ability to reproduce reported issues
-    - [ ] zebrad reports sufficient information to allow us to troubleshoot reported issues
+    - [ ] `zebrad` reports sufficient information to allow us to troubleshoot reported issues
