@@ -65,7 +65,9 @@ impl FinalizedState {
                     "state is already at the configured height"
                 );
 
-                // There's no need to sync before exit, because the trees have just been opened
+                // RocksDB can do a cleanup when column families are opened.
+                // So we want to drop it before we exit.
+                std::mem::drop(new_state);
                 std::process::exit(0);
             }
         }
@@ -253,7 +255,11 @@ impl FinalizedState {
 
         if result.is_ok() && self.is_at_stop_height(height) {
             tracing::info!(?height, ?hash, "stopping at configured height");
-
+            // We'd like to drop the database here, because that closes the
+            // column families and the database. But Rust's ownership rules
+            // make that difficult, so we just flush instead.
+            self.db.flush().expect("flush is successful");
+            self.delete_ephemeral();
             std::process::exit(0);
         }
 
@@ -327,6 +333,27 @@ impl FinalizedState {
                 block.transactions[index as usize].clone()
             })
     }
+
+    /// If the database is `ephemeral`, delete it.
+    fn delete_ephemeral(&self) {
+        if self.ephemeral {
+            let path = self.db.path();
+            tracing::debug!("removing temporary database files {:?}", path);
+            // We'd like to use `rocksdb::Env::mem_env` for ephemeral databases,
+            // but the Zcash blockchain might not fit in memory. So we just
+            // delete the database files instead.
+            //
+            // We'd like to call `DB::destroy` here, but calling destroy on a
+            // live DB is undefined behaviour:
+            // https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ#basic-readwrite
+            //
+            // So we assume that all the database files are under `path`, and
+            // delete them using standard filesystem APIs. Deleting open files
+            // might cause errors on non-Unix platforms, so we ignore the result.
+            // (The OS will delete them eventually anyway.)
+            let _res = std::fs::remove_dir_all(path);
+        }
+    }
 }
 
 // Drop isn't guaranteed to run, such as when we panic, or if someone stored
@@ -335,11 +362,7 @@ impl FinalizedState {
 // up automatically eventually.
 impl Drop for FinalizedState {
     fn drop(&mut self) {
-        if self.ephemeral {
-            let path = self.db.path();
-            tracing::debug!("removing temporary database files {:?}", path);
-            let _res = std::fs::remove_dir_all(path);
-        }
+        self.delete_ephemeral()
     }
 }
 
