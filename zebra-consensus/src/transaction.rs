@@ -164,7 +164,7 @@ where
 
                     check::has_inputs_and_outputs(&tx)?;
 
-                    // TODO: rework this code
+                    // TODO: rework this code #1377
                     let sighash = tx.sighash(
                         upgrade,
                         HashType::ALL, // TODO: check these
@@ -179,7 +179,8 @@ where
 
                         // Then, pass those items to self.joinsplit to verify them.
 
-                        check::validate_joinsplit_sig(joinsplit_data, sighash.as_bytes())?;
+                        // Ignore pending sighash check #1377
+                        let _ = check::validate_joinsplit_sig(joinsplit_data, sighash.as_bytes());
                     }
 
                     if let Some(shielded_data) = shielded_data {
@@ -194,12 +195,13 @@ where
                             // description while adding the resulting future to
                             // our collection of async checks that (at a
                             // minimum) must pass for the transaction to verify.
-                            let rsp = redjubjub_verifier
+                            let _rsp = redjubjub_verifier
                                 .ready_and()
                                 .await?
                                 .call((spend.rk, spend.spend_auth_sig, &sighash).into());
 
-                            async_checks.push(rsp.boxed());
+                            // Disable pending sighash check #1377
+                            //async_checks.push(rsp.boxed());
 
                             // TODO: prepare public inputs for spends, then create
                             // a groth16::Item and pass to self.spend
@@ -227,12 +229,14 @@ where
                         });
 
                         let bvk = shielded_data.binding_verification_key(*value_balance);
-                        let rsp = redjubjub_verifier
+                        let _rsp = redjubjub_verifier
                             .ready_and()
                             .await?
                             .call((bvk, shielded_data.binding_sig, &sighash).into())
                             .boxed();
-                        async_checks.push(rsp);
+
+                        // Disable pending sighash check #1377
+                        //async_checks.push(rsp);
                     }
 
                     // Finally, wait for all asynchronous checks to complete
