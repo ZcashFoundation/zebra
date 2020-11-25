@@ -56,7 +56,7 @@ impl PendingUtxos {
         }
     }
 
-    /// Scan the set of waiting utxo requests for channels where all recievers
+    /// Scan the set of waiting utxo requests for channels where all receivers
     /// have been dropped and remove the corresponding sender.
     pub fn prune(&mut self) {
         self.0.retain(|_, chan| chan.receiver_count() > 0);
