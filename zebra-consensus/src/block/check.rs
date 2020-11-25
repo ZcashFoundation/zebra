@@ -173,12 +173,24 @@ pub fn merkle_root_validity(
     transaction_hashes: &[transaction::Hash],
 ) -> Result<(), BlockError> {
     let merkle_root = transaction_hashes.iter().cloned().collect();
-    if block.header.merkle_root == merkle_root {
-        Ok(())
-    } else {
-        Err(BlockError::BadMerkleRoot {
+
+    if block.header.merkle_root != merkle_root {
+        return Err(BlockError::BadMerkleRoot {
             actual: merkle_root,
             expected: block.header.merkle_root,
-        })
+        });
     }
+
+    // Bitcoin's transaction Merkle trees are malleable, allowing blocks with
+    // duplicate transactions to have the same Merkle root as blocks without
+    // duplicate transactions. Duplicate transactions should cause a block to be
+    // rejected, as duplicate transactions imply that the block contains a
+    // double-spend.  As a defense-in-depth, however, we also check that there
+    // are no duplicate transaction hashes, by collecting into a HashSet.
+    use std::collections::HashSet;
+    if transaction_hashes.len() != transaction_hashes.iter().collect::<HashSet<_>>().len() {
+        return Err(BlockError::DuplicateTransaction);
+    }
+
+    Ok(())
 }
