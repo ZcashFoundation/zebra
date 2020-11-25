@@ -30,11 +30,14 @@ pub struct Header {
     /// block’s header.
     pub previous_block_hash: Hash,
 
-    /// The root of the transaction Merkle tree.
+    /// The root of the Bitcoin-inherited transaction Merkle tree, binding the
+    /// block header to the transactions in the block.
     ///
-    /// The Merkle root is derived from the SHA256d hashes of all transactions
-    /// included in this block as assembled in a binary tree, ensuring that none
-    /// of those transactions can be modied without modifying the header.
+    /// Note that because of a flaw in Bitcoin's design, the `merkle_root` does
+    /// not always precisely bind the contents of the block (CVE-2012-2459). It
+    /// is sometimes possible for an attacker to create multiple distinct sets of
+    /// transactions with the same Merkle root, although only one set will be
+    /// valid.
     pub merkle_root: merkle::Root,
 
     /// Some kind of root hash.
