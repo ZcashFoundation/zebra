@@ -245,7 +245,7 @@ pub enum Request {
     ///
     /// Returns
     ///
-    /// [`Response::BlockHashes(Vec<block::Hash>)`](Response::Hashes) with max of 500 block hashes.
+    /// [`Response::BlockHashes(Vec<block::Hash>)`](Response::BlockHashes) with max of 500 block hashes.
     /// See https://en.bitcoin.it/wiki/Protocol_documentation#getblocks
     FindBlockHashes {
         /// Hashes of known blocks, ordered from highest height to lowest height.

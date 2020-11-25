@@ -274,6 +274,8 @@ impl StateService {
     /// Return a list of block hashes in the best chain, following the first matching hash in `known_blocks`.
     ///
     /// Starts from the first matching hash in the best chain, ignoring all other hashes in `known_blocks`.
+    /// If there is no matching hash in the best chain, starts from the genesis block.
+    ///
     /// Only matches and returns hashes from the best chain, including non-finalized blocks.
     /// Stops the list of hashes after:
     ///   * adding the non-finalized best tip,
@@ -354,7 +356,7 @@ impl StateService {
 
             res.push(block.hash());
 
-            // Check the stop parameter
+            // Stop after adding the `stop` hash
             if stop == Some(block.hash()) {
                 break;
             }
