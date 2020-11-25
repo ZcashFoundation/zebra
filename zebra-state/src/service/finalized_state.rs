@@ -152,6 +152,7 @@ impl FinalizedState {
             hash,
             height,
             new_outputs,
+            transaction_hashes,
         } = finalized;
 
         let hash_by_height = self.db.cf_handle("hash_by_height").unwrap();
@@ -215,8 +216,12 @@ impl FinalizedState {
 
             // Index each transaction, spent inputs, nullifiers
             // TODO: move computation into FinalizedBlock as with transparent outputs
-            for (transaction_index, transaction) in block.transactions.iter().enumerate() {
-                let transaction_hash = transaction.hash();
+            for (transaction_index, (transaction, transaction_hash)) in block
+                .transactions
+                .iter()
+                .zip(transaction_hashes.into_iter())
+                .enumerate()
+            {
                 let transaction_location = TransactionLocation {
                     height,
                     index: transaction_index

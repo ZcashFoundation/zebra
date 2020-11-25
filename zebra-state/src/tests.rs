@@ -21,6 +21,7 @@ impl Prepare for Arc<Block> {
         let block = self;
         let hash = block.hash();
         let height = block.coinbase_height().unwrap();
+        let transaction_hashes = block.transactions.iter().map(|tx| tx.hash()).collect();
         let new_outputs = crate::utxo::new_outputs(&block);
 
         PreparedBlock {
@@ -28,6 +29,7 @@ impl Prepare for Arc<Block> {
             hash,
             height,
             new_outputs,
+            transaction_hashes,
         }
     }
 }

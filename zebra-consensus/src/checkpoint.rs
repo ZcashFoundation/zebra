@@ -14,7 +14,7 @@
 //! block for the configured network.
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashSet},
     future::Future,
     ops::{Bound, Bound::*},
     pin::Pin,
@@ -459,6 +459,33 @@ where
             }
         };
 
+        // Check for a valid Merkle root. To prevent malleability (CVE-2012-2459),
+        // we also need to check whether the transaction hashes are unique.
+
+        let transaction_hashes = block
+            .transactions
+            .iter()
+            .map(|tx| tx.hash())
+            .collect::<Vec<_>>();
+        let merkle_root = transaction_hashes.iter().cloned().collect();
+
+        if block.header.merkle_root != merkle_root {
+            tx.send(Err(VerifyCheckpointError::BadMerkleRoot {
+                expected: block.header.merkle_root,
+                actual: merkle_root,
+            }))
+            .expect("rx has not been dropped yet");
+            return rx;
+        }
+
+        // Collecting into a HashSet deduplicates, so this checks that there
+        // are no duplicate transaction hashes, preventing Merkle root malleability.
+        if transaction_hashes.len() != transaction_hashes.iter().collect::<HashSet<_>>().len() {
+            tx.send(Err(VerifyCheckpointError::DuplicateTransaction))
+                .expect("rx has not been dropped yet");
+            return rx;
+        }
+
         // Since we're using Arc<Block>, each entry is a single pointer to the
         // Arc. But there are a lot of QueuedBlockLists in the queue, so we keep
         // allocations as small as possible.
@@ -779,6 +806,13 @@ pub enum VerifyCheckpointError {
     },
     #[error("the block {hash:?} does not have a coinbase height")]
     CoinbaseHeight { hash: block::Hash },
+    #[error("merkle root {actual:?} does not match expected {expected:?}")]
+    BadMerkleRoot {
+        actual: block::merkle::Root,
+        expected: block::merkle::Root,
+    },
+    #[error("duplicate transactions in block")]
+    DuplicateTransaction,
     #[error("checkpoint verifier was dropped")]
     Dropped,
     #[error(transparent)]
