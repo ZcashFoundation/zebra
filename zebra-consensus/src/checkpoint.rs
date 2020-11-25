@@ -423,15 +423,40 @@ where
         }
     }
 
-    /// If the block height of `block` is valid, returns that height.
+    /// Check that the block height and Merkle root are valid.
     ///
-    /// Returns an error if the block's height is invalid, see `check_height()`
-    /// for details.
+    /// Checking the Merkle root ensures that the block hash binds the block
+    /// contents. To prevent malleability (CVE-2012-2459), we also need to check
+    /// whether the transaction hashes are unique.
     fn check_block(&self, block: &Block) -> Result<block::Height, VerifyCheckpointError> {
         let block_height = block
             .coinbase_height()
             .ok_or(VerifyCheckpointError::CoinbaseHeight { hash: block.hash() })?;
         self.check_height(block_height)?;
+
+        let transaction_hashes = block
+            .transactions
+            .iter()
+            .map(|tx| tx.hash())
+            .collect::<Vec<_>>();
+        let merkle_root = transaction_hashes.iter().cloned().collect();
+
+        // Check that the Merkle root is valid.
+        if block.header.merkle_root != merkle_root {
+            return Err(VerifyCheckpointError::BadMerkleRoot {
+                expected: block.header.merkle_root,
+                actual: merkle_root,
+            });
+        }
+
+        // To prevent malleability (CVE-2012-2459), we also need to check
+        // whether the transaction hashes are unique. Collecting into a HashSet
+        // deduplicates, so this checks that there are no duplicate transaction
+        // hashes, preventing Merkle root malleability.
+        if transaction_hashes.len() != transaction_hashes.iter().collect::<HashSet<_>>().len() {
+            return Err(VerifyCheckpointError::DuplicateTransaction);
+        }
+
         Ok(block_height)
     }
 
@@ -450,7 +475,7 @@ where
         // Set up a oneshot channel to send results
         let (tx, rx) = oneshot::channel();
 
-        // Check for a valid height
+        // Check that the height and Merkle roots are valid.
         let height = match self.check_block(&block) {
             Ok(height) => height,
             Err(error) => {
@@ -458,33 +483,6 @@ where
                 return rx;
             }
         };
-
-        // Check for a valid Merkle root. To prevent malleability (CVE-2012-2459),
-        // we also need to check whether the transaction hashes are unique.
-
-        let transaction_hashes = block
-            .transactions
-            .iter()
-            .map(|tx| tx.hash())
-            .collect::<Vec<_>>();
-        let merkle_root = transaction_hashes.iter().cloned().collect();
-
-        if block.header.merkle_root != merkle_root {
-            tx.send(Err(VerifyCheckpointError::BadMerkleRoot {
-                expected: block.header.merkle_root,
-                actual: merkle_root,
-            }))
-            .expect("rx has not been dropped yet");
-            return rx;
-        }
-
-        // Collecting into a HashSet deduplicates, so this checks that there
-        // are no duplicate transaction hashes, preventing Merkle root malleability.
-        if transaction_hashes.len() != transaction_hashes.iter().collect::<HashSet<_>>().len() {
-            tx.send(Err(VerifyCheckpointError::DuplicateTransaction))
-                .expect("rx has not been dropped yet");
-            return rx;
-        }
 
         // Since we're using Arc<Block>, each entry is a single pointer to the
         // Arc. But there are a lot of QueuedBlockLists in the queue, so we keep
