@@ -361,7 +361,8 @@ impl StateService {
 
             tracing::info!(
                 "RESPONSE: {:?} {:?}",
-                self.height_by_hash(block.hash()).expect("if hash is in the state then it should have an associated height"),
+                self.height_by_hash(block.hash())
+                    .expect("if hash is in the state then it should have an associated height"),
                 block.hash()
             );
         }
