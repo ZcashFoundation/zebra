@@ -37,6 +37,30 @@ impl HashType {
     }
 }
 
+pub struct SigHash(pub [u8; 32]);
+
+// This will replace SigHasher
+// no lifetime bound, independent of transaction
+// represents per-tx part of sighash computation
+pub struct Sighasher {
+    // tbd
+}
+
+impl Transaction {
+    /// Obtain a SigHash context with precomputed per-Transaction fields.
+    pub fn sighasher(&self) -> Sighasher {
+        todo!();
+    }
+}
+
+impl Sighasher {
+    // tbd: what parameters?
+    pub fn for_input(&self, input: &transparent::Input, prev_output: &transparent::Output) -> SigHash {
+        todo!()
+    }
+    // tbd: other methods?
+}
+
 pub(super) struct SigHasher<'a> {
     trans: &'a Transaction,
     hash_type: HashType,
