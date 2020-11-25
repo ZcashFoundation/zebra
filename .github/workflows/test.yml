@@ -69,7 +69,9 @@ jobs:
           cd zebra/;
           docker build -f docker/Dockerfile.test -t zebrad-test .;
           docker run -i zebrad-test cargo test --workspace --no-fail-fast -- -Zunstable-options --include-ignored;
+          until mount | grep mainnet; do sleep 1; done;
           docker run -i --mount type=bind,source=/mnt/disks/gce-containers-mounts/gce-persistent-disks/zebrad-cache-$SHORT_SHA-mainnet-419200,target=/zebrad-cache zebrad-test:latest cargo test --verbose --features test_sync_past_sapling_mainnet --manifest-path zebrad/Cargo.toml sync_past_sapling_mainnet;
+          until mount | grep testnet; do sleep 1; done;
           docker run -i --mount type=bind,source=/mnt/disks/gce-containers-mounts/gce-persistent-disks/zebrad-cache-$SHORT_SHA-testnet-280000,target=/zebrad-cache zebrad-test:latest cargo test --verbose --features test_sync_past_sapling_testnet --manifest-path zebrad/Cargo.toml sync_past_sapling_testnet;
           "
       # Clean up
