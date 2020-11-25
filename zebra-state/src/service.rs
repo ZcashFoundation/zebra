@@ -287,12 +287,6 @@ impl StateService {
         stop: Option<block::Hash>,
     ) -> Vec<block::Hash> {
         let mut res: Vec<block::Hash> = Vec::new();
-
-        // Known blocks can't be empty
-        if known_blocks.is_empty() {
-            return res;
-        }
-
         // Get chain tip:
         // We can get a block locator request before we have downloaded the genesis block,
         // if this is the case we return an empty response.
