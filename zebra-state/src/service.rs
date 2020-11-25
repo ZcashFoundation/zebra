@@ -304,9 +304,9 @@ impl StateService {
         if !known_blocks.is_empty() {
             for hash in known_blocks {
                 let height_hash = self.height_by_hash(hash);
-                if height_hash.is_some() {
+                if let Some(height_hash) = height_hash {
                     locator_tip_hash = hash;
-                    locator_tip_height = height_hash.unwrap();
+                    locator_tip_height = height_hash;
                     break;
                 }
             }
