@@ -120,7 +120,7 @@ where
 
         let fut = async move {
             // Check if the block is already in the state.
-            match state.oneshot(zs::Request::Depth(hash.into())).await {
+            match state.oneshot(zs::Request::Depth(hash)).await {
                 Ok(zs::Response::Depth(None)) => Ok(()),
                 Ok(zs::Response::Depth(Some(_))) => Err("already present".into()),
                 Ok(_) => unreachable!("wrong response"),
