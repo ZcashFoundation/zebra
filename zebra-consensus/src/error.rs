@@ -105,6 +105,9 @@ pub enum BlockError {
         expected: block::merkle::Root,
     },
 
+    #[error("block contains duplicate transactions")]
+    DuplicateTransaction,
+
     #[error("block {0:?} is already in the chain at depth {1:?}")]
     AlreadyInChain(zebra_chain::block::Hash, u32),
 
