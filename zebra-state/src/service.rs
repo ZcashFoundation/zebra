@@ -374,8 +374,27 @@ impl Service<Request> for StateService {
         let now = Instant::now();
 
         if self.last_prune + Self::PRUNE_INTERVAL < now {
+            let tip = self.tip();
+            let old_len = self.pending_utxos.len();
+
             self.pending_utxos.prune();
             self.last_prune = now;
+
+            let new_len = self.pending_utxos.len();
+            let prune_count = old_len
+                .checked_sub(new_len)
+                .expect("prune does not add any utxo requests");
+            if prune_count > 0 {
+                tracing::info!(
+                    ?old_len,
+                    ?new_len,
+                    ?prune_count,
+                    ?tip,
+                    "pruned utxo requests"
+                );
+            } else {
+                tracing::debug!(len = ?old_len, ?tip, "no utxo requests needed pruning");
+            }
         }
 
         Poll::Ready(Ok(()))
