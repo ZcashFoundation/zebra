@@ -61,11 +61,6 @@ But you'll probably get the best results with a recent Ubuntu Linux, or the othe
     - [ ] `zebrad` executes normally
         - [ ] without any of the "usual" errors
         - [ ] without any severe warnings
-    - [ ] Users can access resources to troubleshoot `zebrad` malfunction
-- Support
-    - [ ] we have a clearly documented mechanism for users to report issues with `zebrad`
-    - [ ] we have the ability to reproduce reported issues
-    - [ ] `zebrad` reports sufficient information to allow us to troubleshoot reported issues
 
 ## Future Releases
 
