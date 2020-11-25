@@ -31,6 +31,51 @@ But you'll probably get the best results with a recent Ubuntu Linux, or the othe
 
 - `zebrad` Functionality
     - [ ] `zebrad` can sync to mainnet tip
+        - [ ] under excellent network conditions (within 2 - 5 hours)
+        - reasonable and sub-optimal network conditions are not yet supported
+    - [ ] `zebrad` can stay within a few blocks of the mainnet tip after the initial sync
+        - [ ] under excellent network conditions
+        - reasonable and sub-optimal network conditions are not yet supported
+    - [ ] `zebrad` can validate proof of work
+    - [ ] `zebrad` can validate the transaction merkle tree
+    - [ ] `zebrad` can serve blocks to peers
+- `zebrad` Performance
+    - [ ] `zebrad` functionality works on platforms that meet its system requirements
+- Testing
+    - [ ] CI Passes
+        - [ ] Unit tests pass reliably
+        - [ ] Property tests pass reliably
+        - [ ] Acceptance tests pass reliably
+- Implementation and Launch
+    - [ ] All release blocker bugs have been fixed
+    - [ ] Release notes are available
+    - [ ] Known issues are clearly documented
+    - [ ] Users can access the documentation to deploy `zebrad` nodes
+- User Experience
+    - [ ] Build completes within 20 minutes in Zebra's CI
+    - [ ] `zebrad` executes normally
+        - [ ] `zebrad`'s default logging works reasonably well in a terminal
+        - [ ] panics, error logs, and warning logs are rare
+        - [ ] known panics, errors and warnings have open tickets
+
+## Future Releases
+
+### System Requirements
+
+_TBD_
+
+### Build Requirements
+
+_TBD_
+
+### Supported Platforms
+
+_TBD_
+
+### Go/No-Go Criteria
+
+- `zebrad` Functionality
+    - [ ] `zebrad` can sync to mainnet tip
         - [ ] under perfect network conditions (within 2 - 3 hours)
         - [ ] under reasonable network conditions (in under 5 hours)
         - [ ] under sub-optimal network conditions (?)
@@ -51,50 +96,6 @@ But you'll probably get the best results with a recent Ubuntu Linux, or the othe
 - Network Readiness
     - [ ] `zebrad` can interact with other nodes
     - [ ] We have a mechanism to deal with misbehaving `zebrad` nodes
-- Implementation and Launch
-    - [ ] All blocker bugs have been fixed
-    - [ ] Release notes are available
-    - [ ] Known issues are clearly documented
-    - [ ] Users can access the documentation to deploy `zebrad` nodes
-- User Experience
-    - [ ] Build completes within 20 minutes in Zebra's CI
-    - [ ] `zebrad` executes normally
-        - [ ] without any of the "usual" errors
-        - [ ] without any severe warnings
-
-## Future Releases
-
-### System Requirements
-
-_TBD_
-
-### Build Requirements
-
-_TBD_
-
-### Supported Platforms
-
-_TBD_
-
-### Go/No-Go Criteria
-
-- `zebrad` Functionality
-    - [ ] `zebrad` can sync to mainnet tip
-        - [ ] under excellent network conditions (within 2 - 5 hours)
-        - reasonable and sub-optimal network conditions are not yet supported
-    - [ ] `zebrad` can stay within a few blocks of the mainnet tip after the initial sync
-        - [ ] under excellent network conditions
-        - reasonable and sub-optimal network conditions are not yet supported
-    - [ ] `zebrad` can validate proof of work
-    - [ ] `zebrad` can validate the transaction merkle tree
-    - [ ] `zebrad` can serve blocks to peers
-- `zebrad` Performance
-    - [ ] `zebrad` functionality works on platforms that meet its system requirements
-- Testing
-    - [ ] CI Passes
-        - [ ] Unit tests pass reliably
-        - [ ] Property tests pass reliably
-        - [ ] Acceptance tests pass reliably
 - Implementation and Launch
     - [ ] All release blocker bugs have been fixed
     - [ ] Release notes are available
