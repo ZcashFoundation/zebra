@@ -211,10 +211,9 @@ impl AdjustedDifficulty {
                     .expect("difficulty thresholds in previously verified blocks are valid")
             })
             .sum();
-        let total: U256 = total.into();
-        let divisor: U256 = POW_AVERAGING_WINDOW.into();
 
-        (total / divisor).into()
+        let divisor: U256 = POW_AVERAGING_WINDOW.into();
+        total / divisor
     }
 
     /// Calculate the bounded median timespan. The median timespan is the
