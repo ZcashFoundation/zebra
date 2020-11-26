@@ -93,8 +93,6 @@ pub(crate) const CONSENSUS_BRANCH_IDS: &[(NetworkUpgrade, ConsensusBranchId)] = 
     (Sapling, ConsensusBranchId(0x76b809bb)),
     (Blossom, ConsensusBranchId(0x2bb40e60)),
     (Heartwood, ConsensusBranchId(0xf5b9230b)),
-    // As of 24 September 2020. Could change before mainnet activation.
-    // See ZIP 251 for any updates.
     (Canopy, ConsensusBranchId(0xe9ff75a6)),
 ];
 
