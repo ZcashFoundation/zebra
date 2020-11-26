@@ -181,8 +181,11 @@ impl NonFinalizedState {
     }
 
     /// Returns the hash for a given `block::Height` if it is present in the best chain.
-    pub fn hash(&self, height: block::Height) -> Option<block::Hash> {
-        self.block(height.into()).map(|block| block.hash())
+    pub fn best_hash(&self, height: block::Height) -> Option<block::Hash> {
+        self.best_chain()?
+            .blocks
+            .get(&height)
+            .map(|prepared| prepared.hash)
     }
 
     /// Returns the tip of the best chain.

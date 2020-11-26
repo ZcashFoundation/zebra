@@ -202,7 +202,7 @@ impl StateService {
         let mut hashes = Vec::with_capacity(heights.len());
 
         for height in heights {
-            if let Some(hash) = self.hash(height) {
+            if let Some(hash) = self.best_hash(height) {
                 hashes.push(hash);
             }
         }
@@ -243,8 +243,10 @@ impl StateService {
     }
 
     /// Return the hash for the block at `height` in the current best chain.
-    pub fn hash(&self, height: block::Height) -> Option<block::Hash> {
-        self.mem.hash(height).or_else(|| self.disk.hash(height))
+    pub fn best_hash(&self, height: block::Height) -> Option<block::Hash> {
+        self.mem
+            .best_hash(height)
+            .or_else(|| self.disk.hash(height))
     }
 
     /// Return true if `hash` is in the current best chain.
@@ -351,7 +353,7 @@ impl StateService {
             .map(|stop_height| std::cmp::min(final_height, stop_height))
             .unwrap_or(final_height);
         let final_hash = self
-            .hash(final_height)
+            .best_hash(final_height)
             .expect("final height must have a hash");
 
         // The Find response does not include the intersection
