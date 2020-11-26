@@ -13,7 +13,7 @@ use tower::{util::BoxService, Service};
 use tracing::instrument;
 use zebra_chain::{
     block::{self, Block},
-    parameters::{genesis_hash, Network},
+    parameters::Network,
     transaction,
     transaction::Transaction,
     transparent,
@@ -287,86 +287,151 @@ impl StateService {
         }
     }
 
-    /// Return a list of block hashes in the best chain, following the first matching hash in `known_blocks`.
+    /// Find the first hash that's in the peer's `known_blocks` and the local best chain.
     ///
-    /// Starts from the first matching hash in the best chain, ignoring all other hashes in `known_blocks`.
-    /// If there is no matching hash in the best chain, starts from the genesis block.
-    ///
-    /// Only matches and returns hashes from the best chain, including non-finalized blocks.
-    /// Stops the list of hashes after:
-    ///   * adding the non-finalized best tip,
-    ///   * adding the stop hash to the list, if it is in the best chain, or
-    ///   * adding 500 hashes to the list.
-    pub fn find_chain_hashes(
-        &self,
-        known_blocks: Vec<block::Hash>,
-        stop: Option<block::Hash>,
-    ) -> Vec<block::Hash> {
-        let mut res: Vec<block::Hash> = Vec::new();
-        // Get chain tip:
-        // We can get a block locator request before we have downloaded the genesis block,
-        // if this is the case we return an empty response.
-        let chain_tip = self.tip();
-        if chain_tip.is_none() {
-            return res;
-        }
-        let chain_tip_height = chain_tip.unwrap().0;
+    /// Returns `None` if:
+    ///   * there is no matching hash in the best chain, or
+    ///   * the state is empty.
+    fn find_chain_intersection(&self, known_blocks: Vec<block::Hash>) -> Option<block::Hash> {
+        // We can get a block locator request before we have downloaded the genesis block
+        self.tip()?;
 
-        // Get requested tip:
-        // Use the genesis hash if locator is empty or if no hash in the
-        // locator is present in our best chain.
-        let mut locator_tip_hash = genesis_hash(self.network);
-        let mut locator_tip_height = block::Height(1);
-        if !known_blocks.is_empty() {
-            for hash in known_blocks {
-                let height_hash = self.height_by_hash(hash);
-                if let Some(height_hash) = height_hash {
-                    locator_tip_hash = hash;
-                    locator_tip_height = height_hash;
-                    break;
-                }
+        for hash in known_blocks {
+            if self.best_chain_contains(hash) {
+                return Some(hash);
             }
         }
-        tracing::info!(
-            "REQUESTED TIP: {:?} {:?}",
-            locator_tip_height,
-            locator_tip_hash
-        );
 
-        const MAX_FIND_BLOCK_HASHES_RESULTS: usize = 500;
+        None
+    }
 
-        // Compute a new tip, make sure it is below our chain tip.
-        let new_tip_height = block::Height(std::cmp::min(
-            locator_tip_height.0 + MAX_FIND_BLOCK_HASHES_RESULTS as u32,
-            chain_tip_height.0,
-        ));
-        let new_tip_hash = self.hash(new_tip_height).expect("new tip must have a hash");
+    /// Returns a list of block hashes in the best chain, following the `intersection` with the best
+    /// chain. If there is no intersection with the best chain, starts from the genesis block.
+    ///
+    /// Includes finalized and non-finalized blocks.
+    ///
+    /// Stops the list of hashes after:
+    ///   * adding the non-finalized best tip,
+    ///   * adding the `stop` hash to the list, if it is in the best chain, or
+    ///   * adding `max_len` hashes to the list.
+    ///
+    /// Returns an empty list if the state is empty.
+    pub fn collect_chain_hashes(
+        &self,
+        intersection: Option<block::Hash>,
+        stop: Option<block::Hash>,
+        max_len: usize,
+    ) -> Vec<block::Hash> {
+        let mut res: Vec<block::Hash> = Vec::new();
 
-        // Get a new chain starting at the new "requested" tip.
-        let new_chain = self.chain(new_tip_hash);
+        assert!(max_len > 0, "max_len must be at least 1");
 
-        for block in new_chain {
-            // If we get the requested tip we are over
-            if block.hash() == locator_tip_hash {
+        // We can get a block locator request before we have downloaded the genesis block
+        let chain_tip_height = self.tip().map(|t| t.0);
+        if chain_tip_height.is_none() {
+            return res;
+        }
+        let chain_tip_height = chain_tip_height.unwrap();
+
+        let intersection_height = intersection.map(|hash| {
+            self.best_height_by_hash(hash)
+                .expect("the intersection hash must be in the best chain")
+        });
+        let max_len_height = if let Some(intersection_height) = intersection_height {
+            // start after the intersection_height, and return max_len hashes
+            (intersection_height + (max_len as i32))
+                .expect("the final height does not exceed Height::MAX")
+        } else {
+            // start at genesis, and return max_len hashes
+            block::Height((max_len - 1) as _)
+        };
+
+        let stop_height = stop.map(|hash| self.best_height_by_hash(hash)).flatten();
+
+        // Compute the final height, making sure it is:
+        //   * at or below our chain tip, and
+        //   * at or below the height of the stop hash.
+        let final_height = std::cmp::min(max_len_height, chain_tip_height);
+        let final_height = if let Some(stop_height) = stop_height {
+            std::cmp::min(final_height, stop_height)
+        } else {
+            final_height
+        };
+        let final_hash = self
+            .hash(final_height)
+            .expect("final height must have a hash");
+
+        for block in self.chain(final_hash) {
+            // The block locator does not include the intersection
+            if Some(block.hash()) == intersection {
                 break;
             }
 
             res.push(block.hash());
 
-            // Stop after adding the `stop` hash
-            if stop == Some(block.hash()) {
-                break;
-            }
-
-            tracing::info!(
-                "RESPONSE: {:?} {:?}",
-                self.height_by_hash(block.hash())
+            tracing::trace!(
+                hash = ?block.hash(),
+                height = ?self.best_height_by_hash(block.hash())
                     .expect("if hash is in the state then it should have an associated height"),
-                block.hash()
+                "adding hash to peer Find response",
             );
         }
         res.reverse();
+
+        tracing::info!(
+            ?final_height,
+            response_len = ?res.len(),
+            ?chain_tip_height,
+            ?stop_height,
+            ?intersection_height,
+            ?final_hash,
+            ?intersection,
+            "collected chain hashes for peer Find response",
+        );
+
+        // Check the function implements the Find protocol
+        assert!(
+            res.len() <= max_len,
+            "a Find response must not exceed the maximum response length"
+        );
+        assert!(
+            intersection
+                .map(|hash| !res.contains(&hash))
+                .unwrap_or(true),
+            "the list must not contain the intersection hash"
+        );
+        assert!(
+            stop.map(|hash| !res[..(res.len() - 1)].contains(&hash))
+                .unwrap_or(true),
+            "if the stop hash is in the list, it must be the final hash"
+        );
+
         res
+    }
+
+    /// Finds the first hash that's in the peer's `known_blocks` and the local best chain.
+    /// Returns a list of hashes that follow that intersection, from the best chain.
+    ///
+    /// Starts from the first matching hash in the best chain, ignoring all other hashes in
+    /// `known_blocks`. If there is no matching hash in the best chain, starts from the genesis
+    /// block.
+    ///
+    /// Includes finalized and non-finalized blocks.
+    ///
+    /// Stops the list of hashes after:
+    ///   * adding the non-finalized best tip,
+    ///   * adding the `stop` hash to the list, if it is in the best chain, or
+    ///   * adding 500 hashes to the list.
+    ///
+    /// Returns an empty list if the state is empty.
+    pub fn find_chain_hashes(
+        &self,
+        known_blocks: Vec<block::Hash>,
+        stop: Option<block::Hash>,
+        max_len: usize,
+    ) -> Vec<block::Hash> {
+        let intersection = self.find_chain_intersection(known_blocks);
+        self.collect_chain_hashes(intersection, stop, max_len)
     }
 }
 
@@ -551,7 +616,8 @@ impl Service<Request> for StateService {
                 fut.boxed()
             }
             Request::FindBlockHashes { known_blocks, stop } => {
-                let res = self.find_chain_hashes(known_blocks, stop);
+                const MAX_FIND_BLOCK_HASHES_RESULTS: usize = 500;
+                let res = self.find_chain_hashes(known_blocks, stop, MAX_FIND_BLOCK_HASHES_RESULTS);
                 async move { Ok(Response::BlockHashes(res)) }.boxed()
             }
         }
