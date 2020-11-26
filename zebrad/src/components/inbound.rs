@@ -164,9 +164,14 @@ impl Service<zn::Request> for Inbound {
                     })
                 .boxed()
             }
-            zn::Request::FindHeaders { .. } => {
-                debug!("ignoring unimplemented request");
-                async { Ok(zn::Response::Nil) }.boxed()
+            zn::Request::FindHeaders { known_blocks, stop } => {
+                let request = zs::Request::FindBlockHeaders { known_blocks, stop };
+                self.state.call(request).map_ok(|resp| match resp {
+                        zs::Response::BlockHeaders(headers) if headers.is_empty() => zn::Response::Nil,
+                        zs::Response::BlockHeaders(headers) => zn::Response::BlockHeaders(headers),
+                        _ => unreachable!("zebra-state should always respond to a `FindBlockHeaders` request with a `BlockHeaders` response"),
+                    })
+                .boxed()
             }
             zn::Request::PushTransaction(_transaction) => {
                 debug!("ignoring unimplemented request");

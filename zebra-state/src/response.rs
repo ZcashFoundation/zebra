@@ -38,4 +38,7 @@ pub enum Response {
 
     /// The response to a `FindBlockHashes` request.
     BlockHashes(Vec<block::Hash>),
+
+    /// The response to a `FindBlockHeaders` request.
+    BlockHeaders(Vec<block::Header>),
 }

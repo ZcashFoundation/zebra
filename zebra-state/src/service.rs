@@ -612,6 +612,20 @@ impl Service<Request> for StateService {
                 let res = self.find_chain_hashes(known_blocks, stop, MAX_FIND_BLOCK_HASHES_RESULTS);
                 async move { Ok(Response::BlockHashes(res)) }.boxed()
             }
+            Request::FindBlockHeaders { known_blocks, stop } => {
+                const MAX_FIND_BLOCK_HEADERS_RESULTS: usize = 160;
+                let res =
+                    self.find_chain_hashes(known_blocks, stop, MAX_FIND_BLOCK_HEADERS_RESULTS);
+                let res: Vec<_> = res
+                    .iter()
+                    .map(|&hash| {
+                        self.best_block(hash.into())
+                            .expect("block for found hash is in the best chain")
+                            .header
+                    })
+                    .collect();
+                async move { Ok(Response::BlockHeaders(res)) }.boxed()
+            }
         }
     }
 }
