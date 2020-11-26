@@ -385,12 +385,13 @@ impl Ord for Chain {
 
 #[cfg(test)]
 mod tests {
-    use std::{env, fmt, sync::Arc};
+    use std::{env, sync::Arc};
 
-    use zebra_chain::serialization::ZcashDeserializeInto;
     use zebra_chain::{
         block::Block,
+        fmt::SummaryDebug,
         parameters::{Network, NetworkUpgrade},
+        serialization::ZcashDeserializeInto,
         LedgerState,
     };
     use zebra_test::prelude::*;
@@ -399,14 +400,6 @@ mod tests {
 
     use self::assert_eq;
     use super::*;
-
-    struct SummaryDebug<T>(T);
-
-    impl<T> fmt::Debug for SummaryDebug<Vec<T>> {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            write!(f, "{}, len={}", std::any::type_name::<T>(), self.0.len())
-        }
-    }
 
     #[test]
     fn construct_empty() {

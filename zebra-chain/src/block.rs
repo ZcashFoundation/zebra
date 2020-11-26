@@ -24,7 +24,7 @@ pub use root_hash::RootHash;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{parameters::Network, transaction::Transaction, transparent};
+use crate::{fmt::DisplayToDebug, parameters::Network, transaction::Transaction, transparent};
 
 /// A Zcash block, containing a header and a list of transactions.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -43,17 +43,6 @@ impl fmt::Display for Block {
         }
 
         fmter.field("hash", &DisplayToDebug(self.hash())).finish()
-    }
-}
-
-struct DisplayToDebug<T>(T);
-
-impl<T> fmt::Debug for DisplayToDebug<T>
-where
-    T: fmt::Display,
-{
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
     }
 }
 
