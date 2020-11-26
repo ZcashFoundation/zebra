@@ -34,15 +34,20 @@ state service.
 
 * **block chain**: A sequence of valid blocks linked by inclusion of the
   previous block hash in the subsequent block. Chains are rooted at the
-  *genesis* block and extend to a *tip*.
+  genesis block and extend to a **tip**.
 
 * **chain state**: The state of the ledger after application of a particular
   sequence of blocks (state transitions).
 
-* **cumulative difficulty**: The cumulative proof-of-work from genesis to the
-  chain tip.
+* **block work**: The approximate amount of work required for a miner to generate
+  a block hash that passes the difficulty filter. The number of block header
+  attempts and the mining time are proportional to the work value. Numerically
+  higher work values represent longer processing times.
 
-* **best chain**: The chain with the greatest cumulative difficulty. This chain
+* **cumulative work**: The sum of the **block work** of all blocks in a chain, from
+  genesis to the chain tip.
+
+* **best chain**: The chain with the greatest **cumulative work**. This chain
   represents the consensus state of the Zcash network and transactions.
 
 * **side chain**: A chain which is not contained in the best chain.
@@ -69,6 +74,11 @@ state service.
   chain is usually 100 blocks (the reorg limit) above the finalized tip. But it can
   be lower during the initial sync, and after a chain reorganization, if the new
   best chain is at a lower height.
+
+* **relevant chain**: The relevant chain for a block starts at the previous
+  block, and extends back to genesis.
+
+* **relevant tip**: The tip of the relevant chain.
 
 # Guide-level explanation
 [guide-level-explanation]: #guide-level-explanation
@@ -229,7 +239,6 @@ chains, so that the map ordering is the ordering of worst to best chains.
 
 ### The `Chain` type
 [chain-type]: #chain-type
-
 
 The `Chain` type represents a chain of blocks. Each block represents an
 incremental state update, and the `Chain` type caches the cumulative state
@@ -706,6 +715,59 @@ These updates can be performed in a batch or without necessarily iterating
 over all transactions, if the data is available by other means; they're
 specified this way for clarity.
 
+## Accessing previous blocks for contextual validation
+[previous-block-context]: #previous-block-context
+
+The state service performs contextual validation of blocks received via the
+`CommitBlock` request. Since `CommitBlock` is synchronous, contextual validation
+must also be performed synchronously.
+
+The relevant chain for a block starts at its previous block, and follows the
+chain of previous blocks back to the genesis block.
+
+### Relevant chain iterator
+[relevant-chain-iterator]: #relevant-chain-iterator
+
+The relevant chain can be retrieved from the state service as follows:
+* if the previous block is the finalized tip:
+  * get recent blocks from the finalized state
+* if the previous block is in the non-finalized state:
+  * get recent blocks from the relevant chain, then
+  * get recent blocks from the finalized state, if required
+
+The relevant chain can start at any non-finalized block, or at the finalized tip.
+
+### Relevant chain implementation
+[relevant-chain-implementation]: #relevant-chain-implementation
+
+The relevant chain is implemented as a `StateService` iterator, which returns
+`Arc<Block>`s.
+
+The chain iterator implements `ExactSizeIterator`, so Zebra can efficiently
+assert that the relevant chain contains enough blocks to perform each contextual
+validation check.
+
+```rust
+impl StateService {
+    /// Return an iterator over the relevant chain of the block identified by
+    /// `hash`.
+    ///
+    /// The block identified by `hash` is included in the chain of blocks yielded
+    /// by the iterator.
+    pub fn chain(&self, hash: block::Hash) -> Iter<'_> { ... }
+}
+
+impl Iterator for Iter<'_>  {
+    type Item = Arc<Block>;
+    ...
+}
+impl ExactSizeIterator for Iter<'_> { ... }
+impl FusedIterator for Iter<'_> {}
+```
+
+For further details, see [PR 1271].
+
+[PR 1271]: https://github.com/ZcashFoundation/zebra/pull/1271
 
 ## Request / Response API
 [request-response]: #request-response
