@@ -13,8 +13,9 @@ use crate::{PreparedBlock, ValidateContextError};
 
 use super::check;
 
-pub mod difficulty;
 use difficulty::{AdjustedDifficulty, POW_MEDIAN_BLOCK_SPAN};
+
+pub(crate) mod difficulty;
 
 /// Check that `block` is contextually valid for `network`, based on the
 /// `finalized_tip_height` and `relevant_chain`.
