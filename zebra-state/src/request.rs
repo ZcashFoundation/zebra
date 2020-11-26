@@ -246,7 +246,7 @@ pub enum Request {
     /// If there is no matching hash in the best chain, starts from the genesis hash.
     ///
     /// Stops the list of hashes after:
-    ///   * adding the non-finalized best tip,
+    ///   * adding the best tip,
     ///   * adding the `stop` hash to the list, if it is in the best chain, or
     ///   * adding 500 hashes to the list.
     ///
@@ -269,7 +269,7 @@ pub enum Request {
     /// If there is no matching hash in the best chain, starts from the genesis header.
     ///
     /// Stops the list of headers after:
-    ///   * adding the non-finalized best tip,
+    ///   * adding the best tip,
     ///   * adding the header matching the `stop` hash to the list, if it is in the best chain, or
     ///   * adding 160 headers to the list.
     ///

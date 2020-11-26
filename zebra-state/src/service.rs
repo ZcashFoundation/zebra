@@ -310,7 +310,7 @@ impl StateService {
     /// Includes finalized and non-finalized blocks.
     ///
     /// Stops the list of hashes after:
-    ///   * adding the non-finalized best tip,
+    ///   * adding the best tip,
     ///   * adding the `stop` hash to the list, if it is in the best chain, or
     ///   * adding `max_len` hashes to the list.
     ///
@@ -411,7 +411,7 @@ impl StateService {
     /// Includes finalized and non-finalized blocks.
     ///
     /// Stops the list of hashes after:
-    ///   * adding the non-finalized best tip,
+    ///   * adding the best tip,
     ///   * adding the `stop` hash to the list, if it is in the best chain, or
     ///   * adding 500 hashes to the list.
     ///
