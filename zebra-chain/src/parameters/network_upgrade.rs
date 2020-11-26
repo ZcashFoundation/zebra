@@ -203,7 +203,7 @@ impl NetworkUpgrade {
 
     /// Returns the target block spacing for `network` and `height`.
     ///
-    /// See `target_spacing` for details.
+    /// See [`target_spacing()`] for details.
     pub fn target_spacing_for_height(network: Network, height: block::Height) -> Duration {
         NetworkUpgrade::current(network, height).target_spacing()
     }
@@ -269,7 +269,7 @@ impl NetworkUpgrade {
 
     /// Returns the averaging window timespan for `network` and `height`.
     ///
-    /// See `averaging_window_timespan` for details.
+    /// See [`averaging_window_timespan()`] for details.
     pub fn averaging_window_timespan_for_height(
         network: Network,
         height: block::Height,
