@@ -228,9 +228,9 @@ impl StateService {
 
     /// Return the block identified by either its `height` or `hash` if it exists
     /// in the current best chain.
-    pub fn block(&self, hash_or_height: HashOrHeight) -> Option<Arc<Block>> {
+    pub fn best_block(&self, hash_or_height: HashOrHeight) -> Option<Arc<Block>> {
         self.mem
-            .block(hash_or_height)
+            .best_block(hash_or_height)
             .or_else(|| self.disk.block(hash_or_height))
     }
 
@@ -595,7 +595,7 @@ impl Service<Request> for StateService {
             }
             Request::Block(hash_or_height) => {
                 metrics::counter!("state.requests", 1, "type" => "block");
-                let rsp = Ok(self.block(hash_or_height)).map(Response::Block);
+                let rsp = Ok(self.best_block(hash_or_height)).map(Response::Block);
                 async move { rsp }.boxed()
             }
             Request::AwaitUtxo(outpoint) => {

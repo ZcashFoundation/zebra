@@ -169,7 +169,7 @@ impl NonFinalizedState {
     }
 
     /// Returns the `block` at a given height or hash in the best chain.
-    pub fn block(&self, hash_or_height: HashOrHeight) -> Option<Arc<Block>> {
+    pub fn best_block(&self, hash_or_height: HashOrHeight) -> Option<Arc<Block>> {
         let best_chain = self.best_chain()?;
         let height =
             hash_or_height.height_or_else(|hash| best_chain.height_by_hash.get(&hash).cloned())?;
