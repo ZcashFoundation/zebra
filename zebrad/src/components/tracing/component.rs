@@ -1,5 +1,7 @@
 use abscissa_core::{Component, FrameworkError, FrameworkErrorKind, Shutdown};
 
+use opentelemetry::exporter::trace::stdout;
+
 use tracing_error::ErrorLayer;
 use tracing_subscriber::{
     fmt::Formatter, layer::SubscriberExt, reload::Handle, util::SubscriberInitExt, EnvFilter,
