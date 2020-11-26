@@ -68,7 +68,8 @@ impl AdjustedDifficulty {
     /// Note that the `time`s might not be in reverse chronological order, because
     /// block times are supplied by miners.
     ///
-    /// Panics:
+    /// # Panics
+    ///
     /// If the `context` contains fewer than 28 items.
     pub fn new_from_block<C>(
         candidate_block: &Block,
@@ -100,7 +101,8 @@ impl AdjustedDifficulty {
     ///
     /// See `new_from_block` for detailed information about the `context`.
     ///
-    /// Panics:
+    /// # Panics
+    ///
     /// If the context contains fewer than 28 items.
     pub fn new_from_header<C>(
         candidate_header: &block::Header,
