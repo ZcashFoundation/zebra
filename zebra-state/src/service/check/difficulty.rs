@@ -99,7 +99,7 @@ impl AdjustedDifficulty {
     /// Designed for use when validating block headers, where the full block has not
     /// been downloaded yet.
     ///
-    /// See `new_from_block` for detailed information about the `context`.
+    /// See [`new_from_block()`] for detailed information about the `context`.
     ///
     /// # Panics
     ///
@@ -165,7 +165,7 @@ impl AdjustedDifficulty {
     /// `candidate_height`, `network`, and the relevant `difficulty_threshold`s and
     /// `time`s.
     ///
-    /// See `expected_difficulty_threshold` for details.
+    /// See [`expected_difficulty_threshold()`] for details.
     ///
     /// Implements `ThresholdBits` from the Zcash specification. (Which excludes the
     /// Testnet minimum difficulty adjustment.)
@@ -264,7 +264,7 @@ impl AdjustedDifficulty {
     ///
     /// Implements `ActualTimespan` from the Zcash specification.
     ///
-    /// See `median_timespan_bounded` for details.
+    /// See [`median_timespan_bounded()`] for details.
     fn median_timespan(&self) -> Duration {
         let newer_times: [DateTime<Utc>; POW_MEDIAN_BLOCK_SPAN] = self.relevant_times
             [0..POW_MEDIAN_BLOCK_SPAN]
