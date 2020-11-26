@@ -296,13 +296,10 @@ impl StateService {
         // We can get a block locator request before we have downloaded the genesis block
         self.tip()?;
 
-        for hash in known_blocks {
-            if self.best_chain_contains(hash) {
-                return Some(hash);
-            }
-        }
-
-        None
+        known_blocks
+            .iter()
+            .find(|&&hash| self.best_chain_contains(hash))
+            .cloned()
     }
 
     /// Returns a list of block hashes in the best chain, following the `intersection` with the best
@@ -322,14 +319,12 @@ impl StateService {
         stop: Option<block::Hash>,
         max_len: usize,
     ) -> Vec<block::Hash> {
-        let mut res: Vec<block::Hash> = Vec::new();
-
         assert!(max_len > 0, "max_len must be at least 1");
 
         // We can get a block locator request before we have downloaded the genesis block
         let chain_tip_height = self.tip().map(|t| t.0);
         if chain_tip_height.is_none() {
-            return res;
+            return Vec::new();
         }
         let chain_tip_height = chain_tip_height.unwrap();
 
@@ -340,7 +335,7 @@ impl StateService {
         let max_len_height = if let Some(intersection_height) = intersection_height {
             // start after the intersection_height, and return max_len hashes
             (intersection_height + (max_len as i32))
-                .expect("the final height does not exceed Height::MAX")
+                .expect("the Find response height does not exceed Height::MAX")
         } else {
             // start at genesis, and return max_len hashes
             block::Height((max_len - 1) as _)
@@ -352,30 +347,27 @@ impl StateService {
         //   * at or below our chain tip, and
         //   * at or below the height of the stop hash.
         let final_height = std::cmp::min(max_len_height, chain_tip_height);
-        let final_height = if let Some(stop_height) = stop_height {
-            std::cmp::min(final_height, stop_height)
-        } else {
-            final_height
-        };
+        let final_height = stop_height
+            .map(|stop_height| std::cmp::min(final_height, stop_height))
+            .unwrap_or(final_height);
         let final_hash = self
             .hash(final_height)
             .expect("final height must have a hash");
 
-        for block in self.chain(final_hash) {
-            // The block locator does not include the intersection
-            if Some(block.hash()) == intersection {
-                break;
-            }
-
-            res.push(block.hash());
-
-            tracing::trace!(
-                hash = ?block.hash(),
-                height = ?self.best_height_by_hash(block.hash())
-                    .expect("if hash is in the state then it should have an associated height"),
-                "adding hash to peer Find response",
-            );
-        }
+        // The Find response does not include the intersection
+        let mut res: Vec<_> = self
+            .chain(final_hash)
+            .map(|block| block.hash())
+            .take_while(|&hash| Some(hash) != intersection)
+            .inspect(|hash| {
+                tracing::trace!(
+                    ?hash,
+                    height = ?self.best_height_by_hash(*hash)
+                        .expect("if hash is in the state then it should have an associated height"),
+                    "adding hash to peer Find response",
+                )
+            })
+            .collect();
         res.reverse();
 
         tracing::info!(
