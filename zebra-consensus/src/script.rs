@@ -1,11 +1,21 @@
 use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc};
 
+use tower::timeout::Timeout;
 use tracing::Instrument;
 
 use zebra_chain::{parameters::NetworkUpgrade, transaction::Transaction, transparent};
 use zebra_state::Utxo;
 
 use crate::BoxError;
+
+/// A timeout applied to UTXO lookup requests.
+///
+/// The exact value is non-essential, but this should be long enough to allow
+/// out-of-order verification of blocks (UTXOs are not required to be ready
+/// immediately) while being short enough to prune blocks that are too far in the
+/// future to be worth keeping in the queue, and to fail blocks that reference
+/// invalid UTXOs.
+const UTXO_LOOKUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10 * 60);
 
 /// Asynchronous script verification.
 ///
@@ -20,12 +30,14 @@ use crate::BoxError;
 /// [RFC4]: https://zebra.zfnd.org/dev/rfcs/0004-asynchronous-script-verification.html
 #[derive(Debug, Clone)]
 pub struct Verifier<ZS> {
-    state: ZS,
+    state: Timeout<ZS>,
 }
 
 impl<ZS> Verifier<ZS> {
     pub fn new(state: ZS) -> Self {
-        Self { state }
+        Self {
+            state: Timeout::new(state, UTXO_LOOKUP_TIMEOUT),
+        }
     }
 }
 
