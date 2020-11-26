@@ -356,7 +356,7 @@ impl StateService {
             .best_hash(final_height)
             .expect("final height must have a hash");
 
-        // The Find response does not include the intersection
+        // We can use an "any chain" method here, because `final_hash` is in the best chain
         let mut res: Vec<_> = self
             .chain(final_hash)
             .map(|block| block.hash())
