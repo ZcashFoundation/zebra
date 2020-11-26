@@ -305,7 +305,7 @@ impl StateService {
     }
 
     /// Returns a list of block hashes in the best chain, following the `intersection` with the best
-    /// chain. If there is no intersection with the best chain, starts from the genesis block.
+    /// chain. If there is no intersection with the best chain, starts from the genesis hash.
     ///
     /// Includes finalized and non-finalized blocks.
     ///
@@ -378,9 +378,7 @@ impl StateService {
             ?chain_tip_height,
             ?stop_height,
             ?intersection_height,
-            ?final_hash,
-            ?intersection,
-            "collected chain hashes for peer Find response",
+            "responding to peer GetBlocks or GetHeaders",
         );
 
         // Check the function implements the Find protocol
@@ -408,7 +406,7 @@ impl StateService {
     ///
     /// Starts from the first matching hash in the best chain, ignoring all other hashes in
     /// `known_blocks`. If there is no matching hash in the best chain, starts from the genesis
-    /// block.
+    /// hash.
     ///
     /// Includes finalized and non-finalized blocks.
     ///

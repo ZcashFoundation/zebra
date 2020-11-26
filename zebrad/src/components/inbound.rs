@@ -160,7 +160,7 @@ impl Service<zn::Request> for Inbound {
                 self.state.call(request).map_ok(|resp| match resp {
                         zs::Response::BlockHashes(hashes) if hashes.is_empty() => zn::Response::Nil,
                         zs::Response::BlockHashes(hashes) => zn::Response::BlockHashes(hashes),
-                        _ => unreachable!("zebra-state should always respond to a `FindBlocks` request with a `BlockHashes` response"),
+                        _ => unreachable!("zebra-state should always respond to a `FindBlockHashes` request with a `BlockHashes` response"),
                     })
                 .boxed()
             }
