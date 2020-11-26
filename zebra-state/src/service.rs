@@ -218,7 +218,10 @@ impl StateService {
     /// Return the depth of block `hash` in the current best chain.
     pub fn depth(&self, hash: block::Hash) -> Option<u32> {
         let tip = self.tip()?.0;
-        let height = self.mem.height(hash).or_else(|| self.disk.height(hash))?;
+        let height = self
+            .mem
+            .best_height_by_hash(hash)
+            .or_else(|| self.disk.height(hash))?;
 
         Some(tip.0 - height.0)
     }
@@ -244,10 +247,23 @@ impl StateService {
         self.mem.hash(height).or_else(|| self.disk.hash(height))
     }
 
-    /// Return the height for the block at `hash` in any chain.
-    pub fn height_by_hash(&self, hash: block::Hash) -> Option<block::Height> {
+    /// Return true if `hash` is in the current best chain.
+    pub fn best_chain_contains(&self, hash: block::Hash) -> bool {
+        self.best_height_by_hash(hash).is_some()
+    }
+
+    /// Return the height for the block at `hash`, if `hash` is in the best chain.
+    pub fn best_height_by_hash(&self, hash: block::Hash) -> Option<block::Height> {
         self.mem
-            .height_by_hash(hash)
+            .best_height_by_hash(hash)
+            .or_else(|| self.disk.height(hash))
+    }
+
+    /// Return the height for the block at `hash` in any chain.
+    #[allow(dead_code)]
+    pub fn any_height_by_hash(&self, hash: block::Hash) -> Option<block::Height> {
+        self.mem
+            .any_height_by_hash(hash)
             .or_else(|| self.disk.height(hash))
     }
 
@@ -437,7 +453,7 @@ impl ExactSizeIterator for Iter<'_> {
         match self.state {
             IterState::NonFinalized(hash) => self
                 .service
-                .height_by_hash(hash)
+                .best_height_by_hash(hash)
                 .map(|height| (height.0 + 1) as _)
                 .unwrap_or(0),
             IterState::Finalized(height) => (height.0 + 1) as _,
