@@ -115,21 +115,15 @@ impl AdjustedDifficulty {
     {
         let candidate_height = (previous_block_height + 1).expect("next block height is valid");
 
-        // unzip would be a lot nicer here, but we can't satisfy its trait bounds
-        let context: Vec<_> = context
+        let (relevant_difficulty_thresholds, relevant_times) = context
             .into_iter()
             .take(POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN)
-            .collect();
-        let relevant_difficulty_thresholds = context
-            .iter()
-            .map(|pair| pair.0)
-            .collect::<Vec<_>>()
+            .unzip::<_, _, Vec<_>, Vec<_>>();
+
+        let relevant_difficulty_thresholds = relevant_difficulty_thresholds
             .try_into()
             .expect("not enough context: difficulty adjustment needs at least 28 (PoWAveragingWindow + PoWMedianBlockSpan) headers");
-        let relevant_times = context
-            .iter()
-            .map(|pair| pair.1)
-            .collect::<Vec<_>>()
+        let relevant_times = relevant_times
             .try_into()
             .expect("not enough context: difficulty adjustment needs at least 28 (PoWAveragingWindow + PoWMedianBlockSpan) headers");
 
