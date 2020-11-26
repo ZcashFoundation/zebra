@@ -1,12 +1,13 @@
 //! Definitions of network messages.
 
 use std::error::Error;
-use std::{net, sync::Arc};
+use std::{fmt, net, sync::Arc};
 
 use chrono::{DateTime, Utc};
 
 use zebra_chain::{
     block::{self, Block},
+    fmt::{DisplayToDebug, SummaryDebug},
     transaction::Transaction,
 };
 
@@ -30,7 +31,7 @@ use crate::meta_addr::MetaAddr;
 /// during serialization).
 ///
 /// [btc_wiki_protocol]: https://en.bitcoin.it/wiki/Protocol_documentation
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub enum Message {
     /// A `version` message.
     ///
@@ -306,4 +307,139 @@ pub enum RejectReason {
     InsufficientFee = 0x42,
     Checkpoint = 0x43,
     Other = 0x50,
+}
+
+// Modified from the derived Debug, to summarise `Vec`s
+impl fmt::Debug for Message {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Message::Version {
+                version: ref __self_0,
+                services: ref __self_1,
+                timestamp: ref __self_2,
+                address_recv: ref __self_3,
+                address_from: ref __self_4,
+                nonce: ref __self_5,
+                user_agent: ref __self_6,
+                start_height: ref __self_7,
+                relay: ref __self_8,
+            } => {
+                let mut debug_trait_builder = f.debug_struct("Version");
+                let _ = debug_trait_builder.field("version", &&(*__self_0));
+                let _ = debug_trait_builder.field("services", &&(*__self_1));
+                let _ = debug_trait_builder.field("timestamp", &&(*__self_2));
+                let _ = debug_trait_builder.field("address_recv", &&(*__self_3));
+                let _ = debug_trait_builder.field("address_from", &&(*__self_4));
+                let _ = debug_trait_builder.field("nonce", &&(*__self_5));
+                let _ = debug_trait_builder.field("user_agent", &&(*__self_6));
+                let _ = debug_trait_builder.field("start_height", &&(*__self_7));
+                let _ = debug_trait_builder.field("relay", &&(*__self_8));
+                debug_trait_builder.finish()
+            }
+            Message::Verack => {
+                let mut debug_trait_builder = f.debug_tuple("Verack");
+                debug_trait_builder.finish()
+            }
+            Message::Ping(ref __self_0) => {
+                let mut debug_trait_builder = f.debug_tuple("Ping");
+                let _ = debug_trait_builder.field(&&(*__self_0));
+                debug_trait_builder.finish()
+            }
+            Message::Pong(ref __self_0) => {
+                let mut debug_trait_builder = f.debug_tuple("Pong");
+                let _ = debug_trait_builder.field(&&(*__self_0));
+                debug_trait_builder.finish()
+            }
+            Message::Reject {
+                message: ref __self_0,
+                ccode: ref __self_1,
+                reason: ref __self_2,
+                data: ref __self_3,
+            } => {
+                let mut debug_trait_builder = f.debug_struct("Reject");
+                let _ = debug_trait_builder.field("message", &&(*__self_0));
+                let _ = debug_trait_builder.field("ccode", &&(*__self_1));
+                let _ = debug_trait_builder.field("reason", &&(*__self_2));
+                let _ = debug_trait_builder.field("data", &&(*__self_3));
+                debug_trait_builder.finish()
+            }
+            Message::GetAddr => {
+                let mut debug_trait_builder = f.debug_tuple("GetAddr");
+                debug_trait_builder.finish()
+            }
+            Message::Addr(addr) => {
+                let mut debug_trait_builder = f.debug_tuple("Addr");
+                let _ = debug_trait_builder.field(&SummaryDebug(addr));
+                debug_trait_builder.finish()
+            }
+            Message::GetBlocks { known_blocks, stop } => {
+                let mut debug_trait_builder = f.debug_struct("GetBlocks");
+                let _ = debug_trait_builder.field("known_blocks", &SummaryDebug(known_blocks));
+                let _ = debug_trait_builder.field("stop", stop);
+                debug_trait_builder.finish()
+            }
+            Message::Inv(inv) => {
+                let mut debug_trait_builder = f.debug_tuple("Inv");
+                let _ = debug_trait_builder.field(&SummaryDebug(inv));
+                debug_trait_builder.finish()
+            }
+            Message::GetHeaders { known_blocks, stop } => {
+                let mut debug_trait_builder = f.debug_struct("GetHeaders");
+                let _ = debug_trait_builder.field("known_blocks", &SummaryDebug(known_blocks));
+                let _ = debug_trait_builder.field("stop", stop);
+                debug_trait_builder.finish()
+            }
+            Message::Headers(headers) => {
+                let mut debug_trait_builder = f.debug_tuple("Headers");
+                let _ = debug_trait_builder.field(&SummaryDebug(headers));
+                debug_trait_builder.finish()
+            }
+            Message::GetData(data) => {
+                let mut debug_trait_builder = f.debug_tuple("GetData");
+                let _ = debug_trait_builder.field(&SummaryDebug(data));
+                debug_trait_builder.finish()
+            }
+            Message::Block(block) => {
+                let mut debug_trait_builder = f.debug_tuple("Block");
+                let _ = debug_trait_builder.field(&DisplayToDebug(block));
+                debug_trait_builder.finish()
+            }
+            Message::Tx(tx) => {
+                let mut debug_trait_builder = f.debug_tuple("Tx");
+                let _ = debug_trait_builder.field(&tx);
+                debug_trait_builder.finish()
+            }
+            Message::NotFound(not_found) => {
+                let mut debug_trait_builder = f.debug_tuple("NotFound");
+                let _ = debug_trait_builder.field(&SummaryDebug(not_found));
+                debug_trait_builder.finish()
+            }
+            Message::Mempool => {
+                let mut debug_trait_builder = f.debug_tuple("Mempool");
+                debug_trait_builder.finish()
+            }
+            Message::FilterLoad {
+                filter: ref __self_0,
+                hash_functions_count: ref __self_1,
+                tweak: ref __self_2,
+                flags: ref __self_3,
+            } => {
+                let mut debug_trait_builder = f.debug_struct("FilterLoad");
+                let _ = debug_trait_builder.field("filter", &&(*__self_0));
+                let _ = debug_trait_builder.field("hash_functions_count", &&(*__self_1));
+                let _ = debug_trait_builder.field("tweak", &&(*__self_2));
+                let _ = debug_trait_builder.field("flags", &&(*__self_3));
+                debug_trait_builder.finish()
+            }
+            Message::FilterAdd { data } => {
+                let mut debug_trait_builder = f.debug_struct("FilterAdd");
+                let _ = debug_trait_builder.field("data", &SummaryDebug(data));
+                debug_trait_builder.finish()
+            }
+            Message::FilterClear => {
+                let mut debug_trait_builder = f.debug_tuple("FilterClear");
+                debug_trait_builder.finish()
+            }
+        }
+    }
 }
