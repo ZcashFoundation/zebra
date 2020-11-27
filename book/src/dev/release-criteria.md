@@ -27,7 +27,9 @@ While Zebra is still in alpha, we don't guarantee support for any particular pla
 
 But you'll probably get the best results with a recent Ubuntu Linux, or the other platforms that our CI runs on.
 
-### Go/No-Go Criteria
+### Go/No-Go Status
+
+_Last updated:_
 
 - `zebrad` Functionality
     - [ ] `zebrad` can sync to mainnet tip
