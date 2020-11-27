@@ -13,20 +13,26 @@ jobs:
   coverage:
     name: Coverage
     timeout-minutes: 30
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
         with:
-          toolchain: stable
+          toolchain: nightly
           override: true
-      - name: Skip network tests on Ubuntu
-        # Ubuntu runners don't have network or DNS configured during test steps
-        run: echo "ZEBRA_SKIP_NETWORK_TESTS=1" >> $GITHUB_ENV
-      - name: Run cargo-tarpaulin
-        uses: actions-rs/tarpaulin@v0.1
-        with:
-          version: '0.16.0'
-          timeout: 600
+          profile: minimal
+          components: llvm-tools-preview
+      - name: Install rustfilt symbol demangler
+        run: cargo install rustfilt
+      - name: Rerun tests for coverage
+        run: cargo test
+        env:
+          RUSTFLAGS: -Zinstrument-coverage
+          LLVM_PROFILE_FILE: "${{ github.workspace }}/test.%p.profraw"
+          ZEBRA_SKIP_NETWORK_TESTS: 1
+      - name: Merge coverage data
+        run: $(rustc --print target-libdir)/../bin/llvm-profdata merge --sparse test.*.profraw -o test.profdata
+      - name: Generate coverage report
+        run: $(rustc --print target-libdir)/../bin/llvm-cov export -format=lcov -instr-profile=test.profdata $(find target/debug/deps -type f -perm -u+x ! -name '*.so') > "lcov.info"
       - name: Upload coverage report to Codecov
-        uses: codecov/codecov-action@v1.0.15
+        uses: codecov/codecov-action@v1
