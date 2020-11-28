@@ -1,0 +1,23 @@
+#! /bin/bash
+set -e
+set -o xtrace
+
+rm -rf ./target/
+mkdir -p ./target/coverage
+ZEBRA_SKIP_NETWORK_TESTS=1 LLVM_PROFILE_FILE="${PWD}/target/coverage/test.%p.profraw" RUSTFLAGS="-Zinstrument-coverage" cargo test
+$(rustc --print target-libdir)/../bin/llvm-profdata merge --sparse ./target/coverage/test.*.profraw -o ./target/coverage/test.profdata
+
+rm -rf ./target/coverage/html/
+# This one works and shows all the details I want in the CLI
+$(rustc --print target-libdir)/../bin/llvm-cov show \
+	-format=html \
+	-Xdemangler=rustfilt \
+	-show-instantiations \
+	-output-dir=./target/coverage/html \
+	-ignore-filename-regex=".*/.cargo/registry/.*" \
+	-ignore-filename-regex=".*/.cargo/git/.*" \
+	-ignore-filename-regex=".*/.rustup/.*" \
+	-instr-profile=./target/coverage/test.profdata \
+	$(find target/ -type f -perm -u+x ! -name '*.so')
+
+xdg-open ./target/coverage/html/index.html
