@@ -33,7 +33,7 @@ jobs:
       - name: Merge coverage data
         run: $(rustc --print target-libdir)/../bin/llvm-profdata merge --sparse test.*.profraw -o test.profdata
       - name: Generate detailed html coverage report for github artifact
-        run: $(rustc --print target-libdir)/../bin/llvm-cov show -format=html -Xdemangler=rustfilt -show-instantiations -output-dir=./coverage -instr-profile=./test.profdata $(find target/debug/deps -type f -perm -u+x ! -name '*.so')
+        run: $(rustc --print target-libdir)/../bin/llvm-cov show -format=html -ignore-filename-regex="*/.cargo/registry/*" -Xdemangler=rustfilt -show-instantiations -output-dir=./coverage -instr-profile=./test.profdata $(find target/debug/deps -type f -perm -u+x ! -name '*.so')
       - uses: actions/upload-artifact@v2
         with:
           name: coverage
