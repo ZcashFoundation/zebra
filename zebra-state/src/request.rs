@@ -239,4 +239,50 @@ pub enum Request {
     /// Code making this request should apply a timeout layer to the service to
     /// handle missing UTXOs.
     AwaitUtxo(transparent::OutPoint),
+
+    /// Finds the first hash that's in the peer's `known_blocks` and the local best chain.
+    /// Returns a list of hashes that follow that intersection, from the best chain.
+    ///
+    /// If there is no matching hash in the best chain, starts from the genesis hash.
+    ///
+    /// Stops the list of hashes after:
+    ///   * adding the best tip,
+    ///   * adding the `stop` hash to the list, if it is in the best chain, or
+    ///   * adding 500 hashes to the list.
+    ///
+    /// Returns an empty list if the state is empty.
+    ///
+    /// Returns
+    ///
+    /// [`Response::BlockHashes(Vec<block::Hash>)`](Response::BlockHashes).
+    /// See https://en.bitcoin.it/wiki/Protocol_documentation#getblocks
+    FindBlockHashes {
+        /// Hashes of known blocks, ordered from highest height to lowest height.
+        known_blocks: Vec<block::Hash>,
+        /// Optionally, the last block hash to request.
+        stop: Option<block::Hash>,
+    },
+
+    /// Finds the first hash that's in the peer's `known_blocks` and the local best chain.
+    /// Returns a list of headers that follow that intersection, from the best chain.
+    ///
+    /// If there is no matching hash in the best chain, starts from the genesis header.
+    ///
+    /// Stops the list of headers after:
+    ///   * adding the best tip,
+    ///   * adding the header matching the `stop` hash to the list, if it is in the best chain, or
+    ///   * adding 160 headers to the list.
+    ///
+    /// Returns an empty list if the state is empty.
+    ///
+    /// Returns
+    ///
+    /// [`Response::BlockHeaders(Vec<block::Header>)`](Response::BlockHeaders).
+    /// See https://en.bitcoin.it/wiki/Protocol_documentation#getheaders
+    FindBlockHeaders {
+        /// Hashes of known blocks, ordered from highest height to lowest height.
+        known_blocks: Vec<block::Hash>,
+        /// Optionally, the hash of the last header to request.
+        stop: Option<block::Hash>,
+    },
 }

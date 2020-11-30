@@ -16,6 +16,7 @@ extern crate serde;
 
 pub mod amount;
 pub mod block;
+pub mod fmt;
 pub mod parameters;
 pub mod primitives;
 pub mod sapling;

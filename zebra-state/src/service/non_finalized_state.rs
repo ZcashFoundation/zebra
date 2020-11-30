@@ -169,7 +169,7 @@ impl NonFinalizedState {
     }
 
     /// Returns the `block` at a given height or hash in the best chain.
-    pub fn block(&self, hash_or_height: HashOrHeight) -> Option<Arc<Block>> {
+    pub fn best_block(&self, hash_or_height: HashOrHeight) -> Option<Arc<Block>> {
         let best_chain = self.best_chain()?;
         let height =
             hash_or_height.height_or_else(|hash| best_chain.height_by_hash.get(&hash).cloned())?;
@@ -181,8 +181,11 @@ impl NonFinalizedState {
     }
 
     /// Returns the hash for a given `block::Height` if it is present in the best chain.
-    pub fn hash(&self, height: block::Height) -> Option<block::Hash> {
-        self.block(height.into()).map(|block| block.hash())
+    pub fn best_hash(&self, height: block::Height) -> Option<block::Hash> {
+        self.best_chain()?
+            .blocks
+            .get(&height)
+            .map(|prepared| prepared.hash)
     }
 
     /// Returns the tip of the best chain.
@@ -194,15 +197,15 @@ impl NonFinalizedState {
         Some((height, hash))
     }
 
-    /// Returns the depth of `hash` in the best chain.
-    pub fn height(&self, hash: block::Hash) -> Option<block::Height> {
+    /// Returns the height of `hash` in the best chain.
+    pub fn best_height_by_hash(&self, hash: block::Hash) -> Option<block::Height> {
         let best_chain = self.best_chain()?;
         let height = *best_chain.height_by_hash.get(&hash)?;
         Some(height)
     }
 
     /// Returns the height of `hash` in any chain.
-    pub fn height_by_hash(&self, hash: block::Hash) -> Option<block::Height> {
+    pub fn any_height_by_hash(&self, hash: block::Hash) -> Option<block::Height> {
         for chain in self.chain_set.iter().rev() {
             if let Some(height) = chain.height_by_hash.get(&hash) {
                 return Some(*height);

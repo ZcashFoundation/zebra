@@ -33,6 +33,12 @@ pub enum Response {
     /// Response to [`Request::Block`] with the specified block.
     Block(Option<Arc<Block>>),
 
-    /// The response to a `AwaitUtxo` request
+    /// The response to a `AwaitUtxo` request.
     Utxo(Utxo),
+
+    /// The response to a `FindBlockHashes` request.
+    BlockHashes(Vec<block::Hash>),
+
+    /// The response to a `FindBlockHeaders` request.
+    BlockHeaders(Vec<block::Header>),
 }

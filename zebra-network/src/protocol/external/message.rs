@@ -1,12 +1,13 @@
 //! Definitions of network messages.
 
 use std::error::Error;
-use std::{net, sync::Arc};
+use std::{fmt, net, sync::Arc};
 
 use chrono::{DateTime, Utc};
 
 use zebra_chain::{
     block::{self, Block},
+    fmt::{DisplayToDebug, SummaryDebug},
     transaction::Transaction,
 };
 
@@ -30,7 +31,7 @@ use crate::meta_addr::MetaAddr;
 /// during serialization).
 ///
 /// [btc_wiki_protocol]: https://en.bitcoin.it/wiki/Protocol_documentation
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub enum Message {
     /// A `version` message.
     ///
@@ -306,4 +307,94 @@ pub enum RejectReason {
     InsufficientFee = 0x42,
     Checkpoint = 0x43,
     Other = 0x50,
+}
+
+/// Summarise `Vec`s when debugging messages
+impl fmt::Debug for Message {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Message::Version {
+                version,
+                services,
+                timestamp,
+                address_recv,
+                address_from,
+                nonce,
+                user_agent,
+                start_height,
+                relay,
+            } => f
+                .debug_struct("Version")
+                .field("version", version)
+                .field("services", services)
+                .field("timestamp", timestamp)
+                .field("address_recv", address_recv)
+                .field("address_from", address_from)
+                .field("nonce", nonce)
+                .field("user_agent", user_agent)
+                .field("start_height", start_height)
+                .field("relay", relay)
+                .finish(),
+            Message::Verack => f.debug_tuple("Verack").finish(),
+            Message::Ping(nonce) => f.debug_tuple("Ping").field(nonce).finish(),
+            Message::Pong(nonce) => f.debug_tuple("Pong").field(nonce).finish(),
+            Message::Reject {
+                message,
+                ccode,
+                reason,
+                data,
+            } => f
+                .debug_struct("Reject")
+                .field("message", message)
+                .field("ccode", ccode)
+                .field("reason", reason)
+                .field("data", data)
+                .finish(),
+            Message::GetAddr => f.debug_tuple("GetAddr").finish(),
+            Message::Addr(addr) => f.debug_tuple("Addr").field(&SummaryDebug(addr)).finish(),
+            Message::GetBlocks { known_blocks, stop } => f
+                .debug_struct("GetBlocks")
+                .field("known_blocks", &SummaryDebug(known_blocks))
+                .field("stop", stop)
+                .finish(),
+            Message::Inv(inv) => f.debug_tuple("Inv").field(&SummaryDebug(inv)).finish(),
+            Message::GetHeaders { known_blocks, stop } => f
+                .debug_struct("GetHeaders")
+                .field("known_blocks", &SummaryDebug(known_blocks))
+                .field("stop", stop)
+                .finish(),
+            Message::Headers(headers) => f
+                .debug_tuple("Headers")
+                .field(&SummaryDebug(headers))
+                .finish(),
+            Message::GetData(data) => f.debug_tuple("GetData").field(&SummaryDebug(data)).finish(),
+            Message::Block(block) => f
+                .debug_tuple("Block")
+                .field(&DisplayToDebug(block))
+                .finish(),
+            Message::Tx(tx) => f.debug_tuple("Tx").field(&tx).finish(),
+            Message::NotFound(not_found) => f
+                .debug_tuple("NotFound")
+                .field(&SummaryDebug(not_found))
+                .finish(),
+            Message::Mempool => f.debug_tuple("Mempool").finish(),
+            Message::FilterLoad {
+                filter,
+                hash_functions_count,
+                tweak,
+                flags,
+            } => f
+                .debug_struct("FilterLoad")
+                .field("filter", filter)
+                .field("hash_functions_count", hash_functions_count)
+                .field("tweak", tweak)
+                .field("flags", flags)
+                .finish(),
+            Message::FilterAdd { data } => f
+                .debug_struct("FilterAdd")
+                .field("data", &SummaryDebug(data))
+                .finish(),
+            Message::FilterClear => f.debug_tuple("FilterClear").finish(),
+        }
+    }
 }

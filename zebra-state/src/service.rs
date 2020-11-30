@@ -208,7 +208,7 @@ impl StateService {
         let mut hashes = Vec::with_capacity(heights.len());
 
         for height in heights {
-            if let Some(hash) = self.hash(height) {
+            if let Some(hash) = self.best_hash(height) {
                 hashes.push(hash);
             }
         }
@@ -224,16 +224,19 @@ impl StateService {
     /// Return the depth of block `hash` in the current best chain.
     pub fn depth(&self, hash: block::Hash) -> Option<u32> {
         let tip = self.tip()?.0;
-        let height = self.mem.height(hash).or_else(|| self.disk.height(hash))?;
+        let height = self
+            .mem
+            .best_height_by_hash(hash)
+            .or_else(|| self.disk.height(hash))?;
 
         Some(tip.0 - height.0)
     }
 
     /// Return the block identified by either its `height` or `hash` if it exists
     /// in the current best chain.
-    pub fn block(&self, hash_or_height: HashOrHeight) -> Option<Arc<Block>> {
+    pub fn best_block(&self, hash_or_height: HashOrHeight) -> Option<Arc<Block>> {
         self.mem
-            .block(hash_or_height)
+            .best_block(hash_or_height)
             .or_else(|| self.disk.block(hash_or_height))
     }
 
@@ -246,14 +249,29 @@ impl StateService {
     }
 
     /// Return the hash for the block at `height` in the current best chain.
-    pub fn hash(&self, height: block::Height) -> Option<block::Hash> {
-        self.mem.hash(height).or_else(|| self.disk.hash(height))
+    pub fn best_hash(&self, height: block::Height) -> Option<block::Hash> {
+        self.mem
+            .best_hash(height)
+            .or_else(|| self.disk.hash(height))
+    }
+
+    /// Return true if `hash` is in the current best chain.
+    pub fn best_chain_contains(&self, hash: block::Hash) -> bool {
+        self.best_height_by_hash(hash).is_some()
+    }
+
+    /// Return the height for the block at `hash`, if `hash` is in the best chain.
+    pub fn best_height_by_hash(&self, hash: block::Hash) -> Option<block::Height> {
+        self.mem
+            .best_height_by_hash(hash)
+            .or_else(|| self.disk.height(hash))
     }
 
     /// Return the height for the block at `hash` in any chain.
-    pub fn height_by_hash(&self, hash: block::Hash) -> Option<block::Height> {
+    #[allow(dead_code)]
+    pub fn any_height_by_hash(&self, hash: block::Hash) -> Option<block::Height> {
         self.mem
-            .height_by_hash(hash)
+            .any_height_by_hash(hash)
             .or_else(|| self.disk.height(hash))
     }
 
@@ -275,6 +293,143 @@ impl StateService {
             service: self,
             state: IterState::NonFinalized(hash),
         }
+    }
+
+    /// Find the first hash that's in the peer's `known_blocks` and the local best chain.
+    ///
+    /// Returns `None` if:
+    ///   * there is no matching hash in the best chain, or
+    ///   * the state is empty.
+    fn find_chain_intersection(&self, known_blocks: Vec<block::Hash>) -> Option<block::Hash> {
+        // We can get a block locator request before we have downloaded the genesis block
+        self.tip()?;
+
+        known_blocks
+            .iter()
+            .find(|&&hash| self.best_chain_contains(hash))
+            .cloned()
+    }
+
+    /// Returns a list of block hashes in the best chain, following the `intersection` with the best
+    /// chain. If there is no intersection with the best chain, starts from the genesis hash.
+    ///
+    /// Includes finalized and non-finalized blocks.
+    ///
+    /// Stops the list of hashes after:
+    ///   * adding the best tip,
+    ///   * adding the `stop` hash to the list, if it is in the best chain, or
+    ///   * adding `max_len` hashes to the list.
+    ///
+    /// Returns an empty list if the state is empty.
+    pub fn collect_chain_hashes(
+        &self,
+        intersection: Option<block::Hash>,
+        stop: Option<block::Hash>,
+        max_len: usize,
+    ) -> Vec<block::Hash> {
+        assert!(max_len > 0, "max_len must be at least 1");
+
+        // We can get a block locator request before we have downloaded the genesis block
+        let chain_tip_height = if let Some((height, _)) = self.tip() {
+            height
+        } else {
+            return Vec::new();
+        };
+
+        let intersection_height = intersection.map(|hash| {
+            self.best_height_by_hash(hash)
+                .expect("the intersection hash must be in the best chain")
+        });
+        let max_len_height = if let Some(intersection_height) = intersection_height {
+            // start after the intersection_height, and return max_len hashes
+            (intersection_height + (max_len as i32))
+                .expect("the Find response height does not exceed Height::MAX")
+        } else {
+            // start at genesis, and return max_len hashes
+            block::Height((max_len - 1) as _)
+        };
+
+        let stop_height = stop.map(|hash| self.best_height_by_hash(hash)).flatten();
+
+        // Compute the final height, making sure it is:
+        //   * at or below our chain tip, and
+        //   * at or below the height of the stop hash.
+        let final_height = std::cmp::min(max_len_height, chain_tip_height);
+        let final_height = stop_height
+            .map(|stop_height| std::cmp::min(final_height, stop_height))
+            .unwrap_or(final_height);
+        let final_hash = self
+            .best_hash(final_height)
+            .expect("final height must have a hash");
+
+        // We can use an "any chain" method here, because `final_hash` is in the best chain
+        let mut res: Vec<_> = self
+            .chain(final_hash)
+            .map(|block| block.hash())
+            .take_while(|&hash| Some(hash) != intersection)
+            .inspect(|hash| {
+                tracing::trace!(
+                    ?hash,
+                    height = ?self.best_height_by_hash(*hash)
+                        .expect("if hash is in the state then it should have an associated height"),
+                    "adding hash to peer Find response",
+                )
+            })
+            .collect();
+        res.reverse();
+
+        tracing::info!(
+            ?final_height,
+            response_len = ?res.len(),
+            ?chain_tip_height,
+            ?stop_height,
+            ?intersection_height,
+            "responding to peer GetBlocks or GetHeaders",
+        );
+
+        // Check the function implements the Find protocol
+        assert!(
+            res.len() <= max_len,
+            "a Find response must not exceed the maximum response length"
+        );
+        assert!(
+            intersection
+                .map(|hash| !res.contains(&hash))
+                .unwrap_or(true),
+            "the list must not contain the intersection hash"
+        );
+        assert!(
+            stop.map(|hash| !res[..(res.len() - 1)].contains(&hash))
+                .unwrap_or(true),
+            "if the stop hash is in the list, it must be the final hash"
+        );
+
+        res
+    }
+
+    /// Finds the first hash that's in the peer's `known_blocks` and the local best chain.
+    /// Returns a list of hashes that follow that intersection, from the best chain.
+    ///
+    /// Starts from the first matching hash in the best chain, ignoring all other hashes in
+    /// `known_blocks`. If there is no matching hash in the best chain, starts from the genesis
+    /// hash.
+    ///
+    /// Includes finalized and non-finalized blocks.
+    ///
+    /// Stops the list of hashes after:
+    ///   * adding the best tip,
+    ///   * adding the `stop` hash to the list, if it is in the best chain, or
+    ///   * adding 500 hashes to the list.
+    ///
+    /// Returns an empty list if the state is empty.
+    pub fn find_chain_hashes(
+        &self,
+        known_blocks: Vec<block::Hash>,
+        stop: Option<block::Hash>,
+        max_len: usize,
+    ) -> Vec<block::Hash> {
+        let intersection = self.find_chain_intersection(known_blocks);
+        self.collect_chain_hashes(intersection, stop, max_len)
     }
 }
 
@@ -361,7 +516,7 @@ impl ExactSizeIterator for Iter<'_> {
         match self.state {
             IterState::NonFinalized(hash) => self
                 .service
-                .height_by_hash(hash)
+                .best_height_by_hash(hash)
                 .map(|height| (height.0 + 1) as _)
                 .unwrap_or(0),
             IterState::Finalized(height) => (height.0 + 1) as _,
@@ -463,7 +618,7 @@ impl Service<Request> for StateService {
             }
             Request::Block(hash_or_height) => {
                 metrics::counter!("state.requests", 1, "type" => "block");
-                let rsp = Ok(self.block(hash_or_height)).map(Response::Block);
+                let rsp = Ok(self.best_block(hash_or_height)).map(Response::Block);
                 async move { rsp }.boxed()
             }
             Request::AwaitUtxo(outpoint) => {
@@ -476,6 +631,25 @@ impl Service<Request> for StateService {
                 }
 
                 fut.boxed()
+            }
+            Request::FindBlockHashes { known_blocks, stop } => {
+                const MAX_FIND_BLOCK_HASHES_RESULTS: usize = 500;
+                let res = self.find_chain_hashes(known_blocks, stop, MAX_FIND_BLOCK_HASHES_RESULTS);
+                async move { Ok(Response::BlockHashes(res)) }.boxed()
+            }
+            Request::FindBlockHeaders { known_blocks, stop } => {
+                const MAX_FIND_BLOCK_HEADERS_RESULTS: usize = 160;
+                let res =
+                    self.find_chain_hashes(known_blocks, stop, MAX_FIND_BLOCK_HEADERS_RESULTS);
+                let res: Vec<_> = res
+                    .iter()
+                    .map(|&hash| {
+                        self.best_block(hash.into())
+                            .expect("block for found hash is in the best chain")
+                            .header
+                    })
+                    .collect();
+                async move { Ok(Response::BlockHeaders(res)) }.boxed()
             }
         }
     }
