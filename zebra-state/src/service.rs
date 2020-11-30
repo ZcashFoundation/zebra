@@ -324,11 +324,11 @@ impl StateService {
         assert!(max_len > 0, "max_len must be at least 1");
 
         // We can get a block locator request before we have downloaded the genesis block
-        let chain_tip_height = self.tip().map(|t| t.0);
-        if chain_tip_height.is_none() {
+        let chain_tip_height = if let Some((height, _)) = self.tip() {
+            height
+        } else {
             return Vec::new();
-        }
-        let chain_tip_height = chain_tip_height.unwrap();
+        };
 
         let intersection_height = intersection.map(|hash| {
             self.best_height_by_hash(hash)
