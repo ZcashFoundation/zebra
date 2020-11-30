@@ -1,12 +1,11 @@
-use std::path::Path;
-
+use abscissa_core::{Component, FrameworkError, FrameworkErrorKind, Shutdown};
 use tracing_error::ErrorLayer;
 use tracing_subscriber::{
     fmt::Formatter, layer::SubscriberExt, reload::Handle, util::SubscriberInitExt, EnvFilter,
     FmtSubscriber,
 };
 
-use abscissa_core::{Component, FrameworkError, FrameworkErrorKind, Shutdown};
+use crate::config::TracingSection;
 
 use super::flame;
 
@@ -18,7 +17,10 @@ pub struct Tracing {
 
 impl Tracing {
     /// Try to create a new [`Tracing`] component with the given `filter`.
-    pub fn new(filter: &str, flame_root: Option<&Path>) -> Result<Self, FrameworkError> {
+    pub fn new(config: TracingSection) -> Result<Self, FrameworkError> {
+        let filter = config.filter.unwrap_or_else(|| "".to_string());
+        let flame_root = &config.flamegraph;
+
         // Construct a tracing subscriber with the supplied filter and enable reloading.
         let builder = FmtSubscriber::builder()
             .with_ansi(true)
