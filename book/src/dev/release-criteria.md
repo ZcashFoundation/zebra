@@ -27,38 +27,36 @@ While Zebra is still in alpha, we don't guarantee support for any particular pla
 
 But you'll probably get the best results with a recent Ubuntu Linux, or the other platforms that our CI runs on.
 
-### Go/No-Go Status
+### Go/No-Go Status :red_circle:
 
-_Last updated:_
+_Last updated:_ November 30 2020
 
 - `zebrad` Functionality
     - [ ] `zebrad` can sync to mainnet tip
-        - [ ] under excellent network conditions (within 2 - 5 hours)
+        - :yellow_circle: under excellent network conditions (within 2 - 5 hours)
         - reasonable and sub-optimal network conditions are not yet supported
     - [ ] `zebrad` can stay within a few blocks of the mainnet tip after the initial sync
-        - [ ] under excellent network conditions
+        - :yellow_circle: under excellent network conditions
         - reasonable and sub-optimal network conditions are not yet supported
-    - [ ] `zebrad` can validate proof of work
-    - [ ] `zebrad` can validate the transaction merkle tree
-    - [ ] `zebrad` can serve blocks to peers
+    - :green_circle:  `zebrad` can validate proof of work
+    - :red_circle: `zebrad` can validate the transaction merkle tree
+    - :yellow_circle: `zebrad` can serve blocks to peers
 - `zebrad` Performance
-    - [ ] `zebrad` functionality works on platforms that meet its system requirements
+    - :yellow_circle: `zebrad` functionality works on platforms that meet its system requirements
 - Testing
-    - [ ] CI Passes
-        - [ ] Unit tests pass reliably
-        - [ ] Property tests pass reliably
-        - [ ] Acceptance tests pass reliably
+    - :yellow_circle: CI Passes
+        - :green_circle:  Unit tests pass reliably
+        - :green_circle:  Property tests pass reliably
+        - :yellow_circle: Acceptance tests pass reliably
 - Implementation and Launch
-    - [ ] All release blocker bugs have been fixed
-    - [ ] Release notes are available
-    - [ ] Known issues are clearly documented
-    - [ ] Users can access the documentation to deploy `zebrad` nodes
+    - :red_circle: All [release blocker bugs]() have been fixed
+    - :green_circle: Users can access the documentation to deploy `zebrad` nodes
 - User Experience
-    - [ ] Build completes within 20 minutes in Zebra's CI
-    - [ ] `zebrad` executes normally
-        - [ ] `zebrad`'s default logging works reasonably well in a terminal
-        - [ ] panics, error logs, and warning logs are rare
-        - [ ] known panics, errors and warnings have open tickets
+    - :green_circle: Build completes within 30 minutes in Zebra's CI
+    - :yellow_circle: `zebrad` executes normally
+        - :green_circle: `zebrad`'s default logging works reasonably well in a terminal
+        - :green_circle: panics, error logs, and warning logs are rare on mainnet
+        - :yellow_circle: known panics, errors and warnings have open tickets
 
 ## Future Releases
 
