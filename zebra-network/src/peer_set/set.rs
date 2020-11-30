@@ -7,6 +7,7 @@ use std::{
     marker::PhantomData,
     pin::Pin,
     task::{Context, Poll},
+    time::Instant,
 };
 
 use futures::{
@@ -100,6 +101,8 @@ where
     /// the `PeerSet` propagate errors from background tasks back to the user
     guards: futures::stream::FuturesUnordered<JoinHandle<Result<(), BoxError>>>,
     inventory_registry: InventoryRegistry,
+    /// The last time we logged a message about the peer set size
+    last_peer_log: Option<Instant>,
 }
 
 impl<D> PeerSet<D>
@@ -128,6 +131,7 @@ where
             guards: futures::stream::FuturesUnordered::new(),
             handle_rx,
             inventory_registry: InventoryRegistry::new(inv_stream),
+            last_peer_log: None,
         }
     }
 
@@ -343,6 +347,40 @@ where
         .boxed()
     }
 
+    fn log_peer_set_size(&mut self) {
+        let ready_services_len = self.ready_services.len();
+        let unready_services_len = self.unready_services.len();
+        trace!(ready_peers = ?ready_services_len, unready_peers = ?unready_services_len);
+
+        if ready_services_len > 0 {
+            return;
+        }
+
+        // These logs are designed to be human-readable in a terminal, at the
+        // default Zebra log level. If you need to know the peer set size for
+        // every request, use the trace-level logs, or the metrics exporter.
+        if let Some(last_peer_log) = self.last_peer_log {
+            // Avoid duplicate peer set logs
+            if Instant::now().duration_since(last_peer_log).as_secs() < 60 {
+                return;
+            }
+        } else {
+            // Suppress initial logs until the peer set has started up.
+            // There can be multiple initial requests before the first peer is
+            // ready.
+            self.last_peer_log = Some(Instant::now());
+            return;
+        }
+
+        self.last_peer_log = Some(Instant::now());
+        if unready_services_len == 0 {
+            warn!("network request with no peer connections. Hint: check your network connection. Configure fast and reliable initial peers");
+        } else {
+            info!("network request with no ready peers: finding more peers, waiting for {} peers to answer requests. Hint: configure fast and reliable initial peers",
+                  unready_services_len);
+        }
+    }
+
     fn update_metrics(&self) {
         let num_ready = self.ready_services.len();
         let num_unready = self.unready_services.len();
@@ -374,6 +412,7 @@ where
         self.inventory_registry.poll_inventory(cx)?;
         self.poll_unready(cx);
 
+        self.log_peer_set_size();
         self.update_metrics();
 
         loop {
