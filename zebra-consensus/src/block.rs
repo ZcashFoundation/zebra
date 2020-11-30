@@ -151,15 +151,8 @@ where
             check::difficulty_is_valid(&block.header, network, &height, &hash)?;
             check::equihash_solution_is_valid(&block.header)?;
 
-            // Since errors cause an early exit, try to do the
-            // quick checks first.
-
-            // Field validity and structure checks
-            let now = Utc::now();
-            check::time_is_valid_at(&block.header, now, &height, &hash)
-                .map_err(VerifyBlockError::Time)?;
-            check::coinbase_is_first(&block)?;
-            check::subsidy_is_valid(&block, network)?;
+            // Next, check the Merkle root validity, to ensure that
+            // the header binds to the transactions in the blocks.
 
             // Precomputing this avoids duplicating transaction hash computations.
             let transaction_hashes = block
@@ -169,6 +162,16 @@ where
                 .collect::<Vec<_>>();
 
             check::merkle_root_validity(&block, &transaction_hashes)?;
+
+            // Since errors cause an early exit, try to do the
+            // quick checks first.
+
+            // Field validity and structure checks
+            let now = Utc::now();
+            check::time_is_valid_at(&block.header, now, &height, &hash)
+                .map_err(VerifyBlockError::Time)?;
+            check::coinbase_is_first(&block)?;
+            check::subsidy_is_valid(&block, network)?;
 
             let mut async_checks = FuturesUnordered::new();
 
