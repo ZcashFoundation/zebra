@@ -126,7 +126,18 @@ mod tests {
         for block_bytes in zebra_test::vectors::BLOCKS.iter() {
             let block = Block::zcash_deserialize(&**block_bytes).unwrap();
             let merkle_root = block.transactions.iter().collect::<Root>();
-            assert_eq!(merkle_root, block.header.merkle_root);
+            assert_eq!(
+                merkle_root,
+                block.header.merkle_root,
+                "block: {:?} {:?} transaction hashes: {:?}",
+                block.coinbase_height().unwrap(),
+                block.hash(),
+                block
+                    .transactions
+                    .iter()
+                    .map(|tx| tx.hash())
+                    .collect::<Vec<_>>()
+            );
         }
     }
 }
