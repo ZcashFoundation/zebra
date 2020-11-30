@@ -23,9 +23,9 @@ pub(crate) mod difficulty;
 /// The relevant chain is an iterator over the ancestors of `block`, starting
 /// with its parent block.
 ///
-/// Panics if the finalized state is empty.
+/// # Panics
 ///
-/// Skips the difficulty adjustment check if the state contains less than 28
+/// If the state contains less than 28
 /// (`POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN`) blocks.
 #[tracing::instrument(
     name = "contextual_validation",
@@ -53,6 +53,11 @@ where
         .into_iter()
         .take(MAX_CONTEXT_BLOCKS)
         .collect();
+    assert_eq!(
+        relevant_chain.len(),
+        POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN,
+        "state must contain enough blocks to do contextual validation"
+    );
 
     let parent_block = relevant_chain
         .get(0)
@@ -63,20 +68,18 @@ where
         .expect("valid blocks have a coinbase height");
     check::height_one_more_than_parent_height(parent_height, prepared.height)?;
 
-    if relevant_chain.len() >= POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN {
-        let relevant_data = relevant_chain.iter().map(|block| {
-            (
-                block.borrow().header.difficulty_threshold,
-                block.borrow().header.time,
-            )
-        });
-        let expected_difficulty =
-            AdjustedDifficulty::new_from_block(&prepared.block, network, relevant_data);
-        check::difficulty_threshold_is_valid(
-            prepared.block.header.difficulty_threshold,
-            expected_difficulty,
-        )?;
-    }
+    let relevant_data = relevant_chain.iter().map(|block| {
+        (
+            block.borrow().header.difficulty_threshold,
+            block.borrow().header.time,
+        )
+    });
+    let expected_difficulty =
+        AdjustedDifficulty::new_from_block(&prepared.block, network, relevant_data);
+    check::difficulty_threshold_is_valid(
+        prepared.block.header.difficulty_threshold,
+        expected_difficulty,
+    )?;
 
     // TODO: other contextual validation design and implementation
     Ok(())
