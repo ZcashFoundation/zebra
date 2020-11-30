@@ -58,17 +58,20 @@ fn parse_coinbase_height(
             Height((op_n - 0x50) as u32),
             CoinbaseData(data.split_off(1)),
         )),
-        // Blocks 17 through 256 exclusive encode block height with the `0x01` opcode.
-        (Some(0x01), len) if len >= 2 => {
+        // Blocks 17 through 128 exclusive encode block height with the `0x01` opcode.
+        // The Bitcoin encoding requires that the most significant byte is below 0x80.
+        (Some(0x01), len) if len >= 2 && data[1] < 0x80 => {
             Ok((Height(data[1] as u32), CoinbaseData(data.split_off(2))))
         }
-        // Blocks 256 through 65536 exclusive encode block height with the `0x02` opcode.
-        (Some(0x02), len) if len >= 3 => Ok((
+        // Blocks 128 through 32768 exclusive encode block height with the `0x02` opcode.
+        // The Bitcoin encoding requires that the most significant byte is below 0x80.
+        (Some(0x02), len) if len >= 3 && data[2] < 0x80 => Ok((
             Height(data[1] as u32 + ((data[2] as u32) << 8)),
             CoinbaseData(data.split_off(3)),
         )),
-        // Blocks 65536 through 2**24 exclusive encode block height with the `0x03` opcode.
-        (Some(0x03), len) if len >= 4 => Ok((
+        // Blocks 65536 through 2**23 exclusive encode block height with the `0x03` opcode.
+        // The Bitcoin encoding requires that the most significant byte is below 0x80.
+        (Some(0x03), len) if len >= 4 && data[3] < 0x80 => Ok((
             Height(data[1] as u32 + ((data[2] as u32) << 8) + ((data[3] as u32) << 16)),
             CoinbaseData(data.split_off(4)),
         )),
@@ -82,7 +85,8 @@ fn parse_coinbase_height(
             Ok((Height(0), CoinbaseData(data)))
         }
         // As noted above, this is included for completeness.
-        (Some(0x04), len) if len >= 5 => {
+        // The Bitcoin encoding requires that the most significant byte is below 0x80.
+        (Some(0x04), len) if len >= 5 && data[4] < 0x80 => {
             let h = data[1] as u32
                 + ((data[2] as u32) << 8)
                 + ((data[3] as u32) << 16)
@@ -106,13 +110,13 @@ fn coinbase_height_len(height: block::Height) -> usize {
         0
     } else if let _h @ 1..=16 = height.0 {
         1
-    } else if let _h @ 17..=255 = height.0 {
+    } else if let _h @ 17..=127 = height.0 {
         2
-    } else if let _h @ 256..=65535 = height.0 {
+    } else if let _h @ 128..=32767 = height.0 {
         3
-    } else if let _h @ 65536..=16_777_215 = height.0 {
+    } else if let _h @ 32768..=8_388_607 = height.0 {
         4
-    } else if let _h @ 16_777_216..=block::Height::MAX_AS_U32 = height.0 {
+    } else if let _h @ 8_388_608..=block::Height::MAX_AS_U32 = height.0 {
         5
     } else {
         panic!("Invalid coinbase height");
@@ -122,22 +126,24 @@ fn coinbase_height_len(height: block::Height) -> usize {
 fn write_coinbase_height<W: io::Write>(height: block::Height, mut w: W) -> Result<(), io::Error> {
     // We can't write this as a match statement on stable until exclusive range
     // guards are stabilized.
+    // The Bitcoin encoding requires that the most significant byte is below 0x80,
+    // so the ranges run up to 2^{n-1} rather than 2^n.
     if let 0 = height.0 {
         // Genesis block does not include height.
     } else if let h @ 1..=16 = height.0 {
         w.write_u8(0x50 + (h as u8))?;
-    } else if let h @ 17..=255 = height.0 {
+    } else if let h @ 17..=127 = height.0 {
         w.write_u8(0x01)?;
         w.write_u8(h as u8)?;
-    } else if let h @ 256..=65535 = height.0 {
+    } else if let h @ 128..=32767 = height.0 {
         w.write_u8(0x02)?;
         w.write_u16::<LittleEndian>(h as u16)?;
-    } else if let h @ 65536..=16_777_215 = height.0 {
+    } else if let h @ 32768..=8_388_607 = height.0 {
         w.write_u8(0x03)?;
         w.write_u8(h as u8)?;
         w.write_u8((h >> 8) as u8)?;
         w.write_u8((h >> 16) as u8)?;
-    } else if let h @ 16_777_216..=block::Height::MAX_AS_U32 = height.0 {
+    } else if let h @ 8_388_608..=block::Height::MAX_AS_U32 = height.0 {
         w.write_u8(0x04)?;
         w.write_u32::<LittleEndian>(h)?;
     } else {
