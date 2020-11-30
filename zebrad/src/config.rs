@@ -43,6 +43,11 @@ pub struct ZebradConfig {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct TracingSection {
+    /// Whether to use colored terminal output, if available.
+    ///
+    /// Defaults to `true`.
+    pub use_color: bool,
+
     /// The filter used for tracing events.
     ///
     /// The filter is used to create a `tracing-subscriber`
@@ -101,6 +106,7 @@ pub struct TracingSection {
 impl Default for TracingSection {
     fn default() -> Self {
         Self {
+            use_color: true,
             filter: None,
             endpoint_addr: None,
             flamegraph: None,
