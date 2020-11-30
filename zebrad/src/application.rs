@@ -139,16 +139,24 @@ impl Application for ZebradApp {
             .map(ZebradCmd::is_server)
             .unwrap_or(false);
 
-        // Launch network endpoints for long-running commands
+        // Launch network endpoints only for long-running commands.
         if is_server {
-            let filter = cfg_ref.tracing.filter.as_deref().unwrap_or(default_filter);
-            let flame_root = cfg_ref.tracing.flamegraph.as_deref();
-            components.push(Box::new(Tracing::new(filter, flame_root)?));
+            // Override the default tracing filter based on the command-line verbosity.
+            let mut tracing_config = cfg_ref.tracing.clone();
+            tracing_config.filter = tracing_config
+                .filter
+                .or_else(|| Some(default_filter.to_owned()));
+
+            components.push(Box::new(Tracing::new(tracing_config)?));
             components.push(Box::new(TokioComponent::new()?));
             components.push(Box::new(TracingEndpoint::new(cfg_ref)?));
             components.push(Box::new(MetricsEndpoint::new(cfg_ref)?));
         } else {
-            components.push(Box::new(Tracing::new(default_filter, None)?));
+            // Don't apply the configured filter for short-lived commands.
+            let mut tracing_config = cfg_ref.tracing.clone();
+            tracing_config.filter = Some(default_filter.to_owned());
+            tracing_config.flamegraph = None;
+            components.push(Box::new(Tracing::new(tracing_config)?));
         }
 
         self.state.components.register(components)
