@@ -80,11 +80,26 @@ fn deserialize_block() {
         .zcash_deserialize_into::<Block>()
         .expect("block test vector should deserialize");
 
-    for block in zebra_test::vectors::BLOCKS.iter() {
-        block
+    for block_bytes in zebra_test::vectors::BLOCKS.iter() {
+        let block = block_bytes
             .zcash_deserialize_into::<Block>()
             .expect("block is structurally valid");
+
+        let round_trip_bytes = block
+            .zcash_serialize_to_vec()
+            .expect("vec serialization is infallible");
+
+        assert_eq!(&round_trip_bytes[..], *block_bytes);
     }
+}
+
+#[test]
+fn coinbase_parsing_rejects_above_0x80() {
+    zebra_test::init();
+
+    zebra_test::vectors::BAD_BLOCK_MAINNET_202_BYTES
+        .zcash_deserialize_into::<Block>()
+        .expect_err("parsing fails");
 }
 
 #[test]

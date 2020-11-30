@@ -167,6 +167,12 @@ lazy_static! {
         <Vec<u8>>::from_hex(include_str!("block-main-0-000-202.txt").trim())
             .expect("Block bytes are in valid hex representation");
 
+    /// This contains an encoding of block 202 but with an improperly encoded
+    /// coinbase height.
+    pub static ref BAD_BLOCK_MAINNET_202_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-main-0-000-202-bad.txt").trim())
+            .expect("Block bytes are in valid hex representation");
+
     // Overwinter transition
     // for i in 347499 347500 347501; do
     //     zcash-cli getblock $i 0 > block-main-$[i/1000000]-$[i/1000%1000]-$[i%1000].txt
