@@ -293,7 +293,10 @@ where
                     handshakes.push(
                         connector
                             .call(candidate.addr)
-                            .map_err(move |_| candidate)
+                            .map_err(move |e| {
+                                debug!(?candidate.addr, ?e, "failed to connect to candidate");
+                                candidate
+                            })
                             .boxed(),
                     );
                 } else {
@@ -318,7 +321,7 @@ where
                 success_tx.send(Ok(change)).await?;
             }
             Right((Some(Err(candidate)), _)) => {
-                debug!(?candidate.addr, "failed to connect to peer");
+                debug!(?candidate.addr, "marking candidate as failed");
                 candidates.report_failed(candidate);
                 // The demand signal that was taken out of the queue
                 // to attempt to connect to the failed candidate never
