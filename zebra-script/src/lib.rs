@@ -2,6 +2,9 @@
 #![doc(html_favicon_url = "https://www.zfnd.org/images/zebra-favicon-128.png")]
 #![doc(html_logo_url = "https://www.zfnd.org/images/zebra-icon.png")]
 #![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_script")]
+// Disable some broken or unwanted clippy nightly lints
+#![allow(clippy::unknown_clippy_lints)]
+#![allow(clippy::unnecessary_wraps)]
 
 use displaydoc::Display;
 #[cfg(windows)]

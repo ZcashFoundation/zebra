@@ -8,8 +8,10 @@
 #![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_chain")]
 // #![deny(missing_docs)]
 #![allow(clippy::try_err)]
+// Disable some broken or unwanted clippy nightly lints
 #![allow(clippy::unknown_clippy_lints)]
 #![allow(clippy::from_iter_instead_of_collect)]
+#![allow(clippy::unnecessary_wraps)]
 
 #[macro_use]
 extern crate serde;

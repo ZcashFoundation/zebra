@@ -104,10 +104,10 @@ To set the filter, POST the new filter string to /filter:
             .expect("response with known status code cannot fail"),
         (&Method::POST, "/filter") => match read_filter(req).await {
             Ok(filter) => {
-                app_writer()
-                    .state_mut()
+                app_reader()
+                    .state()
                     .components
-                    .get_downcast_mut::<Tracing>()
+                    .get_downcast_ref::<Tracing>()
                     .expect("Tracing component should be available")
                     .reload_filter(filter);
 

@@ -38,6 +38,9 @@
 // Tracing causes false positives on this lint:
 // https://github.com/tokio-rs/tracing/issues/553
 #![allow(clippy::cognitive_complexity)]
+// Disable some broken or unwanted clippy nightly lints
+#![allow(clippy::unknown_clippy_lints)]
+#![allow(clippy::unnecessary_wraps)]
 
 #[macro_use]
 extern crate pin_project;
