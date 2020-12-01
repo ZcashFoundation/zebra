@@ -460,20 +460,34 @@ where
                         let shutdown_rx_ref = Pin::new(&mut shutdown_rx);
                         match future::select(interval_stream.next(), shutdown_rx_ref).await {
                             Either::Left(_) => {
-                                // We don't wait on a response because heartbeats are checked
-                                // internally to the connection logic, we just need a separate
-                                // task (this one) to generate them.
-                                let (request_tx, _) = oneshot::channel();
+                                let (tx, rx) = oneshot::channel();
+                                let request = Request::Ping(Nonce::default());
+                                tracing::trace!(?request, "queueing heartbeat request");
                                 if server_tx
                                     .send(ClientRequest {
-                                        request: Request::Ping(Nonce::default()),
-                                        tx: request_tx,
+                                        request,
+                                        tx,
                                         span: tracing::Span::current(),
                                     })
                                     .await
                                     .is_err()
                                 {
+                                    tracing::trace!(
+                                        "error sending heartbeat request, shutting down"
+                                    );
                                     return;
+                                }
+                                // Heartbeats are checked internally to the
+                                // connection logic, but we need to wait on the
+                                // response to avoid canceling the request.
+                                match rx.await {
+                                    Ok(_) => tracing::trace!("got heartbeat response"),
+                                    Err(_) => {
+                                        tracing::trace!(
+                                            "error awaiting heartbeat response, shutting down"
+                                        );
+                                        return;
+                                    }
                                 }
                             }
                             Either::Right(_) => return, // got shutdown signal
