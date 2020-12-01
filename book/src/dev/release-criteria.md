@@ -27,36 +27,36 @@ While Zebra is still in alpha, we don't guarantee support for any particular pla
 
 But you'll probably get the best results with a recent Ubuntu Linux, or the other platforms that our CI runs on.
 
-### Go/No-Go Status :red_circle:
+### Go/No-Go Status 🛑
 
 _Last updated:_ November 30 2020
 
 - `zebrad` Functionality
     - [ ] `zebrad` can sync to mainnet tip
-        - :yellow_circle: under excellent network conditions (within 2 - 5 hours)
+        - ⚠️ under excellent network conditions (within 2 - 5 hours)
         - reasonable and sub-optimal network conditions are not yet supported
     - [ ] `zebrad` can stay within a few blocks of the mainnet tip after the initial sync
-        - :yellow_circle: under excellent network conditions
+        - ⚠️ under excellent network conditions
         - reasonable and sub-optimal network conditions are not yet supported
-    - :green_circle:  `zebrad` can validate proof of work
-    - :red_circle: `zebrad` can validate the transaction merkle tree
-    - :yellow_circle: `zebrad` can serve blocks to peers
+    - ✅  `zebrad` can validate proof of work
+    - 🛑 `zebrad` can validate the transaction merkle tree
+    - ⚠️ `zebrad` can serve blocks to peers
 - `zebrad` Performance
-    - :yellow_circle: `zebrad` functionality works on platforms that meet its system requirements
+    - ⚠️ `zebrad` functionality works on platforms that meet its system requirements
 - Testing
-    - :yellow_circle: CI Passes
-        - :green_circle:  Unit tests pass reliably
-        - :green_circle:  Property tests pass reliably
-        - :yellow_circle: Acceptance tests pass reliably
+    - ⚠️ CI Passes
+        - ✅  Unit tests pass reliably
+        - ✅  Property tests pass reliably
+        - ⚠️ Acceptance tests pass reliably
 - Implementation and Launch
-    - :red_circle: All [release blocker bugs]() have been fixed
-    - :green_circle: Users can access the documentation to deploy `zebrad` nodes
+    - 🛑 All [release blocker bugs](https://github.com/ZcashFoundation/zebra/issues?q=is%3Aopen+is%3Aissue+milestone%3A%22First+Alpha+Release%22+label%3AC-bug) have been fixed
+    - ✅ Users can access the documentation to deploy `zebrad` nodes
 - User Experience
-    - :green_circle: Build completes within 30 minutes in Zebra's CI
-    - :yellow_circle: `zebrad` executes normally
-        - :green_circle: `zebrad`'s default logging works reasonably well in a terminal
-        - :green_circle: panics, error logs, and warning logs are rare on mainnet
-        - :yellow_circle: known panics, errors and warnings have open tickets
+    - ✅ Build completes within 30 minutes in Zebra's CI
+    - ⚠️ `zebrad` executes normally
+        - ✅ `zebrad`'s default logging works reasonably well in a terminal
+        - ✅ panics, error logs, and warning logs are rare on mainnet
+        - ⚠️ known panics, errors and warnings have open tickets
 
 ## Future Releases
 
