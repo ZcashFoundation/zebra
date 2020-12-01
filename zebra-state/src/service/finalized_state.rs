@@ -31,7 +31,18 @@ pub struct FinalizedState {
 
 impl FinalizedState {
     pub fn new(config: &Config, network: Network) -> Self {
-        let db = config.open_db(network);
+        let (path, db_options) = config.db_config(network);
+        let column_families = vec![
+            rocksdb::ColumnFamilyDescriptor::new("hash_by_height", db_options.clone()),
+            rocksdb::ColumnFamilyDescriptor::new("height_by_hash", db_options.clone()),
+            rocksdb::ColumnFamilyDescriptor::new("block_by_height", db_options.clone()),
+            rocksdb::ColumnFamilyDescriptor::new("tx_by_hash", db_options.clone()),
+            rocksdb::ColumnFamilyDescriptor::new("utxo_by_outpoint", db_options.clone()),
+            rocksdb::ColumnFamilyDescriptor::new("sprout_nullifiers", db_options.clone()),
+            rocksdb::ColumnFamilyDescriptor::new("sapling_nullifiers", db_options.clone()),
+        ];
+        let db = rocksdb::DB::open_cf_descriptors(&db_options, path, column_families)
+            .expect("database path and options are valid");
 
         let new_state = Self {
             queued_by_prev_hash: HashMap::new(),
