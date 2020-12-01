@@ -5,8 +5,10 @@
 #![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_state")]
 #![warn(missing_docs)]
 #![allow(clippy::try_err)]
+// Disable some broken or unwanted clippy nightly lints
 #![allow(clippy::unknown_clippy_lints)]
 #![allow(clippy::field_reassign_with_default)]
+#![allow(clippy::unnecessary_wraps)]
 
 mod config;
 mod constants;

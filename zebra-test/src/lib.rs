@@ -1,5 +1,6 @@
 //! Miscellaneous test code for Zebra.
 
+// Disable some broken or unwanted clippy nightly lints
 #![allow(clippy::unknown_clippy_lints)]
 #![allow(clippy::from_iter_instead_of_collect)]
 // Each lazy_static variable uses additional recursion
