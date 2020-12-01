@@ -55,7 +55,7 @@ impl Tracing {
     /// Reload the currently-active filter with the supplied value.
     ///
     /// This can be used to provide a dynamic tracing filter endpoint.
-    pub fn reload_filter(&mut self, filter: impl Into<EnvFilter>) {
+    pub fn reload_filter(&self, filter: impl Into<EnvFilter>) {
         self.filter_handle
             .reload(filter)
             .expect("the subscriber is not dropped before the component is");
