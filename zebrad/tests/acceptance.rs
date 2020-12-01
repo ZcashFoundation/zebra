@@ -790,7 +790,6 @@ async fn metrics_endpoint() -> Result<()> {
 }
 
 #[tokio::test]
-#[ignore]
 async fn tracing_endpoint() -> Result<()> {
     use hyper::{Body, Client, Request, Uri};
 
