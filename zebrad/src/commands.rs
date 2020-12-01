@@ -7,8 +7,8 @@ mod version;
 use self::ZebradCmd::*;
 use self::{generate::GenerateCmd, start::StartCmd, version::VersionCmd};
 
-use crate::config::ZebradConfig;
 use crate::application::ZebradApp;
+use crate::config::ZebradConfig;
 
 use abscissa_core::{
     config::Override, Command, Configurable, FrameworkError, Help, Options, Runnable,
