@@ -561,8 +561,9 @@ where
 
     // This function has its own span, because we're creating a new work
     // context (namely, the work of processing the inbound msg as a request)
-    #[instrument(skip(self))]
+    #[instrument(name = "msg_as_req", skip(self, msg), fields(%msg))]
     async fn handle_message_as_request(&mut self, msg: Message) {
+        trace!(?msg);
         let req = match msg {
             Message::Ping(nonce) => {
                 trace!(?nonce, "responding to heartbeat");
