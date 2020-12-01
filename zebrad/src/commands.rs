@@ -54,7 +54,7 @@ impl ZebradCmd {
 
 impl Runnable for ZebradCmd {
     fn run(&self) {
-        let span = info_span!("zebrad", GIT_SHA = %Self::SHA);
+        let span = error_span!("git", SHA = %Self::SHA);
         let _guard = span.enter();
         match self {
             Generate(cmd) => cmd.run(),
