@@ -465,7 +465,14 @@ impl Codec {
                 _ => return Err(Error::Parse("invalid RejectReason value in ccode field")),
             },
             reason: reader.read_string()?,
-            data: Some(reader.read_32_bytes()?),
+            // Sometimes there's data, sometimes there isn't. There's no length
+            // field, this is just implicitly encoded by the body_len.
+            // Apparently all existing implementations only supply 32 bytes of
+            // data (hash identifying the rejected object) or none (and we model
+            // the Reject message that way), so instead of passing in the
+            // body_len separately and calculating remaining bytes, just try to
+            // read 32 bytes and ignore any failures.
+            data: reader.read_32_bytes().ok(),
         })
     }
 
