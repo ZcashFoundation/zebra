@@ -320,7 +320,12 @@ impl Decoder for Codec {
                 trace!(
                     ?self.state,
                     ?magic,
-                    command = %String::from_utf8_lossy(&command),
+                    command = %String::from_utf8(
+                        command.iter()
+                            .cloned()
+                            .flat_map(std::ascii::escape_default)
+                            .collect()
+                    ).unwrap(),
                     body_len,
                     ?checksum,
                     "read header from src buffer"
