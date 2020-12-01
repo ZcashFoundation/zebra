@@ -6,6 +6,7 @@ use abscissa_core::{
     config,
     config::Configurable,
     terminal::component::Terminal,
+    terminal::ColorChoice,
     Application, Component, EntryPoint, FrameworkError, Shutdown, StandardPaths,
 };
 use application::fatal_error;
@@ -90,21 +91,24 @@ impl Application for ZebradApp {
         &mut self,
         command: &Self::Cmd,
     ) -> Result<Vec<Box<dyn Component<Self>>>, FrameworkError> {
-        let terminal = Terminal::new(self.term_colors(command));
-        // This MUST happen after `Terminal::new` to ensure our preferred panic
-        // handler is the last one installed
-        color_eyre::config::HookBuilder::default()
-            .issue_url(concat!(env!("CARGO_PKG_REPOSITORY"), "/issues/new"))
-            .add_issue_metadata("version", env!("CARGO_PKG_VERSION"))
-            .add_issue_metadata("git commit", Self::GIT_COMMIT)
-            .issue_filter(|kind| match kind {
-                color_eyre::ErrorKind::NonRecoverable(_) => true,
-                color_eyre::ErrorKind::Recoverable(error) => {
-                    !error.is::<tower::timeout::error::Elapsed>()
-                }
-            })
-            .install()
-            .unwrap();
+        // Automatically use color if we're outputting to a terminal
+        //
+        // The `abcissa` docs claim that abscissa implements `Auto`, but it
+        // does not - except in `color_backtrace` backtraces.
+        let mut term_colors = self.term_colors(command);
+        if term_colors == ColorChoice::Auto {
+            // We want to disable colors on a per-stream basis, but that feature
+            // can only be implemented inside the terminal component streams.
+            // Instead, if either output stream is not a terminal, disable
+            // colors.
+            //
+            // We'd also like to check `config.tracing.use_color` here, but the
+            // config has not been loaded yet.
+            if !atty::is(atty::Stream::Stdout) || !atty::is(atty::Stream::Stderr) {
+                term_colors = ColorChoice::Never;
+            }
+        }
+        let terminal = Terminal::new(term_colors);
 
         Ok(vec![Box::new(terminal)])
     }
@@ -128,6 +132,28 @@ impl Application for ZebradApp {
             .map(|path| self.load_config(&path))
             .transpose()?
             .unwrap_or_default();
+
+        // Only use color if tracing output is being sent to a terminal
+        let use_color = config.tracing.use_color && atty::is(atty::Stream::Stdout);
+
+        // color_eyre always uses color, so disable it if we don't want color
+        // (color_backtrace automatically disables color if stderr is a file)
+        if use_color {
+            // This MUST happen after `Terminal::new` to ensure our preferred panic
+            // handler is the last one installed
+            color_eyre::config::HookBuilder::default()
+                .issue_url(concat!(env!("CARGO_PKG_REPOSITORY"), "/issues/new"))
+                .add_issue_metadata("version", env!("CARGO_PKG_VERSION"))
+                .add_issue_metadata("git commit", Self::GIT_COMMIT)
+                .issue_filter(|kind| match kind {
+                    color_eyre::ErrorKind::NonRecoverable(_) => true,
+                    color_eyre::ErrorKind::Recoverable(error) => {
+                        !error.is::<tower::timeout::error::Elapsed>()
+                    }
+                })
+                .install()
+                .unwrap();
+        }
 
         let config = command.process_config(config)?;
         self.config = Some(config);
