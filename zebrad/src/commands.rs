@@ -8,6 +8,7 @@ use self::ZebradCmd::*;
 use self::{generate::GenerateCmd, start::StartCmd, version::VersionCmd};
 
 use crate::config::ZebradConfig;
+use crate::application::ZebradApp;
 
 use abscissa_core::{
     config::Override, Command, Configurable, FrameworkError, Help, Options, Runnable,
@@ -38,8 +39,6 @@ pub enum ZebradCmd {
 }
 
 impl ZebradCmd {
-    pub const GIT_COMMIT: &'static str = env!("VERGEN_SHA_SHORT");
-
     /// Returns true if this command is a server command.
     ///
     /// For example, `Start` acts as a Zcash node.
@@ -54,7 +53,7 @@ impl ZebradCmd {
 
 impl Runnable for ZebradCmd {
     fn run(&self) {
-        let span = error_span!("", zebrad = %Self::GIT_COMMIT);
+        let span = error_span!("", zebrad = ZebradApp::GIT_COMMIT);
         let _guard = span.enter();
         match self {
             Generate(cmd) => cmd.run(),
