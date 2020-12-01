@@ -52,26 +52,12 @@ fn gen_temp_path(prefix: &str) -> PathBuf {
 }
 
 impl Config {
-    pub(crate) fn open_db(&self, network: Network) -> rocksdb::DB {
+    /// Returns the path and database options for the finalized state database
+    pub(crate) fn db_config(&self, network: Network) -> (PathBuf, rocksdb::Options) {
         let net_dir = match network {
             Network::Mainnet => "mainnet",
             Network::Testnet => "testnet",
         };
-
-        let mut opts = rocksdb::Options::default();
-
-        let cfs = vec![
-            rocksdb::ColumnFamilyDescriptor::new("hash_by_height", opts.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("height_by_hash", opts.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("block_by_height", opts.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("tx_by_hash", opts.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("utxo_by_outpoint", opts.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("sprout_nullifiers", opts.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("sapling_nullifiers", opts.clone()),
-        ];
-
-        opts.create_if_missing(true);
-        opts.create_missing_column_families(true);
 
         let path = if self.ephemeral {
             gen_temp_path(&format!(
@@ -86,7 +72,12 @@ impl Config {
                 .join(net_dir)
         };
 
-        rocksdb::DB::open_cf_descriptors(&opts, path, cfs).unwrap()
+        let mut opts = rocksdb::Options::default();
+
+        opts.create_if_missing(true);
+        opts.create_missing_column_families(true);
+
+        (path, opts)
     }
 
     /// Construct a config for an ephemeral in memory database
