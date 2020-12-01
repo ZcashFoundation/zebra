@@ -644,9 +644,13 @@ impl Service<Request> for StateService {
                 let res: Vec<_> = res
                     .iter()
                     .map(|&hash| {
-                        self.best_block(hash.into())
-                            .expect("block for found hash is in the best chain")
-                            .header
+                        let block = self
+                            .best_block(hash.into())
+                            .expect("block for found hash is in the best chain");
+                        block::CountedHeader {
+                            transaction_count: block.transactions.len(),
+                            header: block.header,
+                        }
                     })
                     .collect();
                 async move { Ok(Response::BlockHeaders(res)) }.boxed()

@@ -18,7 +18,7 @@ use std::fmt;
 
 pub use hash::Hash;
 pub use header::BlockTimeError;
-pub use header::Header;
+pub use header::{CountedHeader, Header};
 pub use height::Height;
 pub use root_hash::RootHash;
 

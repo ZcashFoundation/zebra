@@ -40,5 +40,5 @@ pub enum Response {
     BlockHashes(Vec<block::Hash>),
 
     /// The response to a `FindBlockHeaders` request.
-    BlockHeaders(Vec<block::Header>),
+    BlockHeaders(Vec<block::CountedHeader>),
 }
