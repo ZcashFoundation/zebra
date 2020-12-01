@@ -191,8 +191,7 @@ where
     fn call(&mut self, req: (TcpStream, SocketAddr)) -> Self::Future {
         let (tcp_stream, addr) = req;
 
-        let connector_span =
-            span!(parent: &self.parent_span, Level::INFO, "connector", addr = ?addr);
+        let connector_span = span!(Level::INFO, "connector", addr = ?addr);
         // set parent: None for the peer connection span, as it should exist
         // independently of its creation source (inbound connection, crawler,
         // initial peer, ...)
