@@ -38,7 +38,7 @@ pub enum ZebradCmd {
 }
 
 impl ZebradCmd {
-    pub const SHA: &'static str = env!("VERGEN_SHA_SHORT");
+    pub const GIT_COMMIT: &'static str = env!("VERGEN_SHA_SHORT");
 
     /// Returns true if this command is a server command.
     ///
