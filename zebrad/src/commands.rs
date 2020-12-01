@@ -8,6 +8,7 @@ use self::ZebradCmd::*;
 use self::{generate::GenerateCmd, start::StartCmd, version::VersionCmd};
 
 use crate::config::ZebradConfig;
+use crate::application::ZebradApp;
 
 use abscissa_core::{
     config::Override, Command, Configurable, FrameworkError, Help, Options, Runnable,
@@ -18,7 +19,7 @@ use std::path::PathBuf;
 pub const CONFIG_FILE: &str = "zebrad.toml";
 
 /// Zebrad Subcommands
-#[derive(Command, Debug, Options, Runnable)]
+#[derive(Command, Debug, Options)]
 pub enum ZebradCmd {
     /// The `generate` subcommand
     #[options(help = "generate a skeleton configuration")]
@@ -46,6 +47,19 @@ impl ZebradCmd {
             // List all the commands, so new commands have to make a choice here
             Start(_) => true,
             Generate(_) | Help(_) | Version(_) => false,
+        }
+    }
+}
+
+impl Runnable for ZebradCmd {
+    fn run(&self) {
+        let span = error_span!("", zebrad = ZebradApp::GIT_COMMIT);
+        let _guard = span.enter();
+        match self {
+            Generate(cmd) => cmd.run(),
+            ZebradCmd::Help(cmd) => cmd.run(),
+            Start(cmd) => cmd.run(),
+            Version(cmd) => cmd.run(),
         }
     }
 }
