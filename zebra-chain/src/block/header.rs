@@ -109,3 +109,12 @@ impl Header {
         }
     }
 }
+
+/// A header with a count of the number of transactions in its block.
+///
+/// This structure is used in the Bitcoin network protocol.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CountedHeader {
+    pub header: Header,
+    pub transaction_count: usize,
+}

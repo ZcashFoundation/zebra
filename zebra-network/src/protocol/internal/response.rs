@@ -22,7 +22,7 @@ pub enum Response {
     BlockHashes(Vec<block::Hash>),
 
     /// A list of block headers.
-    BlockHeaders(Vec<block::Header>),
+    BlockHeaders(Vec<block::CountedHeader>),
 
     /// A list of transactions.
     Transactions(Vec<Arc<Transaction>>),
