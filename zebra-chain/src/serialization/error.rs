@@ -7,14 +7,14 @@ use thiserror::Error;
 #[derive(Error, Debug)]
 pub enum SerializationError {
     /// An io error that prevented deserialization
-    #[error("unable to deserialize type")]
+    #[error("io error: {0}")]
     Io(#[from] io::Error),
     /// The data to be deserialized was malformed.
     // XXX refine errors
     #[error("parse error: {0}")]
     Parse(&'static str),
     /// An error caused when validating a zatoshi `Amount`
-    #[error("input couldn't be parsed as a zatoshi `Amount`")]
+    #[error("input couldn't be parsed as a zatoshi `Amount`: {source}")]
     Amount {
         /// The source error indicating how the num failed to validate
         #[from]
