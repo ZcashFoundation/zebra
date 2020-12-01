@@ -32,7 +32,7 @@ pub enum PeerError {
     #[error("Client request timed out")]
     ClientRequestTimeout,
     /// A serialization error occurred while reading or writing a message.
-    #[error("Serialization error")]
+    #[error("Serialization error: {0}")]
     Serialization(#[from] SerializationError),
     /// A badly-behaved remote peer sent a handshake message after the handshake was
     /// already complete.
