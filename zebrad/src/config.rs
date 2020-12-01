@@ -45,7 +45,11 @@ pub struct ZebradConfig {
 pub struct TracingSection {
     /// Whether to use colored terminal output, if available.
     ///
-    /// Defaults to `true`.
+    /// Colored terminal output is automatically disabled if an output stream
+    /// is connected to a file. (Or another non-terminal device.)
+    ///
+    /// Defaults to `true`, which automatically enables colored output to
+    /// terminals.
     pub use_color: bool,
 
     /// The filter used for tracing events.

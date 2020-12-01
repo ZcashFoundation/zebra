@@ -38,6 +38,7 @@ metrics-exporter-prometheus = "0.1.0-alpha.7"
 
 dirs = "3.0.1"
 inferno = { version = "0.10.2", default-features = false }
+atty = "0.2.14"
 
 [build-dependencies]
 vergen = "3.1.0"

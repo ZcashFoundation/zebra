@@ -3342,6 +3342,7 @@ name = "zebrad"
 version = "3.0.0-alpha.0"
 dependencies = [
  "abscissa_core",
+ "atty",
  "chrono",
  "color-eyre",
  "dirs",
