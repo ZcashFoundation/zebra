@@ -15,7 +15,7 @@ use futures::{
 use tokio::{net::TcpStream, sync::broadcast};
 use tokio_util::codec::Framed;
 use tower::Service;
-use tracing::{span, Level};
+use tracing::{span, Level, Span};
 use tracing_futures::Instrument;
 
 use zebra_chain::block;
@@ -44,6 +44,7 @@ pub struct Handshake<S> {
     user_agent: String,
     our_services: PeerServices,
     relay: bool,
+    parent_span: Span,
 }
 
 pub struct Builder<S> {
@@ -136,6 +137,7 @@ where
         let user_agent = self.user_agent.unwrap_or_else(|| "".to_string());
         let our_services = self.our_services.unwrap_or_else(PeerServices::empty);
         let relay = self.relay.unwrap_or(false);
+
         Ok(Handshake {
             config,
             inbound_service,
@@ -145,6 +147,7 @@ where
             user_agent,
             our_services,
             relay,
+            parent_span: Span::current(),
         })
     }
 }
@@ -188,11 +191,12 @@ where
     fn call(&mut self, req: (TcpStream, SocketAddr)) -> Self::Future {
         let (tcp_stream, addr) = req;
 
-        let connector_span = span!(Level::INFO, "connector", addr = ?addr);
+        let connector_span =
+            span!(parent: &self.parent_span, Level::INFO, "connector", addr = ?addr);
         // set parent: None for the peer connection span, as it should exist
         // independently of its creation source (inbound connection, crawler,
         // initial peer, ...)
-        let connection_span = span!(parent: None, Level::INFO, "peer", addr = ?addr);
+        let connection_span = span!(parent: &self.parent_span, Level::INFO, "peer", addr = ?addr);
 
         // Clone these upfront, so they can be moved into the future.
         let nonces = self.nonces.clone();
