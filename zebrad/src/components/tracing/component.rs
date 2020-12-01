@@ -1,7 +1,5 @@
 use abscissa_core::{Component, FrameworkError, FrameworkErrorKind, Shutdown};
 
-use opentelemetry::exporter::trace::stdout;
-
 use tracing_error::ErrorLayer;
 use tracing_subscriber::{
     fmt::Formatter, layer::SubscriberExt, reload::Handle, util::SubscriberInitExt, EnvFilter,
@@ -25,7 +23,9 @@ impl Tracing {
         let flame_root = &config.flamegraph;
 
         // Install a new OpenTelemetry trace pipeline
-        let (tracer, _uninstall) = opentelemetry_otlp::new_pipeline().install()?;
+        let (tracer, _uninstall) = opentelemetry_jaeger::new_pipeline()
+            .install()
+            .map_err(|e| FrameworkErrorKind::ComponentError.context(e))?;
 
         // Create a tracing layer with the configured tracer
         let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
