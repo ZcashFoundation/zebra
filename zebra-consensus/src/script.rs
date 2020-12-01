@@ -12,10 +12,15 @@ use crate::BoxError;
 ///
 /// The exact value is non-essential, but this should be long enough to allow
 /// out-of-order verification of blocks (UTXOs are not required to be ready
-/// immediately) while being short enough to prune blocks that are too far in the
-/// future to be worth keeping in the queue, and to fail blocks that reference
-/// invalid UTXOs.
-const UTXO_LOOKUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+/// immediately) while being short enough to:
+///   * prune blocks that are too far in the future to be worth keeping in the
+///     queue,
+///   * fail blocks that reference invalid UTXOs, and
+///   * fail blocks that reference UTXOs from blocks that have temporarily failed
+///     to download, because a peer sent Zebra a bad list of block hashes. (The
+///     UTXO verification failure will restart the sync, and re-download the
+///     chain in the correct order.)
+const UTXO_LOOKUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3 * 60);
 
 /// Asynchronous script verification.
 ///
