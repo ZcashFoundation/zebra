@@ -2,22 +2,28 @@
 set -e
 set -o xtrace
 
-rm -rf ./target/
-mkdir -p ./target/coverage
-ZEBRA_SKIP_NETWORK_TESTS=1 LLVM_PROFILE_FILE="${PWD}/target/coverage/test.%p.profraw" RUSTFLAGS="-Zinstrument-coverage" cargo test
-$(rustc --print target-libdir)/../bin/llvm-profdata merge --sparse ./target/coverage/test.*.profraw -o ./target/coverage/test.profdata
+export CARGO_TARGET_DIR="coverage-target"
 
-rm -rf ./target/coverage/html/
-# This one works and shows all the details I want in the CLI
-$(rustc --print target-libdir)/../bin/llvm-cov show \
+rm -rf ./"$CARGO_TARGET_DIR"/coverage
+mkdir -p ./$CARGO_TARGET_DIR/coverage
+export ZEBRA_SKIP_NETWORK_TESTS=1
+export LLVM_PROFILE_FILE="${PWD}/$CARGO_TARGET_DIR/coverage/test.%m.profraw"
+export RUSTFLAGS="-Zinstrument-coverage -C link-dead-code -C debuginfo=2"
+cargo +nightly test --no-run --message-format=json | jq -r "select(.profile.test == true) | .filenames[]" | grep -v dSYM - > ./$CARGO_TARGET_DIR/files.txt
+cargo +nightly test
+$(rustc +nightly --print target-libdir)/../bin/llvm-profdata merge --sparse ./$CARGO_TARGET_DIR/coverage/test.*.profraw -o ./$CARGO_TARGET_DIR/coverage/test.profdata
+
+rm -rf ./$CARGO_TARGET_DIR/coverage/html/
+
+$(rustc +nightly --print target-libdir)/../bin/llvm-cov show \
 	-format=html \
 	-Xdemangler=rustfilt \
 	-show-instantiations \
-	-output-dir=./target/coverage/html \
+	-output-dir=./$CARGO_TARGET_DIR/coverage/html \
 	-ignore-filename-regex=".*/.cargo/registry/.*" \
 	-ignore-filename-regex=".*/.cargo/git/.*" \
 	-ignore-filename-regex=".*/.rustup/.*" \
-	-instr-profile=./target/coverage/test.profdata \
-	$(find target/ -type f -perm -u+x ! -name '*.so')
+	-instr-profile=./$CARGO_TARGET_DIR/coverage/test.profdata \
+	$(printf -- "-object %s " $(cat ./$CARGO_TARGET_DIR/files.txt))
 
-xdg-open ./target/coverage/html/index.html
+xdg-open ./$CARGO_TARGET_DIR/coverage/html/index.html
