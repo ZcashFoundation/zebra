@@ -10,7 +10,7 @@ edition = "2018"
 [dependencies]
 zebra-chain = { path = "../zebra-chain" }
 
-color-eyre = "0.5"
+color-eyre = "0.5.9"
 dirs = "3.0.1"
 hex = "0.4.2"
 lazy_static = "1.4.0"
