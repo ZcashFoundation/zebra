@@ -1863,9 +1863,9 @@ dependencies = [
 
 [[package]]
 name = "owo-colors"
-version = "1.1.3"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a1250cdd103eef6bd542b5ae82989f931fc00a41a27f60377338241594410f3"
+checksum = "25ac891a7415905f6cc1b61909772d1a975c0281da8b455f269daa0b6e56f9cb"
 
 [[package]]
 name = "parity-scale-codec"
