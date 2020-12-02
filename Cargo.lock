@@ -2214,6 +2214,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rlimit"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e7148757b4951f04391d2b301b2e3597d504c4d2434212d542b73c1a6b3f847"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "rocksdb"
 version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3277,6 +3286,7 @@ dependencies = [
  "primitive-types",
  "proptest",
  "proptest-derive",
+ "rlimit",
  "rocksdb",
  "serde",
  "spandoc",
