@@ -1,0 +1,2 @@
+exporters:
+  - gomod: "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/stackdriverexporter v0.14.0"
