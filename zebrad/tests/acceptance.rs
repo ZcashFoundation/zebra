@@ -770,8 +770,9 @@ async fn metrics_endpoint() -> Result<()> {
     assert!(res.status().is_success());
     let body = hyper::body::to_bytes(res).await?;
     assert!(std::str::from_utf8(&body)
-        .unwrap()
-        .contains("metrics snapshot"));
+        .expect("metrics response is valid UTF-8")
+        .contains("metrics snapshot"),
+        "metrics exporter returns data in the expected format");
 
     child.kill()?;
 
