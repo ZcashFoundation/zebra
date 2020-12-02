@@ -769,10 +769,12 @@ async fn metrics_endpoint() -> Result<()> {
     let res = client.get(Uri::from_static(url)).await?;
     assert!(res.status().is_success());
     let body = hyper::body::to_bytes(res).await?;
-    assert!(std::str::from_utf8(&body)
-        .expect("metrics response is valid UTF-8")
-        .contains("metrics snapshot"),
-        "metrics exporter returns data in the expected format");
+    assert!(
+        std::str::from_utf8(&body)
+            .expect("metrics response is valid UTF-8")
+            .contains("metrics snapshot"),
+        "metrics exporter returns data in the expected format"
+    );
 
     child.kill()?;
 
