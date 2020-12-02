@@ -374,9 +374,9 @@ where
 
         self.last_peer_log = Some(Instant::now());
         if unready_services_len == 0 {
-            warn!("network request with no peer connections. Hint: check your network connection. Configure fast and reliable initial peers");
+            warn!("network request with no peer connections. Hint: check your network connection");
         } else {
-            info!("network request with no ready peers: finding more peers, waiting for {} peers to answer requests. Hint: configure fast and reliable initial peers",
+            info!("network request with no ready peers: finding more peers, waiting for {} peers to answer requests",
                   unready_services_len);
         }
     }
