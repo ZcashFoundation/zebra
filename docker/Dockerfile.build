@@ -19,6 +19,7 @@ RUN cargo test --all --release; cargo build --release
 # Runner image
 FROM debian:buster-slim AS zebrad-release
 
+COPY --from=builder /zebra/otelcol-custom /
 COPY --from=builder /zebra/target/release/zebrad /
 
 ARG CHECKPOINT_SYNC=true
