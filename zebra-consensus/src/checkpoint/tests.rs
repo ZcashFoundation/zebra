@@ -274,7 +274,9 @@ async fn continuous_blockchain(restart_height: Option<block::Height>) -> Result<
         let initial_tip = restart_height.map(|block::Height(height)| {
             (blockchain[height as usize].1, blockchain[height as usize].2)
         });
-        let state_service = ServiceBuilder::new().buffer(1).service(zebra_state::init(zebra_state::Config::ephemeral(), Mainnet));
+        let state_service = ServiceBuilder::new()
+            .buffer(1)
+            .service(zebra_state::init(zebra_state::Config::ephemeral(), Mainnet));
         let mut checkpoint_verifier =
             CheckpointVerifier::from_list(checkpoint_list, initial_tip, state_service.clone())
                 .map_err(|e| eyre!(e))?;
