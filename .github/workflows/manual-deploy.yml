@@ -35,6 +35,11 @@ jobs:
         project_id: ${{ env.PROJECT_ID }}
         service_account_key: ${{ secrets.GCLOUD_AUTH }}
 
+    - name: Build custom OpenTelemetry Collector binary
+      run: |
+        go get github.com/observatorium/opentelemetry-collector-builder;
+        opentelemetry-collector-builder --output-path=.;
+
     # Build and push image to Google Container Registry
     - name: Build
       # Tagging w/ the commit SHA blocks the :latest tag on GCR
