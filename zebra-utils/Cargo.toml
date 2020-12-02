@@ -9,7 +9,7 @@ publish = false
 
 [dependencies]
 structopt = "0.3.21"
-color-eyre = "0.5.8"
+color-eyre = "0.5.9"
 hex = "0.4"
 serde_json = "1.0"
 tracing-error = { version = "0.1.2", features = ["traced-error"] }
