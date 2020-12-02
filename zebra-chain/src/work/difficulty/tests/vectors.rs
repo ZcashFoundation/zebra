@@ -307,8 +307,7 @@ fn block_difficulty_for_network(network: Network) -> Result<(), Report> {
         {
             let canonical_compact = threshold.to_compact();
 
-            assert_eq!(block.header.difficulty_threshold,
-                       canonical_compact);
+            assert_eq!(block.header.difficulty_threshold, canonical_compact);
         }
 
         /// SPANDOC: Check the work for block {?height, ?network}
@@ -367,8 +366,11 @@ fn genesis_block_difficulty_for_network(network: Network) -> Result<(), Report> 
 
     /// SPANDOC: Check the genesis PoWLimit {?network, ?threshold, ?hash}
     {
-        assert_eq!(threshold, ExpandedDifficulty::target_difficulty_limit(network),
-                   "genesis block difficulty thresholds must be equal to the PoWLimit");
+        assert_eq!(
+            threshold,
+            ExpandedDifficulty::target_difficulty_limit(network),
+            "genesis block difficulty thresholds must be equal to the PoWLimit"
+        );
     }
 
     Ok(())
