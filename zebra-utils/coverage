@@ -29,6 +29,6 @@ $(rustc +nightly --print target-libdir)/../bin/llvm-cov show \
 $(rustc +nightly --print target-libdir)/../bin/llvm-cov export \
 	-format=lcov \
 	-instr-profile=./$CARGO_TARGET_DIR/coverage/test.profdata \
-	$(printf -- "-object %s " $(cat ./$CARGO_TARGET_DIR/files.txt)) > "./$CARG_TARGET_DIR/coverage/lcov.info"
+	$(printf -- "-object %s " $(cat ./$CARGO_TARGET_DIR/files.txt)) > "./$CARGO_TARGET_DIR/coverage/lcov.info"
 
 xdg-open ./$CARGO_TARGET_DIR/coverage/html/index.html
