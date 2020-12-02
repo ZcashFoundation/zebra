@@ -639,8 +639,14 @@ impl Service<Request> for StateService {
             }
             Request::FindBlockHeaders { known_blocks, stop } => {
                 const MAX_FIND_BLOCK_HEADERS_RESULTS: usize = 160;
-                let res =
-                    self.find_chain_hashes(known_blocks, stop, MAX_FIND_BLOCK_HEADERS_RESULTS);
+                // Zcashd will blindly request more block headers as long as it
+                // got 160 block headers in response to a previous query, EVEN
+                // IF THOSE HEADERS ARE ALREADY KNOWN.  To dodge this behavior,
+                // return slightly fewer than the maximum, to get it to go away.
+                //
+                // https://github.com/bitcoin/bitcoin/pull/4468/files#r17026905
+                let count = MAX_FIND_BLOCK_HEADERS_RESULTS - 2;
+                let res = self.find_chain_hashes(known_blocks, stop, count);
                 let res: Vec<_> = res
                     .iter()
                     .map(|&hash| {
