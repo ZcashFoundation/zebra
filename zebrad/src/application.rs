@@ -110,6 +110,24 @@ impl Application for ZebradApp {
         }
         let terminal = Terminal::new(term_colors);
 
+        // This MUST happen after `Terminal::new` to ensure our preferred panic
+        // handler is the last one installed
+        //
+        // color_eyre always uses color, but that's an issue we want to solve upstream
+        // (color_backtrace automatically disables color if stderr is a file)
+        color_eyre::config::HookBuilder::default()
+            .issue_url(concat!(env!("CARGO_PKG_REPOSITORY"), "/issues/new"))
+            .add_issue_metadata("version", env!("CARGO_PKG_VERSION"))
+            .add_issue_metadata("git commit", Self::GIT_COMMIT)
+            .issue_filter(|kind| match kind {
+                color_eyre::ErrorKind::NonRecoverable(_) => true,
+                color_eyre::ErrorKind::Recoverable(error) => {
+                    !error.is::<tower::timeout::error::Elapsed>()
+                }
+            })
+            .install()
+            .unwrap();
+
         Ok(vec![Box::new(terminal)])
     }
 
@@ -132,28 +150,6 @@ impl Application for ZebradApp {
             .map(|path| self.load_config(&path))
             .transpose()?
             .unwrap_or_default();
-
-        // Only use color if tracing output is being sent to a terminal
-        let use_color = config.tracing.use_color && atty::is(atty::Stream::Stdout);
-
-        // color_eyre always uses color, so disable it if we don't want color
-        // (color_backtrace automatically disables color if stderr is a file)
-        if use_color {
-            // This MUST happen after `Terminal::new` to ensure our preferred panic
-            // handler is the last one installed
-            color_eyre::config::HookBuilder::default()
-                .issue_url(concat!(env!("CARGO_PKG_REPOSITORY"), "/issues/new"))
-                .add_issue_metadata("version", env!("CARGO_PKG_VERSION"))
-                .add_issue_metadata("git commit", Self::GIT_COMMIT)
-                .issue_filter(|kind| match kind {
-                    color_eyre::ErrorKind::NonRecoverable(_) => true,
-                    color_eyre::ErrorKind::Recoverable(error) => {
-                        !error.is::<tower::timeout::error::Elapsed>()
-                    }
-                })
-                .install()
-                .unwrap();
-        }
 
         let config = command.process_config(config)?;
         self.config = Some(config);
