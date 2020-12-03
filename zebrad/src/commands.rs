@@ -53,7 +53,7 @@ impl ZebradCmd {
 
 impl Runnable for ZebradCmd {
     fn run(&self) {
-        let span = error_span!("", zebrad = ZebradApp::GIT_COMMIT);
+        let span = error_span!("", zebrad = ZebradApp::git_commit());
         let _guard = span.enter();
         match self {
             Generate(cmd) => cmd.run(),

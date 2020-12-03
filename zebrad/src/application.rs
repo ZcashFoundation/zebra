@@ -45,7 +45,12 @@ pub struct ZebradApp {
 }
 
 impl ZebradApp {
-    pub const GIT_COMMIT: &'static str = env!("VERGEN_SHA_SHORT");
+    pub fn git_commit() -> &'static str {
+        const GIT_COMMIT_VERGEN: &str = env!("VERGEN_SHA_SHORT");
+        const GIT_COMMIT_GCLOUD: Option<&str> = option_env!("SHORT_SHA");
+
+        GIT_COMMIT_GCLOUD.unwrap_or(GIT_COMMIT_VERGEN)
+    }
 }
 
 /// Initialize a new application instance.
@@ -118,7 +123,7 @@ impl Application for ZebradApp {
         color_eyre::config::HookBuilder::default()
             .issue_url(concat!(env!("CARGO_PKG_REPOSITORY"), "/issues/new"))
             .add_issue_metadata("version", env!("CARGO_PKG_VERSION"))
-            .add_issue_metadata("git commit", Self::GIT_COMMIT)
+            .add_issue_metadata("git commit", Self::git_commit())
             .issue_filter(|kind| match kind {
                 color_eyre::ErrorKind::NonRecoverable(_) => true,
                 color_eyre::ErrorKind::Recoverable(error) => {
