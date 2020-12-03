@@ -271,11 +271,7 @@ impl AdjustedDifficulty {
     ///
     /// See [`median_timespan_bounded()`] for details.
     fn median_timespan(&self) -> Duration {
-        let newer_times: [DateTime<Utc>; POW_MEDIAN_BLOCK_SPAN] = self.relevant_times
-            [0..POW_MEDIAN_BLOCK_SPAN]
-            .try_into()
-            .expect("relevant times is the correct length");
-        let newer_median = AdjustedDifficulty::median_time(newer_times);
+        let newer_median = self.median_time_past();
 
         let older_times: [DateTime<Utc>; POW_MEDIAN_BLOCK_SPAN] = self.relevant_times
             [POW_AVERAGING_WINDOW..]
@@ -285,6 +281,21 @@ impl AdjustedDifficulty {
 
         // `ActualTimespan` in the Zcash specification
         newer_median - older_median
+    }
+
+    /// Calculate the median of the `time`s from the previous
+    /// `PoWMedianBlockSpan` (11) blocks in the relevant chain.
+    ///
+    /// Implements `median-time-past` and `MedianTime(candidate_height)` from the
+    /// Zcash specification. (These functions are identical, but they are
+    /// specified in slightly different ways.)
+    pub fn median_time_past(&self) -> DateTime<Utc> {
+        let median_times: [DateTime<Utc>; POW_MEDIAN_BLOCK_SPAN] = self.relevant_times
+            [0..POW_MEDIAN_BLOCK_SPAN]
+            .try_into()
+            .expect("relevant times is the correct length");
+
+        AdjustedDifficulty::median_time(median_times)
     }
 
     /// Calculate the median of the `median_block_span_times`: the `time`s from a
