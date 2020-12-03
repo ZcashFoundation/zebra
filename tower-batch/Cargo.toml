@@ -21,4 +21,4 @@ tokio = { version = "0.3", features = ["full"]}
 tracing = "0.1.22"
 zebra-test = { path = "../zebra-test/" }
 tower-fallback = { path = "../tower-fallback/" }
-color-eyre = "0.5.9"
+color-eyre = "0.5.10"
