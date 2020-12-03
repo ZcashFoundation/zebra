@@ -36,39 +36,39 @@ pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 pub struct CommitBlockError(#[from] ValidateContextError);
 
 /// An error describing why a block failed contextual validation.
-#[derive(displaydoc::Display, Debug, Error)]
+#[derive(Debug, Error)]
 #[non_exhaustive]
 #[allow(missing_docs)]
 pub enum ValidateContextError {
-    /// block height {candidate_height:?} is lower than the current finalized height {finalized_tip_height:?}
+    #[error("block height {candidate_height:?} is lower than the current finalized height {finalized_tip_height:?}")]
     #[non_exhaustive]
     OrphanedBlock {
         candidate_height: block::Height,
         finalized_tip_height: block::Height,
     },
 
-    /// block height {candidate_height:?} is not one greater than its parent block's height {parent_height:?}
+    #[error("block height {candidate_height:?} is not one greater than its parent block's height {parent_height:?}")]
     #[non_exhaustive]
     NonSequentialBlock {
         candidate_height: block::Height,
         parent_height: block::Height,
     },
 
-    /// block time {candidate_time:?} is less than or equal to the median-time-past for the block {median_time_past:?}
+    #[error("block time {candidate_time:?} is less than or equal to the median-time-past for the block {median_time_past:?}")]
     #[non_exhaustive]
     TimeTooEarly {
         candidate_time: DateTime<Utc>,
         median_time_past: DateTime<Utc>,
     },
 
-    /// block time {candidate_time:?} is greater than the median-time-past for the block plus 90 minutes {block_time_max:?}
+    #[error("block time {candidate_time:?} is greater than the median-time-past for the block plus 90 minutes {block_time_max:?}")]
     #[non_exhaustive]
     TimeTooLate {
         candidate_time: DateTime<Utc>,
         block_time_max: DateTime<Utc>,
     },
 
-    /// block difficulty threshold {difficulty_threshold:?} is not equal to the expected difficulty for the block {expected_difficulty:?}
+    #[error("block difficulty threshold {difficulty_threshold:?} is not equal to the expected difficulty for the block {expected_difficulty:?}")]
     #[non_exhaustive]
     InvalidDifficultyThreshold {
         difficulty_threshold: CompactDifficulty,
