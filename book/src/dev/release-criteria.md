@@ -53,7 +53,7 @@ _Last updated: November 30 2020_
     - ✅ Users can access the documentation to deploy `zebrad` nodes
 - User Experience
     - ⚠️ Build completes within 30 minutes in Zebra's CI
-    - ⚠️ `zebrad` executes normally
+    - ✅ `zebrad` executes normally
         - ✅ `zebrad`'s default logging works reasonably well in a terminal
         - ✅ panics, error logs, and warning logs are rare on mainnet
-        - ⚠️ known panics, errors and warnings have open tickets
+        - ✅ known panics, errors and warnings have open tickets
