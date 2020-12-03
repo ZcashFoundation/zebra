@@ -63,9 +63,13 @@ pub struct CompactDifficulty(pub(crate) u32);
 
 impl fmt::Debug for CompactDifficulty {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // There isn't a standard way to represent alternate formats for the
+        // same value.
         f.debug_tuple("CompactDifficulty")
             // Use hex, because it's a float
             .field(&format_args!("{:#010x}", self.0))
+            // Use expanded difficulty, for bitwise difficulty comparisons
+            .field(&format_args!("{:?}", self.to_expanded()))
             .finish()
     }
 }

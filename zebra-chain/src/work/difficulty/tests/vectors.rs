@@ -19,15 +19,29 @@ fn debug_format() {
 
     assert_eq!(
         format!("{:?}", CompactDifficulty(0)),
-        "CompactDifficulty(0x00000000)"
+        "CompactDifficulty(0x00000000, None)"
     );
     assert_eq!(
         format!("{:?}", CompactDifficulty(1)),
-        "CompactDifficulty(0x00000001)"
+        "CompactDifficulty(0x00000001, None)"
     );
     assert_eq!(
         format!("{:?}", CompactDifficulty(u32::MAX)),
-        "CompactDifficulty(0xffffffff)"
+        "CompactDifficulty(0xffffffff, None)"
+    );
+    let one = CompactDifficulty((1 << PRECISION) + (1 << 16));
+    assert_eq!(
+        format!("{:?}", one),
+        "CompactDifficulty(0x01010000, Some(ExpandedDifficulty(\"0000000000000000000000000000000000000000000000000000000000000001\")))");
+    let mant = CompactDifficulty(OFFSET as u32 * (1 << PRECISION) + UNSIGNED_MANTISSA_MASK);
+    assert_eq!(
+        format!("{:?}", mant),
+        "CompactDifficulty(0x037fffff, Some(ExpandedDifficulty(\"00000000000000000000000000000000000000000000000000000000007fffff\")))"
+    );
+    let exp = CompactDifficulty(((31 + OFFSET - 2) as u32) * (1 << PRECISION) + (1 << 16));
+    assert_eq!(
+        format!("{:?}", exp),
+        "CompactDifficulty(0x20010000, Some(ExpandedDifficulty(\"0100000000000000000000000000000000000000000000000000000000000000\")))"
     );
 
     assert_eq!(
