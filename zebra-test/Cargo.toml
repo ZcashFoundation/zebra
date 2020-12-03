@@ -20,7 +20,7 @@ spandoc = "0.2.0"
 regex = "1.4.2"
 thiserror = "1.0.22"
 pretty_assertions = "0.6.1"
-owo-colors = "1.2.0"
+owo-colors = "1.2.1"
 proptest = "0.10.1"
 tempdir = "0.3.7"
 
