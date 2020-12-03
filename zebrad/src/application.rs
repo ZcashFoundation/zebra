@@ -96,6 +96,7 @@ impl Application for ZebradApp {
         // The `abcissa` docs claim that abscissa implements `Auto`, but it
         // does not - except in `color_backtrace` backtraces.
         let mut term_colors = self.term_colors(command);
+        let is_tty = atty::is(atty::Stream::Stdout) && atty::is(atty::Stream::Stderr);
         if term_colors == ColorChoice::Auto {
             // We want to disable colors on a per-stream basis, but that feature
             // can only be implemented inside the terminal component streams.
@@ -104,7 +105,7 @@ impl Application for ZebradApp {
             //
             // We'd also like to check `config.tracing.use_color` here, but the
             // config has not been loaded yet.
-            if !atty::is(atty::Stream::Stdout) || !atty::is(atty::Stream::Stderr) {
+            if !is_tty {
                 term_colors = ColorChoice::Never;
             }
         }
@@ -112,10 +113,14 @@ impl Application for ZebradApp {
 
         // This MUST happen after `Terminal::new` to ensure our preferred panic
         // handler is the last one installed
-        //
-        // color_eyre always uses color, but that's an issue we want to solve upstream
-        // (color_backtrace automatically disables color if stderr is a file)
+        let theme = if is_tty {
+            color_eyre::config::Theme::dark()
+        } else {
+            color_eyre::config::Theme::new()
+        };
+
         color_eyre::config::HookBuilder::default()
+            .theme(theme)
             .issue_url(concat!(env!("CARGO_PKG_REPOSITORY"), "/issues/new"))
             .add_issue_metadata("version", env!("CARGO_PKG_VERSION"))
             .add_issue_metadata("git commit", Self::GIT_COMMIT)
