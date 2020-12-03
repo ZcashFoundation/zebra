@@ -45,7 +45,7 @@ pub const BLOCK_MAX_TIME_SINCE_MEDIAN: i64 = 90 * 60;
 /// The activation height for the block maximum time rule on Testnet.
 ///
 /// Part of the block header consensus rules in the Zcash specification.
-pub const BLOCK_MAX_TIME_TESTNET_ACTIVATION_HEIGHT: block::Height = block::Height(653606);
+pub const TESTNET_MAX_TIME_START_HEIGHT: block::Height = block::Height(653_606);
 
 /// Contains the context needed to calculate the adjusted difficulty for a block.
 pub(super) struct AdjustedDifficulty {

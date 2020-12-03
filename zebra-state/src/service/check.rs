@@ -14,9 +14,7 @@ use crate::{PreparedBlock, ValidateContextError};
 
 use super::check;
 
-use difficulty::{
-    AdjustedDifficulty, BLOCK_MAX_TIME_TESTNET_ACTIVATION_HEIGHT, POW_MEDIAN_BLOCK_SPAN,
-};
+use difficulty::{AdjustedDifficulty, POW_MEDIAN_BLOCK_SPAN, TESTNET_MAX_TIME_START_HEIGHT};
 
 pub(crate) mod difficulty;
 
@@ -150,8 +148,8 @@ fn difficulty_threshold_is_valid(
         })?
     }
 
-    // The maximum time rule is only active on Testnet from height 653606 onwards
-    if (network == Network::Mainnet || candidate_height >= BLOCK_MAX_TIME_TESTNET_ACTIVATION_HEIGHT)
+    // The maximum time rule is only active on Testnet from a specific height
+    if (network == Network::Mainnet || candidate_height >= TESTNET_MAX_TIME_START_HEIGHT)
         && candidate_time > block_time_max
     {
         Err(ValidateContextError::TimeTooLate {
