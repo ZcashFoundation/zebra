@@ -10,8 +10,10 @@ WORKDIR /zebra
 
 ARG SHORT_SHA
 
+ENV SHORT_SHA="$SHORT_SHA"
 ENV RUST_BACKTRACE full
 ENV CARGO_HOME /zebra/.cargo/
+
 RUN rustc -V; cargo -V; rustup -V
 
 COPY . .
@@ -23,7 +25,6 @@ FROM debian:buster-slim AS zebrad-release
 
 COPY --from=builder /zebra/target/release/zebrad /
 
-ARG SHORT_SHA
 ARG CHECKPOINT_SYNC=true
 ARG NETWORK=Mainnet
 
