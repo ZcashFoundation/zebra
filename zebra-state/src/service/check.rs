@@ -14,7 +14,9 @@ use crate::{PreparedBlock, ValidateContextError};
 
 use super::check;
 
-use difficulty::{AdjustedDifficulty, POW_MEDIAN_BLOCK_SPAN};
+use difficulty::{
+    AdjustedDifficulty, BLOCK_MAX_TIME_TESTNET_ACTIVATION_HEIGHT, POW_MEDIAN_BLOCK_SPAN,
+};
 
 pub(crate) mod difficulty;
 
@@ -80,6 +82,7 @@ where
     check::difficulty_threshold_is_valid(
         prepared.block.header.difficulty_threshold,
         difficulty_adjustment,
+        network,
     )?;
 
     // TODO: other contextual validation design and implementation
@@ -122,7 +125,8 @@ fn height_one_more_than_parent_height(
 /// header.
 ///
 /// Uses the `difficulty_adjustment` context for the block to:
-///   * check that the the `time` field is within the valid range, and
+///   * check that the the `time` field is within the valid range,
+///     based on `network` and  candidate height, and
 ///   * check that the expected difficulty is equal to the block's
 ///     `difficulty_threshold`.
 ///
@@ -131,8 +135,10 @@ fn height_one_more_than_parent_height(
 fn difficulty_threshold_is_valid(
     difficulty_threshold: CompactDifficulty,
     difficulty_adjustment: AdjustedDifficulty,
+    network: Network,
 ) -> Result<(), ValidateContextError> {
     // Check the block header time consensus rules from the Zcash specification
+    let candidate_height = difficulty_adjustment.candidate_height();
     let candidate_time = difficulty_adjustment.candidate_time();
     let median_time_past = difficulty_adjustment.median_time_past();
     let block_time_max =
@@ -142,7 +148,12 @@ fn difficulty_threshold_is_valid(
             candidate_time,
             median_time_past,
         })?
-    } else if candidate_time > block_time_max {
+    }
+
+    // The maximum time rule is only active on Testnet from height 653606 onwards
+    if (network == Network::Mainnet || candidate_height >= BLOCK_MAX_TIME_TESTNET_ACTIVATION_HEIGHT)
+        && candidate_time > block_time_max
+    {
         Err(ValidateContextError::TimeTooLate {
             candidate_time,
             block_time_max,
