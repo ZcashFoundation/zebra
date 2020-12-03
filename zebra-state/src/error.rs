@@ -43,6 +43,14 @@ pub enum ValidateContextError {
     #[non_exhaustive]
     NonSequentialBlock,
 
+    /// block.header.time is less than or equal to the median-time-past for the block
+    #[non_exhaustive]
+    TimeTooEarly,
+
+    /// block.header.time is greater than the median-time-past for the block plus 90 minutes
+    #[non_exhaustive]
+    TimeTooLate,
+
     /// block.header.difficulty_threshold is not equal to the adjusted difficulty for the block
     #[non_exhaustive]
     InvalidDifficultyThreshold,
