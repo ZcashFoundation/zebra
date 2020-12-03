@@ -1,5 +1,9 @@
 use std::sync::Arc;
+
+use chrono::{DateTime, Utc};
 use thiserror::Error;
+
+use zebra_chain::{block, work::difficulty::CompactDifficulty};
 
 /// A wrapper for type erased errors that is itself clonable and implements the
 /// Error trait
@@ -34,24 +38,40 @@ pub struct CommitBlockError(#[from] ValidateContextError);
 /// An error describing why a block failed contextual validation.
 #[derive(displaydoc::Display, Debug, Error)]
 #[non_exhaustive]
+#[allow(missing_docs)]
 pub enum ValidateContextError {
-    /// block.height is lower than the current finalized height
+    /// block height {candidate_height:?} is lower than the current finalized height {finalized_tip_height:?}
     #[non_exhaustive]
-    OrphanedBlock,
+    OrphanedBlock {
+        candidate_height: block::Height,
+        finalized_tip_height: block::Height,
+    },
 
-    /// block.height is not one greater than its parent block's height
+    /// block height {candidate_height:?} is not one greater than its parent block's height {parent_height:?}
     #[non_exhaustive]
-    NonSequentialBlock,
+    NonSequentialBlock {
+        candidate_height: block::Height,
+        parent_height: block::Height,
+    },
 
-    /// block.header.time is less than or equal to the median-time-past for the block
+    /// block time {candidate_time:?} is less than or equal to the median-time-past for the block {median_time_past:?}
     #[non_exhaustive]
-    TimeTooEarly,
+    TimeTooEarly {
+        candidate_time: DateTime<Utc>,
+        median_time_past: DateTime<Utc>,
+    },
 
-    /// block.header.time is greater than the median-time-past for the block plus 90 minutes
+    /// block time {candidate_time:?} is greater than the median-time-past for the block plus 90 minutes {block_time_max:?}
     #[non_exhaustive]
-    TimeTooLate,
+    TimeTooLate {
+        candidate_time: DateTime<Utc>,
+        block_time_max: DateTime<Utc>,
+    },
 
-    /// block.header.difficulty_threshold is not equal to the adjusted difficulty for the block
+    /// block difficulty threshold {difficulty_threshold:?} is not equal to the expected difficulty for the block {expected_difficulty:?}
     #[non_exhaustive]
-    InvalidDifficultyThreshold,
+    InvalidDifficultyThreshold {
+        difficulty_threshold: CompactDifficulty,
+        expected_difficulty: CompactDifficulty,
+    },
 }
