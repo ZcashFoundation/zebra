@@ -8,7 +8,9 @@ RUN apt-get update && \
 RUN mkdir /zebra
 WORKDIR /zebra
 
-ENV RUST_BACKTRACE 1
+ARG SHORT_SHA
+
+ENV RUST_BACKTRACE full
 ENV CARGO_HOME /zebra/.cargo/
 RUN rustc -V; cargo -V; rustup -V
 
@@ -21,6 +23,7 @@ FROM debian:buster-slim AS zebrad-release
 
 COPY --from=builder /zebra/target/release/zebrad /
 
+ARG SHORT_SHA
 ARG CHECKPOINT_SYNC=true
 ARG NETWORK=Mainnet
 
