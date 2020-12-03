@@ -2,6 +2,7 @@
 
 use std::borrow::Borrow;
 
+use chrono::Duration;
 use zebra_chain::{
     block::{self, Block},
     parameters::Network,
@@ -74,11 +75,11 @@ where
             block.borrow().header.time,
         )
     });
-    let expected_difficulty =
+    let difficulty_adjustment =
         AdjustedDifficulty::new_from_block(&prepared.block, network, relevant_data);
     check::difficulty_threshold_is_valid(
         prepared.block.header.difficulty_threshold,
-        expected_difficulty,
+        difficulty_adjustment,
     )?;
 
     // TODO: other contextual validation design and implementation
@@ -111,22 +112,37 @@ fn height_one_more_than_parent_height(
     }
 }
 
-/// Validate the `difficulty_threshold` from a candidate block's header, based
-/// on an `expected_difficulty` for that block.
+/// Validate the `time` and `difficulty_threshold` from a candidate block's
+/// header.
 ///
-/// Uses `expected_difficulty` to calculate the expected difficulty value, then
-/// compares that value to the `difficulty_threshold`.
+/// Uses the `difficulty_adjustment` context for the block to:
+///   * check that the the `time` field is within the valid range, and
+///   * check that the expected difficulty is equal to the block's
+///     `difficulty_threshold`.
 ///
-/// The check passes if the values are equal.
+/// These checks are performed together, because the time field is used to
+/// calculate the expected difficulty adjustment.
 fn difficulty_threshold_is_valid(
     difficulty_threshold: CompactDifficulty,
-    expected_difficulty: AdjustedDifficulty,
+    difficulty_adjustment: AdjustedDifficulty,
 ) -> Result<(), ValidateContextError> {
-    if difficulty_threshold == expected_difficulty.expected_difficulty_threshold() {
-        Ok(())
-    } else {
-        Err(ValidateContextError::InvalidDifficultyThreshold)
+    // Check the block header time consensus rules from the Zcash specification
+    let median_time_past = difficulty_adjustment.median_time_past();
+    let block_max_time_since_median = Duration::seconds(difficulty::BLOCK_MAX_TIME_SINCE_MEDIAN);
+    if difficulty_adjustment.candidate_time() <= median_time_past {
+        Err(ValidateContextError::TimeTooEarly)?
+    } else if difficulty_adjustment.candidate_time()
+        > median_time_past + block_max_time_since_median
+    {
+        Err(ValidateContextError::TimeTooLate)?
     }
+
+    let expected_difficulty = difficulty_adjustment.expected_difficulty_threshold();
+    if difficulty_threshold != expected_difficulty {
+        Err(ValidateContextError::InvalidDifficultyThreshold)?
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

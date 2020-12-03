@@ -36,6 +36,12 @@ pub const POW_MAX_ADJUST_UP_PERCENT: i32 = 16;
 /// `PoWMaxAdjustDown * 100` in the Zcash specification.
 pub const POW_MAX_ADJUST_DOWN_PERCENT: i32 = 32;
 
+/// The maximum number of seconds between the `meadian-time-past` of a block,
+/// and the block's `time` field.
+///
+/// Part of the block header consensus rules in the Zcash specification.
+pub const BLOCK_MAX_TIME_SINCE_MEDIAN: i64 = 90 * 60;
+
 /// Contains the context needed to calculate the adjusted difficulty for a block.
 pub(super) struct AdjustedDifficulty {
     /// The `header.time` field from the candidate block
@@ -139,6 +145,11 @@ impl AdjustedDifficulty {
             relevant_difficulty_thresholds,
             relevant_times,
         }
+    }
+
+    /// Returns the candidate block's time field.
+    pub fn candidate_time(&self) -> DateTime<Utc> {
+        self.candidate_time
     }
 
     /// Calculate the expected `difficulty_threshold` for a candidate block, based
