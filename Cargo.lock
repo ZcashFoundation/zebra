@@ -490,9 +490,9 @@ dependencies = [
 
 [[package]]
 name = "color-eyre"
-version = "0.5.9"
+version = "0.5.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4cd93ec975c58d2e669fcfd09bcbb38a9ea4a182dd612e0855a3503b825e393b"
+checksum = "7b29030875fd8376e4a28ef497790d5b4a7843d8d1396bf08ce46f5eec562c5c"
 dependencies = [
  "backtrace",
  "color-spantrace",
@@ -1742,9 +1742,9 @@ dependencies = [
 
 [[package]]
 name = "owo-colors"
-version = "1.2.0"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25ac891a7415905f6cc1b61909772d1a975c0281da8b455f269daa0b6e56f9cb"
+checksum = "13370dae44474229701bb69b90b4f4dca6404cb0357a2d50d635f1171dc3aa7b"
 
 [[package]]
 name = "parity-scale-codec"
