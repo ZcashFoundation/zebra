@@ -1,4 +1,9 @@
 //! Block difficulty adjustment calculations for contextual validation.
+//!
+//! This module supports the following consensus rule calculations:
+//!  * `ThresholdBits` from the Zcash Specification,
+//!  * the Testnet minimum difficulty adjustment from ZIPs 205 and 208, and
+//!  * `median-time-past`.
 
 use chrono::{DateTime, Duration, Utc};
 use primitive_types::U256;
