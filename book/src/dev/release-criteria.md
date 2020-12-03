@@ -52,7 +52,7 @@ _Last updated: November 30 2020_
     - 🛑 All [release blocker bugs](https://github.com/ZcashFoundation/zebra/issues?q=is%3Aopen+is%3Aissue+milestone%3A%22First+Alpha+Release%22+label%3AC-bug) have been fixed
     - ✅ Users can access the documentation to deploy `zebrad` nodes
 - User Experience
-    - ✅ Build completes within 30 minutes in Zebra's CI
+    - ⚠️ Build completes within 30 minutes in Zebra's CI
     - ⚠️ `zebrad` executes normally
         - ✅ `zebrad`'s default logging works reasonably well in a terminal
         - ✅ panics, error logs, and warning logs are rare on mainnet
