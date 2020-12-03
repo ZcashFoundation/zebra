@@ -90,10 +90,13 @@ where
 /// block is less than or equal to the finalized tip height.
 fn block_is_not_orphaned(
     finalized_tip_height: block::Height,
-    height: block::Height,
+    candidate_height: block::Height,
 ) -> Result<(), ValidateContextError> {
-    if height <= finalized_tip_height {
-        Err(ValidateContextError::OrphanedBlock)
+    if candidate_height <= finalized_tip_height {
+        Err(ValidateContextError::OrphanedBlock {
+            candidate_height,
+            finalized_tip_height,
+        })
     } else {
         Ok(())
     }
@@ -103,10 +106,13 @@ fn block_is_not_orphaned(
 /// equal to the parent_height+1.
 fn height_one_more_than_parent_height(
     parent_height: block::Height,
-    height: block::Height,
+    candidate_height: block::Height,
 ) -> Result<(), ValidateContextError> {
-    if parent_height + 1 != Some(height) {
-        Err(ValidateContextError::NonSequentialBlock)
+    if parent_height + 1 != Some(candidate_height) {
+        Err(ValidateContextError::NonSequentialBlock {
+            candidate_height,
+            parent_height,
+        })
     } else {
         Ok(())
     }
@@ -127,19 +133,28 @@ fn difficulty_threshold_is_valid(
     difficulty_adjustment: AdjustedDifficulty,
 ) -> Result<(), ValidateContextError> {
     // Check the block header time consensus rules from the Zcash specification
+    let candidate_time = difficulty_adjustment.candidate_time();
     let median_time_past = difficulty_adjustment.median_time_past();
-    let block_max_time_since_median = Duration::seconds(difficulty::BLOCK_MAX_TIME_SINCE_MEDIAN);
-    if difficulty_adjustment.candidate_time() <= median_time_past {
-        Err(ValidateContextError::TimeTooEarly)?
-    } else if difficulty_adjustment.candidate_time()
-        > median_time_past + block_max_time_since_median
-    {
-        Err(ValidateContextError::TimeTooLate)?
+    let block_time_max =
+        median_time_past + Duration::seconds(difficulty::BLOCK_MAX_TIME_SINCE_MEDIAN);
+    if candidate_time <= median_time_past {
+        Err(ValidateContextError::TimeTooEarly {
+            candidate_time,
+            median_time_past,
+        })?
+    } else if candidate_time > block_time_max {
+        Err(ValidateContextError::TimeTooLate {
+            candidate_time,
+            block_time_max,
+        })?
     }
 
     let expected_difficulty = difficulty_adjustment.expected_difficulty_threshold();
     if difficulty_threshold != expected_difficulty {
-        Err(ValidateContextError::InvalidDifficultyThreshold)?
+        Err(ValidateContextError::InvalidDifficultyThreshold {
+            difficulty_threshold,
+            expected_difficulty,
+        })?
     }
 
     Ok(())
