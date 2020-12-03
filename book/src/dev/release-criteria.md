@@ -38,7 +38,7 @@ _Last updated: November 30 2020_
     - `zebrad` can stay within a few blocks of the mainnet tip after the initial sync
         - ⚠️ under excellent network conditions
         - _reasonable and sub-optimal network conditions are not yet supported_
-    - ✅  `zebrad` can validate proof of work
+    - ⚠️  `zebrad` can validate proof of work
     - 🛑 `zebrad` can validate the transaction merkle tree
     - ⚠️ `zebrad` can serve blocks to peers
 - `zebrad` Performance
