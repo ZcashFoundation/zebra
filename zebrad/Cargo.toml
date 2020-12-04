@@ -52,6 +52,7 @@ tempdir = "0.3.7"
 zebra-test = { path = "../zebra-test" }
 
 [features]
+enable-sentry = []
 test_sync_to_sapling_mainnet = []
 test_sync_to_sapling_testnet = []
 test_sync_past_sapling_mainnet = []

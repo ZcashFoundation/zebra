@@ -3,7 +3,7 @@ FROM rust:buster as builder
 
 RUN apt-get update && \
 	apt-get install -y --no-install-recommends \
-	make cmake g++ gcc llvm libclang-dev clang
+	make cmake g++ gcc llvm libclang-dev clang ca-certificates
 
 RUN mkdir /zebra
 WORKDIR /zebra
@@ -18,7 +18,7 @@ RUN rustc -V; cargo -V; rustup -V
 
 COPY . .
 
-RUN cargo test --all --release; cargo build --release
+RUN cargo test --all --release; cargo build --release --features enable-sentry
 
 
 # Runner image
@@ -41,6 +41,8 @@ RUN cat /zebrad.toml
 
 EXPOSE 3000 8233 18233
 
+ENV RUST_LOG debug
 ENV RUST_BACKTRACE full
+ENV SENTRY_DSN https://94059ee72a44420286310990b7c614b5@o485484.ingest.sentry.io/5540918
 
 CMD [ "/zebrad", "-c", "/zebrad.toml", "start" ]
