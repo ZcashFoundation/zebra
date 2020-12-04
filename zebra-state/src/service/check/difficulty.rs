@@ -36,7 +36,7 @@ pub const POW_MAX_ADJUST_UP_PERCENT: i32 = 16;
 /// `PoWMaxAdjustDown * 100` in the Zcash specification.
 pub const POW_MAX_ADJUST_DOWN_PERCENT: i32 = 32;
 
-/// The maximum number of seconds between the `meadian-time-past` of a block,
+/// The maximum number of seconds between the `median-time-past` of a block,
 /// and the block's `time` field.
 ///
 /// Part of the block header consensus rules in the Zcash specification.
