@@ -74,7 +74,7 @@ into several components:
   that check whether a new block is a valid extension of an existing chain,
   such as updating the nullifier set or checking that transaction inputs remain
   unspent.
-  
+
 - [`zebrad`](https://doc.zebra.zfnd.org/zebrad/index.html) contains the full
   node, which connects these components together and implements logic to handle
   inbound requests from peers and the chain sync process.
@@ -93,6 +93,24 @@ developer documentation, such as design documents.  We also render [API
 documentation](https://doc.zebra.zfnd.org) for the external API of our crates,
 as well as [internal documentation](https://doc-internal.zebra.zfnd.org) for
 private APIs.
+
+## Alpha Release Details
+
+Our first alpha release is planned for the December 8th, 2020. Zebra's
+architecture is mostly filled out but we're missing most of the validation
+logic. Right now we only support syncing and storing the block chain and a
+few critical consensus checks. We do validate proof of work and bitcoin
+merkle roots, so we shouldn't diverge from zcashd without expensive work
+being done to mislead zebra. This alpha release is aimed at establishing our
+release process, support process, and ironing out bugs in the supporting
+storage and networking code.
+
+If you're interested in testing out zebra please feel free, but keep in mind
+that there is a lot of key functionality still missing.
+
+### System Requirements
+
+TBD
 
 ## License
 
