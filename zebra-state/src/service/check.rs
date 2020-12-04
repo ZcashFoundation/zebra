@@ -80,7 +80,6 @@ where
     check::difficulty_threshold_is_valid(
         prepared.block.header.difficulty_threshold,
         difficulty_adjustment,
-        network,
     )?;
 
     // TODO: other contextual validation design and implementation
@@ -119,12 +118,12 @@ fn height_one_more_than_parent_height(
     }
 }
 
-/// Validate the `time` and `difficulty_threshold` from a candidate block's
+/// Validate the time and `difficulty_threshold` from a candidate block's
 /// header.
 ///
 /// Uses the `difficulty_adjustment` context for the block to:
-///   * check that the the `time` field is within the valid range,
-///     based on `network` and  candidate height, and
+///   * check that the candidate block's time is within the valid range,
+///     based on the network and  candidate height, and
 ///   * check that the expected difficulty is equal to the block's
 ///     `difficulty_threshold`.
 ///
@@ -133,11 +132,11 @@ fn height_one_more_than_parent_height(
 fn difficulty_threshold_is_valid(
     difficulty_threshold: CompactDifficulty,
     difficulty_adjustment: AdjustedDifficulty,
-    network: Network,
 ) -> Result<(), ValidateContextError> {
     // Check the block header time consensus rules from the Zcash specification
     let candidate_height = difficulty_adjustment.candidate_height();
     let candidate_time = difficulty_adjustment.candidate_time();
+    let network = difficulty_adjustment.network();
     let median_time_past = difficulty_adjustment.median_time_past();
     let block_time_max =
         median_time_past + Duration::seconds(difficulty::BLOCK_MAX_TIME_SINCE_MEDIAN);

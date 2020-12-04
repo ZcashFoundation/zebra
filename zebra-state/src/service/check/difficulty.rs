@@ -162,6 +162,11 @@ impl AdjustedDifficulty {
         self.candidate_time
     }
 
+    /// Returns the configured network.
+    pub fn network(&self) -> Network {
+        self.network
+    }
+
     /// Calculate the expected `difficulty_threshold` for a candidate block, based
     /// on the `candidate_time`, `candidate_height`, `network`, and the
     /// `difficulty_threshold`s and `time`s from the previous
