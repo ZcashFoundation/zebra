@@ -24,6 +24,10 @@ RUN cargo test --all --release; cd zebrad/; cargo build --release --features ena
 # Runner image
 FROM debian:buster-slim AS zebrad-release
 
+RUN apt-get update && \
+	apt-get install -y --no-install-recommends \
+	ca-certificates
+
 COPY --from=builder /zebra/target/release/zebrad /
 
 ARG CHECKPOINT_SYNC=true
