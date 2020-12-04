@@ -114,7 +114,7 @@ impl Application for ZebradApp {
             //
             // We'd also like to check `config.tracing.use_color` here, but the
             // config has not been loaded yet.
-            if !Self::is_tty() {
+            if !Self::outputs_are_ttys() {
                 term_colors = ColorChoice::Never;
             }
         }
