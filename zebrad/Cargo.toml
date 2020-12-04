@@ -40,6 +40,8 @@ dirs = "3.0.1"
 inferno = { version = "0.10.2", default-features = false }
 atty = "0.2.14"
 
+sentry = "0.19.0"
+
 [build-dependencies]
 vergen = "3.1.0"
 
