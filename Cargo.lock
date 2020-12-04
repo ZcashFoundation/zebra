@@ -2810,18 +2810,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e987b6bf443f4b5b3b6f38704195592cca41c5bb7aedd3c3693c7081f8289860"
 
 [[package]]
-name = "tower-util"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d1093c19826d33807c72511e68f73b4a0469a3f22c2bd5f7d5212178b4b89674"
-dependencies = [
- "futures-core",
- "futures-util",
- "pin-project 0.4.27",
- "tower-service",
-]
-
-[[package]]
 name = "tracing"
 version = "0.1.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3215,7 +3203,6 @@ dependencies = [
  "tower",
  "tower-batch",
  "tower-fallback",
- "tower-util",
  "tracing",
  "tracing-error",
  "tracing-futures",
@@ -3296,7 +3283,6 @@ dependencies = [
  "tokio",
  "tower",
  "tracing",
- "tracing-error",
  "zebra-chain",
  "zebra-test",
 ]

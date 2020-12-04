@@ -22,7 +22,7 @@ thiserror = "1.0.22"
 pretty_assertions = "0.6.1"
 owo-colors = "1.2.0"
 proptest = "0.10.1"
-tempdir = "0.3.7"
 
 [dev-dependencies]
+tempdir = "0.3.7"
 tokio = { version = "0.3.4", features = ["full"] }
