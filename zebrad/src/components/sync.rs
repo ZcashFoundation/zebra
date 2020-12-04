@@ -254,6 +254,8 @@ where
     /// multiple peers
     #[instrument(skip(self))]
     async fn obtain_tips(&mut self) -> Result<(), Report> {
+        panic!("Everything is on fire!");
+
         let block_locator = self
             .state
             .ready_and()
