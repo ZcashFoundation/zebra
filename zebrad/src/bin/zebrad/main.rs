@@ -10,7 +10,10 @@ fn main() {
     if cfg!(feature = "enable-sentry") {
         // The Sentry default config pulls in the DSN from the `SENTRY_DSN`
         // environment variable.
-        let _guard = sentry::init(());
+        let _guard = sentry::init(sentry::ClientOptions {
+            debug: true,
+            ..Default::default()
+        });
     }
 
     abscissa_core::boot(&APPLICATION);
