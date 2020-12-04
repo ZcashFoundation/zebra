@@ -29,7 +29,7 @@ But you'll probably get the best results with a recent Ubuntu Linux, or the othe
 
 ### Go/No-Go Status: 🛑
 
-_Last updated: November 30 2020_
+_Last updated: December 4 2020_
 
 - `zebrad` Functionality
     - `zebrad` can sync to mainnet tip
