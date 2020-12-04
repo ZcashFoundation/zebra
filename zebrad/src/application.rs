@@ -45,7 +45,8 @@ pub struct ZebradApp {
 }
 
 impl ZebradApp {
-    fn is_tty() -> bool {
+    /// Are standard output and standard error both connected to ttys?
+    fn outputs_are_ttys() -> bool {
         atty::is(atty::Stream::Stdout) && atty::is(atty::Stream::Stderr)
     }
 
