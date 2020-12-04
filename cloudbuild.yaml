@@ -1,6 +1,8 @@
 steps:
 - name: 'gcr.io/cloud-builders/docker'
   args: ['build',
+        '--build-arg',
+         'SHORT_SHA=$SHORT_SHA',
          '--build-arg',
          'checkpoint_sync=${_CHECKPOINT_SYNC}',
          '--build-arg',

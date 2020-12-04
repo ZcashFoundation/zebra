@@ -7,6 +7,9 @@ RUN apt-get update && \
 RUN mkdir /zebra
 WORKDIR /zebra
 
+ARG SHORT_SHA
+ENV SHORT_SHA $SHORT_SHA
+
 ENV RUST_BACKTRACE full
 ENV CARGO_HOME /zebra/.cargo/
 
