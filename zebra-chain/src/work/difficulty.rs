@@ -63,8 +63,8 @@ pub struct CompactDifficulty(pub(crate) u32);
 
 impl fmt::Debug for CompactDifficulty {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        // There isn't a standard way to represent alternate formats for the
-        // same value.
+        // There isn't a standard way to show different representations of the
+        // same value
         f.debug_tuple("CompactDifficulty")
             // Use hex, because it's a float
             .field(&format_args!("{:#010x}", self.0))
@@ -139,8 +139,8 @@ impl Work {
 
 impl fmt::Debug for Work {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        // There isn't a standard way to represent alternate formats for the
-        // same value.
+        // There isn't a standard way to show different representations of the
+        // same value
         f.debug_tuple("Work")
             // Use hex, because expanded difficulty is in hex.
             .field(&format_args!("{:#x}", self.0))
