@@ -25,4 +25,4 @@ proptest = "0.10.1"
 tempdir = "0.3.7"
 
 [dev-dependencies]
-tokio = { version = "0.3", features = ["full"] }
+tokio = { version = "0.3.4", features = ["full"] }
