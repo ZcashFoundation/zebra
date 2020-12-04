@@ -145,7 +145,7 @@ impl Application for ZebradApp {
 
         let config = command.process_config(config)?;
 
-        let theme = if Self::is_tty() && config.tracing.use_color {
+        let theme = if Self::outputs_are_ttys() && config.tracing.use_color {
             color_eyre::config::Theme::dark()
         } else {
             color_eyre::config::Theme::new()
