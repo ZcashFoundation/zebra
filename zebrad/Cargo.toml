@@ -21,7 +21,7 @@ rand = "0.7"
 
 hyper = { version = "0.14.0-dev", features = ["full"] }
 futures = "0.3"
-tokio = { version = "0.3", features = ["time", "rt-multi-thread", "stream", "macros", "tracing", "signal"] }
+tokio = { version = "0.3.4", features = ["time", "rt-multi-thread", "stream", "macros", "tracing", "signal"] }
 tower = { version = "0.4", features = ["hedge", "limit"] }
 pin-project = "0.4.23"
 
