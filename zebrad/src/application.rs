@@ -45,6 +45,11 @@ pub struct ZebradApp {
 }
 
 impl ZebradApp {
+    /// Are standard output and standard error both connected to ttys?
+    fn outputs_are_ttys() -> bool {
+        atty::is(atty::Stream::Stdout) && atty::is(atty::Stream::Stderr)
+    }
+
     pub fn git_commit() -> &'static str {
         const GIT_COMMIT_VERGEN: &str = env!("VERGEN_SHA_SHORT");
         const GIT_COMMIT_GCLOUD: Option<&str> = option_env!("SHORT_SHA");
@@ -109,29 +114,11 @@ impl Application for ZebradApp {
             //
             // We'd also like to check `config.tracing.use_color` here, but the
             // config has not been loaded yet.
-            if !atty::is(atty::Stream::Stdout) || !atty::is(atty::Stream::Stderr) {
+            if !Self::outputs_are_ttys() {
                 term_colors = ColorChoice::Never;
             }
         }
         let terminal = Terminal::new(term_colors);
-
-        // This MUST happen after `Terminal::new` to ensure our preferred panic
-        // handler is the last one installed
-        //
-        // color_eyre always uses color, but that's an issue we want to solve upstream
-        // (color_backtrace automatically disables color if stderr is a file)
-        color_eyre::config::HookBuilder::default()
-            .issue_url(concat!(env!("CARGO_PKG_REPOSITORY"), "/issues/new"))
-            .add_issue_metadata("version", env!("CARGO_PKG_VERSION"))
-            .add_issue_metadata("git commit", Self::git_commit())
-            .issue_filter(|kind| match kind {
-                color_eyre::ErrorKind::NonRecoverable(_) => true,
-                color_eyre::ErrorKind::Recoverable(error) => {
-                    !error.is::<tower::timeout::error::Elapsed>()
-                }
-            })
-            .install()
-            .unwrap();
 
         Ok(vec![Box::new(terminal)])
     }
@@ -157,6 +144,29 @@ impl Application for ZebradApp {
             .unwrap_or_default();
 
         let config = command.process_config(config)?;
+
+        let theme = if Self::outputs_are_ttys() && config.tracing.use_color {
+            color_eyre::config::Theme::dark()
+        } else {
+            color_eyre::config::Theme::new()
+        };
+
+        // This MUST happen after `Terminal::new` to ensure our preferred panic
+        // handler is the last one installed
+        color_eyre::config::HookBuilder::default()
+            .theme(theme)
+            .issue_url(concat!(env!("CARGO_PKG_REPOSITORY"), "/issues/new"))
+            .add_issue_metadata("version", env!("CARGO_PKG_VERSION"))
+            .add_issue_metadata("git commit", Self::git_commit())
+            .issue_filter(|kind| match kind {
+                color_eyre::ErrorKind::NonRecoverable(_) => true,
+                color_eyre::ErrorKind::Recoverable(error) => {
+                    !error.is::<tower::timeout::error::Elapsed>()
+                }
+            })
+            .install()
+            .unwrap();
+
         self.config = Some(config);
 
         let cfg_ref = self
