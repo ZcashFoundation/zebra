@@ -29,7 +29,7 @@ But you'll probably get the best results with a recent Ubuntu Linux, or the othe
 
 ### Go/No-Go Status: 🛑
 
-_Last updated: November 30 2020_
+_Last updated: December 4 2020_
 
 - `zebrad` Functionality
     - `zebrad` can sync to mainnet tip
@@ -48,11 +48,13 @@ _Last updated: November 30 2020_
         - ✅  Unit tests pass reliably
         - ✅  Property tests pass reliably
         - ⚠️ Acceptance tests pass reliably
+    - ✅ Each Zebra crate [builds individually](https://github.com/ZcashFoundation/zebra/issues/1364)
 - Implementation and Launch
     - 🛑 All [release blocker bugs](https://github.com/ZcashFoundation/zebra/issues?q=is%3Aopen+is%3Aissue+milestone%3A%22First+Alpha+Release%22+label%3AC-bug) have been fixed
     - ✅ Users can access the documentation to deploy `zebrad` nodes
 - User Experience
     - ⚠️ Build completes within 30 minutes in Zebra's CI
+        - ⚠️ Unused dependencies have been removed (use `cargo-udeps`)
     - ✅ `zebrad` executes normally
         - ✅ `zebrad`'s default logging works reasonably well in a terminal
         - ✅ panics, error logs, and warning logs are rare on mainnet
