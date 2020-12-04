@@ -1,7 +1,6 @@
 name: Manual Deploy
 
 on:
-  push:
   workflow_dispatch:
     inputs:
       network:
