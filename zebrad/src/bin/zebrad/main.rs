@@ -12,13 +12,13 @@ fn main() {
 
         // The Sentry default config pulls in the DSN from the `SENTRY_DSN`
         // environment variable.
-        let _guard = sentry::init(
+        std::mem::forget(sentry::init(
             sentry::ClientOptions {
                 debug: true,
                 ..Default::default()
             }
             .add_integration(tracing_integration),
-        );
+        ));
     }
 
     abscissa_core::boot(&APPLICATION);
