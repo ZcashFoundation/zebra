@@ -8,16 +8,16 @@
 
 ## Alpha Release Details
 
-Our first alpha release is planned for the December 8th, 2020. Zebra's
-architecture is mostly filled out but we're missing most of the validation
-logic. Right now we only support syncing and storing the block chain and a
+Our first alpha release is planned for December 8th, 2020. Zebra's
+architecture is mostly filled out but most of the validation logic is incomplete. 
+Right now we only support syncing and storing the block chain and a
 few critical consensus checks. We do validate proof of work and bitcoin
 merkle roots, so we shouldn't diverge from zcashd without expensive work
-being done to mislead zebra. This alpha release is aimed at establishing our
+being done to mislead zebrad. This alpha release is aimed at establishing our
 release process, support process, and ironing out bugs in the supporting
 storage and networking code.
 
-If you're interested in testing out zebra please feel free, but keep in mind
+If you're interested in testing out zebrad please feel free, but keep in mind
 that there is a lot of key functionality still missing.
 
 ### System Requirements
