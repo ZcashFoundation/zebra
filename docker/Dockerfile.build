@@ -18,7 +18,7 @@ RUN rustc -V; cargo -V; rustup -V
 
 COPY . .
 
-RUN cargo test --all --release; cd zebrad/; cargo build --release --features enable-sentry
+RUN cd zebrad/; cargo build --release --features enable-sentry
 
 
 # Runner image
