@@ -26,7 +26,7 @@ The goals of this release are to:
 
 Run `cargo ...` **TODO**
 
-If you're interested in testing out zebrad please feel free, but keep in mind
+If you're interested in testing out `zebrad` please feel free, but keep in mind
 that there is a lot of key functionality still missing.
 
 ### System Requirements
@@ -49,7 +49,7 @@ Proof of Work:
 - validate transaction merkle roots
 
 Validating proof of work increases the cost of creating a consensus split
-between Zebra and `zcashd`.
+between `zebrad` and `zcashd`.
 
 This release also implements some other Zcash consensus rules, to check that
 Zebra's [validation architecture](#architecture) supports future work on a
@@ -97,7 +97,7 @@ private APIs.
 Unlike `zcashd`, which originated as a Bitcoin Core fork and inherited its
 monolithic architecture, Zebra has a modular, library-first design, with the
 intent that each component can be independently reused outside of the `zebrad`
-fullnode.  For instance, the `zebra-network` crate containing the network stack
+full node.  For instance, the `zebra-network` crate containing the network stack
 can also be used to implement anonymous transaction relay, network crawlers, or
 other functionality, without requiring a full node.
 
