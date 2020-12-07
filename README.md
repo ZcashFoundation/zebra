@@ -84,7 +84,7 @@ There are a few bugs in the Zebra alpha release that we're still working on
 fixing:
 - [Occasional panics in the `tokio` time wheel implementation #1452](https://github.com/ZcashFoundation/zebra/issues/1452)
 - [Peer connections sometimes fail permanently #1435](https://github.com/ZcashFoundation/zebra/issues/1435)
-  - these permanent failures can happen after a network disconnection, sleep, or peer disconnection
+  - these permanent failures can happen after a network disconnection, sleep, or individual peer disconnections
 
 ## Documentation
 
