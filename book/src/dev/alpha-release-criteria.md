@@ -2,16 +2,15 @@
 
 ## Alpha Release
 
-In the first alpha release, we want Zebra to participate in the network and replicate the Zcash chain state. We also want to validate proof of work and the transaction merkle tree, and serve blocks to peers.
+In the first alpha release, we want Zebra to participate in the network and replicate the Zcash chain state.
+We also want to validate proof of work and the transaction merkle tree, and serve blocks to peers.
 
 ### System Requirements
 
-Our CI tests that Zebra builds, passes its tests, and syncs to tip on the following configurations:
-* Ubuntu Linux ...
+Our CI tests that Zebra builds, passes its tests, and syncs on recent Ubuntu Linux, macOS, and Windows.
 
-Our CI tests that Zebra builds and passes its tests on the following configurations:
-* recent macOS ...
-* recent Windows ...
+See the [README](https://github.com/ZcashFoundation/zebra/blob/main/README.md#system-requirements)
+for specific system requirements.
 
 ### Build Requirements
 
