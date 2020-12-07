@@ -162,6 +162,8 @@ impl Application for ZebradApp {
                 color_eyre::ErrorKind::NonRecoverable(_) => true,
                 color_eyre::ErrorKind::Recoverable(error) => {
                     !error.is::<tower::timeout::error::Elapsed>()
+                        && !error.is::<tokio::time::error::Elapsed>()
+                        && !error.to_string().contains("timed out")
                 }
             })
             .install()
