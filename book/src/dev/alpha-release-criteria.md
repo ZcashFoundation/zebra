@@ -53,6 +53,7 @@ _Last updated: December 4 2020_
 - Implementation and Launch
     - 🛑 All [release blocker bugs](https://github.com/ZcashFoundation/zebra/issues?q=is%3Aopen+is%3Aissue+milestone%3A%22First+Alpha+Release%22+label%3AC-bug) have been fixed
     - ✅ The list of known serious issues is up to date
+    - ⚠️ The Zebra crate versions are up to date
     - ✅ Users can access the documentation to deploy `zebrad` nodes
 - User Experience
     - ⚠️ Build completes within 30 minutes in Zebra's CI
