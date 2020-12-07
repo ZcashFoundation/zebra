@@ -314,9 +314,10 @@ where
                 let _ = demand_tx.try_send(());
             }
             Right((Some(Ok(change)), _)) => {
-                // in fact all changes are Insert so this branch is always taken
                 if let Change::Insert(ref addr, _) = change {
                     debug!(candidate.addr = ?addr, "successfully dialed new peer");
+                } else {
+                    unreachable!("unexpected handshake result: all changes should be Insert");
                 }
                 success_tx.send(Ok(change)).await?;
             }
@@ -328,9 +329,18 @@ where
                 // turned into a connection, so add it back:
                 let _ = demand_tx.try_send(());
             }
-            // If we don't match one of these patterns, shutdown.
-            _ => break,
+            // We don't expect to see these patterns during normal operation
+            Left((Left((None, _)), _)) => {
+                unreachable!("demand_rx never fails, because we hold demand_tx");
+            }
+            Left((Right((None, _)), _)) => {
+                unreachable!("crawl_timer never terminates");
+            }
+            Right((None, _)) => {
+                unreachable!(
+                    "handshakes never terminates, because it contains a future that never resolves"
+                );
+            }
         }
     }
-    Ok(())
 }
