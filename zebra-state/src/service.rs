@@ -268,7 +268,6 @@ impl StateService {
     }
 
     /// Return the height for the block at `hash` in any chain.
-    #[allow(dead_code)]
     pub fn any_height_by_hash(&self, hash: block::Hash) -> Option<block::Height> {
         self.mem
             .any_height_by_hash(hash)
@@ -516,7 +515,7 @@ impl ExactSizeIterator for Iter<'_> {
         match self.state {
             IterState::NonFinalized(hash) => self
                 .service
-                .best_height_by_hash(hash)
+                .any_height_by_hash(hash)
                 .map(|height| (height.0 + 1) as _)
                 .unwrap_or(0),
             IterState::Finalized(height) => (height.0 + 1) as _,
