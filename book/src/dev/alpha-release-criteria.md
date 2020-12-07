@@ -38,9 +38,10 @@ _Last updated: December 4 2020_
     - `zebrad` can stay within a few blocks of the mainnet tip after the initial sync
         - ⚠️ under excellent network conditions
         - _reasonable and sub-optimal network conditions are not yet supported_
-    - ⚠️  `zebrad` can validate proof of work
-    - 🛑 `zebrad` can validate the transaction merkle tree
+    - ✅  `zebrad` can validate proof of work
+    - ✅ `zebrad` can validate the transaction merkle tree
     - ⚠️ `zebrad` can serve blocks to peers
+    - ✅ The hard-coded [checkpoint lists](https://github.com/ZcashFoundation/zebra/tree/main/zebra-consensus/src/checkpoint) are up-to-date
 - `zebrad` Performance
     - ⚠️ `zebrad` functionality works on platforms that meet its system requirements
 - Testing
@@ -51,10 +52,11 @@ _Last updated: December 4 2020_
     - ✅ Each Zebra crate [builds individually](https://github.com/ZcashFoundation/zebra/issues/1364)
 - Implementation and Launch
     - 🛑 All [release blocker bugs](https://github.com/ZcashFoundation/zebra/issues?q=is%3Aopen+is%3Aissue+milestone%3A%22First+Alpha+Release%22+label%3AC-bug) have been fixed
+    - ✅ The list of known serious issues is up to date
     - ✅ Users can access the documentation to deploy `zebrad` nodes
 - User Experience
     - ⚠️ Build completes within 30 minutes in Zebra's CI
-        - ⚠️ Unused dependencies have been removed (use `cargo-udeps`)
+        - ✅ Unused dependencies have been removed (use `cargo-udeps`)
     - ✅ `zebrad` executes normally
         - ✅ `zebrad`'s default logging works reasonably well in a terminal
         - ✅ panics, error logs, and warning logs are rare on mainnet
