@@ -27,6 +27,7 @@ Currently, Zebra does not validate all the Zcash consensus rules. It may be
 unreliable on Testnet, and under less-than-perfect network conditions. See
 our [current features](#current-features) and [roadmap](future-work) for
 details.
+
 ### Getting Started
 
 Run `cargo ...` **TODO**
