@@ -57,7 +57,8 @@ pub const TIMESTAMP_TRUNCATION_SECONDS: i64 = 30 * 60;
 /// This must be a valid [BIP 14] user agent.
 ///
 /// [BIP 14]: https://github.com/bitcoin/bips/blob/master/bip-0014.mediawiki
-pub const USER_AGENT: &str = "/🦓Zebra🦓:3.0.0-alpha.0/";
+// XXX can we generate this from crate metadata?
+pub const USER_AGENT: &str = "/🦓Zebra🦓:1.0.0-alpha.0/";
 
 /// The Zcash network protocol version implemented by this crate, and advertised
 /// during connection setup.
