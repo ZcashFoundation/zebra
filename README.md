@@ -33,8 +33,6 @@ details.
 Building `zebrad` requires [Rust](https://www.rust-lang.org/tools/install),
 [libclang](https://clang.llvm.org/get_started.html), and a C++ compiler.
 
-Running `zebrad` requires a machine with 
-
 #### Detailed Build and Run Instructions
 
 1. Install [`cargo` and `rustc`](https://www.rust-lang.org/tools/install)
