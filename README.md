@@ -115,7 +115,25 @@ full validating node:
 - transaction scripts (incomplete)
 - batch verification (incomplete)
 
-### Future Work
+### Dependencies
+
+Zebra depends on a number of pure Rust crates, and some Rust/C++ crates:
+- [rocksdb](https://crates.io/crates/rocksdb)
+- [zcash_script](https://crates.io/crates/zcash_script)
+
+### Known Issues
+
+There are a few bugs in the Zebra alpha release that we're still working on
+fixing:
+- [Occasional panics in the `tokio` time wheel implementation #1452](https://github.com/ZcashFoundation/zebra/issues/1452)
+  - workaround: restart `zebrad`
+- [Peer connections sometimes fail permanently #1435](https://github.com/ZcashFoundation/zebra/issues/1435)
+  - these permanent failures can happen after a network disconnection, sleep, or individual peer disconnections
+  - workaround: use `Control-C` to exit `zebrad`, and then restart `zebrad`
+- [Duplicate block errors #1372](https://github.com/ZcashFoundation/zebra/issues/1372)
+  - these errors can be ignored, unless they happen frequently
+
+## Future Work
 
 In 2021, we intend to add RPC support and wallet integration.  This phased
 approach allows us to test Zebra's independent implementation of the consensus
@@ -132,24 +150,6 @@ Performance and Reliability:
 - reliable syncing under poor network conditions
 - batch verification
 - performance tuning
-
-### Known Issues
-
-There are a few bugs in the Zebra alpha release that we're still working on
-fixing:
-- [Occasional panics in the `tokio` time wheel implementation #1452](https://github.com/ZcashFoundation/zebra/issues/1452)
-  - workaround: restart `zebrad`
-- [Peer connections sometimes fail permanently #1435](https://github.com/ZcashFoundation/zebra/issues/1435)
-  - these permanent failures can happen after a network disconnection, sleep, or individual peer disconnections
-  - workaround: use `Control-C` to exit `zebrad`, and then restart `zebrad`
-- [Duplicate block errors #1372](https://github.com/ZcashFoundation/zebra/issues/1372)
-  - these errors can be ignored, unless they happen frequently
-
-### Dependencies
-
-Zebra depends on a number of pure Rust crates, and some Rust/C++ crates:
-- rocksdb: check out the [rocksdb dependencies](https://crates.io/crates/rocksdb) and
-- zcash_script: check out the [zcash_script dependencies](https://crates.io/crates/zcash_script)
 
 ## Documentation
 
