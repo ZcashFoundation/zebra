@@ -48,9 +48,10 @@ that there is a lot of key functionality still missing.
 #### Build Troubleshooting
 
 If you're having trouble with:
-- libclang: check out the [clang-sys documentation](https://github.com/KyleMayes/clang-sys#dependencies)
-- g++ or MSVC++: try using clang or Xcode instead
-- rustc: use rustc 1.48 or later
+- **dependencies:** use `cargo install --locked ...` to build with the exact crate versions used for the release
+- **libclang:** check out the [clang-sys documentation](https://github.com/KyleMayes/clang-sys#dependencies)
+- **g++ or MSVC++:** try using clang or Xcode instead
+- **rustc:** use rustc 1.48 or later
   - Zebra's minimum supported Rust version (MSRV) may change in future release
 
 ### System Requirements
