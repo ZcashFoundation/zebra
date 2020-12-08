@@ -153,7 +153,7 @@ impl Application for ZebradApp {
 
         // This MUST happen after `Terminal::new` to ensure our preferred panic
         // handler is the last one installed
-        color_eyre::config::HookBuilder::default()
+        let builder = color_eyre::config::HookBuilder::default()
             .theme(theme)
             .issue_url(concat!(env!("CARGO_PKG_REPOSITORY"), "/issues/new"))
             .add_issue_metadata("version", env!("CARGO_PKG_VERSION"))
@@ -165,9 +165,36 @@ impl Application for ZebradApp {
                         && !error.is::<tokio::time::error::Elapsed>()
                         && !error.to_string().contains("timed out")
                 }
-            })
-            .install()
-            .unwrap();
+            });
+
+        let (panic_hook, eyre_hook) = builder.into_hooks();
+        eyre_hook.install().unwrap();
+
+        // The Sentry default config pulls in the DSN from the `SENTRY_DSN`
+        // environment variable.
+        #[cfg(feature = "enable-sentry")]
+        let guard = sentry::init(
+            sentry::ClientOptions {
+                debug: true,
+                ..Default::default()
+            }
+            .add_integration(sentry_tracing::TracingIntegration::default()),
+        );
+
+        std::panic::set_hook(Box::new(move |panic_info| {
+            let panic_report = panic_hook.panic_report(panic_info);
+            eprintln!("{}", panic_report);
+
+            #[cfg(feature = "enable-sentry")]
+            {
+                let event = crate::sentry::panic_event_from(panic_report);
+                sentry::capture_event(event);
+
+                if !guard.close(None) {
+                    warn!("unable to flush sentry events during panic");
+                }
+            }
+        }));
 
         self.config = Some(config);
 
