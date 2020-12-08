@@ -10,9 +10,10 @@ in
     name = "zebra_shell";
     buildInputs = [
       cacert
-      nixpkgs.latest.rustChannels.stable.rust
-      # for a specific Rust version
+      # stable updates automatically, select a specific Rust version using:
       #(rustChannelOf { channel = "1.48"; }).rust
+      nixpkgs.latest.rustChannels.stable.rust
+      # zebra can use any C++ compiler
       clang
       llvmPackages.libclang
     ];
