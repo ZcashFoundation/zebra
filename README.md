@@ -118,7 +118,7 @@ full validating node:
 
 ### Dependencies
 
-Zebra depends on a number of pure Rust crates, and some Rust/C++ crates:
+Zebra primarily depends on pure Rust crates, and some Rust/C++ crates:
 - [rocksdb](https://crates.io/crates/rocksdb)
 - [zcash_script](https://crates.io/crates/zcash_script)
 
