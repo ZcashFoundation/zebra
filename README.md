@@ -35,7 +35,8 @@ Building `zebrad` requires [Rust](https://www.rust-lang.org/tools/install),
 
 #### Detailed Build and Run Instructions
 
-1. Install [`cargo` and `rustc`](https://www.rust-lang.org/tools/install)
+1. Install [`cargo` and `rustc`](https://www.rust-lang.org/tools/install). 
+     - Using `rustup` by default installs the stable Rust toolchain, which is what `zebrad` targets.
 2. Install Zebra's build dependencies:
      - **libclang:** the `libclang`, `libclang-dev`, `llvm`, or `llvm-dev` packages
      - **a C++ compiler:** use `clang`, `g++`, `Xcode`, `MSVC`, or similar
