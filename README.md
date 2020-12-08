@@ -36,16 +36,25 @@ details.
 #### Detailed Build and Run Instructions
 
 1. Install `cargo` and `rustc`
+     - most people use [rustup](https://rustup.rs/) or their package manager
 2. Install the dependencies for the
    [rocksdb](https://crates.io/crates/rocksdb) and
    [zcash_script](https://crates.io/crates/zcash_script) Rust crates, including:
-     - libclang: different distributions call it `libclang`, `libclang-dev`, `llvm`, or `llvm-dev` 
-     - a C++ compiler: `clang++`, `g++`, `Xcode`, `MSVC++`, or your platform's `cc`
+     - **libclang:** `libclang`, `libclang-dev`, `llvm`, or `llvm-dev` 
+     - **a C++ compiler:** `clang`, `g++`, `Xcode`, `MSVC`, or similar
 3. Run `cargo install --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-alpha.0 zebrad`
 4. Run `zebrad start`
 
 If you're interested in testing out `zebrad` please feel free, but keep in mind
 that there is a lot of key functionality still missing.
+
+#### Build Troubleshooting
+
+If you're having trouble with:
+- libclang: check out the [clang-sys documentation](https://github.com/KyleMayes/clang-sys#dependencies)
+- g++ or MSVC++: try using clang or Xcode instead
+- rustc: use rustc 1.48 or later
+  - Zebra's minimum supported Rust version (MSRV) may change in future release
 
 ### System Requirements
 
