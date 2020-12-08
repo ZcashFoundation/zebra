@@ -94,8 +94,8 @@ fixing:
 - [Peer connections sometimes fail permanently #1435](https://github.com/ZcashFoundation/zebra/issues/1435)
   - these permanent failures can happen after a network disconnection, sleep, or individual peer disconnections
   - workaround: use `Control-C` to exit `zebrad`, and then restart `zebrad`
-  - [Duplicate block errors #1372](https://github.com/ZcashFoundation/zebra/issues/1372)
-    - these errors can be ignored, unless they happen frequently
+- [Duplicate block errors #1372](https://github.com/ZcashFoundation/zebra/issues/1372)
+  - these errors can be ignored, unless they happen frequently
 
 ## Documentation
 
