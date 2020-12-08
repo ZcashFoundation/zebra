@@ -19,13 +19,13 @@ Our first alpha release is planned for December 8th, 2020.
 
 The goals of this release are to:
 - participate in the Zcash network,
-- replicate the Zcash chain state, and
-- implement the Zcash proof of work consensus rules,
+- replicate the Zcash chain state,
+- implement the Zcash proof of work consensus rules, and
 - sync on Mainnet under excellent network conditions.
 
 Currently, Zebra does not validate all the Zcash consensus rules. It may be
 unreliable on Testnet, and under less-than-perfect network conditions. See
-our [current features](#current-features) and [roadmap](future-work) for
+our [current features](#current-features) and [roadmap](#future-work) for
 details.
 
 ### Getting Started
