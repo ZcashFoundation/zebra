@@ -30,8 +30,10 @@ details.
 
 ### Getting Started
 
-`zebrad` requires [Rust](https://www.rust-lang.org/tools/install),
+Building `zebrad` requires [Rust](https://www.rust-lang.org/tools/install),
 [libclang](https://clang.llvm.org/get_started.html), and a C++ compiler.
+
+Running `zebrad` requires a machine with 
 
 #### Detailed Build and Run Instructions
 
@@ -73,6 +75,16 @@ We usually run `zebrad` on systems with:
 - 4+ CPU cores
 - 16+ GB RAM
 - 50GB+ available disk space for finalized state
+- 100+ Mbps network connections
+
+`zebrad` might build and run fine on smaller and slower systems - we haven't
+tested its exact limits yet.
+
+### Network Usage
+
+`zebrad`'s typical network usage is:
+- initial sync: 30 GB download
+- ongoing updates: 10-50 MB upload and download per day, depending on peer requests
 
 The major constraint we've found on `zebrad` performance is the network weather,
 especially the ability to make good connections to other Zcash network peers.
