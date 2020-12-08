@@ -30,14 +30,19 @@ details.
 
 ### Getting Started
 
+`zebrad` requires [Rust](https://www.rust-lang.org/tools/install)
+
+Depending on your platform, you may also need to install LLVM and clang, as we
+do on Debian.
+
 Run `cargo install --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-alpha.0 zebrad`
 
-If you're interested in testing out `zebrad` please feel free, but keep in
-mind that there is a lot of key functionality still missing.
+If you're interested in testing out `zebrad` please feel free, but keep in mind
+that there is a lot of key functionality still missing.
 
 ### System Requirements
 
-We usually build zebrad on systems with:
+We usually build `zebrad` on systems with:
 - 2+ CPU cores
 - 7+ GB RAM
 - 14+ GB of disk space
@@ -45,12 +50,18 @@ We usually build zebrad on systems with:
 On many-core machines (like, 32-core) the build is very fast; on 2-core machines
 it's less fast.
 
-We usually run zebrad on systems with:
+We continuously test that our builds and tests pass on:
+- Windows Server 2019
+- macOS Big Sur 11.0
+- Ubuntu 18.04 / the latest LTS
+- Debian Buster
+
+We usually run `zebrad` on systems with:
 - 4+ CPU cores
 - 16+ GB RAM
 - 50GB+ available disk space for finalized state
 
-The major constraint we've found on zebrad performance is the network weather,
+The major constraint we've found on `zebrad` performance is the network weather,
 especially the ability to make good connections to other Zcash network peers.
 
 ### Current Features
