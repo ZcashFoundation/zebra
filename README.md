@@ -30,10 +30,10 @@ details.
 
 ### Getting Started
 
-Run `cargo ...` **TODO**
+Run `cargo install --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-alpha.0 zebrad`
 
-If you're interested in testing out `zebrad` please feel free, but keep in mind
-that there is a lot of key functionality still missing.
+If you're interested in testing out `zebrad` please feel free, but keep in
+mind that there is a lot of key functionality still missing.
 
 ### System Requirements
 
