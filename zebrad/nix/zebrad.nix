@@ -15,6 +15,7 @@ in
       nixpkgs.latest.rustChannels.stable.rust
       # zebra can use any C++ compiler
       clang
+      # bindgen requires libclang
       llvmPackages.libclang
     ];
 
