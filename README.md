@@ -30,12 +30,19 @@ details.
 
 ### Getting Started
 
-`zebrad` requires [Rust](https://www.rust-lang.org/tools/install)
+`zebrad` requires [Rust](https://www.rust-lang.org/tools/install),
+[libclang](https://clang.llvm.org/), and a C++ compiler.
 
-Depending on your platform, you may also need to install LLVM and clang, as we
-do on Debian.
+#### Detailed Build and Run Instructions
 
-Run `cargo install --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-alpha.0 zebrad`
+1. Install `cargo` and `rustc`
+2. Install the dependencies for the
+   [rocksdb](https://crates.io/crates/rocksdb) and
+   [zcash_script](https://crates.io/crates/zcash_script) Rust crates, including:
+     - libclang: different distributions call it `libclang`, `libclang-dev`, `llvm`, or `llvm-dev` 
+     - a C++ compiler: `clang++`, `g++`, `Xcode`, `MSVC++`, or your platform's `cc`
+3. Run `cargo install --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-alpha.0 zebrad`
+4. Run `zebrad start`
 
 If you're interested in testing out `zebrad` please feel free, but keep in mind
 that there is a lot of key functionality still missing.
