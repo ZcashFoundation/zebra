@@ -37,7 +37,21 @@ mind that there is a lot of key functionality still missing.
 
 ### System Requirements
 
-**TBD**
+We usually build zebrad on systems with:
+- 2+ CPU cores
+- 7+ GB RAM
+- 14+ GB of disk space
+
+On many-core machines (like, 32-core) the build is very fast; on 2-core machines
+it's less fast.
+
+We usually run zebrad on systems with:
+- 4+ CPU cores
+- 16+ GB RAM
+- 50GB+ available disk space for finalized state
+
+The major constraint we've found on zebrad performance is the network weather,
+especially the ability to make good connections to other Zcash network peers.
 
 ### Current Features
 
