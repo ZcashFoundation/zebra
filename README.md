@@ -31,17 +31,14 @@ details.
 ### Getting Started
 
 `zebrad` requires [Rust](https://www.rust-lang.org/tools/install),
-[libclang](https://clang.llvm.org/), and a C++ compiler.
+[libclang](https://clang.llvm.org/get_started.html), and a C++ compiler.
 
 #### Detailed Build and Run Instructions
 
-1. Install `cargo` and `rustc`
-     - most people use [rustup](https://rustup.rs/) or their package manager
-2. Install the dependencies for the
-   [rocksdb](https://crates.io/crates/rocksdb) and
-   [zcash_script](https://crates.io/crates/zcash_script) Rust crates, including:
-     - **libclang:** `libclang`, `libclang-dev`, `llvm`, or `llvm-dev` 
-     - **a C++ compiler:** `clang`, `g++`, `Xcode`, `MSVC`, or similar
+1. Install [`cargo` and `rustc`](https://www.rust-lang.org/tools/install)
+2. Install Zebra's build dependencies:
+     - **libclang:** the `libclang`, `libclang-dev`, `llvm`, or `llvm-dev` packages
+     - **a C++ compiler:** use `clang`, `g++`, `Xcode`, `MSVC`, or similar
 3. Run `cargo install --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-alpha.0 zebrad`
 4. Run `zebrad start`
 
@@ -137,6 +134,12 @@ fixing:
   - workaround: use `Control-C` to exit `zebrad`, and then restart `zebrad`
 - [Duplicate block errors #1372](https://github.com/ZcashFoundation/zebra/issues/1372)
   - these errors can be ignored, unless they happen frequently
+
+### Dependencies
+
+Zebra depends on a number of pure Rust crates, and some Rust/C++ crates:
+- rocksdb: check out the [rocksdb dependencies](https://crates.io/crates/rocksdb) and
+- zcash_script: check out the [zcash_script dependencies](https://crates.io/crates/zcash_script)
 
 ## Documentation
 
