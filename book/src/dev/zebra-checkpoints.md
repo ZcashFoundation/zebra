@@ -5,4 +5,4 @@
 Developers should run this tool every few months to add new checkpoints for the `checkpoint_sync = true` mode.
 (By default, Zebra syncs up to Sapling using checkpoints. These checkpoints don't need to be updated.)
 
-For ore information on how to run this program visit [Zebra checkpoints document](https://github.com/ZcashFoundation/zebra/tree/main/zebra-consensus/src/checkpoint/README.md)
+For more information on how to run this program visit [Zebra checkpoints document](https://github.com/ZcashFoundation/zebra/tree/main/zebra-consensus/src/checkpoint/README.md)
