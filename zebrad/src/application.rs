@@ -174,6 +174,7 @@ impl Application for ZebradApp {
         let guard = sentry::init(
             sentry::ClientOptions {
                 debug: true,
+                release: Some(Self::git_commit().into()),
                 ..Default::default()
             }
             .add_integration(sentry_tracing::TracingIntegration::default()),
