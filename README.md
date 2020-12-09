@@ -30,14 +30,64 @@ details.
 
 ### Getting Started
 
-Run `cargo ...` **TODO**
+Building `zebrad` requires [Rust](https://www.rust-lang.org/tools/install),
+[libclang](https://clang.llvm.org/get_started.html), and a C++ compiler.
+
+#### Detailed Build and Run Instructions
+
+1. Install [`cargo` and `rustc`](https://www.rust-lang.org/tools/install). 
+     - Using `rustup` installs the stable Rust toolchain, which `zebrad` targets.
+2. Install Zebra's build dependencies:
+     - **libclang:** the `libclang`, `libclang-dev`, `llvm`, or `llvm-dev` packages, depending on your package manager
+     - **a C++ compiler:** use `clang`, `g++`, `Xcode`, `MSVC`, or similar
+3. Run `cargo install --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-alpha.0 zebrad`
+4. Run `zebrad start`
 
 If you're interested in testing out `zebrad` please feel free, but keep in mind
 that there is a lot of key functionality still missing.
 
+#### Build Troubleshooting
+
+If you're having trouble with:
+- **dependencies:** use `cargo install --locked ...` to build with the exact crate versions used for the release
+- **libclang:** check out the [clang-sys documentation](https://github.com/KyleMayes/clang-sys#dependencies)
+- **g++ or MSVC++:** try using clang or Xcode instead
+- **rustc:** use rustc 1.48 or later
+  - Zebra does not have a minimum supported Rust version (MSRV) policy yet
+
 ### System Requirements
 
-**TBD**
+We usually build `zebrad` on systems with:
+- 2+ CPU cores
+- 7+ GB RAM
+- 14+ GB of disk space
+
+On many-core machines (like, 32-core) the build is very fast; on 2-core machines
+it's less fast.
+
+We continuously test that our builds and tests pass on:
+- Windows Server 2019
+- macOS Big Sur 11.0
+- Ubuntu 18.04 / the latest LTS
+- Debian Buster
+
+We usually run `zebrad` on systems with:
+- 4+ CPU cores
+- 16+ GB RAM
+- 50GB+ available disk space for finalized state
+- 100+ Mbps network connections
+
+`zebrad` might build and run fine on smaller and slower systems - we haven't
+tested its exact limits yet.
+
+### Network Usage
+
+`zebrad`'s typical network usage is:
+- initial sync: 30 GB download
+- ongoing updates: 10-50 MB upload and download per day, depending on peer requests
+
+The major constraint we've found on `zebrad` performance is the network weather,
+especially the ability to make good connections to other Zcash network peers.
 
 ### Current Features
 
@@ -67,7 +117,27 @@ full validating node:
 - transaction scripts (incomplete)
 - batch verification (incomplete)
 
-### Future Work
+### Dependencies
+
+Zebra primarily depends on pure Rust crates, and some Rust/C++ crates:
+- [rocksdb](https://crates.io/crates/rocksdb)
+- [zcash_script](https://crates.io/crates/zcash_script)
+
+### Known Issues
+
+There are a few bugs in the Zebra alpha release that we're still working on
+fixing:
+- [Occasional panics in the `tokio` time wheel implementation #1452](https://github.com/ZcashFoundation/zebra/issues/1452)
+  - workaround: restart `zebrad`
+- [Occasional panics during client requests #1471](https://github.com/ZcashFoundation/zebra/issues/1471)
+  - workaround: restart `zebrad`
+- [Peer connections sometimes fail permanently #1435](https://github.com/ZcashFoundation/zebra/issues/1435)
+  - these permanent failures can happen after a network disconnection, sleep, or individual peer disconnections
+  - workaround: use `Control-C` to exit `zebrad`, and then restart `zebrad`
+- [Duplicate block errors #1372](https://github.com/ZcashFoundation/zebra/issues/1372)
+  - these errors can be ignored, unless they happen frequently
+
+## Future Work
 
 In 2021, we intend to add RPC support and wallet integration.  This phased
 approach allows us to test Zebra's independent implementation of the consensus
@@ -84,18 +154,6 @@ Performance and Reliability:
 - reliable syncing under poor network conditions
 - batch verification
 - performance tuning
-
-### Known Issues
-
-There are a few bugs in the Zebra alpha release that we're still working on
-fixing:
-- [Occasional panics in the `tokio` time wheel implementation #1452](https://github.com/ZcashFoundation/zebra/issues/1452)
-  - workaround: restart `zebrad`
-- [Peer connections sometimes fail permanently #1435](https://github.com/ZcashFoundation/zebra/issues/1435)
-  - these permanent failures can happen after a network disconnection, sleep, or individual peer disconnections
-  - workaround: use `Control-C` to exit `zebrad`, and then restart `zebrad`
-  - [Duplicate block errors #1372](https://github.com/ZcashFoundation/zebra/issues/1372)
-    - these errors can be ignored, unless they happen frequently
 
 ## Documentation
 
