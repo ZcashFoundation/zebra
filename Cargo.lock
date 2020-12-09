@@ -3231,15 +3231,15 @@ dependencies = [
 
 [[package]]
 name = "tokio-util"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "73af76301319bcacf00d26d3c75534ef248dcad7ceaf36d93ec902453c3b1706"
+checksum = "3137de2b078e95274b696cc522e87f22c9a753fe3ef3344116ffb94f104f10a3"
 dependencies = [
  "bytes 0.6.0",
  "futures-core",
  "futures-sink",
  "log",
- "pin-project-lite 0.1.11",
+ "pin-project-lite 0.2.0",
  "tokio 0.3.5",
 ]
 
@@ -3933,7 +3933,7 @@ dependencies = [
  "serde",
  "thiserror",
  "tokio 0.3.5",
- "tokio-util 0.5.0",
+ "tokio-util 0.5.1",
  "tower",
  "tracing",
  "tracing-error",
