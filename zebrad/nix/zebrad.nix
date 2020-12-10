@@ -7,7 +7,7 @@ let
 in
   with nixpkgs;
   stdenv.mkDerivation {
-    name = "zebra_shell";
+    name = "zebrad";
     buildInputs = [
       cacert
       # stable updates automatically, select a specific Rust version using:
@@ -27,19 +27,25 @@ in
 
     shellHook = ''
       # ignore the cargo config in $HOME
-      export CARGO_HOME=$(mktemp -d)
-      # put the targets in a temp dir
-      export CARGO_TARGET_DIR=$(mktemp -d)
+#      export CARGO_HOME=$(mktemp -d)
+      # put the build products in a temp dir
+#      export CARGO_TARGET_DIR=$(mktemp -d)
 
       # branch/tag/ref: use a specific git reference
       #   - required, because cargo defaults to the master branch
       # locked: use the exact versions in Cargo.lock (optional)
       # root/no-track: use a temporary install directory (optional)
       cargo install --git https://github.com/ZcashFoundation/zebra \
-        --branch main \
+        --tag v1.0.0-alpha.0 \
         --locked \
-        --root $(mktemp -d) \
-        --no-track \
         zebrad
+
+# Alternate arguments:
+# use a branch instead
+#        --branch main \
+# install to a temporary directory
+#        --root $(mktemp -d) \
+# don't update the cargo metadata
+#        --no-track \
    '';
   }
