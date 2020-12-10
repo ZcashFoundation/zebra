@@ -4,6 +4,7 @@ Zebra validates pre-Sapling blocks using a list of `Mainnet` and `Testnet` block
 
 - [Mainnet checkpoints](https://github.com/ZcashFoundation/zebra/blob/main/zebra-consensus/src/checkpoint/main-checkpoints.txt)
 - [Testnet checkpoints](https://github.com/ZcashFoundation/zebra/blob/main/zebra-consensus/src/checkpoint/test-checkpoints.txt)
+
 Zebra can also be configured to use these checkpoints after Sapling:
     [consensus]
     checkpoint_sync = true
