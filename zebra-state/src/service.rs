@@ -299,7 +299,7 @@ impl StateService {
     /// Returns `None` if:
     ///   * there is no matching hash in the best chain, or
     ///   * the state is empty.
-    fn find_chain_intersection(&self, known_blocks: Vec<block::Hash>) -> Option<block::Hash> {
+    fn find_best_chain_intersection(&self, known_blocks: Vec<block::Hash>) -> Option<block::Hash> {
         // We can get a block locator request before we have downloaded the genesis block
         self.best_tip()?;
 
@@ -427,7 +427,7 @@ impl StateService {
         stop: Option<block::Hash>,
         max_len: usize,
     ) -> Vec<block::Hash> {
-        let intersection = self.find_chain_intersection(known_blocks);
+        let intersection = self.find_best_chain_intersection(known_blocks);
         self.collect_chain_hashes(intersection, stop, max_len)
     }
 }
