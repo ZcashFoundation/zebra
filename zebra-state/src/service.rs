@@ -186,7 +186,7 @@ impl StateService {
         &mut self,
         prepared: &PreparedBlock,
     ) -> Result<(), ValidateContextError> {
-        let relevant_chain = self.chain(prepared.block.header.previous_block_hash);
+        let relevant_chain = self.any_ancestor_blocks(prepared.block.header.previous_block_hash);
         assert!(relevant_chain.len() >= POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN,
                 "contextual validation requires at least 28 (POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN) blocks");
 
@@ -287,7 +287,7 @@ impl StateService {
     ///
     /// The block identified by `hash` is included in the chain of blocks yielded
     /// by the iterator.
-    pub fn chain(&self, hash: block::Hash) -> Iter<'_> {
+    pub fn any_ancestor_blocks(&self, hash: block::Hash) -> Iter<'_> {
         Iter {
             service: self,
             state: IterState::NonFinalized(hash),
@@ -363,7 +363,7 @@ impl StateService {
 
         // We can use an "any chain" method here, because `final_hash` is in the best chain
         let mut res: Vec<_> = self
-            .chain(final_hash)
+            .any_ancestor_blocks(final_hash)
             .map(|block| block.hash())
             .take_while(|&hash| Some(hash) != intersection)
             .inspect(|hash| {
