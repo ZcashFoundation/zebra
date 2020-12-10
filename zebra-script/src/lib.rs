@@ -100,6 +100,77 @@ fn verify_script(
     }
 }
 
+struct Verifier {
+    precomputed: *mut std::ffi::c_void,
+}
+
+impl Verifier {
+    pub fn new(transaction: Arc<Transaction>) -> Self {
+        let tx_to = transaction
+            .zcash_serialize_to_vec()
+            .expect("serialization into a vec is infallible");
+
+        let tx_to_ptr = tx_to.as_ptr();
+        let tx_to_len = tx_to.len() as u32;
+        let mut err = 0;
+
+        let precomputed = unsafe {
+            zcash_script::zcash_script_new_precomputed_tx(tx_to_ptr, tx_to_len, &mut err)
+        };
+
+        Self { precomputed }
+    }
+
+    pub fn is_valid(
+        &self,
+        branch_id: ConsensusBranchId,
+        (input_index, previous_output): (u32, transparent::Output),
+    ) -> Result<(), Error> {
+        let transparent::Output { value, lock_script } = previous_output;
+        let script_pub_key: &[u8] = lock_script.0.as_ref();
+        let n_in = input_index as _;
+
+        let script_ptr = script_pub_key.as_ptr();
+        let script_len = script_pub_key.len();
+
+        let amount = value.into();
+        let flags = zcash_script::zcash_script_SCRIPT_FLAGS_VERIFY_P2SH
+            | zcash_script::zcash_script_SCRIPT_FLAGS_VERIFY_CHECKLOCKTIMEVERIFY;
+
+        let consensus_branch_id = branch_id.into();
+
+        let mut err = 0;
+
+        let ret = unsafe {
+            zcash_script::zcash_script_verify_precomputed(
+                self.precomputed,
+                n_in,
+                script_ptr,
+                script_len as u32,
+                amount,
+                #[cfg(not(windows))]
+                flags,
+                #[cfg(windows)]
+                flags.try_into().expect("why bindgen whyyy"),
+                consensus_branch_id,
+                &mut err,
+            )
+        };
+
+        if ret == 1 {
+            Ok(())
+        } else {
+            Err(Error::from(err))
+        }
+    }
+}
+
+impl Drop for Verifier {
+    fn drop(&mut self) {
+        unsafe { zcash_script::zcash_script_free_precomputed_tx(self.precomputed) };
+    }
+}
+
 /// Verify a script within a transaction given the corresponding
 /// `transparent::Output` it is spending and the `ConsensusBranchId` of the block
 /// containing the transaction.
@@ -168,6 +239,29 @@ mod tests {
             .expect("Blossom has a ConsensusBranchId");
 
         is_valid(transaction, branch_id, (input_index, output))?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn verify_valid_script_parsed_precomputed() -> Result<()> {
+        zebra_test::init();
+
+        let transaction =
+            SCRIPT_TX.zcash_deserialize_into::<Arc<zebra_chain::transaction::Transaction>>()?;
+        let coin = u64::pow(10, 8);
+        let amount = 212 * coin;
+        let output = transparent::Output {
+            value: amount.try_into()?,
+            lock_script: transparent::Script(SCRIPT_PUBKEY.clone()),
+        };
+        let input_index = 0;
+        let branch_id = Blossom
+            .branch_id()
+            .expect("Blossom has a ConsensusBranchId");
+
+        let verifier = super::Verifier::new(transaction);
+        verifier.is_valid(branch_id, (input_index, output))?;
 
         Ok(())
     }
