@@ -320,7 +320,7 @@ impl StateService {
     ///   * adding `max_len` hashes to the list.
     ///
     /// Returns an empty list if the state is empty.
-    pub fn collect_chain_hashes(
+    pub fn collect_best_chain_hashes(
         &self,
         intersection: Option<block::Hash>,
         stop: Option<block::Hash>,
@@ -428,7 +428,7 @@ impl StateService {
         max_len: usize,
     ) -> Vec<block::Hash> {
         let intersection = self.find_best_chain_intersection(known_blocks);
-        self.collect_chain_hashes(intersection, stop, max_len)
+        self.collect_best_chain_hashes(intersection, stop, max_len)
     }
 }
 
