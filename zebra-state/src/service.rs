@@ -275,7 +275,7 @@ impl StateService {
     }
 
     /// Return the [`Utxo`] pointed to by `outpoint` if it exists in any chain.
-    pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<Utxo> {
+    pub fn any_utxo(&self, outpoint: &transparent::OutPoint) -> Option<Utxo> {
         self.mem
             .utxo(outpoint)
             .or_else(|| self.queued_blocks.utxo(outpoint))
@@ -625,7 +625,7 @@ impl Service<Request> for StateService {
 
                 let fut = self.pending_utxos.queue(outpoint);
 
-                if let Some(utxo) = self.utxo(&outpoint) {
+                if let Some(utxo) = self.any_utxo(&outpoint) {
                     self.pending_utxos.respond(&outpoint, utxo);
                 }
 
