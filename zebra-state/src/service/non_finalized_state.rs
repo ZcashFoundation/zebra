@@ -153,8 +153,8 @@ impl NonFinalizedState {
         None
     }
 
-    /// Returns the `block` with the given hash in the any chain.
-    pub fn block_by_hash(&self, hash: block::Hash) -> Option<Arc<Block>> {
+    /// Returns the `block` with the given hash in any chain.
+    pub fn any_block_by_hash(&self, hash: block::Hash) -> Option<Arc<Block>> {
         for chain in self.chain_set.iter().rev() {
             if let Some(prepared) = chain
                 .height_by_hash

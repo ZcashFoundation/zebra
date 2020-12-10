@@ -452,7 +452,7 @@ impl Iter<'_> {
             IterState::Finalized(_) | IterState::Finished => unreachable!(),
         };
 
-        if let Some(block) = service.mem.block_by_hash(hash) {
+        if let Some(block) = service.mem.any_block_by_hash(hash) {
             let hash = block.header.previous_block_hash;
             self.state = IterState::NonFinalized(hash);
             Some(block)
