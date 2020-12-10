@@ -202,7 +202,7 @@ impl StateService {
 
     /// Create a block locator for the current best chain.
     fn block_locator(&self) -> Option<Vec<block::Hash>> {
-        let tip_height = self.tip()?.0;
+        let tip_height = self.best_tip()?.0;
 
         let heights = crate::util::block_locator_heights(tip_height);
         let mut hashes = Vec::with_capacity(heights.len());
@@ -217,13 +217,13 @@ impl StateService {
     }
 
     /// Return the tip of the current best chain.
-    pub fn tip(&self) -> Option<(block::Height, block::Hash)> {
+    pub fn best_tip(&self) -> Option<(block::Height, block::Hash)> {
         self.mem.tip().or_else(|| self.disk.tip())
     }
 
     /// Return the depth of block `hash` in the current best chain.
     pub fn depth(&self, hash: block::Hash) -> Option<u32> {
-        let tip = self.tip()?.0;
+        let tip = self.best_tip()?.0;
         let height = self
             .mem
             .best_height_by_hash(hash)
@@ -301,7 +301,7 @@ impl StateService {
     ///   * the state is empty.
     fn find_chain_intersection(&self, known_blocks: Vec<block::Hash>) -> Option<block::Hash> {
         // We can get a block locator request before we have downloaded the genesis block
-        self.tip()?;
+        self.best_tip()?;
 
         known_blocks
             .iter()
@@ -329,7 +329,7 @@ impl StateService {
         assert!(max_len > 0, "max_len must be at least 1");
 
         // We can get a block locator request before we have downloaded the genesis block
-        let chain_tip_height = if let Some((height, _)) = self.tip() {
+        let chain_tip_height = if let Some((height, _)) = self.best_tip() {
             height
         } else {
             return Vec::new();
@@ -534,7 +534,7 @@ impl Service<Request> for StateService {
         let now = Instant::now();
 
         if self.last_prune + Self::PRUNE_INTERVAL < now {
-            let tip = self.tip();
+            let tip = self.best_tip();
             let old_len = self.pending_utxos.len();
 
             self.pending_utxos.prune();
@@ -602,7 +602,7 @@ impl Service<Request> for StateService {
             }
             Request::Tip => {
                 metrics::counter!("state.requests", 1, "type" => "tip");
-                let rsp = Ok(self.tip()).map(Response::Tip);
+                let rsp = Ok(self.best_tip()).map(Response::Tip);
                 async move { rsp }.boxed()
             }
             Request::BlockLocator => {
