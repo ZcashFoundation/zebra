@@ -6,9 +6,10 @@ Zebra validates pre-Sapling blocks using a list of `Mainnet` and `Testnet` block
 - [Testnet checkpoints](https://github.com/ZcashFoundation/zebra/blob/main/zebra-consensus/src/checkpoint/test-checkpoints.txt)
 
 Zebra can also be configured to use these checkpoints after Sapling:
+```
     [consensus]
     checkpoint_sync = true
-
+```
 ## Update checkpoints
 
 Checkpoint lists are distributed with Zebra, maintainers should update them about every few months to get newer hashes. Here we explain how this process is done.
