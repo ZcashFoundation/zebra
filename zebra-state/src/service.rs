@@ -222,7 +222,7 @@ impl StateService {
     }
 
     /// Return the depth of block `hash` in the current best chain.
-    pub fn depth(&self, hash: block::Hash) -> Option<u32> {
+    pub fn best_depth(&self, hash: block::Hash) -> Option<u32> {
         let tip = self.best_tip()?.0;
         let height = self
             .mem
@@ -597,7 +597,7 @@ impl Service<Request> for StateService {
             }
             Request::Depth(hash) => {
                 metrics::counter!("state.requests", 1, "type" => "depth");
-                let rsp = Ok(self.depth(hash)).map(Response::Depth);
+                let rsp = Ok(self.best_depth(hash)).map(Response::Depth);
                 async move { rsp }.boxed()
             }
             Request::Tip => {
