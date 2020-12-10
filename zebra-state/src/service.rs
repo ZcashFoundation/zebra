@@ -244,7 +244,7 @@ impl StateService {
     /// best chain.
     pub fn best_transaction(&self, hash: transaction::Hash) -> Option<Arc<Transaction>> {
         self.mem
-            .transaction(hash)
+            .best_transaction(hash)
             .or_else(|| self.disk.transaction(hash))
     }
 

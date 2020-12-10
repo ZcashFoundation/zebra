@@ -216,7 +216,7 @@ impl NonFinalizedState {
     }
 
     /// Returns the given transaction if it exists in the best chain.
-    pub fn transaction(&self, hash: transaction::Hash) -> Option<Arc<Transaction>> {
+    pub fn best_transaction(&self, hash: transaction::Hash) -> Option<Arc<Transaction>> {
         let best_chain = self.best_chain()?;
         best_chain
             .tx_by_hash
