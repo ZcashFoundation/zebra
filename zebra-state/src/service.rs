@@ -286,7 +286,7 @@ impl StateService {
     /// `hash`.
     ///
     /// The block identified by `hash` is included in the chain of blocks yielded
-    /// by the iterator.
+    /// by the iterator. `hash` can come from any chain.
     pub fn any_ancestor_blocks(&self, hash: block::Hash) -> Iter<'_> {
         Iter {
             service: self,
