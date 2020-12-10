@@ -1,17 +1,20 @@
 # Zebra checkpoints
 
-To speed up the initial chain sync, zebra uses a list of checkpoint hashes for the `Mainnet` and for the `Testnet`:
+Zebra validates pre-Sapling blocks using a list of `Mainnet` and `Testnet` block hash checkpoints:
 
 - [Mainnet checkpoints](https://github.com/ZcashFoundation/zebra/blob/main/zebra-consensus/src/checkpoint/main-checkpoints.txt)
 - [Testnet checkpoints](https://github.com/ZcashFoundation/zebra/blob/main/zebra-consensus/src/checkpoint/test-checkpoints.txt)
+Zebra can also be configured to use these checkpoints after Sapling:
+    [consensus]
+    checkpoint_sync = true
 
 ## Update checkpoints
 
-Checkpoint lists are distributed with zebra, maintainers should update them about every few months to get newer hashes. Here we explain how this process is done.
+Checkpoint lists are distributed with Zebra, maintainers should update them about every few months to get newer hashes. Here we explain how this process is done.
 
 ### Use the `zebra-checkpoints` utility
 
-`zebra-checkpoints` is the program we use to collect checkpoints. Currently this program uses `zcash-cli` to get the hashes. `zcash-cli` must be available in your machine and it must be connected to a synchronized(mainnet or testnet) instance of `zcashd` to get the most recent hashes.
+`zebra-checkpoints` is the program we use to collect checkpoints. Currently this program uses `zcash-cli` to get the hashes. `zcash-cli` must be available in your machine and it must be connected to a synchronized (Mainnet or Testnet) instance of `zcashd` to get the most recent hashes.
 
 To build the `zebra-checkpoints` binary please check [here](https://github.com/ZcashFoundation/zebra/tree/main/zebra-utils/README.md#zebra-checkpoints).
 
