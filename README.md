@@ -49,7 +49,9 @@ that there is a lot of key functionality still missing.
 #### Build Troubleshooting
 
 If you're having trouble with:
-- **dependencies:** use `cargo install` without `--locked` to build with the latest versions of each dependency
+- **dependencies:**
+  - install both `libclang` and `clang` - they are usually different packages
+  - use `cargo install` without `--locked` to build with the latest versions of each dependency
 - **libclang:** check out the [clang-sys documentation](https://github.com/KyleMayes/clang-sys#dependencies)
 - **g++ or MSVC++:** try using clang or Xcode instead
 - **rustc:** use rustc 1.48 or later
