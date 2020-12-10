@@ -3831,9 +3831,9 @@ dependencies = [
 
 [[package]]
 name = "zcash_script"
-version = "0.1.4"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8bf1995ddb0c827f160357922a96c0cd34c6dd759757cb2b799128d6f420c91e"
+checksum = "381b15f5e9b000121834a4fcf4351e020e42ed1b23620da3cf5c650f896d7a6a"
 dependencies = [
  "bindgen",
  "blake2b_simd",
@@ -3843,7 +3843,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-chain"
-version = "3.0.0-alpha.0"
+version = "1.0.0-alpha.0"
 dependencies = [
  "bech32",
  "bincode",
@@ -3881,11 +3881,11 @@ dependencies = [
 
 [[package]]
 name = "zebra-client"
-version = "3.0.0-alpha.0"
+version = "1.0.0-alpha.0"
 
 [[package]]
 name = "zebra-consensus"
-version = "3.0.0-alpha.0"
+version = "1.0.0-alpha.0"
 dependencies = [
  "chrono",
  "color-eyre",
@@ -3916,7 +3916,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-network"
-version = "3.0.0-alpha.0"
+version = "1.0.0-alpha.0"
 dependencies = [
  "bitflags",
  "byteorder",
@@ -3944,11 +3944,11 @@ dependencies = [
 
 [[package]]
 name = "zebra-rpc"
-version = "3.0.0-alpha.0"
+version = "1.0.0-alpha.0"
 
 [[package]]
 name = "zebra-script"
-version = "3.0.0-alpha.0"
+version = "1.0.0-alpha.0"
 dependencies = [
  "displaydoc",
  "hex",
@@ -3961,7 +3961,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-state"
-version = "3.0.0-alpha.0"
+version = "1.0.0-alpha.0"
 dependencies = [
  "chrono",
  "color-eyre",
@@ -3990,7 +3990,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-test"
-version = "3.0.0-alpha.0"
+version = "1.0.0-alpha.0"
 dependencies = [
  "color-eyre",
  "futures",
@@ -4012,7 +4012,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-utils"
-version = "3.0.0-alpha.0"
+version = "1.0.0-alpha.0"
 dependencies = [
  "color-eyre",
  "hex",
