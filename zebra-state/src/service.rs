@@ -421,7 +421,7 @@ impl StateService {
     ///   * adding 500 hashes to the list.
     ///
     /// Returns an empty list if the state is empty.
-    pub fn find_chain_hashes(
+    pub fn find_best_chain_hashes(
         &self,
         known_blocks: Vec<block::Hash>,
         stop: Option<block::Hash>,
@@ -633,7 +633,7 @@ impl Service<Request> for StateService {
             }
             Request::FindBlockHashes { known_blocks, stop } => {
                 const MAX_FIND_BLOCK_HASHES_RESULTS: usize = 500;
-                let res = self.find_chain_hashes(known_blocks, stop, MAX_FIND_BLOCK_HASHES_RESULTS);
+                let res = self.find_best_chain_hashes(known_blocks, stop, MAX_FIND_BLOCK_HASHES_RESULTS);
                 async move { Ok(Response::BlockHashes(res)) }.boxed()
             }
             Request::FindBlockHeaders { known_blocks, stop } => {
@@ -645,7 +645,7 @@ impl Service<Request> for StateService {
                 //
                 // https://github.com/bitcoin/bitcoin/pull/4468/files#r17026905
                 let count = MAX_FIND_BLOCK_HEADERS_RESULTS - 2;
-                let res = self.find_chain_hashes(known_blocks, stop, count);
+                let res = self.find_best_chain_hashes(known_blocks, stop, count);
                 let res: Vec<_> = res
                     .iter()
                     .map(|&hash| {
