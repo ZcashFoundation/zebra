@@ -633,7 +633,8 @@ impl Service<Request> for StateService {
             }
             Request::FindBlockHashes { known_blocks, stop } => {
                 const MAX_FIND_BLOCK_HASHES_RESULTS: usize = 500;
-                let res = self.find_best_chain_hashes(known_blocks, stop, MAX_FIND_BLOCK_HASHES_RESULTS);
+                let res =
+                    self.find_best_chain_hashes(known_blocks, stop, MAX_FIND_BLOCK_HASHES_RESULTS);
                 async move { Ok(Response::BlockHashes(res)) }.boxed()
             }
             Request::FindBlockHeaders { known_blocks, stop } => {
