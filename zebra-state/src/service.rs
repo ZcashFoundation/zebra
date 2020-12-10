@@ -218,7 +218,7 @@ impl StateService {
 
     /// Return the tip of the current best chain.
     pub fn best_tip(&self) -> Option<(block::Height, block::Hash)> {
-        self.mem.tip().or_else(|| self.disk.tip())
+        self.mem.best_tip().or_else(|| self.disk.tip())
     }
 
     /// Return the depth of block `hash` in the current best chain.

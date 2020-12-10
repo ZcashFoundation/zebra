@@ -189,7 +189,7 @@ impl NonFinalizedState {
     }
 
     /// Returns the tip of the best chain.
-    pub fn tip(&self) -> Option<(block::Height, block::Hash)> {
+    pub fn best_tip(&self) -> Option<(block::Height, block::Hash)> {
         let best_chain = self.best_chain()?;
         let height = best_chain.non_finalized_tip_height();
         let hash = best_chain.non_finalized_tip_hash();
@@ -412,7 +412,7 @@ mod tests {
         state.commit_block(more_work_child.prepare());
         assert_eq!(2, state.chain_set.len());
 
-        let tip_hash = state.tip().unwrap().1;
+        let tip_hash = state.best_tip().unwrap().1;
         assert_eq!(expected_hash, tip_hash);
 
         Ok(())
