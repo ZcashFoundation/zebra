@@ -242,7 +242,7 @@ impl StateService {
 
     /// Return the transaction identified by `hash` if it exists in the current
     /// best chain.
-    pub fn transaction(&self, hash: transaction::Hash) -> Option<Arc<Transaction>> {
+    pub fn best_transaction(&self, hash: transaction::Hash) -> Option<Arc<Transaction>> {
         self.mem
             .transaction(hash)
             .or_else(|| self.disk.transaction(hash))
@@ -612,7 +612,7 @@ impl Service<Request> for StateService {
             }
             Request::Transaction(hash) => {
                 metrics::counter!("state.requests", 1, "type" => "transaction");
-                let rsp = Ok(self.transaction(hash)).map(Response::Transaction);
+                let rsp = Ok(self.best_transaction(hash)).map(Response::Transaction);
                 async move { rsp }.boxed()
             }
             Request::Block(hash_or_height) => {
