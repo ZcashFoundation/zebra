@@ -87,8 +87,8 @@ impl PrecomputedTransaction {
     ///
     /// # Details
     ///
-    /// input index corresponds to the index of the `TransparentInput` which in
-    /// `transaction` used to identify the `previous_output`
+    /// The `input_index` corresponds to the index of the `TransparentInput` which in
+    /// `transaction` used to identify the `previous_output`.
     pub fn is_valid(
         &self,
         branch_id: ConsensusBranchId,
