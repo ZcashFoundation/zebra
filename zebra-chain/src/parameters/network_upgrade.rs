@@ -118,6 +118,12 @@ const TESTNET_MINIMUM_DIFFICULTY_GAP_MULTIPLIER: i32 = 6;
 /// Based on https://zips.z.cash/zip-0208#minimum-difficulty-blocks-on-the-test-network
 const TESTNET_MINIMUM_DIFFICULTY_START_HEIGHT: block::Height = block::Height(299_188);
 
+/// The activation height for the block maximum time rule on Testnet.
+///
+/// Part of the block header consensus rules in the Zcash specification at
+/// https://zips.z.cash/protocol/protocol.pdf#blockheader
+pub const TESTNET_MAX_TIME_START_HEIGHT: block::Height = block::Height(653_606);
+
 impl NetworkUpgrade {
     /// Returns a BTreeMap of activation heights and network upgrades for
     /// `network`.
@@ -273,6 +279,16 @@ impl NetworkUpgrade {
         height: block::Height,
     ) -> Duration {
         NetworkUpgrade::current(network, height).averaging_window_timespan()
+    }
+
+    /// Always returns true if `network` is the Mainnet.
+    /// If `network` is the Testnet, the `height` should be at least
+    /// TESTNET_MAX_TIME_START_HEIGHT to return true.
+    /// Returns false otherwise.
+    ///
+    /// Part of the consensus rules at https://zips.z.cash/protocol/protocol.pdf#blockheader
+    pub fn is_time_rule_active(network: Network, height: block::Height) -> bool {
+        network == Network::Mainnet || height >= TESTNET_MAX_TIME_START_HEIGHT
     }
 }
 
