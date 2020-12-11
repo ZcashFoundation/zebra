@@ -142,8 +142,8 @@ impl NonFinalizedState {
     }
 
     /// Returns the `transparent::Output` pointed to by the given
-    /// `transparent::OutPoint` if it is present.
-    pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<Utxo> {
+    /// `transparent::OutPoint` if it is present in any chain.
+    pub fn any_utxo(&self, outpoint: &transparent::OutPoint) -> Option<Utxo> {
         for chain in self.chain_set.iter().rev() {
             if let Some(output) = chain.created_utxos.get(outpoint) {
                 return Some(output.clone());
@@ -153,8 +153,8 @@ impl NonFinalizedState {
         None
     }
 
-    /// Returns the `block` with the given hash in the any chain.
-    pub fn block_by_hash(&self, hash: block::Hash) -> Option<Arc<Block>> {
+    /// Returns the `block` with the given hash in any chain.
+    pub fn any_block_by_hash(&self, hash: block::Hash) -> Option<Arc<Block>> {
         for chain in self.chain_set.iter().rev() {
             if let Some(prepared) = chain
                 .height_by_hash
@@ -189,7 +189,7 @@ impl NonFinalizedState {
     }
 
     /// Returns the tip of the best chain.
-    pub fn tip(&self) -> Option<(block::Height, block::Hash)> {
+    pub fn best_tip(&self) -> Option<(block::Height, block::Hash)> {
         let best_chain = self.best_chain()?;
         let height = best_chain.non_finalized_tip_height();
         let hash = best_chain.non_finalized_tip_hash();
@@ -216,7 +216,7 @@ impl NonFinalizedState {
     }
 
     /// Returns the given transaction if it exists in the best chain.
-    pub fn transaction(&self, hash: transaction::Hash) -> Option<Arc<Transaction>> {
+    pub fn best_transaction(&self, hash: transaction::Hash) -> Option<Arc<Transaction>> {
         let best_chain = self.best_chain()?;
         best_chain
             .tx_by_hash
@@ -412,7 +412,7 @@ mod tests {
         state.commit_block(more_work_child.prepare());
         assert_eq!(2, state.chain_set.len());
 
-        let tip_hash = state.tip().unwrap().1;
+        let tip_hash = state.best_tip().unwrap().1;
         assert_eq!(expected_hash, tip_hash);
 
         Ok(())
