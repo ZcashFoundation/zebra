@@ -45,7 +45,7 @@ Instead, this happened: [explanation]
 
 **Commands**
 
-Introduce the exact sequence of command line instructions executed so the team can reproduce the problem.
+Copy and paste the exact commands you used, so the team can try to reproduce the issue.
 
 **Logs**
 
