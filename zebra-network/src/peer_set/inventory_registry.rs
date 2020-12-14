@@ -77,7 +77,7 @@ impl InventoryRegistry {
     /// - rotates HashMaps based on interval events
     /// - drains the inv_stream channel and registers all advertised inventory
     pub fn poll_inventory(&mut self, cx: &mut Context<'_>) -> Result<(), BoxError> {
-        while let Poll::Ready(_) = Pin::new(&mut self.interval).poll_next(cx) {
+        while Pin::new(&mut self.interval).poll_next(cx).is_ready() {
             self.rotate();
         }
 
