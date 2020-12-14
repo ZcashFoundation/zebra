@@ -281,13 +281,15 @@ impl NetworkUpgrade {
         NetworkUpgrade::current(network, height).averaging_window_timespan()
     }
 
+    /// Returns true if the maximum block time rule is active for `network` and `height`.
+    ///
     /// Always returns true if `network` is the Mainnet.
     /// If `network` is the Testnet, the `height` should be at least
     /// TESTNET_MAX_TIME_START_HEIGHT to return true.
     /// Returns false otherwise.
     ///
     /// Part of the consensus rules at https://zips.z.cash/protocol/protocol.pdf#blockheader
-    pub fn is_time_rule_active(network: Network, height: block::Height) -> bool {
+    pub fn is_max_block_time_enforced(network: Network, height: block::Height) -> bool {
         network == Network::Mainnet || height >= TESTNET_MAX_TIME_START_HEIGHT
     }
 }

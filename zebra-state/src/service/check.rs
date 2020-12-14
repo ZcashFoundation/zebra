@@ -149,7 +149,7 @@ fn difficulty_threshold_is_valid(
     }
 
     // The maximum time rule is only active on Testnet from a specific height
-    if NetworkUpgrade::is_time_rule_active(network, candidate_height)
+    if NetworkUpgrade::is_max_block_time_enforced(network, candidate_height)
         && candidate_time > block_time_max
     {
         Err(ValidateContextError::TimeTooLate {
