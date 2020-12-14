@@ -167,8 +167,10 @@ impl Service<zn::Request> for Inbound {
                     .try_filter_map(|rsp| {
                         futures::future::ready(match rsp {
                             zs::Response::Block(Some(block)) => Ok(Some(block)),
-                            // XXX: check how zcashd handles missing blocks?
-                            zs::Response::Block(None) => Err("missing block".into()),
+                            // `zcashd` ignores missing blocks in GetData responses,
+                            // rather than including them in a trailing `NotFound`
+                            // message
+                            zs::Response::Block(None) => Ok(None),
                             _ => unreachable!("wrong response from state"),
                         })
                     })
@@ -177,6 +179,11 @@ impl Service<zn::Request> for Inbound {
                     .boxed()
             }
             zn::Request::TransactionsByHash(_transactions) => {
+                // `zcashd` returns a list of found blocks, followed by a
+                // `NotFound` message if any transactions are missing. `zcashd`
+                // says that SPV clients rely on this behaviour - are there any
+                // of them on the Zcash network?
+                // https://github.com/zcash/zcash/blob/e7b425298f6d9a54810cb7183f00be547e4d9415/src/main.cpp#L5632
                 debug!("ignoring unimplemented request");
                 async { Ok(zn::Response::Nil) }.boxed()
             }

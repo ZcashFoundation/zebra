@@ -1,18 +1,11 @@
-// NOT A PLACE OF HONOR
-//
-// NO ESTEEMED DEED IS COMMEMORATED HERE
-//
-// NOTHING VALUED IS HERE
-//
-// What is here was dangerous and repulsive to us. This message is a warning
-// about danger.
-//
-// The danger is in a particular module... it increases towards a center... the
-// center of danger is pub async fn Connection::run the danger is still present,
-// in your time, as it was in ours.
-//
-// The danger is to the mind. The danger is unleashed only if you substantially
-// disturb this code. This code is best shunned and left encapsulated.
+//! Zcash peer connection protocol handing for Zebra.
+//!
+//! Maps the external Zcash/Bitcoin protocol to Zebra's internal request/response
+//! protocol.
+//!
+//! This module contains a lot of undocumented state, assumptions and invariants.
+//! And it's unclear if these assumptions match the `zcashd` implementation.
+//! It should be refactored into a cleaner set of request/response pairs (#1515).
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -91,6 +84,9 @@ impl Handler {
                 }
             }
             (Handler::Peers, Message::Addr(addrs)) => Handler::Finished(Ok(Response::Peers(addrs))),
+            // `zcashd` returns transactions contiguously (but not necessarily immediately).
+            // It uses `NotFound` if any transactions are missing:
+            // https://github.com/zcash/zcash/blob/e7b425298f6d9a54810cb7183f00be547e4d9415/src/main.cpp#L5617
             (
                 Handler::TransactionsByHash {
                     mut hashes,
@@ -98,20 +94,38 @@ impl Handler {
                 },
                 Message::Tx(transaction),
             ) => {
+                // assumptions:
+                //   - the transaction list is contiguous
+                //   - missing transaction hashes are included in a `NotFound` message
                 if hashes.remove(&transaction.hash()) {
+                    // we are in the middle of the contiguous transaction response
                     transactions.push(transaction);
+                    if hashes.is_empty() {
+                        Handler::Finished(Ok(Response::Transactions(transactions)))
+                    } else {
+                        Handler::TransactionsByHash {
+                            hashes,
+                            transactions,
+                        }
+                    }
                 } else {
+                    // we are before or after the contiguous block response
                     ignored_msg = Some(Message::Tx(transaction));
-                }
-                if hashes.is_empty() {
-                    Handler::Finished(Ok(Response::Transactions(transactions)))
-                } else {
-                    Handler::TransactionsByHash {
-                        hashes,
-                        transactions,
+                    if !transactions.is_empty() {
+                        warn!("unexpected transaction from peer: transaction responses should be contiguous, followed by notfound. Using partial received transactions as the peer response");
+                        // TODO: does the caller need a list of missing transactions?
+                        Handler::Finished(Ok(Response::Transactions(transactions)))
+                    } else {
+                        // If the caller doesn't know any of the transactions,
+                        // we'll get a `NotFound` with all the hashes
+                        Handler::TransactionsByHash {
+                            hashes,
+                            transactions,
+                        }
                     }
                 }
             }
+            // `zcashd` peers actually return this response
             (
                 Handler::TransactionsByHash {
                     hashes,
@@ -119,6 +133,11 @@ impl Handler {
                 },
                 Message::NotFound(items),
             ) => {
+                // assumptions:
+                //   - the peer eventually returns a transaction or a `NotFound` entry
+                //     for each hash
+                //   - all `NotFound` entries are contained in a single message
+                //   - the `NotFound` message comes after the transactions
                 let hash_in_hashes = |item: &InventoryHash| {
                     if let InventoryHash::Tx(hash) = item {
                         hashes.contains(hash)
@@ -127,8 +146,21 @@ impl Handler {
                     }
                 };
                 if items.iter().all(hash_in_hashes) {
-                    Handler::Finished(Err(PeerError::NotFound(items)))
+                    // all hashes have a transaction or a `NotFound` entry
+                    if !transactions.is_empty() {
+                        // TODO: does the caller need a list of missing transactions?
+                        Handler::Finished(Ok(Response::Transactions(transactions)))
+                    } else {
+                        Handler::Finished(Err(PeerError::NotFound(items)))
+                    }
                 } else {
+                    // waiting for more transactions or a complete `NotFound` message
+                    if items.iter().any(hash_in_hashes) {
+                        debug!(
+                            not_found_transactions = ?items.iter().cloned().filter(hash_in_hashes).count(),
+                            remaining_transactions = ?hashes.len(),
+                            "notfound containing some of the remaining requested transactions");
+                    }
                     ignored_msg = Some(Message::NotFound(items));
                     Handler::TransactionsByHash {
                         hashes,
@@ -136,6 +168,9 @@ impl Handler {
                     }
                 }
             }
+            // `zcashd` returns blocks sequentially (but not necessarily immediately).
+            // It silently skips missing blocks, rather than using `NotFound`:
+            // https://github.com/zcash/zcash/blob/e7b425298f6d9a54810cb7183f00be547e4d9415/src/main.cpp#L5523
             (
                 Handler::BlocksByHash {
                     mut hashes,
@@ -143,18 +178,37 @@ impl Handler {
                 },
                 Message::Block(block),
             ) => {
+                // assumptions:
+                //   - the block list is contiguous
+                //   - missing blocks are silently skipped (rather than using `NotFound`)
                 if hashes.remove(&block.hash()) {
+                    // we are in the middle of the contiguous block response
                     blocks.push(block);
+                    if hashes.is_empty() {
+                        Handler::Finished(Ok(Response::Blocks(blocks)))
+                    } else {
+                        Handler::BlocksByHash { hashes, blocks }
+                    }
                 } else {
+                    // we are before or after the contiguous block response
                     ignored_msg = Some(Message::Block(block));
-                }
-                if hashes.is_empty() {
-                    Handler::Finished(Ok(Response::Blocks(blocks)))
-                } else {
-                    Handler::BlocksByHash { hashes, blocks }
+                    if !blocks.is_empty() {
+                        // TODO: does the caller need a list of missing blocks?
+                        Handler::Finished(Ok(Response::Blocks(blocks)))
+                    } else {
+                        // TODO: what if the peer doesn't know any of the blocks
+                        //       we asked for?
+                        Handler::BlocksByHash { hashes, blocks }
+                    }
                 }
             }
+            // peers are allowed to return this response, but `zcashd` never does
             (Handler::BlocksByHash { hashes, blocks }, Message::NotFound(items)) => {
+                // assumptions:
+                //   - the peer eventually returns a block or a `NotFound` entry
+                //     for each hash
+                //   - all `NotFound` entries are contained in a single message
+                //   - the `NotFound` message comes after the blocks
                 let hash_in_hashes = |item: &InventoryHash| {
                     if let InventoryHash::Block(hash) = item {
                         hashes.contains(hash)
@@ -163,8 +217,21 @@ impl Handler {
                     }
                 };
                 if items.iter().all(hash_in_hashes) {
-                    Handler::Finished(Err(PeerError::NotFound(items)))
+                    // all hashes have a block or a `NotFound` entry
+                    if !blocks.is_empty() {
+                        // TODO: does the caller need a list of missing blocks?
+                        Handler::Finished(Ok(Response::Blocks(blocks)))
+                    } else {
+                        Handler::Finished(Err(PeerError::NotFound(items)))
+                    }
                 } else {
+                    // waiting for more blocks or a complete `NotFound` message
+                    if items.iter().any(hash_in_hashes) {
+                        debug!(
+                            not_found_blocks = ?items.iter().cloned().filter(hash_in_hashes).count(),
+                            remaining_blocks = ?hashes.len(),
+                            "notfound containing some of the remaining requested blocks");
+                    }
                     ignored_msg = Some(Message::NotFound(items));
                     Handler::BlocksByHash { hashes, blocks }
                 }
