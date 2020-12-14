@@ -7,8 +7,8 @@ Zebra validates pre-Sapling blocks using a list of `Mainnet` and `Testnet` block
 
 Zebra can also be configured to use these checkpoints after Sapling:
 ```
-    [consensus]
-    checkpoint_sync = true
+[consensus]
+checkpoint_sync = true
 ```
 ## Update checkpoints
 
