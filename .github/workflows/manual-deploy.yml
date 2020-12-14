@@ -60,6 +60,7 @@ jobs:
         --container-mount-disk mount-path='/zebrad-cache',name=zebrad-cache-$SHORT_SHA \
         --create-disk name=zebrad-cache-$SHORT_SHA,size=100GB,type=pd-balanced \
         --machine-type n2-standard-4 \
+        --metadata=google-monitoring-enabled=true \
         --service-account cos-vm@zealous-zebra.iam.gserviceaccount.com \
         --tags zebrad \
         --zone us-central1-a
