@@ -290,7 +290,10 @@ impl NetworkUpgrade {
     ///
     /// Part of the consensus rules at https://zips.z.cash/protocol/protocol.pdf#blockheader
     pub fn is_max_block_time_enforced(network: Network, height: block::Height) -> bool {
-        network == Network::Mainnet || height >= TESTNET_MAX_TIME_START_HEIGHT
+        match network {
+            Network::Mainnet => true,
+            Network::Testnet => height >= TESTNET_MAX_TIME_START_HEIGHT,
+        }
     }
 }
 
