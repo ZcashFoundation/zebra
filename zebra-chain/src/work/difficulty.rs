@@ -451,28 +451,26 @@ impl PartialOrd<block::Hash> for ExpandedDifficulty {
 impl PartialEq<ExpandedDifficulty> for block::Hash {
     /// Is `self` equal to `other`?
     ///
-    /// See `partial_cmp` for details.
+    /// See `<ExpandedDifficulty as PartialOrd<block::Hash>::partial_cmp`
+    /// for details.
     fn eq(&self, other: &ExpandedDifficulty) -> bool {
         other.eq(self)
     }
 }
 
 impl PartialOrd<ExpandedDifficulty> for block::Hash {
-    /// `block::Hash`es are compared with `ExpandedDifficulty` thresholds by
-    /// converting the hash to a 256-bit integer in little-endian order.
+    /// How does `self` compare to `other`?
+    ///
+    /// See `<ExpandedDifficulty as PartialOrd<block::Hash>::partial_cmp`
+    /// for details.
     fn partial_cmp(&self, other: &ExpandedDifficulty) -> Option<Ordering> {
-        use Ordering::*;
-
-        // Use the base implementation, but reverse the order.
-        match other
-            .partial_cmp(self)
-            .expect("difficulties and hashes have a total order")
-        {
-            Less => Greater,
-            Greater => Less,
-            Equal => Equal,
-        }
-        .into()
+        Some(
+            // Use the canonical implementation, but reverse the order
+            other
+                .partial_cmp(self)
+                .expect("difficulties and hashes have a total order")
+                .reverse(),
+        )
     }
 }
 
