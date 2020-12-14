@@ -5,8 +5,8 @@ use std::borrow::Borrow;
 use chrono::Duration;
 use zebra_chain::{
     block::{self, Block},
-    parameters::Network,
     parameters::POW_AVERAGING_WINDOW,
+    parameters::{Network, NetworkUpgrade},
     work::difficulty::CompactDifficulty,
 };
 
@@ -14,7 +14,7 @@ use crate::{PreparedBlock, ValidateContextError};
 
 use super::check;
 
-use difficulty::{AdjustedDifficulty, POW_MEDIAN_BLOCK_SPAN, TESTNET_MAX_TIME_START_HEIGHT};
+use difficulty::{AdjustedDifficulty, POW_MEDIAN_BLOCK_SPAN};
 
 pub(crate) mod difficulty;
 
@@ -148,7 +148,7 @@ fn difficulty_threshold_is_valid(
     }
 
     // The maximum time rule is only active on Testnet from a specific height
-    if (network == Network::Mainnet || candidate_height >= TESTNET_MAX_TIME_START_HEIGHT)
+    if NetworkUpgrade::is_max_block_time_enforced(network, candidate_height)
         && candidate_time > block_time_max
     {
         Err(ValidateContextError::TimeTooLate {
