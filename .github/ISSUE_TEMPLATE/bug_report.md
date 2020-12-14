@@ -49,4 +49,6 @@ Introduce the exact sequence of command line instructions executed so the team c
 
 **Logs**
 
-Paste your entire output or logs. If they are too big please upload them somewhere like [Gist](https://gist.github.com/) and add a link to it here.
+Copy and paste the last 100 Zebra log lines.
+
+If you can, upload the full logs to [Gist](https://gist.github.com/), and add a link to them here.
