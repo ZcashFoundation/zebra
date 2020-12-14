@@ -25,9 +25,11 @@ Then:
 
 
 **Platform**
+
 The output of `uname -a` (UNIX), or version and 32 or 64-bit (Windows)
 
 **Description**
+
 Enter your issue details here.
 One way to structure the description:
 
@@ -40,3 +42,13 @@ I tried this:
 I expected to see this happen: [explanation]
 
 Instead, this happened: [explanation]
+
+**Commands**
+
+Copy and paste the exact commands you used, so the team can try to reproduce the issue.
+
+**Logs**
+
+Copy and paste the last 100 Zebra log lines.
+
+If you can, upload the full logs to [Gist](https://gist.github.com/), and add a link to them here.
