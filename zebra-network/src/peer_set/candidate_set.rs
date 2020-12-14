@@ -106,6 +106,7 @@ where
         // existing peers, but we don't make too many because update may be
         // called while the peer set is already loaded.
         let mut responses = FuturesUnordered::new();
+        trace!("sending GetPeers requests");
         // Yes this loops only once (for now), until we add fanout back.
         for _ in 0..1usize {
             self.peer_service.ready_and().await?;
@@ -115,7 +116,7 @@ where
             if let Ok(Response::Peers(addrs)) = rsp {
                 let addr_len = addrs.len();
                 let prev_len = self.gossiped.len();
-                // Filter new addresses to ensure that gossiped
+                // Filter new addresses to ensure that gossiped addresses are actually new
                 let failed = &self.failed;
                 let peer_set = &self.peer_set;
                 let new_addrs = addrs
@@ -151,6 +152,11 @@ where
         metrics::gauge!("candidate_set.disconnected", self.disconnected.len() as i64);
         metrics::gauge!("candidate_set.gossiped", self.gossiped.len() as i64);
         metrics::gauge!("candidate_set.failed", self.failed.len() as i64);
+        debug!(
+            disconnected_peers = self.disconnected.len(),
+            gossiped_peers = self.gossiped.len(),
+            failed_peers = self.failed.len()
+        );
         let guard = self.peer_set.lock().unwrap();
         self.disconnected
             .drain_oldest()
