@@ -211,7 +211,21 @@ where
     S: Service<(TcpStream, SocketAddr), Response = peer::Client, Error = BoxError> + Clone,
     S::Future: Send + 'static,
 {
-    let listener = TcpListener::bind(addr).await?;
+    let check_listener = TcpListener::bind(addr).await;
+
+    let listener = match check_listener {
+        Ok(l) => l,
+        Err(_) => {
+            error!(
+                "{} {} {}",
+                "Listener failed. Port already in use.",
+                "Is another instance of zebrad or zcashd running in your local machine ?",
+                "Consider changing the default port in the configuration file."
+            );
+            std::process::exit(1);
+        }
+    };
+
     let local_addr = listener.local_addr()?;
     info!("Opened Zcash protocol endpoint at {}", local_addr);
     loop {
