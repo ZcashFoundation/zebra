@@ -42,11 +42,6 @@ pub const POW_MAX_ADJUST_DOWN_PERCENT: i32 = 32;
 /// Part of the block header consensus rules in the Zcash specification.
 pub const BLOCK_MAX_TIME_SINCE_MEDIAN: i64 = 90 * 60;
 
-/// The activation height for the block maximum time rule on Testnet.
-///
-/// Part of the block header consensus rules in the Zcash specification.
-pub const TESTNET_MAX_TIME_START_HEIGHT: block::Height = block::Height(653_606);
-
 /// Contains the context needed to calculate the adjusted difficulty for a block.
 pub(super) struct AdjustedDifficulty {
     /// The `header.time` field from the candidate block
@@ -160,6 +155,11 @@ impl AdjustedDifficulty {
     /// Returns the candidate block's time field.
     pub fn candidate_time(&self) -> DateTime<Utc> {
         self.candidate_time
+    }
+
+    /// Returns the configured network.
+    pub fn network(&self) -> Network {
+        self.network
     }
 
     /// Calculate the expected `difficulty_threshold` for a candidate block, based

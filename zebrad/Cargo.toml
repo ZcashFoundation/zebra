@@ -2,7 +2,7 @@
 name = "zebrad"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
-version = "3.0.0-alpha.0"
+version = "1.0.0-alpha.0"
 edition = "2018"
 repository = "https://github.com/ZcashFoundation/zebra"
 
@@ -40,6 +40,9 @@ dirs = "3.0.1"
 inferno = { version = "0.10.2", default-features = false }
 atty = "0.2.14"
 
+sentry = { version = "0.21.0", default-features = false, features = ["backtrace", "contexts", "reqwest", "rustls"] }
+sentry-tracing = { git = "https://github.com/kellpossible/sentry-tracing.git", rev = "f1a4a4a16b5ff1022ae60be779eb3fb928ce9b0f" }
+
 [build-dependencies]
 vergen = "3.1.0"
 
@@ -50,6 +53,7 @@ tempdir = "0.3.7"
 zebra-test = { path = "../zebra-test" }
 
 [features]
+enable-sentry = []
 test_sync_to_sapling_mainnet = []
 test_sync_to_sapling_testnet = []
 test_sync_past_sapling_mainnet = []

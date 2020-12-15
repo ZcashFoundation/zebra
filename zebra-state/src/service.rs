@@ -186,7 +186,7 @@ impl StateService {
         &mut self,
         prepared: &PreparedBlock,
     ) -> Result<(), ValidateContextError> {
-        let relevant_chain = self.chain(prepared.block.header.previous_block_hash);
+        let relevant_chain = self.any_ancestor_blocks(prepared.block.header.previous_block_hash);
         assert!(relevant_chain.len() >= POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN,
                 "contextual validation requires at least 28 (POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN) blocks");
 
@@ -202,7 +202,7 @@ impl StateService {
 
     /// Create a block locator for the current best chain.
     fn block_locator(&self) -> Option<Vec<block::Hash>> {
-        let tip_height = self.tip()?.0;
+        let tip_height = self.best_tip()?.0;
 
         let heights = crate::util::block_locator_heights(tip_height);
         let mut hashes = Vec::with_capacity(heights.len());
@@ -217,13 +217,13 @@ impl StateService {
     }
 
     /// Return the tip of the current best chain.
-    pub fn tip(&self) -> Option<(block::Height, block::Hash)> {
-        self.mem.tip().or_else(|| self.disk.tip())
+    pub fn best_tip(&self) -> Option<(block::Height, block::Hash)> {
+        self.mem.best_tip().or_else(|| self.disk.tip())
     }
 
     /// Return the depth of block `hash` in the current best chain.
-    pub fn depth(&self, hash: block::Hash) -> Option<u32> {
-        let tip = self.tip()?.0;
+    pub fn best_depth(&self, hash: block::Hash) -> Option<u32> {
+        let tip = self.best_tip()?.0;
         let height = self
             .mem
             .best_height_by_hash(hash)
@@ -242,9 +242,9 @@ impl StateService {
 
     /// Return the transaction identified by `hash` if it exists in the current
     /// best chain.
-    pub fn transaction(&self, hash: transaction::Hash) -> Option<Arc<Transaction>> {
+    pub fn best_transaction(&self, hash: transaction::Hash) -> Option<Arc<Transaction>> {
         self.mem
-            .transaction(hash)
+            .best_transaction(hash)
             .or_else(|| self.disk.transaction(hash))
     }
 
@@ -275,9 +275,9 @@ impl StateService {
     }
 
     /// Return the [`Utxo`] pointed to by `outpoint` if it exists in any chain.
-    pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<Utxo> {
+    pub fn any_utxo(&self, outpoint: &transparent::OutPoint) -> Option<Utxo> {
         self.mem
-            .utxo(outpoint)
+            .any_utxo(outpoint)
             .or_else(|| self.queued_blocks.utxo(outpoint))
             .or_else(|| self.disk.utxo(outpoint))
     }
@@ -286,8 +286,8 @@ impl StateService {
     /// `hash`.
     ///
     /// The block identified by `hash` is included in the chain of blocks yielded
-    /// by the iterator.
-    pub fn chain(&self, hash: block::Hash) -> Iter<'_> {
+    /// by the iterator. `hash` can come from any chain.
+    pub fn any_ancestor_blocks(&self, hash: block::Hash) -> Iter<'_> {
         Iter {
             service: self,
             state: IterState::NonFinalized(hash),
@@ -299,9 +299,9 @@ impl StateService {
     /// Returns `None` if:
     ///   * there is no matching hash in the best chain, or
     ///   * the state is empty.
-    fn find_chain_intersection(&self, known_blocks: Vec<block::Hash>) -> Option<block::Hash> {
+    fn find_best_chain_intersection(&self, known_blocks: Vec<block::Hash>) -> Option<block::Hash> {
         // We can get a block locator request before we have downloaded the genesis block
-        self.tip()?;
+        self.best_tip()?;
 
         known_blocks
             .iter()
@@ -320,7 +320,7 @@ impl StateService {
     ///   * adding `max_len` hashes to the list.
     ///
     /// Returns an empty list if the state is empty.
-    pub fn collect_chain_hashes(
+    pub fn collect_best_chain_hashes(
         &self,
         intersection: Option<block::Hash>,
         stop: Option<block::Hash>,
@@ -329,7 +329,7 @@ impl StateService {
         assert!(max_len > 0, "max_len must be at least 1");
 
         // We can get a block locator request before we have downloaded the genesis block
-        let chain_tip_height = if let Some((height, _)) = self.tip() {
+        let chain_tip_height = if let Some((height, _)) = self.best_tip() {
             height
         } else {
             return Vec::new();
@@ -363,7 +363,7 @@ impl StateService {
 
         // We can use an "any chain" method here, because `final_hash` is in the best chain
         let mut res: Vec<_> = self
-            .chain(final_hash)
+            .any_ancestor_blocks(final_hash)
             .map(|block| block.hash())
             .take_while(|&hash| Some(hash) != intersection)
             .inspect(|hash| {
@@ -421,14 +421,14 @@ impl StateService {
     ///   * adding 500 hashes to the list.
     ///
     /// Returns an empty list if the state is empty.
-    pub fn find_chain_hashes(
+    pub fn find_best_chain_hashes(
         &self,
         known_blocks: Vec<block::Hash>,
         stop: Option<block::Hash>,
         max_len: usize,
     ) -> Vec<block::Hash> {
-        let intersection = self.find_chain_intersection(known_blocks);
-        self.collect_chain_hashes(intersection, stop, max_len)
+        let intersection = self.find_best_chain_intersection(known_blocks);
+        self.collect_best_chain_hashes(intersection, stop, max_len)
     }
 }
 
@@ -452,7 +452,7 @@ impl Iter<'_> {
             IterState::Finalized(_) | IterState::Finished => unreachable!(),
         };
 
-        if let Some(block) = service.mem.block_by_hash(hash) {
+        if let Some(block) = service.mem.any_block_by_hash(hash) {
             let hash = block.header.previous_block_hash;
             self.state = IterState::NonFinalized(hash);
             Some(block)
@@ -534,7 +534,7 @@ impl Service<Request> for StateService {
         let now = Instant::now();
 
         if self.last_prune + Self::PRUNE_INTERVAL < now {
-            let tip = self.tip();
+            let tip = self.best_tip();
             let old_len = self.pending_utxos.len();
 
             self.pending_utxos.prune();
@@ -597,12 +597,12 @@ impl Service<Request> for StateService {
             }
             Request::Depth(hash) => {
                 metrics::counter!("state.requests", 1, "type" => "depth");
-                let rsp = Ok(self.depth(hash)).map(Response::Depth);
+                let rsp = Ok(self.best_depth(hash)).map(Response::Depth);
                 async move { rsp }.boxed()
             }
             Request::Tip => {
                 metrics::counter!("state.requests", 1, "type" => "tip");
-                let rsp = Ok(self.tip()).map(Response::Tip);
+                let rsp = Ok(self.best_tip()).map(Response::Tip);
                 async move { rsp }.boxed()
             }
             Request::BlockLocator => {
@@ -612,7 +612,7 @@ impl Service<Request> for StateService {
             }
             Request::Transaction(hash) => {
                 metrics::counter!("state.requests", 1, "type" => "transaction");
-                let rsp = Ok(self.transaction(hash)).map(Response::Transaction);
+                let rsp = Ok(self.best_transaction(hash)).map(Response::Transaction);
                 async move { rsp }.boxed()
             }
             Request::Block(hash_or_height) => {
@@ -625,7 +625,7 @@ impl Service<Request> for StateService {
 
                 let fut = self.pending_utxos.queue(outpoint);
 
-                if let Some(utxo) = self.utxo(&outpoint) {
+                if let Some(utxo) = self.any_utxo(&outpoint) {
                     self.pending_utxos.respond(&outpoint, utxo);
                 }
 
@@ -633,7 +633,8 @@ impl Service<Request> for StateService {
             }
             Request::FindBlockHashes { known_blocks, stop } => {
                 const MAX_FIND_BLOCK_HASHES_RESULTS: usize = 500;
-                let res = self.find_chain_hashes(known_blocks, stop, MAX_FIND_BLOCK_HASHES_RESULTS);
+                let res =
+                    self.find_best_chain_hashes(known_blocks, stop, MAX_FIND_BLOCK_HASHES_RESULTS);
                 async move { Ok(Response::BlockHashes(res)) }.boxed()
             }
             Request::FindBlockHeaders { known_blocks, stop } => {
@@ -645,7 +646,7 @@ impl Service<Request> for StateService {
                 //
                 // https://github.com/bitcoin/bitcoin/pull/4468/files#r17026905
                 let count = MAX_FIND_BLOCK_HEADERS_RESULTS - 2;
-                let res = self.find_chain_hashes(known_blocks, stop, count);
+                let res = self.find_best_chain_hashes(known_blocks, stop, count);
                 let res: Vec<_> = res
                     .iter()
                     .map(|&hash| {
