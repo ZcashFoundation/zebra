@@ -59,6 +59,8 @@ jobs:
         --container-image "gcr.io/$PROJECT_ID/$REPOSITORY/$BRANCH_NAME:$SHORT_SHA" \
         --container-mount-disk mount-path='/zebrad-cache',name=zebrad-cache-$SHORT_SHA \
         --create-disk name=zebrad-cache-$SHORT_SHA,size=100GB,type=pd-balanced \
+        --image-family cos-stable \
+        --image-project cos-cloud \
         --machine-type n2-standard-4 \
         --metadata=google-monitoring-enabled=true \
         --service-account cos-vm@zealous-zebra.iam.gserviceaccount.com \
