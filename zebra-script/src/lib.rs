@@ -203,4 +203,140 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn reuse_script_verifier_pass_pass() -> Result<()> {
+        zebra_test::init();
+
+        let coin = u64::pow(10, 8);
+        let transaction =
+            SCRIPT_TX.zcash_deserialize_into::<Arc<zebra_chain::transaction::Transaction>>()?;
+
+        let verifier = super::PrecomputedTransaction::new(&transaction);
+
+        let input_index = 0;
+        let branch_id = Blossom
+            .branch_id()
+            .expect("Blossom has a ConsensusBranchId");
+
+        let amount = 212 * coin;
+        let output = transparent::Output {
+            value: amount.try_into()?,
+            lock_script: transparent::Script(SCRIPT_PUBKEY.clone()),
+        };
+        verifier.is_valid(branch_id, (input_index, output))?;
+
+        let amount = 212 * coin;
+        let output = transparent::Output {
+            value: amount.try_into()?,
+            lock_script: transparent::Script(SCRIPT_PUBKEY.clone()),
+        };
+        verifier.is_valid(branch_id, (input_index, output))?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn reuse_script_verifier_pass_fail() -> Result<()> {
+        zebra_test::init();
+
+        let coin = u64::pow(10, 8);
+        let transaction =
+            SCRIPT_TX.zcash_deserialize_into::<Arc<zebra_chain::transaction::Transaction>>()?;
+
+        let verifier = super::PrecomputedTransaction::new(&transaction);
+
+        let input_index = 0;
+        let branch_id = Blossom
+            .branch_id()
+            .expect("Blossom has a ConsensusBranchId");
+
+        let amount = 212 * coin;
+        let output = transparent::Output {
+            value: amount.try_into()?,
+            lock_script: transparent::Script(SCRIPT_PUBKEY.clone()),
+        };
+        verifier.is_valid(branch_id, (input_index, output))?;
+
+        let amount = 211 * coin;
+        let output = transparent::Output {
+            value: amount.try_into()?,
+            lock_script: transparent::Script(SCRIPT_PUBKEY.clone()),
+        };
+        verifier
+            .is_valid(branch_id, (input_index, output))
+            .unwrap_err();
+
+        Ok(())
+    }
+
+    #[test]
+    fn reuse_script_verifier_fail_pass() -> Result<()> {
+        zebra_test::init();
+
+        let coin = u64::pow(10, 8);
+        let transaction =
+            SCRIPT_TX.zcash_deserialize_into::<Arc<zebra_chain::transaction::Transaction>>()?;
+
+        let verifier = super::PrecomputedTransaction::new(&transaction);
+
+        let input_index = 0;
+        let branch_id = Blossom
+            .branch_id()
+            .expect("Blossom has a ConsensusBranchId");
+
+        let amount = 211 * coin;
+        let output = transparent::Output {
+            value: amount.try_into()?,
+            lock_script: transparent::Script(SCRIPT_PUBKEY.clone()),
+        };
+        verifier
+            .is_valid(branch_id, (input_index, output))
+            .unwrap_err();
+
+        let amount = 212 * coin;
+        let output = transparent::Output {
+            value: amount.try_into()?,
+            lock_script: transparent::Script(SCRIPT_PUBKEY.clone()),
+        };
+        verifier.is_valid(branch_id, (input_index, output))?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn reuse_script_verifier_fail_fail() -> Result<()> {
+        zebra_test::init();
+
+        let coin = u64::pow(10, 8);
+        let transaction =
+            SCRIPT_TX.zcash_deserialize_into::<Arc<zebra_chain::transaction::Transaction>>()?;
+
+        let verifier = super::PrecomputedTransaction::new(&transaction);
+
+        let input_index = 0;
+        let branch_id = Blossom
+            .branch_id()
+            .expect("Blossom has a ConsensusBranchId");
+
+        let amount = 211 * coin;
+        let output = transparent::Output {
+            value: amount.try_into()?,
+            lock_script: transparent::Script(SCRIPT_PUBKEY.clone()),
+        };
+        verifier
+            .is_valid(branch_id, (input_index, output))
+            .unwrap_err();
+
+        let amount = 210 * coin;
+        let output = transparent::Output {
+            value: amount.try_into()?,
+            lock_script: transparent::Script(SCRIPT_PUBKEY.clone()),
+        };
+        verifier
+            .is_valid(branch_id, (input_index, output))
+            .unwrap_err();
+
+        Ok(())
+    }
 }

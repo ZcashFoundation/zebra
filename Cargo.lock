@@ -3247,7 +3247,7 @@ version = "1.0.0-alpha.0"
 
 [[package]]
 name = "zebra-script"
-version = "1.0.0-alpha.0"
+version = "1.0.0-alpha.1"
 dependencies = [
  "displaydoc",
  "hex",
