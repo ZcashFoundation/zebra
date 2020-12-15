@@ -23,7 +23,7 @@ use color_eyre::eyre::Result;
 use eyre::WrapErr;
 use tempdir::TempDir;
 
-use std::{env, fs, io::Write, path::Path, path::PathBuf, time::Duration};
+use std::{convert::TryInto, env, fs, io::Write, path::Path, path::PathBuf, time::Duration};
 
 use zebra_chain::{
     block::Height,
@@ -739,15 +739,27 @@ fn sync_past_sapling_testnet() {
     sync_past_sapling(network).unwrap();
 }
 
+/// Returns a random port
+///
+/// Does not check if the port is already in use. It's impossible to do this
+/// check in a reliable, cross-platform way.
+fn random_port() -> u16 {
+    // Use the intersection of the IANA ephemeral port range, and the Linux
+    // ephemeral port range:
+    // https://en.wikipedia.org/wiki/Ephemeral_port#Range
+    rand::thread_rng().gen_range(49152, 60999)
+}
+
 #[tokio::test]
 async fn metrics_endpoint() -> Result<()> {
-    use hyper::{Client, Uri};
+    use hyper::Client;
 
     zebra_test::init();
 
     // [Note on port conflict](#Note on port conflict)
-    let endpoint = "127.0.0.1:50001";
-    let url = "http://127.0.0.1:50001";
+    let port = random_port();
+    let endpoint = format!("127.0.0.1:{}", port);
+    let url = format!("http://{}", endpoint);
 
     // Write a configuration that has metrics endpoint_addr set
     let mut config = default_test_config()?;
@@ -766,7 +778,7 @@ async fn metrics_endpoint() -> Result<()> {
     let client = Client::new();
 
     // Test metrics endpoint
-    let res = client.get(Uri::from_static(url)).await?;
+    let res = client.get(url.try_into().expect("url is valid")).await?;
     assert!(res.status().is_success());
     let body = hyper::body::to_bytes(res).await?;
     assert!(
@@ -794,14 +806,15 @@ async fn metrics_endpoint() -> Result<()> {
 
 #[tokio::test]
 async fn tracing_endpoint() -> Result<()> {
-    use hyper::{Body, Client, Request, Uri};
+    use hyper::{Body, Client, Request};
 
     zebra_test::init();
 
     // [Note on port conflict](#Note on port conflict)
-    let endpoint = "127.0.0.1:50002";
-    let url_default = "http://127.0.0.1:50002";
-    let url_filter = "http://127.0.0.1:50002/filter";
+    let port = random_port();
+    let endpoint = format!("127.0.0.1:{}", port);
+    let url_default = format!("http://{}", endpoint);
+    let url_filter = format!("{}/filter", url_default);
 
     // Write a configuration that has tracing endpoint_addr option set
     let mut config = default_test_config()?;
@@ -820,7 +833,9 @@ async fn tracing_endpoint() -> Result<()> {
     let client = Client::new();
 
     // Test tracing endpoint
-    let res = client.get(Uri::from_static(url_default)).await?;
+    let res = client
+        .get(url_default.try_into().expect("url_default is valid"))
+        .await?;
     assert!(res.status().is_success());
     let body = hyper::body::to_bytes(res).await?;
     assert!(std::str::from_utf8(&body).unwrap().contains(
@@ -828,12 +843,14 @@ async fn tracing_endpoint() -> Result<()> {
     ));
 
     // Set a filter and make sure it was changed
-    let request = Request::post(url_filter)
+    let request = Request::post(url_filter.clone())
         .body(Body::from("zebrad=debug"))
         .unwrap();
     let _post = client.request(request).await?;
 
-    let tracing_res = client.get(Uri::from_static(url_filter)).await?;
+    let tracing_res = client
+        .get(url_filter.try_into().expect("url_filter is valid"))
+        .await?;
     assert!(tracing_res.status().is_success());
     let tracing_body = hyper::body::to_bytes(tracing_res).await?;
     assert!(std::str::from_utf8(&tracing_body)
