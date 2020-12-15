@@ -35,6 +35,12 @@ use zebra_chain::{
 use zebra_test::{command::TestDirExt, prelude::*};
 use zebrad::config::ZebradConfig;
 
+/// The amount of time we wait after launching `zebrad`.
+///
+/// Previously, this value was 1 second, which caused occasional
+/// `tracing_endpoint` test failures on some machines.
+const LAUNCH_DELAY: Duration = Duration::from_secs(3);
+
 fn default_test_config() -> Result<ZebradConfig> {
     let mut config = ZebradConfig::default();
     config.state = zebra_state::Config::ephemeral();
@@ -259,8 +265,8 @@ fn start_no_args() -> Result<()> {
 
     let mut child = testdir.spawn_child(&["-v", "start"])?;
 
-    // Run the program and kill it at 1 second
-    std::thread::sleep(Duration::from_secs(1));
+    // Run the program and kill it after a few seconds
+    std::thread::sleep(LAUNCH_DELAY);
     child.kill()?;
 
     let output = child.wait_with_output()?;
@@ -283,8 +289,8 @@ fn start_args() -> Result<()> {
 
     // Any free argument is valid
     let mut child = testdir.spawn_child(&["start", "argument"])?;
-    // Run the program and kill it at 1 second
-    std::thread::sleep(Duration::from_secs(1));
+    // Run the program and kill it after a few seconds
+    std::thread::sleep(LAUNCH_DELAY);
     child.kill()?;
     let output = child.wait_with_output()?;
 
@@ -310,8 +316,8 @@ fn persistent_mode() -> Result<()> {
 
     let mut child = testdir.spawn_child(&["-v", "start"])?;
 
-    // Run the program and kill it at 1 second
-    std::thread::sleep(Duration::from_secs(1));
+    // Run the program and kill it after a few seconds
+    std::thread::sleep(LAUNCH_DELAY);
     child.kill()?;
     let output = child.wait_with_output()?;
 
@@ -334,8 +340,8 @@ fn ephemeral_mode() -> Result<()> {
 
     // Any free argument is valid
     let mut child = testdir.spawn_child(&["start", "argument"])?;
-    // Run the program and kill it at 1 second
-    std::thread::sleep(Duration::from_secs(1));
+    // Run the program and kill it after a few seconds
+    std::thread::sleep(LAUNCH_DELAY);
     child.kill()?;
     let output = child.wait_with_output()?;
 
@@ -369,8 +375,8 @@ fn misconfigured_ephemeral_mode() -> Result<()> {
     let mut child = dir
         .with_config(config)?
         .spawn_child(&["start", "argument"])?;
-    // Run the program and kill it at 1 second
-    std::thread::sleep(Duration::from_secs(1));
+    // Run the program and kill it after a few seconds
+    std::thread::sleep(LAUNCH_DELAY);
     child.kill()?;
     let output = child.wait_with_output()?;
 
@@ -469,9 +475,9 @@ fn valid_generated_config(command: &str, expected_output: &str) -> Result<()> {
     // Check if the file was created
     assert_with_context!(generated_config_path.exists(), &output);
 
-    // Run command using temp dir and kill it at 1 second
+    // Run command using temp dir and kill it after a few seconds
     let mut child = testdir.spawn_child(&[command])?;
-    std::thread::sleep(Duration::from_secs(1));
+    std::thread::sleep(LAUNCH_DELAY);
     child.kill()?;
 
     let output = child.wait_with_output()?;
@@ -771,8 +777,9 @@ async fn metrics_endpoint() -> Result<()> {
 
     let mut child = dir.spawn_child(&["start"])?;
 
-    // Run the program for a second before testing the endpoint
-    std::thread::sleep(Duration::from_secs(1));
+    // Run `zebrad` for a few seconds before testing the endpoint
+    // Since we're an async function, we have to use a sleep future, not thread sleep.
+    tokio::time::sleep(LAUNCH_DELAY).await;
 
     // Create an http client
     let client = Client::new();
@@ -826,8 +833,9 @@ async fn tracing_endpoint() -> Result<()> {
 
     let mut child = dir.spawn_child(&["start"])?;
 
-    // Run the program for a second before testing the endpoint
-    std::thread::sleep(Duration::from_secs(1));
+    // Run `zebrad` for a few seconds before testing the endpoint
+    // Since we're an async function, we have to use a sleep future, not thread sleep.
+    tokio::time::sleep(LAUNCH_DELAY).await;
 
     // Create an http client
     let client = Client::new();
