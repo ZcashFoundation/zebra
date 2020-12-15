@@ -113,7 +113,7 @@ where
     #[instrument(level = "debug", skip(self), fields(%hash))]
     pub async fn download_and_verify(&mut self, hash: block::Hash) -> Result<(), Report> {
         if self.cancel_handles.contains_key(&hash) {
-            return Err(eyre!("duplicate hash queued for download"));
+            return Err(eyre!("duplicate hash queued for download: {:?}", hash));
         }
 
         // We construct the block requests sequentially, waiting for the peer

@@ -161,9 +161,15 @@ impl Application for ZebradApp {
             .issue_filter(|kind| match kind {
                 color_eyre::ErrorKind::NonRecoverable(_) => true,
                 color_eyre::ErrorKind::Recoverable(error) => {
-                    !error.is::<tower::timeout::error::Elapsed>()
-                        && !error.is::<tokio::time::error::Elapsed>()
-                        && !error.to_string().contains("timed out")
+                    // type checks should be faster than string conversions
+                    if error.is::<tower::timeout::error::Elapsed>()
+                        || error.is::<tokio::time::error::Elapsed>()
+                    {
+                        return false;
+                    }
+
+                    let error_str = error.to_string();
+                    !error_str.contains("timed out") && !error_str.contains("duplicate hash")
                 }
             });
 
