@@ -304,6 +304,7 @@ impl Handler {
     }
 }
 
+#[must_use = "AwaitingResponse.tx.send() must be called before drop"]
 pub(super) enum State {
     /// Awaiting a client request or a peer message.
     AwaitingRequest,
