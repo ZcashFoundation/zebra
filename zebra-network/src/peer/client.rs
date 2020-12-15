@@ -25,11 +25,14 @@ pub struct Client {
 
 /// A message from the `peer::Client` to the `peer::Server`.
 #[derive(Debug)]
+#[must_use = "tx.send() must be called before drop"]
 pub(super) struct ClientRequest {
     /// The actual request.
     pub request: Request,
     /// The return message channel, included because `peer::Client::call` returns a
     /// future that may be moved around before it resolves.
+    ///
+    /// INVARIANT: `tx.send()` must be called before dropping `tx`.
     pub tx: oneshot::Sender<Result<Response, SharedPeerError>>,
     /// The tracing context for the request, so that work the connection task does
     /// processing messages in the context of this request will have correct context.
