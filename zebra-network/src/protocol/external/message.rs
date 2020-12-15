@@ -213,7 +213,7 @@ pub enum Message {
 
     /// A `notfound` message.
     ///
-    /// `zcashd` returns `notfound` if a requested transaction (`Tx`) isn't
+    /// `zcashd` returns `NotFound` if a requested transaction (`Tx`) isn't
     /// available in its mempool or state. But missing blocks and headers are
     /// silently skipped.
     ///
