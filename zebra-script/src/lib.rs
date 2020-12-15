@@ -9,6 +9,7 @@
 use displaydoc::Display;
 #[cfg(windows)]
 use std::convert::TryInto;
+use std::sync::Arc;
 use thiserror::Error;
 use zcash_script::{
     zcash_script_error_t, zcash_script_error_t_zcash_script_ERR_OK,
@@ -57,15 +58,18 @@ impl From<zcash_script_error_t> for Error {
 
 /// A preprocessed Transction which can be used to verify scripts within said
 /// Transaction.
-pub struct PrecomputedTransaction {
+#[derive(Debug)]
+pub struct CachedFfiTransaction {
+    transaction: Arc<Transaction>,
     precomputed: *mut std::ffi::c_void,
 }
 
-unsafe impl Send for PrecomputedTransaction {}
+unsafe impl Send for CachedFfiTransaction {}
+unsafe impl Sync for CachedFfiTransaction {}
 
-impl PrecomputedTransaction {
+impl CachedFfiTransaction {
     /// Construct a `PrecomputedTransaction` from a `Transaction`.
-    pub fn new(transaction: &Transaction) -> Self {
+    pub fn new(transaction: Arc<Transaction>) -> Self {
         let tx_to = transaction
             .zcash_serialize_to_vec()
             .expect("serialization into a vec is infallible");
@@ -78,7 +82,14 @@ impl PrecomputedTransaction {
             zcash_script::zcash_script_new_precomputed_tx(tx_to_ptr, tx_to_len, &mut err)
         };
 
-        Self { precomputed }
+        Self {
+            transaction,
+            precomputed,
+        }
+    }
+
+    pub fn inputs(&self) -> &[transparent::Input] {
+        self.transaction.inputs()
     }
 
     /// Verify a script within a transaction given the corresponding
@@ -133,7 +144,7 @@ impl PrecomputedTransaction {
     }
 }
 
-impl Drop for PrecomputedTransaction {
+impl Drop for CachedFfiTransaction {
     fn drop(&mut self) {
         unsafe { zcash_script::zcash_script_free_precomputed_tx(self.precomputed) };
     }
@@ -173,7 +184,7 @@ mod tests {
             .branch_id()
             .expect("Blossom has a ConsensusBranchId");
 
-        let verifier = super::PrecomputedTransaction::new(&transaction);
+        let verifier = super::CachedFfiTransaction::new(transaction);
         verifier.is_valid(branch_id, (input_index, output))?;
 
         Ok(())
@@ -196,7 +207,7 @@ mod tests {
             .branch_id()
             .expect("Blossom has a ConsensusBranchId");
 
-        let verifier = super::PrecomputedTransaction::new(&transaction);
+        let verifier = super::CachedFfiTransaction::new(transaction);
         verifier
             .is_valid(branch_id, (input_index, output))
             .unwrap_err();
@@ -212,7 +223,7 @@ mod tests {
         let transaction =
             SCRIPT_TX.zcash_deserialize_into::<Arc<zebra_chain::transaction::Transaction>>()?;
 
-        let verifier = super::PrecomputedTransaction::new(&transaction);
+        let verifier = super::CachedFfiTransaction::new(transaction);
 
         let input_index = 0;
         let branch_id = Blossom
@@ -244,7 +255,7 @@ mod tests {
         let transaction =
             SCRIPT_TX.zcash_deserialize_into::<Arc<zebra_chain::transaction::Transaction>>()?;
 
-        let verifier = super::PrecomputedTransaction::new(&transaction);
+        let verifier = super::CachedFfiTransaction::new(transaction);
 
         let input_index = 0;
         let branch_id = Blossom
@@ -278,7 +289,7 @@ mod tests {
         let transaction =
             SCRIPT_TX.zcash_deserialize_into::<Arc<zebra_chain::transaction::Transaction>>()?;
 
-        let verifier = super::PrecomputedTransaction::new(&transaction);
+        let verifier = super::CachedFfiTransaction::new(transaction);
 
         let input_index = 0;
         let branch_id = Blossom
@@ -312,7 +323,7 @@ mod tests {
         let transaction =
             SCRIPT_TX.zcash_deserialize_into::<Arc<zebra_chain::transaction::Transaction>>()?;
 
-        let verifier = super::PrecomputedTransaction::new(&transaction);
+        let verifier = super::CachedFfiTransaction::new(transaction);
 
         let input_index = 0;
         let branch_id = Blossom

@@ -20,6 +20,7 @@ use zebra_chain::{
     transparent,
 };
 
+use zebra_script::CachedFfiTransaction;
 use zebra_state as zs;
 
 use crate::{error::TransactionError, script, BoxError};
@@ -150,11 +151,14 @@ where
                     } else {
                         // otherwise, check no coinbase inputs
                         // feed all of the inputs to the script verifier
+                        let cached_ffi_transaction =
+                            Arc::new(CachedFfiTransaction::new(tx.clone()));
+
                         for input_index in 0..inputs.len() {
                             let rsp = script_verifier.ready_and().await?.call(script::Request {
                                 upgrade,
                                 known_utxos: known_utxos.clone(),
-                                transaction: tx.clone(),
+                                cached_ffi_transaction: cached_ffi_transaction.clone(),
                                 input_index,
                             });
 

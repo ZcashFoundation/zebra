@@ -3,7 +3,8 @@ use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc};
 use tower::timeout::Timeout;
 use tracing::Instrument;
 
-use zebra_chain::{parameters::NetworkUpgrade, transaction::Transaction, transparent};
+use zebra_chain::{parameters::NetworkUpgrade, transparent};
+use zebra_script::CachedFfiTransaction;
 use zebra_state::Utxo;
 
 use crate::BoxError;
@@ -55,7 +56,7 @@ pub struct Request {
     ///
     /// This causes quadratic script verification behavior, so
     /// at some future point, we need to reform this data.
-    pub transaction: Arc<Transaction>,
+    pub cached_ffi_transaction: Arc<CachedFfiTransaction>,
     pub input_index: usize,
     /// A set of additional UTXOs known in the context of this verification request.
     ///
@@ -89,12 +90,12 @@ where
         use futures_util::FutureExt;
 
         let Request {
-            transaction,
+            cached_ffi_transaction,
             input_index,
             known_utxos,
             upgrade,
         } = req;
-        let input = &transaction.inputs()[input_index];
+        let input = &cached_ffi_transaction.inputs()[input_index];
         let branch_id = upgrade
             .branch_id()
             .expect("post-Sapling NUs have a consensus branch ID");
@@ -106,8 +107,6 @@ where
                 let span = tracing::trace_span!("script", ?outpoint);
                 let query =
                     span.in_scope(|| self.state.call(zebra_state::Request::AwaitUtxo(outpoint)));
-
-                let script_context = zebra_script::PrecomputedTransaction::new(&transaction);
 
                 async move {
                     tracing::trace!("awaiting outpoint lookup");
@@ -121,7 +120,8 @@ where
                     };
                     tracing::trace!(?utxo, "got UTXO");
 
-                    script_context.is_valid(branch_id, (input_index as u32, utxo.output))?;
+                    cached_ffi_transaction
+                        .is_valid(branch_id, (input_index as u32, utxo.output))?;
                     tracing::trace!("script verification succeeded");
 
                     Ok(())
