@@ -64,6 +64,31 @@ pub struct CachedFfiTransaction {
     precomputed: *mut std::ffi::c_void,
 }
 
+// # SAFETY
+//
+// ## Justification
+//
+// `CachedFfiTransaction` is not `Send` and `Sync` by default because of the
+// `*mut c_void` it contains. This is because raw pointers could allow the same
+// data to be mutated from different threads if copied.
+//
+// CachedFFiTransaction needs to be Send and Sync to be stored within a `Box<dyn
+// Future + Send + Sync + static>`. The async block `CachedFfiTransaction` is
+// owned by in `zebra_consensus/src/transaction.rs` holds it across an await
+// point when the transaction verifier is spawning all of the script verifier
+// futures, because the service readiness check requires an await between each
+// task spawn. Each `script` future needs a copy of the
+// `Arc<CachedFfiTransaction>` so that it can simultaniously verify inputs
+// without cloning the c++ allocated type unnecessarily.
+//
+// ## Explanation
+//
+// It is safe for us to mark this as `Send` and `Sync` because the data pointed
+// to by `precomputed` is never modified after it is constructed and points to
+// heap memory with a stable memory location. The function
+// `zcash_script::zcash_script_verify_precomputed` only reads from the
+// precomputed context while verifying inputs, which makes it safe to treat this
+// pointer like a shared reference (given that is how it is used).
 unsafe impl Send for CachedFfiTransaction {}
 unsafe impl Sync for CachedFfiTransaction {}
 
