@@ -171,7 +171,13 @@ impl Application for ZebradApp {
             .panic_section(metadata_section)
             .issue_url(concat!(env!("CARGO_PKG_REPOSITORY"), "/issues/new"))
             .issue_filter(|kind| match kind {
-                color_eyre::ErrorKind::NonRecoverable(_) => true,
+                color_eyre::ErrorKind::NonRecoverable(error) => {
+                    let error_str = match error.downcast_ref::<String>() {
+                        Some(as_string) => as_string,
+                        None => return true,
+                    };
+                    !error_str.contains("Port already in use")
+                }
                 color_eyre::ErrorKind::Recoverable(error) => {
                     // type checks should be faster than string conversions
                     if error.is::<tower::timeout::error::Elapsed>()
