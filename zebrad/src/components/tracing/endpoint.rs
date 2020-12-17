@@ -55,11 +55,12 @@ impl TracingEndpoint {
                 // need to construct it inside the task.
                 let server = match Server::try_bind(&addr) {
                     Ok(s) => s,
-                    Err(e) => {
-                        error!("Could not open tracing endpoint listener");
-                        error!("Error: {}", e);
-                        return;
-                    }
+                    Err(_) => panic!(
+                        "{} {} {}",
+                        "Port for tracing endpoint already in use by another process:",
+                        addr,
+                        "- You can change the tracing endpoint port in the config."
+                    ),
                 }
                 .serve(service);
 
