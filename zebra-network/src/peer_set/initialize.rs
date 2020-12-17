@@ -216,13 +216,12 @@ where
     let listener = match check_listener {
         Ok(l) => l,
         Err(_) => {
-            error!(
+            panic!(
                 "{} {} {}",
                 "Listener failed. Port already in use.",
                 "Is another instance of zebrad or zcashd running in your local machine ?",
                 "Consider changing the default port in the configuration file."
             );
-            std::process::exit(1);
         }
     };
 
