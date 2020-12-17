@@ -13,10 +13,18 @@ impl MetricsEndpoint {
     pub fn new(config: &ZebradConfig) -> Result<Self, FrameworkError> {
         if let Some(addr) = config.metrics.endpoint_addr {
             info!("Initializing metrics endpoint at {}", addr);
-            metrics_exporter_prometheus::PrometheusBuilder::new()
+            let check_endpoint = metrics_exporter_prometheus::PrometheusBuilder::new()
                 .listen_address(addr)
-                .install()
-                .expect("FIXME ERROR CONVERSION");
+                .install();
+            match check_endpoint {
+                Ok(endpoint) => endpoint,
+                Err(_) => panic!(
+                    "{} {} {}",
+                    "Port for metrics endpoint already in use by another process:",
+                    addr,
+                    "- You can change the metrics default endpoint in the config."
+                ),
+            }
         }
         Ok(Self {})
     }

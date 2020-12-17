@@ -47,7 +47,7 @@ impl FinalizedState {
             Ok(d) => d,
             Err(_) => panic!(
                 "{} {}",
-                "LOCK file in use.", "Check if there is antoher zebrad process running."
+                "LOCK file already in use.", "Check if there is antoher zebrad process running."
             ),
         };
 

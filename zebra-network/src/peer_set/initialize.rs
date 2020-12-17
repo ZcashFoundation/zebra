@@ -218,7 +218,7 @@ where
         Err(_) => panic!(
             "{} {} {}",
             "Listener failed. Port already in use.",
-            "Is another instance of zebrad or zcashd running in your local machine ?",
+            "Is another instance of zebrad or zcashd running in your local machine?",
             "Consider changing the default port in the configuration file."
         ),
     };
