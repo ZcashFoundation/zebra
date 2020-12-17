@@ -41,8 +41,17 @@ impl FinalizedState {
             rocksdb::ColumnFamilyDescriptor::new("sprout_nullifiers", db_options.clone()),
             rocksdb::ColumnFamilyDescriptor::new("sapling_nullifiers", db_options.clone()),
         ];
-        let db = rocksdb::DB::open_cf_descriptors(&db_options, path, column_families)
-            .expect("database path and options are valid");
+        let db_check = rocksdb::DB::open_cf_descriptors(&db_options, path, column_families);
+
+        let db = match db_check {
+            Ok(d) => d,
+            Err(_) => {
+                panic!(
+                    "{} {}",
+                    "LOCK file in use.", "Check if there is antoher zebrad process running."
+                );
+            }
+        };
 
         let new_state = Self {
             queued_by_prev_hash: HashMap::new(),
