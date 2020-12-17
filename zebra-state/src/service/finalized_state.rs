@@ -45,12 +45,10 @@ impl FinalizedState {
 
         let db = match db_check {
             Ok(d) => d,
-            Err(_) => {
-                panic!(
-                    "{} {}",
-                    "LOCK file in use.", "Check if there is antoher zebrad process running."
-                );
-            }
+            Err(_) => panic!(
+                "{} {}",
+                "LOCK file in use.", "Check if there is antoher zebrad process running."
+            ),
         };
 
         let new_state = Self {
