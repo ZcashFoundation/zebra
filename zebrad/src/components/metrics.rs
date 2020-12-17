@@ -22,7 +22,7 @@ impl MetricsEndpoint {
                     "{} {} {}",
                     "Port for metrics endpoint already in use by another process:",
                     addr,
-                    "- You can change the metrics default endpoint in the config."
+                    "- You can change the metrics endpoint in the config."
                 ),
             }
         }
