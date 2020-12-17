@@ -215,14 +215,12 @@ where
 
     let listener = match check_listener {
         Ok(l) => l,
-        Err(_) => {
-            panic!(
-                "{} {} {}",
-                "Listener failed. Port already in use.",
-                "Is another instance of zebrad or zcashd running in your local machine ?",
-                "Consider changing the default port in the configuration file."
-            );
-        }
+        Err(_) => panic!(
+            "{} {} {}",
+            "Listener failed. Port already in use.",
+            "Is another instance of zebrad or zcashd running in your local machine ?",
+            "Consider changing the default port in the configuration file."
+        ),
     };
 
     let local_addr = listener.local_addr()?;
