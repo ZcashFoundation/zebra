@@ -159,7 +159,13 @@ impl Application for ZebradApp {
             .add_issue_metadata("version", env!("CARGO_PKG_VERSION"))
             .add_issue_metadata("git commit", Self::git_commit())
             .issue_filter(|kind| match kind {
-                color_eyre::ErrorKind::NonRecoverable(_) => true,
+                color_eyre::ErrorKind::NonRecoverable(error) => {
+                    let error_str = match error.downcast_ref::<String>() {
+                        Some(as_string) => as_string,
+                        None => return true,
+                    };
+                    !error_str.contains("Port already in use")
+                }
                 color_eyre::ErrorKind::Recoverable(error) => {
                     // type checks should be faster than string conversions
                     if error.is::<tower::timeout::error::Elapsed>()
