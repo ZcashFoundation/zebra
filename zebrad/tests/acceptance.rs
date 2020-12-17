@@ -745,15 +745,39 @@ fn sync_past_sapling_testnet() {
     sync_past_sapling(network).unwrap();
 }
 
-/// Returns a random port
+/// Returns a random port number from the ephemeral port range.
 ///
 /// Does not check if the port is already in use. It's impossible to do this
 /// check in a reliable, cross-platform way.
-fn random_port() -> u16 {
+///
+/// ## Usage
+///
+/// If you want a once-off random unallocated port, use
+/// `random_unallocated_port`. Don't use this function if you don't need
+/// to - it has a small risk of port conflcits.
+///
+/// Use this function when you need to use the same random port multiple
+/// times. For example: setting up both ends of a connection, or re-using
+/// the same port multiple times.
+fn random_known_port() -> u16 {
     // Use the intersection of the IANA ephemeral port range, and the Linux
     // ephemeral port range:
     // https://en.wikipedia.org/wiki/Ephemeral_port#Range
     rand::thread_rng().gen_range(49152, 60999)
+}
+
+/// Returns the "magic" port number that tells the operating system to
+/// choose a random unallocated port.
+///
+/// The OS chooses a different port each time it opens a connection or
+/// listener with this magic port number.
+///
+/// ## Usage
+///
+/// See the usage note for `random_known_port`.
+#[allow(dead_code)]
+fn random_unallocated_port() -> u16 {
+    0
 }
 
 #[tokio::test]
@@ -763,7 +787,7 @@ async fn metrics_endpoint() -> Result<()> {
     zebra_test::init();
 
     // [Note on port conflict](#Note on port conflict)
-    let port = random_port();
+    let port = random_known_port();
     let endpoint = format!("127.0.0.1:{}", port);
     let url = format!("http://{}", endpoint);
 
@@ -818,7 +842,7 @@ async fn tracing_endpoint() -> Result<()> {
     zebra_test::init();
 
     // [Note on port conflict](#Note on port conflict)
-    let port = random_port();
+    let port = random_known_port();
     let endpoint = format!("127.0.0.1:{}", port);
     let url_default = format!("http://{}", endpoint);
     let url_filter = format!("{}/filter", url_default);
