@@ -177,6 +177,7 @@ impl Application for ZebradApp {
                         None => return true,
                     };
                     !error_str.contains("Port already in use")
+                        && !error_str.contains("LOCK file in use")
                 }
                 color_eyre::ErrorKind::Recoverable(error) => {
                     // type checks should be faster than string conversions
