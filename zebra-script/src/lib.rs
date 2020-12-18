@@ -127,7 +127,7 @@ impl CachedFfiTransaction {
                 #[cfg(not(windows))]
                 flags,
                 #[cfg(windows)]
-                flags.try_into().expect("why bindgen whyyy"),
+                flags.try_into().expect("zcash_script_SCRIPT_FLAGS_VERIFY_* enum values fit in a c_uint"),
                 consensus_branch_id,
                 &mut err,
             )
@@ -150,11 +150,11 @@ impl CachedFfiTransaction {
 // data to be mutated from different threads if copied.
 //
 // CachedFFiTransaction needs to be Send and Sync to be stored within a `Box<dyn
-// Future + Send + Sync + static>`. The async block `CachedFfiTransaction` is
-// owned by in `zebra_consensus/src/transaction.rs` holds it across an await
-// point when the transaction verifier is spawning all of the script verifier
-// futures, because the service readiness check requires an await between each
-// task spawn. Each `script` future needs a copy of the
+// Future + Send + Sync + static>`. In `zebra_consensus/src/transaction.rs`, an
+// async block owns a `CachedFfiTransaction`, and holds it across an await
+// point, while the transaction verifier is spawning all of the script verifier
+// futures. The service readiness check requires this await between each task
+// spawn. Each `script` future needs a copy of the
 // `Arc<CachedFfiTransaction>` so that it can simultaniously verify inputs
 // without cloning the c++ allocated type unnecessarily.
 //
