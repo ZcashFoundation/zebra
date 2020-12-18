@@ -543,12 +543,8 @@ where
             return;
         }
 
-        // XXX(hdevalence) this is truly horrible, but let's fix it later
-
-        // Inner matches return a Result with a new state or an (error, Option<oneshot::Sender>)
-        // Middle match returns Result with the new state or the (error, Option<oneshot::Sender>)
-        // Outer match updates state or fails, and sends the error on the Sender if it is Some
-        match match (&self.state, request) {
+        // These matches return a Result with a new state or an (error, Option<oneshot::Sender>)
+        let new_state_result = match (&self.state, request) {
             (Failed, _) => panic!("failed connection cannot handle requests"),
             (AwaitingResponse { .. }, _) => panic!("tried to update pending request"),
 
@@ -671,7 +667,9 @@ where
                     Err(e) => Err((e, None)),
                 }
             }
-        } {
+        };
+        // Updates state or fails. Sends the error on the Sender if it is Some.
+        match new_state_result {
             Ok(new_state) => {
                 self.state = new_state;
                 self.request_timer = Some(sleep(constants::REQUEST_TIMEOUT));
@@ -682,7 +680,7 @@ where
                 self.fail_with(e);
             }
             Err((e, None)) => self.fail_with(e),
-        }
+        };
     }
 
     // This function has its own span, because we're creating a new work
