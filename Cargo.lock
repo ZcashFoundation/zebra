@@ -3829,9 +3829,9 @@ dependencies = [
 
 [[package]]
 name = "zcash_script"
-version = "0.1.4"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8bf1995ddb0c827f160357922a96c0cd34c6dd759757cb2b799128d6f420c91e"
+checksum = "381b15f5e9b000121834a4fcf4351e020e42ed1b23620da3cf5c650f896d7a6a"
 dependencies = [
  "bindgen",
  "blake2b_simd",
@@ -3946,7 +3946,7 @@ version = "1.0.0-alpha.0"
 
 [[package]]
 name = "zebra-script"
-version = "1.0.0-alpha.0"
+version = "1.0.0-alpha.1"
 dependencies = [
  "displaydoc",
  "hex",
