@@ -128,7 +128,7 @@ impl Handler {
                     if !transactions.is_empty() {
                         // if our peers start sending mixed solicited and unsolicited transactions,
                         // we should update this code to handle those responses
-                        error!("unexpected transaction from peer: transaction responses should be sent in a cintinuous batch, followed by notfound. Using partial received transactions as the peer response");
+                        error!("unexpected transaction from peer: transaction responses should be sent in a continuous batch, followed by notfound. Using partial received transactions as the peer response");
                         // TODO: does the caller need a list of missing transactions? (#1515)
                         Handler::Finished(Ok(Response::Transactions(transactions)))
                     } else {
