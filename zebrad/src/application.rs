@@ -176,7 +176,18 @@ impl Application for ZebradApp {
                         Some(as_string) => as_string,
                         None => return true,
                     };
-                    !error_str.contains("already in use")
+                    // listener port conflicts
+                    if error_str.contains("already in use") {
+                        return false;
+                    }
+                    // RocksDB lock file conflicts
+                    if error_str.contains("lock file")
+                        && (error_str.contains("temporarily unavailable")
+                            || error_str.contains("in use"))
+                    {
+                        return false;
+                    }
+                    true
                 }
                 color_eyre::ErrorKind::Recoverable(error) => {
                     // type checks should be faster than string conversions

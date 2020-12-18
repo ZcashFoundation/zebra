@@ -55,11 +55,11 @@ impl TracingEndpoint {
                 // need to construct it inside the task.
                 let server = match Server::try_bind(&addr) {
                     Ok(s) => s,
-                    Err(_) => panic!(
-                        "{} {} {}",
-                        "Port for tracing endpoint already in use by another process:",
-                        addr,
-                        "- You can change the tracing endpoint port in the config."
+                    Err(e) => panic!(
+                        "Opening tracing endpoint listener {:?} failed: {:?}. \
+                         Hint: Check if another zebrad or zcashd process is running. \
+                         Try changing the tracing endpoint_addr in the Zebra config.",
+                        addr, e,
                     ),
                 }
                 .serve(service);

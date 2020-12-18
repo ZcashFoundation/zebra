@@ -211,15 +211,15 @@ where
     S: Service<(TcpStream, SocketAddr), Response = peer::Client, Error = BoxError> + Clone,
     S::Future: Send + 'static,
 {
-    let check_listener = TcpListener::bind(addr).await;
+    let listener_result = TcpListener::bind(addr).await;
 
-    let listener = match check_listener {
+    let listener = match listener_result {
         Ok(l) => l,
-        Err(_) => panic!(
-            "{} {} {}",
-            "Listener failed. Port already in use.",
-            "Is another instance of zebrad or zcashd running in your local machine?",
-            "Consider changing the default port in the configuration file."
+        Err(e) => panic!(
+            "Opening Zcash network protocol listener {:?} failed: {:?}. \
+             Hint: Check if another zebrad or zcashd process is running. \
+             Try changing the network listen_addr in the Zebra config.",
+            addr, e,
         ),
     };
 
