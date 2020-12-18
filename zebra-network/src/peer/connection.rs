@@ -96,10 +96,10 @@ impl Handler {
                 Message::Tx(transaction),
             ) => {
                 // assumptions:
-                //   - the transaction list is contiguous
+                //   - the transaction messages are sent in a single continous batch
                 //   - missing transaction hashes are included in a `NotFound` message
                 if hashes.remove(&transaction.hash()) {
-                    // we are in the middle of the contiguous transaction response
+                    // we are in the middle of the continous transaction messages
                     transactions.push(transaction);
                     if hashes.is_empty() {
                         Handler::Finished(Ok(Response::Transactions(transactions)))
@@ -110,20 +110,33 @@ impl Handler {
                         }
                     }
                 } else {
-                    // we are before or after the contiguous block response
+                    // We got a transaction we didn't ask for. If the caller doesn't know any of the
+                    // transactions, they should have sent a `NotFound` with all the hashes, rather
+                    // than an unsolicited transaction.
+                    //
+                    // So either:
+                    // 1. The peer implements the protocol badly, skipping `NotFound`.
+                    //    We should cancel the request, so we don't hang waiting for transactions
+                    //    that will never arrive.
+                    // 2. The peer sent an unsolicited transaction.
+                    //    We should ignore the transaction, and wait for the actual response.
+                    //
+                    // We end the request, so we don't hang on bad peers (case 1). But we keep the
+                    // connection open, so the inbound service can process transactions from good
+                    // peers (case 2).
                     ignored_msg = Some(Message::Tx(transaction));
                     if !transactions.is_empty() {
-                        // we don't expect zcashd to behave like this
-                        error!("unexpected transaction from peer: transaction responses should be contiguous, followed by notfound. Using partial received transactions as the peer response");
-                        // TODO: does the caller need a list of missing transactions?
+                        // if our peers start sending mixed solicited and unsolicited transactions,
+                        // we should update this code to handle those responses
+                        error!("unexpected transaction from peer: transaction responses should be sent in a cintinuous batch, followed by notfound. Using partial received transactions as the peer response");
+                        // TODO: does the caller need a list of missing transactions? (#1515)
                         Handler::Finished(Ok(Response::Transactions(transactions)))
                     } else {
-                        // If the caller doesn't know any of the transactions,
-                        // we'll get a `NotFound` with all the hashes
-                        Handler::TransactionsByHash {
-                            hashes,
-                            transactions,
-                        }
+                        // TODO: is it really an error if we ask for a transaction hash, but the peer
+                        // doesn't know it? Should we close the connection on that kind of error?
+                        // Should we fake a NotFound response here? (#1515)
+                        let items = hashes.iter().map(|h| InventoryHash::Tx(*h)).collect();
+                        Handler::Finished(Err(PeerError::NotFound(items)))
                     }
                 }
             }
@@ -139,35 +152,36 @@ impl Handler {
                 //   - the peer eventually returns a transaction or a `NotFound` entry
                 //     for each hash
                 //   - all `NotFound` entries are contained in a single message
-                //   - the `NotFound` message comes after the transactions
-                let hash_in_hashes = |item: &InventoryHash| {
-                    if let InventoryHash::Tx(hash) = item {
-                        hashes.contains(hash)
-                    } else {
-                        false
-                    }
-                };
-                if items.iter().all(hash_in_hashes) {
-                    // all hashes have a transaction or a `NotFound` entry
-                    if !transactions.is_empty() {
-                        // TODO: does the caller need a list of missing transactions?
-                        Handler::Finished(Ok(Response::Transactions(transactions)))
-                    } else {
-                        Handler::Finished(Err(PeerError::NotFound(items)))
-                    }
+                //   - the `NotFound` message comes after the transaction messages
+                //
+                // If we're in sync with the peer, then the `NotFound` should contain the remaining
+                // hashes from the handler. If we're not in sync with the peer, we should return
+                // what we got so far, and log an error.
+                let missing_transactions: HashSet<_> = items
+                    .iter()
+                    .filter_map(|inv| match &inv {
+                        InventoryHash::Tx(tx) => Some(tx),
+                        _ => None,
+                    })
+                    .cloned()
+                    .collect();
+                if missing_transactions != hashes {
+                    trace!(?items, ?missing_transactions, ?hashes);
+                    // if these errors are noisy, we should replace them with debugs
+                    error!("unexpected notfound message from peer: all remaining transaction hashes should be listed in the notfound. Using partial received transactions as the peer response");
+                }
+                if missing_transactions.len() != items.len() {
+                    trace!(?items, ?missing_transactions, ?hashes);
+                    error!("unexpected notfound message from peer: notfound contains duplicate hashes or non-transaction hashes. Using partial received transactions as the peer response");
+                }
+
+                if !transactions.is_empty() {
+                    // TODO: does the caller need a list of missing transactions? (#1515)
+                    Handler::Finished(Ok(Response::Transactions(transactions)))
                 } else {
-                    // waiting for more transactions or a complete `NotFound` message
-                    if items.iter().any(hash_in_hashes) {
-                        debug!(
-                            not_found_transactions = ?items.iter().cloned().filter(hash_in_hashes).count(),
-                            remaining_transactions = ?hashes.len(),
-                            "notfound containing some of the remaining requested transactions");
-                    }
-                    ignored_msg = Some(Message::NotFound(items));
-                    Handler::TransactionsByHash {
-                        hashes,
-                        transactions,
-                    }
+                    // TODO: is it really an error if we ask for a transaction hash, but the peer
+                    // doesn't know it? Should we close the connection on that kind of error? (#1515)
+                    Handler::Finished(Err(PeerError::NotFound(items)))
                 }
             }
             // `zcashd` returns requested blocks in a single batch of messages.
@@ -182,10 +196,11 @@ impl Handler {
                 Message::Block(block),
             ) => {
                 // assumptions:
-                //   - the block list is contiguous
-                //   - missing blocks are silently skipped (rather than using `NotFound`)
+                //   - the block messages are sent in a single continuous batch
+                //   - missing blocks are silently skipped
+                //     (there is no `NotFound` message at the end of the batch)
                 if hashes.remove(&block.hash()) {
-                    // we are in the middle of the contiguous block response
+                    // we are in the middle of the continuous block messages
                     blocks.push(block);
                     if hashes.is_empty() {
                         Handler::Finished(Ok(Response::Blocks(blocks)))
@@ -193,15 +208,28 @@ impl Handler {
                         Handler::BlocksByHash { hashes, blocks }
                     }
                 } else {
-                    // we are before or after the contiguous block response
+                    // We got a block we didn't ask for.
+                    //
+                    // So either:
+                    // 1. The peer doesn't know any of the blocks we asked for.
+                    //    We should cancel the request, so we don't hang waiting for blocks that
+                    //    will never arrive.
+                    // 2. The peer sent an unsolicited block.
+                    //    We should ignore that block, and wait for the actual response.
+                    //
+                    // We end the request, so we don't hang on forked or lagging peers (case 1).
+                    // But we keep the connection open, so the inbound service can process blocks
+                    // from good peers (case 2).
                     ignored_msg = Some(Message::Block(block));
                     if !blocks.is_empty() {
-                        // TODO: does the caller need a list of missing blocks?
+                        // TODO: does the caller need a list of missing blocks? (#1515)
                         Handler::Finished(Ok(Response::Blocks(blocks)))
                     } else {
-                        // TODO: what if the peer doesn't know any of the blocks
-                        //       we asked for?
-                        Handler::BlocksByHash { hashes, blocks }
+                        // TODO: is it really an error if we ask for a block hash, but the peer
+                        // doesn't know it? Should we close the connection on that kind of error?
+                        // Should we fake a NotFound response here? (#1515)
+                        let items = hashes.iter().map(|h| InventoryHash::Block(*h)).collect();
+                        Handler::Finished(Err(PeerError::NotFound(items)))
                     }
                 }
             }
@@ -211,32 +239,36 @@ impl Handler {
                 //   - the peer eventually returns a block or a `NotFound` entry
                 //     for each hash
                 //   - all `NotFound` entries are contained in a single message
-                //   - the `NotFound` message comes after the blocks
-                let hash_in_hashes = |item: &InventoryHash| {
-                    if let InventoryHash::Block(hash) = item {
-                        hashes.contains(hash)
-                    } else {
-                        false
-                    }
-                };
-                if items.iter().all(hash_in_hashes) {
-                    // all hashes have a block or a `NotFound` entry
-                    if !blocks.is_empty() {
-                        // TODO: does the caller need a list of missing blocks?
-                        Handler::Finished(Ok(Response::Blocks(blocks)))
-                    } else {
-                        Handler::Finished(Err(PeerError::NotFound(items)))
-                    }
+                //   - the `NotFound` message comes after the block messages
+                //
+                // If we're in sync with the peer, then the `NotFound` should contain the remaining
+                // hashes from the handler. If we're not in sync with the peer, we should return
+                // what we got so far, and log an error.
+                let missing_blocks: HashSet<_> = items
+                    .iter()
+                    .filter_map(|inv| match &inv {
+                        InventoryHash::Block(b) => Some(b),
+                        _ => None,
+                    })
+                    .cloned()
+                    .collect();
+                if missing_blocks != hashes {
+                    trace!(?items, ?missing_blocks, ?hashes);
+                    // if these errors are noisy, we should replace them with debugs
+                    error!("unexpected notfound message from peer: all remaining block hashes should be listed in the notfound. Using partial received blocks as the peer response");
+                }
+                if missing_blocks.len() != items.len() {
+                    trace!(?items, ?missing_blocks, ?hashes);
+                    error!("unexpected notfound message from peer: notfound contains duplicate hashes or non-block hashes. Using partial received blocks as the peer response");
+                }
+
+                if !blocks.is_empty() {
+                    // TODO: does the caller need a list of missing blocks? (#1515)
+                    Handler::Finished(Ok(Response::Blocks(blocks)))
                 } else {
-                    // waiting for more blocks or a complete `NotFound` message
-                    if items.iter().any(hash_in_hashes) {
-                        debug!(
-                            not_found_blocks = ?items.iter().cloned().filter(hash_in_hashes).count(),
-                            remaining_blocks = ?hashes.len(),
-                            "notfound containing some of the remaining requested blocks");
-                    }
-                    ignored_msg = Some(Message::NotFound(items));
-                    Handler::BlocksByHash { hashes, blocks }
+                    // TODO: is it really an error if we ask for a block hash, but the peer
+                    // doesn't know it? Should we close the connection on that kind of error? (#1515)
+                    Handler::Finished(Err(PeerError::NotFound(items)))
                 }
             }
             (Handler::FindBlocks, Message::Inv(items))
