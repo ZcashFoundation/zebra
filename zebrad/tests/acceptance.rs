@@ -2,6 +2,7 @@
 //! output for given argument combinations matches what is expected.
 //!
 //! ### Note on port conflict
+//!
 //! If the test child has a cache or port conflict with another test, or a
 //! running zebrad or zcashd, then it will panic. But the acceptance tests
 //! expect it to run until it is killed.
@@ -1052,11 +1053,12 @@ async fn tracing_endpoint() -> Result<()> {
 
     Ok(())
 }
-/// Test will start 2 zebrad nodes one after the other using the same configuration.
-/// It is expected that the first node spawned will block the network port and data dir.
-/// The second node will panic with some of the conflicts added in #1535.
+
+/// Test will start 2 zebrad nodes one after the other using the same Zcash listener.
+/// It is expected that the first node spawned will get exclusive use of the port.
+/// The second node will panic with the Zcash listener conflict hint added in #1535.
 #[test]
-fn resources_in_use_conflicts() -> Result<()> {
+fn zcash_listener_conflict() -> Result<()> {
     zebra_test::init();
 
     // [Note on port conflict](#Note on port conflict)
@@ -1073,8 +1075,9 @@ fn resources_in_use_conflicts() -> Result<()> {
     // Start the first node
     let mut node1 = dir1.spawn_child(&["start"])?;
 
-    // From another folder create the same configuration.
-    // `cache_dir` and `network.listen_addr` will be the same in the 2 nodes.
+    // From another folder create a configuration with the same listener.
+    // `network.listen_addr` will be the same in the 2 nodes.
+    // (But since the config is ephemeral, they will have different state paths.)
     let dir2 = TempDir::new("zebrad_tests")?;
     fs::File::create(dir2.path().join("zebrad.toml"))?
         .write_all(toml::to_string(&config)?.as_bytes())?;
@@ -1096,9 +1099,9 @@ fn resources_in_use_conflicts() -> Result<()> {
         .stdout_contains(format!(r"Opened Zcash protocol endpoint at {}", listen_addr).as_str())?;
     output1.assert_was_killed()?;
 
-    // In the second node we look for any of our panics.
+    // In the second node we look for the Zcash listener conflict
     let output2 = node2.wait_with_output()?;
-    output2.stderr_contains("already in use|lock file|temporarily unavailable|in use")?;
+    output2.stderr_contains("already in use")?;
     output2.assert_was_not_killed()?;
 
     Ok(())
