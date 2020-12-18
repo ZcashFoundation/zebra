@@ -127,7 +127,9 @@ impl CachedFfiTransaction {
                 #[cfg(not(windows))]
                 flags,
                 #[cfg(windows)]
-                flags.try_into().expect("zcash_script_SCRIPT_FLAGS_VERIFY_* enum values fit in a c_uint"),
+                flags
+                    .try_into()
+                    .expect("zcash_script_SCRIPT_FLAGS_VERIFY_* enum values fit in a c_uint"),
                 consensus_branch_id,
                 &mut err,
             )
