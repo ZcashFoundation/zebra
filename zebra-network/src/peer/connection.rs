@@ -36,6 +36,7 @@ use crate::{
 
 use super::{ClientRequest, ErrorSlot, PeerError, SharedPeerError};
 
+#[derive(Debug)]
 pub(super) enum Handler {
     /// Indicates that the handler has finished processing the request.
     /// An error here is scoped to the request.
@@ -303,6 +304,7 @@ impl Handler {
     }
 }
 
+#[derive(Debug)]
 #[must_use = "AwaitingResponse.tx.send() must be called before drop"]
 pub(super) enum State {
     /// Awaiting a client request or a peer message.
@@ -710,9 +712,9 @@ where
             Ok((AwaitingRequest, None)) => unreachable!(
                 "successful AwaitingRequest states must send a response on tx, but tx is None",
             ),
-            Ok((AwaitingResponse { .. }, Some(tx))) => unreachable!(
-                "successful AwaitingResponse states must keep tx, but tx is Some: {:?}",
-                tx
+            Ok((new_state @ AwaitingResponse { .. }, Some(tx))) => unreachable!(
+                "successful AwaitingResponse states must keep tx, but tx is Some: {:?} for: {:?}",
+                tx, new_state,
             ),
         };
     }
