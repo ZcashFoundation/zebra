@@ -84,8 +84,9 @@ impl Handler {
                 }
             }
             (Handler::Peers, Message::Addr(addrs)) => Handler::Finished(Ok(Response::Peers(addrs))),
-            // `zcashd` returns transactions contiguously (but not necessarily immediately).
-            // It uses `NotFound` if any transactions are missing:
+            // `zcashd` returns requested transactions in a single batch of messages.
+            // Other transaction or non-transaction messages can come before or after the batch.
+            // After the transaction batch, `zcashd` sends `NotFound` if any transactions are missing:
             // https://github.com/zcash/zcash/blob/e7b425298f6d9a54810cb7183f00be547e4d9415/src/main.cpp#L5617
             (
                 Handler::TransactionsByHash {
@@ -112,7 +113,8 @@ impl Handler {
                     // we are before or after the contiguous block response
                     ignored_msg = Some(Message::Tx(transaction));
                     if !transactions.is_empty() {
-                        warn!("unexpected transaction from peer: transaction responses should be contiguous, followed by notfound. Using partial received transactions as the peer response");
+                        // we don't expect zcashd to behave like this
+                        error!("unexpected transaction from peer: transaction responses should be contiguous, followed by notfound. Using partial received transactions as the peer response");
                         // TODO: does the caller need a list of missing transactions?
                         Handler::Finished(Ok(Response::Transactions(transactions)))
                     } else {
@@ -168,8 +170,9 @@ impl Handler {
                     }
                 }
             }
-            // `zcashd` returns blocks sequentially (but not necessarily immediately).
-            // It silently skips missing blocks, rather than using `NotFound`:
+            // `zcashd` returns requested blocks in a single batch of messages.
+            // Other blocks or non-blocks messages can come before or after the batch.
+            // `zcashd` silently skips missing blocks, rather than sending a final `NotFound` message.
             // https://github.com/zcash/zcash/blob/e7b425298f6d9a54810cb7183f00be547e4d9415/src/main.cpp#L5523
             (
                 Handler::BlocksByHash {

@@ -179,11 +179,13 @@ impl Service<zn::Request> for Inbound {
                     .boxed()
             }
             zn::Request::TransactionsByHash(_transactions) => {
-                // `zcashd` returns a list of found blocks, followed by a
+                // `zcashd` returns a list of found transactions, followed by a
                 // `NotFound` message if any transactions are missing. `zcashd`
-                // says that SPV clients rely on this behaviour - are there any
-                // of them on the Zcash network?
+                // says that Simplified Payment Verification (SPV) clients rely on
+                // this behaviour - are there any of them on the Zcash network?
                 // https://github.com/zcash/zcash/blob/e7b425298f6d9a54810cb7183f00be547e4d9415/src/main.cpp#L5632
+                // We'll implement this request once we have a mempool:
+                // https://en.bitcoin.it/wiki/Protocol_documentation#getdata
                 debug!("ignoring unimplemented request");
                 async { Ok(zn::Response::Nil) }.boxed()
             }
