@@ -7,7 +7,7 @@
 //! And it's unclear if these assumptions match the `zcashd` implementation.
 //! It should be refactored into a cleaner set of request/response pairs (#1515).
 
-use std::{collections::HashSet, fmt, sync::Arc};
+use std::{collections::HashSet, sync::Arc};
 
 use futures::{
     channel::{mpsc, oneshot},
@@ -495,8 +495,9 @@ where
     /// Marks the peer as having failed with error `e`.
     fn fail_with<E>(&mut self, e: E)
     where
-        E: Into<SharedPeerError> + fmt::Display,
+        E: Into<SharedPeerError>,
     {
+        let e = e.into();
         debug!(%e, "failing peer service with error");
         // Update the shared error slot
         let mut guard = self
@@ -507,7 +508,7 @@ where
         if guard.is_some() {
             panic!("called fail_with on already-failed connection state");
         } else {
-            *guard = Some(e.into());
+            *guard = Some(e);
         }
         // Drop the guard immediately to release the mutex.
         std::mem::drop(guard);
