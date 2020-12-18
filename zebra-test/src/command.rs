@@ -369,6 +369,24 @@ impl<T> TestOutput<T> {
     fn was_killed(&self) -> bool {
         self.output.status.signal() != Some(9)
     }
+
+    #[instrument(skip(self))]
+    pub fn stderr_contains(&self, regex: &str) -> Result<&Self> {
+        let re = regex::Regex::new(regex)?;
+        let stderr = String::from_utf8_lossy(&self.output.stderr);
+
+        for line in stderr.lines() {
+            if re.is_match(line) {
+                return Ok(self);
+            }
+        }
+
+        Err(eyre!(
+            "stderr of command did not contain any matches for the given regex"
+        ))
+        .context_from(self)
+        .with_section(|| format!("{:?}", regex).header("Match Regex:"))
+    }
 }
 
 /// Add context to an error report

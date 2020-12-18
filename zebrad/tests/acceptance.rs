@@ -1052,3 +1052,54 @@ async fn tracing_endpoint() -> Result<()> {
 
     Ok(())
 }
+/// Test will start 2 zebrad nodes one after the other using the same configuration.
+/// It is expected that the first node spawned will block the network port and data dir.
+/// The second node will panic with some of the conflicts added in #1535.
+#[test]
+fn resources_in_use_conflicts() -> Result<()> {
+    zebra_test::init();
+
+    // [Note on port conflict](#Note on port conflict)
+    let port = random_known_port();
+    let listen_addr = format!("127.0.0.1:{}", port);
+
+    // Write a configuration that has our created network listen_addr
+    let mut config = default_test_config()?;
+    config.network.listen_addr = listen_addr.parse().unwrap();
+    let dir1 = TempDir::new("zebrad_tests")?;
+    fs::File::create(dir1.path().join("zebrad.toml"))?
+        .write_all(toml::to_string(&config)?.as_bytes())?;
+
+    // Start the first node
+    let mut node1 = dir1.spawn_child(&["start"])?;
+
+    // From another folder create the same configuration.
+    // `cache_dir` and `network.listen_addr` will be the same in the 2 nodes.
+    let dir2 = TempDir::new("zebrad_tests")?;
+    fs::File::create(dir2.path().join("zebrad.toml"))?
+        .write_all(toml::to_string(&config)?.as_bytes())?;
+
+    // wait a bit to spawn the second node, we want the first fully started.
+    std::thread::sleep(LAUNCH_DELAY);
+
+    // Spawn the second node
+    let mut node2 = dir2.spawn_child(&["start"])?;
+
+    // Wait a few seconds and kill both nodes
+    std::thread::sleep(LAUNCH_DELAY);
+    node1.kill()?;
+    node2.kill()?;
+
+    // In node1 we just want to check the network port was opened.
+    let output1 = node1.wait_with_output()?;
+    output1
+        .stdout_contains(format!(r"Opened Zcash protocol endpoint at {}", listen_addr).as_str())?;
+    output1.assert_was_killed()?;
+
+    // In the second node we look for any of our panics.
+    let output2 = node2.wait_with_output()?;
+    output2.stderr_contains("already in use|lock file|temporarily unavailable|in use")?;
+    output2.assert_was_not_killed()?;
+
+    Ok(())
+}
