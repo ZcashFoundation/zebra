@@ -41,13 +41,15 @@ impl FinalizedState {
             rocksdb::ColumnFamilyDescriptor::new("sprout_nullifiers", db_options.clone()),
             rocksdb::ColumnFamilyDescriptor::new("sapling_nullifiers", db_options.clone()),
         ];
-        let db_check = rocksdb::DB::open_cf_descriptors(&db_options, path, column_families);
+        let db_result = rocksdb::DB::open_cf_descriptors(&db_options, &path, column_families);
 
-        let db = match db_check {
+        let db = match db_result {
             Ok(d) => d,
-            Err(_) => panic!(
-                "{} {}",
-                "LOCK file already in use.", "Check if there is antoher zebrad process running."
+            Err(e) => panic!(
+                "Opening database {:?} failed: {:?}. \
+                 Hint: Check if another zebrad process is running. \
+                 Try changing the state cache_dir in the Zebra config.",
+                path, e,
             ),
         };
 
