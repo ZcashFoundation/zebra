@@ -1068,19 +1068,15 @@ fn zcash_listener_conflict() -> Result<()> {
     // Write a configuration that has our created network listen_addr
     let mut config = default_test_config()?;
     config.network.listen_addr = listen_addr.parse().unwrap();
-    let dir1 = TempDir::new("zebrad_tests")?;
-    fs::File::create(dir1.path().join("zebrad.toml"))?
-        .write_all(toml::to_string(&config)?.as_bytes())?;
-
-    // Start the first node
-    let mut node1 = dir1.spawn_child(&["start"])?;
+    let dir1 = TempDir::new("zebrad_tests")?.with_config(config.clone())?;
 
     // From another folder create a configuration with the same listener.
     // `network.listen_addr` will be the same in the 2 nodes.
     // (But since the config is ephemeral, they will have different state paths.)
-    let dir2 = TempDir::new("zebrad_tests")?;
-    fs::File::create(dir2.path().join("zebrad.toml"))?
-        .write_all(toml::to_string(&config)?.as_bytes())?;
+    let dir2 = TempDir::new("zebrad_tests")?.with_config(config)?;
+
+    // Start the first node
+    let mut node1 = dir1.spawn_child(&["start"])?;
 
     // wait a bit to spawn the second node, we want the first fully started.
     std::thread::sleep(LAUNCH_DELAY);
