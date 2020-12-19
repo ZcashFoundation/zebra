@@ -647,8 +647,8 @@ fn sync_until(
 
     let mut child = tempdir.spawn_child(&["start"])?.with_timeout(timeout);
 
-    // TODO: is there a way to check for testnet or mainnet here?
-    // For example: "network=Mainnet" or "network=Testnet"
+    let network = format!("network: {},", network);
+    child.expect_stdout(&network)?;
     child.expect_stdout(stop_regex)?;
     child.kill()?;
 
@@ -672,9 +672,7 @@ fn create_cached_database_height(network: Network, height: Height) -> Result<()>
     // TODO: add convenience methods?
     config.network.network = network;
     config.state.debug_stop_at_height = Some(height.0);
-    let dir = PathBuf::from("/zebrad-cache");
-
-    fs::File::create(dir.join("zebrad.toml"))?.write_all(toml::to_string(&config)?.as_bytes())?;
+    let dir = PathBuf::from("/zebrad-cache").with_config(config)?;
 
     let mut child = dir
         .spawn_child(&["start"])?
@@ -713,6 +711,7 @@ fn sync_to_sapling_mainnet() {
     let network = Mainnet;
     create_cached_database(network).unwrap();
 }
+
 // Sync to the sapling activation height testnet and stop.
 #[cfg_attr(feature = "test_sync_to_sapling_testnet", test)]
 fn sync_to_sapling_testnet() {
@@ -795,10 +794,7 @@ async fn metrics_endpoint() -> Result<()> {
     let mut config = default_test_config()?;
     config.metrics.endpoint_addr = Some(endpoint.parse().unwrap());
 
-    let dir = TempDir::new("zebrad_tests")?;
-    fs::File::create(dir.path().join("zebrad.toml"))?
-        .write_all(toml::to_string(&config)?.as_bytes())?;
-
+    let dir = TempDir::new("zebrad_tests")?.with_config(config)?;
     let mut child = dir.spawn_child(&["start"])?;
 
     // Run `zebrad` for a few seconds before testing the endpoint
@@ -851,10 +847,7 @@ async fn tracing_endpoint() -> Result<()> {
     let mut config = default_test_config()?;
     config.tracing.endpoint_addr = Some(endpoint.parse().unwrap());
 
-    let dir = TempDir::new("zebrad_tests")?;
-    fs::File::create(dir.path().join("zebrad.toml"))?
-        .write_all(toml::to_string(&config)?.as_bytes())?;
-
+    let dir = TempDir::new("zebrad_tests")?.with_config(config)?;
     let mut child = dir.spawn_child(&["start"])?;
 
     // Run `zebrad` for a few seconds before testing the endpoint
