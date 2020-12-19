@@ -12,7 +12,7 @@ use std::{
     io::BufRead,
     io::{BufReader, Lines, Read},
     path::Path,
-    process::{Child, ChildStdout, Command, ExitStatus, Output, Stdio},
+    process::{Child, ChildStderr, ChildStdout, Command, ExitStatus, Output, Stdio},
     time::{Duration, Instant},
 };
 
@@ -86,6 +86,7 @@ impl CommandExt for Command {
             dir,
             deadline: None,
             stdout: None,
+            stderr: None,
             bypass_test_capture: false,
         })
     }
@@ -152,6 +153,7 @@ pub struct TestChild<T> {
     pub cmd: String,
     pub child: Child,
     pub stdout: Option<Lines<BufReader<ChildStdout>>>,
+    pub stderr: Option<Lines<BufReader<ChildStderr>>>,
     pub deadline: Option<Instant>,
     bypass_test_capture: bool,
 }
@@ -184,7 +186,7 @@ impl<T> TestChild<T> {
         })
     }
 
-    /// Set a timeout for `expect_stdout`.
+    /// Set a timeout for `expect_stdout` or `expect_stderr`.
     ///
     /// Does not apply to `wait_with_output`.
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
@@ -192,17 +194,18 @@ impl<T> TestChild<T> {
         self
     }
 
-    /// Configures testrunner to forward stdout to the true stdout rather than
-    /// fakestdout used by cargo tests.
+    /// Configures testrunner to forward stdout and stderr to the true stdout,
+    /// rather than the fakestdout used by cargo tests.
     pub fn bypass_test_capture(mut self, cond: bool) -> Self {
         self.bypass_test_capture = cond;
         self
     }
 
-    /// Checks each line of the child's stdout against `regex`, and returns matching lines.
+    /// Checks each line of the child's stdout against `regex`, and returns Ok
+    /// if a line matches.
     ///
     /// Kills the child after the configured timeout has elapsed.
-    /// Note: the timeout is only checked after each line.
+    /// See `expect_line_matching` for details.
     #[instrument(skip(self))]
     pub fn expect_stdout(&mut self, regex: &str) -> Result<&mut Self> {
         if self.stdout.is_none() {
@@ -214,12 +217,67 @@ impl<T> TestChild<T> {
                 .map(BufRead::lines)
         }
 
-        let re = regex::Regex::new(regex).expect("regex must be valid");
         let mut lines = self
             .stdout
             .take()
             .expect("child must capture stdout to call expect_stdout");
 
+        match self.expect_line_matching(&mut lines, regex, "stdout") {
+            Ok(()) => {
+                self.stdout = Some(lines);
+                Ok(self)
+            }
+            Err(report) => Err(report),
+        }
+    }
+
+    /// Checks each line of the child's stderr against `regex`, and returns Ok
+    /// if a line matches.
+    ///
+    /// Kills the child after the configured timeout has elapsed.
+    /// See `expect_line_matching` for details.
+    #[instrument(skip(self))]
+    pub fn expect_stderr(&mut self, regex: &str) -> Result<&mut Self> {
+        if self.stderr.is_none() {
+            self.stderr = self
+                .child
+                .stderr
+                .take()
+                .map(BufReader::new)
+                .map(BufRead::lines)
+        }
+
+        let mut lines = self
+            .stderr
+            .take()
+            .expect("child must capture stderr to call expect_stderr");
+
+        match self.expect_line_matching(&mut lines, regex, "stderr") {
+            Ok(()) => {
+                self.stderr = Some(lines);
+                Ok(self)
+            }
+            Err(report) => Err(report),
+        }
+    }
+
+    /// Checks each line in `lines` against `regex`, and returns Ok if a line
+    /// matches. Uses `stream_name` as the name for `lines` in error reports.
+    ///
+    /// Kills the child after the configured timeout has elapsed.
+    /// Note: the timeout is only checked after each full line is received from
+    /// the child.
+    #[instrument(skip(self, lines))]
+    pub fn expect_line_matching<L>(
+        &mut self,
+        lines: &mut L,
+        regex: &str,
+        stream_name: &str,
+    ) -> Result<()>
+    where
+        L: Iterator<Item = std::io::Result<String>>,
+    {
+        let re = regex::Regex::new(regex).expect("regex must be valid");
         while !self.past_deadline() && self.is_running() {
             let line = if let Some(line) = lines.next() {
                 line?
@@ -227,20 +285,21 @@ impl<T> TestChild<T> {
                 break;
             };
 
-            // since we're about to discard this line write it to stdout so our
-            // test runner can capture it and display if the test fails, may
-            // cause weird reordering for stdout / stderr
-            if !self.bypass_test_capture {
-                println!("{}", line);
-            } else {
+            // Since we're about to discard this line write it to stdout, so it
+            // can be preserved. May cause weird reordering for stdout / stderr.
+            // Uses stdout even if the original lines were from stderr.
+            if self.bypass_test_capture {
+                // send lines to the terminal (or process stdout file redirect)
                 use std::io::Write;
                 #[allow(clippy::explicit_write)]
                 writeln!(std::io::stdout(), "{}", line).unwrap();
+            } else {
+                // if the test fails, the test runner captures and displays it
+                println!("{}", line);
             }
 
             if re.is_match(&line) {
-                self.stdout = Some(lines);
-                return Ok(self);
+                return Ok(());
             }
         }
 
@@ -251,9 +310,12 @@ impl<T> TestChild<T> {
             self.kill()?;
         }
 
-        let report = eyre!("stdout of command did not contain any matches for the given regex")
-            .context_from(self)
-            .with_section(|| format!("{:?}", regex).header("Match Regex:"));
+        let report = eyre!(
+            "{} of command did not contain any matches for the given regex",
+            stream_name
+        )
+        .context_from(self)
+        .with_section(|| format!("{:?}", regex).header("Match Regex:"));
 
         Err(report)
     }
@@ -340,6 +402,51 @@ impl<T> TestOutput<T> {
             .with_section(|| format!("{:?}", regex).header("Match Regex:"))
     }
 
+    #[instrument(skip(self))]
+    pub fn stderr_contains(&self, regex: &str) -> Result<&Self> {
+        let re = regex::Regex::new(regex)?;
+        let stderr = String::from_utf8_lossy(&self.output.stderr);
+
+        for line in stderr.lines() {
+            if re.is_match(line) {
+                return Ok(self);
+            }
+        }
+
+        Err(eyre!(
+            "stderr of command did not contain any matches for the given regex"
+        ))
+        .context_from(self)
+        .with_section(|| format!("{:?}", regex).header("Match Regex:"))
+    }
+
+    #[instrument(skip(self))]
+    pub fn stderr_equals(&self, s: &str) -> Result<&Self> {
+        let stderr = String::from_utf8_lossy(&self.output.stderr);
+
+        if stderr == s {
+            return Ok(self);
+        }
+
+        Err(eyre!("stderr of command is not equal the given string"))
+            .context_from(self)
+            .with_section(|| format!("{:?}", s).header("Match String:"))
+    }
+
+    #[instrument(skip(self))]
+    pub fn stderr_matches(&self, regex: &str) -> Result<&Self> {
+        let re = regex::Regex::new(regex)?;
+        let stderr = String::from_utf8_lossy(&self.output.stderr);
+
+        if re.is_match(&stderr) {
+            return Ok(self);
+        }
+
+        Err(eyre!("stderr of command is not equal to the given regex"))
+            .context_from(self)
+            .with_section(|| format!("{:?}", regex).header("Match Regex:"))
+    }
+
     /// Returns Ok if the program was killed, Err(Report) if exit was by another
     /// reason.
     pub fn assert_was_killed(&self) -> Result<()> {
@@ -368,24 +475,6 @@ impl<T> TestOutput<T> {
     #[cfg(unix)]
     fn was_killed(&self) -> bool {
         self.output.status.signal() != Some(9)
-    }
-
-    #[instrument(skip(self))]
-    pub fn stderr_contains(&self, regex: &str) -> Result<&Self> {
-        let re = regex::Regex::new(regex)?;
-        let stderr = String::from_utf8_lossy(&self.output.stderr);
-
-        for line in stderr.lines() {
-            if re.is_match(line) {
-                return Ok(self);
-            }
-        }
-
-        Err(eyre!(
-            "stderr of command did not contain any matches for the given regex"
-        ))
-        .context_from(self)
-        .with_section(|| format!("{:?}", regex).header("Match Regex:"))
     }
 }
 
@@ -441,7 +530,12 @@ impl<T> ContextFrom<&mut TestChild<T>> for Report {
             let _ = stdout.read_to_string(&mut stdout_buf);
         }
 
-        if let Some(stderr) = &mut source.child.stderr {
+        if let Some(stderr) = &mut source.stderr {
+            for line in stderr {
+                let line = if let Ok(line) = line { line } else { break };
+                let _ = writeln!(&mut stderr_buf, "{}", line);
+            }
+        } else if let Some(stderr) = &mut source.child.stderr {
             let _ = stderr.read_to_string(&mut stderr_buf);
         }
 
