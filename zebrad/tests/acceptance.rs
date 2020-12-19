@@ -1069,20 +1069,40 @@ fn zcash_listener_conflict() -> Result<()> {
     let mut config = default_test_config()?;
     config.network.listen_addr = listen_addr.parse().unwrap();
     let dir1 = TempDir::new("zebrad_tests")?.with_config(config.clone())?;
+    let regex1 = format!(r"Opened Zcash protocol endpoint at {}", listen_addr);
 
     // From another folder create a configuration with the same listener.
     // `network.listen_addr` will be the same in the 2 nodes.
     // (But since the config is ephemeral, they will have different state paths.)
     let dir2 = TempDir::new("zebrad_tests")?.with_config(config)?;
 
+    check_config_conflict(dir1, regex1.as_str(), dir2, "already in use")?;
+
+    Ok(())
+}
+
+/// Launch a node in `first_dir`, wait a few seconds, then launch a node in
+/// `second_dir`. Check that the first node's stdout contains
+/// `first_stdout_regex`, and the second node's stderr contains
+/// `second_stderr_regex`.
+fn check_config_conflict<T, U>(
+    first_dir: T,
+    first_stdout_regex: &str,
+    second_dir: U,
+    second_stderr_regex: &str,
+) -> Result<()>
+where
+    T: ZebradTestDirExt,
+    U: ZebradTestDirExt,
+{
     // Start the first node
-    let mut node1 = dir1.spawn_child(&["start"])?;
+    let mut node1 = first_dir.spawn_child(&["start"])?;
 
     // wait a bit to spawn the second node, we want the first fully started.
     std::thread::sleep(LAUNCH_DELAY);
 
     // Spawn the second node
-    let mut node2 = dir2.spawn_child(&["start"])?;
+    let mut node2 = second_dir.spawn_child(&["start"])?;
 
     // Wait a few seconds and kill both nodes
     std::thread::sleep(LAUNCH_DELAY);
@@ -1091,13 +1111,12 @@ fn zcash_listener_conflict() -> Result<()> {
 
     // In node1 we just want to check the network port was opened.
     let output1 = node1.wait_with_output()?;
-    output1
-        .stdout_contains(format!(r"Opened Zcash protocol endpoint at {}", listen_addr).as_str())?;
+    output1.stdout_contains(first_stdout_regex)?;
     output1.assert_was_killed()?;
 
     // In the second node we look for the Zcash listener conflict
     let output2 = node2.wait_with_output()?;
-    output2.stderr_contains("already in use")?;
+    output2.stderr_contains(second_stderr_regex)?;
     output2.assert_was_not_killed()?;
 
     Ok(())
