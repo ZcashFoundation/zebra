@@ -44,7 +44,10 @@ impl FinalizedState {
         let db_result = rocksdb::DB::open_cf_descriptors(&db_options, &path, column_families);
 
         let db = match db_result {
-            Ok(d) => d,
+            Ok(d) => {
+                tracing::info!("Opened Zebra state cache at: {:?}", path);
+                d
+            }
             Err(e) => panic!(
                 "Opening database {:?} failed: {:?}. \
                  Hint: Check if another zebrad process is running. \

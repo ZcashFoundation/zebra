@@ -976,7 +976,7 @@ async fn metrics_endpoint() -> Result<()> {
     let output = output.assert_failure()?;
 
     // Make sure metrics was started
-    output.stdout_contains(format!(r"Initializing metrics endpoint at {}", endpoint).as_str())?;
+    output.stdout_contains(format!(r"Opened metrics endpoint at {}", endpoint).as_str())?;
 
     // [Note on port conflict](#Note on port conflict)
     output
@@ -1043,7 +1043,7 @@ async fn tracing_endpoint() -> Result<()> {
     let output = output.assert_failure()?;
 
     // Make sure tracing endpoint was started
-    output.stdout_contains(format!(r"Initializing tracing endpoint at {}", endpoint).as_str())?;
+    output.stdout_contains(format!(r"Opened tracing endpoint at {}", endpoint).as_str())?;
     // Todo: Match some trace level messages from output
 
     // [Note on port conflict](#Note on port conflict)
@@ -1081,6 +1081,84 @@ fn zcash_listener_conflict() -> Result<()> {
     Ok(())
 }
 
+/// Start 2 zebrad nodes using the same metrics listener port, but different
+/// state directories and Zcash listener ports. The first node should get
+/// exclusive use of the port. The second node will panic with the Zcash metrics
+/// conflict hint added in #1535.
+#[test]
+fn zcash_metrics_conflict() -> Result<()> {
+    zebra_test::init();
+
+    // [Note on port conflict](#Note on port conflict)
+    let port = random_known_port();
+    let listen_addr = format!("127.0.0.1:{}", port);
+
+    // Write a configuration that has our created metrics endpoint_addr
+    let mut config = default_test_config()?;
+    config.metrics.endpoint_addr = Some(listen_addr.parse().unwrap());
+    let dir1 = TempDir::new("zebrad_tests")?.with_config(config.clone())?;
+    let regex1 = format!(r"Opened metrics endpoint at {}", listen_addr);
+
+    // From another folder create a configuration with the same endpoint.
+    // `metrics.endpoint_addr` will be the same in the 2 nodes.
+    // But they will have different Zcash listeners (auto port) and states (ephemeral)
+    let dir2 = TempDir::new("zebrad_tests")?.with_config(config)?;
+
+    check_config_conflict(dir1, regex1.as_str(), dir2, "already in use")?;
+
+    Ok(())
+}
+
+/// Start 2 zebrad nodes using the same tracing listener port, but different
+/// state directories and Zcash listener ports. The first node should get
+/// exclusive use of the port. The second node will panic with the Zcash tracing
+/// conflict hint added in #1535.
+#[test]
+fn zcash_tracing_conflict() -> Result<()> {
+    zebra_test::init();
+
+    // [Note on port conflict](#Note on port conflict)
+    let port = random_known_port();
+    let listen_addr = format!("127.0.0.1:{}", port);
+
+    // Write a configuration that has our created tracing endpoint_addr
+    let mut config = default_test_config()?;
+    config.tracing.endpoint_addr = Some(listen_addr.parse().unwrap());
+    let dir1 = TempDir::new("zebrad_tests")?.with_config(config.clone())?;
+    let regex1 = format!(r"Opened tracing endpoint at {}", listen_addr);
+
+    // From another folder create a configuration with the same endpoint.
+    // `tracing.endpoint_addr` will be the same in the 2 nodes.
+    // But they will have different Zcash listeners (auto port) and states (ephemeral)
+    let dir2 = TempDir::new("zebrad_tests")?.with_config(config)?;
+
+    check_config_conflict(dir1, regex1.as_str(), dir2, "already in use")?;
+
+    Ok(())
+}
+
+/// Start 2 zebrad nodes using the same state directory, but different Zcash
+/// listener ports. The first node should get exclusive access to the database.
+/// The second node will panic with the Zcash state conflict hint added in #1535.
+#[test]
+fn zcash_state_conflict() -> Result<()> {
+    zebra_test::init();
+
+    // A persistent config has a fixed temp state directory, but asks the OS to
+    // automatically choose an unused port
+    let config = persistent_test_config()?;
+    let dir_conflict = TempDir::new("zebrad_tests")?.with_config(config)?;
+
+    check_config_conflict(
+        dir_conflict.path(),
+        "Opened Zebra state cache",
+        dir_conflict.path(),
+        "lock file",
+    )?;
+
+    Ok(())
+}
+
 /// Launch a node in `first_dir`, wait a few seconds, then launch a node in
 /// `second_dir`. Check that the first node's stdout contains
 /// `first_stdout_regex`, and the second node's stderr contains
@@ -1109,15 +1187,19 @@ where
     node1.kill()?;
     node2.kill()?;
 
-    // In node1 we just want to check the network port was opened.
+    // In node1 we want to check for the success regex
     let output1 = node1.wait_with_output()?;
     output1.stdout_contains(first_stdout_regex)?;
-    output1.assert_was_killed()?;
+    output1
+        .assert_was_killed()
+        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
 
-    // In the second node we look for the Zcash listener conflict
+    // In the second node we look for the conflict regex
     let output2 = node2.wait_with_output()?;
     output2.stderr_contains(second_stderr_regex)?;
-    output2.assert_was_not_killed()?;
+    output2
+        .assert_was_not_killed()
+        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
 
     Ok(())
 }
