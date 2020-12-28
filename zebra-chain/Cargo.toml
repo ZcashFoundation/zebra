@@ -29,7 +29,7 @@ rand_core = "0.5.1"
 ripemd160 = "0.8.0"
 secp256k1 = { version = "0.19.0", features = ["serde"] }
 serde = { version = "1", features = ["serde_derive", "rc"] }
-serde-big-array = "0.3.0"
+serde-big-array = "0.3.1"
 sha2 = { version = "0.9.2", features=["compress"] }
 thiserror = "1"
 x25519-dalek = { version = "1.1", features = ["serde"] }
