@@ -62,7 +62,7 @@ jobs:
         --image-family cos-dev \
         --image-project cos-cloud \
         --machine-type n2-standard-4 \
-        --metadata startup-script="systemctl start node-problem-detector" \
+        --metadata google-monitoring-enabled=true,startup-script="systemctl start node-problem-detector" \
         --service-account cos-vm@zealous-zebra.iam.gserviceaccount.com \
         --tags zebrad \
         --zone us-central1-a
