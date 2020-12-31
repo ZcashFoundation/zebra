@@ -672,7 +672,9 @@ fn create_cached_database_height(network: Network, height: Height) -> Result<()>
     // TODO: add convenience methods?
     config.network.network = network;
     config.state.debug_stop_at_height = Some(height.0);
-    let dir = PathBuf::from("/zebrad-cache").with_config(config)?;
+    let dir = PathBuf::from("/zebrad-cache");
+
+    fs::File::create(dir.join("zebrad.toml"))?.write_all(toml::to_string(&config)?.as_bytes())?;
 
     let mut child = dir
         .spawn_child(&["start"])?
