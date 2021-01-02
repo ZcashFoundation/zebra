@@ -35,6 +35,8 @@ ARG NETWORK=Mainnet
 
 RUN printf "[consensus]\n" >> /zebrad.toml
 RUN printf "checkpoint_sync = ${CHECKPOINT_SYNC}\n" >> /zebrad.toml
+RUN printf "[metrics]\n" >> /zebrad.toml
+RUN printf "endpoint_addr = '0.0.0.0:9999'\n" >> /zebrad.toml
 RUN printf "[network]\n" >> /zebrad.toml
 RUN printf "network = '${NETWORK}'\n" >> /zebrad.toml
 RUN printf "[state]\n" >> /zebrad.toml
