@@ -466,7 +466,7 @@ where
                                 if server_tx
                                     .send(ClientRequest {
                                         request,
-                                        tx,
+                                        tx: tx.into(),
                                         span: tracing::Span::current(),
                                     })
                                     .await

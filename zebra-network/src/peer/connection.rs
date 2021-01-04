@@ -10,7 +10,7 @@
 use std::{collections::HashSet, sync::Arc};
 
 use futures::{
-    channel::{mpsc, oneshot},
+    channel::mpsc,
     future::{self, Either},
     prelude::*,
     stream::Stream,
@@ -34,7 +34,7 @@ use crate::{
     BoxError,
 };
 
-use super::{ClientRequest, ErrorSlot, PeerError, SharedPeerError};
+use super::{ClientRequest, ErrorSlot, MustUseOneshotSender, PeerError, SharedPeerError};
 
 #[derive(Debug)]
 pub(super) enum Handler {
@@ -312,7 +312,7 @@ pub(super) enum State {
     /// Awaiting a peer message we can interpret as a client request.
     AwaitingResponse {
         handler: Handler,
-        tx: oneshot::Sender<Result<Response, SharedPeerError>>,
+        tx: MustUseOneshotSender<Result<Response, SharedPeerError>>,
         span: tracing::Span,
     },
     /// A failure has occurred and we are shutting down the connection.
