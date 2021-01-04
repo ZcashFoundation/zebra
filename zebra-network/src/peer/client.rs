@@ -33,10 +33,80 @@ pub(super) struct ClientRequest {
     /// future that may be moved around before it resolves.
     ///
     /// INVARIANT: `tx.send()` must be called before dropping `tx`.
-    pub tx: oneshot::Sender<Result<Response, SharedPeerError>>,
+    pub tx: MustUseOneshotSender<Result<Response, SharedPeerError>>,
     /// The tracing context for the request, so that work the connection task does
     /// processing messages in the context of this request will have correct context.
     pub span: tracing::Span,
+}
+
+/// A oneshot::Sender that must be used by calling `send()`.
+///
+/// Panics on drop if `tx` has not been used or canceled.
+/// Panics if `tx.send()` is used more than once.
+#[derive(Debug)]
+#[must_use = "tx.send() must be called before drop"]
+pub(super) struct MustUseOneshotSender<T: std::fmt::Debug> {
+    /// The sender for the oneshot channel.
+    ///
+    /// `None` if `tx.send()` has been used.
+    pub tx: Option<oneshot::Sender<T>>,
+}
+
+impl<T: std::fmt::Debug> MustUseOneshotSender<T> {
+    /// Forwards `t` to `tx.send()`, and marks this sender as used.
+    ///
+    /// Panics if `tx.send()` is used more than once.
+    pub fn send(mut self, t: T) -> Result<(), T> {
+        self.tx
+            .take()
+            .unwrap_or_else(|| {
+                panic!(
+                    "multiple uses of oneshot sender: oneshot must be used exactly once: {:?}",
+                    self
+                )
+            })
+            .send(t)
+    }
+
+    /// Returns `tx.cancellation()`.
+    ///
+    /// Panics if `tx.send()` has previously been used.
+    pub fn cancellation(&mut self) -> oneshot::Cancellation<'_, T> {
+        self.tx
+            .as_mut()
+            .map(|tx| tx.cancellation())
+            .unwrap_or_else( || {
+                panic!("called cancellation() after using oneshot sender: oneshot must be used exactly once")
+            })
+    }
+
+    /// Returns `tx.is_canceled()`.
+    ///
+    /// Panics if `tx.send()` has previously been used.
+    pub fn is_canceled(&self) -> bool {
+        self.tx
+            .as_ref()
+            .map(|tx| tx.is_canceled())
+            .unwrap_or_else(
+                || panic!("called is_canceled() after using oneshot sender: oneshot must be used exactly once: {:?}", self))
+    }
+}
+
+impl<T: std::fmt::Debug> From<oneshot::Sender<T>> for MustUseOneshotSender<T> {
+    fn from(sender: oneshot::Sender<T>) -> Self {
+        MustUseOneshotSender { tx: Some(sender) }
+    }
+}
+
+impl<T: std::fmt::Debug> Drop for MustUseOneshotSender<T> {
+    fn drop(&mut self) {
+        // is_canceled() will not panic, because we check is_none() first
+        assert!(
+            self.tx.is_none() || self.is_canceled(),
+            "unused oneshot sender: oneshot must be used or canceled: {:?}",
+            self
+        );
+    }
 }
 
 impl Service<Request> for Client {
@@ -66,7 +136,11 @@ impl Service<Request> for Client {
         // request.
         let span = tracing::Span::current();
 
-        match self.server_tx.try_send(ClientRequest { request, span, tx }) {
+        match self.server_tx.try_send(ClientRequest {
+            request,
+            span,
+            tx: tx.into(),
+        }) {
             Err(e) => {
                 if e.is_disconnected() {
                     future::ready(Err(self

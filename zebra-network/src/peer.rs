@@ -12,6 +12,7 @@ mod error;
 mod handshake;
 
 use client::ClientRequest;
+use client::MustUseOneshotSender;
 use error::ErrorSlot;
 
 pub use client::Client;
