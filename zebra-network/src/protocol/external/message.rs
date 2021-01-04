@@ -193,7 +193,13 @@ pub enum Message {
     /// content of a specific object, and is usually sent after
     /// receiving an `inv` packet, after filtering known elements.
     ///
+    /// `zcashd` returns requested items in a single batch of messages.
+    /// Missing blocks are silently skipped. Missing transaction hashes are
+    /// included in a single `NotFound` message following the transactions.
+    /// Other item or non-item messages can come before or after the batch.
+    ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#getdata)
+    /// [zcashd code](https://github.com/zcash/zcash/blob/e7b425298f6d9a54810cb7183f00be547e4d9415/src/main.cpp#L5523)
     GetData(Vec<InventoryHash>),
 
     /// A `block` message.
@@ -208,7 +214,16 @@ pub enum Message {
 
     /// A `notfound` message.
     ///
+    /// When a peer requests a list of transaction hashes, `zcashd` returns:
+    ///   - a batch of messages containing found transactions, then
+    ///   - a `NotFound` message containing a list of transaction hashes that
+    ///      aren't available in its mempool or state.
+    ///
+    /// But when a peer requests blocks or headers, any missing items are
+    /// silently skipped, without any `NotFound` messages.
+    ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#notfound)
+    /// [zcashd code](https://github.com/zcash/zcash/blob/e7b425298f6d9a54810cb7183f00be547e4d9415/src/main.cpp#L5632)
     // See note above on `Inventory`.
     NotFound(Vec<InventoryHash>),
 

@@ -78,7 +78,7 @@ pub enum Request {
     /// Returns [`Response::Transactions`](super::Response::Transactions).
     TransactionsByHash(HashSet<transaction::Hash>),
 
-    /// Request block hashes of subsequent blocks in the chain, giving hashes of
+    /// Request block hashes of subsequent blocks in the chain, given hashes of
     /// known blocks.
     ///
     /// # Returns
@@ -104,7 +104,7 @@ pub enum Request {
         stop: Option<block::Hash>,
     },
 
-    /// Request headers of subsequent blocks in the chain, giving hashes of
+    /// Request headers of subsequent blocks in the chain, given hashes of
     /// known blocks.
     ///
     /// # Returns
