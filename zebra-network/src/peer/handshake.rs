@@ -188,6 +188,7 @@ where
         Poll::Ready(Ok(()))
     }
 
+    #[instrument(skip(self))]
     fn call(&mut self, req: (TcpStream, SocketAddr)) -> Self::Future {
         let (tcp_stream, addr) = req;
 
