@@ -12,7 +12,7 @@ use tower::Service;
 
 use crate::protocol::internal::{Request, Response};
 
-use super::{ErrorSlot, SharedPeerError};
+use super::{ErrorSlot, PeerError, SharedPeerError};
 
 /// The "client" duplex half of a peer connection.
 pub struct Client {
@@ -148,6 +148,8 @@ impl Service<Request> for Client {
         }) {
             Err(e) => {
                 if e.is_disconnected() {
+                    let ClientRequest { tx, .. } = e.into_inner();
+                    let _ = tx.send(Err(PeerError::ConnectionClosed.into()));
                     future::ready(Err(self
                         .error_slot
                         .try_get_error()
