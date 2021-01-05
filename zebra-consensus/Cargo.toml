@@ -10,7 +10,7 @@ chrono = "0.4.19"
 displaydoc = "0.1.7"
 jubjub = "0.5.1"
 once_cell = "1.5"
-rand = "0.7"
+rand = "0.8"
 redjubjub = "0.2"
 serde = { version = "1", features = ["serde_derive"] }
 
@@ -31,7 +31,7 @@ zebra-script = { path = "../zebra-script" }
 
 [dev-dependencies]
 color-eyre = "0.5.10"
-rand = "0.7"
+rand = "0.8"
 spandoc = "0.2"
 tokio = { version = "0.3.4", features = ["full"] }
 tracing-error = "0.1.2"

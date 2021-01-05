@@ -16,7 +16,7 @@ futures = "0.3.7"
 
 [dev-dependencies]
 ed25519-zebra = "2.1.0"
-rand = "0.7"
+rand = "0.8"
 tokio = { version = "0.3", features = ["full"]}
 tracing = "0.1.22"
 zebra-test = { path = "../zebra-test/" }
