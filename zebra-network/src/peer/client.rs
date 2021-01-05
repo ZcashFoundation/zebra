@@ -33,6 +33,8 @@ pub(super) struct ClientRequest {
     /// future that may be moved around before it resolves.
     ///
     /// INVARIANT: `tx.send()` must be called before dropping `tx`.
+    ///
+    /// JUSTIFICATION: the `peer::Client` will translate all `Request`s into a `ClientRequest` which it sends to a background task, and if the send replies with `Ok(())` it will assume that it is safe to unconditionally poll the `Receiver` tied to the `Sender` used to create the `ClientRequest`.
     pub tx: MustUseOneshotSender<Result<Response, SharedPeerError>>,
     /// The tracing context for the request, so that work the connection task does
     /// processing messages in the context of this request will have correct context.
