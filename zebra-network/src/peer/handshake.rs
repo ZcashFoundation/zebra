@@ -489,6 +489,8 @@ where
                                             let _ =
                                                 tx.send(Err(PeerError::ConnectionClosed.into()));
                                         } else if e.is_full() {
+                                            // TODO: wait for the sink to be ready, or wait for a timeout,
+                                            // then close the connection with an overloaded error (#1551)
                                             let ClientRequest { tx, .. } = e.into_inner();
                                             let _ = tx.send(Err(PeerError::Overloaded.into()));
                                         } else {
