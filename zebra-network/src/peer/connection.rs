@@ -10,7 +10,6 @@
 use std::{collections::HashSet, sync::Arc};
 
 use futures::{
-    channel::mpsc,
     future::{self, Either},
     prelude::*,
     stream::Stream,
@@ -34,7 +33,10 @@ use crate::{
     BoxError,
 };
 
-use super::{ClientRequest, ErrorSlot, MustUseOneshotSender, PeerError, SharedPeerError};
+use super::{
+    ClientRequestReceiver, ErrorSlot, InProgressClientRequest, MustUseOneshotSender, PeerError,
+    SharedPeerError,
+};
 
 #[derive(Debug)]
 pub(super) enum Handler {
@@ -327,7 +329,9 @@ pub struct Connection<S, Tx> {
     /// other state handling.
     pub(super) request_timer: Option<Sleep>,
     pub(super) svc: S,
-    pub(super) client_rx: mpsc::Receiver<ClientRequest>,
+    /// A `mpsc::Receiver<ClientRequest>` that converts its results to
+    /// `InProgressClientRequest`
+    pub(super) client_rx: ClientRequestReceiver,
     /// A slot for an error shared between the Connection and the Client that uses it.
     pub(super) error_slot: ErrorSlot,
     //pub(super) peer_rx: Rx,
@@ -475,7 +479,7 @@ where
                 // requests before we can return and complete the future.
                 State::Failed => {
                     match self.client_rx.next().await {
-                        Some(ClientRequest { tx, span, .. }) => {
+                        Some(InProgressClientRequest { tx, span, .. }) => {
                             trace!(
                                 parent: &span,
                                 "erroring pending request to failed connection"
@@ -535,11 +539,11 @@ where
     ///
     /// NOTE: the caller should use .instrument(msg.span) to instrument the function.
     #[instrument(skip(self))]
-    async fn handle_client_request(&mut self, req: ClientRequest) {
+    async fn handle_client_request(&mut self, req: InProgressClientRequest) {
         trace!(?req.request);
         use Request::*;
         use State::*;
-        let ClientRequest { request, tx, span } = req;
+        let InProgressClientRequest { request, tx, span } = req;
 
         if tx.is_canceled() {
             metrics::counter!("peer.canceled", 1);

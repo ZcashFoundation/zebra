@@ -435,7 +435,7 @@ where
             let server = Connection {
                 state: connection::State::AwaitingRequest,
                 svc: inbound_service,
-                client_rx: server_rx,
+                client_rx: server_rx.into(),
                 error_slot: slot,
                 peer_tx,
                 request_timer: None,
@@ -451,7 +451,7 @@ where
             let heartbeat_span = tracing::debug_span!(parent: connection_span, "heartbeat");
             tokio::spawn(
                 async move {
-                    use super::client::ClientRequest;
+                    use super::ClientRequest;
                     use futures::future::Either;
 
                     let mut shutdown_rx = shutdown_rx;
@@ -466,16 +466,23 @@ where
                                 tracing::trace!(?request, "queueing heartbeat request");
                                 match server_tx.try_send(ClientRequest {
                                     request,
-                                    tx: tx.into(),
+                                    tx,
                                     span: tracing::Span::current(),
                                 }) {
                                     Ok(()) => {
                                         match server_tx.flush().await {
                                             Ok(()) => {}
                                             Err(e) => {
-                                                // TODO: we can't get the client request for this failure,
-                                                // so we can't ensure the invariant holds
-                                                panic!("flushing client request failed: {:?}", e);
+                                                // We can't get the client request for this failure,
+                                                // so we can't send an error back here. But that's ok,
+                                                // because:
+                                                //   - this error never happens (or it's very rare)
+                                                //   - if the flush() fails, the server hasn't
+                                                //     received the request
+                                                tracing::warn!(
+                                                    "flushing client request failed: {:?}",
+                                                    e
+                                                );
                                             }
                                         }
                                     }
