@@ -7,6 +7,7 @@ use std::{
 use futures::{
     channel::{mpsc, oneshot},
     future, ready,
+    stream::{Stream, StreamExt},
 };
 use tower::Service;
 
@@ -25,8 +26,32 @@ pub struct Client {
 
 /// A message from the `peer::Client` to the `peer::Server`.
 #[derive(Debug)]
-#[must_use = "tx.send() must be called before drop"]
 pub(super) struct ClientRequest {
+    /// The actual request.
+    pub request: Request,
+    /// The return message channel, included because `peer::Client::call` returns a
+    /// future that may be moved around before it resolves.
+    pub tx: oneshot::Sender<Result<Response, SharedPeerError>>,
+    /// The tracing context for the request, so that work the connection task does
+    /// processing messages in the context of this request will have correct context.
+    pub span: tracing::Span,
+}
+
+/// A receiver for the `peer::Server`, which wraps a `mpsc::Receiver`,
+/// converting `ClientRequest`s into `InProgressClientRequest`s.
+#[derive(Debug)]
+pub(super) struct ClientRequestReceiver {
+    /// The inner receiver
+    inner: mpsc::Receiver<ClientRequest>,
+}
+
+/// A message from the `peer::Client` to the `peer::Server`,
+/// after it has been received by the `peer::Server`.
+///
+///
+#[derive(Debug)]
+#[must_use = "tx.send() must be called before drop"]
+pub(super) struct InProgressClientRequest {
     /// The actual request.
     pub request: Request,
     /// The return message channel, included because `peer::Client::call` returns a
@@ -34,7 +59,15 @@ pub(super) struct ClientRequest {
     ///
     /// INVARIANT: `tx.send()` must be called before dropping `tx`.
     ///
-    /// JUSTIFICATION: the `peer::Client` will translate all `Request`s into a `ClientRequest` which it sends to a background task, and if the send replies with `Ok(())` it will assume that it is safe to unconditionally poll the `Receiver` tied to the `Sender` used to create the `ClientRequest`.
+    /// JUSTIFICATION: the `peer::Client` translates `Request`s into
+    /// `ClientRequest`s, which it sends to a background task. If the send is
+    /// `Ok(())`, it will assume that it is safe to unconditionally poll the
+    /// `Receiver` tied to the `Sender` used to create the `ClientRequest`.
+    ///
+    /// We enforce this invariant via the type system, by converting
+    /// `ClientRequest`s to `InProgressClientRequest`s when they are received by
+    /// the background task. These conversions are implemented by
+    /// `ClientRequestReceiver`.
     pub tx: MustUseOneshotSender<Result<Response, SharedPeerError>>,
     /// The tracing context for the request, so that work the connection task does
     /// processing messages in the context of this request will have correct context.
@@ -52,6 +85,49 @@ pub(super) struct MustUseOneshotSender<T: std::fmt::Debug> {
     ///
     /// `None` if `tx.send()` has been used.
     pub tx: Option<oneshot::Sender<T>>,
+}
+
+impl From<ClientRequest> for InProgressClientRequest {
+    fn from(client_request: ClientRequest) -> Self {
+        let ClientRequest { request, tx, span } = client_request;
+        InProgressClientRequest {
+            request,
+            tx: tx.into(),
+            span,
+        }
+    }
+}
+
+impl ClientRequestReceiver {
+    /// Forwards to `inner.close()`
+    pub fn close(&mut self) {
+        self.inner.close()
+    }
+}
+
+impl Stream for ClientRequestReceiver {
+    type Item = InProgressClientRequest;
+
+    /// Converts the successful result of `inner.poll_next()` to an
+    /// `InProgressClientRequest`.
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        match self.inner.poll_next_unpin(cx) {
+            Poll::Ready(client_request) => Poll::Ready(client_request.map(Into::into)),
+            // `inner.poll_next_unpin` parks the task for this future
+            Poll::Pending => Poll::Pending,
+        }
+    }
+
+    /// Returns `inner.size_hint()`
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+}
+
+impl From<mpsc::Receiver<ClientRequest>> for ClientRequestReceiver {
+    fn from(rx: mpsc::Receiver<ClientRequest>) -> Self {
+        ClientRequestReceiver { inner: rx }
+    }
 }
 
 impl<T: std::fmt::Debug> MustUseOneshotSender<T> {
@@ -143,11 +219,7 @@ impl Service<Request> for Client {
         // request.
         let span = tracing::Span::current();
 
-        match self.server_tx.try_send(ClientRequest {
-            request,
-            span,
-            tx: tx.into(),
-        }) {
+        match self.server_tx.try_send(ClientRequest { request, span, tx }) {
             Err(e) => {
                 if e.is_disconnected() {
                     let ClientRequest { tx, .. } = e.into_inner();
