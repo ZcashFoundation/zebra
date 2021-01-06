@@ -134,7 +134,6 @@ impl<T: std::fmt::Debug> MustUseOneshotSender<T> {
     /// Forwards `t` to `tx.send()`, and marks this sender as used.
     ///
     /// Panics if `tx.send()` is used more than once.
-    #[instrument(skip(self))]
     pub fn send(mut self, t: T) -> Result<(), T> {
         self.tx
             .take()
@@ -150,7 +149,6 @@ impl<T: std::fmt::Debug> MustUseOneshotSender<T> {
     /// Returns `tx.cancellation()`.
     ///
     /// Panics if `tx.send()` has previously been used.
-    #[instrument(skip(self))]
     pub fn cancellation(&mut self) -> oneshot::Cancellation<'_, T> {
         self.tx
             .as_mut()
@@ -163,7 +161,6 @@ impl<T: std::fmt::Debug> MustUseOneshotSender<T> {
     /// Returns `tx.is_canceled()`.
     ///
     /// Panics if `tx.send()` has previously been used.
-    #[instrument(skip(self))]
     pub fn is_canceled(&self) -> bool {
         self.tx
             .as_ref()
@@ -208,7 +205,6 @@ impl Service<Request> for Client {
         }
     }
 
-    #[instrument(skip(self))]
     fn call(&mut self, request: Request) -> Self::Future {
         use futures::future::FutureExt;
 

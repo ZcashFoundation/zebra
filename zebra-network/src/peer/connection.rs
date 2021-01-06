@@ -345,7 +345,6 @@ where
     Tx: Sink<Message, Error = SerializationError> + Unpin,
 {
     /// Consume this `Connection` to form a spawnable future containing its event loop.
-    #[instrument(skip(self, peer_rx))]
     pub async fn run<Rx>(mut self, mut peer_rx: Rx)
     where
         Rx: Stream<Item = Result<Message, SerializationError>> + Unpin,
@@ -538,7 +537,6 @@ where
     /// remote peer.
     ///
     /// NOTE: the caller should use .instrument(msg.span) to instrument the function.
-    #[instrument(skip(self))]
     async fn handle_client_request(&mut self, req: InProgressClientRequest) {
         trace!(?req.request);
         use Request::*;
