@@ -962,12 +962,12 @@ dependencies = [
 
 [[package]]
 name = "fixed-hash"
-version = "0.6.1"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11498d382790b7a8f2fd211780bec78619bba81cdad3a283997c0c41f836759c"
+checksum = "cfcf0ed7fe52a17a03854ec54a9f76d6d84508d1c0e66bc1793301c73fc8493c"
 dependencies = [
  "byteorder",
- "rand 0.7.3",
+ "rand 0.8.1",
  "rustc-hex",
  "static_assertions",
 ]
@@ -2123,9 +2123,9 @@ dependencies = [
 
 [[package]]
 name = "primitive-types"
-version = "0.7.3"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7dd39dcacf71411ba488570da7bbc89b717225e46478b30ba99b92db6b149809"
+checksum = "b3824ae2c5e27160113b9e029a10ec9e3f0237bad8029f69c7724393c9fdefd8"
 dependencies = [
  "fixed-hash",
  "impl-codec",
@@ -2199,7 +2199,7 @@ dependencies = [
  "num-traits",
  "quick-error",
  "rand 0.7.3",
- "rand_chacha",
+ "rand_chacha 0.2.2",
  "rand_xorshift",
  "regex-syntax",
  "rusty-fork",
@@ -2283,9 +2283,20 @@ checksum = "6a6b1679d49b24bbfe0c803429aa1874472f50d9b363131f0e89fc356b544d03"
 dependencies = [
  "getrandom 0.1.15",
  "libc",
- "rand_chacha",
+ "rand_chacha 0.2.2",
  "rand_core 0.5.1",
  "rand_hc",
+]
+
+[[package]]
+name = "rand"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c24fcd450d3fa2b592732565aa4f17a27a61c65ece4726353e000939b0edee34"
+dependencies = [
+ "libc",
+ "rand_chacha 0.3.0",
+ "rand_core 0.6.1",
 ]
 
 [[package]]
@@ -2296,6 +2307,16 @@ checksum = "f4c8ed856279c9737206bf725bf36935d8666ead7aa69b52be55af369d193402"
 dependencies = [
  "ppv-lite86",
  "rand_core 0.5.1",
+]
+
+[[package]]
+name = "rand_chacha"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e12735cf05c9e10bf21534da50a147b924d555dc7a547c42e6bb2d5b6017ae0d"
+dependencies = [
+ "ppv-lite86",
+ "rand_core 0.6.1",
 ]
 
 [[package]]
@@ -2320,6 +2341,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "90bde5296fc891b0cef12a6d03ddccc162ce7b2aff54160af9338f8d40df6d19"
 dependencies = [
  "getrandom 0.1.15",
+]
+
+[[package]]
+name = "rand_core"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c026d7df8b298d90ccbbc5190bd04d85e159eaf5576caeacf8741da93ccbd2e5"
+dependencies = [
+ "getrandom 0.2.0",
 ]
 
 [[package]]
@@ -3444,13 +3474,13 @@ checksum = "373c8a200f9e67a0c95e62a4f52fbf80c23b4381c05a17845531982fa99e6b33"
 
 [[package]]
 name = "uint"
-version = "0.8.5"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9db035e67dfaf7edd9aebfe8676afcd63eed53c8a4044fed514c8cccf1835177"
+checksum = "e11fe9a9348741cf134085ad57c249508345fe16411b3d7fb4ff2da2f1d6382e"
 dependencies = [
  "byteorder",
  "crunchy",
- "rustc-hex",
+ "hex",
  "static_assertions",
 ]
 
