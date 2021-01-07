@@ -23,7 +23,7 @@ use color_eyre::eyre::Result;
 use eyre::WrapErr;
 use tempdir::TempDir;
 
-use std::{collections::HashSet, convert::TryInto, env, fs, io::Write, path::Path, path::PathBuf, time::Duration};
+use std::{collections::HashSet, convert::TryInto, env, path::Path, path::PathBuf, time::Duration};
 
 use zebra_chain::{
     block::Height,
@@ -104,6 +104,9 @@ where
     }
 
     fn with_config(self, mut config: ZebradConfig) -> Result<Self> {
+        use std::fs;
+        use std::io::Write;
+
         let dir = self.as_ref();
 
         if !config.state.ephemeral {
@@ -119,6 +122,9 @@ where
     }
 
     fn replace_config(self, mut config: ZebradConfig) -> Result<Self> {
+        use std::fs;
+        use std::io::Write;
+
         let dir = self.as_ref();
 
         if !config.state.ephemeral {
@@ -225,11 +231,16 @@ fn generate_args() -> Result<()> {
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
-    // Check if the temp dir still exist
-    assert_with_context!(testdir.path().exists(), &output);
-
-    // Check if the file was created
-    assert_with_context!(generated_config_path.exists(), &output);
+    assert_with_context!(
+        testdir.path().exists(),
+        &output,
+        "unexpected deletion of test temp directory"
+    );
+    assert_with_context!(
+        generated_config_path.exists(),
+        &output,
+        "unexpected deletion of config file"
+    );
 
     Ok(())
 }
@@ -304,8 +315,7 @@ fn start_args() -> Result<()> {
     let testdir = testdir()?.with_config(default_test_config()?)?;
     let testdir = &testdir;
 
-    // Any free argument is valid
-    let mut child = testdir.spawn_child(&["start", "argument"])?;
+    let mut child = testdir.spawn_child(&["start"])?;
     // Run the program and kill it after a few seconds
     std::thread::sleep(LAUNCH_DELAY);
     child.kill()?;
@@ -771,11 +781,10 @@ fn create_cached_database_height(network: Network, height: Height) -> Result<()>
     // TODO: add convenience methods?
     config.network.network = network;
     config.state.debug_stop_at_height = Some(height.0);
+
     let dir = PathBuf::from("/zebrad-cache");
-
-    fs::File::create(dir.join("zebrad.toml"))?.write_all(toml::to_string(&config)?.as_bytes())?;
-
     let mut child = dir
+        .with_config(config)?
         .spawn_child(&["start"])?
         .with_timeout(timeout)
         .bypass_test_capture(true);
