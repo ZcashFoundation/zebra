@@ -1,7 +1,6 @@
 use std::net::SocketAddr;
 use std::{
     collections::HashMap,
-    convert::TryInto,
     fmt::Debug,
     future::Future,
     marker::PhantomData,
@@ -385,9 +384,9 @@ where
         let num_ready = self.ready_services.len();
         let num_unready = self.unready_services.len();
         let num_peers = num_ready + num_unready;
-        metrics::gauge!("pool.num_ready", num_ready.try_into().unwrap());
-        metrics::gauge!("pool.num_unready", num_unready.try_into().unwrap());
-        metrics::gauge!("pool.num_peers", num_peers.try_into().unwrap());
+        metrics::gauge!("pool.num_ready", num_ready as f64);
+        metrics::gauge!("pool.num_unready", num_unready as f64);
+        metrics::gauge!("pool.num_peers", num_peers as f64);
     }
 }
 

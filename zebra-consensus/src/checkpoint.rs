@@ -203,8 +203,8 @@ where
                 if height >= checkpoint_list.max_height() {
                     (None, Progress::FinalCheckpoint)
                 } else {
-                    metrics::gauge!("checkpoint.verified.height", height.0 as i64);
-                    metrics::gauge!("checkpoint.processing.next.height", height.0 as i64);
+                    metrics::gauge!("checkpoint.verified.height", height.0 as f64);
+                    metrics::gauge!("checkpoint.processing.next.height", height.0 as f64);
                     (Some(hash), Progress::InitialTip(height))
                 }
             }
@@ -298,7 +298,7 @@ where
         }
         metrics::gauge!(
             "checkpoint.queued.continuous.height",
-            pending_height.0 as i64
+            pending_height.0 as f64
         );
 
         // Now find the start of the checkpoint range
@@ -320,11 +320,11 @@ where
         if let Some(block::Height(target_checkpoint)) = target_checkpoint {
             metrics::gauge!(
                 "checkpoint.processing.next.height",
-                target_checkpoint as i64
+                target_checkpoint as f64
             );
         } else {
             // Use the start height if there is no potential next checkpoint
-            metrics::gauge!("checkpoint.processing.next.height", start_height.0 as i64);
+            metrics::gauge!("checkpoint.processing.next.height", start_height.0 as f64);
             metrics::counter!("checkpoint.waiting.count", 1);
         }
 
@@ -393,12 +393,12 @@ where
     /// Increase the current checkpoint height to `verified_height`,
     fn update_progress(&mut self, verified_height: block::Height) {
         if let Some(max_height) = self.queued.keys().next_back() {
-            metrics::gauge!("checkpoint.queued.max.height", max_height.0 as i64);
+            metrics::gauge!("checkpoint.queued.max.height", max_height.0 as f64);
         } else {
             // use -1 as a sentinel value for "None", because 0 is a valid height
-            metrics::gauge!("checkpoint.queued.max.height", -1);
+            metrics::gauge!("checkpoint.queued.max.height", -1.0);
         }
-        metrics::gauge!("checkpoint.queued_slots", self.queued.len() as i64);
+        metrics::gauge!("checkpoint.queued_slots", self.queued.len() as f64);
 
         // Ignore blocks that are below the previous checkpoint, or otherwise
         // have invalid heights.
@@ -413,10 +413,10 @@ where
 
         // Ignore heights that aren't checkpoint heights
         if verified_height == self.checkpoint_list.max_height() {
-            metrics::gauge!("checkpoint.verified.height", verified_height.0 as i64);
+            metrics::gauge!("checkpoint.verified.height", verified_height.0 as f64);
             self.verifier_progress = FinalCheckpoint;
         } else if self.checkpoint_list.contains(verified_height) {
-            metrics::gauge!("checkpoint.verified.height", verified_height.0 as i64);
+            metrics::gauge!("checkpoint.verified.height", verified_height.0 as f64);
             self.verifier_progress = PreviousCheckpoint(verified_height);
             // We're done with the initial tip hash now
             self.initial_tip_hash = None;
@@ -525,7 +525,7 @@ where
                 .keys()
                 .next_back()
                 .expect("queued has at least one entry")
-                .0 as i64
+                .0 as f64
         );
 
         let is_checkpoint = self.checkpoint_list.contains(height);
@@ -853,7 +853,7 @@ where
         let rx = self.queue_block(block.clone());
         self.process_checkpoint_range();
 
-        metrics::gauge!("checkpoint.queued_slots", self.queued.len() as i64);
+        metrics::gauge!("checkpoint.queued_slots", self.queued.len() as f64);
 
         // Because the checkpoint verifier duplicates state from the state
         // service (it tracks which checkpoints have been verified), we must

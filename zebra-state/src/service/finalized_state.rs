@@ -123,10 +123,13 @@ impl FinalizedState {
             self.max_queued_height = std::cmp::max(self.max_queued_height, height.0 as _);
         }
 
-        metrics::gauge!("state.finalized.queued.max.height", self.max_queued_height);
+        metrics::gauge!(
+            "state.finalized.queued.max.height",
+            self.max_queued_height as f64
+        );
         metrics::gauge!(
             "state.finalized.queued.block.count",
-            self.queued_by_prev_hash.len() as _
+            self.queued_by_prev_hash.len() as f64
         );
     }
 
