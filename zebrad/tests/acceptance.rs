@@ -341,39 +341,28 @@ fn persistent_mode() -> Result<()> {
     // Make sure the command was killed
     output.assert_was_killed()?;
 
-    // Check that we have persistent rocksdb database
     let cache_dir = testdir.path().join("state");
-    assert_with_context!(cache_dir.read_dir()?.count() > 0, &output);
+    assert_with_context!(
+        cache_dir.read_dir()?.count() > 0,
+        &output,
+        "unexpected empty state directory from persistent state config"
+    );
 
     Ok(())
 }
 
-#[test]
-fn ephemeral_mode() -> Result<()> {
-    zebra_test::init();
-
-    let testdir = testdir()?.with_config(default_test_config()?)?;
-    let testdir = &testdir;
-
-    // Any free argument is valid
-    let mut child = testdir.spawn_child(&["start", "argument"])?;
-    // Run the program and kill it after a few seconds
-    std::thread::sleep(LAUNCH_DELAY);
-    child.kill()?;
-    let output = child.wait_with_output()?;
-
-    // Make sure the command was killed
-    output.assert_was_killed()?;
-
-    let cache_dir = testdir.path().join("state");
-    assert_with_context!(!cache_dir.exists(), &output);
-
-    Ok(())
-}
-
-/// The check performed by the `misconfigured_ephemeral_mode` test
+/// The cache_dir config used in the ephemeral mode tests
 #[derive(Debug, PartialEq, Eq)]
-enum MisconfiguredEphemeral {
+enum EphemeralConfig {
+    /// the cache_dir config is left at its default value
+    Default,
+    /// the cache_dir config is set to a path in the tempdir
+    MisconfiguredCacheDir,
+}
+
+/// The check performed by the ephemeral mode tests
+#[derive(Debug, PartialEq, Eq)]
+enum EphemeralCheck {
     /// an existing directory is not deleted
     ExistingDirectory,
     /// a missing directory is not created
@@ -381,30 +370,48 @@ enum MisconfiguredEphemeral {
 }
 
 #[test]
+fn ephemeral_existing_directory() -> Result<()> {
+    ephemeral(EphemeralConfig::Default, EphemeralCheck::ExistingDirectory)
+}
+
+#[test]
+fn ephemeral_missing_directory() -> Result<()> {
+    ephemeral(EphemeralConfig::Default, EphemeralCheck::MissingDirectory)
+}
+
+#[test]
 fn misconfigured_ephemeral_existing_directory() -> Result<()> {
-    misconfigured_ephemeral_mode(MisconfiguredEphemeral::ExistingDirectory)
+    ephemeral(
+        EphemeralConfig::MisconfiguredCacheDir,
+        EphemeralCheck::ExistingDirectory,
+    )
 }
 
 #[test]
 fn misconfigured_ephemeral_missing_directory() -> Result<()> {
-    misconfigured_ephemeral_mode(MisconfiguredEphemeral::MissingDirectory)
+    ephemeral(
+        EphemeralConfig::MisconfiguredCacheDir,
+        EphemeralCheck::MissingDirectory,
+    )
 }
 
-fn misconfigured_ephemeral_mode(check: MisconfiguredEphemeral) -> Result<()> {
+fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck) -> Result<()> {
     use std::fs;
     use std::io::ErrorKind;
 
     zebra_test::init();
 
-    // Write a configuration that sets both the cache_dir and ephemeral options
     let mut config = default_test_config()?;
     let run_dir = TempDir::new("zebrad_tests")?;
 
     let ignored_cache_dir = run_dir.path().join("state");
-    config.state.cache_dir = ignored_cache_dir.clone();
-    if check == MisconfiguredEphemeral::ExistingDirectory {
+    if cache_dir_config == EphemeralConfig::MisconfiguredCacheDir {
+        // Write a configuration that sets both the cache_dir and ephemeral options
+        config.state.cache_dir = ignored_cache_dir.clone();
+    }
+    if cache_dir_check == EphemeralCheck::ExistingDirectory {
         // We set the cache_dir config to a newly created empty temp directory,
-        // then make sure that it is empty after the test.
+        // then make sure that it is empty after the test
         fs::create_dir(&ignored_cache_dir)?;
     }
 
@@ -420,9 +427,9 @@ fn misconfigured_ephemeral_mode(check: MisconfiguredEphemeral) -> Result<()> {
     // Make sure the command was killed
     output.assert_was_killed()?;
 
-    let expected_run_dir_file_names = match check {
+    let expected_run_dir_file_names = match cache_dir_check {
         // we created the state directory, so it should still exist
-        MisconfiguredEphemeral::ExistingDirectory => {
+        EphemeralCheck::ExistingDirectory => {
             assert_with_context!(
                 ignored_cache_dir
                     .read_dir()
@@ -430,7 +437,9 @@ fn misconfigured_ephemeral_mode(check: MisconfiguredEphemeral) -> Result<()> {
                     .count()
                     == 0,
                 &output,
-                "unexpected items in ignored_cache_dir: ephemeral should take precedence over cache_dir in the config, so the cache_dir should be empty, but it actually contains: {:?}",
+                "unexpected items in ignored_cache_dir for ephemeral {:?} {:?}: {:?}",
+                cache_dir_config,
+                cache_dir_check,
                 ignored_cache_dir.read_dir().unwrap().collect::<Vec<_>>()
             );
 
@@ -438,7 +447,7 @@ fn misconfigured_ephemeral_mode(check: MisconfiguredEphemeral) -> Result<()> {
         }
 
         // we didn't create the state directory, so it should not exist
-        MisconfiguredEphemeral::MissingDirectory => {
+        EphemeralCheck::MissingDirectory => {
             assert_with_context!(
                 ignored_cache_dir
                     .read_dir()
@@ -446,7 +455,9 @@ fn misconfigured_ephemeral_mode(check: MisconfiguredEphemeral) -> Result<()> {
                     .kind()
                     == ErrorKind::NotFound,
                 &output,
-                "unexpected creation of ignored_cache_dir: ephemeral should take precedence over cache_dir in the config, so the cache dir should not be created by the test, but it exists and contains these files: {:?}",
+                "unexpected creation of ignored_cache_dir for ephemeral {:?} {:?}: the cache dir exists and contains these files: {:?}",
+                cache_dir_config,
+                cache_dir_check,
                 ignored_cache_dir.read_dir().unwrap().collect::<Vec<_>>()
             );
 
@@ -466,7 +477,9 @@ fn misconfigured_ephemeral_mode(check: MisconfiguredEphemeral) -> Result<()> {
     assert_with_context!(
         run_dir_file_names == expected_run_dir_file_names,
         &output,
-        "unexpected items in run_dir: zebrad's ephemeral mode should not use the working directory, so it should only contain {:?}, but it actually contains: {:?}",
+        "unexpected items in run_dir for ephemeral {:?} {:?}: expected {:?}, actual: {:?}",
+        cache_dir_config,
+        cache_dir_check,
         expected_run_dir_file_names,
         run_dir_file_names
     );
