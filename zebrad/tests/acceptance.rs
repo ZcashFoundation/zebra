@@ -234,12 +234,12 @@ fn generate_args() -> Result<()> {
     assert_with_context!(
         testdir.path().exists(),
         &output,
-        "unexpected deletion of test temp directory"
+        "test temp directory not found"
     );
     assert_with_context!(
         generated_config_path.exists(),
         &output,
-        "unexpected deletion of config file"
+        "generated config file not found"
     );
 
     Ok(())
@@ -355,7 +355,7 @@ fn persistent_mode() -> Result<()> {
     assert_with_context!(
         cache_dir.read_dir()?.count() > 0,
         &output,
-        "unexpected empty state directory from persistent state config"
+        "state directory empty despite persistent state config"
     );
 
     Ok(())
@@ -447,7 +447,7 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
                     .count()
                     == 0,
                 &output,
-                "unexpected items in ignored_cache_dir for ephemeral {:?} {:?}: {:?}",
+                "ignored_cache_dir not empty for ephemeral {:?} {:?}: {:?}",
                 cache_dir_config,
                 cache_dir_check,
                 ignored_cache_dir.read_dir().unwrap().collect::<Vec<_>>()
@@ -487,7 +487,7 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
     assert_with_context!(
         run_dir_file_names == expected_run_dir_file_names,
         &output,
-        "unexpected items in run_dir for ephemeral {:?} {:?}: expected {:?}, actual: {:?}",
+        "run_dir not empty for ephemeral {:?} {:?}: expected {:?}, actual: {:?}",
         cache_dir_config,
         cache_dir_check,
         expected_run_dir_file_names,
@@ -576,7 +576,7 @@ fn valid_generated_config(command: &str, expected_output: &str) -> Result<()> {
     assert_with_context!(
         generated_config_path.exists(),
         &output,
-        "config file generation failed"
+        "generated config file not found"
     );
 
     // Run command using temp dir and kill it after a few seconds
@@ -595,12 +595,12 @@ fn valid_generated_config(command: &str, expected_output: &str) -> Result<()> {
     assert_with_context!(
         testdir.path().exists(),
         &output,
-        "unexpected deletion of test temp directory"
+        "test temp directory not found"
     );
     assert_with_context!(
         generated_config_path.exists(),
         &output,
-        "unexpected deletion of config file"
+        "generated config file not found"
     );
 
     Ok(())
