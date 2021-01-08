@@ -5,6 +5,9 @@ license = "MIT OR Apache-2.0"
 version = "1.0.0-alpha.0"
 edition = "2018"
 repository = "https://github.com/ZcashFoundation/zebra"
+# make `cargo run` use `zebrad` by default
+# when run in the workspace directory
+default-run = "zebrad"
 
 [dependencies]
 zebra-chain = { path = "../zebra-chain" }
