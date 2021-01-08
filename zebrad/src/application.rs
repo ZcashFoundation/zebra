@@ -145,6 +145,9 @@ impl Application for ZebradApp {
 
         let config = command.process_config(config)?;
 
+        let span = error_span!("", net = ?config.network.network);
+        let _guard = span.enter();
+
         let theme = if Self::outputs_are_ttys() && config.tracing.use_color {
             color_eyre::config::Theme::dark()
         } else {
@@ -248,10 +251,8 @@ impl Application for ZebradApp {
         // application configuration is processed
         self.register_components(command)?;
 
+        // Fire callback to signal state in the application lifecycle
         let config = self.config.take().unwrap();
-
-        // Fire callback regardless of whether any config was loaded to
-        // in order to signal state in the application lifecycle
         self.after_config(config)?;
 
         Ok(())
