@@ -158,6 +158,7 @@ impl Application for ZebradApp {
             .issue_url(concat!(env!("CARGO_PKG_REPOSITORY"), "/issues/new"))
             .add_issue_metadata("version", env!("CARGO_PKG_VERSION"))
             .add_issue_metadata("git commit", Self::git_commit())
+            .add_issue_metadata("Zcash network", config.network.network)
             .issue_filter(|kind| match kind {
                 color_eyre::ErrorKind::NonRecoverable(_) => true,
                 color_eyre::ErrorKind::Recoverable(error) => {
