@@ -249,11 +249,12 @@ impl Application for ZebradApp {
         }
 
         // Activate the global span, so it's visible when we load the other
-        // components
+        // components. Space is at a premium here, so we use an empty message,
+        // short commit hash, and the unique part of the network name.
         let global_span = error_span!(
             "",
             zebrad = ZebradApp::git_commit(),
-            net = ?self.config.clone().unwrap().network.network,
+            net = &self.config.clone().unwrap().network.network.to_string()[..4],
         );
         let global_guard = global_span.enter();
         // leak the global span, to make sure it stays active
