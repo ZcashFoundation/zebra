@@ -151,13 +151,25 @@ impl Application for ZebradApp {
             color_eyre::config::Theme::new()
         };
 
-        // This MUST happen after `Terminal::new` to ensure our preferred panic
-        // handler is the last one installed
-        let builder = color_eyre::config::HookBuilder::default()
+        // collect the common metadata for the issue URL and panic report
+        let network = config.network.network.to_string();
+        let panic_metadata = vec![
+            ("version", env!("CARGO_PKG_VERSION").to_string()),
+            ("git commit", Self::git_commit().to_string()),
+            ("Zcash network", network),
+        ];
+
+        let mut builder = color_eyre::config::HookBuilder::default();
+        let mut metadata_section = "Metadata:".to_string();
+        for (k, v) in panic_metadata {
+            builder = builder.add_issue_metadata(k, v.clone());
+            metadata_section.push_str(&format!("\n{}: {}", k, v));
+        }
+
+        builder = builder
             .theme(theme)
+            .panic_section(metadata_section)
             .issue_url(concat!(env!("CARGO_PKG_REPOSITORY"), "/issues/new"))
-            .add_issue_metadata("version", env!("CARGO_PKG_VERSION"))
-            .add_issue_metadata("git commit", Self::git_commit())
             .issue_filter(|kind| match kind {
                 color_eyre::ErrorKind::NonRecoverable(_) => true,
                 color_eyre::ErrorKind::Recoverable(error) => {
@@ -173,6 +185,8 @@ impl Application for ZebradApp {
                 }
             });
 
+        // This MUST happen after `Terminal::new` to ensure our preferred panic
+        // handler is the last one installed
         let (panic_hook, eyre_hook) = builder.into_hooks();
         eyre_hook.install().unwrap();
 
@@ -217,7 +231,7 @@ impl Application for ZebradApp {
             .map(ZebradCmd::is_server)
             .unwrap_or(false);
 
-        // Launch network endpoints only for long-running commands.
+        // Ignore the tracing filter for short-lived commands
         if is_server {
             // Override the default tracing filter based on the command-line verbosity.
             let mut tracing_config = cfg_ref.tracing.clone();
@@ -226,15 +240,31 @@ impl Application for ZebradApp {
                 .or_else(|| Some(default_filter.to_owned()));
 
             components.push(Box::new(Tracing::new(tracing_config)?));
-            components.push(Box::new(TokioComponent::new()?));
-            components.push(Box::new(TracingEndpoint::new(cfg_ref)?));
-            components.push(Box::new(MetricsEndpoint::new(cfg_ref)?));
         } else {
             // Don't apply the configured filter for short-lived commands.
             let mut tracing_config = cfg_ref.tracing.clone();
             tracing_config.filter = Some(default_filter.to_owned());
             tracing_config.flamegraph = None;
             components.push(Box::new(Tracing::new(tracing_config)?));
+        }
+
+        // Activate the global span, so it's visible when we load the other
+        // components. Space is at a premium here, so we use an empty message,
+        // short commit hash, and the unique part of the network name.
+        let global_span = error_span!(
+            "",
+            zebrad = ZebradApp::git_commit(),
+            net = &self.config.clone().unwrap().network.network.to_string()[..4],
+        );
+        let global_guard = global_span.enter();
+        // leak the global span, to make sure it stays active
+        std::mem::forget(global_guard);
+
+        // Launch network and async endpoints only for long-running commands.
+        if is_server {
+            components.push(Box::new(TokioComponent::new()?));
+            components.push(Box::new(TracingEndpoint::new(cfg_ref)?));
+            components.push(Box::new(MetricsEndpoint::new(cfg_ref)?));
         }
 
         self.state.components.register(components)
@@ -247,10 +277,8 @@ impl Application for ZebradApp {
         // application configuration is processed
         self.register_components(command)?;
 
+        // Fire callback to signal state in the application lifecycle
         let config = self.config.take().unwrap();
-
-        // Fire callback regardless of whether any config was loaded to
-        // in order to signal state in the application lifecycle
         self.after_config(config)?;
 
         Ok(())
