@@ -151,14 +151,25 @@ impl Application for ZebradApp {
             color_eyre::config::Theme::new()
         };
 
-        // This MUST happen after `Terminal::new` to ensure our preferred panic
-        // handler is the last one installed
-        let builder = color_eyre::config::HookBuilder::default()
+        // collect the common metadata for the issue URL and panic report
+        let network = config.network.network.to_string();
+        let panic_metadata = vec![
+            ("version", env!("CARGO_PKG_VERSION").to_string()),
+            ("git commit", Self::git_commit().to_string()),
+            ("Zcash network", network),
+        ];
+
+        let mut builder = color_eyre::config::HookBuilder::default();
+        let mut metadata_section = "Metadata:".to_string();
+        for (k, v) in panic_metadata {
+            builder = builder.add_issue_metadata(k, v.clone());
+            metadata_section.push_str(&format!("\n{}: {}", k, v));
+        }
+
+        builder = builder
             .theme(theme)
+            .panic_section(metadata_section)
             .issue_url(concat!(env!("CARGO_PKG_REPOSITORY"), "/issues/new"))
-            .add_issue_metadata("version", env!("CARGO_PKG_VERSION"))
-            .add_issue_metadata("git commit", Self::git_commit())
-            .add_issue_metadata("Zcash network", config.network.network)
             .issue_filter(|kind| match kind {
                 color_eyre::ErrorKind::NonRecoverable(_) => true,
                 color_eyre::ErrorKind::Recoverable(error) => {
@@ -174,6 +185,8 @@ impl Application for ZebradApp {
                 }
             });
 
+        // This MUST happen after `Terminal::new` to ensure our preferred panic
+        // handler is the last one installed
         let (panic_hook, eyre_hook) = builder.into_hooks();
         eyre_hook.install().unwrap();
 
