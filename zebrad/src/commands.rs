@@ -7,7 +7,6 @@ mod version;
 use self::ZebradCmd::*;
 use self::{generate::GenerateCmd, start::StartCmd, version::VersionCmd};
 
-use crate::application::{app_config, ZebradApp};
 use crate::config::ZebradConfig;
 
 use abscissa_core::{
@@ -53,13 +52,6 @@ impl ZebradCmd {
 
 impl Runnable for ZebradCmd {
     fn run(&self) {
-        let span = error_span!(
-            "",
-            zebrad = ZebradApp::git_commit(),
-            net = ?app_config().network.network
-        );
-        let _guard = span.enter();
-
         match self {
             Generate(cmd) => cmd.run(),
             ZebradCmd::Help(cmd) => cmd.run(),

@@ -145,9 +145,6 @@ impl Application for ZebradApp {
 
         let config = command.process_config(config)?;
 
-        let span = error_span!("", net = ?config.network.network);
-        let _guard = span.enter();
-
         let theme = if Self::outputs_are_ttys() && config.tracing.use_color {
             color_eyre::config::Theme::dark()
         } else {
@@ -221,7 +218,7 @@ impl Application for ZebradApp {
             .map(ZebradCmd::is_server)
             .unwrap_or(false);
 
-        // Launch network endpoints only for long-running commands.
+        // Ignore the tracing filter for short-lived commands
         if is_server {
             // Override the default tracing filter based on the command-line verbosity.
             let mut tracing_config = cfg_ref.tracing.clone();
@@ -230,15 +227,30 @@ impl Application for ZebradApp {
                 .or_else(|| Some(default_filter.to_owned()));
 
             components.push(Box::new(Tracing::new(tracing_config)?));
-            components.push(Box::new(TokioComponent::new()?));
-            components.push(Box::new(TracingEndpoint::new(cfg_ref)?));
-            components.push(Box::new(MetricsEndpoint::new(cfg_ref)?));
         } else {
             // Don't apply the configured filter for short-lived commands.
             let mut tracing_config = cfg_ref.tracing.clone();
             tracing_config.filter = Some(default_filter.to_owned());
             tracing_config.flamegraph = None;
             components.push(Box::new(Tracing::new(tracing_config)?));
+        }
+
+        // Activate the global span, so it's visible when we load the other
+        // components
+        let global_span = error_span!(
+            "",
+            zebrad = ZebradApp::git_commit(),
+            net = ?self.config.clone().unwrap().network.network,
+        );
+        let global_guard = global_span.enter();
+        // leak the global span, to make sure it stays active
+        std::mem::forget(global_guard);
+
+        // Launch network and async endpoints only for long-running commands.
+        if is_server {
+            components.push(Box::new(TokioComponent::new()?));
+            components.push(Box::new(TracingEndpoint::new(cfg_ref)?));
+            components.push(Box::new(MetricsEndpoint::new(cfg_ref)?));
         }
 
         self.state.components.register(components)
