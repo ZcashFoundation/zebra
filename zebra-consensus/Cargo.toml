@@ -18,7 +18,7 @@ futures = "0.3.9"
 futures-util = "0.3.6"
 metrics = "0.13.0-alpha.8"
 thiserror = "1.0.23"
-tokio = { version = "0.3.4", features = ["time", "sync", "stream", "tracing"] }
+tokio = { version = "0.3.6", features = ["time", "sync", "stream", "tracing"] }
 tower = { version = "0.4", features = ["timeout", "util", "buffer"] }
 tracing = "0.1.22"
 tracing-futures = "0.2.4"
@@ -33,7 +33,7 @@ zebra-script = { path = "../zebra-script" }
 color-eyre = "0.5.10"
 rand = "0.7"
 spandoc = "0.2"
-tokio = { version = "0.3.4", features = ["full"] }
+tokio = { version = "0.3.6", features = ["full"] }
 tracing-error = "0.1.2"
 tracing-subscriber = "0.2.15"
 

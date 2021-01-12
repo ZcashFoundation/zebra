@@ -20,7 +20,7 @@ metrics = "0.13.0-alpha.8"
 tower = { version = "0.4", features = ["buffer", "util"] }
 tracing = "0.1"
 thiserror = "1.0.23"
-tokio = { version = "0.3.4", features = ["sync"] }
+tokio = { version = "0.3.6", features = ["sync"] }
 displaydoc = "0.1.7"
 rocksdb = "0.15.0"
 tempdir = "0.3.7"
@@ -36,7 +36,7 @@ color-eyre = "0.5.10"
 once_cell = "1.5"
 spandoc = "0.2"
 tempdir = "0.3.7"
-tokio = { version = "0.3.4", features = ["full"] }
+tokio = { version = "0.3.6", features = ["full"] }
 proptest = "0.10.1"
 proptest-derive = "0.2"
 primitive-types = "0.8.0"
