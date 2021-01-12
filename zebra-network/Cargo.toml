@@ -10,7 +10,7 @@ edition = "2018"
 [dependencies]
 bitflags = "1.2"
 byteorder = "1.4"
-bytes = "0.6"
+bytes = "1.0"
 chrono = "0.4"
 hex = "0.4"
 # indexmap has rayon support for parallel iteration,
