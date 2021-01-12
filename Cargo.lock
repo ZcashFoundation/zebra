@@ -1716,15 +1716,6 @@ dependencies = [
 
 [[package]]
 name = "metrics"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51b70227ece8711a1aa2f99655efd795d0cff297a5b9fe39645a93aacf6ad39d"
-dependencies = [
- "metrics-core",
-]
-
-[[package]]
-name = "metrics"
 version = "0.13.0-alpha.8"
 source = "git+https://github.com/ZcashFoundation/metrics?rev=971133128e5aebe3ad177acffc6154449736cfa2#971133128e5aebe3ad177acffc6154449736cfa2"
 dependencies = [
@@ -1735,19 +1726,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "metrics-core"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c064b3a1ff41f4bf6c91185c8a0caeccf8a8a27e9d0f92cc54cf3dbec812f48"
-
-[[package]]
 name = "metrics-exporter-prometheus"
 version = "0.1.0-alpha.7"
 source = "git+https://github.com/ZcashFoundation/metrics?rev=971133128e5aebe3ad177acffc6154449736cfa2#971133128e5aebe3ad177acffc6154449736cfa2"
 dependencies = [
  "hdrhistogram 7.1.0",
  "hyper 0.14.0-dev",
- "metrics 0.13.0-alpha.8",
+ "metrics",
  "metrics-util",
  "parking_lot",
  "thiserror",
@@ -1778,7 +1763,7 @@ dependencies = [
  "crossbeam-utils 0.8.0",
  "dashmap",
  "indexmap",
- "metrics 0.13.0-alpha.8",
+ "metrics",
 ]
 
 [[package]]
@@ -3921,7 +3906,7 @@ dependencies = [
  "futures",
  "futures-util",
  "jubjub 0.5.1",
- "metrics 0.12.1",
+ "metrics",
  "once_cell",
  "rand 0.7.3",
  "redjubjub",
@@ -3953,7 +3938,7 @@ dependencies = [
  "futures",
  "hex",
  "indexmap",
- "metrics 0.12.1",
+ "metrics",
  "pin-project 0.4.27",
  "proptest",
  "proptest-derive",
@@ -3998,7 +3983,7 @@ dependencies = [
  "futures",
  "hex",
  "lazy_static",
- "metrics 0.12.1",
+ "metrics",
  "once_cell",
  "primitive-types",
  "proptest",
@@ -4066,7 +4051,7 @@ dependencies = [
  "gumdrop",
  "hyper 0.14.0-dev",
  "inferno",
- "metrics 0.13.0-alpha.8",
+ "metrics",
  "metrics-exporter-prometheus",
  "once_cell",
  "pin-project 0.4.27",

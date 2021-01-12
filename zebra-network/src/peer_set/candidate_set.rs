@@ -149,9 +149,9 @@ where
     }
 
     pub fn next(&mut self) -> Option<MetaAddr> {
-        metrics::gauge!("candidate_set.disconnected", self.disconnected.len() as i64);
-        metrics::gauge!("candidate_set.gossiped", self.gossiped.len() as i64);
-        metrics::gauge!("candidate_set.failed", self.failed.len() as i64);
+        metrics::gauge!("candidate_set.disconnected", self.disconnected.len() as f64);
+        metrics::gauge!("candidate_set.gossiped", self.gossiped.len() as f64);
+        metrics::gauge!("candidate_set.failed", self.failed.len() as f64);
         debug!(
             disconnected_peers = self.disconnected.len(),
             gossiped_peers = self.gossiped.len(),

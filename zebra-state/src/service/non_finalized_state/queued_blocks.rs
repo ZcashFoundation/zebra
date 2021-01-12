@@ -141,12 +141,12 @@ impl QueuedBlocks {
     /// Update metrics after the queue is modified
     fn update_metrics(&self) {
         if let Some(max_height) = self.by_height.keys().next_back() {
-            metrics::gauge!("state.memory.queued.max.height", max_height.0 as i64);
+            metrics::gauge!("state.memory.queued.max.height", max_height.0 as f64);
         } else {
-            // use -1 as a sentinel value for "None", because 0 is a valid height
-            metrics::gauge!("state.memory.queued.max.height", -1);
+            // use f64::NAN as a sentinel value for "None", because 0 is a valid height
+            metrics::gauge!("state.memory.queued.max.height", f64::NAN);
         }
-        metrics::gauge!("state.memory.queued.block.count", self.blocks.len() as _);
+        metrics::gauge!("state.memory.queued.block.count", self.blocks.len() as f64);
     }
 
     /// Try to look up this UTXO in any queued block.

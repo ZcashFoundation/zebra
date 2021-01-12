@@ -272,7 +272,13 @@ where
     let mut crawl_timer = tokio::time::interval(new_peer_interval);
 
     loop {
-        metrics::gauge!("crawler.in_flight_handshakes", handshakes.len() as i64 - 1);
+        metrics::gauge!(
+            "crawler.in_flight_handshakes",
+            handshakes
+                .len()
+                .checked_sub(1)
+                .expect("the pool always contains an unresolved future") as f64
+        );
         // This is a little awkward because there's no select3.
         match select(
             select(demand_rx.next(), crawl_timer.next()),
