@@ -395,8 +395,8 @@ where
         if let Some(max_height) = self.queued.keys().next_back() {
             metrics::gauge!("checkpoint.queued.max.height", max_height.0 as f64);
         } else {
-            // use -1 as a sentinel value for "None", because 0 is a valid height
-            metrics::gauge!("checkpoint.queued.max.height", -1.0);
+            // use f64::NAN as a sentinel value for "None", because 0 is a valid height
+            metrics::gauge!("checkpoint.queued.max.height", f64::NAN);
         }
         metrics::gauge!("checkpoint.queued_slots", self.queued.len() as f64);
 
