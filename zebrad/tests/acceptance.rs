@@ -23,7 +23,7 @@ use color_eyre::eyre::Result;
 use eyre::WrapErr;
 use tempdir::TempDir;
 
-use std::{convert::TryInto, env, fs, io::Write, path::Path, path::PathBuf, time::Duration};
+use std::{collections::HashSet, convert::TryInto, env, path::Path, path::PathBuf, time::Duration};
 
 use zebra_chain::{
     block::Height,
@@ -104,6 +104,9 @@ where
     }
 
     fn with_config(self, mut config: ZebradConfig) -> Result<Self> {
+        use std::fs;
+        use std::io::Write;
+
         let dir = self.as_ref();
 
         if !config.state.ephemeral {
@@ -119,6 +122,9 @@ where
     }
 
     fn replace_config(self, mut config: ZebradConfig) -> Result<Self> {
+        use std::fs;
+        use std::io::Write;
+
         let dir = self.as_ref();
 
         if !config.state.ephemeral {
@@ -161,6 +167,10 @@ fn generate_no_args() -> Result<()> {
     Ok(())
 }
 
+/// Panics if `$pred` is false, with an error report containing:
+///   * context from `$source`, and
+///   * an optional wrapper error, using `$fmt_arg`+ as a format string and
+///     arguments.
 macro_rules! assert_with_context {
     ($pred:expr, $source:expr) => {
         if !$pred {
@@ -170,6 +180,19 @@ macro_rules! assert_with_context {
             let report = color_eyre::eyre::eyre!("failed assertion")
                 .section(stringify!($pred).header("Predicate:"))
                 .context_from($source);
+
+            panic!("Error: {:?}", report);
+        }
+    };
+    ($pred:expr, $source:expr, $($fmt_arg:tt)+) => {
+        if !$pred {
+            use color_eyre::Section as _;
+            use color_eyre::SectionExt as _;
+            use zebra_test::command::ContextFrom as _;
+            let report = color_eyre::eyre::eyre!("failed assertion")
+                .section(stringify!($pred).header("Predicate:"))
+                .context_from($source)
+                .wrap_err(format!($($fmt_arg)+));
 
             panic!("Error: {:?}", report);
         }
@@ -208,11 +231,16 @@ fn generate_args() -> Result<()> {
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
-    // Check if the temp dir still exist
-    assert_with_context!(testdir.path().exists(), &output);
-
-    // Check if the file was created
-    assert_with_context!(generated_config_path.exists(), &output);
+    assert_with_context!(
+        testdir.path().exists(),
+        &output,
+        "test temp directory not found"
+    );
+    assert_with_context!(
+        generated_config_path.exists(),
+        &output,
+        "generated config file not found"
+    );
 
     Ok(())
 }
@@ -287,8 +315,7 @@ fn start_args() -> Result<()> {
     let testdir = testdir()?.with_config(default_test_config()?)?;
     let testdir = &testdir;
 
-    // Any free argument is valid
-    let mut child = testdir.spawn_child(&["start", "argument"])?;
+    let mut child = testdir.spawn_child(&["start"])?;
     // Run the program and kill it after a few seconds
     std::thread::sleep(LAUNCH_DELAY);
     child.kill()?;
@@ -324,73 +351,147 @@ fn persistent_mode() -> Result<()> {
     // Make sure the command was killed
     output.assert_was_killed()?;
 
-    // Check that we have persistent rocksdb database
     let cache_dir = testdir.path().join("state");
-    assert_with_context!(cache_dir.read_dir()?.count() > 0, &output);
-
-    Ok(())
-}
-
-#[test]
-fn ephemeral_mode() -> Result<()> {
-    zebra_test::init();
-
-    let testdir = testdir()?.with_config(default_test_config()?)?;
-    let testdir = &testdir;
-
-    // Any free argument is valid
-    let mut child = testdir.spawn_child(&["start", "argument"])?;
-    // Run the program and kill it after a few seconds
-    std::thread::sleep(LAUNCH_DELAY);
-    child.kill()?;
-    let output = child.wait_with_output()?;
-
-    // Make sure the command was killed
-    output.assert_was_killed()?;
-
-    let cache_dir = testdir.path().join("state");
-    assert_with_context!(!cache_dir.exists(), &output);
-
-    Ok(())
-}
-
-#[test]
-fn misconfigured_ephemeral_mode() -> Result<()> {
-    zebra_test::init();
-
-    let dir = TempDir::new("zebrad_tests")?;
-    let cache_dir = dir.path().join("state");
-    fs::create_dir(&cache_dir)?;
-
-    // Write a configuration that has both cache_dir and ephemeral options set
-    let mut config = default_test_config()?;
-    // Although cache_dir has a default value, we set it a new temp directory
-    // to test that it is empty later.
-    config.state.cache_dir = cache_dir.clone();
-
-    fs::File::create(dir.path().join("zebrad.toml"))?
-        .write_all(toml::to_string(&config)?.as_bytes())?;
-
-    // Any free argument is valid
-    let mut child = dir
-        .with_config(config)?
-        .spawn_child(&["start", "argument"])?;
-    // Run the program and kill it after a few seconds
-    std::thread::sleep(LAUNCH_DELAY);
-    child.kill()?;
-    let output = child.wait_with_output()?;
-
-    // Make sure the command was killed
-    output.assert_was_killed()?;
-
-    // Check that ephemeral takes precedence over cache_dir
     assert_with_context!(
-        cache_dir
-            .read_dir()
-            .expect("cache_dir should still exist")
-            .count()
-            == 0,
-        &output
+        cache_dir.read_dir()?.count() > 0,
+        &output,
+        "state directory empty despite persistent state config"
+    );
+
+    Ok(())
+}
+
+/// The cache_dir config used in the ephemeral mode tests
+#[derive(Debug, PartialEq, Eq)]
+enum EphemeralConfig {
+    /// the cache_dir config is left at its default value
+    Default,
+    /// the cache_dir config is set to a path in the tempdir
+    MisconfiguredCacheDir,
+}
+
+/// The check performed by the ephemeral mode tests
+#[derive(Debug, PartialEq, Eq)]
+enum EphemeralCheck {
+    /// an existing directory is not deleted
+    ExistingDirectory,
+    /// a missing directory is not created
+    MissingDirectory,
+}
+
+#[test]
+fn ephemeral_existing_directory() -> Result<()> {
+    ephemeral(EphemeralConfig::Default, EphemeralCheck::ExistingDirectory)
+}
+
+#[test]
+fn ephemeral_missing_directory() -> Result<()> {
+    ephemeral(EphemeralConfig::Default, EphemeralCheck::MissingDirectory)
+}
+
+#[test]
+fn misconfigured_ephemeral_existing_directory() -> Result<()> {
+    ephemeral(
+        EphemeralConfig::MisconfiguredCacheDir,
+        EphemeralCheck::ExistingDirectory,
+    )
+}
+
+#[test]
+fn misconfigured_ephemeral_missing_directory() -> Result<()> {
+    ephemeral(
+        EphemeralConfig::MisconfiguredCacheDir,
+        EphemeralCheck::MissingDirectory,
+    )
+}
+
+fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck) -> Result<()> {
+    use std::fs;
+    use std::io::ErrorKind;
+
+    zebra_test::init();
+
+    let mut config = default_test_config()?;
+    let run_dir = TempDir::new("zebrad_tests")?;
+
+    let ignored_cache_dir = run_dir.path().join("state");
+    if cache_dir_config == EphemeralConfig::MisconfiguredCacheDir {
+        // Write a configuration that sets both the cache_dir and ephemeral options
+        config.state.cache_dir = ignored_cache_dir.clone();
+    }
+    if cache_dir_check == EphemeralCheck::ExistingDirectory {
+        // We set the cache_dir config to a newly created empty temp directory,
+        // then make sure that it is empty after the test
+        fs::create_dir(&ignored_cache_dir)?;
+    }
+
+    let mut child = run_dir
+        .path()
+        .with_config(config)?
+        .spawn_child(&["start"])?;
+    // Run the program and kill it after a few seconds
+    std::thread::sleep(LAUNCH_DELAY);
+    child.kill()?;
+    let output = child.wait_with_output()?;
+
+    // Make sure the command was killed
+    output.assert_was_killed()?;
+
+    let expected_run_dir_file_names = match cache_dir_check {
+        // we created the state directory, so it should still exist
+        EphemeralCheck::ExistingDirectory => {
+            assert_with_context!(
+                ignored_cache_dir
+                    .read_dir()
+                    .expect("ignored_cache_dir should still exist")
+                    .count()
+                    == 0,
+                &output,
+                "ignored_cache_dir not empty for ephemeral {:?} {:?}: {:?}",
+                cache_dir_config,
+                cache_dir_check,
+                ignored_cache_dir.read_dir().unwrap().collect::<Vec<_>>()
+            );
+
+            ["state", "zebrad.toml"].iter()
+        }
+
+        // we didn't create the state directory, so it should not exist
+        EphemeralCheck::MissingDirectory => {
+            assert_with_context!(
+                ignored_cache_dir
+                    .read_dir()
+                    .expect_err("ignored_cache_dir should not exist")
+                    .kind()
+                    == ErrorKind::NotFound,
+                &output,
+                "unexpected creation of ignored_cache_dir for ephemeral {:?} {:?}: the cache dir exists and contains these files: {:?}",
+                cache_dir_config,
+                cache_dir_check,
+                ignored_cache_dir.read_dir().unwrap().collect::<Vec<_>>()
+            );
+
+            ["zebrad.toml"].iter()
+        }
+    };
+
+    let expected_run_dir_file_names = expected_run_dir_file_names.map(Into::into).collect();
+    let run_dir_file_names = run_dir
+        .path()
+        .read_dir()
+        .expect("run_dir should still exist")
+        .map(|dir_entry| dir_entry.expect("run_dir is readable").file_name())
+        // ignore directory list order, because it can vary based on the OS and filesystem
+        .collect::<HashSet<_>>();
+
+    assert_with_context!(
+        run_dir_file_names == expected_run_dir_file_names,
+        &output,
+        "run_dir not empty for ephemeral {:?} {:?}: expected {:?}, actual: {:?}",
+        cache_dir_config,
+        cache_dir_check,
+        expected_run_dir_file_names,
+        run_dir_file_names
     );
 
     Ok(())
@@ -472,8 +573,11 @@ fn valid_generated_config(command: &str, expected_output: &str) -> Result<()> {
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
-    // Check if the file was created
-    assert_with_context!(generated_config_path.exists(), &output);
+    assert_with_context!(
+        generated_config_path.exists(),
+        &output,
+        "generated config file not found"
+    );
 
     // Run command using temp dir and kill it after a few seconds
     let mut child = testdir.spawn_child(&[command])?;
@@ -488,11 +592,16 @@ fn valid_generated_config(command: &str, expected_output: &str) -> Result<()> {
     // [Note on port conflict](#Note on port conflict)
     output.assert_was_killed().wrap_err("Possible port or cache conflict. Are there other acceptance test, zebrad, or zcashd processes running?")?;
 
-    // Check if the temp dir still exists
-    assert_with_context!(testdir.path().exists(), &output);
-
-    // Check if the created config file still exists
-    assert_with_context!(generated_config_path.exists(), &output);
+    assert_with_context!(
+        testdir.path().exists(),
+        &output,
+        "test temp directory not found"
+    );
+    assert_with_context!(
+        generated_config_path.exists(),
+        &output,
+        "generated config file not found"
+    );
 
     Ok(())
 }
@@ -672,11 +781,10 @@ fn create_cached_database_height(network: Network, height: Height) -> Result<()>
     // TODO: add convenience methods?
     config.network.network = network;
     config.state.debug_stop_at_height = Some(height.0);
+
     let dir = PathBuf::from("/zebrad-cache");
-
-    fs::File::create(dir.join("zebrad.toml"))?.write_all(toml::to_string(&config)?.as_bytes())?;
-
     let mut child = dir
+        .with_config(config)?
         .spawn_child(&["start"])?
         .with_timeout(timeout)
         .bypass_test_capture(true);
