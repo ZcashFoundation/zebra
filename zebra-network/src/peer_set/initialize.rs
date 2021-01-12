@@ -274,7 +274,10 @@ where
     loop {
         metrics::gauge!(
             "crawler.in_flight_handshakes",
-            handshakes.len().checked_sub(1).expect("the pool always contains an unresolved future") as f64
+            handshakes
+                .len()
+                .checked_sub(1)
+                .expect("the pool always contains an unresolved future") as f64
         );
         // This is a little awkward because there's no select3.
         match select(
