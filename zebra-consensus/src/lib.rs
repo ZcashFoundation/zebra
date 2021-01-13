@@ -53,6 +53,7 @@ mod transaction;
 pub mod chain;
 pub mod error;
 
+pub use checkpoint::MAX_CHECKPOINT_BYTE_COUNT;
 pub use checkpoint::MAX_CHECKPOINT_HEIGHT_GAP;
 pub use config::Config;
 

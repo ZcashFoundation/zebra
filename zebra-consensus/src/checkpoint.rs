@@ -88,6 +88,14 @@ pub const MAX_QUEUED_BLOCKS_PER_HEIGHT: usize = 4;
 /// bugs. So the most efficient gap is slightly less than 500 blocks.
 pub const MAX_CHECKPOINT_HEIGHT_GAP: usize = 400;
 
+/// We limit the memory usage and download contention for each checkpoint,
+/// based on the cumulative size of the serialized blocks in the chain.
+///
+/// Deserialized blocks (in memory) are slightly larger than serialized blocks
+/// (on the network or disk). But they should be within a constant factor of the
+/// serialized size.
+pub const MAX_CHECKPOINT_BYTE_COUNT: u64 = 32 * 1024 * 1024;
+
 /// A checkpointing block verifier.
 ///
 /// Verifies blocks using a supplied list of checkpoints. There must be at

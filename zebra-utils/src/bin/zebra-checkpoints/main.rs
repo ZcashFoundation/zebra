@@ -24,12 +24,6 @@ use std::os::unix::process::ExitStatusExt;
 
 mod args;
 
-/// We limit the memory usage for each checkpoint, based on the cumulative size of
-/// the serialized blocks in the chain. Deserialized blocks are slightly larger
-/// than serialized blocks, but they should be within a constant factor of the
-/// serialized size.
-const MAX_CHECKPOINT_BYTE_COUNT: u64 = 32 * 1024 * 1024;
-
 /// Initialise tracing using its defaults.
 fn init_tracing() {
     tracing_subscriber::Registry::default()
@@ -135,7 +129,7 @@ fn main() -> Result<()> {
 
         // check if checkpoint
         if height == block::Height(0)
-            || cumulative_bytes >= MAX_CHECKPOINT_BYTE_COUNT
+            || cumulative_bytes >= zebra_consensus::MAX_CHECKPOINT_BYTE_COUNT
             || height_gap.0 >= zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP as u32
         {
             // print to output

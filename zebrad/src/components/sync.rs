@@ -88,16 +88,22 @@ const BLOCK_VERIFY_TIMEOUT: Duration = Duration::from_secs(180);
 
 /// Controls how long we wait to restart syncing after finishing a sync run.
 ///
-/// This timeout should be long enough to:
+/// This delay should be long enough to:
 ///   - allow zcashd peers to process pending requests. If the node only has a
 ///     few peers, we want to clear as much peer state as possible. In
 ///     particular, zcashd sends "next block range" hints, based on zcashd's
 ///     internal model of our sync progress. But we want to discard these hints,
 ///     so they don't get confused with ObtainTips and ExtendTips responses.
 ///
-/// This timeout is particularly important on instances with slow or unreliable
+/// This delay is particularly important on instances with slow or unreliable
 /// networks, and on testnet, which has a small number of slow peers.
-const SYNC_RESTART_TIMEOUT: Duration = Duration::from_secs(45);
+///
+/// ## Correctness
+///
+/// If this delay is removed (or set too low), the syncer will
+/// sometimes get stuck in a failure loop, due to leftover downloads from
+/// previous sync runs.
+const SYNC_RESTART_DELAY: Duration = Duration::from_secs(61);
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
@@ -178,7 +184,7 @@ where
             AlwaysHedge,
             20,
             0.95,
-            2 * SYNC_RESTART_TIMEOUT,
+            2 * SYNC_RESTART_DELAY,
         );
         // We apply a timeout to the verifier to avoid hangs due to missing earlier blocks.
         let verifier = Timeout::new(verifier, BLOCK_VERIFY_TIMEOUT);
@@ -204,11 +210,11 @@ where
 
         'sync: loop {
             if started_once {
-                tracing::info!(timeout = ?SYNC_RESTART_TIMEOUT, "waiting to restart sync");
+                tracing::info!(timeout = ?SYNC_RESTART_DELAY, "waiting to restart sync");
                 self.prospective_tips = HashSet::new();
                 self.downloads.cancel_all();
                 self.update_metrics();
-                sleep(SYNC_RESTART_TIMEOUT).await;
+                sleep(SYNC_RESTART_DELAY).await;
             } else {
                 started_once = true;
             }
@@ -613,6 +619,8 @@ where
 
 #[cfg(test)]
 mod test {
+    use zebra_chain::parameters::NetworkUpgrade;
+
     use super::*;
 
     /// Make sure the timeout values are consistent with each other.
@@ -620,9 +628,45 @@ mod test {
     fn ensure_timeouts_consistent() {
         zebra_test::init();
 
+        // This constraint clears the download pipeline during a restart
         assert!(
-            BLOCK_DOWNLOAD_TIMEOUT.as_secs() * 2 < SYNC_RESTART_TIMEOUT.as_secs(),
+            SYNC_RESTART_DELAY.as_secs() > 2 * BLOCK_DOWNLOAD_TIMEOUT.as_secs(),
             "Sync restart should allow for pending and buffered requests to complete"
+        );
+
+        // This constraint avoids spurious failures due to block retries timing out.
+        // We multiply by 2, because the Hedge can wait up to BLOCK_DOWNLOAD_TIMEOUT
+        // seconds before retrying.
+        const BLOCK_DOWNLOAD_HEDGE_TIMEOUT: u64 =
+            2 * BLOCK_DOWNLOAD_RETRY_LIMIT as u64 * BLOCK_DOWNLOAD_TIMEOUT.as_secs();
+        assert!(
+            SYNC_RESTART_DELAY.as_secs() > BLOCK_DOWNLOAD_HEDGE_TIMEOUT,
+            "Sync restart should allow for block downloads to time out on every retry"
+        );
+
+        // This constraint avoids spurious failures due to block download timeouts
+        assert!(
+            BLOCK_VERIFY_TIMEOUT.as_secs()
+                > SYNC_RESTART_DELAY.as_secs()
+                    + BLOCK_DOWNLOAD_HEDGE_TIMEOUT
+                    + BLOCK_DOWNLOAD_TIMEOUT.as_secs(),
+            "Block verify should allow for a block timeout, a sync restart, and some block fetches"
+        );
+
+        // The minimum recommended network speed for Zebra, in bytes per second.
+        const MIN_NETWORK_SPEED_BYTES_PER_SEC: u64 = 10 * 1024 * 1024 / 8;
+
+        // This constraint avoids spurious failures when restarting large checkpoints
+        assert!(
+            BLOCK_VERIFY_TIMEOUT.as_secs() > SYNC_RESTART_DELAY.as_secs() + 2 * zebra_consensus::MAX_CHECKPOINT_BYTE_COUNT / MIN_NETWORK_SPEED_BYTES_PER_SEC,
+            "Block verify should allow for a full checkpoint download, a sync restart, then a full checkpoint re-download"
+        );
+
+        // This constraint avoids spurious failures after checkpointing has finished
+        assert!(
+            BLOCK_VERIFY_TIMEOUT.as_secs()
+                > 2 * NetworkUpgrade::Blossom.target_spacing().num_seconds() as u64,
+            "Block verify should allow for at least one new block to be generated and distributed"
         );
     }
 }
