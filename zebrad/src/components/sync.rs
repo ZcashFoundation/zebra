@@ -64,7 +64,7 @@ const TIPS_RESPONSE_TIMEOUT: Duration = Duration::from_secs(6);
 ///
 /// If this timeout is set too low, the syncer will sometimes get stuck in a
 /// failure loop.
-const BLOCK_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(15);
+pub(super) const BLOCK_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Controls how long we wait for a block verify request to complete.
 ///
@@ -92,7 +92,7 @@ const BLOCK_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(15);
 ///
 /// If this timeout is set too low, the syncer will sometimes get stuck in a
 /// failure loop.
-const BLOCK_VERIFY_TIMEOUT: Duration = Duration::from_secs(180);
+pub(super) const BLOCK_VERIFY_TIMEOUT: Duration = Duration::from_secs(180);
 
 /// Controls how long we wait to restart syncing after finishing a sync run.
 ///

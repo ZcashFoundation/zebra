@@ -10,7 +10,7 @@ use futures::{
     stream::{Stream, TryStreamExt},
 };
 use tokio::sync::oneshot;
-use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
+use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service, ServiceExt};
 
 use zebra_network as zn;
 use zebra_state as zs;
@@ -18,6 +18,9 @@ use zebra_state as zs;
 use zebra_chain::block::{self, Block};
 use zebra_consensus::chain::VerifyChainError;
 use zebra_network::AddressBook;
+
+// Re-use the syncer timeouts for consistency.
+use super::sync::{BLOCK_DOWNLOAD_TIMEOUT, BLOCK_VERIFY_TIMEOUT};
 
 mod downloads;
 use downloads::Downloads;
@@ -60,7 +63,7 @@ pub struct Inbound {
     address_book: Option<Arc<Mutex<zn::AddressBook>>>,
     state: State,
     verifier: Verifier,
-    downloads: Option<Pin<Box<Downloads<Outbound, Verifier, State>>>>,
+    downloads: Option<Pin<Box<Downloads<Timeout<Outbound>, Timeout<Verifier>, State>>>>,
 }
 
 impl Inbound {
@@ -96,12 +99,12 @@ impl Service<zn::Request> for Inbound {
             use oneshot::error::TryRecvError;
             match rx.try_recv() {
                 Ok((outbound, address_book)) => {
-                    self.outbound = Some(outbound);
+                    self.outbound = Some(outbound.clone());
                     self.address_book = Some(address_book);
                     self.network_setup = None;
                     self.downloads = Some(Box::pin(Downloads::new(
-                        self.outbound.clone().unwrap(),
-                        self.verifier.clone(),
+                        Timeout::new(outbound, BLOCK_DOWNLOAD_TIMEOUT),
+                        Timeout::new(self.verifier.clone(), BLOCK_VERIFY_TIMEOUT),
                         self.state.clone(),
                     )));
                 }
