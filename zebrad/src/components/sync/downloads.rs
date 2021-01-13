@@ -43,10 +43,21 @@ where
     ZV: Service<Arc<Block>, Response = block::Hash, Error = BoxError> + Send + Clone + 'static,
     ZV::Future: Send,
 {
+    // Services
+    /// A service that forwards requests to connected peers, and returns their
+    /// responses.
     network: ZN,
+
+    /// A service that verifies downloaded blocks.
     verifier: ZV,
+
+    // Internal downloads state
+    /// A list of pending block download and verify tasks.
     #[pin]
     pending: FuturesUnordered<JoinHandle<Result<block::Hash, (BoxError, block::Hash)>>>,
+
+    /// A list of channels that can be used to cancel pending block download and
+    /// verify tasks.
     cancel_handles: HashMap<block::Hash, oneshot::Sender<()>>,
 }
 

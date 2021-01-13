@@ -53,17 +53,37 @@ pub type SetupData = (Outbound, Arc<Mutex<AddressBook>>);
 /// responding to block gossip by attempting to download and validate advertised
 /// blocks.
 pub struct Inbound {
-    // invariant: outbound, address_book are Some if network_setup is None
+    // invariant: address_book, outbound, downloads are Some if network_setup is None
     //
     // why not use an enum for the inbound state? because it would mean
     // match-wrapping the body of Service::call rather than just expect()ing
     // some Options.
+
+    // Setup
+    /// A oneshot channel used to receive the address_book and outbound services
+    /// after the network is set up.
     network_setup: Option<oneshot::Receiver<SetupData>>,
-    outbound: Option<Outbound>,
+
+    // Services
+    /// A list of peer addresses.
     address_book: Option<Arc<Mutex<zn::AddressBook>>>,
-    state: State,
-    verifier: Verifier,
+
+    /// A service that downloads and verifies gossipped blocks.
     downloads: Option<Pin<Box<Downloads<Timeout<Outbound>, Timeout<Verifier>, State>>>>,
+
+    /// A service that forwards requests to connected peers, and returns their
+    /// responses.
+    ///
+    /// Only used for readiness checks, and via `downloads`.
+    outbound: Option<Outbound>,
+
+    /// A service that manages cached blockchain state.
+    state: State,
+
+    /// A service that verifies downloaded blocks.
+    ///
+    /// Only used for readiness checks, and via `downloads`.
+    verifier: Verifier,
 }
 
 impl Inbound {
@@ -74,11 +94,11 @@ impl Inbound {
     ) -> Self {
         Self {
             network_setup: Some(network_setup),
-            outbound: None,
             address_book: None,
+            downloads: None,
+            outbound: None,
             state,
             verifier,
-            downloads: None,
         }
     }
 }
