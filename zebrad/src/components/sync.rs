@@ -32,7 +32,8 @@ const FANOUT: usize = 4;
 /// feed us bad hashes. But spurious failures of valid blocks cause the syncer to
 /// restart from the previous checkpoint, potentially re-downloading blocks.
 ///
-/// We also hedge requests, so we may retry up to twice this many times.
+/// We also hedge requests, so we may retry up to twice this many times. Hedged
+/// retries may be concurrent, inner retries are sequential.
 const BLOCK_DOWNLOAD_RETRY_LIMIT: usize = 2;
 
 /// A lower bound on the user-specified lookahead limit, set to two
@@ -41,6 +42,13 @@ const BLOCK_DOWNLOAD_RETRY_LIMIT: usize = 2;
 const MIN_LOOKAHEAD_LIMIT: usize = zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP * 2;
 
 /// Controls how long we wait for a tips response to return.
+///
+/// ## Correctness
+///
+/// If this timeout is removed (or set too high), the syncer will sometimes hang.
+///
+/// If this timeout is set too low, the syncer will sometimes get stuck in a
+/// failure loop.
 const TIPS_RESPONSE_TIMEOUT: Duration = Duration::from_secs(6);
 
 /// Controls how long we wait for a block download request to complete.
@@ -93,7 +101,8 @@ const BLOCK_VERIFY_TIMEOUT: Duration = Duration::from_secs(180);
 ///     few peers, we want to clear as much peer state as possible. In
 ///     particular, zcashd sends "next block range" hints, based on zcashd's
 ///     internal model of our sync progress. But we want to discard these hints,
-///     so they don't get confused with ObtainTips and ExtendTips responses.
+///     so they don't get confused with ObtainTips and ExtendTips responses, and
+///   - allow in-progress downloads to time out.
 ///
 /// This delay is particularly important on instances with slow or unreliable
 /// networks, and on testnet, which has a small number of slow peers.
@@ -124,13 +133,22 @@ where
     ZV: Service<Arc<Block>, Response = block::Hash, Error = BoxError> + Send + Clone + 'static,
     ZV::Future: Send,
 {
-    /// Used to perform ObtainTips and ExtendTips requests, with no retry logic
-    /// (failover is handled using fanout).
-    tip_network: Timeout<ZN>,
-    state: ZS,
-    prospective_tips: HashSet<CheckedTip>,
+    // Configuration
+    /// The genesis hash for the configured network
     genesis_hash: block::Hash,
+
+    /// The configured lookahead limit, after applying the minimum limit.
     lookahead_limit: usize,
+
+    // Services
+    /// A network service which is used to perform ObtainTips and ExtendTips
+    /// requests.
+    ///
+    /// Has no retry logic, because failover is handled using fanout.
+    tip_network: Timeout<ZN>,
+
+    /// A service which downloads and verifies blocks, using the provided
+    /// network and verifier services.
     downloads: Pin<
         Box<
             Downloads<
@@ -139,6 +157,13 @@ where
             >,
         >,
     >,
+
+    /// The cached block chain state.
+    state: ZS,
+
+    // Internal sync state
+    /// The tips that the syncer is currently following.
+    prospective_tips: HashSet<CheckedTip>,
 }
 
 /// Polls the network to determine whether further blocks are available and
@@ -197,12 +222,12 @@ where
             config.sync.lookahead_limit
         };
         Self {
-            tip_network,
-            state,
-            downloads: Box::pin(Downloads::new(block_network, verifier)),
-            prospective_tips: HashSet::new(),
             genesis_hash: genesis_hash(config.network.network),
             lookahead_limit,
+            tip_network,
+            downloads: Box::pin(Downloads::new(block_network, verifier)),
+            state,
+            prospective_tips: HashSet::new(),
         }
     }
 
