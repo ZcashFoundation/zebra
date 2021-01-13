@@ -44,7 +44,47 @@ const MIN_LOOKAHEAD_LIMIT: usize = zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP * 
 const TIPS_RESPONSE_TIMEOUT: Duration = Duration::from_secs(6);
 
 /// Controls how long we wait for a block download request to complete.
-const BLOCK_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(20);
+///
+/// This timeout makes sure that the syncer doesn't hang when:
+///   - the lookahead queue is full, and
+///   - we are waiting for a request that is stuck.
+/// See [`BLOCK_VERIFY_TIMEOUT`] for details.
+///
+/// ## Correctness
+///
+/// If this timeout is removed (or set too high), the syncer will sometimes hang.
+///
+/// If this timeout is set too low, the syncer will sometimes get stuck in a
+/// failure loop.
+const BLOCK_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// Controls how long we wait for a block verify request to complete.
+///
+/// This timeout makes sure that the syncer doesn't hang when:
+///  - the lookahead queue is full, and
+///  - all pending verifications:
+///    - are waiting on a missing download request,
+///    - are waiting on a download or verify request that has failed, but we have
+///      deliberately ignored the error,
+///    - are for blocks a long way ahead of the current tip, or
+///    - are for invalid blocks which will never verify, because they depend on
+///      missing blocks or transactions.
+/// These conditions can happen during normal operation - they are not bugs.
+///
+/// This timeout also mitigates or hides the following kinds of bugs:
+///  - all pending verifications:
+///    - are waiting on a download or verify request that has failed, but we have
+///      accidentally dropped the error,
+///    - are waiting on a download request that has hung inside Zebra,
+///    - are on tokio threads that are waiting for blocked operations.
+///
+/// ## Correctness
+///
+/// If this timeout is removed (or set too high), the syncer will sometimes hang.
+///
+/// If this timeout is set too low, the syncer will sometimes get stuck in a
+/// failure loop.
+const BLOCK_VERIFY_TIMEOUT: Duration = Duration::from_secs(180);
 
 /// Controls how long we wait to restart syncing after finishing a sync run.
 ///
@@ -87,7 +127,10 @@ where
     lookahead_limit: usize,
     downloads: Pin<
         Box<
-            Downloads<Hedge<ConcurrencyLimit<Retry<zn::RetryLimit, Timeout<ZN>>>, AlwaysHedge>, ZV>,
+            Downloads<
+                Hedge<ConcurrencyLimit<Retry<zn::RetryLimit, Timeout<ZN>>>, AlwaysHedge>,
+                Timeout<ZV>,
+            >,
         >,
     >,
 }
@@ -137,6 +180,8 @@ where
             0.95,
             2 * SYNC_RESTART_TIMEOUT,
         );
+        // We apply a timeout to the verifier to avoid hangs due to missing earlier blocks.
+        let verifier = Timeout::new(verifier, BLOCK_VERIFY_TIMEOUT);
         Self {
             tip_network,
             state,
