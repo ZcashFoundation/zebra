@@ -68,15 +68,30 @@ where
     /// Spawn `zebrad` with `args` as a child process in this test directory,
     /// potentially taking ownership of the tempdir for the duration of the
     /// child process.
+    ///
+    /// If there is a config in the test directory, pass it to `zebrad`.
     fn spawn_child(self, args: &[&str]) -> Result<TestChild<Self>>;
 
-    /// Add the given config to the test directory and use it for all
-    /// subsequently spawned processes.
+    /// Create the config and use it for all subsequently spawned processes.
+    /// Returns an error if the config already exists.
+    ///
+    /// Recursively create directories for the config and state as needed.
     fn with_config(self, config: ZebradConfig) -> Result<Self>;
 
-    /// Overwrite any existing config the test directory and use it for all
+    /// Overwrite any existing config, and use the newly written config for all
     /// subsequently spawned processes.
+    ///
+    /// Recursively create directories for the config and state as needed.
     fn replace_config(self, config: ZebradConfig) -> Result<Self>;
+
+    /// Config writing helper for [`with_config`] and [`replace_config`].
+    ///
+    /// If needed:
+    ///   - recursively create directories for the config and state,
+    ///   - set the cache_dir in the config.
+    ///
+    /// Then write out the config.
+    fn write_config_helper(self, config: ZebradConfig) -> Result<Self>;
 }
 
 impl<T> ZebradTestDirExt for T
@@ -103,25 +118,28 @@ where
         }
     }
 
-    fn with_config(self, mut config: ZebradConfig) -> Result<Self> {
-        use std::fs;
-        use std::io::Write;
-
-        let dir = self.as_ref();
-
-        if !config.state.ephemeral {
-            let cache_dir = dir.join("state");
-            fs::create_dir(&cache_dir)?;
-            config.state.cache_dir = cache_dir;
-        }
-
-        fs::File::create(dir.join("zebrad.toml"))?
-            .write_all(toml::to_string(&config)?.as_bytes())?;
-
-        Ok(self)
+    fn with_config(self, config: ZebradConfig) -> Result<Self> {
+        self.write_config_helper(config)
     }
 
-    fn replace_config(self, mut config: ZebradConfig) -> Result<Self> {
+    fn replace_config(self, config: ZebradConfig) -> Result<Self> {
+        use std::fs;
+        use std::io::ErrorKind;
+
+        // Remove any existing config before writing a new one
+        let dir = self.as_ref();
+        let config_file = dir.join("zebrad.toml");
+        match fs::remove_file(config_file) {
+            Ok(()) => {}
+            // If the config file doesn't exist, that's ok
+            Err(e) if e.kind() == ErrorKind::NotFound => {}
+            Err(e) => Err(e)?,
+        }
+
+        self.write_config_helper(config)
+    }
+
+    fn write_config_helper(self, mut config: ZebradConfig) -> Result<Self> {
         use std::fs;
         use std::io::Write;
 
@@ -129,21 +147,13 @@ where
 
         if !config.state.ephemeral {
             let cache_dir = dir.join("state");
-
-            // Create dir, ignoring existing directories
-            match fs::create_dir(&cache_dir) {
-                Ok(_) => {}
-                Err(e) if (e.kind() == std::io::ErrorKind::AlreadyExists) => {}
-                Err(e) => Err(e)?,
-            };
-
+            fs::create_dir_all(&cache_dir)?;
             config.state.cache_dir = cache_dir;
+        } else {
+            fs::create_dir_all(&dir)?;
         }
 
         let config_file = dir.join("zebrad.toml");
-
-        // Remove any existing config before writing a new one
-        let _ = fs::remove_file(config_file.clone());
         fs::File::create(config_file)?.write_all(toml::to_string(&config)?.as_bytes())?;
 
         Ok(self)
