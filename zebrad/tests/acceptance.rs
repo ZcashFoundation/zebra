@@ -68,15 +68,47 @@ where
     /// Spawn `zebrad` with `args` as a child process in this test directory,
     /// potentially taking ownership of the tempdir for the duration of the
     /// child process.
+    ///
+    /// If there is a config in the test directory, pass it to `zebrad`.
     fn spawn_child(self, args: &[&str]) -> Result<TestChild<Self>>;
 
-    /// Add the given config to the test directory and use it for all
-    /// subsequently spawned processes.
-    fn with_config(self, config: ZebradConfig) -> Result<Self>;
+    /// Create a config file and use it for all subsequently spawned processes.
+    /// Returns an error if the config already exists.
+    ///
+    /// If needed:
+    ///   - recursively create directories for the config and state
+    ///   - set `config.cache_dir` based on `self`
+    fn with_config(self, config: &mut ZebradConfig) -> Result<Self>;
 
-    /// Overwrite any existing config the test directory and use it for all
-    /// subsequently spawned processes.
-    fn replace_config(self, config: ZebradConfig) -> Result<Self>;
+    /// Create a config file with the exact contents of `config`, and use it for
+    /// all subsequently spawned processes. Returns an error if the config
+    /// already exists.
+    ///
+    /// If needed:
+    ///   - recursively create directories for the config and state
+    fn with_exact_config(self, config: &ZebradConfig) -> Result<Self>;
+
+    /// Overwrite any existing config file, and use the newly written config for
+    /// all subsequently spawned processes.
+    ///
+    /// If needed:
+    ///   - recursively create directories for the config and state
+    ///   - set `config.cache_dir` based on `self`
+    fn replace_config(self, config: &mut ZebradConfig) -> Result<Self>;
+
+    /// `cache_dir` config update helper.
+    ///
+    /// If needed:
+    ///   - set the cache_dir in the config.
+    fn cache_config_update_helper(self, config: &mut ZebradConfig) -> Result<Self>;
+
+    /// Config writing helper.
+    ///
+    /// If needed:
+    ///   - recursively create directories for the config and state,
+    ///
+    /// Then write out the config.
+    fn write_config_helper(self, config: &ZebradConfig) -> Result<Self>;
 }
 
 impl<T> ZebradTestDirExt for T
@@ -103,25 +135,44 @@ where
         }
     }
 
-    fn with_config(self, mut config: ZebradConfig) -> Result<Self> {
+    fn with_config(self, config: &mut ZebradConfig) -> Result<Self> {
+        self.cache_config_update_helper(config)?
+            .write_config_helper(config)
+    }
+
+    fn with_exact_config(self, config: &ZebradConfig) -> Result<Self> {
+        self.write_config_helper(config)
+    }
+
+    fn replace_config(self, config: &mut ZebradConfig) -> Result<Self> {
         use std::fs;
-        use std::io::Write;
+        use std::io::ErrorKind;
 
+        // Remove any existing config before writing a new one
         let dir = self.as_ref();
-
-        if !config.state.ephemeral {
-            let cache_dir = dir.join("state");
-            fs::create_dir(&cache_dir)?;
-            config.state.cache_dir = cache_dir;
+        let config_file = dir.join("zebrad.toml");
+        match fs::remove_file(config_file) {
+            Ok(()) => {}
+            // If the config file doesn't exist, that's ok
+            Err(e) if e.kind() == ErrorKind::NotFound => {}
+            Err(e) => Err(e)?,
         }
 
-        fs::File::create(dir.join("zebrad.toml"))?
-            .write_all(toml::to_string(&config)?.as_bytes())?;
+        self.cache_config_update_helper(config)?
+            .write_config_helper(config)
+    }
+
+    fn cache_config_update_helper(self, config: &mut ZebradConfig) -> Result<Self> {
+        if !config.state.ephemeral {
+            let dir = self.as_ref();
+            let cache_dir = dir.join("state");
+            config.state.cache_dir = cache_dir;
+        }
 
         Ok(self)
     }
 
-    fn replace_config(self, mut config: ZebradConfig) -> Result<Self> {
+    fn write_config_helper(self, config: &ZebradConfig) -> Result<Self> {
         use std::fs;
         use std::io::Write;
 
@@ -129,21 +180,12 @@ where
 
         if !config.state.ephemeral {
             let cache_dir = dir.join("state");
-
-            // Create dir, ignoring existing directories
-            match fs::create_dir(&cache_dir) {
-                Ok(_) => {}
-                Err(e) if (e.kind() == std::io::ErrorKind::AlreadyExists) => {}
-                Err(e) => Err(e)?,
-            };
-
-            config.state.cache_dir = cache_dir;
+            fs::create_dir_all(&cache_dir)?;
+        } else {
+            fs::create_dir_all(&dir)?;
         }
 
         let config_file = dir.join("zebrad.toml");
-
-        // Remove any existing config before writing a new one
-        let _ = fs::remove_file(config_file.clone());
         fs::File::create(config_file)?.write_all(toml::to_string(&config)?.as_bytes())?;
 
         Ok(self)
@@ -155,7 +197,7 @@ fn generate_no_args() -> Result<()> {
     zebra_test::init();
 
     let child = testdir()?
-        .with_config(default_test_config()?)?
+        .with_config(&mut default_test_config()?)?
         .spawn_child(&["generate"])?;
 
     let output = child.wait_with_output()?;
@@ -249,7 +291,7 @@ fn generate_args() -> Result<()> {
 fn help_no_args() -> Result<()> {
     zebra_test::init();
 
-    let testdir = testdir()?.with_config(default_test_config()?)?;
+    let testdir = testdir()?.with_config(&mut default_test_config()?)?;
 
     let child = testdir.spawn_child(&["help"])?;
     let output = child.wait_with_output()?;
@@ -289,7 +331,7 @@ fn start_no_args() -> Result<()> {
     zebra_test::init();
 
     // start caches state, so run one of the start tests with persistent state
-    let testdir = testdir()?.with_config(persistent_test_config()?)?;
+    let testdir = testdir()?.with_config(&mut persistent_test_config()?)?;
 
     let mut child = testdir.spawn_child(&["-v", "start"])?;
 
@@ -312,7 +354,7 @@ fn start_no_args() -> Result<()> {
 fn start_args() -> Result<()> {
     zebra_test::init();
 
-    let testdir = testdir()?.with_config(default_test_config()?)?;
+    let testdir = testdir()?.with_config(&mut default_test_config()?)?;
     let testdir = &testdir;
 
     let mut child = testdir.spawn_child(&["start"])?;
@@ -338,7 +380,7 @@ fn start_args() -> Result<()> {
 fn persistent_mode() -> Result<()> {
     zebra_test::init();
 
-    let testdir = testdir()?.with_config(persistent_test_config()?)?;
+    let testdir = testdir()?.with_config(&mut persistent_test_config()?)?;
     let testdir = &testdir;
 
     let mut child = testdir.spawn_child(&["-v", "start"])?;
@@ -427,7 +469,7 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
 
     let mut child = run_dir
         .path()
-        .with_config(config)?
+        .with_config(&mut config)?
         .spawn_child(&["start"])?;
     // Run the program and kill it after a few seconds
     std::thread::sleep(LAUNCH_DELAY);
@@ -501,7 +543,7 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
 fn app_no_args() -> Result<()> {
     zebra_test::init();
 
-    let testdir = testdir()?.with_config(default_test_config()?)?;
+    let testdir = testdir()?.with_config(&mut default_test_config()?)?;
 
     let child = testdir.spawn_child(&[])?;
     let output = child.wait_with_output()?;
@@ -516,7 +558,7 @@ fn app_no_args() -> Result<()> {
 fn version_no_args() -> Result<()> {
     zebra_test::init();
 
-    let testdir = testdir()?.with_config(default_test_config()?)?;
+    let testdir = testdir()?.with_config(&mut default_test_config()?)?;
 
     let child = testdir.spawn_child(&["version"])?;
     let output = child.wait_with_output()?;
@@ -531,7 +573,7 @@ fn version_no_args() -> Result<()> {
 fn version_args() -> Result<()> {
     zebra_test::init();
 
-    let testdir = testdir()?.with_config(default_test_config()?)?;
+    let testdir = testdir()?.with_config(&mut default_test_config()?)?;
     let testdir = &testdir;
 
     // unexpected free argument `argument`
@@ -749,9 +791,9 @@ fn sync_until(
     config.state.debug_stop_at_height = Some(height.0);
 
     let tempdir = if let Some(reuse_tempdir) = reuse_tempdir {
-        reuse_tempdir.replace_config(config)?
+        reuse_tempdir.replace_config(&mut config)?
     } else {
-        testdir()?.with_config(config)?
+        testdir()?.with_config(&mut config)?
     };
 
     let mut child = tempdir.spawn_child(&["start"])?.with_timeout(timeout);
@@ -784,7 +826,7 @@ fn create_cached_database_height(network: Network, height: Height) -> Result<()>
 
     let dir = PathBuf::from("/zebrad-cache");
     let mut child = dir
-        .with_config(config)?
+        .with_exact_config(&config)?
         .spawn_child(&["start"])?
         .with_timeout(timeout)
         .bypass_test_capture(true);
@@ -904,7 +946,7 @@ async fn metrics_endpoint() -> Result<()> {
     let mut config = default_test_config()?;
     config.metrics.endpoint_addr = Some(endpoint.parse().unwrap());
 
-    let dir = TempDir::new("zebrad_tests")?.with_config(config)?;
+    let dir = TempDir::new("zebrad_tests")?.with_config(&mut config)?;
     let mut child = dir.spawn_child(&["start"])?;
 
     // Run `zebrad` for a few seconds before testing the endpoint
@@ -957,7 +999,7 @@ async fn tracing_endpoint() -> Result<()> {
     let mut config = default_test_config()?;
     config.tracing.endpoint_addr = Some(endpoint.parse().unwrap());
 
-    let dir = TempDir::new("zebrad_tests")?.with_config(config)?;
+    let dir = TempDir::new("zebrad_tests")?.with_config(&mut config)?;
     let mut child = dir.spawn_child(&["start"])?;
 
     // Run `zebrad` for a few seconds before testing the endpoint
