@@ -214,16 +214,15 @@ where
         // We apply a timeout to the verifier to avoid hangs due to missing earlier blocks.
         let verifier = Timeout::new(verifier, BLOCK_VERIFY_TIMEOUT);
         // Warn the user if we're ignoring their configured lookahead limit
-        let lookahead_limit = if config.sync.lookahead_limit < MIN_LOOKAHEAD_LIMIT {
-            tracing::warn!(config_lookahead_limit = ?config.sync.lookahead_limit, ?MIN_LOOKAHEAD_LIMIT,
-                          "configured lookahead limit too low: using minimum lookahead limit");
+        assert!(
+            config.sync.lookahead_limit >= MIN_LOOKAHEAD_LIMIT,
+            "configured lookahead limit {} too low, must be at least {}",
+            config.sync.lookahead_limit,
             MIN_LOOKAHEAD_LIMIT
-        } else {
-            config.sync.lookahead_limit
-        };
+        );
         Self {
             genesis_hash: genesis_hash(config.network.network),
-            lookahead_limit,
+            lookahead_limit: config.sync.lookahead_limit,
             tip_network,
             downloads: Box::pin(Downloads::new(block_network, verifier)),
             state,
