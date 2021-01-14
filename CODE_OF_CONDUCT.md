@@ -13,6 +13,8 @@
 - Private harassment is also unacceptable. No matter who you are, if you feel you have been or are being harassed or made uncomfortable by a community member, please contact the Zcash Foundation [moderation team] immediately. Whether you’re a regular contributor or a newcomer, we care about making this community a safe place for you and we’ve got your back.
 - Likewise any spamming, trolling, flaming, baiting or other attention-stealing behavior is not welcome.
 
+> [[EMAIL THE MODERATION TEAM][moderation team]]
+
 ## Moderation
 
 These are the policies for upholding our community’s standards of conduct. If you feel that a thread needs moderation, please contact the Zcash Foundation [moderation team].
@@ -31,8 +33,6 @@ In the Zcash Foundation community we strive to go the extra step to look out for
 And if someone takes issue with something you said or did, resist the urge to be defensive. Just stop doing what it was they complained about and apologize. Even if you feel you were misinterpreted or unfairly accused, chances are good there was something you could’ve communicated better — remember that it’s your responsibility to make your fellow humans comfortable. Everyone wants to get along and we are all here first and foremost because we want to talk about cool technology. You will find that people will be eager to assume good intent and forgive as long as you earn their trust.
 
 The enforcement policies listed above apply to all official Zcash Foundation venues; including Discord channels (https://discord.com/channels/676527656170160146/716086297210650634); GitHub repositories under ZcashFoundation; and all forums (https://forum.zcashcommunity.com). For other projects adopting the Zcash Foundation Code of Conduct, please contact the maintainers of those projects for enforcement. If you wish to use this code of conduct for your own project, consider explicitly mentioning your moderation policy or making a copy with your own moderation policy so as to avoid confusion.
-
-> [[EMAIL THE MODERATION TEAM][moderation team]]
 
 Based on the Rust Code of Conduct, adapted from the Node.js Policy on Trolling as well as the Contributor Covenant v1.3.0.
 
