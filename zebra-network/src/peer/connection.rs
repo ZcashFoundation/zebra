@@ -840,6 +840,7 @@ where
         if self.svc.ready_and().await.is_err() {
             // Treat all service readiness errors as Overloaded
             self.fail_with(PeerError::Overloaded);
+            return;
         }
 
         let rsp = match self.svc.call(req).await {
