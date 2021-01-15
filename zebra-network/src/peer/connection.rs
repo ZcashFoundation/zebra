@@ -511,8 +511,32 @@ where
             .0
             .lock()
             .expect("mutex should be unpoisoned");
-        if guard.is_some() {
-            panic!("called fail_with on already-failed connection state");
+        if let Some(original_error) = guard.clone() {
+            // A failed connection might experience further errors if we:
+            // 1. concurrently process two different messages
+            // 2. check for a failed state for the second message
+            // 3. fail the connection due to the first message
+            // 4. fail the connection due to the second message
+            //
+            // It's not clear:
+            // * if this is actually a bug,
+            // * how we can modify Zebra to avoid it.
+            //
+            // This warning can also happen due to these bugs:
+            // * we mark a connection as failed without using fail_with
+            // * we call fail_with without checking for a failed connection
+            //   state
+            //
+            // See the original bug #1510, the initial fix #1531, and the later
+            // bug #1599.
+            warn!(?original_error,
+                  new_error = ?e,
+                  connection_state = ?self.state,
+                  client_receiver = ?self.client_rx,
+                  "calling fail_with on already-failed connection state: ignoring new error");
+            // we don't need to clean up the connection, the original call to
+            // fail_with does that
+            return;
         } else {
             *guard = Some(e);
         }
