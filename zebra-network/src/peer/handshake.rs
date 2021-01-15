@@ -192,9 +192,9 @@ where
         let (tcp_stream, addr) = req;
 
         let connector_span = span!(Level::INFO, "connector", addr = ?addr);
-        // set parent: None for the peer connection span, as it should exist
-        // independently of its creation source (inbound connection, crawler,
-        // initial peer, ...)
+        // set the peer connection span's parent to the global span, as it
+        // should exist independently of its creation source (inbound
+        // connection, crawler, initial peer, ...)
         let connection_span = span!(parent: &self.parent_span, Level::INFO, "peer", addr = ?addr);
 
         // Clone these upfront, so they can be moved into the future.
@@ -315,12 +315,13 @@ where
             //  auto currentEpoch = CurrentEpoch(GetHeight(), consensusParams);
             //  if (pfrom->nVersion < consensusParams.vUpgrades[currentEpoch].nProtocolVersion)
             //
-            // For approximately 1.5 days before a network upgrade, we also need to:
-            //  - avoid old peers, and
-            //  - prefer updated peers.
-            // For example, we could reject old peers with probability 0.5.
+            // For approximately 1.5 days before a network upgrade, zcashd also:
+            //  - avoids old peers, and
+            //  - prefers updated peers.
+            // We haven't decided if we need this behaviour in Zebra yet (see #706).
             //
-            // At the network upgrade, we also need to disconnect from old peers.
+            // At the network upgrade, we also need to disconnect from old peers (see #1334).
+            //
             // TODO: replace min_for_upgrade(network, MIN_NETWORK_UPGRADE) with
             //       current_min(network, height) where network is the
             //       configured network, and height is the best tip's block
