@@ -423,7 +423,11 @@ where
                                 State::AwaitingResponse {
                                     ref mut handler, ..
                                 } => span.in_scope(|| handler.process_message(peer_msg)),
-                                _ => unreachable!(),
+                                _ => unreachable!("unexpected state after AwaitingResponse: {:?}, peer_msg: {:?}, client_receiver: {:?}",
+                                                  self.state,
+                                                  peer_msg,
+                                                  self.client_rx,
+                                ),
                             };
                             // If the message was not consumed, check whether it
                             // should be handled as a request.
@@ -444,7 +448,10 @@ where
                                         State::AwaitingRequest
                                     }
                                     pending @ State::AwaitingResponse { .. } => pending,
-                                    _ => unreachable!(),
+                                    _ => unreachable!(
+                                        "unexpected failed connection state while AwaitingResponse: client_receiver: {:?}",
+                                        self.client_rx
+                                    ),
                                 };
                             }
                         }
@@ -465,7 +472,10 @@ where
                                     let _ = tx.send(Err(e.into()));
                                     State::AwaitingRequest
                                 }
-                                _ => unreachable!(),
+                                _ => unreachable!(
+                                    "unexpected failed connection state while AwaitingResponse: client_receiver: {:?}",
+                                    self.client_rx
+                                ),
                             };
                         }
                         Either::Right((Either::Right(_), _peer_fut)) => {
@@ -481,7 +491,7 @@ where
                         Some(InProgressClientRequest { tx, span, .. }) => {
                             trace!(
                                 parent: &span,
-                                "erroring pending request to failed connection"
+                                "sending an error response to a pending request on a failed connection"
                             );
                             let e = self
                                 .error_slot
@@ -504,7 +514,10 @@ where
         E: Into<SharedPeerError>,
     {
         let e = e.into();
-        debug!(%e, "failing peer service with error");
+        debug!(%e,
+               connection_state = ?self.state,
+               client_receiver = ?self.client_rx,
+               "failing peer service with error");
         // Update the shared error slot
         let mut guard = self
             .error_slot
@@ -575,9 +588,17 @@ where
 
         // These matches return a Result with (new_state, Option<Sender>) or an (error, Sender)
         let new_state_result = match (&self.state, request) {
-            (Failed, _) => panic!("failed connection cannot handle requests"),
-            (AwaitingResponse { .. }, _) => panic!("tried to update pending request"),
-
+            (Failed, request) => panic!(
+                "failed connection cannot handle new request: {:?}, client_receiver: {:?}",
+                request,
+                self.client_rx
+            ),
+            (pending @ AwaitingResponse { .. }, request) => panic!(
+                "tried to process new request: {:?} while awaiting a response: {:?}, client_receiver: {:?}",
+                request,
+                pending,
+                self.client_rx
+            ),
             (AwaitingRequest, Peers) => match self.peer_tx.send(Message::GetAddr).await {
                 Ok(()) => Ok((
                     AwaitingResponse {
@@ -875,7 +896,10 @@ where
                     self.fail_with(PeerError::Overloaded);
                 } else {
                     // We could send a reject to the remote peer.
-                    error!(%e);
+                    error!(%e,
+                           connection_state = ?self.state,
+                           client_receiver = ?self.client_rx,
+                           "error processing peer request");
                 }
                 return;
             }
