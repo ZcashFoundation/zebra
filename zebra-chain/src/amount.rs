@@ -404,9 +404,7 @@ where
 mod test {
     use super::*;
 
-    use std::{
-        collections::hash_map::RandomState, collections::HashSet, fmt::Debug, iter::FromIterator,
-    };
+    use std::{collections::hash_map::RandomState, collections::HashSet, fmt::Debug};
 
     use color_eyre::eyre::Result;
 
@@ -601,20 +599,19 @@ mod test {
         let another_one = Amount::<NonNegative>::try_from(1)?;
         let zero = Amount::<NonNegative>::try_from(0)?;
 
-        let hash_set: HashSet<Amount<NonNegative>, RandomState> =
-            HashSet::from_iter([one].iter().cloned());
+        let hash_set: HashSet<Amount<NonNegative>, RandomState> = [one].iter().cloned().collect();
         assert_eq!(hash_set.len(), 1);
 
         let hash_set: HashSet<Amount<NonNegative>, RandomState> =
-            HashSet::from_iter([one, one].iter().cloned());
+            [one, one].iter().cloned().collect();
         assert_eq!(hash_set.len(), 1, "Amount hashes are consistent");
 
         let hash_set: HashSet<Amount<NonNegative>, RandomState> =
-            HashSet::from_iter([one, another_one].iter().cloned());
+            [one, another_one].iter().cloned().collect();
         assert_eq!(hash_set.len(), 1, "Amount hashes are by value");
 
         let hash_set: HashSet<Amount<NonNegative>, RandomState> =
-            HashSet::from_iter([one, zero].iter().cloned());
+            [one, zero].iter().cloned().collect();
         assert_eq!(
             hash_set.len(),
             2,
