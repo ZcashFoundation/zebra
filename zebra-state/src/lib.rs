@@ -13,7 +13,6 @@
 // Use the old lint name to build without warnings on stable until 1.51 is stable
 #![allow(clippy::unknown_clippy_lints)]
 // The actual lints we want to disable
-#![allow(clippy::field_reassign_with_default)]
 #![allow(clippy::unnecessary_wraps)]
 
 mod config;

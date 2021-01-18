@@ -16,7 +16,6 @@
 // Use the old lint name to build without warnings on stable until 1.51 is stable
 #![allow(clippy::unknown_clippy_lints)]
 // The actual lints we want to disable
-#![allow(clippy::from_iter_instead_of_collect)]
 #![allow(clippy::unnecessary_wraps)]
 
 #[macro_use]
