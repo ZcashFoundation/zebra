@@ -110,11 +110,12 @@ impl Config {
         (path, opts)
     }
 
-    /// Construct a config for an ephemeral in memory database
-    pub fn ephemeral() -> Self {
-        let mut config = Self::default();
-        config.ephemeral = true;
-        config
+    /// Construct a config for an ephemeral database
+    pub fn ephemeral() -> Config {
+        Config {
+            ephemeral: true,
+            ..Config::default()
+        }
     }
 
     /// Calculate the database's share of `open_file_limit`
