@@ -39,11 +39,16 @@ use zebrad::config::ZebradConfig;
 const LAUNCH_DELAY: Duration = Duration::from_secs(3);
 
 fn default_test_config() -> Result<ZebradConfig> {
-    let mut config = ZebradConfig::default();
-    config.state = zebra_state::Config::ephemeral();
-    config.network.listen_addr = "127.0.0.1:0".parse()?;
-
-    Ok(config)
+    let auto_port_ipv4_local = zebra_network::Config {
+        listen_addr: "127.0.0.1:0".parse()?,
+        ..zebra_network::Config::default()
+    };
+    let local_ephemeral = ZebradConfig {
+        state: zebra_state::Config::ephemeral(),
+        network: auto_port_ipv4_local,
+        ..ZebradConfig::default()
+    };
+    Ok(local_ephemeral)
 }
 
 fn persistent_test_config() -> Result<ZebradConfig> {
