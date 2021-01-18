@@ -3,7 +3,7 @@
 use hex::FromHex;
 use lazy_static::lazy_static;
 
-use std::{collections::BTreeMap, iter::FromIterator};
+use std::collections::BTreeMap;
 
 lazy_static! {
 
@@ -22,8 +22,7 @@ lazy_static! {
     /// Mainnet blocks, indexed by height
     ///
     /// This is actually a bijective map, the tests ensure that values are unique.
-    pub static ref MAINNET_BLOCKS: BTreeMap<u32, &'static [u8]> = BTreeMap::from_iter(
-        [
+    pub static ref MAINNET_BLOCKS: BTreeMap<u32, &'static [u8]> = [
             // Genesis
             (0, BLOCK_MAINNET_GENESIS_BYTES.as_ref()),
             // BeforeOverwinter
@@ -62,14 +61,12 @@ lazy_static! {
             (975_066, BLOCK_MAINNET_975066_BYTES.as_ref()),
             (982_681, BLOCK_MAINNET_982681_BYTES.as_ref()),
             // TODO: Canopy and First Halving, see #1099
-        ].iter().cloned()
-    );
+        ].iter().cloned().collect();
 
     /// Testnet blocks, indexed by height
     ///
     /// This is actually a bijective map, the tests ensure that values are unique.
-    pub static ref TESTNET_BLOCKS: BTreeMap<u32, &'static [u8]> = BTreeMap::from_iter(
-        [
+    pub static ref TESTNET_BLOCKS: BTreeMap<u32, &'static [u8]> = [
             // Genesis
             (0, BLOCK_TESTNET_GENESIS_BYTES.as_ref()),
             // BeforeOverwinter
@@ -120,8 +117,7 @@ lazy_static! {
             // Shielded coinbase
             (1_101_629, BLOCK_TESTNET_1101629_BYTES.as_ref()),
             // TODO: First Halving, see #1104
-        ].iter().cloned()
-    );
+        ].iter().cloned().collect();
 
     // Mainnet
 
