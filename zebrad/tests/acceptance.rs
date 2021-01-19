@@ -38,6 +38,8 @@ use zebrad::config::ZebradConfig;
 /// Previously, this value was 1 second, which caused occasional
 /// `tracing_endpoint` test failures on some machines.
 const LAUNCH_DELAY: Duration = Duration::from_secs(3);
+const LAUNCH_DELAY_BIG: Duration = Duration::from_secs(100);
+
 
 fn default_test_config() -> Result<ZebradConfig> {
     let auto_port_ipv4_local = zebra_network::Config {
@@ -1057,6 +1059,7 @@ async fn tracing_endpoint() -> Result<()> {
 /// Test will start 2 zebrad nodes one after the other using the same Zcash listener.
 /// It is expected that the first node spawned will get exclusive use of the port.
 /// The second node will panic with the Zcash listener conflict hint added in #1535.
+
 #[test]
 fn zcash_listener_conflict() -> Result<()> {
     zebra_test::init();
@@ -1183,7 +1186,7 @@ where
     let mut node2 = second_dir.spawn_child(&["start"])?;
 
     // Wait a few seconds and kill both nodes
-    std::thread::sleep(LAUNCH_DELAY);
+    std::thread::sleep(LAUNCH_DELAY_BIG);
     node1.kill()?;
     node2.kill()?;
 
