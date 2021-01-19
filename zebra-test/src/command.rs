@@ -406,6 +406,7 @@ impl<T> TestOutput<T> {
     pub fn stderr_contains(&self, regex: &str) -> Result<&Self> {
         let re = regex::Regex::new(regex)?;
         let stderr = String::from_utf8_lossy(&self.output.stderr);
+        dbg!(&stderr);
 
         for line in stderr.lines() {
             if re.is_match(line) {
