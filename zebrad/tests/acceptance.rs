@@ -1068,13 +1068,13 @@ fn zcash_listener_conflict() -> Result<()> {
     // Write a configuration that has our created network listen_addr
     let mut config = default_test_config()?;
     config.network.listen_addr = listen_addr.parse().unwrap();
-    let dir1 = TempDir::new("zebrad_tests")?.with_config(config.clone())?;
+    let dir1 = TempDir::new("zebrad_tests")?.with_config(&mut config)?;
     let regex1 = format!(r"Opened Zcash protocol endpoint at {}", listen_addr);
 
     // From another folder create a configuration with the same listener.
     // `network.listen_addr` will be the same in the 2 nodes.
     // (But since the config is ephemeral, they will have different state paths.)
-    let dir2 = TempDir::new("zebrad_tests")?.with_config(config)?;
+    let dir2 = TempDir::new("zebrad_tests")?.with_config(&mut config)?;
 
     check_config_conflict(dir1, regex1.as_str(), dir2, "already in use")?;
 
@@ -1096,13 +1096,13 @@ fn zcash_metrics_conflict() -> Result<()> {
     // Write a configuration that has our created metrics endpoint_addr
     let mut config = default_test_config()?;
     config.metrics.endpoint_addr = Some(listen_addr.parse().unwrap());
-    let dir1 = TempDir::new("zebrad_tests")?.with_config(config.clone())?;
+    let dir1 = TempDir::new("zebrad_tests")?.with_config(&mut config)?;
     let regex1 = format!(r"Opened metrics endpoint at {}", listen_addr);
 
     // From another folder create a configuration with the same endpoint.
     // `metrics.endpoint_addr` will be the same in the 2 nodes.
     // But they will have different Zcash listeners (auto port) and states (ephemeral)
-    let dir2 = TempDir::new("zebrad_tests")?.with_config(config)?;
+    let dir2 = TempDir::new("zebrad_tests")?.with_config(&mut config)?;
 
     check_config_conflict(dir1, regex1.as_str(), dir2, "already in use")?;
 
@@ -1124,13 +1124,13 @@ fn zcash_tracing_conflict() -> Result<()> {
     // Write a configuration that has our created tracing endpoint_addr
     let mut config = default_test_config()?;
     config.tracing.endpoint_addr = Some(listen_addr.parse().unwrap());
-    let dir1 = TempDir::new("zebrad_tests")?.with_config(config.clone())?;
+    let dir1 = TempDir::new("zebrad_tests")?.with_config(&mut config)?;
     let regex1 = format!(r"Opened tracing endpoint at {}", listen_addr);
 
     // From another folder create a configuration with the same endpoint.
     // `tracing.endpoint_addr` will be the same in the 2 nodes.
     // But they will have different Zcash listeners (auto port) and states (ephemeral)
-    let dir2 = TempDir::new("zebrad_tests")?.with_config(config)?;
+    let dir2 = TempDir::new("zebrad_tests")?.with_config(&mut config)?;
 
     check_config_conflict(dir1, regex1.as_str(), dir2, "already in use")?;
 
@@ -1146,8 +1146,8 @@ fn zcash_state_conflict() -> Result<()> {
 
     // A persistent config has a fixed temp state directory, but asks the OS to
     // automatically choose an unused port
-    let config = persistent_test_config()?;
-    let dir_conflict = TempDir::new("zebrad_tests")?.with_config(config)?;
+    let mut config = persistent_test_config()?;
+    let dir_conflict = TempDir::new("zebrad_tests")?.with_config(&mut config)?;
 
     check_config_conflict(
         dir_conflict.path(),
