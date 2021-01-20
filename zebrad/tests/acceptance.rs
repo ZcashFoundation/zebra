@@ -40,7 +40,6 @@ use zebrad::config::ZebradConfig;
 const LAUNCH_DELAY: Duration = Duration::from_secs(3);
 const LAUNCH_DELAY_BIG: Duration = Duration::from_secs(100);
 
-
 fn default_test_config() -> Result<ZebradConfig> {
     let auto_port_ipv4_local = zebra_network::Config {
         listen_addr: "127.0.0.1:0".parse()?,
