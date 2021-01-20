@@ -38,7 +38,9 @@ use zebrad::config::ZebradConfig;
 /// Previously, this value was 1 second, which caused occasional
 /// `tracing_endpoint` test failures on some machines.
 const LAUNCH_DELAY: Duration = Duration::from_secs(3);
-const LAUNCH_DELAY_BIG: Duration = Duration::from_secs(100);
+
+///
+const LAUNCH_DELAY_BIG: Duration = Duration::from_secs(25);
 
 fn default_test_config() -> Result<ZebradConfig> {
     let auto_port_ipv4_local = zebra_network::Config {
@@ -1174,37 +1176,41 @@ where
     T: ZebradTestDirExt,
     U: ZebradTestDirExt,
 {
-    // Start the first node
-    let mut node1 = first_dir.spawn_child(&["start"])?;
+    // Only execute this test in windows or linux families
+    if !cfg!(target_os = "macos") {
+        // Start the first node
+        let mut node1 = first_dir.spawn_child(&["start"])?;
 
-    // wait a bit to spawn the second node, we want the first fully started.
-    std::thread::sleep(LAUNCH_DELAY);
+        // Wait a bit to spawn the second node, we want the first fully started.
+        std::thread::sleep(LAUNCH_DELAY_BIG);
 
-    // Spawn the second node
-    let mut node2 = second_dir.spawn_child(&["start"])?;
+        // Spawn the second node
+        let mut node2 = second_dir.spawn_child(&["start"])?;
 
-    // Wait a few seconds and kill both nodes
-    std::thread::sleep(LAUNCH_DELAY_BIG);
+        // Wait a few seconds and kill both nodes
+        std::thread::sleep(LAUNCH_DELAY_BIG);
 
-    node1.kill()?;
-    node2.kill()?;
+        node1.kill()?;
+        node2.kill()?;
 
-    // In node1 we want to check for the success regex
-    let output1 = node1.wait_with_output()?;
-    output1.stdout_contains(first_stdout_regex)?;
-    output1
-        .assert_was_killed()
-        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+        // In node1 we want to check for the success regex
+        let output1 = node1.wait_with_output()?;
+        output1.stdout_contains(first_stdout_regex)?;
+        output1
+            .assert_was_killed()
+            .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
 
-    // In the second node we look for the conflict regex
-    let output2 = node2.wait_with_output()?;
-    output2.stderr_contains(second_stderr_regex)?;
-    // The following check fails on Windows so it is removed by now
-    /*
-    output2
-        .assert_was_not_killed()
-        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+        // In the second node we look for the conflict regex
+        let output2 = node2.wait_with_output()?;
+        output2.stderr_contains(second_stderr_regex)?;
 
-    */
+        // Windows is marking the exit as killed
+        if !cfg!(windows) {
+            output2
+                .assert_was_not_killed()
+                .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+        }
+    }
+
     Ok(())
 }

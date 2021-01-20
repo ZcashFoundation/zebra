@@ -392,6 +392,7 @@ impl<T> TestOutput<T> {
     pub fn stdout_matches(&self, regex: &str) -> Result<&Self> {
         let re = regex::Regex::new(regex)?;
         let stdout = String::from_utf8_lossy(&self.output.stdout);
+        dbg!(&stdout);
 
         if re.is_match(&stdout) {
             return Ok(self);
