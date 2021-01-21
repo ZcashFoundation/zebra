@@ -6,6 +6,7 @@
 use std::{
     net::SocketAddr,
     sync::{Arc, Mutex},
+    time::Duration,
 };
 
 use futures::{
@@ -211,10 +212,18 @@ where
     S: Service<(TcpStream, SocketAddr), Response = peer::Client, Error = BoxError> + Clone,
     S::Future: Send + 'static,
 {
-    let listener_result = TcpListener::bind(addr).await;
+    let listener_fut = TcpListener::bind(addr);
+    let listener_fut = tokio::time::timeout(Duration::from_secs(3), listener_fut);
+    let listener_result = listener_fut.await;
 
     let listener = match listener_result {
-        Ok(l) => l,
+        Ok(Ok(l)) => l,
+        Ok(Err(e)) => panic!(
+            "Opening Zcash network protocol listener {:?} failed: {:?}. \
+             Hint: Check if another zebrad or zcashd process is running. \
+             Try changing the network listen_addr in the Zebra config.",
+            addr, e,
+        ),
         Err(e) => panic!(
             "Opening Zcash network protocol listener {:?} failed: {:?}. \
              Hint: Check if another zebrad or zcashd process is running. \
