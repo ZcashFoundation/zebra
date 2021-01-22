@@ -118,14 +118,22 @@ where
     let peer_set = Buffer::new(BoxService::new(peer_set), constants::PEERSET_BUFFER_SIZE);
     info!("checkpoint: {}", line!());
 
-    // Connect the tx end to the 3 peer sources:
+    let initial_peers_fut = {
+        let initial_peers = config.initial_peers();
+        info!("checkpoint: {}", line!());
+        let connector = connector.clone();
+        info!("checkpoint: {}", line!());
+        let tx = peerset_tx.clone();
+        info!("checkpoint: {}", line!());
+
+        // Connect the tx end to the 3 peer sources:
+        add_initial_peers(initial_peers, connector, tx)
+    };
+
+    info!("checkpoint: {}", line!());
 
     // 1. Initial peers, specified in the config.
-    let add_guard = tokio::spawn(add_initial_peers(
-        config.initial_peers(),
-        connector.clone(),
-        peerset_tx.clone(),
-    ));
+    let add_guard = tokio::spawn(initial_peers_fut);
 
     info!("checkpoint: {}", line!());
     // 2. Incoming peer connections, via a listener.
