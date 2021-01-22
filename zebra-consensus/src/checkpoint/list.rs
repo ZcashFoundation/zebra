@@ -55,7 +55,7 @@ impl FromStr for CheckpointList {
             };
         }
 
-        Ok(CheckpointList::from_list(checkpoint_list)?)
+        CheckpointList::from_list(checkpoint_list)
     }
 }
 

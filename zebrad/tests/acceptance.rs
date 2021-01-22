@@ -783,7 +783,7 @@ fn sync_until(
         // This message is captured by the test runner, use
         // `cargo test -- --nocapture` to see it.
         eprintln!("Skipping network test because '$ZEBRA_SKIP_NETWORK_TESTS' is set.");
-        return Ok(testdir()?);
+        return testdir();
     }
 
     // Use a persistent state, so we can handle large syncs
