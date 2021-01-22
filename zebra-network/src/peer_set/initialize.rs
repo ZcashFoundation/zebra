@@ -67,6 +67,7 @@ where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
     S::Future: Send + 'static,
 {
+    info!("checkpoint: {}", line!());
     let (address_book, timestamp_collector) = TimestampCollector::spawn();
     let (inv_sender, inv_receiver) = broadcast::channel(100);
 
@@ -115,6 +116,7 @@ where
         inv_receiver,
     );
     let peer_set = Buffer::new(BoxService::new(peer_set), constants::PEERSET_BUFFER_SIZE);
+    info!("checkpoint: {}", line!());
 
     // Connect the tx end to the 3 peer sources:
 
@@ -125,6 +127,7 @@ where
         peerset_tx.clone(),
     ));
 
+    info!("checkpoint: {}", line!());
     // 2. Incoming peer connections, via a listener.
 
     // Warn if we're configured using the wrong network port.
@@ -143,7 +146,9 @@ where
         );
     }
 
+    info!("checkpoint: {}", line!());
     let listen_guard = tokio::spawn(listen(config.listen_addr, listener, peerset_tx.clone()));
+    info!("checkpoint: {}", line!());
 
     // 3. Outgoing peers we connect to in response to load.
     let mut candidates = CandidateSet::new(address_book.clone(), peer_set.clone());
