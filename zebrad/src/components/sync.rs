@@ -36,9 +36,10 @@ const FANOUT: usize = 4;
 /// retries may be concurrent, inner retries are sequential.
 const BLOCK_DOWNLOAD_RETRY_LIMIT: usize = 2;
 
-/// A lower bound on the user-specified lookahead limit, set to two
-/// checkpoint intervals so that we're sure that the lookahead limit
-/// always contains at least one complete checkpoint interval.
+/// A lower bound on the user-specified lookahead limit.
+///
+/// Set to two checkpoint intervals, so that we're sure that the lookahead
+/// limit always contains at least one complete checkpoint.
 const MIN_LOOKAHEAD_LIMIT: usize = zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP * 2;
 
 /// Controls how long we wait for a tips response to return.
