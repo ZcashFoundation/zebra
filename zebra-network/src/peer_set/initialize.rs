@@ -212,6 +212,7 @@ where
     S: Service<(TcpStream, SocketAddr), Response = peer::Client, Error = BoxError> + Clone,
     S::Future: Send + 'static,
 {
+    println!("attempting to open listener");
     let listener_fut = TcpListener::bind(addr);
     let listener_fut = tokio::time::timeout(Duration::from_secs(3), listener_fut);
     let listener_result = listener_fut.await;
