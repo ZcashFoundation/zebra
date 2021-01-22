@@ -216,20 +216,20 @@ where
     let listener_fut = tokio::time::timeout(Duration::from_secs(3), listener_fut);
     let listener_result = listener_fut.await;
 
+    let panic_now = |e: &dyn std::fmt::Debug| {
+        println!("Panicking now");
+        panic!(
+            "Opening Zcash network protocol listener {:?} failed: {:?}. \
+             Hint: Check if another zebrad or zcashd process is running. \
+             Try changing the network listen_addr in the Zebra config.",
+            addr, e,
+        );
+    };
+
     let listener = match listener_result {
         Ok(Ok(l)) => l,
-        Ok(Err(e)) => panic!(
-            "Opening Zcash network protocol listener {:?} failed: {:?}. \
-             Hint: Check if another zebrad or zcashd process is running. \
-             Try changing the network listen_addr in the Zebra config.",
-            addr, e,
-        ),
-        Err(e) => panic!(
-            "Opening Zcash network protocol listener {:?} failed: {:?}. \
-             Hint: Check if another zebrad or zcashd process is running. \
-             Try changing the network listen_addr in the Zebra config.",
-            addr, e,
-        ),
+        Ok(Err(e)) => panic_now(&e),
+        Err(e) => panic_now(&e),
     };
 
     let local_addr = listener.local_addr()?;
