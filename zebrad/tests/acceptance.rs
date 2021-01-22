@@ -122,14 +122,13 @@ where
         let default_config_path = path.join("zebrad.toml");
 
         if default_config_path.exists() {
-            let mut extra_args: Vec<_> = Vec::new();
-            extra_args.push("-c");
-            extra_args.push(
+            let mut extra_args: Vec<_> = vec![
+                "-c",
                 default_config_path
                     .as_path()
                     .to_str()
                     .expect("Path is valid Unicode"),
-            );
+            ];
             extra_args.extend_from_slice(args);
             self.spawn_child_with_command(env!("CARGO_BIN_EXE_zebrad"), &extra_args)
         } else {

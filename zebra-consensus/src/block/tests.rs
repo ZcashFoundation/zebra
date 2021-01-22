@@ -393,8 +393,7 @@ fn founders_reward_validation_failure() -> Result<(), Report> {
         .unwrap();
 
     // Build new block
-    let mut transactions: Vec<Arc<zebra_chain::transaction::Transaction>> = Vec::new();
-    transactions.push(Arc::new(tx));
+    let transactions: Vec<Arc<zebra_chain::transaction::Transaction>> = vec![Arc::new(tx)];
     let block = Block {
         header: block.header,
         transactions,
