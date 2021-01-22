@@ -53,7 +53,9 @@ pub type SetupData = (Outbound, Arc<Mutex<AddressBook>>);
 /// responding to block gossip by attempting to download and validate advertised
 /// blocks.
 pub struct Inbound {
-    // invariant: address_book and downloads are Some if network_setup or verifier are None
+    // invariants:
+    //  * Before setup: address_book and downloads are None, and the *_setup members are Some
+    //  * After setup: address_book and downloads are Some, and the *_setup members are None
     //
     // why not use an enum for the inbound state? because it would mean
     // match-wrapping the body of Service::call rather than just expect()ing
@@ -70,10 +72,10 @@ pub struct Inbound {
     /// after the network is set up.
     ///
     /// `None` after the network is set up and `downloads` is created.
-    verifier: Option<Verifier>,
+    verifier_setup: Option<Verifier>,
 
-    // Services
-    /// A service that maintains a list of peer addresses.
+    // Services and Data Stores
+    /// A shared list of peer addresses.
     ///
     /// `None` until the network is set up.
     address_book: Option<Arc<Mutex<zn::AddressBook>>>,
@@ -95,7 +97,7 @@ impl Inbound {
     ) -> Self {
         Self {
             network_setup: Some(network_setup),
-            verifier: Some(verifier),
+            verifier_setup: Some(verifier),
             address_book: None,
             downloads: None,
             state,
@@ -119,17 +121,18 @@ impl Service<zn::Request> for Inbound {
             use oneshot::error::TryRecvError;
             match rx.try_recv() {
                 Ok((outbound, address_book)) => {
+                    let verifier = self
+                        .verifier_setup
+                        .take()
+                        .expect("unexpected missing verifier during inbound network setup");
+
                     self.address_book = Some(address_book);
                     self.downloads = Some(Box::pin(Downloads::new(
                         Timeout::new(outbound, BLOCK_DOWNLOAD_TIMEOUT),
-                        Timeout::new(
-                            self.verifier
-                                .take()
-                                .expect("verifier is Some when network_setup is Some"),
-                            BLOCK_VERIFY_TIMEOUT,
-                        ),
+                        Timeout::new(verifier, BLOCK_VERIFY_TIMEOUT),
                         self.state.clone(),
                     )));
+
                     self.network_setup = None;
                 }
                 Err(TryRecvError::Empty) => {
