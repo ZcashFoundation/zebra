@@ -6,6 +6,7 @@
 use std::{
     net::SocketAddr,
     sync::{Arc, Mutex},
+    time::Duration,
 };
 
 use futures::{
@@ -17,6 +18,7 @@ use futures::{
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::broadcast,
+    task,
 };
 use tower::{
     buffer::Buffer, discover::Change, layer::Layer, load::peak_ewma::PeakEwmaDiscover,
@@ -250,16 +252,28 @@ where
     S: Service<(TcpStream, SocketAddr), Response = peer::Client, Error = BoxError> + Clone,
     S::Future: Send + 'static,
 {
-    let listener_result = TcpListener::bind(addr).await;
 
-    let listener = match listener_result {
-        Ok(l) => l,
-        Err(e) => panic!(
+    let bind_fut = task::spawn_blocking(move || {
+        TcpListener::bind(addr)
+    }).await?;
+
+    let listener_fut = tokio::time::timeout(Duration::from_secs(1), bind_fut);
+    let listener_result = listener_fut.await;
+
+    let panic_now = |e: &dyn std::fmt::Debug| {
+        println!("Panicking now");
+        panic!(
             "Opening Zcash network protocol listener {:?} failed: {:?}. \
              Hint: Check if another zebrad or zcashd process is running. \
              Try changing the network listen_addr in the Zebra config.",
             addr, e,
-        ),
+        );
+    };
+
+    let listener = match listener_result {
+        Ok(Ok(l)) => l,
+        Ok(Err(e)) => panic_now(&e),
+        Err(e) => panic_now(&e),
     };
 
     let local_addr = listener.local_addr()?;
