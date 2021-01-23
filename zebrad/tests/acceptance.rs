@@ -39,9 +39,6 @@ use zebrad::config::ZebradConfig;
 /// `tracing_endpoint` test failures on some machines.
 const LAUNCH_DELAY: Duration = Duration::from_secs(3);
 
-///
-const LAUNCH_DELAY_BIG: Duration = Duration::from_secs(25);
-
 fn default_test_config() -> Result<ZebradConfig> {
     let auto_port_ipv4_local = zebra_network::Config {
         listen_addr: "127.0.0.1:0".parse()?,
@@ -1063,7 +1060,6 @@ async fn tracing_endpoint() -> Result<()> {
 #[test]
 #[ignore]
 fn zcash_listener_conflict() -> Result<()> {
-    
     zebra_test::init();
 
     // [Note on port conflict](#Note on port conflict)
@@ -1184,13 +1180,13 @@ where
         let mut node1 = first_dir.spawn_child(&["start"])?;
 
         // Wait a bit to spawn the second node, we want the first fully started.
-        std::thread::sleep(LAUNCH_DELAY_BIG);
+        std::thread::sleep(LAUNCH_DELAY);
 
         // Spawn the second node
         let mut node2 = second_dir.spawn_child(&["start"])?;
 
         // Wait a few seconds and kill both nodes
-        std::thread::sleep(LAUNCH_DELAY_BIG);
+        std::thread::sleep(LAUNCH_DELAY);
 
         node1.kill()?;
         node2.kill()?;
