@@ -1061,7 +1061,9 @@ async fn tracing_endpoint() -> Result<()> {
 /// It is expected that the first node spawned will get exclusive use of the port.
 /// The second node will panic with the Zcash listener conflict hint added in #1535.
 #[test]
+#[ignore]
 fn zcash_listener_conflict() -> Result<()> {
+    
     zebra_test::init();
 
     // [Note on port conflict](#Note on port conflict)
