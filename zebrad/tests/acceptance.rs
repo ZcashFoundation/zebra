@@ -1058,7 +1058,6 @@ async fn tracing_endpoint() -> Result<()> {
 /// It is expected that the first node spawned will get exclusive use of the port.
 /// The second node will panic with the Zcash listener conflict hint added in #1535.
 #[test]
-#[ignore]
 fn zcash_listener_conflict() -> Result<()> {
     zebra_test::init();
 
@@ -1174,7 +1173,7 @@ where
     T: ZebradTestDirExt,
     U: ZebradTestDirExt,
 {
-    // Only execute this test in windows or linux families
+    // Don't execute this tests in macOS
     if !cfg!(target_os = "macos") {
         // Start the first node
         let mut node1 = first_dir.spawn_child(&["start"])?;
@@ -1202,8 +1201,14 @@ where
         let output2 = node2.wait_with_output()?;
         output2.stderr_contains(second_stderr_regex)?;
 
-        // Windows is marking the exit as killed
-        if !cfg!(windows) {
+        // Panics on Windows exit with the same kill signal code(1)
+        if cfg!(target_os = "windows") {
+            output2
+                .assert_was_killed()
+                .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+        }
+        // Panics on Linux exit with a different kill signal code(9) 
+        else {
             output2
                 .assert_was_not_killed()
                 .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
