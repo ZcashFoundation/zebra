@@ -18,7 +18,7 @@ use zebra_chain::{
 use zebra_network as zn;
 use zebra_state as zs;
 
-use crate::config::ZebradConfig;
+use crate::{config::ZebradConfig, BoxError};
 
 mod downloads;
 use downloads::{AlwaysHedge, Downloads};
@@ -113,8 +113,6 @@ pub(super) const BLOCK_VERIFY_TIMEOUT: Duration = Duration::from_secs(180);
 /// sometimes get stuck in a failure loop, due to leftover downloads from
 /// previous sync runs.
 const SYNC_RESTART_DELAY: Duration = Duration::from_secs(61);
-
-type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 /// Helps work around defects in the bitcoin protocol by checking whether
 /// the returned hashes actually extend a chain tip.
