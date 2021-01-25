@@ -229,7 +229,7 @@ where
 {
     let bind_fut = task::spawn_blocking(move || TcpListener::bind(addr)).await?;
 
-    let listener_fut = tokio::time::timeout(Duration::from_secs(1), bind_fut);
+    let listener_fut = tokio::time::timeout(constants::BIND_TIMEOUT, bind_fut);
     let listener_result = listener_fut.await;
 
     let panic_now = |e: &dyn std::fmt::Debug| {
