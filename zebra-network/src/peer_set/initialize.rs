@@ -6,7 +6,6 @@
 use std::{
     net::SocketAddr,
     sync::{Arc, Mutex},
-    time::Duration,
 };
 
 use futures::{
