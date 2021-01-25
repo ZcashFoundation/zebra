@@ -66,7 +66,7 @@ pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 mod address_book;
 mod config;
-mod constants;
+pub mod constants;
 mod isolated;
 mod meta_addr;
 mod peer;

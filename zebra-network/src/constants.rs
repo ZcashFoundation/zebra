@@ -95,6 +95,15 @@ pub const EWMA_DEFAULT_RTT: Duration = Duration::from_secs(20 + 1);
 /// better peers when we restart the sync.
 pub const EWMA_DECAY_TIME: Duration = Duration::from_secs(200);
 
+/// The maximum time to open a port if it haves a timeout.
+pub const BIND_TIMEOUT: Duration = Duration::from_secs(1);
+
+/// Linux portion of OS error when the port attempting to be opened is already in use.
+pub const PORT_IN_USE_LINUX: &str = "already in use";
+
+/// Windows portion of OS error when the port attempting to be opened is already in use.
+pub const PORT_IN_USE_WINDOWS: &str = "one usage";
+
 /// Magic numbers used to identify different Zcash networks.
 pub mod magics {
     use super::*;

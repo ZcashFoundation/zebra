@@ -95,7 +95,7 @@ where
             hs_timeout.layer(peer::Connector::new(hs)),
         )
     };
-    
+
     // Create an mpsc channel for peer changes, with a generous buffer.
     let (peerset_tx, peerset_rx) = mpsc::channel::<PeerChange>(100);
     // Create an mpsc channel for peerset demand signaling.
@@ -227,10 +227,7 @@ where
     S: Service<(TcpStream, SocketAddr), Response = peer::Client, Error = BoxError> + Clone,
     S::Future: Send + 'static,
 {
-
-    let bind_fut = task::spawn_blocking(move || {
-        TcpListener::bind(addr)
-    }).await?;
+    let bind_fut = task::spawn_blocking(move || TcpListener::bind(addr)).await?;
 
     let listener_fut = tokio::time::timeout(Duration::from_secs(1), bind_fut);
     let listener_result = listener_fut.await;
