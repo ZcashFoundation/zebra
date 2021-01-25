@@ -119,7 +119,7 @@ where
     let peer_set = Buffer::new(BoxService::new(peer_set), constants::PEERSET_BUFFER_SIZE);
     info!("checkpoint: {}", line!());
 
-    // 2. Incoming peer connections, via a listener.
+    // 1. Incoming peer connections, via a listener.
 
     // Warn if we're configured using the wrong network port.
     // TODO: use the right port if the port is unspecified
@@ -155,35 +155,10 @@ where
 
     info!("checkpoint: {}", line!());
 
-    // 1. Initial peers, specified in the config.
+    // 2. Initial peers, specified in the config.
     let add_guard = tokio::spawn(initial_peers_fut);
 
     info!("checkpoint: {}", line!());
-
-    /*
-    // 2. Incoming peer connections, via a listener.
-
-    // Warn if we're configured using the wrong network port.
-    // TODO: use the right port if the port is unspecified
-    //       split the address and port configs?
-    let (wrong_net, wrong_net_port) = match config.network {
-        Network::Mainnet => (Network::Testnet, 18233),
-        Network::Testnet => (Network::Mainnet, 8233),
-    };
-    if config.listen_addr.port() == wrong_net_port {
-        warn!(
-            "We are configured with port {} for {:?}, but that port is the default port for {:?}",
-            config.listen_addr.port(),
-            config.network,
-            wrong_net
-        );
-    }
-
-    info!("checkpoint: {}", line!());
-    let listen_guard = tokio::spawn(listen(config.listen_addr, listener, peerset_tx.clone()));
-    info!("checkpoint: {}", line!());
-
-    */
 
     // 3. Outgoing peers we connect to in response to load.
     let mut candidates = CandidateSet::new(address_book.clone(), peer_set.clone());
