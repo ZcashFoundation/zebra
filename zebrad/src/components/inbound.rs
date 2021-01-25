@@ -1,5 +1,6 @@
 use std::{
     future::Future,
+    mem,
     pin::Pin,
     sync::{Arc, Mutex},
     task::{Context, Poll},
@@ -28,8 +29,53 @@ use downloads::Downloads;
 type Outbound = Buffer<BoxService<zn::Request, zn::Response, zn::BoxError>, zn::Request>;
 type State = Buffer<BoxService<zs::Request, zs::Response, zs::BoxError>, zs::Request>;
 type Verifier = Buffer<BoxService<Arc<Block>, block::Hash, VerifyChainError>, Arc<Block>>;
+type InboundDownloads = Downloads<Timeout<Outbound>, Timeout<Verifier>, State>;
 
-pub type SetupData = (Outbound, Arc<Mutex<AddressBook>>);
+pub type NetworkSetupData = (Outbound, Arc<Mutex<AddressBook>>);
+
+/// Tracks the internal state of the [`Inbound`] service during network setup.
+pub enum Setup {
+    /// Waiting for network setup to complete.
+    ///
+    /// Requests that depend on Zebra's internal network setup are ignored.
+    /// Other requests are answered.
+    AwaitingNetwork {
+        /// A oneshot channel used to receive the address_book and outbound services
+        /// after the network is set up.
+        network_setup: oneshot::Receiver<NetworkSetupData>,
+
+        /// A service that verifies downloaded blocks. Given to `downloads`
+        /// after the network is set up.
+        verifier: Verifier,
+    },
+
+    /// Network setup is complete.
+    ///
+    /// All requests are answered.
+    Initialized {
+        /// A shared list of peer addresses.
+        address_book: Arc<Mutex<zn::AddressBook>>,
+
+        /// A `futures::Stream` that downloads and verifies gossipped blocks.
+        downloads: Pin<Box<InboundDownloads>>,
+    },
+
+    /// Temporary state used in the service's internal network initialization
+    /// code.
+    ///
+    /// If this state occurs outside the service initialization code, the
+    /// service panics.
+    FailedInit,
+
+    /// Network setup failed, because the setup channel permanently failed.
+    /// The service keeps returning readiness errors for every request.
+    ///
+    /// We keep hold of the closed oneshot, so we can use it to create a
+    /// new error for each `poll_ready` call.
+    FailedRecv {
+        failed_setup: oneshot::Receiver<NetworkSetupData>,
+    },
+}
 
 /// Uses the node state to respond to inbound peer requests.
 ///
@@ -53,37 +99,10 @@ pub type SetupData = (Outbound, Arc<Mutex<AddressBook>>);
 /// responding to block gossip by attempting to download and validate advertised
 /// blocks.
 pub struct Inbound {
-    // invariants:
-    //  * Before setup: address_book and downloads are None, and the *_setup members are Some
-    //  * After setup: address_book and downloads are Some, and the *_setup members are None
-    //
-    // why not use an enum for the inbound state? because it would mean
-    // match-wrapping the body of Service::call rather than just expect()ing
-    // some Options.
-
-    // Setup
-    /// A oneshot channel used to receive the address_book and outbound services
-    /// after the network is set up.
+    /// Provides network-dependent services, if they are available.
     ///
-    /// `None` after the network is set up.
-    network_setup: Option<oneshot::Receiver<SetupData>>,
-
-    /// A service that verifies downloaded blocks. Given to `downloads`
-    /// after the network is set up.
-    ///
-    /// `None` after the network is set up and `downloads` is created.
-    verifier_setup: Option<Verifier>,
-
-    // Services and Data Stores
-    /// A shared list of peer addresses.
-    ///
-    /// `None` until the network is set up.
-    address_book: Option<Arc<Mutex<zn::AddressBook>>>,
-
-    /// A stream that downloads and verifies gossipped blocks.
-    ///
-    /// `None` until the network is set up.
-    downloads: Option<Pin<Box<Downloads<Timeout<Outbound>, Timeout<Verifier>, State>>>>,
+    /// Some services are unavailable until Zebra has completed network setup.
+    network: Setup,
 
     /// A service that manages cached blockchain state.
     state: State,
@@ -91,15 +110,15 @@ pub struct Inbound {
 
 impl Inbound {
     pub fn new(
-        network_setup: oneshot::Receiver<SetupData>,
+        network_setup: oneshot::Receiver<NetworkSetupData>,
         state: State,
         verifier: Verifier,
     ) -> Self {
         Self {
-            network_setup: Some(network_setup),
-            verifier_setup: Some(verifier),
-            address_book: None,
-            downloads: None,
+            network: Setup::AwaitingNetwork {
+                network_setup,
+                verifier,
+            },
             state,
         }
     }
@@ -112,44 +131,75 @@ impl Service<zn::Request> for Inbound {
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        use oneshot::error::TryRecvError;
+
         // Check whether the network setup is finished, but don't wait for it to
         // become ready before reporting readiness. We expect to get it "soon",
         // and reporting unreadiness might cause unwanted load-shedding, since
         // the load-shed middleware is unable to distinguish being unready due
         // to load from being unready while waiting on setup.
-        if let Some(mut rx) = self.network_setup.take() {
-            use oneshot::error::TryRecvError;
-            match rx.try_recv() {
-                Ok((outbound, address_book)) => {
-                    let verifier = self
-                        .verifier_setup
-                        .take()
-                        .expect("unexpected missing verifier during inbound network setup");
+        if matches!(self.network, Setup::AwaitingNetwork { .. }) {
+            // Unfortunately, we can't match, swap, and destructure at the same time
+            let mut awaiting_state = Setup::FailedInit;
+            mem::swap(&mut self.network, &mut awaiting_state);
+            if let Setup::AwaitingNetwork {
+                mut network_setup,
+                verifier,
+            } = awaiting_state
+            {
+                match network_setup.try_recv() {
+                    Ok((outbound, address_book)) => {
+                        let downloads = Box::pin(Downloads::new(
+                            Timeout::new(outbound, BLOCK_DOWNLOAD_TIMEOUT),
+                            Timeout::new(verifier, BLOCK_VERIFY_TIMEOUT),
+                            self.state.clone(),
+                        ));
+                        self.network = Setup::Initialized {
+                            address_book,
+                            downloads,
+                        };
+                    }
+                    Err(TryRecvError::Empty) => {
+                        // There's no setup data yet, so keep waiting for it
+                        self.network = Setup::AwaitingNetwork {
+                            network_setup,
+                            verifier,
+                        };
+                    }
+                    Err(error @ TryRecvError::Closed) => {
+                        // Mark the service as failed, because network setup failed
+                        error!(?error, "inbound network setup failed");
+                        self.network = Setup::FailedRecv {
+                            failed_setup: network_setup,
+                        };
+                        return Poll::Ready(Err(error.into()));
+                    }
+                }
+            }
+        }
 
-                    self.address_book = Some(address_book);
-                    self.downloads = Some(Box::pin(Downloads::new(
-                        Timeout::new(outbound, BLOCK_DOWNLOAD_TIMEOUT),
-                        Timeout::new(verifier, BLOCK_VERIFY_TIMEOUT),
-                        self.state.clone(),
-                    )));
+        // Unfortunately, we can't combine these matches into an exhaustive match statement,
+        // because they use mutable references, or they depend on the state we've just modified.
 
-                    self.network_setup = None;
-                }
-                Err(TryRecvError::Empty) => {
-                    self.network_setup = Some(rx);
-                }
-                Err(e @ TryRecvError::Closed) => {
-                    // In this case, report that the service failed, and put the
-                    // failed oneshot back so we'll fail again in case
-                    // poll_ready is called after failure.
-                    self.network_setup = Some(rx);
-                    return Poll::Ready(Err(e.into()));
-                }
-            };
+        // Make sure we left the network setup in a valid state
+        if matches!(self.network, Setup::FailedInit) {
+            unreachable!("incomplete Inbound initialization");
+        }
+
+        // If network setup failed, report service failure
+        if let Setup::FailedRecv { failed_setup } = &mut self.network {
+            // TryRecvError is not cloneable, so we have to generate a new error from the oneshot,
+            // rather than re-using a clone of the original error
+            let failed_response = failed_setup.try_recv();
+            if let Err(error @ TryRecvError::Closed) = failed_response {
+                return Poll::Ready(Err(error.into()));
+            } else {
+                unreachable!("unexpected response from failed Inbound network setup oneshot");
+            }
         }
 
         // Clean up completed download tasks, ignoring their results
-        if let Some(downloads) = self.downloads.as_mut() {
+        if let Setup::Initialized { downloads, .. } = &mut self.network {
             while let Poll::Ready(Some(_)) = downloads.as_mut().poll_next(cx) {}
         }
 
@@ -168,22 +218,21 @@ impl Service<zn::Request> for Inbound {
     #[instrument(name = "inbound", skip(self, req))]
     fn call(&mut self, req: zn::Request) -> Self::Future {
         match req {
-            zn::Request::Peers => match self.address_book.as_ref() {
-                Some(addrs) => {
+            zn::Request::Peers => {
+                if let Setup::Initialized { address_book, .. } = &self.network {
                     // We could truncate the list to try to not reveal our entire
                     // peer set. But because we don't monitor repeated requests,
                     // this wouldn't actually achieve anything, because a crawler
                     // could just repeatedly query it.
-                    let mut peers = addrs.lock().unwrap().sanitized();
+                    let mut peers = address_book.lock().unwrap().sanitized();
                     const MAX_ADDR: usize = 1000; // bitcoin protocol constant
                     peers.truncate(MAX_ADDR);
                     async { Ok(zn::Response::Peers(peers)) }.boxed()
-                }
-                None => {
+                } else {
                     info!("ignoring `Peers` request from remote peer during network setup");
                     async { Ok(zn::Response::Nil) }.boxed()
                 }
-            },
+            }
             zn::Request::BlocksByHash(hashes) => {
                 // Correctness:
                 //
@@ -246,7 +295,7 @@ impl Service<zn::Request> for Inbound {
                 async { Ok(zn::Response::Nil) }.boxed()
             }
             zn::Request::AdvertiseBlock(hash) => {
-                if let Some(downloads) = self.downloads.as_mut() {
+                if let Setup::Initialized { downloads, .. } = &mut self.network {
                     downloads.download_and_verify(hash);
                 } else {
                     info!(
