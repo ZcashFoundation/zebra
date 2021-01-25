@@ -5,9 +5,7 @@ This page is copyright Zcash Foundation, 2021. It is posted in order to conform 
 
 The Zcash Foundation is committed to working with researchers who submit security vulnerability notifications to us to resolve those issues on an appropriate timeline and perform a coordinated release, giving credit to the reporter if they would like.
 
-Please submit issues to security@zfnd.org, using the following PGP key:
-
-<TODO: generate, multiple backup>
+Please submit issues to security@zfnd.org.
 
 ## Sending Disclosures
 
