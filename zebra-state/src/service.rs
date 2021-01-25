@@ -530,13 +530,6 @@ impl Service<Request> for StateService {
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
-    // ## Correctness:
-    //
-    // This function must not return Poll::Pending, unless:
-    // 1. We remove all instances of `call_all` on the state service, or fix the leaked
-    //    service reservation in the `CallAll` implementation:
-    //    https://github.com/tower-rs/tower/blob/master/tower/src/util/call_all/common.rs#L112
-    // 2. We schedule the current task for wakeup via the `Context`
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         let now = Instant::now();
 
