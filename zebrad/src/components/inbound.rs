@@ -179,7 +179,10 @@ impl Service<zn::Request> for Inbound {
                     peers.truncate(MAX_ADDR);
                     async { Ok(zn::Response::Peers(peers)) }.boxed()
                 }
-                None => async { Err("not ready to serve addresses".into()) }.boxed(),
+                None => {
+                    info!("ignoring `Peers` request from remote peer during network setup");
+                    async { Ok(zn::Response::Nil) }.boxed()
+                }
             },
             zn::Request::BlocksByHash(hashes) => {
                 // Correctness:
@@ -245,6 +248,11 @@ impl Service<zn::Request> for Inbound {
             zn::Request::AdvertiseBlock(hash) => {
                 if let Some(downloads) = self.downloads.as_mut() {
                     downloads.download_and_verify(hash);
+                } else {
+                    info!(
+                        ?hash,
+                        "ignoring `AdvertiseBlock` request from remote peer during network setup"
+                    );
                 }
                 async { Ok(zn::Response::Nil) }.boxed()
             }
