@@ -1188,9 +1188,8 @@ where
         let node2 = second_dir.spawn_child(&["start"])?;
 
         // Wait a few seconds and kill first node.
-        // Second node gets killed by the panic.
+        // Second node is terminated by panic, no need to kill.
         std::thread::sleep(LAUNCH_DELAY);
-
         node1.kill()?;
 
         // In node1 we want to check for the success regex
