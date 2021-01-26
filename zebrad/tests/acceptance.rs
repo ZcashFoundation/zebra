@@ -30,7 +30,7 @@ use zebra_chain::{
         NetworkUpgrade,
     },
 };
-use zebra_network::constants::{PORT_IN_USE_LINUX, PORT_IN_USE_WINDOWS};
+use zebra_network::constants::{PORT_IN_USE_UNIX, PORT_IN_USE_WINDOWS};
 use zebra_test::{command::TestDirExt, prelude::*};
 use zebrad::config::ZebradConfig;
 
@@ -1081,7 +1081,7 @@ fn zcash_listener_conflict() -> Result<()> {
         dir1,
         regex1.as_str(),
         dir2,
-        format!("({})|({})", PORT_IN_USE_LINUX, PORT_IN_USE_WINDOWS).as_str(),
+        format!("({})|({})", PORT_IN_USE_UNIX, PORT_IN_USE_WINDOWS).as_str(),
     )?;
 
     Ok(())
@@ -1114,7 +1114,7 @@ fn zcash_metrics_conflict() -> Result<()> {
         dir1,
         regex1.as_str(),
         dir2,
-        format!("({})|({})", PORT_IN_USE_LINUX, PORT_IN_USE_WINDOWS).as_str(),
+        format!("({})|({})", PORT_IN_USE_UNIX, PORT_IN_USE_WINDOWS).as_str(),
     )?;
 
     Ok(())
@@ -1147,7 +1147,7 @@ fn zcash_tracing_conflict() -> Result<()> {
         dir1,
         regex1.as_str(),
         dir2,
-        format!("({})|({})", PORT_IN_USE_LINUX, PORT_IN_USE_WINDOWS).as_str(),
+        format!("({})|({})", PORT_IN_USE_UNIX, PORT_IN_USE_WINDOWS).as_str(),
     )?;
 
     Ok(())
@@ -1189,43 +1189,48 @@ where
     T: ZebradTestDirExt,
     U: ZebradTestDirExt,
 {
-    // Start the first node
-    let mut node1 = first_dir.spawn_child(&["start"])?;
+    // By DNS issues we want to skip all port conflict tests on macOS by now.
+    // They should be activated after https://github.com/ZcashFoundation/zebra/issues/1631
+    if !cfg!(target_os = "macos") {
+        // Start the first node
+        let mut node1 = first_dir.spawn_child(&["start"])?;
 
-    // Wait a bit to spawn the second node, we want the first fully started.
-    std::thread::sleep(LAUNCH_DELAY);
+        // Wait a bit to spawn the second node, we want the first fully started.
+        std::thread::sleep(LAUNCH_DELAY);
 
-    // Spawn the second node
-    let mut node2 = second_dir.spawn_child(&["start"])?;
+        // Spawn the second node
+        let mut node2 = second_dir.spawn_child(&["start"])?;
 
-    // Wait a few seconds and kill both nodes
-    std::thread::sleep(LAUNCH_DELAY);
+        // Wait a few seconds and kill both nodes
+        std::thread::sleep(LAUNCH_DELAY);
 
-    node1.kill()?;
-    node2.kill()?;
+        node1.kill()?;
+        node2.kill()?;
 
-    // In node1 we want to check for the success regex
-    let output1 = node1.wait_with_output()?;
-    output1.stdout_contains(first_stdout_regex)?;
-    output1
-        .assert_was_killed()
-        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
-
-    // In the second node we look for the conflict regex
-    let output2 = node2.wait_with_output()?;
-    output2.stderr_contains(second_stderr_regex)?;
-
-    // Panics on Windows exit with the same kill signal code(1)
-    if cfg!(target_os = "windows") {
-        output2
+        // In node1 we want to check for the success regex
+        let output1 = node1.wait_with_output()?;
+        output1.stdout_contains(first_stdout_regex)?;
+        output1
             .assert_was_killed()
             .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
-    }
-    // Panics on Linux exit with a different kill signal code(9)
-    else {
-        output2
-            .assert_was_not_killed()
-            .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+
+        // In the second node we look for the conflict regex
+        let output2 = node2.wait_with_output()?;
+        output2.stderr_contains(second_stderr_regex)?;
+
+        // Panics on Windows exit with the same kill signal code(1)
+        // https://github.com/ZcashFoundation/zebra/issues/1632
+        if cfg!(target_os = "windows") {
+            output2
+                .assert_was_killed()
+                .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+        }
+        // Panics on Linux exit with a different kill signal code(9)
+        else {
+            output2
+                .assert_was_not_killed()
+                .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+        }
     }
 
     Ok(())

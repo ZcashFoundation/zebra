@@ -12,7 +12,7 @@ use abscissa_core::{
 use application::fatal_error;
 use std::process;
 
-use zebra_network::constants::{PORT_IN_USE_LINUX, PORT_IN_USE_WINDOWS};
+use zebra_network::constants::{PORT_IN_USE_UNIX, PORT_IN_USE_WINDOWS};
 
 /// Application state
 pub static APPLICATION: AppCell<ZebradApp> = AppCell::new();
@@ -179,7 +179,7 @@ impl Application for ZebradApp {
                         None => return true,
                     };
                     // listener port conflicts
-                    if error_str.contains(PORT_IN_USE_LINUX)
+                    if error_str.contains(PORT_IN_USE_UNIX)
                         || error_str.contains(PORT_IN_USE_WINDOWS)
                     {
                         return false;

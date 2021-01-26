@@ -17,7 +17,6 @@ use futures::{
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::broadcast,
-    task,
 };
 use tower::{
     buffer::Buffer, discover::Change, layer::Layer, load::peak_ewma::PeakEwmaDiscover,
@@ -67,7 +66,6 @@ where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
     S::Future: Send + 'static,
 {
-    info!("checkpoint: {}", line!());
     let (address_book, timestamp_collector) = TimestampCollector::spawn();
     let (inv_sender, inv_receiver) = broadcast::channel(100);
 
@@ -116,7 +114,6 @@ where
         inv_receiver,
     );
     let peer_set = Buffer::new(BoxService::new(peer_set), constants::PEERSET_BUFFER_SIZE);
-    info!("checkpoint: {}", line!());
 
     // 1. Incoming peer connections, via a listener.
 
@@ -136,28 +133,19 @@ where
         );
     }
 
-    info!("checkpoint: {}", line!());
     let listen_guard = tokio::spawn(listen(config.listen_addr, listener, peerset_tx.clone()));
-    info!("checkpoint: {}", line!());
 
     let initial_peers_fut = {
         let initial_peers = config.initial_peers();
-        info!("checkpoint: {}", line!());
         let connector = connector.clone();
-        info!("checkpoint: {}", line!());
         let tx = peerset_tx.clone();
-        info!("checkpoint: {}", line!());
 
         // Connect the tx end to the 3 peer sources:
         add_initial_peers(initial_peers, connector, tx)
     };
 
-    info!("checkpoint: {}", line!());
-
     // 2. Initial peers, specified in the config.
     let add_guard = tokio::spawn(initial_peers_fut);
-
-    info!("checkpoint: {}", line!());
 
     // 3. Outgoing peers we connect to in response to load.
     let mut candidates = CandidateSet::new(address_book.clone(), peer_set.clone());
@@ -226,25 +214,16 @@ where
     S: Service<(TcpStream, SocketAddr), Response = peer::Client, Error = BoxError> + Clone,
     S::Future: Send + 'static,
 {
-    let bind_fut = task::spawn_blocking(move || TcpListener::bind(addr)).await?;
+    let listener_result = TcpListener::bind(addr).await;
 
-    let listener_fut = tokio::time::timeout(constants::BIND_TIMEOUT, bind_fut);
-    let listener_result = listener_fut.await;
-
-    let panic_now = |e: &dyn std::fmt::Debug| {
-        println!("Panicking now");
-        panic!(
+    let listener = match listener_result {
+        Ok(l) => l,
+        Err(e) => panic!(
             "Opening Zcash network protocol listener {:?} failed: {:?}. \
              Hint: Check if another zebrad or zcashd process is running. \
              Try changing the network listen_addr in the Zebra config.",
             addr, e,
-        );
-    };
-
-    let listener = match listener_result {
-        Ok(Ok(l)) => l,
-        Ok(Err(e)) => panic_now(&e),
-        Err(e) => panic_now(&e),
+        ),
     };
 
     let local_addr = listener.local_addr()?;
