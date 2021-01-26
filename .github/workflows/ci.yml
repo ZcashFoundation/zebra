@@ -46,13 +46,6 @@ jobs:
         with:
           command: test
           args: --verbose --manifest-path zebrad/Cargo.toml sync_large_checkpoints_ -- --ignored
-      - name: Run zebrad tracing test
-        env:
-          RUST_BACKTRACE: full
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --verbose --manifest-path zebrad/Cargo.toml tracing_endpoint -- --ignored
 
   build-chain-no-features:
     name: Build zebra-chain w/o features on ubuntu-latest
