@@ -172,9 +172,9 @@ impl<T: std::fmt::Debug> MustUseOneshotSender<T> {
     /// Returns true if the application is shutting down.
     ///
     /// Returns false otherwise.
-    pub fn is_shutdown(&self) -> bool {
+    pub fn is_shutting_down(&self) -> bool {
         use std::sync::atomic::Ordering;
-        crate::IS_SHUTDOWN.load(Ordering::Relaxed)
+        crate::IS_SHUTTING_DOWN.load(Ordering::Relaxed)
     }
 }
 
@@ -187,8 +187,8 @@ impl<T: std::fmt::Debug> From<oneshot::Sender<T>> for MustUseOneshotSender<T> {
 impl<T: std::fmt::Debug> Drop for MustUseOneshotSender<T> {
     #[instrument(skip(self))]
     fn drop(&mut self) {
-        // we don't evaluate if we are shutting down
-        if !self.is_shutdown() {
+        // we don't panic if we are shutting down anyway
+        if !self.is_shutting_down() {
             // is_canceled() will not panic, because we check is_none() first
             assert!(
                 self.tx.is_none() || self.is_canceled(),

@@ -91,4 +91,4 @@ pub mod types {
 
 use std::sync::atomic::AtomicBool;
 /// A flag to indicate if zebrad is shutting down.
-pub static IS_SHUTDOWN: AtomicBool = AtomicBool::new(false);
+pub static IS_SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
