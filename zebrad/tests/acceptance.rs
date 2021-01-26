@@ -31,6 +31,7 @@ use zebra_chain::{
     },
 };
 use zebra_network::constants::PORT_IN_USE_ERROR;
+use zebra_state::constants::LOCK_FILE_ERROR;
 use zebra_test::{command::TestDirExt, prelude::*};
 use zebrad::config::ZebradConfig;
 
@@ -1154,7 +1155,7 @@ fn zcash_state_conflict() -> Result<()> {
         dir_conflict.path(),
         "Opened Zebra state cache",
         dir_conflict.path(),
-        "lock file",
+        LOCK_FILE_ERROR,
     )?;
 
     Ok(())

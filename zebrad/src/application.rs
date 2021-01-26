@@ -13,6 +13,7 @@ use application::fatal_error;
 use std::process;
 
 use zebra_network::constants::PORT_IN_USE_ERROR;
+use zebra_state::constants::LOCK_FILE_ERROR;
 
 /// Application state
 pub static APPLICATION: AppCell<ZebradApp> = AppCell::new();
@@ -183,7 +184,7 @@ impl Application for ZebradApp {
                         return false;
                     }
                     // RocksDB lock file conflicts
-                    if error_str.contains("lock file")
+                    if error_str.contains(LOCK_FILE_ERROR)
                         && (error_str.contains("temporarily unavailable")
                             || error_str.contains("in use"))
                     {

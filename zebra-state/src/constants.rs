@@ -1,3 +1,5 @@
+//! Definitions of constants.
+
 /// The maturity threshold for transparent coinbase outputs.
 ///
 /// A transaction MUST NOT spend a transparent output of a coinbase transaction
@@ -13,3 +15,6 @@ pub const MAX_BLOCK_REORG_HEIGHT: u32 = MIN_TRANSPARENT_COINBASE_MATURITY - 1;
 
 /// The database format version, incremented each time the database format changes.
 pub const DATABASE_FORMAT_VERSION: u32 = 4;
+
+/// Portion of OS error when the RocksDB lock file is already open.
+pub const LOCK_FILE_ERROR: &str = "lock file";
