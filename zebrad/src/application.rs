@@ -12,7 +12,7 @@ use abscissa_core::{
 use application::fatal_error;
 use std::process;
 
-use zebra_network::constants::{PORT_IN_USE_UNIX, PORT_IN_USE_WINDOWS};
+use zebra_network::constants::PORT_IN_USE_ERROR;
 
 /// Application state
 pub static APPLICATION: AppCell<ZebradApp> = AppCell::new();
@@ -179,9 +179,7 @@ impl Application for ZebradApp {
                         None => return true,
                     };
                     // listener port conflicts
-                    if error_str.contains(PORT_IN_USE_UNIX)
-                        || error_str.contains(PORT_IN_USE_WINDOWS)
-                    {
+                    if error_str.contains(PORT_IN_USE_ERROR) {
                         return false;
                     }
                     // RocksDB lock file conflicts

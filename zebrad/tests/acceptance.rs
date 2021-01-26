@@ -30,7 +30,7 @@ use zebra_chain::{
         NetworkUpgrade,
     },
 };
-use zebra_network::constants::{PORT_IN_USE_UNIX, PORT_IN_USE_WINDOWS};
+use zebra_network::constants::PORT_IN_USE_ERROR;
 use zebra_test::{command::TestDirExt, prelude::*};
 use zebrad::config::ZebradConfig;
 
@@ -1077,12 +1077,7 @@ fn zcash_listener_conflict() -> Result<()> {
     // (But since the config is ephemeral, they will have different state paths.)
     let dir2 = TempDir::new("zebrad_tests")?.with_config(&mut config)?;
 
-    check_config_conflict(
-        dir1,
-        regex1.as_str(),
-        dir2,
-        format!("({})|({})", PORT_IN_USE_UNIX, PORT_IN_USE_WINDOWS).as_str(),
-    )?;
+    check_config_conflict(dir1, regex1.as_str(), dir2, PORT_IN_USE_ERROR)?;
 
     Ok(())
 }
@@ -1110,12 +1105,7 @@ fn zcash_metrics_conflict() -> Result<()> {
     // But they will have different Zcash listeners (auto port) and states (ephemeral)
     let dir2 = TempDir::new("zebrad_tests")?.with_config(&mut config)?;
 
-    check_config_conflict(
-        dir1,
-        regex1.as_str(),
-        dir2,
-        format!("({})|({})", PORT_IN_USE_UNIX, PORT_IN_USE_WINDOWS).as_str(),
-    )?;
+    check_config_conflict(dir1, regex1.as_str(), dir2, PORT_IN_USE_ERROR)?;
 
     Ok(())
 }
@@ -1143,12 +1133,7 @@ fn zcash_tracing_conflict() -> Result<()> {
     // But they will have different Zcash listeners (auto port) and states (ephemeral)
     let dir2 = TempDir::new("zebrad_tests")?.with_config(&mut config)?;
 
-    check_config_conflict(
-        dir1,
-        regex1.as_str(),
-        dir2,
-        format!("({})|({})", PORT_IN_USE_UNIX, PORT_IN_USE_WINDOWS).as_str(),
-    )?;
+    check_config_conflict(dir1, regex1.as_str(), dir2, PORT_IN_USE_ERROR)?;
 
     Ok(())
 }
