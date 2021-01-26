@@ -1184,13 +1184,13 @@ where
         std::thread::sleep(LAUNCH_DELAY);
 
         // Spawn the second node
-        let mut node2 = second_dir.spawn_child(&["start"])?;
+        let node2 = second_dir.spawn_child(&["start"])?;
 
-        // Wait a few seconds and kill both nodes
+        // Wait a few seconds and kill first node.
+        // Second node gets killed by the panic.
         std::thread::sleep(LAUNCH_DELAY);
 
         node1.kill()?;
-        node2.kill()?;
 
         // In node1 we want to check for the success regex
         let output1 = node1.wait_with_output()?;
@@ -1202,20 +1202,9 @@ where
         // In the second node we look for the conflict regex
         let output2 = node2.wait_with_output()?;
         output2.stderr_contains(second_stderr_regex)?;
-
-        // Panics on Windows exit with the same kill signal code(1)
-        // Follow up at #1632
-        if cfg!(target_os = "windows") {
-            output2
-                .assert_was_killed()
-                .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
-        }
-        // Panics on Linux exit with a different kill signal code(9)
-        else {
-            output2
-                .assert_was_not_killed()
-                .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
-        }
+        output2
+            .assert_was_not_killed()
+            .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
     }
 
     Ok(())
