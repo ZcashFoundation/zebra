@@ -48,6 +48,7 @@ impl FinalizedState {
                 tracing::info!("Opened Zebra state cache at: {:?}", path);
                 d
             }
+            // TODO: provide a different hint if the disk is full, see #1623
             Err(e) => panic!(
                 "Opening database {:?} failed: {:?}. \
                  Hint: Check if another zebrad process is running. \

@@ -1190,7 +1190,7 @@ where
     U: ZebradTestDirExt,
 {
     // By DNS issues we want to skip all port conflict tests on macOS by now.
-    // They should be activated after https://github.com/ZcashFoundation/zebra/issues/1631
+    // Follow up at #1631
     if !cfg!(target_os = "macos") {
         // Start the first node
         let mut node1 = first_dir.spawn_child(&["start"])?;
@@ -1219,7 +1219,7 @@ where
         output2.stderr_contains(second_stderr_regex)?;
 
         // Panics on Windows exit with the same kill signal code(1)
-        // https://github.com/ZcashFoundation/zebra/issues/1632
+        // Follow up at #1632
         if cfg!(target_os = "windows") {
             output2
                 .assert_was_killed()
