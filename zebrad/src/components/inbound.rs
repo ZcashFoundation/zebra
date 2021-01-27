@@ -191,10 +191,22 @@ impl Service<zn::Request> for Inbound {
             // TryRecvError is not cloneable, so we have to generate a new error from the oneshot,
             // rather than re-using a clone of the original error
             let failed_response = failed_setup.try_recv();
-            if let Err(error @ TryRecvError::Closed) = failed_response {
-                return Poll::Ready(Err(error.into()));
-            } else {
-                unreachable!("unexpected response from failed Inbound network setup oneshot");
+            match failed_response {
+                Err(error @ TryRecvError::Closed) => {
+                    return Poll::Ready(Err(error.into()));
+                }
+                Err(error) => {
+                    unreachable!(
+                        "unexpected error kind from failed Inbound network setup oneshot: {:?}",
+                        error
+                    );
+                }
+                Ok(_) => {
+                    // we can't log the response, because it doesn't impl Debug
+                    unreachable!(
+                        "unexpected success response from failed Inbound network setup oneshot"
+                    );
+                }
             }
         }
 
