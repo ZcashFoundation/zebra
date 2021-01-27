@@ -1177,35 +1177,37 @@ where
 {
     // By DNS issues we want to skip all port conflict tests on macOS by now.
     // Follow up at #1631
-    if !cfg!(target_os = "macos") {
-        // Start the first node
-        let mut node1 = first_dir.spawn_child(&["start"])?;
-
-        // Wait a bit to spawn the second node, we want the first fully started.
-        std::thread::sleep(LAUNCH_DELAY);
-
-        // Spawn the second node
-        let node2 = second_dir.spawn_child(&["start"])?;
-
-        // Wait a few seconds and kill first node.
-        // Second node is terminated by panic, no need to kill.
-        std::thread::sleep(LAUNCH_DELAY);
-        node1.kill()?;
-
-        // In node1 we want to check for the success regex
-        let output1 = node1.wait_with_output()?;
-        output1.stdout_contains(first_stdout_regex)?;
-        output1
-            .assert_was_killed()
-            .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
-
-        // In the second node we look for the conflict regex
-        let output2 = node2.wait_with_output()?;
-        output2.stderr_contains(second_stderr_regex)?;
-        output2
-            .assert_was_not_killed()
-            .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+    if cfg!(target_os = "macos") {
+        return Ok(());
     }
+
+    // Start the first node
+    let mut node1 = first_dir.spawn_child(&["start"])?;
+
+    // Wait a bit to spawn the second node, we want the first fully started.
+    std::thread::sleep(LAUNCH_DELAY);
+
+    // Spawn the second node
+    let node2 = second_dir.spawn_child(&["start"])?;
+
+    // Wait a few seconds and kill first node.
+    // Second node is terminated by panic, no need to kill.
+    std::thread::sleep(LAUNCH_DELAY);
+    node1.kill()?;
+
+    // In node1 we want to check for the success regex
+    let output1 = node1.wait_with_output()?;
+    output1.stdout_contains(first_stdout_regex)?;
+    output1
+        .assert_was_killed()
+        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+
+    // In the second node we look for the conflict regex
+    let output2 = node2.wait_with_output()?;
+    output2.stderr_contains(second_stderr_regex)?;
+    output2
+        .assert_was_not_killed()
+        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
 
     Ok(())
 }
