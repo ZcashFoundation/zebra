@@ -239,24 +239,25 @@ impl Service<zn::Request> for Inbound {
                 //
                 // We can't use `call_all` here, because it leaks buffer slots:
                 // https://github.com/tower-rs/tower/blob/master/tower/src/util/call_all/common.rs#L112
-                let mut state = self.state.clone();
-                async move {
-                    let mut blocks = Vec::new();
-                    for hash in hashes {
-                        let request = zs::Request::Block(hash.into());
-                        // we can't use ServiceExt::oneshot here, due to lifetime issues
-                        match state.ready_and().await?.call(request).await? {
-                            zs::Response::Block(Some(block)) => blocks.push(block),
+                use futures::stream::TryStreamExt;
+                hashes
+                    .into_iter()
+                    .map(|hash| zs::Request::Block(hash.into()))
+                    .map(|request| self.state.clone().oneshot(request))
+                    .collect::<futures::stream::FuturesOrdered<_>>()
+                    .try_filter_map(|response| async move {
+                        Ok(match response {
+                            zs::Response::Block(Some(block)) => Some(block),
                             // `zcashd` ignores missing blocks in GetData responses,
                             // rather than including them in a trailing `NotFound`
                             // message
-                            zs::Response::Block(None) => {}
+                            zs::Response::Block(None) => None,
                             _ => unreachable!("wrong response from state"),
-                        }
-                    }
-                    Ok(zn::Response::Blocks(blocks))
-                }
-                .boxed()
+                        })
+                    })
+                    .try_collect::<Vec<_>>()
+                    .map_ok(zn::Response::Blocks)
+                    .boxed()
             }
             zn::Request::TransactionsByHash(_transactions) => {
                 // `zcashd` returns a list of found transactions, followed by a
