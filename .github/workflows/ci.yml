@@ -37,7 +37,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --verbose --all
+          args: --verbose --verbose --all
       # Explicitly run any tests that are usually #[ignored], modulo ZEBRA_SKIP_NETWORK_TESTS
       - name: Run zebrad large sync tests
         env:
@@ -45,7 +45,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --verbose --manifest-path zebrad/Cargo.toml sync_large_checkpoints_ -- --ignored
+          args: --verbose --verbose --manifest-path zebrad/Cargo.toml sync_large_checkpoints_ -- --ignored
 
   build-chain-no-features:
     name: Build zebra-chain w/o features on ubuntu-latest
