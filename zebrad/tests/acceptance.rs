@@ -1160,7 +1160,11 @@ fn zcash_state_conflict() -> Result<()> {
 
     check_config_conflict(
         dir_conflict.path(),
-        format!("Opened Zebra state cache at {:?}", dir_conflict_full).as_str(),
+        format!(
+            "(Opened Zebra state cache at).*({})",
+            dir_conflict_full.to_str().unwrap()
+        )
+        .as_str(),
         dir_conflict.path(),
         LOCK_FILE_ERROR.as_str(),
     )?;
