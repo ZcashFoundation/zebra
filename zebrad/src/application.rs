@@ -184,10 +184,7 @@ impl Application for ZebradApp {
                         return false;
                     }
                     // RocksDB lock file conflicts
-                    if error_str.contains(LOCK_FILE_ERROR)
-                        && (error_str.contains("temporarily unavailable")
-                            || error_str.contains("in use"))
-                    {
+                    if LOCK_FILE_ERROR.is_match(error_str) {
                         return false;
                     }
                     true

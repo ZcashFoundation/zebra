@@ -1155,7 +1155,7 @@ fn zcash_state_conflict() -> Result<()> {
         dir_conflict.path(),
         "Opened Zebra state cache",
         dir_conflict.path(),
-        LOCK_FILE_ERROR,
+        LOCK_FILE_ERROR.as_str(),
     )?;
 
     Ok(())
