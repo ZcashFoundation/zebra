@@ -1151,11 +1151,18 @@ fn zcash_state_conflict() -> Result<()> {
     let mut config = persistent_test_config()?;
     let dir_conflict = TempDir::new("zebrad_tests")?.with_config(&mut config)?;
 
+    let mut dir_conflict_full = PathBuf::new();
+    dir_conflict_full.push(dir_conflict.path());
+    dir_conflict_full.push("state");
+    dir_conflict_full.push("state");
+    dir_conflict_full.push("v4");
+    dir_conflict_full.push("mainnet");
+
     check_config_conflict(
         dir_conflict.path(),
         format!(
-            "Opened Zebra state cache at \"{}/state/state/v4/mainnet\"",
-            dir_conflict.path().to_str().unwrap()
+            "Opened Zebra state cache at \"{}\"",
+            dir_conflict_full.to_str().unwrap()
         )
         .as_str(),
         dir_conflict.path(),
