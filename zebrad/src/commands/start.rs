@@ -20,7 +20,7 @@
 //!      new blocks to be verified and added to the local state
 //!  * Inbound Service
 //!    * handles requests from peers for network data and chain data
-//!    * herforms transaction and block diffusion
+//!    * performs transaction and block diffusion
 //!    * downloads and verifies gossipped blocks and transactions
 
 use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
