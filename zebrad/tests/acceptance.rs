@@ -1162,7 +1162,7 @@ fn zcash_state_conflict() -> Result<()> {
         dir_conflict.path(),
         format!(
             "Opened Zebra state cache at \"{}\"",
-            dir_conflict_full.to_str().unwrap()
+            dir_conflict_full.to_str().unwrap().replace("\\", "\\\\")
         )
         .as_str(),
         dir_conflict.path(),
