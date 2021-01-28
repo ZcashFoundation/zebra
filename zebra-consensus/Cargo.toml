@@ -1,6 +1,6 @@
 [package]
 name = "zebra-consensus"
-version = "1.0.0-alpha.0"
+version = "1.0.0-alpha.1"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 edition = "2018"
