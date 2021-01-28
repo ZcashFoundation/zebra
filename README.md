@@ -15,9 +15,9 @@ like to find out more or get involved!
 
 ## Alpha Releases
 
-Our first alpha release is planned for December 8th, 2020.
+Every few weeks, we release a new Zebra alpha release.
 
-The goals of this release are to:
+The goals of the alpha release series are to:
 - participate in the Zcash network,
 - replicate the Zcash chain state,
 - implement the Zcash proof of work consensus rules, and
@@ -40,7 +40,7 @@ Building `zebrad` requires [Rust](https://www.rust-lang.org/tools/install),
 2. Install Zebra's build dependencies:
      - **libclang:** the `libclang`, `libclang-dev`, `llvm`, or `llvm-dev` packages, depending on your package manager
      - **clang** or another C++ compiler: `g++`, `Xcode`, or `MSVC`
-3. Run `cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-alpha.0 zebrad`
+3. Run `cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-alpha.1 zebrad`
 4. Run `zebrad start`
 
 If you're interested in testing out `zebrad` please feel free, but keep in mind
@@ -127,12 +127,7 @@ Zebra primarily depends on pure Rust crates, and some Rust/C++ crates:
 
 ### Known Issues
 
-There are a few bugs in the Zebra alpha release that we're still working on
-fixing:
-- [Occasional panics in the `tokio` time wheel implementation #1452](https://github.com/ZcashFoundation/zebra/issues/1452)
-  - workaround: restart `zebrad`
-- [Occasional panics during client requests #1471](https://github.com/ZcashFoundation/zebra/issues/1471)
-  - workaround: restart `zebrad`
+There are a few bugs in Zebra that we're still working on fixing:
 - [Peer connections sometimes fail permanently #1435](https://github.com/ZcashFoundation/zebra/issues/1435)
   - these permanent failures can happen after a network disconnection, sleep, or individual peer disconnections
   - workaround: use `Control-C` to exit `zebrad`, and then restart `zebrad`
@@ -141,9 +136,9 @@ fixing:
 
 ## Future Work
 
-In 2021, we intend to add RPC support and wallet integration.  This phased
-approach allows us to test Zebra's independent implementation of the consensus
-rules, before asking users to entrust it with their funds.
+In 2021, we intend to finish validation, add RPC support, and add wallet integration.
+This phased approach allows us to test Zebra's independent implementation of the
+consensus rules, before asking users to entrust it with their funds.
 
 Features:
 - full consensus rule validation
