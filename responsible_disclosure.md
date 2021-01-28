@@ -1,11 +1,24 @@
 This page is copyright Zcash Foundation, 2021. It is posted in order to conform to this standard: https://github.com/RD-Crypto-Spec/Responsible-Disclosure/tree/d47a5a3dafa5942c8849a93441745fdd186731e6
 
 # Security Disclosures
+
+## Disclosure Principles
+
+The Zcash Foundation's security disclosure process aims to achieve the following goals:
+- protecting Zcash users and the wider Zcash ecosystem
+- respecting the work of security researchers
+- improving the ongoing health of the Zcash ecosystem
+
+Specifically, we will:
+- assume good faith from researchers and ecosystem partners
+- operate a no fault process, focusing on the technical issues
+- work with security researchers, regardless of how they choose to disclose issues
+
 ## Receiving Disclosures
 
 The Zcash Foundation is committed to working with researchers who submit security vulnerability notifications to us to resolve those issues on an appropriate timeline and perform a coordinated release, giving credit to the reporter if they would like.
 
-Please submit issues to security@zfnd.org.
+Our best contact for security issues is security@zfnd.org.
 
 ## Sending Disclosures
 
