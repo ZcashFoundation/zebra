@@ -96,7 +96,11 @@ pub const EWMA_DEFAULT_RTT: Duration = Duration::from_secs(20 + 1);
 pub const EWMA_DECAY_TIME: Duration = Duration::from_secs(200);
 
 /// OS-specific error when the port attempting to be opened is already in use.
-pub const PORT_IN_USE_ERROR: &str = if cfg!(unix) { "already in use" } else { "one usage" };
+pub const PORT_IN_USE_ERROR: &str = if cfg!(unix) {
+    "already in use"
+} else {
+    "one usage"
+};
 
 /// Magic numbers used to identify different Zcash networks.
 pub mod magics {
