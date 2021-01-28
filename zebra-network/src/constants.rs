@@ -95,13 +95,8 @@ pub const EWMA_DEFAULT_RTT: Duration = Duration::from_secs(20 + 1);
 /// better peers when we restart the sync.
 pub const EWMA_DECAY_TIME: Duration = Duration::from_secs(200);
 
-/// Unix portion of OS error when the port attempting to be opened is already in use.
-#[cfg(unix)]
-pub const PORT_IN_USE_ERROR: &str = "already in use";
-
-/// Windows portion of OS error when the port attempting to be opened is already in use.
-#[cfg(not(unix))]
-pub const PORT_IN_USE_ERROR: &str = "one usage";
+/// OS-specific error when the port attempting to be opened is already in use.
+pub const PORT_IN_USE_ERROR: &str = if cfg!(unix) { "already in use" } else { "one usage" };
 
 /// Magic numbers used to identify different Zcash networks.
 pub mod magics {
