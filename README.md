@@ -129,10 +129,6 @@ Zebra primarily depends on pure Rust crates, and some Rust/C++ crates:
 
 There are a few bugs in the Zebra alpha release that we're still working on
 fixing:
-- [Occasional panics in the `tokio` time wheel implementation #1452](https://github.com/ZcashFoundation/zebra/issues/1452)
-  - workaround: restart `zebrad`
-- [Occasional panics during client requests #1471](https://github.com/ZcashFoundation/zebra/issues/1471)
-  - workaround: restart `zebrad`
 - [Peer connections sometimes fail permanently #1435](https://github.com/ZcashFoundation/zebra/issues/1435)
   - these permanent failures can happen after a network disconnection, sleep, or individual peer disconnections
   - workaround: use `Control-C` to exit `zebrad`, and then restart `zebrad`
