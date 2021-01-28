@@ -9,15 +9,19 @@
 //!    * handles all external network requests for the Zcash protocol
 //!      * via zebra_network::Message and zebra_network::Response
 //!    * provides an interface to the rest of the network for other services and
-//!    tasks running within this node
+//!      tasks running within this node
 //!      * via zebra_network::Request
 //!  * Consensus Service
 //!    * handles all validation logic for the node
 //!    * verifies blocks using zebra-chain and zebra-script, then stores verified
-//!    blocks in zebra-state
+//!      blocks in zebra-state
 //!  * Sync Task
-//!    * This task runs in the background and continuously queries the network for
-//!    new blocks to be verified and added to the local state
+//!    * runs in the background and continuously queries the network for
+//!      new blocks to be verified and added to the local state
+//!  * Inbound Service
+//!    * handles requests from peers for network data and chain data
+//!    * herforms transaction and block diffusion
+//!    * downloads and verifies gossipped blocks and transactions
 
 use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
 use color_eyre::eyre::{eyre, Report};
