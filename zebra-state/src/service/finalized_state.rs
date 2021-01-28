@@ -21,7 +21,11 @@ use super::QueuedFinalized;
 pub struct FinalizedState {
     /// Queued blocks that arrived out of order, indexed by their parent block hash.
     queued_by_prev_hash: HashMap<block::Hash, QueuedFinalized>,
-    max_queued_height: i64,
+    /// A metric tracking the maximum height that's currently in `queued_by_prev_hash`
+    ///
+    /// Set to `f64::NAN` if `queued_by_prev_hash` is empty, because grafana shows NaNs
+    /// as a break in the graph.
+    max_queued_height: f64,
 
     db: rocksdb::DB,
     ephemeral: bool,
@@ -46,7 +50,7 @@ impl FinalizedState {
 
         let new_state = Self {
             queued_by_prev_hash: HashMap::new(),
-            max_queued_height: -1,
+            max_queued_height: f64::NAN,
             db,
             ephemeral: config.ephemeral,
             debug_stop_at_height: config.debug_stop_at_height.map(block::Height),
@@ -117,16 +121,17 @@ impl FinalizedState {
         }
 
         if self.queued_by_prev_hash.is_empty() {
-            // use -1 as a sentinel value for "None", because 0 is a valid height
-            self.max_queued_height = -1;
-        } else {
-            self.max_queued_height = std::cmp::max(self.max_queued_height, height.0 as _);
+            self.max_queued_height = f64::NAN;
+        } else if self.max_queued_height.is_nan() || self.max_queued_height < height.0 as _ {
+            // if there are still blocks in the queue, then either:
+            //   - the new block was lower than the old maximum, and there was a gap before it,
+            //     so the maximum is still the same (and we skip this code), or
+            //   - the new block is higher than the old maximum, and there is at least one gap
+            //     between the finalized tip and the new maximum
+            self.max_queued_height = height.0 as _;
         }
 
-        metrics::gauge!(
-            "state.finalized.queued.max.height",
-            self.max_queued_height as f64
-        );
+        metrics::gauge!("state.finalized.queued.max.height", self.max_queued_height);
         metrics::gauge!(
             "state.finalized.queued.block.count",
             self.queued_by_prev_hash.len() as f64
