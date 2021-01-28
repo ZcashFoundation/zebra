@@ -1153,7 +1153,11 @@ fn zcash_state_conflict() -> Result<()> {
 
     check_config_conflict(
         dir_conflict.path(),
-        "Opened Zebra state cache",
+        format!(
+            "Opened Zebra state cache at \"{}/state/state/v4/mainnet\"",
+            dir_conflict.path().to_str().unwrap()
+        )
+        .as_str(),
         dir_conflict.path(),
         LOCK_FILE_ERROR.as_str(),
     )?;

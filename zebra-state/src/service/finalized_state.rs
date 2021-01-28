@@ -45,7 +45,7 @@ impl FinalizedState {
 
         let db = match db_result {
             Ok(d) => {
-                tracing::info!("Opened Zebra state cache at: {:?}", path);
+                tracing::info!("Opened Zebra state cache at {:?}", path);
                 d
             }
             // TODO: provide a different hint if the disk is full, see #1623
