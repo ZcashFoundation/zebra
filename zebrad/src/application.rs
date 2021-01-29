@@ -180,7 +180,7 @@ impl Application for ZebradApp {
                         None => return true,
                     };
                     // listener port conflicts
-                    if if PORT_IN_USE_ERROR.is_match(error_str) {
+                    if PORT_IN_USE_ERROR.is_match(error_str) {
                         return false;
                     }
                     // RocksDB lock file conflicts

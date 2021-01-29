@@ -104,7 +104,7 @@ lazy_static! {
     pub static ref PORT_IN_USE_ERROR: Regex = if cfg!(unix) {
         Regex::new("already in use")
     } else {
-        Regex::new("(access a socket in a way forbidden by its access permissions)|(Only one usage of each socket address)"
+        Regex::new("(access a socket in a way forbidden by its access permissions)|(Only one usage of each socket address)")
     }.expect("regex is valid");
 };
 
