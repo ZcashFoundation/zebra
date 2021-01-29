@@ -1151,20 +1151,29 @@ fn zcash_state_conflict() -> Result<()> {
     let mut config = persistent_test_config()?;
     let dir_conflict = TempDir::new("zebrad_tests")?.with_config(&mut config)?;
 
-    let mut dir_conflict_full = PathBuf::new();
-    dir_conflict_full.push(dir_conflict.path());
-    dir_conflict_full.push("state");
-    dir_conflict_full.push("state");
-    dir_conflict_full.push("v4");
-    dir_conflict_full.push("mainnet");
+    // Windows problems with this match will be worked on at #1654
+    // We are matching the whole opened path only for unix by now.
+    let regex = if cfg!(unix) {
+        let mut dir_conflict_full = PathBuf::new();
+        dir_conflict_full.push(dir_conflict.path());
+        dir_conflict_full.push("state");
+        dir_conflict_full.push("state");
+        dir_conflict_full.push(format!(
+            "v{}",
+            zebra_state::constants::DATABASE_FORMAT_VERSION
+        ));
+        dir_conflict_full.push(config.network.network.to_string().to_lowercase());
+        format!(
+            "Opened Zebra state cache at {:?}",
+            dir_conflict_full.to_str().unwrap()
+        )
+    } else {
+        String::from("Opened Zebra state cache at ")
+    };
 
     check_config_conflict(
         dir_conflict.path(),
-        format!(
-            r"(Opened Zebra state cache at ).*({})",
-            regex::escape(dir_conflict_full.to_str().unwrap())
-        )
-        .as_str(),
+        regex.as_str(),
         dir_conflict.path(),
         LOCK_FILE_ERROR.as_str(),
     )?;
