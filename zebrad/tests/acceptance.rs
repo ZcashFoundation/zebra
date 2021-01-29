@@ -1078,7 +1078,7 @@ fn zcash_listener_conflict() -> Result<()> {
     // (But since the config is ephemeral, they will have different state paths.)
     let dir2 = TempDir::new("zebrad_tests")?.with_config(&mut config)?;
 
-    check_config_conflict(dir1, regex1.as_str(), dir2, PORT_IN_USE_ERROR)?;
+    check_config_conflict(dir1, regex1.as_str(), dir2, PORT_IN_USE_ERROR.as_str())?;
 
     Ok(())
 }
@@ -1106,7 +1106,7 @@ fn zcash_metrics_conflict() -> Result<()> {
     // But they will have different Zcash listeners (auto port) and states (ephemeral)
     let dir2 = TempDir::new("zebrad_tests")?.with_config(&mut config)?;
 
-    check_config_conflict(dir1, regex1.as_str(), dir2, PORT_IN_USE_ERROR)?;
+    check_config_conflict(dir1, regex1.as_str(), dir2, PORT_IN_USE_ERROR.as_str())?;
 
     Ok(())
 }
@@ -1134,7 +1134,7 @@ fn zcash_tracing_conflict() -> Result<()> {
     // But they will have different Zcash listeners (auto port) and states (ephemeral)
     let dir2 = TempDir::new("zebrad_tests")?.with_config(&mut config)?;
 
-    check_config_conflict(dir1, regex1.as_str(), dir2, PORT_IN_USE_ERROR)?;
+    check_config_conflict(dir1, regex1.as_str(), dir2, PORT_IN_USE_ERROR.as_str())?;
 
     Ok(())
 }
