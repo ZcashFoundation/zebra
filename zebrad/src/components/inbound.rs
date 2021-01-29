@@ -1,6 +1,5 @@
 use std::{
     future::Future,
-    mem,
     pin::Pin,
     sync::{Arc, Mutex},
     task::{Context, Poll},
@@ -10,7 +9,6 @@ use futures::{
     future::{FutureExt, TryFutureExt},
     stream::Stream,
 };
-use mem::swap;
 use oneshot::error::TryRecvError;
 use tokio::sync::oneshot;
 use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service, ServiceExt};
