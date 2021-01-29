@@ -106,7 +106,7 @@ lazy_static! {
     } else {
         Regex::new("(access a socket in a way forbidden by its access permissions)|(Only one usage of each socket address)")
     }.expect("regex is valid");
-};
+}
 
 /// Magic numbers used to identify different Zcash networks.
 pub mod magics {
