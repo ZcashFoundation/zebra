@@ -26,7 +26,7 @@ displaydoc = "0.1.7"
 rocksdb = "0.15.0"
 tempdir = "0.3.7"
 chrono = "0.4.19"
-primitive-types = "0.8.0"
+primitive-types = "0.9.0"
 rlimit = "0.5.3"
 
 [dev-dependencies]
@@ -40,4 +40,4 @@ tempdir = "0.3.7"
 tokio = { version = "0.3.6", features = ["full"] }
 proptest = "0.10.1"
 proptest-derive = "0.2"
-primitive-types = "0.8.0"
+primitive-types = "0.9.0"
