@@ -99,7 +99,7 @@ pub const EWMA_DECAY_TIME: Duration = Duration::from_secs(200);
 pub const PORT_IN_USE_ERROR: &str = if cfg!(unix) {
     "already in use"
 } else {
-    "one usage"
+    "access a socket in a way forbidden by its access permissions"
 };
 
 /// Magic numbers used to identify different Zcash networks.
