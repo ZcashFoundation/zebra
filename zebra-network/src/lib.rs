@@ -88,7 +88,3 @@ pub use crate::{
 pub mod types {
     pub use crate::{meta_addr::MetaAddr, protocol::types::PeerServices};
 }
-
-use std::sync::atomic::AtomicBool;
-/// A flag to indicate if zebrad is shutting down.
-pub static IS_SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);

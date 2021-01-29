@@ -34,7 +34,7 @@ impl TokioComponent {
 /// Zebrad's graceful shutdown function, blocks until one of the supported
 /// shutdown signals is received.
 async fn shutdown() {
-    zebra_network::IS_SHUTTING_DOWN.store(true, Ordering::Relaxed);
+    zebra_chain::shutdown::IS_SHUTTING_DOWN.store(true, Ordering::Relaxed);
     imp::shutdown().await;
 }
 

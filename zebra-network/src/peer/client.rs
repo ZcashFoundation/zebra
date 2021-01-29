@@ -174,7 +174,7 @@ impl<T: std::fmt::Debug> MustUseOneshotSender<T> {
     /// Returns false otherwise.
     pub fn is_shutting_down(&self) -> bool {
         use std::sync::atomic::Ordering;
-        crate::IS_SHUTTING_DOWN.load(Ordering::Relaxed)
+        zebra_chain::shutdown::IS_SHUTTING_DOWN.load(Ordering::Relaxed)
     }
 }
 
