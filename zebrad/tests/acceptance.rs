@@ -1164,8 +1164,8 @@ fn zcash_state_conflict() -> Result<()> {
         ));
         dir_conflict_full.push(config.network.network.to_string().to_lowercase());
         format!(
-            "Opened Zebra state cache at {:?}",
-            dir_conflict_full.to_str().unwrap()
+            "Opened Zebra state cache at {}",
+            dir_conflict_full.display()
         )
     } else {
         String::from("Opened Zebra state cache at ")
