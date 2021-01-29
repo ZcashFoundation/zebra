@@ -183,8 +183,8 @@ impl Service<zn::Request> for Inbound {
                     Setup::FailedRecv { error }
                 }
             },
-            // Make sure we left the network setup in a valid state
-            Setup::FailedInit => unreachable!("incomplete Inbound initialization"),
+            // Make sure previous network setups were left in a valid state
+            Setup::FailedInit => unreachable!("incomplete previous Inbound initialization"),
             // If network setup failed, report service failure
             Setup::FailedRecv { error } => {
                 result = Err(error.clone().into());
@@ -202,6 +202,11 @@ impl Service<zn::Request> for Inbound {
                 }
             }
         };
+
+        // Make sure we're leaving the network setup in a valid state
+        if matches!(self.network_setup, Setup::FailedInit) {
+            unreachable!("incomplete Inbound initialization after poll_ready state handling");
+        }
 
         // TODO:
         //  * do we want to propagate backpressure from the download queue or its outbound network?
