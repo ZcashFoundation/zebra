@@ -41,7 +41,6 @@ impl TracingEndpoint {
         } else {
             return Ok(());
         };
-        info!("Initializing tracing endpoint at {}", addr);
 
         let service =
             make_service_fn(|_| async { Ok::<_, hyper::Error>(service_fn(request_handler)) });
@@ -54,12 +53,16 @@ impl TracingEndpoint {
                 // try_bind uses the tokio runtime, so we
                 // need to construct it inside the task.
                 let server = match Server::try_bind(&addr) {
-                    Ok(s) => s,
-                    Err(e) => {
-                        error!("Could not open tracing endpoint listener");
-                        error!("Error: {}", e);
-                        return;
+                    Ok(s) => {
+                        info!("Opened tracing endpoint at {}", addr);
+                        s
                     }
+                    Err(e) => panic!(
+                        "Opening tracing endpoint listener {:?} failed: {:?}. \
+                         Hint: Check if another zebrad or zcashd process is running. \
+                         Try changing the tracing endpoint_addr in the Zebra config.",
+                        addr, e,
+                    ),
                 }
                 .serve(service);
 

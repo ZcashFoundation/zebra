@@ -12,6 +12,9 @@ use abscissa_core::{
 use application::fatal_error;
 use std::process;
 
+use zebra_network::constants::PORT_IN_USE_ERROR;
+use zebra_state::constants::LOCK_FILE_ERROR;
+
 /// Application state
 pub static APPLICATION: AppCell<ZebradApp> = AppCell::new();
 
@@ -171,7 +174,21 @@ impl Application for ZebradApp {
             .panic_section(metadata_section)
             .issue_url(concat!(env!("CARGO_PKG_REPOSITORY"), "/issues/new"))
             .issue_filter(|kind| match kind {
-                color_eyre::ErrorKind::NonRecoverable(_) => true,
+                color_eyre::ErrorKind::NonRecoverable(error) => {
+                    let error_str = match error.downcast_ref::<String>() {
+                        Some(as_string) => as_string,
+                        None => return true,
+                    };
+                    // listener port conflicts
+                    if PORT_IN_USE_ERROR.is_match(error_str) {
+                        return false;
+                    }
+                    // RocksDB lock file conflicts
+                    if LOCK_FILE_ERROR.is_match(error_str) {
+                        return false;
+                    }
+                    true
+                }
                 color_eyre::ErrorKind::Recoverable(error) => {
                     // type checks should be faster than string conversions
                     if error.is::<tower::timeout::error::Elapsed>()

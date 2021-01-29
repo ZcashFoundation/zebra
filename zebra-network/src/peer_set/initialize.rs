@@ -115,16 +115,7 @@ where
     );
     let peer_set = Buffer::new(BoxService::new(peer_set), constants::PEERSET_BUFFER_SIZE);
 
-    // Connect the tx end to the 3 peer sources:
-
-    // 1. Initial peers, specified in the config.
-    let add_guard = tokio::spawn(add_initial_peers(
-        config.initial_peers(),
-        connector.clone(),
-        peerset_tx.clone(),
-    ));
-
-    // 2. Incoming peer connections, via a listener.
+    // 1. Incoming peer connections, via a listener.
 
     // Warn if we're configured using the wrong network port.
     // TODO: use the right port if the port is unspecified
@@ -143,6 +134,18 @@ where
     }
 
     let listen_guard = tokio::spawn(listen(config.listen_addr, listener, peerset_tx.clone()));
+
+    let initial_peers_fut = {
+        let initial_peers = config.initial_peers();
+        let connector = connector.clone();
+        let tx = peerset_tx.clone();
+
+        // Connect the tx end to the 3 peer sources:
+        add_initial_peers(initial_peers, connector, tx)
+    };
+
+    // 2. Initial peers, specified in the config.
+    let add_guard = tokio::spawn(initial_peers_fut);
 
     // 3. Outgoing peers we connect to in response to load.
     let mut candidates = CandidateSet::new(address_book.clone(), peer_set.clone());
@@ -211,7 +214,18 @@ where
     S: Service<(TcpStream, SocketAddr), Response = peer::Client, Error = BoxError> + Clone,
     S::Future: Send + 'static,
 {
-    let listener = TcpListener::bind(addr).await?;
+    let listener_result = TcpListener::bind(addr).await;
+
+    let listener = match listener_result {
+        Ok(l) => l,
+        Err(e) => panic!(
+            "Opening Zcash network protocol listener {:?} failed: {:?}. \
+             Hint: Check if another zebrad or zcashd process is running. \
+             Try changing the network listen_addr in the Zebra config.",
+            addr, e,
+        ),
+    };
+
     let local_addr = listener.local_addr()?;
     info!("Opened Zcash protocol endpoint at {}", local_addr);
     loop {

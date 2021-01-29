@@ -45,8 +45,21 @@ impl FinalizedState {
             rocksdb::ColumnFamilyDescriptor::new("sprout_nullifiers", db_options.clone()),
             rocksdb::ColumnFamilyDescriptor::new("sapling_nullifiers", db_options.clone()),
         ];
-        let db = rocksdb::DB::open_cf_descriptors(&db_options, path, column_families)
-            .expect("database path and options are valid");
+        let db_result = rocksdb::DB::open_cf_descriptors(&db_options, &path, column_families);
+
+        let db = match db_result {
+            Ok(d) => {
+                tracing::info!("Opened Zebra state cache at {}", path.display());
+                d
+            }
+            // TODO: provide a different hint if the disk is full, see #1623
+            Err(e) => panic!(
+                "Opening database {:?} failed: {:?}. \
+                 Hint: Check if another zebrad process is running. \
+                 Try changing the state cache_dir in the Zebra config.",
+                path, e,
+            ),
+        };
 
         let new_state = Self {
             queued_by_prev_hash: HashMap::new(),

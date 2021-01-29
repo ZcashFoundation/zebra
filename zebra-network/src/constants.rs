@@ -2,6 +2,9 @@
 
 use std::time::Duration;
 
+use lazy_static::lazy_static;
+use regex::Regex;
+
 // XXX should these constants be split into protocol also?
 use crate::protocol::external::types::*;
 
@@ -94,6 +97,16 @@ pub const EWMA_DEFAULT_RTT: Duration = Duration::from_secs(20 + 1);
 /// This should be much larger than the `SYNC_RESTART_TIMEOUT`, so we choose
 /// better peers when we restart the sync.
 pub const EWMA_DECAY_TIME: Duration = Duration::from_secs(200);
+
+lazy_static! {
+    /// OS-specific error when the port attempting to be opened is already in use.
+    pub static ref PORT_IN_USE_ERROR: Regex = if cfg!(unix) {
+        #[allow(clippy::trivial_regex)]
+        Regex::new("already in use")
+    } else {
+        Regex::new("(access a socket in a way forbidden by its access permissions)|(Only one usage of each socket address)")
+    }.expect("regex is valid");
+}
 
 /// Magic numbers used to identify different Zcash networks.
 pub mod magics {

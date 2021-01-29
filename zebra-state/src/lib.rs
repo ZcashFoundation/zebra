@@ -16,7 +16,7 @@
 #![allow(clippy::unnecessary_wraps)]
 
 mod config;
-mod constants;
+pub mod constants;
 mod error;
 mod request;
 mod response;
