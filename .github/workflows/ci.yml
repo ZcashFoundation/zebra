@@ -39,15 +39,16 @@ jobs:
           command: test
           args: --verbose --all
       # Explicitly run any tests that are usually #[ignored], modulo ZEBRA_SKIP_NETWORK_TESTS
-      # This tests are temporally disabled by #1651
-      #
-      # - name: Run zebrad large sync tests
-      #  env:
-      #    RUST_BACKTRACE: full
-      #  uses: actions-rs/cargo@v1
-      #  with:
-      #    command: test
-      #    args: --verbose --manifest-path zebrad/Cargo.toml sync_large_checkpoints_ -- --ignored
+      - name: Run zebrad large sync tests
+        # There is a compiler issue when building the acceptance integration
+        # test binary, this disables these tests on Windows for now.
+        if: matrix.os == 'ubuntu-latest' || matrix.os == 'macOS-latest'
+        env:
+          RUST_BACKTRACE: full
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --verbose --manifest-path zebrad/Cargo.toml sync_large_checkpoints_ -- --ignored
 
   build-chain-no-features:
     name: Build zebra-chain w/o features on ubuntu-latest
