@@ -16,8 +16,10 @@ hex = "0.4"
 # indexmap has rayon support for parallel iteration,
 # which we don't use, so disable it to drop the dependencies.
 indexmap = { version = "1.6", default-features = false }
+lazy_static = "1.4.0"
 pin-project = "0.4"
 rand = "0.7"
+regex = "1"
 serde = { version = "1", features = ["serde_derive"] }
 thiserror = "1"
 
