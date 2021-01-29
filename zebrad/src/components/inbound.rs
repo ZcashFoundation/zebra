@@ -150,7 +150,9 @@ impl Service<zn::Request> for Inbound {
         // and reporting unreadiness might cause unwanted load-shedding, since
         // the load-shed middleware is unable to distinguish being unready due
         // to load from being unready while waiting on setup.
-        let mut result = Ok(());
+
+        // Every network_setup state handler must provide a result
+        let result;
 
         self.network_setup = match self.take_setup() {
             Setup::AwaitingNetwork {
@@ -163,6 +165,7 @@ impl Service<zn::Request> for Inbound {
                         Timeout::new(verifier, BLOCK_VERIFY_TIMEOUT),
                         self.state.clone(),
                     ));
+                    result = Ok(());
                     Setup::Initialized {
                         address_book,
                         downloads,
@@ -170,6 +173,7 @@ impl Service<zn::Request> for Inbound {
                 }
                 Err(TryRecvError::Empty) => {
                     // There's no setup data yet, so keep waiting for it
+                    result = Ok(());
                     Setup::AwaitingNetwork {
                         network_setup,
                         verifier,
@@ -196,6 +200,8 @@ impl Service<zn::Request> for Inbound {
                 mut downloads,
             } => {
                 while let Poll::Ready(Some(_)) = downloads.as_mut().poll_next(cx) {}
+
+                result = Ok(());
                 Setup::Initialized {
                     address_book,
                     downloads,
