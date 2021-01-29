@@ -3,7 +3,7 @@
 use crate::prelude::*;
 use abscissa_core::{Application, Component, FrameworkError, Shutdown};
 use color_eyre::Report;
-use std::{future::Future, sync::atomic::Ordering};
+use std::future::Future;
 use tokio::runtime::Runtime;
 
 /// An Abscissa component which owns a Tokio runtime.
@@ -34,7 +34,6 @@ impl TokioComponent {
 /// Zebrad's graceful shutdown function, blocks until one of the supported
 /// shutdown signals is received.
 async fn shutdown() {
-    zebra_chain::shutdown::IS_SHUTTING_DOWN.store(true, Ordering::Relaxed);
     imp::shutdown().await;
 }
 
@@ -85,6 +84,7 @@ mod imp {
             .expect("Failed to register signal handler")
             .recv()
             .await;
+        zebra_chain::shutdown::set_shutting_down();
 
         info!(
             // use target to remove 'imp' from output
@@ -105,6 +105,7 @@ mod imp {
         tokio::signal::ctrl_c()
             .await
             .expect("listening for ctrl-c signal should never fail");
+        zebra_chain::shutdown::set_shutting_down();
 
         info!(
             // use target to remove 'imp' from output
