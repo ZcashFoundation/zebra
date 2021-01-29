@@ -110,7 +110,7 @@ pub struct Inbound {
     /// Provides network-dependent services, if they are available.
     ///
     /// Some services are unavailable until Zebra has completed network setup.
-    network: Setup,
+    network_setup: Setup,
 
     /// A service that manages cached blockchain state.
     state: State,
@@ -123,7 +123,7 @@ impl Inbound {
         verifier: Verifier,
     ) -> Self {
         Self {
-            network: Setup::AwaitingNetwork {
+            network_setup: Setup::AwaitingNetwork {
                 network_setup,
                 verifier,
             },
@@ -132,9 +132,9 @@ impl Inbound {
     }
 
     fn take_setup(&mut self) -> Setup {
-        let mut network = Setup::FailedInit;
-        std::mem::swap(&mut self.network, &mut network);
-        network
+        let mut network_setup = Setup::FailedInit;
+        std::mem::swap(&mut self.network_setup, &mut network_setup);
+        network_setup
     }
 }
 
@@ -152,7 +152,7 @@ impl Service<zn::Request> for Inbound {
         // to load from being unready while waiting on setup.
         let mut result = Ok(());
 
-        self.network = match self.take_setup() {
+        self.network_setup = match self.take_setup() {
             Setup::AwaitingNetwork {
                 mut network_setup,
                 verifier,
@@ -219,7 +219,7 @@ impl Service<zn::Request> for Inbound {
     fn call(&mut self, req: zn::Request) -> Self::Future {
         match req {
             zn::Request::Peers => {
-                if let Setup::Initialized { address_book, .. } = &self.network {
+                if let Setup::Initialized { address_book, .. } = &self.network_setup {
                     // We could truncate the list to try to not reveal our entire
                     // peer set. But because we don't monitor repeated requests,
                     // this wouldn't actually achieve anything, because a crawler
@@ -296,7 +296,7 @@ impl Service<zn::Request> for Inbound {
                 async { Ok(zn::Response::Nil) }.boxed()
             }
             zn::Request::AdvertiseBlock(hash) => {
-                if let Setup::Initialized { downloads, .. } = &mut self.network {
+                if let Setup::Initialized { downloads, .. } = &mut self.network_setup {
                     downloads.download_and_verify(hash);
                 } else {
                     info!(
