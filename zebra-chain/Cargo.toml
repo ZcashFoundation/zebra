@@ -22,7 +22,7 @@ byteorder = "1.4"
 chrono = { version = "0.4", features = ["serde"] }
 futures = "0.3"
 hex = "0.4"
-jubjub = "0.5.1"
+jubjub = "0.6.0"
 lazy_static = "1.4.0"
 primitive-types = "0.9.0"
 rand_core = "0.5.1"
