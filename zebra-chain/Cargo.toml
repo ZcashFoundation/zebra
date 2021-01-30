@@ -14,7 +14,7 @@ proptest-impl = ["proptest", "proptest-derive"]
 
 [dependencies]
 bech32 = "0.7.2"
-bitvec = "0.17.4"
+bitvec = "0.20.1"
 blake2b_simd = "0.5.11"
 blake2s_simd = "0.5.11"
 bs58 = { version = "0.4", features = ["check"] }
