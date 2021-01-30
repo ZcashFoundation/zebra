@@ -280,17 +280,6 @@ dependencies = [
 
 [[package]]
 name = "bitvec"
-version = "0.18.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d2838fdd79e8776dbe07a106c784b0f8dda571a21b2750a092cc4cbaa653c8e"
-dependencies = [
- "funty",
- "radium 0.4.1",
- "wyz",
-]
-
-[[package]]
-name = "bitvec"
 version = "0.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f5011ffc90248764d7005b0e10c7294f5aa1bd87d9dd7248f4ad475b347c294d"
@@ -364,13 +353,12 @@ dependencies = [
 
 [[package]]
 name = "bls12_381"
-version = "0.3.1"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4caf0101205582491f772d60a6fcb6bcec19963e68209cb631851eeadb01421f"
+checksum = "1c56609cc42c628848e7b18e0baf42a4ef626b8c50442dc08b8094bd21d8ad32"
 dependencies = [
- "bitvec 0.18.4",
  "ff",
- "rand_core 0.5.1",
+ "rand_core 0.6.1",
  "subtle",
 ]
 
@@ -963,12 +951,12 @@ dependencies = [
 
 [[package]]
 name = "ff"
-version = "0.8.0"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "01646e077d4ebda82b73f1bca002ea1e91561a77df2431a9e79729bcc31950ef"
+checksum = "72a4d941a5b7c2a75222e2d44fcdf634a67133d9db31e177ae5ff6ecda852bfe"
 dependencies = [
- "bitvec 0.18.4",
- "rand_core 0.5.1",
+ "bitvec 0.20.1",
+ "rand_core 0.6.1",
  "subtle",
 ]
 
@@ -1212,13 +1200,13 @@ checksum = "9b919933a397b79c37e33b77bb2aa3dc8eb6e165ad809e58ff75bc7db2e34574"
 
 [[package]]
 name = "group"
-version = "0.8.0"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc11f9f5fbf1943b48ae7c2bf6846e7d827a512d1be4f23af708f5ca5d01dde1"
+checksum = "61b3c1e8b4f1ca07e6605ea1be903a5f6956aec5c8a67fd44d56076631675ed8"
 dependencies = [
  "byteorder",
  "ff",
- "rand_core 0.5.1",
+ "rand_core 0.6.1",
  "subtle",
 ]
 
@@ -1579,15 +1567,15 @@ dependencies = [
 
 [[package]]
 name = "jubjub"
-version = "0.5.1"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "620638af3b80d23f4df0cae21e3cc9809ac8826767f345066f010bcea66a2c55"
+checksum = "4d7e7fef85ae7b26dd89f34175b7f3c5ace64067a110c2ac86cf92407a6666ca"
 dependencies = [
- "bitvec 0.18.4",
- "bls12_381 0.3.1",
+ "bitvec 0.20.1",
+ "bls12_381 0.4.0",
  "ff",
  "group",
- "rand_core 0.5.1",
+ "rand_core 0.6.1",
  "subtle",
 ]
 
@@ -2253,12 +2241,6 @@ name = "radium"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "def50a86306165861203e7f84ecffbbdfdea79f0e51039b33de1e952358c47ac"
-
-[[package]]
-name = "radium"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64de9a0c5361e034f1aefc9f71a86871ec870e766fe31a009734a989b329286a"
 
 [[package]]
 name = "radium"
@@ -3900,7 +3882,7 @@ dependencies = [
  "equihash",
  "futures",
  "hex",
- "jubjub 0.5.1",
+ "jubjub 0.6.0",
  "lazy_static",
  "primitive-types",
  "proptest",
@@ -3932,7 +3914,7 @@ dependencies = [
  "displaydoc",
  "futures",
  "futures-util",
- "jubjub 0.5.1",
+ "jubjub 0.6.0",
  "metrics",
  "once_cell",
  "rand 0.7.3",
