@@ -141,7 +141,7 @@ where
         let tx = peerset_tx.clone();
 
         // Connect the tx end to the 3 peer sources:
-        add_initial_peers(initial_peers, connector, tx)
+        add_initial_peers(initial_peers.await, connector, tx)
     };
 
     // 2. Initial peers, specified in the config.

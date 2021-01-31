@@ -37,7 +37,10 @@ pub struct Config {
 }
 
 impl Config {
-    fn parse_peers<S: ToSocketAddrs>(peers: HashSet<S>) -> HashSet<SocketAddr> {
+    async fn parse_peers<S: ToSocketAddrs>(peers: HashSet<S>) -> HashSet<SocketAddr> {
+        // Test dns function
+        let _test_dns = Config::resolve("willnotresolve.whatev3r:8233".to_string()).await;
+
         peers
             .iter()
             .flat_map(|s| s.to_socket_addrs())
@@ -46,10 +49,29 @@ impl Config {
     }
 
     /// Get the initial seed peers based on the configured network.
-    pub fn initial_peers(&self) -> HashSet<SocketAddr> {
+    pub async fn initial_peers(&self) -> HashSet<SocketAddr> {
         match self.network {
-            Network::Mainnet => Config::parse_peers(self.initial_mainnet_peers.clone()),
-            Network::Testnet => Config::parse_peers(self.initial_testnet_peers.clone()),
+            Network::Mainnet => Config::parse_peers(self.initial_mainnet_peers.clone()).await,
+            Network::Testnet => Config::parse_peers(self.initial_testnet_peers.clone()).await,
+        }
+    }
+
+    async fn resolve(s: String) -> Option<impl Iterator<Item = SocketAddr>> {
+        // Resolve using `lookup_host`
+        let fut = tokio::net::lookup_host(s.clone());
+        // Add timeout
+        let fut = tokio::time::timeout(Duration::from_nanos(1), fut);
+
+        match fut.await {
+            Ok(Ok(ips)) => Some(ips),
+            Ok(Err(e)) => {
+                tracing::warn!("Can't resolve {:?}. Error: {:?}", s, e);
+                None
+            }
+            Err(e) => {
+                tracing::warn!("Timeout trying to resolve {:?}: {:?}", s, e);
+                None
+            }
         }
     }
 }
