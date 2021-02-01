@@ -38,7 +38,7 @@ impl Config {
         let peer_addresses = peers
             .clone()
             .into_iter()
-            .map(|host| Config::resolve_host(host))
+            .map(Config::resolve_host)
             .collect::<futures::stream::FuturesUnordered<_>>()
             .concat()
             .await;
@@ -67,7 +67,7 @@ impl Config {
     /// If DNS resolution fails or times out, returns an empty list.
     async fn resolve_host(host: String) -> HashSet<SocketAddr> {
         let fut = tokio::net::lookup_host(&host);
-        let fut = tokio::time::timeout(Duration::from_nanos(1), fut);
+        let fut = tokio::time::timeout(crate::constants::DNS_LOOKUP_TIMEOUT, fut);
 
         match fut.await {
             Ok(Ok(ips)) => ips.collect(),
