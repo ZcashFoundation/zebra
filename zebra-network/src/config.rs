@@ -1,9 +1,4 @@
-use std::{
-    collections::HashSet,
-    net::{SocketAddr, ToSocketAddrs},
-    string::String,
-    time::Duration,
-};
+use std::{collections::HashSet, net::SocketAddr, string::String, time::Duration};
 
 use zebra_chain::parameters::Network;
 
@@ -37,15 +32,25 @@ pub struct Config {
 }
 
 impl Config {
-    async fn parse_peers<S: ToSocketAddrs>(peers: HashSet<S>) -> HashSet<SocketAddr> {
-        // Test dns function
-        let _test_dns = Config::resolve_host("willnotresolve.whatev3r:8233".to_string()).await;
+    async fn parse_peers(peers: HashSet<String>) -> HashSet<SocketAddr> {
+        use futures::stream::StreamExt;
+        // See https://docs.rs/futures/0.3.12/futures/stream/trait.StreamExt.html
+        let peer_addresses = peers
+            .clone()
+            .into_iter()
+            .map(|host| Config::resolve_host(host))
+            .collect::<futures::stream::FuturesUnordered<_>>()
+            .concat()
+            .await;
 
-        peers
-            .iter()
-            .flat_map(|s| s.to_socket_addrs())
-            .flatten()
-            .collect()
+        if peer_addresses.is_empty() {
+            tracing::warn!(
+                ?peers,
+                ?peer_addresses,
+                "empty peer list after DNS resolution"
+            );
+        };
+        peer_addresses
     }
 
     /// Get the initial seed peers based on the configured network.
