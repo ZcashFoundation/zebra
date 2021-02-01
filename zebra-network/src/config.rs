@@ -39,7 +39,7 @@ pub struct Config {
 impl Config {
     async fn parse_peers<S: ToSocketAddrs>(peers: HashSet<S>) -> HashSet<SocketAddr> {
         // Test dns function
-        let _test_dns = Config::resolve("willnotresolve.whatev3r:8233".to_string()).await;
+        let _test_dns = Config::resolve_host("willnotresolve.whatev3r:8233".to_string()).await;
 
         peers
             .iter()
@@ -56,21 +56,23 @@ impl Config {
         }
     }
 
-    async fn resolve(s: String) -> Option<impl Iterator<Item = SocketAddr>> {
-        // Resolve using `lookup_host`
-        let fut = tokio::net::lookup_host(s.clone());
-        // Add timeout
+    /// Resolves `host` into zero or more IP addresses.
+    ///
+    /// If `host` is a DNS name, performs DNS resolution with a timeout of a few seconds.
+    /// If DNS resolution fails or times out, returns an empty list.
+    async fn resolve_host(host: String) -> HashSet<SocketAddr> {
+        let fut = tokio::net::lookup_host(&host);
         let fut = tokio::time::timeout(Duration::from_nanos(1), fut);
 
         match fut.await {
-            Ok(Ok(ips)) => Some(ips),
+            Ok(Ok(ips)) => ips.collect(),
             Ok(Err(e)) => {
-                tracing::warn!("Can't resolve {:?}. Error: {:?}", s, e);
-                None
+                tracing::info!(?host, ?e, "DNS error resolving peer IP address");
+                HashSet::new()
             }
             Err(e) => {
-                tracing::warn!("Timeout trying to resolve {:?}: {:?}", s, e);
-                None
+                tracing::info!(?host, ?e, "DNS timeout resolving peer IP address");
+                HashSet::new()
             }
         }
     }
