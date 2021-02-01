@@ -235,6 +235,10 @@ communication between stateful components is handled internally by
 [internal asynchronous RPC abstraction](https://docs.rs/tower/)
 ("microservices in one process").
 
+## Security
+
+Zebra has a [responsible disclosure policy](https://github.com/ZcashFoundation/zebra/blob/main/responsible_disclosure.md), which we encourage security researchers to follow.
+
 ## License
 
 Zebra is distributed under the terms of both the MIT license
