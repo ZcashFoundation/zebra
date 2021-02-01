@@ -34,7 +34,6 @@ pub struct Config {
 impl Config {
     async fn parse_peers(peers: HashSet<String>) -> HashSet<SocketAddr> {
         use futures::stream::StreamExt;
-        // See https://docs.rs/futures/0.3.12/futures/stream/trait.StreamExt.html
         let peer_addresses = peers
             .clone()
             .into_iter()
