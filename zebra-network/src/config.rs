@@ -32,6 +32,10 @@ pub struct Config {
 }
 
 impl Config {
+    /// Concurrently resolves `peers` into zero or more IP addresses, with a timeout
+    /// of a few seconds on each DNS request.
+    ///
+    /// If DNS resolution fails or times out for all peers, returns an empty list.
     async fn parse_peers(peers: HashSet<String>) -> HashSet<SocketAddr> {
         use futures::stream::StreamExt;
         let peer_addresses = peers

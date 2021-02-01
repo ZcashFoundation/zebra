@@ -110,10 +110,10 @@ lazy_static! {
 
 /// The timeout for DNS lookups.
 ///
-/// [6.1.3.3  Efficient Resource Usage] from RFC [Requirements for Internet Hosts]
+/// [6.1.3.3 Efficient Resource Usage] from [RFC 1123: Requirements for Internet Hosts]
 /// suggest no less than 5 seconds for resolving timeout.
 ///
-/// [Requirements for Internet Hosts] https://tools.ietf.org/rfcmarkup?doc=1123
+/// [RFC 1123: Requirements for Internet Hosts] https://tools.ietf.org/rfcmarkup?doc=1123
 /// [6.1.3.3  Efficient Resource Usage] https://tools.ietf.org/rfcmarkup?doc=1123#page-77
 pub const DNS_LOOKUP_TIMEOUT: Duration = Duration::from_secs(5);
 
