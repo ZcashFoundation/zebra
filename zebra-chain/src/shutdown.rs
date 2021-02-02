@@ -5,7 +5,9 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// A flag to indicate if zebrad is shutting down.
+/// A flag to indicate if Zebra is shutting down.
+///
+/// Initialized to `false` at startup.
 pub static IS_SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
 
 /// Returns true if the application is shutting down.
@@ -21,6 +23,7 @@ pub fn is_shutting_down() -> bool {
     IS_SHUTTING_DOWN.load(Ordering::SeqCst)
 }
 
+/// Sets the Zebra shutdown flag to `true`.
 pub fn set_shutting_down() {
     IS_SHUTTING_DOWN.store(true, Ordering::SeqCst);
 }
