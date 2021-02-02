@@ -793,7 +793,7 @@ where
 
 #[derive(Debug, Error)]
 pub enum VerifyCheckpointError {
-    #[error("checkpoint request after checkpointing finished")]
+    #[error("checkpoint request after the final checkpoint has been verified")]
     Finished,
     #[error("block at {height:?} is higher than the maximum checkpoint {max_height:?}")]
     TooHigh {
@@ -832,6 +832,8 @@ pub enum VerifyCheckpointError {
         expected: block::Hash,
         found: block::Hash,
     },
+    #[error("zebra is shutting down")]
+    ShuttingDown,
 }
 
 /// The CheckpointVerifier service implementation.
@@ -907,7 +909,7 @@ where
         async move {
             let result = commit_finalized_block.await;
             if zebra_chain::shutdown::is_shutting_down() {
-                Err(VerifyCheckpointError::Finished)
+                Err(VerifyCheckpointError::ShuttingDown)
             } else {
                 result.expect("commit_finalized_block should not panic")
             }
