@@ -905,11 +905,11 @@ where
         });
 
         async move {
-            let fut = commit_finalized_block.await;
+            let result = commit_finalized_block.await;
             if zebra_chain::shutdown::is_shutting_down() {
                 Err(VerifyCheckpointError::Finished)
             } else {
-                fut.expect("commit_finalized_block should not panic")
+                result.expect("commit_finalized_block should not panic")
             }
         }
         .boxed()
