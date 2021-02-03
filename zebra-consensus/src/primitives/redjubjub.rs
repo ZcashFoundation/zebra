@@ -62,9 +62,9 @@ pub struct Verifier {
 impl Default for Verifier {
     fn default() -> Self {
         let batch = batch::Verifier::default();
-        // This bound limits the number of concurrent batches. It should be
-        // big enough to avoid RecvErrors when tasks wait on results for a long
-        // time.
+        // This bound limits the number of concurrent batches for this verifier.
+        // If tasks delay checking for verifier results, and the bound is too small,
+        // new batches will be rejected with `RecvError`s.
         let (tx, _) = channel(512);
         Self { tx, batch }
     }
