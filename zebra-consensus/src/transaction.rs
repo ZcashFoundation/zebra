@@ -74,7 +74,8 @@ pub enum Request {
         transaction: Arc<Transaction>,
         /// Additional UTXOs which are known at the time of verification.
         known_utxos: Arc<HashMap<transparent::OutPoint, zs::Utxo>>,
-        /// The active NU in the context of this verification.
+        /// Bug: this field should be the next block height, because some
+        /// consensus rules depend on the exact height. See #1683.
         upgrade: NetworkUpgrade,
     },
 }
