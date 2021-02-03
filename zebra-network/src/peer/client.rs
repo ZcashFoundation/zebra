@@ -179,12 +179,15 @@ impl<T: std::fmt::Debug> From<oneshot::Sender<T>> for MustUseOneshotSender<T> {
 impl<T: std::fmt::Debug> Drop for MustUseOneshotSender<T> {
     #[instrument(skip(self))]
     fn drop(&mut self) {
-        // is_canceled() will not panic, because we check is_none() first
-        assert!(
-            self.tx.is_none() || self.is_canceled(),
-            "unused oneshot sender: oneshot must be used or canceled: {:?}",
-            self
-        );
+        // we don't panic if we are shutting down anyway
+        if !zebra_chain::shutdown::is_shutting_down() {
+            // is_canceled() will not panic, because we check is_none() first
+            assert!(
+                self.tx.is_none() || self.is_canceled(),
+                "unused oneshot sender: oneshot must be used or canceled: {:?}",
+                self
+            );
+        }
     }
 }
 

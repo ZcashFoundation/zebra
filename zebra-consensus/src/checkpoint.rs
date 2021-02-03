@@ -793,7 +793,7 @@ where
 
 #[derive(Debug, Error)]
 pub enum VerifyCheckpointError {
-    #[error("checkpoint request after checkpointing finished")]
+    #[error("checkpoint request after the final checkpoint has been verified")]
     Finished,
     #[error("block at {height:?} is higher than the maximum checkpoint {max_height:?}")]
     TooHigh {
@@ -832,6 +832,8 @@ pub enum VerifyCheckpointError {
         expected: block::Hash,
         found: block::Hash,
     },
+    #[error("zebra is shutting down")]
+    ShuttingDown,
 }
 
 /// The CheckpointVerifier service implementation.
@@ -905,9 +907,19 @@ where
         });
 
         async move {
-            commit_finalized_block
-                .await
-                .expect("commit_finalized_block should not panic")
+            let result = commit_finalized_block.await;
+            // Avoid a panic on shutdown
+            //
+            // When `zebrad` is terminated using Ctrl-C, the `commit_finalized_block` task
+            // can return a `JoinError::Cancelled`. We expect task cancellation on shutdown,
+            // so we don't need to panic here. The persistent state is correct even when the
+            // task is cancelled, because block data is committed inside transactions, in
+            // height order.
+            if zebra_chain::shutdown::is_shutting_down() {
+                Err(VerifyCheckpointError::ShuttingDown)
+            } else {
+                result.expect("commit_finalized_block should not panic")
+            }
         }
         .boxed()
     }
