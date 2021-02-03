@@ -36,12 +36,11 @@ impl Config {
     /// of a few seconds on each DNS request.
     ///
     /// If DNS resolution fails or times out for all peers, returns an empty list.
-    async fn parse_peers(peers: HashSet<String>) -> HashSet<SocketAddr> {
+    async fn parse_peers(peers: &HashSet<String>) -> HashSet<SocketAddr> {
         use futures::stream::StreamExt;
         let peer_addresses = peers
-            .clone()
-            .into_iter()
-            .map(Config::resolve_host)
+            .iter()
+            .map(|s| Config::resolve_host(s))
             .collect::<futures::stream::FuturesUnordered<_>>()
             .concat()
             .await;
@@ -59,8 +58,8 @@ impl Config {
     /// Get the initial seed peers based on the configured network.
     pub async fn initial_peers(&self) -> HashSet<SocketAddr> {
         match self.network {
-            Network::Mainnet => Config::parse_peers(self.initial_mainnet_peers.clone()).await,
-            Network::Testnet => Config::parse_peers(self.initial_testnet_peers.clone()).await,
+            Network::Mainnet => Config::parse_peers(&self.initial_mainnet_peers).await,
+            Network::Testnet => Config::parse_peers(&self.initial_testnet_peers).await,
         }
     }
 
@@ -68,8 +67,8 @@ impl Config {
     ///
     /// If `host` is a DNS name, performs DNS resolution with a timeout of a few seconds.
     /// If DNS resolution fails or times out, returns an empty list.
-    async fn resolve_host(host: String) -> HashSet<SocketAddr> {
-        let fut = tokio::net::lookup_host(&host);
+    async fn resolve_host(host: &str) -> HashSet<SocketAddr> {
+        let fut = tokio::net::lookup_host(host);
         let fut = tokio::time::timeout(crate::constants::DNS_LOOKUP_TIMEOUT, fut);
 
         match fut.await {
