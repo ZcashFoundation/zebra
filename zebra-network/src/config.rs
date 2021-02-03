@@ -1,9 +1,4 @@
-use std::{
-    collections::HashSet,
-    net::{SocketAddr, ToSocketAddrs},
-    string::String,
-    time::Duration,
-};
+use std::{collections::HashSet, net::SocketAddr, string::String, time::Duration};
 
 use zebra_chain::parameters::Network;
 
@@ -37,19 +32,55 @@ pub struct Config {
 }
 
 impl Config {
-    fn parse_peers<S: ToSocketAddrs>(peers: HashSet<S>) -> HashSet<SocketAddr> {
-        peers
+    /// Concurrently resolves `peers` into zero or more IP addresses, with a timeout
+    /// of a few seconds on each DNS request.
+    ///
+    /// If DNS resolution fails or times out for all peers, returns an empty list.
+    async fn parse_peers(peers: &HashSet<String>) -> HashSet<SocketAddr> {
+        use futures::stream::StreamExt;
+        let peer_addresses = peers
             .iter()
-            .flat_map(|s| s.to_socket_addrs())
-            .flatten()
-            .collect()
+            .map(|s| Config::resolve_host(s))
+            .collect::<futures::stream::FuturesUnordered<_>>()
+            .concat()
+            .await;
+
+        if peer_addresses.is_empty() {
+            tracing::warn!(
+                ?peers,
+                ?peer_addresses,
+                "empty peer list after DNS resolution"
+            );
+        };
+        peer_addresses
     }
 
     /// Get the initial seed peers based on the configured network.
-    pub fn initial_peers(&self) -> HashSet<SocketAddr> {
+    pub async fn initial_peers(&self) -> HashSet<SocketAddr> {
         match self.network {
-            Network::Mainnet => Config::parse_peers(self.initial_mainnet_peers.clone()),
-            Network::Testnet => Config::parse_peers(self.initial_testnet_peers.clone()),
+            Network::Mainnet => Config::parse_peers(&self.initial_mainnet_peers).await,
+            Network::Testnet => Config::parse_peers(&self.initial_testnet_peers).await,
+        }
+    }
+
+    /// Resolves `host` into zero or more IP addresses.
+    ///
+    /// If `host` is a DNS name, performs DNS resolution with a timeout of a few seconds.
+    /// If DNS resolution fails or times out, returns an empty list.
+    async fn resolve_host(host: &str) -> HashSet<SocketAddr> {
+        let fut = tokio::net::lookup_host(host);
+        let fut = tokio::time::timeout(crate::constants::DNS_LOOKUP_TIMEOUT, fut);
+
+        match fut.await {
+            Ok(Ok(ips)) => ips.collect(),
+            Ok(Err(e)) => {
+                tracing::info!(?host, ?e, "DNS error resolving peer IP address");
+                HashSet::new()
+            }
+            Err(e) => {
+                tracing::info!(?host, ?e, "DNS timeout resolving peer IP address");
+                HashSet::new()
+            }
         }
     }
 }
