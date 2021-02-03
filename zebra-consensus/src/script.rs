@@ -50,13 +50,9 @@ impl<ZS> Verifier<ZS> {
 /// A script verification request.
 #[derive(Debug)]
 pub struct Request {
-    /// Ideally, this would supply only an `Outpoint` and the unlock script,
-    /// rather than the entire `Transaction`, but we call a C++
-    /// implementation, and its FFI requires the entire transaction.
-    ///
-    /// This causes quadratic script verification behavior, so
-    /// at some future point, we need to reform this data.
+    /// A cached transaction, in the format required by the script verifier FFI interface.
     pub cached_ffi_transaction: Arc<CachedFfiTransaction>,
+    /// The index of an input in `cached_ffi_transaction`, used for verifying this request
     pub input_index: usize,
     /// A set of additional UTXOs known in the context of this verification request.
     ///
