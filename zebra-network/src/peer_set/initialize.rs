@@ -135,20 +135,19 @@ where
 
     let listen_guard = tokio::spawn(listen(config.listen_addr, listener, peerset_tx.clone()));
 
-    let connector = connector.clone();
-    let tx = peerset_tx.clone();
-
-    // Clone some values so we can move them
-    let config_clone = config.clone();
-    let connector_clone = connector.clone();
-
-    let initial_peers_fut = async move {
-        // Connect the tx end to the 3 peer sources:
-        add_initial_peers(config_clone.initial_peers().await, connector_clone, tx).await
-    }
-    .boxed();
-
     // 2. Initial peers, specified in the config.
+    let initial_peers_fut = {
+        let config = config.clone();
+        let connector = connector.clone();
+        let peerset_tx = peerset_tx.clone();
+        async move {
+            let initial_peers = config.initial_peers().await;
+            // Connect the tx end to the 3 peer sources:
+            add_initial_peers(initial_peers, connector, peerset_tx).await
+        }
+        .boxed()
+    };
+
     let add_guard = tokio::spawn(initial_peers_fut);
 
     // 3. Outgoing peers we connect to in response to load.
