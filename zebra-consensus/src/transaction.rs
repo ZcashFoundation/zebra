@@ -44,9 +44,14 @@ where
 {
     // XXX: how should this struct be constructed?
     pub fn new(network: Network, script_verifier: script::Verifier<ZS>) -> Self {
+        // let (spend_verifier, output_verifier, joinsplit_verifier) = todo!();
+
         Self {
             network,
             script_verifier,
+            // spend_verifier,
+            // output_verifier,
+            // joinsplit_verifier,
         }
     }
 }
