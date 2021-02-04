@@ -57,8 +57,8 @@ where
         T::Error: Send + Sync,
         Request: Send + 'static,
     {
-        // XXX(hdevalence): is this bound good
-        let bound = 1;
+        // We use the max_items as maximum number of requests.
+        let bound = max_items;
         let (tx, rx) = mpsc::unbounded_channel();
         let (handle, worker) = Worker::new(service, rx, max_items, max_latency);
         tokio::spawn(worker.run());
