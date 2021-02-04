@@ -205,6 +205,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "474a626a67200bd107d44179bb3d4fc61891172d11696609264589be6a0e6a43"
 
 [[package]]
+name = "bellman"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7089887635778eabf0038a166f586eee5413fb85c8fa6c9a754914f0f644f49f"
+dependencies = [
+ "bitvec 0.18.4",
+ "blake2s_simd",
+ "byteorder",
+ "crossbeam",
+ "ff 0.8.0",
+ "futures 0.1.30",
+ "futures-cpupool",
+ "group 0.8.0",
+ "num_cpus",
+ "pairing",
+ "rand_core 0.5.1",
+ "subtle",
+]
+
+[[package]]
 name = "bincode"
 version = "1.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -276,6 +296,17 @@ checksum = "41262f11d771fd4a61aa3ce019fca363b4b6c282fca9da2a31186d3965a47a5c"
 dependencies = [
  "either",
  "radium 0.3.0",
+]
+
+[[package]]
+name = "bitvec"
+version = "0.18.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d2838fdd79e8776dbe07a106c784b0f8dda571a21b2750a092cc4cbaa653c8e"
+dependencies = [
+ "funty",
+ "radium 0.4.1",
+ "wyz",
 ]
 
 [[package]]
@@ -353,11 +384,25 @@ dependencies = [
 
 [[package]]
 name = "bls12_381"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4caf0101205582491f772d60a6fcb6bcec19963e68209cb631851eeadb01421f"
+dependencies = [
+ "bitvec 0.18.4",
+ "ff 0.8.0",
+ "group 0.8.0",
+ "pairing",
+ "rand_core 0.5.1",
+ "subtle",
+]
+
+[[package]]
+name = "bls12_381"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1c56609cc42c628848e7b18e0baf42a4ef626b8c50442dc08b8094bd21d8ad32"
 dependencies = [
- "ff",
+ "ff 0.9.0",
  "rand_core 0.6.1",
  "subtle",
 ]
@@ -951,6 +996,17 @@ dependencies = [
 
 [[package]]
 name = "ff"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "01646e077d4ebda82b73f1bca002ea1e91561a77df2431a9e79729bcc31950ef"
+dependencies = [
+ "bitvec 0.18.4",
+ "rand_core 0.5.1",
+ "subtle",
+]
+
+[[package]]
+name = "ff"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72a4d941a5b7c2a75222e2d44fcdf634a67133d9db31e177ae5ff6ecda852bfe"
@@ -1030,6 +1086,12 @@ checksum = "0ba62103ce691c2fd80fbae2213dfdda9ce60804973ac6b6e97de818ea7f52c8"
 
 [[package]]
 name = "futures"
+version = "0.1.30"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4c7e4c2612746b0df8fed4ce0c69156021b704c9aefa360311c04e6e9e002eed"
+
+[[package]]
+name = "futures"
 version = "0.3.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "da9052a1a50244d8d5aa9bf55cbc2fb6f357c86cc52e46c62ed390a7180cf150"
@@ -1058,6 +1120,16 @@ name = "futures-core"
 version = "0.3.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "79e5145dde8da7d1b3892dad07a9c98fc04bc39892b1ecc9692cf53e2b780a65"
+
+[[package]]
+name = "futures-cpupool"
+version = "0.1.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab90cde24b3319636588d0c35fe03b1333857621051837ed769faefb4c2162e4"
+dependencies = [
+ "futures 0.1.30",
+ "num_cpus",
+]
 
 [[package]]
 name = "futures-executor"
@@ -1200,12 +1272,24 @@ checksum = "9b919933a397b79c37e33b77bb2aa3dc8eb6e165ad809e58ff75bc7db2e34574"
 
 [[package]]
 name = "group"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cc11f9f5fbf1943b48ae7c2bf6846e7d827a512d1be4f23af708f5ca5d01dde1"
+dependencies = [
+ "byteorder",
+ "ff 0.8.0",
+ "rand_core 0.5.1",
+ "subtle",
+]
+
+[[package]]
+name = "group"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "61b3c1e8b4f1ca07e6605ea1be903a5f6956aec5c8a67fd44d56076631675ed8"
 dependencies = [
  "byteorder",
- "ff",
+ "ff 0.9.0",
  "rand_core 0.6.1",
  "subtle",
 ]
@@ -1573,8 +1657,8 @@ checksum = "4d7e7fef85ae7b26dd89f34175b7f3c5ace64067a110c2ac86cf92407a6666ca"
 dependencies = [
  "bitvec 0.20.1",
  "bls12_381 0.4.0",
- "ff",
- "group",
+ "ff 0.9.0",
+ "group 0.9.0",
  "rand_core 0.6.1",
  "subtle",
 ]
@@ -1982,6 +2066,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2386b4ebe91c2f7f51082d4cefa145d030e33a1842a96b12e4885cc3c01f7a55"
 
 [[package]]
+name = "pairing"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f702cdbee9e0a6272452c20dec82465bc821116598b4eeb63e9a71a69dbf7fd"
+dependencies = [
+ "ff 0.8.0",
+ "group 0.8.0",
+]
+
+[[package]]
 name = "parity-scale-codec"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2241,6 +2335,12 @@ name = "radium"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "def50a86306165861203e7f84ecffbbdfdea79f0e51039b33de1e952358c47ac"
+
+[[package]]
+name = "radium"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "64de9a0c5361e034f1aefc9f71a86871ec870e766fe31a009734a989b329286a"
 
 [[package]]
 name = "radium"
@@ -3295,7 +3395,7 @@ version = "0.1.0"
 dependencies = [
  "color-eyre",
  "ed25519-zebra 2.2.0",
- "futures",
+ "futures 0.3.12",
  "futures-core",
  "pin-project 0.4.27",
  "rand 0.7.3",
@@ -3880,7 +3980,7 @@ dependencies = [
  "displaydoc",
  "ed25519-zebra 1.0.1",
  "equihash",
- "futures",
+ "futures 0.3.12",
  "hex",
  "jubjub 0.6.0",
  "lazy_static",
@@ -3909,14 +4009,17 @@ version = "1.0.0-alpha.0"
 name = "zebra-consensus"
 version = "1.0.0-alpha.1"
 dependencies = [
+ "bellman",
+ "bls12_381 0.3.1",
  "chrono",
  "color-eyre",
  "displaydoc",
- "futures",
+ "futures 0.3.12",
  "futures-util",
  "jubjub 0.6.0",
  "metrics",
  "once_cell",
+ "pairing",
  "rand 0.7.3",
  "redjubjub",
  "serde",
@@ -3944,7 +4047,7 @@ dependencies = [
  "byteorder",
  "bytes 0.6.0",
  "chrono",
- "futures",
+ "futures 0.3.12",
  "hex",
  "indexmap",
  "lazy_static",
@@ -3991,7 +4094,7 @@ dependencies = [
  "color-eyre",
  "dirs",
  "displaydoc",
- "futures",
+ "futures 0.3.12",
  "hex",
  "lazy_static",
  "metrics",
@@ -4018,7 +4121,7 @@ name = "zebra-test"
 version = "1.0.0-alpha.1"
 dependencies = [
  "color-eyre",
- "futures",
+ "futures 0.3.12",
  "hex",
  "lazy_static",
  "owo-colors",
@@ -4059,7 +4162,7 @@ dependencies = [
  "chrono",
  "color-eyre",
  "dirs",
- "futures",
+ "futures 0.3.12",
  "gumdrop",
  "hyper 0.14.0-dev",
  "inferno",

@@ -7,14 +7,16 @@ use super::{
 
 use crate::semaphore::Semaphore;
 use futures_core::ready;
-use std::task::{Context, Poll};
+use std::{
+    fmt,
+    task::{Context, Poll},
+};
 use tokio::sync::{mpsc, oneshot};
 use tower::Service;
 
 /// Allows batch processing of requests.
 ///
 /// See the module documentation for more details.
-#[derive(Debug)]
 pub struct Batch<T, Request>
 where
     T: Service<BatchControl<Request>>,
@@ -33,6 +35,20 @@ where
     // limit how many items are in the channel.
     semaphore: Semaphore,
     handle: Handle,
+}
+
+impl<T, Request> fmt::Debug for Batch<T, Request>
+where
+    T: Service<BatchControl<Request>>,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let name = std::any::type_name::<Self>();
+        f.debug_struct(name)
+            .field("tx", &self.tx)
+            .field("semaphore", &self.semaphore)
+            .field("handle", &self.handle)
+            .finish()
+    }
 }
 
 impl<T, Request> Batch<T, Request>
