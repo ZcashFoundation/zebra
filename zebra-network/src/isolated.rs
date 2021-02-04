@@ -35,6 +35,10 @@ use crate::{peer, BoxError, Config, Request, Response};
 /// connection allows this method to be used with clearnet or Tor transports.
 ///
 /// - `user_agent`: a valid BIP14 user-agent, e.g., the empty string.
+///
+/// # Bug
+///
+/// `connect_isolated` only works on `Mainnet`, see #1687.
 pub fn connect_isolated(
     conn: TcpStream,
     user_agent: String,
