@@ -100,7 +100,7 @@ pub const MAX_CHECKPOINT_BYTE_COUNT: u64 = 32 * 1024 * 1024;
 ///
 /// Verifies blocks using a supplied list of checkpoints. There must be at
 /// least one checkpoint for the genesis block.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct CheckpointVerifier<S>
 where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
@@ -125,7 +125,7 @@ where
     ///
     /// The first checkpoint does not have any ancestors, so it only verifies the
     /// genesis block.
-    queued: BTreeMap<block::Height, QueuedBlockList>,
+    queued: Arc<BTreeMap<block::Height, QueuedBlockList>>,
 
     /// The current progress of this verifier.
     verifier_progress: Progress<block::Height>,
@@ -223,7 +223,7 @@ where
             checkpoint_list,
             initial_tip_hash,
             state_service,
-            queued: BTreeMap::new(),
+            queued: Arc::new(BTreeMap::new()),
             verifier_progress,
         }
     }

@@ -58,32 +58,37 @@ where
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        match (self.checkpoint.poll_ready(cx), self.block.poll_ready(cx)) {
-            // First, fail if either service fails.
-            (Poll::Ready(Err(e)), _) => Poll::Ready(Err(VerifyChainError::Checkpoint(e))),
-            (_, Poll::Ready(Err(e))) => Poll::Ready(Err(VerifyChainError::Block(e))),
-            // Second, we're unready if either service is unready.
-            (Poll::Pending, _) | (_, Poll::Pending) => Poll::Pending,
-            // Finally, we're ready if both services are ready and OK.
-            (Poll::Ready(Ok(())), Poll::Ready(Ok(()))) => Poll::Ready(Ok(())),
-        }
+        self.checkpoint.poll_ready(cx);
+        self.block.poll_ready(cx);
+
+        Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, block: Arc<Block>) -> Self::Future {
-        match block.coinbase_height() {
-            Some(height) if height <= self.max_checkpoint_height => self
-                .checkpoint
-                .call(block)
-                .map_err(VerifyChainError::Checkpoint)
-                .boxed(),
-            // This also covers blocks with no height, which the block verifier
-            // will reject immediately.
-            _ => self
-                .block
-                .call(block)
-                .map_err(VerifyChainError::Block)
-                .boxed(),
+        let mut b = self.block.clone();
+        let mut cp = self.checkpoint.clone();
+        async {
+            match block.coinbase_height() {
+                Some(height) if height <= self.max_checkpoint_height => cp
+                    .ready_and()
+                    .await
+                    .unwrap() // safe because poll_ready is always ok?
+                    .call(block)
+                    .await
+                    .map_err(VerifyChainError::Checkpoint),
+
+                // This also covers blocks with no height, which the block verifier
+                // will reject immediately.
+                _ => b
+                    .ready_and()
+                    .await
+                    .unwrap() // safe because poll_ready is always ok?
+                    .call(block)
+                    .await
+                    .map_err(VerifyChainError::Block),
+            }
         }
+        .boxed()
     }
 }
 
