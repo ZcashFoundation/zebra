@@ -219,7 +219,7 @@ dependencies = [
  "futures-cpupool",
  "group 0.8.0",
  "num_cpus",
- "pairing",
+ "pairing 0.18.0",
  "rand_core 0.5.1",
  "subtle",
 ]
@@ -391,7 +391,7 @@ dependencies = [
  "bitvec 0.18.4",
  "ff 0.8.0",
  "group 0.8.0",
- "pairing",
+ "pairing 0.18.0",
  "rand_core 0.5.1",
  "subtle",
 ]
@@ -2073,6 +2073,16 @@ checksum = "4f702cdbee9e0a6272452c20dec82465bc821116598b4eeb63e9a71a69dbf7fd"
 dependencies = [
  "ff 0.8.0",
  "group 0.8.0",
+]
+
+[[package]]
+name = "pairing"
+version = "0.19.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9be899ebf10363f018353dba1baabb7e83145f3683c7b83b73b93b563e3167cc"
+dependencies = [
+ "ff 0.9.0",
+ "group 0.9.0",
 ]
 
 [[package]]
@@ -4019,7 +4029,7 @@ dependencies = [
  "jubjub 0.6.0",
  "metrics",
  "once_cell",
- "pairing",
+ "pairing 0.19.0",
  "rand 0.7.3",
  "redjubjub",
  "serde",

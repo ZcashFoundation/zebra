@@ -30,7 +30,7 @@ tower-batch = { path = "../tower-batch/" }
 zebra-chain = { path = "../zebra-chain" }
 zebra-state = { path = "../zebra-state" }
 zebra-script = { path = "../zebra-script" }
-pairing = "0.18.0"
+pairing = "0.19.0"
 
 [dev-dependencies]
 color-eyre = "0.5.10"
