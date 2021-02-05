@@ -57,8 +57,12 @@ where
         T::Error: Send + Sync,
         Request: Send + 'static,
     {
-        // XXX(hdevalence): is this bound good
-        let bound = 1;
+        // The semaphore bound limits the maximum number of concurrent requests
+        // (specifically, requests which got a `Ready` from `poll_ready`, but haven't
+        // used their semaphore reservation in a `call` yet).
+        // We choose a bound that allows callers to check readiness for every item in
+        // a batch, then actually submit those items.
+        let bound = max_items;
         let (tx, rx) = mpsc::unbounded_channel();
         let (handle, worker) = Worker::new(service, rx, max_items, max_latency);
         tokio::spawn(worker.run());
