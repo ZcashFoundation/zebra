@@ -22,6 +22,13 @@ use tower_fallback::Fallback;
 
 use crate::BoxError;
 
+use self::hash_reader::HashReader;
+
+mod hash_reader;
+mod params;
+
+pub use params::PARAMS;
+
 // === TEMPORARY BATCH BELLMAN SUBSTITUTE ===
 // These types are meant to be API compatible with the work in progress batch
 // verification API being implemented in Bellman. Once we've finished that

@@ -31,6 +31,9 @@ zebra-chain = { path = "../zebra-chain" }
 zebra-state = { path = "../zebra-state" }
 zebra-script = { path = "../zebra-script" }
 pairing = "0.18.0"
+wagyu-zcash-parameters = "0.2.0"
+lazy_static = "1.4.0"
+blake2b_simd = "0.5.11"
 
 [dev-dependencies]
 color-eyre = "0.5.10"
