@@ -35,7 +35,7 @@ where
     S::Future: Send + 'static,
 {
     block: BlockVerifier<S>,
-    checkpoint: CheckpointVerifier<S>,
+    checkpoint: Buffer<CheckpointVerifier<S>, Arc<block::Block>>,
     max_checkpoint_height: block::Height,
 }
 
@@ -70,7 +70,7 @@ where
 
     fn call(&mut self, block: Arc<Block>) -> Self::Future {
         let mut b = self.block.clone();
-        let mut cp = Buffer::new(BoxService::new(self.checkpoint), 3).clone();
+        let mut cp = self.checkpoint.clone();
         let max_checkpoint_height = self.max_checkpoint_height;
         async move {
             match block.coinbase_height() {
@@ -80,7 +80,8 @@ where
                     .unwrap() // safe because poll_ready is always ok?
                     .call(block)
                     .await
-                    .map_err(VerifyChainError::Checkpoint),
+                    .map_err(VerifyChainError::Checkpoint)
+                    ,
 
                 // This also covers blocks with no height, which the block verifier
                 // will reject immediately.
@@ -90,7 +91,8 @@ where
                     .unwrap() // safe because poll_ready is always ok?
                     .call(block)
                     .await
-                    .map_err(VerifyChainError::Block),
+                    .map_err(VerifyChainError::Block)
+                    ,
             }
         }
         .boxed()
@@ -146,7 +148,10 @@ where
     tracing::info!(?tip, ?max_checkpoint_height, "initializing chain verifier");
 
     let block = BlockVerifier::new(network, state_service.clone());
-    let checkpoint = CheckpointVerifier::from_checkpoint_list(list, tip, state_service);
+    let checkpoint = Buffer::new(
+        CheckpointVerifier::from_checkpoint_list(list, tip, state_service),
+        3,
+    );
 
     Buffer::new(
         BoxService::new(ChainVerifier {
