@@ -94,6 +94,9 @@ where
         // Then, poll to acquire a semaphore permit. If we acquire a permit,
         // then there's enough buffer capacity to send a new request. Otherwise,
         // we need to wait for capacity.
+
+        // In tokio 0.3.7, `acquire_owned` panics if its semaphore returns an error,
+        // so we don't need to handle errors until we upgrade to tokio 1.0.
         ready!(self.semaphore.poll_acquire(cx));
 
         Poll::Ready(Ok(()))
