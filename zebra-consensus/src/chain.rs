@@ -49,7 +49,11 @@ pub enum VerifyChainError {
 
 impl<S> Service<Arc<Block>> for ChainVerifier<S>
 where
-    S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
+    S: Service<zs::Request, Response = zs::Response, Error = BoxError>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
     S::Future: Send + 'static,
 {
     type Response = block::Hash;
@@ -66,10 +70,11 @@ where
 
     fn call(&mut self, block: Arc<Block>) -> Self::Future {
         let mut b = self.block.clone();
-        let mut cp = self.checkpoint.clone();
-        async {
+        let mut cp = Buffer::new(BoxService::new(self.checkpoint), 3).clone();
+        let max_checkpoint_height = self.max_checkpoint_height;
+        async move {
             match block.coinbase_height() {
-                Some(height) if height <= self.max_checkpoint_height => cp
+                Some(height) if height <= max_checkpoint_height => cp
                     .ready_and()
                     .await
                     .unwrap() // safe because poll_ready is always ok?
@@ -111,7 +116,11 @@ pub async fn init<S>(
     mut state_service: S,
 ) -> Buffer<BoxService<Arc<Block>, block::Hash, VerifyChainError>, Arc<Block>>
 where
-    S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
+    S: Service<zs::Request, Response = zs::Response, Error = BoxError>
+        + Send
+        + Clone
+        + 'static
+        + Sync,
     S::Future: Send + 'static,
 {
     let list = CheckpointList::new(network);
