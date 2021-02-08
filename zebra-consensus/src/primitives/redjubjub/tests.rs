@@ -9,9 +9,9 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use tower::ServiceExt;
 use tower_batch::Batch;
 
-async fn sign_and_verify<V>(mut verifier: V, n: usize) -> Result<(), V::Error>
+async fn sign_and_verify<V>(verifier: V, n: usize) -> Result<(), V::Error>
 where
-    V: Service<Item, Response = ()>,
+    V: Service<Item, Response = ()> + Clone,
 {
     let rng = thread_rng();
     let mut results = FuturesUnordered::new();
@@ -24,15 +24,15 @@ where
                 let sk = SigningKey::<SpendAuth>::new(rng);
                 let vk = VerificationKey::from(&sk);
                 let sig = sk.sign(rng, &msg[..]);
-                verifier.ready_and().await?;
-                results.push(span.in_scope(|| verifier.call((vk.into(), sig, msg).into())))
+                results
+                    .push(span.in_scope(|| verifier.clone().oneshot((vk.into(), sig, msg).into())))
             }
             1 => {
                 let sk = SigningKey::<Binding>::new(rng);
                 let vk = VerificationKey::from(&sk);
                 let sig = sk.sign(rng, &msg[..]);
-                verifier.ready_and().await?;
-                results.push(span.in_scope(|| verifier.call((vk.into(), sig, msg).into())))
+                results
+                    .push(span.in_scope(|| verifier.clone().oneshot((vk.into(), sig, msg).into())))
             }
             _ => panic!(),
         }
