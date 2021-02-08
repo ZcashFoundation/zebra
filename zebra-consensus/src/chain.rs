@@ -64,7 +64,7 @@ pub enum VerifyChainError {
 
 impl<S> Service<Arc<Block>> for ChainVerifier<S>
 where
-    S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Clone + Send + 'static,
+    S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
 {
     type Response = block::Hash;
