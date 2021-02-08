@@ -83,30 +83,23 @@ where
     }
 
     fn call(&mut self, block: Arc<Block>) -> Self::Future {
-        let mut block_verifier = self.block_verifier.clone();
-        let mut checkpoint_verifier = self.checkpoint_verifier.clone();
+        let block_verifier = self.block_verifier.clone();
+        let checkpoint_verifier = self.checkpoint_verifier.clone();
         let max_checkpoint_height = self.max_checkpoint_height;
+
         async move {
             match block.coinbase_height() {
                 Some(height) if (height <= max_checkpoint_height) => checkpoint_verifier
-                    .ready_and()
+                    .oneshot(block)
                     .await
-                    .map_err(VerifyChainError::Checkpoint)?
-                    .call(block)
-                    .await
-                    .map_err(VerifyChainError::Checkpoint)
-                    ,
+                    .map_err(VerifyChainError::Checkpoint),
 
                 // This also covers blocks with no height, which the block verifier
                 // will reject immediately.
                 _ => block_verifier
-                    .ready_and()
+                    .oneshot(block)
                     .await
-                    .map_err(VerifyChainError::Block)?
-                    .call(block)
-                    .await
-                    .map_err(VerifyChainError::Block)
-                    ,
+                    .map_err(VerifyChainError::Block),
             }
         }
         .boxed()
