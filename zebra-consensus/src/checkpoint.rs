@@ -15,19 +15,18 @@
 
 use std::{
     collections::{BTreeMap, HashSet},
-    future::Future,
     ops::{Bound, Bound::*},
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
 };
 
-use futures_util::FutureExt;
+use futures::{Future, FutureExt, TryFutureExt};
 use thiserror::Error;
 use tokio::sync::oneshot;
 use tower::{Service, ServiceExt};
-
 use tracing::instrument;
+
 use zebra_chain::{
     block::{self, Block},
     parameters::{Network, GENESIS_PREVIOUS_BLOCK_HASH},
@@ -881,22 +880,25 @@ where
         // commit-if-verified logic. This task will always execute, except if
         // the program is interrupted, in which case there is no longer a
         // checkpoint verifier to keep in sync with the state.
-        let mut state_service = self.state_service.clone();
+        let state_service = self.state_service.clone();
         let commit_finalized_block = tokio::spawn(async move {
             let hash = rx
                 .await
+                .map_err(Into::into)
+                .map_err(VerifyCheckpointError::CommitFinalized)
                 .expect("CheckpointVerifier does not leave dangling receivers")?;
 
             // Once we get a verified hash, we must commit it to the chain state
             // as a finalized block, or exit the program, so .expect rather than
             // propagate errors from the state service.
+            //
+            // We use a `ServiceExt::oneshot`, so that every state service
+            // `poll_ready` has a corresponding `call`. See #1593.
             match state_service
-                .ready_and()
+                .oneshot(zs::Request::CommitFinalizedBlock(block.into()))
+                .map_err(VerifyCheckpointError::CommitFinalized)
                 .await
-                .expect("Verified checkpoints must be committed transactionally")
-                .call(zs::Request::CommitFinalizedBlock(block.into()))
-                .await
-                .expect("Verified checkpoints must be committed transactionally")
+                .expect("state service commit block failed: verified checkpoints must be committed transactionally")
             {
                 zs::Response::Committed(committed_hash) => {
                     assert_eq!(committed_hash, hash, "state must commit correct hash");
