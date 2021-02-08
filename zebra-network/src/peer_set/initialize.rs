@@ -194,28 +194,16 @@ where
     S::Future: Send + 'static,
 {
     info!(?initial_peers, "Connecting to initial peer set");
-    use futures::TryStreamExt;
+    let mut handshakes = initial_peers
+        .iter()
+        .map(|request| connector.clone().oneshot(*request))
+        .collect::<futures::stream::FuturesUnordered<_>>();
 
-    let fut = initial_peers
-        .clone()
-        .into_iter()
-        .map(|request| connector.clone().oneshot(request))
-        .collect::<futures::stream::FuturesUnordered<_>>()
-        .try_collect::<Vec<_>>();
-
-    match fut.await {
-        Ok(vector) => {
-            for change in vector {
-                tx.send(Ok(change)).await?
-            }
-            dbg!("success");
-            Ok(())
-        }
-        Err(e) => {
-            dbg!(e);
-            Ok(())
-        }
+    while let Some(handshake_result) = handshakes.next().await {
+        tx.send(handshake_result).await?;
     }
+
+    Ok(())
 }
 
 /// Bind to `addr`, listen for peers using `handshaker`, then send the
