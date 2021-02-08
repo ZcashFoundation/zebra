@@ -2,7 +2,7 @@
 mod tests;
 
 use displaydoc::Display;
-use futures::FutureExt;
+use futures::{FutureExt, TryFutureExt};
 use std::{
     future::Future,
     pin::Pin,
@@ -83,26 +83,26 @@ where
     }
 
     fn call(&mut self, block: Arc<Block>) -> Self::Future {
-        let block_verifier = self.block_verifier.clone();
-        let checkpoint_verifier = self.checkpoint_verifier.clone();
-        let max_checkpoint_height = self.max_checkpoint_height;
-
-        async move {
-            match block.coinbase_height() {
-                Some(height) if (height <= max_checkpoint_height) => checkpoint_verifier
-                    .oneshot(block)
-                    .await
-                    .map_err(VerifyChainError::Checkpoint),
-
-                // This also covers blocks with no height, which the block verifier
-                // will reject immediately.
-                _ => block_verifier
-                    .oneshot(block)
-                    .await
-                    .map_err(VerifyChainError::Block),
-            }
+        match block.coinbase_height() {
+            // Correctness:
+            //
+            // We use `ServiceExt::oneshot` to make sure every `poll_ready` has
+            // a matching `call`. See #1593 for details.
+            Some(height) if height <= self.max_checkpoint_height => self
+                .checkpoint_verifier
+                .clone()
+                .oneshot(block)
+                .map_err(VerifyChainError::Checkpoint)
+                .boxed(),
+            // This also covers blocks with no height, which the block verifier
+            // will reject immediately.
+            _ => self
+                .block_verifier
+                .clone()
+                .oneshot(block)
+                .map_err(VerifyChainError::Block)
+                .boxed(),
         }
-        .boxed()
     }
 }
 
