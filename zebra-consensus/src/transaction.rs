@@ -126,7 +126,7 @@ where
             } => (transaction, known_utxos, upgrade),
         };
 
-        let mut redjubjub_verifier = crate::primitives::redjubjub::VERIFIER.clone();
+        let redjubjub_verifier = crate::primitives::redjubjub::VERIFIER.clone();
         let script_verifier = self.script_verifier.clone();
         let span = tracing::debug_span!("tx", hash = %tx.hash());
         async move {
@@ -208,10 +208,12 @@ where
                             // description while adding the resulting future to
                             // our collection of async checks that (at a
                             // minimum) must pass for the transaction to verify.
+
+                            // We use a `ServiceExt::oneshot`, so that every redjubjub_verifier
+                            // service `poll_ready` has a corresponding `call`. See #1593.
                             let _rsp = redjubjub_verifier
-                                .ready_and()
-                                .await?
-                                .call((spend.rk, spend.spend_auth_sig, &sighash).into());
+                                .clone()
+                                .oneshot((spend.rk, spend.spend_auth_sig, &sighash).into());
 
                             // Disable pending sighash check #1377
                             //async_checks.push(rsp.boxed());
@@ -242,11 +244,11 @@ where
                         });
 
                         let bvk = shielded_data.binding_verification_key(*value_balance);
+
+                        // We use a `ServiceExt::oneshot`, so that every redjubjub_verifier
+                        // service `poll_ready` has a corresponding `call`. See #1593.
                         let _rsp = redjubjub_verifier
-                            .ready_and()
-                            .await?
-                            .call((bvk, shielded_data.binding_sig, &sighash).into())
-                            .boxed();
+                            .oneshot((bvk, shielded_data.binding_sig, &sighash).into());
 
                         // Disable pending sighash check #1377
                         //async_checks.push(rsp);
