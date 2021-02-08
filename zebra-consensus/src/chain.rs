@@ -57,10 +57,13 @@ where
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.checkpoint.poll_ready(cx);
-        self.block.poll_ready(cx);
-
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        // Correctness:
+        //
+        // We can't call `poll_ready` on the block and checkpoint verifiers here,
+        // because each `poll_ready` must be followed by a `call`, and we don't
+        // know which verifier we're going to choose yet.
+        // See #1593 for details.
         Poll::Ready(Ok(()))
     }
 
