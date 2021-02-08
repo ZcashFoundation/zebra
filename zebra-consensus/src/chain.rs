@@ -22,10 +22,22 @@ use zebra_state as zs;
 
 use crate::{
     block::BlockVerifier,
-    block::VerifyBlockError,
-    checkpoint::{CheckpointList, CheckpointVerifier, VerifyCheckpointError},
+    checkpoint::{CheckpointList, CheckpointVerifier},
     BoxError, Config,
 };
+
+/// The bound for each verifier's buffer.
+///
+/// We choose the verifier buffer bound based on the maximum number of
+/// concurrent verifier users, to avoid contention:
+///   - the `ChainSync` component
+///   - the `Inbound` service
+///   - a miner component, which we might add in future, and
+///   - 1 extra slot to avoid contention.
+///
+/// We deliberately add extra slots, because they only cost a small amount of
+/// memory, but missing slots can significantly slow down Zebra.
+const VERIFIER_BUFFER_BOUND: usize = 4;
 
 /// The chain verifier routes requests to either the checkpoint verifier or the
 /// block verifier, depending on the maximum checkpoint height.
@@ -34,8 +46,11 @@ where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
 {
-    block: BlockVerifier<S>,
-    checkpoint: Buffer<CheckpointVerifier<S>, Arc<block::Block>>,
+    // Normally, we erase the types on buffer-wrapped services.
+    // But if we did that here, the block and checkpoint services would be
+    // type-indistinguishable, risking future substitution errors.
+    block_verifier: Buffer<BlockVerifier<S>, Arc<block::Block>>,
+    checkpoint_verifier: Buffer<CheckpointVerifier<S>, Arc<block::Block>>,
     max_checkpoint_height: block::Height,
 }
 
@@ -68,12 +83,12 @@ where
     }
 
     fn call(&mut self, block: Arc<Block>) -> Self::Future {
-        let mut b = self.block.clone();
-        let mut cp = self.checkpoint.clone();
+        let mut block_verifier = self.block_verifier.clone();
+        let mut checkpoint_verifier = self.checkpoint_verifier.clone();
         let max_checkpoint_height = self.max_checkpoint_height;
         async move {
             match block.coinbase_height() {
-                Some(height) if height <= max_checkpoint_height => cp
+                Some(height) if (height <= max_checkpoint_height) => checkpoint_verifier
                     .ready_and()
                     .await
                     .unwrap() // safe because poll_ready is always ok?
@@ -84,7 +99,7 @@ where
 
                 // This also covers blocks with no height, which the block verifier
                 // will reject immediately.
-                _ => b
+                _ => block_verifier
                     .ready_and()
                     .await
                     .unwrap() // safe because poll_ready is always ok?
@@ -142,18 +157,18 @@ where
     };
     tracing::info!(?tip, ?max_checkpoint_height, "initializing chain verifier");
 
-    let block = BlockVerifier::new(network, state_service.clone());
-    let checkpoint = Buffer::new(
-        CheckpointVerifier::from_checkpoint_list(list, tip, state_service),
-        3,
-    );
+    let block_verifier = BlockVerifier::new(network, state_service.clone());
+    let checkpoint_verifier = CheckpointVerifier::from_checkpoint_list(list, tip, state_service);
+
+    let block_verifier = Buffer::new(block_verifier, VERIFIER_BUFFER_BOUND);
+    let checkpoint_verifier = Buffer::new(checkpoint_verifier, VERIFIER_BUFFER_BOUND);
 
     Buffer::new(
         BoxService::new(ChainVerifier {
-            block,
-            checkpoint,
+            block_verifier,
+            checkpoint_verifier,
             max_checkpoint_height,
         }),
-        3,
+        VERIFIER_BUFFER_BOUND,
     )
 }
