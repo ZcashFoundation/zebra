@@ -2,7 +2,7 @@
 mod tests;
 
 use displaydoc::Display;
-use futures::{FutureExt, TryFutureExt};
+use futures::FutureExt;
 use std::{
     future::Future,
     pin::Pin,
@@ -49,11 +49,7 @@ pub enum VerifyChainError {
 
 impl<S> Service<Arc<Block>> for ChainVerifier<S>
 where
-    S: Service<zs::Request, Response = zs::Response, Error = BoxError>
-        + Clone
-        + Send
-        + Sync
-        + 'static,
+    S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Clone + Send + 'static,
     S::Future: Send + 'static,
 {
     type Response = block::Hash;
@@ -118,11 +114,7 @@ pub async fn init<S>(
     mut state_service: S,
 ) -> Buffer<BoxService<Arc<Block>, block::Hash, VerifyChainError>, Arc<Block>>
 where
-    S: Service<zs::Request, Response = zs::Response, Error = BoxError>
-        + Send
-        + Clone
-        + 'static
-        + Sync,
+    S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
 {
     let list = CheckpointList::new(network);

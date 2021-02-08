@@ -39,7 +39,7 @@ mod subsidy;
 mod tests;
 
 /// Asynchronous block verification.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct BlockVerifier<S> {
     /// The network to be verified.
     network: Network,
