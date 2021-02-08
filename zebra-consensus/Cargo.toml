@@ -6,15 +6,19 @@ license = "MIT OR Apache-2.0"
 edition = "2018"
 
 [dependencies]
+#bellman = "0.8"
+bellman = { git = "https://github.com/ZcashFoundation/bellman", rev = "b9737fc0e88c76cfb1e492e207afa222928c0b6d" }
+blake2b_simd = "0.5.11"
+bls12_381 = "0.4.0"
 chrono = "0.4.19"
 displaydoc = "0.1.7"
 jubjub = "0.6.0"
+lazy_static = "1.4.0"
 once_cell = "1.7"
+pairing = "0.19.0"
 rand = "0.7"
 redjubjub = "0.2"
 serde = { version = "1", features = ["serde_derive"] }
-bellman = "0.8"
-bls12_381 = "0.3.1"
 
 futures = "0.3.13"
 futures-util = "0.3.6"
@@ -30,10 +34,7 @@ tower-batch = { path = "../tower-batch/" }
 zebra-chain = { path = "../zebra-chain" }
 zebra-state = { path = "../zebra-state" }
 zebra-script = { path = "../zebra-script" }
-pairing = "0.18.0"
 wagyu-zcash-parameters = "0.2.0"
-lazy_static = "1.4.0"
-blake2b_simd = "0.5.11"
 
 [dev-dependencies]
 color-eyre = "0.5.10"

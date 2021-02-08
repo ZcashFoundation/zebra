@@ -51,7 +51,7 @@ mod checkpoint;
 mod config;
 #[allow(dead_code)]
 mod parameters;
-#[allow(dead_code)] // Remove this once transaction verification is implemented
+// #[allow(dead_code)] // Remove this once transaction verification is implemented
 mod primitives;
 mod script;
 mod transaction;
