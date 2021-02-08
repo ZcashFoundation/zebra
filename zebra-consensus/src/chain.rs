@@ -57,9 +57,9 @@ where
 #[derive(Debug, Display, Error)]
 pub enum VerifyChainError {
     /// block could not be checkpointed
-    Checkpoint(#[source] VerifyCheckpointError),
+    Checkpoint(#[source] BoxError),
     /// block could not be verified
-    Block(#[source] VerifyBlockError),
+    Block(#[source] BoxError),
 }
 
 impl<S> Service<Arc<Block>> for ChainVerifier<S>
@@ -91,7 +91,7 @@ where
                 Some(height) if (height <= max_checkpoint_height) => checkpoint_verifier
                     .ready_and()
                     .await
-                    .unwrap() // safe because poll_ready is always ok?
+                    .map_err(VerifyChainError::Checkpoint)?
                     .call(block)
                     .await
                     .map_err(VerifyChainError::Checkpoint)
@@ -102,7 +102,7 @@ where
                 _ => block_verifier
                     .ready_and()
                     .await
-                    .unwrap() // safe because poll_ready is always ok?
+                    .map_err(VerifyChainError::Block)?
                     .call(block)
                     .await
                     .map_err(VerifyChainError::Block)
