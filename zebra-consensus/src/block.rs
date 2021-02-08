@@ -111,8 +111,8 @@ where
     }
 
     fn call(&mut self, block: Arc<Block>) -> Self::Future {
-        let mut state_service = self.state_service.clone();
-        let mut transaction_verifier = self.transaction_verifier.clone();
+        let state_service = self.state_service.clone();
+        let transaction_verifier = self.transaction_verifier.clone();
         let network = self.network;
 
         // We don't include the block hash, because it's likely already in a parent span
@@ -123,11 +123,12 @@ where
             let hash = block.hash();
             // Check that this block is actually a new block.
             tracing::trace!("checking that block is not already in state");
+
+            // We use a `ServiceExt::oneshot`, so that every state service
+            //  `poll_ready` has a corresponding `call`. See #1593.
             match state_service
-                .ready_and()
-                .await
-                .map_err(|source| VerifyBlockError::Depth { source, hash })?
-                .call(zs::Request::Depth(hash))
+                .clone()
+                .oneshot(zs::Request::Depth(hash))
                 .await
                 .map_err(|source| VerifyBlockError::Depth { source, hash })?
             {
@@ -177,15 +178,15 @@ where
 
             let known_utxos = new_outputs(&block, &transaction_hashes);
             for transaction in &block.transactions {
-                let rsp = transaction_verifier
-                    .ready_and()
-                    .await
-                    .expect("transaction verifier is always ready")
-                    .call(tx::Request::Block {
-                        transaction: transaction.clone(),
-                        known_utxos: known_utxos.clone(),
-                        height,
-                    });
+                let request = tx::Request::Block {
+                    transaction: transaction.clone(),
+                    known_utxos: known_utxos.clone(),
+                    height,
+                };
+
+                // We use a `ServiceExt::oneshot`, so that transaction_verifier
+                // service `poll_ready` has a corresponding `call`. See #1593.
+                let rsp = transaction_verifier.clone().oneshot(request);
                 async_checks.push(rsp);
             }
             tracing::trace!(len = async_checks.len(), "built async tx checks");
@@ -211,11 +212,11 @@ where
                 new_outputs,
                 transaction_hashes,
             };
+
+            // We use a `ServiceExt::oneshot`, so that every state service
+            //  `poll_ready` has a corresponding `call`. See #1593.
             match state_service
-                .ready_and()
-                .await
-                .map_err(VerifyBlockError::Commit)?
-                .call(zs::Request::CommitBlock(prepared_block))
+                .oneshot(zs::Request::CommitBlock(prepared_block))
                 .await
                 .map_err(VerifyBlockError::Commit)?
             {
