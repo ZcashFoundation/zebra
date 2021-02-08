@@ -79,6 +79,7 @@ pub use crate::{
     address_book::AddressBook,
     config::Config,
     isolated::connect_isolated,
+    meta_addr::PeerConnectionState,
     peer_set::init,
     policies::{RetryErrors, RetryLimit},
     protocol::internal::{Request, Response},
