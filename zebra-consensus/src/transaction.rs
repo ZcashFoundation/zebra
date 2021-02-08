@@ -127,7 +127,7 @@ where
         };
 
         let mut redjubjub_verifier = crate::primitives::redjubjub::VERIFIER.clone();
-        let mut script_verifier = self.script_verifier.clone();
+        let script_verifier = self.script_verifier.clone();
         let span = tracing::debug_span!("tx", hash = %tx.hash());
         async move {
             tracing::trace!(?tx);
@@ -161,12 +161,15 @@ where
                             Arc::new(CachedFfiTransaction::new(tx.clone()));
 
                         for input_index in 0..inputs.len() {
-                            let rsp = script_verifier.ready_and().await?.call(script::Request {
+                            let request = script::Request {
                                 upgrade,
                                 known_utxos: known_utxos.clone(),
                                 cached_ffi_transaction: cached_ffi_transaction.clone(),
                                 input_index,
-                            });
+                            };
+                            // We use a `ServiceExt::oneshot`, so that every script_verifier
+                            // service `poll_ready` has a corresponding `call`. See #1593.
+                            let rsp = script_verifier.clone().oneshot(request);
 
                             async_checks.push(rsp);
                         }
