@@ -122,7 +122,7 @@ where
 pub async fn init<S>(
     config: Config,
     network: Network,
-    mut state_service: S,
+    state_service: S,
 ) -> Buffer<BoxService<Arc<Block>, block::Hash, VerifyChainError>, Arc<Block>>
 where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
@@ -137,11 +137,13 @@ where
             .expect("hardcoded checkpoint list extends past sapling activation")
     };
 
+    // Correctness:
+    //
+    // We use `ServiceExt::oneshot` to make sure every `poll_ready` has a
+    // matching `call`. See #1593 for details.
     let tip = match state_service
-        .ready_and()
-        .await
-        .unwrap()
-        .call(zs::Request::Tip)
+        .clone()
+        .oneshot(zs::Request::Tip)
         .await
         .unwrap()
     {
