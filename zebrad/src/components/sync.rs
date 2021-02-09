@@ -351,7 +351,8 @@ where
             })
             .map_err(|e| eyre!(e))?;
 
-        tracing::info!(?block_locator, "trying to obtain new chain tips");
+        tracing::info!("trying to obtain new chain tips");
+        tracing::debug!(?block_locator, "got block locator");
 
         let mut requests = FuturesUnordered::new();
         for _ in 0..FANOUT {
@@ -465,8 +466,8 @@ where
         let tips = std::mem::take(&mut self.prospective_tips);
 
         let mut download_set = HashSet::new();
-        tracing::info!(?tip, "trying to extend chain tips");
         for tip in tips {
+            tracing::info!(?tip, "trying to extend chain tips");
             let mut responses = FuturesUnordered::new();
             for _ in 0..FANOUT {
                 responses.push(
