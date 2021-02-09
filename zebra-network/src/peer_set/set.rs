@@ -424,10 +424,11 @@ where
                     .get_index_mut(index)
                     .expect("preselected index must be valid");
 
-                // `PeerSet` calls `poll_ready` multiple times on its `Client` services.
                 // `Buffer`ed polls can fill up their Buffer reservations, causing hangs.
-                // The next `assert` will make sure the service type is never `Buffer`. #1593
-                assert!(!format!("{:?}", type_of(&service)).contains("Buffer"));
+                // See #1593 for details.
+                assert!(!format!("{:?}", type_of(&service)).contains("Buffer"),
+                    "Clients must not use tower::Buffer, because PeerSet uses 
+                     poll_ready multiple times before each call, which can cause hangs with buffers");
 
                 trace!(preselected_index = index, ?key);
                 match service.poll_ready(cx) {
@@ -481,6 +482,8 @@ where
 
 // Get the type of a variable as a string
 use std::any::type_name;
+// replace with type_name_of_val when it stabilises
+// https://github.com/rust-lang/rust/issues/66359
 fn type_of<T>(_: T) -> &'static str {
     type_name::<T>()
 }
