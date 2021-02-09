@@ -423,6 +423,12 @@ where
                     .ready_services
                     .get_index_mut(index)
                     .expect("preselected index must be valid");
+
+                // `PeerSet` calls `poll_ready` multiple times on its `Client` services.
+                // `Buffer`ed polls can fill up their Buffer reservations, causing hangs.
+                // The next `assert` will make sure the service type is never `Buffer`. #1593
+                assert!(!format!("{:?}", type_of(&service)).contains("Buffer"));
+
                 trace!(preselected_index = index, ?key);
                 match service.poll_ready(cx) {
                     Poll::Ready(Ok(())) => return Poll::Ready(Ok(())),
@@ -471,4 +477,10 @@ where
             _ => self.route_p2c(req),
         }
     }
+}
+
+// Get the type of a variable as a string
+use std::any::type_name;
+fn type_of<T>(_: T) -> &'static str {
+    type_name::<T>()
 }
