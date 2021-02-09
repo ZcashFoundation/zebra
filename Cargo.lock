@@ -206,21 +206,21 @@ checksum = "474a626a67200bd107d44179bb3d4fc61891172d11696609264589be6a0e6a43"
 
 [[package]]
 name = "bellman"
-version = "0.8.1"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7089887635778eabf0038a166f586eee5413fb85c8fa6c9a754914f0f644f49f"
+checksum = "193b2e515c2f2b4547c724dd4d06ee046c95b78a6b2b60e16dd735e4d3b14002"
 dependencies = [
- "bitvec 0.18.4",
+ "bitvec 0.20.1",
  "blake2s_simd",
  "byteorder",
  "crossbeam",
- "ff 0.8.0",
+ "ff 0.9.0",
  "futures 0.1.30",
  "futures-cpupool",
- "group 0.8.0",
+ "group 0.9.0",
  "num_cpus",
- "pairing",
- "rand_core 0.5.1",
+ "pairing 0.19.0",
+ "rand_core 0.6.1",
  "subtle",
 ]
 
@@ -391,7 +391,7 @@ dependencies = [
  "bitvec 0.18.4",
  "ff 0.8.0",
  "group 0.8.0",
- "pairing",
+ "pairing 0.18.0",
  "rand_core 0.5.1",
  "subtle",
 ]
@@ -2073,6 +2073,16 @@ checksum = "4f702cdbee9e0a6272452c20dec82465bc821116598b4eeb63e9a71a69dbf7fd"
 dependencies = [
  "ff 0.8.0",
  "group 0.8.0",
+]
+
+[[package]]
+name = "pairing"
+version = "0.19.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9be899ebf10363f018353dba1baabb7e83145f3683c7b83b73b93b563e3167cc"
+dependencies = [
+ "ff 0.9.0",
+ "group 0.9.0",
 ]
 
 [[package]]
@@ -4019,7 +4029,7 @@ dependencies = [
  "jubjub 0.6.0",
  "metrics",
  "once_cell",
- "pairing",
+ "pairing 0.18.0",
  "rand 0.7.3",
  "redjubjub",
  "serde",
