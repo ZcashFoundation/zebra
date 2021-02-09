@@ -619,7 +619,8 @@ where
     /// Returns `true` if the hash is present in the state, and `false`
     /// if the hash is not present in the state.
     ///
-    /// TODO: handle multiple tips in the state.
+    /// BUG: check if the hash is in any chain (#862)
+    /// Depth only checks the main chain.
     async fn state_contains(&mut self, hash: block::Hash) -> Result<bool, Report> {
         match self
             .state
