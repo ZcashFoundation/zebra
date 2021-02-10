@@ -75,6 +75,7 @@ We follow the [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) format.
 
 We use [the Release Drafter workflow](https://github.com/marketplace/actions/release-drafter) to automatically create a [draft changelog](https://github.com/ZcashFoundation/zebra/releases).
 
+To create the final change log:
 - [ ] Delete any trivial changes
 - [ ] Combine duplicate changes
 - [ ] Edit change descriptions so they are consistent, and make sense to non-developers
