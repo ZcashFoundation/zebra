@@ -432,7 +432,6 @@ where
                     .ready_services
                     .get_index_mut(index)
                     .expect("preselected index must be valid");
-
                 trace!(preselected_index = index, ?key);
                 match service.poll_ready(cx) {
                     Poll::Ready(Ok(())) => return Poll::Ready(Ok(())),
