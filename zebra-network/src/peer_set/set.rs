@@ -406,6 +406,14 @@ where
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        // Using `poll_ready` without `call` fills up `Buffer` reservations, causing hangs.
+        // See #1593 for details.
+        assert!(
+            !type_name::<D::Service>().contains("Buffer"),
+            "Clients must not use tower::Buffer, because PeerSet uses `poll_ready` 
+            multiple times before each `call`, which causes buffer hangs"
+        );
+
         self.poll_background_errors(cx)?;
         // Process peer discovery updates.
         let _ = self.poll_discover(cx)?;
@@ -424,14 +432,6 @@ where
                     .ready_services
                     .get_index_mut(index)
                     .expect("preselected index must be valid");
-
-                // Using `poll_ready` without `call` fills up `Buffer` reservations, causing hangs.
-                // See #1593 for details.
-                assert!(
-                    !type_name::<D::Service>().contains("Buffer"),
-                    "Clients must not use tower::Buffer, because PeerSet uses `poll_ready` 
-                     multiple times before each `call`, which causes buffer hangs"
-                );
 
                 trace!(preselected_index = index, ?key);
                 match service.poll_ready(cx) {
