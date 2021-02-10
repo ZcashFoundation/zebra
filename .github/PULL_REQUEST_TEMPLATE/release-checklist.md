@@ -73,8 +73,7 @@ Merge all these version increments as one commit, by squashing and rebasing the 
 
 We follow the [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) format.
 
-TODO: @dconnoly
-We use an automated tool ([the Release Drafter workflow](https://github.com/marketplace/actions/release-drafter)) to create a [draft changelog](https://github.com/ZcashFoundation/zebra/releases).
+We use [the Release Drafter workflow](https://github.com/marketplace/actions/release-drafter) to automatically create a [draft changelog](https://github.com/ZcashFoundation/zebra/releases).
 
 - [ ] Delete any trivial changes
 - [ ] Combine duplicate changes
