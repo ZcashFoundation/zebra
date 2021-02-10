@@ -1,5 +1,6 @@
 use std::net::SocketAddr;
 use std::{
+    any::type_name,
     collections::HashMap,
     fmt::Debug,
     future::Future,
@@ -424,11 +425,13 @@ where
                     .get_index_mut(index)
                     .expect("preselected index must be valid");
 
-                // `Buffer`ed polls can fill up their Buffer reservations, causing hangs.
+                // Using `poll_ready` without `call` fills up `Buffer` reservations, causing hangs.
                 // See #1593 for details.
-                assert!(!format!("{:?}", type_of(&service)).contains("Buffer"),
-                    "Clients must not use tower::Buffer, because PeerSet uses 
-                     poll_ready multiple times before each call, which can cause hangs with buffers");
+                assert!(
+                    !type_name::<D::Service>().contains("Buffer"),
+                    "Clients must not use tower::Buffer, because PeerSet uses `poll_ready` 
+                     multiple times before each `call`, which causes buffer hangs"
+                );
 
                 trace!(preselected_index = index, ?key);
                 match service.poll_ready(cx) {
@@ -478,12 +481,4 @@ where
             _ => self.route_p2c(req),
         }
     }
-}
-
-// Get the type of a variable as a string
-use std::any::type_name;
-// replace with type_name_of_val when it stabilises
-// https://github.com/rust-lang/rust/issues/66359
-fn type_of<T>(_: T) -> &'static str {
-    type_name::<T>()
 }
