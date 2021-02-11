@@ -9,7 +9,11 @@ use std::sync::Arc;
 /// A response to a network request, represented in internal format.
 #[derive(Clone, Debug)]
 pub enum Response {
-    /// A response with no data.
+    /// Do not send any response to this request.
+    ///
+    /// Either:
+    ///  * the request does not need a response, or
+    ///  * we have no useful data to provide in response to the request.
     Nil,
 
     /// A list of peers, used to respond to `GetPeers`.
