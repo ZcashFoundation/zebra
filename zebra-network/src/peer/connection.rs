@@ -18,7 +18,7 @@ use futures::{
     prelude::*,
     stream::Stream,
 };
-use tokio::time::Sleep;
+use tokio::time::{sleep, Sleep};
 use tower::Service;
 use tracing_futures::Instrument;
 
@@ -29,6 +29,7 @@ use zebra_chain::{
 };
 
 use crate::{
+    constants,
     protocol::{
         external::{types::Nonce, InventoryHash, Message},
         internal::{Request, Response},
@@ -377,11 +378,15 @@ impl State {
                     .instrument(span.clone())
                     .await
                 {
-                    Either::Left((None, _)) => Transition::ExitResponse {
-                        e: PeerError::ConnectionClosed.into(),
-                        tx,
-                    },
-                    Either::Left((Some(Err(e)), _)) => Transition::ExitResponse { e: e.into(), tx },
+                    Either::Left((None, _)) => {
+                        Transition::ExitResponse {
+                            e: PeerError::ConnectionClosed.into(),
+                            tx,
+                        }
+                    }
+                    Either::Left((Some(Err(e)), _)) => {
+                        Transition::ExitResponse { e: e.into(), tx }
+                    }
                     Either::Left((Some(Ok(peer_msg)), _cancel)) => {
                         let request_msg = span.in_scope(|| handler.process_message(peer_msg));
                         // If the message was not consumed, check whether it
@@ -390,8 +395,11 @@ impl State {
                             // do NOT instrument with the request span, this is
                             // independent work
                             match conn.handle_message_as_request(msg).await {
-                                Ok(()) => Transition::AwaitRequest,
-                                Err(e) => Transition::Exit(e.into()),
+                                Ok(()) => {
+                                    Transition::AwaitResponse { tx, handler, span }
+                                    // Transition::AwaitRequest
+                                }
+                                Err(e) => Transition::ExitResponse { e: e.into(), tx },
                             }
                         } else {
                             // Otherwise, check whether the handler is finished
@@ -515,18 +523,22 @@ where
                 .step(&mut self, &mut peer_rx)
                 .await;
 
+            if matches!(transition, Transition::AwaitResponse { .. }) {
+                self.request_timer = Some(sleep(constants::REQUEST_TIMEOUT));
+            }
+
             self.state = match transition.try_into() {
                 Ok(state) => Some(state),
                 Err(e) => {
-                    while let Some(InProgressClientRequest { tx, span, .. }) =
-                        self.client_rx.next().await
-                    {
-                        trace!(
-                            parent: &span,
-                            "sending an error response to a pending request on a failed connection"
-                        );
-                        let _ = tx.send(Err(e.clone()));
-                    }
+                    // while let Some(InProgressClientRequest { tx, span, .. }) =
+                    //     self.client_rx.next().await
+                    // {
+                    //     trace!(
+                    //         parent: &span,
+                    //         "sending an error response to a pending request on a failed connection"
+                    //     );
+                    //     let _ = tx.send(Err(e.clone()));
+                    // }
                     return;
                 }
             }
