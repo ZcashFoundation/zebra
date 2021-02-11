@@ -5,7 +5,7 @@ on: pull_request
 jobs:
 
   test:
-    name: Test on ${{ matrix.os }} with Rust ${{ matrix.rust }}
+    name: Test (+${{ matrix.rust }}) on ${{ matrix.os }}
     # The large timeout is to accommodate Windows builds
     timeout-minutes: 45
     runs-on: ${{ matrix.os }}
@@ -72,7 +72,7 @@ jobs:
         run: cargo build --verbose --no-default-features
 
   build:
-    name: Build on ${{ matrix.os }} with Rust ${{ matrix.rust }}
+    name: Build (+${{ matrix.rust }}) on ${{ matrix.os }}
     timeout-minutes: 30
     runs-on: ${{ matrix.os }}
     strategy:
