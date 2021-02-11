@@ -52,7 +52,7 @@ jobs:
           args: --verbose --manifest-path zebrad/Cargo.toml sync_large_checkpoints_ -- --ignored
 
   build-chain-no-features:
-    name: Build zebra-chain w/o features (+${{ matrix.rust }}) on ubuntu-latest
+    name: Build (+${{ matrix.rust }}) zebra-chain w/o features on ubuntu-latest
     timeout-minutes: 30
     runs-on: ubuntu-latest    
     strategy:
