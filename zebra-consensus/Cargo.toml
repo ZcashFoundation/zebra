@@ -6,9 +6,9 @@ license = "MIT OR Apache-2.0"
 edition = "2018"
 
 [dependencies]
-#bellman = "0.8"
-bellman = { git = "https://github.com/ZcashFoundation/bellman", rev = "b9737fc0e88c76cfb1e492e207afa222928c0b6d" }
 blake2b_simd = "0.5.11"
+#bellman = "0.8"
+bellman = { git = "https://github.com/zkcrypto/bellman", rev = "bd4af09f50a4d020a3672aff37c4f3f2da2bb36b" }
 bls12_381 = "0.4.0"
 chrono = "0.4.19"
 displaydoc = "0.1.7"

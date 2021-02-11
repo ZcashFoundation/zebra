@@ -207,7 +207,7 @@ checksum = "474a626a67200bd107d44179bb3d4fc61891172d11696609264589be6a0e6a43"
 [[package]]
 name = "bellman"
 version = "0.9.0"
-source = "git+https://github.com/ZcashFoundation/bellman?rev=b9737fc0e88c76cfb1e492e207afa222928c0b6d#b9737fc0e88c76cfb1e492e207afa222928c0b6d"
+source = "git+https://github.com/zkcrypto/bellman?rev=bd4af09f50a4d020a3672aff37c4f3f2da2bb36b#bd4af09f50a4d020a3672aff37c4f3f2da2bb36b"
 dependencies = [
  "bitvec 0.20.1",
  "blake2s_simd",
