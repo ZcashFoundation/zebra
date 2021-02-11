@@ -105,7 +105,7 @@ pub static JOINSPLIT_VERIFIER: Lazy<
 > = Lazy::new(|| {
     Fallback::new(
         Batch::new(
-            Verifier::new(PARAMS.sprout.verifiying_key),
+            Verifier::new(PARAMS.sprout.verifying_key),
             super::MAX_BATCH_SIZE,
             super::MAX_BATCH_LATENCY,
         ),
@@ -119,7 +119,7 @@ pub static JOINSPLIT_VERIFIER: Lazy<
         // function (which is possible because it doesn't capture any state).
         tower::service_fn(
             (|item: Item| {
-                ready(item.verify_single(prepare_verifying_key(PARAMS.sprout.verifiying_key)))
+                ready(item.verify_single(prepare_verifying_key(PARAMS.sprout.verifying_key)))
             }) as fn(_) -> _,
         ),
     )
