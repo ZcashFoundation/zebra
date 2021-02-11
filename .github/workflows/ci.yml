@@ -40,13 +40,14 @@ jobs:
           args: --verbose --all
 
   ignored-test:
-    name: Large Tests on ${{ matrix.os }}
+    name: Large Tests (+${{ matrix.rust }}) on ${{ matrix.os }}
     # The large timeout is to accommodate Windows builds
     timeout-minutes: 45
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macOS-latest]
+        rust: [stable, beta]
 
     steps:
       - uses: actions/checkout@v1
@@ -74,7 +75,7 @@ jobs:
         with:
           command: test
           args: --verbose --manifest-path zebrad/Cargo.toml sync_large_checkpoints_ -- --ignored
-  
+
   build-chain-no-features:
     name: Build zebra-chain w/o features on ubuntu-latest
     timeout-minutes: 30
