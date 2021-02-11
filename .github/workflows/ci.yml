@@ -31,13 +31,6 @@ jobs:
         # Windows runners have an unreliable network
         if: matrix.os == 'ubuntu-latest' || matrix.os == 'windows-latest'
         run: echo "ZEBRA_SKIP_NETWORK_TESTS=1" >> $GITHUB_ENV
-      - name: Run tests
-        env:
-          RUST_BACKTRACE: full
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --verbose --all
       # Explicitly run any tests that are usually #[ignored], modulo ZEBRA_SKIP_NETWORK_TESTS
       - name: Run zebrad large sync tests
         env:
@@ -46,6 +39,13 @@ jobs:
         with:
           command: test
           args: --verbose --manifest-path zebrad/Cargo.toml sync_large_checkpoints_ -- --ignored
+      - name: Run tests
+        env:
+          RUST_BACKTRACE: full
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --verbose --all
 
   build-chain-no-features:
     name: Build zebra-chain w/o features on ubuntu-latest
