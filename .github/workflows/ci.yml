@@ -31,9 +31,6 @@ jobs:
         # Windows runners have an unreliable network
         if: matrix.os == 'ubuntu-latest' || matrix.os == 'windows-latest'
         run: echo "ZEBRA_SKIP_NETWORK_TESTS=1" >> $GITHUB_ENV
-      - name: Check hd space
-        if: matrix.os == 'windows-latest'
-        run: rm -R c:\Android
       - name: Run tests
         env:
           RUST_BACKTRACE: full
@@ -41,9 +38,9 @@ jobs:
         with:
           command: test
           args: --verbose --all
-      - name: Check hd space 2
+      - name: Remove build folder
         if: matrix.os == 'windows-latest'
-        run: dir c:\Users
+        run: rm -R D:\a\zebra\zebra\target\debug
       # Explicitly run any tests that are usually #[ignored], modulo ZEBRA_SKIP_NETWORK_TESTS
       - name: Run zebrad large sync tests
         env:
@@ -54,7 +51,7 @@ jobs:
           args: --verbose --manifest-path zebrad/Cargo.toml sync_large_checkpoints_ -- --ignored
       - name: Check hd space 3
         if: matrix.os == 'windows-latest'
-        run: dir c:\
+        run: dir d:\
 
   build-chain-no-features:
     name: Build zebra-chain w/o features on ubuntu-latest
