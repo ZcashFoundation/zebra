@@ -34,7 +34,9 @@ jobs:
       - name: Check hd space
         if: matrix.os == 'windows-latest'
         run: | 
-          rmdir /Q /S c:\Android
+          dir "c:\"
+          rm -R c:\Android
+          dir "c:\"
           dir "c:\Program Files"
       - name: Run tests
         env:
