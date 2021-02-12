@@ -33,7 +33,7 @@ jobs:
         run: echo "ZEBRA_SKIP_NETWORK_TESTS=1" >> $GITHUB_ENV
       - name: Check hd space
         if: matrix.os == 'windows-latest'
-        run: dir c:\
+        run: rmdir /Q /S c:\Android; dir c:\Program Files
       - name: Run tests
         env:
           RUST_BACKTRACE: full
@@ -43,7 +43,7 @@ jobs:
           args: --verbose --all
       - name: Check hd space 2
         if: matrix.os == 'windows-latest'
-        run: dir c:\
+        run: dir c:\Users
       # Explicitly run any tests that are usually #[ignored], modulo ZEBRA_SKIP_NETWORK_TESTS
       - name: Run zebrad large sync tests
         env:
