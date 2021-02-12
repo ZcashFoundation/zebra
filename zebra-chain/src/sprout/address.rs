@@ -74,9 +74,7 @@ impl ZcashDeserialize for SproutShieldedAddress {
         let network = match version_bytes {
             magics::MAINNET => Network::Mainnet,
             magics::TESTNET => Network::Testnet,
-            _ => panic!(SerializationError::Parse(
-                "bad sprout shielded addr version/type",
-            )),
+            _ => panic!("SerializationError: bad sprout shielded addr version/type"),
         };
 
         Ok(SproutShieldedAddress {
