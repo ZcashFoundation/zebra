@@ -33,11 +33,7 @@ jobs:
         run: echo "ZEBRA_SKIP_NETWORK_TESTS=1" >> $GITHUB_ENV
       - name: Check hd space
         if: matrix.os == 'windows-latest'
-        run: | 
-          dir "c:\"
-          rm -R c:\Android
-          dir "c:\"
-          dir "c:\Program Files"
+        run: rm -R c:\Android
       - name: Run tests
         env:
           RUST_BACKTRACE: full
