@@ -7,7 +7,7 @@ jobs:
   test:
     name: Test on ${{ matrix.os }}
     # The large timeout is to accommodate Windows builds
-    timeout-minutes: 45
+    timeout-minutes: 60
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -38,7 +38,8 @@ jobs:
         with:
           command: test
           args: --verbose --all
-      - name: Remove build folder
+      # we need to make some space in windows: #1651
+      - name: Remove previous run build folder
         if: matrix.os == 'windows-latest'
         run: rm -R D:\a\zebra\zebra\target\debug
       # Explicitly run any tests that are usually #[ignored], modulo ZEBRA_SKIP_NETWORK_TESTS
@@ -49,9 +50,6 @@ jobs:
         with:
           command: test
           args: --verbose --manifest-path zebrad/Cargo.toml sync_large_checkpoints_ -- --ignored
-      - name: Check hd space 3
-        if: matrix.os == 'windows-latest'
-        run: dir d:\
 
   build-chain-no-features:
     name: Build zebra-chain w/o features on ubuntu-latest
