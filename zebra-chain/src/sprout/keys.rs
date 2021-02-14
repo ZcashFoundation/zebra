@@ -89,9 +89,7 @@ impl ZcashDeserialize for SpendingKey {
         let network = match version_bytes {
             sk_magics::MAINNET => Network::Mainnet,
             sk_magics::TESTNET => Network::Testnet,
-            _ => panic!(SerializationError::Parse(
-                "bad sprout spending key version/type",
-            )),
+            _ => panic!("SerializationError: bad sprout spending key version/type"),
         };
 
         Ok(SpendingKey {
@@ -277,9 +275,7 @@ impl ZcashDeserialize for IncomingViewingKey {
         let network = match version_bytes {
             ivk_magics::MAINNET => Network::Mainnet,
             ivk_magics::TESTNET => Network::Testnet,
-            _ => panic!(SerializationError::Parse(
-                "bad sprout incoming viewing key network",
-            )),
+            _ => panic!("SerializationError: bad sprout incoming viewing key network"),
         };
 
         Ok(IncomingViewingKey {
