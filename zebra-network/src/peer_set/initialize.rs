@@ -194,10 +194,9 @@ where
     S::Future: Send + 'static,
 {
     info!(?initial_peers, "Connecting to initial peer set");
-    let mut handshakes = initial_peers
-        .iter()
-        .map(|request| connector.clone().oneshot(*request))
-        .collect::<futures::stream::FuturesUnordered<_>>();
+    use tower::util::CallAllUnordered;
+    let addr_stream = futures::stream::iter(initial_peers.into_iter());
+    let mut handshakes = CallAllUnordered::new(connector, addr_stream);
 
     while let Some(handshake_result) = handshakes.next().await {
         tx.send(handshake_result).await?;
