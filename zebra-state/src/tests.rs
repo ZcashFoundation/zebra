@@ -151,10 +151,10 @@ fn test_block_locator_heights() {
             "locators must end with the specified final height"
         );
         assert!(height - final_height.0 <= constants::MAX_BLOCK_REORG_HEIGHT,
-                    format!("locator for {} must not be more than the maximum reorg height {} below the tip, but {} is {} blocks below the tip",
-                         height,
-                         constants::MAX_BLOCK_REORG_HEIGHT,
-                         final_height.0,
-                         height - final_height.0));
+                    "locator for {} must not be more than the maximum reorg height {} below the tip, but {} is {} blocks below the tip",
+                    height,
+                    constants::MAX_BLOCK_REORG_HEIGHT,
+                    final_height.0,
+                    height - final_height.0);
     }
 }
