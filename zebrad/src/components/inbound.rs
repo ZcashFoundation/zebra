@@ -247,7 +247,11 @@ impl Service<zn::Request> for Inbound {
             zn::Request::BlocksByHash(hashes) => {
                 // Correctness:
                 //
-                // We can't use `call_all` here, because it leaks buffer slots:
+                // We can't use `call_all` here, because it can hold one buffer slot per concurrent
+                // future, until the `CallAll` struct is dropped. We can't hold those slots in this
+                // future because:
+                // * we're not sure when the returned future will complete, and
+                // * we don't limit how many returned futures can be concurrently running
                 // https://github.com/tower-rs/tower/blob/master/tower/src/util/call_all/common.rs#L112
                 use futures::stream::TryStreamExt;
                 hashes
