@@ -100,6 +100,7 @@ where
             transparent::Input::PrevOut { outpoint, .. } => {
                 let outpoint = *outpoint;
 
+                // Avoid calling the state service if the utxo is already known
                 let span = tracing::trace_span!("script", ?outpoint);
                 let query =
                     span.in_scope(|| self.state.call(zebra_state::Request::AwaitUtxo(outpoint)));
