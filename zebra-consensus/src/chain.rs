@@ -82,7 +82,10 @@ where
         // The chain verifier holds one slot in each verifier, for each concurrent task.
         // Therefore, any shared buffers or batches polled by these verifiers should double
         // their bounds. (For example, the state service buffer.)
-        ready!(self.checkpoint.poll_ready(cx).map_err(VerifyChainError::Checkpoint))?;
+        ready!(self
+            .checkpoint
+            .poll_ready(cx)
+            .map_err(VerifyChainError::Checkpoint))?;
         ready!(self.block.poll_ready(cx).map_err(VerifyChainError::Block))?;
         Poll::Ready(Ok(()))
     }
