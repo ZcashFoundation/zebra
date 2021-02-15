@@ -27,6 +27,19 @@ use crate::{
     BoxError, Config,
 };
 
+/// The bound for the chain verifier's buffer.
+///
+/// We choose the verifier buffer bound based on the maximum number of
+/// concurrent verifier users, to avoid contention:
+///   - the `ChainSync` component
+///   - the `Inbound` service
+///   - a miner component, which we might add in future, and
+///   - 1 extra slot to avoid contention.
+///
+/// We deliberately add extra slots, because they only cost a small amount of
+/// memory, but missing slots can significantly slow down Zebra.
+const VERIFIER_BUFFER_BOUND: usize = 4;
+
 /// The chain verifier routes requests to either the checkpoint verifier or the
 /// block verifier, depending on the maximum checkpoint height.
 struct ChainVerifier<S>
@@ -140,6 +153,6 @@ where
             checkpoint,
             max_checkpoint_height,
         }),
-        3,
+        VERIFIER_BUFFER_BOUND,
     )
 }
