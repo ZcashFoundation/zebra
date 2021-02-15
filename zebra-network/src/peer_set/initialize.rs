@@ -194,6 +194,12 @@ where
     S::Future: Send + 'static,
 {
     info!(?initial_peers, "Connecting to initial peer set");
+    // ## Correctness:
+    //
+    // Each `CallAll` can hold one `Buffer` or `Batch` reservation for
+    // an indefinite period. We can use `CallAllUnordered` without filling
+    // the underlying `Inbound` buffer, because we immediately drive this
+    // single `CallAll` to completion, and handshakes have a short timeout.
     use tower::util::CallAllUnordered;
     let addr_stream = futures::stream::iter(initial_peers.into_iter());
     let mut handshakes = CallAllUnordered::new(connector, addr_stream);
