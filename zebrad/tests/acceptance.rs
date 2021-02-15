@@ -37,9 +37,9 @@ use zebrad::config::ZebradConfig;
 
 /// The amount of time we wait after launching `zebrad`.
 ///
-/// Previously, this value was 1 second, which caused occasional
-/// `tracing_endpoint` test failures on some machines.
-const LAUNCH_DELAY: Duration = Duration::from_secs(3);
+/// Previously, this value was 3 seconds, which caused rare
+/// metrics or tracing test failures in Windows CI.
+const LAUNCH_DELAY: Duration = Duration::from_secs(10);
 
 fn default_test_config() -> Result<ZebradConfig> {
     let auto_port_ipv4_local = zebra_network::Config {
@@ -1059,7 +1059,7 @@ async fn tracing_endpoint() -> Result<()> {
 /// It is expected that the first node spawned will get exclusive use of the port.
 /// The second node will panic with the Zcash listener conflict hint added in #1535.
 #[test]
-fn zcash_listener_conflict() -> Result<()> {
+fn zebra_zcash_listener_conflict() -> Result<()> {
     zebra_test::init();
 
     // [Note on port conflict](#Note on port conflict)
@@ -1087,7 +1087,7 @@ fn zcash_listener_conflict() -> Result<()> {
 /// exclusive use of the port. The second node will panic with the Zcash metrics
 /// conflict hint added in #1535.
 #[test]
-fn zcash_metrics_conflict() -> Result<()> {
+fn zebra_metrics_conflict() -> Result<()> {
     zebra_test::init();
 
     // [Note on port conflict](#Note on port conflict)
@@ -1115,7 +1115,7 @@ fn zcash_metrics_conflict() -> Result<()> {
 /// exclusive use of the port. The second node will panic with the Zcash tracing
 /// conflict hint added in #1535.
 #[test]
-fn zcash_tracing_conflict() -> Result<()> {
+fn zebra_tracing_conflict() -> Result<()> {
     zebra_test::init();
 
     // [Note on port conflict](#Note on port conflict)
@@ -1142,7 +1142,7 @@ fn zcash_tracing_conflict() -> Result<()> {
 /// listener ports. The first node should get exclusive access to the database.
 /// The second node will panic with the Zcash state conflict hint added in #1535.
 #[test]
-fn zcash_state_conflict() -> Result<()> {
+fn zebra_state_conflict() -> Result<()> {
     zebra_test::init();
 
     // A persistent config has a fixed temp state directory, but asks the OS to
