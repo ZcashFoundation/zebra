@@ -38,7 +38,7 @@ use zebrad::config::ZebradConfig;
 /// The amount of time we wait after launching `zebrad`.
 ///
 /// Previously, this value was 3 seconds, which caused rare
-/// `metrics_conflict` test failures in Windows CI.
+/// metrics or tracing test failures in Windows CI.
 const LAUNCH_DELAY: Duration = Duration::from_secs(10);
 
 fn default_test_config() -> Result<ZebradConfig> {
