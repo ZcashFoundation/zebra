@@ -71,15 +71,20 @@ where
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        match (self.checkpoint.poll_ready(cx), self.block.poll_ready(cx)) {
-            // First, fail if either service fails.
-            (Poll::Ready(Err(e)), _) => Poll::Ready(Err(VerifyChainError::Checkpoint(e))),
-            (_, Poll::Ready(Err(e))) => Poll::Ready(Err(VerifyChainError::Block(e))),
-            // Second, we're unready if either service is unready.
-            (Poll::Pending, _) | (_, Poll::Pending) => Poll::Pending,
-            // Finally, we're ready if both services are ready and OK.
-            (Poll::Ready(Ok(())), Poll::Ready(Ok(()))) => Poll::Ready(Ok(())),
-        }
+        // Correctness:
+        //
+        // We acquire checkpoint readiness before block readiness, to avoid an unlikely
+        // hang during the checkpoint to block verifier transition. If the checkpoint and
+        // block verifiers are contending for the same buffer/batch, we want the checkpoint
+        // verifier to win, so that checkpoint verification completes, and block verification
+        // can start. (Buffers and batches have multiple slots, so this contention is unlikely.)
+        use futures::ready;
+        // The chain verifier holds one slot in each verifier, for each concurrent task.
+        // Therefore, any shared buffers or batches polled by these verifiers should double
+        // their bounds. (For example, the state service buffer.)
+        ready!(self.checkpoint.poll_ready(cx).map_err(VerifyChainError::Checkpoint))?;
+        ready!(self.block.poll_ready(cx).map_err(VerifyChainError::Block))?;
+        Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, block: Arc<Block>) -> Self::Future {
