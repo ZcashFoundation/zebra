@@ -1,0 +1,70 @@
+name: Docs
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+
+  build:
+    name: Build and Deploy Docs (+beta)
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout the source code
+      uses: actions/checkout@master
+
+    - name: Install latest beta
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: beta
+        override: true
+
+    - name: Install mdbook
+      run: |
+        cd book
+        curl -L https://github.com/rust-lang/mdBook/releases/download/v0.4.5/mdbook-v0.4.5-x86_64-unknown-linux-gnu.tar.gz | tar xz
+        # Add the book directory to the $PATH
+        echo "$GITHUB_WORKSPACE/book" >> $GITHUB_PATH
+    - name: Build Zebra book
+      run: |
+        mdbook build book/
+    - name: Deploy Zebra book to firebase
+      uses: w9jds/firebase-action@v2.0.0
+      with:
+        args: deploy
+      env:
+        FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+        PROJECT_PATH: book/
+        PROJECT_ID: zebra-book
+
+    - name: Build external docs
+      run: |
+        # Exclude zebra-utils, it is not for library or app users
+        cargo doc --no-deps --workspace --exclude zebra-utils
+      env:
+        RUSTDOCFLAGS: "--html-in-header katex-header.html"
+
+    - name: Deploy external docs to firebase
+      uses: w9jds/firebase-action@v2.0.0
+      with:
+        args: deploy
+      env:
+        FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+        PROJECT_ID: zealous-zebra
+
+    - name: Build internal docs
+      run: |
+        cargo doc --no-deps --document-private-items
+      env:
+        RUSTDOCFLAGS: "--html-in-header katex-header.html"
+
+    - name: Deploy external docs to firebase
+      uses: w9jds/firebase-action@v2.0.0
+      with:
+        args: deploy
+      env:
+        FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+PROJECT_ID: zebra-doc-internal
+
