@@ -1,7 +1,7 @@
 name: CI
 
 on:
-  workflow_dispatch: 
+  workflow_dispatch:
   pull_request:
   push:
     branches:
@@ -20,6 +20,7 @@ jobs:
         rust: [stable, beta]
     env:
       CARGO_INCREMENTAL: 0
+      RUST_BACKTRACE: full
 
     steps:
       - uses: actions/checkout@v1
@@ -39,17 +40,18 @@ jobs:
         # Windows runners have an unreliable network
         if: matrix.os == 'ubuntu-latest' || matrix.os == 'windows-latest'
         run: echo "ZEBRA_SKIP_NETWORK_TESTS=1" >> $GITHUB_ENV
+      - name: Show env vars
+        run: |
+            echo "ZEBRA_SKIP_NETWORK_TESTS=${{ env.ZEBRA_SKIP_NETWORK_TESTS }}"
+            echo "CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}"
+            echo "RUST_BACKTRACE=${{ env.RUST_BACKTRACE }}"
       - name: Run tests
-        env:
-          RUST_BACKTRACE: full
         uses: actions-rs/cargo@v1
         with:
           command: test
           args: --verbose --all
       # Explicitly run any tests that are usually #[ignored], modulo ZEBRA_SKIP_NETWORK_TESTS
       - name: Run zebrad large sync tests
-        env:
-          RUST_BACKTRACE: full
         uses: actions-rs/cargo@v1
         with:
           command: test
@@ -62,6 +64,10 @@ jobs:
     strategy:
       matrix:
         rust: [stable, beta]
+    env:
+      CARGO_INCREMENTAL: 0
+      RUST_BACKTRACE: full
+
 
     steps:
       - uses: actions/checkout@v1
@@ -73,10 +79,13 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: fetch
+      - name: Show env vars
+        run: |
+            echo "ZEBRA_SKIP_NETWORK_TESTS=${{ env.ZEBRA_SKIP_NETWORK_TESTS }}"
+            echo "CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}"
+            echo "RUST_BACKTRACE=${{ env.RUST_BACKTRACE }}"
       - name: Run build without features enabled
         working-directory: ./zebra-chain
-        env:
-          RUST_BACKTRACE: full
         run: cargo build --verbose --no-default-features
 
   build:
@@ -87,6 +96,9 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macOS-latest]
         rust: [stable, beta]
+    env:
+      CARGO_INCREMENTAL: 0
+      RUST_BACKTRACE: full
 
     steps:
       - uses: actions/checkout@v1
@@ -101,6 +113,11 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: fetch
+      - name: Show env vars
+        run: |
+            echo "ZEBRA_SKIP_NETWORK_TESTS=${{ env.ZEBRA_SKIP_NETWORK_TESTS }}"
+            echo "CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}"
+            echo "RUST_BACKTRACE=${{ env.RUST_BACKTRACE }}"
       - name: Build
         uses: actions-rs/cargo@v1
         with:
@@ -111,6 +128,10 @@ jobs:
     name: Clippy (stable)
     timeout-minutes: 30
     runs-on: ubuntu-latest
+    env:
+      CARGO_INCREMENTAL: 0
+      RUST_BACKTRACE: full
+
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
@@ -118,6 +139,11 @@ jobs:
           toolchain: stable
           components: clippy
           override: true
+      - name: Show env vars
+        run: |
+            echo "ZEBRA_SKIP_NETWORK_TESTS=${{ env.ZEBRA_SKIP_NETWORK_TESTS }}"
+            echo "CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}"
+            echo "RUST_BACKTRACE=${{ env.RUST_BACKTRACE }}"
       - name: Run clippy
         uses: actions-rs/clippy-check@v1
         with:
@@ -129,6 +155,10 @@ jobs:
     name: Rustfmt
     timeout-minutes: 30
     runs-on: ubuntu-latest
+    env:
+      CARGO_INCREMENTAL: 0
+      RUST_BACKTRACE: full
+
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
@@ -136,6 +166,11 @@ jobs:
           toolchain: stable
           override: true
       - run: rustup component add rustfmt
+      - name: Show env vars
+        run: |
+            echo "ZEBRA_SKIP_NETWORK_TESTS=${{ env.ZEBRA_SKIP_NETWORK_TESTS }}"
+            echo "CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}"
+            echo "RUST_BACKTRACE=${{ env.RUST_BACKTRACE }}"
       - uses: actions-rs/cargo@v1
         with:
           command: fmt
