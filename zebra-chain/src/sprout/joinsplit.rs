@@ -39,7 +39,7 @@ pub struct JoinSplit<P: ZkSnarkProof> {
     /// JoinSplit description.
     pub random_seed: [u8; 32],
     /// A message authentication tag.
-    pub vmacs: [note::MAC; 2],
+    pub vmacs: [note::Mac; 2],
     /// A ZK JoinSplit proof, either a
     /// [`Groth16Proof`](crate::primitives::Groth16Proof) or a
     /// [`Bctv14Proof`](crate::primitives::Bctv14Proof).
@@ -86,8 +86,8 @@ impl<P: ZkSnarkProof> ZcashDeserialize for JoinSplit<P> {
             ephemeral_key: x25519_dalek::PublicKey::from(reader.read_32_bytes()?),
             random_seed: reader.read_32_bytes()?,
             vmacs: [
-                note::MAC::zcash_deserialize(&mut reader)?,
-                note::MAC::zcash_deserialize(&mut reader)?,
+                note::Mac::zcash_deserialize(&mut reader)?,
+                note::Mac::zcash_deserialize(&mut reader)?,
             ],
             zkproof: P::zcash_deserialize(&mut reader)?,
             enc_ciphertexts: [
