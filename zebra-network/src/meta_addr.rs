@@ -22,7 +22,7 @@ use crate::protocol::types::PeerServices;
 /// [`AddressBook::maybe_connected_peers`] and
 /// [`AddressBook::reconnection_peers`].
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum PeerConnectionState {
+pub enum PeerAddrState {
     /// The peer has sent us a valid message.
     ///
     /// Peers remain in this state, even if they stop responding to requests.
@@ -42,19 +42,19 @@ pub enum PeerConnectionState {
     AttemptPending,
 }
 
-impl Default for PeerConnectionState {
+impl Default for PeerAddrState {
     fn default() -> Self {
-        PeerConnectionState::NeverAttempted
+        PeerAddrState::NeverAttempted
     }
 }
 
-impl Ord for PeerConnectionState {
-    /// `PeerConnectionState`s are sorted in approximate reconnection attempt
+impl Ord for PeerAddrState {
+    /// `PeerAddrState`s are sorted in approximate reconnection attempt
     /// order, ignoring liveness.
     ///
     /// See [`CandidateSet`] and [`MetaAddr::cmp`] for more details.
     fn cmp(&self, other: &Self) -> Ordering {
-        use PeerConnectionState::*;
+        use PeerAddrState::*;
         match (self, other) {
             (Responded, Responded)
             | (NeverAttempted, NeverAttempted)
@@ -73,7 +73,7 @@ impl Ord for PeerConnectionState {
     }
 }
 
-impl PartialOrd for PeerConnectionState {
+impl PartialOrd for PeerAddrState {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
@@ -120,7 +120,7 @@ pub struct MetaAddr {
     pub last_seen: DateTime<Utc>,
 
     /// The outcome of our most recent communication attempt with this peer.
-    pub last_connection_state: PeerConnectionState,
+    pub last_connection_state: PeerAddrState,
 }
 
 impl MetaAddr {
@@ -144,7 +144,7 @@ impl Ord for MetaAddr {
     /// See [`CandidateSet`] for more details.
     fn cmp(&self, other: &Self) -> Ordering {
         use std::net::IpAddr::{V4, V6};
-        use PeerConnectionState::*;
+        use PeerAddrState::*;
 
         let oldest_first = self.last_seen.cmp(&other.last_seen);
         let newest_first = oldest_first.reverse();
@@ -216,7 +216,7 @@ mod tests {
             services,
             addr,
             last_seen: Utc.timestamp(1_573_680_222, 0),
-            last_connection_state: PeerConnectionState::Responded,
+            last_connection_state: PeerAddrState::Responded,
         }
         .sanitize();
 

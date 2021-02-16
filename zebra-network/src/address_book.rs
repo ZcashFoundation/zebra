@@ -10,7 +10,7 @@ use std::{
 use chrono::{DateTime, Utc};
 use tracing::Span;
 
-use crate::{constants, types::MetaAddr, PeerConnectionState};
+use crate::{constants, types::MetaAddr, PeerAddrState};
 
 /// A database of peers, their advertised services, and information on when they
 /// were last seen.
@@ -127,7 +127,7 @@ impl AddressBook {
             None => false,
             // NeverAttempted, Failed, and AttemptPending peers should never be live
             Some(peer) => {
-                peer.last_connection_state == PeerConnectionState::Responded
+                peer.last_connection_state == PeerAddrState::Responded
                     && peer.last_seen > AddressBook::liveness_cutoff_time()
             }
         }
@@ -139,7 +139,7 @@ impl AddressBook {
         let _guard = self.span.enter();
         match self.by_addr.get(addr) {
             None => false,
-            Some(peer) => peer.last_connection_state == PeerConnectionState::AttemptPending,
+            Some(peer) => peer.last_connection_state == PeerAddrState::AttemptPending,
         }
     }
 
@@ -176,10 +176,7 @@ impl AddressBook {
     }
 
     /// Return an iterator over all the peers in `state`, in arbitrary order.
-    pub fn state_peers(
-        &'_ self,
-        state: PeerConnectionState,
-    ) -> impl Iterator<Item = MetaAddr> + '_ {
+    pub fn state_peers(&'_ self, state: PeerAddrState) -> impl Iterator<Item = MetaAddr> + '_ {
         let _guard = self.span.enter();
 
         self.by_addr
@@ -226,14 +223,10 @@ impl AddressBook {
     fn update_metrics(&self) {
         let _guard = self.span.enter();
 
-        let responded = self.state_peers(PeerConnectionState::Responded).count();
-        let never_attempted = self
-            .state_peers(PeerConnectionState::NeverAttempted)
-            .count();
-        let failed = self.state_peers(PeerConnectionState::Failed).count();
-        let pending = self
-            .state_peers(PeerConnectionState::AttemptPending)
-            .count();
+        let responded = self.state_peers(PeerAddrState::Responded).count();
+        let never_attempted = self.state_peers(PeerAddrState::NeverAttempted).count();
+        let failed = self.state_peers(PeerAddrState::Failed).count();
+        let pending = self.state_peers(PeerAddrState::AttemptPending).count();
 
         let recently_live = self.recently_live_peers().count();
         let recently_stopped_responding = responded

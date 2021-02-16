@@ -4,12 +4,12 @@ use chrono::Utc;
 use futures::stream::{FuturesUnordered, StreamExt};
 use tower::{Service, ServiceExt};
 
-use crate::{types::MetaAddr, AddressBook, BoxError, PeerConnectionState, Request, Response};
+use crate::{types::MetaAddr, AddressBook, BoxError, PeerAddrState, Request, Response};
 
 /// The `CandidateSet` manages the `PeerSet`'s peer reconnection attempts.
 ///
 /// It divides the set of all possible candidate peers into disjoint subsets,
-/// using the `PeerConnectionState`:
+/// using the `PeerAddrState`:
 ///
 /// 1. `Responded` peers, which we previously connected to. If we have not received
 ///    any messages from a `Responded` peer within a cutoff time, we assume that it
@@ -54,7 +54,7 @@ use crate::{types::MetaAddr, AddressBook, BoxError, PeerConnectionState, Request
 ///  │ #1 oldest_first        #2 newest_first        #3 oldest_first ││
 ///  │        │                      │                      │        ││
 ///  │        ├──────────────────────┴──────────────────────┘        ││
-///  │        │      disjoint `PeerConnectionState`s                 ││
+///  │        │         disjoint `PeerAddrState`s                    ││
 ///  ├────────┼──────────────────────────────────────────────────────┘│
 ///  │        ▼                                                       │
 ///  │        Λ                                                       │
@@ -193,7 +193,7 @@ where
         let mut reconnect = peer_set_guard.reconnection_peers().next()?;
 
         reconnect.last_seen = Utc::now();
-        reconnect.last_connection_state = PeerConnectionState::AttemptPending;
+        reconnect.last_connection_state = PeerAddrState::AttemptPending;
         peer_set_guard.update(reconnect);
 
         Some(reconnect)
@@ -202,7 +202,7 @@ where
     /// Mark `addr` as a failed peer.
     pub fn report_failed(&mut self, mut addr: MetaAddr) {
         addr.last_seen = Utc::now();
-        addr.last_connection_state = PeerConnectionState::Failed;
+        addr.last_connection_state = PeerAddrState::Failed;
         self.peer_set.lock().unwrap().update(addr);
     }
 }
