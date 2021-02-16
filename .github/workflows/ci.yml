@@ -34,11 +34,10 @@ jobs:
       - name: Install LLVM on Windows
         if: matrix.os == 'windows-latest'
         run: choco install llvm -y
-      - name: Run network tests only on macOS
-        # Only macOS runners have all network capabilities:
-        # https://docs.github.com/en/actions/reference/specifications-for-github-hosted-runners#cloud-hosts-for-github-hosted-runners
-        # Tests that only check launch behaviour or local port binding are not skipped in any platform.
-        if: matrix.os != 'macOS-latest'
+      - name: Skip network tests on Ubuntu and Windows
+        # Ubuntu runners don't have network or DNS configured during test steps
+        # Windows runners have an unreliable network
+        if: matrix.os == 'ubuntu-latest' || matrix.os == 'windows-latest'
         run: echo "ZEBRA_SKIP_NETWORK_TESTS=1" >> $GITHUB_ENV
       - name: Run tests
         env:
