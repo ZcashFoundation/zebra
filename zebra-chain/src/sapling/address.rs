@@ -5,7 +5,7 @@ use std::{
     io::{self, Read, Write},
 };
 
-use bech32::{self, FromBase32, ToBase32};
+use bech32::{self, FromBase32, ToBase32, Variant};
 
 #[cfg(test)]
 use proptest::prelude::*;
@@ -58,7 +58,7 @@ impl fmt::Display for Address {
             _ => human_readable_parts::TESTNET,
         };
 
-        bech32::encode_to_fmt(f, hrp, bytes.get_ref().to_base32()).unwrap()
+        bech32::encode_to_fmt(f, hrp, bytes.get_ref().to_base32(), Variant::Bech32).unwrap()
     }
 }
 
@@ -67,7 +67,7 @@ impl std::str::FromStr for Address {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match bech32::decode(s) {
-            Ok((hrp, bytes)) => {
+            Ok((hrp, bytes, Variant::Bech32)) => {
                 let mut decoded_bytes = io::Cursor::new(Vec::<u8>::from_base32(&bytes).unwrap());
 
                 let mut diversifier_bytes = [0; 11];
@@ -84,7 +84,7 @@ impl std::str::FromStr for Address {
                     transmission_key: keys::TransmissionKey::from(transmission_key_bytes),
                 })
             }
-            Err(_) => Err(SerializationError::Parse("bech32 decoding error")),
+            _ => Err(SerializationError::Parse("bech32 decoding error")),
         }
     }
 }
