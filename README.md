@@ -237,7 +237,7 @@ communication between stateful components is handled internally by
 
 ## Security
 
-Zebra has a [responsible disclosure policy](https://github.com/ZcashFoundation/zebra/blob/main/responsible_disclosure.md), which we encourage security researchers to follow.
+Zebra has a [responsible disclosure policy](https://github.com/ZcashFoundation/zebra/blob/main/SECURITY.md), which we encourage security researchers to follow.
 
 ## License
 
