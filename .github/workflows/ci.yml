@@ -12,7 +12,7 @@ jobs:
   test:
     name: Test (+${{ matrix.rust }}) on ${{ matrix.os }}
     # The large timeout is to accommodate Windows builds
-    timeout-minutes: 45
+    timeout-minutes: 60
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -58,12 +58,12 @@ jobs:
 
   build-chain-no-features:
     name: Build (+${{ matrix.rust }}) zebra-chain w/o features on ubuntu-latest
-    timeout-minutes: 30
-    runs-on: ubuntu-latest    
+    timeout-minutes: 60
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         rust: [stable, beta]
-    
+
     steps:
       - uses: actions/checkout@v1
       - uses: actions-rs/toolchain@v1
@@ -82,7 +82,7 @@ jobs:
 
   build:
     name: Build (+${{ matrix.rust }}) on ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 60
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
