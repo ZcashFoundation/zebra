@@ -175,7 +175,7 @@ impl ZcashSerialize for Input {
                 let total_len = height_len + data.as_ref().len();
                 writer.write_compactsize(total_len as u64)?;
                 write_coinbase_height(*height, &mut writer)?;
-                writer.write_all(&data.as_ref()[..])?;
+                writer.write_all(data.as_ref())?;
                 writer.write_u32::<LittleEndian>(*sequence)?;
             }
         }
