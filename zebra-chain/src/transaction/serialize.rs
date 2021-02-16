@@ -204,12 +204,12 @@ impl ZcashDeserialize for Transaction {
             }),
             (2, false) => {
                 // Version 2 transactions use Sprout-on-BCTV14.
-                type OptV2JSD = Option<JoinSplitData<Bctv14Proof>>;
+                type OptV2Jsd = Option<JoinSplitData<Bctv14Proof>>;
                 Ok(Transaction::V2 {
                     inputs: Vec::zcash_deserialize(&mut reader)?,
                     outputs: Vec::zcash_deserialize(&mut reader)?,
                     lock_time: LockTime::zcash_deserialize(&mut reader)?,
-                    joinsplit_data: OptV2JSD::zcash_deserialize(&mut reader)?,
+                    joinsplit_data: OptV2Jsd::zcash_deserialize(&mut reader)?,
                 })
             }
             (3, true) => {
@@ -220,13 +220,13 @@ impl ZcashDeserialize for Transaction {
                     ));
                 }
                 // Version 3 transactions use Sprout-on-BCTV14.
-                type OptV3JSD = Option<JoinSplitData<Bctv14Proof>>;
+                type OptV3Jsd = Option<JoinSplitData<Bctv14Proof>>;
                 Ok(Transaction::V3 {
                     inputs: Vec::zcash_deserialize(&mut reader)?,
                     outputs: Vec::zcash_deserialize(&mut reader)?,
                     lock_time: LockTime::zcash_deserialize(&mut reader)?,
                     expiry_height: block::Height(reader.read_u32::<LittleEndian>()?),
-                    joinsplit_data: OptV3JSD::zcash_deserialize(&mut reader)?,
+                    joinsplit_data: OptV3Jsd::zcash_deserialize(&mut reader)?,
                 })
             }
             (4, true) => {
@@ -237,7 +237,7 @@ impl ZcashDeserialize for Transaction {
                     ));
                 }
                 // Version 4 transactions use Sprout-on-Groth16.
-                type OptV4JSD = Option<JoinSplitData<Groth16Proof>>;
+                type OptV4Jsd = Option<JoinSplitData<Groth16Proof>>;
 
                 // The previous match arms deserialize in one go, because the
                 // internal structure happens to nicely line up with the
@@ -254,7 +254,7 @@ impl ZcashDeserialize for Transaction {
                 let value_balance = (&mut reader).zcash_deserialize_into()?;
                 let mut shielded_spends = Vec::zcash_deserialize(&mut reader)?;
                 let mut shielded_outputs = Vec::zcash_deserialize(&mut reader)?;
-                let joinsplit_data = OptV4JSD::zcash_deserialize(&mut reader)?;
+                let joinsplit_data = OptV4Jsd::zcash_deserialize(&mut reader)?;
 
                 use futures::future::Either::*;
                 let shielded_data = if !shielded_spends.is_empty() {

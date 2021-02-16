@@ -16,7 +16,7 @@ use crate::{
 
 use super::{commitment::CommitmentRandomness, keys::PayingKey};
 
-pub use mac::MAC;
+pub use mac::Mac;
 
 pub use ciphertexts::EncryptedNote;
 
