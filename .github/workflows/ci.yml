@@ -39,7 +39,8 @@ jobs:
         # https://docs.github.com/en/actions/reference/specifications-for-github-hosted-runners#cloud-hosts-for-github-hosted-runners
         # Tests that only check launch behaviour or local port binding are not skipped in any platform.
         if: matrix.os != 'macOS-latest'
-        run: echo "ZEBRA_SKIP_NETWORK_TESTS=1" >> $GITHUB_ENV
+        env:
+          ZEBRA_SKIP_NETWORK_TESTS: 1
       - name: Run tests
         env:
           RUST_BACKTRACE: full
