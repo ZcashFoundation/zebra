@@ -193,7 +193,7 @@ where
     S: Service<SocketAddr, Response = Change<SocketAddr, peer::Client>, Error = BoxError> + Clone,
     S::Future: Send + 'static,
 {
-    info!(?initial_peers, "Connecting to initial peer set");
+    info!(?initial_peers, "connecting to initial peer set");
     // ## Correctness:
     //
     // Each `CallAll` can hold one `Buffer` or `Batch` reservation for
@@ -205,6 +205,10 @@ where
     let mut handshakes = CallAllUnordered::new(connector, addr_stream);
 
     while let Some(handshake_result) = handshakes.next().await {
+        // this is verbose, but it's better than just hanging with no output
+        if let Err(ref e) = handshake_result {
+            info!(?e, "an initial peer connection failed");
+        }
         tx.send(handshake_result).await?;
     }
 
