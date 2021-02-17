@@ -28,9 +28,6 @@ pub enum PeerError {
     /// The remote peer closed the connection.
     #[error("Peer closed connection")]
     ConnectionClosed,
-    /// The local client closed the connection.
-    #[error("Internal client dropped connection")]
-    ConnectionDropped,
     /// The remote peer did not respond to a [`peer::Client`] request in time.
     #[error("Client request timed out")]
     ClientRequestTimeout,
