@@ -12,13 +12,13 @@ impl MetricsEndpoint {
     /// Create the component.
     pub fn new(config: &ZebradConfig) -> Result<Self, FrameworkError> {
         if let Some(addr) = config.metrics.endpoint_addr {
+            info!("Trying to open metrics endpoint at {}...", addr);
             let endpoint_result = metrics_exporter_prometheus::PrometheusBuilder::new()
                 .listen_address(addr)
                 .install();
             match endpoint_result {
-                Ok(endpoint) => {
+                Ok(()) => {
                     info!("Opened metrics endpoint at {}", addr);
-                    endpoint
                 }
                 Err(e) => panic!(
                     "Opening metrics endpoint listener {:?} failed: {:?}. \

@@ -227,6 +227,7 @@ where
     S: Service<(TcpStream, SocketAddr), Response = peer::Client, Error = BoxError> + Clone,
     S::Future: Send + 'static,
 {
+    info!("Trying to open Zcash protocol endpoint at {}...", addr);
     let listener_result = TcpListener::bind(addr).await;
 
     let listener = match listener_result {

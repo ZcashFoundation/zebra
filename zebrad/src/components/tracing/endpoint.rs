@@ -45,6 +45,7 @@ impl TracingEndpoint {
         let service =
             make_service_fn(|_| async { Ok::<_, hyper::Error>(service_fn(request_handler)) });
 
+        info!("Trying to open tracing endpoint at {}...", addr);
         tokio_component
             .rt
             .as_ref()
@@ -53,10 +54,7 @@ impl TracingEndpoint {
                 // try_bind uses the tokio runtime, so we
                 // need to construct it inside the task.
                 let server = match Server::try_bind(&addr) {
-                    Ok(s) => {
-                        info!("Opened tracing endpoint at {}", addr);
-                        s
-                    }
+                    Ok(s) => s,
                     Err(e) => panic!(
                         "Opening tracing endpoint listener {:?} failed: {:?}. \
                          Hint: Check if another zebrad or zcashd process is running. \
@@ -65,6 +63,8 @@ impl TracingEndpoint {
                     ),
                 }
                 .serve(service);
+
+                info!("Opened tracing endpoint at {}", server.local_addr());
 
                 if let Err(e) = server.await {
                     error!("Server error: {}", e);
