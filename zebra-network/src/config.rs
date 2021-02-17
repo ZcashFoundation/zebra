@@ -38,21 +38,27 @@ impl Config {
     /// If DNS resolution fails or times out for all peers, returns an empty list.
     async fn parse_peers(peers: &HashSet<String>) -> HashSet<SocketAddr> {
         use futures::stream::StreamExt;
-        let peer_addresses = peers
-            .iter()
-            .map(|s| Config::resolve_host(s))
-            .collect::<futures::stream::FuturesUnordered<_>>()
-            .concat()
-            .await;
 
-        if peer_addresses.is_empty() {
-            tracing::warn!(
-                ?peers,
-                ?peer_addresses,
-                "empty peer list after DNS resolution"
-            );
-        };
-        peer_addresses
+        loop {
+            let peer_addresses = peers
+                .iter()
+                .map(|s| Config::resolve_host(s))
+                .collect::<futures::stream::FuturesUnordered<_>>()
+                .concat()
+                .await;
+
+            if peer_addresses.is_empty() {
+                tracing::info!(
+                    ?peers,
+                    ?peer_addresses,
+                    "empty peer list after DNS resolution, retrying after {} seconds",
+                    crate::constants::DNS_LOOKUP_TIMEOUT.as_secs()
+                );
+                tokio::time::sleep(crate::constants::DNS_LOOKUP_TIMEOUT).await;
+            } else {
+                return peer_addresses;
+            }
+        }
     }
 
     /// Get the initial seed peers based on the configured network.
