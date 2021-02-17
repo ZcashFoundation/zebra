@@ -446,6 +446,7 @@ where
 
             trace!("preselected service was not ready, reselecting");
             self.preselected_p2c_index = self.preselect_p2c_index();
+            self.update_metrics();
 
             if self.preselected_p2c_index.is_none() {
                 trace!("no ready services, sending demand signal");
@@ -456,7 +457,7 @@ where
     }
 
     fn call(&mut self, req: Request) -> Self::Future {
-        match req {
+        let fut = match req {
             // Only do inventory-aware routing on individual items.
             Request::BlocksByHash(ref hashes) if hashes.len() == 1 => {
                 let hash = InventoryHash::from(*hashes.iter().next().unwrap());
@@ -469,6 +470,9 @@ where
             Request::AdvertiseTransactions(_) => self.route_all(req),
             Request::AdvertiseBlock(_) => self.route_all(req),
             _ => self.route_p2c(req),
-        }
+        };
+        self.update_metrics();
+
+        fut
     }
 }
