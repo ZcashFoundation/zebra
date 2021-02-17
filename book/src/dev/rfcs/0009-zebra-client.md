@@ -279,6 +279,10 @@ Supporting a wallet assumes risk.  Effort required to implement wallet functiona
     - light client protocol as currently implemented requires stack assumptions
       such as protobufs and a hardcoded lightserver to talk to
 
+- What about having one database per key?
+    - easy to reliably delete or backup all data related to a single key
+    - might use slightly more space/CPU
+    - slightly harder to delete all the keys
 
 # Unresolved questions
 [unresolved-questions]: #unresolved-questions
