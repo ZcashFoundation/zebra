@@ -4,6 +4,9 @@
 // When we upgrade to tower 0.4, we can use tokio's PollSemaphore, like tower's:
 // ccfaffc buffer, limit: use `tokio-util`'s `PollSemaphore` (#556)
 
+// Ignore lints on this copied code
+#![allow(dead_code)]
+
 pub(crate) use self::sync::OwnedSemaphorePermit as Permit;
 use futures_core::ready;
 use std::{
