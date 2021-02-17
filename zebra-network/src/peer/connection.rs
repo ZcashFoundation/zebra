@@ -378,15 +378,11 @@ impl State {
                     .instrument(span.clone())
                     .await
                 {
-                    Either::Left((None, _)) => {
-                        Transition::ExitResponse {
-                            e: PeerError::ConnectionClosed.into(),
-                            tx,
-                        }
-                    }
-                    Either::Left((Some(Err(e)), _)) => {
-                        Transition::ExitResponse { e: e.into(), tx }
-                    }
+                    Either::Left((None, _)) => Transition::ExitResponse {
+                        e: PeerError::ConnectionClosed.into(),
+                        tx,
+                    },
+                    Either::Left((Some(Err(e)), _)) => Transition::ExitResponse { e: e.into(), tx },
                     Either::Left((Some(Ok(peer_msg)), _cancel)) => {
                         let request_msg = span.in_scope(|| handler.process_message(peer_msg));
                         // If the message was not consumed, check whether it
