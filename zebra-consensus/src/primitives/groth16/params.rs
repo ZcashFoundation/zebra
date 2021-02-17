@@ -51,7 +51,7 @@ impl SproutParams {
 
         // There is extra stuff (the transcript) at the end of the parameter file which is
         // used to verify the parameter validity, but we're not interested in that. We do
-        // want to read it, though, so that the BLAKE2b computed afterward is consistent
+        // want to read it, though, so that the BLAKE2b hash computed afterward is consistent
         // with `b2sum` on the files.
         io::copy(&mut fs, &mut io::sink())?;
 
@@ -97,7 +97,7 @@ impl SaplingParams {
 
         // There is extra stuff (the transcript) at the end of the parameter file which is
         // used to verify the parameter validity, but we're not interested in that. We do
-        // want to read it, though, so that the BLAKE2b computed afterward is consistent
+        // want to read it, though, so that the BLAKE2b hash computed afterward is consistent
         // with `b2sum` on the files.
         let mut sink = io::sink();
         io::copy(&mut spend_fs, &mut sink)?;
