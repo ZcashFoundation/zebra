@@ -22,6 +22,8 @@ use tower::{
     buffer::Buffer, discover::Change, layer::Layer, load::peak_ewma::PeakEwmaDiscover,
     util::BoxService, Service, ServiceExt,
 };
+use tracing::Span;
+use tracing_futures::Instrument;
 
 use crate::{
     constants, peer, timestamp_collector::TimestampCollector, AddressBook, BoxError, Config,
@@ -133,7 +135,9 @@ where
         );
     }
 
-    let listen_guard = tokio::spawn(listen(config.listen_addr, listener, peerset_tx.clone()));
+    let listen_guard = tokio::spawn(
+        listen(config.listen_addr, listener, peerset_tx.clone()).instrument(Span::current()),
+    );
 
     // 2. Initial peers, specified in the config.
     let initial_peers_fut = {
@@ -148,7 +152,7 @@ where
         .boxed()
     };
 
-    let add_guard = tokio::spawn(initial_peers_fut);
+    let add_guard = tokio::spawn(initial_peers_fut.instrument(Span::current()));
 
     // 3. Outgoing peers we connect to in response to load.
     let mut candidates = CandidateSet::new(address_book.clone(), peer_set.clone());
@@ -165,14 +169,17 @@ where
         let _ = demand_tx.try_send(());
     }
 
-    let crawl_guard = tokio::spawn(crawl_and_dial(
-        config.new_peer_interval,
-        demand_tx,
-        demand_rx,
-        candidates,
-        connector,
-        peerset_tx,
-    ));
+    let crawl_guard = tokio::spawn(
+        crawl_and_dial(
+            config.new_peer_interval,
+            demand_tx,
+            demand_rx,
+            candidates,
+            connector,
+            peerset_tx,
+        )
+        .instrument(Span::current()),
+    );
 
     handle_tx
         .send(vec![add_guard, listen_guard, crawl_guard])
