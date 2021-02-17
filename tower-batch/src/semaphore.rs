@@ -32,7 +32,7 @@ pub(crate) struct Close {
 }
 
 enum State {
-    Waiting(Pin<Box<dyn Future<Output = Permit> + Send + 'static>>),
+    Waiting(Pin<Box<dyn Future<Output = Permit> + Send + Sync + 'static>>),
     Ready(Permit),
     Empty,
 }
