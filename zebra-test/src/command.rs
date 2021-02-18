@@ -479,30 +479,36 @@ impl<T> TestOutput<T> {
     /// reason.
     pub fn assert_was_killed(&self) -> Result<()> {
         if self.was_killed() {
-            Err(eyre!("command was killed")).context_from(self)?
+            Ok(())
+        } else {
+            Err(eyre!(
+                "command exited without a kill, but the test expected kill exit"
+            ))
+            .context_from(self)?
         }
-
-        Ok(())
     }
 
     /// Returns Ok if the program was not killed, Err(Report) if exit was by
     /// another reason.
     pub fn assert_was_not_killed(&self) -> Result<()> {
-        if !self.was_killed() {
-            Err(eyre!("command wasn't killed")).context_from(self)?
+        if self.was_killed() {
+            Err(eyre!(
+                "command was killed, but the test expected an exit without a kill"
+            ))
+            .context_from(self)?
+        } else {
+            Ok(())
         }
-
-        Ok(())
     }
 
     #[cfg(not(unix))]
     fn was_killed(&self) -> bool {
-        self.output.status.code() != Some(1)
+        self.output.status.code() == Some(1)
     }
 
     #[cfg(unix)]
     fn was_killed(&self) -> bool {
-        self.output.status.signal() != Some(9)
+        self.output.status.signal() == Some(9)
     }
 }
 
