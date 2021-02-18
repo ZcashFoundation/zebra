@@ -320,6 +320,34 @@ impl<T> TestChild<T> {
         Err(report)
     }
 
+    /// Kill `child`, wait for its output, and use that output as the context for
+    /// an error report based on `error`.
+    #[instrument(skip(self, result))]
+    pub fn kill_on_error<V, E>(mut self, result: Result<V, E>) -> Result<(V, Self), Report>
+    where
+        E: Into<Report> + Send + Sync + 'static,
+    {
+        let mut error: Report = match result {
+            Ok(success) => return Ok((success, self)),
+            Err(error) => error.into(),
+        };
+
+        if self.is_running() {
+            let kill_res = self.kill();
+            if let Err(kill_err) = kill_res {
+                error = error.wrap_err(kill_err);
+            }
+        }
+
+        let output_res = self.wait_with_output();
+        let error = match output_res {
+            Err(output_err) => error.wrap_err(output_err),
+            Ok(output) => error.context_from(&output),
+        };
+
+        Err(error)
+    }
+
     fn past_deadline(&self) -> bool {
         self.deadline
             .map(|deadline| Instant::now() > deadline)
