@@ -32,7 +32,10 @@ use zebra_chain::{
 };
 use zebra_network::constants::PORT_IN_USE_ERROR;
 use zebra_state::constants::LOCK_FILE_ERROR;
-use zebra_test::{command::TestDirExt, prelude::*};
+use zebra_test::{
+    command::{ContextFrom, TestDirExt},
+    prelude::*,
+};
 use zebrad::config::ZebradConfig;
 
 /// The amount of time we wait after launching `zebrad`.
@@ -1226,24 +1229,38 @@ where
     // In node1 we want to check for the success regex
     // If there are any errors, we also want to print the node2 output.
     let output1 = node1.wait_with_output();
-    let (output1, node2) = node2.kill_on_error(output1)?;
-    let res1 = output1.stdout_contains(first_stdout_regex);
-    let (_, node2) = node2.kill_on_error(res1)?;
-    let res1 = output1
-        .assert_was_killed()
-        .wrap_err("Possible port conflict. Are there other acceptance tests running?");
-    let (_, mut node2) = node2.kill_on_error(res1)?;
+    let (output1, mut node2) = node2.kill_on_error(output1)?;
 
     // node2 should have panicked due to a conflict. Kill it here
     // anyway, so it doesn't outlive the test on error.
-    let _ = node2.kill();
+    if node2.is_running() {
+        use color_eyre::eyre::eyre;
+        return node2
+            .kill_on_error::<(), _>(Err(eyre!("conflicted node2 did not panic")))
+            .context_from(&output1)
+            .map(|_| ());
+    }
+    // Now we're sure both nodes are dead, and we have both their outputs
+    let output2 = node2.wait_with_output().context_from(&output1)?;
+
+    // Look for the success regex
+    output1
+        .stdout_contains(first_stdout_regex)
+        .context_from(&output2)?;
+    use color_eyre::Help;
+    output1
+        .assert_was_killed()
+        .warning("Possible port conflict. Are there other acceptance tests running?")
+        .context_from(&output2)?;
 
     // In the second node we look for the conflict regex
-    let output2 = node2.wait_with_output()?;
-    output2.stderr_contains(second_stderr_regex)?;
+    output2
+        .stderr_contains(second_stderr_regex)
+        .context_from(&output1)?;
     output2
         .assert_was_not_killed()
-        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+        .warning("Possible port conflict. Are there other acceptance tests running?")
+        .context_from(&output1)?;
 
     Ok(())
 }

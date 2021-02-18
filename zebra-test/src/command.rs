@@ -354,7 +354,8 @@ impl<T> TestChild<T> {
             .unwrap_or(false)
     }
 
-    fn is_running(&mut self) -> bool {
+    /// Is this process currently running?
+    pub fn is_running(&mut self) -> bool {
         matches!(self.child.try_wait(), Ok(None))
     }
 }
