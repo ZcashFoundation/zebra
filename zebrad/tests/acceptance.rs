@@ -951,7 +951,7 @@ async fn metrics_endpoint() -> Result<()> {
     config.metrics.endpoint_addr = Some(endpoint.parse().unwrap());
 
     let dir = TempDir::new("zebrad_tests")?.with_config(&mut config)?;
-    let mut child = dir.spawn_child(&["start"])?;
+    let child = dir.spawn_child(&["start"])?;
 
     // Run `zebrad` for a few seconds before testing the endpoint
     // Since we're an async function, we have to use a sleep future, not thread sleep.
@@ -961,9 +961,11 @@ async fn metrics_endpoint() -> Result<()> {
     let client = Client::new();
 
     // Test metrics endpoint
-    let res = client.get(url.try_into().expect("url is valid")).await?;
+    let res = client.get(url.try_into().expect("url is valid")).await;
+    let (res, child) = child.kill_on_error(res)?;
     assert!(res.status().is_success());
-    let body = hyper::body::to_bytes(res).await?;
+    let body = hyper::body::to_bytes(res).await;
+    let (body, mut child) = child.kill_on_error(body)?;
     assert!(
         std::str::from_utf8(&body)
             .expect("metrics response is valid UTF-8")
@@ -1004,7 +1006,7 @@ async fn tracing_endpoint() -> Result<()> {
     config.tracing.endpoint_addr = Some(endpoint.parse().unwrap());
 
     let dir = TempDir::new("zebrad_tests")?.with_config(&mut config)?;
-    let mut child = dir.spawn_child(&["start"])?;
+    let child = dir.spawn_child(&["start"])?;
 
     // Run `zebrad` for a few seconds before testing the endpoint
     // Since we're an async function, we have to use a sleep future, not thread sleep.
@@ -1016,9 +1018,11 @@ async fn tracing_endpoint() -> Result<()> {
     // Test tracing endpoint
     let res = client
         .get(url_default.try_into().expect("url_default is valid"))
-        .await?;
+        .await;
+    let (res, child) = child.kill_on_error(res)?;
     assert!(res.status().is_success());
-    let body = hyper::body::to_bytes(res).await?;
+    let body = hyper::body::to_bytes(res).await;
+    let (body, child) = child.kill_on_error(body)?;
     assert!(std::str::from_utf8(&body).unwrap().contains(
         "This HTTP endpoint allows dynamic control of the filter applied to\ntracing events."
     ));
@@ -1027,13 +1031,16 @@ async fn tracing_endpoint() -> Result<()> {
     let request = Request::post(url_filter.clone())
         .body(Body::from("zebrad=debug"))
         .unwrap();
-    let _post = client.request(request).await?;
+    let post = client.request(request).await;
+    let (_post, child) = child.kill_on_error(post)?;
 
     let tracing_res = client
         .get(url_filter.try_into().expect("url_filter is valid"))
-        .await?;
+        .await;
+    let (tracing_res, child) = child.kill_on_error(tracing_res)?;
     assert!(tracing_res.status().is_success());
-    let tracing_body = hyper::body::to_bytes(tracing_res).await?;
+    let tracing_body = hyper::body::to_bytes(tracing_res).await;
+    let (tracing_body, mut child) = child.kill_on_error(tracing_body)?;
     assert!(std::str::from_utf8(&tracing_body)
         .unwrap()
         .contains("zebrad=debug"));
@@ -1201,25 +1208,35 @@ where
     }
 
     // Start the first node
-    let mut node1 = first_dir.spawn_child(&["start"])?;
+    let node1 = first_dir.spawn_child(&["start"])?;
 
     // Wait a bit to spawn the second node, we want the first fully started.
     std::thread::sleep(LAUNCH_DELAY);
 
     // Spawn the second node
-    let node2 = second_dir.spawn_child(&["start"])?;
+    let node2 = second_dir.spawn_child(&["start"]);
+    let (node2, mut node1) = node1.kill_on_error(node2)?;
 
     // Wait a few seconds and kill first node.
     // Second node is terminated by panic, no need to kill.
     std::thread::sleep(LAUNCH_DELAY);
-    node1.kill()?;
+    let node1_kill_res = node1.kill();
+    let (_, node2) = node2.kill_on_error(node1_kill_res)?;
 
     // In node1 we want to check for the success regex
-    let output1 = node1.wait_with_output()?;
-    output1.stdout_contains(first_stdout_regex)?;
-    output1
+    // If there are any errors, we also want to print the node2 output.
+    let output1 = node1.wait_with_output();
+    let (output1, node2) = node2.kill_on_error(output1)?;
+    let res1 = output1.stdout_contains(first_stdout_regex);
+    let (_, node2) = node2.kill_on_error(res1)?;
+    let res1 = output1
         .assert_was_killed()
-        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+        .wrap_err("Possible port conflict. Are there other acceptance tests running?");
+    let (_, mut node2) = node2.kill_on_error(res1)?;
+
+    // node2 should have panicked due to a conflict. Kill it here
+    // anyway, so it doesn't outlive the test on error.
+    let _ = node2.kill();
 
     // In the second node we look for the conflict regex
     let output2 = node2.wait_with_output()?;
