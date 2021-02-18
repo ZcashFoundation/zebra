@@ -1204,12 +1204,6 @@ where
     T: ZebradTestDirExt,
     U: ZebradTestDirExt,
 {
-    // By DNS issues we want to skip all port conflict tests on macOS by now.
-    // Follow up at #1631
-    if cfg!(target_os = "macos") {
-        return Ok(());
-    }
-
     // Start the first node
     let node1 = first_dir.spawn_child(&["start"])?;
 
