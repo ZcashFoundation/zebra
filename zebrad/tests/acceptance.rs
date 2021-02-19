@@ -745,7 +745,7 @@ fn sync_large_checkpoints_mainnet() -> Result<()> {
     Ok(())
 }
 
-// Todo: We had a `sync_large_checkpoints_mainnet` here but it was removed because
+// Todo: We had a `sync_large_checkpoints_testnet` here but it was removed because
 // the testnet is unreliable(#1222). Enable after we have more testnet instances(#1791).
 
 /// Sync `network` until `zebrad` reaches `height`, and ensure that
