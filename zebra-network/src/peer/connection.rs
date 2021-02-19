@@ -2,6 +2,11 @@
 //!
 //! Maps the external Zcash/Bitcoin protocol to Zebra's internal request/response
 //! protocol.
+//!
+//! This module contains a lot of undocumented assumptions about the Zcash
+//! network protocol. We don't know if these assumptions match the `zcashd`
+//! implementation. It should be refactored into a cleaner set of
+//! request/response pairs (#1515).
 
 use std::{
     collections::HashSet,
