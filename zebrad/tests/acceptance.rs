@@ -745,9 +745,9 @@ fn sync_large_checkpoints_mainnet() -> Result<()> {
     Ok(())
 }
 
-/* This test is very unreliable so we are fully disabling it until 
-   we deploy more testnet instances(#1222).
-   Todo: Enable after we have more testnet instances. */
+/* This test is very unreliable so we are fully disabling it until
+we deploy more testnet instances(#1222).
+Todo: Enable after we have more testnet instances. */
 /*
 /// Test if `zebrad` can sync some larger checkpoints on testnet.
 ///
