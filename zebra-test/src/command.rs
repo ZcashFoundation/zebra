@@ -163,8 +163,8 @@ impl<T> TestChild<T> {
     ///
     /// ## BUGS
     ///
-    /// On Windows, this function can return `Ok` for processes that have
-    /// panicked. See #1781.
+    /// On Windows (and possibly macOS), this function can return `Ok` for
+    /// processes that have panicked. See #1781.
     #[spandoc::spandoc]
     pub fn kill(&mut self) -> Result<()> {
         /// SPANDOC: Killing child process
@@ -363,8 +363,8 @@ impl<T> TestChild<T> {
     ///
     /// ## BUGS
     ///
-    /// On Windows, this function can return `true` for processes that have
-    /// panicked. See #1781.
+    /// On Windows and macOS, this function can return `true` for processes that
+    /// have panicked. See #1781.
     pub fn is_running(&mut self) -> bool {
         matches!(self.child.try_wait(), Ok(None))
     }

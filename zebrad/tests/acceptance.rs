@@ -1223,16 +1223,17 @@ where
     // In node1 we want to check for the success regex
     // If there are any errors, we also want to print the node2 output.
     let output1 = node1.wait_with_output();
-    // This mut is only used on cfg(unix), due to #1781.
+    // This mut is only used on some platforms, due to #1781.
     #[allow(unused_mut)]
     let (output1, mut node2) = node2.kill_on_error(output1)?;
 
     // node2 should have panicked due to a conflict. Kill it here anyway, so it
     // doesn't outlive the test on error.
     //
-    // This code doesn't work on Windows. It's cleanup code that only runs when
-    // node2 doesn't panic as expected. So it's ok to skip it. See #1781.
-    #[cfg(unix)]
+    // This code doesn't work on Windows or macOS. It's cleanup code that only
+    // runs when node2 doesn't panic as expected. So it's ok to skip it.
+    // See #1781.
+    #[cfg(target_os = "linux")]
     if node2.is_running() {
         use color_eyre::eyre::eyre;
         return node2
