@@ -10,7 +10,7 @@ edition = "2018"
 [dependencies]
 zcash_script = "0.1.5"
 zebra-chain = { path = "../zebra-chain" }
-thiserror = "1.0.23"
+thiserror = "1.0.24"
 displaydoc = "0.1.7"
 
 [dev-dependencies]
