@@ -27,7 +27,7 @@ Block subsidy and miner fees are part of the protocol, the semantic verification
 - **network upgrade**: An intentional consensus rule change undertaken by the community in order to improve the network.
 - **transaction fees**: The sum of the extra [transparent value pool](#transparent-value-pool-calculation) and shielded valueBalance amounts, for all the transactions in a block. This amount can be spent by the miner in the coinbase transaction.
 
-### Transparent value pool calculation
+### Transaction fees calculation
 
 There is a "transparent value pool" inside each transaction, containing "funds in motion" (distinct from the actual transparent value pool of UTXOs, being "funds at rest"). Balance of that pool works as follows:
 
