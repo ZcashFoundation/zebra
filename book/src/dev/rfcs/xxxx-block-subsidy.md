@@ -7,7 +7,7 @@
 [summary]: #summary
 
 
-Zebra manages [semantic verification](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/rfcs/0002-parallel-verification.md#definitions) in the `zebra-consensus` crate, this is done for all incoming blocks. Inside each block the coinbase transaction is special, it holds the subsidy rewards that are paid to different participants(miners, founders, funding stream receivers). This RFC describes how to implement the needed calculations and verification for block subsidy and miner fees.
+Zebra manages [semantic verification](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/rfcs/0002-parallel-verification.md#definitions) in the `zebra-consensus` crate, this is done for all incoming blocks. Inside each block the coinbase transaction is special, it holds the subsidy rewards that are paid to different participants (miners, founders, funding stream receivers). This RFC describes how to implement the needed calculations and verification for block subsidy and miner fees.
 
 # Motivation
 [motivation]: #motivation
