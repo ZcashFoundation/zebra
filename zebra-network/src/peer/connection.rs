@@ -11,13 +11,14 @@
 use std::{
     collections::HashSet,
     convert::{TryFrom, TryInto},
+    iter,
     sync::Arc,
 };
 
 use futures::{
     future::{self, Either},
     prelude::*,
-    stream::Stream,
+    stream::{FuturesOrdered, Stream},
 };
 use tokio::time::{sleep, Sleep};
 use tower::Service;
@@ -281,7 +282,6 @@ impl Handler {
                     Handler::Finished(Err(PeerError::NotFound(items)))
                 }
             }
-            // TODO: does zcashd concatenate inv messages of different types?
             (Handler::FindBlocks, Message::Inv(items))
                 if items
                     .iter()
@@ -538,10 +538,15 @@ where
     Tx: Sink<Message, Error = SerializationError> + Unpin,
 {
     /// Consume this `Connection` to form a spawnable future containing its event loop.
-    pub async fn run<Rx>(mut self, mut peer_rx: Rx)
+    pub async fn run<Rx>(mut self, peer_rx: Rx)
     where
         Rx: Stream<Item = Result<Message, SerializationError>> + Unpin,
     {
+        // zcashd sometimes combines Inv messages of different types
+        // split those messages here
+        let mut peer_rx = peer_rx
+            .map_ok(|msg| split_inv_by_type(msg).map(Ok))
+            .try_flatten();
         loop {
             let transition = self
                 .state
@@ -806,6 +811,7 @@ where
                 {
                     Request::TransactionsByHash(transaction_hashes(&items).collect())
                 }
+                [] => Err(PeerError::WrongMessage("empty getdata message"))?,
                 // TODO: does zcashd concatenate getdata messages of the same or different types?
                 _ => {
                     // temporary logging to help us decide how to handle multiples
@@ -902,6 +908,49 @@ where
     }
 }
 
+/// Returns true if `last` and `next` are both blocks, both transactions, or
+/// `last` is `None`.
+fn same_inv_types(last: Option<&InventoryHash>, next: &InventoryHash) -> bool {
+    matches!(
+        (last, next),
+        (Some(InventoryHash::Block(_)), InventoryHash::Block(_))
+            | (Some(InventoryHash::Tx(_)), InventoryHash::Tx(_))
+            | (None, _)
+    )
+}
+
+/// If `msg` is an `Inv` which contains multiple item types, split it up into
+/// separate multi-block and multi-transaction messages.
+///
+/// Other `InventoryHash` variants are split into single messages.
+fn split_inv_by_type(msg: Message) -> FuturesOrdered<future::Ready<Message>> {
+    match msg {
+        Message::Inv(items) => {
+            let mut messages = Vec::new();
+            let mut current_message_items = Vec::new();
+
+            for item in items {
+                if !same_inv_types(current_message_items.last(), &item) {
+                    messages.push(Message::Inv(current_message_items));
+                    current_message_items = Vec::new();
+                }
+                current_message_items.push(item);
+            }
+
+            if !current_message_items.is_empty() {
+                messages.push(Message::Inv(current_message_items));
+            }
+
+            messages
+                .into_iter()
+                .map(future::ready)
+                .collect::<futures::stream::FuturesOrdered<_>>()
+        }
+        other => iter::once(future::ready(other)).collect::<futures::stream::FuturesOrdered<_>>(),
+    }
+}
+
+/// Return all the transaction hashes in `items`.
 fn transaction_hashes(items: &'_ [InventoryHash]) -> impl Iterator<Item = transaction::Hash> + '_ {
     items.iter().filter_map(|item| {
         if let InventoryHash::Tx(hash) = item {
@@ -912,6 +961,7 @@ fn transaction_hashes(items: &'_ [InventoryHash]) -> impl Iterator<Item = transa
     })
 }
 
+/// Return all the block hashes in `items`.
 fn block_hashes(items: &'_ [InventoryHash]) -> impl Iterator<Item = block::Hash> + '_ {
     items.iter().filter_map(|item| {
         if let InventoryHash::Block(hash) = item {
