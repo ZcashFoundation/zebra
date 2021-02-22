@@ -9,7 +9,7 @@ use std::{
 };
 
 use bellman::{
-    groth16::{batch, prepare_verifying_key, PreparedVerifyingKey, VerifyingKey},
+    groth16::{batch, prepare_verifying_key, VerifyingKey},
     VerificationError,
 };
 use bls12_381::Bls12;
@@ -40,7 +40,7 @@ pub static SPEND_VERIFIER: Lazy<
 > = Lazy::new(|| {
     Fallback::new(
         Batch::new(
-            Verifier::new(PARAMS.sapling.spend.vk),
+            Verifier::new(&PARAMS.sapling.spend.vk),
             super::MAX_BATCH_SIZE,
             super::MAX_BATCH_LATENCY,
         ),
@@ -53,8 +53,9 @@ pub static SPEND_VERIFIER: Lazy<
         // we use a Ready to avoid an async block and cast the closure to a
         // function (which is possible because it doesn't capture any state).
         tower::service_fn(
-            (|item: Item| ready(item.verify_single(prepare_verifying_key(PARAMS.sapling.spend.vk))))
-                as fn(_) -> _,
+            (|item: Item| {
+                ready(item.verify_single(&prepare_verifying_key(&PARAMS.sapling.spend.vk)))
+            }) as fn(_) -> _,
         ),
     )
 });
@@ -72,7 +73,7 @@ pub static OUTPUT_VERIFIER: Lazy<
 > = Lazy::new(|| {
     Fallback::new(
         Batch::new(
-            Verifier::new(PARAMS.sapling.output.vk),
+            Verifier::new(&PARAMS.sapling.output.vk),
             super::MAX_BATCH_SIZE,
             super::MAX_BATCH_LATENCY,
         ),
@@ -86,7 +87,7 @@ pub static OUTPUT_VERIFIER: Lazy<
         // function (which is possible because it doesn't capture any state).
         tower::service_fn(
             (|item: Item| {
-                ready(item.verify_single(prepare_verifying_key(PARAMS.sapling.output.vk)))
+                ready(item.verify_single(&prepare_verifying_key(&PARAMS.sapling.output.vk)))
             }) as fn(_) -> _,
         ),
     )
@@ -105,7 +106,7 @@ pub static JOINSPLIT_VERIFIER: Lazy<
 > = Lazy::new(|| {
     Fallback::new(
         Batch::new(
-            Verifier::new(PARAMS.sprout.verifying_key),
+            Verifier::new(&PARAMS.sprout.verifying_key),
             super::MAX_BATCH_SIZE,
             super::MAX_BATCH_LATENCY,
         ),
@@ -119,7 +120,7 @@ pub static JOINSPLIT_VERIFIER: Lazy<
         // function (which is possible because it doesn't capture any state).
         tower::service_fn(
             (|item: Item| {
-                ready(item.verify_single(prepare_verifying_key(PARAMS.sprout.verifying_key)))
+                ready(item.verify_single(&prepare_verifying_key(&PARAMS.sprout.verifying_key)))
             }) as fn(_) -> _,
         ),
     )
