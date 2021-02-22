@@ -36,7 +36,7 @@ tracing-error = { version = "0.1.2", features = ["traced-error"] }
 zebra-chain = { path = "../zebra-chain" }
 
 [dev-dependencies]
-proptest = "0.10"
+proptest = "1.0"
 proptest-derive = "0.3.0"
 
 zebra-test = { path = "../zebra-test/" }
