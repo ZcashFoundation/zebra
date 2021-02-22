@@ -29,7 +29,7 @@ Block subsidy and miner fees are part of the protocol, the semantic verification
 
 ### Transaction fees calculation
 
-There is a "transparent value pool" inside each transaction, containing "funds in motion" (distinct from the actual transparent value pool of UTXOs, being "funds at rest"). Balance of that pool works as follows:
+There is a value pool inside each transaction, containing "funds in motion" (distinct from the actual value pools of transparent and shielded UTXOs, being "funds at rest"). Balance of that pool works as follows:
 
 Transparent:
 
