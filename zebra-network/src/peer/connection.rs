@@ -281,6 +281,7 @@ impl Handler {
                     Handler::Finished(Err(PeerError::NotFound(items)))
                 }
             }
+            // TODO: does zcashd concatenate inv messages of different types?
             (Handler::FindBlocks, Message::Inv(items))
                 if items
                     .iter()
@@ -768,6 +769,7 @@ where
                 {
                     Request::TransactionsByHash(transaction_hashes(&items).collect())
                 }
+                // TODO: does zcashd concatenate inv messages of the same or different types?
                 [InventoryHash::Block(_), rest @ ..]
                     if rest
                         .iter()
@@ -804,6 +806,7 @@ where
                 {
                     Request::TransactionsByHash(transaction_hashes(&items).collect())
                 }
+                // TODO: does zcashd concatenate getdata messages of the same or different types?
                 _ => {
                     // temporary logging to help us decide how to handle multiples
                     let blocks = items
