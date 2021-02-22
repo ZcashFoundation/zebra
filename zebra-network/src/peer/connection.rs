@@ -356,7 +356,7 @@ impl State {
         // interpreted as a response to a pending client request
         // (Handler::process_request), and if not, interpret them as a request
         // from the remote peer to our node
-        // (Connection::handle_message_as_request/drive_peer_request).
+        // (Connection::handle_message_as_requests/drive_peer_request).
         //
         // We also need to handle those client requests in the first place
         // (Connection::handle_client_request). The client requests are received
@@ -383,7 +383,7 @@ impl State {
                     }
                     Either::Left((Some(Err(e)), _)) => Transition::Close(e.into()),
                     Either::Left((Some(Ok(msg)), _)) => {
-                        match conn.handle_message_as_request(msg).await {
+                        match conn.handle_message_as_requests(msg).await {
                             Ok(()) => Transition::AwaitRequest,
                             Err(e) => Transition::Close(e.into()),
                         }
@@ -434,7 +434,7 @@ impl State {
                         if let Some(msg) = request_msg {
                             // do NOT instrument with the request span, this is
                             // independent work
-                            match conn.handle_message_as_request(msg).await {
+                            match conn.handle_message_as_requests(msg).await {
                                 Ok(()) => {
                                     Transition::AwaitResponse { tx, handler, span }
                                     // Transition::AwaitRequest
@@ -714,10 +714,23 @@ where
         }
     }
 
+    /// Hangle `msg` as a request, potentially splitting it up into multiple
+    /// sub-messages.
     // This function has its own span, because we're creating a new work
     // context (namely, the work of processing the inbound msg as a request)
     #[instrument(name = "msg_as_req", skip(self, msg), fields(%msg))]
-    async fn handle_message_as_request(&mut self, msg: Message) -> Result<(), PeerError> {
+    async fn handle_message_as_requests(&mut self, msg: Message) -> Result<(), PeerError> {
+        // zcashd sometimes combines Inv messages from multiple blocks
+        // split them into single-block messages here
+        for msg in split_single_block(msg)? {
+            self.handle_message_as_single_request(msg).await?;
+        }
+
+        Ok(())
+    }
+
+    /// Handle `msg` as a single request.
+    async fn handle_message_as_single_request(&mut self, msg: Message) -> Result<(), PeerError> {
         trace!(?msg);
         let req = match msg {
             Message::Ping(nonce) => {
@@ -947,6 +960,34 @@ fn split_inv_by_type(msg: Message) -> FuturesOrdered<future::Ready<Message>> {
                 .collect::<futures::stream::FuturesOrdered<_>>()
         }
         other => iter::once(future::ready(other)).collect::<futures::stream::FuturesOrdered<_>>(),
+    }
+}
+
+/// If `msg` is an `Inv` which contains multiple blocks, split it up into
+/// separate single-block messages, up to a small limit.
+/// Otherwise, return an error for large block messages.
+///
+/// All other message variants are passed through unmodified.
+fn split_single_block(msg: Message) -> Result<Vec<Message>, PeerError> {
+    match &msg {
+        Message::Inv(items) => match &items[..] {
+            [InventoryHash::Block(_)] => Ok(vec![msg]),
+            [b1 @ InventoryHash::Block(_), b2 @ InventoryHash::Block(_)] => {
+                let m1 = Message::Inv(vec![*b1]);
+                let m2 = Message::Inv(vec![*b2]);
+                Ok(vec![m1, m2])
+            }
+            [InventoryHash::Block(_), rest @ ..] => {
+                assert!(
+                    rest.iter()
+                        .all(|item| matches!(item, InventoryHash::Block(_))),
+                    "inv messages should be split by inv type"
+                );
+                Err(PeerError::WrongMessage("inv with many blocks as request"))?
+            }
+            _ => Ok(vec![msg]),
+        },
+        _ => Ok(vec![msg]),
     }
 }
 
