@@ -773,9 +773,23 @@ where
                         .iter()
                         .all(|item| matches!(item, InventoryHash::Block(_))) =>
                 {
+                    // temporary logging to help us decide how to handle multiples
+                    info!(blocks = ?items.len(), "inv with multiple blocks");
                     Err(PeerError::WrongMessage("inv with multiple blocks"))?
                 }
-                _ => Err(PeerError::WrongMessage("inv with mixed item types"))?,
+                _ => {
+                    // temporary logging to help us decide how to handle multiples
+                    let blocks = items
+                        .iter()
+                        .filter(|item| matches!(item, InventoryHash::Block(_)))
+                        .count();
+                    let transactions = items
+                        .iter()
+                        .filter(|item| matches!(item, InventoryHash::Tx(_)))
+                        .count();
+                    info!(?blocks, ?transactions, items = ?items.len(), "inv with mixed item types");
+                    Err(PeerError::WrongMessage("inv with mixed item types"))?
+                }
             },
             Message::GetData(items) => match &items[..] {
                 [InventoryHash::Block(_), rest @ ..]
@@ -790,7 +804,19 @@ where
                 {
                     Request::TransactionsByHash(transaction_hashes(&items).collect())
                 }
-                _ => Err(PeerError::WrongMessage("getdata with mixed item types"))?,
+                _ => {
+                    // temporary logging to help us decide how to handle multiples
+                    let blocks = items
+                        .iter()
+                        .filter(|item| matches!(item, InventoryHash::Block(_)))
+                        .count();
+                    let transactions = items
+                        .iter()
+                        .filter(|item| matches!(item, InventoryHash::Tx(_)))
+                        .count();
+                    info!(?blocks, ?transactions, items = ?items.len(), "getdata with mixed item types");
+                    Err(PeerError::WrongMessage("getdata with mixed item types"))?
+                }
             },
             Message::GetAddr => Request::Peers,
             Message::GetBlocks { known_blocks, stop } => Request::FindBlocks { known_blocks, stop },
