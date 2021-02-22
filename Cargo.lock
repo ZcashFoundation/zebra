@@ -2315,7 +2315,7 @@ dependencies = [
  "libc",
  "rand_chacha 0.2.2",
  "rand_core 0.5.1",
- "rand_hc",
+ "rand_hc 0.2.0",
 ]
 
 [[package]]
@@ -2327,6 +2327,7 @@ dependencies = [
  "libc",
  "rand_chacha 0.3.0",
  "rand_core 0.6.1",
+ "rand_hc 0.3.0",
 ]
 
 [[package]]
@@ -2392,6 +2393,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rand_hc"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3190ef7066a446f2e7f42e239d161e905420ccab01eb967c9eb27d21b2322a73"
+dependencies = [
+ "rand_core 0.6.1",
+]
+
+[[package]]
 name = "rand_xorshift"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2454,6 +2464,19 @@ dependencies = [
  "digest 0.9.0",
  "jubjub 0.3.0",
  "rand_core 0.5.1",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
+name = "redjubjub"
+version = "0.2.3"
+dependencies = [
+ "blake2b_simd",
+ "byteorder",
+ "digest 0.9.0",
+ "jubjub 0.3.0",
+ "rand_core 0.6.1",
  "serde",
  "thiserror",
 ]
@@ -3342,7 +3365,7 @@ dependencies = [
  "futures 0.3.13",
  "futures-core",
  "pin-project 0.4.27",
- "rand 0.7.3",
+ "rand 0.8.1",
  "tokio 0.3.6",
  "tower",
  "tower-fallback",
@@ -3982,8 +4005,8 @@ dependencies = [
  "primitive-types",
  "proptest",
  "proptest-derive",
- "rand_core 0.5.1",
- "redjubjub",
+ "rand_core 0.6.1",
+ "redjubjub 0.2.2",
  "ripemd160",
  "secp256k1",
  "serde",
@@ -4017,8 +4040,8 @@ dependencies = [
  "metrics",
  "once_cell",
  "pairing",
- "rand 0.7.3",
- "redjubjub",
+ "rand 0.8.1",
+ "redjubjub 0.2.3",
  "serde",
  "spandoc",
  "thiserror",
@@ -4053,7 +4076,7 @@ dependencies = [
  "pin-project 0.4.27",
  "proptest",
  "proptest-derive",
- "rand 0.7.3",
+ "rand 0.8.1",
  "regex",
  "serde",
  "thiserror",
@@ -4168,7 +4191,7 @@ dependencies = [
  "metrics-exporter-prometheus",
  "once_cell",
  "pin-project 0.4.27",
- "rand 0.7.3",
+ "rand 0.8.1",
  "sentry",
  "sentry-tracing",
  "serde",

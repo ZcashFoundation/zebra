@@ -6,19 +6,19 @@ license = "MIT"
 edition = "2018"
 
 [dependencies]
-tokio = { version = "0.3.6", features = ["time", "sync", "stream", "tracing", "macros"] }
-tower = { version = "0.4", features = ["util", "buffer"] }
+futures = "0.3.13"
 futures-core = "0.3.13"
 pin-project = "0.4.27"
+tokio = { version = "0.3.6", features = ["time", "sync", "stream", "tracing", "macros"] }
+tower = { version = "0.4", features = ["util", "buffer"] }
 tracing = "0.1.25"
 tracing-futures = "0.2.5"
-futures = "0.3.13"
 
 [dev-dependencies]
+color-eyre = "0.5.10"
 ed25519-zebra = "2.1.0"
-rand = "0.7"
+rand = "0.8"
 tokio = { version = "0.3.6", features = ["full"]}
+tower-fallback = { path = "../tower-fallback/" }
 tracing = "0.1.25"
 zebra-test = { path = "../zebra-test/" }
-tower-fallback = { path = "../tower-fallback/" }
-color-eyre = "0.5.10"
