@@ -779,37 +779,29 @@ where
             }
             Message::Tx(transaction) => Request::PushTransaction(transaction),
             Message::Inv(items) => match &items[..] {
-                // We don't expect to be advertised multiple blocks at a time,
-                // so we ignore any advertisements of multiple blocks.
+                // Assume that mixed and multi-block messages have been split earlier
                 [InventoryHash::Block(hash)] => Request::AdvertiseBlock(*hash),
-                [InventoryHash::Tx(_), rest @ ..]
-                    if rest.iter().all(|item| matches!(item, InventoryHash::Tx(_))) =>
-                {
-                    Request::TransactionsByHash(transaction_hashes(&items).collect())
-                }
-                // TODO: does zcashd concatenate inv messages of the same or different types?
-                [InventoryHash::Block(_), rest @ ..]
+                [InventoryHash::Block(_), rest @ ..] => {
                     if rest
                         .iter()
-                        .all(|item| matches!(item, InventoryHash::Block(_))) =>
-                {
-                    // temporary logging to help us decide how to handle multiples
-                    info!(blocks = ?items.len(), "inv with multiple blocks");
-                    Err(PeerError::WrongMessage("inv with multiple blocks"))?
+                        .all(|item| matches!(item, InventoryHash::Block(_)))
+                    {
+                        unreachable!("multi-block inv messages are already split");
+                    } else {
+                        unreachable!("mixed inv messages are already split");
+                    }
                 }
-                _ => {
-                    // temporary logging to help us decide how to handle multiples
-                    let blocks = items
-                        .iter()
-                        .filter(|item| matches!(item, InventoryHash::Block(_)))
-                        .count();
-                    let transactions = items
-                        .iter()
-                        .filter(|item| matches!(item, InventoryHash::Tx(_)))
-                        .count();
-                    info!(?blocks, ?transactions, items = ?items.len(), "inv with mixed item types");
-                    Err(PeerError::WrongMessage("inv with mixed item types"))?
+                [InventoryHash::Tx(_), rest @ ..] => {
+                    assert!(
+                        rest.iter().all(|item| matches!(item, InventoryHash::Tx(_))),
+                        "mixed inv messages are already split"
+                    );
+                    Request::TransactionsByHash(transaction_hashes(&items).collect())
                 }
+                [] => Err(PeerError::WrongMessage("empty inv message"))?,
+                _ => Err(PeerError::WrongMessage(
+                    "inv with Error or FilteredBlock item types",
+                ))?,
             },
             Message::GetData(items) => match &items[..] {
                 [InventoryHash::Block(_), rest @ ..]
@@ -827,7 +819,8 @@ where
                 [] => Err(PeerError::WrongMessage("empty getdata message"))?,
                 // TODO: does zcashd concatenate getdata messages of the same or different types?
                 _ => {
-                    // temporary logging to help us decide how to handle multiples
+                    // temporary logging / asserts to help us decide how to handle multiples
+                    // replace with matches
                     let blocks = items
                         .iter()
                         .filter(|item| matches!(item, InventoryHash::Block(_)))
@@ -837,7 +830,15 @@ where
                         .filter(|item| matches!(item, InventoryHash::Tx(_)))
                         .count();
                     info!(?blocks, ?transactions, items = ?items.len(), "getdata with mixed item types");
-                    Err(PeerError::WrongMessage("getdata with mixed item types"))?
+                    assert!(
+                        blocks == 0 || transactions == 0,
+                        "getdata must not have mixed types: blocks: {} transactions: {}",
+                        blocks,
+                        transactions
+                    );
+                    Err(PeerError::WrongMessage(
+                        "getdata with mixed, Error, or FilteredBlock item types",
+                    ))?
                 }
             },
             Message::GetAddr => Request::Peers,
