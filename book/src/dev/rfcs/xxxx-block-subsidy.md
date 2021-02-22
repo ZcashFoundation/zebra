@@ -282,11 +282,13 @@ Each stage should have code, unit tests, block test vector tests, and property t
 
 For each network(Mainnet, Testnet), calculation of subsidy amounts need a `Height` as input and will output different amounts according to it.
 
-- Test all subsidy amount functions(`block_subsidy()`, `founders_reward()` and `funding_stream()`) against all network upgrade events of each network and make sure they return the expected amounts according to known outputs.
+- Test all subsidy amount functions(`block_subsidy()`, `miner_subsidy()` and `funding_stream()`) against all network upgrade events of each network and make sure they return the expected amounts according to known outputs.
 
 For each network, the address of the reward receiver on each block will depend on the `Height`.
 
-- Test all subsidy address functions(`founders_reward_address()` and `funding_stream_address()`) against all network upgrade events of each network and make sure they return the expected addresses.
+- Test the subsidy address function (`funding_stream_address()`) against all network upgrade events of each network and make sure they return the expected addresses.
+
+- Note: the founders reward tests are a low priority.
 
 Validation tests will test the consensus rules using real blocks from `zebra-test` crate. For both networks, blocks for all network upgrades were added to the crate in [#1096](https://github.com/ZcashFoundation/zebra/pull/1096). Blocks containing shielded coinbase were also introduced at [#1116](https://github.com/ZcashFoundation/zebra/pull/1116)
 
