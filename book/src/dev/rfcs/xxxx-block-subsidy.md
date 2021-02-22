@@ -262,15 +262,19 @@ pub enum SubsidyError {
 ```
 ## Implementation Plan
 
-1. Founders Reward Amounts
-2. Founders Reward Addresses
-3. Funding Streams Amounts (defer Shielded Coinbase)
-4. Funding Streams Addresses 
-5. Shielded Coinbase for Funding Streams
+Required:
+1. Funding Streams Amounts (defer Shielded Coinbase)
+2. Funding Streams Addresses 
+3. Shielded Coinbase for Funding Streams
+4. Miner Subsidy Amounts
+5. Shielded Coinbase for Miner Subsidy
+
+Optional - might be replaced by a Canopy checkpoint:
+A. Founders Reward Amounts
+B. Founders Reward Addresses
 
 The following contextual validation checks are out of scope for this RFC:
-* Miner Subsidy Amounts
-* Shielded Coinbase for Miner Subsidy
+* Transaction Fees
 
 Each stage should have code, unit tests, block test vector tests, and property tests, before moving on to the next stage. (A stage can be implemented in multiple PRs.)
 
