@@ -48,8 +48,8 @@ pub enum PeerError {
     /// A peer sent us a message we don't support.
     #[error("Remote peer sent an unsupported message type: {0}")]
     UnsupportedMessage(&'static str),
-    /// A peer sent us a message we couldn't interpret in context.
-    #[error("Remote peer sent an uninterpretable message: {0}")]
+    /// A peer sent us a message we couldn't transform into our request/response protocol
+    #[error("Remote peer sent a message that was not a Zebra request/response: {0}")]
     WrongMessage(&'static str),
     /// We got a `Reject` message. This does not necessarily mean that
     /// the peer connection is in a bad state, but for the time being

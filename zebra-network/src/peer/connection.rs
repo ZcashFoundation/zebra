@@ -768,6 +768,13 @@ where
                 {
                     Request::TransactionsByHash(transaction_hashes(&items).collect())
                 }
+                [InventoryHash::Block(_), rest @ ..]
+                    if rest
+                        .iter()
+                        .all(|item| matches!(item, InventoryHash::Block(_))) =>
+                {
+                    Err(PeerError::WrongMessage("inv with multiple blocks"))?
+                }
                 _ => Err(PeerError::WrongMessage("inv with mixed item types"))?,
             },
             Message::GetData(items) => match &items[..] {
