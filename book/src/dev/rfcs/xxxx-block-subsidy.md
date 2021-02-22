@@ -25,7 +25,7 @@ Block subsidy and miner fees are part of the protocol, the semantic verification
 - **block subsidy**: Miner subsidy plus founders reward or funding stream if any of the 2 are active.
 - **coinbase transaction**: The first transaction in a block; this is the transaction that handles block subsidy.
 - **network upgrade**: An intentional consensus rule change undertaken by the community in order to improve the network.
-- **miner fees**: The sum of the extra [transparent value pool](#transparent-value-pool-calculation) amounts, for all the transactions in a block.
+- **transaction fees**: The sum of the extra [transparent value pool](#transparent-value-pool-calculation) and shielded valueBalance amounts, for all the transactions in a block. This amount can be spent by the miner in the coinbase transaction.
 
 ### Transparent value pool calculation
 
