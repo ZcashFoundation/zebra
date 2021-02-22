@@ -270,8 +270,8 @@ Required:
 5. Shielded Coinbase for Miner Subsidy
 
 Optional - might be replaced by a Canopy checkpoint:
-A. Founders Reward Amounts
-B. Founders Reward Addresses
+1. Founders Reward Amounts
+2. Founders Reward Addresses
 
 The following contextual validation checks are out of scope for this RFC:
 * Transaction Fees
