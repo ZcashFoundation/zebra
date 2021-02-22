@@ -53,7 +53,7 @@ https://zips.z.cash/protocol/canopy.pdf#joinsplitencodingandconsensus
 
 The balance rule is that this pool must have non-negative value, and its net value is the miner fee for the transaction.
 
-**Note:** To compute the transparent value pool we need blockchain state. The `tx_in` is always a reference to a previous transaction output, this is different from Sprout and Sapling pools where everything we need is in the same transaction. The details about how this is going to be implemented are outside of the scope of this RFC. They will be documented in a separate contextual validation RFC.
+**Note:** To compute the value pool we need blockchain state. The `tx_in` is always a reference to a previous transaction output, this is different from Sprout and Sapling pools where everything we need is in the same transaction. The details about how this is going to be implemented are outside of the scope of this RFC. They will be documented in a separate contextual validation RFC.
 
 # Guide-level explanation
 [guide-level-explanation]: #guide-level-explanation
