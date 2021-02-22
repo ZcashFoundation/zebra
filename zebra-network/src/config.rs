@@ -43,7 +43,7 @@ impl Config {
     ///
     /// If DNS resolution fails or times out for all peers, continues retrying
     /// until at least one peer is found.
-    async fn parse_peers(peers: &HashSet<String>) -> HashSet<SocketAddr> {
+    async fn resolve_peers(peers: &HashSet<String>) -> HashSet<SocketAddr> {
         use futures::stream::StreamExt;
 
         loop {
@@ -75,8 +75,8 @@ impl Config {
     /// Get the initial seed peers based on the configured network.
     pub async fn initial_peers(&self) -> HashSet<SocketAddr> {
         match self.network {
-            Network::Mainnet => Config::parse_peers(&self.initial_mainnet_peers).await,
-            Network::Testnet => Config::parse_peers(&self.initial_testnet_peers).await,
+            Network::Mainnet => Config::resolve_peers(&self.initial_mainnet_peers).await,
+            Network::Testnet => Config::resolve_peers(&self.initial_testnet_peers).await,
         }
     }
 
