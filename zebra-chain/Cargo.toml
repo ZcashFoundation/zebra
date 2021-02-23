@@ -41,7 +41,8 @@ proptest-derive = { version = "0.3.0", optional = true }
 displaydoc = "0.1.7"
 ed25519-zebra = "1"
 equihash = "0.1"
-redjubjub = "0.2"
+#redjubjub = "0.2"
+redjubjub = {git = "https://github.com/ZcashFoundation/redjubjub", rev = "8101eaff1cb2fca45334f77a65caa4c46e3d545b"}
 bitflags = "1.2.1"
 
 [dev-dependencies]
