@@ -3391,7 +3391,7 @@ dependencies = [
 
 [[package]]
 name = "tower-batch"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "color-eyre",
  "ed25519-zebra 2.2.0",
@@ -3966,7 +3966,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-chain"
-version = "1.0.0-alpha.2"
+version = "1.0.0-alpha.3"
 dependencies = [
  "bech32",
  "bincode",
@@ -4008,7 +4008,7 @@ version = "1.0.0-alpha.0"
 
 [[package]]
 name = "zebra-consensus"
-version = "1.0.0-alpha.2"
+version = "1.0.0-alpha.3"
 dependencies = [
  "bellman",
  "bls12_381 0.3.1",
@@ -4042,7 +4042,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-network"
-version = "1.0.0-alpha.2"
+version = "1.0.0-alpha.3"
 dependencies = [
  "bitflags",
  "byteorder",
@@ -4076,7 +4076,7 @@ version = "1.0.0-alpha.0"
 
 [[package]]
 name = "zebra-script"
-version = "1.0.0-alpha.3"
+version = "1.0.0-alpha.4"
 dependencies = [
  "displaydoc",
  "hex",
@@ -4089,7 +4089,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-state"
-version = "1.0.0-alpha.2"
+version = "1.0.0-alpha.3"
 dependencies = [
  "chrono",
  "color-eyre",
@@ -4119,7 +4119,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-test"
-version = "1.0.0-alpha.2"
+version = "1.0.0-alpha.3"
 dependencies = [
  "color-eyre",
  "futures 0.3.12",
@@ -4141,7 +4141,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-utils"
-version = "1.0.0-alpha.2"
+version = "1.0.0-alpha.3"
 dependencies = [
  "color-eyre",
  "hex",
@@ -4156,7 +4156,7 @@ dependencies = [
 
 [[package]]
 name = "zebrad"
-version = "1.0.0-alpha.2"
+version = "1.0.0-alpha.3"
 dependencies = [
  "abscissa_core",
  "atty",
