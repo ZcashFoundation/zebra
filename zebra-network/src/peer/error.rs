@@ -8,9 +8,6 @@ use zebra_chain::serialization::SerializationError;
 use crate::protocol::external::InventoryHash;
 
 /// A wrapper around `Arc<PeerError>` that implements `Error`.
-// TODO soon this Wrapper will not be necessary. Once
-// https://github.com/rust-lang/rust/pull/80553 lands on stable we should
-// replace this with a type alias.
 #[derive(Error, Debug, Clone)]
 #[error(transparent)]
 pub struct SharedPeerError(Arc<TracedError<PeerError>>);
