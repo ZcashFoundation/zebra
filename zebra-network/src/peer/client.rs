@@ -46,6 +46,8 @@ pub(super) struct ClientRequestReceiver {
 
 /// A message from the `peer::Client` to the `peer::Server`,
 /// after it has been received by the `peer::Server`.
+///
+///
 #[derive(Debug)]
 #[must_use = "tx.send() must be called before drop"]
 pub(super) struct InProgressClientRequest {
