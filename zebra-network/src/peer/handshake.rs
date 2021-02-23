@@ -27,7 +27,7 @@ use crate::{
         internal::{Request, Response},
     },
     types::MetaAddr,
-    BoxError, Config, PeerAddrState,
+    BoxError, Config,
 };
 
 use super::{Client, Connection, HandshakeError, PeerError};
@@ -388,7 +388,6 @@ where
                                     addr,
                                     services: remote_services,
                                     last_seen: Utc::now(),
-                                    last_connection_state: PeerAddrState::Responded,
                                 })
                                 .await;
                         }

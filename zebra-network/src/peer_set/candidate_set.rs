@@ -3,73 +3,60 @@ use std::sync::{Arc, Mutex};
 use chrono::Utc;
 use futures::stream::{FuturesUnordered, StreamExt};
 use tower::{Service, ServiceExt};
+use tracing::Level;
 
-use crate::{types::MetaAddr, AddressBook, BoxError, PeerAddrState, Request, Response};
+use crate::{types::MetaAddr, AddressBook, BoxError, Request, Response};
 
-/// The `CandidateSet` manages the `PeerSet`'s peer reconnection attempts.
+/// The `CandidateSet` maintains a pool of candidate peers.
 ///
-/// It divides the set of all possible candidate peers into disjoint subsets,
-/// using the `PeerAddrState`:
+/// It divides the set of all possible candidate peers into three disjoint subsets:
 ///
-/// 1. `Responded` peers, which we previously connected to. If we have not received
-///    any messages from a `Responded` peer within a cutoff time, we assume that it
-///    has disconnected or hung, and attempt reconnection;
-/// 2. `NeverAttempted` peers, which we learned about from other peers or a DNS
-///    seeder, but have never connected to;
-/// 3. `Failed` peers, to whom we attempted to connect but were unable to;
-/// 4. `AttemptPending` peers, which we've recently queued for reconnection.
+/// 1. Disconnected peers, which we previously connected to but are not currently connected to;
+/// 2. Gossiped peers, which we learned about from other peers but have never connected to;
+/// 3. Failed peers, to whom we attempted to connect but were unable to.
 ///
 /// ```ascii,no_run
-///                         ┌──────────────────┐
-///                         │     PeerSet      │
-///                         │GetPeers Responses│
-///                         └──────────────────┘
+///                         ┌─────────────────┐
+///                         │     PeerSet     │
+///                         │GetPeers Requests│
+///                         └─────────────────┘
 ///                                  │
 ///                                  │
 ///                                  │
 ///                                  │
 ///                                  ▼
-///             filter by            Λ
-///          !contains_addr         ╱ ╲
-///  ┌────────────────────────────▶▕   ▏
-///  │                              ╲ ╱
-///  │                               V
-///  │                               │
-///  │                               │
-///  │                               │
-///  │                               │
-///  │                               │
-///  │                               │
-///  │                               │
-///  │                               │
-///  ├───────────────────────────────┼───────────────────────────────┐
-///  │ PeerSet AddressBook           ▼                               │
-///  │ ┌─────────────┐       ┌────────────────┐      ┌─────────────┐ │
-///  │ │  Possibly   │       │`NeverAttempted`│      │  `Failed`   │ │
-///  │ │Disconnected │       │     Peers      │      │   Peers     │◀┼┐
-///  │ │ `Responded` │       │                │      │             │ ││
-///  │ │    Peers    │       │                │      │             │ ││
-///  │ └─────────────┘       └────────────────┘      └─────────────┘ ││
-///  │        │                      │                      │        ││
-///  │ #1 oldest_first        #2 newest_first        #3 oldest_first ││
-///  │        │                      │                      │        ││
-///  │        ├──────────────────────┴──────────────────────┘        ││
-///  │        │         disjoint `PeerAddrState`s                    ││
-///  ├────────┼──────────────────────────────────────────────────────┘│
-///  │        ▼                                                       │
-///  │        Λ                                                       │
-///  │       ╱ ╲         filter by                                    │
-///  └─────▶▕   ▏!is_potentially_connected                            │
-///          ╲ ╱      to remove live                                  │
-///           V      `Responded` peers                                │
-///           │                                                       │
-///           │                                                       │
-///           ▼                                                       │
-///    ┌────────────────┐                                             │
-///    │`AttemptPending`│                                             │
-///    │     Peers      │                                             │
-///    │                │                                             │
-///    └────────────────┘                                             │
+///    ┌─────────────┐   filter by   Λ     filter by
+///    │   PeerSet   │!contains_addr╱ ╲ !contains_addr
+/// ┌──│ AddressBook │────────────▶▕   ▏◀───────────────────┐
+/// │  └─────────────┘              ╲ ╱                     │
+/// │         │                      V                      │
+/// │         │disconnected_peers    │                      │
+/// │         ▼                      │                      │
+/// │         Λ     filter by        │                      │
+/// │        ╱ ╲ !contains_addr      │                      │
+/// │       ▕   ▏◀───────────────────┼──────────────────────┤
+/// │        ╲ ╱                     │                      │
+/// │         V                      │                      │
+/// │         │                      │                      │
+/// │┌────────┼──────────────────────┼──────────────────────┼────────┐
+/// ││        ▼                      ▼                      │        │
+/// ││ ┌─────────────┐        ┌─────────────┐        ┌─────────────┐ │
+/// ││ │Disconnected │        │  Gossiped   │        │Failed Peers │ │
+/// ││ │    Peers    │        │    Peers    │        │ AddressBook │◀┼┐
+/// ││ │ AddressBook │        │ AddressBook │        │             │ ││
+/// ││ └─────────────┘        └─────────────┘        └─────────────┘ ││
+/// ││        │                      │                      │        ││
+/// ││ #1 drain_oldest        #2 drain_newest        #3 drain_oldest ││
+/// ││        │                      │                      │        ││
+/// ││        ├──────────────────────┴──────────────────────┘        ││
+/// ││        │           disjoint candidate sets                    ││
+/// │└────────┼──────────────────────────────────────────────────────┘│
+/// │         ▼                                                       │
+/// │         Λ                                                       │
+/// │        ╱ ╲         filter by                                    │
+/// └──────▶▕   ▏!is_potentially_connected                            │
+///          ╲ ╱                                                      │
+///           V                                                       │
 ///           │                                                       │
 ///           │                                                       │
 ///           ▼                                                       │
@@ -86,20 +73,11 @@ use crate::{types::MetaAddr, AddressBook, BoxError, PeerAddrState, Request, Resp
 ///    │peer::Client│
 ///    │to Discover │
 ///    └────────────┘
-///           │
-///           │
-///           ▼
-///  ┌───────────────────────────────────────┐
-///  │ every time we receive a peer message: │
-///  │  * update state to `Responded`        │
-///  │  * update last_seen to now()          │
-///  └───────────────────────────────────────┘
-///
 /// ```
-// TODO:
-//   * draw arrow from the "peer message" box into the `Responded` state box
-//   * make the "disjoint states" box include `AttemptPending`
 pub(super) struct CandidateSet<S> {
+    pub(super) disconnected: AddressBook,
+    pub(super) gossiped: AddressBook,
+    pub(super) failed: AddressBook,
     pub(super) peer_set: Arc<Mutex<AddressBook>>,
     pub(super) peer_service: S,
 }
@@ -109,28 +87,16 @@ where
     S: Service<Request, Response = Response, Error = BoxError>,
     S::Future: Send + 'static,
 {
-    /// Uses `peer_set` and `peer_service` to manage a [`CandidateSet`] of peers.
     pub fn new(peer_set: Arc<Mutex<AddressBook>>, peer_service: S) -> CandidateSet<S> {
         CandidateSet {
+            disconnected: AddressBook::new(span!(Level::TRACE, "disconnected peers")),
+            gossiped: AddressBook::new(span!(Level::TRACE, "gossiped peers")),
+            failed: AddressBook::new(span!(Level::TRACE, "failed peers")),
             peer_set,
             peer_service,
         }
     }
 
-    /// Update the peer set from the network.
-    ///
-    /// - Ask a few live `Responded` peers to send us more peers.
-    /// - Process all completed peer responses, adding new peers in the
-    ///   `NeverAttempted` state.
-    ///
-    /// ## Correctness
-    ///
-    /// The handshaker sets up the peer message receiver so it also sends a
-    /// `Responded` peer address update.
-    ///
-    /// `report_failed` puts peers into the `Failed` state.
-    ///
-    /// `next` puts peers into the `AttemptPending` state.
     pub async fn update(&mut self) -> Result<(), BoxError> {
         // Opportunistically crawl the network on every update call to ensure
         // we're actively fetching peers. Continue independently of whether we
@@ -147,62 +113,60 @@ where
             responses.push(self.peer_service.call(Request::Peers));
         }
         while let Some(rsp) = responses.next().await {
-            if let Ok(Response::Peers(rsp_addrs)) = rsp {
+            if let Ok(Response::Peers(addrs)) = rsp {
+                let addr_len = addrs.len();
+                let prev_len = self.gossiped.len();
                 // Filter new addresses to ensure that gossiped addresses are actually new
+                let failed = &self.failed;
                 let peer_set = &self.peer_set;
-                let new_addrs = rsp_addrs
-                    .iter()
-                    .filter(|meta| !peer_set.lock().unwrap().contains_addr(&meta.addr))
-                    .collect::<Vec<_>>();
+                let new_addrs = addrs
+                    .into_iter()
+                    .filter(|meta| !failed.contains_addr(&meta.addr))
+                    .filter(|meta| !peer_set.lock().unwrap().contains_addr(&meta.addr));
+                self.gossiped.extend(new_addrs);
                 trace!(
-                    ?rsp_addrs,
-                    new_addr_count = ?new_addrs.len(),
+                    addr_len,
+                    new_addrs = self.gossiped.len() - prev_len,
                     "got response to GetPeers"
                 );
-                // New addresses are deserialized in the `NeverAttempted` state
-                peer_set
-                    .lock()
-                    .unwrap()
-                    .extend(new_addrs.into_iter().cloned());
             } else {
                 trace!("got error in GetPeers request");
             }
         }
 
+        // Determine whether any known peers have recently disconnected.
+        let failed = &self.failed;
+        let peer_set = &self.peer_set;
+        self.disconnected.extend(
+            peer_set
+                .lock()
+                .expect("mutex must be unpoisoned")
+                .disconnected_peers()
+                .filter(|meta| failed.contains_addr(&meta.addr)),
+        );
+
         Ok(())
     }
 
-    /// Returns the next candidate for a connection attempt, if any are available.
-    ///
-    /// Returns peers in this order:
-    /// - oldest `Responded` that are not live
-    /// - newest `NeverAttempted`
-    /// - oldest `Failed`
-    ///
-    /// Skips `AttemptPending` peers and live `Responded` peers.
-    ///
-    /// ## Correctness
-    ///
-    /// `AttemptPending` peers will become `Responded` if they respond, or
-    /// become `Failed` if they time out or provide a bad response.
-    ///
-    /// Live `Responded` peers will stay live if they keep responding, or
-    /// become a reconnection candidate if they stop responding.
     pub fn next(&mut self) -> Option<MetaAddr> {
-        let mut peer_set_guard = self.peer_set.lock().unwrap();
-        let mut reconnect = peer_set_guard.reconnection_peers().next()?;
-
-        reconnect.last_seen = Utc::now();
-        reconnect.last_connection_state = PeerAddrState::AttemptPending;
-        peer_set_guard.update(reconnect);
-
-        Some(reconnect)
+        metrics::gauge!("candidate_set.disconnected", self.disconnected.len() as f64);
+        metrics::gauge!("candidate_set.gossiped", self.gossiped.len() as f64);
+        metrics::gauge!("candidate_set.failed", self.failed.len() as f64);
+        debug!(
+            disconnected_peers = self.disconnected.len(),
+            gossiped_peers = self.gossiped.len(),
+            failed_peers = self.failed.len()
+        );
+        let guard = self.peer_set.lock().unwrap();
+        self.disconnected
+            .drain_oldest()
+            .chain(self.gossiped.drain_newest())
+            .chain(self.failed.drain_oldest())
+            .find(|meta| !guard.is_potentially_connected(&meta.addr))
     }
 
-    /// Mark `addr` as a failed peer.
     pub fn report_failed(&mut self, mut addr: MetaAddr) {
         addr.last_seen = Utc::now();
-        addr.last_connection_state = PeerAddrState::Failed;
-        self.peer_set.lock().unwrap().update(addr);
+        self.failed.update(addr);
     }
 }
