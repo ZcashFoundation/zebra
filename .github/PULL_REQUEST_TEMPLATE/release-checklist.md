@@ -93,7 +93,6 @@ To create the final change log:
 - [ ] Edit change descriptions so they are consistent, and make sense to non-developers
 - [ ] Check the category for each change
   - prefer the "Fix" category if you're not sure
-- [ ] Point the GitHub changelog to the version increment commit
 
 #### Change Categories
 
@@ -104,6 +103,11 @@ From "Keep a Changelog":
 * `Removed` for now removed features.
 * `Fixed` for any bug fixes.
 * `Security` in case of vulnerabilities.
+
+## After merging this PR
+- [ ] Update the draft release with the final changelog
+- [ ] Point the draft release at the commit resulting from merging this PR, using the correct version tag name
+- [ ] Mark the release as 'pre-release' (until we are no longer alpha/beta)
 
 ## Final Testing
 
