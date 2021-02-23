@@ -99,7 +99,7 @@ impl Config {
     /// Resolves `host` into zero or more IP addresses.
     ///
     /// If `host` is a DNS name, performs DNS resolution with a timeout of a few seconds.
-    /// If DNS resolution fails or times out, returns an errror.
+    /// If DNS resolution fails or times out, returns an error.
     async fn resolve_host_once(host: &str) -> Result<HashSet<SocketAddr>, BoxError> {
         let fut = tokio::net::lookup_host(host);
         let fut = tokio::time::timeout(crate::constants::DNS_LOOKUP_TIMEOUT, fut);
