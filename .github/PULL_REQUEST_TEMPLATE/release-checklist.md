@@ -9,8 +9,7 @@ assignees: ''
 
 ## Initial Testing
 
-- [ ] After any changes, test that the `cargo install` command in `README.md’
-      works (use `--path` instead of `--git` locally)
+- [ ] After any changes, test that the `cargo install` command in `README.md` works (use `--path` instead of `--git` locally)
 
 ## Versioning
 
