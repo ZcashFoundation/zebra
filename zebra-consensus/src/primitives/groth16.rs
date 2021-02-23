@@ -134,7 +134,7 @@ pub type Item = batch::Item<Bls12>;
 /// This is the core implementation for the batch verification logic of the groth
 /// verifier. It handles batching incoming requests, driving batches to
 /// completion, and reporting results.
-struct Verifier {
+pub struct Verifier {
     batch: batch::Verifier<Bls12>,
     // Making this 'static makes managing lifetimes much easier.
     vk: &'static VerifyingKey<Bls12>,
