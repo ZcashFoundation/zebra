@@ -74,9 +74,9 @@ You can use `fastmod` to interactively find and replace versions.
 
 For example, for `zebra-1.0.0-alpha-3`, we did:
 ```
-fastmod --extensions rs,toml --fixed-strings '1.0.0-alpha.3' '1.0.0-alpha.4'
-fastmod --extensions rs,toml --fixed-strings '1.0.0-alpha.2' '1.0.0-alpha.3'
-fastmod --extensions rs,toml --fixed-strings '0.2.0' '0.2.1' tower-batch
+fastmod --extensions rs,toml,md --fixed-strings '1.0.0-alpha.3' '1.0.0-alpha.4'
+fastmod --extensions rs,toml,md --fixed-strings '1.0.0-alpha.2' '1.0.0-alpha.3'
+fastmod --extensions rs,toml,md --fixed-strings '0.2.0' '0.2.1' tower-batch
 ```
 
 We skipped `tower-fallback`, because it hadn't changed since the last tag.
