@@ -436,6 +436,7 @@ where
                 svc: inbound_service,
                 client_rx: server_rx.into(),
                 peer_tx,
+                request_timer: None,
             };
 
             tokio::spawn(
