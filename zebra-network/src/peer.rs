@@ -15,6 +15,7 @@ use client::ClientRequest;
 use client::ClientRequestReceiver;
 use client::InProgressClientRequest;
 use client::MustUseOneshotSender;
+use error::ErrorSlot;
 
 pub use client::Client;
 pub use connection::Connection;

@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use thiserror::Error;
 
@@ -28,9 +28,6 @@ pub enum PeerError {
     /// The remote peer closed the connection.
     #[error("Peer closed connection")]
     ConnectionClosed,
-    /// The local client closed the connection.
-    #[error("Internal client dropped connection")]
-    ConnectionDropped,
     /// The remote peer did not respond to a [`peer::Client`] request in time.
     #[error("Client request timed out")]
     ClientRequestTimeout,
@@ -65,6 +62,19 @@ pub enum PeerError {
     /// We requested data that the peer couldn't find.
     #[error("Remote peer could not find items: {0:?}")]
     NotFound(Vec<InventoryHash>),
+}
+
+#[derive(Default, Clone)]
+pub(super) struct ErrorSlot(pub(super) Arc<Mutex<Option<SharedPeerError>>>);
+
+impl ErrorSlot {
+    pub fn try_get_error(&self) -> Option<SharedPeerError> {
+        self.0
+            .lock()
+            .expect("error mutex should be unpoisoned")
+            .as_ref()
+            .cloned()
+    }
 }
 
 /// An error during a handshake with a remote peer.
