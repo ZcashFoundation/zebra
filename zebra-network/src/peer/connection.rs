@@ -783,9 +783,9 @@ where
 
     /// Given a `req` originating from the peer, drive it to completion and send
     /// any appropriate messages to the remote peer. If an error occurs while
-    /// processing the request (e.g., the service is shedding load), then we
-    /// return a peer error, which terminates the entire peer connection,
-    /// shrinking the number of connected peers.
+    /// processing the request (e.g., the service is shedding load), then we call
+    /// fail_with to terminate the entire peer connection, shrinking the number
+    /// of connected peers.
     async fn drive_peer_request(&mut self, req: Request) -> Result<(), PeerError> {
         trace!(?req);
         use tower::{load_shed::error::Overloaded, ServiceExt};
@@ -805,8 +805,8 @@ where
                 } else {
                     // We could send a reject to the remote peer, but that might cause
                     // them to disconnect, and we might be using them to sync blocks.
-                    // For similar reasons, we don't return an error - we only close
-                    // the connection if the peer is doing something wrong.
+                    // For similar reasons, we don't want to fail_with() here - we
+                    // only close the connection if the peer is doing something wrong.
                     error!(%e,
                            connection_state = ?self.state,
                            client_receiver = ?self.client_rx,
