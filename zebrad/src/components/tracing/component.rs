@@ -77,7 +77,7 @@ impl<A: abscissa_core::Application> Component<A> for Tracing {
     }
 
     fn version(&self) -> abscissa_core::Version {
-        abscissa_core::Version::parse("1.0.0-alpha.2").unwrap()
+        abscissa_core::Version::parse("1.0.0-alpha.3").unwrap()
     }
 
     fn before_shutdown(&self, _kind: Shutdown) -> Result<(), FrameworkError> {
