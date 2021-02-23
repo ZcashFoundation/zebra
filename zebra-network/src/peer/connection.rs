@@ -564,16 +564,6 @@ where
         use Request::*;
         let InProgressClientRequest { request, tx, span } = req;
 
-        // common logic for client requests without an expected response
-        fn continue_without_response(
-            tx: MustUseOneshotSender<Result<Response, SharedPeerError>>,
-        ) -> Transition {
-            // Since we're not waiting for further messages, we need to
-            // send a response before dropping tx.
-            let _ = tx.send(Ok(Response::Nil));
-            Transition::AwaitRequest
-        }
-
         match request {
             Peers => match self.peer_tx.send(Message::GetAddr).await {
                 Ok(()) => Transition::AwaitResponse {
@@ -667,7 +657,12 @@ where
             },
             PushTransaction(transaction) => {
                 match self.peer_tx.send(Message::Tx(transaction)).await {
-                    Ok(()) => continue_without_response(tx),
+                    Ok(()) => {
+                        // Since we're not waiting for further messages, we need to
+                        // send a response before dropping tx.
+                        let _ = tx.send(Ok(Response::Nil));
+                        Transition::AwaitRequest
+                    }
                     Err(e) => Transition::CloseResponse { e: e.into(), tx },
                 }
             }
@@ -677,13 +672,23 @@ where
                     .send(Message::Inv(hashes.iter().map(|h| (*h).into()).collect()))
                     .await
                 {
-                    Ok(()) => continue_without_response(tx),
+                    Ok(()) => {
+                        // Since we're not waiting for further messages, we need to
+                        // send a response before dropping tx.
+                        let _ = tx.send(Ok(Response::Nil));
+                        Transition::AwaitRequest
+                    }
                     Err(e) => Transition::CloseResponse { e: e.into(), tx },
                 }
             }
             AdvertiseBlock(hash) => {
                 match self.peer_tx.send(Message::Inv(vec![hash.into()])).await {
-                    Ok(()) => continue_without_response(tx),
+                    Ok(()) => {
+                        // Since we're not waiting for further messages, we need to
+                        // send a response before dropping tx.
+                        let _ = tx.send(Ok(Response::Nil));
+                        Transition::AwaitRequest
+                    }
                     Err(e) => Transition::CloseResponse { e: e.into(), tx },
                 }
             }
