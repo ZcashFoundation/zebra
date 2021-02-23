@@ -345,7 +345,7 @@ impl State {
                     }
                     Either::Right((None, _)) => {
                         trace!("client_rx closed, ending connection");
-                        Transition::ExitClient
+                        Transition::Exit(PeerError::ConnectionDropped.into())
                     }
                     Either::Right((Some(req), _)) => {
                         if req.tx.is_canceled() {
@@ -439,12 +439,9 @@ enum Transition {
         tx: MustUseOneshotSender<Result<Response, SharedPeerError>>,
         span: tracing::Span,
     },
-    /// Exiting because the client was closed or dropped, and there are
-    /// no more client requests.
-    ExitClient,
-    /// Exiting while awaiting further client requests
+    // Exiting while no client response is expected
     Exit(SharedPeerError),
-    /// Exiting while processing a peer response to a client request
+    // Exiting while processing a client response
     ExitResponse {
         tx: MustUseOneshotSender<Result<Response, SharedPeerError>>,
         e: SharedPeerError,
@@ -452,7 +449,7 @@ enum Transition {
 }
 
 impl TryFrom<Transition> for State {
-    type Error = Option<SharedPeerError>;
+    type Error = SharedPeerError;
 
     fn try_from(trans: Transition) -> Result<Self, Self::Error> {
         match trans {
@@ -460,11 +457,10 @@ impl TryFrom<Transition> for State {
             Transition::AwaitResponse { handler, tx, span } => {
                 Ok(State::AwaitingResponse { handler, tx, span })
             }
-            Transition::ExitClient => Err(None),
-            Transition::Exit(e) => Err(Some(e)),
+            Transition::Exit(e) => Err(e),
             Transition::ExitResponse { tx, e } => {
                 let _ = tx.send(Err(e.clone()));
-                Err(Some(e))
+                Err(e)
             }
         }
     }
@@ -529,20 +525,16 @@ where
 
             self.state = match transition.try_into() {
                 Ok(state) => Some(state),
-                Err(None) => {
-                    trace!("client_rx dropped: no pending client requests");
-                    return;
-                }
-                Err(Some(e)) => {
-                    while let Some(InProgressClientRequest { tx, span, .. }) =
-                        self.client_rx.next().await
-                    {
-                        trace!(
-                            parent: &span,
-                            "sending an error response to a pending client request on a failed connection"
-                        );
-                        let _ = tx.send(Err(e.clone()));
-                    }
+                Err(e) => {
+                    // while let Some(InProgressClientRequest { tx, span, .. }) =
+                    //     self.client_rx.next().await
+                    // {
+                    //     trace!(
+                    //         parent: &span,
+                    //         "sending an error response to a pending request on a failed connection"
+                    //     );
+                    //     let _ = tx.send(Err(e.clone()));
+                    // }
                     return;
                 }
             }
