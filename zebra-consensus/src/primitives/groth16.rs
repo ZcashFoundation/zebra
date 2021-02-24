@@ -20,6 +20,7 @@ use tokio::sync::broadcast::{channel, error::RecvError, Sender};
 use tower::{util::ServiceFn, Service};
 use tower_batch::{Batch, BatchControl};
 use tower_fallback::Fallback;
+use zebra_chain::sapling::Spend;
 
 mod hash_reader;
 mod params;
@@ -128,6 +129,28 @@ pub static JOINSPLIT_VERIFIER: Lazy<
 
 /// A Groth16 verification item, used as the request type of the service.
 pub type Item = batch::Item<Bls12>;
+
+pub struct ItemWrapper(Item);
+
+impl From<&Spend> for ItemWrapper {
+    fn from(spend: &Spend) -> Self {
+        Self(Item::from((
+            bellman::groth16::Proof::read(&spend.zkproof.0[..]).unwrap(),
+            vec![
+                <Bls12 as pairing::Engine>::Fr::from_bytes(&spend.cv.into()).unwrap(),
+                <Bls12 as pairing::Engine>::Fr::from_bytes(&spend.anchor.into()).unwrap(),
+                <Bls12 as pairing::Engine>::Fr::from_bytes(&spend.nullifier.into()).unwrap(),
+                <Bls12 as pairing::Engine>::Fr::from_bytes(&spend.rk.into()).unwrap(),
+            ],
+        )))
+    }
+}
+
+impl From<ItemWrapper> for Item {
+    fn from(item_wrapper: ItemWrapper) -> Self {
+        item_wrapper.0
+    }
+}
 
 /// Groth16 signature verifier implementation
 ///
