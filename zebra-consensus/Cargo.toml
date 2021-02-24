@@ -22,7 +22,7 @@ metrics = "0.13.0-alpha.8"
 thiserror = "1.0.24"
 tokio = { version = "0.3.6", features = ["time", "sync", "stream", "tracing"] }
 tower = { version = "0.4", features = ["timeout", "util", "buffer"] }
-tracing = "0.1.24"
+tracing = "0.1.25"
 tracing-futures = "0.2.5"
 
 tower-fallback = { path = "../tower-fallback/" }
