@@ -34,7 +34,7 @@ zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
 zebra-test = { path = "../zebra-test/" }
 
 color-eyre = "0.5.10"
-once_cell = "1.6"
+once_cell = "1.7"
 spandoc = "0.2"
 tempdir = "0.3.7"
 tokio = { version = "0.3.6", features = ["full"] }
