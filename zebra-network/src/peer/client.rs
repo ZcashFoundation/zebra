@@ -6,14 +6,14 @@ use std::{
 
 use futures::{
     channel::{mpsc, oneshot},
-    future, ready,
+    ready,
     stream::{Stream, StreamExt},
 };
 use tower::Service;
 
 use crate::protocol::internal::{Request, Response};
 
-use super::{ErrorSlot, PeerError, SharedPeerError};
+use super::{PeerError, SharedPeerError};
 
 /// The "client" duplex half of a peer connection.
 pub struct Client {
@@ -21,7 +21,6 @@ pub struct Client {
     // This is always Some except when we take it on drop.
     pub(super) shutdown_tx: Option<oneshot::Sender<()>>,
     pub(super) server_tx: mpsc::Sender<ClientRequest>,
-    pub(super) error_slot: ErrorSlot,
 }
 
 /// A message from the `peer::Client` to the `peer::Server`.
@@ -95,13 +94,6 @@ impl From<ClientRequest> for InProgressClientRequest {
             tx: tx.into(),
             span,
         }
-    }
-}
-
-impl ClientRequestReceiver {
-    /// Forwards to `inner.close()`
-    pub fn close(&mut self) {
-        self.inner.close()
     }
 }
 
@@ -199,10 +191,7 @@ impl Service<Request> for Client {
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         if ready!(self.server_tx.poll_ready(cx)).is_err() {
-            Poll::Ready(Err(self
-                .error_slot
-                .try_get_error()
-                .expect("failed servers must set their error slot")))
+            Poll::Ready(Err(PeerError::ConnectionClosed.into()))
         } else {
             Poll::Ready(Ok(()))
         }
@@ -221,13 +210,7 @@ impl Service<Request> for Client {
         match self.server_tx.try_send(ClientRequest { request, span, tx }) {
             Err(e) => {
                 if e.is_disconnected() {
-                    let ClientRequest { tx, .. } = e.into_inner();
-                    let _ = tx.send(Err(PeerError::ConnectionClosed.into()));
-                    future::ready(Err(self
-                        .error_slot
-                        .try_get_error()
-                        .expect("failed servers must set their error slot")))
-                    .boxed()
+                    async { Err(PeerError::ConnectionClosed.into()) }.boxed()
                 } else {
                     // sending fails when there's not enough
                     // channel space, but we called poll_ready

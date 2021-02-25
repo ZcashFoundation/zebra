@@ -30,7 +30,7 @@ use crate::{
     BoxError, Config, PeerAddrState,
 };
 
-use super::{Client, Connection, ErrorSlot, HandshakeError, PeerError};
+use super::{Client, Connection, HandshakeError, PeerError};
 
 /// A [`Service`] that handshakes with a remote peer and constructs a
 /// client/server pair.
@@ -349,12 +349,10 @@ where
             // in this block, see constants.rs for more.
             let (server_tx, server_rx) = mpsc::channel(0);
             let (shutdown_tx, shutdown_rx) = oneshot::channel();
-            let slot = ErrorSlot::default();
 
             let client = Client {
                 shutdown_tx: Some(shutdown_tx),
                 server_tx: server_tx.clone(),
-                error_slot: slot.clone(),
             };
 
             let (peer_tx, peer_rx) = stream.split();
@@ -434,10 +432,9 @@ where
 
             use super::connection;
             let server = Connection {
-                state: connection::State::AwaitingRequest,
+                state: Some(connection::State::AwaitingRequest),
                 svc: inbound_service,
                 client_rx: server_rx.into(),
-                error_slot: slot,
                 peer_tx,
                 request_timer: None,
             };
