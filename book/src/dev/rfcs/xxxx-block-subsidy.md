@@ -149,7 +149,7 @@ const FUNDING_STREAM_HEIGHT_RANGES: &[(Network, Range<_>)] = &[
 ];
 ```
 
-Each `FundingStreamReceiver` for the mainnet must have 48 payment addresses associated with and 51 for the testnet. 
+Each `FundingStreamReceiver` for the mainnet must have 48 payment addresses associated with and 51 for the testnet.*
 
 https://zips.z.cash/zip-0214#mainnet-recipient-addresses
 
@@ -161,6 +161,8 @@ The following constants are needed:
 - `FUNDING_STREAM_BP_ADDRESSES_TESTNET: [&str; 51]`
 - `FUNDING_STREAM_ZF_ADDRESSES_TESTNET: [&str; 51]`
 - `FUNDING_STREAM_MG_ADDRESSES_TESTNET: [&str; 51]`
+
+\* The MG stream is subject to change. [ZIP 1014](https://zips.z.cash/zip-1014#direct-grant-option) and [ZIP 214](https://zips.z.cash/zip-0214) explicitly permit splitting the stream to allow for direct grant recipients that could change the number of addresses. This are not considered in this spec.
 
 ## General subsidy
 
