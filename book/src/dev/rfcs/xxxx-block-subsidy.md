@@ -25,31 +25,31 @@ Block subsidy and miner fees are part of the protocol, the semantic verification
 - **funding streams**: The portion of the block subsidy that goes into one or more pre defined funding stream addresses. Payment is done with one output for each active funding stream of the block.
 - **miner subsidy**: The portion of the block subsidy that goes into the miner of the block, excluding fees.
 - **network upgrade**: An intentional consensus rule change undertaken by the community in order to improve the network.
-- **transaction fees**: The sum of the extra [transparent value pool](#transparent-value-pool-calculation) and shielded valueBalance amounts, for all the transactions in a block. This amount can be spent by the miner in the coinbase transaction.
+- **transaction fees**: The sum of the extra [transparent value pool](#transparent-value-pool-calculation) and shielded values, for all the transactions in a block. This amount can be spent by the miner in the coinbase transaction.
 
 ### Transaction fees calculation
 
-There is a value pool inside each transaction, containing "funds in motion" (distinct from the actual value pools of transparent and shielded UTXOs, being "funds at rest"). Balance of that pool works as follows:
+There is a value pool inside each block called "[chain value pool balance](https://zips.z.cash/zip-0209#terminology)". Balance of that pool works as follows:
 
 Transparent:
 
 - `tx_in` adds to the pool.
 - `tx_out` subtracts from the pool.
 
-https://zips.z.cash/protocol/canopy.pdf#txnencodingandconsensus
+https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
 
 Sprout:
 
 - `vpub_new` values from `vJoinSplit` of the transaction add to the pool.
 - `vpub_old` values from `vJoinSplit` of the transaction subtract from the pool.
 
-https://zips.z.cash/protocol/canopy.pdf#joinsplitencodingandconsensus
+https://zips.z.cash/protocol/protocol.pdf#joinsplitencodingandconsensus
 
 Sapling:
 
 - `valueBalance` adds to the pool. It itself is equal to `sum(SaplingSpends) - sum(SaplingOutputs)`, so it has the same functional effect as for transparent and Sprout.
 
-https://zips.z.cash/protocol/canopy.pdf#joinsplitencodingandconsensus
+https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
 
 The balance rule is that this pool must have non-negative value, and its net value is the miner fee for the transaction.
 
@@ -166,9 +166,9 @@ The following constants are needed:
 
 The block subsidy and other utility functions are inside the general subsidy category.
 
-https://zips.z.cash/protocol/canopy.pdf#subsidyconcepts
+https://zips.z.cash/protocol/protocol.pdf#subsidyconcepts
 
-https://zips.z.cash/protocol/canopy.pdf#subsidies
+https://zips.z.cash/protocol/protocol.pdf#subsidies
 
 - `block_subsidy(Height, Network) -> Result<Amount<NonNegative>, Error>` - Total block subsidy.
 - `miner_subsidy(Height, Network) -> Result<Amount<NonNegative>, Error>` - Miner portion.
@@ -179,7 +179,7 @@ https://zips.z.cash/protocol/canopy.pdf#subsidies
 
 Only functions specific to calculation of founders reward.
 
-https://zips.z.cash/protocol/canopy.pdf#foundersreward
+https://zips.z.cash/protocol/protocol.pdf#foundersreward
 
 - `founders_reward(Height, Network) -> Result<Amount<NonNegative>, Error>` - Founders reward portion for this block.
 - `founders_address_change_interval() -> Height` - Calculates the founders reward change interval. `FounderAddressChangeInterval` in the protocol specs. 
@@ -190,7 +190,7 @@ https://zips.z.cash/protocol/canopy.pdf#foundersreward
 
 Only functions specific to the calculation of funding streams.
 
-https://zips.z.cash/protocol/canopy.pdf#fundingstreams
+https://zips.z.cash/protocol/protocol.pdf#fundingstreams
 
 https://zips.z.cash/zip-0207
 
