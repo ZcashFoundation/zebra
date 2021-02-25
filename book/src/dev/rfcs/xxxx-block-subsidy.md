@@ -51,7 +51,7 @@ Sapling:
 
 https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
 
-The balance rule is that this pool must have non-negative value, and its net value is the miner fee for the transaction.
+The balance rule is that this pool must have non-negative value(See [ZIP 209](https://zips.z.cash/zip-0209)), and its net value is the miner fee for the transaction.
 
 **Note:** To compute the value pool we need blockchain state. The `tx_in` is always a reference to a previous transaction output, this is different from Sprout and Sapling pools where everything we need is in the same transaction. The details about how this is going to be implemented are outside of the scope of this RFC. They will be documented in a separate contextual validation RFC.
 
