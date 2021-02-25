@@ -911,6 +911,7 @@ where
                 for transaction in transactions.into_iter() {
                     if let Err(e) = self.peer_tx.send(Message::Tx(transaction)).await {
                         self.fail_with(e);
+                        return;
                     }
                 }
             }
@@ -919,6 +920,7 @@ where
                 for block in blocks.into_iter() {
                     if let Err(e) = self.peer_tx.send(Message::Block(block)).await {
                         self.fail_with(e);
+                        return;
                     }
                 }
             }
