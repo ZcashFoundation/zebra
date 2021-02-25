@@ -324,6 +324,7 @@ pub(super) enum State {
         /// internal Response format.
         tx: MustUseOneshotSender<Result<Response, SharedPeerError>>,
         span: tracing::Span,
+        request_timer: Sleep,
     },
 }
 
@@ -403,15 +404,12 @@ impl State {
                 span,
                 mut tx,
                 mut handler,
+                request_timer,
             } => {
                 // we have to get rid of the span reference so we can tamper with the state
                 let span = span.clone();
                 trace!(parent: &span, "awaiting response to client request");
-                let timer_ref = conn
-                    .request_timer
-                    .as_mut()
-                    .expect("timeout must be set while awaiting response");
-                let cancel = future::select(timer_ref, tx.cancellation());
+                let cancel = future::select(request_timer, tx.cancellation());
                 match future::select(peer_rx.next(), cancel)
                     .instrument(span.clone())
                     .await
@@ -500,9 +498,12 @@ impl TryFrom<Transition> for State {
     fn try_from(trans: Transition) -> Result<Self, Self::Error> {
         match trans {
             Transition::AwaitRequest => Ok(State::AwaitingRequest),
-            Transition::AwaitResponse { handler, tx, span } => {
-                Ok(State::AwaitingResponse { handler, tx, span })
-            }
+            Transition::AwaitResponse { handler, tx, span } => Ok(State::AwaitingResponse {
+                handler,
+                tx,
+                span,
+                request_timer: sleep(constants::REQUEST_TIMEOUT),
+            }),
             Transition::ClientClose => Err(None),
             Transition::Close(e) => Err(Some(e)),
             Transition::CloseResponse { tx, e } => {
@@ -516,12 +517,6 @@ impl TryFrom<Transition> for State {
 /// The state associated with a peer connection.
 pub struct Connection<S, Tx> {
     pub(super) state: Option<State>,
-    /// A timeout for a client request. This is stored separately from
-    /// State so that we can move the future out of it independently of
-    /// other state handling.
-    // I don't think this is necessary, and will try moving it into `State` in
-    // the next commit TODO(jane)
-    pub(super) request_timer: Option<Sleep>,
     pub(super) svc: S,
     /// A `mpsc::Receiver<ClientRequest>` that converts its results to
     /// `InProgressClientRequest`
@@ -548,10 +543,6 @@ where
                 .expect("state only None during steps")
                 .step(&mut self, &mut peer_rx)
                 .await;
-
-            if matches!(transition, Transition::AwaitResponse { .. }) {
-                self.request_timer = Some(sleep(constants::REQUEST_TIMEOUT));
-            }
 
             self.state = match transition.try_into() {
                 Ok(state) => Some(state),
