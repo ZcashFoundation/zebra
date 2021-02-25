@@ -23,7 +23,7 @@ Block subsidy and miner fees are part of the protocol, the semantic verification
 - **coinbase transaction**: The first transaction in a block; this is the transaction that handles block subsidy.
 - **founders reward**: The portion of the block subsidy that goes into a pre defined founder address in a single output.
 - **funding streams**: The portion of the block subsidy that goes into one or more pre defined funding stream addresses. Payment is done with one output for each active funding stream of the block.
-- **miner subsidy**: The portion of the block subsidy that goes into the miner of the block, excluding fees.
+- **miner subsidy**: The portion of the block subsidy that goes into the miner of the block, excluding fees. The miner may split this amount into any number of outputs, to any addresses, including extra outputs to founders rewards and funding stream addresses.
 - **network upgrade**: An intentional consensus rule change undertaken by the community in order to improve the network.
 - **transaction fees**: The sum of the extra [transparent value pool](#transparent-value-pool-calculation) and shielded values, for all the transactions in a block. This amount can be spent by the miner in the coinbase transaction.
 
