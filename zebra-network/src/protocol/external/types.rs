@@ -57,9 +57,8 @@ impl Version {
             (Mainnet, Heartwood) => 170_011,
             (Testnet, Canopy) => 170_012,
             (Mainnet, Canopy) => 170_013,
-            (_, NU5) => {
-                unimplemented!("NU5 upgrade is still in progress and not fully implemented")
-            }
+            (Testnet, NU5) => 170_014,
+            (Mainnet, NU5) => 170_015,
         })
     }
 
