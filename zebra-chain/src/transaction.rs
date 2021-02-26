@@ -40,7 +40,7 @@ use crate::{
 ///
 /// Zcash has a number of different transaction formats. They are represented
 /// internally by different enum variants. Because we checkpoint on Sapling
-/// activation, we do not parse any pre-Sapling transaction types.
+/// activation, we do not validate any pre-Sapling transaction types.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 // XXX consider boxing the Optional fields of V4 txs
 #[allow(clippy::large_enum_variant)]
