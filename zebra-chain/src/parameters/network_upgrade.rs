@@ -37,6 +37,8 @@ pub enum NetworkUpgrade {
     Heartwood,
     /// The Zcash protocol after the Canopy upgrade.
     Canopy,
+    /// The Zcash protocol after the NU5 upgrade.
+    NU5,
 }
 
 /// Mainnet network upgrade activation heights.
@@ -200,6 +202,7 @@ impl NetworkUpgrade {
         let spacing_seconds = match self {
             Genesis | BeforeOverwinter | Overwinter | Sapling => PRE_BLOSSOM_POW_TARGET_SPACING,
             Blossom | Heartwood | Canopy => POST_BLOSSOM_POW_TARGET_SPACING,
+            NU5 => unimplemented!("NU5 upgrade is still in progress and not fully implemented"),
         };
 
         Duration::seconds(spacing_seconds)

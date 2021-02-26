@@ -236,6 +236,9 @@ impl Arbitrary for Transaction {
             NetworkUpgrade::Blossom | NetworkUpgrade::Heartwood | NetworkUpgrade::Canopy => {
                 Self::v4_strategy(ledger_state)
             }
+            NetworkUpgrade::NU5 => {
+                unimplemented!("NU5 upgrade is still in progress and not fully implemented")
+            }
         }
     }
 
