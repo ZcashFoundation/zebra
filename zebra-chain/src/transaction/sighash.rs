@@ -1,6 +1,9 @@
 use super::Transaction;
 use crate::{
-    parameters::{ConsensusBranchId, NetworkUpgrade},
+    parameters::{
+        ConsensusBranchId, NetworkUpgrade, ORCHARD_VERSION_GROUP_ID, OVERWINTER_VERSION_GROUP_ID,
+        SAPLING_VERSION_GROUP_ID,
+    },
     serialization::{WriteZcashExt, ZcashSerialize},
     transparent,
 };
@@ -11,10 +14,6 @@ use std::io;
 
 static ZIP143_EXPLANATION: &str = "Invalid transaction version: after Overwinter activation transaction versions 1 and 2 are rejected";
 static ZIP243_EXPLANATION: &str = "Invalid transaction version: after Sapling activation transaction versions 1, 2, and 3 are rejected";
-
-const OVERWINTER_VERSION_GROUP_ID: u32 = 0x03C4_8270;
-const SAPLING_VERSION_GROUP_ID: u32 = 0x892F_2085;
-const ORCHARD_VERSION_GROUP_ID: u32 = 0x6A7_270A;
 
 const ZCASH_SIGHASH_PERSONALIZATION_PREFIX: &[u8; 12] = b"ZcashSigHash";
 const ZCASH_PREVOUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashPrevoutHash";

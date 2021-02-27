@@ -6,6 +6,7 @@ use std::{io, sync::Arc};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 use crate::{
+    parameters::{ORCHARD_VERSION_GROUP_ID, OVERWINTER_VERSION_GROUP_ID, SAPLING_VERSION_GROUP_ID},
     primitives::ZkSnarkProof,
     serialization::{
         ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashDeserializeInto,
@@ -15,10 +16,6 @@ use crate::{
 };
 
 use super::*;
-
-const OVERWINTER_VERSION_GROUP_ID: u32 = 0x03C4_8270;
-const SAPLING_VERSION_GROUP_ID: u32 = 0x892F_2085;
-const ORCHARD_VERSION_GROUP_ID: u32 = 0x6A7_270A;
 
 impl ZcashDeserialize for jubjub::Fq {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
