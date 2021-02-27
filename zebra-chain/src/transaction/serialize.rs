@@ -18,6 +18,7 @@ use super::*;
 
 const OVERWINTER_VERSION_GROUP_ID: u32 = 0x03C4_8270;
 const SAPLING_VERSION_GROUP_ID: u32 = 0x892F_2085;
+const ORCHARD_VERSION_GROUP_ID: u32 = 0x6A7_270A;
 
 impl ZcashDeserialize for jubjub::Fq {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
@@ -181,6 +182,23 @@ impl ZcashSerialize for Transaction {
                     Some(sd) => writer.write_all(&<[u8; 64]>::from(sd.binding_sig)[..])?,
                     None => {}
                 }
+            }
+            Transaction::V5 {
+                tx_in,
+                tx_out,
+                lock_time,
+                expiry_height,
+                rest,
+            } => {
+                // Write version 4 and set the fOverwintered bit.
+                writer.write_u32::<LittleEndian>(4 | (1 << 31))?;
+                writer.write_u32::<LittleEndian>(ORCHARD_VERSION_GROUP_ID)?;
+                tx_in.zcash_serialize(&mut writer)?;
+                tx_out.zcash_serialize(&mut writer)?;
+                lock_time.zcash_serialize(&mut writer)?;
+                writer.write_u32::<LittleEndian>(expiry_height.0)?;
+                // write the rest
+                writer.write_all(rest)?;
             }
         }
         Ok(())

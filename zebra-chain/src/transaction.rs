@@ -99,6 +99,21 @@ pub enum Transaction {
         /// The shielded data for this transaction, if any.
         shielded_data: Option<ShieldedData>,
     },
+    /// An Orchard transaction (`version = 5`).
+    V5 {
+        /// The transparent inputs to the transaction.
+        tx_in: Vec<transparent::Input>,
+        /// The transparent outputs from the transaction.
+        tx_out: Vec<transparent::Output>,
+        /// The earliest time or block height that this transaction can be added to the
+        /// chain.
+        lock_time: LockTime,
+        /// The latest block height that this transaction can be added to the chain.
+        expiry_height: block::Height,
+
+        /// The rest of the transaction as bytes
+        rest: Vec<u8>,
+    },
 }
 
 impl Transaction {
@@ -114,6 +129,7 @@ impl Transaction {
             Transaction::V2 { ref inputs, .. } => inputs,
             Transaction::V3 { ref inputs, .. } => inputs,
             Transaction::V4 { ref inputs, .. } => inputs,
+            Transaction::V5 { ref tx_in, .. } => tx_in,
         }
     }
 
@@ -124,6 +140,7 @@ impl Transaction {
             Transaction::V2 { ref outputs, .. } => outputs,
             Transaction::V3 { ref outputs, .. } => outputs,
             Transaction::V4 { ref outputs, .. } => outputs,
+            Transaction::V5 { ref tx_out, .. } => tx_out,
         }
     }
 
@@ -134,6 +151,7 @@ impl Transaction {
             Transaction::V2 { lock_time, .. } => *lock_time,
             Transaction::V3 { lock_time, .. } => *lock_time,
             Transaction::V4 { lock_time, .. } => *lock_time,
+            Transaction::V5 { lock_time, .. } => *lock_time,
         }
     }
 
@@ -144,6 +162,7 @@ impl Transaction {
             Transaction::V2 { .. } => None,
             Transaction::V3 { expiry_height, .. } => Some(*expiry_height),
             Transaction::V4 { expiry_height, .. } => Some(*expiry_height),
+            Transaction::V5 { expiry_height, .. } => Some(*expiry_height),
         }
     }
 

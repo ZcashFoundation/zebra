@@ -53,6 +53,7 @@ impl FakeChainHelper for Arc<Block> {
             Transaction::V2 { inputs, .. } => &mut inputs[0],
             Transaction::V3 { inputs, .. } => &mut inputs[0],
             Transaction::V4 { inputs, .. } => &mut inputs[0],
+            Transaction::V5 { tx_in, .. } => &mut tx_in[0],
         };
 
         match input {

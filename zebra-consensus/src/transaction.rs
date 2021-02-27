@@ -132,7 +132,10 @@ where
         async move {
             tracing::trace!(?tx);
             match &*tx {
-                Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => {
+                Transaction::V1 { .. }
+                | Transaction::V2 { .. }
+                | Transaction::V3 { .. }
+                | Transaction::V5 { .. } => {
                     tracing::debug!(?tx, "got transaction with wrong version");
                     Err(TransactionError::WrongVersion)
                 }

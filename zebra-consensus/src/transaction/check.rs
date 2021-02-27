@@ -68,7 +68,10 @@ pub fn has_inputs_and_outputs(tx: &Transaction) -> Result<(), TransactionError> 
                 Ok(())
             }
         }
-        Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => {
+        Transaction::V1 { .. }
+        | Transaction::V2 { .. }
+        | Transaction::V3 { .. }
+        | Transaction::V5 { .. } => {
             unreachable!("tx version is checked first")
         }
     }
@@ -111,7 +114,10 @@ pub fn coinbase_tx_no_joinsplit_or_spend(tx: &Transaction) -> Result<(), Transac
 
             Transaction::V4 { .. } => Ok(()),
 
-            Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => {
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V5 { .. } => {
                 unreachable!("tx version is checked first")
             }
         }
