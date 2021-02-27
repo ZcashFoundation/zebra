@@ -471,7 +471,7 @@ impl<'a> SigHasher<'a> {
 
         let value_balance = match self.trans {
             V4 { value_balance, .. } => value_balance,
-            V5 { .. } => unreachable!("NOT IMPLEMENTED YET!"),
+            V5 { .. } => unimplemented!("v5 transaction"),
             V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(ZIP243_EXPLANATION),
         };
 
