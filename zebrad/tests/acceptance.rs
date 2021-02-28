@@ -918,7 +918,9 @@ fn random_known_port() -> u16 {
     //   - macOS and Windows sequential ephemeral port allocations,
     //     starting from 49152:
     //      - https://dataplane.org/ephemeralports.html
-    rand::thread_rng().gen_range(53500, 60999)
+    use rand::Rng;
+
+    rand::thread_rng().gen_range(53500..60999)
 }
 
 /// Returns the "magic" port number that tells the operating system to
