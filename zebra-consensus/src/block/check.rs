@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 
 use zebra_chain::{
     block::{Block, Hash, Header, Height},
-    parameters::{Network, NetworkUpgrade},
+    parameters::Network,
     transaction,
     work::{difficulty::ExpandedDifficulty, equihash},
 };
