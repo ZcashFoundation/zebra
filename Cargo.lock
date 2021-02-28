@@ -3351,7 +3351,7 @@ dependencies = [
  "futures 0.3.13",
  "futures-core",
  "pin-project 0.4.27",
- "rand 0.8.1",
+ "rand 0.7.3",
  "tokio 0.3.6",
  "tower",
  "tower-fallback",
