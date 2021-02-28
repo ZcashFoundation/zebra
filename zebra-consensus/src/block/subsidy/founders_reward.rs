@@ -95,7 +95,7 @@ pub fn check_script_form(lock_script: Script, address: Address) -> bool {
         .expect("we should get address bytes here");
 
     address_hash = address_hash[2..22].to_vec();
-    address_hash.insert(0, 0x14 as u8);
+    address_hash.insert(0, 0x14_u8);
     address_hash.insert(0, OpCode::Hash160 as u8);
     address_hash.insert(address_hash.len(), OpCode::Equal as u8);
     if lock_script.0.len() == address_hash.len() && lock_script == Script(address_hash) {
