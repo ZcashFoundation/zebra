@@ -6,7 +6,7 @@ use std::{io, sync::Arc};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 use crate::{
-    parameters::{ORCHARD_VERSION_GROUP_ID, OVERWINTER_VERSION_GROUP_ID, SAPLING_VERSION_GROUP_ID},
+    parameters::{OVERWINTER_VERSION_GROUP_ID, SAPLING_VERSION_GROUP_ID, TX_V5_VERSION_GROUP_ID},
     primitives::ZkSnarkProof,
     serialization::{
         ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashDeserializeInto,
@@ -189,7 +189,7 @@ impl ZcashSerialize for Transaction {
             } => {
                 // Write version 5 and set the fOverwintered bit.
                 writer.write_u32::<LittleEndian>(5 | (1 << 31))?;
-                writer.write_u32::<LittleEndian>(ORCHARD_VERSION_GROUP_ID)?;
+                writer.write_u32::<LittleEndian>(TX_V5_VERSION_GROUP_ID)?;
                 tx_in.zcash_serialize(&mut writer)?;
                 tx_out.zcash_serialize(&mut writer)?;
                 lock_time.zcash_serialize(&mut writer)?;

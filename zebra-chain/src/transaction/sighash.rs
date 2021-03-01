@@ -1,8 +1,8 @@
 use super::Transaction;
 use crate::{
     parameters::{
-        ConsensusBranchId, NetworkUpgrade, ORCHARD_VERSION_GROUP_ID, OVERWINTER_VERSION_GROUP_ID,
-        SAPLING_VERSION_GROUP_ID,
+        ConsensusBranchId, NetworkUpgrade, OVERWINTER_VERSION_GROUP_ID, SAPLING_VERSION_GROUP_ID,
+        TX_V5_VERSION_GROUP_ID,
     },
     serialization::{WriteZcashExt, ZcashSerialize},
     transparent,
@@ -138,7 +138,7 @@ impl<'a> SigHasher<'a> {
             Transaction::V1 { .. } | Transaction::V2 { .. } => unreachable!(ZIP143_EXPLANATION),
             Transaction::V3 { .. } => OVERWINTER_VERSION_GROUP_ID,
             Transaction::V4 { .. } => SAPLING_VERSION_GROUP_ID,
-            Transaction::V5 { .. } => ORCHARD_VERSION_GROUP_ID,
+            Transaction::V5 { .. } => TX_V5_VERSION_GROUP_ID,
         })
     }
 
