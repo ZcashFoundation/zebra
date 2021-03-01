@@ -53,6 +53,9 @@ pub enum TransactionError {
     #[error("could not verify a transparent script")]
     Script(#[from] zebra_script::Error),
 
+    #[error("spend description cv and rk MUST NOT be of small order")]
+    SmallOrder,
+
     // XXX change this when we align groth16 verifier errors with bellman
     // and add a from annotation when the error type is more precise
     #[error("spend proof MUST be valid given a primary input formed from the other fields except spendAuthSig")]

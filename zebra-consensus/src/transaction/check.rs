@@ -7,6 +7,7 @@ use std::convert::TryFrom;
 use zebra_chain::{
     amount::Amount,
     primitives::{ed25519, Groth16Proof},
+    sapling::Spend,
     transaction::{JoinSplitData, ShieldedData, Transaction},
 };
 
@@ -115,6 +116,24 @@ pub fn coinbase_tx_no_joinsplit_or_spend(tx: &Transaction) -> Result<(), Transac
                 unreachable!("tx version is checked first")
             }
         }
+    } else {
+        Ok(())
+    }
+}
+
+/// Check that a Spend description's cv and rk are not of small order,
+/// i.e. [h_J]cv MUST NOT be 𝒪_J and [h_J]rk MUST NOT be 𝒪_J.
+///
+/// https://zips.z.cash/protocol/protocol.pdf#spenddesc
+pub fn spend_cv_rk_not_small_order(spend: &Spend) -> Result<(), TransactionError> {
+    if bool::from(spend.cv.0.is_small_order())
+        || bool::from(
+            jubjub::AffinePoint::from_bytes(spend.rk.into())
+                .unwrap()
+                .is_small_order(),
+        )
+    {
+        Err(TransactionError::SmallOrder)
     } else {
         Ok(())
     }

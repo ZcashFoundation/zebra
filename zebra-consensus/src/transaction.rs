@@ -205,8 +205,34 @@ where
                         for spend in shielded_data.spends() {
                             // TODO: check that spend.cv and spend.rk are NOT of small
                             // order.
-                            // https://zips.z.cash/protocol/protocol.pdf#spenddesc
 
+                            // Consensus rule: cv and rk MUST NOT be of small
+                            // order, i.e. [h_J]cv MUST NOT be 𝒪_J and [h_J]rk
+                            // MUST NOT be 𝒪_J.
+                            //
+                            // https://zips.z.cash/protocol/protocol.pdf#spenddesc
+                            check::spend_cv_rk_not_small_order(spend)?;
+
+                            // Consensus rule: The proof π_ZKSpend MUST be valid
+                            // given a primary input formed from the other
+                            // fields except spendAuthSig.
+                            //
+                            // Queue the verification of the Groth16 spend proof
+                            // for each Spend description while adding the
+                            // resulting future to our collection of async
+                            // checks that (at a minimum) must pass for the
+                            // transaction to verify.
+                            let spend_rsp = spend_verifier
+                                .ready_and()
+                                .await?
+                                .call(primitives::groth16::ItemWrapper::from(spend).into());
+
+                            async_checks.push(spend_rsp.boxed());
+
+                            // Consensus rule: The spend authorization signature
+                            // MUST be a valid SpendAuthSig signature over
+                            // SigHash using rk as the validating key.
+                            //
                             // Queue the validation of the RedJubjub spend
                             // authorization signature for each Spend
                             // description while adding the resulting future to
@@ -219,18 +245,6 @@ where
 
                             // Disable pending sighash check #1377
                             // async_checks.push(rsp.boxed());
-
-                            // Queue the verification of the Groth16 spend proof
-                            // for each Spend description while adding the
-                            // resulting future to our collection of async
-                            // checks that (at a minimum) must pass for the
-                            // transaction to verify.
-                            let spend_rsp = spend_verifier
-                                .ready_and()
-                                .await?
-                                .call(primitives::groth16::ItemWrapper::from(spend).into());
-
-                            async_checks.push(spend_rsp.boxed());
                         }
 
                         for output in shielded_data.outputs() {
@@ -238,6 +252,10 @@ where
                             // order.
                             // https://zips.z.cash/protocol/protocol.pdf#outputdesc
 
+                            // Consensus rule: The proof π_ZKOutput MUST be
+                            // valid given a primary input formed from the other
+                            // fields except C^enc and C^out.
+                            //
                             // Queue the verification of the Groth16 output
                             // proof for each Output description while adding
                             // the resulting future to our collection of async
