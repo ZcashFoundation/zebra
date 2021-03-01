@@ -136,8 +136,7 @@ where
                 | Transaction::V2 { .. }
                 | Transaction::V3 { .. }
                 | Transaction::V5 { .. } => {
-                    tracing::debug!(?tx, "got transaction with wrong version");
-                    Err(TransactionError::WrongVersion)
+                    unimplemented!("v5 transaction validation as specified in ZIP-216, ZIP-224, ZIP-225, and ZIP-244")
                 }
                 Transaction::V4 {
                     inputs,
