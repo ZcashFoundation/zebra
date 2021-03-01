@@ -245,7 +245,7 @@ impl<'a> SigHasher<'a> {
             Transaction::V1 { .. } | Transaction::V2 { .. } => unreachable!(ZIP143_EXPLANATION),
             Transaction::V3 { joinsplit_data, .. } => joinsplit_data.is_some(),
             Transaction::V4 { joinsplit_data, .. } => joinsplit_data.is_some(),
-            Transaction::V5 { .. } => unimplemented!("v5 transaction"),
+            Transaction::V5 { .. } => unimplemented!("v5 transaction format as specified in ZIP-225"),
         };
 
         if !has_joinsplits {
@@ -409,7 +409,7 @@ impl<'a> SigHasher<'a> {
                 shielded_data: None,
                 ..
             } => return writer.write_all(&[0; 32]),
-            V5 { .. } => unimplemented!("v5 transaction"),
+            V5 { .. } => unimplemented!("v5 transaction hash as specified in ZIP-225 and ZIP-244"),
             V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(ZIP243_EXPLANATION),
         };
 
@@ -446,7 +446,7 @@ impl<'a> SigHasher<'a> {
                 shielded_data: None,
                 ..
             } => return writer.write_all(&[0; 32]),
-            V5 { .. } => unimplemented!("v5 transaction"),
+            V5 { .. } => unimplemented!("v5 transaction hash as specified in ZIP-225 and ZIP-244"),
             V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(ZIP243_EXPLANATION),
         };
 
@@ -471,7 +471,7 @@ impl<'a> SigHasher<'a> {
 
         let value_balance = match self.trans {
             V4 { value_balance, .. } => value_balance,
-            V5 { .. } => unimplemented!("v5 transaction"),
+            V5 { .. } => unimplemented!("v5 transaction hash as specified in ZIP-225 and ZIP-244"),
             V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(ZIP243_EXPLANATION),
         };
 
