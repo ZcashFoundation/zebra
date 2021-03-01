@@ -42,7 +42,7 @@ use crate::{
 /// internally by different enum variants. Because we checkpoint on Sapling
 /// activation, we do not validate any pre-Sapling transaction types.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-// XXX consider boxing the Optional fields of V4 txs
+// XXX consider boxing the Optional fields of V4 and V5 txs
 #[allow(clippy::large_enum_variant)]
 pub enum Transaction {
     /// A fully transparent transaction (`version = 1`).
