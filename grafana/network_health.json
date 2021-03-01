@@ -1,0 +1,799 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "gnetId": null,
+  "graphTooltip": 0,
+  "id": 4,
+  "iteration": 1614572684426,
+  "links": [],
+  "panels": [
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": null,
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "hiddenSeries": false,
+      "id": 2,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "show": true,
+        "total": false,
+        "values": false
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "7.2.2",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "repeat": "job",
+      "repeatDirection": "h",
+      "scopedVars": {
+        "job": {
+          "selected": false,
+          "text": "zebrad-mainnet",
+          "value": "zebrad-mainnet"
+        }
+      },
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "expr": "sum(rate(bytes_read{job=\"$job\"}[1s]))",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "bytes read [1s]",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(bytes_written{job=\"$job\"}[1s]))",
+          "interval": "",
+          "legendFormat": "bytes written [1s]",
+          "refId": "B"
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "bytes - $job",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "format": "bytes",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": null,
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "hiddenSeries": false,
+      "id": 8,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "show": true,
+        "total": false,
+        "values": false
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "7.2.2",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "repeatDirection": "h",
+      "repeatIteration": 1614572684426,
+      "repeatPanelId": 2,
+      "scopedVars": {
+        "job": {
+          "selected": false,
+          "text": "zebrad-testnet",
+          "value": "zebrad-testnet"
+        }
+      },
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "expr": "sum(rate(bytes_read{job=\"$job\"}[1s]))",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "bytes read [1s]",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(bytes_written{job=\"$job\"}[1s]))",
+          "interval": "",
+          "legendFormat": "bytes written [1s]",
+          "refId": "B"
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "bytes - $job",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "format": "bytes",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": null,
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 6
+      },
+      "hiddenSeries": false,
+      "id": 6,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "show": true,
+        "total": false,
+        "values": false
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "7.2.2",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "repeat": "job",
+      "repeatDirection": "h",
+      "scopedVars": {
+        "job": {
+          "selected": false,
+          "text": "zebrad-mainnet",
+          "value": "zebrad-mainnet"
+        }
+      },
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "expr": "pool_num_peers{job=\"$job\"}",
+          "interval": "",
+          "legendFormat": "total peers",
+          "refId": "A"
+        },
+        {
+          "expr": "pool_num_ready{job=\"$job\"}",
+          "interval": "",
+          "legendFormat": "ready peers",
+          "refId": "B"
+        },
+        {
+          "expr": "pool_num_unready{job=\"$job\"}",
+          "interval": "",
+          "legendFormat": "unready peers",
+          "refId": "C"
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "peer readiness - $job",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": null,
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 6
+      },
+      "hiddenSeries": false,
+      "id": 9,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "show": true,
+        "total": false,
+        "values": false
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "7.2.2",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "repeatDirection": "h",
+      "repeatIteration": 1614572684426,
+      "repeatPanelId": 6,
+      "scopedVars": {
+        "job": {
+          "selected": false,
+          "text": "zebrad-testnet",
+          "value": "zebrad-testnet"
+        }
+      },
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "expr": "pool_num_peers{job=\"$job\"}",
+          "interval": "",
+          "legendFormat": "total peers",
+          "refId": "A"
+        },
+        {
+          "expr": "pool_num_ready{job=\"$job\"}",
+          "interval": "",
+          "legendFormat": "ready peers",
+          "refId": "B"
+        },
+        {
+          "expr": "pool_num_unready{job=\"$job\"}",
+          "interval": "",
+          "legendFormat": "unready peers",
+          "refId": "C"
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "peer readiness - $job",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": null,
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 15
+      },
+      "hiddenSeries": false,
+      "id": 7,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "show": true,
+        "total": false,
+        "values": false
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "7.2.2",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "repeat": "job",
+      "scopedVars": {
+        "job": {
+          "selected": false,
+          "text": "zebrad-mainnet",
+          "value": "zebrad-mainnet"
+        }
+      },
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "expr": "candidate_set_disconnected{job=\"$job\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "recently stopped peers",
+          "refId": "A"
+        },
+        {
+          "expr": "candidate_set_failed{job=\"$job\"}",
+          "interval": "",
+          "legendFormat": "failed candidates",
+          "refId": "B"
+        },
+        {
+          "expr": "candidate_set_gossiped{job=\"$job\"}",
+          "interval": "",
+          "legendFormat": "never attempted candidates",
+          "refId": "C"
+        },
+        {
+          "expr": "candidate_set_pending{job=\"$job\"}",
+          "interval": "",
+          "legendFormat": "connection attempt pending",
+          "refId": "D"
+        },
+        {
+          "expr": "candidate_set_responded{job=\"$job\"}",
+          "interval": "",
+          "legendFormat": "recent peers",
+          "refId": "E"
+        },
+        {
+          "expr": "candidate_set_recently_live{job=\"$job\"}",
+          "interval": "",
+          "legendFormat": "recently live peers",
+          "refId": "F"
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "candidate set - $job",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": null,
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 15
+      },
+      "hiddenSeries": false,
+      "id": 10,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "show": true,
+        "total": false,
+        "values": false
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "7.2.2",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "repeatIteration": 1614572684426,
+      "repeatPanelId": 7,
+      "scopedVars": {
+        "job": {
+          "selected": false,
+          "text": "zebrad-testnet",
+          "value": "zebrad-testnet"
+        }
+      },
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "expr": "candidate_set_disconnected{job=\"$job\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "recently stopped peers",
+          "refId": "A"
+        },
+        {
+          "expr": "candidate_set_failed{job=\"$job\"}",
+          "interval": "",
+          "legendFormat": "failed candidates",
+          "refId": "B"
+        },
+        {
+          "expr": "candidate_set_gossiped{job=\"$job\"}",
+          "interval": "",
+          "legendFormat": "never attempted candidates",
+          "refId": "C"
+        },
+        {
+          "expr": "candidate_set_pending{job=\"$job\"}",
+          "interval": "",
+          "legendFormat": "connection attempt pending",
+          "refId": "D"
+        },
+        {
+          "expr": "candidate_set_responded{job=\"$job\"}",
+          "interval": "",
+          "legendFormat": "recent peers",
+          "refId": "E"
+        },
+        {
+          "expr": "candidate_set_recently_live{job=\"$job\"}",
+          "interval": "",
+          "legendFormat": "recently live peers",
+          "refId": "F"
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "candidate set - $job",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 26,
+  "style": "dark",
+  "tags": [],
+  "templating": {
+    "list": [
+      {
+        "allValue": null,
+        "current": {
+          "selected": false,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "datasource": "Prometheus-Zebra",
+        "definition": "label_values(bytes_read, job)",
+        "hide": 0,
+        "includeAll": true,
+        "label": null,
+        "multi": true,
+        "name": "job",
+        "options": [],
+        "query": "label_values(bytes_read, job)",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "tagValuesQuery": "",
+        "tags": [],
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      }
+    ]
+  },
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": [
+      "5s"
+    ]
+  },
+  "timezone": "",
+  "title": "network health",
+  "uid": "320aS_dMk",
+  "version": 12
+}

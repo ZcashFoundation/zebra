@@ -1,0 +1,890 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "gnetId": null,
+  "graphTooltip": 0,
+  "id": 3,
+  "iteration": 1614572686856,
+  "links": [],
+  "panels": [
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": null,
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "hiddenSeries": false,
+      "id": 2,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "show": true,
+        "total": false,
+        "values": false
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "7.2.2",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "repeat": "job",
+      "repeatDirection": "h",
+      "scopedVars": {
+        "job": {
+          "selected": false,
+          "text": "zebrad-mainnet",
+          "value": "zebrad-mainnet"
+        }
+      },
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "expr": "checkpoint_processing_next_height{job=\"$job\"}",
+          "interval": "",
+          "legendFormat": "checkpoint_processing_next_height",
+          "refId": "A"
+        },
+        {
+          "expr": "checkpoint_queued_continuous_height{job=\"$job\"}",
+          "interval": "",
+          "legendFormat": "checkpoint_queued_continuous_height",
+          "refId": "B"
+        },
+        {
+          "expr": "checkpoint_verified_height{job=\"$job\"}",
+          "interval": "",
+          "legendFormat": "checkpoint_verified_height",
+          "refId": "C"
+        },
+        {
+          "expr": "checkpoint_queued_max_height{job=\"$job\"}",
+          "interval": "",
+          "legendFormat": "checkpoint_queued_max_height",
+          "refId": "D"
+        },
+        {
+          "expr": "state_finalized_committed_block_height{job=\"$job\"}",
+          "interval": "",
+          "legendFormat": "state_finalized_committed_block_height",
+          "refId": "E"
+        },
+        {
+          "expr": "state_finalized_queued_max_height{job=\"$job\"}",
+          "interval": "",
+          "legendFormat": "state_finalized_queued_max_height",
+          "refId": "F"
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "Checkpoint Height - $job",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": null,
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "hiddenSeries": false,
+      "id": 9,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "show": true,
+        "total": false,
+        "values": false
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "7.2.2",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "repeatDirection": "h",
+      "repeatIteration": 1614572686856,
+      "repeatPanelId": 2,
+      "scopedVars": {
+        "job": {
+          "selected": false,
+          "text": "zebrad-testnet",
+          "value": "zebrad-testnet"
+        }
+      },
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "expr": "checkpoint_processing_next_height{job=\"$job\"}",
+          "interval": "",
+          "legendFormat": "checkpoint_processing_next_height",
+          "refId": "A"
+        },
+        {
+          "expr": "checkpoint_queued_continuous_height{job=\"$job\"}",
+          "interval": "",
+          "legendFormat": "checkpoint_queued_continuous_height",
+          "refId": "B"
+        },
+        {
+          "expr": "checkpoint_verified_height{job=\"$job\"}",
+          "interval": "",
+          "legendFormat": "checkpoint_verified_height",
+          "refId": "C"
+        },
+        {
+          "expr": "checkpoint_queued_max_height{job=\"$job\"}",
+          "interval": "",
+          "legendFormat": "checkpoint_queued_max_height",
+          "refId": "D"
+        },
+        {
+          "expr": "state_finalized_committed_block_height{job=\"$job\"}",
+          "interval": "",
+          "legendFormat": "state_finalized_committed_block_height",
+          "refId": "E"
+        },
+        {
+          "expr": "state_finalized_queued_max_height{job=\"$job\"}",
+          "interval": "",
+          "legendFormat": "state_finalized_queued_max_height",
+          "refId": "F"
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "Checkpoint Height - $job",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": null,
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 7
+      },
+      "hiddenSeries": false,
+      "id": 8,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "show": true,
+        "total": false,
+        "values": false
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "7.2.2",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "repeat": "job",
+      "repeatDirection": "h",
+      "scopedVars": {
+        "job": {
+          "selected": false,
+          "text": "zebrad-mainnet",
+          "value": "zebrad-mainnet"
+        }
+      },
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "expr": "rate(checkpoint_verified_block_count[1s])",
+          "interval": "",
+          "legendFormat": "checkpoint verify rate [1s]",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(state_finalized_committed_block_count[1s])",
+          "interval": "",
+          "legendFormat": "state commit rate [1s]",
+          "refId": "C"
+        },
+        {
+          "expr": "rate(sync_downloaded_block_count[1s])",
+          "interval": "",
+          "legendFormat": "sync download rate [1s]",
+          "refId": "E"
+        },
+        {
+          "expr": "rate(gossip_downloaded_block_count[1s])",
+          "interval": "",
+          "legendFormat": "gossip download rate [1s]",
+          "refId": "B"
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "Checkpoint Pipeline Throughput - $job",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": null,
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 7
+      },
+      "hiddenSeries": false,
+      "id": 10,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "show": true,
+        "total": false,
+        "values": false
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "7.2.2",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "repeatDirection": "h",
+      "repeatIteration": 1614572686856,
+      "repeatPanelId": 8,
+      "scopedVars": {
+        "job": {
+          "selected": false,
+          "text": "zebrad-testnet",
+          "value": "zebrad-testnet"
+        }
+      },
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "expr": "rate(checkpoint_verified_block_count[1s])",
+          "interval": "",
+          "legendFormat": "checkpoint verify rate [1s]",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(state_finalized_committed_block_count[1s])",
+          "interval": "",
+          "legendFormat": "state commit rate [1s]",
+          "refId": "C"
+        },
+        {
+          "expr": "rate(sync_downloaded_block_count[1s])",
+          "interval": "",
+          "legendFormat": "sync download rate [1s]",
+          "refId": "E"
+        },
+        {
+          "expr": "rate(gossip_downloaded_block_count[1s])",
+          "interval": "",
+          "legendFormat": "gossip download rate [1s]",
+          "refId": "B"
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "Checkpoint Pipeline Throughput - $job",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": null,
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 14
+      },
+      "hiddenSeries": false,
+      "id": 4,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "show": true,
+        "total": false,
+        "values": false
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "7.2.2",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "repeat": "job",
+      "repeatDirection": "h",
+      "scopedVars": {
+        "job": {
+          "selected": false,
+          "text": "zebrad-mainnet",
+          "value": "zebrad-mainnet"
+        }
+      },
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "expr": "checkpoint_queued_slots{job=\"$job\"}",
+          "interval": "",
+          "legendFormat": "checkpoint_queued_slots",
+          "refId": "A"
+        },
+        {
+          "expr": "state_finalized_queued_block_count{job=\"$job\"}",
+          "interval": "",
+          "legendFormat": "state_finalized_queued_block_count",
+          "refId": "B"
+        },
+        {
+          "expr": "sync_prospective_tips_len{job=\"$job\"}",
+          "interval": "",
+          "legendFormat": "sync_prospective_tips_len",
+          "refId": "C"
+        },
+        {
+          "expr": "sync_downloads_in_flight{job=\"$job\"}",
+          "interval": "",
+          "legendFormat": "sync_downloads_in_flight",
+          "refId": "D"
+        },
+        {
+          "expr": "sync_pending_blocks_len{job=\"$job\"}",
+          "interval": "",
+          "legendFormat": "sync_pending_blocks_len",
+          "refId": "E"
+        },
+        {
+          "expr": "rate(sync_cancelled_download_count{job=\"$job\"}[1s])",
+          "interval": "",
+          "legendFormat": "sync_cancelled_download_count[1s]",
+          "refId": "F"
+        },
+        {
+          "expr": "rate(sync_cancelled_verify_count{job=\"$job\"}[1s])",
+          "interval": "",
+          "legendFormat": "sync_cancelled_verify_count[1s]",
+          "refId": "G"
+        },
+        {
+          "expr": "rate(gossip_queued_block_count{job=\"$job\"}[1s])",
+          "interval": "",
+          "legendFormat": "gossip_queued_block_count[1s]",
+          "refId": "H"
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "Checkpoint Queues - $job",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": null,
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 14
+      },
+      "hiddenSeries": false,
+      "id": 11,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "show": true,
+        "total": false,
+        "values": false
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "7.2.2",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "repeatDirection": "h",
+      "repeatIteration": 1614572686856,
+      "repeatPanelId": 4,
+      "scopedVars": {
+        "job": {
+          "selected": false,
+          "text": "zebrad-testnet",
+          "value": "zebrad-testnet"
+        }
+      },
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "expr": "checkpoint_queued_slots{job=\"$job\"}",
+          "interval": "",
+          "legendFormat": "checkpoint_queued_slots",
+          "refId": "A"
+        },
+        {
+          "expr": "state_finalized_queued_block_count{job=\"$job\"}",
+          "interval": "",
+          "legendFormat": "state_finalized_queued_block_count",
+          "refId": "B"
+        },
+        {
+          "expr": "sync_prospective_tips_len{job=\"$job\"}",
+          "interval": "",
+          "legendFormat": "sync_prospective_tips_len",
+          "refId": "C"
+        },
+        {
+          "expr": "sync_downloads_in_flight{job=\"$job\"}",
+          "interval": "",
+          "legendFormat": "sync_downloads_in_flight",
+          "refId": "D"
+        },
+        {
+          "expr": "sync_pending_blocks_len{job=\"$job\"}",
+          "interval": "",
+          "legendFormat": "sync_pending_blocks_len",
+          "refId": "E"
+        },
+        {
+          "expr": "rate(sync_cancelled_download_count{job=\"$job\"}[1s])",
+          "interval": "",
+          "legendFormat": "sync_cancelled_download_count[1s]",
+          "refId": "F"
+        },
+        {
+          "expr": "rate(sync_cancelled_verify_count{job=\"$job\"}[1s])",
+          "interval": "",
+          "legendFormat": "sync_cancelled_verify_count[1s]",
+          "refId": "G"
+        },
+        {
+          "expr": "rate(gossip_queued_block_count{job=\"$job\"}[1s])",
+          "interval": "",
+          "legendFormat": "gossip_queued_block_count[1s]",
+          "refId": "H"
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "Checkpoint Queues - $job",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 26,
+  "style": "dark",
+  "tags": [],
+  "templating": {
+    "list": [
+      {
+        "allValue": null,
+        "current": {
+          "selected": false,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "datasource": "Prometheus-Zebra",
+        "definition": "label_values(sync_prospective_tips_len, job)",
+        "hide": 0,
+        "includeAll": true,
+        "label": null,
+        "multi": true,
+        "name": "job",
+        "options": [],
+        "query": "label_values(sync_prospective_tips_len, job)",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "tagValuesQuery": "",
+        "tags": [],
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      }
+    ]
+  },
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": [
+      "5s",
+      "10s",
+      "30s",
+      "1m",
+      "5m",
+      "15m",
+      "30m",
+      "1h",
+      "2h",
+      "1d"
+    ]
+  },
+  "timezone": "",
+  "title": "checkpoint verification",
+  "uid": "o4LmN_OMk",
+  "version": 42
+}
