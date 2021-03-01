@@ -38,6 +38,9 @@ pub enum NetworkUpgrade {
     /// The Zcash protocol after the Canopy upgrade.
     Canopy,
     /// The Zcash protocol after the NU5 upgrade.
+    ///
+    /// Note: Network Upgrade 5 includes the Orchard Shielded Protocol, and
+    /// other changes. The NU5 code name has not been chosen yet.
     NU5,
 }
 

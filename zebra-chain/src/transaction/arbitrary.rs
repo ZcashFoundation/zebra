@@ -237,7 +237,7 @@ impl Arbitrary for Transaction {
                 Self::v4_strategy(ledger_state)
             }
             NetworkUpgrade::NU5 => {
-                unimplemented!("NU5 upgrade is still in progress and not fully implemented")
+                unimplemented!("NU5 upgrade can use v4 or v5 transactions, as specified in ZIP-225")
             }
         }
     }
