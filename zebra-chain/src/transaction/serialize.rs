@@ -300,6 +300,23 @@ impl ZcashDeserialize for Transaction {
                     joinsplit_data,
                 })
             }
+            (5, false) => {
+                let id = reader.read_u32::<LittleEndian>()?;
+                if id != TX_V5_VERSION_GROUP_ID {
+                    return Err(SerializationError::Parse("expected TX_V5_VERSION_GROUP_ID"));
+                }
+                Ok(Transaction::V5 {
+                    tx_in: Vec::zcash_deserialize(&mut reader)?,
+                    tx_out: Vec::zcash_deserialize(&mut reader)?,
+                    lock_time: LockTime::zcash_deserialize(&mut reader)?,
+                    expiry_height: block::Height(reader.read_u32::<LittleEndian>()?),
+                    rest: {
+                        let mut buffer = Vec::new();
+                        reader.read_to_end(&mut buffer)?;
+                        buffer
+                    },
+                })
+            }
             (_, _) => Err(SerializationError::Parse("bad tx header")),
         }
     }
