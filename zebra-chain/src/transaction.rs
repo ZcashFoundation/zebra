@@ -194,7 +194,8 @@ impl Transaction {
                     .flat_map(|joinsplit| joinsplit.nullifiers.iter()),
             ),
             // No JoinSplits
-            _ => Box::new(std::iter::empty()),
+            Transaction::V1 { .. } | Transaction::V5 { .. } => Box::new(std::iter::empty()),
+            _ => Box::new(std::iter::empty())
         }
     }
 
@@ -208,8 +209,10 @@ impl Transaction {
                 shielded_data: Some(shielded_data),
                 ..
             } => Box::new(shielded_data.nullifiers()),
+            Transaction::V5 { .. } => unimplemented!("v5 transaction format as specified in ZIP-225"),
             // No JoinSplits
-            _ => Box::new(std::iter::empty()),
+            Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => Box::new(std::iter::empty()),
+            _ => Box::new(std::iter::empty())
         }
     }
 
