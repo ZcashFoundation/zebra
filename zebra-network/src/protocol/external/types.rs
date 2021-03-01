@@ -189,7 +189,7 @@ mod test {
         zebra_test::init();
 
         let highest_network_upgrade = NetworkUpgrade::current(network, block::Height::MAX);
-        assert!(highest_network_upgrade == Canopy || highest_network_upgrade == Heartwood,
+        assert!(highest_network_upgrade == NU5 || highest_network_upgrade == Canopy,
                 "expected coverage of all network upgrades: add the new network upgrade to the list in this test");
 
         for &network_upgrade in &[
@@ -199,6 +199,7 @@ mod test {
             Blossom,
             Heartwood,
             Canopy,
+            NU5,
         ] {
             let height = network_upgrade.activation_height(network);
             if let Some(height) = height {
