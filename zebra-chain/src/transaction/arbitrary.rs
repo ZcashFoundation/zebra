@@ -256,8 +256,13 @@ impl Arbitrary for Transaction {
             NetworkUpgrade::Blossom | NetworkUpgrade::Heartwood | NetworkUpgrade::Canopy => {
                 Self::v4_strategy(ledger_state)
             }
-            // Blocked by #1823
-            //NetworkUpgrade::NU5 => Self::v5_strategy(ledger_state),
+            // Blocked by #1823 and #1824, see #1826
+            /*
+            NetworkUpgrade::NU5 => prop_oneof!(
+                Self::v4_strategy(ledger_state),
+                Self::v5_strategy(ledger_state)
+            ),
+            */
         }
     }
 
