@@ -20,7 +20,7 @@ use tokio::sync::broadcast::{channel, error::RecvError, Sender};
 use tower::{util::ServiceFn, Service};
 use tower_batch::{Batch, BatchControl};
 use tower_fallback::Fallback;
-use zebra_chain::sapling::Spend;
+use zebra_chain::sapling::{Output, Spend};
 
 mod hash_reader;
 mod params;
@@ -102,30 +102,30 @@ pub static OUTPUT_VERIFIER: Lazy<
 /// Note that making a `Service` call requires mutable access to the service, so
 /// you should call `.clone()` on the global handle to create a local, mutable
 /// handle.
-pub static JOINSPLIT_VERIFIER: Lazy<
-    Fallback<Batch<Verifier, Item>, ServiceFn<fn(Item) -> Ready<Result<(), VerificationError>>>>,
-> = Lazy::new(|| {
-    Fallback::new(
-        Batch::new(
-            Verifier::new(&PARAMS.sprout.verifying_key),
-            super::MAX_BATCH_SIZE,
-            super::MAX_BATCH_LATENCY,
-        ),
-        // We want to fallback to individual verification if batch verification
-        // fails, so we need a Service to use. The obvious way to do this would
-        // be to write a closure that returns an async block. But because we
-        // have to specify the type of a static, we need to be able to write the
-        // type of the closure and its return value, and both closures and async
-        // blocks have eldritch types whose names cannot be written. So instead,
-        // we use a Ready to avoid an async block and cast the closure to a
-        // function (which is possible because it doesn't capture any state).
-        tower::service_fn(
-            (|item: Item| {
-                ready(item.verify_single(&prepare_verifying_key(&PARAMS.sprout.verifying_key)))
-            }) as fn(_) -> _,
-        ),
-    )
-});
+// pub static JOINSPLIT_VERIFIER: Lazy<
+//     Fallback<Batch<Verifier, Item>, ServiceFn<fn(Item) -> Ready<Result<(), VerificationError>>>>,
+// > = Lazy::new(|| {
+//     Fallback::new(
+//         Batch::new(
+//             Verifier::new(&PARAMS.sprout.verifying_key),
+//             super::MAX_BATCH_SIZE,
+//             super::MAX_BATCH_LATENCY,
+//         ),
+//         // We want to fallback to individual verification if batch verification
+//         // fails, so we need a Service to use. The obvious way to do this would
+//         // be to write a closure that returns an async block. But because we
+//         // have to specify the type of a static, we need to be able to write the
+//         // type of the closure and its return value, and both closures and async
+//         // blocks have eldritch types whose names cannot be written. So instead,
+//         // we use a Ready to avoid an async block and cast the closure to a
+//         // function (which is possible because it doesn't capture any state).
+//         tower::service_fn(
+//             (|item: Item| {
+//                 ready(item.verify_single(&prepare_verifying_key(&PARAMS.sprout.verifying_key)))
+//             }) as fn(_) -> _,
+//         ),
+//     )
+// });
 
 /// A Groth16 verification item, used as the request type of the service.
 pub type Item = batch::Item<Bls12>;
@@ -136,12 +136,16 @@ impl From<&Spend> for ItemWrapper {
     fn from(spend: &Spend) -> Self {
         Self(Item::from((
             bellman::groth16::Proof::read(&spend.zkproof.0[..]).unwrap(),
-            vec![
-                <Bls12 as pairing::Engine>::Fr::from_bytes(&spend.cv.into()).unwrap(),
-                <Bls12 as pairing::Engine>::Fr::from_bytes(&spend.anchor.into()).unwrap(),
-                <Bls12 as pairing::Engine>::Fr::from_bytes(&spend.nullifier.into()).unwrap(),
-                <Bls12 as pairing::Engine>::Fr::from_bytes(&spend.rk.into()).unwrap(),
-            ],
+            spend.primary_inputs(),
+        )))
+    }
+}
+
+impl From<&Output> for ItemWrapper {
+    fn from(output: &Output) -> Self {
+        Self(Item::from((
+            bellman::groth16::Proof::read(&output.zkproof.0[..]).unwrap(),
+            output.primary_inputs(),
         )))
     }
 }

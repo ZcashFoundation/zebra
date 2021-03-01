@@ -128,7 +128,7 @@ where
 
         let mut spend_verifier = primitives::groth16::SPEND_VERIFIER.clone();
         let mut output_verifier = primitives::groth16::OUTPUT_VERIFIER.clone();
-        let mut joinsplit_verifier = primitives::groth16::JOINSPLIT_VERIFIER.clone();
+        // let mut joinsplit_verifier = primitives::groth16::JOINSPLIT_VERIFIER.clone();
 
         let mut redjubjub_verifier = primitives::redjubjub::VERIFIER.clone();
         let mut script_verifier = self.script_verifier.clone();
@@ -201,6 +201,7 @@ where
 
                     if let Some(shielded_data) = shielded_data {
                         check::shielded_balances_match(&shielded_data, *value_balance)?;
+
                         for spend in shielded_data.spends() {
                             // TODO: check that spend.cv and spend.rk are NOT of small
                             // order.
@@ -224,7 +225,6 @@ where
                             // resulting future to our collection of async
                             // checks that (at a minimum) must pass for the
                             // transaction to verify.
-
                             let spend_rsp = spend_verifier
                                 .ready_and()
                                 .await?
@@ -233,7 +233,7 @@ where
                             async_checks.push(spend_rsp.boxed());
                         }
 
-                        shielded_data.outputs().for_each(|_output| {
+                        for output in shielded_data.outputs() {
                             // TODO: check that output.cv and output.epk are NOT of small
                             // order.
                             // https://zips.z.cash/protocol/protocol.pdf#outputdesc
@@ -243,14 +243,13 @@ where
                             // the resulting future to our collection of async
                             // checks that (at a minimum) must pass for the
                             // transaction to verify.
+                            let output_rsp = output_verifier
+                                .ready_and()
+                                .await?
+                                .call(primitives::groth16::ItemWrapper::from(output).into());
 
-                            // let output_rsp = output_verifier
-                            //     .ready_and()
-                            //     .await?
-                            //     .call(primitives::groth16::ItemWrapper::from(output).into());
-
-                            // async_checks.push(output_rsp.boxed());
-                        });
+                            async_checks.push(output_rsp.boxed());
+                        }
 
                         let bvk = shielded_data.binding_verification_key(*value_balance);
                         let _rsp = redjubjub_verifier
