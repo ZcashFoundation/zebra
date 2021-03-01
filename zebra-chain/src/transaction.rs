@@ -99,7 +99,7 @@ pub enum Transaction {
         /// The shielded data for this transaction, if any.
         shielded_data: Option<ShieldedData>,
     },
-    /// An Orchard transaction (`version = 5`).
+    /// A `version = 5` transaction, which supports `Sapling` and `Orchard`.
     V5 {
         /// The transparent inputs to the transaction.
         tx_in: Vec<transparent::Input>,

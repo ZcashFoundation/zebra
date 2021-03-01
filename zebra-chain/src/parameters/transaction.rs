@@ -1,9 +1,9 @@
 //! Transaction consensus and utility parameters.
 
-///The version group ID for Overwinter transactions.
+/// The version group ID for Overwinter transactions.
 pub const OVERWINTER_VERSION_GROUP_ID: u32 = 0x03C4_8270;
 
-///The version group ID for Sapling transactions.
+/// The version group ID for Sapling transactions.
 pub const SAPLING_VERSION_GROUP_ID: u32 = 0x892F_2085;
 
 /// The version group ID for version 5 transactions.
