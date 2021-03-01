@@ -205,8 +205,7 @@ impl NetworkUpgrade {
     pub fn target_spacing(&self) -> Duration {
         let spacing_seconds = match self {
             Genesis | BeforeOverwinter | Overwinter | Sapling => PRE_BLOSSOM_POW_TARGET_SPACING,
-            Blossom | Heartwood | Canopy => POST_BLOSSOM_POW_TARGET_SPACING,
-            NU5 => unimplemented!("NU5 upgrade is still in progress and not fully implemented"),
+            Blossom | Heartwood | Canopy | NU5 => POST_BLOSSOM_POW_TARGET_SPACING,
         };
 
         Duration::seconds(spacing_seconds)
