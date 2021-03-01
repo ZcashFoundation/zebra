@@ -174,7 +174,7 @@ impl UpdateWith<PreparedBlock> for Chain {
                     ..
                 } => (inputs, shielded_data, joinsplit_data),
                 V5 { .. } => unimplemented!("v5 transaction format as specified in ZIP-225"),
-                V1 | V2 | V3 => unreachable!(
+                V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(
                     "older transaction versions only exist in finalized blocks pre sapling",
                 ),
             };
@@ -234,7 +234,7 @@ impl UpdateWith<PreparedBlock> for Chain {
                     ..
                 } => (inputs, shielded_data, joinsplit_data),
                 V5 { .. } => unimplemented!("v5 transaction format as specified in ZIP-225"),
-                V1 | V2 | V3 => unreachable!(
+                V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(
                     "older transaction versions only exist in finalized blocks pre sapling",
                 ),
             };
