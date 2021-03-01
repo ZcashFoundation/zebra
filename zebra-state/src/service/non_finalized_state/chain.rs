@@ -165,14 +165,16 @@ impl UpdateWith<PreparedBlock> for Chain {
             .zip(transaction_hashes.iter().cloned())
             .enumerate()
         {
+            use transaction::Transaction::*;
             let (inputs, shielded_data, joinsplit_data) = match transaction.deref() {
-                transaction::Transaction::V4 {
+                V4 {
                     inputs,
                     shielded_data,
                     joinsplit_data,
                     ..
                 } => (inputs, shielded_data, joinsplit_data),
-                _ => unreachable!(
+                V5 { .. } => unimplemented!("v5 transaction format as specified in ZIP-225"),
+                V1 | V2 | V3 => unreachable!(
                     "older transaction versions only exist in finalized blocks pre sapling",
                 ),
             };
@@ -223,14 +225,16 @@ impl UpdateWith<PreparedBlock> for Chain {
         for (transaction, transaction_hash) in
             block.transactions.iter().zip(transaction_hashes.iter())
         {
+            use transaction::Transaction::*;
             let (inputs, shielded_data, joinsplit_data) = match transaction.deref() {
-                transaction::Transaction::V4 {
+                V4 {
                     inputs,
                     shielded_data,
                     joinsplit_data,
                     ..
                 } => (inputs, shielded_data, joinsplit_data),
-                _ => unreachable!(
+                V5 { .. } => unimplemented!("v5 transaction format as specified in ZIP-225"),
+                V1 | V2 | V3 => unreachable!(
                     "older transaction versions only exist in finalized blocks pre sapling",
                 ),
             };
