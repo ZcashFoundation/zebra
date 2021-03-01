@@ -15,14 +15,14 @@ lazy_static::lazy_static! {
 
 #[non_exhaustive]
 pub struct Groth16Params {
-    pub sprout: SproutParams,
+    // pub sprout: SproutParams,
     pub sapling: SaplingParams,
 }
 
 impl Groth16Params {
     fn new() -> Self {
         Self {
-            sprout: SproutParams::new(),
+            // sprout: SproutParams::new(),
             sapling: SaplingParams::new(),
         }
     }
