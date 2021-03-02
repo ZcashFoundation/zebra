@@ -305,16 +305,19 @@ impl ZcashDeserialize for Transaction {
                 if id != TX_V5_VERSION_GROUP_ID {
                     return Err(SerializationError::Parse("expected TX_V5_VERSION_GROUP_ID"));
                 }
+                let inputs = Vec::zcash_deserialize(&mut reader)?;
+                let outputs = Vec::zcash_deserialize(&mut reader)?;
+                let lock_time = LockTime::zcash_deserialize(&mut reader)?;
+                let expiry_height = block::Height(reader.read_u32::<LittleEndian>()?);
+                let mut rest = Vec::new();
+                reader.read_to_end(&mut rest)?;
+
                 Ok(Transaction::V5 {
-                    inputs: Vec::zcash_deserialize(&mut reader)?,
-                    outputs: Vec::zcash_deserialize(&mut reader)?,
-                    lock_time: LockTime::zcash_deserialize(&mut reader)?,
-                    expiry_height: block::Height(reader.read_u32::<LittleEndian>()?),
-                    rest: {
-                        let mut buffer = Vec::new();
-                        reader.read_to_end(&mut buffer)?;
-                        buffer
-                    },
+                    inputs,
+                    outputs,
+                    lock_time,
+                    expiry_height,
+                    rest,
                 })
             }
             (_, _) => Err(SerializationError::Parse("bad tx header")),
