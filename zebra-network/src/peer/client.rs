@@ -218,7 +218,7 @@ impl Service<Request> for Client {
         // request.
         let span = tracing::Span::current();
 
-        match self.server_tx.try_send(ClientRequest { request, span, tx }) {
+        match self.server_tx.try_send(ClientRequest { request, tx, span }) {
             Err(e) => {
                 if e.is_disconnected() {
                     let ClientRequest { tx, .. } = e.into_inner();
