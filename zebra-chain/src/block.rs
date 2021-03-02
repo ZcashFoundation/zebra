@@ -70,14 +70,8 @@ impl Block {
     ///
     /// Returns None if this block does not have a block height.
     pub fn root_hash(&self, network: Network) -> Option<RootHash> {
-        match self.coinbase_height() {
-            Some(height) => Some(RootHash::from_bytes(
-                self.header.root_bytes,
-                network,
-                height,
-            )),
-            None => None,
-        }
+        self.coinbase_height()
+            .map(|height| RootHash::from_bytes(self.header.root_bytes, network, height))
     }
 }
 
