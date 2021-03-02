@@ -213,9 +213,7 @@ async fn multi_item_checkpoint_list() -> Result<(), Report> {
     Ok(())
 }
 
-// Temporarily ignore this test, until the state can handle out-of-order blocks
-// #[tokio::test]
-#[allow(dead_code)]
+#[tokio::test]
 async fn continuous_blockchain_test() -> Result<(), Report> {
     continuous_blockchain(None).await?;
     for height in 0..=10 {
@@ -226,7 +224,6 @@ async fn continuous_blockchain_test() -> Result<(), Report> {
 
 /// Test a continuous blockchain, restarting verification at `restart_height`.
 // TODO: does this duplicate the test code commented out in src/chain/tests.rs?
-#[allow(dead_code)]
 #[spandoc::spandoc]
 async fn continuous_blockchain(restart_height: Option<block::Height>) -> Result<(), Report> {
     zebra_test::init();
@@ -313,6 +310,7 @@ async fn continuous_blockchain(restart_height: Option<block::Height>) -> Result<
 
         // Now verify each block
         for (block, height, _hash) in blockchain {
+            // Commit directly to the state until after the (fake) restart height
             if let Some(restart_height) = restart_height {
                 if height <= restart_height {
                     let mut state_service = state_service.clone();
@@ -320,15 +318,20 @@ async fn continuous_blockchain(restart_height: Option<block::Height>) -> Result<
                     let ready_state_service =
                         state_service.ready_and().map_err(|e| eyre!(e)).await?;
 
-                    /// SPANDOC: Add block to the state {?height}
+                    /// SPANDOC: Add block directly to the state {?height}
                     ready_state_service
                         .call(zebra_state::Request::CommitFinalizedBlock(
                             block.clone().into(),
                         ))
                         .await
                         .map_err(|e| eyre!(e))?;
+
+                    // Skip verification for (fake) previous blocks
+                    continue;
                 }
             }
+
+            // Stop verifying after the final checkpoint is reached
             if height > checkpoint_verifier.checkpoint_list.max_height() {
                 break;
             }
