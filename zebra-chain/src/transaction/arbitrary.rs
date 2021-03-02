@@ -114,9 +114,9 @@ impl Transaction {
             any::<Vec<u8>>(),
         )
             .prop_map(
-                |(tx_in, tx_out, lock_time, expiry_height, rest)| Transaction::V5 {
-                    tx_in,
-                    tx_out,
+                |(inputs, outputs, lock_time, expiry_height, rest)| Transaction::V5 {
+                    inputs,
+                    outputs,
                     lock_time,
                     expiry_height,
                     rest,

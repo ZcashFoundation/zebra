@@ -102,9 +102,9 @@ pub enum Transaction {
     /// A `version = 5` transaction, which supports `Sapling` and `Orchard`.
     V5 {
         /// The transparent inputs to the transaction.
-        tx_in: Vec<transparent::Input>,
+        inputs: Vec<transparent::Input>,
         /// The transparent outputs from the transaction.
-        tx_out: Vec<transparent::Output>,
+        outputs: Vec<transparent::Output>,
         /// The earliest time or block height that this transaction can be added to the
         /// chain.
         lock_time: LockTime,
@@ -129,7 +129,7 @@ impl Transaction {
             Transaction::V2 { ref inputs, .. } => inputs,
             Transaction::V3 { ref inputs, .. } => inputs,
             Transaction::V4 { ref inputs, .. } => inputs,
-            Transaction::V5 { ref tx_in, .. } => tx_in,
+            Transaction::V5 { ref inputs, .. } => inputs,
         }
     }
 
@@ -140,7 +140,7 @@ impl Transaction {
             Transaction::V2 { ref outputs, .. } => outputs,
             Transaction::V3 { ref outputs, .. } => outputs,
             Transaction::V4 { ref outputs, .. } => outputs,
-            Transaction::V5 { ref tx_out, .. } => tx_out,
+            Transaction::V5 { ref outputs, .. } => outputs,
         }
     }
 
