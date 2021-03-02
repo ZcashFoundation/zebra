@@ -94,39 +94,6 @@ pub static OUTPUT_VERIFIER: Lazy<
     )
 });
 
-/// Global batch verification context for Groth16 proofs of JoinSplit statements.
-///
-/// This service transparently batches contemporaneous proof verifications,
-/// handling batch failures by falling back to individual verification.
-///
-/// Note that making a `Service` call requires mutable access to the service, so
-/// you should call `.clone()` on the global handle to create a local, mutable
-/// handle.
-// pub static JOINSPLIT_VERIFIER: Lazy<
-//     Fallback<Batch<Verifier, Item>, ServiceFn<fn(Item) -> Ready<Result<(), VerificationError>>>>,
-// > = Lazy::new(|| {
-//     Fallback::new(
-//         Batch::new(
-//             Verifier::new(&PARAMS.sprout.verifying_key),
-//             super::MAX_BATCH_SIZE,
-//             super::MAX_BATCH_LATENCY,
-//         ),
-//         // We want to fallback to individual verification if batch verification
-//         // fails, so we need a Service to use. The obvious way to do this would
-//         // be to write a closure that returns an async block. But because we
-//         // have to specify the type of a static, we need to be able to write the
-//         // type of the closure and its return value, and both closures and async
-//         // blocks have eldritch types whose names cannot be written. So instead,
-//         // we use a Ready to avoid an async block and cast the closure to a
-//         // function (which is possible because it doesn't capture any state).
-//         tower::service_fn(
-//             (|item: Item| {
-//                 ready(item.verify_single(&prepare_verifying_key(&PARAMS.sprout.verifying_key)))
-//             }) as fn(_) -> _,
-//         ),
-//     )
-// });
-
 /// A Groth16 verification item, used as the request type of the service.
 pub type Item = batch::Item<Bls12>;
 

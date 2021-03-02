@@ -128,7 +128,6 @@ where
 
         let mut spend_verifier = primitives::groth16::SPEND_VERIFIER.clone();
         let mut output_verifier = primitives::groth16::OUTPUT_VERIFIER.clone();
-        // let mut joinsplit_verifier = primitives::groth16::JOINSPLIT_VERIFIER.clone();
 
         let mut redjubjub_verifier = primitives::redjubjub::VERIFIER.clone();
         let mut script_verifier = self.script_verifier.clone();
