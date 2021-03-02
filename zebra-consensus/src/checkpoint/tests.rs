@@ -228,7 +228,6 @@ async fn continuous_blockchain_restart() -> Result<(), Report> {
 }
 
 /// Test a continuous blockchain, restarting verification at `restart_height`.
-// TODO: does this duplicate the test code commented out in src/chain/tests.rs?
 #[spandoc::spandoc]
 async fn continuous_blockchain(restart_height: Option<block::Height>) -> Result<(), Report> {
     zebra_test::init();
