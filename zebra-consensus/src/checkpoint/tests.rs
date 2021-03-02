@@ -214,8 +214,13 @@ async fn multi_item_checkpoint_list() -> Result<(), Report> {
 }
 
 #[tokio::test]
-async fn continuous_blockchain_test() -> Result<(), Report> {
+async fn continuous_blockchain_no_restart() -> Result<(), Report> {
     continuous_blockchain(None).await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn continuous_blockchain_restart() -> Result<(), Report> {
     for height in 0..=10 {
         continuous_blockchain(Some(block::Height(height))).await?;
     }
@@ -247,6 +252,7 @@ async fn continuous_blockchain(restart_height: Option<block::Height>) -> Result<
         let hash = block.hash();
         blockchain.push((block.clone(), block.coinbase_height().unwrap(), hash));
     }
+    let blockchain_len = blockchain.len();
 
     // Parse only some blocks as checkpoints
     let mut checkpoints = Vec::new();
@@ -370,6 +376,33 @@ async fn continuous_blockchain(restart_height: Option<block::Height>) -> Result<
             }
         }
 
+        // Check that we have the correct number of verify tasks
+        if let Some(block::Height(restart_height)) = restart_height {
+            let restart_height = restart_height as usize;
+            if restart_height >= blockchain_len - 1 {
+                assert_eq!(
+                    handles.len(),
+                    0,
+                    "unexpected number of verify tasks for restart height: {:?}",
+                    restart_height,
+                );
+            } else {
+                assert_eq!(
+                    handles.len(),
+                    blockchain_len - restart_height - 2,
+                    "unexpected number of verify tasks for restart height: {:?}",
+                    restart_height,
+                );
+            }
+        } else {
+            assert_eq!(
+                handles.len(),
+                blockchain_len - 1,
+                "unexpected number of verify tasks with no restart height",
+            );
+        }
+
+        /// SPANDOC: wait on spawned verification tasks for restart height {?restart_height}
         while let Some(result) = handles.next().await {
             result??.map_err(|e| eyre!(e))?;
         }
@@ -377,15 +410,21 @@ async fn continuous_blockchain(restart_height: Option<block::Height>) -> Result<
         // Final checks
         assert_eq!(
             checkpoint_verifier.previous_checkpoint_height(),
-            FinalCheckpoint
+            FinalCheckpoint,
+            "unexpected previous checkpoint for restart height: {:?}",
+            restart_height,
         );
         assert_eq!(
             checkpoint_verifier.target_checkpoint_height(),
-            FinishedVerifying
+            FinishedVerifying,
+            "unexpected target checkpoint for restart height: {:?}",
+            restart_height,
         );
         assert_eq!(
             checkpoint_verifier.checkpoint_list.max_height(),
-            block::Height(9)
+            block::Height(9),
+            "unexpected max checkpoint height for restart height: {:?}",
+            restart_height,
         );
     }
 
