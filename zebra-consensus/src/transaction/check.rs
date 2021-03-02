@@ -68,10 +68,10 @@ pub fn has_inputs_and_outputs(tx: &Transaction) -> Result<(), TransactionError> 
                 Ok(())
             }
         }
-        Transaction::V1 { .. }
-        | Transaction::V2 { .. }
-        | Transaction::V3 { .. }
-        | Transaction::V5 { .. } => {
+        Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => {
+            unreachable!("tx version is checked first")
+        }
+        Transaction::V5 { .. } => {
             unimplemented!("v5 transaction format as specified in ZIP-225")
         }
     }
@@ -114,10 +114,11 @@ pub fn coinbase_tx_no_joinsplit_or_spend(tx: &Transaction) -> Result<(), Transac
 
             Transaction::V4 { .. } => Ok(()),
 
-            Transaction::V1 { .. }
-            | Transaction::V2 { .. }
-            | Transaction::V3 { .. }
-            | Transaction::V5 { .. } => {
+            Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => {
+                unreachable!("tx version is checked first")
+            }
+
+            Transaction::V5 { .. } => {
                 unimplemented!("v5 coinbase validation as specified in ZIP-225 and the draft spec")
             }
         }

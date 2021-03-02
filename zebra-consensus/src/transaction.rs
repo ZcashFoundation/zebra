@@ -132,11 +132,9 @@ where
         async move {
             tracing::trace!(?tx);
             match &*tx {
-                Transaction::V1 { .. }
-                | Transaction::V2 { .. }
-                | Transaction::V3 { .. }
-                | Transaction::V5 { .. } => {
-                    unimplemented!("v5 transaction validation as specified in ZIP-216, ZIP-224, ZIP-225, and ZIP-244")
+                Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => {
+                    tracing::debug!(?tx, "got transaction with wrong version");
+                    Err(TransactionError::WrongVersion)
                 }
                 Transaction::V4 {
                     inputs,
@@ -259,6 +257,9 @@ where
                     }
 
                     Ok(tx.hash())
+                }
+                Transaction::V5 { .. } => {
+                    unimplemented!("v5 transaction validation as specified in ZIP-216, ZIP-224, ZIP-225, and ZIP-244")
                 }
             }
         }
