@@ -14,6 +14,28 @@ lazy_static! {
         .map(|(_height, block)| *block)
         .collect();
 
+    /// Continuous mainnet blocks, indexed by height
+    ///
+    /// Contains the continuous blockchain from genesis onwards.
+    /// Stops at the first gap in the chain.
+    pub static ref CONTINUOUS_MAINNET_BLOCKS: BTreeMap<u32, &'static [u8]> = MAINNET_BLOCKS
+        .iter()
+        .enumerate()
+        .take_while(|(i, (height, _block))| *i == **height as usize)
+        .map(|(_i, (height, block))| (*height, *block))
+        .collect();
+
+    /// Continuous testnet blocks, indexed by height
+    ///
+    /// Contains the continuous blockchain from genesis onwards.
+    /// Stops at the first gap in the chain.
+    pub static ref CONTINUOUS_TESTNET_BLOCKS: BTreeMap<u32, &'static [u8]> = TESTNET_BLOCKS
+        .iter()
+        .enumerate()
+        .take_while(|(i, (height, _block))| *i == **height as usize)
+        .map(|(_i, (height, block))| (*height, *block))
+        .collect();
+
     // Update these lists of blocks when you add new block test vectors to
     // this file
     //

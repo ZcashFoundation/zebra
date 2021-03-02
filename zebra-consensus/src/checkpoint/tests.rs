@@ -215,63 +215,54 @@ async fn multi_item_checkpoint_list() -> Result<(), Report> {
 
 #[tokio::test]
 async fn continuous_blockchain_no_restart() -> Result<(), Report> {
-    continuous_blockchain(None).await?;
+    continuous_blockchain(None, Mainnet).await?;
+    continuous_blockchain(None, Testnet).await?;
     Ok(())
 }
 
 #[tokio::test]
 async fn continuous_blockchain_restart() -> Result<(), Report> {
     for height in 0..=10 {
-        continuous_blockchain(Some(block::Height(height))).await?;
+        continuous_blockchain(Some(block::Height(height)), Mainnet).await?;
+    }
+    for height in 0..=10 {
+        continuous_blockchain(Some(block::Height(height)), Testnet).await?;
     }
     Ok(())
 }
 
-/// Test a continuous blockchain, restarting verification at `restart_height`.
+/// Test a continuous blockchain on `network`, restarting verification at `restart_height`.
 #[spandoc::spandoc]
-async fn continuous_blockchain(restart_height: Option<block::Height>) -> Result<(), Report> {
+async fn continuous_blockchain(
+    restart_height: Option<block::Height>,
+    network: Network,
+) -> Result<(), Report> {
     zebra_test::init();
 
     // A continuous blockchain
-    let mut blockchain = Vec::new();
-    for b in &[
-        &zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..],
-        &zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..],
-        &zebra_test::vectors::BLOCK_MAINNET_2_BYTES[..],
-        &zebra_test::vectors::BLOCK_MAINNET_3_BYTES[..],
-        &zebra_test::vectors::BLOCK_MAINNET_4_BYTES[..],
-        &zebra_test::vectors::BLOCK_MAINNET_5_BYTES[..],
-        &zebra_test::vectors::BLOCK_MAINNET_6_BYTES[..],
-        &zebra_test::vectors::BLOCK_MAINNET_7_BYTES[..],
-        &zebra_test::vectors::BLOCK_MAINNET_8_BYTES[..],
-        &zebra_test::vectors::BLOCK_MAINNET_9_BYTES[..],
-        &zebra_test::vectors::BLOCK_MAINNET_10_BYTES[..],
-    ] {
-        let block = Arc::<Block>::zcash_deserialize(*b)?;
-        let hash = block.hash();
-        blockchain.push((block.clone(), block.coinbase_height().unwrap(), hash));
-    }
+    let blockchain = match network {
+        Mainnet => zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS.iter(),
+        Testnet => zebra_test::vectors::CONTINUOUS_TESTNET_BLOCKS.iter(),
+    };
+    let blockchain: Vec<_> = blockchain
+        .map(|(height, b)| {
+            let block = Arc::<Block>::zcash_deserialize(*b).unwrap();
+            let hash = block.hash();
+            let coinbase_height = block.coinbase_height().unwrap();
+            assert_eq!(*height, coinbase_height.0);
+            (block, coinbase_height, hash)
+        })
+        .collect();
     let blockchain_len = blockchain.len();
 
-    // Parse only some blocks as checkpoints
-    let mut checkpoints = Vec::new();
-    for b in &[
-        &zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..],
-        &zebra_test::vectors::BLOCK_MAINNET_5_BYTES[..],
-        &zebra_test::vectors::BLOCK_MAINNET_9_BYTES[..],
-    ] {
-        let block = Arc::<Block>::zcash_deserialize(*b)?;
-        let hash = block.hash();
-        checkpoints.push((block.clone(), block.coinbase_height().unwrap(), hash));
-    }
-
-    // The checkpoint list will contain only block 0, 5 and 9
-    let checkpoint_list: BTreeMap<block::Height, block::Hash> = checkpoints
+    // Use some of the blocks as checkpoints
+    let checkpoint_list = vec![&blockchain[0], &blockchain[5], &blockchain[9]];
+    let checkpoint_list: BTreeMap<block::Height, block::Hash> = checkpoint_list
         .iter()
         .map(|(_block, height, hash)| (*height, *hash))
         .collect();
 
-    /// SPANDOC: Verify blocks, restarting at {?restart_height}
+    /// SPANDOC: Verify blocks, restarting at {?restart_height} {?network}
     {
         let initial_tip = restart_height.map(|block::Height(height)| {
             (blockchain[height as usize].1, blockchain[height as usize].2)
@@ -401,7 +392,7 @@ async fn continuous_blockchain(restart_height: Option<block::Height>) -> Result<
             );
         }
 
-        /// SPANDOC: wait on spawned verification tasks for restart height {?restart_height}
+        /// SPANDOC: wait on spawned verification tasks for restart height {?restart_height} {?network}
         while let Some(result) = handles.next().await {
             result??.map_err(|e| eyre!(e))?;
         }
