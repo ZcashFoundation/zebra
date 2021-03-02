@@ -85,8 +85,8 @@ where
         let semaphore = Semaphore::new(bound);
         Batch {
             tx,
-            handle,
             semaphore,
+            handle,
         }
     }
 
@@ -140,8 +140,8 @@ where
 
         match self.tx.send(Message {
             request,
-            span,
             tx,
+            span,
             _permit,
         }) {
             Err(_) => ResponseFuture::failed(self.get_worker_error()),

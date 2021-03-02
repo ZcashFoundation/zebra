@@ -51,7 +51,7 @@ impl CommandExt for Command {
             .wrap_err("failed to execute process")
             .with_section(command)?;
 
-        Ok(TestStatus { status, cmd })
+        Ok(TestStatus { cmd, status })
     }
 
     /// wrapper for `output` fn on `Command` that constructs informative error
