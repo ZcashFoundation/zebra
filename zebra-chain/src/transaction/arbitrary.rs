@@ -236,6 +236,9 @@ impl Arbitrary for Transaction {
             NetworkUpgrade::Blossom | NetworkUpgrade::Heartwood | NetworkUpgrade::Canopy => {
                 Self::v4_strategy(ledger_state)
             }
+            NetworkUpgrade::NU5 => {
+                unimplemented!("NU5 upgrade can use v4 or v5 transactions, as specified in ZIP-225")
+            }
         }
     }
 
