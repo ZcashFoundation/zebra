@@ -181,19 +181,19 @@ impl ZcashSerialize for Transaction {
                 }
             }
             Transaction::V5 {
-                inputs,
-                outputs,
                 lock_time,
                 expiry_height,
+                inputs,
+                outputs,
                 rest,
             } => {
                 // Write version 5 and set the fOverwintered bit.
                 writer.write_u32::<LittleEndian>(5 | (1 << 31))?;
                 writer.write_u32::<LittleEndian>(TX_V5_VERSION_GROUP_ID)?;
-                inputs.zcash_serialize(&mut writer)?;
-                outputs.zcash_serialize(&mut writer)?;
                 lock_time.zcash_serialize(&mut writer)?;
                 writer.write_u32::<LittleEndian>(expiry_height.0)?;
+                inputs.zcash_serialize(&mut writer)?;
+                outputs.zcash_serialize(&mut writer)?;
                 // write the rest
                 writer.write_all(rest)?;
             }
@@ -305,18 +305,18 @@ impl ZcashDeserialize for Transaction {
                 if id != TX_V5_VERSION_GROUP_ID {
                     return Err(SerializationError::Parse("expected TX_V5_VERSION_GROUP_ID"));
                 }
-                let inputs = Vec::zcash_deserialize(&mut reader)?;
-                let outputs = Vec::zcash_deserialize(&mut reader)?;
                 let lock_time = LockTime::zcash_deserialize(&mut reader)?;
                 let expiry_height = block::Height(reader.read_u32::<LittleEndian>()?);
+                let inputs = Vec::zcash_deserialize(&mut reader)?;
+                let outputs = Vec::zcash_deserialize(&mut reader)?;
                 let mut rest = Vec::new();
                 reader.read_to_end(&mut rest)?;
 
                 Ok(Transaction::V5 {
-                    inputs,
-                    outputs,
                     lock_time,
                     expiry_height,
+                    inputs,
+                    outputs,
                     rest,
                 })
             }

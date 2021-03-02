@@ -101,16 +101,15 @@ pub enum Transaction {
     },
     /// A `version = 5` transaction, which supports `Sapling` and `Orchard`.
     V5 {
-        /// The transparent inputs to the transaction.
-        inputs: Vec<transparent::Input>,
-        /// The transparent outputs from the transaction.
-        outputs: Vec<transparent::Output>,
         /// The earliest time or block height that this transaction can be added to the
         /// chain.
         lock_time: LockTime,
         /// The latest block height that this transaction can be added to the chain.
         expiry_height: block::Height,
-
+        /// The transparent inputs to the transaction.
+        inputs: Vec<transparent::Input>,
+        /// The transparent outputs from the transaction.
+        outputs: Vec<transparent::Output>,
         /// The rest of the transaction as bytes
         rest: Vec<u8>,
     },
