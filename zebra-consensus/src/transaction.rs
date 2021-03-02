@@ -202,9 +202,6 @@ where
                         check::shielded_balances_match(&shielded_data, *value_balance)?;
 
                         for spend in shielded_data.spends() {
-                            // TODO: check that spend.cv and spend.rk are NOT of small
-                            // order.
-
                             // Consensus rule: cv and rk MUST NOT be of small
                             // order, i.e. [h_J]cv MUST NOT be 𝒪_J and [h_J]rk
                             // MUST NOT be 𝒪_J.
@@ -247,9 +244,12 @@ where
                         }
 
                         for output in shielded_data.outputs() {
-                            // TODO: check that output.cv and output.epk are NOT of small
-                            // order.
+                            // Consensus rule: cv and wpk MUST NOT be of small
+                            // order, i.e. [h_J]cv MUST NOT be 𝒪_J and [h_J]wpk
+                            // MUST NOT be 𝒪_J.
+                            //
                             // https://zips.z.cash/protocol/protocol.pdf#outputdesc
+                            check::output_cv_epk_not_small_order(output)?;
 
                             // Consensus rule: The proof π_ZKOutput MUST be
                             // valid given a primary input formed from the other

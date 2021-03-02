@@ -7,7 +7,7 @@ use std::convert::TryFrom;
 use zebra_chain::{
     amount::Amount,
     primitives::{ed25519, Groth16Proof},
-    sapling::Spend,
+    sapling::{Output, Spend},
     transaction::{JoinSplitData, ShieldedData, Transaction},
 };
 
@@ -129,6 +129,24 @@ pub fn spend_cv_rk_not_small_order(spend: &Spend) -> Result<(), TransactionError
     if bool::from(spend.cv.0.is_small_order())
         || bool::from(
             jubjub::AffinePoint::from_bytes(spend.rk.into())
+                .unwrap()
+                .is_small_order(),
+        )
+    {
+        Err(TransactionError::SmallOrder)
+    } else {
+        Ok(())
+    }
+}
+
+/// Check that a Output description's cv and epk are not of small order,
+/// i.e. [h_J]cv MUST NOT be 𝒪_J and [h_J]epk MUST NOT be 𝒪_J.
+///
+/// https://zips.z.cash/protocol/protocol.pdf#outputdesc
+pub fn output_cv_epk_not_small_order(output: &Output) -> Result<(), TransactionError> {
+    if bool::from(output.cv.0.is_small_order())
+        || bool::from(
+            jubjub::AffinePoint::from_bytes(output.ephemeral_key.into())
                 .unwrap()
                 .is_small_order(),
         )
