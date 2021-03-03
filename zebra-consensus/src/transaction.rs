@@ -258,6 +258,9 @@ where
 
                     Ok(tx.hash())
                 }
+                Transaction::V5 { .. } => {
+                    unimplemented!("v5 transaction validation as specified in ZIP-216, ZIP-224, ZIP-225, and ZIP-244")
+                }
             }
         }
         .instrument(span)

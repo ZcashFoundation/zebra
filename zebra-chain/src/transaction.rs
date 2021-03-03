@@ -42,7 +42,7 @@ use crate::{
 /// internally by different enum variants. Because we checkpoint on Sapling
 /// activation, we do not validate any pre-Sapling transaction types.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-// XXX consider boxing the Optional fields of V4 txs
+// XXX consider boxing the Optional fields of V4 and V5 txs
 #[allow(clippy::large_enum_variant)]
 pub enum Transaction {
     /// A fully transparent transaction (`version = 1`).
@@ -99,6 +99,22 @@ pub enum Transaction {
         /// The shielded data for this transaction, if any.
         shielded_data: Option<ShieldedData>,
     },
+    /// A `version = 5` transaction, which supports `Sapling` and `Orchard`.
+    // TODO: does this transaction type support `Sprout`?
+    // Check for ZIP-225 updates after the decision on 2021-03-05.
+    V5 {
+        /// The earliest time or block height that this transaction can be added to the
+        /// chain.
+        lock_time: LockTime,
+        /// The latest block height that this transaction can be added to the chain.
+        expiry_height: block::Height,
+        /// The transparent inputs to the transaction.
+        inputs: Vec<transparent::Input>,
+        /// The transparent outputs from the transaction.
+        outputs: Vec<transparent::Output>,
+        /// The rest of the transaction as bytes
+        rest: Vec<u8>,
+    },
 }
 
 impl Transaction {
@@ -114,6 +130,7 @@ impl Transaction {
             Transaction::V2 { ref inputs, .. } => inputs,
             Transaction::V3 { ref inputs, .. } => inputs,
             Transaction::V4 { ref inputs, .. } => inputs,
+            Transaction::V5 { ref inputs, .. } => inputs,
         }
     }
 
@@ -124,6 +141,7 @@ impl Transaction {
             Transaction::V2 { ref outputs, .. } => outputs,
             Transaction::V3 { ref outputs, .. } => outputs,
             Transaction::V4 { ref outputs, .. } => outputs,
+            Transaction::V5 { ref outputs, .. } => outputs,
         }
     }
 
@@ -134,6 +152,7 @@ impl Transaction {
             Transaction::V2 { lock_time, .. } => *lock_time,
             Transaction::V3 { lock_time, .. } => *lock_time,
             Transaction::V4 { lock_time, .. } => *lock_time,
+            Transaction::V5 { lock_time, .. } => *lock_time,
         }
     }
 
@@ -144,6 +163,7 @@ impl Transaction {
             Transaction::V2 { .. } => None,
             Transaction::V3 { expiry_height, .. } => Some(*expiry_height),
             Transaction::V4 { expiry_height, .. } => Some(*expiry_height),
+            Transaction::V5 { expiry_height, .. } => Some(*expiry_height),
         }
     }
 
@@ -174,8 +194,26 @@ impl Transaction {
                     .joinsplits()
                     .flat_map(|joinsplit| joinsplit.nullifiers.iter()),
             ),
+            // Maybe JoinSplits, maybe not, we're still deciding
+            Transaction::V5 { .. } => {
+                unimplemented!(
+                    "v5 transaction format as specified in ZIP-225 after decision on 2021-03-12"
+                )
+            }
             // No JoinSplits
-            _ => Box::new(std::iter::empty()),
+            Transaction::V1 { .. }
+            | Transaction::V2 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V3 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V4 {
+                joinsplit_data: None,
+                ..
+            } => Box::new(std::iter::empty()),
         }
     }
 
@@ -189,8 +227,17 @@ impl Transaction {
                 shielded_data: Some(shielded_data),
                 ..
             } => Box::new(shielded_data.nullifiers()),
+            Transaction::V5 { .. } => {
+                unimplemented!("v5 transaction format as specified in ZIP-225")
+            }
             // No JoinSplits
-            _ => Box::new(std::iter::empty()),
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V4 {
+                shielded_data: None,
+                ..
+            } => Box::new(std::iter::empty()),
         }
     }
 
