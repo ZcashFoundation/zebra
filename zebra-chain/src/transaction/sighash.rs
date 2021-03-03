@@ -246,7 +246,7 @@ impl<'a> SigHasher<'a> {
             Transaction::V3 { joinsplit_data, .. } => joinsplit_data.is_some(),
             Transaction::V4 { joinsplit_data, .. } => joinsplit_data.is_some(),
             Transaction::V5 { .. } => {
-                unimplemented!("v5 transaction format as specified in ZIP-225")
+                unimplemented!("v5 transaction hash as specified in ZIP-225 and ZIP-244")
             }
         };
 
@@ -261,7 +261,7 @@ impl<'a> SigHasher<'a> {
 
         // This code, and the check above for has_joinsplits cannot be combined
         // into a single branch because the `joinsplit_data` type of each
-        // tranaction kind has a different type.
+        // transaction kind has a different type.
         //
         // For v3 joinsplit_data is a JoinSplitData<Bctv14Proof>
         // For v4 joinsplit_data is a JoinSplitData<Groth16Proof>
@@ -269,6 +269,8 @@ impl<'a> SigHasher<'a> {
         // The type parameter on these types prevents them from being unified,
         // which forces us to duplicate the logic in each branch even though the
         // code within each branch is identical.
+        //
+        // TODO: use a generic function to remove the duplicate code
         match self.trans {
             Transaction::V3 {
                 joinsplit_data: Some(jsd),
