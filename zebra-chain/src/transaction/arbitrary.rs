@@ -107,18 +107,18 @@ impl Transaction {
     /// Generate a proptest strategy for V5 Transactions
     pub fn v5_strategy(ledger_state: LedgerState) -> BoxedStrategy<Self> {
         (
-            transparent::Input::vec_strategy(ledger_state, 10),
-            vec(any::<transparent::Output>(), 0..10),
             any::<LockTime>(),
             any::<block::Height>(),
+            transparent::Input::vec_strategy(ledger_state, 10),
+            vec(any::<transparent::Output>(), 0..10),
             any::<Vec<u8>>(),
         )
             .prop_map(
-                |(inputs, outputs, lock_time, expiry_height, rest)| Transaction::V5 {
-                    inputs,
-                    outputs,
+                |(lock_time, expiry_height, inputs, outputs, rest)| Transaction::V5 {
                     lock_time,
                     expiry_height,
+                    inputs,
+                    outputs,
                     rest,
                 },
             )
