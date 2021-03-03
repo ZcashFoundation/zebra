@@ -1,7 +1,7 @@
 name: Docs
 
 on:
-  pull_request:
+  workflow_dispatch:
   push:
     branches:
       - main
@@ -28,9 +28,11 @@ jobs:
         curl -L https://github.com/rust-lang/mdBook/releases/download/v0.4.5/mdbook-v0.4.5-x86_64-unknown-linux-gnu.tar.gz | tar xz
         # Add the book directory to the $PATH
         echo "$GITHUB_WORKSPACE/book" >> $GITHUB_PATH
+    
     - name: Build Zebra book
       run: |
         mdbook build book/
+    
     - name: Deploy Zebra book to firebase
       uses: w9jds/firebase-action@v2.0.0
       with:
