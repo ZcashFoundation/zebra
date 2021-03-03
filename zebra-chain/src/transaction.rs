@@ -197,7 +197,7 @@ impl Transaction {
             // Maybe JoinSplits, maybe not, we're still deciding
             Transaction::V5 { .. } => {
                 unimplemented!(
-                    "v5 transaction format as specified in ZIP-225 after decision on 2021-03-05"
+                    "v5 transaction format as specified in ZIP-225 after decision on 2021-03-12"
                 )
             }
             // No JoinSplits
