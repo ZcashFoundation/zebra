@@ -100,6 +100,8 @@ pub enum Transaction {
         shielded_data: Option<ShieldedData>,
     },
     /// A `version = 5` transaction, which supports `Sapling` and `Orchard`.
+    // TODO: does this transaction type support `Sprout`?
+    // Check for ZIP-225 updates after the decision on 2021-03-05.
     V5 {
         /// The earliest time or block height that this transaction can be added to the
         /// chain.
@@ -192,6 +194,12 @@ impl Transaction {
                     .joinsplits()
                     .flat_map(|joinsplit| joinsplit.nullifiers.iter()),
             ),
+            // Maybe JoinSplits, maybe not, we're still deciding
+            Transaction::V5 { .. } => {
+                unimplemented!(
+                    "v5 transaction format as specified in ZIP-225 after decision on 2021-03-05"
+                )
+            }
             // No JoinSplits
             Transaction::V1 { .. }
             | Transaction::V2 {
@@ -205,8 +213,7 @@ impl Transaction {
             | Transaction::V4 {
                 joinsplit_data: None,
                 ..
-            }
-            | Transaction::V5 { .. } => Box::new(std::iter::empty()),
+            } => Box::new(std::iter::empty()),
         }
     }
 
