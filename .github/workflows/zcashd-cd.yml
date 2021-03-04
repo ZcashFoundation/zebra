@@ -1,0 +1,77 @@
+name: Zcashd Manual Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      network:
+        default: 'testnet'
+      size:
+        default: 10
+
+env:
+  PROJECT_ID: zealous-zebra
+  REGION: us-east1
+  ZONE: us-east1-b
+
+jobs:
+
+  deploy:
+    name: Deploy mainnet nodes
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Set project and image names
+        run: |
+          BRANCH_NAME=$(expr $GITHUB_REF : '.*/\(.*\)') && \
+          BRANCH_NAME=${BRANCH_NAME,,} && \
+          REPOSITORY=${GITHUB_REPOSITORY,,} && \
+          echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV && \
+          echo "SHORT_SHA=$(git rev-parse --short=7 $GITHUB_SHA)" >> $GITHUB_ENV && \
+          echo "REPOSITORY=$REPOSITORY" >> $GITHUB_ENV
+
+      # Setup gcloud CLI
+      - name: Set up gcloud SDK environment
+        uses: GoogleCloudPlatform/github-actions/setup-gcloud@master
+        with:
+          version: '295.0.0'
+          project_id: ${{ env.PROJECT_ID }}
+          service_account_key: ${{ secrets.GCLOUD_AUTH }}
+
+      # Create instance template from container image
+      - name: Create instance template
+        run: |
+          gcloud compute instance-templates create-with-container "zcashd-$BRANCH_NAME-$SHORT_SHA" \
+          --container-image "electriccoinco/zcashd" \
+          --container-env ZCASHD_NETWORK="${{ github.event.inputs.network }}" \
+          --machine-type n2d-standard-4 \
+          --service-account cos-vm@zealous-zebra.iam.gserviceaccount.com \
+          --scopes cloud-platform \
+          --tags zcashd \
+
+      # Check if our destination instance group exists already
+      - name: Check if instance group exists
+        id: does-group-exist
+        continue-on-error: true
+        run: |
+          gcloud compute instance-groups list | grep "zcashd-$BRANCH_NAME-${{ github.event.inputs.network }}"\ \ "$REGION"
+
+      # Deploy new managed instance group using the new instance template
+      - name: Create managed instance group
+        if: steps.does-group-exist.outcome == 'failure'
+        run: |
+          gcloud compute instance-groups managed create \
+          "zcashd-$BRANCH_NAME-${{ github.event.inputs.network }}" \
+          --template "zcashd-$BRANCH_NAME-$SHORT_SHA" \
+          --region "$REGION" \
+          --size "${{ github.event.inputs.size }}"
+
+      # Rolls out update to existing group using the new instance template
+      - name: Update managed instance group
+        if: steps.does-group-exist.outcome == 'success'
+        run: |
+          gcloud compute instance-groups managed rolling-action start-update \
+          "zcashd-$BRANCH_NAME-${{ github.event.inputs.network }}" \
+          --version template="zcashd-$BRANCH_NAME-$SHORT_SHA" \
+          --region "$REGION"
