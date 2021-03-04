@@ -11,7 +11,7 @@ edition = "2018"
 zebra-chain = { path = "../zebra-chain" }
 
 dirs = "3.0.1"
-hex = "0.4.2"
+hex = "0.4.3"
 lazy_static = "1.4.0"
 regex = "1"
 serde = { version = "1", features = ["serde_derive"] }

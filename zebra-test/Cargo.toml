@@ -8,7 +8,7 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-hex = "0.4.2"
+hex = "0.4.3"
 lazy_static = "1.4.0"
 tower = { version = "0.4", features = ["util"] }
 futures = "0.3.13"
