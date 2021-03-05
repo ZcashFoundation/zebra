@@ -328,7 +328,7 @@ where
                     trace!("too many in-flight handshakes, dropping demand signal");
                     continue;
                 }
-                if let Some(candidate) = candidates.next() {
+                if let Some(candidate) = candidates.next().await {
                     debug!(?candidate.addr, "attempting outbound connection in response to demand");
                     connector.ready_and().await?;
                     handshakes.push(

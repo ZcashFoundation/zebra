@@ -1,7 +1,12 @@
-use std::sync::{Arc, Mutex};
+use std::{
+    mem,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use chrono::Utc;
 use futures::stream::{FuturesUnordered, StreamExt};
+use tokio::time::{sleep, sleep_until, Instant, Sleep};
 use tower::{Service, ServiceExt};
 
 use crate::{types::MetaAddr, AddressBook, BoxError, PeerAddrState, Request, Response};
@@ -102,6 +107,7 @@ use crate::{types::MetaAddr, AddressBook, BoxError, PeerAddrState, Request, Resp
 pub(super) struct CandidateSet<S> {
     pub(super) peer_set: Arc<Mutex<AddressBook>>,
     pub(super) peer_service: S,
+    sleep: Sleep,
 }
 
 impl<S> CandidateSet<S>
@@ -109,11 +115,14 @@ where
     S: Service<Request, Response = Response, Error = BoxError>,
     S::Future: Send + 'static,
 {
+    const PEER_CONNECTION_INTERVAL: Duration = Duration::from_millis(100);
+
     /// Uses `peer_set` and `peer_service` to manage a [`CandidateSet`] of peers.
     pub fn new(peer_set: Arc<Mutex<AddressBook>>, peer_service: S) -> CandidateSet<S> {
         CandidateSet {
             peer_set,
             peer_service,
+            sleep: sleep(Duration::from_secs(0)),
         }
     }
 
@@ -188,13 +197,19 @@ where
     ///
     /// Live `Responded` peers will stay live if they keep responding, or
     /// become a reconnection candidate if they stop responding.
-    pub fn next(&mut self) -> Option<MetaAddr> {
+    pub async fn next(&mut self) -> Option<MetaAddr> {
+        let now = Instant::now();
+        let mut sleep = sleep_until(now + Self::PEER_CONNECTION_INTERVAL);
+        mem::swap(&mut self.sleep, &mut sleep);
+
         let mut peer_set_guard = self.peer_set.lock().unwrap();
         let mut reconnect = peer_set_guard.reconnection_peers().next()?;
 
         reconnect.last_seen = Utc::now();
         reconnect.last_connection_state = PeerAddrState::AttemptPending;
         peer_set_guard.update(reconnect);
+
+        sleep.await;
 
         Some(reconnect)
     }

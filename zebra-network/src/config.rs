@@ -34,6 +34,10 @@ pub struct Config {
     pub peerset_initial_target_size: usize,
 
     /// How frequently we attempt to connect to a new peer.
+    ///
+    /// This duration only pertains to the rate at which zebra crawls for new
+    /// peers, not the rate zebra connects to new peers, which is restricted to
+    /// CandidateSet::PEER_CONNECTION_INTERVAL (100 milliseconds)
     pub new_peer_interval: Duration,
 }
 
