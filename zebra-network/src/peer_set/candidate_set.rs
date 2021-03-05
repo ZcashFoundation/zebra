@@ -11,9 +11,10 @@ use crate::{types::MetaAddr, AddressBook, BoxError, PeerAddrState, Request, Resp
 /// It divides the set of all possible candidate peers into disjoint subsets,
 /// using the `PeerAddrState`:
 ///
-/// 1. `Responded` peers, which we previously connected to. If we have not received
-///    any messages from a `Responded` peer within a cutoff time, we assume that it
-///    has disconnected or hung, and attempt reconnection;
+/// 1. `Responded` peers, which we previously had inbound or outbound connections
+///    to. If we have not received any messages from a `Responded` peer within a
+///    cutoff time, we assume that it has disconnected or hung, and attempt
+///    reconnection;
 /// 2. `NeverAttempted` peers, which we learned about from other peers or a DNS
 ///    seeder, but have never connected to;
 /// 3. `Failed` peers, to whom we attempted to connect but were unable to;
@@ -37,13 +38,13 @@ use crate::{types::MetaAddr, AddressBook, BoxError, PeerAddrState, Request, Resp
 ///  │                               │
 ///  │                               │
 ///  │                               │
-///  │                               │
-///  │                               │
-///  │                               │
-///  │                               │
-///  │                               │
-///  ├───────────────────────────────┼───────────────────────────────┐
-///  │ PeerSet AddressBook           ▼                               │
+///  │ ┌──────────────────┐          │
+///  │ │  Listener Port   │          │
+///  │ │ Peer Connections │          │
+///  │ └──────────────────┘          │
+///  │          │                    │
+///  ├──────────┼────────────────────┼───────────────────────────────┐
+///  │ PeerSet  ▼  AddressBook       ▼                               │
 ///  │ ┌─────────────┐       ┌────────────────┐      ┌─────────────┐ │
 ///  │ │  Possibly   │       │`NeverAttempted`│      │  `Failed`   │ │
 ///  │ │Disconnected │       │     Peers      │      │   Peers     │◀┼┐
