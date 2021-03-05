@@ -10,8 +10,8 @@ on:
 
 env:
   PROJECT_ID: zealous-zebra
-  REGION: us-east1
-  ZONE: us-east1-b
+  REGION: us-central1
+  ZONE: us-central1-c
 
 jobs:
 
@@ -26,10 +26,8 @@ jobs:
         run: |
           BRANCH_NAME=$(expr $GITHUB_REF : '.*/\(.*\)') && \
           BRANCH_NAME=${BRANCH_NAME,,} && \
-          REPOSITORY=${GITHUB_REPOSITORY,,} && \
           echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV && \
           echo "SHORT_SHA=$(git rev-parse --short=7 $GITHUB_SHA)" >> $GITHUB_ENV && \
-          echo "REPOSITORY=$REPOSITORY" >> $GITHUB_ENV
 
       # Setup gcloud CLI
       - name: Set up gcloud SDK environment
@@ -43,6 +41,7 @@ jobs:
       - name: Create instance template
         run: |
           gcloud compute instance-templates create-with-container "zcashd-$BRANCH_NAME-$SHORT_SHA" \
+          --boot-disk-size 100GB \
           --container-image "electriccoinco/zcashd" \
           --container-env ZCASHD_NETWORK="${{ github.event.inputs.network }}" \
           --machine-type n2d-standard-4 \
