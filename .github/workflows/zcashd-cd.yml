@@ -53,7 +53,7 @@ jobs:
         id: does-group-exist
         continue-on-error: true
         run: |
-          gcloud compute instance-groups list | grep "zcashd-$BRANCH_NAME-${{ github.event.inputs.network }}"\ \ "$REGION"
+          gcloud compute instance-groups list | grep "zcashd-$BRANCH_NAME-${{ github.event.inputs.network }}" | grep "$REGION"
 
       # Deploy new managed instance group using the new instance template
       - name: Create managed instance group
