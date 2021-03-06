@@ -106,7 +106,7 @@ jobs:
         id: does-group-exist
         continue-on-error: true
         run: |
-          gcloud compute instance-groups list | grep "zebrad-$BRANCH_NAME"\ \ "$REGION"
+          gcloud compute instance-groups list | grep "zebrad-$BRANCH_NAME" | grep "$REGION"
 
       # Deploy new managed instance group using the new instance template
       - name: Create managed instance group
