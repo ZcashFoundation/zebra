@@ -226,19 +226,24 @@ impl Transaction {
         // This function returns a boxed iterator because the different
         // transaction variants end up having different iterator types
         match self {
-            // JoinSplits with Groth Proofs
+            // Transactions with ShieldedData
             Transaction::V4 {
                 shielded_data: Some(shielded_data),
                 ..
             } => Box::new(shielded_data.nullifiers()),
-            Transaction::V5 { .. } => {
-                unimplemented!("v5 transaction format as specified in ZIP-225")
-            }
-            // No JoinSplits
+            Transaction::V5 {
+                shielded_data: Some(shielded_data),
+                ..
+            } => Box::new(shielded_data.nullifiers()),
+            // No ShieldedData
             Transaction::V1 { .. }
             | Transaction::V2 { .. }
             | Transaction::V3 { .. }
             | Transaction::V4 {
+                shielded_data: None,
+                ..
+            }
+            | Transaction::V5 {
                 shielded_data: None,
                 ..
             } => Box::new(std::iter::empty()),
