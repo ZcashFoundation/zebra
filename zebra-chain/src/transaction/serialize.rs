@@ -66,6 +66,65 @@ impl<P: ZkSnarkProof> ZcashDeserialize for Option<JoinSplitData<P>> {
     }
 }
 
+struct SigShieldedData<'a> {
+    sig: bool,
+    shielded_data: &'a Option<ShieldedData>,
+}
+
+impl ZcashSerialize for SigShieldedData<'_> {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        let sig = self.sig;
+        let shielded_data = self.shielded_data;
+        match shielded_data {
+            None => {
+                // Signal no shielded spends and no shielded outputs.
+                writer.write_compactsize(0)?;
+                writer.write_compactsize(0)?;
+            }
+            Some(shielded_data) => {
+                writer.write_compactsize(shielded_data.spends().count() as u64)?;
+                for spend in shielded_data.spends() {
+                    spend.zcash_serialize(&mut writer)?;
+                }
+                writer.write_compactsize(shielded_data.outputs().count() as u64)?;
+                for output in shielded_data.outputs() {
+                    output.zcash_serialize(&mut writer)?;
+                }
+                if sig {
+                    writer.write_all(&<[u8; 64]>::from(shielded_data.binding_sig)[..])?
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+fn deserialize_shielded_data<R: io::Read>(
+    mut reader: R,
+    mut shielded_spends: Vec<sapling::Spend>,
+    mut shielded_outputs: Vec<sapling::Output>,
+) -> Result<Option<ShieldedData>, SerializationError> {
+    use futures::future::Either::*;
+
+    if !shielded_spends.is_empty() {
+        Ok(Some(ShieldedData {
+            first: Left(shielded_spends.remove(0)),
+            rest_spends: shielded_spends,
+            rest_outputs: shielded_outputs,
+            binding_sig: reader.read_64_bytes()?.into(),
+        }))
+    } else if !shielded_outputs.is_empty() {
+        Ok(Some(ShieldedData {
+            first: Right(shielded_outputs.remove(0)),
+            rest_spends: shielded_spends,
+            rest_outputs: shielded_outputs,
+            binding_sig: reader.read_64_bytes()?.into(),
+        }))
+    } else {
+        Ok(None)
+    }
+}
+
 impl ZcashSerialize for Transaction {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         // Post-Sapling, transaction size is limited to MAX_BLOCK_BYTES.
@@ -152,29 +211,19 @@ impl ZcashSerialize for Transaction {
                 // instead we have to interleave serialization of the
                 // ShieldedData and the JoinSplitData.
 
-                match shielded_data {
-                    None => {
-                        // Signal no shielded spends and no shielded outputs.
-                        writer.write_compactsize(0)?;
-                        writer.write_compactsize(0)?;
-                    }
-                    Some(shielded_data) => {
-                        writer.write_compactsize(shielded_data.spends().count() as u64)?;
-                        for spend in shielded_data.spends() {
-                            spend.zcash_serialize(&mut writer)?;
-                        }
-                        writer.write_compactsize(shielded_data.outputs().count() as u64)?;
-                        for output in shielded_data.outputs() {
-                            output.zcash_serialize(&mut writer)?;
-                        }
-                    }
-                }
+                // Serialize ShieldedData without doing the binding_sig.
+                let sig_shielded_data = SigShieldedData {
+                    sig: false,
+                    shielded_data,
+                };
+                sig_shielded_data.zcash_serialize(&mut writer)?;
 
                 match joinsplit_data {
                     None => writer.write_compactsize(0)?,
                     Some(jsd) => jsd.zcash_serialize(&mut writer)?,
                 }
 
+                // Manually write the binding_sig after the JoinSplitData.
                 match shielded_data {
                     Some(sd) => writer.write_all(&<[u8; 64]>::from(sd.binding_sig)[..])?,
                     None => {}
@@ -185,6 +234,8 @@ impl ZcashSerialize for Transaction {
                 expiry_height,
                 inputs,
                 outputs,
+                shielded_data,
+                value_balance,
                 rest,
             } => {
                 // Write version 5 and set the fOverwintered bit.
@@ -194,6 +245,20 @@ impl ZcashSerialize for Transaction {
                 writer.write_u32::<LittleEndian>(expiry_height.0)?;
                 inputs.zcash_serialize(&mut writer)?;
                 outputs.zcash_serialize(&mut writer)?;
+
+                // Version 5 internal structure is different from version 4.
+                // Here we can do the binding signature without interleave
+                // the serialization.
+
+                // Serialize the ShieldedData including the binding_sig.
+                let sig_shielded_data = SigShieldedData {
+                    sig: true,
+                    shielded_data,
+                };
+                sig_shielded_data.zcash_serialize(&mut writer)?;
+
+                value_balance.zcash_serialize(&mut writer)?;
+
                 // write the rest
                 writer.write_all(rest)?;
             }
@@ -267,28 +332,11 @@ impl ZcashDeserialize for Transaction {
                 let lock_time = LockTime::zcash_deserialize(&mut reader)?;
                 let expiry_height = block::Height(reader.read_u32::<LittleEndian>()?);
                 let value_balance = (&mut reader).zcash_deserialize_into()?;
-                let mut shielded_spends = Vec::zcash_deserialize(&mut reader)?;
-                let mut shielded_outputs = Vec::zcash_deserialize(&mut reader)?;
+                let shielded_spends = Vec::zcash_deserialize(&mut reader)?;
+                let shielded_outputs = Vec::zcash_deserialize(&mut reader)?;
                 let joinsplit_data = OptV4Jsd::zcash_deserialize(&mut reader)?;
-
-                use futures::future::Either::*;
-                let shielded_data = if !shielded_spends.is_empty() {
-                    Some(ShieldedData {
-                        first: Left(shielded_spends.remove(0)),
-                        rest_spends: shielded_spends,
-                        rest_outputs: shielded_outputs,
-                        binding_sig: reader.read_64_bytes()?.into(),
-                    })
-                } else if !shielded_outputs.is_empty() {
-                    Some(ShieldedData {
-                        first: Right(shielded_outputs.remove(0)),
-                        rest_spends: shielded_spends,
-                        rest_outputs: shielded_outputs,
-                        binding_sig: reader.read_64_bytes()?.into(),
-                    })
-                } else {
-                    None
-                };
+                let shielded_data =
+                    deserialize_shielded_data(&mut reader, shielded_spends, shielded_outputs)?;
 
                 Ok(Transaction::V4 {
                     inputs,
@@ -309,6 +357,12 @@ impl ZcashDeserialize for Transaction {
                 let expiry_height = block::Height(reader.read_u32::<LittleEndian>()?);
                 let inputs = Vec::zcash_deserialize(&mut reader)?;
                 let outputs = Vec::zcash_deserialize(&mut reader)?;
+                let shielded_spends = Vec::zcash_deserialize(&mut reader)?;
+                let shielded_outputs = Vec::zcash_deserialize(&mut reader)?;
+                let shielded_data =
+                    deserialize_shielded_data(&mut reader, shielded_spends, shielded_outputs)?;
+                let value_balance = (&mut reader).zcash_deserialize_into()?;
+
                 let mut rest = Vec::new();
                 reader.read_to_end(&mut rest)?;
 
@@ -317,6 +371,8 @@ impl ZcashDeserialize for Transaction {
                     expiry_height,
                     inputs,
                     outputs,
+                    shielded_data,
+                    value_balance,
                     rest,
                 })
             }

@@ -112,6 +112,10 @@ pub enum Transaction {
         inputs: Vec<transparent::Input>,
         /// The transparent outputs from the transaction.
         outputs: Vec<transparent::Output>,
+        /// The shielded data for this transaction, if any.
+        shielded_data: Option<ShieldedData>,
+        /// The net value of Sapling spend transfers minus output transfers.
+        value_balance: Amount,
         /// The rest of the transaction as bytes
         rest: Vec<u8>,
     },

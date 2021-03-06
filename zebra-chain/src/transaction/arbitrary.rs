@@ -111,14 +111,26 @@ impl Transaction {
             any::<block::Height>(),
             transparent::Input::vec_strategy(ledger_state, 10),
             vec(any::<transparent::Output>(), 0..10),
+            option::of(any::<ShieldedData>()),
+            any::<Amount>(),
             any::<Vec<u8>>(),
         )
             .prop_map(
-                |(lock_time, expiry_height, inputs, outputs, rest)| Transaction::V5 {
+                |(
                     lock_time,
                     expiry_height,
                     inputs,
                     outputs,
+                    shielded_data,
+                    value_balance,
+                    rest,
+                )| Transaction::V5 {
+                    lock_time,
+                    expiry_height,
+                    inputs,
+                    outputs,
+                    shielded_data,
+                    value_balance,
                     rest,
                 },
             )
