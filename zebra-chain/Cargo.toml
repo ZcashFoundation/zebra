@@ -25,6 +25,7 @@ chrono = { version = "0.4", features = ["serde"] }
 displaydoc = "0.2.1"
 equihash = "0.1"
 futures = "0.3"
+halo2 = { git = "https://github.com/zcash/halo2.git", branch = "main" }
 hex = "0.4"
 jubjub = "0.6.0"
 lazy_static = "1.4.0"
@@ -47,6 +48,9 @@ ed25519-zebra = "2.2.0"
 redjubjub = "0.4"
 
 zebra-test = { path = "../zebra-test/", optional = true }
+
+# Temporary workaround for https://github.com/myrrlyn/funty/issues/3
+funty = "=1.1.0"
 
 [dev-dependencies]
 bincode = "1"

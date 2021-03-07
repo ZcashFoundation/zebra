@@ -4,6 +4,7 @@
 use std::{convert::TryInto, io, sync::Arc};
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use halo2::pasta::pallas;
 
 use crate::{
     block::MAX_BLOCK_BYTES,
@@ -34,9 +35,19 @@ impl ZcashDeserialize for jubjub::Fq {
     }
 }
 
-// Transaction V3 and V4 serialize sprout JoinSplitData in a single continuous
-// byte range, so we can implement its serialization and deserialization
-// separately.
+impl ZcashDeserialize for pallas::Scalar {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        let possible_scalar = pallas::Scalar::from_bytes(&reader.read_32_bytes()?);
+
+        if possible_scalar.is_some().into() {
+            Ok(possible_scalar.unwrap())
+        } else {
+            Err(SerializationError::Parse(
+                "Invalid pallas::Scalar, input not canonical",
+            ))
+        }
+    }
+}
 
 impl<P: ZkSnarkProof> ZcashSerialize for JoinSplitData<P> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
