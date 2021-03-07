@@ -1418,6 +1418,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "62aca2aba2d62b4a7f5b33f3712cb1b0692779a56fb510499d5c0aa594daeaf3"
 
 [[package]]
+name = "halo2"
+version = "0.0.1"
+source = "git+https://github.com/zcash/halo2.git?branch=main#dda60a363001373d564156ad0334e2022d85a5b4"
+dependencies = [
+ "blake2b_simd",
+ "crossbeam-utils 0.8.0",
+ "ff",
+ "funty",
+ "group",
+ "num_cpus",
+ "pasta_curves",
+ "rand 0.8.1",
+]
+
+[[package]]
 name = "hashbrown"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2219,6 +2234,21 @@ dependencies = [
  "redox_syscall 0.1.57",
  "smallvec 1.5.0",
  "winapi 0.3.9",
+]
+
+[[package]]
+name = "pasta_curves"
+version = "0.0.0"
+source = "git+https://github.com/zcash/pasta_curves.git?rev=b55a6960dfafd7f767e2820ddf1adaa499322f98#b55a6960dfafd7f767e2820ddf1adaa499322f98"
+dependencies = [
+ "blake2b_simd",
+ "ff",
+ "funty",
+ "group",
+ "lazy_static",
+ "rand 0.8.1",
+ "static_assertions",
+ "subtle",
 ]
 
 [[package]]
@@ -4304,7 +4334,9 @@ dependencies = [
  "displaydoc",
  "ed25519-zebra",
  "equihash",
+ "funty",
  "futures 0.3.14",
+ "halo2",
  "hex",
  "itertools 0.10.0",
  "jubjub",

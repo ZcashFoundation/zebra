@@ -8,11 +8,13 @@ use crate::serialization::{ZcashDeserialize, ZcashSerialize};
 
 mod bctv14;
 mod groth16;
+mod halo2;
 
-pub use bctv14::Bctv14Proof;
-pub use groth16::Groth16Proof;
+pub use self::bctv14::Bctv14Proof;
+pub use self::groth16::Groth16Proof;
+pub use self::halo2::Halo2Proof;
 
-/// A marker trait used to abstract over BCTV14 or Groth16 proofs.
+/// A marker trait used to abstract over BCTV14, Groth16, or Halo2 proofs.
 pub trait ZkSnarkProof:
     Copy
     + Clone
@@ -28,6 +30,7 @@ pub trait ZkSnarkProof:
 }
 impl ZkSnarkProof for Bctv14Proof {}
 impl ZkSnarkProof for Groth16Proof {}
+impl ZkSnarkProof for Halo2Proof {}
 
 mod private {
     use super::*;
@@ -35,4 +38,5 @@ mod private {
     pub trait Sealed {}
     impl Sealed for Bctv14Proof {}
     impl Sealed for Groth16Proof {}
+    impl Sealed for Halo2Proof {}
 }
