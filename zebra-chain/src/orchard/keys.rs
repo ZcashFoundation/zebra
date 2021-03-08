@@ -723,7 +723,7 @@ impl FromStr for FullViewingKey {
 }
 
 #[derive(Copy, Clone, PartialEq)]
-pub struct DiversifierKey();
+pub struct DiversifierKey([u8; 32]);
 
 /// An ephemeral public key for Orchard key agreement.
 ///
