@@ -205,15 +205,18 @@ where
     /// become a reconnection candidate if they stop responding.
     pub async fn next(&mut self) -> Option<MetaAddr> {
         let now = Instant::now();
-        let mut sleep = sleep_until(now + Self::PEER_CONNECTION_INTERVAL);
+        let mut sleep = sleep_until(now + Self::MIN_PEER_CONNECTION_INTERVAL);
         mem::swap(&mut self.sleep, &mut sleep);
 
-        let mut peer_set_guard = self.peer_set.lock().unwrap();
-        let mut reconnect = peer_set_guard.reconnection_peers().next()?;
+        let reconnect = {
+            let mut peer_set_guard = self.peer_set.lock().unwrap();
+            let mut reconnect = peer_set_guard.reconnection_peers().next()?;
 
-        reconnect.last_seen = Utc::now();
-        reconnect.last_connection_state = PeerAddrState::AttemptPending;
-        peer_set_guard.update(reconnect);
+            reconnect.last_seen = Utc::now();
+            reconnect.last_connection_state = PeerAddrState::AttemptPending;
+            peer_set_guard.update(reconnect);
+            reconnect
+        };
 
         sleep.await;
 
