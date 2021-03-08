@@ -190,7 +190,7 @@ impl ZcashSerialize for Transaction {
                 outputs,
                 lock_time,
                 expiry_height,
-                value_balance,
+                sapling_value_balance,
                 shielded_data,
                 joinsplit_data,
             } => {
@@ -201,7 +201,7 @@ impl ZcashSerialize for Transaction {
                 outputs.zcash_serialize(&mut writer)?;
                 lock_time.zcash_serialize(&mut writer)?;
                 writer.write_u32::<LittleEndian>(expiry_height.0)?;
-                value_balance.zcash_serialize(&mut writer)?;
+                sapling_value_balance.zcash_serialize(&mut writer)?;
 
                 // The previous match arms serialize in one go, because the
                 // internal structure happens to nicely line up with the
@@ -235,7 +235,7 @@ impl ZcashSerialize for Transaction {
                 inputs,
                 outputs,
                 shielded_data,
-                value_balance,
+                sapling_value_balance,
                 rest,
             } => {
                 // Write version 5 and set the fOverwintered bit.
@@ -257,7 +257,7 @@ impl ZcashSerialize for Transaction {
                 };
                 sig_shielded_data.zcash_serialize(&mut writer)?;
 
-                value_balance.zcash_serialize(&mut writer)?;
+                sapling_value_balance.zcash_serialize(&mut writer)?;
 
                 // write the rest
                 writer.write_all(rest)?;
@@ -331,7 +331,7 @@ impl ZcashDeserialize for Transaction {
                 let outputs = Vec::zcash_deserialize(&mut reader)?;
                 let lock_time = LockTime::zcash_deserialize(&mut reader)?;
                 let expiry_height = block::Height(reader.read_u32::<LittleEndian>()?);
-                let value_balance = (&mut reader).zcash_deserialize_into()?;
+                let sapling_value_balance = (&mut reader).zcash_deserialize_into()?;
                 let shielded_spends = Vec::zcash_deserialize(&mut reader)?;
                 let shielded_outputs = Vec::zcash_deserialize(&mut reader)?;
                 let joinsplit_data = OptV4Jsd::zcash_deserialize(&mut reader)?;
@@ -343,7 +343,7 @@ impl ZcashDeserialize for Transaction {
                     outputs,
                     lock_time,
                     expiry_height,
-                    value_balance,
+                    sapling_value_balance,
                     shielded_data,
                     joinsplit_data,
                 })
@@ -361,7 +361,7 @@ impl ZcashDeserialize for Transaction {
                 let shielded_outputs = Vec::zcash_deserialize(&mut reader)?;
                 let shielded_data =
                     deserialize_shielded_data(&mut reader, shielded_spends, shielded_outputs)?;
-                let value_balance = (&mut reader).zcash_deserialize_into()?;
+                let sapling_value_balance = (&mut reader).zcash_deserialize_into()?;
 
                 let mut rest = Vec::new();
                 reader.read_to_end(&mut rest)?;
@@ -372,7 +372,7 @@ impl ZcashDeserialize for Transaction {
                     inputs,
                     outputs,
                     shielded_data,
-                    value_balance,
+                    sapling_value_balance,
                     rest,
                 })
             }

@@ -89,7 +89,7 @@ impl Transaction {
                     outputs,
                     lock_time,
                     expiry_height,
-                    value_balance,
+                    sapling_value_balance,
                     shielded_data,
                     joinsplit_data,
                 )| Transaction::V4 {
@@ -97,7 +97,7 @@ impl Transaction {
                     outputs,
                     lock_time,
                     expiry_height,
-                    value_balance,
+                    sapling_value_balance,
                     shielded_data,
                     joinsplit_data,
                 },
@@ -122,7 +122,7 @@ impl Transaction {
                     inputs,
                     outputs,
                     shielded_data,
-                    value_balance,
+                    sapling_value_balance,
                     rest,
                 )| Transaction::V5 {
                     lock_time,
@@ -130,7 +130,7 @@ impl Transaction {
                     inputs,
                     outputs,
                     shielded_data,
-                    value_balance,
+                    sapling_value_balance,
                     rest,
                 },
             )

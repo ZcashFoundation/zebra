@@ -93,7 +93,7 @@ pub enum Transaction {
         /// The latest block height that this transaction can be added to the chain.
         expiry_height: block::Height,
         /// The net value of Sapling spend transfers minus output transfers.
-        value_balance: Amount,
+        sapling_value_balance: Amount,
         /// The JoinSplit data for this transaction, if any.
         joinsplit_data: Option<JoinSplitData<Groth16Proof>>,
         /// The shielded data for this transaction, if any.
@@ -115,7 +115,7 @@ pub enum Transaction {
         /// The shielded data for this transaction, if any.
         shielded_data: Option<ShieldedData>,
         /// The net value of Sapling spend transfers minus output transfers.
-        value_balance: Amount,
+        sapling_value_balance: Amount,
         /// The rest of the transaction as bytes
         rest: Vec<u8>,
     },

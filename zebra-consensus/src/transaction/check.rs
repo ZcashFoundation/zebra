@@ -82,10 +82,10 @@ pub fn has_inputs_and_outputs(tx: &Transaction) -> Result<(), TransactionError> 
 /// https://zips.z.cash/protocol/protocol.pdf#consensusfrombitcoin
 pub fn shielded_balances_match(
     shielded_data: &ShieldedData,
-    value_balance: Amount,
+    sapling_value_balance: Amount,
 ) -> Result<(), TransactionError> {
     if (shielded_data.spends().count() + shielded_data.outputs().count() != 0)
-        || i64::from(value_balance) == 0
+        || i64::from(sapling_value_balance) == 0
     {
         Ok(())
     } else {

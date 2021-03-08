@@ -98,11 +98,12 @@ impl ShieldedData {
     /// https://zips.z.cash/protocol/protocol.pdf#saplingbalance
     pub fn binding_verification_key(
         &self,
-        value_balance: Amount,
+        sapling_value_balance: Amount,
     ) -> redjubjub::VerificationKeyBytes<Binding> {
         let cv_old: ValueCommitment = self.spends().map(|spend| spend.cv).sum();
         let cv_new: ValueCommitment = self.outputs().map(|output| output.cv).sum();
-        let cv_balance: ValueCommitment = ValueCommitment::new(jubjub::Fr::zero(), value_balance);
+        let cv_balance: ValueCommitment =
+            ValueCommitment::new(jubjub::Fr::zero(), sapling_value_balance);
 
         let key_bytes: [u8; 32] = (cv_old - cv_new - cv_balance).into();
 

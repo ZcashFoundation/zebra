@@ -486,13 +486,16 @@ impl<'a> SigHasher<'a> {
     fn hash_value_balance<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         use Transaction::*;
 
-        let value_balance = match self.trans {
-            V4 { value_balance, .. } => value_balance,
+        let sapling_value_balance = match self.trans {
+            V4 {
+                sapling_value_balance,
+                ..
+            } => sapling_value_balance,
             V5 { .. } => unimplemented!("v5 transaction hash as specified in ZIP-225 and ZIP-244"),
             V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(ZIP243_EXPLANATION),
         };
 
-        writer.write_all(&value_balance.to_bytes())?;
+        writer.write_all(&sapling_value_balance.to_bytes())?;
 
         Ok(())
     }

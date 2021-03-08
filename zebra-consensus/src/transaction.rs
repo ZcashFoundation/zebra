@@ -141,7 +141,7 @@ where
                     // outputs,
                     // lock_time,
                     // expiry_height,
-                    value_balance,
+                    sapling_value_balance,
                     joinsplit_data,
                     shielded_data,
                     ..
@@ -194,7 +194,7 @@ where
                     }
 
                     if let Some(shielded_data) = shielded_data {
-                        check::shielded_balances_match(&shielded_data, *value_balance)?;
+                        check::shielded_balances_match(&shielded_data, *sapling_value_balance)?;
                         for spend in shielded_data.spends() {
                             // TODO: check that spend.cv and spend.rk are NOT of small
                             // order.
@@ -238,7 +238,7 @@ where
                             // transaction to verify.
                         });
 
-                        let bvk = shielded_data.binding_verification_key(*value_balance);
+                        let bvk = shielded_data.binding_verification_key(*sapling_value_balance);
                         let _rsp = redjubjub_verifier
                             .ready_and()
                             .await?
