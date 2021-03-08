@@ -1,7 +1,6 @@
 //! Pedersen hash functions and helpers.
 
 use bitvec::prelude::*;
-use rand_core::{CryptoRng, RngCore};
 
 use super::super::keys::find_group_hash;
 
@@ -126,22 +125,4 @@ pub fn windowed_pedersen_commitment(r: jubjub::Fr, s: &BitVec<Lsb0, u8>) -> jubj
     const D: [u8; 8] = *b"Zcash_PH";
 
     pedersen_hash_to_point(D, &s) + find_group_hash(D, b"r") * r
-}
-
-/// Generates a random scalar from the scalar field 𝔽_{r_𝕁}.
-///
-/// The prime order subgroup 𝕁^(r) is the order-r_𝕁 subgroup of 𝕁 that consists
-/// of the points whose order divides r. This function is useful when generating
-/// the uniform distribution on 𝔽_{r_𝕁} needed for Sapling commitment schemes'
-/// trapdoor generators.
-///
-/// https://zips.z.cash/protocol/protocol.pdf#jubjub
-pub fn generate_trapdoor<T>(csprng: &mut T) -> jubjub::Fr
-where
-    T: RngCore + CryptoRng,
-{
-    let mut bytes = [0u8; 64];
-    csprng.fill_bytes(&mut bytes);
-    // Fr::from_bytes_wide() reduces the input modulo r via Fr::from_u512()
-    jubjub::Fr::from_bytes_wide(&bytes)
 }
