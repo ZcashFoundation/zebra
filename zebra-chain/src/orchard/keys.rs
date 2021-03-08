@@ -389,7 +389,7 @@ mod ivk_hrp {
     pub const TESTNET: &str = "zivktestorchard";
 }
 
-/// An _Incoming Viewing Key_, as described in [protocol specification
+/// An incoming viewing key, as described in [protocol specification
 /// §4.2.3][ps].
 ///
 /// Used to decrypt incoming notes without spending them.
@@ -433,18 +433,23 @@ impl From<[u8; 32]> for IncomingViewingKey {
     }
 }
 
-impl From<(SpendValidatingKey, NullifierDerivingKey)> for IncomingViewingKey {
-    /// For this invocation of Blake2s-256 as _CRH^ivk_.
+impl From<FullViewingKey> for IncomingViewingKey {
+    /// Commit^ivk_rivk(ak, nk) :=
+    ///    SinsemillaShortCommit_rcm (︁"z.cash:Orchard-CommitIvk", I2LEBSP_l(ak) || I2LEBSP_l(nk)︁) mod r_P
     ///
     /// https://zips.z.cash/protocol/protocol.pdf#orchardkeycomponents
     /// https://zips.z.cash/protocol/protocol.pdf#concreteprfs
 
-    fn from((ask, nk): (SpendValidatingKey, NullifierDerivingKey)) -> Self {
-        unimplemented!();
+    fn from(fvk: FullViewingKey) -> Self {
+        let M = fvk.ak.into().join(fvk.nk.into());
 
-        let hash_bytes = commit_ivk(ask.into(), nk.into());
+        // Commit^ivk_rivk
+        let scalar = sinsemilla_short_commit(fvk.ivk.into(), "z.cash:Orchard-CommitIvk", M);
 
-        IncomingViewingKey::from(hash_bytes)
+        Self {
+            network: Network::default(),
+            scalar,
+        }
     }
 }
 
