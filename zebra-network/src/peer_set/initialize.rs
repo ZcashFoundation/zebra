@@ -171,7 +171,7 @@ where
 
     let crawl_guard = tokio::spawn(
         crawl_and_dial(
-            config.new_peer_interval,
+            config.crawl_new_peer_interval,
             demand_tx,
             demand_rx,
             candidates,
@@ -269,7 +269,7 @@ where
 /// Given a channel that signals a need for new peers, try to connect to a peer
 /// and send the resulting `peer::Client` through a channel.
 #[instrument(skip(
-    new_peer_interval,
+    crawl_new_peer_interval,
     demand_tx,
     demand_rx,
     candidates,
@@ -277,7 +277,7 @@ where
     success_tx
 ))]
 async fn crawl_and_dial<C, S>(
-    new_peer_interval: std::time::Duration,
+    crawl_new_peer_interval: std::time::Duration,
     mut demand_tx: mpsc::Sender<()>,
     mut demand_rx: mpsc::Receiver<()>,
     mut candidates: CandidateSet<S>,
@@ -304,7 +304,7 @@ where
     // never terminates.
     handshakes.push(future::pending().boxed());
 
-    let mut crawl_timer = tokio::time::interval(new_peer_interval);
+    let mut crawl_timer = tokio::time::interval(crawl_new_peer_interval);
 
     loop {
         metrics::gauge!(

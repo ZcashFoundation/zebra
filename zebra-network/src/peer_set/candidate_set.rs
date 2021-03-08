@@ -203,6 +203,12 @@ where
     ///
     /// Live `Responded` peers will stay live if they keep responding, or
     /// become a reconnection candidate if they stop responding.
+    ///
+    /// ## Security
+    ///
+    /// Zebra resists distributed denial of service attacks by making sure that
+    /// new peer connections are initiated at least
+    /// `MIN_PEER_CONNECTION_INTERVAL` apart.
     pub async fn next(&mut self) -> Option<MetaAddr> {
         let now = Instant::now();
         let mut sleep = sleep_until(now + Self::MIN_PEER_CONNECTION_INTERVAL);
