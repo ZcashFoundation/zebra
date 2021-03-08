@@ -151,15 +151,29 @@ impl FromStr for SpendingKey {
 }
 
 impl SpendingKey {
-    /// Generate a new _SpendingKey_.
+    /// Generate a new `SpendingKey`.
+    ///
+    /// When generating, we check that the corresponding `SpendAuthorizingKey`
+    /// is not zero, else fail.
+    ///
+    ///
     pub fn new<T>(csprng: &mut T) -> Self
     where
         T: RngCore + CryptoRng,
     {
-        let mut bytes = [0u8; 32];
-        csprng.fill_bytes(&mut bytes);
+        loop {
+            let mut bytes = [0u8; 32];
+            csprng.fill_bytes(&mut bytes);
 
-        Self::from(bytes)
+            let sk = Self::from(bytes);
+
+            // "if ask = 0, discard this key and repeat with a new sk"
+            if SpendAuthorizingKey::from(sk).0 == pallas::Scalar::zero() {
+                continue;
+            }
+
+            break sk;
+        }
     }
 }
 

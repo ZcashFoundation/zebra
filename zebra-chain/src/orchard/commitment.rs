@@ -3,8 +3,6 @@
 // #[cfg(test)]
 // mod test_vectors;
 
-pub mod sinsemilla_hashes;
-
 use std::{convert::TryFrom, fmt, io};
 
 use bitvec::prelude::*;
