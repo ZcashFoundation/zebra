@@ -355,16 +355,11 @@ impl From<&NullifierDerivingKey> for [u8; 32] {
 }
 
 impl From<SpendingKey> for NullifierDerivingKey {
-    /// Requires JubJub's _FindGroupHash^J("Zcash_H_", "")_, then uses
-    /// the resulting generator point to scalar multiply the
-    /// ProofAuthorizingKey into the new NullifierDerivingKey
+    /// nk = ToBase^Orchard(PRF^expand_sk ([7]))
     ///
     /// https://zips.z.cash/protocol/protocol.pdf#orchardkeycomponents
-    /// https://zips.z.cash/protocol/protocol.pdf#concretegrouphashjubjub
     fn from(sk: SpendingKey) -> Self {
-        let generator_point = prf_expand(sk, []);
-
-        Self(pallas::Affine::from(generator_point * sk.0))
+        Self(pallas::Base::from_bytes_wide(prf_expand(sk, [7])))
     }
 }
 
