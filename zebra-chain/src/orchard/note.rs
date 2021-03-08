@@ -1,7 +1,9 @@
-//! Sapling notes
+//! Orchard notes
 
 #![allow(clippy::unit_arg)]
 #![allow(dead_code)]
+
+use halo2::pasta::pallas;
 
 mod ciphertexts;
 mod nullifiers;
@@ -9,17 +11,14 @@ mod nullifiers;
 #[cfg(any(test, feature = "proptest-impl"))]
 mod arbitrary;
 
-use crate::{
-    amount::{Amount, NonNegative},
-    transaction::Memo,
-};
+use crate::amount::{Amount, NonNegative};
 
 use super::{
     commitment::CommitmentRandomness,
     keys::{Diversifier, TransmissionKey},
 };
 
-pub use ciphertexts::{EncryptedNote, WrappedNoteKey};
+pub use ciphertexts::EncryptedNote;
 
 pub use nullifiers::Nullifier;
 
@@ -35,9 +34,11 @@ pub struct Note {
     pub transmission_key: TransmissionKey,
     /// An integer representing the value of the note in zatoshi.
     pub value: Amount<NonNegative>,
+    /// Used as input to PRF^nf as part of deriving the nullier of the note.
+    pub rho: pallas::Base, // TODO: refine type
+    /// Sender-controlled randomness.
+    pub psi: pallas::Base, // TODO: refine type
     /// A random commitment trapdoor used to produce the associated
     /// note commitment.
     pub rcm: CommitmentRandomness,
-    /// The note memo, after decryption
-    pub memo: Memo,
 }

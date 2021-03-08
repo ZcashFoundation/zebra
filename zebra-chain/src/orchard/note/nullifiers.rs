@@ -1,31 +1,33 @@
 #![allow(clippy::unit_arg)]
 #![allow(dead_code)]
 
-use super::super::{
-    commitment::{pedersen_hashes::mixing_pedersen_hash, NoteCommitment},
-    keys::NullifierDerivingKey,
-    tree::Position,
-};
+use halo2::pasta::pallas;
 
-/// Invokes Blake2s-256 as PRF^nfSapling to derive the nullifier for a
-/// Sapling note.
-///
-/// PRF^nfSapling(ρ*) := BLAKE2s-256("Zcash_nf", nk* || ρ*)
-///
-/// https://zips.z.cash/protocol/protocol.pdf#concreteprfs
-fn prf_nf(nk: [u8; 32], rho: [u8; 32]) -> [u8; 32] {
-    let hash = blake2s_simd::Params::new()
-        .hash_length(32)
-        .personal(b"Zcash_nf")
-        .to_state()
-        .update(&nk[..])
-        .update(&rho[..])
-        .finalize();
+use super::super::{commitment::NoteCommitment, keys::NullifierDerivingKey, tree::Position};
 
-    *hash.as_array()
+/// A cryptographic permutation, defined in [poseidonhash].
+///
+/// PoseidonHash(x, y) = f([x, y, 0])_1 (using 1-based indexing).
+///
+/// [poseidonhash]: https://zips.z.cash/protocol/nu5.pdf#poseidonhash
+fn poseidon_hash(x: pallas::Base, y: pallas::Base) -> pallas::Base {
+    unimplemented!()
 }
 
-/// A Nullifier for Sapling transactions
+/// Derive the nullifier for a Orchard note.
+///
+/// Instantiated using the PoseidonHash hash function defined in [§5.4.1.10
+/// ‘PoseidonHash Function’][poseidon]
+///
+/// PRF^nfOrchard(nk*, ρ*) := PoseidonHash(nk*, ρ*)
+///
+/// [concreteprfs]: https://zips.z.cash/protocol/protocol.pdf#concreteprfs
+/// [poseidonhash]: https://zips.z.cash/protocol/nu5.pdf#poseidonhash
+fn prf_nf(nk: [u8; 32], rho: [u8; 32]) -> [u8; 32] {
+    poseidon_hash(nk, rho)
+}
+
+/// A Nullifier for Orchard transactions
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),
