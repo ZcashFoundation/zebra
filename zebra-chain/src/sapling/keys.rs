@@ -63,6 +63,25 @@ fn prf_expand(sk: [u8; 32], t: &[u8]) -> [u8; 64] {
     *hash.as_array()
 }
 
+/// Used to derive the outgoing cipher key _ock_ used to encrypt an Output ciphertext.
+///
+/// PRF^ock(ovk, cv, cm_u, ephemeralKey) := BLAKE2b-256(“Zcash_Derive_ock”, ovk || cv || cm_u || ephemeralKey)
+///
+/// https://zips.z.cash/protocol/nu5.pdf#concreteprfs
+fn prf_ock(ovk: [u8; 32], cv: [u8; 32], cm_u: [u8; 32], ephemeral_key: [u8; 32]) -> [u8; 32] {
+    let hash = blake2b_simd::Params::new()
+        .hash_length(32)
+        .personal(b"Zcash_Derive_ock")
+        .to_state()
+        .update(ovk)
+        .update(cv)
+        .update(cm_u)
+        .update(ephemeral_key)
+        .finalize();
+
+    *hash.as_array()
+}
+
 /// Invokes Blake2s-256 as _CRH^ivk_, to derive the IncomingViewingKey
 /// bytes from an AuthorizingKey and NullifierDerivingKey.
 ///

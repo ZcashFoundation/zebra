@@ -21,6 +21,24 @@ use super::keys::{find_group_hash, Diversifier, TransmissionKey};
 
 use pedersen_hashes::*;
 
+/// Generates a random scalar from the scalar field 𝔽_{r_𝕁}.
+///
+/// The prime order subgroup 𝕁^(r) is the order-r_𝕁 subgroup of 𝕁 that consists
+/// of the points whose order divides r. This function is useful when generating
+/// the uniform distribution on 𝔽_{r_𝕁} needed for Sapling commitment schemes'
+/// trapdoor generators.
+///
+/// https://zips.z.cash/protocol/protocol.pdf#jubjub
+pub fn generate_trapdoor<T>(csprng: &mut T) -> jubjub::Fr
+where
+    T: RngCore + CryptoRng,
+{
+    let mut bytes = [0u8; 64];
+    csprng.fill_bytes(&mut bytes);
+    // Fr::from_bytes_wide() reduces the input modulo r via Fr::from_u512()
+    jubjub::Fr::from_bytes_wide(&bytes)
+}
+
 /// The randomness used in the Pedersen Hash for note commitment.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct CommitmentRandomness(jubjub::Fr);
