@@ -115,7 +115,13 @@ where
     S: Service<Request, Response = Response, Error = BoxError>,
     S::Future: Send + 'static,
 {
-    const PEER_CONNECTION_INTERVAL: Duration = Duration::from_millis(100);
+    /// The minimum time between successive calls to `CandidateSet::next()`.
+    ///
+    /// ## Security
+    ///
+    /// Zebra resists distributed denial of service attacks by making sure that new peer connections
+    /// are initiated at least `MIN_PEER_CONNECTION_INTERVAL` apart.
+    const MIN_PEER_CONNECTION_INTERVAL: Duration = Duration::from_millis(100);
 
     /// Uses `peer_set` and `peer_service` to manage a [`CandidateSet`] of peers.
     pub fn new(peer_set: Arc<Mutex<AddressBook>>, peer_service: S) -> CandidateSet<S> {
