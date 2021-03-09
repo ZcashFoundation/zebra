@@ -745,8 +745,22 @@ fn sync_large_checkpoints_mainnet() -> Result<()> {
     Ok(())
 }
 
-// Todo: We had a `sync_large_checkpoints_testnet` here but it was removed because
-// the testnet is unreliable(#1222). Enable after we have more testnet instances(#1791).
+/// Test if `zebrad` can sync some larger checkpoints on testnet.
+///
+/// This test does not run by default, see `sync_large_checkpoints_mainnet`
+/// for details.
+#[test]
+#[ignore]
+fn sync_large_checkpoints_testnet() -> Result<()> {
+    sync_until(
+        LARGE_CHECKPOINT_TEST_HEIGHT,
+        Testnet,
+        STOP_AT_HEIGHT_REGEX,
+        LARGE_CHECKPOINT_TIMEOUT,
+        None,
+    )
+    .map(|_tempdir| ())
+}
 
 /// Sync `network` until `zebrad` reaches `height`, and ensure that
 /// the output contains `stop_regex`. If `reuse_tempdir` is supplied,
