@@ -39,6 +39,7 @@ pub struct Config {
     /// This duration only pertains to the rate at which zebra crawls for new
     /// peers, not the rate zebra connects to new peers, which is restricted to
     /// CandidateSet::PEER_CONNECTION_INTERVAL
+    #[serde(alias = "new_peer_interval")]
     pub crawl_new_peer_interval: Duration,
 }
 
