@@ -111,12 +111,13 @@ pub fn sinsemilla_hash(D: &[u8], M: &BitVec<Lsb0, u8>) -> pallas::Base {
 /// We construct Sinsemilla commitments by hashing to a point with Sinsemilla
 /// hash, and adding a randomized point on the Pallas curve.
 ///
-/// SinsemillaCommit_r(D, M) := SinsemillaHashToPoint(D || "-M", M) + [r]GroupHash^P(D ||“-r”,"")
+/// SinsemillaCommit_r(D, M) := SinsemillaHashToPoint(D || "-M", M) + [r]GroupHash^P(D || "-r", "")
 ///
 /// https://zips.z.cash/protocol/nu5.pdf#concretesinsemillacommit
 #[allow(non_snake_case)]
 pub fn sinsemilla_commit(r: pallas::Scalar, D: &[u8], M: &BitVec<Lsb0, u8>) -> pallas::Point {
-    sinsemilla_hash_to_point(D.join(b"-M"), M) + r * pallas_group_hash(D.join(b"r"), b"")
+    sinsemilla_hash_to_point((D, b"-M").concat(), M)
+        + r * pallas_group_hash((D, b"r").concat(), b"")
 }
 
 /// SinsemillaShortCommit_r(D, M) := Extract_P(SinsemillaCommit_r(D, M))

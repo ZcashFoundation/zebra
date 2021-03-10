@@ -369,6 +369,7 @@ impl PartialEq<[u8; 32]> for NullifierDerivingKey {
     }
 }
 
+// XXX: Should this be replaced by commitment::CommitmentRandomness?
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub struct IvkCommitRandomness(pallas::Scalar);
 
@@ -439,9 +440,8 @@ impl From<FullViewingKey> for IncomingViewingKey {
     ///
     /// https://zips.z.cash/protocol/protocol.pdf#orchardkeycomponents
     /// https://zips.z.cash/protocol/protocol.pdf#concreteprfs
-
     fn from(fvk: FullViewingKey) -> Self {
-        let M = fvk.ak.into().join(fvk.nk.into());
+        let M = (fvk.ak.into(), fvk.nk.into()).concat();
 
         // Commit^ivk_rivk
         let scalar = sinsemilla_short_commit(fvk.ivk.into(), "z.cash:Orchard-CommitIvk", M);
