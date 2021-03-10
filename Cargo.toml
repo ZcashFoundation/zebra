@@ -12,6 +12,9 @@ members = [
         "zebra-utils",
         "tower-batch",
         "tower-fallback",
+        "seamare",
+        "seamare-lints",
+        "cargo-seamare",
 ]
 
 [profile.dev]
