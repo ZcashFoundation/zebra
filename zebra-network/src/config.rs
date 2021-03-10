@@ -33,8 +33,14 @@ pub struct Config {
     /// set size to reduce Zebra's bandwidth usage.
     pub peerset_initial_target_size: usize,
 
-    /// How frequently we attempt to connect to a new peer.
-    pub new_peer_interval: Duration,
+    /// How frequently we attempt to crawl the network to discover new peer
+    /// connections.
+    ///
+    /// This duration only pertains to the rate at which zebra crawls for new
+    /// peers, not the rate zebra connects to new peers, which is restricted to
+    /// CandidateSet::PEER_CONNECTION_INTERVAL
+    #[serde(alias = "new_peer_interval")]
+    pub crawl_new_peer_interval: Duration,
 }
 
 impl Config {
@@ -146,7 +152,7 @@ impl Default for Config {
             network: Network::Mainnet,
             initial_mainnet_peers: mainnet_peers,
             initial_testnet_peers: testnet_peers,
-            new_peer_interval: Duration::from_secs(60),
+            crawl_new_peer_interval: Duration::from_secs(60),
 
             // The default peerset target size should be large enough to ensure
             // nodes have a reliable set of peers. But it should also be limited
