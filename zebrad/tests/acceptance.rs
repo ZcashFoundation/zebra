@@ -47,6 +47,7 @@ const LAUNCH_DELAY: Duration = Duration::from_secs(10);
 fn default_test_config() -> Result<ZebradConfig> {
     let auto_port_ipv4_local = zebra_network::Config {
         listen_addr: "127.0.0.1:0".parse()?,
+        crawl_new_peer_interval: Duration::from_secs(30),
         ..zebra_network::Config::default()
     };
     let local_ephemeral = ZebradConfig {
@@ -662,7 +663,7 @@ const STOP_AT_HEIGHT_REGEX: &str = "stopping at configured height";
 
 const STOP_ON_LOAD_TIMEOUT: Duration = Duration::from_secs(5);
 // usually it's much shorter than this
-const SMALL_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(30);
+const SMALL_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(120);
 const LARGE_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(180);
 
 /// Test if `zebrad` can sync the first checkpoint on mainnet.
