@@ -6,7 +6,7 @@ use std::{
 
 use chrono::Utc;
 use futures::stream::{FuturesUnordered, StreamExt};
-use tokio::time::{sleep, sleep_until, Instant, Sleep};
+use tokio::time::{sleep, sleep_until, Sleep};
 use tower::{Service, ServiceExt};
 
 use crate::{types::MetaAddr, AddressBook, BoxError, PeerAddrState, Request, Response};
