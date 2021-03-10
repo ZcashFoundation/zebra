@@ -210,12 +210,14 @@ where
     /// new peer connections are initiated at least
     /// `MIN_PEER_CONNECTION_INTERVAL` apart.
     pub async fn next(&mut self) -> Option<MetaAddr> {
-        let now = Instant::now();
-        let mut sleep = sleep_until(now + Self::MIN_PEER_CONNECTION_INTERVAL);
+        let current_deadline = self.sleep.deadline();
+        let mut sleep = sleep_until(current_deadline + Self::MIN_PEER_CONNECTION_INTERVAL);
         mem::swap(&mut self.sleep, &mut sleep);
 
         let reconnect = {
             let mut peer_set_guard = self.peer_set.lock().unwrap();
+            // It's okay to early return here because we're returning None
+            // instead of yielding the next connection.
             let mut reconnect = peer_set_guard.reconnection_peers().next()?;
 
             reconnect.last_seen = Utc::now();
@@ -224,6 +226,7 @@ where
             reconnect
         };
 
+        // This is the line that is most relevant to the above ## Security section
         sleep.await;
 
         Some(reconnect)
