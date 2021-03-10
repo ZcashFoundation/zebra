@@ -113,8 +113,8 @@ impl VerificationKey<SpendAuth> {
     /// Randomize this verification key with the given `randomizer`.
     ///
     /// Randomization is only supported for `SpendAuth` keys.
-    pub fn randomize(&self, randomizer: &Randomizer) -> VerificationKey<SpendAuth> {
-        use crate::private::Sealed;
+    pub fn randomize(&self, randomizer: &pallas::Scalar) -> VerificationKey<SpendAuth> {
+        use super::private::Sealed;
         let point = self.point + &(&SpendAuth::basepoint() * randomizer);
         let bytes = VerificationKeyBytes {
             bytes: point.to_bytes().as_ref().try_into().unwrap(),
@@ -137,7 +137,7 @@ impl<T: SigType> VerificationKey<T> {
     /// Verify a purported `signature` over `msg` made by this verification key.
     // This is similar to impl signature::Verifier but without boxed errors
     pub fn verify(&self, msg: &[u8], signature: &Signature<T>) -> Result<(), Error> {
-        use crate::HStar;
+        use super::HStar;
         let c = HStar::default()
             .update(&signature.r_bytes[..])
             .update(&self.bytes.bytes[..]) // XXX ugly
