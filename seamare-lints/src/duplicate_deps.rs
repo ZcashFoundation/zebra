@@ -1,6 +1,6 @@
 use guppy::Version;
-use std::collections::BTreeMap;
 use seamare::prelude::*;
+use std::collections::BTreeMap;
 
 /// Ensure that packages within the workspace only depend on one version of a third-party crate.
 #[derive(Debug)]
