@@ -107,7 +107,7 @@ use crate::{types::MetaAddr, AddressBook, BoxError, PeerAddrState, Request, Resp
 pub(super) struct CandidateSet<S> {
     pub(super) peer_set: Arc<Mutex<AddressBook>>,
     pub(super) peer_service: S,
-    sleep: Sleep,
+    next_peer_min_wait: Sleep,
 }
 
 impl<S> CandidateSet<S>
@@ -128,7 +128,7 @@ where
         CandidateSet {
             peer_set,
             peer_service,
-            sleep: sleep(Duration::from_secs(0)),
+            next_peer_min_wait: sleep(Duration::from_secs(0)),
         }
     }
 
@@ -210,9 +210,9 @@ where
     /// new peer connections are initiated at least
     /// `MIN_PEER_CONNECTION_INTERVAL` apart.
     pub async fn next(&mut self) -> Option<MetaAddr> {
-        let current_deadline = self.sleep.deadline();
+        let current_deadline = self.next_peer_min_wait.deadline();
         let mut sleep = sleep_until(current_deadline + Self::MIN_PEER_CONNECTION_INTERVAL);
-        mem::swap(&mut self.sleep, &mut sleep);
+        mem::swap(&mut self.next_peer_min_wait, &mut sleep);
 
         let reconnect = {
             let mut peer_set_guard = self.peer_set.lock().unwrap();
