@@ -16,8 +16,8 @@ pub use self::halo2::Halo2Proof;
 
 /// A marker trait used to abstract over BCTV14, Groth16, or Halo2 proofs.
 pub trait ZkSnarkProof:
-    Copy
-    + Clone
+    // Copy +
+    Clone
     + Debug
     + PartialEq
     + Eq

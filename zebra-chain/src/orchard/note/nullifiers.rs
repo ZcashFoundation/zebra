@@ -3,7 +3,24 @@
 
 use halo2::pasta::pallas;
 
-use super::super::{commitment::NoteCommitment, keys::NullifierDerivingKey, tree::Position};
+use super::super::{
+    commitment::NoteCommitment, keys::NullifierDerivingKey, sinsemilla::*, tree::Position,
+};
+
+/// Orchard ixing Pedersen hash Function
+///
+/// Used to compute ρ from a note commitment and its position in the note
+/// commitment tree.  It takes as input a Pedersen commitment P, and hashes it
+/// with another input x.
+///
+/// MixingPedersenHash(P, x) := P + [x]GroupHash^P^(r)(“Zcash_P_”, “”)
+///
+/// https://zips.z.cash/protocol/protocol.pdf#concretemixinghash
+// TODO: I'M EXTRAPOLATING HERE, DOUBLE CHECK THE SPEC WHEN FINALIZED
+#[allow(non_snake_case)]
+pub fn mixing_pedersen_hash(P: pallas::Point, x: pallas::Scalar) -> pallas::Point {
+    P + pallas_group_hash(*b"Zcash_P_", b"") * x
+}
 
 /// A cryptographic permutation, defined in [poseidonhash].
 ///
@@ -42,8 +59,15 @@ impl From<[u8; 32]> for Nullifier {
 }
 
 impl<'a> From<(NoteCommitment, Position, &'a NullifierDerivingKey)> for Nullifier {
+    /// Derive a `Nullifier` for an Orchard _note_.
+    ///
+    /// For a _note_, the _nullifier_ is derived as PRF^nfOrchard_nk(ρ*), where
+    /// k is a representation of the _nullifier deriving key_ associated with
+    /// the _note_ and ρ = repr_P(ρ).
+    ///
+    /// https://zips.z.cash/protocol/nu5.pdf#commitmentsandnullifiers
     fn from((cm, pos, nk): (NoteCommitment, Position, &'a NullifierDerivingKey)) -> Self {
-        let rho = jubjub::AffinePoint::from(mixing_pedersen_hash(cm.0.into(), pos.0.into()));
+        let rho = pallas::Affine::from(mixing_pedersen_hash(cm.0.into(), pos.0.into()));
 
         Nullifier(prf_nf(nk.into(), rho.to_bytes()))
     }

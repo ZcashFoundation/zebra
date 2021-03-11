@@ -18,7 +18,7 @@ use super::{
     keys::{Diversifier, TransmissionKey},
 };
 
-pub use ciphertexts::EncryptedNote;
+pub use ciphertexts::{EncryptedNote, WrappedNoteKey};
 
 pub use nullifiers::Nullifier;
 
