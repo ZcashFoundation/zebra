@@ -438,16 +438,25 @@ where
         }
     }
 
-    /// Check that the block height and Merkle root are valid.
+    /// Check that the block height, proof of work, and Merkle root are valid.
+    ///
+    /// ## Security
+    ///
+    /// Checking the proof of work makes resource exhaustion attacks harder to
+    /// carry out, because malicious blocks require a valid proof of work.
     ///
     /// Checking the Merkle root ensures that the block hash binds the block
     /// contents. To prevent malleability (CVE-2012-2459), we also need to check
     /// whether the transaction hashes are unique.
     fn check_block(&self, block: &Block) -> Result<block::Height, VerifyCheckpointError> {
-        let block_height = block
+        let hash = block.hash();
+        let height = block
             .coinbase_height()
-            .ok_or(VerifyCheckpointError::CoinbaseHeight { hash: block.hash() })?;
-        self.check_height(block_height)?;
+            .ok_or(VerifyCheckpointError::CoinbaseHeight { hash })?;
+        self.check_height(height)?;
+
+        crate::block::check::difficulty_is_valid(&block.header, self.network, &height, &hash)?;
+        crate::block::check::equihash_solution_is_valid(&block.header)?;
 
         let transaction_hashes = block
             .transactions
@@ -457,7 +466,7 @@ where
 
         crate::block::check::merkle_root_validity(&block, &transaction_hashes)?;
 
-        Ok(block_height)
+        Ok(height)
     }
 
     /// Queue `block` for verification, and return the `Receiver` for the
@@ -838,6 +847,12 @@ impl From<VerifyBlockError> for VerifyCheckpointError {
 
 impl From<BlockError> for VerifyCheckpointError {
     fn from(err: BlockError) -> VerifyCheckpointError {
+        VerifyCheckpointError::VerifyBlock(err.into())
+    }
+}
+
+impl From<equihash::Error> for VerifyCheckpointError {
+    fn from(err: equihash::Error) -> VerifyCheckpointError {
         VerifyCheckpointError::VerifyBlock(err.into())
     }
 }
