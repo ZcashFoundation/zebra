@@ -9,7 +9,7 @@
 mod tests;
 
 use std::{
-    convert::{From, Into, TryFrom},
+    convert::{From, Into, TryFrom, TryInto},
     fmt,
     io::{self, Write},
     str::FromStr,
@@ -18,7 +18,8 @@ use std::{
 use aes::Aes256;
 use bech32::{self, FromBase32, ToBase32, Variant};
 use fpe::ff1::{BinaryNumeralString, FF1};
-use halo2::pasta::pallas;
+use group::GroupEncoding;
+use halo2::{arithmetic::FieldExt, pasta::pallas};
 use rand_core::{CryptoRng, RngCore};
 
 use crate::{
@@ -42,13 +43,15 @@ use super::sinsemilla::*;
 #[allow(non_snake_case)]
 fn prp_d(K: [u8; 32], d: [u8; 11]) -> [u8; 11] {
     let radix = 2;
-    let tweak = "";
+    let tweak = b"";
 
     let ff = FF1::<Aes256>::new(&K, radix).expect("valid radix");
 
-    let enc = ff
-        .encrypt(tweak.into(), &BinaryNumeralString::from_bytes_le(&d))
-        .unwrap();
+    ff.encrypt(tweak, &BinaryNumeralString::from_bytes_le(&d))
+        .unwrap()
+        .to_bytes_le()
+        .try_into()
+        .unwrap()
 }
 
 /// Invokes Blake2b-512 as PRF^expand with parameter t.
@@ -59,16 +62,17 @@ fn prp_d(K: [u8; 32], d: [u8; 11]) -> [u8; 11] {
 // TODO: This is basically a duplicate of the one in our sapling module, its
 // definition in the draft NU5 spec is incomplete so I'm putting it here in case
 // it changes.
-fn prf_expand(sk: [u8; 32], t: &[u8]) -> [u8; 64] {
-    let hash = blake2b_simd::Params::new()
+fn prf_expand(sk: [u8; 32], t: &[&[u8]]) -> [u8; 64] {
+    let state = blake2b_simd::Params::new()
         .hash_length(64)
         .personal(b"Zcash_ExpandSeed")
-        .to_state()
-        .update(&sk[..])
-        .update(t)
-        .finalize();
+        .to_state();
 
-    *hash.as_array()
+    state.update(&sk[..]);
+
+    t.iter().for_each(|t_i| state.update(t_i));
+
+    *state.finalize().as_array()
 }
 
 /// Used to derive the outgoing cipher key _ock_ used to encrypt an encrypted
@@ -77,15 +81,15 @@ fn prf_expand(sk: [u8; 32], t: &[u8]) -> [u8; 64] {
 /// PRF^ock(ovk, cv, cm_x, ephemeralKey) := BLAKE2b-256(“Zcash_Orchardock”, ovk || cv || cm_x || ephemeralKey)
 ///
 /// https://zips.z.cash/protocol/nu5.pdf#concreteprfs
-fn prf_ock(ovk: [u8; 32], cv: [u8; 32], cm_x: [u8; 32], ephemeral_key: [u8; 32]) -> [u8; 32] {
+fn prf_ock(ovk: [u8; 32], cv: [u8; 32], cm_x: [u8; 32], ephemeral_key: [u8; 32]) -> [u8; 64] {
     let hash = blake2b_simd::Params::new()
         .hash_length(32)
         .personal(b"Zcash_Orchardock")
         .to_state()
-        .update(ovk)
-        .update(cv)
-        .update(cm_x)
-        .update(ephemeral_key)
+        .update(&ovk)
+        .update(&cv)
+        .update(&cm_x)
+        .update(&ephemeral_key)
         .finalize();
 
     *hash.as_array()
@@ -348,8 +352,8 @@ pub struct NullifierDerivingKey(pub pallas::Base);
 impl fmt::Debug for NullifierDerivingKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("NullifierDerivingKey")
-            .field("u", &hex::encode(self.0.get_u().to_bytes()))
-            .field("v", &hex::encode(self.0.get_v().to_bytes()))
+            .field("x", &hex::encode(self.0.get_x().to_bytes()))
+            .field("y", &hex::encode(self.0.get_y().to_bytes()))
             .finish()
     }
 }
@@ -406,13 +410,27 @@ impl From<SpendingKey> for IvkCommitRandomness {
     ///
     /// https://zips.z.cash/protocol/protocol.pdf#orchardkeycomponents
     fn from(sk: SpendingKey) -> Self {
-        Self(pallas::Scalar::from_bytes_wide(prf_expand(sk, [8])))
+        Self(pallas::Scalar::from_bytes_wide(prf_expand(sk.into(), &[8])))
     }
 }
 
 impl From<IvkCommitRandomness> for [u8; 32] {
     fn from(rivk: IvkCommitRandomness) -> Self {
         rivk.0.into()
+    }
+}
+
+impl TryFrom<[u8; 32]> for IvkCommitRandomness {
+    type Error = &'static str;
+
+    fn try_from(bytes: [u8; 32]) -> Result<Self, Self::Error> {
+        let possible_scalar = pallas::Scalar::from_bytes(&bytes);
+
+        if possible_scalar.is_some().into() {
+            Ok(Self(possible_scalar.unwrap()))
+        } else {
+            Err("Invalid pallas::Scalar value")
+        }
     }
 }
 
@@ -476,10 +494,18 @@ impl From<FullViewingKey> for IncomingViewingKey {
     /// https://zips.z.cash/protocol/protocol.pdf#orchardkeycomponents
     /// https://zips.z.cash/protocol/protocol.pdf#concreteprfs
     fn from(fvk: FullViewingKey) -> Self {
-        let M = (fvk.ak.into(), fvk.nk.into()).concat();
+        let M = (
+            fvk.spend_validating_key.into(),
+            fvk.nullifier_deriving_key.into(),
+        )
+            .concat();
 
         // Commit^ivk_rivk
-        let scalar = sinsemilla_short_commit(fvk.ivk.into(), "z.cash:Orchard-CommitIvk", M);
+        let scalar = sinsemilla_short_commit(
+            fvk.ivk_commit_randomness.into(),
+            "z.cash:Orchard-CommitIvk",
+            M,
+        );
 
         Self {
             network: Network::default(),
@@ -594,7 +620,7 @@ impl FromStr for FullViewingKey {
                     },
                     spend_validating_key: SpendValidatingKey::from(ak_bytes),
                     nullifier_deriving_key: NullifierDerivingKey::from(nk_bytes),
-                    ivk_commit_randomness: IvkCommitRandomness::from(rivk_bytes),
+                    ivk_commit_randomness: IvkCommitRandomness::try_from(rivk_bytes).unwrap(),
                 })
             }
             _ => Err(SerializationError::Parse("bech32 decoding error")),
@@ -605,12 +631,19 @@ impl FromStr for FullViewingKey {
 impl FullViewingKey {
     /// [4.2.3]: https://zips.z.cash/protocol/protocol.pdf#orchardkeycomponents
     #[allow(non_snake_case)]
-    pub fn to_R(&self) -> [u8; 32] {
+    pub fn to_R(&self) -> [u8; 64] {
         // let K = I2LEBSP_l_sk(rivk)
         let K: [u8; 32] = self.ivk_commit_randomness.into();
 
         // let R = PRF^expand_K( [0x82] || I2LEOSP256(ak) || I2LEOSP256(nk) )
-        prf_expand(K, ([0x82], self.ak.into(), self.nk.into()).concat())
+        prf_expand(
+            K,
+            [
+                [0x82u8],
+                self.spend_validating_key.into(),
+                self.nullifier_deriving_key.into(),
+            ],
+        )
     }
 }
 
@@ -688,7 +721,7 @@ impl From<Diversifier> for pallas::Point {
     ///
     /// [orchardkeycomponents]: https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents
     fn from(d: Diversifier) -> Self {
-        diversify_hash(d.0)
+        diversify_hash(&d.0)
     }
 }
 
