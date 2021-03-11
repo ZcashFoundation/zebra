@@ -4448,6 +4448,7 @@ dependencies = [
  "fpe",
  "funty",
  "futures 0.3.14",
+ "group 0.9.0",
  "halo2",
  "hex",
  "itertools 0.10.0",

@@ -4,6 +4,20 @@ use bitvec::prelude::*;
 
 use halo2::pasta::pallas;
 
+/// [Hash Extractor for Pallas][concreteextractorpallas]
+///
+/// P → B^[l^Orchard_Merkle]
+///
+/// [concreteextractorpallas]: https://zips.z.cash/protocol/nu5.pdf#concreteextractorpallas
+// TODO: should this return the basefield element type, or the bytes?
+pub fn extract_p(point: pallas::Point) -> pallas::Base {
+    match pallas::Affine::from(point).get_xy().into() {
+        // If Some, it's not the identity.
+        Some((x, _)) => x,
+        _ => pallas::Base::zero(),
+    }
+}
+
 /// GroupHash into Pallas, aka _GroupHash^P_
 ///
 /// Produces a random point in the Pallas curve.  The first input element acts
@@ -21,7 +35,7 @@ pub fn pallas_group_hash(D: &[u8], M: &[u8]) -> pallas::Point {
 /// https://zips.z.cash/protocol/protocol.pdf#concretesinsemillahash
 #[allow(non_snake_case)]
 fn Q(D: &[u8]) -> pallas::Point {
-    pallas_group_hash("z.cash:SinsemillaQ", D)
+    pallas_group_hash(b"z.cash:SinsemillaQ", D)
 }
 
 /// S(j) := GroupHash^P(︀“z.cash:SinsemillaS”, LEBS2OSP32(I2LEBSP32(j)))
@@ -32,7 +46,7 @@ fn Q(D: &[u8]) -> pallas::Point {
 // XXX: should j be strictly limited to k=10 bits?
 #[allow(non_snake_case)]
 fn S(j: [u8; 2]) -> pallas::Point {
-    pallas_group_hash("z.cash:SinsemillaS", &j)
+    pallas_group_hash(b"z.cash:SinsemillaS", &j)
 }
 
 /// "...an algebraic hash function with collision resistance (for fixed input
@@ -76,20 +90,6 @@ pub fn sinsemilla_hash_to_point(D: &[u8], M: &BitVec<Lsb0, u8>) -> pallas::Point
     acc
 }
 
-/// [Hash Extractor for Pallas][concreteextractorpallas]
-///
-/// P → B^[l^Orchard_Merkle]
-///
-/// [concreteextractorpallas]: https://zips.z.cash/protocol/nu5.pdf#concreteextractorpallas
-// TODO: should this return the basefield element type, or the bytes?
-pub fn extract_p(point: pallas::Point) -> pallas::Base {
-    match pallas::Affine::from(point).get_xy().into() {
-        // If Some, it's not the identity.
-        Some((x, _)) => x,
-        _ => pallas::Base::zero(),
-    }
-}
-
 /// Sinsemilla Hash Function
 ///
 /// "SinsemillaHash is an algebraic hash function with collision resistance (for
@@ -117,7 +117,7 @@ pub fn sinsemilla_hash(D: &[u8], M: &BitVec<Lsb0, u8>) -> pallas::Base {
 #[allow(non_snake_case)]
 pub fn sinsemilla_commit(r: pallas::Scalar, D: &[u8], M: &BitVec<Lsb0, u8>) -> pallas::Point {
     sinsemilla_hash_to_point((D, b"-M").concat(), M)
-        + r * pallas_group_hash((D, b"r").concat(), b"")
+        + pallas_group_hash((D, b"r").concat(), b"") * r
 }
 
 /// SinsemillaShortCommit_r(D, M) := Extract_P(SinsemillaCommit_r(D, M))

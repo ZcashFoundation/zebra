@@ -27,6 +27,7 @@ displaydoc = "0.2.1"
 equihash = "0.1"
 fpe = "0.4"
 futures = "0.3"
+group = "0.9"
 halo2 = { git = "https://github.com/zcash/halo2.git", branch = "main" }
 hex = "0.4"
 jubjub = "0.6.0"
