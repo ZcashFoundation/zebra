@@ -1,0 +1,211 @@
+- Feature Name: `v5_transaction`
+- Start Date: 2021-03-11
+- Design PR: [ZcashFoundation/zebra#0000](https://github.com/ZcashFoundation/zebra/pull/0000)
+- Zebra Issue: [ZcashFoundation/zebra#1863](https://github.com/ZcashFoundation/zebra/issues/1863)
+
+# Summary
+[summary]: #summary
+
+Network Upgrade number 5(`NU5`) introduces a new transaction type(transaction version 5). This document is a proposed design for implementing such a transaction version.
+
+# Motivation
+[motivation]: #motivation
+
+The Zebra software wants to be a protocol compatible Zcash implementation One of the tasks to do this includes the support of the new version 5 transactions that will be implemented in the next network upgrade.
+
+# Definitions
+[definitions]: #definitions
+
+- `NU5`
+- `Orchard`
+- `Sapling`
+- `orchard data` - Data types needed to support orchard transactions.
+- `saplig data` - Data types needed to support sapling transactions.
+- `orchard transaction` - Transactions that suppoort orchard data. Currently only V5.
+- `sapling transaction` - Transactions that support sapling data. Currently V4 and V5 but the data is implemented differently in them.
+
+# Guide-level explanation
+[guide-level-explanation]: #guide-level-explanation
+
+V5 transactions are described by the protocol in the second table of [Transaction Encoding and Consensus](https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus).
+
+We need the raw representation to Serialize/Deserialize the transaction however Zebra uses its own representation internally.
+
+V5 transactions are the only ones that will support orchard transactions with `Orchard` data types.
+
+V4 and V5 transactions both support sapling data but they are implemented differently. By this reason we need to split sapling data types into V4 and V5.
+
+The order of some of the fields changed from V4 to V5. For example the `lock_time` and `expiry_height` were moved above the transparent inputs and outputs.
+
+All of the changes proposed in this document are only to the `zebra-chain` crate.
+
+To highlight changes all document comments from the code snippets in the [reference section](#reference-level-explanation) were removed.
+
+# Reference-level explanation
+[reference-level-explanation]: #reference-level-explanation
+
+We start by looking how a V4(already implemented) transaction is represented in Zebra.
+
+This transaction version is specified by the protocol in the first table of [Transaction Encoding and Consensus](https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus).
+
+
+```
+V4 {
+    inputs: Vec<transparent::Input>,
+    outputs: Vec<transparent::Output>,
+    lock_time: LockTime,
+    expiry_height: block::Height,
+    value_balance: Amount,
+    joinsplit_data: Option<JoinSplitData<Groth16Proof>>,
+    shielded_data: Option<ShieldedData>,
+}
+```
+
+Currently the `ShieldedData` type is defined in `zebra-chain/src/transaction/shielded_data.rs` as follows:
+
+```
+pub struct ShieldedData {
+    pub first: Either<Spend, Output>,
+    pub rest_spends: Vec<Spend>,
+    pub rest_outputs: Vec<Output>,
+    pub binding_sig: Signature<Binding>,
+}
+```
+
+We know by protocol(2nd table of [Transaction Encoding and Consensus](https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus)) that V5 transactions will support sapling data however we also know by protocol that spends([Spend Description Encoding and Consensus](https://zips.z.cash/protocol/nu5.pdf#spendencodingandconsensus), See †) and outputs([Output Description Encoding and Consensus](https://zips.z.cash/protocol/nu5.pdf#outputencodingandconsensus), See †) fields change from V4 to V5.
+
+Here we have the proposed changes for V4 transactions:
+
+```
+V4 {
+    inputs: Vec<transparent::Input>,
+    outputs: Vec<transparent::Output>,
+    lock_time: LockTime,
+    expiry_height: block::Height,
+    sapling_value_balance: Amount,
+    joinsplit_data: Option<JoinSplitData<Groth16Proof>>,
+    shielded_data: Option<SaplingV4ShieldedData>,
+}
+```
+
+The only change above from the current implementation is the `shielded_data` field type, changed from  `Option<ShieldedData>` to `Option<SaplingV4ShieldedData>`.
+
+`ShieldedData` is currently defined and implemented in `src/transaction/shielded_data.rs`. We propose to change `ShieldedData` into `SaplingV4ShieldedData` and to add `SaplingV5ShieldedData` into the same file.
+
+The difference between V4 and V5 shielded data is in the spends and outputs. For this reason we need to add V4 and V5 spend and output versions to our code:
+
+```
+pub struct SaplingV4ShieldedData {
+    pub first: Either<SpendV4, OutputV4>,
+    pub rest_spends: Vec<SpendV4>,
+    pub rest_outputs: Vec<OutputV4>,
+    pub binding_sig: Signature<Binding>,
+}
+```
+
+Proposed `SpendV4` and `OutputV4` is now described, this is the same as the current implementation but just changing the struct names. 
+Sapling spend code is located at `zebra-chain/src/sapling/spend.rs`:
+
+```
+pub struct SpendV4 {
+    pub cv: commitment::ValueCommitment,
+    pub anchor: tree::Root,
+    pub nullifier: note::Nullifier,
+    pub rk: redjubjub::VerificationKeyBytes<SpendAuth>,
+    pub zkproof: Groth16Proof,
+    pub spend_auth_sig: redjubjub::Signature<SpendAuth>,
+}
+```
+
+The output code is located at `zebra-chain/src/sapling/output.rs`:
+
+```
+pub struct OutputV4 {
+    pub cv: commitment::ValueCommitment,
+    pub cm_u: jubjub::Fq,
+    pub ephemeral_key: keys::EphemeralPublicKey,
+    pub enc_ciphertext: note::EncryptedNote,
+    pub out_ciphertext: note::WrappedNoteKey,
+    pub zkproof: Groth16Proof,
+}
+```
+
+Now lets see how the v5 transaction is specified in the protocol, this is the second table of [Transaction Encoding and Consensus](https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus).
+
+We propose the following representation for transaction V5 in Zebra:
+
+```
+V5 {
+    lock_time: LockTime,
+    expiry_height: block::Height,
+    inputs: Vec<transparent::Input>,
+    outputs: Vec<transparent::Output>,
+    shielded_data: Option<SaplingV5ShieldedData>,
+    value_balance_sapling: Amount,
+    output_proofs_sapling: Vec<Groth16Proof>
+    anchor_sapling: tree::Root,
+    spend_zkproof_sapling: Vec<Groth16Proof>,
+    spend_auth_sigs_sapling: Vec<redjubjub::Signature<SpendAuth>>
+    orchard_data: Option<OrchardData>,
+    flags_orchard: u8,
+    value_balance_orchard: Amount,
+    anchor_orchard: tree::Root,
+}
+```
+
+`SaplingV5ShieldedData` is different from `SaplingV4ShieldedData` so a new type will be defined and implemented in `zebra-chain/src/transaction/shielded_data.rs`.
+Definition will look as follows:
+
+```
+pub struct SaplingV5ShieldedData {
+    pub first: Either<SpendV5, OutputV5>,
+    pub rest_spends: Vec<SpendV5>,
+    pub rest_outputs: Vec<OutputV5>,
+    pub binding_sig: Signature<Binding>,
+}
+```
+
+This leads to new sapling output and spend types.
+
+V5 sapling spend will be defined and implemented in `zebra-chain/src/sapling/spend.rs`(this is in the same file as `SpendV4`):
+```
+pub struct SpendV5 {
+    pub cv: commitment::ValueCommitment,
+    pub nullifier: note::Nullifier,
+    pub rk: redjubjub::VerificationKeyBytes<SpendAuth>,
+}
+```
+
+V5 sapling output will live in `zebra-chain/src/sapling/output.rs`(this is in the same file as `OutputV4`):
+
+```
+pub struct OutputV5 {
+    pub cv: commitment::ValueCommitment,
+    pub cm_u: jubjub::Fq,
+    pub ephemeral_key: keys::EphemeralPublicKey,
+    pub enc_ciphertext: note::EncryptedNote,
+    pub out_ciphertext: note::WrappedNoteKey,
+}
+```
+
+Finally, the new V5 structure will create a new `OrchardData` type. This new type will be defined in a separated file: `zebra-chain/src/transaction/orchard_data.rs` and it will look as follows:
+```
+pub struct OrchardData {
+    pub cv: commitment::ValueCommitment,
+    pub nullifier: ...,
+    pub rk: ...,
+    pub cmx: ...,
+    pub ephemeral_key: keys::EphemeralPublicKey,
+    pub enc_ciphertext: note::EncryptedNote,
+    pub out_ciphertext: note::WrappedNoteKey,
+}
+```
+
+## Test Plan
+[test-plan]: #test-plan
+
+- All renamed, modified and new types should serialize and deserialize. 
+- The full V4 and V5 transactions should serialize and deserialize.
+- Prop test strategies for v4 and v5 will be updated and created.
+
+
