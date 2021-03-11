@@ -30,7 +30,7 @@ pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 /// This timeout should remain small, because it helps stop slow peers getting
 /// into the peer set. This is particularly important for network-constrained
 /// nodes, and on testnet.
-pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(4);
+pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(6);
 
 /// We expect to receive a message from a live peer at least once in this time duration.
 ///
