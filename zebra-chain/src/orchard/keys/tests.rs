@@ -12,10 +12,10 @@ impl Arbitrary for TransmissionKey {
         (any::<SpendingKey>())
             .prop_map(|spending_key| {
                 let spend_authorizing_key = SpendAuthorizingKey::from(spending_key);
-                let proof_authorizing_key = ProofAuthorizingKey::from(spending_key);
 
-                let authorizing_key = AuthorizingKey::from(spend_authorizing_key);
-                let nullifier_deriving_key = NullifierDerivingKey::from(proof_authorizing_key);
+                let spend_validating_key = SpendValidatingKey::from(spending_key);
+                let nullifier_deriving_key = NullifierDerivingKey::from(spending_key);
+                let ivk_commit_randomness = IvkCommitRandomness::from();
 
                 let incoming_viewing_key =
                     IncomingViewingKey::from((authorizing_key, nullifier_deriving_key));

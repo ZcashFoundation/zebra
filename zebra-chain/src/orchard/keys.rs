@@ -410,7 +410,9 @@ impl From<SpendingKey> for IvkCommitRandomness {
     ///
     /// https://zips.z.cash/protocol/protocol.pdf#orchardkeycomponents
     fn from(sk: SpendingKey) -> Self {
-        Self(pallas::Scalar::from_bytes_wide(prf_expand(sk.into(), &[8])))
+        let scalar = pallas::Scalar::from_bytes_wide(&prf_expand(sk.into(), &[&[8]]));
+
+        Self(scalar)
     }
 }
 
