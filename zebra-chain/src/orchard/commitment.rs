@@ -95,42 +95,39 @@ impl NoteCommitment {
         diversifier: Diversifier,
         transmission_key: TransmissionKey,
         value: Amount<NonNegative>,
-        rho: pallas::Base,
-        psi: pallas::Base,
     ) -> Option<(CommitmentRandomness, Self)>
     where
         T: RngCore + CryptoRng,
     {
-        unimplemented!();
+        // s as in the argument name for WindowedPedersenCommit_r(s)
+        let mut s: BitVec<Lsb0, u8> = BitVec::new();
 
-        // // s as in the argument name for WindowedPedersenCommit_r(s)
-        // let mut s: BitVec<Lsb0, u8> = BitVec::new();
+        // Prefix
+        s.append(&mut bitvec![1; 6]);
 
-        // // Prefix
-        // s.append(&mut bitvec![1; 6]);
+        // The `TryFrom<Diversifier>` impls for the `pallas::*Point`s handles
+        // calling `DiversifyHash` implicitly.
+        let g_d_bytes: [u8; 32];
+        if let Ok(g_d) = pallas::Affine::try_from(diversifier) {
+            g_d_bytes = g_d.to_bytes();
+        } else {
+            return None;
+        }
 
-        // // The `TryFrom<Diversifier>` impls for the `jubjub::*Point`s handles
-        // // calling `DiversifyHash` implicitly.
-        // let g_d_bytes: [u8; 32];
-        // if let Ok(g_d) = pallas::Affine::try_from(diversifier) {
-        //     g_d_bytes = g_d.to_bytes();
-        // } else {
-        //     return None;
-        // }
+        let pk_d_bytes = <[u8; 32]>::from(transmission_key);
+        let v_bytes = value.to_bytes();
 
-        // let pk_d_bytes = <[u8; 32]>::from(transmission_key);
-        // let v_bytes = value.to_bytes();
+        // g*d || pk*d || I2LEBSP64(v)
+        s.append(&mut BitVec::<Lsb0, u8>::from_slice(&g_d_bytes[..]));
+        s.append(&mut BitVec::<Lsb0, u8>::from_slice(&pk_d_bytes[..]));
+        s.append(&mut BitVec::<Lsb0, u8>::from_slice(&v_bytes[..]));
 
-        // s.append(&mut BitVec::<Lsb0, u8>::from_slice(&g_d_bytes[..]));
-        // s.append(&mut BitVec::<Lsb0, u8>::from_slice(&pk_d_bytes[..]));
-        // s.append(&mut BitVec::<Lsb0, u8>::from_slice(&v_bytes[..]));
+        let rcm = CommitmentRandomness(generate_trapdoor(csprng));
 
-        // let rcm = CommitmentRandomness(generate_trapdoor(csprng));
-
-        // Some((
-        //     rcm,
-        //     NoteCommitment::from(windowed_pedersen_commitment(rcm.0, &s)),
-        // ))
+        Some((
+            rcm,
+            NoteCommitment::from(sinsemilla_commit(rcm.0, "z.cash:Orchard-NoteCommit", &s)),
+        ))
     }
 }
 

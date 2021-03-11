@@ -15,7 +15,9 @@ use std::{
     str::FromStr,
 };
 
+use aes::Aes256;
 use bech32::{self, FromBase32, ToBase32, Variant};
+use fpe::ff1::{BinaryNumeralString, FF1};
 use halo2::pasta::pallas;
 use rand_core::{CryptoRng, RngCore};
 
@@ -28,6 +30,26 @@ use crate::{
 };
 
 use super::sinsemilla::*;
+
+/// PRP^d_K(d) := FF1-AES256_K("", d)
+///
+/// "Let FF1-AES256_K(tweak, x) be the FF1 format-preserving encryption
+/// algorithm using AES with a 256-bit key K, and parameters radix = 2, minlen =
+/// 88, maxlen = 88. It will be used only with the empty string "" as the
+/// tweak. x is a sequence of 88bits, as is the output."
+///
+/// https://zips.z.cash/protocol/nu5.pdf#concreteprps
+#[allow(non_snake_case)]
+fn prp_d(K: [u8; 32], d: [u8; 11]) -> [u8; 11] {
+    let radix = 2;
+    let tweak = "";
+
+    let ff = FF1::<Aes256>::new(&K, radix).expect("valid radix");
+
+    let enc = ff
+        .encrypt(tweak.into(), &BinaryNumeralString::from_bytes_le(&d))
+        .unwrap();
+}
 
 /// Invokes Blake2b-512 as PRF^expand with parameter t.
 ///
@@ -256,15 +278,13 @@ impl From<OutgoingViewingKey> for [u8; 32] {
 impl From<FullViewingKey> for OutgoingViewingKey {
     /// Derive an `OutgoingViewingKey` from a `FullViewingKey`.
     ///
-    /// let 𝐾 = I2LEBSPℓsk(rivk)
-    /// let 𝐵 = reprP(ak) || I2LEBSP256(nk)
-    /// let 𝑅 = PRFexpand
-    /// 𝐾 ([0x82] || LEBS2OSP512(B))
-    /// let dk be the rst ℓdk/8 bytes of 𝑅 and let ovk be the remaining ℓovk/8 bytes of 𝑅.
-    ///
-    /// https://zips.z.cash/protocol/protocol.pdf#orchardkeycomponents
-    fn from(spending_key: SpendingKey) -> OutgoingViewingKey {
-        unimplemented!()
+    /// [4.2.3]: https://zips.z.cash/protocol/protocol.pdf#orchardkeycomponents
+    #[allow(non_snake_case)]
+    fn from(fvk: FullViewingKey) -> OutgoingViewingKey {
+        let R = fvk.to_R();
+
+        // let ovk be the remaining [32] bytes of R [which is 64 bytes]
+        Self(R[32..])
     }
 }
 
@@ -381,6 +401,21 @@ impl fmt::Debug for IvkCommitRandomness {
     }
 }
 
+impl From<SpendingKey> for IvkCommitRandomness {
+    /// rivk = ToScalar^Orchard(PRF^expand_sk ([8]))
+    ///
+    /// https://zips.z.cash/protocol/protocol.pdf#orchardkeycomponents
+    fn from(sk: SpendingKey) -> Self {
+        Self(pallas::Scalar::from_bytes_wide(prf_expand(sk, [8])))
+    }
+}
+
+impl From<IvkCommitRandomness> for [u8; 32] {
+    fn from(rivk: IvkCommitRandomness) -> Self {
+        rivk.0.into()
+    }
+}
+
 /// Magic human-readable strings used to identify what networks Orchard incoming
 /// viewing keys are associated with when encoded/decoded with bech32.
 ///
@@ -483,161 +518,6 @@ impl PartialEq<[u8; 32]> for IncomingViewingKey {
     }
 }
 
-/// A _Diversifier_, as described in [protocol specification §4.2.3][ps].
-///
-/// Combined with an _IncomingViewingKey_, produces a _diversified
-/// payment address_.
-///
-/// [ps]: https://zips.z.cash/protocol/protocol.pdf#orchardkeycomponents
-#[derive(Copy, Clone, Eq, PartialEq)]
-#[cfg_attr(
-    any(test, feature = "proptest-impl"),
-    derive(proptest_derive::Arbitrary)
-)]
-pub struct Diversifier(pub [u8; 11]);
-
-impl fmt::Debug for Diversifier {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple("Diversifier")
-            .field(&hex::encode(&self.0))
-            .finish()
-    }
-}
-
-impl From<[u8; 11]> for Diversifier {
-    fn from(bytes: [u8; 11]) -> Self {
-        Self(bytes)
-    }
-}
-
-impl From<Diversifier> for [u8; 11] {
-    fn from(d: Diversifier) -> [u8; 11] {
-        d.0
-    }
-}
-
-impl TryFrom<Diversifier> for pallas::Affine {
-    type Error = &'static str;
-
-    /// Get a diversified base point from a diversifier value in affine
-    /// representation.
-    fn try_from(d: Diversifier) -> Result<Self, Self::Error> {
-        if let Ok(projective_point) = pallas::Point::try_from(d) {
-            Ok(projective_point.into())
-        } else {
-            Err("Invalid Diversifier -> pallas::Affine")
-        }
-    }
-}
-
-impl From<Diversifier> for pallas::Point {
-    /// g_d := DiversifyHash^Orchard(d)
-    ///
-    /// [orchardkeycomponents]: https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents
-    fn from(d: Diversifier) -> Self {
-        diversify_hash(d.0)
-    }
-}
-
-impl From<SpendingKey> for Diversifier {
-    /// Derives a [_default diversifier_][4.2.3] from a `SpendingKey`.
-    ///
-    /// 'For each spending key, there is also a default diversified
-    /// payment address with a “random-looking” diversifier. This
-    /// allows an implementation that does not expose diversified
-    /// addresses as a user-visible feature, to use a default address
-    /// that cannot be distinguished (without knowledge of the
-    /// spending key) from one with a random diversifier...'
-    ///
-    /// Derived as specied in [ZIP-32].
-    ///
-    /// [4.2.3]: https://zips.z.cash/protocol/protocol.pdf#orchardkeycomponents
-    /// [ZIP-32]: https://zips.z.cash/zip-0032#orchard-diversifier-derivation
-    fn from(sk: SpendingKey) -> Diversifier {
-        // Needs FF1-AES permutation
-        unimplemented!()
-    }
-}
-
-impl PartialEq<[u8; 11]> for Diversifier {
-    fn eq(&self, other: &[u8; 11]) -> bool {
-        self.0 == *other
-    }
-}
-
-impl Diversifier {
-    /// Generate a new `Diversifier`.
-    ///
-    /// https://zips.z.cash/protocol/protocol.pdf#orchardkeycomponents
-    pub fn new<T>(csprng: &mut T) -> Self
-    where
-        T: RngCore + CryptoRng,
-    {
-        let mut bytes = [0u8; 11];
-        csprng.fill_bytes(&mut bytes);
-
-        Self::from(bytes)
-    }
-}
-
-/// A (diversified) transmission Key
-///
-/// In Orchard, secrets need to be transmitted to a recipient of funds in order
-/// for them to be later spent. To transmit these secrets securely to a
-/// recipient without requiring an out-of-band communication channel, the
-/// transmission key is used to encrypt them.
-///
-/// Derived by multiplying a Pallas point [derived][ps] from a `Diversifier` by
-/// the `IncomingViewingKey` scalar.
-///
-/// [ps]: https://zips.z.cash/protocol/protocol.pdf#concretediversifyhash
-#[derive(Copy, Clone, PartialEq)]
-pub struct TransmissionKey(pub pallas::Affine);
-
-impl fmt::Debug for TransmissionKey {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("TransmissionKey")
-            .field("x", &hex::encode(self.0.get_x().to_bytes()))
-            .field("y", &hex::encode(self.0.get_y().to_bytes()))
-            .finish()
-    }
-}
-
-impl Eq for TransmissionKey {}
-
-impl From<[u8; 32]> for TransmissionKey {
-    /// Attempts to interpret a byte representation of an affine point, failing
-    /// if the element is not on the curve or non-canonical.
-    ///
-    /// https://github.com/zkcrypto/jubjub/blob/master/src/lib.rs#L411
-    fn from(bytes: [u8; 32]) -> Self {
-        Self(pallas::Affine::from_bytes(bytes).unwrap())
-    }
-}
-
-impl From<TransmissionKey> for [u8; 32] {
-    fn from(pk_d: TransmissionKey) -> [u8; 32] {
-        pk_d.0.to_bytes()
-    }
-}
-
-impl From<(IncomingViewingKey, Diversifier)> for TransmissionKey {
-    /// This includes _KA^Orchard.DerivePublic(ivk, G_d)_, which is just a
-    /// scalar mult _\[ivk\]G_d_.
-    ///
-    /// https://zips.z.cash/protocol/protocol.pdf#orchardkeycomponents
-    /// https://zips.z.cash/protocol/protocol.pdf#concreteorchardkeyagreement
-    fn from((ivk, d): (IncomingViewingKey, Diversifier)) -> Self {
-        Self(pallas::Affine::from(ivk.scalar * pallas::Point::from(d)))
-    }
-}
-
-impl PartialEq<[u8; 32]> for TransmissionKey {
-    fn eq(&self, other: &[u8; 32]) -> bool {
-        <[u8; 32]>::from(*self) == *other
-    }
-}
-
 /// Magic human-readable strings used to identify what networks Orchard full
 /// viewing keys are associated with when encoded/decoded with bech32.
 ///
@@ -722,8 +602,188 @@ impl FromStr for FullViewingKey {
     }
 }
 
+impl FullViewingKey {
+    /// [4.2.3]: https://zips.z.cash/protocol/protocol.pdf#orchardkeycomponents
+    #[allow(non_snake_case)]
+    pub fn to_R(&self) -> [u8; 32] {
+        // let K = I2LEBSP_l_sk(rivk)
+        let K: [u8; 32] = self.ivk_commit_randomness.into();
+
+        // let R = PRF^expand_K( [0x82] || I2LEOSP256(ak) || I2LEOSP256(nk) )
+        prf_expand(K, ([0x82], self.ak.into(), self.nk.into()).concat())
+    }
+}
+
 #[derive(Copy, Clone, PartialEq)]
 pub struct DiversifierKey([u8; 32]);
+
+impl From<FullViewingKey> for DiversifierKey {
+    /// Derives a _diversifier key_ from a `FullViewingKey`.
+    ///
+    /// 'For each spending key, there is also a default diversified
+    /// payment address with a “random-looking” diversifier. This
+    /// allows an implementation that does not expose diversified
+    /// addresses as a user-visible feature, to use a default address
+    /// that cannot be distinguished (without knowledge of the
+    /// spending key) from one with a random diversifier...'
+    ///
+    /// Derived as specied in [ZIP-32].
+    ///
+    /// [4.2.3]: https://zips.z.cash/protocol/protocol.pdf#orchardkeycomponents
+    /// [ZIP-32]: https://zips.z.cash/zip-0032#orchard-diversifier-derivation
+    #[allow(non_snake_case)]
+    fn from(fvk: FullViewingKey) -> DiversifierKey {
+        let R = fvk.to_R();
+
+        // let dk be the first [32] bytes of R
+        Self(R[..32])
+    }
+}
+
+/// A _Diversifier_, as described in [protocol specification §4.2.3][ps].
+///
+/// Combined with an _IncomingViewingKey_, produces a _diversified
+/// payment address_.
+///
+/// [ps]: https://zips.z.cash/protocol/protocol.pdf#orchardkeycomponents
+#[derive(Copy, Clone, Eq, PartialEq)]
+#[cfg_attr(
+    any(test, feature = "proptest-impl"),
+    derive(proptest_derive::Arbitrary)
+)]
+pub struct Diversifier(pub [u8; 11]);
+
+impl fmt::Debug for Diversifier {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple("Diversifier")
+            .field(&hex::encode(&self.0))
+            .finish()
+    }
+}
+
+impl From<[u8; 11]> for Diversifier {
+    fn from(bytes: [u8; 11]) -> Self {
+        Self(bytes)
+    }
+}
+
+impl From<DiversifierKey> for Diversifier {
+    /// Generates the _default diversifier_, where the index into the
+    /// `DiversifierKey` is 0.
+    ///
+    /// [orchardkeycomponents]: https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents
+    fn from(dk: DiversifierKey) -> Self {
+        Self(prp_d(dk.into(), [0u8; 11]))
+    }
+}
+
+impl From<Diversifier> for [u8; 11] {
+    fn from(d: Diversifier) -> [u8; 11] {
+        d.0
+    }
+}
+
+impl From<Diversifier> for pallas::Point {
+    /// g_d := DiversifyHash^Orchard(d)
+    ///
+    /// [orchardkeycomponents]: https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents
+    fn from(d: Diversifier) -> Self {
+        diversify_hash(d.0)
+    }
+}
+
+impl PartialEq<[u8; 11]> for Diversifier {
+    fn eq(&self, other: &[u8; 11]) -> bool {
+        self.0 == *other
+    }
+}
+
+impl TryFrom<Diversifier> for pallas::Affine {
+    type Error = &'static str;
+
+    /// Get a diversified base point from a diversifier value in affine
+    /// representation.
+    fn try_from(d: Diversifier) -> Result<Self, Self::Error> {
+        if let Ok(projective_point) = pallas::Point::try_from(d) {
+            Ok(projective_point.into())
+        } else {
+            Err("Invalid Diversifier -> pallas::Affine")
+        }
+    }
+}
+
+impl Diversifier {
+    /// Generate a new `Diversifier`.
+    ///
+    /// https://zips.z.cash/protocol/protocol.pdf#orchardkeycomponents
+    pub fn new<T>(csprng: &mut T) -> Self
+    where
+        T: RngCore + CryptoRng,
+    {
+        let mut bytes = [0u8; 11];
+        csprng.fill_bytes(&mut bytes);
+
+        Self::from(bytes)
+    }
+}
+
+/// A (diversified) transmission Key
+///
+/// In Orchard, secrets need to be transmitted to a recipient of funds in order
+/// for them to be later spent. To transmit these secrets securely to a
+/// recipient without requiring an out-of-band communication channel, the
+/// transmission key is used to encrypt them.
+///
+/// Derived by multiplying a Pallas point [derived][ps] from a `Diversifier` by
+/// the `IncomingViewingKey` scalar.
+///
+/// [ps]: https://zips.z.cash/protocol/protocol.pdf#concretediversifyhash
+#[derive(Copy, Clone, PartialEq)]
+pub struct TransmissionKey(pub pallas::Affine);
+
+impl fmt::Debug for TransmissionKey {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("TransmissionKey")
+            .field("x", &hex::encode(self.0.get_x().to_bytes()))
+            .field("y", &hex::encode(self.0.get_y().to_bytes()))
+            .finish()
+    }
+}
+
+impl Eq for TransmissionKey {}
+
+impl From<[u8; 32]> for TransmissionKey {
+    /// Attempts to interpret a byte representation of an affine point, failing
+    /// if the element is not on the curve or non-canonical.
+    ///
+    /// https://github.com/zkcrypto/jubjub/blob/master/src/lib.rs#L411
+    fn from(bytes: [u8; 32]) -> Self {
+        Self(pallas::Affine::from_bytes(bytes).unwrap())
+    }
+}
+
+impl From<TransmissionKey> for [u8; 32] {
+    fn from(pk_d: TransmissionKey) -> [u8; 32] {
+        pk_d.0.to_bytes()
+    }
+}
+
+impl From<(IncomingViewingKey, Diversifier)> for TransmissionKey {
+    /// This includes _KA^Orchard.DerivePublic(ivk, G_d)_, which is just a
+    /// scalar mult _\[ivk\]G_d_.
+    ///
+    /// https://zips.z.cash/protocol/protocol.pdf#orchardkeycomponents
+    /// https://zips.z.cash/protocol/protocol.pdf#concreteorchardkeyagreement
+    fn from((ivk, d): (IncomingViewingKey, Diversifier)) -> Self {
+        Self(pallas::Affine::from(pallas::Point::from(d) * ivk.scalar))
+    }
+}
+
+impl PartialEq<[u8; 32]> for TransmissionKey {
+    fn eq(&self, other: &[u8; 32]) -> bool {
+        <[u8; 32]>::from(*self) == *other
+    }
+}
 
 /// An ephemeral public key for Orchard key agreement.
 ///

@@ -11,9 +11,10 @@ mod constants;
 // mod hash;
 // mod scalar_mul;
 // mod signature;
-// mod signing_key;
+mod signing_key;
 mod verification_key;
 
+pub use signing_key::SigningKey;
 pub use verification_key::{VerificationKey, VerificationKeyBytes};
 
 /// Abstracts over different RedPallas parameter choices, [`Binding`]
