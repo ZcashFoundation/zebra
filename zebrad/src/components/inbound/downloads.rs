@@ -23,10 +23,27 @@ type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 /// The maximum number of concurrent inbound download and verify tasks.
 ///
-/// Set to one and a half checkpoint intervals, so that the inbound queue can
-/// hold a complete checkpoint interval, if needed. We expect the syncer to
-/// download and verify checkpoints, so this bound might never be reached.
-const MAX_INBOUND_CONCURRENCY: usize = zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP * 3 / 2;
+/// We expect the syncer to download and verify checkpoints, so this bound
+/// can be small.
+///
+/// ## Security
+///
+/// We use a small concurrency limit, to prevent memory denial-of-service
+/// attacks.
+///
+/// The maximum block size is 2 million bytes. A deserialized malicious
+/// block with ~225_000 transparent outputs can take up 9MB of RAM. As of
+/// February 2021, a growing `Vec` can allocate up to 2x its current length,
+/// leading to an overall memory usage of 18MB per malicious block. (See
+/// #1880 for more details.)
+///
+/// Malicious blocks will eventually timeout or fail contextual validation.
+/// Once validation fails, the block is dropped, and its memory is deallocated.
+///
+/// Since Zebra keeps an `inv` index, inbound downloads for malicious blocks
+/// will be directed to the malicious node that originally gossiped the hash.
+/// Therefore, this attack can be carried out by a single malicious node.
+const MAX_INBOUND_CONCURRENCY: usize = 10;
 
 /// The action taken in response to a peer's gossipped block hash.
 pub enum DownloadAction {
