@@ -33,7 +33,7 @@ use zebra_state as zs;
 use crate::{error::*, transaction as tx};
 use crate::{script, BoxError};
 
-mod check;
+pub mod check;
 mod subsidy;
 #[cfg(test)]
 mod tests;

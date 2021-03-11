@@ -14,7 +14,7 @@
 //! block for the configured network.
 
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::BTreeMap,
     ops::{Bound, Bound::*},
     pin::Pin,
     sync::Arc,
@@ -30,10 +30,11 @@ use tracing::instrument;
 use zebra_chain::{
     block::{self, Block},
     parameters::{Network, GENESIS_PREVIOUS_BLOCK_HASH},
+    work::equihash,
 };
 use zebra_state as zs;
 
-use crate::BoxError;
+use crate::{block::VerifyBlockError, error::BlockError, BoxError};
 
 pub(crate) mod list;
 mod types;
@@ -453,23 +454,8 @@ where
             .iter()
             .map(|tx| tx.hash())
             .collect::<Vec<_>>();
-        let merkle_root = transaction_hashes.iter().cloned().collect();
 
-        // Check that the Merkle root is valid.
-        if block.header.merkle_root != merkle_root {
-            return Err(VerifyCheckpointError::BadMerkleRoot {
-                expected: block.header.merkle_root,
-                actual: merkle_root,
-            });
-        }
-
-        // To prevent malleability (CVE-2012-2459), we also need to check
-        // whether the transaction hashes are unique. Collecting into a HashSet
-        // deduplicates, so this checks that there are no duplicate transaction
-        // hashes, preventing Merkle root malleability.
-        if transaction_hashes.len() != transaction_hashes.iter().collect::<HashSet<_>>().len() {
-            return Err(VerifyCheckpointError::DuplicateTransaction);
-        }
+        crate::block::check::merkle_root_validity(&block, &transaction_hashes)?;
 
         Ok(block_height)
     }
@@ -831,6 +817,8 @@ pub enum VerifyCheckpointError {
     CommitFinalized(BoxError),
     #[error(transparent)]
     CheckpointList(BoxError),
+    #[error(transparent)]
+    VerifyBlock(BoxError),
     #[error("too many queued blocks at this height")]
     QueuedLimit,
     #[error("the block hash does not match the chained checkpoint hash, expected {expected:?} found {found:?}")]
@@ -840,6 +828,18 @@ pub enum VerifyCheckpointError {
     },
     #[error("zebra is shutting down")]
     ShuttingDown,
+}
+
+impl From<VerifyBlockError> for VerifyCheckpointError {
+    fn from(err: VerifyBlockError) -> VerifyCheckpointError {
+        VerifyCheckpointError::VerifyBlock(err.into())
+    }
+}
+
+impl From<BlockError> for VerifyCheckpointError {
+    fn from(err: BlockError) -> VerifyCheckpointError {
+        VerifyCheckpointError::VerifyBlock(err.into())
+    }
 }
 
 /// The CheckpointVerifier service implementation.
