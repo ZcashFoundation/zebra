@@ -108,6 +108,9 @@ where
     /// The checkpoint list for this verifier.
     checkpoint_list: CheckpointList,
 
+    /// The network rules used by this verifier.
+    network: Network,
+
     /// The hash of the initial tip, if any.
     initial_tip_hash: Option<block::Hash>,
 
@@ -164,11 +167,11 @@ where
             ?initial_tip,
             "initialising CheckpointVerifier"
         );
-        Self::from_checkpoint_list(checkpoint_list, initial_tip, state_service)
+        Self::from_checkpoint_list(checkpoint_list, network, initial_tip, state_service)
     }
 
-    /// Return a checkpoint verification service using `list`, `initial_tip`,
-    /// and `state_service`.
+    /// Return a checkpoint verification service using `list`, `network`,
+    /// `initial_tip`, and `state_service`.
     ///
     /// Assumes that the provided genesis checkpoint is correct.
     ///
@@ -181,18 +184,20 @@ where
     #[allow(dead_code)]
     pub(crate) fn from_list(
         list: impl IntoIterator<Item = (block::Height, block::Hash)>,
+        network: Network,
         initial_tip: Option<(block::Height, block::Hash)>,
         state_service: S,
     ) -> Result<Self, VerifyCheckpointError> {
         Ok(Self::from_checkpoint_list(
             CheckpointList::from_list(list).map_err(VerifyCheckpointError::CheckpointList)?,
+            network,
             initial_tip,
             state_service,
         ))
     }
 
     /// Return a checkpoint verification service using `checkpoint_list`,
-    /// `initial_tip`, and `state_service`.
+    /// `network`, `initial_tip`, and `state_service`.
     ///
     /// Assumes that the provided genesis checkpoint is correct.
     ///
@@ -200,6 +205,7 @@ where
     /// hard-coded checkpoint lists. See that function for more details.
     pub(crate) fn from_checkpoint_list(
         checkpoint_list: CheckpointList,
+        network: Network,
         initial_tip: Option<(block::Height, block::Hash)>,
         state_service: S,
     ) -> Self {
@@ -220,6 +226,7 @@ where
         };
         CheckpointVerifier {
             checkpoint_list,
+            network,
             initial_tip_hash,
             state_service,
             queued: BTreeMap::new(),

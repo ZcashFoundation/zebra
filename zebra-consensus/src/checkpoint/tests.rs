@@ -49,7 +49,7 @@ async fn single_item_checkpoint_list() -> Result<(), Report> {
         .buffer(1)
         .service(zebra_state::init(zebra_state::Config::ephemeral(), Mainnet));
     let mut checkpoint_verifier =
-        CheckpointVerifier::from_list(genesis_checkpoint_list, None, state_service)
+        CheckpointVerifier::from_list(genesis_checkpoint_list, Mainnet, None, state_service)
             .map_err(|e| eyre!(e))?;
 
     assert_eq!(
@@ -133,7 +133,7 @@ async fn multi_item_checkpoint_list() -> Result<(), Report> {
         .buffer(1)
         .service(zebra_state::init(zebra_state::Config::ephemeral(), Mainnet));
     let mut checkpoint_verifier =
-        CheckpointVerifier::from_list(checkpoint_list, None, state_service)
+        CheckpointVerifier::from_list(checkpoint_list, Mainnet, None, state_service)
             .map_err(|e| eyre!(e))?;
 
     assert_eq!(
@@ -280,9 +280,13 @@ async fn continuous_blockchain(
         let state_service = ServiceBuilder::new()
             .buffer(1)
             .service(zebra_state::init(zebra_state::Config::ephemeral(), Mainnet));
-        let mut checkpoint_verifier =
-            CheckpointVerifier::from_list(checkpoint_list, initial_tip, state_service.clone())
-                .map_err(|e| eyre!(e))?;
+        let mut checkpoint_verifier = CheckpointVerifier::from_list(
+            checkpoint_list,
+            network,
+            initial_tip,
+            state_service.clone(),
+        )
+        .map_err(|e| eyre!(e))?;
 
         // Setup checks
         if restart_height.is_some() {
@@ -457,7 +461,7 @@ async fn block_higher_than_max_checkpoint_fail() -> Result<(), Report> {
         .buffer(1)
         .service(zebra_state::init(zebra_state::Config::ephemeral(), Mainnet));
     let mut checkpoint_verifier =
-        CheckpointVerifier::from_list(genesis_checkpoint_list, None, state_service)
+        CheckpointVerifier::from_list(genesis_checkpoint_list, Mainnet, None, state_service)
             .map_err(|e| eyre!(e))?;
 
     assert_eq!(
@@ -536,7 +540,7 @@ async fn wrong_checkpoint_hash_fail() -> Result<(), Report> {
         .buffer(1)
         .service(zebra_state::init(zebra_state::Config::ephemeral(), Mainnet));
     let mut checkpoint_verifier =
-        CheckpointVerifier::from_list(genesis_checkpoint_list, None, state_service)
+        CheckpointVerifier::from_list(genesis_checkpoint_list, Mainnet, None, state_service)
             .map_err(|e| eyre!(e))?;
 
     assert_eq!(
@@ -720,7 +724,7 @@ async fn checkpoint_drop_cancel() -> Result<(), Report> {
         .buffer(1)
         .service(zebra_state::init(zebra_state::Config::ephemeral(), Mainnet));
     let mut checkpoint_verifier =
-        CheckpointVerifier::from_list(checkpoint_list, None, state_service)
+        CheckpointVerifier::from_list(checkpoint_list, Mainnet, None, state_service)
             .map_err(|e| eyre!(e))?;
 
     assert_eq!(
