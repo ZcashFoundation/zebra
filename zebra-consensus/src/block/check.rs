@@ -183,10 +183,22 @@ pub fn merkle_root_validity(
 
     // Bitcoin's transaction Merkle trees are malleable, allowing blocks with
     // duplicate transactions to have the same Merkle root as blocks without
-    // duplicate transactions. Duplicate transactions should cause a block to be
+    // duplicate transactions.
+    //
+    // Collecting into a HashSet deduplicates, so this checks that there are no
+    // duplicate transaction hashes, preventing Merkle root malleability.
+    //
+    // ## Full Block Validation
+    //
+    // Duplicate transactions should cause a block to be
     // rejected, as duplicate transactions imply that the block contains a
     // double-spend.  As a defense-in-depth, however, we also check that there
-    // are no duplicate transaction hashes, by collecting into a HashSet.
+    // are no duplicate transaction hashes.
+    //
+    // ## Checkpoint Validation
+    //
+    // To prevent malleability (CVE-2012-2459), we also need to check
+    // whether the transaction hashes are unique.
     use std::collections::HashSet;
     if transaction_hashes.len() != transaction_hashes.iter().collect::<HashSet<_>>().len() {
         return Err(BlockError::DuplicateTransaction);
