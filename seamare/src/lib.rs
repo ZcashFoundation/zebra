@@ -9,6 +9,8 @@
 // Note: This crate is highly copy from diem x-lint repo. (https://github.com/diem/diem/tree/master/devtools/x-lint)
 
 pub mod content;
+pub mod core_context;
+mod error;
 pub mod file_path;
 pub mod package;
 pub mod project;
@@ -187,10 +189,11 @@ impl<'l> fmt::Display for LintKind<'l> {
 pub mod prelude {
     pub use super::{
         content::{ContentContext, ContentLinter},
+        core_context::CoreContext,
+        error::{Result, SeamareError},
         file_path::{FilePathContext, FilePathLinter},
-        package::{PackageContext, PackageLinter},
+        package::{PackageContext, PackageLinter, WorkspaceStatus},
         project::{ProjectContext, ProjectLinter},
         LintFormatter, LintKind, LintLevel, LintMessage, LintSource, Linter, RunStatus, SkipReason,
     };
-    pub use x_core::{Result, SystemError};
 }

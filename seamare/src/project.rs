@@ -3,9 +3,7 @@
 
 use crate::{prelude::*, LintContext};
 use guppy::graph::PackageGraph;
-use hakari::Hakari;
 use std::path::{Path, PathBuf};
-use x_core::{WorkspaceSubset, XCoreContext};
 
 /// Represents a linter that checks some property for the overall project.
 ///
@@ -25,16 +23,16 @@ pub trait ProjectLinter: Linter {
 /// Overall linter context for a project.
 #[derive(Debug)]
 pub struct ProjectContext<'l> {
-    core: &'l XCoreContext,
+    core: &'l CoreContext,
 }
 
 impl<'l> ProjectContext<'l> {
-    pub fn new(core: &'l XCoreContext) -> Self {
+    pub fn new(core: &'l CoreContext) -> Self {
         Self { core }
     }
 
     /// Returns the core context.
-    pub fn core(&self) -> &'l XCoreContext {
+    pub fn core(&self) -> &'l CoreContext {
         self.core
     }
 
@@ -51,19 +49,6 @@ impl<'l> ProjectContext<'l> {
     /// Returns the absolute path from the project root.
     pub fn full_path(&self, path: impl AsRef<Path>) -> PathBuf {
         self.core.project_root().join(path.as_ref())
-    }
-
-    /// Returns information about the default workspace members.
-    ///
-    /// This includes all packages included by default in the default workspace members, but not
-    /// those that Cargo would ignore.
-    pub fn default_members(&self) -> Result<&WorkspaceSubset> {
-        Ok(self.core.subsets()?.default_members())
-    }
-
-    /// Returns Hakari information.
-    pub fn hakari(&self) -> Result<Hakari<'l, 'static>> {
-        Ok(self.core.hakari_builder()?.compute())
     }
 }
 

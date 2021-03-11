@@ -4,7 +4,17 @@
 use crate::{prelude::*, LintContext};
 use camino::Utf8Path;
 use guppy::graph::{PackageGraph, PackageMetadata};
-use x_core::WorkspaceStatus;
+
+/// The status of a particular package ID in a `WorkspaceSubset`.
+#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
+pub enum WorkspaceStatus {
+    /// This package ID is a root member of the workspace subset.
+    RootMember,
+    /// This package ID is a dependency of the workspace subset, but not a root member.
+    Dependency,
+    /// This package ID is not a dependency of the workspace subset.
+    Absent,
+}
 
 /// Represents a linter that runs once per package.
 pub trait PackageLinter: Linter {
@@ -24,7 +34,6 @@ pub struct PackageContext<'l> {
     package_graph: &'l PackageGraph,
     workspace_path: &'l Utf8Path,
     metadata: PackageMetadata<'l>,
-    is_default_member: bool,
 }
 
 impl<'l> PackageContext<'l> {
@@ -34,13 +43,11 @@ impl<'l> PackageContext<'l> {
         workspace_path: &'l Utf8Path,
         metadata: PackageMetadata<'l>,
     ) -> Result<Self> {
-        let default_members = project_ctx.default_members()?;
         Ok(Self {
             project_ctx,
             package_graph,
             workspace_path,
             metadata,
-            is_default_member: default_members.status_of(metadata.id()) != WorkspaceStatus::Absent,
         })
     }
 
@@ -62,11 +69,6 @@ impl<'l> PackageContext<'l> {
     /// Returns the metadata for this package.
     pub fn metadata(&self) -> &PackageMetadata<'l> {
         &self.metadata
-    }
-
-    /// Returns true if this is a default member of this workspace.
-    pub fn is_default_member(&self) -> bool {
-        self.is_default_member
     }
 }
 
