@@ -77,7 +77,7 @@ impl ZcashSerialize for Transaction {
         // we start parsing mempool transactions, or generating our own
         // transactions (see #483).
         //
-        // Since we checkpoint on Sapling activation, we won't ever need
+        // Since we checkpoint on Canopy activation, we won't ever need
         // to check the smaller pre-Sapling transaction size limit.
         match self {
             Transaction::V1 {

@@ -113,7 +113,7 @@ This release also implements some other Zcash consensus rules, to check that
 Zebra's [validation architecture](#architecture) supports future work on a
 full validating node:
 - block and transaction structure
-- checkpoint-based verification up to Sapling
+- checkpoint-based verification up to Canopy
 - transaction validation (incomplete)
 - transaction cryptography (incomplete)
 - transaction scripts (incomplete)
