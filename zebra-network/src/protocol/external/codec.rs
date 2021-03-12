@@ -566,8 +566,8 @@ impl Codec {
         Ok(Message::NotFound(Vec::zcash_deserialize(reader)?))
     }
 
-    fn read_tx<R: Read>(&self, rdr: R) -> Result<Message, Error> {
-        Ok(Message::Tx(Transaction::zcash_deserialize(rdr)?.into()))
+    fn read_tx<R: Read>(&self, reader: R) -> Result<Message, Error> {
+        Ok(Message::Tx(Transaction::zcash_deserialize(reader)?.into()))
     }
 
     fn read_mempool<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
