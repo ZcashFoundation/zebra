@@ -2846,7 +2846,7 @@ dependencies = [
  "serde_json",
  "strip-ansi-escapes",
  "tracing",
- "tracing-subscriber 0.2.16",
+ "tracing-subscriber 0.2.17",
 ]
 
 [[package]]
@@ -3453,7 +3453,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4d7c0b83d4a500748fa5879461652b361edf5c9d51ede2a2ac03875ca185e24"
 dependencies = [
  "tracing",
- "tracing-subscriber 0.2.16",
+ "tracing-subscriber 0.2.17",
 ]
 
 [[package]]
@@ -3464,7 +3464,7 @@ checksum = "bd520fe41c667b437952383f3a1ec14f1fa45d653f719a77eedd6e6a02d8fa54"
 dependencies = [
  "lazy_static",
  "tracing",
- "tracing-subscriber 0.2.16",
+ "tracing-subscriber 0.2.17",
 ]
 
 [[package]]
@@ -3517,9 +3517,9 @@ dependencies = [
 
 [[package]]
 name = "tracing-subscriber"
-version = "0.2.16"
+version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ab8966ac3ca27126141f7999361cc97dd6fb4b71da04c02044fa9045d98bb96"
+checksum = "705096c6f83bf68ea5d357a6aa01829ddbdac531b357b45abeca842938085baa"
 dependencies = [
  "ansi_term 0.12.1",
  "chrono",
@@ -4016,7 +4016,7 @@ dependencies = [
  "tracing",
  "tracing-error",
  "tracing-futures",
- "tracing-subscriber 0.2.16",
+ "tracing-subscriber 0.2.17",
  "zebra-chain",
  "zebra-script",
  "zebra-state",
@@ -4119,7 +4119,7 @@ dependencies = [
  "tower",
  "tracing",
  "tracing-error",
- "tracing-subscriber 0.2.16",
+ "tracing-subscriber 0.2.17",
 ]
 
 [[package]]
@@ -4131,7 +4131,7 @@ dependencies = [
  "serde_json",
  "structopt",
  "tracing-error",
- "tracing-subscriber 0.2.16",
+ "tracing-subscriber 0.2.17",
  "zebra-chain",
  "zebra-consensus",
  "zebra-state",
@@ -4167,7 +4167,7 @@ dependencies = [
  "tracing-error",
  "tracing-flame",
  "tracing-futures",
- "tracing-subscriber 0.2.16",
+ "tracing-subscriber 0.2.17",
  "vergen",
  "zebra-chain",
  "zebra-consensus",
