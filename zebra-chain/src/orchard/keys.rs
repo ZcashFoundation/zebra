@@ -18,7 +18,7 @@ use std::{
 use aes::Aes256;
 use bech32::{self, FromBase32, ToBase32, Variant};
 use fpe::ff1::{BinaryNumeralString, FF1};
-use group::{prime::PrimeCurveAffine, GroupEncoding};
+use group::GroupEncoding;
 use halo2::{
     arithmetic::{CurveAffine, FieldExt},
     pasta::pallas,

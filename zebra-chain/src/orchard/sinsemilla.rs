@@ -2,7 +2,10 @@
 
 use bitvec::prelude::*;
 
-use halo2::pasta::pallas;
+use halo2::{
+    arithmetic::{CurveAffine, CurveExt},
+    pasta::pallas,
+};
 
 /// [Hash Extractor for Pallas][concreteextractorpallas]
 ///
@@ -27,7 +30,9 @@ pub fn extract_p(point: pallas::Point) -> pallas::Base {
 /// https://zips.z.cash/protocol/protocol.pdf#concretegrouphashpallasandvesta
 #[allow(non_snake_case)]
 pub fn pallas_group_hash(D: &[u8], M: &[u8]) -> pallas::Point {
-    pallas::Point::hash_to_curve(D)(M)
+    let domain_separator = std::str::from_utf8(D).unwrap();
+
+    pallas::Point::hash_to_curve(domain_separator)(M)
 }
 
 /// Q(D) := GroupHash^P(︀“z.cash:SinsemillaQ”, D)

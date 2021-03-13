@@ -6,7 +6,12 @@
 use std::{convert::TryFrom, fmt, io};
 
 use bitvec::prelude::*;
-use halo2::pasta::pallas;
+use group::{prime::PrimeCurveAffine, GroupEncoding};
+use halo2::{
+    arithmetic::{CurveAffine, FieldExt},
+    pasta::pallas,
+};
+
 use rand_core::{CryptoRng, RngCore};
 
 use crate::{
@@ -44,9 +49,13 @@ pub struct NoteCommitment(#[serde(with = "serde_helpers::Affine")] pub pallas::A
 
 impl fmt::Debug for NoteCommitment {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // This will panic if the public key is the identity, which is bad news
+        // bears.
+        let (x, y) = self.0.get_xy().unwrap();
+
         f.debug_struct("NoteCommitment")
-            .field("x", &hex::encode(self.0.get_x().to_bytes()))
-            .field("y", &hex::encode(self.0.get_y().to_bytes()))
+            .field("x", &hex::encode(x.to_bytes()))
+            .field("y", &hex::encode(y.to_bytes()))
             .finish()
     }
 }
@@ -136,7 +145,7 @@ impl NoteCommitment {
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#concretehomomorphiccommit
 #[derive(Clone, Copy, Deserialize, PartialEq, Serialize)]
-pub struct ValueCommitment(#[serde(with = "serde_helpers::AffinePoint")] pub pallas::Affine);
+pub struct ValueCommitment(#[serde(with = "serde_helpers::Affine")] pub pallas::Affine);
 
 impl<'a> std::ops::Add<&'a ValueCommitment> for ValueCommitment {
     type Output = Self;
@@ -163,9 +172,13 @@ impl std::ops::AddAssign<ValueCommitment> for ValueCommitment {
 
 impl fmt::Debug for ValueCommitment {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // This will panic if the public key is the identity, which is bad news
+        // bears.
+        let (x, y) = self.0.get_xy().unwrap();
+
         f.debug_struct("ValueCommitment")
-            .field("x", &hex::encode(self.0.get_x().to_bytes()))
-            .field("y", &hex::encode(self.0.get_y().to_bytes()))
+            .field("x", &hex::encode(x.to_bytes()))
+            .field("y", &hex::encode(y.to_bytes()))
             .finish()
     }
 }
@@ -228,7 +241,7 @@ impl TryFrom<[u8; 32]> for ValueCommitment {
     type Error = &'static str;
 
     fn try_from(bytes: [u8; 32]) -> Result<Self, Self::Error> {
-        let possible_point = pallas::Affine::from_bytes(bytes);
+        let possible_point = pallas::Affine::from_bytes(&bytes);
 
         if possible_point.is_some().into() {
             Ok(Self(possible_point.unwrap()))
@@ -271,12 +284,12 @@ impl ValueCommitment {
     /// https://zips.z.cash/protocol/protocol.pdf#concretehomomorphiccommit
     #[allow(non_snake_case)]
     pub fn new(rcv: pallas::Scalar, value: Amount) -> Self {
-        let v = pallas::Scalar::from(value);
+        let v = pallas::Scalar::from_bytes(value.to_bytes());
 
         // TODO: These generator points can be generated once somewhere else to
         // avoid having to recompute them on every new commitment.
-        let V = pallas_group_hash(*b"z.cash:Orchard-cv", b"v");
-        let R = pallas_group_hash(*b"z.cash:Orchard-cv", b"r");
+        let V = pallas_group_hash(b"z.cash:Orchard-cv", b"v");
+        let R = pallas_group_hash(b"z.cash:Orchard-cv", b"r");
 
         Self::from(V * v + R * rcv)
     }

@@ -1,7 +1,6 @@
-// Extracted from redjubjub for now.
+// XXX: Extracted from redjubjub for now.
 
-#![deny(missing_docs)]
-
+use group::GroupEncoding;
 use halo2::pasta::pallas;
 
 // pub mod batch;

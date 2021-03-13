@@ -1,6 +1,6 @@
 use std::io;
 
-use halo2::pasta::pallas;
+use halo2::{arithmetic::FieldExt, pasta::pallas};
 
 use crate::{
     primitives::redpallas::{self, SpendAuth},
@@ -27,7 +27,7 @@ pub struct Action {
     /// A value commitment to net value of the input note minus the output note
     pub cv: commitment::ValueCommitment,
     /// The nullifier of the input note being spent.
-    pub nullifer: note::Nullifier,
+    pub nullifier: note::Nullifier,
     /// The randomized validating key for spendAuthSig,
     pub rk: redpallas::VerificationKeyBytes<SpendAuth>,
     /// The 𝑥-coordinate of the note commitment for the output note.

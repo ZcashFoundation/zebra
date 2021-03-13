@@ -4,9 +4,10 @@ use std::{
     marker::PhantomData,
 };
 
+use group::{cofactor::CofactorGroup, GroupEncoding};
 use halo2::pasta::pallas;
 
-use super::SigType;
+use super::{Error, SigType, SigningKey};
 
 /// A refinement type for `[u8; 32]` indicating that the bytes represent
 /// an encoding of a RedPallas verification key.
@@ -64,4 +65,58 @@ impl<T: SigType> Hash for VerificationKeyBytes<T> {
 pub struct VerificationKey<T: SigType> {
     pub(crate) point: pallas::Point,
     pub(crate) bytes: VerificationKeyBytes<T>,
+}
+
+impl<T: SigType> From<VerificationKey<T>> for VerificationKeyBytes<T> {
+    fn from(pk: VerificationKey<T>) -> VerificationKeyBytes<T> {
+        pk.bytes
+    }
+}
+
+impl<T: SigType> From<VerificationKey<T>> for [u8; 32] {
+    fn from(pk: VerificationKey<T>) -> [u8; 32] {
+        pk.bytes.bytes
+    }
+}
+
+impl<T: SigType> TryFrom<VerificationKeyBytes<T>> for VerificationKey<T> {
+    type Error = Error;
+
+    fn try_from(bytes: VerificationKeyBytes<T>) -> Result<Self, Self::Error> {
+        // This checks that the encoding is canonical...
+        let maybe_point = pallas::Affine::from_bytes(&bytes.bytes);
+
+        if maybe_point.is_some().into() {
+            let point: pallas::Point = maybe_point.unwrap().into();
+
+            // This checks that the verification key is not of small order.
+            if <bool>::from(point.is_small_order()) == false {
+                Ok(VerificationKey { point, bytes })
+            } else {
+                Err(Error::MalformedVerificationKey)
+            }
+        } else {
+            Err(Error::MalformedVerificationKey)
+        }
+    }
+}
+
+impl<T: SigType> TryFrom<[u8; 32]> for VerificationKey<T> {
+    type Error = Error;
+
+    fn try_from(bytes: [u8; 32]) -> Result<Self, Self::Error> {
+        use std::convert::TryInto;
+        VerificationKeyBytes::from(bytes).try_into()
+    }
+}
+
+impl<T: SigType> VerificationKey<T> {
+    pub(crate) fn from(s: &pallas::Scalar) -> VerificationKey<T> {
+        let point = &T::basepoint() * s;
+        let bytes = VerificationKeyBytes {
+            bytes: pallas::Affine::from(&point).to_bytes(),
+            _marker: PhantomData,
+        };
+        VerificationKey { bytes, point }
+    }
 }
