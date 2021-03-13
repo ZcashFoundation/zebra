@@ -190,7 +190,7 @@ pub struct OutputV5 {
 }
 ```
 
-Finally, the new V5 structure will create a new `OrchardData` type. This new type will be defined in a separated file: `zebra-chain/src/transaction/orchard_data.rs` and it will look as follows:
+The new V5 structure will create a new `OrchardData` type. This new type will be defined in a separated file: `zebra-chain/src/transaction/orchard_data.rs` and it will look as follows:
 ```
 pub struct OrchardData {
     pub cv: commitment::ValueCommitment,
@@ -200,6 +200,18 @@ pub struct OrchardData {
     pub ephemeral_key: keys::EphemeralPublicKey,
     pub enc_ciphertext: note::EncryptedNote,
     pub out_ciphertext: note::WrappedNoteKey,
+}
+```
+
+Also in the V5 transaction we have a new `OrchardFlags`. This is a bitfield type defined as:
+
+```
+bitflags! {
+    pub struct OrchardFlags: u8 {
+        const ENABLE_SPENDS = 0;
+        const ENABLE_OUTPUTS = 1;
+        // Reserved, zeros (bits 2 .. 7)
+    }
 }
 ```
 
