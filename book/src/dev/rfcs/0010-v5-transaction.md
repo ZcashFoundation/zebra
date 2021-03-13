@@ -81,18 +81,16 @@ V4 {
     ...
     sapling_value_balance: Amount,
     ...
-    sapling_shielded_data: Option<SaplingV4ShieldedData>,
+    sapling_shielded_data: Option<SaplingShieldedDataV4>,
 }
 ```
 
-The only change above from the current implementation is the `shielded_data` field type, changed from  `Option<ShieldedData>` to `Option<SaplingV4ShieldedData>`.
-
-`ShieldedData` is currently defined and implemented in `src/transaction/shielded_data.rs`. We propose to change `ShieldedData` into `SaplingV4ShieldedData` and to add `SaplingV5ShieldedData` into the same file.
+`ShieldedData` is currently defined and implemented in `src/transaction/shielded_data.rs`. We propose to change `ShieldedData` into `SaplingShieldedDataV4` and to add `SaplingShieldedDataV5` into the same file.
 
 The difference between V4 and V5 shielded data is in the spends and outputs. For this reason we need to add V4 and V5 spend and output versions to our code:
 
 ```
-pub struct SaplingV4ShieldedData {
+pub struct SaplingShieldedDataV4 {
     /// Either a spend or output description.
     ///
     /// Storing this separately ensures that it is impossible to construct
@@ -144,7 +142,7 @@ V5 {
     outputs: Vec<transparent::Output>,
     sapling_value_balance: Amount,
     sapling_anchor: tree::Root,
-    sapling_shielded_data: Option<SaplingV5ShieldedData>,
+    sapling_shielded_data: Option<SaplingShieldedDataV5>,
     orchard_flags: OrchardFlags,
     orchard_value_balance: Amount,
     orchard_anchor: tree::Root,
@@ -152,11 +150,11 @@ V5 {
 }
 ```
 
-`SaplingV5ShieldedData` is different from `SaplingV4ShieldedData` so a new type will be defined and implemented in `zebra-chain/src/transaction/shielded_data.rs`.
+`SaplingShieldedDataV5` is different from `SaplingShieldedDataV4` so a new type will be defined and implemented in `zebra-chain/src/transaction/shielded_data.rs`.
 Definition will look as follows:
 
 ```
-pub struct SaplingV5ShieldedData {
+pub struct SaplingShieldedDataV5 {
     pub first: Either<SpendV5, OutputV5>,
     pub rest_spends: Vec<SpendV5>,
     pub rest_outputs: Vec<OutputV5>,
@@ -196,7 +194,7 @@ pub struct OrchardData {
     pub cv: commitment::ValueCommitment,
     pub nullifier: ...,
     pub rk: ...,
-    pub cmx: ...,
+    pub cm_x: ...,
     pub ephemeral_key: keys::EphemeralPublicKey,
     pub enc_ciphertext: note::EncryptedNote,
     pub out_ciphertext: note::WrappedNoteKey,
