@@ -3,9 +3,10 @@ use std::{
     marker::PhantomData,
 };
 
+use halo2::arithmetic::FieldExt;
 use halo2::pasta::pallas;
 
-use super::{SigType, VerificationKey};
+use super::{Error, SigType, VerificationKey};
 
 /// A RedPallas signing key.
 #[derive(Copy, Clone, Debug)]
@@ -16,4 +17,26 @@ use super::{SigType, VerificationKey};
 pub struct SigningKey<T: SigType> {
     sk: pallas::Scalar,
     pk: VerificationKey<T>,
+}
+
+impl<'a, T: SigType> From<&'a SigningKey<T>> for VerificationKey<T> {
+    fn from(sk: &'a SigningKey<T>) -> VerificationKey<T> {
+        sk.pk.clone()
+    }
+}
+
+impl<T: SigType> TryFrom<[u8; 32]> for SigningKey<T> {
+    type Error = Error;
+
+    fn try_from(bytes: [u8; 32]) -> Result<Self, Self::Error> {
+        let maybe_sk = pallas::Scalar::from_bytes(&bytes);
+
+        if maybe_sk.is_some().into() {
+            let sk = maybe_sk.unwrap();
+            let pk = VerificationKey::from(&sk);
+            Ok(SigningKey { sk, pk })
+        } else {
+            Err(Error::MalformedSigningKey)
+        }
+    }
 }

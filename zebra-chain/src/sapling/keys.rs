@@ -15,7 +15,7 @@ mod test_vectors;
 mod tests;
 
 use std::{
-    convert::{From, Into, TryFrom},
+    convert::{From, Into, TryFrom, TryInto},
     fmt,
     io::{self, Write},
     str::FromStr,
@@ -73,13 +73,13 @@ fn prf_ock(ovk: [u8; 32], cv: [u8; 32], cm_u: [u8; 32], ephemeral_key: [u8; 32])
         .hash_length(32)
         .personal(b"Zcash_Derive_ock")
         .to_state()
-        .update(ovk)
-        .update(cv)
-        .update(cm_u)
-        .update(ephemeral_key)
+        .update(&ovk)
+        .update(&cv)
+        .update(&cm_u)
+        .update(&ephemeral_key)
         .finalize();
 
-    *hash.as_array()
+    *hash.as_bytes().try_into().expect("32 byte array")
 }
 
 /// Invokes Blake2s-256 as _CRH^ivk_, to derive the IncomingViewingKey
