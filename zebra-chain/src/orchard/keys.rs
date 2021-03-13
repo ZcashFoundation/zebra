@@ -133,8 +133,6 @@ pub struct SpendingKey {
     bytes: [u8; 32],
 }
 
-// TODO: impl a From that accepts a Network?
-
 impl From<[u8; 32]> for SpendingKey {
     /// Generate a _SpendingKey_ from existing bytes.
     fn from(bytes: [u8; 32]) -> Self {
@@ -186,7 +184,7 @@ impl SpendingKey {
     /// When generating, we check that the corresponding `SpendAuthorizingKey`
     /// is not zero, else fail.
     ///
-    ///
+    /// [orchardkeycomponents]: https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents
     pub fn new<T>(csprng: &mut T) -> Self
     where
         T: RngCore + CryptoRng,
@@ -302,7 +300,8 @@ impl PartialEq<[u8; 32]> for OutgoingViewingKey {
     }
 }
 
-/// A Spend validating key, as described in [protocol specification §4.2.3][orchardkeycomponents].
+/// A Spend validating key, as described in [protocol specification
+/// §4.2.3][orchardkeycomponents].
 ///
 /// Used to validate Orchard _Spend Authorization Signatures_, proving ownership
 /// of notes.
@@ -355,16 +354,15 @@ pub struct NullifierDerivingKey(pub pallas::Base);
 
 impl fmt::Debug for NullifierDerivingKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("NullifierDerivingKey")
-            .field("x", &hex::encode(self.0.get_x().to_bytes()))
-            .field("y", &hex::encode(self.0.get_y().to_bytes()))
+        f.debug_tuple("NullifierDerivingKey")
+            .field(&hex::encode(self.0.to_bytes()))
             .finish()
     }
 }
 
 impl From<[u8; 32]> for NullifierDerivingKey {
     fn from(bytes: [u8; 32]) -> Self {
-        Self(pallas::Affine::from_bytes(bytes).unwrap())
+        Self(pallas::Base::from_bytes(&bytes).unwrap())
     }
 }
 
@@ -510,7 +508,7 @@ impl From<FullViewingKey> for IncomingViewingKey {
             .concat();
 
         // Commit^ivk_rivk
-        let scalar = sinsemilla_short_commit(
+        let commit_x = sinsemilla_short_commit(
             fvk.ivk_commit_randomness.into(),
             b"z.cash:Orchard-CommitIvk",
             M,
@@ -518,7 +516,8 @@ impl From<FullViewingKey> for IncomingViewingKey {
 
         Self {
             network: Network::default(),
-            scalar,
+            // mod r_P
+            scalar: pallas::Scalar::from_bytes(&commit_x.into()).unwrap(),
         }
     }
 }
@@ -677,8 +676,14 @@ impl From<FullViewingKey> for DiversifierKey {
     fn from(fvk: FullViewingKey) -> DiversifierKey {
         let R = fvk.to_R();
 
-        // let dk be the first [32] bytes of R
-        Self(R[..32])
+        // "let dk be the first [32] bytes of R"
+        Self(R[..32].try_into().expect("subslice of R is a valid array"))
+    }
+}
+
+impl From<DiversifierKey> for [u8; 32] {
+    fn from(dk: DiversifierKey) -> [u8; 32] {
+        dk.0
     }
 }
 
@@ -785,9 +790,13 @@ pub struct TransmissionKey(pub pallas::Affine);
 
 impl fmt::Debug for TransmissionKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // This will panic if the public key is the identity, which is bad news
+        // bears.
+        let (x, y) = self.0.get_xy().unwrap();
+
         f.debug_struct("TransmissionKey")
-            .field("x", &hex::encode(self.0.get_x().to_bytes()))
-            .field("y", &hex::encode(self.0.get_y().to_bytes()))
+            .field("x", &hex::encode(x.to_bytes()))
+            .field("y", &hex::encode(y.to_bytes()))
             .finish()
     }
 }
@@ -800,7 +809,7 @@ impl From<[u8; 32]> for TransmissionKey {
     ///
     /// https://github.com/zkcrypto/jubjub/blob/master/src/lib.rs#L411
     fn from(bytes: [u8; 32]) -> Self {
-        Self(pallas::Affine::from_bytes(bytes).unwrap())
+        Self(pallas::Affine::from_bytes(&bytes).unwrap())
     }
 }
 
@@ -835,9 +844,13 @@ pub struct EphemeralPublicKey(#[serde(with = "serde_helpers::Affine")] pub palla
 
 impl fmt::Debug for EphemeralPublicKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // This will panic if the public key is the identity, which is bad news
+        // bears.
+        let (x, y) = self.0.get_xy().unwrap();
+
         f.debug_struct("EphemeralPublicKey")
-            .field("x", &hex::encode(self.0.get_x().to_bytes()))
-            .field("y", &hex::encode(self.0.get_y().to_bytes()))
+            .field("x", &hex::encode(x.to_bytes()))
+            .field("y", &hex::encode(y.to_bytes()))
             .finish()
     }
 }
@@ -845,8 +858,8 @@ impl fmt::Debug for EphemeralPublicKey {
 impl Eq for EphemeralPublicKey {}
 
 impl From<&EphemeralPublicKey> for [u8; 32] {
-    fn from(nk: &EphemeralPublicKey) -> [u8; 32] {
-        nk.0.to_bytes()
+    fn from(epk: &EphemeralPublicKey) -> [u8; 32] {
+        epk.0.to_bytes()
     }
 }
 
@@ -860,7 +873,7 @@ impl TryFrom<[u8; 32]> for EphemeralPublicKey {
     type Error = &'static str;
 
     fn try_from(bytes: [u8; 32]) -> Result<Self, Self::Error> {
-        let possible_point = pallas::Affine::from_bytes(bytes);
+        let possible_point = pallas::Affine::from_bytes(&bytes);
 
         if possible_point.is_some().into() {
             Ok(Self(possible_point.unwrap()))
@@ -882,3 +895,38 @@ impl ZcashDeserialize for EphemeralPublicKey {
         Self::try_from(reader.read_32_bytes()?).map_err(|e| SerializationError::Parse(e))
     }
 }
+
+/// An _outgoing cipher key_ for Orchard note encryption/decryption.
+///
+/// https://zips.z.cash/protocol/nu5.pdf#saplingandorchardencrypt
+#[derive(Copy, Clone, PartialEq)]
+pub struct OutgoingCipherKey([u8; 32]);
+
+impl fmt::Debug for OutgoingCipherKey {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple("OutgoingCipherKey")
+            .field(&hex::encode(self.0))
+            .finish()
+    }
+}
+
+impl From<&OutgoingCipherKey> for [u8; 32] {
+    fn from(ock: &OutgoingCipherKey) -> [u8; 32] {
+        ock.0
+    }
+}
+
+// impl
+//     From<(
+//         OutgoingViewingKey,
+//         ValueCommitment,
+//         NoteCommitment,
+//         EphemeralKey,
+//     )> for OutgoingCipherKey
+// {
+//     type Error = &'static str;
+
+//     fn from((): ()) -> Result<Self, Self::Error> {
+//         Self(prf_ock())
+//     }
+// }
