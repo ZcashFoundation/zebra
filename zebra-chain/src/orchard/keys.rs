@@ -18,8 +18,11 @@ use std::{
 use aes::Aes256;
 use bech32::{self, FromBase32, ToBase32, Variant};
 use fpe::ff1::{BinaryNumeralString, FF1};
-use group::GroupEncoding;
-use halo2::{arithmetic::FieldExt, pasta::pallas};
+use group::{prime::PrimeCurveAffine, GroupEncoding};
+use halo2::{
+    arithmetic::{CurveAffine, FieldExt},
+    pasta::pallas,
+};
 use rand_core::{CryptoRng, RngCore};
 
 use crate::{
@@ -63,14 +66,14 @@ fn prp_d(K: [u8; 32], d: [u8; 11]) -> [u8; 11] {
 // definition in the draft NU5 spec is incomplete so I'm putting it here in case
 // it changes.
 fn prf_expand(sk: [u8; 32], t: &[&[u8]]) -> [u8; 64] {
-    let state = blake2b_simd::Params::new()
+    let mut state = blake2b_simd::Params::new()
         .hash_length(64)
         .personal(b"Zcash_ExpandSeed")
         .to_state();
 
     state.update(&sk[..]);
 
-    t.iter().for_each(|t_i| state.update(t_i));
+    t.iter().map(|t_i| state.update(t_i));
 
     *state.finalize().as_array()
 }
@@ -81,7 +84,8 @@ fn prf_expand(sk: [u8; 32], t: &[&[u8]]) -> [u8; 64] {
 /// PRF^ock(ovk, cv, cm_x, ephemeralKey) := BLAKE2b-256(“Zcash_Orchardock”, ovk || cv || cm_x || ephemeralKey)
 ///
 /// https://zips.z.cash/protocol/nu5.pdf#concreteprfs
-fn prf_ock(ovk: [u8; 32], cv: [u8; 32], cm_x: [u8; 32], ephemeral_key: [u8; 32]) -> [u8; 64] {
+/// https://zips.z.cash/protocol/nu5.pdf#concretesym
+fn prf_ock(ovk: [u8; 32], cv: [u8; 32], cm_x: [u8; 32], ephemeral_key: [u8; 32]) -> [u8; 32] {
     let hash = blake2b_simd::Params::new()
         .hash_length(32)
         .personal(b"Zcash_Orchardock")
@@ -92,7 +96,7 @@ fn prf_ock(ovk: [u8; 32], cv: [u8; 32], cm_x: [u8; 32], ephemeral_key: [u8; 32])
         .update(&ephemeral_key)
         .finalize();
 
-    *hash.as_array()
+    hash.as_bytes().try_into().expect("32 byte array")
 }
 
 /// Used to derive a diversified base point from a diversifier value.
@@ -101,7 +105,7 @@ fn prf_ock(ovk: [u8; 32], cv: [u8; 32], cm_x: [u8; 32], ephemeral_key: [u8; 32])
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#concretediversifyhash
 fn diversify_hash(d: &[u8]) -> pallas::Point {
-    pallas_group_hash(*b"z.cash:Orchard-gd", &d)
+    pallas_group_hash(b"z.cash:Orchard-gd", &d)
 }
 
 /// Magic human-readable strings used to identify what networks Orchard spending
@@ -236,7 +240,7 @@ impl From<SpendingKey> for SpendAuthorizingKey {
     /// https://zips.z.cash/protocol/protocol.pdf#orchardkeycomponents
     /// https://zips.z.cash/protocol/protocol.pdf#concreteprfs
     fn from(spending_key: SpendingKey) -> SpendAuthorizingKey {
-        let hash_bytes = prf_expand(spending_key.bytes, &[6]);
+        let hash_bytes = prf_expand(spending_key.bytes, &[&[6]]);
 
         // Handles ToScalar^Orchard
         Self(pallas::Scalar::from_bytes_wide(&hash_bytes))
@@ -288,7 +292,7 @@ impl From<FullViewingKey> for OutgoingViewingKey {
         let R = fvk.to_R();
 
         // let ovk be the remaining [32] bytes of R [which is 64 bytes]
-        Self(R[32..])
+        Self::from(R[32..64])
     }
 }
 
@@ -383,7 +387,10 @@ impl From<SpendingKey> for NullifierDerivingKey {
     ///
     /// https://zips.z.cash/protocol/protocol.pdf#orchardkeycomponents
     fn from(sk: SpendingKey) -> Self {
-        Self(pallas::Base::from_bytes_wide(prf_expand(sk, [7])))
+        Self(pallas::Base::from_bytes_wide(&prf_expand(
+            sk.into(),
+            &[&[7]],
+        )))
     }
 }
 
@@ -505,7 +512,7 @@ impl From<FullViewingKey> for IncomingViewingKey {
         // Commit^ivk_rivk
         let scalar = sinsemilla_short_commit(
             fvk.ivk_commit_randomness.into(),
-            "z.cash:Orchard-CommitIvk",
+            b"z.cash:Orchard-CommitIvk",
             M,
         );
 
@@ -640,8 +647,8 @@ impl FullViewingKey {
         // let R = PRF^expand_K( [0x82] || I2LEOSP256(ak) || I2LEOSP256(nk) )
         prf_expand(
             K,
-            [
-                [0x82u8],
+            &[
+                &[0x82u8],
                 self.spend_validating_key.into(),
                 self.nullifier_deriving_key.into(),
             ],
