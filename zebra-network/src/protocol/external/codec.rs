@@ -404,33 +404,43 @@ impl Decoder for Codec {
                     ));
                 }
 
-                let body_reader = Cursor::new(&body);
+                let mut body_reader = Cursor::new(&body);
                 match &command {
-                    b"version\0\0\0\0\0" => self.read_version(body_reader),
-                    b"verack\0\0\0\0\0\0" => self.read_verack(body_reader),
-                    b"ping\0\0\0\0\0\0\0\0" => self.read_ping(body_reader),
-                    b"pong\0\0\0\0\0\0\0\0" => self.read_pong(body_reader),
-                    b"reject\0\0\0\0\0\0" => self.read_reject(body_reader),
-                    b"addr\0\0\0\0\0\0\0\0" => self.read_addr(body_reader),
-                    b"getaddr\0\0\0\0\0" => self.read_getaddr(body_reader),
-                    b"block\0\0\0\0\0\0\0" => self.read_block(body_reader),
-                    b"getblocks\0\0\0" => self.read_getblocks(body_reader),
-                    b"headers\0\0\0\0\0" => self.read_headers(body_reader),
-                    b"getheaders\0\0" => self.read_getheaders(body_reader),
-                    b"inv\0\0\0\0\0\0\0\0\0" => self.read_inv(body_reader),
-                    b"getdata\0\0\0\0\0" => self.read_getdata(body_reader),
-                    b"notfound\0\0\0\0" => self.read_notfound(body_reader),
-                    b"tx\0\0\0\0\0\0\0\0\0\0" => self.read_tx(body_reader),
-                    b"mempool\0\0\0\0\0" => self.read_mempool(body_reader),
-                    b"filterload\0\0" => self.read_filterload(body_reader, body_len),
-                    b"filteradd\0\0\0" => self.read_filteradd(body_reader),
-                    b"filterclear\0" => self.read_filterclear(body_reader),
+                    b"version\0\0\0\0\0" => self.read_version(&mut body_reader),
+                    b"verack\0\0\0\0\0\0" => self.read_verack(&mut body_reader),
+                    b"ping\0\0\0\0\0\0\0\0" => self.read_ping(&mut body_reader),
+                    b"pong\0\0\0\0\0\0\0\0" => self.read_pong(&mut body_reader),
+                    b"reject\0\0\0\0\0\0" => self.read_reject(&mut body_reader),
+                    b"addr\0\0\0\0\0\0\0\0" => self.read_addr(&mut body_reader),
+                    b"getaddr\0\0\0\0\0" => self.read_getaddr(&mut body_reader),
+                    b"block\0\0\0\0\0\0\0" => self.read_block(&mut body_reader),
+                    b"getblocks\0\0\0" => self.read_getblocks(&mut body_reader),
+                    b"headers\0\0\0\0\0" => self.read_headers(&mut body_reader),
+                    b"getheaders\0\0" => self.read_getheaders(&mut body_reader),
+                    b"inv\0\0\0\0\0\0\0\0\0" => self.read_inv(&mut body_reader),
+                    b"getdata\0\0\0\0\0" => self.read_getdata(&mut body_reader),
+                    b"notfound\0\0\0\0" => self.read_notfound(&mut body_reader),
+                    b"tx\0\0\0\0\0\0\0\0\0\0" => self.read_tx(&mut body_reader),
+                    b"mempool\0\0\0\0\0" => self.read_mempool(&mut body_reader),
+                    b"filterload\0\0" => self.read_filterload(&mut body_reader, body_len),
+                    b"filteradd\0\0\0" => self.read_filteradd(&mut body_reader),
+                    b"filterclear\0" => self.read_filterclear(&mut body_reader),
                     _ => return Err(Parse("unknown command")),
                 }
                 // We need Ok(Some(msg)) to signal that we're done decoding.
                 // This is also convenient for tracing the parse result.
                 .map(|msg| {
-                    trace!("finished message decoding");
+                    // bitcoin allows extra data at the end of most messages,
+                    // so that old nodes can still read newer message formats,
+                    // and ignore any extra fields
+                    let extra_bytes = body.len() as u64 - body_reader.position();
+                    if extra_bytes == 0 {
+                        trace!(?extra_bytes, %msg, "finished message decoding");
+                    } else {
+                        // log when there are extra bytes, so we know when we need to
+                        // upgrade message formats
+                        debug!(?extra_bytes, %msg, "extra data after decoding message");
+                    }
                     Some(msg)
                 })
             }
@@ -566,8 +576,8 @@ impl Codec {
         Ok(Message::NotFound(Vec::zcash_deserialize(reader)?))
     }
 
-    fn read_tx<R: Read>(&self, rdr: R) -> Result<Message, Error> {
-        Ok(Message::Tx(Transaction::zcash_deserialize(rdr)?.into()))
+    fn read_tx<R: Read>(&self, reader: R) -> Result<Message, Error> {
+        Ok(Message::Tx(Transaction::zcash_deserialize(reader)?.into()))
     }
 
     fn read_mempool<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
