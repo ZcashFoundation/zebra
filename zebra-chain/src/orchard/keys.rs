@@ -143,6 +143,12 @@ impl From<[u8; 32]> for SpendingKey {
     }
 }
 
+impl From<SpendingKey> for [u8; 32] {
+    fn from(sk: SpendingKey) -> Self {
+        sk.bytes
+    }
+}
+
 impl fmt::Display for SpendingKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let hrp = match self.network {
