@@ -53,10 +53,7 @@ impl<'l> FilePathContext<'l> {
     /// `pub(super)` is to dissuade individual linters from loading file contexts.
     pub(super) fn load(self) -> Result<Option<ContentContext<'l>>> {
         let full_path = self.project_ctx.full_path(self.file_path);
-        let contents_opt = read_file(&full_path).map_err(|err| SeamareError::IO {
-            path: format!("{}", full_path),
-            detail: err,
-        })?;
+        let contents_opt = read_file(&full_path)?;
         Ok(contents_opt.map(|content| ContentContext::new(self, content)))
     }
 }
