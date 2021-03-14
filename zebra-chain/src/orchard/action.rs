@@ -43,9 +43,9 @@ pub struct Action {
 impl ZcashSerialize for Action {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         self.cv.zcash_serialize(&mut writer)?;
-        writer.write_32_bytes(self.nullifier.into())?;
+        writer.write_all(&<[u8; 32]>::from(self.nullifier)[..])?;
         writer.write_all(&<[u8; 32]>::from(self.rk)[..])?;
-        writer.write_all(self.cm_x.to_bytes())?;
+        writer.write_all(&<[u8; 32]>::from(self.cm_x)[..])?;
         self.ephemeral_key.zcash_serialize(&mut writer)?;
         self.enc_ciphertext.zcash_serialize(&mut writer)?;
         self.out_ciphertext.zcash_serialize(&mut writer)?;

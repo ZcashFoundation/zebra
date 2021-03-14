@@ -4,7 +4,7 @@
 use std::{convert::TryInto, io, sync::Arc};
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use halo2::pasta::pallas;
+use halo2::{arithmetic::FieldExt, pasta::pallas};
 
 use crate::{
     block::MAX_BLOCK_BYTES,
@@ -44,6 +44,20 @@ impl ZcashDeserialize for pallas::Scalar {
         } else {
             Err(SerializationError::Parse(
                 "Invalid pallas::Scalar, input not canonical",
+            ))
+        }
+    }
+}
+
+impl ZcashDeserialize for pallas::Base {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        let possible_field_element = pallas::Base::from_bytes(&reader.read_32_bytes()?);
+
+        if possible_field_element.is_some().into() {
+            Ok(possible_field_element.unwrap())
+        } else {
+            Err(SerializationError::Parse(
+                "Invalid pallas::Base, input not canonical",
             ))
         }
     }
