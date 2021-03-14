@@ -1,6 +1,7 @@
 #![allow(clippy::unit_arg)]
 #![allow(dead_code)]
 
+use group::GroupEncoding;
 use halo2::pasta::pallas;
 
 use super::super::{
@@ -19,7 +20,7 @@ use super::super::{
 // TODO: I'M EXTRAPOLATING HERE, DOUBLE CHECK THE SPEC WHEN FINALIZED
 #[allow(non_snake_case)]
 pub fn mixing_pedersen_hash(P: pallas::Point, x: pallas::Scalar) -> pallas::Point {
-    P + pallas_group_hash(*b"Zcash_P_", b"") * x
+    P + pallas_group_hash(b"Zcash_P_", b"") * x
 }
 
 /// A cryptographic permutation, defined in [poseidonhash].
@@ -41,7 +42,7 @@ fn poseidon_hash(x: pallas::Base, y: pallas::Base) -> pallas::Base {
 /// [concreteprfs]: https://zips.z.cash/protocol/protocol.pdf#concreteprfs
 /// [poseidonhash]: https://zips.z.cash/protocol/nu5.pdf#poseidonhash
 fn prf_nf(nk: [u8; 32], rho: [u8; 32]) -> [u8; 32] {
-    poseidon_hash(nk, rho)
+    poseidon_hash(nk.into(), rho.into()).into()
 }
 
 /// A Nullifier for Orchard transactions
