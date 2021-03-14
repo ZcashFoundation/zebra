@@ -386,7 +386,7 @@ where
         let num_peers = num_ready + num_unready;
         metrics::gauge!("pool.num_ready", num_ready as f64);
         metrics::gauge!("pool.num_unready", num_unready as f64);
-        metrics::gauge!("pool.num_peers", num_peers as f64);
+        metrics::gauge!("zcash.net.peers", num_peers as f64);
     }
 }
 
