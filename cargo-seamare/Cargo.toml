@@ -10,3 +10,4 @@ edition = "2018"
 seamare = { path = "../seamare" }
 seamare-lints = { path = "../seamare-lints" }
 guppy = "0.8.0"
+camino = "1.0.3"
