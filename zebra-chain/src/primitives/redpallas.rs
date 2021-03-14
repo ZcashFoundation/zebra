@@ -5,7 +5,7 @@ use halo2::pasta::pallas;
 
 // pub mod batch;
 mod constants;
-// mod error;
+mod error;
 // pub mod frost;
 // mod hash;
 // mod scalar_mul;
@@ -13,6 +13,7 @@ mod constants;
 mod signing_key;
 mod verification_key;
 
+pub use error::Error;
 pub use signing_key::SigningKey;
 pub use verification_key::{VerificationKey, VerificationKeyBytes};
 
