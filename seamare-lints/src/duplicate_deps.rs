@@ -18,7 +18,7 @@ impl ProjectLinter for DirectDepDups {
         ctx: &ProjectContext<'l>,
         out: &mut LintFormatter<'l, '_>,
     ) -> Result<RunStatus<'l>> {
-        let package_graph = ctx.package_graph()?;
+        let package_graph = ctx.package_graph();
 
         // This is a map of direct deps by name -> version -> packages that depend on it.
         let mut direct_deps: BTreeMap<&str, BTreeMap<&Version, Vec<&str>>> = BTreeMap::new();

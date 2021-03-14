@@ -9,4 +9,6 @@ pub enum SeamareError {
         path: String,
         detail: std::io::Error,
     },
+    #[error("Build package graph failed")]
+    Guppy(#[from] guppy::Error),
 }

@@ -1,36 +1,41 @@
-use super::error::Result;
+use super::error::{Result, SeamareError};
+use camino::Utf8Path;
 use guppy::graph::PackageGraph;
-use once_cell::sync::OnceCell;
-use std::path::{Path, PathBuf};
+use guppy::MetadataCommand;
 
+// TODO: maybe it's better to store `project_root` field like what x-linter does.
+// but it's borrowed from inner `package_graph` field, doesn't know how to handle this for now..
 #[derive(Debug)]
-pub struct CoreContext {
-    current_dir: PathBuf,
-    package_graph: OnceCell<PackageGraph>,
+pub struct CoreContext<'ctx> {
+    current_dir: &'ctx Utf8Path,
+    package_graph: PackageGraph,
 }
 
-impl CoreContext {
-    pub fn new(current_dir: PathBuf) -> CoreContext {
-        unimplemented!()
+impl<'ctx> CoreContext<'ctx> {
+    /// Create a new context across the linter.
+    pub fn new(current_dir: &Utf8Path) -> Result<CoreContext> {
+        let package_graph = Self::build_package_graph(current_dir)?;
+        Ok(CoreContext {
+            current_dir,
+            package_graph,
+        })
     }
 
-    pub fn initialize(&mut self) -> Result<()> {
-        unimplemented!()
+    pub fn current_dir(&self) -> &Utf8Path {
+        &self.current_dir
     }
 
-    pub fn current_dir(&self) -> &Path {
-        unimplemented!()
+    pub fn package_graph(&self) -> &PackageGraph {
+        &self.package_graph
     }
 
-    pub fn package_graph(&self) -> Result<&PackageGraph> {
-        unimplemented!()
+    pub fn project_root(&self) -> &Utf8Path {
+        self.package_graph().workspace().root()
     }
 
-    pub fn project_root(&self) -> &Path {
-        unimplemented!()
-    }
-
-    fn try_build_package_graph(&self) -> Result<PackageGraph> {
-        unimplemented!()
+    fn build_package_graph(current_dir: &Utf8Path) -> Result<PackageGraph> {
+        let mut cmd = MetadataCommand::new();
+        cmd.current_dir(current_dir);
+        cmd.build_graph().map_err(|e| SeamareError::Guppy(e))
     }
 }

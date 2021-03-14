@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{prelude::*, LintContext};
+use camino::{Utf8Path, Utf8PathBuf};
 use guppy::graph::PackageGraph;
-use std::path::{Path, PathBuf};
 
 /// Represents a linter that checks some property for the overall project.
 ///
@@ -23,7 +23,7 @@ pub trait ProjectLinter: Linter {
 /// Overall linter context for a project.
 #[derive(Debug)]
 pub struct ProjectContext<'l> {
-    core: &'l CoreContext,
+    core: &'l CoreContext<'l>,
 }
 
 impl<'l> ProjectContext<'l> {
@@ -37,17 +37,17 @@ impl<'l> ProjectContext<'l> {
     }
 
     /// Returns the project root.
-    pub fn project_root(&self) -> &'l Path {
+    pub fn project_root(&self) -> &'l Utf8Path {
         self.core.project_root()
     }
 
     /// Returns the package graph, computing it for the first time if necessary.
-    pub fn package_graph(&self) -> Result<&'l PackageGraph> {
-        Ok(self.core.package_graph()?)
+    pub fn package_graph(&self) -> &'l PackageGraph {
+        self.core.package_graph()
     }
 
     /// Returns the absolute path from the project root.
-    pub fn full_path(&self, path: impl AsRef<Path>) -> PathBuf {
+    pub fn full_path(&self, path: impl AsRef<Utf8Path>) -> Utf8PathBuf {
         self.core.project_root().join(path.as_ref())
     }
 }
