@@ -75,7 +75,7 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "block_verified_block_height{job=\"$job\"}",
+          "expr": "zcash_chain_verified_block_height{job=\"$job\"}",
           "interval": "",
           "legendFormat": "verified block height",
           "refId": "A"
@@ -179,7 +179,7 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "block_verified_block_height{job=\"$job\"}",
+          "expr": "zcash_chain_verified_block_height{job=\"$job\"}",
           "interval": "",
           "legendFormat": "verified block height",
           "refId": "A"
@@ -283,9 +283,9 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "rate(block_verified_block_count{job=\"$job\"}[1s])",
+          "expr": "rate(zcash_chain_verified_block_total{job=\"$job\"}[1s])",
           "interval": "",
-          "legendFormat": "block_verified_block_count[1s]",
+          "legendFormat": "zcash_chain_verified_block_total[1s]",
           "refId": "A"
         },
         {
@@ -406,9 +406,9 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "rate(block_verified_block_count{job=\"$job\"}[1s])",
+          "expr": "rate(zcash_chain_verified_block_total{job=\"$job\"}[1s])",
           "interval": "",
-          "legendFormat": "block_verified_block_count[1s]",
+          "legendFormat": "zcash_chain_verified_block_total[1s]",
           "refId": "A"
         },
         {
@@ -528,9 +528,9 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "rate(block_verified_block_count{job=\"$job\"}[1s])",
+          "expr": "rate(zcash_chain_verified_block_total{job=\"$job\"}[1s])",
           "interval": "",
-          "legendFormat": "block_verified_block_count[1s]",
+          "legendFormat": "zcash_chain_verified_block_total[1s]",
           "refId": "A"
         },
         {
@@ -651,9 +651,9 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "rate(block_verified_block_count{job=\"$job\"}[1s])",
+          "expr": "rate(zcash_chain_verified_block_total{job=\"$job\"}[1s])",
           "interval": "",
-          "legendFormat": "block_verified_block_count[1s]",
+          "legendFormat": "zcash_chain_verified_block_total[1s]",
           "refId": "A"
         },
         {
@@ -735,14 +735,14 @@
           ]
         },
         "datasource": "Prometheus-Zebra",
-        "definition": "label_values(block_verified_block_height, job)",
+        "definition": "label_values(zcash_chain_verified_block_height, job)",
         "hide": 0,
         "includeAll": true,
         "label": null,
         "multi": true,
         "name": "job",
         "options": [],
-        "query": "label_values(block_verified_block_height, job)",
+        "query": "label_values(zcash_chain_verified_block_height, job)",
         "refresh": 1,
         "regex": "",
         "skipUrlSync": false,

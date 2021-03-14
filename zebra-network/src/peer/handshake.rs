@@ -364,7 +364,7 @@ where
             let peer_tx = peer_tx.with(move |msg: Message| {
                 // Add a metric for outbound messages.
                 // XXX add a dimension tagging message metrics by type
-                metrics::counter!("peer.outbound_messages", 1, "addr" => addr.to_string());
+                metrics::counter!("zcash.net.out.messages", 1, "addr" => addr.to_string());
                 // We need to use future::ready rather than an async block here,
                 // because we need the sink to be Unpin, and the With<Fut, ...>
                 // returned by .with is Unpin only if Fut is Unpin, and the
@@ -380,7 +380,7 @@ where
                         if msg.is_ok() {
                             // XXX add a dimension tagging message metrics by type
                             metrics::counter!(
-                                "inbound_messages",
+                                "zcash.net.in.messages",
                                 1,
                                 "addr" => addr.to_string(),
                             );

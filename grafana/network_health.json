@@ -76,14 +76,14 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "sum(rate(bytes_read{job=\"$job\"}[1s]))",
+          "expr": "sum(rate(zcash_net_in_bytes_total{job=\"$job\"}[1s]))",
           "hide": false,
           "interval": "",
           "legendFormat": "bytes read [1s]",
           "refId": "A"
         },
         {
-          "expr": "sum(rate(bytes_written{job=\"$job\"}[1s]))",
+          "expr": "sum(rate(zcash_net_out_bytes_total{job=\"$job\"}[1s]))",
           "interval": "",
           "legendFormat": "bytes written [1s]",
           "refId": "B"
@@ -188,14 +188,14 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "sum(rate(bytes_read{job=\"$job\"}[1s]))",
+          "expr": "sum(rate(zcash_net_in_bytes_total{job=\"$job\"}[1s]))",
           "hide": false,
           "interval": "",
           "legendFormat": "bytes read [1s]",
           "refId": "A"
         },
         {
-          "expr": "sum(rate(bytes_written{job=\"$job\"}[1s]))",
+          "expr": "sum(rate(zcash_net_out_bytes_total{job=\"$job\"}[1s]))",
           "interval": "",
           "legendFormat": "bytes written [1s]",
           "refId": "B"
@@ -299,7 +299,7 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "pool_num_peers{job=\"$job\"}",
+          "expr": "zcash_net_peers{job=\"$job\"}",
           "interval": "",
           "legendFormat": "total peers",
           "refId": "A"
@@ -416,7 +416,7 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "pool_num_peers{job=\"$job\"}",
+          "expr": "zcash_net_peers{job=\"$job\"}",
           "interval": "",
           "legendFormat": "total peers",
           "refId": "A"
@@ -763,14 +763,14 @@
           ]
         },
         "datasource": "Prometheus-Zebra",
-        "definition": "label_values(bytes_read, job)",
+        "definition": "label_values(zcash_net_in_bytes_total, job)",
         "hide": 0,
         "includeAll": true,
         "label": null,
         "multi": true,
         "name": "job",
         "options": [],
-        "query": "label_values(bytes_read, job)",
+        "query": "label_values(zcash_net_in_bytes_total, job)",
         "refresh": 1,
         "regex": "",
         "skipUrlSync": false,
