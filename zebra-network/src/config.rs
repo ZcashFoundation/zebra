@@ -13,6 +13,10 @@ const MAX_SINGLE_PEER_RETRIES: usize = 2;
 #[serde(deny_unknown_fields, default)]
 pub struct Config {
     /// The address on which this node should listen for connections.
+    ///
+    /// Zebra will also advertise this address to other nodes. Advertising a
+    /// different external IP address is currently not supported, see #1890
+    /// for details.
     pub listen_addr: SocketAddr,
 
     /// The network to connect to.
