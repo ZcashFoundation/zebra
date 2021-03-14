@@ -78,7 +78,7 @@ impl TryFrom<[u8; 32]> for NoteCommitment {
     type Error = &'static str;
 
     fn try_from(bytes: [u8; 32]) -> Result<Self, Self::Error> {
-        let possible_point = pallas::Affine::from_bytes(bytes);
+        let possible_point = pallas::Affine::from_bytes(&bytes);
 
         if possible_point.is_some().into() {
             Ok(Self(possible_point.unwrap()))
@@ -135,8 +135,19 @@ impl NoteCommitment {
 
         Some((
             rcm,
-            NoteCommitment::from(sinsemilla_commit(rcm.0, "z.cash:Orchard-NoteCommit", &s)),
+            NoteCommitment::from(sinsemilla_commit(rcm.0, b"z.cash:Orchard-NoteCommit", &s)),
         ))
+    }
+
+    /// Hash Extractor for Pallas
+    ///
+    /// https://zips.z.cash/protocol/protocol.pdf#concreteextractorpallas
+    pub fn extract_x(&self) -> pallas::Base {
+        match self.0.get_xy().into {
+            // If Some, it's not the identity.
+            Some((x, _)) => x,
+            _ => pallas::Base::zero(),
+        }
     }
 }
 
@@ -159,8 +170,7 @@ impl std::ops::Add<ValueCommitment> for ValueCommitment {
     type Output = Self;
 
     fn add(self, rhs: ValueCommitment) -> Self::Output {
-        let value = self.0.to_extended() + rhs.0.to_extended();
-        ValueCommitment(value.into())
+        ValueCommitment((self.0 + rhs.0).into())
     }
 }
 
@@ -212,7 +222,7 @@ impl std::ops::Sub<ValueCommitment> for ValueCommitment {
     type Output = Self;
 
     fn sub(self, rhs: ValueCommitment) -> Self::Output {
-        ValueCommitment((self.0.to_extended() - rhs.0.to_extended()).into())
+        ValueCommitment((self.0 - rhs.0).into())
     }
 }
 
@@ -284,7 +294,7 @@ impl ValueCommitment {
     /// https://zips.z.cash/protocol/protocol.pdf#concretehomomorphiccommit
     #[allow(non_snake_case)]
     pub fn new(rcv: pallas::Scalar, value: Amount) -> Self {
-        let v = pallas::Scalar::from_bytes(value.to_bytes());
+        let v = pallas::Scalar::from(value);
 
         // TODO: These generator points can be generated once somewhere else to
         // avoid having to recompute them on every new commitment.
@@ -448,7 +458,7 @@ mod tests {
 
         let sum: ValueCommitment = vec![g, other_g].into_iter().sum();
 
-        let doubled_g = ValueCommitment(g_point.to_extended().double().into());
+        let doubled_g = ValueCommitment(g_point.into().double().into());
 
         assert_eq!(sum, doubled_g);
     }

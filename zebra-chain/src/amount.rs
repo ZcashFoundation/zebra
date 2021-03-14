@@ -166,6 +166,17 @@ impl<C> From<Amount<C>> for jubjub::Fr {
     }
 }
 
+impl<C> From<Amount<C>> for halo2::pasta::pallas::Scalar {
+    fn from(a: Amount<C>) -> halo2::pasta::pallas::Scalar {
+        // TODO: this isn't constant time -- does that matter?
+        if a.0 < 0 {
+            halo2::pasta::pallas::Scalar::from(a.0.abs() as u64).neg()
+        } else {
+            halo2::pasta::pallas::Scalar::from(a.0 as u64)
+        }
+    }
+}
+
 impl<C> TryFrom<i64> for Amount<C>
 where
     C: Constraint,
