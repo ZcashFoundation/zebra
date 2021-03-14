@@ -47,7 +47,7 @@ pub struct Affine {
 
 impl From<Affine> for pallas::Affine {
     fn from(local: Affine) -> Self {
-        pallas::Affine::from_bytes(local.bytes).unwrap()
+        pallas::Affine::from_bytes(&local.bytes).unwrap()
     }
 }
 
