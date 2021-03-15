@@ -4,7 +4,7 @@ use std::io::{self, Read};
 /// A sequence of message authentication tags ...
 ///
 /// binding h_sig to each a_sk of the JoinSplit description, computed as
-/// described in § 4.10 ‘Non-malleability (Sprout)’ on p. 37
+/// described in § 4.10 'Non-malleability (Sprout)' on p. 37
 #[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),

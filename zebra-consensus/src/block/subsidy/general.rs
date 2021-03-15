@@ -121,7 +121,7 @@ mod test {
         let blossom_height = Blossom.activation_height(network).unwrap();
         let first_halving_height = match network {
             Network::Mainnet => Canopy.activation_height(network).unwrap(),
-            // Based on "7.7 Calculation of Block Subsidy and Founders’ Reward"
+            // Based on "7.7 Calculation of Block Subsidy and Founders' Reward"
             Network::Testnet => Height(1_116_000),
         };
 
@@ -208,7 +208,7 @@ mod test {
         let blossom_height = Blossom.activation_height(network).unwrap();
         let first_halving_height = match network {
             Network::Mainnet => Canopy.activation_height(network).unwrap(),
-            // Based on "7.7 Calculation of Block Subsidy and Founders’ Reward"
+            // Based on "7.7 Calculation of Block Subsidy and Founders' Reward"
             Network::Testnet => Height(1_116_000),
         };
 
@@ -234,7 +234,7 @@ mod test {
         );
 
         // After the 2nd halving, the block subsidy is reduced to 1.5625 ZEC
-        // See "7.7 Calculation of Block Subsidy and Founders’ Reward"
+        // See "7.7 Calculation of Block Subsidy and Founders' Reward"
         assert_eq!(
             Amount::try_from(156_250_000),
             block_subsidy(

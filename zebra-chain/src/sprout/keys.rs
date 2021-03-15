@@ -2,7 +2,7 @@
 //!
 //! "The receiving key sk_enc, the incoming viewing key ivk = (apk,
 //! sk_enc), and the shielded payment address addr_pk = (a_pk, pk_enc) are
-//! derived from a_sk, as described in [‘Sprout Key Components’][ps]
+//! derived from a_sk, as described in ['Sprout Key Components'][ps]
 //!
 //! [ps]: https://zips.z.cash/protocol/protocol.pdf#sproutkeycomponents
 #![allow(clippy::unit_arg)]
@@ -223,7 +223,7 @@ mod ivk_magics {
     pub const TESTNET: [u8; 3] = [0xA8, 0xAC, 0x0C];
 }
 
-/// The recipient’s possession of the associated incoming viewing key
+/// The recipient's possession of the associated incoming viewing key
 /// is used to reconstruct the original note and memo field.
 pub struct IncomingViewingKey {
     network: Network,
