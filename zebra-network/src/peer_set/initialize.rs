@@ -114,6 +114,7 @@ where
         demand_tx.clone(),
         handle_rx,
         inv_receiver,
+        address_book.clone(),
     );
     let peer_set = Buffer::new(BoxService::new(peer_set), constants::PEERSET_BUFFER_SIZE);
 
