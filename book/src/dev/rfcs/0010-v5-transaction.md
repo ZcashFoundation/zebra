@@ -175,7 +175,9 @@ pub struct SpendV5 {
 }
 ```
 
-V5 sapling output will live in `zebra-chain/src/sapling/output.rs` (this is in the same file as `OutputV4`):
+V5 sapling output will live in `zebra-chain/src/sapling/output.rs` (this is in the same file as `OutputV4`).
+
+Note: the V4 and V5 sapling outputs currently have identical fields. We use different types to consistently distinguish V4 and V5 transaction data.
 
 ```
 pub struct OutputV5 {
@@ -187,7 +189,11 @@ pub struct OutputV5 {
     pub zkproof: Groth16Proof,
 }
 ```
+To abstract over the `V4` and `V5` `Transaction` enum variants, we will implement `Transaction` methods to access sapling and orchard data. 
 
+To abstract over the `SaplingShieldedDataV4`/`SaplingShieldedDataV5`, `SpendV4`/`SpendV5`, and `OutputV4`/`OutputV5` structs, we will implement `SaplingShieldedData`, `Spend`, and `Output` traits to access sapling data.
+
+The methods in these traits will be implemented in a similar way to the existing `Transaction` methods.
 The new V5 structure will create a new `OrchardShieldedData` type. This new type will be defined in a separated file: `zebra-chain/src/transaction/orchard_shielded_data.rs` and it will look as follows:
 ```
 pub struct OrchardShieldedData {
