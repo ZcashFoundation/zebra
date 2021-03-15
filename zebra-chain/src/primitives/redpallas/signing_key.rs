@@ -1,7 +1,4 @@
-use std::{
-    convert::{TryFrom, TryInto},
-    marker::PhantomData,
-};
+use std::convert::TryFrom;
 
 use halo2::arithmetic::FieldExt;
 use halo2::pasta::pallas;
