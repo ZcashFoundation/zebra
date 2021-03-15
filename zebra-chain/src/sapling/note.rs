@@ -28,9 +28,9 @@ pub use nullifiers::Nullifier;
 /// address.
 #[derive(Clone, Debug)]
 pub struct Note {
-    /// The diversifer of the recipient’s shielded payment address.
+    /// The diversifer of the recipient's shielded payment address.
     pub diversifier: Diversifier,
-    /// The diversified transmission key of the recipient’s shielded
+    /// The diversified transmission key of the recipient's shielded
     /// payment address.
     pub transmission_key: TransmissionKey,
     /// An integer representing the value of the note in zatoshi.

@@ -30,13 +30,13 @@
 //! Sapling-on-Groth16). A single transaction can have multiple proofs or
 //! signatures of different kinds, depending on the transaction version and its
 //! structure. Verification of a transaction conventionally proceeds
-//! “depth-first”, checking that the structure is appropriate and then that all
+//! "depth-first", checking that the structure is appropriate and then that all
 //! the component signatures and proofs are valid.
 //!
 //! Now consider the problem of implementing batch verification in this context,
 //! using conventional batch verification APIs that require passing a list of
 //! signatures or proofs. This is quite complicated, requiring implementing a
-//! second transposed set of validation logic that proceeds “breadth-first”,
+//! second transposed set of validation logic that proceeds "breadth-first",
 //! checking that the structure of each transaction is appropriate while
 //! assembling collections of signatures and proofs to verify. This transposed
 //! validation logic must match the untransposed logic, but there is another

@@ -1,4 +1,4 @@
-//! Founders’ Reward calculations. - [§7.7][7.7]
+//! Founders' Reward calculations. - [§7.7][7.7]
 //!
 //! [7.7]: https://zips.z.cash/protocol/protocol.pdf#subsidies
 

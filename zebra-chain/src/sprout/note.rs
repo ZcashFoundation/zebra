@@ -33,7 +33,7 @@ pub use nullifiers::{Nullifier, NullifierSeed};
     derive(proptest_derive::Arbitrary)
 )]
 pub struct Note {
-    /// The paying key of the recipient’s shielded payment address
+    /// The paying key of the recipient's shielded payment address
     pub paying_key: PayingKey,
     /// An integer representing the value of the note in zatoshi (1 ZEC
     /// = 10^8 zatoshi)

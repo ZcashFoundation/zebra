@@ -70,7 +70,7 @@ lazy_static! {
     };
 }
 
-/// The index of a note’s commitment at the leafmost layer of its Note
+/// The index of a note's commitment at the leafmost layer of its Note
 /// Commitment Tree.
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#merkletree

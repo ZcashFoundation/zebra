@@ -35,10 +35,10 @@ mod magics {
 /// In Bitcoin a single byte is used for the version field identifying
 /// the address type. In Zcash two bytes are used. For addresses on
 /// the production network, this and the encoded length cause the first
-/// two characters of the Base58Check encoding to be fixed as “t3” for
-/// P2SH addresses, and as “t1” for P2PKH addresses. (This does not
+/// two characters of the Base58Check encoding to be fixed as "t3" for
+/// P2SH addresses, and as "t1" for P2PKH addresses. (This does not
 /// imply that a transparent Zcash address can be parsed identically
-/// to a Bitcoin address just by removing the “t”.)
+/// to a Bitcoin address just by removing the "t".)
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#transparentaddrencoding
 #[derive(Copy, Clone, Eq, PartialEq)]

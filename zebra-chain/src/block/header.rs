@@ -27,7 +27,7 @@ pub struct Header {
     /// the genesis block.
     ///
     /// This ensures no previous block can be changed without also changing this
-    /// block’s header.
+    /// block's header.
     pub previous_block_hash: Hash,
 
     /// The root of the Bitcoin-inherited transaction Merkle tree, binding the
@@ -52,7 +52,7 @@ pub struct Header {
     /// started hashing the header (according to the miner).
     pub time: DateTime<Utc>,
 
-    /// An encoded version of the target threshold this block’s header
+    /// An encoded version of the target threshold this block's header
     /// hash must be less than or equal to, in the same nBits format
     /// used by Bitcoin.
     ///
