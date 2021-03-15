@@ -79,7 +79,7 @@ fn prf_ock(ovk: [u8; 32], cv: [u8; 32], cm_u: [u8; 32], ephemeral_key: [u8; 32])
         .update(&ephemeral_key)
         .finalize();
 
-    *hash.as_bytes().try_into().expect("32 byte array")
+    <[u8; 32]>::try_from(hash.as_bytes()).expect("32 byte array")
 }
 
 /// Invokes Blake2s-256 as _CRH^ivk_, to derive the IncomingViewingKey
