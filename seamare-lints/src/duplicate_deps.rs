@@ -38,6 +38,7 @@ impl ProjectLinter for DirectDepDups {
             false
         });
         for (direct_dep, versions) in direct_deps {
+            println!("{}", direct_dep);
             if versions.len() > 1 {
                 let mut msg = format!("duplicate direct dependency '{}':\n", direct_dep);
                 for (version, packages) in versions {

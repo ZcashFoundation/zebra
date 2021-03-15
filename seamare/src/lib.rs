@@ -26,7 +26,7 @@ pub trait Linter: Send + Sync + fmt::Debug {
 }
 
 /// Represents common functionality among various `Context` instances.
-trait LintContext<'l> {
+pub trait LintContext<'l> {
     /// Returns the kind of this lint context.
     fn kind(&self) -> LintKind<'l>;
 
@@ -194,6 +194,7 @@ pub mod prelude {
         file_path::{FilePathContext, FilePathLinter},
         package::{PackageContext, PackageLinter, WorkspaceStatus},
         project::{ProjectContext, ProjectLinter},
-        LintFormatter, LintKind, LintLevel, LintMessage, LintSource, Linter, RunStatus, SkipReason,
+        LintContext, LintFormatter, LintKind, LintLevel, LintMessage, LintSource, Linter,
+        RunStatus, SkipReason,
     };
 }

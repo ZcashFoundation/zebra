@@ -11,3 +11,4 @@ seamare = { path = "../seamare" }
 seamare-lints = { path = "../seamare-lints" }
 guppy = "0.8.0"
 camino = "1.0.3"
+anyhow = "1.0.38"
