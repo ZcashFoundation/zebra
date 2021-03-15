@@ -5,6 +5,7 @@ use std::{
     collections::{BTreeSet, HashMap},
     iter::Extend,
     net::SocketAddr,
+    time::Instant,
 };
 
 use chrono::{DateTime, Utc};
@@ -21,6 +22,9 @@ pub struct AddressBook {
 
     /// The span for operations on this address book.
     span: Span,
+
+    /// The last time we logged a message about the address metrics
+    last_address_log: Option<Instant>,
 }
 
 /// Metrics about the states of the addresses in an [`AddressBook`].
@@ -52,9 +56,10 @@ impl AddressBook {
         let constructor_span = span.clone();
         let _guard = constructor_span.enter();
 
-        let new_book = AddressBook {
+        let mut new_book = AddressBook {
             by_addr: HashMap::default(),
             span,
+            last_address_log: None,
         };
 
         new_book.update_metrics();
@@ -103,6 +108,7 @@ impl AddressBook {
         }
 
         self.by_addr.insert(new.addr, new);
+        std::mem::drop(_guard);
         self.update_metrics();
     }
 
@@ -120,6 +126,7 @@ impl AddressBook {
         );
 
         if let Some(entry) = self.by_addr.remove(&removed_addr) {
+            std::mem::drop(_guard);
             self.update_metrics();
             Some(entry)
         } else {
@@ -264,7 +271,7 @@ impl AddressBook {
     }
 
     /// Update the metrics for this address book.
-    fn update_metrics(&self) {
+    fn update_metrics(&mut self) {
         let _guard = self.span.enter();
 
         let m = self.address_metrics();
@@ -283,9 +290,51 @@ impl AddressBook {
             m.recently_stopped_responding as f64
         );
 
-        debug!(
+        std::mem::drop(_guard);
+        self.log_metrics(&m);
+    }
+
+    /// Log metrics for this address book
+    fn log_metrics(&mut self, m: &AddressMetrics) {
+        let _guard = self.span.enter();
+
+        trace!(
             address_metrics = ?m,
         );
+
+        if m.responded > 0 {
+            return;
+        }
+
+        // These logs are designed to be human-readable in a terminal, at the
+        // default Zebra log level. If you need to know address states for
+        // every request, use the trace-level logs, or the metrics exporter.
+        if let Some(last_address_log) = self.last_address_log {
+            // Avoid duplicate address logs
+            if Instant::now().duration_since(last_address_log).as_secs() < 60 {
+                return;
+            }
+        } else {
+            // Suppress initial logs until the peer set has started up.
+            // There can be multiple address changes before the first peer has
+            // responded.
+            self.last_address_log = Some(Instant::now());
+            return;
+        }
+
+        self.last_address_log = Some(Instant::now());
+        // if all peers have failed
+        if m.responded + m.attempt_pending + m.never_attempted == 0 {
+            warn!(
+                address_metrics = ?m,
+                "all peer addresses have failed. Hint: check your network connection"
+            );
+        } else {
+            info!(
+                address_metrics = ?m,
+                "no active peer connections: trying gossiped addresses"
+            );
+        }
     }
 }
 
