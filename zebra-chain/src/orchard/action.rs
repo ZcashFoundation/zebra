@@ -1,11 +1,12 @@
 use std::io;
 
-use halo2::{arithmetic::FieldExt, pasta::pallas};
+use halo2::pasta::pallas;
 
 use crate::{
     primitives::redpallas::{self, SpendAuth},
     serialization::{
-        ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
+        serde_helpers, ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize,
+        ZcashSerialize,
     },
 };
 
@@ -30,7 +31,8 @@ pub struct Action {
     pub nullifier: note::Nullifier,
     /// The randomized validating key for spendAuthSig,
     pub rk: redpallas::VerificationKeyBytes<SpendAuth>,
-    /// The 𝑥-coordinate of the note commitment for the output note.
+    /// The x-coordinate of the note commitment for the output note.
+    #[serde(with = "serde_helpers::Base")]
     pub cm_x: pallas::Base,
     /// An encoding of an ephemeral Pallas public key.
     pub ephemeral_key: keys::EphemeralPublicKey,
