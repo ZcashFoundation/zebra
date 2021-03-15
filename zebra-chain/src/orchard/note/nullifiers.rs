@@ -2,7 +2,7 @@
 #![allow(dead_code)]
 
 use group::GroupEncoding;
-use halo2::pasta::pallas;
+use halo2::{arithmetic::FieldExt, pasta::pallas};
 
 use super::super::{
     commitment::NoteCommitment, keys::NullifierDerivingKey, sinsemilla::*, tree::Position,
@@ -28,7 +28,7 @@ pub fn mixing_pedersen_hash(P: pallas::Point, x: pallas::Scalar) -> pallas::Poin
 /// PoseidonHash(x, y) = f([x, y, 0])_1 (using 1-based indexing).
 ///
 /// [poseidonhash]: https://zips.z.cash/protocol/nu5.pdf#poseidonhash
-fn poseidon_hash(x: pallas::Base, y: pallas::Base) -> pallas::Base {
+fn poseidon_hash(_x: pallas::Base, _y: pallas::Base) -> pallas::Base {
     unimplemented!()
 }
 
@@ -41,8 +41,12 @@ fn poseidon_hash(x: pallas::Base, y: pallas::Base) -> pallas::Base {
 ///
 /// [concreteprfs]: https://zips.z.cash/protocol/protocol.pdf#concreteprfs
 /// [poseidonhash]: https://zips.z.cash/protocol/nu5.pdf#poseidonhash
-fn prf_nf(nk: [u8; 32], rho: [u8; 32]) -> [u8; 32] {
-    poseidon_hash(nk.into(), rho.into()).into()
+fn prf_nf(nk_bytes: [u8; 32], rho_bytes: [u8; 32]) -> [u8; 32] {
+    poseidon_hash(
+        pallas::Base::from_bytes(&nk_bytes).unwrap(),
+        pallas::Base::from_bytes(&rho_bytes).unwrap(),
+    )
+    .into()
 }
 
 /// A Nullifier for Orchard transactions

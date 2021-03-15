@@ -74,7 +74,9 @@ fn prf_expand(sk: [u8; 32], t: Vec<&[u8]>) -> [u8; 64] {
 
     state.update(&sk[..]);
 
-    t.iter().map(|t_i| state.update(t_i));
+    for t_i in t {
+        state.update(t_i);
+    }
 
     *state.finalize().as_array()
 }
@@ -370,14 +372,6 @@ impl fmt::Debug for NullifierDerivingKey {
     }
 }
 
-impl From<[u8; 32]> for NullifierDerivingKey {
-    fn from(bytes: [u8; 32]) -> Self {
-        Self(pallas::Base::from_bytes(&bytes).unwrap())
-    }
-}
-
-impl Eq for NullifierDerivingKey {}
-
 impl From<NullifierDerivingKey> for [u8; 32] {
     fn from(nk: NullifierDerivingKey) -> [u8; 32] {
         nk.0.to_bytes()
@@ -387,6 +381,18 @@ impl From<NullifierDerivingKey> for [u8; 32] {
 impl From<&NullifierDerivingKey> for [u8; 32] {
     fn from(nk: &NullifierDerivingKey) -> [u8; 32] {
         nk.0.to_bytes()
+    }
+}
+
+impl From<NullifierDerivingKey> for pallas::Base {
+    fn from(nk: NullifierDerivingKey) -> pallas::Base {
+        nk.0
+    }
+}
+
+impl From<[u8; 32]> for NullifierDerivingKey {
+    fn from(bytes: [u8; 32]) -> Self {
+        Self(pallas::Base::from_bytes(&bytes).unwrap())
     }
 }
 
@@ -401,6 +407,8 @@ impl From<SpendingKey> for NullifierDerivingKey {
         )))
     }
 }
+
+impl Eq for NullifierDerivingKey {}
 
 impl PartialEq<[u8; 32]> for NullifierDerivingKey {
     fn eq(&self, other: &[u8; 32]) -> bool {
@@ -501,7 +509,7 @@ impl fmt::Display for IncomingViewingKey {
 
 impl From<[u8; 32]> for IncomingViewingKey {
     /// Generate an _IncomingViewingKey_ from existing bytes.
-    fn from(mut bytes: [u8; 32]) -> Self {
+    fn from(bytes: [u8; 32]) -> Self {
         Self {
             // TODO: handle setting the Network better.
             network: Network::default(),
@@ -663,9 +671,13 @@ impl FullViewingKey {
         // let K = I2LEBSP_l_sk(rivk)
         let K: [u8; 32] = self.ivk_commit_randomness.into();
 
-        let t: Vec<&[u8]> = vec![&[0x82u8]];
-        t.push(&<[u8; 32]>::from(self.spend_validating_key));
-        t.push(&<[u8; 32]>::from(self.nullifier_deriving_key));
+        let mut t: Vec<&[u8]> = vec![&[0x82u8]];
+
+        let ak_bytes = <[u8; 32]>::from(self.spend_validating_key);
+        t.push(&ak_bytes);
+
+        let nk_bytes = <[u8; 32]>::from(self.nullifier_deriving_key);
+        t.push(&nk_bytes);
 
         // let R = PRF^expand_K( [0x82] || I2LEOSP256(ak) || I2LEOSP256(nk) )
         prf_expand(K, t)
