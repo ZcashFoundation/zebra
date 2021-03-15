@@ -217,7 +217,7 @@ impl AdjustedDifficulty {
     ///
     /// Implements `MeanTarget` from the Zcash specification.
     fn mean_target_difficulty(&self) -> ExpandedDifficulty {
-        // In Zebra, contextual validation starts after Sapling activation, so we
+        // In Zebra, contextual validation starts after Canopy activation, so we
         // can assume that the relevant chain contains at least 17 blocks.
         // Therefore, the `PoWLimit` case of `MeanTarget()` from the Zcash
         // specification is unreachable.

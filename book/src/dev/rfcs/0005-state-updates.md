@@ -258,7 +258,7 @@ new chains for `push` when new blocks arrive whose parent isn't a tip of an
 existing chain.
 
 **Note:** The `Chain` type's API is only designed to handle non-finalized
-data. The genesis block and all pre sapling blocks are always considered to
+data. The genesis block and all pre canopy blocks are always considered to
 be finalized blocks and should not be handled via the `Chain` type through
 `CommitBlock`. They should instead be committed directly to the finalized
 state with `CommitFinalizedBlock`. This is particularly important with the
@@ -419,7 +419,7 @@ chain and updates all side chains to match.
 
 Commit `block` to the non-finalized state.
 
-1. If the block is a pre-Sapling block, panic.
+1. If the block is a pre-Canopy block, panic.
 
 2. If any chains tip hash equal `block.header.previous_block_hash` remove that chain from `self.chain_set`
 

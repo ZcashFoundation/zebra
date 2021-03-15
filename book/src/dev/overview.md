@@ -27,8 +27,8 @@ The following are general desiderata for Zebra:
   perform Zcash-related tasks.  Implementation details of each
   component should not leak into all other components.
 
-* Zebra should checkpoint on Sapling activation and drop all
-  Sprout-related functionality not required post-Sapling.
+* Zebra should checkpoint on Canopy activation and drop all
+  Sprout-related functionality not required post-Canopy.
 
 ### Non-Goals
 
@@ -189,7 +189,7 @@ for Zcash script inspection, debugging, etc.
     transaction is accepted in a particular chain state context.
   - verifying mempool (unconfirmed) transactions
 - block checkpoints
-  - mandatory checkpoints (genesis block, sapling activation)
+  - mandatory checkpoints (genesis block, canopy activation)
   - optional regular checkpoints (every Nth block)
 - modifying the chain state
   - adding new blocks to `ZebraState`, including chain reorganisation

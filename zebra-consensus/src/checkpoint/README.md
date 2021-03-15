@@ -1,11 +1,11 @@
 # Zebra checkpoints
 
-Zebra validates pre-Sapling blocks using a list of `Mainnet` and `Testnet` block hash checkpoints:
+Zebra validates pre-Canopy blocks using a list of `Mainnet` and `Testnet` block hash checkpoints:
 
 - [Mainnet checkpoints](https://github.com/ZcashFoundation/zebra/blob/main/zebra-consensus/src/checkpoint/main-checkpoints.txt)
 - [Testnet checkpoints](https://github.com/ZcashFoundation/zebra/blob/main/zebra-consensus/src/checkpoint/test-checkpoints.txt)
 
-Zebra can also be configured to use these checkpoints after Sapling:
+Zebra can also be configured to use these checkpoints after Canopy:
 ```
 [consensus]
 checkpoint_sync = true
