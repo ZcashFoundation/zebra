@@ -5,8 +5,7 @@ use halo2::pasta::pallas;
 use crate::{
     primitives::redpallas::{self, SpendAuth},
     serialization::{
-        serde_helpers, ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize,
-        ZcashSerialize,
+        serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
     },
 };
 

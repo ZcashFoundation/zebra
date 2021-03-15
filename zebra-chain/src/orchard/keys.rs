@@ -9,7 +9,7 @@
 mod tests;
 
 use std::{
-    convert::{From, Into, TryFrom, TryInto},
+    convert::{From, Into, TryFrom},
     fmt,
     io::{self, Write},
     str::FromStr,

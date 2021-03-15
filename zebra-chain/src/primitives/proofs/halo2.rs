@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::{fmt, io};
 
-use crate::serialization::{serde_helpers, SerializationError, ZcashDeserialize, ZcashSerialize};
+use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 
 /// An encoding of a Halo2 proof, as used in [Zcash][halo2].
 ///
