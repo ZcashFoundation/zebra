@@ -65,6 +65,19 @@ impl From<Scalar> for pallas::Scalar {
 }
 
 #[derive(Deserialize, Serialize)]
+#[serde(remote = "pallas::Base")]
+pub struct Base {
+    #[serde(getter = "pallas::Base::to_bytes")]
+    bytes: [u8; 32],
+}
+
+impl From<Base> for pallas::Base {
+    fn from(local: Base) -> Self {
+        pallas::Base::from_bytes(&local.bytes).unwrap()
+    }
+}
+
+#[derive(Deserialize, Serialize)]
 #[serde(remote = "futures::future::Either")]
 pub enum Either<A, B> {
     Left(A),
