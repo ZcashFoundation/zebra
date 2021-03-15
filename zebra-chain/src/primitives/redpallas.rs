@@ -48,12 +48,12 @@ mod private {
     }
     impl Sealed for Binding {
         fn basepoint() -> pallas::Point {
-            pallas::Point::from_bytes(constants::BINDINGSIG_BASEPOINT_BYTES).unwrap()
+            pallas::Point::from_bytes(&constants::BINDINGSIG_BASEPOINT_BYTES).unwrap()
         }
     }
     impl Sealed for SpendAuth {
         fn basepoint() -> pallas::Point {
-            pallas::Point::from_bytes(constants::SPENDAUTHSIG_BASEPOINT_BYTES).unwrap()
+            pallas::Point::from_bytes(&constants::SPENDAUTHSIG_BASEPOINT_BYTES).unwrap()
         }
     }
 }

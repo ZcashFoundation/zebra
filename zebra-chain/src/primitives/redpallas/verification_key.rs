@@ -7,7 +7,7 @@ use std::{
 use group::{cofactor::CofactorGroup, GroupEncoding};
 use halo2::pasta::pallas;
 
-use super::{Error, SigType, SigningKey};
+use super::{Error, SigType};
 
 /// A refinement type for `[u8; 32]` indicating that the bytes represent
 /// an encoding of a RedPallas verification key.
@@ -79,6 +79,18 @@ impl<T: SigType> From<VerificationKey<T>> for [u8; 32] {
     }
 }
 
+impl<T: SigType> From<&pallas::Scalar> for VerificationKey<T> {
+    fn from(s: &pallas::Scalar) -> VerificationKey<T> {
+        let point = &T::basepoint() * s;
+        let bytes = VerificationKeyBytes {
+            bytes: pallas::Affine::from(&point).to_bytes(),
+            _marker: PhantomData,
+        };
+
+        Self { bytes, point }
+    }
+}
+
 impl<T: SigType> TryFrom<VerificationKeyBytes<T>> for VerificationKey<T> {
     type Error = Error;
 
@@ -107,16 +119,5 @@ impl<T: SigType> TryFrom<[u8; 32]> for VerificationKey<T> {
     fn try_from(bytes: [u8; 32]) -> Result<Self, Self::Error> {
         use std::convert::TryInto;
         VerificationKeyBytes::from(bytes).try_into()
-    }
-}
-
-impl<T: SigType> VerificationKey<T> {
-    pub(crate) fn from(s: &pallas::Scalar) -> VerificationKey<T> {
-        let point = &T::basepoint() * s;
-        let bytes = VerificationKeyBytes {
-            bytes: pallas::Affine::from(&point).to_bytes(),
-            _marker: PhantomData,
-        };
-        VerificationKey { bytes, point }
     }
 }
