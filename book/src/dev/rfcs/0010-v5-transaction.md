@@ -16,9 +16,9 @@ The Zebra software wants to be a protocol compatible Zcash implementation. One o
 # Definitions
 [definitions]: #definitions
 
-- `NU5`
-- `Orchard`
-- `Sapling`
+- `NU5` - the 5th Zcash network upgrade, counting from the `Overwinter` upgrade as upgrade zero.
+- `Orchard` - a new shielded pool introduced in `NU5`.
+- `Sapling` - a new shielded pool introduced in the 1st network upgrade. (`Sapling` is also the name of that network upgrade, but this RFC is focused on the `Sapling` shielded pool.)
 - `orchard data` - Data types needed to support orchard transactions.
 - `sapling data` - Data types needed to support sapling transactions.
 - `orchard transaction version` - Transactions that support orchard data. Currently only V5.
@@ -191,8 +191,12 @@ pub struct OutputV5 {
 The new V5 structure will create a new `OrchardShieldedData` type. This new type will be defined in a separated file: `zebra-chain/src/transaction/orchard_shielded_data.rs` and it will look as follows:
 ```
 pub struct OrchardShieldedData {
+    /// An action description.
+    ///
+    /// Storing this separately ensures that it is impossible to construct
+    /// an invalid `OrchardShieldedData` with no actions.
     pub first: Action,
-    pub rest_spends: Vec<Action>,
+    pub rest: Vec<Action>,
     pub binding_sig: Signature<Binding>,
 }
 ```
@@ -204,8 +208,8 @@ Finally, in the V5 transaction we have a new `OrchardFlags`. This is a bitfield 
 ```
 bitflags! {
     pub struct OrchardFlags: u8 {
-        const ENABLE_SPENDS = 0;
-        const ENABLE_OUTPUTS = 1;
+        const ENABLE_SPENDS = 0b00000001;
+        const ENABLE_OUTPUTS = 0b00000010;
         // Reserved, zeros (bits 2 .. 7)
     }
 }
@@ -217,4 +221,11 @@ bitflags! {
 - All renamed, modified and new types should serialize and deserialize. 
 - The full V4 and V5 transactions should serialize and deserialize.
 - Prop test strategies for v4 and v5 will be updated and created.
-
+- Before NU5 activation on testnet, test on the following test vectors:
+  - Hand-crafted Orchard, Orchard/Sapling, Orchard/Sprout, and Orchard/Sapling/Sprout transactions based on the spec
+  - Converted Sapling and Sapling/Sprout transactions in the existing test vectors from `V4` to `V5` format
+  - Any available `zcashd` test vectors
+- After NU5 activation on testnet:
+  - Add test vectors using the testnet activation block and 2 more post-activation blocks
+- After NU5 activation on mainnet:
+  - Add test vectors using the mainnet activation block and 2 more post-activation blocks
