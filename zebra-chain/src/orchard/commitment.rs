@@ -143,7 +143,7 @@ impl NoteCommitment {
     ///
     /// https://zips.z.cash/protocol/protocol.pdf#concreteextractorpallas
     pub fn extract_x(&self) -> pallas::Base {
-        match self.0.get_xy().into {
+        match self.0.get_xy().into() {
             // If Some, it's not the identity.
             Some((x, _)) => x,
             _ => pallas::Base::zero(),
