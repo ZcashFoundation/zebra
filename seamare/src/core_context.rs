@@ -15,6 +15,8 @@ pub struct CoreContext<'ctx> {
 
 impl<'ctx> CoreContext<'ctx> {
     /// Create a new context across the linter.
+    ///
+    /// It will return error when we can't build guppy `PackageGraph`, such as `current_dir` not inside a rust project.
     pub fn new(current_dir: &Utf8Path) -> Result<CoreContext> {
         let package_graph = Self::build_package_graph(current_dir)?;
         Ok(CoreContext {
