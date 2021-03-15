@@ -85,7 +85,7 @@ V4 {
 }
 ```
 
-`ShieldedData` is currently defined and implemented in `src/transaction/shielded_data.rs`. We propose to change `ShieldedData` into `SaplingShieldedDataV4` and to add `SaplingShieldedDataV5` into the same file.
+`ShieldedData` is currently defined and implemented in `src/transaction/shielded_data.rs`. We propose to rename this file to `src/transaction/sapling_shielded_data.rs`. Inside we will change `ShieldedData` into `SaplingShieldedDataV4` and add the new version `SaplingShieldedDataV5`.
 
 The difference between V4 and V5 shielded data is in the spends and outputs. For this reason we need to add V4 and V5 spend and output versions to our code:
 
@@ -150,7 +150,7 @@ V5 {
 }
 ```
 
-`SaplingShieldedDataV5` is different from `SaplingShieldedDataV4` so a new type will be defined and implemented in `zebra-chain/src/transaction/shielded_data.rs`.
+`SaplingShieldedDataV5` is different from `SaplingShieldedDataV4` so a new type will be defined and implemented in `zebra-chain/src/transaction/sapling_shielded_data.rs`.
 Definition will look as follows:
 
 ```
