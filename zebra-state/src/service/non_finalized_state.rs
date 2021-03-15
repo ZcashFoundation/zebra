@@ -11,6 +11,7 @@ use std::{collections::BTreeSet, mem, ops::Deref, sync::Arc};
 
 use zebra_chain::{
     block::{self, Block},
+    parameters::{Network, NetworkUpgrade::Canopy},
     transaction::{self, Transaction},
     transparent,
 };
@@ -25,7 +26,9 @@ pub struct NonFinalizedState {
     /// Verified, non-finalized chains, in ascending order.
     ///
     /// The best chain is `chain_set.last()` or `chain_set.iter().next_back()`.
-    chain_set: BTreeSet<Box<Chain>>,
+    pub chain_set: BTreeSet<Box<Chain>>,
+    /// The configured Zcash network
+    pub network: Network,
 }
 
 impl NonFinalizedState {
@@ -70,6 +73,15 @@ impl NonFinalizedState {
     /// Commit block to the non-finalized state.
     pub fn commit_block(&mut self, prepared: PreparedBlock) {
         let parent_hash = prepared.block.header.previous_block_hash;
+        let (height, hash) = (prepared.height, prepared.hash);
+
+        let canopy_height = Canopy.activation_height(self.network).unwrap();
+        if height < canopy_height {
+            panic!(
+                "commit_block can only be applied to block heights that are equal \
+                or greater than canopy network upgrade height"
+            );
+        }
 
         let mut parent_chain = self
             .take_chain_if(|chain| chain.non_finalized_tip_hash() == parent_hash)
@@ -81,7 +93,6 @@ impl NonFinalizedState {
             })
             .expect("commit_block is only called with blocks that are ready to be commited");
 
-        let (height, hash) = (prepared.height, prepared.hash);
         parent_chain.push(prepared);
         self.chain_set.insert(parent_chain);
         self.update_metrics_for_committed_block(height, hash);
