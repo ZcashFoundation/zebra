@@ -1,4 +1,7 @@
-use std::sync::{Arc, Mutex};
+use std::{
+    pin::Pin,
+    sync::{Arc, Mutex},
+};
 
 use futures::future::TryFutureExt;
 use pin_project::pin_project;
@@ -9,6 +12,8 @@ use tokio::{
 };
 use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
+
+use crate::semaphore;
 
 use super::{
     error::{Closed, ServiceError},
@@ -23,7 +28,7 @@ use super::{
 /// as part of the public API. This is the "sealed" pattern to include "private"
 /// types in public traits that are not meant for consumers of the library to
 /// implement (only call).
-#[pin_project]
+#[pin_project(PinnedDrop)]
 #[derive(Debug)]
 pub struct Worker<T, Request>
 where
@@ -36,6 +41,7 @@ where
     handle: Handle,
     max_items: usize,
     max_latency: std::time::Duration,
+    close: Option<semaphore::Close>,
 }
 
 /// Get the error out
@@ -54,6 +60,7 @@ where
         rx: mpsc::UnboundedReceiver<Message<Request, T::Future>>,
         max_items: usize,
         max_latency: std::time::Duration,
+        close: semaphore::Close,
     ) -> (Handle, Worker<T, Request>) {
         let handle = Handle {
             inner: Arc::new(Mutex::new(None)),
@@ -66,6 +73,7 @@ where
             failed: None,
             max_items,
             max_latency,
+            close: Some(close),
         };
 
         (handle, worker)
@@ -88,6 +96,12 @@ where
                         .as_ref()
                         .expect("Worker::failed did not set self.failed?")
                         .clone()));
+
+                    // Wake any tasks waiting on channel capacity.
+                    if let Some(close) = self.close.take() {
+                        tracing::debug!("waking pending tasks");
+                        close.close();
+                    }
                 }
             }
         }
@@ -218,6 +232,19 @@ impl Clone for Handle {
     fn clone(&self) -> Handle {
         Handle {
             inner: self.inner.clone(),
+        }
+    }
+}
+
+#[pin_project::pinned_drop]
+impl<T, Request> PinnedDrop for Worker<T, Request>
+where
+    T: Service<BatchControl<Request>>,
+    T::Error: Into<crate::BoxError>,
+{
+    fn drop(mut self: Pin<&mut Self>) {
+        if let Some(close) = self.as_mut().close.take() {
+            close.close();
         }
     }
 }

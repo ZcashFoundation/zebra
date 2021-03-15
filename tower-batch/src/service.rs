@@ -101,9 +101,9 @@ where
         // We choose a bound that allows callers to check readiness for every item in
         // a batch, then actually submit those items.
         let bound = max_items;
-        let semaphore = Semaphore::new(bound);
+        let (semaphore, close) = Semaphore::new_with_close(bound);
 
-        let (handle, worker) = Worker::new(service, rx, max_items, max_latency);
+        let (handle, worker) = Worker::new(service, rx, max_items, max_latency, close);
         let batch = Batch {
             tx,
             semaphore,
