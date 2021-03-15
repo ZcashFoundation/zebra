@@ -8,6 +8,7 @@
 //! [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
 //! [3.1]: https://zips.z.cash/protocol/protocol.pdf#addressesandkeys
 #![allow(clippy::unit_arg)]
+#![allow(dead_code)]
 
 #[cfg(test)]
 mod test_vectors;

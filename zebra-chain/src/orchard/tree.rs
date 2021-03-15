@@ -11,11 +11,12 @@
 //! A root of a note commitment tree is associated with each treestate.
 
 #![allow(clippy::unit_arg)]
+#![allow(dead_code)]
 
 use std::{collections::VecDeque, fmt};
 
 use bitvec::prelude::*;
-use group::GroupEncoding;
+use halo2::arithmetic::FieldExt;
 use lazy_static::lazy_static;
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
@@ -42,7 +43,7 @@ fn merkle_crh_orchard(layer: u8, left: [u8; 32], right: [u8; 32]) -> [u8; 32] {
     s.extend_from_slice(&left.bits::<Lsb0>()[0..255]);
     s.extend_from_slice(&right.bits::<Lsb0>()[0..255]);
 
-    sinsemilla_hash_to_point(b"Zcash_PH", &s).to_bytes()
+    sinsemilla_hash(b"z.cash:Orchard-MerkleCRH", &s).to_bytes()
 }
 
 lazy_static! {
@@ -147,7 +148,7 @@ impl From<Vec<jubjub::Fq>> for NoteCommitmentTree {
 }
 
 impl NoteCommitmentTree {
-    /// Get the Jubjub-based Pedersen hash of root node of this merkle tree of
+    /// Get the Pallas-based Pedersen hash of root node of this merkle tree of
     /// commitment notes.
     pub fn hash(&self) -> [u8; 32] {
         self.root.0

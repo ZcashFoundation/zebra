@@ -1,7 +1,8 @@
 //! Orchard key types.
 //!
-//! [orchardkeycomponents]: https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents
+//! https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents
 #![allow(clippy::unit_arg)]
+#![allow(dead_code)]
 
 // #[cfg(test)]
 // mod test_vectors;
@@ -9,7 +10,7 @@
 mod tests;
 
 use std::{
-    convert::{From, Into, TryFrom},
+    convert::{From, Into, TryFrom, TryInto},
     fmt,
     io::{self, Write},
     str::FromStr,
