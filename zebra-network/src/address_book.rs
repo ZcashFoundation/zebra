@@ -23,6 +23,28 @@ pub struct AddressBook {
     span: Span,
 }
 
+/// Metrics about the states of the addresses in an [`AddressBook`].
+#[derive(Debug)]
+pub struct AddressMetrics {
+    /// The number of addresses in the `Responded` state.
+    responded: usize,
+
+    /// The number of addresses in the `NeverAttempted` state.
+    never_attempted: usize,
+
+    /// The number of addresses in the `Failed` state.
+    failed: usize,
+
+    /// The number of addresses in the `AttemptPending` state.
+    attempt_pending: usize,
+
+    /// The number of `Responded` addresses within the liveness limit.
+    recently_live: usize,
+
+    /// The number of `Responded` addresses outside the liveness limit.
+    recently_stopped_responding: usize,
+}
+
 #[allow(clippy::len_without_is_empty)]
 impl AddressBook {
     /// Construct an `AddressBook` with the given [`tracing::Span`].
@@ -219,42 +241,50 @@ impl AddressBook {
         self.by_addr.len()
     }
 
-    /// Update the metrics for this address book.
-    fn update_metrics(&self) {
-        let _guard = self.span.enter();
-
+    /// Returns metrics for the addresses in this address book.
+    pub fn address_metrics(&self) -> AddressMetrics {
         let responded = self.state_peers(PeerAddrState::Responded).count();
         let never_attempted = self.state_peers(PeerAddrState::NeverAttempted).count();
         let failed = self.state_peers(PeerAddrState::Failed).count();
-        let pending = self.state_peers(PeerAddrState::AttemptPending).count();
+        let attempt_pending = self.state_peers(PeerAddrState::AttemptPending).count();
 
         let recently_live = self.recently_live_peers().count();
         let recently_stopped_responding = responded
             .checked_sub(recently_live)
             .expect("all recently live peers must have responded");
 
+        AddressMetrics {
+            responded,
+            never_attempted,
+            failed,
+            attempt_pending,
+            recently_live,
+            recently_stopped_responding,
+        }
+    }
+
+    /// Update the metrics for this address book.
+    fn update_metrics(&self) {
+        let _guard = self.span.enter();
+
+        let m = self.address_metrics();
+
+        // TODO: rename to address_book.[state_name]
+        metrics::gauge!("candidate_set.responded", m.responded as f64);
+        metrics::gauge!("candidate_set.gossiped", m.never_attempted as f64);
+        metrics::gauge!("candidate_set.failed", m.failed as f64);
+        metrics::gauge!("candidate_set.pending", m.attempt_pending as f64);
+
         // TODO: rename to address_book.responded.recently_live
-        metrics::gauge!("candidate_set.recently_live", recently_live as f64);
+        metrics::gauge!("candidate_set.recently_live", m.recently_live as f64);
         // TODO: rename to address_book.responded.stopped_responding
         metrics::gauge!(
             "candidate_set.disconnected",
-            recently_stopped_responding as f64
+            m.recently_stopped_responding as f64
         );
 
-        // TODO: rename to address_book.[state_name]
-        metrics::gauge!("candidate_set.responded", responded as f64);
-        metrics::gauge!("candidate_set.gossiped", never_attempted as f64);
-        metrics::gauge!("candidate_set.failed", failed as f64);
-        metrics::gauge!("candidate_set.pending", pending as f64);
-
         debug!(
-            %recently_live,
-            %recently_stopped_responding,
-            %responded,
-            %never_attempted,
-            %failed,
-            %pending,
-            "address book peers"
+            address_metrics = ?m,
         );
     }
 }
