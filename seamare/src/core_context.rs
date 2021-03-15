@@ -40,6 +40,6 @@ impl<'ctx> CoreContext<'ctx> {
     fn build_package_graph(current_dir: &Utf8Path) -> Result<PackageGraph> {
         let mut cmd = MetadataCommand::new();
         cmd.current_dir(current_dir);
-        cmd.build_graph().map_err(|e| SeamareError::Guppy(e))
+        cmd.build_graph().map_err(SeamareError::Guppy)
     }
 }
