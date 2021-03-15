@@ -5,6 +5,8 @@ use guppy::MetadataCommand;
 
 // TODO: maybe it's better to store `project_root` field like what x-linter does.
 // but it's borrowed from inner `package_graph` field, doesn't know how to handle this for now..
+
+/// Global context shared across cargo-seamare commands.
 #[derive(Debug)]
 pub struct CoreContext<'ctx> {
     current_dir: &'ctx Utf8Path,

@@ -1,6 +1,7 @@
 // Copyright (c) The Diem Core Contributors
 // SPDX-License-Identifier: Apache-2.0
 
+// TODO: it's just copied from x-linter, maybe we don't need this `ContentLinter` and `ContentContext`?
 use crate::{prelude::*, LintContext};
 use std::str;
 

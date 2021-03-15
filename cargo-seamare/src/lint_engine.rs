@@ -1,5 +1,7 @@
 use seamare::prelude::*;
 
+// TODO: I don't know if we need `PackageLinter`, `FilePathLinter`, `ContentLinter`, but for now, let's keep them here.
+
 /// Configuration for the lint engine.
 #[derive(Clone, Debug)]
 pub struct LintEngineConfig<'cfg> {
@@ -31,6 +33,7 @@ impl<'cfg> LintEngineConfig<'cfg> {
         self
     }
 
+    #[allow(dead_code)]
     pub fn with_package_linters(
         &mut self,
         package_linters: &'cfg [&'cfg dyn PackageLinter],
@@ -39,6 +42,7 @@ impl<'cfg> LintEngineConfig<'cfg> {
         self
     }
 
+    #[allow(dead_code)]
     pub fn with_file_path_linters(
         &mut self,
         file_path_linters: &'cfg [&'cfg dyn FilePathLinter],
@@ -47,6 +51,7 @@ impl<'cfg> LintEngineConfig<'cfg> {
         self
     }
 
+    #[allow(dead_code)]
     pub fn with_content_linters(
         &mut self,
         content_linters: &'cfg [&'cfg dyn ContentLinter],
@@ -55,6 +60,7 @@ impl<'cfg> LintEngineConfig<'cfg> {
         self
     }
 
+    #[allow(dead_code)]
     pub fn fail_fast(&mut self, fail_fast: bool) -> &mut Self {
         self.fail_fast = fail_fast;
         self
@@ -83,9 +89,7 @@ impl<'cfg> LintEngine<'cfg> {
         let mut skipped = vec![];
         let mut messages = vec![];
 
-        // TODO: add support for file linters.
-
-        // Run project linters.
+        // Just run project linters.
         if !self.config.project_linters.is_empty() {
             for linter in self.config.project_linters {
                 let source = self.project_ctx.source(linter.name());
