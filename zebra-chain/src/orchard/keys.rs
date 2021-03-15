@@ -17,6 +17,7 @@ use std::{
 
 use aes::Aes256;
 use bech32::{self, FromBase32, ToBase32, Variant};
+use bitvec::prelude::*;
 use fpe::ff1::{BinaryNumeralString, FF1};
 use group::GroupEncoding;
 use halo2::{
@@ -65,7 +66,7 @@ fn prp_d(K: [u8; 32], d: [u8; 11]) -> [u8; 11] {
 // TODO: This is basically a duplicate of the one in our sapling module, its
 // definition in the draft NU5 spec is incomplete so I'm putting it here in case
 // it changes.
-fn prf_expand(sk: [u8; 32], t: &[&[u8]]) -> [u8; 64] {
+fn prf_expand(sk: [u8; 32], t: Vec<&[u8]>) -> [u8; 64] {
     let mut state = blake2b_simd::Params::new()
         .hash_length(64)
         .personal(b"Zcash_ExpandSeed")
@@ -244,7 +245,7 @@ impl From<SpendingKey> for SpendAuthorizingKey {
     /// https://zips.z.cash/protocol/protocol.pdf#orchardkeycomponents
     /// https://zips.z.cash/protocol/protocol.pdf#concreteprfs
     fn from(spending_key: SpendingKey) -> SpendAuthorizingKey {
-        let hash_bytes = prf_expand(spending_key.bytes, &[&[6]]);
+        let hash_bytes = prf_expand(spending_key.bytes, vec![&[6]]);
 
         // Handles ToScalar^Orchard
         Self(pallas::Scalar::from_bytes_wide(&hash_bytes))
@@ -296,7 +297,9 @@ impl From<FullViewingKey> for OutgoingViewingKey {
         let R = fvk.to_R();
 
         // let ovk be the remaining [32] bytes of R [which is 64 bytes]
-        Self::from(R[32..64])
+        let ovk_bytes: [u8; 32] = R[32..64].try_into().expect("32 byte array");
+
+        Self::from(ovk_bytes)
     }
 }
 
@@ -333,6 +336,7 @@ impl From<SpendValidatingKey> for [u8; 32] {
 impl From<SpendAuthorizingKey> for SpendValidatingKey {
     fn from(ask: SpendAuthorizingKey) -> Self {
         let sk = redpallas::SigningKey::<SpendAuth>::try_from(<[u8; 32]>::from(ask)).unwrap();
+
         Self(redpallas::VerificationKey::from(&sk))
     }
 }
@@ -393,7 +397,7 @@ impl From<SpendingKey> for NullifierDerivingKey {
     fn from(sk: SpendingKey) -> Self {
         Self(pallas::Base::from_bytes_wide(&prf_expand(
             sk.into(),
-            &[&[7]],
+            vec![&[7]],
         )))
     }
 }
@@ -421,7 +425,7 @@ impl From<SpendingKey> for IvkCommitRandomness {
     ///
     /// https://zips.z.cash/protocol/protocol.pdf#orchardkeycomponents
     fn from(sk: SpendingKey) -> Self {
-        let scalar = pallas::Scalar::from_bytes_wide(&prf_expand(sk.into(), &[&[8]]));
+        let scalar = pallas::Scalar::from_bytes_wide(&prf_expand(sk.into(), vec![&[8]]));
 
         Self(scalar)
     }
@@ -430,6 +434,12 @@ impl From<SpendingKey> for IvkCommitRandomness {
 impl From<IvkCommitRandomness> for [u8; 32] {
     fn from(rivk: IvkCommitRandomness) -> Self {
         rivk.0.into()
+    }
+}
+
+impl From<IvkCommitRandomness> for pallas::Scalar {
+    fn from(rivk: IvkCommitRandomness) -> Self {
+        rivk.0
     }
 }
 
@@ -506,18 +516,22 @@ impl From<FullViewingKey> for IncomingViewingKey {
     ///
     /// https://zips.z.cash/protocol/protocol.pdf#orchardkeycomponents
     /// https://zips.z.cash/protocol/protocol.pdf#concreteprfs
+    #[allow(non_snake_case)]
     fn from(fvk: FullViewingKey) -> Self {
-        let M = (
-            fvk.spend_validating_key.into(),
-            fvk.nullifier_deriving_key.into(),
-        )
-            .concat();
+        let mut M: BitVec<Lsb0, u8> = BitVec::new();
+
+        M.append(&mut BitVec::<Lsb0, u8>::from_slice(
+            &<[u8; 32]>::from(fvk.spend_validating_key)[..],
+        ));
+        M.append(&mut BitVec::<Lsb0, u8>::from_slice(
+            &<[u8; 32]>::from(fvk.nullifier_deriving_key)[..],
+        ));
 
         // Commit^ivk_rivk
         let commit_x = sinsemilla_short_commit(
             fvk.ivk_commit_randomness.into(),
             b"z.cash:Orchard-CommitIvk",
-            M,
+            &M,
         );
 
         Self {
@@ -649,15 +663,12 @@ impl FullViewingKey {
         // let K = I2LEBSP_l_sk(rivk)
         let K: [u8; 32] = self.ivk_commit_randomness.into();
 
+        let t: Vec<&[u8]> = vec![&[0x82u8]];
+        t.push(&<[u8; 32]>::from(self.spend_validating_key));
+        t.push(&<[u8; 32]>::from(self.nullifier_deriving_key));
+
         // let R = PRF^expand_K( [0x82] || I2LEOSP256(ak) || I2LEOSP256(nk) )
-        prf_expand(
-            K,
-            &[
-                &[0x82u8],
-                self.spend_validating_key.into(),
-                self.nullifier_deriving_key.into(),
-            ],
-        )
+        prf_expand(K, t)
     }
 }
 
