@@ -82,7 +82,12 @@ lazy_static! {
             (949_496, BLOCK_MAINNET_949496_BYTES.as_ref()),
             (975_066, BLOCK_MAINNET_975066_BYTES.as_ref()),
             (982_681, BLOCK_MAINNET_982681_BYTES.as_ref()),
-            // TODO: Canopy and First Halving, see #1099
+            // Last Heartwood
+            (1_046_399, BLOCK_MAINNET_1046399_BYTES.as_ref()),
+            // Canopy and First Coinbase Halving
+            (1_046_400, BLOCK_MAINNET_1046400_BYTES.as_ref()),
+            (1_046_401, BLOCK_MAINNET_1046401_BYTES.as_ref()),
+            (1_180_900, BLOCK_MAINNET_1180900_BYTES.as_ref()),
         ].iter().cloned().collect();
 
     /// Testnet blocks, indexed by height
@@ -276,14 +281,29 @@ lazy_static! {
         <Vec<u8>>::from_hex(include_str!("block-main-0-982-681.txt").trim())
         .expect("Block bytes are in valid hex representation");
 
-    // TODO: Canopy transition, after mainnet canopy activation
-    // for i in 1046399 1046400 1046401; do
+    // Canopy transition and Coinbase Halving
+    // (On mainnet, Canopy happens at the same block as the first coinbase halving)
+    // for i in 1046399 1046400; do
     //     zcash-cli getblock $i 0 > block-main-$[i/1000000]-0$[i/1000%1000]-$[i%1000].txt
     // done
+    pub static ref BLOCK_MAINNET_1046399_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-main-1-046-399.txt").trim())
+            .expect("Block bytes are in valid hex representation");
+    pub static ref BLOCK_MAINNET_1046400_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-main-1-046-400.txt").trim())
+            .expect("Block bytes are in valid hex representation");
+    // Block 1046401 is 72 kB in size (currently the second-largest test vector), so we store it in binary.
+    // i=1046401
+    // zcash-cli getblock $i 0 | xxd -revert -plain > block-main-$[i/1000000]-0$[i/1000%1000]-$[i%1000].bin
+    pub static ref BLOCK_MAINNET_1046401_BYTES: Vec<u8> = include_bytes!("block-main-1-046-401.bin").to_vec();
 
-    // TODO: one more Canopy Mainnet block
-    //       (so that we have at least 3 blocks from Canopy)
-    // Note: don't use the highest block, it must be below the reorg limit!
+    // One more Canopy/Post-Halving block
+    // (so that we have at least 3 blocks after canopy/halving)
+    // i=1180900
+    // zcash-cli getblock $i 0 > block-main-$[i/1000000]-$[i/1000%1000]-$[i%1000].txt
+    pub static ref BLOCK_MAINNET_1180900_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-main-1-180-900.txt").trim())
+            .expect("Block bytes are in valid hex representation");
 
     // Testnet
 
