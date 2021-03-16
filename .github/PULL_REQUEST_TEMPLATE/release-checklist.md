@@ -104,6 +104,8 @@ From "Keep a Changelog":
 * `Fixed` for any bug fixes.
 * `Security` in case of vulnerabilities.
 
+**Important**: Any merge into `main` while the Changelog is still in draft state will remove all the changes made and create a new raw list. Save your Changelog changes locally while in draft to avoid having to redo the list if that happens.
+
 ## After merging this PR
 - [ ] Update the draft release with the final changelog
 - [ ] Point the draft release at the commit resulting from merging this PR, using the correct version tag name
