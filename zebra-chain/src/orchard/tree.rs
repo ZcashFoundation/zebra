@@ -29,17 +29,18 @@ const MERKLE_DEPTH: usize = 32;
 ///
 /// Used to hash incremental Merkle tree hash values for Orchard.
 ///
-/// MerkleCRH^Orchard(layer, left, right) := SinsemillaHashToPoint(“Zcash_PH”, l || left || right),
+/// MerkleCRH^Orchard(layer, left, right) := SinsemillaHash("z.cash:Orchard-MerkleCRH", l || left || right),
 ///
-/// where l = I2LEBSP_6(MerkleDepth^Orchard − 1 − layer) and left, right, and
+/// where l = I2LEBSP_10(MerkleDepth^Orchard − 1 − layer) and left, right, and
 /// the output are all technically 255 bits (l_MerkleOrchard), not 256.
 ///
 /// https://zips.z.cash/protocol/nu5.pdf#merklecrh
+/// https://zips.z.cash/protocol/nu5.pdf#constants
 fn merkle_crh_orchard(layer: u8, left: [u8; 32], right: [u8; 32]) -> [u8; 32] {
     let mut s = bitvec![Lsb0, u8;];
 
-    // Prefix: l = I2LEBSP_6(MerkleDepth^Orchard − 1 − layer)
-    s.extend_from_slice(&layer.bits::<Lsb0>()[0..6]);
+    // Prefix: l = I2LEBSP_10(MerkleDepth^Orchard − 1 − layer)
+    s.extend_from_slice(&layer.bits::<Lsb0>()[0..10]);
     s.extend_from_slice(&left.bits::<Lsb0>()[0..255]);
     s.extend_from_slice(&right.bits::<Lsb0>()[0..255]);
 
