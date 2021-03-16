@@ -286,8 +286,22 @@ mod tests {
     fn best_chain_wins() -> Result<()> {
         zebra_test::init();
 
-        let block1: Arc<Block> =
-            zebra_test::vectors::BLOCK_MAINNET_419200_BYTES.zcash_deserialize_into()?;
+        best_chain_wins_for_network(Network::Mainnet)?;
+        best_chain_wins_for_network(Network::Testnet)?;
+
+        Ok(())
+    }
+
+    fn best_chain_wins_for_network(network: Network) -> Result<()> {
+        let block1: Arc<Block> = match network {
+            Network::Mainnet => {
+                zebra_test::vectors::BLOCK_MAINNET_1180900_BYTES.zcash_deserialize_into()?
+            }
+            Network::Testnet => {
+                zebra_test::vectors::BLOCK_TESTNET_1326100_BYTES.zcash_deserialize_into()?
+            }
+        };
+
         let block2 = block1.make_fake_child().set_work(10);
         let child = block1.make_fake_child().set_work(1);
 
@@ -307,8 +321,22 @@ mod tests {
     fn finalize_pops_from_best_chain() -> Result<()> {
         zebra_test::init();
 
-        let block1: Arc<Block> =
-            zebra_test::vectors::BLOCK_MAINNET_419200_BYTES.zcash_deserialize_into()?;
+        finalize_pops_from_best_chain_for_network(Network::Mainnet)?;
+        finalize_pops_from_best_chain_for_network(Network::Testnet)?;
+
+        Ok(())
+    }
+
+    fn finalize_pops_from_best_chain_for_network(network: Network) -> Result<()> {
+        let block1: Arc<Block> = match network {
+            Network::Mainnet => {
+                zebra_test::vectors::BLOCK_MAINNET_1180900_BYTES.zcash_deserialize_into()?
+            }
+            Network::Testnet => {
+                zebra_test::vectors::BLOCK_TESTNET_1326100_BYTES.zcash_deserialize_into()?
+            }
+        };
+
         let block2 = block1.make_fake_child().set_work(10);
         let child = block1.make_fake_child().set_work(1);
 
@@ -333,8 +361,24 @@ mod tests {
     fn commit_block_extending_best_chain_doesnt_drop_worst_chains() -> Result<()> {
         zebra_test::init();
 
-        let block1: Arc<Block> =
-            zebra_test::vectors::BLOCK_MAINNET_419200_BYTES.zcash_deserialize_into()?;
+        commit_block_extending_best_chain_doesnt_drop_worst_chains_for_network(Network::Mainnet)?;
+        commit_block_extending_best_chain_doesnt_drop_worst_chains_for_network(Network::Testnet)?;
+
+        Ok(())
+    }
+
+    fn commit_block_extending_best_chain_doesnt_drop_worst_chains_for_network(
+        network: Network,
+    ) -> Result<()> {
+        let block1: Arc<Block> = match network {
+            Network::Mainnet => {
+                zebra_test::vectors::BLOCK_MAINNET_1180900_BYTES.zcash_deserialize_into()?
+            }
+            Network::Testnet => {
+                zebra_test::vectors::BLOCK_TESTNET_1326100_BYTES.zcash_deserialize_into()?
+            }
+        };
+
         let block2 = block1.make_fake_child().set_work(10);
         let child1 = block1.make_fake_child().set_work(1);
         let child2 = block2.make_fake_child().set_work(1);
@@ -357,8 +401,21 @@ mod tests {
     fn shorter_chain_can_be_best_chain() -> Result<()> {
         zebra_test::init();
 
-        let block1: Arc<Block> =
-            zebra_test::vectors::BLOCK_MAINNET_419200_BYTES.zcash_deserialize_into()?;
+        shorter_chain_can_be_best_chain_for_network(Network::Mainnet)?;
+        shorter_chain_can_be_best_chain_for_network(Network::Testnet)?;
+
+        Ok(())
+    }
+
+    fn shorter_chain_can_be_best_chain_for_network(network: Network) -> Result<()> {
+        let block1: Arc<Block> = match network {
+            Network::Mainnet => {
+                zebra_test::vectors::BLOCK_MAINNET_1180900_BYTES.zcash_deserialize_into()?
+            }
+            Network::Testnet => {
+                zebra_test::vectors::BLOCK_TESTNET_1326100_BYTES.zcash_deserialize_into()?
+            }
+        };
 
         let long_chain_block1 = block1.make_fake_child().set_work(1);
         let long_chain_block2 = long_chain_block1.make_fake_child().set_work(1);
@@ -381,8 +438,21 @@ mod tests {
     fn longer_chain_with_more_work_wins() -> Result<()> {
         zebra_test::init();
 
-        let block1: Arc<Block> =
-            zebra_test::vectors::BLOCK_MAINNET_419200_BYTES.zcash_deserialize_into()?;
+        longer_chain_with_more_work_wins_for_network(Network::Mainnet)?;
+        longer_chain_with_more_work_wins_for_network(Network::Testnet)?;
+
+        Ok(())
+    }
+
+    fn longer_chain_with_more_work_wins_for_network(network: Network) -> Result<()> {
+        let block1: Arc<Block> = match network {
+            Network::Mainnet => {
+                zebra_test::vectors::BLOCK_MAINNET_1180900_BYTES.zcash_deserialize_into()?
+            }
+            Network::Testnet => {
+                zebra_test::vectors::BLOCK_TESTNET_1326100_BYTES.zcash_deserialize_into()?
+            }
+        };
 
         let long_chain_block1 = block1.make_fake_child().set_work(1);
         let long_chain_block2 = long_chain_block1.make_fake_child().set_work(1);
@@ -409,8 +479,20 @@ mod tests {
     fn equal_length_goes_to_more_work() -> Result<()> {
         zebra_test::init();
 
-        let block1: Arc<Block> =
-            zebra_test::vectors::BLOCK_MAINNET_419200_BYTES.zcash_deserialize_into()?;
+        equal_length_goes_to_more_work_for_network(Network::Mainnet)?;
+        equal_length_goes_to_more_work_for_network(Network::Testnet)?;
+
+        Ok(())
+    }
+    fn equal_length_goes_to_more_work_for_network(network: Network) -> Result<()> {
+        let block1: Arc<Block> = match network {
+            Network::Mainnet => {
+                zebra_test::vectors::BLOCK_MAINNET_1180900_BYTES.zcash_deserialize_into()?
+            }
+            Network::Testnet => {
+                zebra_test::vectors::BLOCK_TESTNET_1326100_BYTES.zcash_deserialize_into()?
+            }
+        };
 
         let less_work_child = block1.make_fake_child().set_work(1);
         let more_work_child = block1.make_fake_child().set_work(3);
