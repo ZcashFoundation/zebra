@@ -16,7 +16,6 @@
 #![allow(unknown_lints)]
 // Disable old lint warnings on nightly until 1.51 is stable
 #![allow(renamed_and_removed_lints)]
-#![warn(missing_docs)]
 
 #[macro_use]
 extern crate serde;

@@ -1,13 +1,16 @@
 //! Orchard-related functionality.
 
+#![warn(missing_docs)]
+
 mod action;
 mod address;
 #[cfg(any(test, feature = "proptest-impl"))]
 mod arbitrary;
 mod commitment;
-pub mod keys;
 mod note;
 mod sinsemilla;
+
+pub mod keys;
 pub mod tree;
 
 pub use action::Action;
