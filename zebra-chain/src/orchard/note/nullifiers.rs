@@ -1,27 +1,13 @@
 #![allow(clippy::unit_arg)]
 #![allow(dead_code)]
 
-use group::GroupEncoding;
 use halo2::{arithmetic::FieldExt, pasta::pallas};
 
-use super::super::{
-    commitment::NoteCommitment, keys::NullifierDerivingKey, sinsemilla::*, tree::Position,
-};
+use crate::serialization::serde_helpers;
 
-/// Orchard ixing Pedersen hash Function
-///
-/// Used to compute ρ from a note commitment and its position in the note
-/// commitment tree.  It takes as input a Pedersen commitment P, and hashes it
-/// with another input x.
-///
-/// MixingPedersenHash(P, x) := P + [x]GroupHash^P^(r)(“Zcash_P_”, “”)
-///
-/// https://zips.z.cash/protocol/protocol.pdf#concretemixinghash
-// TODO: I'M EXTRAPOLATING HERE, DOUBLE CHECK THE SPEC WHEN FINALIZED
-#[allow(non_snake_case)]
-pub fn mixing_pedersen_hash(P: pallas::Point, x: pallas::Scalar) -> pallas::Point {
-    P + pallas_group_hash(b"Zcash_P_", b"") * x
-}
+use super::super::{
+    commitment::NoteCommitment, keys::NullifierDerivingKey, note::Note, sinsemilla::*,
+};
 
 /// A cryptographic permutation, defined in [poseidonhash].
 ///
@@ -32,54 +18,71 @@ fn poseidon_hash(_x: pallas::Base, _y: pallas::Base) -> pallas::Base {
     unimplemented!()
 }
 
-/// Derive the nullifier for a Orchard note.
+/// Used as part of deriving the _nullifier_ for a Orchard _note_.
+///
+/// PRF^nfOrchard: F_𝑞P × F_𝑞P → F_𝑞P
 ///
 /// Instantiated using the PoseidonHash hash function defined in [§5.4.1.10
-/// ‘PoseidonHash Function’][poseidon]
+/// ‘PoseidonHash Function’][poseidon]:
 ///
 /// PRF^nfOrchard(nk*, ρ*) := PoseidonHash(nk*, ρ*)
 ///
 /// [concreteprfs]: https://zips.z.cash/protocol/protocol.pdf#concreteprfs
 /// [poseidonhash]: https://zips.z.cash/protocol/nu5.pdf#poseidonhash
-fn prf_nf(nk_bytes: [u8; 32], rho_bytes: [u8; 32]) -> [u8; 32] {
-    poseidon_hash(
-        pallas::Base::from_bytes(&nk_bytes).unwrap(),
-        pallas::Base::from_bytes(&rho_bytes).unwrap(),
-    )
-    .into()
+fn prf_nf(nk: pallas::Base, rho: pallas::Base) -> pallas::Base {
+    poseidon_hash(nk, rho)
 }
 
 /// A Nullifier for Orchard transactions
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Eq, // Hash,
+    PartialEq,
+    Serialize,
+    Deserialize,
+)]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),
     derive(proptest_derive::Arbitrary)
 )]
-pub struct Nullifier(pub [u8; 32]);
+pub struct Nullifier(#[serde(with = "serde_helpers::Base")] pallas::Base);
 
 impl From<[u8; 32]> for Nullifier {
-    fn from(buf: [u8; 32]) -> Self {
-        Self(buf)
+    fn from(bytes: [u8; 32]) -> Self {
+        Self(pallas::Base::from_bytes(&bytes).unwrap())
     }
 }
 
-impl<'a> From<(NoteCommitment, Position, &'a NullifierDerivingKey)> for Nullifier {
+impl From<(NullifierDerivingKey, Note, NoteCommitment)> for Nullifier {
     /// Derive a `Nullifier` for an Orchard _note_.
     ///
-    /// For a _note_, the _nullifier_ is derived as PRF^nfOrchard_nk(ρ*), where
-    /// k is a representation of the _nullifier deriving key_ associated with
-    /// the _note_ and ρ = repr_P(ρ).
+    /// nk is the _nullifier deriving key_ associated with the _note_; ρ and ψ
+    /// are part of the _note_; and cm is the _note commitment_.
+    ///
+    /// DeriveNullifier_nk(ρ, ψ, cm) = Extract_P(︀ [︀ (PRF^nfOrchard_nk(ρ) + ψ) mod q_P ]︀ K^Orchard + cm)︀
     ///
     /// https://zips.z.cash/protocol/nu5.pdf#commitmentsandnullifiers
-    fn from((cm, pos, nk): (NoteCommitment, Position, &'a NullifierDerivingKey)) -> Self {
-        let rho = pallas::Affine::from(mixing_pedersen_hash(cm.0.into(), pos.0.into()));
+    #[allow(non_snake_case)]
+    fn from((nk, note, cm): (NullifierDerivingKey, Note, NoteCommitment)) -> Self {
+        // TODO: fill this in (K^Orchard) from the spec when defined:
+        // https://zips.z.cash/protocol/nu5.pdf#commitmentsandnullifiers
+        let K = pallas_group_hash(b"Zcash_P_", b"");
 
-        Nullifier(prf_nf(nk.into(), rho.to_bytes()))
+        // impl Add for pallas::Base reduces by the modulus (q_P)
+        //
+        // [︀ (PRF^nfOrchard_nk(ρ) + ψ) mod q_P ]︀ K^Orchard + cm
+        let scalar =
+            pallas::Scalar::from_bytes(&(prf_nf(nk.0, note.rho) + note.psi).to_bytes()).unwrap();
+
+        // Basically a new-gen Pedersen hash?
+        Nullifier(extract_p((K * scalar) + cm.0))
     }
 }
 
 impl From<Nullifier> for [u8; 32] {
     fn from(n: Nullifier) -> Self {
-        n.0
+        n.0.into()
     }
 }
