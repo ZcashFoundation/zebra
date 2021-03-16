@@ -143,7 +143,12 @@ lazy_static! {
             (1_095_000, BLOCK_TESTNET_1095000_BYTES.as_ref()),
             // Shielded coinbase
             (1_101_629, BLOCK_TESTNET_1101629_BYTES.as_ref()),
-            // TODO: First Halving, see #1104
+            // Last Pre-Halving
+            (1_115_999, BLOCK_TESTNET_1115999_BYTES.as_ref()),
+            // First Coinbase Halving
+            (1_116_000, BLOCK_TESTNET_1116000_BYTES.as_ref()),
+            (1_116_001, BLOCK_TESTNET_1116001_BYTES.as_ref()),
+            (1_326_100, BLOCK_TESTNET_1326100_BYTES.as_ref()),
         ].iter().cloned().collect();
 
     // Mainnet
@@ -479,6 +484,30 @@ lazy_static! {
     // Last shielded coinbase block so far
     pub static ref BLOCK_TESTNET_1101629_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("block-test-1-101-629.txt").trim())
+        .expect("Block bytes are in valid hex representation");
+
+    // Testnet Coinbase Halving
+    // i=1115999
+    // zcash-cli -testnet getblock $i 0 > block-test-$[i/1000000]-$[i/1000%1000]-$[i%1000].txt
+    // for i in 1116000 1116001; do
+    //     zcash-cli -testnet getblock $i 0 > block-test-$[i/1000000]-$[i/1000%1000]-00$[i%1000].txt
+    // done
+    pub static ref BLOCK_TESTNET_1115999_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-test-1-115-999.txt").trim())
+        .expect("Block bytes are in valid hex representation");
+    pub static ref BLOCK_TESTNET_1116000_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-test-1-116-000.txt").trim())
+        .expect("Block bytes are in valid hex representation");
+    pub static ref BLOCK_TESTNET_1116001_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-test-1-116-001.txt").trim())
+        .expect("Block bytes are in valid hex representation");
+
+    // One more Post-Halving block
+    // (so that we have at least 3 blocks after the halving)
+    // i=1326100
+    // zcash-cli -testnet getblock $i 0 > block-test-$[i/1000000]-$[i/1000%1000]-$[i%1000].txt
+    pub static ref BLOCK_TESTNET_1326100_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-test-1-326-100.txt").trim())
         .expect("Block bytes are in valid hex representation");
 }
 
