@@ -11,7 +11,6 @@ use halo2::{
     arithmetic::{CurveAffine, FieldExt},
     pasta::pallas,
 };
-
 use rand_core::{CryptoRng, RngCore};
 
 use crate::{
@@ -23,6 +22,7 @@ use crate::{
 
 use super::{
     keys::{Diversifier, TransmissionKey},
+    note::Note,
     sinsemilla::*,
 };
 
@@ -95,15 +95,21 @@ impl NoteCommitment {
     /// before it is encrypted as part of an output of an _Action_. This is a
     /// higher level function that calls `NoteCommit^Orchard_rcm` internally.
     ///
+    /// Unlike in Sapling, the definition of an Orchard _note_ includes the ρ
+    /// field; the _note_'s position in the _note commitment tree_ does not need
+    /// to be known in order to compute this value.
+    ///
     /// NoteCommit^Orchard_rcm(repr_P(gd),repr_P(pkd), v, ρ, ψ) :=
     ///
     /// https://zips.z.cash/protocol/protocol.pdf#concretewindowedcommit
     #[allow(non_snake_case)]
+    // TODO: update to handle rseed, psi, rho
     pub fn new<T>(
         csprng: &mut T,
         diversifier: Diversifier,
         transmission_key: TransmissionKey,
         value: Amount<NonNegative>,
+        note: Note,
     ) -> Option<(CommitmentRandomness, Self)>
     where
         T: RngCore + CryptoRng,
@@ -151,8 +157,8 @@ impl NoteCommitment {
     }
 }
 
-/// A homomorphic Pedersen commitment to the net value of a note, used in Action
-/// descriptions.
+/// A homomorphic Pedersen commitment to the net value of a _note_, used in
+/// Action descriptions.
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#concretehomomorphiccommit
 #[derive(Clone, Copy, Deserialize, PartialEq, Serialize)]

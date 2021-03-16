@@ -31,7 +31,7 @@ fn prf_nf(nk: [u8; 32], rho: [u8; 32]) -> [u8; 32] {
     any(test, feature = "proptest-impl"),
     derive(proptest_derive::Arbitrary)
 )]
-pub struct Nullifier(pub [u8; 32]);
+pub struct Nullifier([u8; 32]);
 
 impl From<[u8; 32]> for Nullifier {
     fn from(buf: [u8; 32]) -> Self {
