@@ -43,10 +43,6 @@ fn prf_nf(nk: pallas::Base, rho: pallas::Base) -> pallas::Base {
     Serialize,
     Deserialize,
 )]
-#[cfg_attr(
-    any(test, feature = "proptest-impl"),
-    derive(proptest_derive::Arbitrary)
-)]
 pub struct Nullifier(#[serde(with = "serde_helpers::Base")] pallas::Base);
 
 impl From<[u8; 32]> for Nullifier {

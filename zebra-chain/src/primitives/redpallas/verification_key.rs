@@ -1,6 +1,6 @@
 use std::{
     convert::TryFrom,
-    hash::{Hash, Hasher},
+    // hash::{Hash, Hasher},
     marker::PhantomData,
 };
 
@@ -36,12 +36,12 @@ impl<T: SigType> From<VerificationKeyBytes<T>> for [u8; 32] {
     }
 }
 
-impl<T: SigType> Hash for VerificationKeyBytes<T> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.bytes.hash(state);
-        self._marker.hash(state);
-    }
-}
+// impl<T: SigType> Hash for VerificationKeyBytes<T> {
+//     fn hash<H: Hasher>(&self, state: &mut H) {
+//         self.bytes.hash(state);
+//         self._marker.hash(state);
+//     }
+// }
 
 /// A valid RedPallas verification key.
 ///
@@ -80,7 +80,7 @@ impl<T: SigType> From<VerificationKey<T>> for [u8; 32] {
 
 impl<T: SigType> From<&pallas::Scalar> for VerificationKey<T> {
     fn from(s: &pallas::Scalar) -> VerificationKey<T> {
-        let point = &T::basepoint() * s;
+        let point = T::basepoint() * s;
         let bytes = VerificationKeyBytes {
             bytes: pallas::Affine::from(&point).to_bytes(),
             _marker: PhantomData,
@@ -101,7 +101,7 @@ impl<T: SigType> TryFrom<VerificationKeyBytes<T>> for VerificationKey<T> {
             let point: pallas::Point = maybe_point.unwrap().into();
 
             // This checks that the verification key is not of small order.
-            if <bool>::from(point.is_small_order()) == false {
+            if !<bool>::from(point.is_small_order()) {
                 Ok(VerificationKey { point, bytes })
             } else {
                 Err(Error::MalformedVerificationKey)

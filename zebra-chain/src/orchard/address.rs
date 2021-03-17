@@ -138,15 +138,14 @@ mod tests {
 
         let spending_key = keys::SpendingKey::new(&mut OsRng);
 
-        let spend_authorizing_key = keys::SpendAuthorizingKey::from(spending_key);
-        let proof_authorizing_key = keys::ProofAuthorizingKey::from(spending_key);
+        let full_viewing_key = keys::FullViewingKey::from(spending_key);
 
-        let authorizing_key = keys::AuthorizingKey::from(spend_authorizing_key);
-        let nullifier_deriving_key = keys::NullifierDerivingKey::from(proof_authorizing_key);
-        let incoming_viewing_key =
-            keys::IncomingViewingKey::from((authorizing_key, nullifier_deriving_key));
+        // Default diversifier, where index = 0.
+        let diversifier_key = keys::DiversifierKey::from(full_viewing_key);
 
-        let diversifier = keys::Diversifier::new(&mut OsRng);
+        let incoming_viewing_key = keys::IncomingViewingKey::from(full_viewing_key);
+
+        let diversifier = keys::Diversifier::from(diversifier_key);
         let transmission_key = keys::TransmissionKey::from((incoming_viewing_key, diversifier));
 
         let _orchard_shielded_address = Address {
