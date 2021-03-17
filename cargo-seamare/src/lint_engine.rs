@@ -1,7 +1,5 @@
 use seamare::prelude::*;
 
-// TODO: I don't know if we need `PackageLinter`, `FilePathLinter`, `ContentLinter`, but for now, let's keep them here.
-
 /// Configuration for the lint engine.
 #[derive(Clone, Debug)]
 pub struct LintEngineConfig<'cfg> {

@@ -1,8 +1,6 @@
 // Copyright (c) The Diem Core Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-// TODO: it's just coped from x-linter, maybe we don't need this `PackageLinter` and `PackageContext`?
-
 use crate::{prelude::*, LintContext};
 use camino::Utf8Path;
 use guppy::graph::{PackageGraph, PackageMetadata};
