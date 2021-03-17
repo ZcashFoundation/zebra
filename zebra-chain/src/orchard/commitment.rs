@@ -1,8 +1,5 @@
 //! Note and value commitments.
 
-// #[cfg(test)]
-// mod test_vectors;
-
 use std::{convert::TryFrom, fmt, io};
 
 use bitvec::prelude::*;
@@ -109,7 +106,7 @@ impl NoteCommitment {
         diversifier: Diversifier,
         transmission_key: TransmissionKey,
         value: Amount<NonNegative>,
-        note: Note,
+        _note: Note,
     ) -> Option<(CommitmentRandomness, Self)>
     where
         T: RngCore + CryptoRng,
@@ -311,161 +308,161 @@ impl ValueCommitment {
     }
 }
 
-#[cfg(test)]
-mod tests {
+// #[cfg(test)]
+// mod tests {
 
-    use std::ops::Neg;
+//     use std::ops::Neg;
 
-    use super::*;
+//     use super::*;
 
-    // #[test]
-    // fn sinsemilla_hash_to_point_test_vectors() {
-    //     zebra_test::init();
+// #[test]
+// fn sinsemilla_hash_to_point_test_vectors() {
+//     zebra_test::init();
 
-    //     const D: [u8; 8] = *b"Zcash_PH";
+//     const D: [u8; 8] = *b"Zcash_PH";
 
-    //     for test_vector in test_vectors::TEST_VECTORS.iter() {
-    //         let result =
-    //             pallas::Affine::from(sinsemilla_hash_to_point(D, &test_vector.input_bits.clone()));
+//     for test_vector in test_vectors::TEST_VECTORS.iter() {
+//         let result =
+//             pallas::Affine::from(sinsemilla_hash_to_point(D, &test_vector.input_bits.clone()));
 
-    //         assert_eq!(result, test_vector.output_point);
-    //     }
-    // }
+//         assert_eq!(result, test_vector.output_point);
+//     }
+// }
 
-    // TODO: these test vectors for ops are from Jubjub, replace with Pallas ones
+// TODO: these test vectors for ops are from Jubjub, replace with Pallas ones
 
-    #[test]
-    fn add() {
-        zebra_test::init();
+// #[test]
+// fn add() {
+//     zebra_test::init();
 
-        let identity = ValueCommitment(pallas::Affine::identity());
+//     let identity = ValueCommitment(pallas::Affine::identity());
 
-        let g = ValueCommitment(pallas::Affine::from_raw_unchecked(
-            pallas::Base::from_raw([
-                0xe4b3_d35d_f1a7_adfe,
-                0xcaf5_5d1b_29bf_81af,
-                0x8b0f_03dd_d60a_8187,
-                0x62ed_cbb8_bf37_87c8,
-            ]),
-            pallas::Base::from_raw([
-                0x0000_0000_0000_000b,
-                0x0000_0000_0000_0000,
-                0x0000_0000_0000_0000,
-                0x0000_0000_0000_0000,
-            ]),
-        ));
+//     let g = ValueCommitment(pallas::Affine::from_raw_unchecked(
+//         pallas::Base::from_raw([
+//             0xe4b3_d35d_f1a7_adfe,
+//             0xcaf5_5d1b_29bf_81af,
+//             0x8b0f_03dd_d60a_8187,
+//             0x62ed_cbb8_bf37_87c8,
+//         ]),
+//         pallas::Base::from_raw([
+//             0x0000_0000_0000_000b,
+//             0x0000_0000_0000_0000,
+//             0x0000_0000_0000_0000,
+//             0x0000_0000_0000_0000,
+//         ]),
+//     ));
 
-        assert_eq!(identity + g, g);
-    }
+//     assert_eq!(identity + g, g);
+// }
 
-    #[test]
-    fn add_assign() {
-        zebra_test::init();
+// #[test]
+// fn add_assign() {
+//     zebra_test::init();
 
-        let mut identity = ValueCommitment(pallas::Affine::identity());
+//     let mut identity = ValueCommitment(pallas::Affine::identity());
 
-        let g = ValueCommitment(pallas::Affine::from_raw_unchecked(
-            pallas::Base::from_raw([
-                0xe4b3_d35d_f1a7_adfe,
-                0xcaf5_5d1b_29bf_81af,
-                0x8b0f_03dd_d60a_8187,
-                0x62ed_cbb8_bf37_87c8,
-            ]),
-            pallas::Base::from_raw([
-                0x0000_0000_0000_000b,
-                0x0000_0000_0000_0000,
-                0x0000_0000_0000_0000,
-                0x0000_0000_0000_0000,
-            ]),
-        ));
+//     let g = ValueCommitment(pallas::Affine::from_raw_unchecked(
+//         pallas::Base::from_raw([
+//             0xe4b3_d35d_f1a7_adfe,
+//             0xcaf5_5d1b_29bf_81af,
+//             0x8b0f_03dd_d60a_8187,
+//             0x62ed_cbb8_bf37_87c8,
+//         ]),
+//         pallas::Base::from_raw([
+//             0x0000_0000_0000_000b,
+//             0x0000_0000_0000_0000,
+//             0x0000_0000_0000_0000,
+//             0x0000_0000_0000_0000,
+//         ]),
+//     ));
 
-        identity += g;
-        let new_g = identity;
+//     identity += g;
+//     let new_g = identity;
 
-        assert_eq!(new_g, g);
-    }
+//     assert_eq!(new_g, g);
+// }
 
-    #[test]
-    fn sub() {
-        zebra_test::init();
+// #[test]
+// fn sub() {
+//     zebra_test::init();
 
-        let g_point = pallas::Affine::from_raw_unchecked(
-            pallas::Base::from_raw([
-                0xe4b3_d35d_f1a7_adfe,
-                0xcaf5_5d1b_29bf_81af,
-                0x8b0f_03dd_d60a_8187,
-                0x62ed_cbb8_bf37_87c8,
-            ]),
-            pallas::Base::from_raw([
-                0x0000_0000_0000_000b,
-                0x0000_0000_0000_0000,
-                0x0000_0000_0000_0000,
-                0x0000_0000_0000_0000,
-            ]),
-        );
+//     let g_point = pallas::Affine::from_raw_unchecked(
+//         pallas::Base::from_raw([
+//             0xe4b3_d35d_f1a7_adfe,
+//             0xcaf5_5d1b_29bf_81af,
+//             0x8b0f_03dd_d60a_8187,
+//             0x62ed_cbb8_bf37_87c8,
+//         ]),
+//         pallas::Base::from_raw([
+//             0x0000_0000_0000_000b,
+//             0x0000_0000_0000_0000,
+//             0x0000_0000_0000_0000,
+//             0x0000_0000_0000_0000,
+//         ]),
+//     );
 
-        let identity = ValueCommitment(pallas::Affine::identity());
+//     let identity = ValueCommitment(pallas::Affine::identity());
 
-        let g = ValueCommitment(g_point);
+//     let g = ValueCommitment(g_point);
 
-        assert_eq!(identity - g, ValueCommitment(g_point.neg()));
-    }
+//     assert_eq!(identity - g, ValueCommitment(g_point.neg()));
+// }
 
-    #[test]
-    fn sub_assign() {
-        zebra_test::init();
+// #[test]
+// fn sub_assign() {
+//     zebra_test::init();
 
-        let g_point = pallas::Affine::from_raw_unchecked(
-            pallas::Base::from_raw([
-                0xe4b3_d35d_f1a7_adfe,
-                0xcaf5_5d1b_29bf_81af,
-                0x8b0f_03dd_d60a_8187,
-                0x62ed_cbb8_bf37_87c8,
-            ]),
-            pallas::Base::from_raw([
-                0x0000_0000_0000_000b,
-                0x0000_0000_0000_0000,
-                0x0000_0000_0000_0000,
-                0x0000_0000_0000_0000,
-            ]),
-        );
+//     let g_point = pallas::Affine::from_raw_unchecked(
+//         pallas::Base::from_raw([
+//             0xe4b3_d35d_f1a7_adfe,
+//             0xcaf5_5d1b_29bf_81af,
+//             0x8b0f_03dd_d60a_8187,
+//             0x62ed_cbb8_bf37_87c8,
+//         ]),
+//         pallas::Base::from_raw([
+//             0x0000_0000_0000_000b,
+//             0x0000_0000_0000_0000,
+//             0x0000_0000_0000_0000,
+//             0x0000_0000_0000_0000,
+//         ]),
+//     );
 
-        let mut identity = ValueCommitment(pallas::Affine::identity());
+//     let mut identity = ValueCommitment(pallas::Affine::identity());
 
-        let g = ValueCommitment(g_point);
+//     let g = ValueCommitment(g_point);
 
-        identity -= g;
-        let new_g = identity;
+//     identity -= g;
+//     let new_g = identity;
 
-        assert_eq!(new_g, ValueCommitment(g_point.neg()));
-    }
+//     assert_eq!(new_g, ValueCommitment(g_point.neg()));
+// }
 
-    #[test]
-    fn sum() {
-        zebra_test::init();
+// #[test]
+// fn sum() {
+//     zebra_test::init();
 
-        let g_point = pallas::Affine::from_raw_unchecked(
-            pallas::Base::from_raw([
-                0xe4b3_d35d_f1a7_adfe,
-                0xcaf5_5d1b_29bf_81af,
-                0x8b0f_03dd_d60a_8187,
-                0x62ed_cbb8_bf37_87c8,
-            ]),
-            pallas::Base::from_raw([
-                0x0000_0000_0000_000b,
-                0x0000_0000_0000_0000,
-                0x0000_0000_0000_0000,
-                0x0000_0000_0000_0000,
-            ]),
-        );
+//     let g_point = pallas::Affine::from_raw_unchecked(
+//         pallas::Base::from_raw([
+//             0xe4b3_d35d_f1a7_adfe,
+//             0xcaf5_5d1b_29bf_81af,
+//             0x8b0f_03dd_d60a_8187,
+//             0x62ed_cbb8_bf37_87c8,
+//         ]),
+//         pallas::Base::from_raw([
+//             0x0000_0000_0000_000b,
+//             0x0000_0000_0000_0000,
+//             0x0000_0000_0000_0000,
+//             0x0000_0000_0000_0000,
+//         ]),
+//     );
 
-        let g = ValueCommitment(g_point);
-        let other_g = ValueCommitment(g_point);
+//     let g = ValueCommitment(g_point);
+//     let other_g = ValueCommitment(g_point);
 
-        let sum: ValueCommitment = vec![g, other_g].into_iter().sum();
+//     let sum: ValueCommitment = vec![g, other_g].into_iter().sum();
 
-        let doubled_g = ValueCommitment(g_point.into().double().into());
+//     let doubled_g = ValueCommitment(g_point.into().double().into());
 
-        assert_eq!(sum, doubled_g);
-    }
-}
+//     assert_eq!(sum, doubled_g);
+// }
+// }

@@ -4,8 +4,6 @@
 #![allow(clippy::unit_arg)]
 #![allow(dead_code)]
 
-// #[cfg(test)]
-// mod test_vectors;
 #[cfg(test)]
 mod tests;
 
@@ -261,57 +259,6 @@ impl PartialEq<[u8; 32]> for SpendAuthorizingKey {
     }
 }
 
-/// An outgoing viewing key, as described in [protocol specification
-/// §4.2.3][ps].
-///
-/// Used to decrypt outgoing notes without spending them.
-///
-/// [ps]: https://zips.z.cash/protocol/protocol.pdf#orchardkeycomponents
-#[derive(Copy, Clone, Eq, PartialEq)]
-pub struct OutgoingViewingKey(pub [u8; 32]);
-
-impl fmt::Debug for OutgoingViewingKey {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple("OutgoingViewingKey")
-            .field(&hex::encode(&self.0))
-            .finish()
-    }
-}
-
-impl From<[u8; 32]> for OutgoingViewingKey {
-    /// Generate an `OutgoingViewingKey` from existing bytes.
-    fn from(bytes: [u8; 32]) -> Self {
-        Self(bytes)
-    }
-}
-
-impl From<OutgoingViewingKey> for [u8; 32] {
-    fn from(ovk: OutgoingViewingKey) -> [u8; 32] {
-        ovk.0
-    }
-}
-
-impl From<FullViewingKey> for OutgoingViewingKey {
-    /// Derive an `OutgoingViewingKey` from a `FullViewingKey`.
-    ///
-    /// [4.2.3]: https://zips.z.cash/protocol/protocol.pdf#orchardkeycomponents
-    #[allow(non_snake_case)]
-    fn from(fvk: FullViewingKey) -> OutgoingViewingKey {
-        let R = fvk.to_R();
-
-        // let ovk be the remaining [32] bytes of R [which is 64 bytes]
-        let ovk_bytes: [u8; 32] = R[32..64].try_into().expect("32 byte array");
-
-        Self::from(ovk_bytes)
-    }
-}
-
-impl PartialEq<[u8; 32]> for OutgoingViewingKey {
-    fn eq(&self, other: &[u8; 32]) -> bool {
-        self.0 == *other
-    }
-}
-
 /// A Spend validating key, as described in [protocol specification
 /// §4.2.3][orchardkeycomponents].
 ///
@@ -417,6 +364,9 @@ impl PartialEq<[u8; 32]> for NullifierDerivingKey {
     }
 }
 
+/// Commit^ivk randomness.
+///
+/// https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents
 // XXX: Should this be replaced by commitment::CommitmentRandomness?
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub struct IvkCommitRandomness(pallas::Scalar);
@@ -544,6 +494,7 @@ impl From<FullViewingKey> for IncomingViewingKey {
         );
 
         Self {
+            // TODO: handle the network better, maybe an enum variant constraint?
             network: Network::default(),
             // mod r_P
             scalar: pallas::Scalar::from_bytes(&commit_x.into()).unwrap(),
@@ -638,6 +589,20 @@ impl fmt::Display for FullViewingKey {
     }
 }
 
+impl From<SpendingKey> for FullViewingKey {
+    fn from(sk: SpendingKey) -> FullViewingKey {
+        let spend_authorizing_key = SpendAuthorizingKey::from(sk);
+
+        Self {
+            // TODO: handle setting the Network better.
+            network: Network::default(),
+            spend_validating_key: SpendValidatingKey::from(spend_authorizing_key),
+            nullifier_deriving_key: NullifierDerivingKey::from(sk),
+            ivk_commit_randomness: IvkCommitRandomness::from(sk),
+        }
+    }
+}
+
 impl FromStr for FullViewingKey {
     type Err = SerializationError;
 
@@ -685,6 +650,70 @@ impl FullViewingKey {
     }
 }
 
+/// An outgoing viewing key, as described in [protocol specification
+/// §4.2.3][ps].
+///
+/// Used to decrypt outgoing notes without spending them.
+///
+/// [ps]: https://zips.z.cash/protocol/protocol.pdf#orchardkeycomponents
+#[derive(Copy, Clone, Eq, PartialEq)]
+pub struct OutgoingViewingKey(pub [u8; 32]);
+
+impl fmt::Debug for OutgoingViewingKey {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple("OutgoingViewingKey")
+            .field(&hex::encode(&self.0))
+            .finish()
+    }
+}
+
+impl From<[u8; 32]> for OutgoingViewingKey {
+    /// Generate an `OutgoingViewingKey` from existing bytes.
+    fn from(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+}
+
+impl From<OutgoingViewingKey> for [u8; 32] {
+    fn from(ovk: OutgoingViewingKey) -> [u8; 32] {
+        ovk.0
+    }
+}
+
+impl From<FullViewingKey> for OutgoingViewingKey {
+    /// Derive an `OutgoingViewingKey` from a `FullViewingKey`.
+    ///
+    /// [4.2.3]: https://zips.z.cash/protocol/protocol.pdf#orchardkeycomponents
+    #[allow(non_snake_case)]
+    fn from(fvk: FullViewingKey) -> OutgoingViewingKey {
+        let R = fvk.to_R();
+
+        // let ovk be the remaining [32] bytes of R [which is 64 bytes]
+        let ovk_bytes: [u8; 32] = R[32..64].try_into().expect("32 byte array");
+
+        Self::from(ovk_bytes)
+    }
+}
+
+impl PartialEq<[u8; 32]> for OutgoingViewingKey {
+    fn eq(&self, other: &[u8; 32]) -> bool {
+        self.0 == *other
+    }
+}
+
+/// A _diversifier key_.
+///
+/// "We define a mechanism for deterministically deriving a sequence of
+/// diversifiers, without leaking how many diversified addresses have already
+/// been generated for an account. Unlike Sapling, we do so by deriving a
+/// _diversifier key_ directly from the _full viewing key_, instead of as part
+/// of the _extended spending key_. This means that the _full viewing key_
+/// provides the capability to determine the position of a _diversifier_ within
+/// the sequence, which matches the capabilities of a Sapling _extended full
+/// viewing key_ but simplifies the key structure."
+///
+/// [4.2.3]: https://zips.z.cash/protocol/protocol.pdf#orchardkeycomponents
+/// [ZIP-32]: https://zips.z.cash/zip-0032#orchard-diversifier-derivation
 #[derive(Copy, Clone, PartialEq)]
 pub struct DiversifierKey([u8; 32]);
 
@@ -698,7 +727,7 @@ impl From<FullViewingKey> for DiversifierKey {
     /// that cannot be distinguished (without knowledge of the
     /// spending key) from one with a random diversifier...'
     ///
-    /// Derived as specied in [ZIP-32].
+    /// Derived as specied in section [4.2.3] of the spec, and [ZIP-32].
     ///
     /// [4.2.3]: https://zips.z.cash/protocol/protocol.pdf#orchardkeycomponents
     /// [ZIP-32]: https://zips.z.cash/zip-0032#orchard-diversifier-derivation
@@ -717,9 +746,9 @@ impl From<DiversifierKey> for [u8; 32] {
     }
 }
 
-/// A _Diversifier_, as described in [protocol specification §4.2.3][ps].
+/// A _diversifier_, as described in [protocol specification §4.2.3][ps].
 ///
-/// Combined with an _IncomingViewingKey_, produces a _diversified
+/// Combined with an `IncomingViewingKey`, produces a _diversified
 /// payment address_.
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#orchardkeycomponents
@@ -811,10 +840,11 @@ impl Diversifier {
 /// recipient without requiring an out-of-band communication channel, the
 /// transmission key is used to encrypt them.
 ///
-/// Derived by multiplying a Pallas point [derived][ps] from a `Diversifier` by
-/// the `IncomingViewingKey` scalar.
+/// Derived by multiplying a Pallas point [derived][concretediversifyhash] from
+/// a `Diversifier` by the `IncomingViewingKey` scalar.
 ///
-/// [ps]: https://zips.z.cash/protocol/protocol.pdf#concretediversifyhash
+/// [concretediversifyhash]: https://zips.z.cash/protocol/protocol.pdf#concretediversifyhash
+/// https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents
 #[derive(Copy, Clone, PartialEq)]
 pub struct TransmissionKey(pub pallas::Affine);
 
@@ -853,6 +883,8 @@ impl From<(IncomingViewingKey, Diversifier)> for TransmissionKey {
     /// This includes _KA^Orchard.DerivePublic(ivk, G_d)_, which is just a
     /// scalar mult _\[ivk\]G_d_.
     ///
+    ///  KA^Orchard.DerivePublic(sk, B) := [sk] B
+    ///
     /// https://zips.z.cash/protocol/protocol.pdf#orchardkeycomponents
     /// https://zips.z.cash/protocol/protocol.pdf#concreteorchardkeyagreement
     fn from((ivk, d): (IncomingViewingKey, Diversifier)) -> Self {
@@ -869,6 +901,7 @@ impl PartialEq<[u8; 32]> for TransmissionKey {
 /// An ephemeral public key for Orchard key agreement.
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#concreteorchardkeyagreement
+/// https://zips.z.cash/protocol/nu5.pdf#saplingandorchardencrypt
 #[derive(Copy, Clone, Deserialize, PartialEq, Serialize)]
 pub struct EphemeralPublicKey(#[serde(with = "serde_helpers::Affine")] pub pallas::Affine);
 

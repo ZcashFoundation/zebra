@@ -30,3 +30,13 @@ impl Arbitrary for Action {
 
     type Strategy = BoxedStrategy<Self>;
 }
+
+impl Arbitrary for note::Nullifier {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        array::uniform32(any::<u8>()).prop_map(Self::from).boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}

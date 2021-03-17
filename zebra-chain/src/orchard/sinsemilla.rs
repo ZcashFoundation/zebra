@@ -89,7 +89,7 @@ pub fn sinsemilla_hash_to_point(D: &[u8], M: &BitVec<Lsb0, u8>) -> pallas::Point
         // An instance of LEBS2IP_k
         let j = &bits.iter().fold(0u16, |j, &bit| j * 2 + bit as u16);
 
-        acc += acc + S(j.to_le_bytes());
+        acc = acc + acc + S(j.to_le_bytes());
     }
 
     acc
