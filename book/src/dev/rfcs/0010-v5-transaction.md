@@ -228,8 +228,11 @@ bitflags! {
 - The full V4 and V5 transactions should serialize and deserialize.
 - Prop test strategies for v4 and v5 will be updated and created.
 - Before NU5 activation on testnet, test on the following test vectors:
-  - Hand-crafted Orchard, Orchard/Sapling, Orchard/Sprout, and Orchard/Sapling/Sprout transactions based on the spec
-  - Converted Sapling and Sapling/Sprout transactions in the existing test vectors from `V4` to `V5` format
+  - Hand-crafted Orchard-only, Orchard/Sapling, Orchard/Transparent, and Orchard/Sapling/Transparent transactions based on the spec
+  - "Fake" Sapling-only and Sapling/Transparent transactions based on the existing test vectors, converted from `V4` to `V5` format
+    - We can write a test utility function to automatically do these conversions
+  - An empty transaction, with no Orchard, Sapling, or Transparent data
+  
   - Any available `zcashd` test vectors
 - After NU5 activation on testnet:
   - Add test vectors using the testnet activation block and 2 more post-activation blocks
