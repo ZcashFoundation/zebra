@@ -18,7 +18,7 @@ use aes::Aes256;
 use bech32::{self, FromBase32, ToBase32, Variant};
 use bitvec::prelude::*;
 use fpe::ff1::{BinaryNumeralString, FF1};
-use group::GroupEncoding;
+use group::{Group, GroupEncoding};
 use halo2::{
     arithmetic::{CurveAffine, FieldExt},
     pasta::pallas,
@@ -103,11 +103,20 @@ fn prf_ock(ovk: [u8; 32], cv: [u8; 32], cm_x: [u8; 32], ephemeral_key: [u8; 32])
 
 /// Used to derive a diversified base point from a diversifier value.
 ///
-/// DiversifyHash^Orchard(d) := GroupHash^P("z.cash:Orchard-gd", LEBS2OSP_l_d(d))
+/// DiversifyHash^Orchard(d) := {︃ GroupHash^P("z.cash:Orchard-gd",""), if P = 0_P
+///                               P,                                   otherwise
+///
+/// where P = GroupHash^P(("z.cash:Orchard-gd", LEBS2OSP_l_d(d)))
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#concretediversifyhash
 fn diversify_hash(d: &[u8]) -> pallas::Point {
-    pallas_group_hash(b"z.cash:Orchard-gd", &d)
+    let p = pallas_group_hash(b"z.cash:Orchard-gd", &d);
+
+    if <bool>::from(p.is_identity()) {
+        pallas_group_hash(b"z.cash:Orchard-gd", b"")
+    } else {
+        p
+    }
 }
 
 /// Magic human-readable strings used to identify what networks Orchard spending
@@ -790,6 +799,8 @@ impl From<Diversifier> for [u8; 11] {
 }
 
 impl From<Diversifier> for pallas::Point {
+    /// Derive a _diversified base_ point.
+    ///
     /// g_d := DiversifyHash^Orchard(d)
     ///
     /// [orchardkeycomponents]: https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents
@@ -888,7 +899,9 @@ impl From<(IncomingViewingKey, Diversifier)> for TransmissionKey {
     /// https://zips.z.cash/protocol/protocol.pdf#orchardkeycomponents
     /// https://zips.z.cash/protocol/protocol.pdf#concreteorchardkeyagreement
     fn from((ivk, d): (IncomingViewingKey, Diversifier)) -> Self {
-        Self(pallas::Affine::from(pallas::Point::from(d) * ivk.scalar))
+        let g_d = pallas::Point::from(d);
+
+        Self(pallas::Affine::from(g_d * ivk.scalar))
     }
 }
 
