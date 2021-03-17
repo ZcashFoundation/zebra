@@ -181,3 +181,26 @@ jobs:
         with:
           command: fmt
           args: --all -- --check
+
+  seamare:
+    name: Seamare
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: install cargo seamare
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: --path cargo-seamare
+
+      - name: Run cargo seamare to catch direct duplicate dependencies
+        uses: actions-rs/cargo@v1
+        with:
+          command: seamare
