@@ -64,7 +64,10 @@ impl StateService {
 
     pub fn new(config: Config, network: Network) -> Self {
         let disk = FinalizedState::new(&config, network);
-        let mem = NonFinalizedState::default();
+        let mem = NonFinalizedState {
+            network,
+            ..Default::default()
+        };
         let queued_blocks = QueuedBlocks::default();
         let pending_utxos = PendingUtxos::default();
 
