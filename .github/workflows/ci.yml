@@ -198,6 +198,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: install
+          # For now seamare is not published, so just install locally
           args: --path cargo-seamare
 
       - name: Run cargo seamare to catch direct duplicate dependencies
