@@ -40,7 +40,7 @@ use super::sinsemilla::*;
 /// "Let FF1-AES256_K(tweak, x) be the FF1 format-preserving encryption
 /// algorithm using AES with a 256-bit key K, and parameters radix = 2, minlen =
 /// 88, maxlen = 88. It will be used only with the empty string "" as the
-/// tweak. x is a sequence of 88bits, as is the output."
+/// tweak. x is a sequence of 88 bits, as is the output."
 ///
 /// https://zips.z.cash/protocol/nu5.pdf#concreteprps
 #[allow(non_snake_case)]
