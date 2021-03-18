@@ -63,8 +63,11 @@ fn S(j: [u8; 2]) -> pallas::Point {
 /// ‘MerkleCRH^Orchard Hash Function’).
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#concretesinsemillahash
+///
+/// # Panics
+///
+/// If `M` is greater than `k*c = 2530` bits.
 #[allow(non_snake_case)]
-// XXX: M is a max of k*c = 2530 bits
 pub fn sinsemilla_hash_to_point(D: &[u8], M: &BitVec<Lsb0, u8>) -> pallas::Point {
     let k = 10;
     let c = 253;
