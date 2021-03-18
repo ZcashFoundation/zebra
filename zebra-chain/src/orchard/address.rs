@@ -55,7 +55,7 @@ impl fmt::Display for Address {
 
         let hrp = match self.network {
             Network::Mainnet => human_readable_parts::MAINNET,
-            _ => human_readable_parts::TESTNET,
+            Network::Testnet => human_readable_parts::TESTNET,
         };
 
         bech32::encode_to_fmt(f, hrp, bytes.get_ref().to_base32(), Variant::Bech32).unwrap()
