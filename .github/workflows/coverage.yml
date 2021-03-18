@@ -11,7 +11,7 @@ on:
 jobs:
 
   coverage:
-    name: Coverage (+nightly)
+    name: Coverage (+nightly-2021-03-17)
     timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
@@ -19,7 +19,7 @@ jobs:
 
       - uses: actions-rs/toolchain@v1
         with:
-          toolchain: nightly
+          toolchain: nightly-2021-03-17
           override: true
           profile: minimal
           components: llvm-tools-preview
