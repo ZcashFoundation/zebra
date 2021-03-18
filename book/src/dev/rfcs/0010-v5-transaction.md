@@ -33,7 +33,7 @@ We need the raw representation to Serialize/Deserialize the transaction however 
 
 V5 transactions are the only ones that will support orchard transactions with `Orchard` data types.
 
-V4 and V5 transactions both support sapling data but they are implemented differently. By this reason we need to split sapling data types into V4 and V5.
+V4 and V5 transactions both support sapling data but they are implemented differently. By this reason we need to split sapling data types into V4 and V5. We do this by using `enum` data types.
 
 The order of some of the fields changed from V4 to V5. For example the `lock_time` and `expiry_height` were moved above the transparent inputs and outputs.
 
@@ -81,46 +81,63 @@ V4 {
     ...
     sapling_value_balance: Amount,
     ...
-    sapling_shielded_data: Option<SaplingShieldedDataV4>,
+    sapling_shielded_data: Option<SaplingShieldedData::V4>,
 }
 ```
 
-`ShieldedData` is currently defined and implemented in `src/transaction/shielded_data.rs`. We propose to rename this file to `src/transaction/sapling_shielded_data.rs`. Inside we will change `ShieldedData` into `SaplingShieldedDataV4` and add the new version `SaplingShieldedDataV5`.
+In order to mantain the order of the fields that we will need for Serialization/Deserialization we keep the `value_balance` in the transaction for V4 but we rename it to `sapling_value_balance` for clarity.
 
-The difference between V4 and V5 shielded data is in the spends and outputs. For this reason we need to add V4 and V5 spend and output versions to our code:
+`ShieldedData` is currently defined and implemented in `src/transaction/shielded_data.rs`. We propose to rename this file to `src/transaction/sapling_shielded_data.rs`. Inside we will change `ShieldedData` into a `SaplingShieldedData` enum with `V4` and `V5` variants.
 
 ```
-pub struct SaplingShieldedDataV4 {
+pub enum SaplingShieldedData {
     /// Either a spend or output description.
     ///
     /// Storing this separately ensures that it is impossible to construct
-    /// an invalid `ShieldedData` with no spends or outputs.
+    /// an invalid `SaplingShieldedData` with no spends or outputs.
     /// ...
-    pub first: Either<SpendV4, OutputV4>,
-    pub rest_spends: Vec<SpendV4>,
-    pub rest_outputs: Vec<OutputV4>,
-    pub binding_sig: Signature<Binding>,
+    V4 {
+        pub first: Either<SaplingSpend::V4, SaplingOutput>,
+        pub rest_spends: Vec<SaplingSpend::V4>,
+        pub rest_outputs: Vec<SaplingOutput>,
+        pub binding_sig: Signature<Binding>,
+    },
+    V5 {
+        pub first: Either<SaplingSpend::V5, SaplingOutput>,
+        pub rest_spends: Vec<SaplingSpend::V5>,
+        pub rest_outputs: Vec<SaplingOutput>,
+        pub sapling_value_balance: Amount,
+        pub anchor: tree::Root,
+        pub binding_sig: Signature<Binding>,
+    }
 }
 ```
 
-Proposed `SpendV4` and `OutputV4` is now described, this is the same as the current implementation but just changing the struct names. 
-Sapling spend code is located at `zebra-chain/src/sapling/spend.rs`:
+Proposed `SaplingSpend` is now defined as an enum with `V4` and `V5` variants. Sapling spend code is located at `zebra-chain/src/sapling/spend.rs`. Notable difference here is that the `anchor` in `V4` is needed for every spend of the transaction while in `V5` the anchor is a single one defined in `SaplingShieldedData`:
 
 ```
-pub struct SpendV4 {
-    pub cv: commitment::ValueCommitment,
-    pub anchor: tree::Root,
-    pub nullifier: note::Nullifier,
-    pub rk: redjubjub::VerificationKeyBytes<SpendAuth>,
-    pub zkproof: Groth16Proof,
-    pub spend_auth_sig: redjubjub::Signature<SpendAuth>,
+pub enum SaplingSpend {
+    V4 {
+        pub cv: commitment::ValueCommitment,
+        pub anchor: tree::Root,
+        pub nullifier: note::Nullifier,
+        pub rk: redjubjub::VerificationKeyBytes<SpendAuth>,
+        pub zkproof: Groth16Proof,
+        pub spend_auth_sig: redjubjub::Signature<SpendAuth>,
+    },
+    V5 {
+        pub cv: commitment::ValueCommitment,
+        pub nullifier: note::Nullifier,
+        pub rk: redjubjub::VerificationKeyBytes<SpendAuth>,
+        pub zkproof: Groth16Proof,
+        pub spend_auth_sig: redjubjub::Signature<SpendAuth>,
+    }
 }
 ```
-
-The output code is located at `zebra-chain/src/sapling/output.rs`:
+In Zebra the output representations are the same for V4 and V5 so no variants are needed. The output code is located at `zebra-chain/src/sapling/output.rs`:
 
 ```
-pub struct OutputV4 {
+pub struct SaplingOutput {
     pub cv: commitment::ValueCommitment,
     pub cm_u: jubjub::Fq,
     pub ephemeral_key: keys::EphemeralPublicKey,
@@ -130,7 +147,7 @@ pub struct OutputV4 {
 }
 ```
 
-Now lets see how the v5 transaction is specified in the protocol, this is the second table of [Transaction Encoding and Consensus](https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus).
+Now lets see how the V5 transaction is specified in the protocol, this is the second table of [Transaction Encoding and Consensus](https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus) and how are we going to represent it based in the above changes for Sapling fields and the new Orchard fields.
 
 We propose the following representation for transaction V5 in Zebra:
 
@@ -140,60 +157,13 @@ V5 {
     expiry_height: block::Height,
     inputs: Vec<transparent::Input>,
     outputs: Vec<transparent::Output>,
-    sapling_value_balance: Amount,
-    sapling_anchor: tree::Root,
-    sapling_shielded_data: Option<SaplingShieldedDataV5>,
-    orchard_flags: OrchardFlags,
-    orchard_value_balance: Amount,
-    orchard_anchor: tree::Root,
+    sapling_shielded_data: Option<SaplingShieldedData::V5>,
     orchard_shielded_data: Option<OrchardShieldedData>,
 }
 ```
 
-`SaplingShieldedDataV5` is different from `SaplingShieldedDataV4` so a new type will be defined and implemented in `zebra-chain/src/transaction/sapling_shielded_data.rs`.
-Definition will look as follows:
+`sapling_shielded_data` will now use `SaplingShieldedData::V5` variant located at `zebra-chain/src/transaction/sapling_shielded_data.rs` with the corresponding `SaplingSpend::V5` for the spends.
 
-```
-pub struct SaplingShieldedDataV5 {
-    pub first: Either<SpendV5, OutputV5>,
-    pub rest_spends: Vec<SpendV5>,
-    pub rest_outputs: Vec<OutputV5>,
-    pub binding_sig: Signature<Binding>,
-}
-```
-
-This leads to new sapling output and spend types.
-
-V5 sapling spend will be defined and implemented in `zebra-chain/src/sapling/spend.rs` (this is in the same file as `SpendV4`):
-```
-pub struct SpendV5 {
-    pub cv: commitment::ValueCommitment,
-    pub nullifier: note::Nullifier,
-    pub rk: redjubjub::VerificationKeyBytes<SpendAuth>,
-    pub zkproof: Groth16Proof,
-    pub spend_auth_sig: redjubjub::Signature<SpendAuth>,
-}
-```
-
-V5 sapling output will live in `zebra-chain/src/sapling/output.rs` (this is in the same file as `OutputV4`).
-
-Note: the V4 and V5 sapling outputs currently have identical fields. We use different types to consistently distinguish V4 and V5 transaction data.
-
-```
-pub struct OutputV5 {
-    pub cv: commitment::ValueCommitment,
-    pub cm_u: jubjub::Fq,
-    pub ephemeral_key: keys::EphemeralPublicKey,
-    pub enc_ciphertext: note::EncryptedNote,
-    pub out_ciphertext: note::WrappedNoteKey,
-    pub zkproof: Groth16Proof,
-}
-```
-To abstract over the `V4` and `V5` `Transaction` enum variants, we will implement `Transaction` methods to access sapling and orchard data. 
-
-To abstract over the `SaplingShieldedDataV4`/`SaplingShieldedDataV5`, `SpendV4`/`SpendV5`, and `OutputV4`/`OutputV5` structs, we will implement `SaplingShieldedData`, `Spend`, and `Output` traits to access sapling data.
-
-The methods in these traits will be implemented in a similar way to the existing `Transaction` methods.
 The new V5 structure will create a new `OrchardShieldedData` type. This new type will be defined in a separated file: `zebra-chain/src/transaction/orchard_shielded_data.rs` and it will look as follows:
 ```
 pub struct OrchardShieldedData {
@@ -203,7 +173,10 @@ pub struct OrchardShieldedData {
     /// an invalid `OrchardShieldedData` with no actions.
     pub first: Action,
     pub rest: Vec<Action>,
-    pub binding_sig: Signature<Binding>,
+    pub flags: OrchardFlags,
+    pub orchard_value_balance: Amount,
+    pub anchor: tree::Root,
+    pub binding_sig: redpallas::Signature<redpallas::Binding>,
 }
 ```
 
