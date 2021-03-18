@@ -6,6 +6,7 @@ use proptest::prelude::*;
 use std::io::Cursor;
 
 proptest! {
+    
     // The tests below are cheap so we can run them a lot.
     #![proptest_config(ProptestConfig::with_cases(100_000))]
 

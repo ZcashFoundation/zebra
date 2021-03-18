@@ -370,3 +370,92 @@ impl SafePreallocate for transparent::Output {
         MAX_BLOCK_BYTES / MIN_TRANSPARENT_OUTPUT_SIZE
     }
 }
+
+#[cfg(test)]
+mod test_safe_preallocate {
+    use super::{
+        transparent::Input, transparent::Output, Transaction, MAX_BLOCK_BYTES,
+        MIN_TRANSPARENT_INPUT_SIZE, MIN_TRANSPARENT_OUTPUT_SIZE, MIN_TRANSPARENT_TX_SIZE,
+    };
+    use crate::serialization::{SafePreallocate, ZcashSerialize};
+    use proptest::prelude::*;
+    use std::{convert::TryInto, sync::Arc};
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(300))]
+
+        /// Confirm that each spend takes at least MIN_TRANSPARENT_TX_SIZE bytes when serialized.
+        /// This verifies that our calculated `SafePreallocate::max_allocation()` is indeed an upper bound.
+        #[test]
+        fn tx_size_is_small_enough(tx in Transaction::arbitrary()) {
+            let serialized = tx.zcash_serialize_to_vec().expect("Serialization to vec must succeed");
+            prop_assert!(serialized.len() as u64 >= MIN_TRANSPARENT_TX_SIZE)
+        }
+
+        /// Confirm that each spend takes at least MIN_TRANSPARENT_TX_SIZE bytes when serialized.
+        /// This verifies that our calculated `SafePreallocate::max_allocation()` is indeed an upper bound.
+        #[test]
+        fn transparent_input_size_is_small_enough(input in Input::arbitrary()) {
+            let serialized = input.zcash_serialize_to_vec().expect("Serialization to vec must succeed");
+            prop_assert!(serialized.len() as u64 >= MIN_TRANSPARENT_INPUT_SIZE)
+        }
+
+        /// Confirm that each spend takes at least MIN_TRANSPARENT_TX_SIZE bytes when serialized.
+        /// This verifies that our calculated `SafePreallocate::max_allocation()` is indeed an upper bound.
+        #[test]
+        fn transparent_output_size_is_small_enough(output in Output::arbitrary()) {
+            let serialized = output.zcash_serialize_to_vec().expect("Serialization to vec must succeed");
+            prop_assert!(serialized.len() as u64 >= MIN_TRANSPARENT_OUTPUT_SIZE)
+        }
+
+    }
+    proptest! {
+        // This test is pretty slow, so only run a few
+        #![proptest_config(ProptestConfig::with_cases(7))]
+        #[test]
+        fn tx_max_allocation_is_big_enough(tx in Transaction::arbitrary()) {
+
+            let max_allocation: usize = <Arc<Transaction>>::max_allocation().try_into().unwrap();
+            let mut smallest_disallowed_vec = Vec::with_capacity(max_allocation + 1);
+            for _ in 0..(<Arc<Transaction>>::max_allocation()+1) {
+                smallest_disallowed_vec.push(Arc::new(tx.clone()));
+            }
+            let serialized = smallest_disallowed_vec.zcash_serialize_to_vec().expect("Serialization to vec must succeed");
+
+            // Check that our smallest_disallowed_vec is only one item larger than the limit
+            prop_assert!(((smallest_disallowed_vec.len() - 1) as u64) == <Arc<Transaction>>::max_allocation());
+            // Check that our smallest_disallowed_vec is too big to be included in a valid block
+            prop_assert!(serialized.len() as u64 >= MAX_BLOCK_BYTES);
+        }
+
+        #[test]
+        fn input_max_allocation_is_big_enough(input in Input::arbitrary()) {
+
+            let max_allocation: usize = Input::max_allocation().try_into().unwrap();
+            let mut smallest_disallowed_vec = Vec::with_capacity(max_allocation + 1);
+            for _ in 0..(Input::max_allocation()+1) {
+                smallest_disallowed_vec.push(input.clone());
+            }
+            let serialized = smallest_disallowed_vec.zcash_serialize_to_vec().expect("Serialization to vec must succeed");
+
+            // Check that our smallest_disallowed_vec is only one item larger than the limit
+            prop_assert!(((smallest_disallowed_vec.len() - 1) as u64) == Input::max_allocation());
+            // Check that our smallest_disallowed_vec is too big to be included in a valid block
+            prop_assert!(serialized.len() as u64 >= MAX_BLOCK_BYTES);
+        }
+        #[test]
+        fn output_max_allocation_is_big_enough(output in Output::arbitrary()) {
+
+            let max_allocation: usize = Output::max_allocation().try_into().unwrap();
+            let mut smallest_disallowed_vec = Vec::with_capacity(max_allocation + 1);
+            for _ in 0..(Output::max_allocation()+1) {
+                smallest_disallowed_vec.push(output.clone());
+            }
+            let serialized = smallest_disallowed_vec.zcash_serialize_to_vec().expect("Serialization to vec must succeed");
+
+            // Check that our smallest_disallowed_vec is only one item larger than the limit
+            prop_assert!(((smallest_disallowed_vec.len() - 1) as u64) == Output::max_allocation());
+            // Check that our smallest_disallowed_vec is too big to be included in a valid block
+            prop_assert!(serialized.len() as u64 >= MAX_BLOCK_BYTES);
+        }
+    }
+}

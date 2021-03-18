@@ -1,3 +1,5 @@
+use std::usize;
+
 use chrono::{DateTime, Duration, Utc};
 use thiserror::Error;
 
@@ -126,9 +128,54 @@ pub struct CountedHeader {
 const BLOCK_HEADER_LENGTH: usize =
     crate::work::equihash::Solution::INPUT_LENGTH + 32 + 3 + crate::work::equihash::SOLUTION_SIZE;
 
+const COUNTED_HEADER_LEN: usize = BLOCK_HEADER_LENGTH + 1;
 impl SafePreallocate for CountedHeader {
     fn max_allocation() -> u64 {
-        // An CountedHeader has BLOCK_HEADER_LENGTH bytes + 1 byte for the transaction count
-        (MAX_PROTOCOL_MESSAGE_LEN / (BLOCK_HEADER_LENGTH + 1)) as u64
+        // A CountedHeader has BLOCK_HEADER_LENGTH bytes + 1 byte for the transaction count
+        (MAX_PROTOCOL_MESSAGE_LEN / COUNTED_HEADER_LEN) as u64
+    }
+}
+
+#[cfg(test)]
+mod test_safe_preallocate {
+    use super::{CountedHeader, Header, COUNTED_HEADER_LEN, MAX_PROTOCOL_MESSAGE_LEN};
+    use crate::serialization::{SafePreallocate, ZcashSerialize};
+    use proptest::prelude::*;
+    use std::convert::TryInto;
+    proptest! {
+
+        #![proptest_config(ProptestConfig::with_cases(10_000))]
+
+        /// Confirm that each counted header takes at least COUNTED_HEADER_LEN bytes when serialized.
+        /// This verifies that our calculated `SafePreallocate::max_allocation()` is indeed an upper bound.
+        #[test]
+        fn counted_header_min_length(header in Header::arbitrary_with(()), transaction_count in (0..std::u32::MAX)) {
+            let header = CountedHeader {
+                header,
+                transaction_count: transaction_count.try_into().expect("Must run test on platform with at least 32 bit address space"),
+            };
+            let serialized_header = header.zcash_serialize_to_vec().expect("Serialization to vec must succeed");
+            prop_assert!(serialized_header.len() >= COUNTED_HEADER_LEN)
+        }
+
+
+        #[test]
+        fn counted_header_max_allocation(header in Header::arbitrary_with(())) {
+            let header = CountedHeader {
+                header,
+                transaction_count: 0,
+            };
+            let max_allocation: usize = CountedHeader::max_allocation().try_into().unwrap();
+            let mut smallest_disallowed_vec = Vec::with_capacity(max_allocation + 1);
+            for _ in 0..(CountedHeader::max_allocation()+1) {
+                smallest_disallowed_vec.push(header.clone());
+            }
+            let serialized = smallest_disallowed_vec.zcash_serialize_to_vec().expect("Serialization to vec must succeed");
+
+            // Check that our smallest_disallowed_vec is only one item larger than the limit
+            prop_assert!(((smallest_disallowed_vec.len() - 1) as u64) == CountedHeader::max_allocation());
+            // Check that our smallest_disallowed_vec is too big to send as a protocol message
+            prop_assert!(serialized.len() >= MAX_PROTOCOL_MESSAGE_LEN);
+        }
     }
 }

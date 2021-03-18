@@ -65,3 +65,42 @@ impl SafePreallocate for Output {
         MAX_BLOCK_BYTES / OUTPUT_SIZE
     }
 }
+
+#[cfg(test)]
+mod test_safe_preallocate {
+    use super::{Output, MAX_BLOCK_BYTES, OUTPUT_SIZE};
+    use crate::serialization::{SafePreallocate, ZcashSerialize};
+    use proptest::prelude::*;
+    use std::convert::TryInto;
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(10_000))]
+
+        /// Confirm that each output takes at least OUTPUT_SIZE bytes when serialized.
+        /// This verifies that our calculated `SafePreallocate::max_allocation()` is indeed an upper bound.
+        #[test]
+        fn output_size_is_small_enough(output in Output::arbitrary_with(())) {
+            let serialized = output.zcash_serialize_to_vec().expect("Serialization to vec must succeed");
+            prop_assert!(serialized.len() as u64 == OUTPUT_SIZE)
+        }
+
+    }
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100))]
+        #[test]
+        fn output_max_allocation_is_big_enough(output in Output::arbitrary_with(())) {
+
+            let max_allocation: usize = Output::max_allocation().try_into().unwrap();
+            let mut smallest_disallowed_vec = Vec::with_capacity(max_allocation + 1);
+            for _ in 0..(Output::max_allocation()+1) {
+                smallest_disallowed_vec.push(output.clone());
+            }
+            let serialized = smallest_disallowed_vec.zcash_serialize_to_vec().expect("Serialization to vec must succeed");
+
+            // Check that our smallest_disallowed_vec is only one item larger than the limit
+            prop_assert!(((smallest_disallowed_vec.len() - 1) as u64) == Output::max_allocation());
+            // Check that our smallest_disallowed_vec is too big to be included in a valid block
+            prop_assert!(serialized.len() as u64 >= MAX_BLOCK_BYTES);
+        }
+    }
+}
