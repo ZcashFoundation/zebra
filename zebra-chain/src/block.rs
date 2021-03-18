@@ -21,10 +21,17 @@ pub use header::BlockTimeError;
 pub use header::{CountedHeader, Header};
 pub use height::Height;
 pub use root_hash::RootHash;
+pub use serialize::MAX_BLOCK_BYTES;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{fmt::DisplayToDebug, parameters::Network, transaction::Transaction, transparent};
+use crate::{
+    fmt::DisplayToDebug,
+    parameters::Network,
+    serialization::{SafePreallocate, MAX_PROTOCOL_MESSAGE_LEN},
+    transaction::Transaction,
+    transparent,
+};
 
 /// A Zcash block, containing a header and a list of transactions.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -78,5 +85,12 @@ impl Block {
 impl<'a> From<&'a Block> for Hash {
     fn from(block: &'a Block) -> Hash {
         (&block.header).into()
+    }
+}
+
+impl SafePreallocate for Hash {
+    fn max_allocation() -> u64 {
+        // A block Hash has takes 32 bytes so we can never receive more than (MAX_PROTOCOL_MESSAGE_LEN / 32) in a single message
+        (MAX_PROTOCOL_MESSAGE_LEN as u64) / 32
     }
 }

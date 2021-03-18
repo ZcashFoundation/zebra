@@ -32,7 +32,7 @@ use super::{
 const HEADER_LEN: usize = 24usize;
 
 /// Maximum size of a protocol message body.
-const MAX_PROTOCOL_MESSAGE_LEN: usize = 2 * 1024 * 1024;
+pub use zebra_chain::serialization::MAX_PROTOCOL_MESSAGE_LEN;
 
 /// A codec which produces Bitcoin messages from byte streams and vice versa.
 pub struct Codec {

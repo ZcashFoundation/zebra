@@ -1,7 +1,10 @@
 use chrono::{DateTime, Duration, Utc};
 use thiserror::Error;
 
-use crate::work::{difficulty::CompactDifficulty, equihash::Solution};
+use crate::{
+    serialization::{SafePreallocate, MAX_PROTOCOL_MESSAGE_LEN},
+    work::{difficulty::CompactDifficulty, equihash::Solution},
+};
 
 use super::{merkle, Hash, Height};
 
@@ -117,4 +120,15 @@ impl Header {
 pub struct CountedHeader {
     pub header: Header,
     pub transaction_count: usize,
+}
+
+// Includes the 32-byte nonce and 3-byte equihash length field.
+const BLOCK_HEADER_LENGTH: usize =
+    crate::work::equihash::Solution::INPUT_LENGTH + 32 + 3 + crate::work::equihash::SOLUTION_SIZE;
+
+impl SafePreallocate for CountedHeader {
+    fn max_allocation() -> u64 {
+        // An CountedHeader has BLOCK_HEADER_LENGTH bytes + 1 byte for the transaction count
+        (MAX_PROTOCOL_MESSAGE_LEN / (BLOCK_HEADER_LENGTH + 1)) as u64
+    }
 }

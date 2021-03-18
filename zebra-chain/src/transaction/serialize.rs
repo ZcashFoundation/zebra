@@ -6,11 +6,12 @@ use std::{io, sync::Arc};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 use crate::{
+    block::MAX_BLOCK_BYTES,
     parameters::{OVERWINTER_VERSION_GROUP_ID, SAPLING_VERSION_GROUP_ID, TX_V5_VERSION_GROUP_ID},
     primitives::ZkSnarkProof,
     serialization::{
-        ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashDeserializeInto,
-        ZcashSerialize,
+        ReadZcashExt, SafePreallocate, SerializationError, WriteZcashExt, ZcashDeserialize,
+        ZcashDeserializeInto, ZcashSerialize,
     },
     sprout,
 };
@@ -340,5 +341,32 @@ where
 {
     fn zcash_serialize<W: io::Write>(&self, writer: W) -> Result<(), io::Error> {
         T::zcash_serialize(self, writer)
+    }
+}
+
+/// A Tx Input must have an Outpoint (32 byte hash + 4 byte index), a 4 byte sequence number,
+/// and a signature script, which always takes a min of 1 byte (for a length 0 script)
+const MIN_TRANSPARENT_INPUT_SIZE: u64 = 32 + 4 + 4 + 1;
+/// A Transparent output has an 8 byte value and script which takes a min of 1 byte
+const MIN_TRANSPARENT_OUTPUT_SIZE: u64 = 8 + 1;
+// All txs must have at least one input and a 4 byte locktime
+const MIN_TRANSPARENT_TX_SIZE: u64 = MIN_TRANSPARENT_INPUT_SIZE + 4;
+
+/// No valid Zcash message contains more transactions than can fit in a single block
+impl SafePreallocate for Arc<Transaction> {
+    fn max_allocation() -> u64 {
+        MAX_BLOCK_BYTES / MIN_TRANSPARENT_TX_SIZE
+    }
+}
+/// No valid Zcash message contains more transactions inputs than can fit in maximally large transaction
+impl SafePreallocate for transparent::Input {
+    fn max_allocation() -> u64 {
+        MAX_BLOCK_BYTES / MIN_TRANSPARENT_INPUT_SIZE
+    }
+}
+/// No valid Zcash message contains more transactions outputs than can fit in maximally large transaction
+impl SafePreallocate for transparent::Output {
+    fn max_allocation() -> u64 {
+        MAX_BLOCK_BYTES / MIN_TRANSPARENT_OUTPUT_SIZE
     }
 }

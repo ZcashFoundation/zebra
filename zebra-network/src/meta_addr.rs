@@ -10,10 +10,11 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{DateTime, TimeZone, Utc};
 
 use zebra_chain::serialization::{
-    ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
+    ReadZcashExt, SafePreallocate, SerializationError, WriteZcashExt, ZcashDeserialize,
+    ZcashSerialize,
 };
 
-use crate::protocol::types::PeerServices;
+use crate::protocol::{external::MAX_PROTOCOL_MESSAGE_LEN, types::PeerServices};
 
 /// Peer connection state, based on our interactions with the peer.
 ///
@@ -198,6 +199,13 @@ impl ZcashDeserialize for MetaAddr {
             addr: reader.read_socket_addr()?,
             last_connection_state: Default::default(),
         })
+    }
+}
+/// A serialized meta addr has a 4 byte time, 8 byte services, 16 byte IP addr, and 2 byte port
+const META_ADDR_SIZE: usize = 4 + 8 + 16 + 2;
+impl SafePreallocate for MetaAddr {
+    fn max_allocation() -> u64 {
+        (MAX_PROTOCOL_MESSAGE_LEN / META_ADDR_SIZE) as u64
     }
 }
 
