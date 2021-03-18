@@ -87,7 +87,7 @@ V4 {
 
 In order to mantain the order of the fields that we will need for Serialization/Deserialization we keep the `value_balance` in the transaction for V4 but we rename it to `sapling_value_balance` for clarity.
 
-`ShieldedData` is currently defined and implemented in `src/transaction/shielded_data.rs`. We propose to rename this file to `src/transaction/sapling_shielded_data.rs`. Inside we will change `ShieldedData` into a `SaplingShieldedData` enum with `V4` and `V5` variants.
+`ShieldedData` is currently defined and implemented in `zebra-chain/src/transaction/shielded_data.rs`. As this is Sapling specific we propose to move this file to `zebra-chain/src/sapling/shielded_data.rs`. Inside we will change `ShieldedData` into `SaplingShieldedData` and implement it as an enum with `V4` and `V5` variants.
 
 ```
 pub enum SaplingShieldedData {
@@ -97,15 +97,15 @@ pub enum SaplingShieldedData {
     /// an invalid `SaplingShieldedData` with no spends or outputs.
     /// ...
     V4 {
-        pub first: Either<SaplingSpend::V4, SaplingOutput>,
-        pub rest_spends: Vec<SaplingSpend::V4>,
-        pub rest_outputs: Vec<SaplingOutput>,
+        pub first: Either<Spend::V4, Output>,
+        pub rest_spends: Vec<Spend::V4>,
+        pub rest_outputs: Vec<Output>,
         pub binding_sig: Signature<Binding>,
     },
     V5 {
-        pub first: Either<SaplingSpend::V5, SaplingOutput>,
-        pub rest_spends: Vec<SaplingSpend::V5>,
-        pub rest_outputs: Vec<SaplingOutput>,
+        pub first: Either<Spend::V5, Output>,
+        pub rest_spends: Vec<Spend::V5>,
+        pub rest_outputs: Vec<Output>,
         pub sapling_value_balance: Amount,
         pub anchor: tree::Root,
         pub binding_sig: Signature<Binding>,
@@ -113,10 +113,10 @@ pub enum SaplingShieldedData {
 }
 ```
 
-Proposed `SaplingSpend` is now defined as an enum with `V4` and `V5` variants. Sapling spend code is located at `zebra-chain/src/sapling/spend.rs`. Notable difference here is that the `anchor` in `V4` is needed for every spend of the transaction while in `V5` the anchor is a single one defined in `SaplingShieldedData`:
+Proposed `Spend` is now defined as an enum with `V4` and `V5` variants. Sapling spend code is located at `zebra-chain/src/sapling/spend.rs`. Notable difference here is that the `anchor` in `V4` is needed for every spend of the transaction while in `V5` the anchor is a single one defined in `SaplingShieldedData`:
 
 ```
-pub enum SaplingSpend {
+pub enum Spend {
     V4 {
         pub cv: commitment::ValueCommitment,
         pub anchor: tree::Root,
@@ -137,7 +137,7 @@ pub enum SaplingSpend {
 In Zebra the output representations are the same for V4 and V5 so no variants are needed. The output code is located at `zebra-chain/src/sapling/output.rs`:
 
 ```
-pub struct SaplingOutput {
+pub struct Output {
     pub cv: commitment::ValueCommitment,
     pub cm_u: jubjub::Fq,
     pub ephemeral_key: keys::EphemeralPublicKey,
@@ -162,9 +162,9 @@ V5 {
 }
 ```
 
-`sapling_shielded_data` will now use `SaplingShieldedData::V5` variant located at `zebra-chain/src/transaction/sapling_shielded_data.rs` with the corresponding `SaplingSpend::V5` for the spends.
+`sapling_shielded_data` will now use `SaplingShieldedData::V5` variant located at `zebra-chain/src/transaction/sapling_shielded_data.rs` with the corresponding `Spend::V5` for the spends.
 
-The new V5 structure will create a new `OrchardShieldedData` type. This new type will be defined in a separated file: `zebra-chain/src/transaction/orchard_shielded_data.rs` and it will look as follows:
+The new V5 structure will create a new `OrchardShieldedData` type. This new type will be defined in a separated file: `zebra-chain/src/orchard/shielded_data.rs` and it will look as follows:
 ```
 pub struct OrchardShieldedData {
     /// An action description.
@@ -182,7 +182,7 @@ pub struct OrchardShieldedData {
 
 Where `Action` is defined as [Action definition](https://github.com/ZcashFoundation/zebra/blob/68c12d045b63ed49dd1963dd2dc22eb991f3998c/zebra-chain/src/orchard/action.rs#L18-L41).
 
-Finally, in the V5 transaction we have a new `OrchardFlags`. This is a bitfield type defined as:
+Finally, in the V5 transaction we have a new `OrchardFlags` type. This is a bitfield type defined as:
 
 ```
 bitflags! {
