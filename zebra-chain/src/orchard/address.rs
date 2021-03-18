@@ -78,7 +78,8 @@ impl std::str::FromStr for Address {
                 Ok(Address {
                     network: match hrp.as_str() {
                         human_readable_parts::MAINNET => Network::Mainnet,
-                        _ => Network::Testnet,
+                        human_readable_parts::TESTNET => Network::Testnet,
+                        _ => Err(SerializationError::Parse("unknown network")),
                     },
                     diversifier: keys::Diversifier::from(diversifier_bytes),
                     transmission_key: keys::TransmissionKey::from(transmission_key_bytes),
