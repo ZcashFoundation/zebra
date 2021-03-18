@@ -210,6 +210,51 @@ impl SafePreallocate for MetaAddr {
 }
 
 #[cfg(test)]
+mod test_safe_preallocate {
+    use std::convert::TryInto;
+
+    use super::{MetaAddr, MAX_PROTOCOL_MESSAGE_LEN, META_ADDR_SIZE};
+    use super::{PeerAddrState, PeerServices};
+    use chrono::{TimeZone, Utc};
+    use zebra_chain::serialization::{SafePreallocate, ZcashSerialize};
+    #[test]
+    fn meta_addr_size_is_small_enough() {
+        let addr = MetaAddr {
+            addr: ([192, 168, 0, 0], 8333).into(),
+            services: PeerServices::default(),
+            last_seen: Utc.timestamp(1_573_680_222, 0),
+            last_connection_state: PeerAddrState::Responded,
+        };
+        let serialized = addr
+            .zcash_serialize_to_vec()
+            .expect("Serialization to vec must succeed");
+        assert!(serialized.len() == META_ADDR_SIZE)
+    }
+    #[test]
+    fn meta_addr_max_allocation_is_big_enough() {
+        let addr = MetaAddr {
+            addr: ([192, 168, 0, 0], 8333).into(),
+            services: PeerServices::default(),
+            last_seen: Utc.timestamp(1_573_680_222, 0),
+            last_connection_state: PeerAddrState::Responded,
+        };
+        let max_allocation: usize = MetaAddr::max_allocation().try_into().unwrap();
+        let mut smallest_disallowed_vec = Vec::with_capacity(max_allocation + 1);
+        for _ in 0..(MetaAddr::max_allocation() + 1) {
+            smallest_disallowed_vec.push(addr.clone());
+        }
+        let serialized = smallest_disallowed_vec
+            .zcash_serialize_to_vec()
+            .expect("Serialization to vec must succeed");
+
+        // Check that our smallest_disallowed_vec is only one item larger than the limit
+        assert!(((smallest_disallowed_vec.len() - 1) as u64) == MetaAddr::max_allocation());
+        // Check that our smallest_disallowed_vec is too big to be included in a valid block
+        assert!(serialized.len() >= MAX_PROTOCOL_MESSAGE_LEN);
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     // XXX remove this test and replace it with a proptest instance.

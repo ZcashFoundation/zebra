@@ -59,7 +59,7 @@ impl ZcashDeserialize for Spend {
     }
 }
 
-/// An output contains: a 32 byte cv, a 32 byte anchor, a 32 byte nullifier,  
+/// A Spend contains: a 32 byte cv, a 32 byte anchor, a 32 byte nullifier,  
 /// a 32 byte rk, a 192 byte zkproof, and a 64 byte spendAuthSig
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#spendencoding
 const SPEND_SIZE: u64 = 32 + 32 + 32 + 32 + 192 + 64;
@@ -68,5 +68,44 @@ const SPEND_SIZE: u64 = 32 + 32 + 32 + 32 + 192 + 64;
 impl SafePreallocate for Spend {
     fn max_allocation() -> u64 {
         MAX_BLOCK_BYTES / SPEND_SIZE
+    }
+}
+
+#[cfg(test)]
+mod test_safe_preallocate {
+    use super::{Spend, MAX_BLOCK_BYTES, SPEND_SIZE};
+    use crate::serialization::{SafePreallocate, ZcashSerialize};
+    use proptest::prelude::*;
+    use std::convert::TryInto;
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(10_000))]
+
+        /// Confirm that each spend takes at least SPEND_SIZE bytes when serialized.
+        /// This verifies that our calculated `SafePreallocate::max_allocation()` is indeed an upper bound.
+        #[test]
+        fn spend_size_is_small_enough(spend in Spend::arbitrary_with(())) {
+            let serialized = spend.zcash_serialize_to_vec().expect("Serialization to vec must succeed");
+            prop_assert!(serialized.len() as u64 == SPEND_SIZE)
+        }
+
+    }
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100))]
+        #[test]
+        fn spend_max_allocation_is_big_enough(output in Spend::arbitrary_with(())) {
+
+            let max_allocation: usize = Spend::max_allocation().try_into().unwrap();
+            let mut smallest_disallowed_vec = Vec::with_capacity(max_allocation + 1);
+            for _ in 0..(Spend::max_allocation()+1) {
+                smallest_disallowed_vec.push(output.clone());
+            }
+            let serialized = smallest_disallowed_vec.zcash_serialize_to_vec().expect("Serialization to vec must succeed");
+
+            // Check that our smallest_disallowed_vec is only one item larger than the limit
+            prop_assert!(((smallest_disallowed_vec.len() - 1) as u64) == Spend::max_allocation());
+            // Check that our smallest_disallowed_vec is too big to be included in a valid block
+            prop_assert!(serialized.len() as u64 >= MAX_BLOCK_BYTES);
+        }
     }
 }

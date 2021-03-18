@@ -94,3 +94,31 @@ impl SafePreallocate for Hash {
         (MAX_PROTOCOL_MESSAGE_LEN as u64) / 32
     }
 }
+
+#[cfg(test)]
+mod test_safe_preallocate {
+    use super::{Hash, MAX_PROTOCOL_MESSAGE_LEN};
+    use crate::serialization::{SafePreallocate, ZcashSerialize};
+    use proptest::prelude::*;
+    use std::convert::TryInto;
+    proptest! {
+
+        #![proptest_config(ProptestConfig::with_cases(200))]
+
+
+        #[test]
+        fn block_hash_max_allocation(hash in Hash::arbitrary_with(())) {
+            let max_allocation: usize = Hash::max_allocation().try_into().unwrap();
+            let mut smallest_disallowed_vec = Vec::with_capacity(max_allocation + 1);
+            for _ in 0..(Hash::max_allocation()+1) {
+                smallest_disallowed_vec.push(hash.clone());
+            }
+            let serialized = smallest_disallowed_vec.zcash_serialize_to_vec().expect("Serialization to vec must succeed");
+
+            // Check that our smallest_disallowed_vec is only one item larger than the limit
+            prop_assert!(((smallest_disallowed_vec.len() - 1) as u64) == Hash::max_allocation());
+            // Check that our smallest_disallowed_vec is too big to send as a protocol message
+            prop_assert!(serialized.len() >= MAX_PROTOCOL_MESSAGE_LEN);
+        }
+    }
+}
