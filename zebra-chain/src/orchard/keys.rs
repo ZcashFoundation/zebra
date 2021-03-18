@@ -460,7 +460,7 @@ impl fmt::Display for IncomingViewingKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let hrp = match self.network {
             Network::Mainnet => ivk_hrp::MAINNET,
-            _ => ivk_hrp::TESTNET,
+            Network::Testnet => ivk_hrp::TESTNET,
         };
 
         bech32::encode_to_fmt(f, hrp, &self.scalar.to_bytes().to_base32(), Variant::Bech32).unwrap()
