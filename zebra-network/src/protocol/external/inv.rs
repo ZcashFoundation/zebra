@@ -10,9 +10,13 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 use zebra_chain::{
     block,
-    serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize},
+    serialization::{
+        ReadZcashExt, SafePreallocate, SerializationError, ZcashDeserialize, ZcashSerialize,
+    },
     transaction,
 };
+
+use super::MAX_PROTOCOL_MESSAGE_LEN;
 
 /// An inventory hash which refers to some advertised or requested data.
 ///
@@ -79,5 +83,12 @@ impl ZcashDeserialize for InventoryHash {
             3 => Ok(InventoryHash::FilteredBlock(block::Hash(bytes))),
             _ => Err(SerializationError::Parse("invalid inventory code")),
         }
+    }
+}
+
+impl SafePreallocate for InventoryHash {
+    fn max_allocation() -> u64 {
+        // An Inventory hash takes 32 bytes, so we can never receive more than (MAX_PROTOCOL_MESSAGE_LEN / 32) in a single message
+        (MAX_PROTOCOL_MESSAGE_LEN / 32) as u64
     }
 }

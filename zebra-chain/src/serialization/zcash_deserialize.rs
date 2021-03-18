@@ -1,4 +1,4 @@
-use std::io;
+use std::{convert::TryInto, io};
 
 use super::{ReadZcashExt, SerializationError};
 
@@ -17,15 +17,15 @@ pub trait ZcashDeserialize: Sized {
     fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError>;
 }
 
-impl<T: ZcashDeserialize> ZcashDeserialize for Vec<T> {
+impl<T: ZcashDeserialize + SafePreallocate> ZcashDeserialize for Vec<T> {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         let len = reader.read_compactsize()?;
-        // We're given len, so we could preallocate. But blindly preallocating
-        // without a size bound can allow DOS attacks, and there's no way to
-        // pass a size bound in a ZcashDeserialize impl, so instead we allocate
-        // as we read from the reader. (The maximum block and transaction sizes
-        // limit the eventual size of these allocations.)
-        let mut vec = Vec::new();
+        if len > T::max_allocation() {
+            return Err(SerializationError::Parse(
+                "Vector longer than max_allocation",
+            ));
+        }
+        let mut vec = Vec::with_capacity(len.try_into()?);
         for _ in 0..len {
             vec.push(T::zcash_deserialize(&mut reader)?);
         }
@@ -48,4 +48,16 @@ impl<R: io::Read> ZcashDeserializeInto for R {
     {
         T::zcash_deserialize(self)
     }
+}
+
+/// Blind preallocation of a Vec<T: SafePreallocate> can be done safely. This is in contrast
+/// to blind preallocation of a generic Vec<T>, which is a DOS vector.
+///
+/// The max_allocation() function provides a loose upper bound on the size of the Vec<T: SafePreallocate>
+/// which can possibly be received from an honest peer. If this limit is too low, Zebra may reject valid messages.
+/// In the worst case, setting the lower bound to low could cause Zebra to fall out of consensus by rejecting all messages containing a valid block.
+pub trait SafePreallocate {
+    /// Provides a ***loose upper bound*** on the size of the Vec<T: SafePreallocate>
+    /// which can possibly be received from an honest peer.
+    fn max_allocation() -> u64;
 }

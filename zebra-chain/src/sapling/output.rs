@@ -1,8 +1,11 @@
 use std::io;
 
 use crate::{
+    block::MAX_BLOCK_BYTES,
     primitives::Groth16Proof,
-    serialization::{serde_helpers, SerializationError, ZcashDeserialize, ZcashSerialize},
+    serialization::{
+        serde_helpers, SafePreallocate, SerializationError, ZcashDeserialize, ZcashSerialize,
+    },
 };
 
 use super::{commitment, keys, note};
@@ -49,5 +52,16 @@ impl ZcashDeserialize for Output {
             out_ciphertext: note::WrappedNoteKey::zcash_deserialize(&mut reader)?,
             zkproof: Groth16Proof::zcash_deserialize(&mut reader)?,
         })
+    }
+}
+/// An output contains: a 32 byte cv, a 32 byte cmu, a 32 byte ephemeral key
+/// a 580 byte encCiphertext, an 80 byte outCiphertext, and a 192 byte zkproof
+/// [ps]: https://zips.z.cash/protocol/protocol.pdf#outputencoding
+const OUTPUT_SIZE: u64 = 32 + 32 + 32 + 580 + 80 + 192;
+
+/// We can never receive more outputs in a single message from an honest peer than would fit in a single block
+impl SafePreallocate for Output {
+    fn max_allocation() -> u64 {
+        MAX_BLOCK_BYTES / OUTPUT_SIZE
     }
 }

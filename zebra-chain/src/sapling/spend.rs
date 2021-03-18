@@ -1,12 +1,14 @@
 use std::io;
 
 use crate::{
+    block::MAX_BLOCK_BYTES,
     primitives::{
         redjubjub::{self, SpendAuth},
         Groth16Proof,
     },
     serialization::{
-        ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
+        ReadZcashExt, SafePreallocate, SerializationError, WriteZcashExt, ZcashDeserialize,
+        ZcashSerialize,
     },
 };
 
@@ -54,5 +56,17 @@ impl ZcashDeserialize for Spend {
             zkproof: Groth16Proof::zcash_deserialize(&mut reader)?,
             spend_auth_sig: reader.read_64_bytes()?.into(),
         })
+    }
+}
+
+/// An output contains: a 32 byte cv, a 32 byte anchor, a 32 byte nullifier,  
+/// a 32 byte rk, a 192 byte zkproof, and a 64 byte spendAuthSig
+/// [ps]: https://zips.z.cash/protocol/protocol.pdf#spendencoding
+const SPEND_SIZE: u64 = 32 + 32 + 32 + 32 + 192 + 64;
+
+/// We can never receive more spends in a single message from an honest peer than would fit in a single block
+impl SafePreallocate for Spend {
+    fn max_allocation() -> u64 {
+        MAX_BLOCK_BYTES / SPEND_SIZE
     }
 }

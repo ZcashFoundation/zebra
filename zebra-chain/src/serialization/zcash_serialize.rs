@@ -38,3 +38,8 @@ impl<T: ZcashSerialize> ZcashSerialize for Vec<T> {
         Ok(())
     }
 }
+
+/// The maximum length of a Zcash message, in bytes.
+///
+/// This value is used to calculate safe preallocation limits for some types
+pub const MAX_PROTOCOL_MESSAGE_LEN: usize = 2 * 1024 * 1024;
