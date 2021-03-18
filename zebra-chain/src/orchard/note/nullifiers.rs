@@ -62,9 +62,8 @@ impl From<(NullifierDerivingKey, Note, NoteCommitment)> for Nullifier {
     /// https://zips.z.cash/protocol/nu5.pdf#commitmentsandnullifiers
     #[allow(non_snake_case)]
     fn from((nk, note, cm): (NullifierDerivingKey, Note, NoteCommitment)) -> Self {
-        // TODO: fill this in (K^Orchard) from the spec when defined:
         // https://zips.z.cash/protocol/nu5.pdf#commitmentsandnullifiers
-        let K = pallas_group_hash(b"Zcash_P_", b"");
+        let K = pallas_group_hash(b"z.cash:Orchard", b"K");
 
         // impl Add for pallas::Base reduces by the modulus (q_P)
         //
