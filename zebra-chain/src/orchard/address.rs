@@ -118,21 +118,6 @@ mod tests {
 
     use super::*;
 
-    // #[test]
-    // fn from_str_display() {
-    //     zebra_test::init();
-
-    //     let zo_addr: Address =
-    //         "zs1qqqqqqqqqqqqqqqqqrjq05nyfku05msvu49mawhg6kr0wwljahypwyk2h88z6975u563j8nfaxd"
-    //             .parse()
-    //             .unwrap();
-
-    //     assert_eq!(
-    //         format!("{}", zo_addr),
-    //         "zs1qqqqqqqqqqqqqqqqqrjq05nyfku05msvu49mawhg6kr0wwljahypwyk2h88z6975u563j8nfaxd"
-    //     );
-    // }
-
     #[test]
     fn derive_keys_and_addresses() {
         zebra_test::init();
