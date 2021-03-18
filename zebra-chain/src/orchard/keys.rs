@@ -164,7 +164,7 @@ impl fmt::Display for SpendingKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let hrp = match self.network {
             Network::Mainnet => sk_hrp::MAINNET,
-            _ => sk_hrp::TESTNET,
+            Network::Testnet => sk_hrp::TESTNET,
         };
 
         bech32::encode_to_fmt(f, hrp, &self.bytes.to_base32(), Variant::Bech32).unwrap()
