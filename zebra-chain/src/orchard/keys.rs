@@ -591,7 +591,7 @@ impl fmt::Display for FullViewingKey {
 
         let hrp = match self.network {
             Network::Mainnet => fvk_hrp::MAINNET,
-            _ => fvk_hrp::TESTNET,
+            Network::Testnet => fvk_hrp::TESTNET,
         };
 
         bech32::encode_to_fmt(f, hrp, bytes.get_ref().to_base32(), Variant::Bech32).unwrap()
