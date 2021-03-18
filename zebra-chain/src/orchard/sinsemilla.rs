@@ -108,8 +108,11 @@ pub fn sinsemilla_hash_to_point(D: &[u8], M: &BitVec<Lsb0, u8>) -> pallas::Point
 /// proof systems including Halo 2."
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#concretesinsemillahash
+///
+/// # Panics
+///
+/// If `M` is greater than `k*c = 2530` bits in `sinsemilla_hash_to_point`.
 #[allow(non_snake_case)]
-// XXX: M is a max of k*c = 2530 bits, sinsemilla_hash_to_point checks this
 pub fn sinsemilla_hash(D: &[u8], M: &BitVec<Lsb0, u8>) -> pallas::Base {
     extract_p(sinsemilla_hash_to_point(D, M))
 }
