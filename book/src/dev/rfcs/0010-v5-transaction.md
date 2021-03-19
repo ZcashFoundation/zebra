@@ -33,23 +33,26 @@ We need the raw representation to Serialize/Deserialize the transaction however 
 
 V5 transactions are the only ones that will support orchard transactions with `Orchard` data types.
 
-V4 and V5 transactions both support sapling data but they are implemented differently. By this reason we need to split sapling data types into V4 and V5. We do this by using `enum` data types.
+V4 and V5 transactions both support sapling data but they are implemented differently. By this reason we need to split sapling data types into V4 and V5.
 
 The order of some of the fields changed from V4 to V5. For example the `lock_time` and `expiry_height` were moved above the transparent inputs and outputs.
 
 All of the changes proposed in this document are only to the `zebra-chain` crate.
 
-To highlight changes all document comments from the code snippets in the [reference section](#reference-level-explanation) were removed.
+To highlight changes most of the document comments from the code snippets in the [reference section](#reference-level-explanation) were removed.
 
 # Reference-level explanation
 [reference-level-explanation]: #reference-level-explanation
+
+## Current V4 Transactions
+[current-v4-transactions]: #current-v4-transactions
 
 We start by looking how a V4 (already implemented) transaction is represented in Zebra.
 
 This transaction version is specified by the protocol in the first table of [Transaction Encoding and Consensus](https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus).
 
 
-```
+```rust
 V4 {
     inputs: Vec<transparent::Input>,
     outputs: Vec<transparent::Output>,
@@ -63,7 +66,7 @@ V4 {
 
 Currently the `ShieldedData` type is defined in `zebra-chain/src/transaction/shielded_data.rs` as follows:
 
-```
+```rust
 pub struct ShieldedData {
     pub first: Either<Spend, Output>,
     pub rest_spends: Vec<Spend>,
@@ -74,46 +77,60 @@ pub struct ShieldedData {
 
 We know by protocol (2nd table of [Transaction Encoding and Consensus](https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus)) that V5 transactions will support sapling data however we also know by protocol that spends ([Spend Description Encoding and Consensus](https://zips.z.cash/protocol/nu5.pdf#spendencodingandconsensus), See †) and outputs ([Output Description Encoding and Consensus](https://zips.z.cash/protocol/nu5.pdf#outputencodingandconsensus), See †) fields change from V4 to V5.
 
-Here we have the proposed changes for V4 transactions:
+## Sapling Changes
+[sapling-changes]: #sapling-changes
 
-```
+### Changes to V4 Transactions
+[changes-to-v4-transactions]: #changes-to-v4-transactions
+
+Here we have the proposed changes for `Transaction::V4`:
+* make `sapling_shielded_data` use the `V4` shielded data type (**TODO: how?**)
+* rename `shielded_data` to `sapling_shielded_data`
+* move `value_balance` into the `sapling::ShieldedData` type
+
+```rust
 V4 {
     ...
-    sapling_shielded_data: Option<SaplingShieldedData::V4>,
+    sapling_shielded_data: Option<sapling::ShieldedData::V4>, // Note: enum variants can't be generic parameters in Rust
 }
 ```
 
+### Changes to Sapling ShieldedData
+[changes-to-sapling-shieldeddata]: #changes-to-sapling-shieldeddata
 
-`ShieldedData` is currently defined and implemented in `zebra-chain/src/transaction/shielded_data.rs`. As this is Sapling specific we propose to move this file to `zebra-chain/src/sapling/shielded_data.rs`. Inside we will change `ShieldedData` into `SaplingShieldedData` and implement it as an enum with `V4` and `V5` variants.
+`ShieldedData` is currently defined and implemented in `zebra-chain/src/transaction/shielded_data.rs`. As this is Sapling specific we propose to move this file to `zebra-chain/src/sapling/shielded_data.rs`. We will also change `ShieldedData` into an enum with `V4` and `V5` variants.
 
-```
-pub enum SaplingShieldedData {
+```rust
+pub enum sapling::ShieldedData {
     V4 {
         /// Either a spend or output description.
         ///
         /// Storing this separately ensures that it is impossible to construct
-        /// an invalid `SaplingShieldedData` with no spends or outputs.
+        /// an invalid `ShieldedData` with no spends or outputs.
         /// ...
-        pub first: Either<Spend::V4, Output>,
-        pub rest_spends: Vec<Spend::V4>,
+        pub first: Either<Spend::V4, Output>, // Note: enum variants can't be generic parameters in Rust
+        pub rest_spends: Vec<Spend::V4>, // Note: enum variants can't be generic parameters in Rust
         pub rest_outputs: Vec<Output>,
-        pub sapling_value_balance: Amount,
+        pub value_balance: Amount,
         pub binding_sig: Signature<Binding>,
     },
     V5 {
-        pub first: Either<Spend::V5, Output>,
-        pub rest_spends: Vec<Spend::V5>,
+        pub first: Either<Spend::V5, Output>, // Note: enum variants can't be generic parameters in Rust
+        pub rest_spends: Vec<Spend::V5>, // Note: enum variants can't be generic parameters in Rust
         pub rest_outputs: Vec<Output>,
-        pub sapling_value_balance: Amount,
+        pub value_balance: Amount,
         pub anchor: tree::Root,
         pub binding_sig: Signature<Binding>,
     }
 }
 ```
 
+### Adding V5 Sapling Spend
+[adding-v5-sapling-spend-and-output]: #adding-v5-sapling-spend-and-output
+
 Proposed `Spend` is now defined as an enum with `V4` and `V5` variants. Sapling spend code is located at `zebra-chain/src/sapling/spend.rs`. Notable difference here is that the `anchor` in `V4` is needed for every spend of the transaction while in `V5` the anchor is a single one defined in `SaplingShieldedData`:
 
-```
+```rust
 pub enum Spend {
     V4 {
         pub cv: commitment::ValueCommitment,
@@ -132,9 +149,13 @@ pub enum Spend {
     }
 }
 ```
-In Zebra the output representations are the same for V4 and V5 so no variants are needed. The output code is located at `zebra-chain/src/sapling/output.rs`:
 
-```
+### No Changes to Sapling Output
+[no-changes-to-sapling-output]: #no-changes-to-sapling-output
+
+In Zcash the Sapling output representations are the same for V4 and V5 transactions, so no variants are needed. The output code is located at `zebra-chain/src/sapling/output.rs`:
+
+```rust
 pub struct Output {
     pub cv: commitment::ValueCommitment,
     pub cm_u: jubjub::Fq,
@@ -145,50 +166,72 @@ pub struct Output {
 }
 ```
 
+## Orchard Additions
+[orchard-additions]: #orchard-additions
+
+### Adding V5 Transactions
+[adding-v5-transactions]: #adding-v5-transactions
+
 Now lets see how the V5 transaction is specified in the protocol, this is the second table of [Transaction Encoding and Consensus](https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus) and how are we going to represent it based in the above changes for Sapling fields and the new Orchard fields.
 
 We propose the following representation for transaction V5 in Zebra:
 
-```
+```rust
 V5 {
     lock_time: LockTime,
     expiry_height: block::Height,
     inputs: Vec<transparent::Input>,
     outputs: Vec<transparent::Output>,
-    sapling_shielded_data: Option<SaplingShieldedData::V5>,
-    orchard_shielded_data: Option<OrchardShieldedData>,
+    sapling_shielded_data: Option<sapling::ShieldedData::V5>, // Note: enum variants can't be generic parameters in Rust
+    orchard_shielded_data: Option<orchard::ShieldedData>,
 }
 ```
 
-`sapling_shielded_data` will now use `SaplingShieldedData::V5` variant located at `zebra-chain/src/transaction/sapling_shielded_data.rs` with the corresponding `Spend::V5` for the spends.
+`sapling_shielded_data` will now use `SaplingShieldedData::V5` variant located at `zebra-chain/src/transaction/sapling_shielded_data.rs` with the corresponding `Spend::V5` for the spends. (**TODO: how?**)
 
-The new V5 structure will create a new `OrchardShieldedData` type. This new type will be defined in a separated file: `zebra-chain/src/orchard/shielded_data.rs` and it will look as follows:
-```
-pub struct OrchardShieldedData {
+### Adding Orchard ShieldedData
+[adding-orchard-shieldeddata]: #adding-orchard-shieldeddata
+
+The new V5 structure will create a new `orchard::ShieldedData` type. This new type will be defined in a separated file: `zebra-chain/src/orchard/shielded_data.rs` and it will look as follows:
+
+```rust
+pub struct orchard::ShieldedData {
     /// An authorized action description.
     ///
     /// Storing this separately ensures that it is impossible to construct
-    /// an invalid `OrchardShieldedData` with no actions.
+    /// an invalid `ShieldedData` with no actions.
     pub first: AuthorizedAction,
     pub rest: Vec<AuthorizedAction>,
-    pub flags: OrchardFlags,
+    pub flags: Flags,
     pub orchard_value_balance: Amount,
     pub anchor: tree::Root,
     pub binding_sig: redpallas::Signature<redpallas::Binding>,
 }
 ```
 
+### Adding Orchard AuthorizedAction
+[adding-orchard-authorizedaction]: #adding-orchard-authorizedaction
+
 In `V5` transactions, there is one `SpendAuth` signature for every `Action`. To ensure that this structural rule is followed, we create an `AuthorizedAction` type:
-AuthorizedAction {
+
+```rust
+/// An authorized action description.
+///
+/// Every authorized Orchard `Action` must have a corresponding `SpendAuth` signature.
+pub struct orchard::AuthorizedAction {
     action: Action,
     spend_auth_sig: redpallas::Signature<redpallas::SpendAuth>,
 }
+```
 
 Where `Action` is defined as [Action definition](https://github.com/ZcashFoundation/zebra/blob/68c12d045b63ed49dd1963dd2dc22eb991f3998c/zebra-chain/src/orchard/action.rs#L18-L41).
 
-Finally, in the V5 transaction we have a new `OrchardFlags` type. This is a bitfield type defined as:
+### Adding Orchard Flags
+[adding-orchard-flags]: #adding-orchard-flags
 
-```
+Finally, in the V5 transaction we have a new `orchard::Flags` type. This is a bitfield type defined as:
+
+```rust
 bitflags! {
     pub struct OrchardFlags: u8 {
         const ENABLE_SPENDS = 0b00000001;
@@ -197,15 +240,6 @@ bitflags! {
     }
 }
 ```
-
-## Security
-
-To avoid parsing memory exhaustion attacks, we will make the following changes across all `Transaction`, `ShieldedData`, `Spend` and `Output` variants, `V1` through to `V5`:
-- Check cardinality consensus rules at parse time, before deserializing any `Vec`s
-  - In general, Zcash requires that each transaction has at least one Transparent/Sprout/Sapling/Orchard transfer, this rule is not currently encoded in our data structures
-- Stop parsing as soon as the first error is detected
-
-These changes should be made in a later pull request, see [#1917](https://github.com/ZcashFoundation/zebra/issues/1917) for details.
 
 ## Test Plan
 [test-plan]: #test-plan
@@ -223,3 +257,12 @@ These changes should be made in a later pull request, see [#1917](https://github
   - Add test vectors using the testnet activation block and 2 more post-activation blocks
 - After NU5 activation on mainnet:
   - Add test vectors using the mainnet activation block and 2 more post-activation blocks
+
+# Security
+
+To avoid parsing memory exhaustion attacks, we will make the following changes across all `Transaction`, `ShieldedData`, `Spend` and `Output` variants, `V1` through to `V5`:
+- Check cardinality consensus rules at parse time, before deserializing any `Vec`s
+  - In general, Zcash requires that each transaction has at least one Transparent/Sprout/Sapling/Orchard transfer, this rule is not currently encoded in our data structures
+- Stop parsing as soon as the first error is detected
+
+These changes should be made in a later pull request, see [#1917](https://github.com/ZcashFoundation/zebra/issues/1917) for details.
