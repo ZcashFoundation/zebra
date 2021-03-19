@@ -33,7 +33,7 @@ We need the raw representation to Serialize/Deserialize the transaction however 
 
 V5 transactions are the only ones that will support orchard transactions with `Orchard` data types.
 
-V4 and V5 transactions both support sapling data but they are implemented differently. By this reason we need to split sapling data types into V4 and V5.
+V4 and V5 transactions both support sapling, but the underying data structures are different. So need to make the sapling data types generic over the V4 and V5 structures.
 
 The order of some of the fields changed from V4 to V5. For example the `lock_time` and `expiry_height` were moved above the transparent inputs and outputs.
 
@@ -52,8 +52,8 @@ We know by protocol (2nd table of [Transaction Encoding and Consensus](https://z
 ### Changes to V4 Transactions
 [changes-to-v4-transactions]: #changes-to-v4-transactions
 
-Here we have the proposed changes for `Transaction::V4`:
-* make `sapling_shielded_data` use the `V4` shielded data type (**TODO: how?**)
+Here we have the proposed changes for V4 transactions:
+* make `sapling_shielded_data` use the `PerSpendAnchor` anchor variant
 * rename `shielded_data` to `sapling_shielded_data`
 * move `value_balance` into the `sapling::ShieldedData` type
 * order fields based on the **last** data deserialized for each field
@@ -65,62 +65,64 @@ enum Transaction::V4 {
     lock_time: LockTime,
     expiry_height: block::Height,
     joinsplit_data: Option<JoinSplitData<Groth16Proof>>,
-    sapling_shielded_data: Option<sapling::ShieldedData::V4>, // Note: enum variants can't be generic parameters in Rust
+    sapling_shielded_data: Option<sapling::ShieldedData<PerSpendAnchor>>,
+}
+```
+
+### Anchor Variants
+[anchor-variants]: #anchor-variants
+
+We implement an `AnchorVariant` generic type trait, because V4 transactions have a per-`Spend` anchor, but V5 transactions have a shared anchor:
+
+```rust
+struct PerSpendAnchor {}
+struct SharedAnchor {}
+
+impl AnchorVariant for PerSpendAnchor {
+    type Shared = ();
+    type PerSpend = tree::Root;
+}
+
+impl AnchorVariant for SharedAnchor {
+    type Shared = tree::Root;
+    type PerSpend = ();
+}
+
+trait AnchorVariant {
+    type Shared;
+    type PerSpend;
 }
 ```
 
 ### Changes to Sapling ShieldedData
 [changes-to-sapling-shieldeddata]: #changes-to-sapling-shieldeddata
 
-`ShieldedData` is currently defined and implemented in `zebra-chain/src/transaction/shielded_data.rs`. As this is Sapling specific we propose to move this file to `zebra-chain/src/sapling/shielded_data.rs`. We will also change `ShieldedData` into an enum with `V4` and `V5` variants.
+`ShieldedData` is currently defined and implemented in `zebra-chain/src/transaction/shielded_data.rs`. As this is Sapling specific we propose to move this file to `zebra-chain/src/sapling/shielded_data.rs`. We use `AnchorVariant` to model the anchor differences between V4 and V5:
 
 ```rust
-enum sapling::ShieldedData {
-    V4 {
-        value_balance: Amount,
-        /// Either a spend or output description.
-        ///
-        /// Storing this separately ensures that it is impossible to construct
-        /// an invalid `ShieldedData` with no spends or outputs.
-        /// ...
-        first: Either<Spend::V4, Output>, // Note: enum variants can't be generic parameters in Rust
-        rest_spends: Vec<Spend::V4>, // Note: enum variants can't be generic parameters in Rust
-        rest_outputs: Vec<Output>,
-        binding_sig: Signature<Binding>,
-    },
-    V5 {
-        value_balance: Amount,
-        anchor: tree::Root,
-        first: Either<Spend::V5, Output>, // Note: enum variants can't be generic parameters in Rust
-        rest_spends: Vec<Spend::V5>, // Note: enum variants can't be generic parameters in Rust
-        rest_outputs: Vec<Output>,
-        binding_sig: Signature<Binding>,
-    }
+struct sapling::ShieldedData<Anchor: AnchorVariant> {
+    value_balance: Amount,
+    anchor: Anchor::Shared,
+    first: Either<Spend<Anchor>, Output>,
+    rest_spends: Vec<Spend<Anchor>>,
+    rest_outputs: Vec<Output>,
+    binding_sig: Signature<Binding>,
 }
 ```
 
 ### Adding V5 Sapling Spend
 [adding-v5-sapling-spend]: #adding-v5-sapling-spend
 
-Proposed `Spend` is now defined as an enum with `V4` and `V5` variants. Sapling spend code is located at `zebra-chain/src/sapling/spend.rs`. Notable difference here is that the `anchor` in `V4` is needed for every spend of the transaction while in `V5` the anchor is a single one defined in `sapling::ShieldedData`:
+Sapling spend code is located at `zebra-chain/src/sapling/spend.rs`. We use `AnchorVariant` to model the anchor differences between V4 and V5:
 
 ```rust
-enum Spend {
-    V4 {
-        cv: commitment::ValueCommitment,
-        anchor: tree::Root,
-        nullifier: note::Nullifier,
-        rk: redjubjub::VerificationKeyBytes<SpendAuth>,
-        zkproof: Groth16Proof,
-        spend_auth_sig: redjubjub::Signature<SpendAuth>,
-    },
-    V5 {
-        cv: commitment::ValueCommitment,
-        nullifier: note::Nullifier,
-        rk: redjubjub::VerificationKeyBytes<SpendAuth>,
-        zkproof: Groth16Proof,
-        spend_auth_sig: redjubjub::Signature<SpendAuth>,
-    }
+struct Spend<Anchor: AnchorVariant> {
+    cv: commitment::ValueCommitment,
+    anchor: Anchor::PerSpend,
+    nullifier: note::Nullifier,
+    rk: redjubjub::VerificationKeyBytes<SpendAuth>,
+    zkproof: Groth16Proof,
+    spend_auth_sig: redjubjub::Signature<SpendAuth>,
 }
 ```
 
@@ -156,12 +158,12 @@ enum Transaction::V5 {
     expiry_height: block::Height,
     inputs: Vec<transparent::Input>,
     outputs: Vec<transparent::Output>,
-    sapling_shielded_data: Option<sapling::ShieldedData::V5>, // Note: enum variants can't be generic parameters in Rust
+    sapling_shielded_data: Option<sapling::ShieldedData<SharedAnchor>>,
     orchard_shielded_data: Option<orchard::ShieldedData>,
 }
 ```
 
-`sapling_shielded_data` will now use `sapling::ShieldedData::V5` variant located at `zebra-chain/src/transaction/sapling/shielded_data.rs` with the corresponding `Spend::V5` for the spends. (**TODO: how?**)
+To model the V5 anchor type, `sapling_shielded_data` uses the `SharedAnchor` variant located at `zebra-chain/src/transaction/sapling/shielded_data.rs`.
 
 ### Adding Orchard ShieldedData
 [adding-orchard-shieldeddata]: #adding-orchard-shieldeddata
