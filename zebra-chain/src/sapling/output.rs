@@ -76,7 +76,7 @@ mod test_safe_preallocate {
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(10_000))]
 
-        /// Confirm that each output takes at least OUTPUT_SIZE bytes when serialized.
+        /// Confirm that each output takes exactly OUTPUT_SIZE bytes when serialized.
         /// This verifies that our calculated `SafePreallocate::max_allocation()` is indeed an upper bound.
         #[test]
         fn output_size_is_small_enough(output in Output::arbitrary_with(())) {

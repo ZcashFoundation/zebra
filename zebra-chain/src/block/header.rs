@@ -124,15 +124,19 @@ pub struct CountedHeader {
     pub transaction_count: usize,
 }
 
-// Includes the 32-byte nonce and 3-byte equihash length field.
+/// The serialized size of a Zcash block header.
+///
+/// Includes the equihash input, 32-byte nonce, 3-byte equihash length field, and equihash solution.
 const BLOCK_HEADER_LENGTH: usize =
     crate::work::equihash::Solution::INPUT_LENGTH + 32 + 3 + crate::work::equihash::SOLUTION_SIZE;
 
-const COUNTED_HEADER_LEN: usize = BLOCK_HEADER_LENGTH + 1;
+/// The minimum size for a serialized CountedHeader.
+///
+/// A CountedHeader has BLOCK_HEADER_LENGTH bytes + 1 or more bytes for the transaction count
+const MIN_COUNTED_HEADER_LEN: usize = BLOCK_HEADER_LENGTH + 1;
 impl SafePreallocate for CountedHeader {
     fn max_allocation() -> u64 {
-        // A CountedHeader has BLOCK_HEADER_LENGTH bytes + 1 byte for the transaction count
-        (MAX_PROTOCOL_MESSAGE_LEN / COUNTED_HEADER_LEN) as u64
+        (MAX_PROTOCOL_MESSAGE_LEN / MIN_COUNTED_HEADER_LEN) as u64
     }
 }
 

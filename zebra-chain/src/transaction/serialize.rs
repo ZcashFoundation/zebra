@@ -353,18 +353,30 @@ const MIN_TRANSPARENT_OUTPUT_SIZE: u64 = 8 + 1;
 const MIN_TRANSPARENT_TX_SIZE: u64 = MIN_TRANSPARENT_INPUT_SIZE + 4;
 
 /// No valid Zcash message contains more transactions than can fit in a single block
+///
+/// `tx` messages contain a single transaction, and `block` messages are limited to the maximum
+/// block size.
 impl SafePreallocate for Arc<Transaction> {
     fn max_allocation() -> u64 {
+        // A transparent transaction is the smallest transaction variant
         MAX_BLOCK_BYTES / MIN_TRANSPARENT_TX_SIZE
     }
 }
-/// No valid Zcash message contains more transactions inputs than can fit in maximally large transaction
+/// The maximum number of inputs in a valid Zcash on-chain transaction.
+///
+/// If a transaction contains more inputs than can fit in maximally large block, it might be
+/// valid on the network and in the mempool, but it can never be mined into a block. So
+/// rejecting these large edge-case transactions can never break consensus.
 impl SafePreallocate for transparent::Input {
     fn max_allocation() -> u64 {
         MAX_BLOCK_BYTES / MIN_TRANSPARENT_INPUT_SIZE
     }
 }
-/// No valid Zcash message contains more transactions outputs than can fit in maximally large transaction
+/// The maximum number of outputs in a valid Zcash on-chain transaction.
+///
+/// If a transaction contains more outputs than can fit in maximally large block, it might be
+/// valid on the network and in the mempool, but it can never be mined into a block. So
+/// rejecting these large edge-case transactions can never break consensus.
 impl SafePreallocate for transparent::Output {
     fn max_allocation() -> u64 {
         MAX_BLOCK_BYTES / MIN_TRANSPARENT_OUTPUT_SIZE

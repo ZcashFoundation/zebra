@@ -111,7 +111,7 @@ mod test_safe_preallocate {
             let max_allocation: usize = Hash::max_allocation().try_into().unwrap();
             let mut smallest_disallowed_vec = Vec::with_capacity(max_allocation + 1);
             for _ in 0..(Hash::max_allocation()+1) {
-                smallest_disallowed_vec.push(hash.clone());
+                smallest_disallowed_vec.push(hash);
             }
             let serialized = smallest_disallowed_vec.zcash_serialize_to_vec().expect("Serialization to vec must succeed");
 
