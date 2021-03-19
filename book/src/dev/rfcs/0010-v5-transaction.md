@@ -79,13 +79,10 @@ Here we have the proposed changes for V4 transactions:
 ```
 V4 {
     ...
-    sapling_value_balance: Amount,
-    ...
     sapling_shielded_data: Option<SaplingShieldedData::V4>,
 }
 ```
 
-In order to mantain the order of the fields that we will need for Serialization/Deserialization we keep the `value_balance` in the transaction for V4 but we rename it to `sapling_value_balance` for clarity.
 
 `ShieldedData` is currently defined and implemented in `zebra-chain/src/transaction/shielded_data.rs`. As this is Sapling specific we propose to move this file to `zebra-chain/src/sapling/shielded_data.rs`. Inside we will change `ShieldedData` into `SaplingShieldedData` and implement it as an enum with `V4` and `V5` variants.
 
@@ -100,6 +97,7 @@ pub enum SaplingShieldedData {
         pub first: Either<Spend::V4, Output>,
         pub rest_spends: Vec<Spend::V4>,
         pub rest_outputs: Vec<Output>,
+        pub sapling_value_balance: Amount,
         pub binding_sig: Signature<Binding>,
     },
     V5 {
