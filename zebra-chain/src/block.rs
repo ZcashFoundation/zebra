@@ -21,6 +21,7 @@ pub use header::BlockTimeError;
 pub use header::{CountedHeader, Header};
 pub use height::Height;
 pub use root_hash::RootHash;
+pub use serialize::MAX_BLOCK_BYTES;
 
 use serde::{Deserialize, Serialize};
 

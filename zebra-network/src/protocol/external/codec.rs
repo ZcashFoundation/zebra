@@ -464,7 +464,7 @@ impl Codec {
                 reader.read_socket_addr()?,
             ),
             nonce: Nonce(reader.read_u64::<LittleEndian>()?),
-            user_agent: reader.read_string()?,
+            user_agent: String::zcash_deserialize(&mut reader)?,
             start_height: block::Height(reader.read_u32::<LittleEndian>()?),
             relay: match reader.read_u8()? {
                 0 => false,
@@ -488,7 +488,7 @@ impl Codec {
 
     fn read_reject<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
         Ok(Message::Reject {
-            message: reader.read_string()?,
+            message: String::zcash_deserialize(&mut reader)?,
             ccode: match reader.read_u8()? {
                 0x01 => RejectReason::Malformed,
                 0x10 => RejectReason::Invalid,
@@ -501,7 +501,7 @@ impl Codec {
                 0x50 => RejectReason::Other,
                 _ => return Err(Error::Parse("invalid RejectReason value in ccode field")),
             },
-            reason: reader.read_string()?,
+            reason: String::zcash_deserialize(&mut reader)?,
             // Sometimes there's data, sometimes there isn't. There's no length
             // field, this is just implicitly encoded by the body_len.
             // Apparently all existing implementations only supply 32 bytes of
