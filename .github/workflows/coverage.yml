@@ -29,7 +29,8 @@ jobs:
           cargo install rustfilt
       - name: Rerun tests for coverage
         env:
-          RUSTFLAGS: -Zinstrument-coverage -C link-dead-code -C debuginfo=2
+          # We don't use "-C link-dead-code", because the resulting binaries are too big for the CI disk
+          RUSTFLAGS: -Zinstrument-coverage -C debuginfo=2
           LLVM_PROFILE_FILE: "${{ github.workspace }}/test.%p.profraw"
           ZEBRA_SKIP_NETWORK_TESTS: 1
         run: |
