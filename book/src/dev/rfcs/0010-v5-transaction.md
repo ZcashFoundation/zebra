@@ -56,6 +56,7 @@ Here we have the proposed changes for `Transaction::V4`:
 * make `sapling_shielded_data` use the `V4` shielded data type (**TODO: how?**)
 * rename `shielded_data` to `sapling_shielded_data`
 * move `value_balance` into the `sapling::ShieldedData` type
+* order fields based on the **last** data deserialized for each field
 
 ```rust
 pub enum Transaction::V4 {
@@ -76,6 +77,7 @@ pub enum Transaction::V4 {
 ```rust
 pub enum sapling::ShieldedData {
     V4 {
+        pub value_balance: Amount,
         /// Either a spend or output description.
         ///
         /// Storing this separately ensures that it is impossible to construct
@@ -84,15 +86,14 @@ pub enum sapling::ShieldedData {
         pub first: Either<Spend::V4, Output>, // Note: enum variants can't be generic parameters in Rust
         pub rest_spends: Vec<Spend::V4>, // Note: enum variants can't be generic parameters in Rust
         pub rest_outputs: Vec<Output>,
-        pub value_balance: Amount,
         pub binding_sig: Signature<Binding>,
     },
     V5 {
+        pub value_balance: Amount,
+        pub anchor: tree::Root,
         pub first: Either<Spend::V5, Output>, // Note: enum variants can't be generic parameters in Rust
         pub rest_spends: Vec<Spend::V5>, // Note: enum variants can't be generic parameters in Rust
         pub rest_outputs: Vec<Output>,
-        pub value_balance: Amount,
-        pub anchor: tree::Root,
         pub binding_sig: Signature<Binding>,
     }
 }
@@ -169,18 +170,20 @@ The new V5 structure will create a new `orchard::ShieldedData` type. This new ty
 
 ```rust
 pub struct orchard::ShieldedData {
+    pub flags: Flags,
+    pub value_balance: Amount,
+    pub anchor: tree::Root,
     /// An authorized action description.
     ///
     /// Storing this separately ensures that it is impossible to construct
     /// an invalid `ShieldedData` with no actions.
     pub first: AuthorizedAction,
     pub rest: Vec<AuthorizedAction>,
-    pub flags: Flags,
-    pub value_balance: Amount,
-    pub anchor: tree::Root,
     pub binding_sig: redpallas::Signature<redpallas::Binding>,
 }
 ```
+
+The fields are ordered based on the **last** data deserialized for each field.
 
 ### Adding Orchard AuthorizedAction
 [adding-orchard-authorizedaction]: #adding-orchard-authorizedaction
