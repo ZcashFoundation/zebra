@@ -165,18 +165,24 @@ V5 {
 The new V5 structure will create a new `OrchardShieldedData` type. This new type will be defined in a separated file: `zebra-chain/src/orchard/shielded_data.rs` and it will look as follows:
 ```
 pub struct OrchardShieldedData {
-    /// An action description.
+    /// An authorized action description.
     ///
     /// Storing this separately ensures that it is impossible to construct
     /// an invalid `OrchardShieldedData` with no actions.
-    pub first: Action,
-    pub rest: Vec<Action>,
+    pub first: AuthorizedAction,
+    pub rest: Vec<AuthorizedAction>,
     pub flags: OrchardFlags,
     pub orchard_value_balance: Amount,
     pub anchor: tree::Root,
     pub binding_sig: redpallas::Signature<redpallas::Binding>,
 }
 ```
+
+In `V5` transactions, there is one `SpendAuth` signature for every `Action`. To ensure that this structural rule is followed, we create an `AuthorizedAction` type:
+AuthorizedAction {
+    action: Action,
+    spend_auth_sig: redpallas::Signature<redpallas::SpendAuth>,
+}
 
 Where `Action` is defined as [Action definition](https://github.com/ZcashFoundation/zebra/blob/68c12d045b63ed49dd1963dd2dc22eb991f3998c/zebra-chain/src/orchard/action.rs#L18-L41).
 
