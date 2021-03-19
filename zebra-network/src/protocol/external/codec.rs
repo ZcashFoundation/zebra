@@ -1,7 +1,10 @@
 //! A Tokio codec mapping byte streams to Bitcoin message streams.
 
 use std::fmt;
-use std::io::{Cursor, Read, Write};
+use std::{
+    cmp::min,
+    io::{Cursor, Read, Write},
+};
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use bytes::{BufMut, BytesMut};
@@ -423,7 +426,7 @@ impl Decoder for Codec {
                     b"tx\0\0\0\0\0\0\0\0\0\0" => self.read_tx(&mut body_reader),
                     b"mempool\0\0\0\0\0" => self.read_mempool(&mut body_reader),
                     b"filterload\0\0" => self.read_filterload(&mut body_reader, body_len),
-                    b"filteradd\0\0\0" => self.read_filteradd(&mut body_reader),
+                    b"filteradd\0\0\0" => self.read_filteradd(&mut body_reader, body_len),
                     b"filterclear\0" => self.read_filterclear(&mut body_reader),
                     _ => return Err(Parse("unknown command")),
                 }
@@ -586,12 +589,12 @@ impl Codec {
 
     fn read_filterload<R: Read>(&self, mut reader: R, body_len: usize) -> Result<Message, Error> {
         if !(FILTERLOAD_REMAINDER_LENGTH <= body_len
-            && body_len <= FILTERLOAD_REMAINDER_LENGTH + MAX_FILTER_LENGTH)
+            && body_len <= FILTERLOAD_REMAINDER_LENGTH + MAX_FILTERLOAD_LENGTH)
         {
             return Err(Error::Parse("Invalid filterload message body length."));
         }
 
-        const MAX_FILTER_LENGTH: usize = 36000;
+        const MAX_FILTERLOAD_LENGTH: usize = 36000;
         const FILTERLOAD_REMAINDER_LENGTH: usize = 4 + 4 + 1;
 
         let filter_length: usize = body_len - FILTERLOAD_REMAINDER_LENGTH;
@@ -607,13 +610,15 @@ impl Codec {
         })
     }
 
-    fn read_filteradd<R: Read>(&self, reader: R) -> Result<Message, Error> {
-        let mut bytes = Vec::new();
+    fn read_filteradd<R: Read>(&self, mut reader: R, body_len: usize) -> Result<Message, Error> {
+        const MAX_FILTERADD_LENGTH: usize = 520;
 
-        // Maximum size of data is 520 bytes.
-        reader.take(520).read_exact(&mut bytes)?;
+        let filter_length: usize = min(body_len, MAX_FILTERADD_LENGTH);
 
-        Ok(Message::FilterAdd { data: bytes })
+        let mut filter_bytes = vec![0; filter_length];
+        reader.read_exact(&mut filter_bytes)?;
+
+        Ok(Message::FilterAdd { data: filter_bytes })
     }
 
     fn read_filterclear<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
