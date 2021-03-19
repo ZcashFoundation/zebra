@@ -214,7 +214,6 @@ These changes should be made in a later pull request, see [#1917](https://github
   - "Fake" Sapling-only and Sapling/Transparent transactions based on the existing test vectors, converted from `V4` to `V5` format
     - We can write a test utility function to automatically do these conversions
   - An empty transaction, with no Orchard, Sapling, or Transparent data
-  
   - Any available `zcashd` test vectors
 - After NU5 activation on testnet:
   - Add test vectors using the testnet activation block and 2 more post-activation blocks
