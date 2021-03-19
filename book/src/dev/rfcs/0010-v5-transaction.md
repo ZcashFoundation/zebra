@@ -91,12 +91,12 @@ In order to mantain the order of the fields that we will need for Serialization/
 
 ```
 pub enum SaplingShieldedData {
-    /// Either a spend or output description.
-    ///
-    /// Storing this separately ensures that it is impossible to construct
-    /// an invalid `SaplingShieldedData` with no spends or outputs.
-    /// ...
     V4 {
+        /// Either a spend or output description.
+        ///
+        /// Storing this separately ensures that it is impossible to construct
+        /// an invalid `SaplingShieldedData` with no spends or outputs.
+        /// ...
         pub first: Either<Spend::V4, Output>,
         pub rest_spends: Vec<Spend::V4>,
         pub rest_outputs: Vec<Output>,
