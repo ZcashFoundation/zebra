@@ -44,22 +44,24 @@ impl<P: ZkSnarkProof> ZcashSerialize for JoinSplitData<P> {
 
 impl<P: ZkSnarkProof> ZcashDeserialize for Option<JoinSplitData<P>> {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let joinsplits: Vec<sprout::JoinSplit<P>> = Vec::zcash_deserialize(&mut reader)?;
-
-        if joinsplits.is_empty() {
-            Ok(None)
-        } else {
-            let (first, rest) = joinsplits
-                .split_first()
-                .expect("a non-empty Vec must have at least one entry");
-            let pub_key = reader.read_32_bytes()?.into();
-            let sig = reader.read_64_bytes()?.into();
-            Ok(Some(JoinSplitData {
-                first: first.clone(),
-                rest: rest.to_vec(),
-                pub_key,
-                sig,
-            }))
+        let num_joinsplits = reader.read_compactsize()?;
+        match num_joinsplits {
+            0 => Ok(None),
+            n => {
+                let first = sprout::JoinSplit::zcash_deserialize(&mut reader)?;
+                let mut rest = Vec::with_capacity((n - 1) as usize);
+                for _ in 0..(n - 1) {
+                    rest.push(sprout::JoinSplit::zcash_deserialize(&mut reader)?);
+                }
+                let pub_key = reader.read_32_bytes()?.into();
+                let sig = reader.read_64_bytes()?.into();
+                Ok(Some(JoinSplitData {
+                    first,
+                    rest,
+                    pub_key,
+                    sig,
+                }))
+            }
         }
     }
 }

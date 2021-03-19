@@ -11,6 +11,15 @@ use super::SerializationError;
 pub trait ReadZcashExt: io::Read {
     /// Reads a `u64` using the Bitcoin `CompactSize` encoding.
     ///
+    /// # Security
+    ///
+    /// Deserialized sizes must be validated before being used.
+    ///
+    /// Preallocating vectors using untrusted `CompactSize`s allows memory
+    /// denial of service attacks. Valid sizes must be less than
+    /// `MAX_BLOCK_BYTES / min_serialized_item_bytes` (or a lower limit
+    /// specified by the Zcash consensus rules or Bitcoin network protocol).
+    ///
     /// # Examples
     ///
     /// ```rust
@@ -85,15 +94,6 @@ pub trait ReadZcashExt: io::Read {
         let ip_addr = self.read_ip_addr()?;
         let port = self.read_u16::<BigEndian>()?;
         Ok(SocketAddr::new(ip_addr, port))
-    }
-
-    /// Read a Bitcoin-encoded UTF-8 string.
-    #[inline]
-    fn read_string(&mut self) -> Result<String, SerializationError> {
-        let len = self.read_compactsize()?;
-        let mut buf = vec![0; len as usize];
-        self.read_exact(&mut buf)?;
-        String::from_utf8(buf).map_err(|_| SerializationError::Parse("invalid utf-8"))
     }
 
     /// Convenience method to read a `[u8; 4]`.
