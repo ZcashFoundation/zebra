@@ -197,8 +197,6 @@ bitflags! {
 ## Security
 
 To avoid parsing memory exhaustion attacks, we will make the following changes across all `Transaction`, `ShieldedData`, `Spend` and `Output` variants, `V1` through to `V5`:
-- `Box` large `Optional` data structures, to defer allocation until the variant or option is actually used
-- Statically assert that these data structures remain as small as possible
 - Check cardinality consensus rules at parse time, before deserializing any `Vec`s
   - In general, Zcash requires that each transaction has at least one Transparent/Sprout/Sapling/Orchard transfer, this rule is not currently encoded in our data structures
 - Stop parsing as soon as the first error is detected
