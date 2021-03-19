@@ -53,7 +53,7 @@ This transaction version is specified by the protocol in the first table of [Tra
 
 
 ```rust
-V4 {
+pub enum Transaction::V4 {
     inputs: Vec<transparent::Input>,
     outputs: Vec<transparent::Output>,
     lock_time: LockTime,
@@ -177,7 +177,7 @@ Now lets see how the V5 transaction is specified in the protocol, this is the se
 We propose the following representation for transaction V5 in Zebra:
 
 ```rust
-V5 {
+pub enum Transaction::V5 {
     lock_time: LockTime,
     expiry_height: block::Height,
     inputs: Vec<transparent::Input>,
