@@ -44,41 +44,10 @@ To highlight changes most of the document comments from the code snippets in the
 # Reference-level explanation
 [reference-level-explanation]: #reference-level-explanation
 
-## Current V4 Transactions
-[current-v4-transactions]: #current-v4-transactions
-
-We start by looking how a V4 (already implemented) transaction is represented in Zebra.
-
-This transaction version is specified by the protocol in the first table of [Transaction Encoding and Consensus](https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus).
-
-
-```rust
-pub enum Transaction::V4 {
-    inputs: Vec<transparent::Input>,
-    outputs: Vec<transparent::Output>,
-    lock_time: LockTime,
-    expiry_height: block::Height,
-    value_balance: Amount,
-    joinsplit_data: Option<JoinSplitData<Groth16Proof>>,
-    shielded_data: Option<ShieldedData>,
-}
-```
-
-Currently the `ShieldedData` type is defined in `zebra-chain/src/transaction/shielded_data.rs` as follows:
-
-```rust
-pub struct ShieldedData {
-    pub first: Either<Spend, Output>,
-    pub rest_spends: Vec<Spend>,
-    pub rest_outputs: Vec<Output>,
-    pub binding_sig: Signature<Binding>,
-}
-```
-
-We know by protocol (2nd table of [Transaction Encoding and Consensus](https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus)) that V5 transactions will support sapling data however we also know by protocol that spends ([Spend Description Encoding and Consensus](https://zips.z.cash/protocol/nu5.pdf#spendencodingandconsensus), See †) and outputs ([Output Description Encoding and Consensus](https://zips.z.cash/protocol/nu5.pdf#outputencodingandconsensus), See †) fields change from V4 to V5.
-
 ## Sapling Changes
 [sapling-changes]: #sapling-changes
+
+We know by protocol (2nd table of [Transaction Encoding and Consensus](https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus)) that V5 transactions will support sapling data however we also know by protocol that spends ([Spend Description Encoding and Consensus](https://zips.z.cash/protocol/nu5.pdf#spendencodingandconsensus), See †) and outputs ([Output Description Encoding and Consensus](https://zips.z.cash/protocol/nu5.pdf#outputencodingandconsensus), See †) fields change from V4 to V5.
 
 ### Changes to V4 Transactions
 [changes-to-v4-transactions]: #changes-to-v4-transactions
@@ -90,7 +59,11 @@ Here we have the proposed changes for `Transaction::V4`:
 
 ```rust
 pub enum Transaction::V4 {
-    ...
+    inputs: Vec<transparent::Input>,
+    outputs: Vec<transparent::Output>,
+    lock_time: LockTime,
+    expiry_height: block::Height,
+    joinsplit_data: Option<JoinSplitData<Groth16Proof>>,
     sapling_shielded_data: Option<sapling::ShieldedData::V4>, // Note: enum variants can't be generic parameters in Rust
 }
 ```
