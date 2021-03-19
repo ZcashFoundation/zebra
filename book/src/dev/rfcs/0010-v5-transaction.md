@@ -59,7 +59,7 @@ Here we have the proposed changes for `Transaction::V4`:
 * order fields based on the **last** data deserialized for each field
 
 ```rust
-pub enum Transaction::V4 {
+enum Transaction::V4 {
     inputs: Vec<transparent::Input>,
     outputs: Vec<transparent::Output>,
     lock_time: LockTime,
@@ -75,26 +75,26 @@ pub enum Transaction::V4 {
 `ShieldedData` is currently defined and implemented in `zebra-chain/src/transaction/shielded_data.rs`. As this is Sapling specific we propose to move this file to `zebra-chain/src/sapling/shielded_data.rs`. We will also change `ShieldedData` into an enum with `V4` and `V5` variants.
 
 ```rust
-pub enum sapling::ShieldedData {
+enum sapling::ShieldedData {
     V4 {
-        pub value_balance: Amount,
+        value_balance: Amount,
         /// Either a spend or output description.
         ///
         /// Storing this separately ensures that it is impossible to construct
         /// an invalid `ShieldedData` with no spends or outputs.
         /// ...
-        pub first: Either<Spend::V4, Output>, // Note: enum variants can't be generic parameters in Rust
-        pub rest_spends: Vec<Spend::V4>, // Note: enum variants can't be generic parameters in Rust
-        pub rest_outputs: Vec<Output>,
-        pub binding_sig: Signature<Binding>,
+        first: Either<Spend::V4, Output>, // Note: enum variants can't be generic parameters in Rust
+        rest_spends: Vec<Spend::V4>, // Note: enum variants can't be generic parameters in Rust
+        rest_outputs: Vec<Output>,
+        binding_sig: Signature<Binding>,
     },
     V5 {
-        pub value_balance: Amount,
-        pub anchor: tree::Root,
-        pub first: Either<Spend::V5, Output>, // Note: enum variants can't be generic parameters in Rust
-        pub rest_spends: Vec<Spend::V5>, // Note: enum variants can't be generic parameters in Rust
-        pub rest_outputs: Vec<Output>,
-        pub binding_sig: Signature<Binding>,
+        value_balance: Amount,
+        anchor: tree::Root,
+        first: Either<Spend::V5, Output>, // Note: enum variants can't be generic parameters in Rust
+        rest_spends: Vec<Spend::V5>, // Note: enum variants can't be generic parameters in Rust
+        rest_outputs: Vec<Output>,
+        binding_sig: Signature<Binding>,
     }
 }
 ```
@@ -105,21 +105,21 @@ pub enum sapling::ShieldedData {
 Proposed `Spend` is now defined as an enum with `V4` and `V5` variants. Sapling spend code is located at `zebra-chain/src/sapling/spend.rs`. Notable difference here is that the `anchor` in `V4` is needed for every spend of the transaction while in `V5` the anchor is a single one defined in `sapling::ShieldedData`:
 
 ```rust
-pub enum Spend {
+enum Spend {
     V4 {
-        pub cv: commitment::ValueCommitment,
-        pub anchor: tree::Root,
-        pub nullifier: note::Nullifier,
-        pub rk: redjubjub::VerificationKeyBytes<SpendAuth>,
-        pub zkproof: Groth16Proof,
-        pub spend_auth_sig: redjubjub::Signature<SpendAuth>,
+        cv: commitment::ValueCommitment,
+        anchor: tree::Root,
+        nullifier: note::Nullifier,
+        rk: redjubjub::VerificationKeyBytes<SpendAuth>,
+        zkproof: Groth16Proof,
+        spend_auth_sig: redjubjub::Signature<SpendAuth>,
     },
     V5 {
-        pub cv: commitment::ValueCommitment,
-        pub nullifier: note::Nullifier,
-        pub rk: redjubjub::VerificationKeyBytes<SpendAuth>,
-        pub zkproof: Groth16Proof,
-        pub spend_auth_sig: redjubjub::Signature<SpendAuth>,
+        cv: commitment::ValueCommitment,
+        nullifier: note::Nullifier,
+        rk: redjubjub::VerificationKeyBytes<SpendAuth>,
+        zkproof: Groth16Proof,
+        spend_auth_sig: redjubjub::Signature<SpendAuth>,
     }
 }
 ```
@@ -130,13 +130,13 @@ pub enum Spend {
 In Zcash the Sapling output representations are the same for V4 and V5 transactions, so no variants are needed. The output code is located at `zebra-chain/src/sapling/output.rs`:
 
 ```rust
-pub struct Output {
-    pub cv: commitment::ValueCommitment,
-    pub cm_u: jubjub::Fq,
-    pub ephemeral_key: keys::EphemeralPublicKey,
-    pub enc_ciphertext: note::EncryptedNote,
-    pub out_ciphertext: note::WrappedNoteKey,
-    pub zkproof: Groth16Proof,
+struct Output {
+    cv: commitment::ValueCommitment,
+    cm_u: jubjub::Fq,
+    ephemeral_key: keys::EphemeralPublicKey,
+    enc_ciphertext: note::EncryptedNote,
+    out_ciphertext: note::WrappedNoteKey,
+    zkproof: Groth16Proof,
 }
 ```
 
@@ -151,7 +151,7 @@ Now lets see how the V5 transaction is specified in the protocol, this is the se
 We propose the following representation for transaction V5 in Zebra:
 
 ```rust
-pub enum Transaction::V5 {
+enum Transaction::V5 {
     lock_time: LockTime,
     expiry_height: block::Height,
     inputs: Vec<transparent::Input>,
@@ -169,18 +169,18 @@ pub enum Transaction::V5 {
 The new V5 structure will create a new `orchard::ShieldedData` type. This new type will be defined in a separated file: `zebra-chain/src/orchard/shielded_data.rs` and it will look as follows:
 
 ```rust
-pub struct orchard::ShieldedData {
-    pub flags: Flags,
-    pub value_balance: Amount,
-    pub anchor: tree::Root,
-    pub combined_proof: Halo2Proof,
+struct orchard::ShieldedData {
+    flags: Flags,
+    value_balance: Amount,
+    anchor: tree::Root,
+    combined_proof: Halo2Proof,
     /// An authorized action description.
     ///
     /// Storing this separately ensures that it is impossible to construct
     /// an invalid `ShieldedData` with no actions.
-    pub first: AuthorizedAction,
-    pub rest: Vec<AuthorizedAction>,
-    pub binding_sig: redpallas::Signature<redpallas::Binding>,
+    first: AuthorizedAction,
+    rest: Vec<AuthorizedAction>,
+    binding_sig: redpallas::Signature<redpallas::Binding>,
 }
 ```
 
@@ -195,7 +195,7 @@ In `V5` transactions, there is one `SpendAuth` signature for every `Action`. To 
 /// An authorized action description.
 ///
 /// Every authorized Orchard `Action` must have a corresponding `SpendAuth` signature.
-pub struct orchard::AuthorizedAction {
+struct orchard::AuthorizedAction {
     action: Action,
     spend_auth_sig: redpallas::Signature<redpallas::SpendAuth>,
 }
@@ -210,7 +210,7 @@ Finally, in the V5 transaction we have a new `orchard::Flags` type. This is a bi
 
 ```rust
 bitflags! {
-    pub struct orchard::Flags: u8 {
+    struct orchard::Flags: u8 {
         const ENABLE_SPENDS = 0b00000001;
         const ENABLE_OUTPUTS = 0b00000010;
         // Reserved, zeros (bits 2 .. 7)
