@@ -173,6 +173,7 @@ pub struct orchard::ShieldedData {
     pub flags: Flags,
     pub value_balance: Amount,
     pub anchor: tree::Root,
+    combined_proof: Halo2Proof,
     /// An authorized action description.
     ///
     /// Storing this separately ensures that it is impossible to construct
