@@ -4,7 +4,7 @@ use crate::serialization::{serde_helpers, SerializationError, ZcashDeserialize, 
 
 /// A ciphertext component for encrypted output notes.
 ///
-/// Corresponds to the Orcahrd 'encCiphertext's
+/// Corresponds to the Orchard 'encCiphertext's
 #[derive(Deserialize, Serialize)]
 pub struct EncryptedNote(#[serde(with = "serde_helpers::BigArray")] pub [u8; 580]);
 
@@ -53,7 +53,7 @@ impl ZcashDeserialize for EncryptedNote {
 
 /// A ciphertext component for encrypted output notes.
 ///
-/// Corresponds to Orcahrd's 'outCiphertext'
+/// Corresponds to Orchard's 'outCiphertext'
 #[derive(Deserialize, Serialize)]
 pub struct WrappedNoteKey(#[serde(with = "serde_helpers::BigArray")] pub [u8; 80]);
 
