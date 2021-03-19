@@ -186,7 +186,7 @@ impl FromStr for SpendingKey {
                     network: match hrp.as_str() {
                         sk_hrp::MAINNET => Network::Mainnet,
                         sk_hrp::TESTNET => Network::Testnet,
-                        _ => Err(SerializationError::Parse("unknown network")),
+                        _ => return Err(SerializationError::Parse("unknown network")),
                     },
                     bytes: decoded_bytes,
                 })
