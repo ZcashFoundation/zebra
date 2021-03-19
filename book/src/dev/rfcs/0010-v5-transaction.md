@@ -11,7 +11,7 @@ Network Upgrade number 5 (`NU5`) introduces a new transaction type (transaction 
 # Motivation
 [motivation]: #motivation
 
-The Zebra software wants to be a protocol compatible Zcash implementation. One of the tasks to do this includes the support of the new version 5 transactions that will be implemented in the next network upgrade.
+The Zebra software wants to be a protocol compatible Zcash implementation. One of the tasks to do this includes the support of the new version 5 transactions that will be implemented in Network Upgrade 5 (NU5).
 
 # Definitions
 [definitions]: #definitions
