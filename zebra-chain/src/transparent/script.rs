@@ -1,11 +1,10 @@
+//! Bitcoin script for Zebra
+
 #![allow(clippy::unit_arg)]
-use crate::serialization::{
-    ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
-};
-use std::{
-    fmt,
-    io::{self, Read},
-};
+
+use crate::serialization::{SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize};
+
+use std::{fmt, io};
 
 /// An encoding of a Bitcoin script.
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize, Hash)]
@@ -32,12 +31,8 @@ impl ZcashSerialize for Script {
 }
 
 impl ZcashDeserialize for Script {
-    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        // XXX what is the max length of a script?
-        let len = reader.read_compactsize()?;
-        let mut bytes = Vec::new();
-        reader.take(len).read_to_end(&mut bytes)?;
-        Ok(Script(bytes))
+    fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
+        Ok(Script(Vec::zcash_deserialize(reader)?))
     }
 }
 
