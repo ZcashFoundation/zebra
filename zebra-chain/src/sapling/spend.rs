@@ -81,7 +81,7 @@ mod test_safe_preallocate {
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(10_000))]
 
-        /// Confirm that each spend takes at least SPEND_SIZE bytes when serialized.
+        /// Confirm that each spend takes exactly SPEND_SIZE bytes when serialized.
         /// This verifies that our calculated `SafePreallocate::max_allocation()` is indeed an upper bound.
         #[test]
         fn spend_size_is_small_enough(spend in Spend::arbitrary_with(())) {
