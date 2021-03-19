@@ -89,7 +89,7 @@ Here we have the proposed changes for `Transaction::V4`:
 * move `value_balance` into the `sapling::ShieldedData` type
 
 ```rust
-V4 {
+pub enum Transaction::V4 {
     ...
     sapling_shielded_data: Option<sapling::ShieldedData::V4>, // Note: enum variants can't be generic parameters in Rust
 }
