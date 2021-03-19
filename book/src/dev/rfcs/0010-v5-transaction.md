@@ -100,7 +100,7 @@ pub enum sapling::ShieldedData {
 ```
 
 ### Adding V5 Sapling Spend
-[adding-v5-sapling-spend-and-output]: #adding-v5-sapling-spend-and-output
+[adding-v5-sapling-spend]: #adding-v5-sapling-spend
 
 Proposed `Spend` is now defined as an enum with `V4` and `V5` variants. Sapling spend code is located at `zebra-chain/src/sapling/spend.rs`. Notable difference here is that the `anchor` in `V4` is needed for every spend of the transaction while in `V5` the anchor is a single one defined in `sapling::ShieldedData`:
 
