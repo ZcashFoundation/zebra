@@ -128,7 +128,7 @@ pub enum sapling::ShieldedData {
 ### Adding V5 Sapling Spend
 [adding-v5-sapling-spend-and-output]: #adding-v5-sapling-spend-and-output
 
-Proposed `Spend` is now defined as an enum with `V4` and `V5` variants. Sapling spend code is located at `zebra-chain/src/sapling/spend.rs`. Notable difference here is that the `anchor` in `V4` is needed for every spend of the transaction while in `V5` the anchor is a single one defined in `SaplingShieldedData`:
+Proposed `Spend` is now defined as an enum with `V4` and `V5` variants. Sapling spend code is located at `zebra-chain/src/sapling/spend.rs`. Notable difference here is that the `anchor` in `V4` is needed for every spend of the transaction while in `V5` the anchor is a single one defined in `sapling::ShieldedData`:
 
 ```rust
 pub enum Spend {
@@ -187,7 +187,7 @@ V5 {
 }
 ```
 
-`sapling_shielded_data` will now use `SaplingShieldedData::V5` variant located at `zebra-chain/src/transaction/sapling_shielded_data.rs` with the corresponding `Spend::V5` for the spends. (**TODO: how?**)
+`sapling_shielded_data` will now use `sapling::ShieldedData::V5` variant located at `zebra-chain/src/transaction/sapling/shielded_data.rs` with the corresponding `Spend::V5` for the spends. (**TODO: how?**)
 
 ### Adding Orchard ShieldedData
 [adding-orchard-shieldeddata]: #adding-orchard-shieldeddata
@@ -203,7 +203,7 @@ pub struct orchard::ShieldedData {
     pub first: AuthorizedAction,
     pub rest: Vec<AuthorizedAction>,
     pub flags: Flags,
-    pub orchard_value_balance: Amount,
+    pub value_balance: Amount,
     pub anchor: tree::Root,
     pub binding_sig: redpallas::Signature<redpallas::Binding>,
 }
@@ -233,7 +233,7 @@ Finally, in the V5 transaction we have a new `orchard::Flags` type. This is a bi
 
 ```rust
 bitflags! {
-    pub struct OrchardFlags: u8 {
+    pub struct orchard::Flags: u8 {
         const ENABLE_SPENDS = 0b00000001;
         const ENABLE_OUTPUTS = 0b00000010;
         // Reserved, zeros (bits 2 .. 7)
