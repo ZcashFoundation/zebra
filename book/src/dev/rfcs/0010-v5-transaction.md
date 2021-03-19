@@ -175,7 +175,7 @@ struct orchard::ShieldedData {
     flags: Flags,
     value_balance: Amount,
     anchor: tree::Root,
-    combined_proof: Halo2Proof,
+    proof: Halo2Proof,
     /// An authorized action description.
     ///
     /// Storing this separately ensures that it is impossible to construct
@@ -223,12 +223,12 @@ bitflags! {
 ## Test Plan
 [test-plan]: #test-plan
 
-- All renamed, modified and new types should serialize and deserialize. 
+- All renamed, modified and new types should serialize and deserialize.
 - The full V4 and V5 transactions should serialize and deserialize.
-- Prop test strategies for v4 and v5 will be updated and created.
+- Prop test strategies for V4 and V5 will be updated and created.
 - Before NU5 activation on testnet, test on the following test vectors:
   - Hand-crafted Orchard-only, Orchard/Sapling, Orchard/Transparent, and Orchard/Sapling/Transparent transactions based on the spec
-  - "Fake" Sapling-only and Sapling/Transparent transactions based on the existing test vectors, converted from `V4` to `V5` format
+  - "Fake" Sapling-only and Sapling/Transparent transactions based on the existing test vectors, converted from V4 to V5 format
     - We can write a test utility function to automatically do these conversions
   - An empty transaction, with no Orchard, Sapling, or Transparent data
   - Any available `zcashd` test vectors
@@ -239,9 +239,9 @@ bitflags! {
 
 # Security
 
-To avoid parsing memory exhaustion attacks, we will make the following changes across all `Transaction`, `ShieldedData`, `Spend` and `Output` variants, `V1` through to `V5`:
+To avoid parsing memory exhaustion attacks, we will make the following changes across all `Transaction`, `ShieldedData`, `Spend` and `Output` variants, V1 through to V5:
 - Check cardinality consensus rules at parse time, before deserializing any `Vec`s
-  - In general, Zcash requires that each transaction has at least one Transparent/Sprout/Sapling/Orchard transfer, this rule is not currently encoded in our data structures
+  - In general, Zcash requires that each transaction has at least one Transparent/Sprout/Sapling/Orchard transfer, this rule is not currently encoded in our data structures (it is only checked during semantic verification)
 - Stop parsing as soon as the first error is detected
 
 These changes should be made in a later pull request, see [#1917](https://github.com/ZcashFoundation/zebra/issues/1917) for details.
