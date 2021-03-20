@@ -82,7 +82,7 @@ pub fn sinsemilla_hash_to_point(D: &[u8], M: &BitVec<Lsb0, u8>) -> pallas::Point
     // https://zips.z.cash/protocol/protocol.pdf#concretesinsemillahash
     for chunk in M.chunks(k) {
         // Pad each chunk with zeros.
-        let mut store = 0u8;
+        let mut store = 0u16;
         let bits = store.bits_mut::<Lsb0>();
         chunk
             .iter()
