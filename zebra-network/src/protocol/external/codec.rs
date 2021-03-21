@@ -615,6 +615,7 @@ impl Codec {
 
         let filter_length: usize = min(body_len, MAX_FILTERADD_LENGTH);
 
+        // Memory Denial of Service: this length has just been bounded
         let mut filter_bytes = vec![0; filter_length];
         reader.read_exact(&mut filter_bytes)?;
 
