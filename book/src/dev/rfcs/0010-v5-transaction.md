@@ -115,11 +115,11 @@ trait AnchorVariant {
 `ShieldedData` is currently defined and implemented in `zebra-chain/src/transaction/shielded_data.rs`. As this is Sapling specific we propose to move this file to `zebra-chain/src/sapling/shielded_data.rs`. We use `AnchorVariant` to model the anchor differences between V4 and V5:
 
 ```rust
-struct sapling::ShieldedData<Anchor: AnchorVariant> {
+struct sapling::ShieldedData<AnchorV: AnchorVariant> {
     value_balance: Amount,
-    anchor: Anchor::Shared,
-    first: Either<Spend<Anchor>, Output>,
-    rest_spends: Vec<Spend<Anchor>>,
+    anchor: AnchorV::Shared,
+    first: Either<Spend<AnchorV>, Output>,
+    rest_spends: Vec<Spend<AnchorV>>,
     rest_outputs: Vec<Output>,
     binding_sig: Signature<Binding>,
 }
@@ -131,9 +131,9 @@ struct sapling::ShieldedData<Anchor: AnchorVariant> {
 Sapling spend code is located at `zebra-chain/src/sapling/spend.rs`. We use `AnchorVariant` to model the anchor differences between V4 and V5:
 
 ```rust
-struct Spend<Anchor: AnchorVariant> {
+struct Spend<AnchorV: AnchorVariant> {
     cv: commitment::ValueCommitment,
-    anchor: Anchor::PerSpend,
+    anchor: AnchorV::PerSpend,
     nullifier: note::Nullifier,
     rk: redjubjub::VerificationKeyBytes<SpendAuth>,
     zkproof: Groth16Proof,
