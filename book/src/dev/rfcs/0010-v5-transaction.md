@@ -29,17 +29,32 @@ The Zebra software wants to be a protocol compatible Zcash implementation. One o
 
 V5 transactions are described by the protocol in the second table of [Transaction Encoding and Consensus](https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus).
 
-We need the raw representation to Serialize/Deserialize the transaction however Zebra uses its own representation internally.
-
-V5 transactions are the only ones that will support orchard transactions with `Orchard` data types.
-
-V4 and V5 transactions both support sapling, but the underying data structures are different. So need to make the sapling data types generic over the V4 and V5 structures.
-
-The order of some of the fields changed from V4 to V5. For example the `lock_time` and `expiry_height` were moved above the transparent inputs and outputs.
-
 All of the changes proposed in this document are only to the `zebra-chain` crate.
 
 To highlight changes most of the document comments from the code snippets in the [reference section](#reference-level-explanation) were removed.
+
+## Sapling Changes Overview
+[sapling-changes-overview]: #sapling-changes-overview
+
+V4 and V5 transactions both support sapling, but the underlying data structures are different. So need to make the sapling data types generic over the V4 and V5 structures.
+
+In V4, anchors are per-spend, but in V5, they are per-transaction.
+
+For consistency, also we move some fields into the `ShieldedData` type, and rename some fields and types.
+
+## Orchard Additions Overview
+[orchard-additions-overview]: #orchard-additions-overview
+
+V5 transactions are the only ones that will support orchard transactions with `Orchard` data types.
+
+Orchard uses `Halo2Proof`s with corresponding signature type changes. Each Orchard `Action` contains a spend and an output. Placeholder values are substituted for unused spends and outputs.
+
+## Other Transaction V5 Changes
+[other-transaction-v5-changes]: #other-transaction-v5-changes
+
+The order of some of the fields changed from V4 to V5. For example the `lock_time` and `expiry_height` were moved above the transparent inputs and outputs.
+
+Zebra enums and structs put fields in serialized order. Composite fields are ordered based on **last** data deserialized for each field.
 
 # Reference-level explanation
 [reference-level-explanation]: #reference-level-explanation
