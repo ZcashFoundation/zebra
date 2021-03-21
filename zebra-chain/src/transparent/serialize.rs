@@ -196,6 +196,7 @@ impl ZcashDeserialize for Input {
             if len > 100 {
                 return Err(SerializationError::Parse("coinbase has too much data"));
             }
+            // Memory Denial of Service: this length has just been checked
             let mut data = vec![0; len as usize];
             reader.read_exact(&mut data[..])?;
             let (height, data) = parse_coinbase_height(data)?;
