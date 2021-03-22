@@ -146,7 +146,7 @@ impl VerifierImpl {
         // let batch = batch::Verifier::default();
         let batch = Batch::default();
         let (tx, _) = channel(super::BROADCAST_BUFFER_SIZE);
-        Self { batch, tx, pvk }
+        Self { batch, pvk, tx }
     }
 }
 

@@ -32,7 +32,7 @@ impl Ed25519Verifier {
         let batch = batch::Verifier::default();
         // XXX(hdevalence) what's a reasonable choice here?
         let (tx, _) = channel(10);
-        Self { tx, batch }
+        Self { batch, tx }
     }
 }
 
