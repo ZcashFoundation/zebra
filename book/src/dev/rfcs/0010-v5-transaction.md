@@ -64,6 +64,8 @@ Zebra enums and structs put fields in serialized order. Composite fields are ord
 
 We know by protocol (2nd table of [Transaction Encoding and Consensus](https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus)) that V5 transactions will support sapling data however we also know by protocol that spends ([Spend Description Encoding and Consensus](https://zips.z.cash/protocol/nu5.pdf#spendencodingandconsensus), See †) and outputs ([Output Description Encoding and Consensus](https://zips.z.cash/protocol/nu5.pdf#outputencodingandconsensus), See †) fields change from V4 to V5.
 
+`ShieldedData` is currently defined and implemented in `zebra-chain/src/transaction/shielded_data.rs`. As this is Sapling specific we propose to move this file to `zebra-chain/src/sapling/shielded_data.rs`.
+
 ### Changes to V4 Transactions
 [changes-to-v4-transactions]: #changes-to-v4-transactions
 
@@ -87,7 +89,7 @@ enum Transaction::V4 {
 ### Anchor Variants
 [anchor-variants]: #anchor-variants
 
-We implement an `AnchorVariant` generic type trait, because V4 transactions have a per-`Spend` anchor, but V5 transactions have a shared anchor:
+We add an `AnchorVariant` generic type trait, because V4 transactions have a per-`Spend` anchor, but V5 transactions have a shared anchor. This trait can be added to `sapling/shielded_data.rs`:
 
 ```rust
 struct PerSpendAnchor {}
@@ -112,7 +114,7 @@ trait AnchorVariant {
 ### Changes to Sapling ShieldedData
 [changes-to-sapling-shieldeddata]: #changes-to-sapling-shieldeddata
 
-`ShieldedData` is currently defined and implemented in `zebra-chain/src/transaction/shielded_data.rs`. As this is Sapling specific we propose to move this file to `zebra-chain/src/sapling/shielded_data.rs`. We use `AnchorVariant` to model the anchor differences between V4 and V5:
+We use `AnchorVariant` in `ShieldedData` to model the anchor differences between V4 and V5:
 
 ```rust
 struct sapling::ShieldedData<AnchorV: AnchorVariant> {
@@ -183,7 +185,7 @@ To model the V5 anchor type, `sapling_shielded_data` uses the `SharedAnchor` var
 ### Adding Orchard ShieldedData
 [adding-orchard-shieldeddata]: #adding-orchard-shieldeddata
 
-The new V5 structure will create a new `orchard::ShieldedData` type. This new type will be defined in a separated file: `zebra-chain/src/orchard/shielded_data.rs` and it will look as follows:
+The new V5 structure will create a new `orchard::ShieldedData` type. This new type will be defined in a new `zebra-chain/src/orchard/shielded_data.rs` file:
 
 ```rust
 struct orchard::ShieldedData {
@@ -206,7 +208,7 @@ The fields are ordered based on the **last** data deserialized for each field.
 ### Adding Orchard AuthorizedAction
 [adding-orchard-authorizedaction]: #adding-orchard-authorizedaction
 
-In `V5` transactions, there is one `SpendAuth` signature for every `Action`. To ensure that this structural rule is followed, we create an `AuthorizedAction` type:
+In `V5` transactions, there is one `SpendAuth` signature for every `Action`. To ensure that this structural rule is followed, we create an `AuthorizedAction` type in `orchard/shielded_data.rs`:
 
 ```rust
 /// An authorized action description.
@@ -234,6 +236,8 @@ bitflags! {
     }
 }
 ```
+
+This type is also defined in `orchard/shielded_data.rs`.
 
 ## Test Plan
 [test-plan]: #test-plan
