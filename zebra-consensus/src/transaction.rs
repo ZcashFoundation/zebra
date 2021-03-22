@@ -155,7 +155,7 @@ where
                         check::coinbase_tx_no_joinsplit_or_spend(&tx)?;
                     } else {
                         // TODO: check no coinbase inputs
-                        
+
                         // feed all of the inputs to the script verifier
                         let cached_ffi_transaction =
                             Arc::new(CachedFfiTransaction::new(tx.clone()));
