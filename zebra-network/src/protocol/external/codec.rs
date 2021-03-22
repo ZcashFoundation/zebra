@@ -588,14 +588,14 @@ impl Codec {
     }
 
     fn read_filterload<R: Read>(&self, mut reader: R, body_len: usize) -> Result<Message, Error> {
+        const MAX_FILTERLOAD_LENGTH: usize = 36000;
+        const FILTERLOAD_REMAINDER_LENGTH: usize = 4 + 4 + 1;
+
         if !(FILTERLOAD_REMAINDER_LENGTH <= body_len
             && body_len <= FILTERLOAD_REMAINDER_LENGTH + MAX_FILTERLOAD_LENGTH)
         {
             return Err(Error::Parse("Invalid filterload message body length."));
         }
-
-        const MAX_FILTERLOAD_LENGTH: usize = 36000;
-        const FILTERLOAD_REMAINDER_LENGTH: usize = 4 + 4 + 1;
 
         let filter_length: usize = body_len - FILTERLOAD_REMAINDER_LENGTH;
 
