@@ -63,7 +63,7 @@ impl Default for Verifier {
     fn default() -> Self {
         let batch = batch::Verifier::default();
         let (tx, _) = channel(super::BROADCAST_BUFFER_SIZE);
-        Self { tx, batch }
+        Self { batch, tx }
     }
 }
 
