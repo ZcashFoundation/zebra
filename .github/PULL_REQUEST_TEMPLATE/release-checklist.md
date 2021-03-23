@@ -15,8 +15,11 @@ assignees: ''
 
 ### Which Crates to Increment
 
-To check if any of the top-level crates need version increments, go to the zebra GitHub code page: https://github.com/ZcashFoundation/zebra
+To check if any of the top-level crates have changed, you can:
+- go to the zebra GitHub code page: https://github.com/ZcashFoundation/zebra and look at the last change for each crate directory, or
+- run `git diff --stat <previous-version-tag>`
 
+Once you know which crates have changed:
 - [ ] Increment the crates that have new commits since the last version update
 - [ ] Increment any crates that depend on crates that have changed
 - [ ] Use the `zebrad` crate version in the `zebrad` app code and `zebra-network` user agent
