@@ -7,15 +7,12 @@ assignees: ''
 
 ---
 
-## Initial Testing
-
-- [ ] After any changes, test that the `cargo install` command in `README.md` works (use `--path` instead of `--git` locally)
-
 ## Versioning
 
 ### Which Crates to Increment
 
-To check if any of the top-level crates need version increments, go to the zebra GitHub code page: https://github.com/ZcashFoundation/zebra
+To check if any of the top-level crates need version increments, go to the zebra GitHub code page: https://github.com/ZcashFoundation/zebra. `git diff --stat <previous-release-tag> origin/main` is also useful to see
+what's changed.
 
 - [ ] Increment the crates that have new commits since the last version update
 - [ ] Increment any crates that depend on crates that have changed
@@ -79,6 +76,10 @@ fastmod --extensions rs,toml,md --fixed-strings '0.2.0' '0.2.1' tower-batch
 ```
 
 We skipped `tower-fallback`, because it hadn't changed since the last tag.
+
+## Initial Testing
+
+- [ ] After any changes, test that the `cargo install` command in `README.md` works (use `--path` instead of `--git` locally)
 
 ## Change Log
 
