@@ -8,6 +8,9 @@ pub struct Config {
     ///
     /// Setting this option to true enables post-Canopy checkpoints.
     /// (Zebra always checkpoints on Canopy activation.)
+    ///
+    /// Future versions of Zebra may change the mandatory checkpoint
+    /// height.
     pub checkpoint_sync: bool,
 }
 
