@@ -231,7 +231,7 @@ Finally, in the V5 transaction we have a new `orchard::Flags` type. This is a bi
 bitflags! {
     /// Per-Transaction flags for Orchard.
     ///
-    /// The spend and output flags are passed to the `Halo2Proof` verifier, which implements
+    /// The spend and output flags are passed to the `Halo2Proof` verifier, which verifies
     /// the relevant note spending and creation consensus rules.
     struct orchard::Flags: u8 {
         /// Enable spending non-zero valued Orchard notes.
