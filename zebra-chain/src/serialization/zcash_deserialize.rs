@@ -18,7 +18,7 @@ pub trait ZcashDeserialize: Sized {
     fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError>;
 }
 
-impl<T: ZcashDeserialize + SafePreallocate> ZcashDeserialize for Vec<T> {
+impl<T: ZcashDeserialize + TrustedPreallocate> ZcashDeserialize for Vec<T> {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         let len = reader.read_compactsize()?;
         if len > T::max_allocation() {
@@ -66,14 +66,14 @@ impl<R: io::Read> ZcashDeserializeInto for R {
     }
 }
 
-/// Blind preallocation of a Vec<T: SafePreallocate> can be done safely. This is in contrast
+/// Blind preallocation of a Vec<T: TrustedPreallocate> is based on a bounded length. This is in contrast
 /// to blind preallocation of a generic Vec<T>, which is a DOS vector.
 ///
-/// The max_allocation() function provides a loose upper bound on the size of the Vec<T: SafePreallocate>
+/// The max_allocation() function provides a loose upper bound on the size of the Vec<T: TrustedPreallocate>
 /// which can possibly be received from an honest peer. If this limit is too low, Zebra may reject valid messages.
-/// In the worst case, setting the lower bound to low could cause Zebra to fall out of consensus by rejecting all messages containing a valid block.
-pub trait SafePreallocate {
-    /// Provides a ***loose upper bound*** on the size of the Vec<T: SafePreallocate>
+/// In the worst case, setting the lower bound too low could cause Zebra to fall out of consensus by rejecting all messages containing a valid block.
+pub trait TrustedPreallocate {
+    /// Provides a ***loose upper bound*** on the size of the Vec<T: TrustedPreallocate>
     /// which can possibly be received from an honest peer.
     fn max_allocation() -> u64;
 }
