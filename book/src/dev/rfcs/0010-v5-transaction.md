@@ -229,8 +229,16 @@ Finally, in the V5 transaction we have a new `orchard::Flags` type. This is a bi
 
 ```rust
 bitflags! {
+    /// Per-Transaction flags for Orchard.
+    ///
+    /// The spend and output flags are passed to the `Halo2Proof` verifier, which implements
+    /// the relevant note spending and creation consensus rules.
     struct orchard::Flags: u8 {
+        /// Enable spending non-zero valued Orchard notes.
+        ///
+        /// "the `enableSpendsOrchard` flag, if present, MUST be 0 for coinbase transactions"
         const ENABLE_SPENDS = 0b00000001;
+        /// Enable creating new non-zero valued Orchard notes.
         const ENABLE_OUTPUTS = 0b00000010;
         // Reserved, zeros (bits 2 .. 7)
     }
