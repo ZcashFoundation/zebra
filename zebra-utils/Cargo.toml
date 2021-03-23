@@ -2,7 +2,7 @@
 name = "zebra-utils"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
-version = "1.0.0-alpha.4"
+version = "1.0.0-alpha.5"
 edition = "2018"
 # Prevent accidental publication of this utility crate.
 publish = false
