@@ -885,6 +885,12 @@ impl fmt::Debug for EphemeralPublicKey {
 
 impl Eq for EphemeralPublicKey {}
 
+impl From<EphemeralPublicKey> for [u8; 32] {
+    fn from(nk: EphemeralPublicKey) -> [u8; 32] {
+        nk.0.to_bytes()
+    }
+}
+
 impl From<&EphemeralPublicKey> for [u8; 32] {
     fn from(nk: &EphemeralPublicKey) -> [u8; 32] {
         nk.0.to_bytes()

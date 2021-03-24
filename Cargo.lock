@@ -227,21 +227,20 @@ checksum = "474a626a67200bd107d44179bb3d4fc61891172d11696609264589be6a0e6a43"
 
 [[package]]
 name = "bellman"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7089887635778eabf0038a166f586eee5413fb85c8fa6c9a754914f0f644f49f"
+version = "0.9.0"
+source = "git+https://github.com/zkcrypto/bellman?rev=bd4af09f50a4d020a3672aff37c4f3f2da2bb36b#bd4af09f50a4d020a3672aff37c4f3f2da2bb36b"
 dependencies = [
- "bitvec 0.18.4",
+ "bitvec 0.20.1",
  "blake2s_simd",
  "byteorder",
  "crossbeam",
- "ff 0.8.0",
+ "ff",
  "futures 0.1.30",
  "futures-cpupool",
- "group 0.8.0",
+ "group",
  "num_cpus",
  "pairing",
- "rand_core 0.5.1",
+ "rand_core 0.6.1",
  "subtle",
 ]
 
@@ -321,17 +320,6 @@ dependencies = [
 
 [[package]]
 name = "bitvec"
-version = "0.18.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d2838fdd79e8776dbe07a106c784b0f8dda571a21b2750a092cc4cbaa653c8e"
-dependencies = [
- "funty",
- "radium 0.4.1",
- "wyz",
-]
-
-[[package]]
-name = "bitvec"
 version = "0.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f5011ffc90248764d7005b0e10c7294f5aa1bd87d9dd7248f4ad475b347c294d"
@@ -405,25 +393,13 @@ dependencies = [
 
 [[package]]
 name = "bls12_381"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4caf0101205582491f772d60a6fcb6bcec19963e68209cb631851eeadb01421f"
-dependencies = [
- "bitvec 0.18.4",
- "ff 0.8.0",
- "group 0.8.0",
- "pairing",
- "rand_core 0.5.1",
- "subtle",
-]
-
-[[package]]
-name = "bls12_381"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1c56609cc42c628848e7b18e0baf42a4ef626b8c50442dc08b8094bd21d8ad32"
 dependencies = [
- "ff 0.9.0",
+ "ff",
+ "group",
+ "pairing",
  "rand_core 0.6.1",
  "subtle",
 ]
@@ -1009,17 +985,6 @@ dependencies = [
 
 [[package]]
 name = "ff"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "01646e077d4ebda82b73f1bca002ea1e91561a77df2431a9e79729bcc31950ef"
-dependencies = [
- "bitvec 0.18.4",
- "rand_core 0.5.1",
- "subtle",
-]
-
-[[package]]
-name = "ff"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72a4d941a5b7c2a75222e2d44fcdf634a67133d9db31e177ae5ff6ecda852bfe"
@@ -1282,24 +1247,12 @@ checksum = "9b919933a397b79c37e33b77bb2aa3dc8eb6e165ad809e58ff75bc7db2e34574"
 
 [[package]]
 name = "group"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc11f9f5fbf1943b48ae7c2bf6846e7d827a512d1be4f23af708f5ca5d01dde1"
-dependencies = [
- "byteorder",
- "ff 0.8.0",
- "rand_core 0.5.1",
- "subtle",
-]
-
-[[package]]
-name = "group"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "61b3c1e8b4f1ca07e6605ea1be903a5f6956aec5c8a67fd44d56076631675ed8"
 dependencies = [
  "byteorder",
- "ff 0.9.0",
+ "ff",
  "rand_core 0.6.1",
  "subtle",
 ]
@@ -1667,8 +1620,8 @@ checksum = "4d7e7fef85ae7b26dd89f34175b7f3c5ace64067a110c2ac86cf92407a6666ca"
 dependencies = [
  "bitvec 0.20.1",
  "bls12_381 0.4.0",
- "ff 0.9.0",
- "group 0.9.0",
+ "ff",
+ "group",
  "rand_core 0.6.1",
  "subtle",
 ]
@@ -2077,12 +2030,12 @@ checksum = "2386b4ebe91c2f7f51082d4cefa145d030e33a1842a96b12e4885cc3c01f7a55"
 
 [[package]]
 name = "pairing"
-version = "0.18.0"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f702cdbee9e0a6272452c20dec82465bc821116598b4eeb63e9a71a69dbf7fd"
+checksum = "9be899ebf10363f018353dba1baabb7e83145f3683c7b83b73b93b563e3167cc"
 dependencies = [
- "ff 0.8.0",
- "group 0.8.0",
+ "ff",
+ "group",
 ]
 
 [[package]]
@@ -2348,12 +2301,6 @@ checksum = "def50a86306165861203e7f84ecffbbdfdea79f0e51039b33de1e952358c47ac"
 
 [[package]]
 name = "radium"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64de9a0c5361e034f1aefc9f71a86871ec870e766fe31a009734a989b329286a"
-
-[[package]]
-name = "radium"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "643f8f41a8ebc4c5dc4515c82bb8abd397b527fc20fd681b7c011c2aee5d44fb"
@@ -2381,7 +2328,7 @@ dependencies = [
  "libc",
  "rand_chacha 0.2.2",
  "rand_core 0.5.1",
- "rand_hc",
+ "rand_hc 0.2.0",
 ]
 
 [[package]]
@@ -2393,6 +2340,7 @@ dependencies = [
  "libc",
  "rand_chacha 0.3.0",
  "rand_core 0.6.1",
+ "rand_hc 0.3.0",
 ]
 
 [[package]]
@@ -2458,6 +2406,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rand_hc"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3190ef7066a446f2e7f42e239d161e905420ccab01eb967c9eb27d21b2322a73"
+dependencies = [
+ "rand_core 0.6.1",
+]
+
+[[package]]
 name = "rand_xorshift"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2512,14 +2469,13 @@ dependencies = [
 [[package]]
 name = "redjubjub"
 version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "63266b4e0d748bf7514f794bcdb1db681a22b11ed4dea3984a3148d6cd5733c3"
+source = "git+https://github.com/ZcashFoundation/redjubjub?rev=8101eaff1cb2fca45334f77a65caa4c46e3d545b#8101eaff1cb2fca45334f77a65caa4c46e3d545b"
 dependencies = [
  "blake2b_simd",
  "byteorder",
  "digest 0.9.0",
  "jubjub 0.3.0",
- "rand_core 0.5.1",
+ "rand_core 0.6.1",
  "serde",
  "thiserror",
 ]
@@ -3777,6 +3733,56 @@ dependencies = [
 ]
 
 [[package]]
+name = "wagyu-zcash-parameters"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "61c904628658374e651288f000934c33ef738b2d8b3e65d4100b70b395dbe2bb"
+dependencies = [
+ "wagyu-zcash-parameters-1",
+ "wagyu-zcash-parameters-2",
+ "wagyu-zcash-parameters-3",
+ "wagyu-zcash-parameters-4",
+ "wagyu-zcash-parameters-5",
+ "wagyu-zcash-parameters-6",
+]
+
+[[package]]
+name = "wagyu-zcash-parameters-1"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "90bf2e21bb027d3f8428c60d6a720b54a08bf6ce4e6f834ef8e0d38bb5695da8"
+
+[[package]]
+name = "wagyu-zcash-parameters-2"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a616ab2e51e74cc48995d476e94de810fb16fc73815f390bf2941b046cc9ba2c"
+
+[[package]]
+name = "wagyu-zcash-parameters-3"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "14da1e2e958ff93c0830ee68e91884069253bf3462a67831b02b367be75d6147"
+
+[[package]]
+name = "wagyu-zcash-parameters-4"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f058aeef03a2070e8666ffb5d1057d8bb10313b204a254a6e6103eb958e9a6d6"
+
+[[package]]
+name = "wagyu-zcash-parameters-5"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ffe916b30e608c032ae1b734f02574a3e12ec19ab5cc5562208d679efe4969d"
+
+[[package]]
+name = "wagyu-zcash-parameters-6"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a7b6d5a78adc3e8f198e9cd730f219a695431467f7ec29dcfc63ade885feebe1"
+
+[[package]]
 name = "wait-timeout"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4053,7 +4059,7 @@ dependencies = [
  "primitive-types",
  "proptest",
  "proptest-derive",
- "rand_core 0.5.1",
+ "rand_core 0.6.1",
  "redjubjub",
  "ripemd160",
  "secp256k1",
@@ -4076,18 +4082,19 @@ name = "zebra-consensus"
 version = "1.0.0-alpha.5"
 dependencies = [
  "bellman",
- "bls12_381 0.3.1",
+ "blake2b_simd",
+ "bls12_381 0.4.0",
  "chrono",
  "color-eyre",
  "displaydoc",
  "futures 0.3.13",
  "futures-util",
  "jubjub 0.6.0",
+ "lazy_static",
  "metrics",
  "once_cell",
  "pairing",
- "rand 0.7.3",
- "redjubjub",
+ "rand 0.8.1",
  "serde",
  "spandoc",
  "thiserror",
@@ -4099,6 +4106,7 @@ dependencies = [
  "tracing-error",
  "tracing-futures",
  "tracing-subscriber 0.2.17",
+ "wagyu-zcash-parameters",
  "zebra-chain",
  "zebra-script",
  "zebra-state",
@@ -4121,7 +4129,7 @@ dependencies = [
  "pin-project 0.4.27",
  "proptest",
  "proptest-derive",
- "rand 0.7.3",
+ "rand 0.8.1",
  "regex",
  "serde",
  "thiserror",
@@ -4236,7 +4244,7 @@ dependencies = [
  "metrics-exporter-prometheus",
  "once_cell",
  "pin-project 0.4.27",
- "rand 0.7.3",
+ "rand 0.8.1",
  "sentry",
  "sentry-tracing",
  "serde",
