@@ -104,6 +104,26 @@ impl Transaction {
             )
             .boxed()
     }
+    /// Generate a proptest strategy for V5 Transactions
+    pub fn v5_strategy(ledger_state: LedgerState) -> BoxedStrategy<Self> {
+        (
+            any::<LockTime>(),
+            any::<block::Height>(),
+            transparent::Input::vec_strategy(ledger_state, 10),
+            vec(any::<transparent::Output>(), 0..10),
+            any::<Vec<u8>>(),
+        )
+            .prop_map(
+                |(lock_time, expiry_height, inputs, outputs, rest)| Transaction::V5 {
+                    lock_time,
+                    expiry_height,
+                    inputs,
+                    outputs,
+                    rest,
+                },
+            )
+            .boxed()
+    }
 
     /// Proptest Strategy for creating a Vector of transactions where the first
     /// transaction is always the only coinbase transaction
@@ -236,6 +256,11 @@ impl Arbitrary for Transaction {
             NetworkUpgrade::Blossom | NetworkUpgrade::Heartwood | NetworkUpgrade::Canopy => {
                 Self::v4_strategy(ledger_state)
             }
+            NetworkUpgrade::NU5 => prop_oneof![
+                Self::v4_strategy(ledger_state),
+                Self::v5_strategy(ledger_state)
+            ]
+            .boxed(),
         }
     }
 

@@ -68,9 +68,9 @@ execute independently and are scheduled co-operatively using explicit yield
 points. Tasks are executed on the Tokio runtime, which can either be single-
 or multi-threaded.
 
-[ps_scan]: https://zips.z.cash/protocol/canopy.pdf#saplingscan
-[ps_keys]: https://zips.z.cash/protocol/canopy.pdf#addressesandkeys
-[ps_sapk]: https://zips.z.cash/protocol/canopy.pdf#saplingkeycomponents
+[ps_scan]: https://zips.z.cash/protocol/protocol.pdf#saplingscan
+[ps_keys]: https://zips.z.cash/protocol/protocol.pdf#addressesandkeys
+[ps_sapk]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
 [tokio-task]: https://docs.rs/tokio/0.2.22/tokio/task/index.html
 
 # Guide-level explanation

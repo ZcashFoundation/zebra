@@ -225,7 +225,7 @@ Contextual validation is implemented in
 `StateService::check_contextual_validity`, which calls a separate function for
 each contextual validity check.
 
-In Zebra, contextual validation starts after Sapling activation, so we can assume
+In Zebra, contextual validation starts after Canopy activation, so we can assume
 that the relevant chain contains at least 28 blocks on Mainnet and Testnet. (And
 panic if this assumption does not hold at runtime.)
 
@@ -423,7 +423,7 @@ the sum of these difficulty thresholds will be less than or equal to
 `(2^251 − 1)*17 = 2^255 + 2^251 - 17`. Therefore, this calculation can not
 overflow a `u256` value. So the function is infalliable.
 
-In Zebra, contextual validation starts after Sapling activation, so we can assume
+In Zebra, contextual validation starts after Canopy activation, so we can assume
 that the relevant chain contains at least 17 blocks. Therefore, the `PoWLimit`
 case of `MeanTarget()` in the Zcash specification is unreachable.
 
@@ -492,7 +492,7 @@ impl NetworkUpgrade {
 
 #### Implementation notes
 
-In Zebra, contextual validation starts after Sapling activation, so we can assume
+In Zebra, contextual validation starts after Canopy activation, so we can assume
 that the relevant chain contains at least 28 blocks. Therefore:
 * `max(0, height − PoWMedianBlockSpan)` in the `MedianTime()` calculation
    simplifies to `height − PoWMedianBlockSpan`, and
@@ -577,7 +577,7 @@ pub fn is_testnet_min_difficulty_block(
 #### Implementation notes
 
 In Zcash, the Testnet minimum difficulty rule starts at block 299188, and in
-Zebra, contextual validation starts after Sapling activation. So we can assume
+Zebra, contextual validation starts after Canopy activation. So we can assume
 that there is always a previous block.
 
 Therefore, this function is infalliable.
@@ -596,7 +596,7 @@ minimum difficulty gap. We use the existing
 `ExpandedDifficulty::target_difficulty_limit` function to calculate the value of
 `ToCompact(PoWLimit(network))`.
 
-In Zebra, contextual validation starts after Sapling activation, so the genesis
+In Zebra, contextual validation starts after Canopy activation, so the genesis
 case of `Threshold()` in the Zcash specification is unreachable.
 
 #### Block difficulty threshold implementation

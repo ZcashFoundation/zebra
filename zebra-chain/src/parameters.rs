@@ -15,10 +15,12 @@
 mod genesis;
 mod network;
 mod network_upgrade;
+mod transaction;
 
 pub use genesis::*;
 pub use network::Network;
 pub use network_upgrade::*;
+pub use transaction::*;
 
 #[cfg(test)]
 mod tests;

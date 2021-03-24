@@ -14,6 +14,28 @@ lazy_static! {
         .map(|(_height, block)| *block)
         .collect();
 
+    /// Continuous mainnet blocks, indexed by height
+    ///
+    /// Contains the continuous blockchain from genesis onwards.
+    /// Stops at the first gap in the chain.
+    pub static ref CONTINUOUS_MAINNET_BLOCKS: BTreeMap<u32, &'static [u8]> = MAINNET_BLOCKS
+        .iter()
+        .enumerate()
+        .take_while(|(i, (height, _block))| *i == **height as usize)
+        .map(|(_i, (height, block))| (*height, *block))
+        .collect();
+
+    /// Continuous testnet blocks, indexed by height
+    ///
+    /// Contains the continuous blockchain from genesis onwards.
+    /// Stops at the first gap in the chain.
+    pub static ref CONTINUOUS_TESTNET_BLOCKS: BTreeMap<u32, &'static [u8]> = TESTNET_BLOCKS
+        .iter()
+        .enumerate()
+        .take_while(|(i, (height, _block))| *i == **height as usize)
+        .map(|(_i, (height, block))| (*height, *block))
+        .collect();
+
     // Update these lists of blocks when you add new block test vectors to
     // this file
     //
@@ -60,7 +82,12 @@ lazy_static! {
             (949_496, BLOCK_MAINNET_949496_BYTES.as_ref()),
             (975_066, BLOCK_MAINNET_975066_BYTES.as_ref()),
             (982_681, BLOCK_MAINNET_982681_BYTES.as_ref()),
-            // TODO: Canopy and First Halving, see #1099
+            // Last Heartwood
+            (1_046_399, BLOCK_MAINNET_1046399_BYTES.as_ref()),
+            // Canopy and First Coinbase Halving
+            (1_046_400, BLOCK_MAINNET_1046400_BYTES.as_ref()),
+            (1_046_401, BLOCK_MAINNET_1046401_BYTES.as_ref()),
+            (1_180_900, BLOCK_MAINNET_1180900_BYTES.as_ref()),
         ].iter().cloned().collect();
 
     /// Testnet blocks, indexed by height
@@ -116,7 +143,12 @@ lazy_static! {
             (1_095_000, BLOCK_TESTNET_1095000_BYTES.as_ref()),
             // Shielded coinbase
             (1_101_629, BLOCK_TESTNET_1101629_BYTES.as_ref()),
-            // TODO: First Halving, see #1104
+            // Last Pre-Halving
+            (1_115_999, BLOCK_TESTNET_1115999_BYTES.as_ref()),
+            // First Coinbase Halving
+            (1_116_000, BLOCK_TESTNET_1116000_BYTES.as_ref()),
+            (1_116_001, BLOCK_TESTNET_1116001_BYTES.as_ref()),
+            (1_326_100, BLOCK_TESTNET_1326100_BYTES.as_ref()),
         ].iter().cloned().collect();
 
     // Mainnet
@@ -254,14 +286,29 @@ lazy_static! {
         <Vec<u8>>::from_hex(include_str!("block-main-0-982-681.txt").trim())
         .expect("Block bytes are in valid hex representation");
 
-    // TODO: Canopy transition, after mainnet canopy activation
-    // for i in 1046399 1046400 1046401; do
+    // Canopy transition and Coinbase Halving
+    // (On mainnet, Canopy happens at the same block as the first coinbase halving)
+    // for i in 1046399 1046400; do
     //     zcash-cli getblock $i 0 > block-main-$[i/1000000]-0$[i/1000%1000]-$[i%1000].txt
     // done
+    pub static ref BLOCK_MAINNET_1046399_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-main-1-046-399.txt").trim())
+            .expect("Block bytes are in valid hex representation");
+    pub static ref BLOCK_MAINNET_1046400_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-main-1-046-400.txt").trim())
+            .expect("Block bytes are in valid hex representation");
+    // Block 1046401 is 72 kB in size (currently the second-largest test vector), so we store it in binary.
+    // i=1046401
+    // zcash-cli getblock $i 0 | xxd -revert -plain > block-main-$[i/1000000]-0$[i/1000%1000]-$[i%1000].bin
+    pub static ref BLOCK_MAINNET_1046401_BYTES: Vec<u8> = include_bytes!("block-main-1-046-401.bin").to_vec();
 
-    // TODO: one more Canopy Mainnet block
-    //       (so that we have at least 3 blocks from Canopy)
-    // Note: don't use the highest block, it must be below the reorg limit!
+    // One more Canopy/Post-Halving block
+    // (so that we have at least 3 blocks after canopy/halving)
+    // i=1180900
+    // zcash-cli getblock $i 0 > block-main-$[i/1000000]-$[i/1000%1000]-$[i%1000].txt
+    pub static ref BLOCK_MAINNET_1180900_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-main-1-180-900.txt").trim())
+            .expect("Block bytes are in valid hex representation");
 
     // Testnet
 
@@ -437,6 +484,30 @@ lazy_static! {
     // Last shielded coinbase block so far
     pub static ref BLOCK_TESTNET_1101629_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("block-test-1-101-629.txt").trim())
+        .expect("Block bytes are in valid hex representation");
+
+    // Testnet Coinbase Halving
+    // i=1115999
+    // zcash-cli -testnet getblock $i 0 > block-test-$[i/1000000]-$[i/1000%1000]-$[i%1000].txt
+    // for i in 1116000 1116001; do
+    //     zcash-cli -testnet getblock $i 0 > block-test-$[i/1000000]-$[i/1000%1000]-00$[i%1000].txt
+    // done
+    pub static ref BLOCK_TESTNET_1115999_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-test-1-115-999.txt").trim())
+        .expect("Block bytes are in valid hex representation");
+    pub static ref BLOCK_TESTNET_1116000_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-test-1-116-000.txt").trim())
+        .expect("Block bytes are in valid hex representation");
+    pub static ref BLOCK_TESTNET_1116001_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-test-1-116-001.txt").trim())
+        .expect("Block bytes are in valid hex representation");
+
+    // One more Post-Halving block
+    // (so that we have at least 3 blocks after the halving)
+    // i=1326100
+    // zcash-cli -testnet getblock $i 0 > block-test-$[i/1000000]-$[i/1000%1000]-$[i%1000].txt
+    pub static ref BLOCK_TESTNET_1326100_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-test-1-326-100.txt").trim())
         .expect("Block bytes are in valid hex representation");
 }
 

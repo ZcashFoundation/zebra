@@ -1,7 +1,12 @@
-use std::sync::{Arc, Mutex};
+use std::{
+    mem,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use chrono::Utc;
 use futures::stream::{FuturesUnordered, StreamExt};
+use tokio::time::{sleep, sleep_until, Sleep};
 use tower::{Service, ServiceExt};
 
 use crate::{types::MetaAddr, AddressBook, BoxError, PeerAddrState, Request, Response};
@@ -11,9 +16,10 @@ use crate::{types::MetaAddr, AddressBook, BoxError, PeerAddrState, Request, Resp
 /// It divides the set of all possible candidate peers into disjoint subsets,
 /// using the `PeerAddrState`:
 ///
-/// 1. `Responded` peers, which we previously connected to. If we have not received
-///    any messages from a `Responded` peer within a cutoff time, we assume that it
-///    has disconnected or hung, and attempt reconnection;
+/// 1. `Responded` peers, which we previously had inbound or outbound connections
+///    to. If we have not received any messages from a `Responded` peer within a
+///    cutoff time, we assume that it has disconnected or hung, and attempt
+///    reconnection;
 /// 2. `NeverAttempted` peers, which we learned about from other peers or a DNS
 ///    seeder, but have never connected to;
 /// 3. `Failed` peers, to whom we attempted to connect but were unable to;
@@ -37,13 +43,13 @@ use crate::{types::MetaAddr, AddressBook, BoxError, PeerAddrState, Request, Resp
 ///  │                               │
 ///  │                               │
 ///  │                               │
-///  │                               │
-///  │                               │
-///  │                               │
-///  │                               │
-///  │                               │
-///  ├───────────────────────────────┼───────────────────────────────┐
-///  │ PeerSet AddressBook           ▼                               │
+///  │ ┌──────────────────┐          │
+///  │ │  Listener Port   │          │
+///  │ │ Peer Connections │          │
+///  │ └──────────────────┘          │
+///  │          │                    │
+///  ├──────────┼────────────────────┼───────────────────────────────┐
+///  │ PeerSet  ▼  AddressBook       ▼                               │
 ///  │ ┌─────────────┐       ┌────────────────┐      ┌─────────────┐ │
 ///  │ │  Possibly   │       │`NeverAttempted`│      │  `Failed`   │ │
 ///  │ │Disconnected │       │     Peers      │      │   Peers     │◀┼┐
@@ -102,6 +108,7 @@ use crate::{types::MetaAddr, AddressBook, BoxError, PeerAddrState, Request, Resp
 pub(super) struct CandidateSet<S> {
     pub(super) peer_set: Arc<Mutex<AddressBook>>,
     pub(super) peer_service: S,
+    next_peer_min_wait: Sleep,
 }
 
 impl<S> CandidateSet<S>
@@ -109,11 +116,20 @@ where
     S: Service<Request, Response = Response, Error = BoxError>,
     S::Future: Send + 'static,
 {
+    /// The minimum time between successive calls to `CandidateSet::next()`.
+    ///
+    /// ## Security
+    ///
+    /// Zebra resists distributed denial of service attacks by making sure that new peer connections
+    /// are initiated at least `MIN_PEER_CONNECTION_INTERVAL` apart.
+    const MIN_PEER_CONNECTION_INTERVAL: Duration = Duration::from_millis(100);
+
     /// Uses `peer_set` and `peer_service` to manage a [`CandidateSet`] of peers.
     pub fn new(peer_set: Arc<Mutex<AddressBook>>, peer_service: S) -> CandidateSet<S> {
         CandidateSet {
             peer_set,
             peer_service,
+            next_peer_min_wait: sleep(Duration::from_secs(0)),
         }
     }
 
@@ -188,13 +204,31 @@ where
     ///
     /// Live `Responded` peers will stay live if they keep responding, or
     /// become a reconnection candidate if they stop responding.
-    pub fn next(&mut self) -> Option<MetaAddr> {
-        let mut peer_set_guard = self.peer_set.lock().unwrap();
-        let mut reconnect = peer_set_guard.reconnection_peers().next()?;
+    ///
+    /// ## Security
+    ///
+    /// Zebra resists distributed denial of service attacks by making sure that
+    /// new peer connections are initiated at least
+    /// `MIN_PEER_CONNECTION_INTERVAL` apart.
+    pub async fn next(&mut self) -> Option<MetaAddr> {
+        let current_deadline = self.next_peer_min_wait.deadline();
+        let mut sleep = sleep_until(current_deadline + Self::MIN_PEER_CONNECTION_INTERVAL);
+        mem::swap(&mut self.next_peer_min_wait, &mut sleep);
 
-        reconnect.last_seen = Utc::now();
-        reconnect.last_connection_state = PeerAddrState::AttemptPending;
-        peer_set_guard.update(reconnect);
+        let reconnect = {
+            let mut peer_set_guard = self.peer_set.lock().unwrap();
+            // It's okay to early return here because we're returning None
+            // instead of yielding the next connection.
+            let mut reconnect = peer_set_guard.reconnection_peers().next()?;
+
+            reconnect.last_seen = Utc::now();
+            reconnect.last_connection_state = PeerAddrState::AttemptPending;
+            peer_set_guard.update(reconnect);
+            reconnect
+        };
+
+        // This is the line that is most relevant to the above ## Security section
+        sleep.await;
 
         Some(reconnect)
     }

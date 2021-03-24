@@ -1,4 +1,4 @@
-//! Constants for Block Subsidy, Funding Streams, and Founders’ Reward
+//! Constants for Block Subsidy, Funding Streams, and Founders' Reward
 
 use zebra_chain::{amount::COIN, block::Height};
 

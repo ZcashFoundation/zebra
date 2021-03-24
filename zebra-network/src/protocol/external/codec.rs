@@ -1,7 +1,10 @@
 //! A Tokio codec mapping byte streams to Bitcoin message streams.
 
 use std::fmt;
-use std::io::{Cursor, Read, Write};
+use std::{
+    cmp::min,
+    io::{Cursor, Read, Write},
+};
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use bytes::{BufMut, BytesMut};
@@ -117,7 +120,7 @@ impl Encoder<Message> for Codec {
         }
 
         if let Some(label) = self.builder.metrics_label.clone() {
-            metrics::counter!("bytes.written", (body_length + HEADER_LEN) as u64, "addr" => label);
+            metrics::counter!("zcash.net.out.bytes.total", (body_length + HEADER_LEN) as u64, "addr" => label);
         }
 
         use Message::*;
@@ -366,7 +369,7 @@ impl Decoder for Codec {
                 }
 
                 if let Some(label) = self.builder.metrics_label.clone() {
-                    metrics::counter!("bytes.read", (body_len + HEADER_LEN) as u64, "addr" =>  label);
+                    metrics::counter!("zcash.net.in.bytes.total", (body_len + HEADER_LEN) as u64, "addr" =>  label);
                 }
 
                 // Reserve buffer space for the expected body and the following header.
@@ -404,33 +407,43 @@ impl Decoder for Codec {
                     ));
                 }
 
-                let body_reader = Cursor::new(&body);
+                let mut body_reader = Cursor::new(&body);
                 match &command {
-                    b"version\0\0\0\0\0" => self.read_version(body_reader),
-                    b"verack\0\0\0\0\0\0" => self.read_verack(body_reader),
-                    b"ping\0\0\0\0\0\0\0\0" => self.read_ping(body_reader),
-                    b"pong\0\0\0\0\0\0\0\0" => self.read_pong(body_reader),
-                    b"reject\0\0\0\0\0\0" => self.read_reject(body_reader),
-                    b"addr\0\0\0\0\0\0\0\0" => self.read_addr(body_reader),
-                    b"getaddr\0\0\0\0\0" => self.read_getaddr(body_reader),
-                    b"block\0\0\0\0\0\0\0" => self.read_block(body_reader),
-                    b"getblocks\0\0\0" => self.read_getblocks(body_reader),
-                    b"headers\0\0\0\0\0" => self.read_headers(body_reader),
-                    b"getheaders\0\0" => self.read_getheaders(body_reader),
-                    b"inv\0\0\0\0\0\0\0\0\0" => self.read_inv(body_reader),
-                    b"getdata\0\0\0\0\0" => self.read_getdata(body_reader),
-                    b"notfound\0\0\0\0" => self.read_notfound(body_reader),
-                    b"tx\0\0\0\0\0\0\0\0\0\0" => self.read_tx(body_reader),
-                    b"mempool\0\0\0\0\0" => self.read_mempool(body_reader),
-                    b"filterload\0\0" => self.read_filterload(body_reader, body_len),
-                    b"filteradd\0\0\0" => self.read_filteradd(body_reader),
-                    b"filterclear\0" => self.read_filterclear(body_reader),
+                    b"version\0\0\0\0\0" => self.read_version(&mut body_reader),
+                    b"verack\0\0\0\0\0\0" => self.read_verack(&mut body_reader),
+                    b"ping\0\0\0\0\0\0\0\0" => self.read_ping(&mut body_reader),
+                    b"pong\0\0\0\0\0\0\0\0" => self.read_pong(&mut body_reader),
+                    b"reject\0\0\0\0\0\0" => self.read_reject(&mut body_reader),
+                    b"addr\0\0\0\0\0\0\0\0" => self.read_addr(&mut body_reader),
+                    b"getaddr\0\0\0\0\0" => self.read_getaddr(&mut body_reader),
+                    b"block\0\0\0\0\0\0\0" => self.read_block(&mut body_reader),
+                    b"getblocks\0\0\0" => self.read_getblocks(&mut body_reader),
+                    b"headers\0\0\0\0\0" => self.read_headers(&mut body_reader),
+                    b"getheaders\0\0" => self.read_getheaders(&mut body_reader),
+                    b"inv\0\0\0\0\0\0\0\0\0" => self.read_inv(&mut body_reader),
+                    b"getdata\0\0\0\0\0" => self.read_getdata(&mut body_reader),
+                    b"notfound\0\0\0\0" => self.read_notfound(&mut body_reader),
+                    b"tx\0\0\0\0\0\0\0\0\0\0" => self.read_tx(&mut body_reader),
+                    b"mempool\0\0\0\0\0" => self.read_mempool(&mut body_reader),
+                    b"filterload\0\0" => self.read_filterload(&mut body_reader, body_len),
+                    b"filteradd\0\0\0" => self.read_filteradd(&mut body_reader, body_len),
+                    b"filterclear\0" => self.read_filterclear(&mut body_reader),
                     _ => return Err(Parse("unknown command")),
                 }
                 // We need Ok(Some(msg)) to signal that we're done decoding.
                 // This is also convenient for tracing the parse result.
                 .map(|msg| {
-                    trace!("finished message decoding");
+                    // bitcoin allows extra data at the end of most messages,
+                    // so that old nodes can still read newer message formats,
+                    // and ignore any extra fields
+                    let extra_bytes = body.len() as u64 - body_reader.position();
+                    if extra_bytes == 0 {
+                        trace!(?extra_bytes, %msg, "finished message decoding");
+                    } else {
+                        // log when there are extra bytes, so we know when we need to
+                        // upgrade message formats
+                        debug!(?extra_bytes, %msg, "extra data after decoding message");
+                    }
                     Some(msg)
                 })
             }
@@ -454,7 +467,7 @@ impl Codec {
                 reader.read_socket_addr()?,
             ),
             nonce: Nonce(reader.read_u64::<LittleEndian>()?),
-            user_agent: reader.read_string()?,
+            user_agent: String::zcash_deserialize(&mut reader)?,
             start_height: block::Height(reader.read_u32::<LittleEndian>()?),
             relay: match reader.read_u8()? {
                 0 => false,
@@ -478,7 +491,7 @@ impl Codec {
 
     fn read_reject<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
         Ok(Message::Reject {
-            message: reader.read_string()?,
+            message: String::zcash_deserialize(&mut reader)?,
             ccode: match reader.read_u8()? {
                 0x01 => RejectReason::Malformed,
                 0x10 => RejectReason::Invalid,
@@ -491,7 +504,7 @@ impl Codec {
                 0x50 => RejectReason::Other,
                 _ => return Err(Error::Parse("invalid RejectReason value in ccode field")),
             },
-            reason: reader.read_string()?,
+            reason: String::zcash_deserialize(&mut reader)?,
             // Sometimes there's data, sometimes there isn't. There's no length
             // field, this is just implicitly encoded by the body_len.
             // Apparently all existing implementations only supply 32 bytes of
@@ -566,8 +579,8 @@ impl Codec {
         Ok(Message::NotFound(Vec::zcash_deserialize(reader)?))
     }
 
-    fn read_tx<R: Read>(&self, rdr: R) -> Result<Message, Error> {
-        Ok(Message::Tx(Transaction::zcash_deserialize(rdr)?.into()))
+    fn read_tx<R: Read>(&self, reader: R) -> Result<Message, Error> {
+        Ok(Message::Tx(Transaction::zcash_deserialize(reader)?.into()))
     }
 
     fn read_mempool<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
@@ -575,14 +588,14 @@ impl Codec {
     }
 
     fn read_filterload<R: Read>(&self, mut reader: R, body_len: usize) -> Result<Message, Error> {
+        const MAX_FILTERLOAD_LENGTH: usize = 36000;
+        const FILTERLOAD_REMAINDER_LENGTH: usize = 4 + 4 + 1;
+
         if !(FILTERLOAD_REMAINDER_LENGTH <= body_len
-            && body_len <= FILTERLOAD_REMAINDER_LENGTH + MAX_FILTER_LENGTH)
+            && body_len <= FILTERLOAD_REMAINDER_LENGTH + MAX_FILTERLOAD_LENGTH)
         {
             return Err(Error::Parse("Invalid filterload message body length."));
         }
-
-        const MAX_FILTER_LENGTH: usize = 36000;
-        const FILTERLOAD_REMAINDER_LENGTH: usize = 4 + 4 + 1;
 
         let filter_length: usize = body_len - FILTERLOAD_REMAINDER_LENGTH;
 
@@ -597,13 +610,16 @@ impl Codec {
         })
     }
 
-    fn read_filteradd<R: Read>(&self, reader: R) -> Result<Message, Error> {
-        let mut bytes = Vec::new();
+    fn read_filteradd<R: Read>(&self, mut reader: R, body_len: usize) -> Result<Message, Error> {
+        const MAX_FILTERADD_LENGTH: usize = 520;
 
-        // Maximum size of data is 520 bytes.
-        reader.take(520).read_exact(&mut bytes)?;
+        let filter_length: usize = min(body_len, MAX_FILTERADD_LENGTH);
 
-        Ok(Message::FilterAdd { data: bytes })
+        // Memory Denial of Service: this length has just been bounded
+        let mut filter_bytes = vec![0; filter_length];
+        reader.read_exact(&mut filter_bytes)?;
+
+        Ok(Message::FilterAdd { data: filter_bytes })
     }
 
     fn read_filterclear<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {

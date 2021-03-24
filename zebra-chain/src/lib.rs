@@ -62,7 +62,7 @@ impl LedgerState {
 impl Default for LedgerState {
     fn default() -> Self {
         let network = parameters::Network::Mainnet;
-        let tip_height = parameters::NetworkUpgrade::Sapling
+        let tip_height = parameters::NetworkUpgrade::Canopy
             .activation_height(network)
             .unwrap();
 

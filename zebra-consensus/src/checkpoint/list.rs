@@ -19,7 +19,28 @@ use std::{
 use zebra_chain::block;
 use zebra_chain::parameters::{genesis_hash, Network};
 
+/// The hard-coded checkpoints for mainnet, generated using the
+/// `zebra-checkpoints` tool.
+///
+/// To regenerate the latest checkpoints, use the following commands:
+/// ```sh
+/// LAST_CHECKPOINT=$(tail -1 main-checkpoints.txt | cut -d' ' -f1)
+/// echo "$LAST_CHECKPOINT"
+/// zebra-checkpoints --cli /path/to/zcash-cli --last-checkpoint "$LAST_CHECKPOINT" >> main-checkpoints.txt &
+/// tail -f main-checkpoints.txt
+/// ```
+///
+/// See the checkpoints [./README.md] for more details.
 const MAINNET_CHECKPOINTS: &str = include_str!("main-checkpoints.txt");
+
+/// The hard-coded checkpoints for testnet, generated using the
+/// `zebra-checkpoints` tool.
+///
+/// To use testnet, use the testnet checkpoints file, and run
+/// `zebra-checkpoints [other args] -- -testnet`.
+///
+/// See [`MAINNET_CHECKPOINTS`] for detailed `zebra-checkpoints` usage
+/// information.
 const TESTNET_CHECKPOINTS: &str = include_str!("test-checkpoints.txt");
 
 /// A list of block height and hash checkpoints.

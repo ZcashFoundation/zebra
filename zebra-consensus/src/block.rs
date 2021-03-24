@@ -33,7 +33,7 @@ use zebra_state as zs;
 use crate::{error::*, transaction as tx};
 use crate::{script, BoxError};
 
-mod check;
+pub mod check;
 mod subsidy;
 #[cfg(test)]
 mod tests;
@@ -198,8 +198,8 @@ where
 
             // Update the metrics after all the validation is finished
             tracing::trace!("verified block");
-            metrics::gauge!("block.verified.block.height", height.0 as _);
-            metrics::counter!("block.verified.block.count", 1);
+            metrics::gauge!("zcash.chain.verified.block.height", height.0 as _);
+            metrics::counter!("zcash.chain.verified.block.total", 1);
 
             // Finally, submit the block for contextual verification.
             let new_outputs = Arc::try_unwrap(known_utxos)

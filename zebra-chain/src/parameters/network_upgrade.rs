@@ -37,6 +37,11 @@ pub enum NetworkUpgrade {
     Heartwood,
     /// The Zcash protocol after the Canopy upgrade.
     Canopy,
+    /// The Zcash protocol after the NU5 upgrade.
+    ///
+    /// Note: Network Upgrade 5 includes the Orchard Shielded Protocol, and
+    /// other changes. The NU5 code name has not been chosen yet.
+    NU5,
 }
 
 /// Mainnet network upgrade activation heights.
@@ -51,6 +56,7 @@ pub(crate) const MAINNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] 
     (block::Height(653_600), Blossom),
     (block::Height(903_000), Heartwood),
     (block::Height(1_046_400), Canopy),
+    // TODO: Add NU5 mainnet activation height
 ];
 
 /// Testnet network upgrade activation heights.
@@ -65,6 +71,7 @@ pub(crate) const TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] 
     (block::Height(584_000), Blossom),
     (block::Height(903_800), Heartwood),
     (block::Height(1_028_500), Canopy),
+    // TODO: Add NU5 testnet activation height
 ];
 
 /// The Consensus Branch Id, used to bind transactions and blocks to a
@@ -94,6 +101,7 @@ pub(crate) const CONSENSUS_BRANCH_IDS: &[(NetworkUpgrade, ConsensusBranchId)] = 
     (Blossom, ConsensusBranchId(0x2bb40e60)),
     (Heartwood, ConsensusBranchId(0xf5b9230b)),
     (Canopy, ConsensusBranchId(0xe9ff75a6)),
+    (NU5, ConsensusBranchId(0xf919a198)),
 ];
 
 /// The target block spacing before Blossom.
@@ -199,7 +207,7 @@ impl NetworkUpgrade {
     pub fn target_spacing(&self) -> Duration {
         let spacing_seconds = match self {
             Genesis | BeforeOverwinter | Overwinter | Sapling => PRE_BLOSSOM_POW_TARGET_SPACING,
-            Blossom | Heartwood | Canopy => POST_BLOSSOM_POW_TARGET_SPACING,
+            Blossom | Heartwood | Canopy | NU5 => POST_BLOSSOM_POW_TARGET_SPACING,
         };
 
         Duration::seconds(spacing_seconds)

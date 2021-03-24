@@ -6,6 +6,7 @@ use std::{io, sync::Arc};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 use crate::{
+    parameters::{OVERWINTER_VERSION_GROUP_ID, SAPLING_VERSION_GROUP_ID, TX_V5_VERSION_GROUP_ID},
     primitives::ZkSnarkProof,
     serialization::{
         ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashDeserializeInto,
@@ -15,9 +16,6 @@ use crate::{
 };
 
 use super::*;
-
-const OVERWINTER_VERSION_GROUP_ID: u32 = 0x03C4_8270;
-const SAPLING_VERSION_GROUP_ID: u32 = 0x892F_2085;
 
 impl ZcashDeserialize for jubjub::Fq {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
@@ -79,7 +77,7 @@ impl ZcashSerialize for Transaction {
         // we start parsing mempool transactions, or generating our own
         // transactions (see #483).
         //
-        // Since we checkpoint on Sapling activation, we won't ever need
+        // Since we checkpoint on Canopy activation, we won't ever need
         // to check the smaller pre-Sapling transaction size limit.
         match self {
             Transaction::V1 {
@@ -182,6 +180,23 @@ impl ZcashSerialize for Transaction {
                     None => {}
                 }
             }
+            Transaction::V5 {
+                lock_time,
+                expiry_height,
+                inputs,
+                outputs,
+                rest,
+            } => {
+                // Write version 5 and set the fOverwintered bit.
+                writer.write_u32::<LittleEndian>(5 | (1 << 31))?;
+                writer.write_u32::<LittleEndian>(TX_V5_VERSION_GROUP_ID)?;
+                lock_time.zcash_serialize(&mut writer)?;
+                writer.write_u32::<LittleEndian>(expiry_height.0)?;
+                inputs.zcash_serialize(&mut writer)?;
+                outputs.zcash_serialize(&mut writer)?;
+                // write the rest
+                writer.write_all(rest)?;
+            }
         }
         Ok(())
     }
@@ -283,6 +298,26 @@ impl ZcashDeserialize for Transaction {
                     value_balance,
                     shielded_data,
                     joinsplit_data,
+                })
+            }
+            (5, false) => {
+                let id = reader.read_u32::<LittleEndian>()?;
+                if id != TX_V5_VERSION_GROUP_ID {
+                    return Err(SerializationError::Parse("expected TX_V5_VERSION_GROUP_ID"));
+                }
+                let lock_time = LockTime::zcash_deserialize(&mut reader)?;
+                let expiry_height = block::Height(reader.read_u32::<LittleEndian>()?);
+                let inputs = Vec::zcash_deserialize(&mut reader)?;
+                let outputs = Vec::zcash_deserialize(&mut reader)?;
+                let mut rest = Vec::new();
+                reader.read_to_end(&mut rest)?;
+
+                Ok(Transaction::V5 {
+                    lock_time,
+                    expiry_height,
+                    inputs,
+                    outputs,
+                    rest,
                 })
             }
             (_, _) => Err(SerializationError::Parse("bad tx header")),

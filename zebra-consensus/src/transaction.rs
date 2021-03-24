@@ -157,10 +157,10 @@ where
 
                     // Handle transparent inputs and outputs.
                     if tx.is_coinbase() {
-                        // do something special for coinbase transactions
                         check::coinbase_tx_no_joinsplit_or_spend(&tx)?;
                     } else {
-                        // otherwise, check no coinbase inputs
+                        // TODO: check no coinbase inputs
+
                         // feed all of the inputs to the script verifier
                         let cached_ffi_transaction =
                             Arc::new(CachedFfiTransaction::new(tx.clone()));
@@ -287,6 +287,9 @@ where
                     }
 
                     Ok(tx.hash())
+                }
+                Transaction::V5 { .. } => {
+                    unimplemented!("v5 transaction validation as specified in ZIP-216, ZIP-224, ZIP-225, and ZIP-244")
                 }
             }
         }

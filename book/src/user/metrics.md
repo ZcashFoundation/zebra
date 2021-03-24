@@ -31,8 +31,10 @@ endpoint_addr = "127.0.0.1:9999"
 ```
 
 In the grafana dashboard:
-1. Create a new Prometheus Data Source
+1. Create a new Prometheus Data Source `Prometheus-Zebra`
 2. Enter the HTTP URL: `127.0.0.1:9090`
 3. Save the configuration
+
+Now you can add the grafana dashboards from `zebra/grafana`, or create your own.
 
 [metrics_section]: https://doc.zebra.zfnd.org/zebrad/config/struct.MetricsSection.html

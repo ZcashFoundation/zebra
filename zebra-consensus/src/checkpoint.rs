@@ -14,7 +14,7 @@
 //! block for the configured network.
 
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::BTreeMap,
     ops::{Bound, Bound::*},
     pin::Pin,
     sync::Arc,
@@ -30,10 +30,11 @@ use tracing::instrument;
 use zebra_chain::{
     block::{self, Block},
     parameters::{Network, GENESIS_PREVIOUS_BLOCK_HASH},
+    work::equihash,
 };
 use zebra_state as zs;
 
-use crate::BoxError;
+use crate::{block::VerifyBlockError, error::BlockError, BoxError};
 
 pub(crate) mod list;
 mod types;
@@ -108,6 +109,9 @@ where
     /// The checkpoint list for this verifier.
     checkpoint_list: CheckpointList,
 
+    /// The network rules used by this verifier.
+    network: Network,
+
     /// The hash of the initial tip, if any.
     initial_tip_hash: Option<block::Hash>,
 
@@ -164,11 +168,11 @@ where
             ?initial_tip,
             "initialising CheckpointVerifier"
         );
-        Self::from_checkpoint_list(checkpoint_list, initial_tip, state_service)
+        Self::from_checkpoint_list(checkpoint_list, network, initial_tip, state_service)
     }
 
-    /// Return a checkpoint verification service using `list`, `initial_tip`,
-    /// and `state_service`.
+    /// Return a checkpoint verification service using `list`, `network`,
+    /// `initial_tip`, and `state_service`.
     ///
     /// Assumes that the provided genesis checkpoint is correct.
     ///
@@ -181,18 +185,20 @@ where
     #[allow(dead_code)]
     pub(crate) fn from_list(
         list: impl IntoIterator<Item = (block::Height, block::Hash)>,
+        network: Network,
         initial_tip: Option<(block::Height, block::Hash)>,
         state_service: S,
     ) -> Result<Self, VerifyCheckpointError> {
         Ok(Self::from_checkpoint_list(
             CheckpointList::from_list(list).map_err(VerifyCheckpointError::CheckpointList)?,
+            network,
             initial_tip,
             state_service,
         ))
     }
 
     /// Return a checkpoint verification service using `checkpoint_list`,
-    /// `initial_tip`, and `state_service`.
+    /// `network`, `initial_tip`, and `state_service`.
     ///
     /// Assumes that the provided genesis checkpoint is correct.
     ///
@@ -200,6 +206,7 @@ where
     /// hard-coded checkpoint lists. See that function for more details.
     pub(crate) fn from_checkpoint_list(
         checkpoint_list: CheckpointList,
+        network: Network,
         initial_tip: Option<(block::Height, block::Hash)>,
         state_service: S,
     ) -> Self {
@@ -220,6 +227,7 @@ where
         };
         CheckpointVerifier {
             checkpoint_list,
+            network,
             initial_tip_hash,
             state_service,
             queued: BTreeMap::new(),
@@ -430,41 +438,35 @@ where
         }
     }
 
-    /// Check that the block height and Merkle root are valid.
+    /// Check that the block height, proof of work, and Merkle root are valid.
+    ///
+    /// ## Security
+    ///
+    /// Checking the proof of work makes resource exhaustion attacks harder to
+    /// carry out, because malicious blocks require a valid proof of work.
     ///
     /// Checking the Merkle root ensures that the block hash binds the block
     /// contents. To prevent malleability (CVE-2012-2459), we also need to check
     /// whether the transaction hashes are unique.
     fn check_block(&self, block: &Block) -> Result<block::Height, VerifyCheckpointError> {
-        let block_height = block
+        let hash = block.hash();
+        let height = block
             .coinbase_height()
-            .ok_or(VerifyCheckpointError::CoinbaseHeight { hash: block.hash() })?;
-        self.check_height(block_height)?;
+            .ok_or(VerifyCheckpointError::CoinbaseHeight { hash })?;
+        self.check_height(height)?;
+
+        crate::block::check::difficulty_is_valid(&block.header, self.network, &height, &hash)?;
+        crate::block::check::equihash_solution_is_valid(&block.header)?;
 
         let transaction_hashes = block
             .transactions
             .iter()
             .map(|tx| tx.hash())
             .collect::<Vec<_>>();
-        let merkle_root = transaction_hashes.iter().cloned().collect();
 
-        // Check that the Merkle root is valid.
-        if block.header.merkle_root != merkle_root {
-            return Err(VerifyCheckpointError::BadMerkleRoot {
-                expected: block.header.merkle_root,
-                actual: merkle_root,
-            });
-        }
+        crate::block::check::merkle_root_validity(&block, &transaction_hashes)?;
 
-        // To prevent malleability (CVE-2012-2459), we also need to check
-        // whether the transaction hashes are unique. Collecting into a HashSet
-        // deduplicates, so this checks that there are no duplicate transaction
-        // hashes, preventing Merkle root malleability.
-        if transaction_hashes.len() != transaction_hashes.iter().collect::<HashSet<_>>().len() {
-            return Err(VerifyCheckpointError::DuplicateTransaction);
-        }
-
-        Ok(block_height)
+        Ok(height)
     }
 
     /// Queue `block` for verification, and return the `Receiver` for the
@@ -824,6 +826,8 @@ pub enum VerifyCheckpointError {
     CommitFinalized(BoxError),
     #[error(transparent)]
     CheckpointList(BoxError),
+    #[error(transparent)]
+    VerifyBlock(BoxError),
     #[error("too many queued blocks at this height")]
     QueuedLimit,
     #[error("the block hash does not match the chained checkpoint hash, expected {expected:?} found {found:?}")]
@@ -833,6 +837,24 @@ pub enum VerifyCheckpointError {
     },
     #[error("zebra is shutting down")]
     ShuttingDown,
+}
+
+impl From<VerifyBlockError> for VerifyCheckpointError {
+    fn from(err: VerifyBlockError) -> VerifyCheckpointError {
+        VerifyCheckpointError::VerifyBlock(err.into())
+    }
+}
+
+impl From<BlockError> for VerifyCheckpointError {
+    fn from(err: BlockError) -> VerifyCheckpointError {
+        VerifyCheckpointError::VerifyBlock(err.into())
+    }
+}
+
+impl From<equihash::Error> for VerifyCheckpointError {
+    fn from(err: equihash::Error) -> VerifyCheckpointError {
+        VerifyCheckpointError::VerifyBlock(err.into())
+    }
 }
 
 /// The CheckpointVerifier service implementation.

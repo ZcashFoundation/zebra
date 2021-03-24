@@ -85,7 +85,7 @@ jobs:
         run: |
           gcloud compute instance-templates create-with-container "zebrad-$BRANCH_NAME-$SHORT_SHA" \
           --container-image "gcr.io/$PROJECT_ID/$REPOSITORY/$BRANCH_NAME:$SHORT_SHA" \
-          --create-disk name=zebrad-cache-$SHORT_SHA,size=100GB,type=pd-balanced \
+          --create-disk name=zebrad-cache-$SHORT_SHA,auto-delete=yes,size=100GB,type=pd-balanced \
           --container-mount-disk mount-path="/zebrad-cache",name=zebrad-cache-$SHORT_SHA \
           --machine-type n2d-standard-4 \
           --service-account cos-vm@zealous-zebra.iam.gserviceaccount.com \
@@ -106,7 +106,7 @@ jobs:
         id: does-group-exist
         continue-on-error: true
         run: |
-          gcloud compute instance-groups list | grep "zebrad-$BRANCH_NAME"\ \ "$REGION"
+          gcloud compute instance-groups list | grep "zebrad-$BRANCH_NAME" | grep "$REGION"
 
       # Deploy new managed instance group using the new instance template
       - name: Create managed instance group

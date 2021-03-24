@@ -1,6 +1,7 @@
 use std::io;
 
 use super::{ReadZcashExt, SerializationError};
+use byteorder::ReadBytesExt;
 
 /// Consensus-critical serialization for Zcash.
 ///
@@ -30,6 +31,21 @@ impl<T: ZcashDeserialize> ZcashDeserialize for Vec<T> {
             vec.push(T::zcash_deserialize(&mut reader)?);
         }
         Ok(vec)
+    }
+}
+
+/// Read a byte.
+impl ZcashDeserialize for u8 {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        Ok(reader.read_u8()?)
+    }
+}
+
+/// Read a Bitcoin-encoded UTF-8 string.
+impl ZcashDeserialize for String {
+    fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
+        let bytes: Vec<_> = Vec::zcash_deserialize(reader)?;
+        String::from_utf8(bytes).map_err(|_| SerializationError::Parse("invalid utf-8"))
     }
 }
 

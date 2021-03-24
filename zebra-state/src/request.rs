@@ -141,8 +141,8 @@ impl From<Arc<Block>> for FinalizedBlock {
 
         Self {
             block,
-            height,
             hash,
+            height,
             new_outputs,
             transaction_hashes,
         }
@@ -153,15 +153,15 @@ impl From<PreparedBlock> for FinalizedBlock {
     fn from(prepared: PreparedBlock) -> Self {
         let PreparedBlock {
             block,
-            height,
             hash,
+            height,
             new_outputs,
             transaction_hashes,
         } = prepared;
         Self {
             block,
-            height,
             hash,
+            height,
             new_outputs,
             transaction_hashes,
         }

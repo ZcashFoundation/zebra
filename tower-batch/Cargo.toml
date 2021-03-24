@@ -1,6 +1,6 @@
 [package]
 name = "tower-batch"
-version = "0.2.1"
+version = "0.2.3"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT"
 edition = "2018"
@@ -19,6 +19,11 @@ color-eyre = "0.5.10"
 ed25519-zebra = "2.1.0"
 rand = "0.7"
 tokio = { version = "0.3.6", features = ["full"]}
+tokio-test = "0.4.1"
 tower-fallback = { path = "../tower-fallback/" }
+tower-test = "0.4.0"
 tracing = "0.1.25"
 zebra-test = { path = "../zebra-test/" }
+
+
+

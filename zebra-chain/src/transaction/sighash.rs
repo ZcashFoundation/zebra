@@ -1,6 +1,9 @@
 use super::Transaction;
 use crate::{
-    parameters::{ConsensusBranchId, NetworkUpgrade},
+    parameters::{
+        ConsensusBranchId, NetworkUpgrade, OVERWINTER_VERSION_GROUP_ID, SAPLING_VERSION_GROUP_ID,
+        TX_V5_VERSION_GROUP_ID,
+    },
     serialization::{WriteZcashExt, ZcashSerialize},
     transparent,
 };
@@ -11,9 +14,6 @@ use std::io;
 
 static ZIP143_EXPLANATION: &str = "Invalid transaction version: after Overwinter activation transaction versions 1 and 2 are rejected";
 static ZIP243_EXPLANATION: &str = "Invalid transaction version: after Sapling activation transaction versions 1, 2, and 3 are rejected";
-
-const OVERWINTER_VERSION_GROUP_ID: u32 = 0x03C4_8270;
-const SAPLING_VERSION_GROUP_ID: u32 = 0x892F_2085;
 
 const ZCASH_SIGHASH_PERSONALIZATION_PREFIX: &[u8; 12] = b"ZcashSigHash";
 const ZCASH_PREVOUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashPrevoutHash";
@@ -85,6 +85,9 @@ impl<'a> SigHasher<'a> {
             Sapling | Blossom | Heartwood | Canopy => self
                 .hash_sighash_zip243(&mut hash)
                 .expect("serialization into hasher never fails"),
+            NU5 => unimplemented!(
+                "NU5 upgrade uses a new transaction digest algorithm, as specified in ZIP-244"
+            ),
         }
 
         hash.finalize()
@@ -126,6 +129,7 @@ impl<'a> SigHasher<'a> {
             Transaction::V1 { .. } | Transaction::V2 { .. } => unreachable!(ZIP143_EXPLANATION),
             Transaction::V3 { .. } => 3 | overwintered_flag,
             Transaction::V4 { .. } => 4 | overwintered_flag,
+            Transaction::V5 { .. } => 5 | overwintered_flag,
         })
     }
 
@@ -134,6 +138,7 @@ impl<'a> SigHasher<'a> {
             Transaction::V1 { .. } | Transaction::V2 { .. } => unreachable!(ZIP143_EXPLANATION),
             Transaction::V3 { .. } => OVERWINTER_VERSION_GROUP_ID,
             Transaction::V4 { .. } => SAPLING_VERSION_GROUP_ID,
+            Transaction::V5 { .. } => TX_V5_VERSION_GROUP_ID,
         })
     }
 
@@ -240,6 +245,9 @@ impl<'a> SigHasher<'a> {
             Transaction::V1 { .. } | Transaction::V2 { .. } => unreachable!(ZIP143_EXPLANATION),
             Transaction::V3 { joinsplit_data, .. } => joinsplit_data.is_some(),
             Transaction::V4 { joinsplit_data, .. } => joinsplit_data.is_some(),
+            Transaction::V5 { .. } => {
+                unimplemented!("v5 transaction hash as specified in ZIP-225 and ZIP-244")
+            }
         };
 
         if !has_joinsplits {
@@ -253,7 +261,7 @@ impl<'a> SigHasher<'a> {
 
         // This code, and the check above for has_joinsplits cannot be combined
         // into a single branch because the `joinsplit_data` type of each
-        // tranaction kind has a different type.
+        // transaction kind has a different type.
         //
         // For v3 joinsplit_data is a JoinSplitData<Bctv14Proof>
         // For v4 joinsplit_data is a JoinSplitData<Groth16Proof>
@@ -261,6 +269,8 @@ impl<'a> SigHasher<'a> {
         // The type parameter on these types prevents them from being unified,
         // which forces us to duplicate the logic in each branch even though the
         // code within each branch is identical.
+        //
+        // TODO: use a generic function to remove the duplicate code
         match self.trans {
             Transaction::V3 {
                 joinsplit_data: Some(jsd),
@@ -280,7 +290,20 @@ impl<'a> SigHasher<'a> {
                 }
                 (&mut hash).write_all(&<[u8; 32]>::from(jsd.pub_key)[..])?;
             }
-            _ => unreachable!("already checked transaction kind above"),
+            Transaction::V5 { .. } => {
+                unimplemented!("v5 transaction hash as specified in ZIP-225 and ZIP-244")
+            }
+
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V4 {
+                joinsplit_data: None,
+                ..
+            } => unreachable!("already checked transaction kind above"),
         };
 
         writer.write_all(hash.finalize().as_ref())
@@ -395,14 +418,15 @@ impl<'a> SigHasher<'a> {
         use Transaction::*;
 
         let shielded_data = match self.trans {
-            Transaction::V4 {
+            V4 {
                 shielded_data: Some(shielded_data),
                 ..
             } => shielded_data,
-            Transaction::V4 {
+            V4 {
                 shielded_data: None,
                 ..
             } => return writer.write_all(&[0; 32]),
+            V5 { .. } => unimplemented!("v5 transaction hash as specified in ZIP-225 and ZIP-244"),
             V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(ZIP243_EXPLANATION),
         };
 
@@ -431,14 +455,15 @@ impl<'a> SigHasher<'a> {
         use Transaction::*;
 
         let shielded_data = match self.trans {
-            Transaction::V4 {
+            V4 {
                 shielded_data: Some(shielded_data),
                 ..
             } => shielded_data,
-            Transaction::V4 {
+            V4 {
                 shielded_data: None,
                 ..
             } => return writer.write_all(&[0; 32]),
+            V5 { .. } => unimplemented!("v5 transaction hash as specified in ZIP-225 and ZIP-244"),
             V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(ZIP243_EXPLANATION),
         };
 
@@ -462,7 +487,8 @@ impl<'a> SigHasher<'a> {
         use Transaction::*;
 
         let value_balance = match self.trans {
-            Transaction::V4 { value_balance, .. } => value_balance,
+            V4 { value_balance, .. } => value_balance,
+            V5 { .. } => unimplemented!("v5 transaction hash as specified in ZIP-225 and ZIP-244"),
             V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(ZIP243_EXPLANATION),
         };
 

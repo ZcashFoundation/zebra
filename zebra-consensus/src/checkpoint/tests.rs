@@ -7,7 +7,7 @@ use super::types::TargetHeight::*;
 
 use color_eyre::eyre::{eyre, Report};
 use futures::{future::TryFutureExt, stream::FuturesUnordered};
-use std::{cmp::min, mem::drop, time::Duration};
+use std::{cmp::min, convert::TryInto, mem::drop, time::Duration};
 use tokio::{stream::StreamExt, time::timeout};
 use tower::{Service, ServiceBuilder, ServiceExt};
 use tracing_futures::Instrument;
@@ -49,7 +49,7 @@ async fn single_item_checkpoint_list() -> Result<(), Report> {
         .buffer(1)
         .service(zebra_state::init(zebra_state::Config::ephemeral(), Mainnet));
     let mut checkpoint_verifier =
-        CheckpointVerifier::from_list(genesis_checkpoint_list, None, state_service)
+        CheckpointVerifier::from_list(genesis_checkpoint_list, Mainnet, None, state_service)
             .map_err(|e| eyre!(e))?;
 
     assert_eq!(
@@ -133,7 +133,7 @@ async fn multi_item_checkpoint_list() -> Result<(), Report> {
         .buffer(1)
         .service(zebra_state::init(zebra_state::Config::ephemeral(), Mainnet));
     let mut checkpoint_verifier =
-        CheckpointVerifier::from_list(checkpoint_list, None, state_service)
+        CheckpointVerifier::from_list(checkpoint_list, Mainnet, None, state_service)
             .map_err(|e| eyre!(e))?;
 
     assert_eq!(
@@ -213,63 +213,66 @@ async fn multi_item_checkpoint_list() -> Result<(), Report> {
     Ok(())
 }
 
-// Temporarily ignore this test, until the state can handle out-of-order blocks
-// #[tokio::test]
-#[allow(dead_code)]
-async fn continuous_blockchain_test() -> Result<(), Report> {
-    continuous_blockchain(None).await?;
-    for height in 0..=10 {
-        continuous_blockchain(Some(block::Height(height))).await?;
+#[tokio::test]
+async fn continuous_blockchain_no_restart() -> Result<(), Report> {
+    continuous_blockchain(None, Mainnet).await?;
+    continuous_blockchain(None, Testnet).await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn continuous_blockchain_restart() -> Result<(), Report> {
+    for height in 0..zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS.len() {
+        continuous_blockchain(Some(block::Height(height.try_into().unwrap())), Mainnet).await?;
+    }
+    for height in 0..zebra_test::vectors::CONTINUOUS_TESTNET_BLOCKS.len() {
+        continuous_blockchain(Some(block::Height(height.try_into().unwrap())), Testnet).await?;
     }
     Ok(())
 }
 
-/// Test a continuous blockchain, restarting verification at `restart_height`.
-// TODO: does this duplicate the test code commented out in src/chain/tests.rs?
-#[allow(dead_code)]
+/// Test a continuous blockchain on `network`, restarting verification at `restart_height`.
 #[spandoc::spandoc]
-async fn continuous_blockchain(restart_height: Option<block::Height>) -> Result<(), Report> {
+async fn continuous_blockchain(
+    restart_height: Option<block::Height>,
+    network: Network,
+) -> Result<(), Report> {
     zebra_test::init();
 
     // A continuous blockchain
-    let mut blockchain = Vec::new();
-    for b in &[
-        &zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..],
-        &zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..],
-        &zebra_test::vectors::BLOCK_MAINNET_2_BYTES[..],
-        &zebra_test::vectors::BLOCK_MAINNET_3_BYTES[..],
-        &zebra_test::vectors::BLOCK_MAINNET_4_BYTES[..],
-        &zebra_test::vectors::BLOCK_MAINNET_5_BYTES[..],
-        &zebra_test::vectors::BLOCK_MAINNET_6_BYTES[..],
-        &zebra_test::vectors::BLOCK_MAINNET_7_BYTES[..],
-        &zebra_test::vectors::BLOCK_MAINNET_8_BYTES[..],
-        &zebra_test::vectors::BLOCK_MAINNET_9_BYTES[..],
-        &zebra_test::vectors::BLOCK_MAINNET_10_BYTES[..],
-    ] {
-        let block = Arc::<Block>::zcash_deserialize(*b)?;
-        let hash = block.hash();
-        blockchain.push((block.clone(), block.coinbase_height().unwrap(), hash));
-    }
+    let blockchain = match network {
+        Mainnet => zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS.iter(),
+        Testnet => zebra_test::vectors::CONTINUOUS_TESTNET_BLOCKS.iter(),
+    };
+    let blockchain: Vec<_> = blockchain
+        .map(|(height, b)| {
+            let block = Arc::<Block>::zcash_deserialize(*b).unwrap();
+            let hash = block.hash();
+            let coinbase_height = block.coinbase_height().unwrap();
+            assert_eq!(*height, coinbase_height.0);
+            (block, coinbase_height, hash)
+        })
+        .collect();
+    let blockchain_len = blockchain.len();
 
-    // Parse only some blocks as checkpoints
-    let mut checkpoints = Vec::new();
-    for b in &[
-        &zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..],
-        &zebra_test::vectors::BLOCK_MAINNET_5_BYTES[..],
-        &zebra_test::vectors::BLOCK_MAINNET_9_BYTES[..],
-    ] {
-        let block = Arc::<Block>::zcash_deserialize(*b)?;
-        let hash = block.hash();
-        checkpoints.push((block.clone(), block.coinbase_height().unwrap(), hash));
-    }
-
-    // The checkpoint list will contain only block 0, 5 and 9
-    let checkpoint_list: BTreeMap<block::Height, block::Hash> = checkpoints
+    // Use some of the blocks as checkpoints
+    // We use these indexes so that we test:
+    //   - checkpoints don't have to be the same length
+    //   - checkpoints start at genesis
+    //   - checkpoints end at the end of the range (there's no point in having extra blocks)
+    let expected_max_height = block::Height((blockchain_len - 1).try_into().unwrap());
+    let checkpoint_list = vec![
+        &blockchain[0],
+        &blockchain[blockchain_len / 3],
+        &blockchain[blockchain_len / 2],
+        &blockchain[blockchain_len - 1],
+    ];
+    let checkpoint_list: BTreeMap<block::Height, block::Hash> = checkpoint_list
         .iter()
         .map(|(_block, height, hash)| (*height, *hash))
         .collect();
 
-    /// SPANDOC: Verify blocks, restarting at {?restart_height}
+    /// SPANDOC: Verify blocks, restarting at {?restart_height} {?network}
     {
         let initial_tip = restart_height.map(|block::Height(height)| {
             (blockchain[height as usize].1, blockchain[height as usize].2)
@@ -277,13 +280,23 @@ async fn continuous_blockchain(restart_height: Option<block::Height>) -> Result<
         let state_service = ServiceBuilder::new()
             .buffer(1)
             .service(zebra_state::init(zebra_state::Config::ephemeral(), Mainnet));
-        let mut checkpoint_verifier =
-            CheckpointVerifier::from_list(checkpoint_list, initial_tip, state_service.clone())
-                .map_err(|e| eyre!(e))?;
+        let mut checkpoint_verifier = CheckpointVerifier::from_list(
+            checkpoint_list,
+            network,
+            initial_tip,
+            state_service.clone(),
+        )
+        .map_err(|e| eyre!(e))?;
 
         // Setup checks
+        if restart_height.is_some() {
+            assert!(
+                restart_height <= Some(checkpoint_verifier.checkpoint_list.max_height()),
+                "restart heights after the final checkpoint are not supported by this test"
+            );
+        }
         if restart_height
-            .map(|h| h >= checkpoint_verifier.checkpoint_list.max_height())
+            .map(|h| h == checkpoint_verifier.checkpoint_list.max_height())
             .unwrap_or(false)
         {
             assert_eq!(
@@ -306,13 +319,14 @@ async fn continuous_blockchain(restart_height: Option<block::Height>) -> Result<
         }
         assert_eq!(
             checkpoint_verifier.checkpoint_list.max_height(),
-            block::Height(9)
+            expected_max_height
         );
 
         let mut handles = FuturesUnordered::new();
 
         // Now verify each block
         for (block, height, _hash) in blockchain {
+            // Commit directly to the state until after the (fake) restart height
             if let Some(restart_height) = restart_height {
                 if height <= restart_height {
                     let mut state_service = state_service.clone();
@@ -320,17 +334,17 @@ async fn continuous_blockchain(restart_height: Option<block::Height>) -> Result<
                     let ready_state_service =
                         state_service.ready_and().map_err(|e| eyre!(e)).await?;
 
-                    /// SPANDOC: Add block to the state {?height}
+                    /// SPANDOC: Add block directly to the state {?height}
                     ready_state_service
                         .call(zebra_state::Request::CommitFinalizedBlock(
                             block.clone().into(),
                         ))
                         .await
                         .map_err(|e| eyre!(e))?;
+
+                    // Skip verification for (fake) previous blocks
+                    continue;
                 }
-            }
-            if height > checkpoint_verifier.checkpoint_list.max_height() {
-                break;
             }
 
             /// SPANDOC: Make sure the verifier service is ready for block {?height}
@@ -367,6 +381,33 @@ async fn continuous_blockchain(restart_height: Option<block::Height>) -> Result<
             }
         }
 
+        // Check that we have the correct number of verify tasks
+        if let Some(block::Height(restart_height)) = restart_height {
+            let restart_height = restart_height as usize;
+            if restart_height == blockchain_len - 1 {
+                assert_eq!(
+                    handles.len(),
+                    0,
+                    "unexpected number of verify tasks for restart height: {:?}",
+                    restart_height,
+                );
+            } else {
+                assert_eq!(
+                    handles.len(),
+                    blockchain_len - restart_height - 1,
+                    "unexpected number of verify tasks for restart height: {:?}",
+                    restart_height,
+                );
+            }
+        } else {
+            assert_eq!(
+                handles.len(),
+                blockchain_len,
+                "unexpected number of verify tasks with no restart height",
+            );
+        }
+
+        /// SPANDOC: wait on spawned verification tasks for restart height {?restart_height} {?network}
         while let Some(result) = handles.next().await {
             result??.map_err(|e| eyre!(e))?;
         }
@@ -374,15 +415,21 @@ async fn continuous_blockchain(restart_height: Option<block::Height>) -> Result<
         // Final checks
         assert_eq!(
             checkpoint_verifier.previous_checkpoint_height(),
-            FinalCheckpoint
+            FinalCheckpoint,
+            "unexpected previous checkpoint for restart height: {:?}",
+            restart_height,
         );
         assert_eq!(
             checkpoint_verifier.target_checkpoint_height(),
-            FinishedVerifying
+            FinishedVerifying,
+            "unexpected target checkpoint for restart height: {:?}",
+            restart_height,
         );
         assert_eq!(
             checkpoint_verifier.checkpoint_list.max_height(),
-            block::Height(9)
+            expected_max_height,
+            "unexpected max checkpoint height for restart height: {:?}",
+            restart_height,
         );
     }
 
@@ -414,7 +461,7 @@ async fn block_higher_than_max_checkpoint_fail() -> Result<(), Report> {
         .buffer(1)
         .service(zebra_state::init(zebra_state::Config::ephemeral(), Mainnet));
     let mut checkpoint_verifier =
-        CheckpointVerifier::from_list(genesis_checkpoint_list, None, state_service)
+        CheckpointVerifier::from_list(genesis_checkpoint_list, Mainnet, None, state_service)
             .map_err(|e| eyre!(e))?;
 
     assert_eq!(
@@ -493,7 +540,7 @@ async fn wrong_checkpoint_hash_fail() -> Result<(), Report> {
         .buffer(1)
         .service(zebra_state::init(zebra_state::Config::ephemeral(), Mainnet));
     let mut checkpoint_verifier =
-        CheckpointVerifier::from_list(genesis_checkpoint_list, None, state_service)
+        CheckpointVerifier::from_list(genesis_checkpoint_list, Mainnet, None, state_service)
             .map_err(|e| eyre!(e))?;
 
     assert_eq!(
@@ -677,7 +724,7 @@ async fn checkpoint_drop_cancel() -> Result<(), Report> {
         .buffer(1)
         .service(zebra_state::init(zebra_state::Config::ephemeral(), Mainnet));
     let mut checkpoint_verifier =
-        CheckpointVerifier::from_list(checkpoint_list, None, state_service)
+        CheckpointVerifier::from_list(checkpoint_list, Mainnet, None, state_service)
             .map_err(|e| eyre!(e))?;
 
     assert_eq!(

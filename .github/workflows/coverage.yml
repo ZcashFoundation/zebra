@@ -32,6 +32,7 @@ jobs:
           RUSTFLAGS: -Zinstrument-coverage -C link-dead-code -C debuginfo=2
           LLVM_PROFILE_FILE: "${{ github.workspace }}/test.%p.profraw"
           ZEBRA_SKIP_NETWORK_TESTS: 1
+          CARGO_INCREMENTAL: 0
         run: |
           cargo test
           cargo test --no-run --message-format=json | jq -r "select(.profile.test == true) | .filenames[]" | grep -v dSYM - > filenames.txt

@@ -15,8 +15,8 @@ use crate::error::TransactionError;
 
 /// Validate the JoinSplit binding signature.
 ///
-/// https://zips.z.cash/protocol/canopy.pdf#sproutnonmalleability
-/// https://zips.z.cash/protocol/canopy.pdf#txnencodingandconsensus
+/// https://zips.z.cash/protocol/protocol.pdf#sproutnonmalleability
+/// https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
 pub fn validate_joinsplit_sig(
     joinsplit_data: &JoinSplitData<Groth16Proof>,
     sighash: &[u8],
@@ -33,7 +33,7 @@ pub fn validate_joinsplit_sig(
 /// * at least one of tx_in_count, nShieldedSpend, and nJoinSplit MUST be non-zero.
 /// * at least one of tx_out_count, nShieldedOutput, and nJoinSplit MUST be non-zero.
 ///
-/// https://zips.z.cash/protocol/canopy.pdf#txnencodingandconsensus
+/// https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
 pub fn has_inputs_and_outputs(tx: &Transaction) -> Result<(), TransactionError> {
     // The consensus rule is written in terms of numbers, but our transactions
     // hold enum'd data. Mixing pattern matching and numerical checks is risky,
@@ -72,12 +72,15 @@ pub fn has_inputs_and_outputs(tx: &Transaction) -> Result<(), TransactionError> 
         Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => {
             unreachable!("tx version is checked first")
         }
+        Transaction::V5 { .. } => {
+            unimplemented!("v5 transaction format as specified in ZIP-225")
+        }
     }
 }
 
 /// Check that if there are no Spends or Outputs, that valueBalance is also 0.
 ///
-/// https://zips.z.cash/protocol/canopy.pdf#consensusfrombitcoin
+/// https://zips.z.cash/protocol/protocol.pdf#consensusfrombitcoin
 pub fn shielded_balances_match(
     shielded_data: &ShieldedData,
     value_balance: Amount,
@@ -93,7 +96,7 @@ pub fn shielded_balances_match(
 
 /// Check that a coinbase tx does not have any JoinSplit or Spend descriptions.
 ///
-/// https://zips.z.cash/protocol/canopy.pdf#txnencodingandconsensus
+/// https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
 pub fn coinbase_tx_no_joinsplit_or_spend(tx: &Transaction) -> Result<(), TransactionError> {
     if tx.is_coinbase() {
         match tx {
@@ -114,6 +117,10 @@ pub fn coinbase_tx_no_joinsplit_or_spend(tx: &Transaction) -> Result<(), Transac
 
             Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => {
                 unreachable!("tx version is checked first")
+            }
+
+            Transaction::V5 { .. } => {
+                unimplemented!("v5 coinbase validation as specified in ZIP-225 and the draft spec")
             }
         }
     } else {

@@ -6,8 +6,11 @@ use serde::{Deserialize, Serialize};
 pub struct Config {
     /// Should Zebra sync using checkpoints?
     ///
-    /// Setting this option to true enables post-Sapling checkpoints.
-    /// (Zebra always checkpoints on Sapling activation.)
+    /// Setting this option to true enables post-Canopy checkpoints.
+    /// (Zebra always checkpoints on Canopy activation.)
+    ///
+    /// Future versions of Zebra may change the mandatory checkpoint
+    /// height.
     pub checkpoint_sync: bool,
 }
 
