@@ -68,31 +68,9 @@ where
 
 #[tokio::test]
 async fn verify_sapling_groth16() {
-    let mut spend_verifier = Fallback::new(
-        Batch::new(
-            Verifier::new(&PARAMS.sapling.spend.vk),
-            crate::primitives::MAX_BATCH_SIZE,
-            crate::primitives::MAX_BATCH_LATENCY,
-        ),
-        tower::service_fn(
-            (|item: Item| {
-                ready(item.verify_single(&prepare_verifying_key(&PARAMS.sapling.spend.vk)))
-            }) as fn(_) -> _,
-        ),
-    );
-
-    let mut output_verifier = Fallback::new(
-        Batch::new(
-            Verifier::new(&PARAMS.sapling.output.vk),
-            crate::primitives::MAX_BATCH_SIZE,
-            crate::primitives::MAX_BATCH_LATENCY,
-        ),
-        tower::service_fn(
-            (|item: Item| {
-                ready(item.verify_single(&prepare_verifying_key(&PARAMS.sapling.output.vk)))
-            }) as fn(_) -> _,
-        ),
-    );
+    // Since we expect these to pass, we can use the communal verifiers.
+    let mut spend_verifier = groth16::SPEND_VERIFIER.clone();
+    let mut output_verifier = groth16::OUTPUT_VERIFIER.clone();
 
     let transactions = zebra_test::vectors::MAINNET_BLOCKS
         .clone()
@@ -162,6 +140,8 @@ where
 #[tokio::test]
 #[should_panic]
 async fn correctly_err_on_invalid_output_proof() {
+    // Since we expect these to fail, we don't want to poison the communal
+    // verifiers.
     let mut output_verifier = Fallback::new(
         Batch::new(
             Verifier::new(&PARAMS.sapling.output.vk),
