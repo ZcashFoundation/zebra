@@ -24,6 +24,8 @@ use zebra_chain::sapling::{Output, Spend};
 
 mod hash_reader;
 mod params;
+#[cfg(test)]
+mod tests;
 
 use self::hash_reader::HashReader;
 use params::PARAMS;
