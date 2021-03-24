@@ -27,7 +27,10 @@ where
 
     for tx in transactions {
         match &*tx {
-            Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => (),
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V5 { .. } => (),
             Transaction::V4 { shielded_data, .. } => {
                 if let Some(shielded_data) = shielded_data {
                     for spend in shielded_data.spends() {
@@ -125,7 +128,10 @@ where
 
     for tx in transactions {
         match &*tx {
-            Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => (),
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V5 { .. } => (),
             Transaction::V4 { shielded_data, .. } => {
                 if let Some(shielded_data) = shielded_data {
                     for output in shielded_data.outputs() {

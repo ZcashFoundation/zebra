@@ -4107,7 +4107,6 @@ dependencies = [
  "tracing-futures",
  "tracing-subscriber 0.2.17",
  "wagyu-zcash-parameters",
-
  "zebra-chain",
  "zebra-script",
  "zebra-state",
