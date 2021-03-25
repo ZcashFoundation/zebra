@@ -17,9 +17,10 @@ async fn verify_groth16_spends_and_outputs<V>(
 where
     V: tower::Service<Item, Response = ()>,
     <V as tower::Service<bellman::groth16::batch::Item<bls12_381::Bls12>>>::Error:
-        std::convert::From<
-            std::boxed::Box<dyn std::error::Error + std::marker::Send + std::marker::Sync>,
-        >,
+        std::fmt::Debug
+            + std::convert::From<
+                std::boxed::Box<dyn std::error::Error + std::marker::Send + std::marker::Sync>,
+            >,
 {
     zebra_test::init();
 
@@ -59,6 +60,7 @@ where
         }
 
         while let Some(result) = async_checks.next().await {
+            tracing::trace!(?result);
             result?;
         }
     }
@@ -113,6 +115,8 @@ where
             Transaction::V4 { shielded_data, .. } => {
                 if let Some(shielded_data) = shielded_data {
                     for output in shielded_data.outputs() {
+                        // This changes the primary inputs to the proof
+                        // verification, causing it to fail for this proof.
                         let mut modified_output = output.clone();
                         modified_output.cm_u = jubjub::Fq::zero();
 
