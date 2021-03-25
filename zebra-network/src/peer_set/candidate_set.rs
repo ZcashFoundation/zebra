@@ -8,7 +8,7 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use tokio::time::{sleep, sleep_until, Sleep};
 use tower::{Service, ServiceExt};
 
-use crate::{types::MetaAddr, AddressBook, BoxError, PeerAddrState, Request, Response};
+use crate::{types::MetaAddr, AddressBook, BoxError, Request, Response};
 
 /// The `CandidateSet` manages the `PeerSet`'s peer reconnection attempts.
 ///
@@ -218,10 +218,9 @@ where
             let mut peer_set_guard = self.peer_set.lock().unwrap();
             // It's okay to early return here because we're returning None
             // instead of yielding the next connection.
-            let mut reconnect = peer_set_guard.reconnection_peers().next()?;
+            let reconnect = peer_set_guard.reconnection_peers().next()?;
 
-            reconnect.update_last_seen();
-            reconnect.last_connection_state = PeerAddrState::AttemptPending;
+            let reconnect = MetaAddr::new_reconnect(&reconnect.addr, &reconnect.services);
             peer_set_guard.update(reconnect);
             reconnect
         };
@@ -233,9 +232,8 @@ where
     }
 
     /// Mark `addr` as a failed peer.
-    pub fn report_failed(&mut self, mut addr: MetaAddr) {
-        addr.update_last_seen();
-        addr.last_connection_state = PeerAddrState::Failed;
+    pub fn report_failed(&mut self, addr: &MetaAddr) {
+        let addr = MetaAddr::new_errored(&addr.addr, &addr.services);
         self.peer_set.lock().unwrap().update(addr);
     }
 }
