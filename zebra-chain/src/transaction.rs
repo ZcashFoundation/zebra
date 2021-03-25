@@ -18,7 +18,6 @@ pub use hash::Hash;
 pub use joinsplit::JoinSplitData;
 pub use lock_time::LockTime;
 pub use memo::Memo;
-pub use sapling::shielded_data::PerSpendAnchor;
 pub use sighash::HashType;
 
 use crate::{
@@ -93,7 +92,7 @@ pub enum Transaction {
         /// The JoinSplit data for this transaction, if any.
         joinsplit_data: Option<JoinSplitData<Groth16Proof>>,
         /// The shielded data for this transaction, if any.
-        sapling_shielded_data: Option<sapling::ShieldedData<PerSpendAnchor>>,
+        sapling_shielded_data: Option<sapling::ShieldedData<sapling::PerSpendAnchor>>,
     },
     /// A `version = 5` transaction, which supports `Sapling` and `Orchard`.
     // TODO: does this transaction type support `Sprout`?

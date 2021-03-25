@@ -10,17 +10,19 @@ use crate::{
     },
 };
 
-use super::{commitment, note, tree};
+use super::{commitment, note, tree, AnchorVariant, PerSpendAnchor};
 
 /// A _Spend Description_, as described in [protocol specification §7.3][ps].
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#spendencoding
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Spend {
+/// 
+/// TODO: remove anchor default.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Spend<AnchorV: AnchorVariant = PerSpendAnchor> {
     /// A value commitment to the value of the input note.
     pub cv: commitment::ValueCommitment,
     /// A root of the Sapling note commitment tree at some block height in the past.
-    pub anchor: tree::Root,
+    pub anchor: AnchorV::PerSpend,
     /// The nullifier of the input note.
     pub nullifier: note::Nullifier,
     /// The randomized public key for `spend_auth_sig`.
@@ -85,3 +87,16 @@ impl ZcashDeserialize for Spend {
         })
     }
 }
+
+impl std::cmp::PartialEq for Spend {
+    fn eq(&self, other: &Self) -> bool {
+        self.cv == other.cv
+            && self.anchor == other.anchor
+            && self.nullifier == other.nullifier
+            && self.rk == other.rk
+            && self.zkproof == other.zkproof
+            && self.spend_auth_sig == other.spend_auth_sig
+    }
+}
+
+impl std::cmp::Eq for Spend {}
