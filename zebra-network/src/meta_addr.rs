@@ -124,13 +124,18 @@ pub struct MetaAddr {
 }
 
 impl MetaAddr {
-    /// Sanitize this `MetaAddr` before sending it to a remote peer.
-    pub fn sanitize(mut self) -> MetaAddr {
+    /// Return a sanitized version of this `MetaAddr`, for sending to a remote peer.
+    pub fn sanitize(&self) -> MetaAddr {
         let interval = crate::constants::TIMESTAMP_TRUNCATION_SECONDS;
         let ts = self.last_seen.timestamp();
-        self.last_seen = Utc.timestamp(ts - ts.rem_euclid(interval), 0);
-        self.last_connection_state = Default::default();
-        self
+        let last_seen = Utc.timestamp(ts - ts.rem_euclid(interval), 0);
+        MetaAddr {
+            addr: self.addr,
+            services: self.services,
+            last_seen,
+            // the state isn't sent to the remote peer, but sanitize it anyway
+            last_connection_state: Default::default(),
+        }
     }
 }
 

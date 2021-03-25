@@ -70,7 +70,10 @@ impl AddressBook {
     pub fn sanitized(&self) -> Vec<MetaAddr> {
         use rand::seq::SliceRandom;
         let _guard = self.span.enter();
-        let mut peers = self.peers().map(MetaAddr::sanitize).collect::<Vec<_>>();
+        let mut peers = self
+            .peers()
+            .map(|a| MetaAddr::sanitize(&a))
+            .collect::<Vec<_>>();
         peers.shuffle(&mut rand::thread_rng());
         peers
     }
