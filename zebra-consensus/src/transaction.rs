@@ -178,11 +178,10 @@ where
                         }
                     }
 
-                    // TODO: rework this code #1377
-                    let sighash = tx.sighash(
+                    let shielded_sighash = tx.sighash(
                         upgrade,
-                        HashType::ALL, // TODO: check these
-                        None,          // TODO: check these
+                        HashType::ALL,
+                        None,
                     );
 
                     if let Some(joinsplit_data) = joinsplit_data {
@@ -192,9 +191,7 @@ where
                         // correctly.
 
                         // Then, pass those items to self.joinsplit to verify them.
-
-                        // Ignore pending sighash check #1377
-                        let _ = check::validate_joinsplit_sig(joinsplit_data, sighash.as_bytes());
+                        check::validate_joinsplit_sig(joinsplit_data, shielded_sighash.as_bytes())?;
                     }
 
                     if let Some(shielded_data) = shielded_data {
@@ -233,13 +230,12 @@ where
                             // description while adding the resulting future to
                             // our collection of async checks that (at a
                             // minimum) must pass for the transaction to verify.
-                            let _rsp = redjubjub_verifier
+                            let rsp = redjubjub_verifier
                                 .ready_and()
                                 .await?
-                                .call((spend.rk, spend.spend_auth_sig, &sighash).into());
+                                .call((spend.rk, spend.spend_auth_sig, &shielded_sighash).into());
 
-                            // Disable pending sighash check #1377
-                            // async_checks.push(rsp.boxed());
+                            async_checks.push(rsp.boxed());
                         }
 
                         for output in shielded_data.outputs() {
