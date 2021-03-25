@@ -15,6 +15,8 @@ use zebra_chain::serialization::{
 
 use crate::protocol::types::PeerServices;
 
+use PeerAddrState::*;
+
 /// Peer connection state, based on our interactions with the peer.
 ///
 /// Zebra also tracks how recently a peer has sent us messages, and derives peer
@@ -44,7 +46,7 @@ pub enum PeerAddrState {
 
 impl Default for PeerAddrState {
     fn default() -> Self {
-        PeerAddrState::NeverAttempted
+        NeverAttempted
     }
 }
 
@@ -54,7 +56,6 @@ impl Ord for PeerAddrState {
     ///
     /// See [`CandidateSet`] and [`MetaAddr::cmp`] for more details.
     fn cmp(&self, other: &Self) -> Ordering {
-        use PeerAddrState::*;
         match (self, other) {
             (Responded, Responded)
             | (NeverAttempted, NeverAttempted)
@@ -149,7 +150,6 @@ impl Ord for MetaAddr {
     /// See [`CandidateSet`] for more details.
     fn cmp(&self, other: &Self) -> Ordering {
         use std::net::IpAddr::{V4, V6};
-        use PeerAddrState::*;
 
         let oldest_first = self.last_seen.cmp(&other.last_seen);
         let newest_first = oldest_first.reverse();
@@ -221,7 +221,7 @@ mod tests {
             services,
             addr,
             last_seen: Utc.timestamp(1_573_680_222, 0),
-            last_connection_state: PeerAddrState::Responded,
+            last_connection_state: Responded,
         }
         .sanitize();
 
