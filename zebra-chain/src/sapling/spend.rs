@@ -15,7 +15,7 @@ use super::{commitment, note, tree, AnchorVariant, PerSpendAnchor};
 /// A _Spend Description_, as described in [protocol specification §7.3][ps].
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#spendencoding
-/// 
+///
 /// TODO: remove anchor default.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Spend<AnchorV: AnchorVariant = PerSpendAnchor> {

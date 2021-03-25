@@ -31,8 +31,11 @@ where
             | Transaction::V2 { .. }
             | Transaction::V3 { .. }
             | Transaction::V5 { .. } => (),
-            Transaction::V4 { shielded_data, .. } => {
-                if let Some(shielded_data) = shielded_data {
+            Transaction::V4 {
+                sapling_shielded_data,
+                ..
+            } => {
+                if let Some(shielded_data) = sapling_shielded_data {
                     for spend in shielded_data.spends() {
                         tracing::trace!(?spend);
 
@@ -110,8 +113,11 @@ where
             | Transaction::V2 { .. }
             | Transaction::V3 { .. }
             | Transaction::V5 { .. } => (),
-            Transaction::V4 { shielded_data, .. } => {
-                if let Some(shielded_data) = shielded_data {
+            Transaction::V4 {
+                sapling_shielded_data,
+                ..
+            } => {
+                if let Some(shielded_data) = sapling_shielded_data {
                     for output in shielded_data.outputs() {
                         let mut modified_output = output.clone();
                         modified_output.cm_u = jubjub::Fq::zero();

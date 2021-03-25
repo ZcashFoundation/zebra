@@ -7,7 +7,7 @@ use std::convert::TryFrom;
 use zebra_chain::{
     amount::Amount,
     primitives::{ed25519, Groth16Proof},
-    sapling::{Output, Spend},
+    sapling::{AnchorVariant, Output, ShieldedData, Spend},
     transaction::{JoinSplitData, Transaction},
 };
 
@@ -82,8 +82,8 @@ pub fn has_inputs_and_outputs(tx: &Transaction) -> Result<(), TransactionError> 
 /// Check that if there are no Spends or Outputs, that valueBalance is also 0.
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#consensusfrombitcoin
-pub fn shielded_balances_match<T: sapling::AnchorVariant>(
-    shielded_data: &sapling::ShieldedData<T>,
+pub fn shielded_balances_match<T: AnchorVariant>(
+    shielded_data: &ShieldedData<T>,
     value_balance: Amount,
 ) -> Result<(), TransactionError> {
     if (shielded_data.spends().count() + shielded_data.outputs().count() != 0)
