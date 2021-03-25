@@ -140,6 +140,33 @@ impl MetaAddr {
         }
     }
 
+    /// Create a new `MetaAddr` for a peer that we want to reconnect to.
+    pub fn new_reconnect(addr: &SocketAddr, services: &PeerServices) -> MetaAddr {
+        MetaAddr {
+            addr: *addr,
+            services: *services,
+            last_seen: Utc::now(),
+            last_connection_state: AttemptPending,
+        }
+    }
+
+    /// Create a new `MetaAddr` for a peer that has just had an error.
+    pub fn new_errored(addr: &SocketAddr, services: &PeerServices) -> MetaAddr {
+        MetaAddr {
+            addr: *addr,
+            services: *services,
+            last_seen: Utc::now(),
+            last_connection_state: Failed,
+        }
+    }
+
+    /// Create a new `MetaAddr` for a peer that has just shut down.
+    pub fn new_shutdown(addr: &SocketAddr, services: &PeerServices) -> MetaAddr {
+        // TODO: if the peer shut down in the Responded state, preserve that
+        // state. All other states should be treated as (timeout) errors.
+        MetaAddr::new_errored(addr, services)
+    }
+
     /// The last time we interacted with this peer.
     ///
     /// The exact meaning depends on `last_connection_state`:
@@ -156,11 +183,6 @@ impl MetaAddr {
     /// clock skew, or buggy or malicious peers.
     pub fn get_last_seen(&self) -> DateTime<Utc> {
         self.last_seen
-    }
-
-    /// Update the last time we interacted with this peer to the current time.
-    pub fn update_last_seen(&mut self) {
-        self.last_seen = Utc::now();
     }
 
     /// Return a sanitized version of this `MetaAddr`, for sending to a remote peer.
