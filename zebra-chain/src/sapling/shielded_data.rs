@@ -3,9 +3,28 @@ use futures::future::Either;
 use crate::{
     amount::Amount,
     primitives::redjubjub::{Binding, Signature},
-    sapling::{Nullifier, Output, Spend, ValueCommitment},
+    sapling::{tree, Nullifier, Output, Spend, ValueCommitment},
     serialization::serde_helpers,
 };
+
+#[derive(Clone, Debug)]
+pub struct PerSpendAnchor {}
+
+#[derive(Clone, Debug)]
+pub struct SharedAnchor {}
+
+impl AnchorVariant for PerSpendAnchor {
+    type Shared = ();
+    type PerSpend = tree::Root;
+}
+impl AnchorVariant for SharedAnchor {
+    type Shared = tree::Root;
+    type PerSpend = ();
+}
+pub trait AnchorVariant {
+    type Shared;
+    type PerSpend;
+}
 
 /// A bundle of [`Spend`] and [`Output`] descriptions and signature data.
 ///
@@ -15,8 +34,14 @@ use crate::{
 /// description with the required signature data, so that an
 /// `Option<ShieldedData>` correctly models the presence or absence of any
 /// shielded data.
+///
+/// TODO: remove anchor default.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ShieldedData {
+pub struct ShieldedData<AnchorV: AnchorVariant = PerSpendAnchor> {
+    /// The net value of Sapling spend transfers minus output transfers.
+    pub value_balance: Amount,
+    /// Todo: Add something useful here.
+    pub anchor: AnchorV::Shared,
     /// Either a spend or output description.
     ///
     /// Storing this separately ensures that it is impossible to construct

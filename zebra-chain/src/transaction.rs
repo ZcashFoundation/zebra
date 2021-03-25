@@ -7,7 +7,6 @@ mod joinsplit;
 mod lock_time;
 mod memo;
 mod serialize;
-mod shielded_data;
 mod sighash;
 
 #[cfg(any(test, feature = "proptest-impl"))]
@@ -19,11 +18,10 @@ pub use hash::Hash;
 pub use joinsplit::JoinSplitData;
 pub use lock_time::LockTime;
 pub use memo::Memo;
-pub use shielded_data::ShieldedData;
+pub use sapling::shielded_data::PerSpendAnchor;
 pub use sighash::HashType;
 
 use crate::{
-    amount::Amount,
     block,
     parameters::NetworkUpgrade,
     primitives::{Bctv14Proof, Groth16Proof},
@@ -92,12 +90,10 @@ pub enum Transaction {
         lock_time: LockTime,
         /// The latest block height that this transaction can be added to the chain.
         expiry_height: block::Height,
-        /// The net value of Sapling spend transfers minus output transfers.
-        value_balance: Amount,
         /// The JoinSplit data for this transaction, if any.
         joinsplit_data: Option<JoinSplitData<Groth16Proof>>,
         /// The shielded data for this transaction, if any.
-        shielded_data: Option<ShieldedData>,
+        sapling_shielded_data: Option<sapling::ShieldedData<PerSpendAnchor>>,
     },
     /// A `version = 5` transaction, which supports `Sapling` and `Orchard`.
     // TODO: does this transaction type support `Sprout`?
@@ -224,9 +220,9 @@ impl Transaction {
         match self {
             // JoinSplits with Groth Proofs
             Transaction::V4 {
-                shielded_data: Some(shielded_data),
+                sapling_shielded_data: Some(sapling_shielded_data),
                 ..
-            } => Box::new(shielded_data.nullifiers()),
+            } => Box::new(sapling_shielded_data.nullifiers()),
             Transaction::V5 { .. } => {
                 unimplemented!("v5 transaction format as specified in ZIP-225")
             }
@@ -235,7 +231,7 @@ impl Transaction {
             | Transaction::V2 { .. }
             | Transaction::V3 { .. }
             | Transaction::V4 {
-                shielded_data: None,
+                sapling_shielded_data: None,
                 ..
             } => Box::new(std::iter::empty()),
         }

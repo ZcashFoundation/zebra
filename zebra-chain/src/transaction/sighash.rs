@@ -419,11 +419,11 @@ impl<'a> SigHasher<'a> {
 
         let shielded_data = match self.trans {
             V4 {
-                shielded_data: Some(shielded_data),
+                sapling_shielded_data: Some(shielded_data),
                 ..
             } => shielded_data,
             V4 {
-                shielded_data: None,
+                sapling_shielded_data: None,
                 ..
             } => return writer.write_all(&[0; 32]),
             V5 { .. } => unimplemented!("v5 transaction hash as specified in ZIP-225 and ZIP-244"),
@@ -456,11 +456,11 @@ impl<'a> SigHasher<'a> {
 
         let shielded_data = match self.trans {
             V4 {
-                shielded_data: Some(shielded_data),
+                sapling_shielded_data: Some(shielded_data),
                 ..
             } => shielded_data,
             V4 {
-                shielded_data: None,
+                sapling_shielded_data: None,
                 ..
             } => return writer.write_all(&[0; 32]),
             V5 { .. } => unimplemented!("v5 transaction hash as specified in ZIP-225 and ZIP-244"),
@@ -484,10 +484,18 @@ impl<'a> SigHasher<'a> {
     }
 
     fn hash_value_balance<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        use crate::amount::Amount;
+        use std::convert::TryFrom;
         use Transaction::*;
 
         let value_balance = match self.trans {
-            V4 { value_balance, .. } => value_balance,
+            V4 {
+                sapling_shielded_data,
+                ..
+            } => match sapling_shielded_data {
+                Some(s) => s.value_balance,
+                None => Amount::try_from(0).unwrap(),
+            },
             V5 { .. } => unimplemented!("v5 transaction hash as specified in ZIP-225 and ZIP-244"),
             V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(ZIP243_EXPLANATION),
         };

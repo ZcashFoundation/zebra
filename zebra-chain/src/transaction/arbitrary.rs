@@ -14,7 +14,7 @@ use crate::{
     sapling, sprout, transparent,
 };
 
-use super::{JoinSplitData, LockTime, Memo, ShieldedData, Transaction};
+use super::{JoinSplitData, LockTime, Memo, Transaction};
 
 impl Transaction {
     /// Generate a proptest strategy for V1 Transactions
@@ -79,8 +79,7 @@ impl Transaction {
             vec(any::<transparent::Output>(), 0..10),
             any::<LockTime>(),
             any::<block::Height>(),
-            any::<Amount>(),
-            option::of(any::<ShieldedData>()),
+            option::of(any::<sapling::ShieldedData>()),
             option::of(any::<JoinSplitData<Groth16Proof>>()),
         )
             .prop_map(
@@ -89,21 +88,20 @@ impl Transaction {
                     outputs,
                     lock_time,
                     expiry_height,
-                    value_balance,
-                    shielded_data,
+                    sapling_shielded_data,
                     joinsplit_data,
                 )| Transaction::V4 {
                     inputs,
                     outputs,
                     lock_time,
                     expiry_height,
-                    value_balance,
-                    shielded_data,
+                    sapling_shielded_data,
                     joinsplit_data,
                 },
             )
             .boxed()
     }
+
     /// Generate a proptest strategy for V5 Transactions
     pub fn v5_strategy(ledger_state: LedgerState) -> BoxedStrategy<Self> {
         (
@@ -205,11 +203,12 @@ impl<P: ZkSnarkProof + Arbitrary + 'static> Arbitrary for JoinSplitData<P> {
     type Strategy = BoxedStrategy<Self>;
 }
 
-impl Arbitrary for ShieldedData {
+impl Arbitrary for sapling::ShieldedData {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         (
+            any::<Amount>(),
             prop_oneof![
                 any::<sapling::Spend>().prop_map(Either::Left),
                 any::<sapling::Output>().prop_map(Either::Right)
@@ -218,16 +217,20 @@ impl Arbitrary for ShieldedData {
             vec(any::<sapling::Output>(), 0..10),
             vec(any::<u8>(), 64),
         )
-            .prop_map(|(first, rest_spends, rest_outputs, sig_bytes)| Self {
-                first,
-                rest_spends,
-                rest_outputs,
-                binding_sig: redjubjub::Signature::from({
-                    let mut b = [0u8; 64];
-                    b.copy_from_slice(sig_bytes.as_slice());
-                    b
-                }),
-            })
+            .prop_map(
+                |(value_balance, first, rest_spends, rest_outputs, sig_bytes)| Self {
+                    value_balance,
+                    anchor: (),
+                    first,
+                    rest_spends,
+                    rest_outputs,
+                    binding_sig: redjubjub::Signature::from({
+                        let mut b = [0u8; 64];
+                        b.copy_from_slice(sig_bytes.as_slice());
+                        b
+                    }),
+                },
+            )
             .boxed()
     }
 

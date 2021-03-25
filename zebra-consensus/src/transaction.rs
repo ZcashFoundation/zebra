@@ -146,9 +146,8 @@ where
                     // outputs,
                     // lock_time,
                     // expiry_height,
-                    value_balance,
                     joinsplit_data,
-                    shielded_data,
+                    sapling_shielded_data,
                     ..
                 } => {
                     // A set of asynchronous checks which must all succeed.
@@ -195,7 +194,7 @@ where
                         check::validate_joinsplit_sig(joinsplit_data, shielded_sighash.as_bytes())?;
                     }
 
-                    if let Some(shielded_data) = shielded_data {
+                    if let Some(shielded_data) = sapling_shielded_data {
                         check::shielded_balances_match(&shielded_data, *value_balance)?;
 
                         for spend in shielded_data.spends() {
@@ -264,7 +263,7 @@ where
                             async_checks.push(output_rsp.boxed());
                         }
 
-                        let bvk = shielded_data.binding_verification_key(*value_balance);
+                        let bvk = shielded_data.binding_verification_key(shielded_data.value_balance);
 
                         // TODO: enable async verification and remove this block - #1939
                         {
