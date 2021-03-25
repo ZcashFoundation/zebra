@@ -88,7 +88,8 @@ const MAX_U8_ALLOCATION: usize = MAX_PROTOCOL_MESSAGE_LEN - 5;
 /// Implement ZcashDeserialize for Vec<u8> directly instead of using the blanket Vec implementation
 ///
 /// This allows us to optimize the inner loop into a single call to `read_exact()`
-/// We don't implement TrustedPreallocate for u8 to allow this optimization without relying on specialization.
+/// Note thate we don't implement TrustedPreallocate for u8.
+/// This allows the optimization without relying on specialization.
 impl ZcashDeserialize for Vec<u8> {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         let len = reader.read_compactsize()?.try_into()?;
