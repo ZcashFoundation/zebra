@@ -21,6 +21,7 @@ pub fn validate_joinsplit_sig(
     joinsplit_data: &JoinSplitData<Groth16Proof>,
     sighash: &[u8],
 ) -> Result<(), TransactionError> {
+    // TODO: batch verify ed25519
     ed25519::VerificationKey::try_from(joinsplit_data.pub_key)
         .and_then(|vk| vk.verify(&joinsplit_data.sig, sighash))
         .map_err(TransactionError::Ed25519)
