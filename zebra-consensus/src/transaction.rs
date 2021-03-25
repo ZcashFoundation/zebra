@@ -264,13 +264,28 @@ where
                         }
 
                         let bvk = shielded_data.binding_verification_key(*value_balance);
+
+                        // TODO: enable async verification and remove this block - #1939
+                        {
+                            let item: zebra_chain::primitives::redjubjub::batch::Item = (bvk, shielded_data.binding_sig, &shielded_sighash).into();
+                            item.verify_single().unwrap_or_else(|binding_sig_error| {
+                                let binding_sig_error = binding_sig_error.to_string();
+                                tracing::warn!(%binding_sig_error, "ignoring");
+                                metrics::counter!("zebra.error.sapling.binding",
+                                                  1,
+                                                  "kind" => binding_sig_error);
+                            });
+                            // Ignore errors until binding signatures are fixed
+                            //.map_err(|e| BoxError::from(Box::new(e)))?;
+                        }
+
                         let _rsp = redjubjub_verifier
                             .ready_and()
                             .await?
-                            .call((bvk, shielded_data.binding_sig, &sighash).into())
+                            .call((bvk, shielded_data.binding_sig, &shielded_sighash).into())
                             .boxed();
 
-                        // Disable pending sighash check #1377
+                        // TODO: stop ignoring binding signature errors - #1939
                         // async_checks.push(rsp);
                     }
 
