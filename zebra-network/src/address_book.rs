@@ -105,7 +105,7 @@ impl AddressBook {
         );
 
         if let Some(prev) = self.get_by_addr(new.addr) {
-            if prev.last_seen > new.last_seen {
+            if prev.get_last_seen() > new.get_last_seen() {
                 return;
             }
         }
@@ -160,7 +160,7 @@ impl AddressBook {
             // NeverAttempted, Failed, and AttemptPending peers should never be live
             Some(peer) => {
                 peer.last_connection_state == PeerAddrState::Responded
-                    && peer.last_seen > AddressBook::liveness_cutoff_time()
+                    && peer.get_last_seen() > AddressBook::liveness_cutoff_time()
             }
         }
     }

@@ -106,6 +106,42 @@ pub struct MetaAddr {
 
     /// The last time we interacted with this peer.
     ///
+    /// See `get_last_seen` for details.
+    last_seen: DateTime<Utc>,
+
+    /// The outcome of our most recent communication attempt with this peer.
+    pub last_connection_state: PeerAddrState,
+}
+
+impl MetaAddr {
+    /// Create a new `MetaAddr` from the deserialized fields in an `Addr`
+    /// message.
+    pub fn new_gossiped(
+        addr: &SocketAddr,
+        services: &PeerServices,
+        last_seen: &DateTime<Utc>,
+    ) -> MetaAddr {
+        MetaAddr {
+            addr: *addr,
+            services: *services,
+            last_seen: *last_seen,
+            // the state is Zebra-specific, it isn't part of the Zcash network protocol
+            last_connection_state: NeverAttempted,
+        }
+    }
+
+    /// Create a new `MetaAddr` for a peer that has just `Responded`.
+    pub fn new_responded(addr: &SocketAddr, services: &PeerServices) -> MetaAddr {
+        MetaAddr {
+            addr: *addr,
+            services: *services,
+            last_seen: Utc::now(),
+            last_connection_state: Responded,
+        }
+    }
+
+    /// The last time we interacted with this peer.
+    ///
     /// The exact meaning depends on `last_connection_state`:
     ///   - `Responded`: the last time we processed a message from this peer
     ///   - `NeverAttempted`: the unverified time provided by the remote peer
@@ -118,17 +154,19 @@ pub struct MetaAddr {
     ///
     /// `last_seen` times from `NeverAttempted` peers may be invalid due to
     /// clock skew, or buggy or malicious peers.
-    pub last_seen: DateTime<Utc>,
+    pub fn get_last_seen(&self) -> DateTime<Utc> {
+        self.last_seen
+    }
 
-    /// The outcome of our most recent communication attempt with this peer.
-    pub last_connection_state: PeerAddrState,
-}
+    /// Update the last time we interacted with this peer to the current time.
+    pub fn update_last_seen(&mut self) {
+        self.last_seen = Utc::now();
+    }
 
-impl MetaAddr {
     /// Return a sanitized version of this `MetaAddr`, for sending to a remote peer.
     pub fn sanitize(&self) -> MetaAddr {
         let interval = crate::constants::TIMESTAMP_TRUNCATION_SECONDS;
-        let ts = self.last_seen.timestamp();
+        let ts = self.get_last_seen().timestamp();
         let last_seen = Utc.timestamp(ts - ts.rem_euclid(interval), 0);
         MetaAddr {
             addr: self.addr,
@@ -151,7 +189,7 @@ impl Ord for MetaAddr {
     fn cmp(&self, other: &Self) -> Ordering {
         use std::net::IpAddr::{V4, V6};
 
-        let oldest_first = self.last_seen.cmp(&other.last_seen);
+        let oldest_first = self.get_last_seen().cmp(&other.get_last_seen());
         let newest_first = oldest_first.reverse();
 
         let connection_state = self.last_connection_state.cmp(&other.last_connection_state);
@@ -187,7 +225,7 @@ impl PartialOrd for MetaAddr {
 
 impl ZcashSerialize for MetaAddr {
     fn zcash_serialize<W: Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
-        writer.write_u32::<LittleEndian>(self.last_seen.timestamp() as u32)?;
+        writer.write_u32::<LittleEndian>(self.get_last_seen().timestamp() as u32)?;
         writer.write_u64::<LittleEndian>(self.services.bits())?;
         writer.write_socket_addr(self.addr)?;
         Ok(())
@@ -196,13 +234,11 @@ impl ZcashSerialize for MetaAddr {
 
 impl ZcashDeserialize for MetaAddr {
     fn zcash_deserialize<R: Read>(mut reader: R) -> Result<Self, SerializationError> {
-        Ok(MetaAddr {
-            last_seen: Utc.timestamp(reader.read_u32::<LittleEndian>()? as i64, 0),
-            // Discard unknown service bits.
-            services: PeerServices::from_bits_truncate(reader.read_u64::<LittleEndian>()?),
-            addr: reader.read_socket_addr()?,
-            last_connection_state: Default::default(),
-        })
+        let last_seen = Utc.timestamp(reader.read_u32::<LittleEndian>()? as i64, 0);
+        let services = PeerServices::from_bits_truncate(reader.read_u64::<LittleEndian>()?);
+        let addr = reader.read_socket_addr()?;
+
+        Ok(MetaAddr::new_gossiped(&addr, &services, &last_seen))
     }
 }
 
@@ -227,7 +263,7 @@ mod tests {
 
         // We want the sanitized timestamp to be a multiple of the truncation interval.
         assert_eq!(
-            entry.last_seen.timestamp() % crate::constants::TIMESTAMP_TRUNCATION_SECONDS,
+            entry.get_last_seen().timestamp() % crate::constants::TIMESTAMP_TRUNCATION_SECONDS,
             0
         );
         // We want the state to be the default

@@ -4,7 +4,6 @@ use std::{
     time::Duration,
 };
 
-use chrono::Utc;
 use futures::stream::{FuturesUnordered, StreamExt};
 use tokio::time::{sleep, sleep_until, Sleep};
 use tower::{Service, ServiceExt};
@@ -221,7 +220,7 @@ where
             // instead of yielding the next connection.
             let mut reconnect = peer_set_guard.reconnection_peers().next()?;
 
-            reconnect.last_seen = Utc::now();
+            reconnect.update_last_seen();
             reconnect.last_connection_state = PeerAddrState::AttemptPending;
             peer_set_guard.update(reconnect);
             reconnect
@@ -235,7 +234,7 @@ where
 
     /// Mark `addr` as a failed peer.
     pub fn report_failed(&mut self, mut addr: MetaAddr) {
-        addr.last_seen = Utc::now();
+        addr.update_last_seen();
         addr.last_connection_state = PeerAddrState::Failed;
         self.peer_set.lock().unwrap().update(addr);
     }

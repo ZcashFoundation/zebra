@@ -27,7 +27,7 @@ use crate::{
         internal::{Request, Response},
     },
     types::MetaAddr,
-    BoxError, Config, PeerAddrState,
+    BoxError, Config,
 };
 
 use super::{Client, Connection, ErrorSlot, HandshakeError, PeerError};
@@ -390,12 +390,7 @@ where
                             );
                             use futures::sink::SinkExt;
                             let _ = timestamp_collector
-                                .send(MetaAddr {
-                                    addr,
-                                    services: remote_services,
-                                    last_seen: Utc::now(),
-                                    last_connection_state: PeerAddrState::Responded,
-                                })
+                                .send(MetaAddr::new_responded(&addr, &remote_services))
                                 .await;
                         }
                         msg
