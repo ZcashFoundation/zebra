@@ -12,7 +12,8 @@ jobs:
 
   coverage:
     name: Coverage (+nightly)
-    timeout-minutes: 30
+    # The large timeout is to accommodate nightly builds
+    timeout-minutes: 45
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
