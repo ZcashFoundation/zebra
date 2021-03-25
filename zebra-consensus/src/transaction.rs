@@ -163,6 +163,7 @@ where
                         check::coinbase_tx_no_joinsplit_or_spend(&tx)?;
                     } else {
                         // feed all of the inputs to the script and shielded verifiers
+                        // the script_verifier also checks transparent sighashes, using its own implementation
                         let cached_ffi_transaction =
                             Arc::new(CachedFfiTransaction::new(tx.clone()));
 
