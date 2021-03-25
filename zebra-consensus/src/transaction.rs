@@ -155,13 +155,14 @@ where
                     // We finish by waiting on these below.
                     let mut async_checks = FuturesUnordered::new();
 
+                    // Do basic checks first
+                    check::has_inputs_and_outputs(&tx)?;
+
                     // Handle transparent inputs and outputs.
                     if tx.is_coinbase() {
                         check::coinbase_tx_no_joinsplit_or_spend(&tx)?;
                     } else {
-                        // TODO: check no coinbase inputs
-
-                        // feed all of the inputs to the script verifier
+                        // feed all of the inputs to the script and shielded verifiers
                         let cached_ffi_transaction =
                             Arc::new(CachedFfiTransaction::new(tx.clone()));
 
@@ -176,8 +177,6 @@ where
                             async_checks.push(rsp);
                         }
                     }
-
-                    check::has_inputs_and_outputs(&tx)?;
 
                     // TODO: rework this code #1377
                     let sighash = tx.sighash(
