@@ -55,7 +55,7 @@ impl RootHash {
                 ChainHistoryActivationReserved(bytes)
             }
             Heartwood | Canopy => ChainHistoryRoot(ChainHistoryMmrRootHash(bytes)),
-            NU5 => unimplemented!("NU5 uses hashAuthDataRoot as specified in ZIP-244"),
+            Nu5 => unimplemented!("Nu5 uses hashAuthDataRoot as specified in ZIP-244"),
         }
     }
 
