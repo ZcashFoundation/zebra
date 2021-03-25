@@ -34,10 +34,8 @@ pub trait AnchorVariant {
 /// description with the required signature data, so that an
 /// `Option<ShieldedData>` correctly models the presence or absence of any
 /// shielded data.
-///
-/// TODO: remove anchor default.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ShieldedData<AnchorV: AnchorVariant = PerSpendAnchor> {
+pub struct ShieldedData<AnchorV: AnchorVariant> {
     /// The net value of Sapling spend transfers minus output transfers.
     pub value_balance: Amount,
     /// Todo: Add something useful here.
@@ -67,7 +65,10 @@ pub struct ShieldedData<AnchorV: AnchorVariant = PerSpendAnchor> {
     pub binding_sig: Signature<Binding>,
 }
 
-impl ShieldedData {
+impl<T> ShieldedData<T>
+where
+    T: AnchorVariant,
+{
     /// Iterate over the [`Spend`]s for this transaction.
     pub fn spends(&self) -> impl Iterator<Item = &Spend> {
         match self.first {
@@ -140,7 +141,10 @@ impl ShieldedData {
 // on which goes in the `first` slot.  This is annoying but a smallish price to
 // pay for structural validity.
 
-impl std::cmp::PartialEq for ShieldedData {
+impl<T> std::cmp::PartialEq for ShieldedData<T>
+where
+    T: AnchorVariant,
+{
     fn eq(&self, other: &Self) -> bool {
         // First check that the lengths match, so we know it is safe to use zip,
         // which truncates to the shorter of the two iterators.
@@ -158,4 +162,4 @@ impl std::cmp::PartialEq for ShieldedData {
     }
 }
 
-impl std::cmp::Eq for ShieldedData {}
+impl<T> std::cmp::Eq for ShieldedData<T> where T: AnchorVariant {}

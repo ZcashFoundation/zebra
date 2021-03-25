@@ -91,12 +91,10 @@ pub enum Transaction {
         expiry_height: block::Height,
         /// The JoinSplit data for this transaction, if any.
         joinsplit_data: Option<JoinSplitData<Groth16Proof>>,
-        /// The shielded data for this transaction, if any.
+        /// The sapling shielded data for this transaction, if any.
         sapling_shielded_data: Option<sapling::ShieldedData<sapling::PerSpendAnchor>>,
     },
     /// A `version = 5` transaction, which supports `Sapling` and `Orchard`.
-    // TODO: does this transaction type support `Sprout`?
-    // Check for ZIP-225 updates after the decision on 2021-03-05.
     V5 {
         /// The earliest time or block height that this transaction can be added to the
         /// chain.
@@ -107,6 +105,8 @@ pub enum Transaction {
         inputs: Vec<transparent::Input>,
         /// The transparent outputs from the transaction.
         outputs: Vec<transparent::Output>,
+        /// The sapling shielded data for this transaction, if any.
+        sapling_shielded_data: Option<sapling::ShieldedData<sapling::SharedAnchor>>,
         /// The rest of the transaction as bytes
         rest: Vec<u8>,
     },

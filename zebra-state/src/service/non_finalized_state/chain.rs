@@ -336,8 +336,8 @@ impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
     }
 }
 
-impl UpdateWith<Option<sapling::ShieldedData>> for Chain {
-    fn update_chain_state_with(&mut self, shielded_data: &Option<sapling::ShieldedData>) {
+impl<T: sapling::AnchorVariant> UpdateWith<Option<sapling::ShieldedData<T>>> for Chain {
+    fn update_chain_state_with(&mut self, shielded_data: &Option<sapling::ShieldedData<T>>) {
         if let Some(shielded_data) = shielded_data {
             for sapling::Spend { nullifier, .. } in shielded_data.spends() {
                 self.sapling_nullifiers.insert(*nullifier);
@@ -345,7 +345,7 @@ impl UpdateWith<Option<sapling::ShieldedData>> for Chain {
         }
     }
 
-    fn revert_chain_state_with(&mut self, shielded_data: &Option<sapling::ShieldedData>) {
+    fn revert_chain_state_with(&mut self, shielded_data: &Option<sapling::ShieldedData<T>>) {
         if let Some(shielded_data) = shielded_data {
             for sapling::Spend { nullifier, .. } in shielded_data.spends() {
                 assert!(
