@@ -40,8 +40,8 @@ pub enum NetworkUpgrade {
     /// The Zcash protocol after the NU5 upgrade.
     ///
     /// Note: Network Upgrade 5 includes the Orchard Shielded Protocol, and
-    /// other changes. The NU5 code name has not been chosen yet.
-    NU5,
+    /// other changes. The Nu5 code name has not been chosen yet.
+    Nu5,
 }
 
 /// Mainnet network upgrade activation heights.
@@ -101,7 +101,7 @@ pub(crate) const CONSENSUS_BRANCH_IDS: &[(NetworkUpgrade, ConsensusBranchId)] = 
     (Blossom, ConsensusBranchId(0x2bb40e60)),
     (Heartwood, ConsensusBranchId(0xf5b9230b)),
     (Canopy, ConsensusBranchId(0xe9ff75a6)),
-    (NU5, ConsensusBranchId(0xf919a198)),
+    (Nu5, ConsensusBranchId(0xf919a198)),
 ];
 
 /// The target block spacing before Blossom.
@@ -207,7 +207,7 @@ impl NetworkUpgrade {
     pub fn target_spacing(&self) -> Duration {
         let spacing_seconds = match self {
             Genesis | BeforeOverwinter | Overwinter | Sapling => PRE_BLOSSOM_POW_TARGET_SPACING,
-            Blossom | Heartwood | Canopy | NU5 => POST_BLOSSOM_POW_TARGET_SPACING,
+            Blossom | Heartwood | Canopy | Nu5 => POST_BLOSSOM_POW_TARGET_SPACING,
         };
 
         Duration::seconds(spacing_seconds)

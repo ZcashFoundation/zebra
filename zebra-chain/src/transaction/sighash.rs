@@ -85,8 +85,8 @@ impl<'a> SigHasher<'a> {
             Sapling | Blossom | Heartwood | Canopy => self
                 .hash_sighash_zip243(&mut hash)
                 .expect("serialization into hasher never fails"),
-            NU5 => unimplemented!(
-                "NU5 upgrade uses a new transaction digest algorithm, as specified in ZIP-244"
+            Nu5 => unimplemented!(
+                "Nu5 upgrade uses a new transaction digest algorithm, as specified in ZIP-244"
             ),
         }
 
