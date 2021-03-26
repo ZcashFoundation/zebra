@@ -20,7 +20,7 @@ jobs:
 
       - uses: actions-rs/toolchain@v1
         with:
-          toolchain: nightly
+          toolchain: nightly-2021-03-24
           override: true
           profile: minimal
           components: llvm-tools-preview
@@ -53,4 +53,3 @@ jobs:
           $(rustc --print target-libdir)/../bin/llvm-cov export -format=lcov -instr-profile=test.profdata $(printf -- "-object %s " $(cat filenames.txt)) > "lcov.info"
       - name: Upload coverage report to Codecov
         uses: codecov/codecov-action@v1
-
