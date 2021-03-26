@@ -409,6 +409,10 @@ where
                             // transactions.)
                             //
                             // https://zebra.zfnd.org/dev/rfcs/0003-inventory-tracking.html#inventory-monitoring
+                            //
+                            // TODO: zcashd has a bug where it merges queued inv messages of
+                            // the same or different types. So Zebra should split small
+                            // merged inv messages into separate inv messages. (#1799)
                             match hashes.as_slice() {
                                 [hash @ InventoryHash::Block(_)] => {
                                     let _ = inv_collector.send((*hash, addr));
