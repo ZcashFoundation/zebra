@@ -33,11 +33,14 @@ pub struct Action {
     /// The x-coordinate of the note commitment for the output note.
     #[serde(with = "serde_helpers::Base")]
     pub cm_x: pallas::Base,
-    /// An encoding of an ephemeral Pallas public key.
+    /// An encoding of an ephemeral Pallas public key corresponding to the
+    /// encrypted private key in `out_ciphertext`.
     pub ephemeral_key: keys::EphemeralPublicKey,
     /// A ciphertext component for the encrypted output note.
     pub enc_ciphertext: note::EncryptedNote,
-    /// A ciphertext component for the encrypted output note.
+    /// A ciphertext component that allows the holder of a full viewing key to
+    /// recover the recipient diversified transmission key and the ephemeral
+    /// private key (and therefore the entire note plaintext).
     pub out_ciphertext: note::WrappedNoteKey,
 }
 
