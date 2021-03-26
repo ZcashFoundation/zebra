@@ -289,26 +289,34 @@ enum CrawlerAction {
     HandshakeFailed { failed_addr: MetaAddr },
 }
 
-/// Given a channel that signals a need for new peers, try to connect to a peer
-/// and send the resulting `peer::Client` through a channel.
-#[instrument(skip(
-    crawl_new_peer_interval,
-    demand_tx,
-    demand_rx,
-    candidates,
-    connector,
-    success_tx
-))]
+/// Given a channel `demand_rx` that signals a need for new peers, try to find
+/// and connect to new peers, and send the resulting `peer::Client`s through the
+/// `success_tx` channel.
+///
+/// Crawl for new peers every `crawl_new_peer_interval`, and whenever there is
+/// demand, but no new peers in `candidates`. After crawling, try to connect to
+/// one new peer using `connector`.
+///
+/// If a handshake fails, restore the unused demand signal by sending it to
+/// `demand_tx`.
+///
+/// The crawler terminates when `candidates.update()` or `success_tx` returns a
+/// permanent internal error. Transient errors and individual peer errors should
+/// be handled within the crawler.
+#[instrument(skip(demand_tx, demand_rx, candidates, connector, success_tx))]
 async fn crawl_and_dial<C, S>(
     crawl_new_peer_interval: std::time::Duration,
     mut demand_tx: mpsc::Sender<()>,
     mut demand_rx: mpsc::Receiver<()>,
     mut candidates: CandidateSet<S>,
-    mut connector: C,
+    connector: C,
     mut success_tx: mpsc::Sender<PeerChange>,
 ) -> Result<(), BoxError>
 where
-    C: Service<SocketAddr, Response = Change<SocketAddr, peer::Client>, Error = BoxError> + Clone,
+    C: Service<SocketAddr, Response = Change<SocketAddr, peer::Client>, Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
     C::Future: Send + 'static,
     S: Service<Request, Response = Response, Error = BoxError>,
     S::Future: Send + 'static,
@@ -370,22 +378,40 @@ where
                 continue;
             }
             DemandHandshake { candidate } => {
-                // TODO: spawn independent task to avoid deadlocks
-                debug!(?candidate.addr, "attempting outbound connection in response to demand");
-                // the connector is always ready, so this can't hang
-                connector.ready_and().await?;
-                // the handshake has timeouts, so it shouldn't hang
-                handshakes.push(Box::pin(connector.call(candidate.addr).map(
-                    move |res| match res {
-                        Ok(peer_set_change) => HandshakeConnected { peer_set_change },
-                        Err(e) => {
-                            debug!(?candidate.addr, ?e, "failed to connect to candidate");
-                            HandshakeFailed {
-                                failed_addr: candidate,
+                let mut hs_connector = connector.clone();
+                // spawn each handshake into an independent task, so it can make
+                // progress independently of the crawls
+                let hs_join = tokio::spawn(async move {
+                    debug!(?candidate.addr, "attempting outbound connection in response to demand");
+                    // the connector is always ready, so this can't hang
+                    let hs_connector = hs_connector
+                        .ready_and()
+                        .await
+                        .expect("connector never errors");
+                    // the handshake has timeouts, so it shouldn't hang
+                    hs_connector
+                        .call(candidate.addr)
+                        .map(move |res| match res {
+                            Ok(peer_set_change) => HandshakeConnected { peer_set_change },
+                            Err(e) => {
+                                debug!(?candidate.addr, ?e, "failed to connect to candidate");
+                                HandshakeFailed {
+                                    failed_addr: candidate,
+                                }
                             }
+                        })
+                        .await
+                })
+                .map(move |res| match res {
+                    Ok(crawler_action) => crawler_action,
+                    Err(e) => {
+                        debug!(?candidate.addr, ?e, "failed to connect to candidate");
+                        HandshakeFailed {
+                            failed_addr: candidate,
                         }
-                    },
-                )));
+                    }
+                });
+                handshakes.push(Box::pin(hs_join));
             }
             DemandCrawl => {
                 debug!("demand for peers but no available candidates");

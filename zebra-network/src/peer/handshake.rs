@@ -403,7 +403,6 @@ where
                                     "command" => msg.to_string(),
                                     "addr" => addr.to_string(),
                                 );
-                                use futures::sink::SinkExt;
                                 // the collector doesn't depend on network activity,
                                 // so this await should not hang
                                 let _ = inbound_ts_collector
@@ -417,7 +416,6 @@ where
                                     "error" => err.to_string(),
                                     "addr" => addr.to_string(),
                                 );
-                                use futures::sink::SinkExt;
                                 let _ = inbound_ts_collector
                                     .send(MetaAddr::new_errored(&addr, &remote_services))
                                     .await;
@@ -497,7 +495,6 @@ where
                 async move {
                     use super::ClientRequest;
                     use futures::future::Either;
-                    use futures::sink::SinkExt;
 
                     let mut shutdown_rx = shutdown_rx;
                     let mut server_tx = server_tx;
