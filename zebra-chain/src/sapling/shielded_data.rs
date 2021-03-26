@@ -38,8 +38,8 @@ pub trait AnchorVariant {
 pub struct ShieldedData<AnchorV: AnchorVariant> {
     /// The net value of Sapling spend transfers minus output transfers.
     pub value_balance: Amount,
-    /// Todo: Add something useful here.
-    pub anchor: AnchorV::Shared,
+    /// The shared anchor for all `Spend`s in this transaction.
+    pub shared_anchor: AnchorV::Shared,
     /// Either a spend or output description.
     ///
     /// Storing this separately ensures that it is impossible to construct

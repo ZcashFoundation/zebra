@@ -119,7 +119,7 @@ We use `AnchorVariant` in `ShieldedData` to model the anchor differences between
 ```rust
 struct sapling::ShieldedData<AnchorV: AnchorVariant> {
     value_balance: Amount,
-    anchor: AnchorV::Shared,
+    shared_anchor: AnchorV::Shared,
     first: Either<Spend<AnchorV>, Output>,
     rest_spends: Vec<Spend<AnchorV>>,
     rest_outputs: Vec<Output>,

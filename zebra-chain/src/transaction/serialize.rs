@@ -281,7 +281,6 @@ impl ZcashDeserialize for Transaction {
                 let expiry_height = block::Height(reader.read_u32::<LittleEndian>()?);
 
                 let value_balance = (&mut reader).zcash_deserialize_into()?;
-                let anchor = ();
                 let mut shielded_spends = Vec::zcash_deserialize(&mut reader)?;
                 let mut shielded_outputs = Vec::zcash_deserialize(&mut reader)?;
 
@@ -291,7 +290,7 @@ impl ZcashDeserialize for Transaction {
                 let sapling_shielded_data = if !shielded_spends.is_empty() {
                     Some(sapling::ShieldedData {
                         value_balance,
-                        anchor,
+                        shared_anchor: (),
                         first: Left(shielded_spends.remove(0)),
                         rest_spends: shielded_spends,
                         rest_outputs: shielded_outputs,
@@ -300,7 +299,7 @@ impl ZcashDeserialize for Transaction {
                 } else if !shielded_outputs.is_empty() {
                     Some(sapling::ShieldedData {
                         value_balance,
-                        anchor,
+                        shared_anchor: (),
                         first: Right(shielded_outputs.remove(0)),
                         rest_spends: shielded_spends,
                         rest_outputs: shielded_outputs,
