@@ -15,10 +15,8 @@ use super::{commitment, note, tree, AnchorVariant, PerSpendAnchor};
 /// A _Spend Description_, as described in [protocol specification §7.3][ps].
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#spendencoding
-///
-/// TODO: remove anchor default.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Spend<AnchorV: AnchorVariant = PerSpendAnchor> {
+pub struct Spend<AnchorV: AnchorVariant> {
     /// A value commitment to the value of the input note.
     pub cv: commitment::ValueCommitment,
     /// A root of the Sapling note commitment tree at some block height in the past.
@@ -33,7 +31,7 @@ pub struct Spend<AnchorV: AnchorVariant = PerSpendAnchor> {
     pub spend_auth_sig: redjubjub::Signature<SpendAuth>,
 }
 
-impl Spend {
+impl Spend<PerSpendAnchor> {
     /// Encodes the primary inputs for the proof statement as 7 Bls12_381 base
     /// field elements, to match bellman::groth16::verify_proof.
     ///
@@ -62,7 +60,7 @@ impl Spend {
     }
 }
 
-impl ZcashSerialize for Spend {
+impl ZcashSerialize for Spend<PerSpendAnchor> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         self.cv.zcash_serialize(&mut writer)?;
         writer.write_all(&self.anchor.0[..])?;
@@ -74,7 +72,7 @@ impl ZcashSerialize for Spend {
     }
 }
 
-impl ZcashDeserialize for Spend {
+impl ZcashDeserialize for Spend<PerSpendAnchor> {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         use crate::sapling::{commitment::ValueCommitment, note::Nullifier};
         Ok(Spend {
@@ -88,7 +86,7 @@ impl ZcashDeserialize for Spend {
     }
 }
 
-impl std::cmp::PartialEq for Spend {
+impl std::cmp::PartialEq for Spend<PerSpendAnchor> {
     fn eq(&self, other: &Self) -> bool {
         self.cv == other.cv
             && self.anchor == other.anchor
@@ -99,4 +97,4 @@ impl std::cmp::PartialEq for Spend {
     }
 }
 
-impl std::cmp::Eq for Spend {}
+impl std::cmp::Eq for Spend<PerSpendAnchor> {}

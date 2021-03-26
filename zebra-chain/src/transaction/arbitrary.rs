@@ -210,10 +210,10 @@ impl Arbitrary for sapling::ShieldedData<sapling::PerSpendAnchor> {
         (
             any::<Amount>(),
             prop_oneof![
-                any::<sapling::Spend>().prop_map(Either::Left),
+                any::<sapling::Spend<sapling::PerSpendAnchor>>().prop_map(Either::Left),
                 any::<sapling::Output>().prop_map(Either::Right)
             ],
-            vec(any::<sapling::Spend>(), 0..10),
+            vec(any::<sapling::Spend<sapling::PerSpendAnchor>>(), 0..10),
             vec(any::<sapling::Output>(), 0..10),
             vec(any::<u8>(), 64),
         )

@@ -20,7 +20,7 @@ use tokio::sync::broadcast::{channel, error::RecvError, Sender};
 use tower::{util::ServiceFn, Service};
 use tower_batch::{Batch, BatchControl};
 use tower_fallback::Fallback;
-use zebra_chain::sapling::{Output, Spend};
+use zebra_chain::sapling::{Output, PerSpendAnchor, Spend};
 
 mod hash_reader;
 mod params;
@@ -101,8 +101,8 @@ pub type Item = batch::Item<Bls12>;
 
 pub struct ItemWrapper(Item);
 
-impl From<&Spend> for ItemWrapper {
-    fn from(spend: &Spend) -> Self {
+impl From<&Spend<PerSpendAnchor>> for ItemWrapper {
+    fn from(spend: &Spend<PerSpendAnchor>) -> Self {
         Self(Item::from((
             bellman::groth16::Proof::read(&spend.zkproof.0[..]).unwrap(),
             spend.primary_inputs(),

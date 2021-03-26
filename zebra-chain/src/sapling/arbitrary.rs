@@ -3,9 +3,9 @@ use proptest::{arbitrary::any, array, collection::vec, prelude::*};
 
 use crate::primitives::Groth16Proof;
 
-use super::{keys, note, tree, NoteCommitment, Output, Spend, ValueCommitment};
+use super::{keys, note, tree, NoteCommitment, Output, PerSpendAnchor, Spend, ValueCommitment};
 
-impl Arbitrary for Spend {
+impl Arbitrary for Spend<PerSpendAnchor> {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
