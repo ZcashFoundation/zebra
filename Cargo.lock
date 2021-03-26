@@ -240,7 +240,7 @@ dependencies = [
  "group",
  "num_cpus",
  "pairing",
- "rand_core 0.6.1",
+ "rand_core 0.6.2",
  "subtle",
 ]
 
@@ -400,7 +400,7 @@ dependencies = [
  "ff",
  "group",
  "pairing",
- "rand_core 0.6.1",
+ "rand_core 0.6.2",
  "subtle",
 ]
 
@@ -990,7 +990,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72a4d941a5b7c2a75222e2d44fcdf634a67133d9db31e177ae5ff6ecda852bfe"
 dependencies = [
  "bitvec 0.20.1",
- "rand_core 0.6.1",
+ "rand_core 0.6.2",
  "subtle",
 ]
 
@@ -1253,7 +1253,7 @@ checksum = "61b3c1e8b4f1ca07e6605ea1be903a5f6956aec5c8a67fd44d56076631675ed8"
 dependencies = [
  "byteorder",
  "ff",
- "rand_core 0.6.1",
+ "rand_core 0.6.2",
  "subtle",
 ]
 
@@ -1622,7 +1622,7 @@ dependencies = [
  "bls12_381 0.4.0",
  "ff",
  "group",
- "rand_core 0.6.1",
+ "rand_core 0.6.2",
  "subtle",
 ]
 
@@ -2339,7 +2339,7 @@ checksum = "c24fcd450d3fa2b592732565aa4f17a27a61c65ece4726353e000939b0edee34"
 dependencies = [
  "libc",
  "rand_chacha 0.3.0",
- "rand_core 0.6.1",
+ "rand_core 0.6.2",
  "rand_hc 0.3.0",
 ]
 
@@ -2360,7 +2360,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e12735cf05c9e10bf21534da50a147b924d555dc7a547c42e6bb2d5b6017ae0d"
 dependencies = [
  "ppv-lite86",
- "rand_core 0.6.1",
+ "rand_core 0.6.2",
 ]
 
 [[package]]
@@ -2389,9 +2389,9 @@ dependencies = [
 
 [[package]]
 name = "rand_core"
-version = "0.6.1"
+version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c026d7df8b298d90ccbbc5190bd04d85e159eaf5576caeacf8741da93ccbd2e5"
+checksum = "34cf66eb183df1c5876e2dcf6b13d57340741e8dc255b48e40a26de954d06ae7"
 dependencies = [
  "getrandom 0.2.0",
 ]
@@ -2411,7 +2411,7 @@ version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3190ef7066a446f2e7f42e239d161e905420ccab01eb967c9eb27d21b2322a73"
 dependencies = [
- "rand_core 0.6.1",
+ "rand_core 0.6.2",
 ]
 
 [[package]]
@@ -2475,7 +2475,7 @@ dependencies = [
  "byteorder",
  "digest 0.9.0",
  "jubjub 0.3.0",
- "rand_core 0.6.1",
+ "rand_core 0.6.2",
  "serde",
  "thiserror",
 ]
@@ -4059,7 +4059,7 @@ dependencies = [
  "primitive-types",
  "proptest",
  "proptest-derive",
- "rand_core 0.6.1",
+ "rand_core 0.6.2",
  "redjubjub",
  "ripemd160",
  "secp256k1",
