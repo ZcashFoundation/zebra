@@ -49,6 +49,14 @@ pub const LIVE_PEER_DURATION: Duration = Duration::from_secs(60 + 20 + 20 + 20);
 /// connected peer.
 pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(60);
 
+/// The number of GetAddr requests sent when crawling for new peers.
+///
+/// ## SECURITY
+///
+/// The fanout should be greater than 1, to ensure that Zebra's address book is
+/// not dominated by a single peer.
+pub const GET_ADDR_FANOUT: usize = 2;
+
 /// Truncate timestamps in outbound address messages to this time interval.
 ///
 /// This is intended to prevent a peer from learning exactly when we received
