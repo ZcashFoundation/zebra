@@ -5,7 +5,6 @@
 use std::convert::TryFrom;
 
 use zebra_chain::{
-    amount::Amount,
     primitives::{ed25519, Groth16Proof},
     sapling::{AnchorVariant, Output, ShieldedData, Spend},
     transaction::{JoinSplitData, Transaction},
@@ -84,10 +83,9 @@ pub fn has_inputs_and_outputs(tx: &Transaction) -> Result<(), TransactionError> 
 /// https://zips.z.cash/protocol/protocol.pdf#consensusfrombitcoin
 pub fn shielded_balances_match<T: AnchorVariant>(
     shielded_data: &ShieldedData<T>,
-    value_balance: Amount,
 ) -> Result<(), TransactionError> {
     if (shielded_data.spends().count() + shielded_data.outputs().count() != 0)
-        || i64::from(value_balance) == 0
+        || i64::from(shielded_data.value_balance) == 0
     {
         Ok(())
     } else {
