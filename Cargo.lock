@@ -1001,7 +1001,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cfcf0ed7fe52a17a03854ec54a9f76d6d84508d1c0e66bc1793301c73fc8493c"
 dependencies = [
  "byteorder",
- "rand 0.8.1",
+ "rand 0.8.3",
  "rustc-hex",
  "static_assertions",
 ]
@@ -2333,9 +2333,9 @@ dependencies = [
 
 [[package]]
 name = "rand"
-version = "0.8.1"
+version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c24fcd450d3fa2b592732565aa4f17a27a61c65ece4726353e000939b0edee34"
+checksum = "0ef9e7e66b4468674bfcb0c81af8b7fa0bb154fa9f28eb840da5c447baeb8d7e"
 dependencies = [
  "libc",
  "rand_chacha 0.3.0",
@@ -3397,7 +3397,7 @@ dependencies = [
  "futures 0.3.13",
  "futures-core",
  "pin-project 0.4.27",
- "rand 0.7.3",
+ "rand 0.8.3",
  "tokio 0.3.6",
  "tokio-test",
  "tower",
@@ -4094,7 +4094,7 @@ dependencies = [
  "metrics",
  "once_cell",
  "pairing",
- "rand 0.8.1",
+ "rand 0.8.3",
  "serde",
  "spandoc",
  "thiserror",
@@ -4129,7 +4129,7 @@ dependencies = [
  "pin-project 0.4.27",
  "proptest",
  "proptest-derive",
- "rand 0.8.1",
+ "rand 0.8.3",
  "regex",
  "serde",
  "thiserror",
@@ -4244,7 +4244,7 @@ dependencies = [
  "metrics-exporter-prometheus",
  "once_cell",
  "pin-project 0.4.27",
- "rand 0.8.1",
+ "rand 0.8.3",
  "sentry",
  "sentry-tracing",
  "serde",

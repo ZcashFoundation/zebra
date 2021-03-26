@@ -17,7 +17,7 @@ tracing-futures = "0.2.5"
 [dev-dependencies]
 color-eyre = "0.5.10"
 ed25519-zebra = "2.1.0"
-rand = "0.7"
+rand = "0.8"
 tokio = { version = "0.3.6", features = ["full"]}
 tokio-test = "0.4.1"
 tower-fallback = { path = "../tower-fallback/" }
