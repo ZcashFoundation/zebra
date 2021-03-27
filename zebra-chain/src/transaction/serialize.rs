@@ -152,20 +152,9 @@ impl ZcashSerialize for Transaction {
 
                 match sapling_shielded_data {
                     None => {
-                        // Signal no sapling value balance, anchor variant,
-                        // shielded spends, shielded outputs.
-                        writer.write_compactsize(0)?;
-                        writer.write_compactsize(0)?;
-                        writer.write_compactsize(0)?;
-                        writer.write_compactsize(0)?;
-
-                        // Todo: check was going on here
-                        // zip243_deserialize_and_round_trip test needs all this 0s at the end
-                        // to pass the last assert_equal.
-                        writer.write_compactsize(0)?;
-                        writer.write_compactsize(0)?;
-                        writer.write_compactsize(0)?;
-                        writer.write_compactsize(0)?;
+                        // Signal no value balance.
+                        writer.write_i64::<LittleEndian>(0)?;
+                        // Signal no shielded spends and no shielded outputs.
                         writer.write_compactsize(0)?;
                         writer.write_compactsize(0)?;
                     }
