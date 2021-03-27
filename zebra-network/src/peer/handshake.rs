@@ -504,12 +504,17 @@ where
                         let shutdown_rx_ref = Pin::new(&mut shutdown_rx);
                         let mut send_addr_err = false;
 
-                        // Currently, select prefers the first future.
-                        // There is no starvation risk here, because
-                        // interval has a limited rate, and shutdown
-                        // is a oneshot.
-                        match future::select(interval_stream.next(), shutdown_rx_ref).await {
-                            Either::Left(_) => {
+                        // CORRECTNESS
+                        //
+                        // Currently, select prefers the first future if multiple
+                        // futures are ready.
+                        //
+                        // Starvation is impossible here, because interval has a
+                        // slow rate, and shutdown is a oneshot. If both futures
+                        // are ready, we want the shutdown to take priority over
+                        // sending a useless heartbeat.
+                        match future::select(shutdown_rx_ref, interval_stream.next()).await {
+                            Either::Right(_) => {
                                 let (tx, rx) = oneshot::channel();
                                 let request = Request::Ping(Nonce::default());
                                 tracing::trace!(?request, "queueing heartbeat request");
@@ -588,7 +593,7 @@ where
                                     }
                                 }
                             }
-                            Either::Right(_) => {
+                            Either::Left(_) => {
                                 tracing::trace!("shutting down due to Client shut down");
                                 // awaiting a local task won't hang
                                 let _ = timestamp_collector
