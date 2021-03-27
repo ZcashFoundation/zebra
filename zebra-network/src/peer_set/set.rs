@@ -464,6 +464,25 @@ where
             if self.preselected_p2c_index.is_none() {
                 trace!("no ready services, sending demand signal");
                 let _ = self.demand_signal.try_send(());
+                // CORRECTNESS
+                //
+                // The current task must be scheduled for wakeup every time we
+                // return `Poll::Pending`.
+                //
+                // As long as there are unready or new peers, this task will run,
+                // because:
+                // - `poll_discover` schedules this task for wakeup when new
+                //   peers arrive.
+                // - if there are unready peers, `poll_unready` schedules this
+                //   task for wakeup when peer services become ready.
+                // - if the preselected peer is not ready, `service.poll_ready`
+                //   schedules this task for wakeup when that service becomes
+                //   ready.
+                //
+                // To avoid peers blocking on a full background error channel:
+                // - if no background tasks have exited since the last poll,
+                //   `poll_background_errors` schedules this task for wakeup when
+                //   the next task exits.
                 return Poll::Pending;
             }
         }

@@ -49,6 +49,13 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut this = self.project();
 
+        // CORRECTNESS
+        //
+        // The current task must be scheduled for wakeup every time we return
+        // `Poll::Pending`.
+        //
+        // This loop ensures that the task is scheduled as required, because it
+        // only returns Pending when another future returns Pending.
         loop {
             match this.state.as_mut().project() {
                 ResponseStateProj::Failed(e) => {

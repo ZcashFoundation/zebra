@@ -113,7 +113,13 @@ impl Stream for ClientRequestReceiver {
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match self.inner.poll_next_unpin(cx) {
             Poll::Ready(client_request) => Poll::Ready(client_request.map(Into::into)),
-            // `inner.poll_next_unpin` parks the task for this future
+            // CORRECTNESS
+            //
+            // The current task must be scheduled for wakeup every time we
+            // return `Poll::Pending`.
+            //
+            // inner.poll_next_unpin` schedules this task for wakeup when
+            // there are new items available in the inner stream.
             Poll::Pending => Poll::Pending,
         }
     }
@@ -198,6 +204,19 @@ impl Service<Request> for Client {
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        // CORRECTNESS
+        //
+        // The current task must be scheduled for wakeup every time we return
+        // `Poll::Pending`.
+        //
+        //`ready!` returns `Poll::Pending` when `server_tx` is unready, and
+        // schedules this task for wakeup.
+        //
+        // Since `shutdown_tx` is used for oneshot communication to the heartbeat
+        // task, it will never be `Pending`.
+        //
+        // TODO: should the Client exit if the heartbeat task exits and drops
+        // `shutdown_tx`?
         if ready!(self.server_tx.poll_ready(cx)).is_err() {
             Poll::Ready(Err(self
                 .error_slot
