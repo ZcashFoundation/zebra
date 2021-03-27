@@ -223,6 +223,8 @@ where
         .in_current_span();
 
         let task = tokio::spawn(async move {
+            // TODO: if the verifier and cancel are both ready, which should we
+            //       prefer? (Currently, select! chooses one at random.)
             tokio::select! {
                 _ = &mut cancel_rx => {
                     tracing::trace!("task cancelled prior to completion");
