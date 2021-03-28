@@ -69,7 +69,8 @@ impl From<(NullifierDerivingKey, Note, NoteCommitment)> for Nullifier {
         //
         // [︀ (PRF^nfOrchard_nk(ρ) + ψ) mod q_P ]︀ K^Orchard + cm
         let scalar =
-            pallas::Scalar::from_bytes(&(prf_nf(nk.0, note.rho) + note.psi).to_bytes()).unwrap();
+            pallas::Scalar::from_bytes(&(prf_nf(nk.0, note.rho.0) + note.psi.0).to_bytes())
+                .unwrap();
 
         // Basically a new-gen Pedersen hash?
         Nullifier(extract_p((K * scalar) + cm.0))

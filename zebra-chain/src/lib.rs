@@ -7,8 +7,6 @@
 #![doc(html_logo_url = "https://www.zfnd.org/images/zebra-icon.png")]
 #![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_chain")]
 #![allow(clippy::try_err)]
-// Use the old lint name to build without warnings on stable until 1.51 is stable
-#![allow(clippy::unknown_clippy_lints)]
 // The actual lints we want to disable
 #![allow(clippy::unnecessary_wraps)]
 // Disable some broken or unwanted clippy nightly lints
