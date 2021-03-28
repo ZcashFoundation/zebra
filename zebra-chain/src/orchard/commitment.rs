@@ -112,7 +112,6 @@ impl NoteCommitment {
     ///
     /// https://zips.z.cash/protocol/protocol.pdf#concretewindowedcommit
     #[allow(non_snake_case)]
-    // TODO: update to handle rseed, psi, rho
     pub fn new<T>(
         csprng: &mut T,
         diversifier: Diversifier,
