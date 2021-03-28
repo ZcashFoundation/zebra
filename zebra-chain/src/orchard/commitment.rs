@@ -18,8 +18,8 @@ use crate::{
 };
 
 use super::{
-    keys::{Diversifier, TransmissionKey},
-    note::Note,
+    keys::{prf_expand, Diversifier, TransmissionKey},
+    note::{self, SeedRandomness},
     sinsemilla::*,
 };
 
@@ -36,9 +36,21 @@ where
     pallas::Scalar::from_bytes_wide(&bytes)
 }
 
-/// The randomness used in the Simsemilla Hash for note commitment.
+/// The randomness used in the Simsemilla hash for note commitment.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct CommitmentRandomness(pallas::Scalar);
+
+impl From<SeedRandomness> for CommitmentRandomness {
+    /// rcm = ToScalar^Orchard((PRF^expand_rseed ([5]))
+    ///
+    /// https://zips.z.cash/protocol/nu5.pdf#orchardsend
+    fn from(rseed: SeedRandomness) -> Self {
+        Self(pallas::Scalar::from_bytes_wide(&prf_expand(
+            rseed.0,
+            vec![&[5]],
+        )))
+    }
+}
 
 /// Note commitments for the output notes.
 #[derive(Clone, Copy, Deserialize, PartialEq, Serialize)]
@@ -106,7 +118,8 @@ impl NoteCommitment {
         diversifier: Diversifier,
         transmission_key: TransmissionKey,
         value: Amount<NonNegative>,
-        _note: Note,
+        rho: note::Rho,
+        psi: note::Psi,
     ) -> Option<(CommitmentRandomness, Self)>
     where
         T: RngCore + CryptoRng,
@@ -126,13 +139,17 @@ impl NoteCommitment {
             return None;
         }
 
-        let pk_d_bytes = <[u8; 32]>::from(transmission_key);
+        let pk_d_bytes: [u8; 32] = transmission_key.into();
         let v_bytes = value.to_bytes();
+        let rho_bytes: [u8; 32] = rho.into();
+        let psi_bytes: [u8; 32] = psi.into();
 
-        // g*d || pk*d || I2LEBSP64(v)
+        // g*d || pk*d || I2LEBSP_64(v) || I2LEBSP_l^Orchard_Base(ρ) || I2LEBSP_l^Orchard_base(ψ)
         s.append(&mut BitVec::<Lsb0, u8>::from_slice(&g_d_bytes[..]));
         s.append(&mut BitVec::<Lsb0, u8>::from_slice(&pk_d_bytes[..]));
         s.append(&mut BitVec::<Lsb0, u8>::from_slice(&v_bytes[..]));
+        s.append(&mut BitVec::<Lsb0, u8>::from_slice(&rho_bytes[..]));
+        s.append(&mut BitVec::<Lsb0, u8>::from_slice(&psi_bytes[..]));
 
         let rcm = CommitmentRandomness(generate_trapdoor(csprng));
 

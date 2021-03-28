@@ -63,9 +63,9 @@ fn prp_d(K: [u8; 32], d: [u8; 11]) -> [u8; 11] {
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#concreteprfs
 // TODO: This is basically a duplicate of the one in our sapling module, its
-// definition in the draft NU5 spec is incomplete so I'm putting it here in case
+// definition in the draft Nu5 spec is incomplete so I'm putting it here in case
 // it changes.
-fn prf_expand(sk: [u8; 32], t: Vec<&[u8]>) -> [u8; 64] {
+pub fn prf_expand(sk: [u8; 32], t: Vec<&[u8]>) -> [u8; 64] {
     let mut state = blake2b_simd::Params::new()
         .hash_length(64)
         .personal(b"Zcash_ExpandSeed")
