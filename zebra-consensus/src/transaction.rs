@@ -193,7 +193,6 @@ where
                         // correctly.
 
                         // Then, pass those items to self.joinsplit to verify them.
-                        // check::validate_joinsplit_sig(joinsplit_data, shielded_sighash.as_bytes())?;
 
                         // Consensus rule: The joinSplitSig MUST represent a
                         // valid signature, under joinSplitPubKey, of the
