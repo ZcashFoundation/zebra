@@ -1,10 +1,10 @@
 //! Blocks and block-related structures (heights, headers, etc.)
 #![allow(clippy::unit_arg)]
 
+mod commitment;
 mod hash;
 mod header;
 mod height;
-mod commitment;
 mod serialize;
 
 pub mod merkle;
@@ -16,11 +16,11 @@ mod tests;
 
 use std::fmt;
 
+pub use commitment::Commitment;
 pub use hash::Hash;
 pub use header::BlockTimeError;
 pub use header::{CountedHeader, Header};
 pub use height::Height;
-pub use commitment::Commitment;
 
 use serde::{Deserialize, Serialize};
 
