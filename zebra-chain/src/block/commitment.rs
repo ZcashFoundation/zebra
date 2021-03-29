@@ -1,7 +1,7 @@
 //! The Commitment enum, used for the corresponding block header field.
 
 use crate::parameters::{Network, NetworkUpgrade, NetworkUpgrade::*};
-use crate::sapling::tree::Root;
+use crate::sapling;
 
 use super::Height;
 
@@ -26,7 +26,7 @@ pub enum Commitment {
     ///
     /// Subsequent `Commitment` variants also commit to the `FinalSaplingRoot`,
     /// via their `EarliestSaplingRoot` and `LatestSaplingRoot` fields.
-    FinalSaplingRoot(Root),
+    FinalSaplingRoot(sapling::tree::Root),
 
     /// [Heartwood activation block] Reserved field.
     ///
@@ -58,7 +58,7 @@ impl Commitment {
 
         match NetworkUpgrade::current(network, height) {
             Genesis | BeforeOverwinter | Overwinter => PreSaplingReserved(bytes),
-            Sapling | Blossom => FinalSaplingRoot(Root(bytes)),
+            Sapling | Blossom => FinalSaplingRoot(sapling::tree::Root(bytes)),
             Heartwood if Some(height) == Heartwood.activation_height(network) => {
                 ChainHistoryActivationReserved(bytes)
             }
