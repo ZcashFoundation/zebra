@@ -47,13 +47,13 @@ impl Block {
     }
 }
 
-impl Arbitrary for RootHash {
+impl Arbitrary for Commitment {
     type Parameters = ();
 
     fn arbitrary_with(_args: ()) -> Self::Strategy {
         (any::<[u8; 32]>(), any::<Network>(), any::<Height>())
-            .prop_map(|(root_bytes, network, block_height)| {
-                RootHash::from_bytes(root_bytes, network, block_height)
+            .prop_map(|(commitment_bytes, network, block_height)| {
+                Commitment::from_bytes(commitment_bytes, network, block_height)
             })
             .boxed()
     }
@@ -82,7 +82,7 @@ impl Arbitrary for Header {
                     version,
                     previous_block_hash,
                     merkle_root,
-                    root_bytes,
+                    commitment_bytes,
                     timestamp,
                     difficulty_threshold,
                     nonce,
@@ -91,7 +91,7 @@ impl Arbitrary for Header {
                     version,
                     previous_block_hash,
                     merkle_root,
-                    root_bytes,
+                    commitment_bytes,
                     time: Utc.timestamp(timestamp, 0),
                     difficulty_threshold,
                     nonce,
