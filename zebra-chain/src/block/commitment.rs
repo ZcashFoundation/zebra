@@ -1,9 +1,11 @@
 //! The Commitment enum, used for the corresponding block header field.
 
+use thiserror::Error;
+
 use crate::parameters::{Network, NetworkUpgrade, NetworkUpgrade::*};
 use crate::sapling;
 
-use super::Height;
+use super::super::block;
 
 /// Zcash blocks contain different kinds of commitments to their contents,
 /// depending on the network and height.
@@ -16,8 +18,10 @@ use super::Height;
 pub enum Commitment {
     /// [Pre-Sapling] Reserved field.
     ///
-    /// All zeroes.
-    PreSaplingReserved([u8; 32]),
+    /// The value of this field MUST be all zeroes.
+    ///
+    /// This field is verified in `Commitment::from_bytes`.
+    PreSaplingReserved,
 
     /// [Sapling and Blossom] The final Sapling treestate of this block.
     ///
@@ -26,13 +30,23 @@ pub enum Commitment {
     ///
     /// Subsequent `Commitment` variants also commit to the `FinalSaplingRoot`,
     /// via their `EarliestSaplingRoot` and `LatestSaplingRoot` fields.
+    ///
+    /// TODO: this field is verified during semantic verification
+    ///
+    ///       since Zebra checkpoints on Canopy, we don't need to validate this
+    ///       field, but since it's included in the ChainHistoryRoot, we are
+    ///       already calculating it, so we might as well validate it
     FinalSaplingRoot(sapling::tree::Root),
 
     /// [Heartwood activation block] Reserved field.
     ///
-    /// All zeroes. This MUST NOT be interpreted as a root hash.
+    /// The value of this field MUST be all zeroes.
+    ///
+    /// This MUST NOT be interpreted as a root hash.
     /// See ZIP-221 for details.
-    ChainHistoryActivationReserved([u8; 32]),
+    ///
+    /// This field is verified in `Commitment::from_bytes`.
+    ChainHistoryActivationReserved,
 
     /// [(Heartwood activation block + 1) to Canopy] The root of a Merkle
     /// Mountain Range chain history tree.
@@ -48,6 +62,8 @@ pub enum Commitment {
     /// therefore transitively to all previous network upgrades covered by a
     /// chain history hash in their activation block, via the previous block
     /// hash field.)
+    ///
+    /// TODO: this field is verified during semantic verification
     ChainHistoryRoot(ChainHistoryMmrRootHash),
 
     /// [NU5 activation onwards] A commitment to:
@@ -62,25 +78,45 @@ pub enum Commitment {
     /// transaction IDs. See ZIP-221 and ZIP-244 for details.
     ///
     /// See also the [`ChainHistoryRoot`] variant.
+    ///
+    /// TODO: this field is verified during semantic verification
     //
     // TODO: Do block commitments activate at NU5 activation, or (NU5 + 1)?
     // https://github.com/zcash/zips/pull/474
     BlockCommitments(BlockCommitmentsHash),
 }
 
+/// The required value of reserved `Commitment`s.
+pub(crate) const RESERVED_BYTES: [u8; 32] = [0; 32];
+
 impl Commitment {
     /// Returns `bytes` as the Commitment variant for `network` and `height`.
-    pub(super) fn from_bytes(bytes: [u8; 32], network: Network, height: Height) -> Commitment {
+    pub(super) fn from_bytes(
+        bytes: [u8; 32],
+        network: Network,
+        height: block::Height,
+    ) -> Result<Commitment, CommitmentError> {
         use Commitment::*;
+        use CommitmentError::*;
 
         match NetworkUpgrade::current(network, height) {
-            Genesis | BeforeOverwinter | Overwinter => PreSaplingReserved(bytes),
-            Sapling | Blossom => FinalSaplingRoot(sapling::tree::Root(bytes)),
-            Heartwood if Some(height) == Heartwood.activation_height(network) => {
-                ChainHistoryActivationReserved(bytes)
+            Genesis | BeforeOverwinter | Overwinter => {
+                if bytes == RESERVED_BYTES {
+                    Ok(PreSaplingReserved)
+                } else {
+                    Err(InvalidPreSaplingReserved { actual: bytes })
+                }
             }
-            Heartwood | Canopy => ChainHistoryRoot(ChainHistoryMmrRootHash(bytes)),
-            Nu5 => BlockCommitments(BlockCommitmentsHash(bytes)),
+            Sapling | Blossom => Ok(FinalSaplingRoot(sapling::tree::Root(bytes))),
+            Heartwood if Some(height) == Heartwood.activation_height(network) => {
+                if bytes == RESERVED_BYTES {
+                    Ok(ChainHistoryActivationReserved)
+                } else {
+                    Err(InvalidChainHistoryActivationReserved { actual: bytes })
+                }
+            }
+            Heartwood | Canopy => Ok(ChainHistoryRoot(ChainHistoryMmrRootHash(bytes))),
+            Nu5 => Ok(BlockCommitments(BlockCommitmentsHash(bytes))),
         }
     }
 
@@ -90,9 +126,9 @@ impl Commitment {
         use Commitment::*;
 
         match self {
-            PreSaplingReserved(b) => b,
+            PreSaplingReserved => RESERVED_BYTES,
             FinalSaplingRoot(hash) => hash.0,
-            ChainHistoryActivationReserved(b) => b,
+            ChainHistoryActivationReserved => RESERVED_BYTES,
             ChainHistoryRoot(hash) => hash.0,
             BlockCommitments(hash) => hash.0,
         }
@@ -118,3 +154,44 @@ pub struct ChainHistoryMmrRootHash([u8; 32]);
 //    - move to a separate file
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct BlockCommitmentsHash([u8; 32]);
+
+/// Errors that can occur when checking RootHash consensus rules.
+///
+/// Each error variant corresponds to a consensus rule, so enumerating
+/// all possible verification failures enumerates the consensus rules we
+/// implement, and ensures that we don't reject blocks or transactions
+/// for a non-enumerated reason.
+#[allow(dead_code)]
+#[derive(Error, Debug, PartialEq)]
+pub enum CommitmentError {
+    #[error("invalid pre-Sapling reserved committment: expected all zeroes, actual: {actual:?}")]
+    InvalidPreSaplingReserved {
+        // TODO: are these fields a security risk? If so, open a ticket to remove
+        // similar fields across Zebra
+        actual: [u8; 32],
+    },
+
+    #[error("invalid final sapling root: expected {expected:?}, actual: {actual:?}")]
+    InvalidFinalSaplingRoot {
+        expected: [u8; 32],
+        actual: [u8; 32],
+    },
+
+    #[error("invalid chain history activation reserved block committment: expected all zeroes, actual: {actual:?}")]
+    InvalidChainHistoryActivationReserved { actual: [u8; 32] },
+
+    #[error("invalid chain history root: expected {expected:?}, actual: {actual:?}")]
+    InvalidChainHistoryRoot {
+        expected: [u8; 32],
+        actual: [u8; 32],
+    },
+
+    #[error("invalid block commitment: expected {expected:?}, actual: {actual:?}")]
+    InvalidBlockCommitment {
+        expected: [u8; 32],
+        actual: [u8; 32],
+    },
+
+    #[error("missing required block height: block commitments can't be parsed without a block height, block hash: {block_hash:?}")]
+    MissingBlockHeight { block_hash: block::Hash },
+}

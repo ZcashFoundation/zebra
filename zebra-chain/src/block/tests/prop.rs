@@ -47,10 +47,13 @@ proptest! {
     ) {
         zebra_test::init();
 
-        let commitment = Commitment::from_bytes(bytes, network, block_height);
-        let other_bytes = commitment.to_bytes();
+        // just skip the test if the bytes don't parse, because there's nothing
+        // to compare with
+        if let Ok(commitment) = Commitment::from_bytes(bytes, network, block_height) {
+            let other_bytes = commitment.to_bytes();
 
-        prop_assert_eq![bytes, other_bytes];
+            prop_assert_eq![bytes, other_bytes];
+        }
     }
 }
 
@@ -69,13 +72,11 @@ proptest! {
         let bytes = block.zcash_serialize_to_vec()?;
         let bytes = &mut bytes.as_slice();
 
-        // Check the root hash
+        // Check the block commitment
         let commitment = block.commitment(network);
-        if let Some(commitment) = commitment {
+        if let Ok(commitment) = commitment {
             let commitment_bytes = commitment.to_bytes();
             prop_assert_eq![block.header.commitment_bytes, commitment_bytes];
-        } else {
-            prop_assert_eq![block.coinbase_height(), None];
         }
 
         // Check the block size limit

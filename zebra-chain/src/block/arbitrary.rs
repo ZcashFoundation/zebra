@@ -53,7 +53,16 @@ impl Arbitrary for Commitment {
     fn arbitrary_with(_args: ()) -> Self::Strategy {
         (any::<[u8; 32]>(), any::<Network>(), any::<Height>())
             .prop_map(|(commitment_bytes, network, block_height)| {
-                Commitment::from_bytes(commitment_bytes, network, block_height)
+                match Commitment::from_bytes(commitment_bytes, network, block_height) {
+                    Ok(commitment) => commitment,
+                    // just fix up the reserved values when they fail
+                    Err(_) => Commitment::from_bytes(
+                        super::commitment::RESERVED_BYTES,
+                        network,
+                        block_height,
+                    )
+                    .expect("from_bytes only fails due to reserved bytes"),
+                }
             })
             .boxed()
     }
