@@ -34,8 +34,8 @@ pub enum Commitment {
     /// See ZIP-221 for details.
     ChainHistoryActivationReserved([u8; 32]),
 
-    /// [After Heartwood activation block] The root of a Merkle Mountain
-    /// Range chain history tree.
+    /// [(Heartwood activation block + 1) to Canopy] The root of a Merkle
+    /// Mountain Range chain history tree.
     ///
     /// This root hash commits to various features of the chain's history,
     /// including the Sapling commitment tree. This commitment supports the
@@ -49,6 +49,23 @@ pub enum Commitment {
     /// chain history hash in their activation block, via the previous block
     /// hash field.)
     ChainHistoryRoot(ChainHistoryMmrRootHash),
+
+    /// [NU5 activation onwards] A commitment to:
+    /// - the chain history Merkle Mountain Range tree, and
+    /// - the auth data merkle tree covering this block.
+    ///
+    /// The chain history Merkle Mountain Range tree commits to the previous
+    /// block and all ancestors in the current network upgrade. The auth data
+    /// merkle tree commits to this block.
+    ///
+    /// This commitment supports the FlyClient protocol and non-malleable
+    /// transaction IDs. See ZIP-221 and ZIP-244 for details.
+    ///
+    /// See also the [`ChainHistoryRoot`] variant.
+    //
+    // TODO: Do block commitments activate at NU5 activation, or (NU5 + 1)?
+    // https://github.com/zcash/zips/pull/474
+    BlockCommitments(BlockCommitmentsHash),
 }
 
 impl Commitment {
@@ -63,7 +80,7 @@ impl Commitment {
                 ChainHistoryActivationReserved(bytes)
             }
             Heartwood | Canopy => ChainHistoryRoot(ChainHistoryMmrRootHash(bytes)),
-            Nu5 => unimplemented!("Nu5 uses hashAuthDataRoot as specified in ZIP-244"),
+            Nu5 => BlockCommitments(BlockCommitmentsHash(bytes)),
         }
     }
 
@@ -74,9 +91,10 @@ impl Commitment {
 
         match self {
             PreSaplingReserved(b) => b,
-            FinalSaplingRoot(v) => v.0,
+            FinalSaplingRoot(hash) => hash.0,
             ChainHistoryActivationReserved(b) => b,
-            ChainHistoryRoot(v) => v.0,
+            ChainHistoryRoot(hash) => hash.0,
+            BlockCommitments(hash) => hash.0,
         }
     }
 }
@@ -84,7 +102,19 @@ impl Commitment {
 /// The root hash of a Merkle Mountain Range chain history tree.
 // TODO:
 //    - add methods for maintaining the MMR peaks, and calculating the root
-//      hash from the current set of peaks.
-//    - move to a separate file.
+//      hash from the current set of peaks
+//    - move to a separate file
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ChainHistoryMmrRootHash([u8; 32]);
+
+/// The Block Commitments for a block. As of NU5, these cover:
+/// - the chain history tree for all ancestors in the current network upgrade,
+///   and
+/// - the transaction authorising data in this block.
+//
+// TODO:
+//    - add auth data type
+//    - add a method for hashing chain history and auth data together
+//    - move to a separate file
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct BlockCommitmentsHash([u8; 32]);
