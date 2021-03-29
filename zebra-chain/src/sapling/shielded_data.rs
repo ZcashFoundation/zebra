@@ -7,10 +7,16 @@ use crate::{
     serialization::serde_helpers,
 };
 
-#[derive(Clone, Debug)]
+use serde::{de::DeserializeOwned, Serialize};
+use std::{
+    cmp::{Eq, PartialEq},
+    fmt::Debug,
+};
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct PerSpendAnchor {}
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct SharedAnchor {}
 
 impl AnchorVariant for PerSpendAnchor {
@@ -21,9 +27,10 @@ impl AnchorVariant for SharedAnchor {
     type Shared = tree::Root;
     type PerSpend = ();
 }
+
 pub trait AnchorVariant {
-    type Shared;
-    type PerSpend;
+    type Shared: Clone + Debug + DeserializeOwned + Serialize + Eq + PartialEq;
+    type PerSpend: Clone + Debug + DeserializeOwned + Serialize + Eq + PartialEq;
 }
 
 /// A bundle of [`Spend`] and [`Output`] descriptions and signature data.
@@ -50,12 +57,12 @@ pub struct ShieldedData<AnchorV: AnchorVariant> {
     /// methods provide iterators over all of the [`Spend`]s and
     /// [`Output`]s.
     #[serde(with = "serde_helpers::Either")]
-    pub first: Either<Spend<PerSpendAnchor>, Output>,
+    pub first: Either<Spend<AnchorV>, Output>,
     /// The rest of the [`Spend`]s for this transaction.
     ///
     /// Note that the [`ShieldedData::spends`] method provides an iterator
     /// over all spend descriptions.
-    pub rest_spends: Vec<Spend<PerSpendAnchor>>,
+    pub rest_spends: Vec<Spend<AnchorV>>,
     /// The rest of the [`Output`]s for this transaction.
     ///
     /// Note that the [`ShieldedData::outputs`] method provides an iterator
@@ -70,7 +77,7 @@ where
     T: AnchorVariant,
 {
     /// Iterate over the [`Spend`]s for this transaction.
-    pub fn spends(&self) -> impl Iterator<Item = &Spend<PerSpendAnchor>> {
+    pub fn spends(&self) -> impl Iterator<Item = &Spend<T>> {
         match self.first {
             Either::Left(ref spend) => Some(spend),
             Either::Right(_) => None,

@@ -86,7 +86,10 @@ impl ZcashDeserialize for Spend<PerSpendAnchor> {
     }
 }
 
-impl std::cmp::PartialEq for Spend<PerSpendAnchor> {
+impl<T> std::cmp::PartialEq for Spend<T>
+where
+    T: AnchorVariant,
+{
     fn eq(&self, other: &Self) -> bool {
         self.cv == other.cv
             && self.anchor == other.anchor
@@ -97,4 +100,4 @@ impl std::cmp::PartialEq for Spend<PerSpendAnchor> {
     }
 }
 
-impl std::cmp::Eq for Spend<PerSpendAnchor> {}
+impl<T> std::cmp::Eq for Spend<T> where T: AnchorVariant {}
