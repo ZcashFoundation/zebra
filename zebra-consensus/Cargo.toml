@@ -11,7 +11,7 @@ blake2b_simd = "0.5.11"
 bellman = { git = "https://github.com/zkcrypto/bellman", rev = "bd4af09f50a4d020a3672aff37c4f3f2da2bb36b" }
 bls12_381 = "0.4.0"
 chrono = "0.4.19"
-displaydoc = "0.2.0"
+displaydoc = "0.2.1"
 jubjub = "0.6.0"
 lazy_static = "1.4.0"
 once_cell = "1.7"
