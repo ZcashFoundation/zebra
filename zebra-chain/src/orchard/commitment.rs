@@ -58,14 +58,18 @@ pub struct NoteCommitment(#[serde(with = "serde_helpers::Affine")] pub pallas::A
 
 impl fmt::Debug for NoteCommitment {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        // This will panic if the public key is the identity, which is bad news
-        // bears.
-        let (x, y) = self.0.get_xy().unwrap();
+        let mut d = f.debug_struct("NoteCommitment");
 
-        f.debug_struct("NoteCommitment")
-            .field("x", &hex::encode(x.to_bytes()))
-            .field("y", &hex::encode(y.to_bytes()))
-            .finish()
+        match self.0.get_xy().into() {
+            Some((x, y)) => d
+                .field("x", &hex::encode(x.to_bytes()))
+                .field("y", &hex::encode(y.to_bytes()))
+                .finish(),
+            None => d
+                .field("x", &hex::encode(pallas::Base::zero().to_bytes()))
+                .field("y", &hex::encode(pallas::Base::zero().to_bytes()))
+                .finish(),
+        }
     }
 }
 
@@ -201,14 +205,18 @@ impl std::ops::AddAssign<ValueCommitment> for ValueCommitment {
 
 impl fmt::Debug for ValueCommitment {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        // This will panic if the public key is the identity, which is bad news
-        // bears.
-        let (x, y) = self.0.get_xy().unwrap();
+        let mut d = f.debug_struct("ValueCommitment");
 
-        f.debug_struct("ValueCommitment")
-            .field("x", &hex::encode(x.to_bytes()))
-            .field("y", &hex::encode(y.to_bytes()))
-            .finish()
+        match self.0.get_xy().into() {
+            Some((x, y)) => d
+                .field("x", &hex::encode(x.to_bytes()))
+                .field("y", &hex::encode(y.to_bytes()))
+                .finish(),
+            None => d
+                .field("x", &hex::encode(pallas::Base::zero().to_bytes()))
+                .field("y", &hex::encode(pallas::Base::zero().to_bytes()))
+                .finish(),
+        }
     }
 }
 
