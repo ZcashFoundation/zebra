@@ -5,11 +5,13 @@ use crate::sapling::tree::Root;
 
 use super::Height;
 
-/// Zcash blocks contain different kinds of root hashes, depending on the network upgrade.
+/// Zcash blocks contain different kinds of commitments to their contents,
+/// depending on the network and height.
 ///
-/// The `BlockHeader.commitment_bytes` field is interpreted differently,
-/// based on the current block height. The interpretation changes at or after
-/// network upgrades.
+/// The `Header.commitment_bytes` field is interpreted differently, based on the
+/// network and height. The interpretation changes in the network upgrade
+/// activation block, or in the block immediately after network upgrade
+/// activation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum Commitment {
     /// [Pre-Sapling] Reserved field.
@@ -21,6 +23,9 @@ pub enum Commitment {
     ///
     /// The root LEBS2OSP256(rt) of the Sapling note commitment tree
     /// corresponding to the final Sapling treestate of this block.
+    ///
+    /// Subsequent `Commitment` variants also commit to the `FinalSaplingRoot`,
+    /// via their `EarliestSaplingRoot` and `LatestSaplingRoot` fields.
     FinalSaplingRoot(Root),
 
     /// [Heartwood activation block] Reserved field.
@@ -39,7 +44,10 @@ pub enum Commitment {
     /// The commitment in each block covers the chain history from the most
     /// recent network upgrade, through to the previous block. In particular,
     /// an activation block commits to the entire previous network upgrade, and
-    /// the block after activation commits only to the activation block.
+    /// the block after activation commits only to the activation block. (And
+    /// therefore transitively to all previous network upgrades covered by a
+    /// chain history hash in their activation block, via the previous block
+    /// hash field.)
     ChainHistoryRoot(ChainHistoryMmrRootHash),
 }
 

@@ -40,12 +40,14 @@ pub struct Header {
     /// valid.
     pub merkle_root: merkle::Root,
 
-    /// Some kind of root hash.
+    /// Zcash blocks contain different kinds of commitments to their contents,
+    /// depending on the network and height.
     ///
-    /// Unfortunately, the interpretation of this field was changed without
-    /// incrementing the version, so it cannot be parsed without the block height
-    /// and network. Use [`Block::commitment`](super::Block::commitment) to get the
-    /// parsed [`Commitment`](super::Commitment).
+    /// The interpretation of this field has been changed multiple times, without
+    /// incrementing the block [`version`]. Therefore, this field cannot be
+    /// parsed without the network and height. Use
+    /// [`Block::commitment`](super::Block::commitment) to get the parsed
+    /// [`Commitment`](super::Commitment).
     pub commitment_bytes: [u8; 32],
 
     /// The block timestamp is a Unix epoch time (UTC) when the miner

@@ -63,9 +63,9 @@ impl Block {
         Hash::from(self)
     }
 
-    /// Get the parsed root hash for this block.
+    /// Get the parsed block [`Commitment`] for this block.
     ///
-    /// The interpretation of the root hash depends on the
+    /// The interpretation of the commitment depends on the
     /// configured `network`, and this block's height.
     ///
     /// Returns None if this block does not have a block height.
