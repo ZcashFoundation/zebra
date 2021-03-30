@@ -46,8 +46,6 @@ XXXX-my-feature with the filename of the RFC
 
 Everyone on the Zebra team should review design RFCs:
 
-- [ ] @dconnolly 
-- [ ] @hdevalence 
-- [ ] @oxarbitrage 
-- [ ] @teor2345 
-- [ ] @yaahc 
+- [ ] @dconnolly
+- [ ] @oxarbitrage
+- [ ] @teor2345
