@@ -99,7 +99,7 @@ impl Service<BatchControl<Item>> for Verifier {
                         }
                         Err(RecvError::Lagged(_)) => {
                             tracing::error!(
-                                "batch verification receiver lagged and lost verification results"
+                                "ed25519 batch verification receiver lagged and lost verification results"
                             );
                             Err(Error::InvalidSignature)
                         }
