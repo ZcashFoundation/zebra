@@ -1,7 +1,14 @@
 - Feature Name: `stolon`
 - Start Date: 2020-08-31
-- Design PR: [ZcashFoundation/zebra#0000](https://github.com/ZcashFoundation/zebra/pull/0000)
-- Zebra Issue: [ZcashFoundation/zebra#0000](https://github.com/ZcashFoundation/zebra/issues/0000)
+- Design PR: [ZcashFoundation/zebra#1006](https://github.com/ZcashFoundation/zebra/pull/1006)
+- Zebra Issue: [ZcashFoundation/zebra#1643](https://github.com/ZcashFoundation/zebra/issues/1643)
+- Zebra Implementation: [ZcashFoundation/zebra#1007](https://github.com/ZcashFoundation/zebra/pull/1007)
+
+# Draft
+
+Note: This is a draft Zebra RFC. See
+[ZcashFoundation/zebra#1643](https://github.com/ZcashFoundation/zebra/issues/1643)
+for more details. 
 
 # Summary
 [summary]: #summary
