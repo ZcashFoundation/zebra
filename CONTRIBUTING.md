@@ -57,7 +57,7 @@ To make a Zebra RFC:
 1. Choose a short feature name like `my-feature`.
 
 2. Copy the `book/src/dev/rfcs/0000-template.md` file to
-`book/src/dev/rfcs/drafts/XXXX-my-feature.md`.
+`book/src/dev/rfcs/drafts/xxxx-my-feature.md`.
 
 3. Edit the template header to add the feature name and the date, but leave
 the other fields blank for now.
