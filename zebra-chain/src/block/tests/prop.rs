@@ -40,15 +40,15 @@ proptest! {
     }
 
     #[test]
-    fn root_hash_roundtrip(
+    fn commitment_roundtrip(
         bytes in any::<[u8; 32]>(),
         network in any::<Network>(),
         block_height in any::<Height>()
     ) {
         zebra_test::init();
 
-        let root_hash = RootHash::from_bytes(bytes, network, block_height);
-        let other_bytes = root_hash.to_bytes();
+        let commitment = Commitment::from_bytes(bytes, network, block_height);
+        let other_bytes = commitment.to_bytes();
 
         prop_assert_eq![bytes, other_bytes];
     }
@@ -70,10 +70,10 @@ proptest! {
         let bytes = &mut bytes.as_slice();
 
         // Check the root hash
-        let root_hash = block.root_hash(network);
-        if let Some(root_hash) = root_hash {
-            let root_hash_bytes = root_hash.to_bytes();
-            prop_assert_eq![block.header.root_bytes, root_hash_bytes];
+        let commitment = block.commitment(network);
+        if let Some(commitment) = commitment {
+            let commitment_bytes = commitment.to_bytes();
+            prop_assert_eq![block.header.commitment_bytes, commitment_bytes];
         } else {
             prop_assert_eq![block.coinbase_height(), None];
         }
