@@ -1,11 +1,16 @@
 - Feature Name: Block subsidy
 - Start Date: 2020-10-05
-- Design PR: [ZcashFoundation/zebra#0000](https://github.com/ZcashFoundation/zebra/pull/0000)
-- Zebra Issue: [ZcashFoundation/zebra#0000](https://github.com/ZcashFoundation/zebra/issues/0000)
+- Design PR: [ZcashFoundation/zebra#1129](https://github.com/ZcashFoundation/zebra/pull/1129)
+- Zebra Issue: [ZcashFoundation/zebra#338](https://github.com/ZcashFoundation/zebra/issues/338)
+
+# Draft
+
+Note: This is a draft Zebra RFC. See
+[ZcashFoundation/zebra#338](https://github.com/ZcashFoundation/zebra/issues/338)
+for more details.
 
 # Summary
 [summary]: #summary
-
 
 Zebra manages [semantic verification](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/rfcs/0002-parallel-verification.md#definitions) in the `zebra-consensus` crate, this is done for all incoming blocks. Inside each block the coinbase transaction is special, it holds the subsidy rewards that are paid to different participants (miners, founders, funding stream receivers). This RFC describes how to implement the needed calculations and verification for block subsidy and miner fees.
 
