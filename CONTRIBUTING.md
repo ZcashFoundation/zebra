@@ -57,7 +57,7 @@ To make a Zebra RFC:
 1. Choose a short feature name like `my-feature`.
 
 2. Copy the `book/src/dev/rfcs/0000-template.md` file to
-`book/src/dev/rfcs/XXXX-my-feature.md`.
+`book/src/dev/rfcs/drafts/XXXX-my-feature.md`.
 
 3. Edit the template header to add the feature name and the date, but leave
 the other fields blank for now.
@@ -67,13 +67,16 @@ useful guide.
 
 5. Create an design PR using the RFC template.
 
-6. Take the next available RFC number (not conflicting with any existing RFCs
-or design PRs) and name the RFC file accordingly, e.g., `0027-my-feature.md`
-for number 27. Make sure that `book/src/SUMMARY.md` links to the numbered RFC.
-
-7. After creating an RFC PR, update the RFC header and the PR description
+6. After creating an RFC PR, update the RFC header and the PR description
 with the PR number.
 
-8. After the RFC is accepted, create an issue for the implementation of the
+7. Make changes to the RFC in collaboration with the Zebra team.
+
+8. When the RFC is merged, take the next available RFC number (not conflicting
+with any existing RFCs or design PRs) and name the RFC file accordingly, e.g.,
+`0027-my-feature.md` for number 27. Make sure that `book/src/SUMMARY.md` links
+to the numbered RFC.
+
+7. After the RFC is accepted, create an issue for the implementation of the
 design, and update the RFC header and PR description with the implementation
 issue number.
