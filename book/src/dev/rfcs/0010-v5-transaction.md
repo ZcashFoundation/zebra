@@ -119,7 +119,7 @@ We use `AnchorVariant` in `ShieldedData` to model the anchor differences between
 ```rust
 struct sapling::ShieldedData<AnchorV: AnchorVariant> {
     value_balance: Amount,
-    anchor: AnchorV::Shared,
+    shared_anchor: AnchorV::Shared,
     first: Either<Spend<AnchorV>, Output>,
     rest_spends: Vec<Spend<AnchorV>>,
     rest_outputs: Vec<Output>,
@@ -135,7 +135,7 @@ Sapling spend code is located at `zebra-chain/src/sapling/spend.rs`. We use `Anc
 ```rust
 struct Spend<AnchorV: AnchorVariant> {
     cv: commitment::ValueCommitment,
-    anchor: AnchorV::PerSpend,
+    per_spend_anchor: AnchorV::PerSpend,
     nullifier: note::Nullifier,
     rk: redjubjub::VerificationKeyBytes<SpendAuth>,
     zkproof: Groth16Proof,
@@ -191,7 +191,7 @@ The new V5 structure will create a new `orchard::ShieldedData` type. This new ty
 struct orchard::ShieldedData {
     flags: Flags,
     value_balance: Amount,
-    anchor: tree::Root,
+    shared_anchor: tree::Root,
     proof: Halo2Proof,
     /// An authorized action description.
     ///

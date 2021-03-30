@@ -72,6 +72,15 @@ where
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
         let this = self.project();
+        // CORRECTNESS
+        //
+        // The current task must be scheduled for wakeup every time we return
+        // `Poll::Pending`.
+        //
+        // If no download and verify tasks have exited since the last poll, this
+        // task is scheduled for wakeup when the next task becomes ready.
+        //
+        // TODO:
         // This would be cleaner with poll_map #63514, but that's nightly only.
         if let Some(join_result) = ready!(this.pending.poll_next(cx)) {
             match join_result.expect("block download and verify tasks must not panic") {
@@ -149,6 +158,8 @@ where
         let mut verifier = self.verifier.clone();
         let task = tokio::spawn(
             async move {
+                // TODO: if the verifier and cancel are both ready, which should
+                //       we prefer? (Currently, select! chooses one at random.)
                 let rsp = tokio::select! {
                     _ = &mut cancel_rx => {
                         tracing::trace!("task cancelled prior to download completion");
@@ -169,6 +180,8 @@ where
                 metrics::counter!("sync.downloaded.block.count", 1);
 
                 let rsp = verifier.ready_and().await?.call(block);
+                // TODO: if the verifier and cancel are both ready, which should
+                //       we prefer? (Currently, select! chooses one at random.)
                 let verification = tokio::select! {
                     _ = &mut cancel_rx => {
                         tracing::trace!("task cancelled prior to verification");

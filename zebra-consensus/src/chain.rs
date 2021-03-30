@@ -71,7 +71,13 @@ where
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        // Correctness:
+        // CORRECTNESS
+        //
+        // The current task must be scheduled for wakeup every time we return
+        // `Poll::Pending`.
+        //
+        // If either verifier is unready, this task is scheduled for wakeup when it becomes
+        // ready.
         //
         // We acquire checkpoint readiness before block readiness, to avoid an unlikely
         // hang during the checkpoint to block verifier transition. If the checkpoint and
