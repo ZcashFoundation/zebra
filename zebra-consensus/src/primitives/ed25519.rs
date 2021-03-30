@@ -109,7 +109,7 @@ impl Service<BatchControl<Item>> for Verifier {
             }
 
             BatchControl::Flush => {
-                tracing::trace!("got flush command");
+                tracing::trace!("got ed25519 flush command");
                 let batch = mem::take(&mut self.batch);
                 let _ = self.tx.send(batch.verify(thread_rng()));
                 Box::pin(async { Ok(()) })
