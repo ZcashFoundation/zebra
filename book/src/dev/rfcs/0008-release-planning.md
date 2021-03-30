@@ -1,7 +1,13 @@
 - Feature Name: `release_planning`
 - Start Date: 2020-09-14
-- Design PR: [ZcashFoundation/zebra#0000](https://github.com/ZcashFoundation/zebra/pull/0000)
-- Zebra Issue: [ZcashFoundation/zebra#0000](https://github.com/ZcashFoundation/zebra/issues/0000)
+- Design PR: [ZcashFoundation/zebra#1063](https://github.com/ZcashFoundation/zebra/pull/1063)
+- Zebra Issue: [ZcashFoundation/zebra#1963](https://github.com/ZcashFoundation/zebra/issues/1963)
+
+# Draft
+
+Note: This is a draft Zebra RFC. See
+[ZcashFoundation/zebra#1963](https://github.com/ZcashFoundation/zebra/issues/1963)
+for more details.
 
 # Summary
 [summary]: #summary
