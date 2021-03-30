@@ -123,7 +123,7 @@ The design suggests to implement the parameters needed for funding streams as:
 ```
 /// The funding stream receiver categories
 pub enum FundingStreamReceiver {
-    BootstrapProject,
+    BootstrapProject, // TODO: it might be clearer to call this ECC, no-one uses the legal name
     ZcashFoundation,
     MajorGrants,
 }
@@ -168,6 +168,8 @@ The following constants are needed:
 - `FUNDING_STREAM_MG_ADDRESSES_TESTNET: [&str; 51]`
 
 \* The MG stream is subject to change. [ZIP 1014](https://zips.z.cash/zip-1014#direct-grant-option) and [ZIP 214](https://zips.z.cash/zip-0214) explicitly permit splitting the stream to allow for direct grant recipients that could change the number of addresses. This are not considered in this spec.
+
+TODO: describe how we would handle this sort of change. For example: add an enum to `FUNDING_STREAM_HEIGHT_RANGES` for each different stream split.
 
 ## General subsidy
 
