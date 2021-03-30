@@ -2,30 +2,13 @@
 //!
 //! Code in this file can freely assume that no pre-V4 transactions are present.
 
-use std::convert::TryFrom;
-
 use zebra_chain::{
     amount::Amount,
-    primitives::{ed25519, Groth16Proof},
     sapling::{Output, Spend},
-    transaction::{JoinSplitData, ShieldedData, Transaction},
+    transaction::{ShieldedData, Transaction},
 };
 
 use crate::error::TransactionError;
-
-/// Validate the JoinSplit binding signature.
-///
-/// https://zips.z.cash/protocol/protocol.pdf#sproutnonmalleability
-/// https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
-pub fn validate_joinsplit_sig(
-    joinsplit_data: &JoinSplitData<Groth16Proof>,
-    sighash: &[u8],
-) -> Result<(), TransactionError> {
-    // TODO: batch verify ed25519: https://github.com/ZcashFoundation/zebra/issues/1944
-    ed25519::VerificationKey::try_from(joinsplit_data.pub_key)
-        .and_then(|vk| vk.verify(&joinsplit_data.sig, sighash))
-        .map_err(TransactionError::Ed25519)
-}
 
 /// Checks that the transaction has inputs and outputs.
 ///

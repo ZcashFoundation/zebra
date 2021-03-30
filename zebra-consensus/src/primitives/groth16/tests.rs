@@ -5,9 +5,7 @@ use tower::ServiceExt;
 
 use zebra_chain::{block::Block, serialization::ZcashDeserializeInto, transaction::Transaction};
 
-use crate::primitives::groth16;
-
-use super::*;
+use crate::primitives::groth16::{self, *};
 
 async fn verify_groth16_spends_and_outputs<V>(
     spend_verifier: &mut V,
