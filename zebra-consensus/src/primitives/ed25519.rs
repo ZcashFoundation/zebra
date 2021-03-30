@@ -82,7 +82,7 @@ impl Service<BatchControl<Item>> for Verifier {
     fn call(&mut self, req: BatchControl<Item>) -> Self::Future {
         match req {
             BatchControl::Item(item) => {
-                tracing::trace!("got item");
+                tracing::trace!("got ed25519 item");
                 self.batch.queue(item);
                 let mut rx = self.tx.subscribe();
                 Box::pin(async move {
