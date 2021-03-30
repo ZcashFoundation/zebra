@@ -103,7 +103,7 @@ impl Service<BatchControl<Item>> for Verifier {
                             );
                             Err(Error::InvalidSignature)
                         }
-                        Err(RecvError::Closed) => panic!("verifier was dropped without flushing"),
+                        Err(RecvError::Closed) => panic!("ed25519 verifier was dropped without flushing"),
                     }
                 })
             }
