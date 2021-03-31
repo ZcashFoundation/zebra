@@ -15,7 +15,7 @@ use super::{commitment, note, tree, AnchorVariant, PerSpendAnchor};
 /// A _Spend Description_, as described in [protocol specification §7.3][ps].
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#spendencoding
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Spend<AnchorV: AnchorVariant> {
     /// A value commitment to the value of the input note.
     pub cv: commitment::ValueCommitment,
@@ -87,19 +87,3 @@ impl ZcashDeserialize for Spend<PerSpendAnchor> {
         })
     }
 }
-
-impl<T> std::cmp::PartialEq for Spend<T>
-where
-    T: AnchorVariant,
-{
-    fn eq(&self, other: &Self) -> bool {
-        self.cv == other.cv
-            && self.anchor == other.anchor
-            && self.nullifier == other.nullifier
-            && self.rk == other.rk
-            && self.zkproof == other.zkproof
-            && self.spend_auth_sig == other.spend_auth_sig
-    }
-}
-
-impl<T> std::cmp::Eq for Spend<T> where T: AnchorVariant {}
