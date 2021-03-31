@@ -336,18 +336,21 @@ impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
     }
 }
 
-impl<T: sapling::AnchorVariant> UpdateWith<Option<sapling::ShieldedData<T>>> for Chain {
-    fn update_chain_state_with(&mut self, shielded_data: &Option<sapling::ShieldedData<T>>) {
+impl<AnchorV> UpdateWith<Option<sapling::ShieldedData<AnchorV>>> for Chain
+where
+    AnchorV: sapling::AnchorVariant + Clone,
+{
+    fn update_chain_state_with(&mut self, shielded_data: &Option<sapling::ShieldedData<AnchorV>>) {
         if let Some(shielded_data) = shielded_data {
-            for sapling::Spend { nullifier, .. } in shielded_data.spends() {
+            for nullifier in shielded_data.nullifiers() {
                 self.sapling_nullifiers.insert(*nullifier);
             }
         }
     }
 
-    fn revert_chain_state_with(&mut self, shielded_data: &Option<sapling::ShieldedData<T>>) {
+    fn revert_chain_state_with(&mut self, shielded_data: &Option<sapling::ShieldedData<AnchorV>>) {
         if let Some(shielded_data) = shielded_data {
-            for sapling::Spend { nullifier, .. } in shielded_data.spends() {
+            for nullifier in shielded_data.nullifiers() {
                 assert!(
                     self.sapling_nullifiers.remove(nullifier),
                     "nullifier must be present if block was"
