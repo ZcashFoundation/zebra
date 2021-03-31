@@ -439,6 +439,7 @@ impl<'a> SigHasher<'a> {
             .personal(ZCASH_SHIELDED_SPENDS_HASH_PERSONALIZATION)
             .to_state();
 
+        // TODO: make a generic wrapper in `spends.rs` that does this serialization
         for spend in shielded_data.spends() {
             // This is the canonical transaction serialization, minus the `spendAuthSig`.
             spend.cv.zcash_serialize(&mut hash)?;

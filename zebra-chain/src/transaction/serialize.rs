@@ -276,6 +276,7 @@ impl ZcashDeserialize for Transaction {
                 let joinsplit_data = OptV4Jsd::zcash_deserialize(&mut reader)?;
 
                 use futures::future::Either::*;
+                // Arbitraily use a spend for `first`, if both are present
                 let sapling_shielded_data = if !shielded_spends.is_empty() {
                     Some(sapling::ShieldedData {
                         value_balance,
@@ -290,6 +291,8 @@ impl ZcashDeserialize for Transaction {
                         value_balance,
                         shared_anchor: (),
                         first: Right(shielded_outputs.remove(0)),
+                        // the spends are actually empty here, but we use the
+                        // vec for consistency and readability
                         rest_spends: shielded_spends,
                         rest_outputs: shielded_outputs,
                         binding_sig: reader.read_64_bytes()?.into(),

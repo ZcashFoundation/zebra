@@ -1,3 +1,8 @@
+//! Sapling spends for `V4` and `V5` `Transaction`s.
+//!
+//! Zebra uses a generic spend type for `V4` and `V5` transactions.
+//! The anchor change is handled using the `AnchorVariant` type trait.
+
 use std::io;
 
 use crate::{
@@ -13,6 +18,13 @@ use crate::{
 use super::{commitment, note, tree, AnchorVariant, PerSpendAnchor};
 
 /// A _Spend Description_, as described in [protocol specification §7.3][ps].
+///
+/// # Differences between Transaction Versions
+///
+/// In `Transaction::V4`, each `Spend` has its own anchor. In `Transaction::V5`,
+/// there is a single `shared_anchor` for the entire transaction. This
+/// structural difference is modeled using the `AnchorVariant` type trait.
+/// A type of `()` means "not present in this transaction version".
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#spendencoding
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -51,6 +63,7 @@ impl Spend<PerSpendAnchor> {
         inputs.push(cv_affine.get_u());
         inputs.push(cv_affine.get_v());
 
+        // TODO: V4 only
         inputs.push(jubjub::Fq::from_bytes(&self.per_spend_anchor.into()).unwrap());
 
         let nullifier_limbs: [jubjub::Fq; 2] = self.nullifier.into();
@@ -65,6 +78,7 @@ impl Spend<PerSpendAnchor> {
 impl ZcashSerialize for Spend<PerSpendAnchor> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         self.cv.zcash_serialize(&mut writer)?;
+        // TODO: V4 only
         writer.write_all(&self.per_spend_anchor.0[..])?;
         writer.write_32_bytes(&self.nullifier.into())?;
         writer.write_all(&<[u8; 32]>::from(self.rk)[..])?;
@@ -79,6 +93,7 @@ impl ZcashDeserialize for Spend<PerSpendAnchor> {
         use crate::sapling::{commitment::ValueCommitment, note::Nullifier};
         Ok(Spend {
             cv: ValueCommitment::zcash_deserialize(&mut reader)?,
+            // TODO: V4 only
             per_spend_anchor: tree::Root(reader.read_32_bytes()?),
             nullifier: Nullifier::from(reader.read_32_bytes()?),
             rk: reader.read_32_bytes()?.into(),

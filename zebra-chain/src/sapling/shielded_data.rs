@@ -1,3 +1,9 @@
+//! Sapling shielded data for `V4` and `V5` `Transaction`s.
+//!
+//! Zebra uses a generic shielded data type for `V4` and `V5` transactions.
+//! The `value_balance` change is handled using the default zero value.
+//! The anchor change is handled using the `AnchorVariant` type trait.
+
 use futures::future::Either;
 
 use crate::{
@@ -13,9 +19,11 @@ use std::{
     fmt::Debug,
 };
 
+/// Per-Spend Sapling anchors, used in Transaction V4.
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct PerSpendAnchor {}
 
+/// Shared Sapling anchors, used in Transaction V5.
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct SharedAnchor {}
 
@@ -23,13 +31,26 @@ impl AnchorVariant for PerSpendAnchor {
     type Shared = ();
     type PerSpend = tree::Root;
 }
+
 impl AnchorVariant for SharedAnchor {
     type Shared = tree::Root;
     type PerSpend = ();
 }
 
+/// A type trait to handle structural differences between V4 and V5 Sapling
+/// Transaction anchors.
+///
+/// In Transaction V4, anchors are per-Spend. In Transaction V5, there is a
+/// single transaction anchor for all Spends in a transaction.
 pub trait AnchorVariant {
+    /// The type of the shared anchor.
+    ///
+    /// `()` means "not present in this transaction version".
     type Shared: Clone + Debug + DeserializeOwned + Serialize + Eq + PartialEq;
+
+    /// The type of the per-spend anchor.
+    ///
+    /// `()` means "not present in this transaction version".
     type PerSpend: Clone + Debug + DeserializeOwned + Serialize + Eq + PartialEq;
 }
 
@@ -41,11 +62,28 @@ pub trait AnchorVariant {
 /// description with the required signature data, so that an
 /// `Option<ShieldedData>` correctly models the presence or absence of any
 /// shielded data.
+///
+/// # Differences between Transaction Versions
+///
+/// The Sapling `value_balance` field is optional in `Transaction::V5`, but
+/// required in `Transaction::V4`. In both cases, if there is no `ShieldedData`,
+/// then the field value must be zero. Therefore, only need to store
+/// `value_balance` when there is some Sapling `ShieldedData`.
+///
+/// In `Transaction::V4`, each `Spend` has its own anchor. In `Transaction::V5`,
+/// there is a single `shared_anchor` for the entire transaction. This
+/// structural difference is modeled using the `AnchorVariant` type trait.
+/// A type of `()` means "not present in this transaction version".
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ShieldedData<AnchorV: AnchorVariant> {
+pub struct ShieldedData<AnchorV>
+where
+    AnchorV: AnchorVariant + Clone,
+{
     /// The net value of Sapling spend transfers minus output transfers.
     pub value_balance: Amount,
     /// The shared anchor for all `Spend`s in this transaction.
+    ///
+    /// A type of `()` means "not present in this transaction version".
     pub shared_anchor: AnchorV::Shared,
     /// Either a spend or output description.
     ///
@@ -145,6 +183,9 @@ where
 // of a ShieldedData with at least one spend and at least one output, depending
 // on which goes in the `first` slot.  This is annoying but a smallish price to
 // pay for structural validity.
+//
+// A `ShieldedData<PerSpendAnchor>` can never be equal to a
+// `ShieldedData<SharedAnchor>`, even if they have the same effects.
 
 impl<AnchorV> std::cmp::PartialEq for ShieldedData<AnchorV>
 where
