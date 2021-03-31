@@ -263,7 +263,7 @@ where
                             async_checks.push(output_rsp.boxed());
                         }
 
-                        let bvk = shielded_data.binding_verification_key(shielded_data.value_balance);
+                        let bvk = shielded_data.binding_verification_key();
 
                         // TODO: enable async verification and remove this block - #1939
                         {
