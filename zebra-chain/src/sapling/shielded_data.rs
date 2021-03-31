@@ -13,10 +13,10 @@ use std::{
     fmt::Debug,
 };
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct PerSpendAnchor {}
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct SharedAnchor {}
 
 impl AnchorVariant for PerSpendAnchor {
@@ -164,10 +164,7 @@ where
         self.value_balance == other.value_balance
             && self.shared_anchor == other.shared_anchor
             && self.binding_sig == other.binding_sig
-            && self
-                .spends()
-                .zip(other.spends())
-                .all(|(a, b)| a == b)
+            && self.spends().zip(other.spends()).all(|(a, b)| a == b)
             && self.outputs().zip(other.outputs()).all(|(a, b)| a == b)
     }
 }
