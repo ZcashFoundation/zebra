@@ -15,7 +15,7 @@ use crate::{
     },
 };
 
-use super::{commitment, note, tree, AnchorVariant, PerSpendAnchor};
+use super::{commitment, note, tree, AnchorVariant, PerSpendAnchor, SharedAnchor};
 
 /// A _Spend Description_, as described in [protocol specification §7.3][ps].
 ///
@@ -43,6 +43,28 @@ pub struct Spend<AnchorV: AnchorVariant> {
     pub zkproof: Groth16Proof,
     /// A signature authorizing this spend.
     pub spend_auth_sig: redjubjub::Signature<SpendAuth>,
+}
+
+impl From<(Spend<SharedAnchor>, tree::Root)> for Spend<PerSpendAnchor> {
+    /// Convert a `Spend<SharedAnchor>` and its shared anchor, into a
+    /// `Spend<PerSpendAnchor>`.
+    fn from(shared_spend: (Spend<SharedAnchor>, tree::Root)) -> Self {
+        Spend::<PerSpendAnchor> {
+            per_spend_anchor: shared_spend.1,
+            cv: shared_spend.0.cv,
+            nullifier: shared_spend.0.nullifier,
+            rk: shared_spend.0.rk,
+            zkproof: shared_spend.0.zkproof,
+            spend_auth_sig: shared_spend.0.spend_auth_sig,
+        }
+    }
+}
+
+impl From<(Spend<PerSpendAnchor>, ())> for Spend<PerSpendAnchor> {
+    /// Take the `Spend<PerSpendAnchor>` from a spend + anchor tuple.
+    fn from(per_spend: (Spend<PerSpendAnchor>, ())) -> Self {
+        per_spend.0
+    }
 }
 
 impl Spend<PerSpendAnchor> {

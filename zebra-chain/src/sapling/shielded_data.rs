@@ -19,7 +19,8 @@ use std::{
     fmt::Debug,
 };
 
-/// Per-Spend Sapling anchors, used in Transaction V4.
+/// Per-Spend Sapling anchors, used in Transaction V4 and the
+/// `spends_per_anchor` method.
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct PerSpendAnchor {}
 
@@ -110,12 +111,37 @@ where
     pub binding_sig: Signature<Binding>,
 }
 
-impl<T> ShieldedData<T>
+impl<AnchorV> ShieldedData<AnchorV>
 where
-    T: AnchorVariant,
+    AnchorV: AnchorVariant + Clone,
+    Spend<PerSpendAnchor>: From<(Spend<AnchorV>, AnchorV::Shared)>,
 {
     /// Iterate over the [`Spend`]s for this transaction.
-    pub fn spends(&self) -> impl Iterator<Item = &Spend<T>> {
+    ///
+    /// Returns `Spend<PerSpendAnchor>` regardless of the underlying transaction
+    /// version, to allow generic verification over V4 and V5 transactions.
+    ///
+    /// # Correctness
+    ///
+    /// Do not use this function for serialization.
+    pub fn spends_per_anchor(&self) -> impl Iterator<Item = Spend<PerSpendAnchor>> + '_ {
+        self.spends()
+            .cloned()
+            .map(move |spend| Spend::<PerSpendAnchor>::from((spend, self.shared_anchor.clone())))
+    }
+}
+
+impl<AnchorV> ShieldedData<AnchorV>
+where
+    AnchorV: AnchorVariant + Clone,
+{
+    /// Iterate over the [`Spend`]s for this transaction, returning them as
+    /// their generic type.
+    ///
+    /// # Correctness
+    ///
+    /// Use this function for serialization.
+    pub fn spends(&self) -> impl Iterator<Item = &Spend<AnchorV>> {
         match self.first {
             Either::Left(ref spend) => Some(spend),
             Either::Right(_) => None,

@@ -81,9 +81,12 @@ pub fn has_inputs_and_outputs(tx: &Transaction) -> Result<(), TransactionError> 
 /// Check that if there are no Spends or Outputs, that valueBalance is also 0.
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#consensusfrombitcoin
-pub fn shielded_balances_match<T: AnchorVariant>(
-    shielded_data: &ShieldedData<T>,
-) -> Result<(), TransactionError> {
+pub fn shielded_balances_match<AnchorV>(
+    shielded_data: &ShieldedData<AnchorV>,
+) -> Result<(), TransactionError>
+where
+    AnchorV: AnchorVariant + Clone,
+{
     if (shielded_data.spends().count() + shielded_data.outputs().count() != 0)
         || i64::from(shielded_data.value_balance) == 0
     {

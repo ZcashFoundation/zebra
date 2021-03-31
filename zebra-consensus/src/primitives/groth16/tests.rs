@@ -36,13 +36,13 @@ where
                 ..
             } => {
                 if let Some(shielded_data) = sapling_shielded_data {
-                    for spend in shielded_data.spends() {
+                    for spend in shielded_data.spends_per_anchor() {
                         tracing::trace!(?spend);
 
                         let spend_rsp = spend_verifier
                             .ready_and()
                             .await?
-                            .call(groth16::ItemWrapper::from(spend).into());
+                            .call(groth16::ItemWrapper::from(&spend).into());
 
                         async_checks.push(spend_rsp);
                     }
