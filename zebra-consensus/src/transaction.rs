@@ -147,9 +147,8 @@ where
                     // outputs,
                     // lock_time,
                     // expiry_height,
-                    value_balance,
                     joinsplit_data,
-                    shielded_data,
+                    sapling_shielded_data,
                     ..
                 } => {
                     // A set of asynchronous checks which must all succeed.
@@ -213,16 +212,16 @@ where
                         async_checks.push(rsp.boxed());
                     }
 
-                    if let Some(shielded_data) = shielded_data {
-                        check::shielded_balances_match(&shielded_data, *value_balance)?;
+                    if let Some(shielded_data) = sapling_shielded_data {
+                        check::shielded_balances_match(&shielded_data)?;
 
-                        for spend in shielded_data.spends() {
+                        for spend in shielded_data.spends_per_anchor() {
                             // Consensus rule: cv and rk MUST NOT be of small
                             // order, i.e. [h_J]cv MUST NOT be 𝒪_J and [h_J]rk
                             // MUST NOT be 𝒪_J.
                             //
                             // https://zips.z.cash/protocol/protocol.pdf#spenddesc
-                            check::spend_cv_rk_not_small_order(spend)?;
+                            check::spend_cv_rk_not_small_order(&spend)?;
 
                             // Consensus rule: The proof π_ZKSpend MUST be valid
                             // given a primary input formed from the other
@@ -236,7 +235,7 @@ where
                             let spend_rsp = spend_verifier
                                 .ready_and()
                                 .await?
-                                .call(primitives::groth16::ItemWrapper::from(spend).into());
+                                .call(primitives::groth16::ItemWrapper::from(&spend).into());
 
                             async_checks.push(spend_rsp.boxed());
 
@@ -282,7 +281,7 @@ where
                             async_checks.push(output_rsp.boxed());
                         }
 
-                        let bvk = shielded_data.binding_verification_key(*value_balance);
+                        let bvk = shielded_data.binding_verification_key();
 
                         // TODO: enable async verification and remove this block - #1939
                         {

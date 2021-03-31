@@ -166,13 +166,13 @@ impl UpdateWith<PreparedBlock> for Chain {
             .enumerate()
         {
             use transaction::Transaction::*;
-            let (inputs, shielded_data, joinsplit_data) = match transaction.deref() {
+            let (inputs, joinsplit_data, sapling_shielded_data) = match transaction.deref() {
                 V4 {
                     inputs,
-                    shielded_data,
                     joinsplit_data,
+                    sapling_shielded_data,
                     ..
-                } => (inputs, shielded_data, joinsplit_data),
+                } => (inputs, joinsplit_data, sapling_shielded_data),
                 V5 { .. } => unimplemented!("v5 transaction format as specified in ZIP-225"),
                 V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(
                     "older transaction versions only exist in finalized blocks pre sapling",
@@ -195,7 +195,7 @@ impl UpdateWith<PreparedBlock> for Chain {
             // add sprout anchor and nullifiers
             self.update_chain_state_with(joinsplit_data);
             // add sapling anchor and nullifier
-            self.update_chain_state_with(shielded_data);
+            self.update_chain_state_with(sapling_shielded_data);
         }
     }
 
@@ -226,13 +226,13 @@ impl UpdateWith<PreparedBlock> for Chain {
             block.transactions.iter().zip(transaction_hashes.iter())
         {
             use transaction::Transaction::*;
-            let (inputs, shielded_data, joinsplit_data) = match transaction.deref() {
+            let (inputs, joinsplit_data, sapling_shielded_data) = match transaction.deref() {
                 V4 {
                     inputs,
-                    shielded_data,
                     joinsplit_data,
+                    sapling_shielded_data,
                     ..
-                } => (inputs, shielded_data, joinsplit_data),
+                } => (inputs, joinsplit_data, sapling_shielded_data),
                 V5 { .. } => unimplemented!("v5 transaction format as specified in ZIP-225"),
                 V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(
                     "older transaction versions only exist in finalized blocks pre sapling",
@@ -252,7 +252,7 @@ impl UpdateWith<PreparedBlock> for Chain {
             // remove sprout anchor and nullifiers
             self.revert_chain_state_with(joinsplit_data);
             // remove sapling anchor and nullfier
-            self.revert_chain_state_with(shielded_data);
+            self.revert_chain_state_with(sapling_shielded_data);
         }
     }
 }
@@ -336,18 +336,21 @@ impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
     }
 }
 
-impl UpdateWith<Option<transaction::ShieldedData>> for Chain {
-    fn update_chain_state_with(&mut self, shielded_data: &Option<transaction::ShieldedData>) {
+impl<AnchorV> UpdateWith<Option<sapling::ShieldedData<AnchorV>>> for Chain
+where
+    AnchorV: sapling::AnchorVariant + Clone,
+{
+    fn update_chain_state_with(&mut self, shielded_data: &Option<sapling::ShieldedData<AnchorV>>) {
         if let Some(shielded_data) = shielded_data {
-            for sapling::Spend { nullifier, .. } in shielded_data.spends() {
+            for nullifier in shielded_data.nullifiers() {
                 self.sapling_nullifiers.insert(*nullifier);
             }
         }
     }
 
-    fn revert_chain_state_with(&mut self, shielded_data: &Option<transaction::ShieldedData>) {
+    fn revert_chain_state_with(&mut self, shielded_data: &Option<sapling::ShieldedData<AnchorV>>) {
         if let Some(shielded_data) = shielded_data {
-            for sapling::Spend { nullifier, .. } in shielded_data.spends() {
+            for nullifier in shielded_data.nullifiers() {
                 assert!(
                     self.sapling_nullifiers.remove(nullifier),
                     "nullifier must be present if block was"

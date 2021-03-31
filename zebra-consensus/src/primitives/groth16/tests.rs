@@ -30,15 +30,18 @@ where
             | Transaction::V2 { .. }
             | Transaction::V3 { .. }
             | Transaction::V5 { .. } => (),
-            Transaction::V4 { shielded_data, .. } => {
-                if let Some(shielded_data) = shielded_data {
-                    for spend in shielded_data.spends() {
+            Transaction::V4 {
+                sapling_shielded_data,
+                ..
+            } => {
+                if let Some(shielded_data) = sapling_shielded_data {
+                    for spend in shielded_data.spends_per_anchor() {
                         tracing::trace!(?spend);
 
                         let spend_rsp = spend_verifier
                             .ready_and()
                             .await?
-                            .call(groth16::ItemWrapper::from(spend).into());
+                            .call(groth16::ItemWrapper::from(&spend).into());
 
                         async_checks.push(spend_rsp);
                     }
@@ -110,8 +113,11 @@ where
             | Transaction::V2 { .. }
             | Transaction::V3 { .. }
             | Transaction::V5 { .. } => (),
-            Transaction::V4 { shielded_data, .. } => {
-                if let Some(shielded_data) = shielded_data {
+            Transaction::V4 {
+                sapling_shielded_data,
+                ..
+            } => {
+                if let Some(shielded_data) = sapling_shielded_data {
                     for output in shielded_data.outputs() {
                         // This changes the primary inputs to the proof
                         // verification, causing it to fail for this proof.

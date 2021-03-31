@@ -3,9 +3,8 @@
 //! Code in this file can freely assume that no pre-V4 transactions are present.
 
 use zebra_chain::{
-    amount::Amount,
-    sapling::{Output, Spend},
-    transaction::{ShieldedData, Transaction},
+    sapling::{AnchorVariant, Output, PerSpendAnchor, ShieldedData, Spend},
+    transaction::Transaction,
 };
 
 use crate::error::TransactionError;
@@ -27,7 +26,7 @@ pub fn has_inputs_and_outputs(tx: &Transaction) -> Result<(), TransactionError> 
             inputs,
             outputs,
             joinsplit_data,
-            shielded_data,
+            sapling_shielded_data,
             ..
         } => {
             let tx_in_count = inputs.len();
@@ -36,11 +35,11 @@ pub fn has_inputs_and_outputs(tx: &Transaction) -> Result<(), TransactionError> 
                 .as_ref()
                 .map(|d| d.joinsplits().count())
                 .unwrap_or(0);
-            let n_shielded_spend = shielded_data
+            let n_shielded_spend = sapling_shielded_data
                 .as_ref()
                 .map(|d| d.spends().count())
                 .unwrap_or(0);
-            let n_shielded_output = shielded_data
+            let n_shielded_output = sapling_shielded_data
                 .as_ref()
                 .map(|d| d.outputs().count())
                 .unwrap_or(0);
@@ -65,12 +64,14 @@ pub fn has_inputs_and_outputs(tx: &Transaction) -> Result<(), TransactionError> 
 /// Check that if there are no Spends or Outputs, that valueBalance is also 0.
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#consensusfrombitcoin
-pub fn shielded_balances_match(
-    shielded_data: &ShieldedData,
-    value_balance: Amount,
-) -> Result<(), TransactionError> {
+pub fn shielded_balances_match<AnchorV>(
+    shielded_data: &ShieldedData<AnchorV>,
+) -> Result<(), TransactionError>
+where
+    AnchorV: AnchorVariant + Clone,
+{
     if (shielded_data.spends().count() + shielded_data.outputs().count() != 0)
-        || i64::from(value_balance) == 0
+        || i64::from(shielded_data.value_balance) == 0
     {
         Ok(())
     } else {
@@ -93,9 +94,11 @@ pub fn coinbase_tx_no_joinsplit_or_spend(tx: &Transaction) -> Result<(), Transac
             // The ShieldedData contains both Spends and Outputs, and Outputs
             // are allowed post-Heartwood, so we have to count Spends.
             Transaction::V4 {
-                shielded_data: Some(shielded_data),
+                sapling_shielded_data: Some(sapling_shielded_data),
                 ..
-            } if shielded_data.spends().count() > 0 => Err(TransactionError::CoinbaseHasSpend),
+            } if sapling_shielded_data.spends().count() > 0 => {
+                Err(TransactionError::CoinbaseHasSpend)
+            }
 
             Transaction::V4 { .. } => Ok(()),
 
@@ -116,7 +119,7 @@ pub fn coinbase_tx_no_joinsplit_or_spend(tx: &Transaction) -> Result<(), Transac
 /// i.e. [h_J]cv MUST NOT be 𝒪_J and [h_J]rk MUST NOT be 𝒪_J.
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#spenddesc
-pub fn spend_cv_rk_not_small_order(spend: &Spend) -> Result<(), TransactionError> {
+pub fn spend_cv_rk_not_small_order(spend: &Spend<PerSpendAnchor>) -> Result<(), TransactionError> {
     if bool::from(spend.cv.0.is_small_order())
         || bool::from(
             jubjub::AffinePoint::from_bytes(spend.rk.into())
