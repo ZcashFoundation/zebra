@@ -146,9 +146,9 @@ where
 // on which goes in the `first` slot.  This is annoying but a smallish price to
 // pay for structural validity.
 
-impl<T> std::cmp::PartialEq for ShieldedData<T>
+impl<AnchorV> std::cmp::PartialEq for ShieldedData<AnchorV>
 where
-    T: AnchorVariant,
+    AnchorV: AnchorVariant + Clone + PartialEq,
 {
     fn eq(&self, other: &Self) -> bool {
         // First check that the lengths match, so we know it is safe to use zip,
@@ -160,11 +160,17 @@ where
             return false;
         }
 
-        // Now check that the binding_sig, spends, outputs match.
-        self.binding_sig == other.binding_sig
-            && self.spends().zip(other.spends()).all(|(a, b)| a == b)
+        // Now check that all the fields match
+        self.value_balance == other.value_balance
+            && self.shared_anchor == other.shared_anchor
+            && self.binding_sig == other.binding_sig
+            && self
+                .spends()
+                .zip(other.spends())
+                .all(|(a, b)| a == b)
             && self.outputs().zip(other.outputs()).all(|(a, b)| a == b)
     }
 }
 
-impl<T> std::cmp::Eq for ShieldedData<T> where T: AnchorVariant {}
+impl<AnchorV> std::cmp::Eq for ShieldedData<AnchorV> where AnchorV: AnchorVariant + Clone + PartialEq
+{}
