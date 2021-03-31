@@ -442,7 +442,8 @@ impl<'a> SigHasher<'a> {
         for spend in shielded_data.spends() {
             // This is the canonical transaction serialization, minus the `spendAuthSig`.
             spend.cv.zcash_serialize(&mut hash)?;
-            hash.write_all(&spend.anchor.0[..])?;
+            // TODO: ZIP-243 Sapling to Canopy only
+            hash.write_all(&spend.per_spend_anchor.0[..])?;
             hash.write_32_bytes(&spend.nullifier.into())?;
             hash.write_all(&<[u8; 32]>::from(spend.rk)[..])?;
             spend.zkproof.zcash_serialize(&mut hash)?;

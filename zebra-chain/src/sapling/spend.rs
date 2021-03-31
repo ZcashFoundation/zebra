@@ -20,7 +20,9 @@ pub struct Spend<AnchorV: AnchorVariant> {
     /// A value commitment to the value of the input note.
     pub cv: commitment::ValueCommitment,
     /// A root of the Sapling note commitment tree at some block height in the past.
-    pub anchor: AnchorV::PerSpend,
+    ///
+    /// A type of `()` means "not present in this transaction version".
+    pub per_spend_anchor: AnchorV::PerSpend,
     /// The nullifier of the input note.
     pub nullifier: note::Nullifier,
     /// The randomized public key for `spend_auth_sig`.
@@ -49,7 +51,7 @@ impl Spend<PerSpendAnchor> {
         inputs.push(cv_affine.get_u());
         inputs.push(cv_affine.get_v());
 
-        inputs.push(jubjub::Fq::from_bytes(&self.anchor.into()).unwrap());
+        inputs.push(jubjub::Fq::from_bytes(&self.per_spend_anchor.into()).unwrap());
 
         let nullifier_limbs: [jubjub::Fq; 2] = self.nullifier.into();
 
@@ -63,7 +65,7 @@ impl Spend<PerSpendAnchor> {
 impl ZcashSerialize for Spend<PerSpendAnchor> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         self.cv.zcash_serialize(&mut writer)?;
-        writer.write_all(&self.anchor.0[..])?;
+        writer.write_all(&self.per_spend_anchor.0[..])?;
         writer.write_32_bytes(&self.nullifier.into())?;
         writer.write_all(&<[u8; 32]>::from(self.rk)[..])?;
         self.zkproof.zcash_serialize(&mut writer)?;
@@ -77,7 +79,7 @@ impl ZcashDeserialize for Spend<PerSpendAnchor> {
         use crate::sapling::{commitment::ValueCommitment, note::Nullifier};
         Ok(Spend {
             cv: ValueCommitment::zcash_deserialize(&mut reader)?,
-            anchor: tree::Root(reader.read_32_bytes()?),
+            per_spend_anchor: tree::Root(reader.read_32_bytes()?),
             nullifier: Nullifier::from(reader.read_32_bytes()?),
             rk: reader.read_32_bytes()?.into(),
             zkproof: Groth16Proof::zcash_deserialize(&mut reader)?,
