@@ -1,5 +1,6 @@
 //! Asynchronous verification of cryptographic primitives.
 
+pub mod ed25519;
 pub mod groth16;
 pub mod redjubjub;
 

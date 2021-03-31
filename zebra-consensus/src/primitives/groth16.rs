@@ -175,7 +175,17 @@ impl Service<BatchControl<Item>> for Verifier {
                 let mut rx = self.tx.subscribe();
                 Box::pin(async move {
                     match rx.recv().await {
-                        Ok(result) => result,
+                        Ok(result) => {
+                            if result.is_ok() {
+                                tracing::trace!(?result, "verified groth16 proof");
+                                metrics::counter!("proofs.groth16.verified", 1);
+                            } else {
+                                tracing::trace!(?result, "invalid groth16 proof");
+                                metrics::counter!("proofs.groth16.invalid", 1);
+                            }
+
+                            result
+                        }
                         Err(RecvError::Lagged(_)) => {
                             tracing::error!(
                                 "missed channel updates, BROADCAST_BUFFER_SIZE is too low!!"

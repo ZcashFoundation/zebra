@@ -38,8 +38,10 @@ proptest = { version = "0.10", optional = true }
 proptest-derive = { version = "0.3.0", optional = true }
 
 # ZF deps
-displaydoc = "0.2.0"
-ed25519-zebra = "2"
+
+displaydoc = "0.2.1"
+# TODO: upgrade ed25510-zebra to 3 when released: https://github.com/ZcashFoundation/ed25519-zebra/issues/45
+ed25519-zebra = {git = "https://github.com/ZcashFoundation/ed25519-zebra", rev = "539fad040c443302775b0f508e616418825e6c22"}
 equihash = "0.1"
 #redjubjub = "0.2"
 redjubjub = {git = "https://github.com/ZcashFoundation/redjubjub", rev = "8101eaff1cb2fca45334f77a65caa4c46e3d545b"}

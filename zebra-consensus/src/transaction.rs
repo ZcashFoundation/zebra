@@ -129,6 +129,7 @@ where
         let mut spend_verifier = primitives::groth16::SPEND_VERIFIER.clone();
         let mut output_verifier = primitives::groth16::OUTPUT_VERIFIER.clone();
 
+        let mut ed25519_verifier = primitives::ed25519::VERIFIER.clone();
         let mut redjubjub_verifier = primitives::redjubjub::VERIFIER.clone();
         let mut script_verifier = self.script_verifier.clone();
 
@@ -191,7 +192,24 @@ where
                         // correctly.
 
                         // Then, pass those items to self.joinsplit to verify them.
-                        check::validate_joinsplit_sig(joinsplit_data, shielded_sighash.as_bytes())?;
+
+                        // Consensus rule: The joinSplitSig MUST represent a
+                        // valid signature, under joinSplitPubKey, of the
+                        // sighash.
+                        //
+                        // Queue the validation of the JoinSplit signature while
+                        // adding the resulting future to our collection of
+                        // async checks that (at a minimum) must pass for the
+                        // transaction to verify.
+                        //
+                        // https://zips.z.cash/protocol/protocol.pdf#sproutnonmalleability
+                        // https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
+                        let rsp = ed25519_verifier
+                            .ready_and()
+                            .await?
+                            .call((joinsplit_data.pub_key, joinsplit_data.sig, &shielded_sighash).into());
+
+                        async_checks.push(rsp.boxed());
                     }
 
                     if let Some(shielded_data) = sapling_shielded_data {

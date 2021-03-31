@@ -108,6 +108,15 @@ where
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
         let this = self.project();
+        // CORRECTNESS
+        //
+        // The current task must be scheduled for wakeup every time we return
+        // `Poll::Pending`.
+        //
+        // If no download and verify tasks have exited since the last poll, this
+        // task is scheduled for wakeup when the next task becomes ready.
+        //
+        // TODO:
         // This would be cleaner with poll_map #63514, but that's nightly only.
         if let Some(join_result) = ready!(this.pending.poll_next(cx)) {
             match join_result.expect("block download and verify tasks must not panic") {
@@ -223,6 +232,8 @@ where
         .in_current_span();
 
         let task = tokio::spawn(async move {
+            // TODO: if the verifier and cancel are both ready, which should we
+            //       prefer? (Currently, select! chooses one at random.)
             tokio::select! {
                 _ = &mut cancel_rx => {
                     tracing::trace!("task cancelled prior to completion");
