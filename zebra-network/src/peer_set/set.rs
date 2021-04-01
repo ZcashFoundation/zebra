@@ -469,6 +469,7 @@ where
                 // fetch more peers, because it also empties the channel.
                 trace!("no ready services, sending demand signal");
                 let _ = self.demand_signal.try_send(());
+
                 // CORRECTNESS
                 //
                 // The current task must be scheduled for wakeup every time we
