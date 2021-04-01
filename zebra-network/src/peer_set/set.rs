@@ -462,6 +462,11 @@ where
             self.update_metrics();
 
             if self.preselected_p2c_index.is_none() {
+                // CORRECTNESS
+                //
+                // If the channel is full, drop the demand signal rather than waiting.
+                // If we waited here, the crawler could deadlock sending a request to
+                // fetch more peers, because it also empties the channel.
                 trace!("no ready services, sending demand signal");
                 let _ = self.demand_signal.try_send(());
                 // CORRECTNESS
