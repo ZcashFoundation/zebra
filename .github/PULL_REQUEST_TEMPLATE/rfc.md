@@ -37,17 +37,15 @@ Fill this in, replacing:
 
 ZcashFoundation/zebra with username/repo (if not making the PR from the Zebra repo)
 my-branch-name with the PR branch
-XXXX-my-feature with the filename of the RFC
+xxxx-my-feature with the filename of the RFC
 
 -->
-[Rendered](https://github.com/ZcashFoundation/zebra/blob/my-branch-name/book/src/dev/rfcs/XXXX-my-feature.md).
+[Rendered](https://github.com/ZcashFoundation/zebra/blob/my-branch-name/book/src/dev/rfcs/drafts/xxxx-my-feature.md).
 
 ## Zebra Team Approval
 
 Everyone on the Zebra team should review design RFCs:
 
-- [ ] @dconnolly 
-- [ ] @hdevalence 
-- [ ] @oxarbitrage 
-- [ ] @teor2345 
-- [ ] @yaahc 
+- [ ] @dconnolly
+- [ ] @oxarbitrage
+- [ ] @teor2345

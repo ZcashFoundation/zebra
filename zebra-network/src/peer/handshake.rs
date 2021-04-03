@@ -27,7 +27,7 @@ use crate::{
         internal::{Request, Response},
     },
     types::MetaAddr,
-    BoxError, Config, PeerAddrState,
+    BoxError, Config,
 };
 
 use super::{Client, Connection, ErrorSlot, HandshakeError, PeerError};
@@ -390,12 +390,7 @@ where
                             );
                             use futures::sink::SinkExt;
                             let _ = timestamp_collector
-                                .send(MetaAddr {
-                                    addr,
-                                    services: remote_services,
-                                    last_seen: Utc::now(),
-                                    last_connection_state: PeerAddrState::Responded,
-                                })
+                                .send(MetaAddr::new_responded(&addr, &remote_services))
                                 .await;
                         }
                         msg
@@ -414,6 +409,10 @@ where
                             // transactions.)
                             //
                             // https://zebra.zfnd.org/dev/rfcs/0003-inventory-tracking.html#inventory-monitoring
+                            //
+                            // TODO: zcashd has a bug where it merges queued inv messages of
+                            // the same or different types. So Zebra should split small
+                            // merged inv messages into separate inv messages. (#1799)
                             match hashes.as_slice() {
                                 [hash @ InventoryHash::Block(_)] => {
                                     let _ = inv_collector.send((*hash, addr));

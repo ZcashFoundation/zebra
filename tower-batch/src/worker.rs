@@ -143,6 +143,7 @@ where
                 },
                 Some(mut sleep) => {
                     // Wait on either a new message or the batch timer.
+                    // If both are ready, select! chooses one of them at random.
                     tokio::select! {
                         maybe_msg = self.rx.recv() => match maybe_msg {
                             Some(msg) => {

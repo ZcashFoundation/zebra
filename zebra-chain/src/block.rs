@@ -1,10 +1,10 @@
 //! Blocks and block-related structures (heights, headers, etc.)
 #![allow(clippy::unit_arg)]
 
+mod commitment;
 mod hash;
 mod header;
 mod height;
-mod root_hash;
 mod serialize;
 
 pub mod merkle;
@@ -16,11 +16,11 @@ mod tests;
 
 use std::fmt;
 
+pub use commitment::Commitment;
 pub use hash::Hash;
 pub use header::BlockTimeError;
 pub use header::{CountedHeader, Header};
 pub use height::Height;
-pub use root_hash::RootHash;
 pub use serialize::MAX_BLOCK_BYTES;
 
 use serde::{Deserialize, Serialize};
@@ -76,9 +76,9 @@ impl Block {
     /// configured `network`, and this block's height.
     ///
     /// Returns None if this block does not have a block height.
-    pub fn root_hash(&self, network: Network) -> Option<RootHash> {
+    pub fn commitment(&self, network: Network) -> Option<Commitment> {
         self.coinbase_height()
-            .map(|height| RootHash::from_bytes(self.header.root_bytes, network, height))
+            .map(|height| Commitment::from_bytes(self.header.commitment_bytes, network, height))
     }
 }
 

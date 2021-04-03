@@ -49,9 +49,9 @@ pub struct Header {
     ///
     /// Unfortunately, the interpretation of this field was changed without
     /// incrementing the version, so it cannot be parsed without the block height
-    /// and network. Use [`Block::root_hash`](super::Block::root_hash) to get the
-    /// parsed [`RootHash`](super::RootHash).
-    pub root_bytes: [u8; 32],
+    /// and network. Use [`Block::commitment`](super::Block::commitment) to get the
+    /// parsed [`Commitment`](super::Commitment).
+    pub commitment_bytes: [u8; 32],
 
     /// The block timestamp is a Unix epoch time (UTC) when the miner
     /// started hashing the header (according to the miner).

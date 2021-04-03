@@ -27,13 +27,25 @@ impl Clone for Groth16Proof {
     }
 }
 
+impl Eq for Groth16Proof {}
+
+impl From<[u8; 192]> for Groth16Proof {
+    fn from(bytes: [u8; 192]) -> Groth16Proof {
+        Self(bytes)
+    }
+}
+
+impl From<Groth16Proof> for [u8; 192] {
+    fn from(rt: Groth16Proof) -> [u8; 192] {
+        rt.0
+    }
+}
+
 impl PartialEq for Groth16Proof {
     fn eq(&self, other: &Self) -> bool {
         self.0[..] == other.0[..]
     }
 }
-
-impl Eq for Groth16Proof {}
 
 impl ZcashSerialize for Groth16Proof {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {

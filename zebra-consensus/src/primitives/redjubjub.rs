@@ -87,7 +87,17 @@ impl Service<BatchControl<Item>> for Verifier {
                 let mut rx = self.tx.subscribe();
                 Box::pin(async move {
                     match rx.recv().await {
-                        Ok(result) => result,
+                        Ok(result) => {
+                            if result.is_ok() {
+                                tracing::trace!(?result, "validated redjubjub signature");
+                                metrics::counter!("signatures.redjubjub.validated", 1);
+                            } else {
+                                tracing::trace!(?result, "invalid redjubjub signature");
+                                metrics::counter!("signatures.redjubjub.invalid", 1);
+                            }
+
+                            result
+                        }
                         Err(RecvError::Lagged(_)) => {
                             tracing::error!(
                                 "batch verification receiver lagged and lost verification results"

@@ -7,8 +7,6 @@
 
 use thiserror::Error;
 
-use zebra_chain::{block, primitives::ed25519};
-
 use crate::BoxError;
 
 #[derive(Error, Debug, PartialEq)]
@@ -55,6 +53,9 @@ pub enum TransactionError {
     #[error("could not verify a transparent script")]
     Script(#[from] zebra_script::Error),
 
+    #[error("spend description cv and rk MUST NOT be of small order")]
+    SmallOrder,
+
     // XXX change this when we align groth16 verifier errors with bellman
     // and add a from annotation when the error type is more precise
     #[error("spend proof MUST be valid given a primary input formed from the other fields except spendAuthSig")]
@@ -63,10 +64,10 @@ pub enum TransactionError {
     #[error(
         "joinSplitSig MUST represent a valid signature under joinSplitPubKey of dataToBeSigned"
     )]
-    Ed25519(#[from] ed25519::Error),
+    Ed25519(#[from] zebra_chain::primitives::ed25519::Error),
 
     #[error("bindingSig MUST represent a valid signature under the transaction binding validating key bvk of SigHash")]
-    RedJubjub(redjubjub::Error),
+    RedJubjub(zebra_chain::primitives::redjubjub::Error),
 
     // temporary error type until #1186 is fixed
     #[error("Downcast from BoxError to redjubjub::Error failed")]
@@ -75,7 +76,7 @@ pub enum TransactionError {
 
 impl From<BoxError> for TransactionError {
     fn from(err: BoxError) -> Self {
-        match err.downcast::<redjubjub::Error>() {
+        match err.downcast::<zebra_chain::primitives::redjubjub::Error>() {
             Ok(e) => TransactionError::RedJubjub(*e),
             Err(e) => TransactionError::InternalDowncastError(format!(
                 "downcast to redjubjub::Error failed, original error: {:?}",
@@ -101,8 +102,8 @@ pub enum BlockError {
 
     #[error("block has mismatched merkle root")]
     BadMerkleRoot {
-        actual: block::merkle::Root,
-        expected: block::merkle::Root,
+        actual: zebra_chain::block::merkle::Root,
+        expected: zebra_chain::block::merkle::Root,
     },
 
     #[error("block contains duplicate transactions")]

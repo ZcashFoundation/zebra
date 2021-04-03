@@ -1,4 +1,4 @@
-//! The RootHash enum, used for the corresponding block header field.
+//! The Commitment enum, used for the corresponding block header field.
 
 use crate::parameters::{Network, NetworkUpgrade, NetworkUpgrade::*};
 use crate::sapling::tree::Root;
@@ -7,11 +7,11 @@ use super::Height;
 
 /// Zcash blocks contain different kinds of root hashes, depending on the network upgrade.
 ///
-/// The `BlockHeader.root_bytes` field is interpreted differently,
+/// The `BlockHeader.commitment_bytes` field is interpreted differently,
 /// based on the current block height. The interpretation changes at or after
 /// network upgrades.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub enum RootHash {
+pub enum Commitment {
     /// [Pre-Sapling] Reserved field.
     ///
     /// All zeroes.
@@ -43,10 +43,10 @@ pub enum RootHash {
     ChainHistoryRoot(ChainHistoryMmrRootHash),
 }
 
-impl RootHash {
-    /// Returns `bytes` as the RootHash variant for `network` and `height`.
-    pub(super) fn from_bytes(bytes: [u8; 32], network: Network, height: Height) -> RootHash {
-        use RootHash::*;
+impl Commitment {
+    /// Returns `bytes` as the Commitment variant for `network` and `height`.
+    pub(super) fn from_bytes(bytes: [u8; 32], network: Network, height: Height) -> Commitment {
+        use Commitment::*;
 
         match NetworkUpgrade::current(network, height) {
             Genesis | BeforeOverwinter | Overwinter => PreSaplingReserved(bytes),
@@ -55,14 +55,14 @@ impl RootHash {
                 ChainHistoryActivationReserved(bytes)
             }
             Heartwood | Canopy => ChainHistoryRoot(ChainHistoryMmrRootHash(bytes)),
-            NU5 => unimplemented!("NU5 uses hashAuthDataRoot as specified in ZIP-244"),
+            Nu5 => unimplemented!("Nu5 uses hashAuthDataRoot as specified in ZIP-244"),
         }
     }
 
-    /// Returns the serialized bytes for this RootHash.
+    /// Returns the serialized bytes for this Commitment.
     #[allow(dead_code)]
     pub(super) fn to_bytes(self) -> [u8; 32] {
-        use RootHash::*;
+        use Commitment::*;
 
         match self {
             PreSaplingReserved(b) => b,

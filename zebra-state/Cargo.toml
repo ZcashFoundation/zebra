@@ -1,6 +1,6 @@
 [package]
 name = "zebra-state"
-version = "1.0.0-alpha.4"
+version = "1.0.0-alpha.5"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 edition = "2018"
@@ -22,7 +22,7 @@ tower = { version = "0.4", features = ["buffer", "util"] }
 tracing = "0.1"
 thiserror = "1.0.24"
 tokio = { version = "0.3.6", features = ["sync"] }
-displaydoc = "0.2.0"
+displaydoc = "0.2.1"
 rocksdb = "0.15.0"
 tempdir = "0.3.7"
 chrono = "0.4.19"

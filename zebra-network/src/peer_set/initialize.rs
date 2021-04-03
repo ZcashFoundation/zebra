@@ -365,7 +365,7 @@ where
             }
             Right((Some(Err(candidate)), _)) => {
                 debug!(?candidate.addr, "marking candidate as failed");
-                candidates.report_failed(candidate);
+                candidates.report_failed(&candidate);
                 // The demand signal that was taken out of the queue
                 // to attempt to connect to the failed candidate never
                 // turned into a connection, so add it back:

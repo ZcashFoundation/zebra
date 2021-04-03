@@ -40,6 +40,15 @@ impl<K, S: Service<Req>, Req> Future for UnreadyService<K, S, Req> {
             return Poll::Ready(Err((key, Error::Canceled)));
         }
 
+        // CORRECTNESS
+        //
+        // The current task must be scheduled for wakeup every time we return
+        // `Poll::Pending`.
+        //
+        //`ready!` returns `Poll::Pending` when the service is unready, and
+        // schedules this task for wakeup.
+        //
+        // `cancel.poll` also schedules this task for wakeup if it is canceled.
         let res = ready!(this
             .service
             .as_mut()
