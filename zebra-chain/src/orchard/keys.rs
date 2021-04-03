@@ -862,14 +862,18 @@ pub struct TransmissionKey(pub pallas::Affine);
 
 impl fmt::Debug for TransmissionKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        // This will panic if the public key is the identity, which is bad news
-        // bears.
-        let (x, y) = self.0.get_xy().unwrap();
+        let mut d = f.debug_struct("TransmissionKey");
 
-        f.debug_struct("TransmissionKey")
-            .field("x", &hex::encode(x.to_bytes()))
-            .field("y", &hex::encode(y.to_bytes()))
-            .finish()
+        match self.0.get_xy().into() {
+            Some((x, y)) => d
+                .field("x", &hex::encode(x.to_bytes()))
+                .field("y", &hex::encode(y.to_bytes()))
+                .finish(),
+            None => d
+                .field("x", &hex::encode(pallas::Base::zero().to_bytes()))
+                .field("y", &hex::encode(pallas::Base::zero().to_bytes()))
+                .finish(),
+        }
     }
 }
 
@@ -921,14 +925,18 @@ pub struct EphemeralPublicKey(#[serde(with = "serde_helpers::Affine")] pub palla
 
 impl fmt::Debug for EphemeralPublicKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        // This will panic if the public key is the identity, which is bad news
-        // bears.
-        let (x, y) = self.0.get_xy().unwrap();
+        let mut d = f.debug_struct("EphemeralPublicKey");
 
-        f.debug_struct("EphemeralPublicKey")
-            .field("x", &hex::encode(x.to_bytes()))
-            .field("y", &hex::encode(y.to_bytes()))
-            .finish()
+        match self.0.get_xy().into() {
+            Some((x, y)) => d
+                .field("x", &hex::encode(x.to_bytes()))
+                .field("y", &hex::encode(y.to_bytes()))
+                .finish(),
+            None => d
+                .field("x", &hex::encode(pallas::Base::zero().to_bytes()))
+                .field("y", &hex::encode(pallas::Base::zero().to_bytes()))
+                .finish(),
+        }
     }
 }
 
