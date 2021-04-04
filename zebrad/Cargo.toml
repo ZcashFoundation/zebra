@@ -2,7 +2,7 @@
 name = "zebrad"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
-version = "1.0.0-alpha.4"
+version = "1.0.0-alpha.5"
 edition = "2018"
 repository = "https://github.com/ZcashFoundation/zebra"
 # make `cargo run` use `zebrad` by default
@@ -20,7 +20,7 @@ gumdrop = "0.7"
 serde = { version = "1", features = ["serde_derive"] }
 toml = "0.5"
 chrono = "0.4"
-rand = "0.7"
+rand = "0.8"
 
 hyper = { version = "0.14.0-dev", features = ["full"] }
 futures = "0.3"

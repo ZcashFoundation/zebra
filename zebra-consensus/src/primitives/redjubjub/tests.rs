@@ -13,7 +13,7 @@ async fn sign_and_verify<V>(mut verifier: V, n: usize) -> Result<(), V::Error>
 where
     V: Service<Item, Response = ()>,
 {
-    let rng = thread_rng();
+    let mut rng = thread_rng();
     let mut results = FuturesUnordered::new();
     for i in 0..n {
         let span = tracing::trace_span!("sig", i);
@@ -21,16 +21,16 @@ where
 
         match i % 2 {
             0 => {
-                let sk = SigningKey::<SpendAuth>::new(rng);
+                let sk = SigningKey::<SpendAuth>::new(&mut rng);
                 let vk = VerificationKey::from(&sk);
-                let sig = sk.sign(rng, &msg[..]);
+                let sig = sk.sign(&mut rng, &msg[..]);
                 verifier.ready_and().await?;
                 results.push(span.in_scope(|| verifier.call((vk.into(), sig, msg).into())))
             }
             1 => {
-                let sk = SigningKey::<Binding>::new(rng);
+                let sk = SigningKey::<Binding>::new(&mut rng);
                 let vk = VerificationKey::from(&sk);
-                let sig = sk.sign(rng, &msg[..]);
+                let sig = sk.sign(&mut rng, &msg[..]);
                 verifier.ready_and().await?;
                 results.push(span.in_scope(|| verifier.call((vk.into(), sig, msg).into())))
             }

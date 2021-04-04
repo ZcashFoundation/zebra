@@ -3,9 +3,11 @@ use proptest::{arbitrary::any, array, collection::vec, prelude::*};
 
 use crate::primitives::Groth16Proof;
 
-use super::{keys, note, tree, NoteCommitment, Output, Spend, ValueCommitment};
+use super::{
+    keys, note, tree, NoteCommitment, Output, PerSpendAnchor, SharedAnchor, Spend, ValueCommitment,
+};
 
-impl Arbitrary for Spend {
+impl Arbitrary for Spend<PerSpendAnchor> {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
@@ -16,8 +18,38 @@ impl Arbitrary for Spend {
             any::<Groth16Proof>(),
             vec(any::<u8>(), 64),
         )
-            .prop_map(|(anchor, nullifier, rpk_bytes, proof, sig_bytes)| Self {
-                anchor,
+            .prop_map(
+                |(per_spend_anchor, nullifier, rpk_bytes, proof, sig_bytes)| Self {
+                    per_spend_anchor,
+                    cv: ValueCommitment(AffinePoint::identity()),
+                    nullifier,
+                    rk: redjubjub::VerificationKeyBytes::from(rpk_bytes),
+                    zkproof: proof,
+                    spend_auth_sig: redjubjub::Signature::from({
+                        let mut b = [0u8; 64];
+                        b.copy_from_slice(sig_bytes.as_slice());
+                        b
+                    }),
+                },
+            )
+            .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
+
+impl Arbitrary for Spend<SharedAnchor> {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        (
+            any::<note::Nullifier>(),
+            array::uniform32(any::<u8>()),
+            any::<Groth16Proof>(),
+            vec(any::<u8>(), 64),
+        )
+            .prop_map(|(nullifier, rpk_bytes, proof, sig_bytes)| Self {
+                per_spend_anchor: (),
                 cv: ValueCommitment(AffinePoint::identity()),
                 nullifier,
                 rk: redjubjub::VerificationKeyBytes::from(rpk_bytes),

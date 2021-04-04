@@ -84,6 +84,18 @@ impl fmt::Debug for Root {
     }
 }
 
+impl From<[u8; 32]> for Root {
+    fn from(bytes: [u8; 32]) -> Root {
+        Self(bytes)
+    }
+}
+
+impl From<Root> for [u8; 32] {
+    fn from(root: Root) -> Self {
+        root.0
+    }
+}
+
 /// Sapling Note Commitment Tree
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct NoteCommitmentTree {

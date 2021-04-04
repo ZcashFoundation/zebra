@@ -9,120 +9,119 @@ use std::{
 };
 
 use bellman::{
-    groth16::{PreparedVerifyingKey, Proof},
+    groth16::{batch, prepare_verifying_key, VerifyingKey},
     VerificationError,
 };
 use bls12_381::Bls12;
-use pairing::MultiMillerLoop;
-use rand::{thread_rng, CryptoRng, RngCore};
+use futures::future::{ready, Ready};
+use once_cell::sync::Lazy;
+use rand::thread_rng;
 use tokio::sync::broadcast::{channel, error::RecvError, Sender};
-use tower::Service;
-use tower_batch::BatchControl;
+use tower::{util::ServiceFn, Service};
+use tower_batch::{Batch, BatchControl};
 use tower_fallback::Fallback;
+use zebra_chain::sapling::{Output, PerSpendAnchor, Spend};
 
-use crate::BoxError;
+mod hash_reader;
+mod params;
+#[cfg(test)]
+mod tests;
 
-// === TEMPORARY BATCH BELLMAN SUBSTITUTE ===
-// These types are meant to be API compatible with the work in progress batch
-// verification API being implemented in Bellman. Once we've finished that
-// implementation and upgraded our dependency, we should be able to remove this
-// section of code and replace each of these types with the commented out items
-// from the rest of this file.
+use self::hash_reader::HashReader;
+use params::PARAMS;
 
-#[derive(Clone)]
-pub struct Item<E: MultiMillerLoop> {
-    proof: Proof<E>,
-    public_inputs: Vec<E::Fr>,
-}
+/// Global batch verification context for Groth16 proofs of Spend statements.
+///
+/// This service transparently batches contemporaneous proof verifications,
+/// handling batch failures by falling back to individual verification.
+///
+/// Note that making a `Service` call requires mutable access to the service, so
+/// you should call `.clone()` on the global handle to create a local, mutable
+/// handle.
+pub static SPEND_VERIFIER: Lazy<
+    Fallback<Batch<Verifier, Item>, ServiceFn<fn(Item) -> Ready<Result<(), VerificationError>>>>,
+> = Lazy::new(|| {
+    Fallback::new(
+        Batch::new(
+            Verifier::new(&PARAMS.sapling.spend.vk),
+            super::MAX_BATCH_SIZE,
+            super::MAX_BATCH_LATENCY,
+        ),
+        // We want to fallback to individual verification if batch verification
+        // fails, so we need a Service to use. The obvious way to do this would
+        // be to write a closure that returns an async block. But because we
+        // have to specify the type of a static, we need to be able to write the
+        // type of the closure and its return value, and both closures and async
+        // blocks have eldritch types whose names cannot be written. So instead,
+        // we use a Ready to avoid an async block and cast the closure to a
+        // function (which is possible because it doesn't capture any state).
+        tower::service_fn(
+            (|item: Item| {
+                ready(item.verify_single(&prepare_verifying_key(&PARAMS.sapling.spend.vk)))
+            }) as fn(_) -> _,
+        ),
+    )
+});
 
-impl<E: MultiMillerLoop> Item<E> {
-    fn verify_single(self, pvk: &PreparedVerifyingKey<E>) -> Result<(), VerificationError> {
-        let Item {
-            proof,
-            public_inputs,
-        } = self;
+/// Global batch verification context for Groth16 proofs of Output statements.
+///
+/// This service transparently batches contemporaneous proof verifications,
+/// handling batch failures by falling back to individual verification.
+///
+/// Note that making a `Service` call requires mutable access to the service, so
+/// you should call `.clone()` on the global handle to create a local, mutable
+/// handle.
+pub static OUTPUT_VERIFIER: Lazy<
+    Fallback<Batch<Verifier, Item>, ServiceFn<fn(Item) -> Ready<Result<(), VerificationError>>>>,
+> = Lazy::new(|| {
+    Fallback::new(
+        Batch::new(
+            Verifier::new(&PARAMS.sapling.output.vk),
+            super::MAX_BATCH_SIZE,
+            super::MAX_BATCH_LATENCY,
+        ),
+        // We want to fallback to individual verification if batch verification
+        // fails, so we need a Service to use. The obvious way to do this would
+        // be to write a closure that returns an async block. But because we
+        // have to specify the type of a static, we need to be able to write the
+        // type of the closure and its return value, and both closures and async
+        // blocks have eldritch types whose names cannot be written. So instead,
+        // we use a Ready to avoid an async block and cast the closure to a
+        // function (which is possible because it doesn't capture any state).
+        tower::service_fn(
+            (|item: Item| {
+                ready(item.verify_single(&prepare_verifying_key(&PARAMS.sapling.output.vk)))
+            }) as fn(_) -> _,
+        ),
+    )
+});
 
-        bellman::groth16::verify_proof(pvk, &proof, &public_inputs)
+/// A Groth16 verification item, used as the request type of the service.
+pub type Item = batch::Item<Bls12>;
+
+pub struct ItemWrapper(Item);
+
+impl From<&Spend<PerSpendAnchor>> for ItemWrapper {
+    fn from(spend: &Spend<PerSpendAnchor>) -> Self {
+        Self(Item::from((
+            bellman::groth16::Proof::read(&spend.zkproof.0[..]).unwrap(),
+            spend.primary_inputs(),
+        )))
     }
 }
 
-impl<E: MultiMillerLoop> From<(&Proof<E>, &[E::Fr])> for Item<E> {
-    fn from((proof, public_inputs): (&Proof<E>, &[E::Fr])) -> Self {
-        (proof.clone(), public_inputs.to_owned()).into()
+impl From<&Output> for ItemWrapper {
+    fn from(output: &Output) -> Self {
+        Self(Item::from((
+            bellman::groth16::Proof::read(&output.zkproof.0[..]).unwrap(),
+            output.primary_inputs(),
+        )))
     }
 }
 
-impl<E: MultiMillerLoop> From<(Proof<E>, Vec<E::Fr>)> for Item<E> {
-    fn from((proof, public_inputs): (Proof<E>, Vec<E::Fr>)) -> Self {
-        Self {
-            proof,
-            public_inputs,
-        }
-    }
-}
-
-#[derive(Default)]
-struct Batch {
-    queue: Vec<Item<Bls12>>,
-}
-
-impl Batch {
-    fn queue(&mut self, item: Item<Bls12>) {
-        self.queue.push(item);
-    }
-
-    fn verify<R: RngCore + CryptoRng>(
-        self,
-        _rng: R,
-        pvk: &PreparedVerifyingKey<Bls12>,
-    ) -> Result<(), VerificationError> {
-        for item in self.queue {
-            item.verify_single(pvk)?;
-        }
-
-        Ok(())
-    }
-}
-
-// === TEMPORARY BATCH BELLMAN SUBSTITUTE END ===
-
-// /// A Groth16 verification item, used as the request type of the service.
-// pub type Item = batch::Item<Bls12>;
-
-/// Groth16 signature verifier service
-#[derive(Clone, Debug)]
-pub struct Verifier {
-    inner: Fallback<tower_batch::Batch<VerifierImpl, Item<Bls12>>, FallbackVerifierImpl>,
-}
-
-impl Verifier {
-    /// Constructs a new verifier.
-    pub fn new(pvk: &'static PreparedVerifyingKey<Bls12>) -> Self {
-        let verifier_impl = VerifierImpl::new(pvk);
-        let fallback_impl = FallbackVerifierImpl::new(pvk);
-
-        let max_items = super::MAX_BATCH_SIZE;
-        let max_latency = super::MAX_BATCH_LATENCY;
-
-        let inner = tower_batch::Batch::new(verifier_impl, max_items, max_latency);
-        let inner = Fallback::new(inner, fallback_impl);
-
-        Self { inner }
-    }
-}
-
-impl Service<Item<Bls12>> for Verifier {
-    type Response = ();
-    type Error = BoxError;
-    type Future = Pin<Box<dyn Future<Output = Result<(), BoxError>> + Send + 'static>>;
-
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx)
-    }
-
-    fn call(&mut self, req: Item<Bls12>) -> Self::Future {
-        use futures::FutureExt;
-        self.inner.call(req).boxed()
+impl From<ItemWrapper> for Item {
+    fn from(item_wrapper: ItemWrapper) -> Self {
+        item_wrapper.0
     }
 }
 
@@ -131,37 +130,35 @@ impl Service<Item<Bls12>> for Verifier {
 /// This is the core implementation for the batch verification logic of the groth
 /// verifier. It handles batching incoming requests, driving batches to
 /// completion, and reporting results.
-struct VerifierImpl {
-    // batch: batch::Verifier<Bls12>,
-    batch: Batch,
+pub struct Verifier {
+    batch: batch::Verifier<Bls12>,
     // Making this 'static makes managing lifetimes much easier.
-    pvk: &'static PreparedVerifyingKey<Bls12>,
+    vk: &'static VerifyingKey<Bls12>,
     /// Broadcast sender used to send the result of a batch verification to each
     /// request source in the batch.
     tx: Sender<Result<(), VerificationError>>,
 }
 
-impl VerifierImpl {
-    fn new(pvk: &'static PreparedVerifyingKey<Bls12>) -> Self {
-        // let batch = batch::Verifier::default();
-        let batch = Batch::default();
+impl Verifier {
+    fn new(vk: &'static VerifyingKey<Bls12>) -> Self {
+        let batch = batch::Verifier::default();
         let (tx, _) = channel(super::BROADCAST_BUFFER_SIZE);
-        Self { batch, pvk, tx }
+        Self { batch, vk, tx }
     }
 }
 
-impl fmt::Debug for VerifierImpl {
+impl fmt::Debug for Verifier {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let name = "VerifierImpl";
+        let name = "Verifier";
         f.debug_struct(name)
             .field("batch", &"..")
-            .field("pvk", &"..")
+            .field("vk", &"..")
             .field("tx", &self.tx)
             .finish()
     }
 }
 
-impl Service<BatchControl<Item<Bls12>>> for VerifierImpl {
+impl Service<BatchControl<Item>> for Verifier {
     type Response = ();
     type Error = VerificationError;
     type Future = Pin<Box<dyn Future<Output = Result<(), VerificationError>> + Send + 'static>>;
@@ -170,7 +167,7 @@ impl Service<BatchControl<Item<Bls12>>> for VerifierImpl {
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, req: BatchControl<Item<Bls12>>) -> Self::Future {
+    fn call(&mut self, req: BatchControl<Item>) -> Self::Future {
         match req {
             BatchControl::Item(item) => {
                 tracing::trace!("got item");
@@ -178,7 +175,17 @@ impl Service<BatchControl<Item<Bls12>>> for VerifierImpl {
                 let mut rx = self.tx.subscribe();
                 Box::pin(async move {
                     match rx.recv().await {
-                        Ok(result) => result,
+                        Ok(result) => {
+                            if result.is_ok() {
+                                tracing::trace!(?result, "verified groth16 proof");
+                                metrics::counter!("proofs.groth16.verified", 1);
+                            } else {
+                                tracing::trace!(?result, "invalid groth16 proof");
+                                metrics::counter!("proofs.groth16.invalid", 1);
+                            }
+
+                            result
+                        }
                         Err(RecvError::Lagged(_)) => {
                             tracing::error!(
                                 "missed channel updates, BROADCAST_BUFFER_SIZE is too low!!"
@@ -193,52 +200,17 @@ impl Service<BatchControl<Item<Bls12>>> for VerifierImpl {
             BatchControl::Flush => {
                 tracing::trace!("got flush command");
                 let batch = mem::take(&mut self.batch);
-                let _ = self.tx.send(batch.verify(thread_rng(), self.pvk));
+                let _ = self.tx.send(batch.verify(thread_rng(), self.vk));
                 Box::pin(async { Ok(()) })
             }
         }
     }
 }
 
-impl Drop for VerifierImpl {
+impl Drop for Verifier {
     fn drop(&mut self) {
         // We need to flush the current batch in case there are still any pending futures.
         let batch = mem::take(&mut self.batch);
-        let _ = self.tx.send(batch.verify(thread_rng(), self.pvk));
-    }
-}
-
-/// Groth16 signature verifier fallback implementation
-#[derive(Clone)]
-struct FallbackVerifierImpl {
-    pvk: &'static PreparedVerifyingKey<Bls12>,
-}
-
-impl FallbackVerifierImpl {
-    fn new(pvk: &'static PreparedVerifyingKey<Bls12>) -> Self {
-        Self { pvk }
-    }
-}
-
-impl fmt::Debug for FallbackVerifierImpl {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let name = "FallbackVerifierImpl";
-        f.debug_struct(name).field("pvk", &"..").finish()
-    }
-}
-
-impl Service<Item<Bls12>> for FallbackVerifierImpl {
-    type Response = ();
-    type Error = VerificationError;
-    type Future = Pin<Box<dyn Future<Output = Result<(), VerificationError>> + Send + 'static>>;
-
-    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
-    }
-
-    fn call(&mut self, item: Item<Bls12>) -> Self::Future {
-        tracing::trace!("got item");
-        let pvk = self.pvk;
-        Box::pin(async move { item.verify_single(pvk) })
+        let _ = self.tx.send(batch.verify(thread_rng(), self.vk));
     }
 }
