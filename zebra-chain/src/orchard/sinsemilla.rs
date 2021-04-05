@@ -12,7 +12,6 @@ use halo2::{
 /// P → B^[l^Orchard_Merkle]
 ///
 /// [concreteextractorpallas]: https://zips.z.cash/protocol/nu5.pdf#concreteextractorpallas
-// TODO: should this return the basefield element type, or the bytes?
 pub fn extract_p(point: pallas::Point) -> pallas::Base {
     match pallas::Affine::from(point).get_xy().into() {
         // If Some, it's not the identity.

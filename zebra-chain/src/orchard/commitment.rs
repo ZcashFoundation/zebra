@@ -321,12 +321,10 @@ impl ValueCommitment {
     /// https://zips.z.cash/protocol/protocol.pdf#concretehomomorphiccommit
     #[allow(non_snake_case)]
     pub fn new(rcv: pallas::Scalar, value: Amount) -> Self {
-        let v = pallas::Scalar::from(value);
-
-        // TODO: These generator points can be generated once somewhere else to
-        // avoid having to recompute them on every new commitment.
         let V = pallas_group_hash(b"z.cash:Orchard-cv", b"v");
         let R = pallas_group_hash(b"z.cash:Orchard-cv", b"r");
+
+        let v = pallas::Scalar::from(value);
 
         Self::from(V * v + R * rcv)
     }
