@@ -456,15 +456,6 @@ checksum = "8d696c370c750c948ada61c69a0ee2cbbb9c50b1019ddb86d9317157a99c2cae"
 
 [[package]]
 name = "bls12_381"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20c116dad307b68138cc2e2f3a699c16f52faa47c65f98fc6de1dea9a097ee1e"
-dependencies = [
- "subtle",
-]
-
-[[package]]
-name = "bls12_381"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1c56609cc42c628848e7b18e0baf42a4ef626b8c50442dc08b8094bd21d8ad32"
@@ -2793,7 +2784,7 @@ checksum = "5dcf30702f15c157e348b4ccef28b1224fc7da8f8430d553bdc47b2d6599107b"
 dependencies = [
  "blake2b_simd",
  "byteorder",
- "digest",
+ "digest 0.9.0",
  "funty",
  "jubjub",
  "rand_core 0.6.2",
