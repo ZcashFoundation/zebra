@@ -19,8 +19,8 @@ pub mod sha256d;
 pub use error::SerializationError;
 pub use read_zcash::ReadZcashExt;
 pub use write_zcash::WriteZcashExt;
-pub use zcash_deserialize::{ZcashDeserialize, ZcashDeserializeInto};
-pub use zcash_serialize::ZcashSerialize;
+pub use zcash_deserialize::{TrustedPreallocate, ZcashDeserialize, ZcashDeserializeInto};
+pub use zcash_serialize::{ZcashSerialize, MAX_PROTOCOL_MESSAGE_LEN};
 
 #[cfg(test)]
 mod proptests;
