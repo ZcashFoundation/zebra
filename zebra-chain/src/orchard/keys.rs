@@ -468,17 +468,6 @@ impl fmt::Display for IncomingViewingKey {
     }
 }
 
-impl From<[u8; 32]> for IncomingViewingKey {
-    /// Generate an _IncomingViewingKey_ from existing bytes.
-    fn from(bytes: [u8; 32]) -> Self {
-        Self {
-            // TODO: handle setting the Network better.
-            network: Network::default(),
-            scalar: pallas::Scalar::from_bytes(&bytes).unwrap(),
-        }
-    }
-}
-
 impl From<FullViewingKey> for IncomingViewingKey {
     /// Commit^ivk_rivk(ak, nk) :=
     ///    SinsemillaShortCommit_rcm (︁"z.cash:Orchard-CommitIvk", I2LEBSP_l(ak) || I2LEBSP_l(nk)︁) mod r_P
@@ -539,6 +528,16 @@ impl FromStr for IncomingViewingKey {
 impl PartialEq<[u8; 32]> for IncomingViewingKey {
     fn eq(&self, other: &[u8; 32]) -> bool {
         self.scalar.to_bytes() == *other
+    }
+}
+
+impl IncomingViewingKey {
+    /// Generate an _IncomingViewingKey_ from existing bytes and a network variant.
+    fn from_bytes(bytes: [u8; 32], network: Network) -> Self {
+        Self {
+            network,
+            scalar: pallas::Scalar::from_bytes(&bytes).unwrap(),
+        }
     }
 }
 
