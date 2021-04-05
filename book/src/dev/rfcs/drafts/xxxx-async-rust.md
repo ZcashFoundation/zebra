@@ -1,6 +1,6 @@
 - Feature Name: async_rust_constraints
 - Start Date: 2021-03-30
-- Design PR: [ZcashFoundation/zebra#0000](https://github.com/ZcashFoundation/zebra/pull/0000)
+- Design PR: [ZcashFoundation/zebra#1965](https://github.com/ZcashFoundation/zebra/pull/1965)
 - Zebra Issue: [ZcashFoundation/zebra#1593](https://github.com/ZcashFoundation/zebra/issues/1593)
 
 # Summary
@@ -50,7 +50,7 @@ TODO: complete the examples in this section
 ## `Poll::Pending` Deadlock Avoidance
 [poll-pending-deadlock-avoidance]: #poll-pending-deadlock-avoidance
 
-Here's a deadlock avoidance example from #1735:
+Here's a deadlock avoidance example from [#1735](https://github.com/ZcashFoundation/zebra/pull/1735):
 ```rust
         // We acquire checkpoint readiness before block readiness, to avoid an unlikely
         // hang during the checkpoint to block verifier transition. If the checkpoint and
