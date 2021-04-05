@@ -8,7 +8,6 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-
 default = []
 proptest-impl = ["proptest", "proptest-derive", "itertools"]
 bench = ["zebra-test"]
@@ -24,8 +23,9 @@ bs58 = { version = "0.4", features = ["check"] }
 byteorder = "1.4"
 chrono = { version = "0.4", features = ["serde"] }
 displaydoc = "0.2.1"
-equihash = "0.1"
 fpe = "0.4"
+# Temporary workaround for https://github.com/myrrlyn/funty/issues/3
+funty = "=1.1.0"
 futures = "0.3"
 group = "0.9"
 halo2 = { git = "https://github.com/zcash/halo2.git", branch = "main" }
@@ -47,13 +47,10 @@ proptest-derive = { version = "0.3.0", optional = true }
 itertools = { version = "0.10.0", optional = true }
 
 # ZF deps
-ed25519-zebra = "2.2.0"
+ed25519-zebra = "2"
+equihash = "0.1"
 redjubjub = "0.4"
 
-zebra-test = { path = "../zebra-test/", optional = true }
-
-# Temporary workaround for https://github.com/myrrlyn/funty/issues/3
-funty = "=1.1.0"
 
 [dev-dependencies]
 bincode = "1"
