@@ -16,10 +16,9 @@ mod tests;
 
 use std::fmt;
 
-pub use commitment::Commitment;
+pub use commitment::{Commitment, CommitmentError};
 pub use hash::Hash;
-pub use header::BlockTimeError;
-pub use header::{CountedHeader, Header};
+pub use header::{BlockTimeError, CountedHeader, Header};
 pub use height::Height;
 pub use serialize::MAX_BLOCK_BYTES;
 
@@ -70,15 +69,20 @@ impl Block {
         Hash::from(self)
     }
 
-    /// Get the parsed root hash for this block.
+    /// Get the parsed block [`Commitment`] for this block.
     ///
-    /// The interpretation of the root hash depends on the
+    /// The interpretation of the commitment depends on the
     /// configured `network`, and this block's height.
     ///
-    /// Returns None if this block does not have a block height.
-    pub fn commitment(&self, network: Network) -> Option<Commitment> {
-        self.coinbase_height()
-            .map(|height| Commitment::from_bytes(self.header.commitment_bytes, network, height))
+    /// Returns an error if this block does not have a block height,
+    /// or if the commitment value is structurally invalid.
+    pub fn commitment(&self, network: Network) -> Result<Commitment, CommitmentError> {
+        match self.coinbase_height() {
+            None => Err(CommitmentError::MissingBlockHeight {
+                block_hash: self.hash(),
+            }),
+            Some(height) => Commitment::from_bytes(self.header.commitment_bytes, network, height),
+        }
     }
 }
 
