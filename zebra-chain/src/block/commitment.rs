@@ -33,9 +33,9 @@ pub enum Commitment {
     ///
     /// TODO: this field is verified during semantic verification
     ///
-    ///       since Zebra checkpoints on Canopy, we don't need to validate this
-    ///       field, but since it's included in the ChainHistoryRoot, we are
-    ///       already calculating it, so we might as well validate it
+    /// Since Zebra checkpoints on Canopy, we don't need to validate this
+    /// field, but since it's included in the ChainHistoryRoot, we are
+    /// already calculating it, so we might as well validate it.
     FinalSaplingRoot(sapling::tree::Root),
 
     /// [Heartwood activation block] Reserved field.
