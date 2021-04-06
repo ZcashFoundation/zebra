@@ -7,9 +7,9 @@ use zebra_chain::serialization::{TrustedPreallocate, ZcashSerialize, MAX_PROTOCO
 use chrono::{TimeZone, Utc};
 use std::convert::TryInto;
 
-#[test]
 /// Confirm that each MetaAddr takes exactly META_ADDR_SIZE bytes when serialized.
 /// This verifies that our calculated `TrustedPreallocate::max_allocation()` is indeed an upper bound.
+#[test]
 fn meta_addr_size_is_correct() {
     let addr = MetaAddr {
         addr: ([192, 168, 0, 0], 8333).into(),
@@ -22,10 +22,11 @@ fn meta_addr_size_is_correct() {
         .expect("Serialization to vec must succeed");
     assert!(serialized.len() == META_ADDR_SIZE)
 }
-#[test]
+
 /// Verifies that...
 /// 1. The smallest disallowed vector of `MetaAddrs`s is too large to fit in a legal Zcash message
 /// 2. The largest allowed vector is small enough to fit in a legal Zcash message
+#[test]
 fn meta_addr_max_allocation_is_correct() {
     let addr = MetaAddr {
         addr: ([192, 168, 0, 0], 8333).into(),

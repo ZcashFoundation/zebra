@@ -46,8 +46,8 @@ proptest! {
     // This test is pretty slow, so only run a few cases
     #![proptest_config(ProptestConfig::with_cases(8))]
 
-    #[test]
     /// Verify the smallest disallowed vector of `Transaction`s is too large to fit in a Zcash block
+    #[test]
     fn tx_max_allocation_is_big_enough(tx in Transaction::arbitrary()) {
 
         let max_allocation: usize = <Arc<Transaction>>::max_allocation().try_into().unwrap();
@@ -63,8 +63,8 @@ proptest! {
         prop_assert!(serialized.len() as u64 > MAX_BLOCK_BYTES);
     }
 
-    #[test]
     /// Verify the smallest disallowed vector of `Input`s is too large to fit in a Zcash block
+    #[test]
     fn input_max_allocation_is_big_enough(input in Input::arbitrary()) {
 
         let max_allocation: usize = Input::max_allocation().try_into().unwrap();
@@ -81,8 +81,9 @@ proptest! {
         // so any serialized Vec<Input> at least MAX_BLOCK_BYTES long is too large to fit in a block.
         prop_assert!(serialized.len() as u64 >= MAX_BLOCK_BYTES);
     }
-    #[test]
+
     /// Verify the smallest disallowed vector of `Output`s is too large to fit in a Zcash block
+    #[test]
     fn output_max_allocation_is_big_enough(output in Output::arbitrary()) {
 
         let max_allocation: usize = Output::max_allocation().try_into().unwrap();

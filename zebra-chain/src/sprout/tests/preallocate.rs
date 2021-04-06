@@ -12,17 +12,17 @@ use proptest::{prelude::*, proptest};
 use std::convert::TryInto;
 
 proptest! {
-    #[test]
     /// Confirm that each  JoinSplit<Btcv14Proof> takes exactly BCTV14_JOINSPLIT_SIZE bytes when serialized.
     /// This verifies that our calculated `TrustedPreallocate::max_allocation()` is indeed an upper bound.
+    #[test]
     fn joinsplit_btcv14_size_is_correct(joinsplit in <JoinSplit<Bctv14Proof>>::arbitrary_with(())) {
         let serialized = joinsplit.zcash_serialize_to_vec().expect("Serialization to vec must succeed");
         prop_assert!(serialized.len() as u64 == BCTV14_JOINSPLIT_SIZE)
     }
 
-    #[test]
     /// Confirm that each  JoinSplit<Btcv14Proof> takes exactly  GROTH16_JOINSPLIT_SIZE bytes when serialized.
     /// This verifies that our calculated `TrustedPreallocate::max_allocation()` is indeed an upper bound.
+    #[test]
     fn joinsplit_groth16_size_is_correct(joinsplit in <JoinSplit<Groth16Proof>>::arbitrary_with(())) {
         let serialized = joinsplit.zcash_serialize_to_vec().expect("Serialization to vec must succeed");
         prop_assert!(serialized.len() as u64 == GROTH16_JOINSPLIT_SIZE)

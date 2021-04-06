@@ -10,9 +10,9 @@ use zebra_chain::{
 
 use std::convert::TryInto;
 
-#[test]
 /// Confirm that each InventoryHash takes exactly INV_HASH_SIZE bytes when serialized.
 /// This verifies that our calculated `TrustedPreallocate::max_allocation()` is indeed an upper bound.
+#[test]
 fn inv_hash_size_is_correct() {
     let block_hash = block::Hash([1u8; 32]);
     let tx_hash = transaction::Hash([1u8; 32]);
@@ -40,11 +40,12 @@ fn inv_hash_size_is_correct() {
         .expect("Serialization to vec must succeed");
     assert!(serializd_inv_err.len() == INV_HASH_SIZE)
 }
-#[test]
+
 /// Verifies that...
 /// 1. The smallest disallowed vector of `InventoryHash`s is too large to fit in a legal Zcash message
 /// 2. The largest allowed vector is small enough to fit in a legal Zcash message
-fn meta_addr_max_allocation_is_correct() {
+#[test]
+fn inv_hash_max_allocation_is_correct() {
     let inv = InventoryHash::Error;
     let max_allocation: usize = InventoryHash::max_allocation().try_into().unwrap();
     let mut smallest_disallowed_vec = Vec::with_capacity(max_allocation + 1);
