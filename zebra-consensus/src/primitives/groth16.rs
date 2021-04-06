@@ -20,7 +20,7 @@ use tokio::sync::broadcast::{channel, error::RecvError, Sender};
 use tower::{util::ServiceFn, Service};
 use tower_batch::{Batch, BatchControl};
 use tower_fallback::Fallback;
-use zebra_chain::sapling::{Output, Spend};
+use zebra_chain::sapling::{Output, PerSpendAnchor, Spend};
 
 mod hash_reader;
 mod params;
@@ -101,8 +101,8 @@ pub type Item = batch::Item<Bls12>;
 
 pub struct ItemWrapper(Item);
 
-impl From<&Spend> for ItemWrapper {
-    fn from(spend: &Spend) -> Self {
+impl From<&Spend<PerSpendAnchor>> for ItemWrapper {
+    fn from(spend: &Spend<PerSpendAnchor>) -> Self {
         Self(Item::from((
             bellman::groth16::Proof::read(&spend.zkproof.0[..]).unwrap(),
             spend.primary_inputs(),
@@ -175,7 +175,17 @@ impl Service<BatchControl<Item>> for Verifier {
                 let mut rx = self.tx.subscribe();
                 Box::pin(async move {
                     match rx.recv().await {
-                        Ok(result) => result,
+                        Ok(result) => {
+                            if result.is_ok() {
+                                tracing::trace!(?result, "verified groth16 proof");
+                                metrics::counter!("proofs.groth16.verified", 1);
+                            } else {
+                                tracing::trace!(?result, "invalid groth16 proof");
+                                metrics::counter!("proofs.groth16.invalid", 1);
+                            }
+
+                            result
+                        }
                         Err(RecvError::Lagged(_)) => {
                             tracing::error!(
                                 "missed channel updates, BROADCAST_BUFFER_SIZE is too low!!"

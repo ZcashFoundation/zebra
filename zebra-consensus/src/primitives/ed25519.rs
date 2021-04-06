@@ -1,4 +1,4 @@
-//! Async RedJubjub batch verifier service
+//! Async Ed25519 batch verifier service
 
 #[cfg(test)]
 mod tests;
@@ -18,9 +18,9 @@ use tokio::sync::broadcast::{channel, error::RecvError, Sender};
 use tower::{util::ServiceFn, Service};
 use tower_batch::{Batch, BatchControl};
 use tower_fallback::Fallback;
-use zebra_chain::primitives::redjubjub::{batch, *};
+use zebra_chain::primitives::ed25519::{batch, *};
 
-/// Global batch verification context for RedJubjub signatures.
+/// Global batch verification context for Ed25519 signatures.
 ///
 /// This service transparently batches contemporaneous signature verifications,
 /// handling batch failures by falling back to individual verification.
@@ -49,7 +49,7 @@ pub static VERIFIER: Lazy<
     )
 });
 
-/// RedJubjub signature verifier service
+/// Ed25519 signature verifier service
 pub struct Verifier {
     batch: batch::Verifier,
     // This uses a "broadcast" channel, which is an mpmc channel. Tokio also
@@ -67,7 +67,7 @@ impl Default for Verifier {
     }
 }
 
-/// Type alias to clarify that this batch::Item is a RedJubjubItem
+/// Type alias to clarify that this `batch::Item` is a `Ed25519Item`
 pub type Item = batch::Item;
 
 impl Service<BatchControl<Item>> for Verifier {
@@ -82,35 +82,36 @@ impl Service<BatchControl<Item>> for Verifier {
     fn call(&mut self, req: BatchControl<Item>) -> Self::Future {
         match req {
             BatchControl::Item(item) => {
-                tracing::trace!("got item");
+                tracing::trace!("got ed25519 item");
                 self.batch.queue(item);
                 let mut rx = self.tx.subscribe();
                 Box::pin(async move {
                     match rx.recv().await {
                         Ok(result) => {
                             if result.is_ok() {
-                                tracing::trace!(?result, "validated redjubjub signature");
-                                metrics::counter!("signatures.redjubjub.validated", 1);
+                                tracing::trace!(?result, "validated ed25519 signature");
+                                metrics::counter!("signatures.ed25519.validated", 1);
                             } else {
-                                tracing::trace!(?result, "invalid redjubjub signature");
-                                metrics::counter!("signatures.redjubjub.invalid", 1);
+                                tracing::trace!(?result, "invalid ed25519 signature");
+                                metrics::counter!("signatures.ed25519.invalid", 1);
                             }
-
                             result
                         }
                         Err(RecvError::Lagged(_)) => {
                             tracing::error!(
-                                "batch verification receiver lagged and lost verification results"
+                                "ed25519 batch verification receiver lagged and lost verification results"
                             );
                             Err(Error::InvalidSignature)
                         }
-                        Err(RecvError::Closed) => panic!("verifier was dropped without flushing"),
+                        Err(RecvError::Closed) => {
+                            panic!("ed25519 verifier was dropped without flushing")
+                        }
                     }
                 })
             }
 
             BatchControl::Flush => {
-                tracing::trace!("got flush command");
+                tracing::trace!("got ed25519 flush command");
                 let batch = mem::take(&mut self.batch);
                 let _ = self.tx.send(batch.verify(thread_rng()));
                 Box::pin(async { Ok(()) })

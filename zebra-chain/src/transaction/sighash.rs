@@ -419,11 +419,11 @@ impl<'a> SigHasher<'a> {
 
         let shielded_data = match self.trans {
             V4 {
-                shielded_data: Some(shielded_data),
+                sapling_shielded_data: Some(shielded_data),
                 ..
             } => shielded_data,
             V4 {
-                shielded_data: None,
+                sapling_shielded_data: None,
                 ..
             } => return writer.write_all(&[0; 32]),
             V5 { .. } => unimplemented!("v5 transaction hash as specified in ZIP-225 and ZIP-244"),
@@ -439,10 +439,12 @@ impl<'a> SigHasher<'a> {
             .personal(ZCASH_SHIELDED_SPENDS_HASH_PERSONALIZATION)
             .to_state();
 
+        // TODO: make a generic wrapper in `spends.rs` that does this serialization
         for spend in shielded_data.spends() {
             // This is the canonical transaction serialization, minus the `spendAuthSig`.
             spend.cv.zcash_serialize(&mut hash)?;
-            hash.write_all(&spend.anchor.0[..])?;
+            // TODO: ZIP-243 Sapling to Canopy only
+            hash.write_all(&spend.per_spend_anchor.0[..])?;
             hash.write_32_bytes(&spend.nullifier.into())?;
             hash.write_all(&<[u8; 32]>::from(spend.rk)[..])?;
             spend.zkproof.zcash_serialize(&mut hash)?;
@@ -456,11 +458,11 @@ impl<'a> SigHasher<'a> {
 
         let shielded_data = match self.trans {
             V4 {
-                shielded_data: Some(shielded_data),
+                sapling_shielded_data: Some(shielded_data),
                 ..
             } => shielded_data,
             V4 {
-                shielded_data: None,
+                sapling_shielded_data: None,
                 ..
             } => return writer.write_all(&[0; 32]),
             V5 { .. } => unimplemented!("v5 transaction hash as specified in ZIP-225 and ZIP-244"),
@@ -484,10 +486,18 @@ impl<'a> SigHasher<'a> {
     }
 
     fn hash_value_balance<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        use crate::amount::Amount;
+        use std::convert::TryFrom;
         use Transaction::*;
 
         let value_balance = match self.trans {
-            V4 { value_balance, .. } => value_balance,
+            V4 {
+                sapling_shielded_data,
+                ..
+            } => match sapling_shielded_data {
+                Some(s) => s.value_balance,
+                None => Amount::try_from(0).unwrap(),
+            },
             V5 { .. } => unimplemented!("v5 transaction hash as specified in ZIP-225 and ZIP-244"),
             V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(ZIP243_EXPLANATION),
         };

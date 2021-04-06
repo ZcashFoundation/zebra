@@ -6,11 +6,12 @@ use std::{io, sync::Arc};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 use crate::{
+    block::MAX_BLOCK_BYTES,
     parameters::{OVERWINTER_VERSION_GROUP_ID, SAPLING_VERSION_GROUP_ID, TX_V5_VERSION_GROUP_ID},
     primitives::ZkSnarkProof,
     serialization::{
-        ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashDeserializeInto,
-        ZcashSerialize,
+        ReadZcashExt, SerializationError, TrustedPreallocate, WriteZcashExt, ZcashDeserialize,
+        ZcashDeserializeInto, ZcashSerialize,
     },
     sprout,
 };
@@ -131,8 +132,7 @@ impl ZcashSerialize for Transaction {
                 outputs,
                 lock_time,
                 expiry_height,
-                value_balance,
-                shielded_data,
+                sapling_shielded_data,
                 joinsplit_data,
             } => {
                 // Write version 4 and set the fOverwintered bit.
@@ -142,7 +142,6 @@ impl ZcashSerialize for Transaction {
                 outputs.zcash_serialize(&mut writer)?;
                 lock_time.zcash_serialize(&mut writer)?;
                 writer.write_u32::<LittleEndian>(expiry_height.0)?;
-                value_balance.zcash_serialize(&mut writer)?;
 
                 // The previous match arms serialize in one go, because the
                 // internal structure happens to nicely line up with the
@@ -152,13 +151,16 @@ impl ZcashSerialize for Transaction {
                 // instead we have to interleave serialization of the
                 // ShieldedData and the JoinSplitData.
 
-                match shielded_data {
+                match sapling_shielded_data {
                     None => {
+                        // Signal no value balance.
+                        writer.write_i64::<LittleEndian>(0)?;
                         // Signal no shielded spends and no shielded outputs.
                         writer.write_compactsize(0)?;
                         writer.write_compactsize(0)?;
                     }
                     Some(shielded_data) => {
+                        shielded_data.value_balance.zcash_serialize(&mut writer)?;
                         writer.write_compactsize(shielded_data.spends().count() as u64)?;
                         for spend in shielded_data.spends() {
                             spend.zcash_serialize(&mut writer)?;
@@ -175,7 +177,7 @@ impl ZcashSerialize for Transaction {
                     Some(jsd) => jsd.zcash_serialize(&mut writer)?,
                 }
 
-                match shielded_data {
+                match sapling_shielded_data {
                     Some(sd) => writer.write_all(&<[u8; 64]>::from(sd.binding_sig)[..])?,
                     None => {}
                 }
@@ -194,6 +196,7 @@ impl ZcashSerialize for Transaction {
                 writer.write_u32::<LittleEndian>(expiry_height.0)?;
                 inputs.zcash_serialize(&mut writer)?;
                 outputs.zcash_serialize(&mut writer)?;
+
                 // write the rest
                 writer.write_all(rest)?;
             }
@@ -266,22 +269,31 @@ impl ZcashDeserialize for Transaction {
                 let outputs = Vec::zcash_deserialize(&mut reader)?;
                 let lock_time = LockTime::zcash_deserialize(&mut reader)?;
                 let expiry_height = block::Height(reader.read_u32::<LittleEndian>()?);
+
                 let value_balance = (&mut reader).zcash_deserialize_into()?;
                 let mut shielded_spends = Vec::zcash_deserialize(&mut reader)?;
                 let mut shielded_outputs = Vec::zcash_deserialize(&mut reader)?;
+
                 let joinsplit_data = OptV4Jsd::zcash_deserialize(&mut reader)?;
 
                 use futures::future::Either::*;
-                let shielded_data = if !shielded_spends.is_empty() {
-                    Some(ShieldedData {
+                // Arbitraily use a spend for `first`, if both are present
+                let sapling_shielded_data = if !shielded_spends.is_empty() {
+                    Some(sapling::ShieldedData {
+                        value_balance,
+                        shared_anchor: (),
                         first: Left(shielded_spends.remove(0)),
                         rest_spends: shielded_spends,
                         rest_outputs: shielded_outputs,
                         binding_sig: reader.read_64_bytes()?.into(),
                     })
                 } else if !shielded_outputs.is_empty() {
-                    Some(ShieldedData {
+                    Some(sapling::ShieldedData {
+                        value_balance,
+                        shared_anchor: (),
                         first: Right(shielded_outputs.remove(0)),
+                        // the spends are actually empty here, but we use the
+                        // vec for consistency and readability
                         rest_spends: shielded_spends,
                         rest_outputs: shielded_outputs,
                         binding_sig: reader.read_64_bytes()?.into(),
@@ -295,8 +307,7 @@ impl ZcashDeserialize for Transaction {
                     outputs,
                     lock_time,
                     expiry_height,
-                    value_balance,
-                    shielded_data,
+                    sapling_shielded_data,
                     joinsplit_data,
                 })
             }
@@ -309,6 +320,7 @@ impl ZcashDeserialize for Transaction {
                 let expiry_height = block::Height(reader.read_u32::<LittleEndian>()?);
                 let inputs = Vec::zcash_deserialize(&mut reader)?;
                 let outputs = Vec::zcash_deserialize(&mut reader)?;
+
                 let mut rest = Vec::new();
                 reader.read_to_end(&mut rest)?;
 
@@ -340,5 +352,140 @@ where
 {
     fn zcash_serialize<W: io::Write>(&self, writer: W) -> Result<(), io::Error> {
         T::zcash_serialize(self, writer)
+    }
+}
+
+/// A Tx Input must have an Outpoint (32 byte hash + 4 byte index), a 4 byte sequence number,
+/// and a signature script, which always takes a min of 1 byte (for a length 0 script)
+const MIN_TRANSPARENT_INPUT_SIZE: u64 = 32 + 4 + 4 + 1;
+/// A Transparent output has an 8 byte value and script which takes a min of 1 byte
+const MIN_TRANSPARENT_OUTPUT_SIZE: u64 = 8 + 1;
+// All txs must have at least one input, a 4 byte locktime, and at least one output
+const MIN_TRANSPARENT_TX_SIZE: u64 = MIN_TRANSPARENT_INPUT_SIZE + 4 + MIN_TRANSPARENT_OUTPUT_SIZE;
+
+/// No valid Zcash message contains more transactions than can fit in a single block
+///
+/// `tx` messages contain a single transaction, and `block` messages are limited to the maximum
+/// block size.
+impl TrustedPreallocate for Arc<Transaction> {
+    fn max_allocation() -> u64 {
+        // A transparent transaction is the smallest transaction variant
+        MAX_BLOCK_BYTES / MIN_TRANSPARENT_TX_SIZE
+    }
+}
+/// The maximum number of inputs in a valid Zcash on-chain transaction.
+///
+/// If a transaction contains more inputs than can fit in maximally large block, it might be
+/// valid on the network and in the mempool, but it can never be mined into a block. So
+/// rejecting these large edge-case transactions can never break consensus.
+impl TrustedPreallocate for transparent::Input {
+    fn max_allocation() -> u64 {
+        MAX_BLOCK_BYTES / MIN_TRANSPARENT_INPUT_SIZE
+    }
+}
+/// The maximum number of outputs in a valid Zcash on-chain transaction.
+///
+/// If a transaction contains more outputs than can fit in maximally large block, it might be
+/// valid on the network and in the mempool, but it can never be mined into a block. So
+/// rejecting these large edge-case transactions can never break consensus.
+impl TrustedPreallocate for transparent::Output {
+    fn max_allocation() -> u64 {
+        MAX_BLOCK_BYTES / MIN_TRANSPARENT_OUTPUT_SIZE
+    }
+}
+
+#[cfg(test)]
+mod test_trusted_preallocate {
+    use super::{
+        transparent::Input, transparent::Output, Transaction, MAX_BLOCK_BYTES,
+        MIN_TRANSPARENT_INPUT_SIZE, MIN_TRANSPARENT_OUTPUT_SIZE, MIN_TRANSPARENT_TX_SIZE,
+    };
+    use crate::serialization::{TrustedPreallocate, ZcashSerialize};
+    use proptest::prelude::*;
+    use std::{convert::TryInto, sync::Arc};
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(300))]
+
+        /// Confirm that each spend takes at least MIN_TRANSPARENT_TX_SIZE bytes when serialized.
+        /// This verifies that our calculated `TrustedPreallocate::max_allocation()` is indeed an upper bound.
+        #[test]
+        fn tx_size_is_small_enough(tx in Transaction::arbitrary()) {
+            let serialized = tx.zcash_serialize_to_vec().expect("Serialization to vec must succeed");
+            prop_assert!(serialized.len() as u64 >= MIN_TRANSPARENT_TX_SIZE)
+        }
+
+        /// Confirm that each spend takes at least MIN_TRANSPARENT_TX_SIZE bytes when serialized.
+        /// This verifies that our calculated `TrustedPreallocate::max_allocation()` is indeed an upper bound.
+        #[test]
+        fn transparent_input_size_is_small_enough(input in Input::arbitrary()) {
+            let serialized = input.zcash_serialize_to_vec().expect("Serialization to vec must succeed");
+            prop_assert!(serialized.len() as u64 >= MIN_TRANSPARENT_INPUT_SIZE)
+        }
+
+        /// Confirm that each spend takes at least MIN_TRANSPARENT_TX_SIZE bytes when serialized.
+        /// This verifies that our calculated `TrustedPreallocate::max_allocation()` is indeed an upper bound.
+        #[test]
+        fn transparent_output_size_is_small_enough(output in Output::arbitrary()) {
+            let serialized = output.zcash_serialize_to_vec().expect("Serialization to vec must succeed");
+            prop_assert!(serialized.len() as u64 >= MIN_TRANSPARENT_OUTPUT_SIZE)
+        }
+
+    }
+    proptest! {
+        // This test is pretty slow, so only run a few
+        #![proptest_config(ProptestConfig::with_cases(7))]
+        #[test]
+        /// Verify the smallest disallowed vector of `Transaction`s is too large to fit in a Zcash block
+        fn tx_max_allocation_is_big_enough(tx in Transaction::arbitrary()) {
+
+            let max_allocation: usize = <Arc<Transaction>>::max_allocation().try_into().unwrap();
+            let mut smallest_disallowed_vec = Vec::with_capacity(max_allocation + 1);
+            for _ in 0..(<Arc<Transaction>>::max_allocation()+1) {
+                smallest_disallowed_vec.push(Arc::new(tx.clone()));
+            }
+            let serialized = smallest_disallowed_vec.zcash_serialize_to_vec().expect("Serialization to vec must succeed");
+
+            // Check that our smallest_disallowed_vec is only one item larger than the limit
+            prop_assert!(((smallest_disallowed_vec.len() - 1) as u64) == <Arc<Transaction>>::max_allocation());
+            // Check that our smallest_disallowed_vec is too big to be included in a valid block
+            prop_assert!(serialized.len() as u64 > MAX_BLOCK_BYTES);
+        }
+
+        #[test]
+        /// Verify the smallest disallowed vector of `Input`s is too large to fit in a Zcash block
+        fn input_max_allocation_is_big_enough(input in Input::arbitrary()) {
+
+            let max_allocation: usize = Input::max_allocation().try_into().unwrap();
+            let mut smallest_disallowed_vec = Vec::with_capacity(max_allocation + 1);
+            for _ in 0..(Input::max_allocation()+1) {
+                smallest_disallowed_vec.push(input.clone());
+            }
+            let serialized = smallest_disallowed_vec.zcash_serialize_to_vec().expect("Serialization to vec must succeed");
+
+            // Check that our smallest_disallowed_vec is only one item larger than the limit
+            prop_assert!(((smallest_disallowed_vec.len() - 1) as u64) == Input::max_allocation());
+            // Check that our smallest_disallowed_vec is too big to be included in a valid block
+            // Note that a serialized block always includes at least one byte for the number of transactions,
+            // so any serialized Vec<Input> at least MAX_BLOCK_BYTES long is too large to fit in a block.
+            prop_assert!(serialized.len() as u64 >= MAX_BLOCK_BYTES);
+        }
+        #[test]
+        /// Verify the smallest disallowed vector of `Output`s is too large to fit in a Zcash block
+        fn output_max_allocation_is_big_enough(output in Output::arbitrary()) {
+
+            let max_allocation: usize = Output::max_allocation().try_into().unwrap();
+            let mut smallest_disallowed_vec = Vec::with_capacity(max_allocation + 1);
+            for _ in 0..(Output::max_allocation()+1) {
+                smallest_disallowed_vec.push(output.clone());
+            }
+            let serialized = smallest_disallowed_vec.zcash_serialize_to_vec().expect("Serialization to vec must succeed");
+
+            // Check that our smallest_disallowed_vec is only one item larger than the limit
+            prop_assert!(((smallest_disallowed_vec.len() - 1) as u64) == Output::max_allocation());
+            // Check that our smallest_disallowed_vec is too big to be included in a valid block
+            // Note that a serialized block always includes at least one byte for the number of transactions,
+            // so any serialized Vec<Output> at least MAX_BLOCK_BYTES long is too large to fit in a block.
+            prop_assert!(serialized.len() as u64 >= MAX_BLOCK_BYTES);
+        }
     }
 }
