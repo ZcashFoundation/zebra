@@ -3,6 +3,8 @@
 #[cfg(any(test, feature = "proptest-impl"))]
 mod arbitrary;
 mod joinsplit;
+#[cfg(test)]
+mod tests;
 
 // XXX clean up these modules
 
