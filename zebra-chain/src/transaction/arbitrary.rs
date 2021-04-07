@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use block::Height;
 use chrono::{TimeZone, Utc};
 use futures::future::Either;
 use proptest::{arbitrary::any, array, collection::vec, option, prelude::*};
@@ -247,7 +246,7 @@ impl Arbitrary for Transaction {
             ..
         } = ledger_state;
 
-        let height = Height(tip_height.0 + 1);
+        let height = block::Height(tip_height.0 + 1);
         let network_upgrade = NetworkUpgrade::current(network, height);
 
         match network_upgrade {

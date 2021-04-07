@@ -1,16 +1,18 @@
-use std::sync::Arc;
-
-use crate::parameters::Network;
-use crate::work::{difficulty::CompactDifficulty, equihash};
-
-use super::*;
-
-use crate::LedgerState;
-use chrono::{TimeZone, Utc};
 use proptest::{
     arbitrary::{any, Arbitrary},
     prelude::*,
 };
+
+use chrono::{TimeZone, Utc};
+use std::sync::Arc;
+
+use crate::LedgerState;
+use crate::{
+    parameters::Network,
+    work::{difficulty::CompactDifficulty, equihash},
+};
+
+use super::*;
 
 impl Arbitrary for Block {
     type Parameters = LedgerState;
