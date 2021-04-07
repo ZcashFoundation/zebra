@@ -86,7 +86,11 @@ proptest! {
     }
 }
 
-/// Return the
+/// Return the following calculations on `spend`:
+///   smallest_disallowed_vec_len
+///   smallest_disallowed_serialized_len
+///   largest_allowed_vec_len
+///   largest_allowed_serialized_len
 fn spend_max_allocation_is_big_enough<AnchorV>(
     spend: Spend<AnchorV>,
 ) -> (usize, usize, usize, usize)
