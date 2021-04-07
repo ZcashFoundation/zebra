@@ -26,9 +26,11 @@ reviews, and testing.
 # Definitions
 [definitions]: #definitions
 
-<!--
-Lay out explicit definitions of any terms that are newly introduced or which cause confusion during the RFC design process.
--->
+- `constraint`
+- `CORRECTNESS comment`
+- `deadlock`
+- `starvation` or `livelock`
+- `hang`
 
 # Guide-level explanation
 [guide-level-explanation]: #guide-level-explanation
