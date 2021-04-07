@@ -46,7 +46,7 @@ impl<K, S: Service<Req>, Req> Future for UnreadyService<K, S, Req> {
         // `Poll::Pending`.
         //
         //`ready!` returns `Poll::Pending` when the service is unready, and
-        // schedules this task for wakeup.
+        // the inner `poll_ready` schedules this task for wakeup.
         //
         // `cancel.poll` also schedules this task for wakeup if it is canceled.
         let res = ready!(this
