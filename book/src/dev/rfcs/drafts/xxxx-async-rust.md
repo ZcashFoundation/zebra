@@ -291,7 +291,7 @@ These constraints are mitigated by:
 A service should be provided wrapped in a `Buffer` if:
 * it is a complex service
 * it has multiple callers, or
-* it has a single caller than calls it multiple times concurrently.
+* it has a single caller that calls it multiple times concurrently.
 
 Services might also have other reasons for using a `Buffer`. These reasons should be documented.
 
@@ -334,7 +334,7 @@ The [`futures::select!`](https://docs.rs/futures/0.3.13/futures/macro.select.htm
 [`tokio::select!`](https://docs.rs/tokio/0.3.6/tokio/macro.select.html) macros select
 ready arguments at random.
 
-Also consdier the `FuturesUnordered` stream for unbiased selection of a large number
+Also consider the `FuturesUnordered` stream for unbiased selection of a large number
 of futures. However, this macro and stream require mapping all arguments to the same
 type.
 
