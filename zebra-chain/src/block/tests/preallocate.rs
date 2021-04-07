@@ -1,11 +1,12 @@
 //! Tests for trusted preallocation during deserialization.
 
-use super::super::{
-    header::MIN_COUNTED_HEADER_LEN, CountedHeader, Hash, Header, BLOCK_HASH_SIZE,
-    MAX_PROTOCOL_MESSAGE_LEN,
+use crate::{
+   block::{
+       header::MIN_COUNTED_HEADER_LEN, CountedHeader, Hash, Header, BLOCK_HASH_SIZE,
+       MAX_PROTOCOL_MESSAGE_LEN,
+    },
+    serialization::{TrustedPreallocate, ZcashSerialize}
 };
-
-use crate::serialization::{TrustedPreallocate, ZcashSerialize};
 
 use proptest::prelude::*;
 use std::convert::TryInto;
