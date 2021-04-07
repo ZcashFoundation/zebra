@@ -58,7 +58,7 @@ Here are some examples of concurrent designs and documentation in Zebra:
 [wakeups-poll-pending]: #wakeups-poll-pending
 
 Here's a wakeup correctness example from
-[unready_service.rs](https://github.com/ZcashFoundation/zebra/blob/main/zebra-network/src/peer_set/unready_service.rs#L43):
+[unready_service.rs](https://github.com/ZcashFoundation/zebra/blob/de6d1c93f3e4f9f4fd849176bea6b39ffc5b260f/zebra-network/src/peer_set/unready_service.rs#L43):
 
 <!-- copied from commit de6d1c93f3e4f9f4fd849176bea6b39ffc5b260f on 2020-04-07 -->
 ```rust
@@ -182,7 +182,7 @@ loop {
 ## Integration Testing Async Code
 [integration-testing]: #integration-testing
 
-Here's an example from [`zebrad/tests/acceptance.rs`](https://github.com/ZcashFoundation/zebra/blob/main/zebrad/tests/acceptance.rs#L699)
+Here's an example from [`zebrad/tests/acceptance.rs`](https://github.com/ZcashFoundation/zebra/blob/5bf0a2954e9df3fad53ad57f6b3a673d9df47b9a/zebrad/tests/acceptance.rs#L699)
 which shows:
 - tests for the async Zebra block download and verification pipeline
 - cancellation tests
