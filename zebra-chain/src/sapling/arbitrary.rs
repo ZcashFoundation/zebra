@@ -4,7 +4,8 @@ use proptest::{arbitrary::any, array, collection::vec, prelude::*};
 use crate::primitives::Groth16Proof;
 
 use super::{
-    keys, note, tree, NoteCommitment, Output, PerSpendAnchor, SharedAnchor, Spend, ValueCommitment,
+    keys, note, tree, FieldNotPresent, NoteCommitment, Output, PerSpendAnchor, SharedAnchor, Spend,
+    ValueCommitment,
 };
 
 impl Arbitrary for Spend<PerSpendAnchor> {
@@ -49,7 +50,7 @@ impl Arbitrary for Spend<SharedAnchor> {
             vec(any::<u8>(), 64),
         )
             .prop_map(|(nullifier, rpk_bytes, proof, sig_bytes)| Self {
-                per_spend_anchor: (),
+                per_spend_anchor: FieldNotPresent,
                 cv: ValueCommitment(AffinePoint::identity()),
                 nullifier,
                 rk: redjubjub::VerificationKeyBytes::from(rpk_bytes),

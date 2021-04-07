@@ -13,7 +13,7 @@ use crate::{
     sapling, sprout, transparent,
 };
 
-use super::{JoinSplitData, LockTime, Memo, Transaction};
+use super::{FieldNotPresent, JoinSplitData, LockTime, Memo, Transaction};
 
 impl Transaction {
     /// Generate a proptest strategy for V1 Transactions
@@ -219,7 +219,7 @@ impl Arbitrary for sapling::ShieldedData<sapling::PerSpendAnchor> {
             .prop_map(
                 |(value_balance, first, rest_spends, rest_outputs, sig_bytes)| Self {
                     value_balance,
-                    shared_anchor: (),
+                    shared_anchor: FieldNotPresent,
                     first,
                     rest_spends,
                     rest_outputs,

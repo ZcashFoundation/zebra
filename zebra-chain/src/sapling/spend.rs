@@ -17,7 +17,7 @@ use crate::{
     },
 };
 
-use super::{commitment, note, tree, AnchorVariant, PerSpendAnchor, SharedAnchor};
+use super::{commitment, note, tree, AnchorVariant, FieldNotPresent, PerSpendAnchor, SharedAnchor};
 
 /// A _Spend Description_, as described in [protocol specification §7.3][ps].
 ///
@@ -26,7 +26,6 @@ use super::{commitment, note, tree, AnchorVariant, PerSpendAnchor, SharedAnchor}
 /// In `Transaction::V4`, each `Spend` has its own anchor. In `Transaction::V5`,
 /// there is a single `shared_anchor` for the entire transaction. This
 /// structural difference is modeled using the `AnchorVariant` type trait.
-/// A type of `()` means "not present in this transaction version".
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#spendencoding
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -35,7 +34,7 @@ pub struct Spend<AnchorV: AnchorVariant> {
     pub cv: commitment::ValueCommitment,
     /// A root of the Sapling note commitment tree at some block height in the past.
     ///
-    /// A type of `()` means "not present in this transaction version".
+    /// Some transaction versions do not have this field.
     pub per_spend_anchor: AnchorV::PerSpend,
     /// The nullifier of the input note.
     pub nullifier: note::Nullifier,
@@ -62,9 +61,9 @@ impl From<(Spend<SharedAnchor>, tree::Root)> for Spend<PerSpendAnchor> {
     }
 }
 
-impl From<(Spend<PerSpendAnchor>, ())> for Spend<PerSpendAnchor> {
+impl From<(Spend<PerSpendAnchor>, FieldNotPresent)> for Spend<PerSpendAnchor> {
     /// Take the `Spend<PerSpendAnchor>` from a spend + anchor tuple.
-    fn from(per_spend: (Spend<PerSpendAnchor>, ())) -> Self {
+    fn from(per_spend: (Spend<PerSpendAnchor>, FieldNotPresent)) -> Self {
         per_spend.0
     }
 }

@@ -21,5 +21,7 @@ pub use commitment::{CommitmentRandomness, NoteCommitment, ValueCommitment};
 pub use keys::Diversifier;
 pub use note::{EncryptedNote, Note, Nullifier, WrappedNoteKey};
 pub use output::Output;
-pub use shielded_data::{AnchorVariant, PerSpendAnchor, SharedAnchor, ShieldedData};
+pub use shielded_data::{
+    AnchorVariant, FieldNotPresent, PerSpendAnchor, SharedAnchor, ShieldedData,
+};
 pub use spend::Spend;

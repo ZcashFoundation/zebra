@@ -28,14 +28,18 @@ pub struct PerSpendAnchor {}
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct SharedAnchor {}
 
+/// This field is not present in this transaction version.
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct FieldNotPresent;
+
 impl AnchorVariant for PerSpendAnchor {
-    type Shared = ();
+    type Shared = FieldNotPresent;
     type PerSpend = tree::Root;
 }
 
 impl AnchorVariant for SharedAnchor {
     type Shared = tree::Root;
-    type PerSpend = ();
+    type PerSpend = FieldNotPresent;
 }
 
 /// A type trait to handle structural differences between V4 and V5 Sapling
@@ -45,13 +49,9 @@ impl AnchorVariant for SharedAnchor {
 /// single transaction anchor for all Spends in a transaction.
 pub trait AnchorVariant {
     /// The type of the shared anchor.
-    ///
-    /// `()` means "not present in this transaction version".
     type Shared: Clone + Debug + DeserializeOwned + Serialize + Eq + PartialEq;
 
     /// The type of the per-spend anchor.
-    ///
-    /// `()` means "not present in this transaction version".
     type PerSpend: Clone + Debug + DeserializeOwned + Serialize + Eq + PartialEq;
 }
 
@@ -74,7 +74,6 @@ pub trait AnchorVariant {
 /// In `Transaction::V4`, each `Spend` has its own anchor. In `Transaction::V5`,
 /// there is a single `shared_anchor` for the entire transaction. This
 /// structural difference is modeled using the `AnchorVariant` type trait.
-/// A type of `()` means "not present in this transaction version".
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ShieldedData<AnchorV>
 where
@@ -84,7 +83,7 @@ where
     pub value_balance: Amount,
     /// The shared anchor for all `Spend`s in this transaction.
     ///
-    /// A type of `()` means "not present in this transaction version".
+    /// Some transaction versions do not have this field.
     pub shared_anchor: AnchorV::Shared,
     /// Either a spend or output description.
     ///
