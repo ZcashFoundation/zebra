@@ -41,14 +41,13 @@ development, reviews, and testing.
 # Guide-level explanation
 [guide-level-explanation]: #guide-level-explanation
 
-<!--
-Explain the proposal as if it was already included in the project and you were teaching it to another Zebra programmer. That generally means:
+If you are designing, developing, or testing concurrent Zebra code, follow the
+patterns in these examples to avoid hangs.
 
-- Introducing new named concepts.
-- Explaining the feature largely in terms of examples.
-- Explaining how Zebra programmers should *think* about the feature, and how it should impact the way they use Zebra. It should explain the impact as concretely as possible.
-- If applicable, provide sample error messages, deprecation warnings, migration guidance, or test strategies.
-- If applicable, describe the differences between teaching this to existing Zebra programmers and new Zebra programmers.
+If you are reviewing concurrent Zebra designs or code, make sure that:
+- it is clear how the design or code avoids hangs
+- the design or code follows the patterns in these examples (as much as possible)
+- the concurrency constraints and risks are documented
 
 For implementation-oriented RFCs (e.g. for Zebra internals), this section should focus on how Zebra contributors should think about the change, and give examples of its concrete impact. For policy RFCs, this section should provide an example-driven introduction to the policy, and explain its impact in concrete terms.
 -->
