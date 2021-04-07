@@ -50,7 +50,7 @@ impl Arbitrary for Spend<SharedAnchor> {
             vec(any::<u8>(), 64),
         )
             .prop_map(|(nullifier, rpk_bytes, proof, sig_bytes)| Self {
-                per_spend_anchor: FieldNotPresent {},
+                per_spend_anchor: FieldNotPresent,
                 cv: ValueCommitment(AffinePoint::identity()),
                 nullifier,
                 rk: redjubjub::VerificationKeyBytes::from(rpk_bytes),

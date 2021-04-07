@@ -30,7 +30,7 @@ pub struct SharedAnchor {}
 
 /// This field is not present in this transaction version.
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub struct FieldNotPresent {}
+pub struct FieldNotPresent;
 
 impl AnchorVariant for PerSpendAnchor {
     type Shared = FieldNotPresent;

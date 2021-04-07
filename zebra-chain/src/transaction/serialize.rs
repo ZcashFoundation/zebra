@@ -281,7 +281,7 @@ impl ZcashDeserialize for Transaction {
                 let sapling_shielded_data = if !shielded_spends.is_empty() {
                     Some(sapling::ShieldedData {
                         value_balance,
-                        shared_anchor: FieldNotPresent {},
+                        shared_anchor: FieldNotPresent,
                         first: Left(shielded_spends.remove(0)),
                         rest_spends: shielded_spends,
                         rest_outputs: shielded_outputs,
@@ -290,7 +290,7 @@ impl ZcashDeserialize for Transaction {
                 } else if !shielded_outputs.is_empty() {
                     Some(sapling::ShieldedData {
                         value_balance,
-                        shared_anchor: FieldNotPresent {},
+                        shared_anchor: FieldNotPresent,
                         first: Right(shielded_outputs.remove(0)),
                         // the spends are actually empty here, but we use the
                         // vec for consistency and readability

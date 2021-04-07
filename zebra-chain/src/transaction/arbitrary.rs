@@ -220,7 +220,7 @@ impl Arbitrary for sapling::ShieldedData<sapling::PerSpendAnchor> {
             .prop_map(
                 |(value_balance, first, rest_spends, rest_outputs, sig_bytes)| Self {
                     value_balance,
-                    shared_anchor: FieldNotPresent {},
+                    shared_anchor: FieldNotPresent,
                     first,
                     rest_spends,
                     rest_outputs,
