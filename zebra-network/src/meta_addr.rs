@@ -18,6 +18,11 @@ use crate::protocol::{external::MAX_PROTOCOL_MESSAGE_LEN, types::PeerServices};
 
 use PeerAddrState::*;
 
+#[cfg(any(test, feature = "proptest-impl"))]
+use proptest_derive::Arbitrary;
+#[cfg(any(test, feature = "proptest-impl"))]
+mod arbitrary;
+
 #[cfg(test)]
 mod tests;
 
@@ -28,6 +33,7 @@ mod tests;
 /// [`AddressBook::maybe_connected_peers`] and
 /// [`AddressBook::reconnection_peers`].
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub enum PeerAddrState {
     /// The peer has sent us a valid message.
     ///
@@ -196,6 +202,8 @@ impl MetaAddr {
         let last_seen = Utc.timestamp(ts - ts.rem_euclid(interval), 0);
         MetaAddr {
             addr: self.addr,
+            // services are sanitized during parsing, so we don't need to make
+            // any changes here
             services: self.services,
             last_seen,
             // the state isn't sent to the remote peer, but sanitize it anyway
