@@ -31,11 +31,11 @@ pub enum Commitment {
     /// Subsequent `Commitment` variants also commit to the `FinalSaplingRoot`,
     /// via their `EarliestSaplingRoot` and `LatestSaplingRoot` fields.
     ///
-    /// TODO: this field is verified during semantic verification
-    ///
     /// Since Zebra checkpoints on Canopy, we don't need to validate this
     /// field, but since it's included in the ChainHistoryRoot, we are
     /// already calculating it, so we might as well validate it.
+    ///
+    /// TODO: this field is verified during semantic verification
     FinalSaplingRoot(sapling::tree::Root),
 
     /// [Heartwood activation block] Reserved field.
@@ -63,7 +63,7 @@ pub enum Commitment {
     /// chain history hash in their activation block, via the previous block
     /// hash field.)
     ///
-    /// TODO: this field is verified during semantic verification
+    /// TODO: this field is verified during contextual verification
     ChainHistoryRoot(ChainHistoryMmrRootHash),
 
     /// [NU5 activation onwards] A commitment to:
@@ -79,11 +79,8 @@ pub enum Commitment {
     ///
     /// See also the [`ChainHistoryRoot`] variant.
     ///
-    /// TODO: this field is verified during semantic verification
-    //
-    // TODO: Do block commitments activate at NU5 activation, or (NU5 + 1)?
-    // https://github.com/zcash/zips/pull/474
-    BlockCommitments(BlockCommitmentsHash),
+    /// TODO: this field is verified during contextual verification
+    ChainHistoryBlockTxAuthCommitment(ChainHistoryBlockTxAuthCommitmentHash),
 }
 
 /// The required value of reserved `Commitment`s.
@@ -116,7 +113,9 @@ impl Commitment {
                 }
             }
             Heartwood | Canopy => Ok(ChainHistoryRoot(ChainHistoryMmrRootHash(bytes))),
-            Nu5 => Ok(BlockCommitments(BlockCommitmentsHash(bytes))),
+            Nu5 => Ok(ChainHistoryBlockTxAuthCommitment(
+                ChainHistoryBlockTxAuthCommitmentHash(bytes),
+            )),
         }
     }
 
@@ -130,7 +129,7 @@ impl Commitment {
             FinalSaplingRoot(hash) => hash.0,
             ChainHistoryActivationReserved => RESERVED_BYTES,
             ChainHistoryRoot(hash) => hash.0,
-            BlockCommitments(hash) => hash.0,
+            ChainHistoryBlockTxAuthCommitment(hash) => hash.0,
         }
     }
 }
@@ -143,17 +142,19 @@ impl Commitment {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ChainHistoryMmrRootHash([u8; 32]);
 
-/// The Block Commitments for a block. As of NU5, these cover:
+/// A block commitment to chain history and transaction auth.
 /// - the chain history tree for all ancestors in the current network upgrade,
 ///   and
 /// - the transaction authorising data in this block.
+///
+/// Introduced in NU5.
 //
 // TODO:
 //    - add auth data type
 //    - add a method for hashing chain history and auth data together
 //    - move to a separate file
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct BlockCommitmentsHash([u8; 32]);
+pub struct ChainHistoryBlockTxAuthCommitmentHash([u8; 32]);
 
 /// Errors that can occur when checking RootHash consensus rules.
 ///
@@ -186,8 +187,8 @@ pub enum CommitmentError {
         actual: [u8; 32],
     },
 
-    #[error("invalid block commitment: expected {expected:?}, actual: {actual:?}")]
-    InvalidBlockCommitment {
+    #[error("invalid chain history + block transaction auth commitment: expected {expected:?}, actual: {actual:?}")]
+    InvalidChainHistoryBlockTxAuthCommitment {
         expected: [u8; 32],
         actual: [u8; 32],
     },
