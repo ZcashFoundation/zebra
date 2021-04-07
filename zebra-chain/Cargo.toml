@@ -41,8 +41,7 @@ proptest = { version = "0.10", optional = true }
 proptest-derive = { version = "0.3.0", optional = true }
 
 # ZF deps
-# TODO: upgrade ed25510-zebra to 3 when released: https://github.com/ZcashFoundation/ed25519-zebra/issues/45
-ed25519-zebra = {git = "https://github.com/ZcashFoundation/ed25519-zebra", rev = "539fad040c443302775b0f508e616418825e6c22"}
+ed25519-zebra = "2.2.0"
 redjubjub = "0.4"
 
 [dev-dependencies]
