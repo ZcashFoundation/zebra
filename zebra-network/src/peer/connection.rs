@@ -372,6 +372,22 @@ where
             match self.state {
                 State::AwaitingRequest => {
                     trace!("awaiting client request or peer message");
+                    // CORRECTNESS
+                    //
+                    // Currently, select prefers the first future if multiple
+                    // futures are ready.
+                    //
+                    // The peer can starve client requests if it sends an
+                    // uninterrupted series of messages. But this is unlikely in
+                    // practice, due to network delays.
+                    //
+                    // If both futures are ready, there's no particular reason
+                    // to prefer one over the other.
+                    //
+                    // TODO: use `futures::select!`, which chooses a ready future
+                    //       at random, avoiding starvation
+                    //       (To use `select!`, we'll need to map the different
+                    //       results to a new enum types.)
                     match future::select(peer_rx.next(), self.client_rx.next()).await {
                         Either::Left((None, _)) => {
                             self.fail_with(PeerError::ConnectionClosed);
@@ -404,14 +420,21 @@ where
                         .request_timer
                         .as_mut()
                         .expect("timeout must be set while awaiting response");
-                    let cancel = future::select(timer_ref, tx.cancellation());
-                    match future::select(peer_rx.next(), cancel)
+                    // CORRECTNESS
+                    //
+                    // Currently, select prefers the first future if multiple
+                    // futures are ready.
+                    //
+                    // If multiple futures are ready, we want the cancellation
+                    // to take priority, then the timeout, then peer responses.
+                    let cancel = future::select(tx.cancellation(), timer_ref);
+                    match future::select(cancel, peer_rx.next())
                         .instrument(span.clone())
                         .await
                     {
-                        Either::Left((None, _)) => self.fail_with(PeerError::ConnectionClosed),
-                        Either::Left((Some(Err(e)), _)) => self.fail_with(e),
-                        Either::Left((Some(Ok(peer_msg)), _cancel)) => {
+                        Either::Right((None, _)) => self.fail_with(PeerError::ConnectionClosed),
+                        Either::Right((Some(Err(e)), _)) => self.fail_with(e),
+                        Either::Right((Some(Ok(peer_msg)), _cancel)) => {
                             // Try to process the message using the handler.
                             // This extremely awkward construction avoids
                             // keeping a live reference to handler across the
@@ -455,7 +478,7 @@ where
                                 };
                             }
                         }
-                        Either::Right((Either::Left(_), _peer_fut)) => {
+                        Either::Left((Either::Right(_), _peer_fut)) => {
                             trace!(parent: &span, "client request timed out");
                             let e = PeerError::ClientRequestTimeout;
                             self.state = match self.state {
@@ -478,7 +501,7 @@ where
                                 ),
                             };
                         }
-                        Either::Right((Either::Right(_), _peer_fut)) => {
+                        Either::Left((Either::Left(_), _peer_fut)) => {
                             trace!(parent: &span, "client request was cancelled");
                             self.state = State::AwaitingRequest;
                         }

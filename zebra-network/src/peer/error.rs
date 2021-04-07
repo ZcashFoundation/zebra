@@ -98,4 +98,13 @@ pub enum HandshakeError {
     /// The remote peer offered a version older than our minimum version.
     #[error("Peer offered obsolete version: {0:?}")]
     ObsoleteVersion(crate::protocol::external::types::Version),
+    /// Sending or receiving a message timed out.
+    #[error("Timeout when sending or receiving a message to peer")]
+    Timeout,
+}
+
+impl From<tokio::time::error::Elapsed> for HandshakeError {
+    fn from(_source: tokio::time::error::Elapsed) -> Self {
+        HandshakeError::Timeout
+    }
 }

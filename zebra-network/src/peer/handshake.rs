@@ -12,7 +12,7 @@ use futures::{
     channel::{mpsc, oneshot},
     prelude::*,
 };
-use tokio::{net::TcpStream, sync::broadcast};
+use tokio::{net::TcpStream, sync::broadcast, time::timeout};
 use tokio_util::codec::Framed;
 use tower::Service;
 use tracing::{span, Level, Span};
@@ -34,6 +34,12 @@ use super::{Client, Connection, ErrorSlot, HandshakeError, PeerError};
 
 /// A [`Service`] that handshakes with a remote peer and constructs a
 /// client/server pair.
+///
+/// CORRECTNESS
+///
+/// To avoid hangs, each handshake (or its connector) should be:
+/// - launched in a separate task, and
+/// - wrapped in a timeout.
 #[derive(Clone)]
 pub struct Handshake<S> {
     config: Config,
@@ -211,6 +217,10 @@ where
         let fut = async move {
             debug!("connecting to remote peer");
 
+            // CORRECTNESS
+            //
+            // As a defence-in-depth against hangs, every send or next on stream
+            // should be wrapped in a timeout.
             let mut stream = Framed::new(
                 tcp_stream,
                 Codec::builder()
@@ -260,11 +270,10 @@ where
             };
 
             debug!(?version, "sending initial version message");
-            stream.send(version).await?;
+            timeout(constants::REQUEST_TIMEOUT, stream.send(version)).await??;
 
-            let remote_msg = stream
-                .next()
-                .await
+            let remote_msg = timeout(constants::REQUEST_TIMEOUT, stream.next())
+                .await?
                 .ok_or(HandshakeError::ConnectionClosed)??;
 
             // Check that we got a Version and destructure its fields into the local scope.
@@ -293,11 +302,10 @@ where
                 return Err(HandshakeError::NonceReuse);
             }
 
-            stream.send(Message::Verack).await?;
+            timeout(constants::REQUEST_TIMEOUT, stream.send(Message::Verack)).await??;
 
-            let remote_msg = stream
-                .next()
-                .await
+            let remote_msg = timeout(constants::REQUEST_TIMEOUT, stream.next())
+                .await?
                 .ok_or(HandshakeError::ConnectionClosed)??;
             if let Message::Verack = remote_msg {
                 debug!("got verack from remote peer");
@@ -376,22 +384,42 @@ where
                 future::ready(Ok(msg))
             });
 
+            // CORRECTNESS
+            //
+            // Every message and error must update the peer address state via
+            // the inbound_ts_collector.
+            let inbound_ts_collector = timestamp_collector.clone();
             let peer_rx = peer_rx
                 .then(move |msg| {
-                    // Add a metric for inbound messages and fire a timestamp event.
-                    let mut timestamp_collector = timestamp_collector.clone();
+                    // Add a metric for inbound messages and errors.
+                    // Fire a timestamp or failure event.
+                    let mut inbound_ts_collector = inbound_ts_collector.clone();
                     async move {
-                        if let Ok(msg) = &msg {
-                            metrics::counter!(
-                                "zcash.net.in.messages",
-                                1,
-                                "command" => msg.to_string(),
-                                "addr" => addr.to_string(),
-                            );
-                            use futures::sink::SinkExt;
-                            let _ = timestamp_collector
-                                .send(MetaAddr::new_responded(&addr, &remote_services))
-                                .await;
+                        match &msg {
+                            Ok(msg) => {
+                                metrics::counter!(
+                                    "zcash.net.in.messages",
+                                    1,
+                                    "command" => msg.to_string(),
+                                    "addr" => addr.to_string(),
+                                );
+                                // the collector doesn't depend on network activity,
+                                // so this await should not hang
+                                let _ = inbound_ts_collector
+                                    .send(MetaAddr::new_responded(&addr, &remote_services))
+                                    .await;
+                            }
+                            Err(err) => {
+                                metrics::counter!(
+                                    "zebra.net.in.errors",
+                                    1,
+                                    "error" => err.to_string(),
+                                    "addr" => addr.to_string(),
+                                );
+                                let _ = inbound_ts_collector
+                                    .send(MetaAddr::new_errored(&addr, &remote_services))
+                                    .await;
+                            }
                         }
                         msg
                     }
@@ -452,6 +480,16 @@ where
                     .boxed(),
             );
 
+            // CORRECTNESS
+            //
+            // To prevent hangs:
+            // - every await that depends on the network must have a timeout (or interval)
+            // - every error/shutdown must update the address book state and return
+            //
+            // The address book state can be updated via `ClientRequest.tx`, or the
+            // timestamp_collector.
+            //
+            // Returning from the spawned closure terminates the connection's heartbeat task.
             let heartbeat_span = tracing::debug_span!(parent: connection_span, "heartbeat");
             tokio::spawn(
                 async move {
@@ -460,11 +498,23 @@ where
 
                     let mut shutdown_rx = shutdown_rx;
                     let mut server_tx = server_tx;
+                    let mut timestamp_collector = timestamp_collector.clone();
                     let mut interval_stream = tokio::time::interval(constants::HEARTBEAT_INTERVAL);
                     loop {
                         let shutdown_rx_ref = Pin::new(&mut shutdown_rx);
-                        match future::select(interval_stream.next(), shutdown_rx_ref).await {
-                            Either::Left(_) => {
+                        let mut send_addr_err = false;
+
+                        // CORRECTNESS
+                        //
+                        // Currently, select prefers the first future if multiple
+                        // futures are ready.
+                        //
+                        // Starvation is impossible here, because interval has a
+                        // slow rate, and shutdown is a oneshot. If both futures
+                        // are ready, we want the shutdown to take priority over
+                        // sending a useless heartbeat.
+                        match future::select(shutdown_rx_ref, interval_stream.next()).await {
+                            Either::Right(_) => {
                                 let (tx, rx) = oneshot::channel();
                                 let request = Request::Ping(Nonce::default());
                                 tracing::trace!(?request, "queueing heartbeat request");
@@ -474,19 +524,28 @@ where
                                     span: tracing::Span::current(),
                                 }) {
                                     Ok(()) => {
-                                        match server_tx.flush().await {
-                                            Ok(()) => {}
-                                            Err(e) => {
-                                                // We can't get the client request for this failure,
-                                                // so we can't send an error back here. But that's ok,
-                                                // because:
-                                                //   - this error never happens (or it's very rare)
-                                                //   - if the flush() fails, the server hasn't
-                                                //     received the request
+                                        // TODO: also wait on the shutdown_rx here
+                                        match timeout(
+                                            constants::HEARTBEAT_INTERVAL,
+                                            server_tx.flush(),
+                                        )
+                                        .await
+                                        {
+                                            Ok(Ok(())) => {
+                                            }
+                                            Ok(Err(e)) => {
                                                 tracing::warn!(
-                                                    "flushing client request failed: {:?}",
-                                                    e
+                                                    ?e,
+                                                    "flushing client request failed, shutting down"
                                                 );
+                                                send_addr_err = true;
+                                            }
+                                            Err(e) => {
+                                                tracing::warn!(
+                                                    ?e,
+                                                    "flushing client request timed out, shutting down"
+                                                );
+                                                send_addr_err = true;
                                             }
                                         }
                                     }
@@ -514,17 +573,46 @@ where
                                 // Heartbeats are checked internally to the
                                 // connection logic, but we need to wait on the
                                 // response to avoid canceling the request.
-                                match rx.await {
-                                    Ok(_) => tracing::trace!("got heartbeat response"),
-                                    Err(_) => {
-                                        tracing::trace!(
+                                //
+                                // TODO: also wait on the shutdown_rx here
+                                match timeout(constants::HEARTBEAT_INTERVAL, rx).await {
+                                    Ok(Ok(_)) => tracing::trace!("got heartbeat response"),
+                                    Ok(Err(e)) => {
+                                        tracing::warn!(
+                                            ?e,
                                             "error awaiting heartbeat response, shutting down"
                                         );
-                                        return;
+                                        send_addr_err = true;
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!(
+                                            ?e,
+                                            "heartbeat response timed out, shutting down"
+                                        );
+                                        send_addr_err = true;
                                     }
                                 }
                             }
-                            Either::Right(_) => return, // got shutdown signal
+                            Either::Left(_) => {
+                                tracing::trace!("shutting down due to Client shut down");
+                                // awaiting a local task won't hang
+                                let _ = timestamp_collector
+                                    .send(MetaAddr::new_shutdown(&addr, &remote_services))
+                                    .await;
+                                return;
+                            }
+                        }
+                        if send_addr_err {
+                            // We can't get the client request for this failure,
+                            // so we can't send an error back on `tx`. So
+                            // we just update the address book with a failure.
+                            let _ = timestamp_collector
+                                .send(MetaAddr::new_errored(
+                                    &addr,
+                                    &remote_services,
+                                ))
+                                .await;
+                            return;
                         }
                     }
                 }
