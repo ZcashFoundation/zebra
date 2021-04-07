@@ -49,31 +49,172 @@ If you are reviewing concurrent Zebra designs or code, make sure that:
 - the design or code follows the patterns in these examples (as much as possible)
 - the concurrency constraints and risks are documented
 
-For implementation-oriented RFCs (e.g. for Zebra internals), this section should focus on how Zebra contributors should think about the change, and give examples of its concrete impact. For policy RFCs, this section should provide an example-driven introduction to the policy, and explain its impact in concrete terms.
--->
+The [Reference](#reference-level-explanation) section contains in-depth
+background information about Rust async concurrency in Zebra.
 
-TODO: complete the examples in this section
+Here are some examples of concurrent designs and documentation in Zebra:
 
-## `Poll::Pending` Deadlock Avoidance
-[poll-pending-deadlock-avoidance]: #poll-pending-deadlock-avoidance
+## Registering Wakeups Before Returning Poll::Pending
+[wakeups-poll-pending]: #wakeups-poll-pending
 
-Here's a deadlock avoidance example from [#1735](https://github.com/ZcashFoundation/zebra/pull/1735):
+Here's a wakeup correctness example from
+[unready_service.rs](https://github.com/ZcashFoundation/zebra/blob/main/zebra-network/src/peer_set/unready_service.rs#L43):
+
+<!-- copied from commit de6d1c93f3e4f9f4fd849176bea6b39ffc5b260f on 2020-04-07 -->
 ```rust
-        // We acquire checkpoint readiness before block readiness, to avoid an unlikely
-        // hang during the checkpoint to block verifier transition. If the checkpoint and
-        // block verifiers are contending for the same buffer/batch, we want the checkpoint
-        // verifier to win, so that checkpoint verification completes, and block verification
-        // can start. (Buffers and batches have multiple slots, so this contention is unlikely.)
-        use futures::ready;
-        // The chain verifier holds one slot in each verifier, for each concurrent task.
-        // Therefore, any shared buffers or batches polled by these verifiers should double
-        // their bounds. (For example, the state service buffer.)
-        ready!(self
-            .checkpoint
-            .poll_ready(cx)
-            .map_err(VerifyChainError::Checkpoint))?;
-        ready!(self.block.poll_ready(cx).map_err(VerifyChainError::Block))?;
-        Poll::Ready(Ok(()))
+// CORRECTNESS
+//
+// The current task must be scheduled for wakeup every time we return
+// `Poll::Pending`.
+//
+//`ready!` returns `Poll::Pending` when the service is unready, and
+// the inner `poll_ready` schedules this task for wakeup.
+//
+// `cancel.poll` also schedules this task for wakeup if it is canceled.
+let res = ready!(this
+    .service
+    .as_mut()
+    .expect("poll after ready")
+    .poll_ready(cx));
+```
+
+## Avoiding Deadlocks when Aquiring Buffer or Service Readiness
+[readiness-deadlock-avoidance]: #readiness-deadlock-avoidance
+
+Here's an example from [#1735](https://github.com/ZcashFoundation/zebra/pull/1735)
+which covers:
+- calling `poll_ready` before each `call`
+- deadlock avoidance when acquiring buffer slots
+- buffer bounds
+
+<!-- copied from the main branch on 2020-04-07 -->
+```rust
+// We acquire checkpoint readiness before block readiness, to avoid an unlikely
+// hang during the checkpoint to block verifier transition. If the checkpoint and
+// block verifiers are contending for the same buffer/batch, we want the checkpoint
+// verifier to win, so that checkpoint verification completes, and block verification
+// can start. (Buffers and batches have multiple slots, so this contention is unlikely.)
+use futures::ready;
+// The chain verifier holds one slot in each verifier, for each concurrent task.
+// Therefore, any shared buffers or batches polled by these verifiers should double
+// their bounds. (For example, the state service buffer.)
+ready!(self
+    .checkpoint
+    .poll_ready(cx)
+    .map_err(VerifyChainError::Checkpoint))?;
+ready!(self.block.poll_ready(cx).map_err(VerifyChainError::Block))?;
+Poll::Ready(Ok(()))
+```
+
+## Prioritising Cancellation Futures
+[prioritising-cancellation-futures]: #prioritising-cancellation-futures
+
+Here's an example from [#1950](https://github.com/ZcashFoundation/zebra/pull/1950)
+which shows biased future selection using the `select` function:
+
+<!-- copied from commit b51070ed323de7a980cd89043947a2b0828e8bf8 on 2020-04-07 -->
+```rust
+// CORRECTNESS
+//
+// Currently, select prefers the first future if multiple
+// futures are ready.
+//
+// If multiple futures are ready, we want the cancellation
+// to take priority, then the timeout, then peer responses.
+let cancel = future::select(tx.cancellation(), timer_ref);
+match future::select(cancel, peer_rx.next()) {
+    ...
+}
+```
+
+## Sharing Progress between Multiple Futures
+[progress-multiple-futures]: #progress-multiple-futures
+
+Here's an example from [#1950](https://github.com/ZcashFoundation/zebra/pull/1950)
+which shows:
+- biased future selection using the `select!` macro
+- deadlock avoidance with `Mutex` locks
+- spawning independent tasks to avoid hangs
+- using timeouts to avoid hangs
+
+<!-- edited from commit b51070ed323de7a980cd89043947a2b0828e8bf8 on 2020-04-07 -->
+```rust
+// CORRECTNESS
+//
+// To avoid hangs and starvation, the crawler must:
+// - spawn a separate task for each handshake, so they can make progress
+//   independently (and avoid deadlocking each other)
+// - use the `select!` macro for all actions, because the `select` function
+//   is biased towards the first ready future
+
+loop {
+    let crawler_action = tokio::select! {
+        a = handshakes.next() => a,
+        a = crawl_timer.next() => a,
+        _ = demand_rx.next() => {
+            if let Some(candidate) = candidates.next().await {
+                // candidates.next has a short delay, and briefly holds the address
+                // book lock, so it shouldn't hang
+                DemandHandshake { candidate }
+            } else {
+                DemandCrawl
+            }
+        }
+    };
+
+    match crawler_action {
+        DemandHandshake { candidate } => {
+            // spawn each handshake into an independent task, so it can make
+            // progress independently of the crawls
+            let hs_join =
+                tokio::spawn(dial(candidate, connector.clone()));
+            handshakes.push(Box::pin(hs_join));
+        }
+        DemandCrawl => {
+            // update has timeouts, and briefly holds the address book
+            // lock, so it shouldn't hang
+            candidates.update().await?;
+        }
+        // handle handshake responses and the crawl timer
+    }
+}
+```
+
+## Integration Testing Async Code
+[integration-testing]: #integration-testing
+
+Here's an example from [`zebrad/tests/acceptance.rs`](https://github.com/ZcashFoundation/zebra/blob/main/zebrad/tests/acceptance.rs#L699)
+which shows:
+- tests for the async Zebra block download and verification pipeline
+- cancellation tests
+- reload tests after a restart
+
+<!-- edited from commit 5bf0a2954e9df3fad53ad57f6b3a673d9df47b9a on 2020-04-07 -->
+```rust
+/// Test if `zebrad` can sync some larger checkpoints on mainnet.
+#[test]
+fn sync_large_checkpoints_mainnet() -> Result<()> {
+    let reuse_tempdir = sync_until(
+        LARGE_CHECKPOINT_TEST_HEIGHT,
+        Mainnet,
+        STOP_AT_HEIGHT_REGEX,
+        LARGE_CHECKPOINT_TIMEOUT,
+        None,
+    )?;
+
+    // if stopping corrupts the rocksdb database, zebrad might hang or crash here
+    // if stopping does not write the rocksdb database to disk, Zebra will
+    // sync, rather than stopping immediately at the configured height
+    sync_until(
+        (LARGE_CHECKPOINT_TEST_HEIGHT - 1).unwrap(),
+        Mainnet,
+        "previous state height is greater than the stop height",
+        STOP_ON_LOAD_TIMEOUT,
+        Some(reuse_tempdir),
+    )?;
+
+    Ok(())
+}
 ```
 
 # Reference-level explanation
