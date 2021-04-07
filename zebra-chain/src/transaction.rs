@@ -18,6 +18,7 @@ pub use hash::Hash;
 pub use joinsplit::JoinSplitData;
 pub use lock_time::LockTime;
 pub use memo::Memo;
+pub use sapling::FieldNotPresent;
 pub use sighash::HashType;
 
 use crate::{
