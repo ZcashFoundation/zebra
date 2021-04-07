@@ -7,6 +7,8 @@ mod message;
 /// Newtype wrappers for primitive types.
 pub mod types;
 
+#[cfg(any(test, feature = "proptest-impl"))]
+mod arbitrary;
 #[cfg(test)]
 mod tests;
 
