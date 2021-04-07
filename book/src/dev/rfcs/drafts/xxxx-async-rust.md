@@ -28,11 +28,15 @@ development, reviews, and testing.
 # Definitions
 [definitions]: #definitions
 
-- `constraint`
-- `CORRECTNESS comment`
-- `deadlock`
-- `starvation` or `livelock`
-- `hang`
+- `hang`: a Zebra component stops making progress.
+- `constraint`: a rule that Zebra must follow to prevent `hang`s.
+- `CORRECTNESS comment`: the documentation for a `constraint` in Zebra's code.
+- `task`: an async task can execute code independently of other tasks, using
+        cooperative multitasking.
+- `deadlock`: a `hang` that stops an async task executing code.
+        For example: a task is never woken up.
+- `starvation` or `livelock`: a `hang` that executes code, but doesn't do
+        anything useful. For example: a loop never terminates.
 
 # Guide-level explanation
 [guide-level-explanation]: #guide-level-explanation
