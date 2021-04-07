@@ -234,6 +234,7 @@ The reference section contains in-depth information about concurrency in Zebra:
   - [Unbiased Selection](#unbiased-selection)
   - [Biased Selection](#biased-selection)
 - [Testing Async Code](#testing-async-code)
+- [Monitoring Async Code](#monitoring-async-code)
 
 Most Zebra designs or code changes will only touch on one or two of these areas.
 
