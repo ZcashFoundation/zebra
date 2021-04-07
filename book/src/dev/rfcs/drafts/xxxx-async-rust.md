@@ -199,8 +199,8 @@ mapping all arguments to the same type.)
 The `futures::select` `Either` return type is complex, particularly when nested. This
 makes code hard to read and maintain. Map the `Either` to a custom enum.
 
-## Test Plan
-[test-plan]: #test-plan
+## Testing Async Code
+[testing-async-code]: #testing-async-code
 
 Zebra's existing acceptance and integration tests will catch most hangs and deadlocks.
 
