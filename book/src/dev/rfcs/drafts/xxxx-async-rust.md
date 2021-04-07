@@ -94,7 +94,6 @@ which covers:
 // block verifiers are contending for the same buffer/batch, we want the checkpoint
 // verifier to win, so that checkpoint verification completes, and block verification
 // can start. (Buffers and batches have multiple slots, so this contention is unlikely.)
-use futures::ready;
 // The chain verifier holds one slot in each verifier, for each concurrent task.
 // Therefore, any shared buffers or batches polled by these verifiers should double
 // their bounds. (For example, the state service buffer.)
