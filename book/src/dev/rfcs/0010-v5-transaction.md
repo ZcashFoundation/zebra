@@ -95,14 +95,17 @@ We add an `AnchorVariant` generic type trait, because V4 transactions have a per
 struct PerSpendAnchor {}
 struct SharedAnchor {}
 
+/// This field is not present in this transaction version.
+struct FieldNotPresent;
+
 impl AnchorVariant for PerSpendAnchor {
-    type Shared = ();
+    type Shared = FieldNotPresent;
     type PerSpend = tree::Root;
 }
 
 impl AnchorVariant for SharedAnchor {
     type Shared = tree::Root;
-    type PerSpend = ();
+    type PerSpend = FieldNotPresent;
 }
 
 trait AnchorVariant {
