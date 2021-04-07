@@ -143,6 +143,7 @@ A service should be provided wrapped in a `Buffer` if:
 Services might also have other reasons for using a `Buffer`. These reasons should be documented.
 
 #### Choosing Buffer Bounds
+[choosing-buffer-bounds]: #choosing-buffer-bounds
 
 Zebra's `Buffer` bounds should be set to the maximum number of concurrent requests, plus 1:
 > it's advisable to set bound to be at least the maximum number of concurrent requests the `Buffer` will see
