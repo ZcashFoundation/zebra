@@ -6,22 +6,24 @@
 # Summary
 [summary]: #summary
 
+Zebra programmers need to carefully write async code so it doesn't deadlock or hang.
+This is particularly important for `poll`, `select`, `Buffer`, `Batch`, and `Mutex`.
+
 Zebra executes concurrent tasks using [async Rust](https://rust-lang.github.io/async-book/),
 with the [tokio](https://docs.rs/tokio/0.3.6/tokio/index.html) executor.
+
 At a higher level, Zebra also uses [`tower::Service`s](https://docs.rs/tower/0.4.1/tower/trait.Service.html),
 [`tower::Buffer`s](https://docs.rs/tower/0.4.1/tower/buffer/struct.Buffer.html),
-and our own [`tower-batch`](https://github.com/ZcashFoundation/zebra/tree/main/tower-batch) implementation.
-
-Zebra programmers need to carefully write async code so it doesn't deadlock or hang.
-This is particularly important for `poll`, `select`, `Buffer`, and `Batch`.
+and our own [`tower-batch`](https://github.com/ZcashFoundation/zebra/tree/main/tower-batch)
+implementation.
 
 # Motivation
 [motivation]: #motivation
 
-Like all concurrent programming, Zebra's code needs to obey certain constraints
-to avoid deadlocks and hangs. Unfortunately, Rust's tooling in these areas is
-still developing, so we need to check these constraints during development,
-reviews, and testing.
+Like all concurrent codebases, Zebra needs to obey certain constraints to avoid
+hangs. Unfortunately, Rust's tooling in these areas is still developing. So
+Zebra developers need to manually check these constraints during design,
+development, reviews, and testing.
 
 # Definitions
 [definitions]: #definitions
