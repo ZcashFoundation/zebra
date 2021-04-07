@@ -7,9 +7,9 @@ use chrono::{TimeZone, Utc};
 use std::sync::Arc;
 
 use crate::{
-    LedgerState,
     parameters::Network,
     work::{difficulty::CompactDifficulty, equihash},
+    LedgerState,
 };
 
 use super::*;
