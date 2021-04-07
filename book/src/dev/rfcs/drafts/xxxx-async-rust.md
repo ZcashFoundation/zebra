@@ -58,7 +58,8 @@ Here are some examples of concurrent designs and documentation in Zebra:
 [wakeups-poll-pending]: #wakeups-poll-pending
 
 Here's a wakeup correctness example from
-[unready_service.rs](https://github.com/ZcashFoundation/zebra/blob/de6d1c93f3e4f9f4fd849176bea6b39ffc5b260f/zebra-network/src/peer_set/unready_service.rs#L43):
+[unready_service.rs](https://github.com/ZcashFoundation/zebra/blob/de6d1c93f3e4f9f4fd849176bea6b39ffc5b260f/zebra-network/src/peer_set/unready_service.rs#L43)
+in [#1954](https://github.com/ZcashFoundation/zebra/pull/1954):
 
 <!-- copied from commit de6d1c93f3e4f9f4fd849176bea6b39ffc5b260f on 2020-04-07 -->
 ```rust
@@ -81,13 +82,14 @@ let res = ready!(this
 ## Avoiding Deadlocks when Aquiring Buffer or Service Readiness
 [readiness-deadlock-avoidance]: #readiness-deadlock-avoidance
 
-Here's an example from [#1735](https://github.com/ZcashFoundation/zebra/pull/1735)
+Here's an example from [zebra-consensus/src/chain.rs](https://github.com/ZcashFoundation/zebra/blob/3af57ece7ae5d43cfbcb6a9215433705aad70b80/zebra-consensus/src/chain.rs#L73)
+in [#1735](https://github.com/ZcashFoundation/zebra/pull/1735)
 which covers:
 - calling `poll_ready` before each `call`
 - deadlock avoidance when acquiring buffer slots
 - buffer bounds
 
-<!-- copied from the main branch on 2020-04-07 -->
+<!-- copied from commit 306fa882148382299c8c31768d5360c0fa23c4d0 on 2020-04-07 -->
 ```rust
 // We acquire checkpoint readiness before block readiness, to avoid an unlikely
 // hang during the checkpoint to block verifier transition. If the checkpoint and
@@ -108,10 +110,11 @@ Poll::Ready(Ok(()))
 ## Prioritising Cancellation Futures
 [prioritising-cancellation-futures]: #prioritising-cancellation-futures
 
-Here's an example from [#1950](https://github.com/ZcashFoundation/zebra/pull/1950)
+Here's an example from [connection.rs](https://github.com/ZcashFoundation/zebra/blob/375c8d8700764534871f02d2d44f847526179dab/zebra-network/src/peer/connection.rs#L423)
+in [#1950](https://github.com/ZcashFoundation/zebra/pull/1950)
 which shows biased future selection using the `select` function:
 
-<!-- copied from commit b51070ed323de7a980cd89043947a2b0828e8bf8 on 2020-04-07 -->
+<!-- copied from commit 375c8d8700764534871f02d2d44f847526179dab on 2020-04-08 -->
 ```rust
 // CORRECTNESS
 //
@@ -129,14 +132,15 @@ match future::select(cancel, peer_rx.next()) {
 ## Sharing Progress between Multiple Futures
 [progress-multiple-futures]: #progress-multiple-futures
 
-Here's an example from [#1950](https://github.com/ZcashFoundation/zebra/pull/1950)
+Here's an example from [peer_set/initialize.rs](https://github.com/ZcashFoundation/zebra/blob/375c8d8700764534871f02d2d44f847526179dab/zebra-network/src/peer_set/initialize.rs#L326)
+in [#1950](https://github.com/ZcashFoundation/zebra/pull/1950)
 which shows:
 - biased future selection using the `select!` macro
 - deadlock avoidance with `Mutex` locks
 - spawning independent tasks to avoid hangs
 - using timeouts to avoid hangs
 
-<!-- edited from commit b51070ed323de7a980cd89043947a2b0828e8bf8 on 2020-04-07 -->
+<!-- edited from commit 375c8d8700764534871f02d2d44f847526179dab on 2020-04-08 -->
 ```rust
 // CORRECTNESS
 //
@@ -183,6 +187,7 @@ loop {
 [integration-testing]: #integration-testing
 
 Here's an example from [`zebrad/tests/acceptance.rs`](https://github.com/ZcashFoundation/zebra/blob/5bf0a2954e9df3fad53ad57f6b3a673d9df47b9a/zebrad/tests/acceptance.rs#L699)
+in [#1193](https://github.com/ZcashFoundation/zebra/pull/1193)
 which shows:
 - tests for the async Zebra block download and verification pipeline
 - cancellation tests
