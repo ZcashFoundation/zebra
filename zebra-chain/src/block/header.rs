@@ -135,69 +135,12 @@ const BLOCK_HEADER_LENGTH: usize =
 /// The minimum size for a serialized CountedHeader.
 ///
 /// A CountedHeader has BLOCK_HEADER_LENGTH bytes + 1 or more bytes for the transaction count
-const MIN_COUNTED_HEADER_LEN: usize = BLOCK_HEADER_LENGTH + 1;
+pub(crate) const MIN_COUNTED_HEADER_LEN: usize = BLOCK_HEADER_LENGTH + 1;
+
 impl TrustedPreallocate for CountedHeader {
     fn max_allocation() -> u64 {
         // Every vector type requires a length field of at least one byte for de/serialization.
         // Therefore, we can never receive more than (MAX_PROTOCOL_MESSAGE_LEN - 1) / MIN_COUNTED_HEADER_LEN counted headers in a single message
         ((MAX_PROTOCOL_MESSAGE_LEN - 1) / MIN_COUNTED_HEADER_LEN) as u64
-    }
-}
-
-#[cfg(test)]
-mod test_trusted_preallocate {
-    use super::{CountedHeader, Header, MAX_PROTOCOL_MESSAGE_LEN, MIN_COUNTED_HEADER_LEN};
-    use crate::serialization::{TrustedPreallocate, ZcashSerialize};
-    use proptest::prelude::*;
-    use std::convert::TryInto;
-    proptest! {
-
-        #![proptest_config(ProptestConfig::with_cases(10_000))]
-
-        /// Confirm that each counted header takes at least COUNTED_HEADER_LEN bytes when serialized.
-        /// This verifies that our calculated `TrustedPreallocate::max_allocation()` is indeed an upper bound.
-        #[test]
-        fn counted_header_min_length(header in Header::arbitrary_with(()), transaction_count in (0..std::u32::MAX)) {
-            let header = CountedHeader {
-                header,
-                transaction_count: transaction_count.try_into().expect("Must run test on platform with at least 32 bit address space"),
-            };
-            let serialized_header = header.zcash_serialize_to_vec().expect("Serialization to vec must succeed");
-            prop_assert!(serialized_header.len() >= MIN_COUNTED_HEADER_LEN)
-        }
-    }
-    proptest! {
-        #![proptest_config(ProptestConfig::with_cases(100))]
-        /// Verify that...
-        /// 1. The smallest disallowed vector of `CountedHeaders`s is too large to send via the Zcash Wire Protocol
-        /// 2. The largest allowed vector is small enough to fit in a legal Zcash Wire Protocol message
-        #[test]
-        fn counted_header_max_allocation(header in Header::arbitrary_with(())) {
-            let header = CountedHeader {
-                header,
-                transaction_count: 0,
-            };
-            let max_allocation: usize = CountedHeader::max_allocation().try_into().unwrap();
-            let mut smallest_disallowed_vec = Vec::with_capacity(max_allocation + 1);
-            for _ in 0..(CountedHeader::max_allocation()+1) {
-                smallest_disallowed_vec.push(header.clone());
-            }
-            let smallest_disallowed_serialized = smallest_disallowed_vec.zcash_serialize_to_vec().expect("Serialization to vec must succeed");
-            // Check that our smallest_disallowed_vec is only one item larger than the limit
-            prop_assert!(((smallest_disallowed_vec.len() - 1) as u64) == CountedHeader::max_allocation());
-            // Check that our smallest_disallowed_vec is too big to send as a protocol message
-            prop_assert!(smallest_disallowed_serialized.len() > MAX_PROTOCOL_MESSAGE_LEN);
-
-
-            // Create largest_allowed_vec by removing one element from smallest_disallowed_vec without copying (for efficiency)
-            smallest_disallowed_vec.pop();
-            let largest_allowed_vec = smallest_disallowed_vec;
-            let largest_allowed_serialized = largest_allowed_vec.zcash_serialize_to_vec().expect("Serialization to vec must succeed");
-
-            // Check that our largest_allowed_vec contains the maximum number of CountedHeaders
-            prop_assert!((largest_allowed_vec.len() as u64) == CountedHeader::max_allocation());
-            // Check that our largest_allowed_vec is small enough to send as a protocol message
-            prop_assert!(largest_allowed_serialized.len() <= MAX_PROTOCOL_MESSAGE_LEN);
-        }
     }
 }

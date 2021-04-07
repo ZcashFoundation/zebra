@@ -7,6 +7,9 @@ mod message;
 /// Newtype wrappers for primitive types.
 pub mod types;
 
+#[cfg(test)]
+mod tests;
+
 pub use codec::{Codec, MAX_PROTOCOL_MESSAGE_LEN};
 pub use inv::InventoryHash;
 pub use message::Message;

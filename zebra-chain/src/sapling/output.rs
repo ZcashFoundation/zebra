@@ -78,10 +78,11 @@ impl ZcashDeserialize for Output {
         })
     }
 }
+
 /// An output contains: a 32 byte cv, a 32 byte cmu, a 32 byte ephemeral key
 /// a 580 byte encCiphertext, an 80 byte outCiphertext, and a 192 byte zkproof
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#outputencoding
-const OUTPUT_SIZE: u64 = 32 + 32 + 32 + 580 + 80 + 192;
+pub(crate) const OUTPUT_SIZE: u64 = 32 + 32 + 32 + 580 + 80 + 192;
 
 /// The maximum number of outputs in a valid Zcash on-chain transaction.
 ///
@@ -93,58 +94,5 @@ impl TrustedPreallocate for Output {
         // Since a serialized Vec<Output> uses at least one byte for its length,
         // the max allocation can never exceed (MAX_BLOCK_BYTES - 1) / OUTPUT_SIZE
         (MAX_BLOCK_BYTES - 1) / OUTPUT_SIZE
-    }
-}
-
-#[cfg(test)]
-mod test_trusted_preallocate {
-    use super::{Output, MAX_BLOCK_BYTES, OUTPUT_SIZE};
-    use crate::serialization::{TrustedPreallocate, ZcashSerialize};
-    use proptest::prelude::*;
-    use std::convert::TryInto;
-
-    proptest! {
-        #![proptest_config(ProptestConfig::with_cases(10_000))]
-
-        /// Confirm that each output takes exactly OUTPUT_SIZE bytes when serialized.
-        /// This verifies that our calculated `TrustedPreallocate::max_allocation()` is indeed an upper bound.
-        #[test]
-        fn output_size_is_small_enough(output in Output::arbitrary_with(())) {
-            let serialized = output.zcash_serialize_to_vec().expect("Serialization to vec must succeed");
-            prop_assert!(serialized.len() as u64 == OUTPUT_SIZE)
-        }
-
-    }
-    proptest! {
-        #![proptest_config(ProptestConfig::with_cases(100))]
-        /// Verify that...
-        /// 1. The smallest disallowed vector of `Outputs`s is too large to fit in a Zcash block
-        /// 2. The largest allowed vector is small enough to fit in a legal Zcash block
-        #[test]
-        fn output_max_allocation_is_big_enough(output in Output::arbitrary_with(())) {
-
-            let max_allocation: usize = Output::max_allocation().try_into().unwrap();
-            let mut smallest_disallowed_vec = Vec::with_capacity(max_allocation + 1);
-            for _ in 0..(Output::max_allocation()+1) {
-                smallest_disallowed_vec.push(output.clone());
-            }
-            let smallest_disallowed_serialized = smallest_disallowed_vec.zcash_serialize_to_vec().expect("Serialization to vec must succeed");
-            // Check that our smallest_disallowed_vec is only one item larger than the limit
-            prop_assert!(((smallest_disallowed_vec.len() - 1) as u64) == Output::max_allocation());
-            // Check that our smallest_disallowed_vec is too big to be included in a valid block
-            // Note that a serialized block always includes at least one byte for the number of transactions,
-            // so any serialized Vec<Output> at least MAX_BLOCK_BYTES long is too large to fit in a block.
-            prop_assert!((smallest_disallowed_serialized.len() as u64) >= MAX_BLOCK_BYTES);
-
-            // Create largest_allowed_vec by removing one element from smallest_disallowed_vec without copying (for efficiency)
-            smallest_disallowed_vec.pop();
-            let largest_allowed_vec = smallest_disallowed_vec;
-            let largest_allowed_serialized = largest_allowed_vec.zcash_serialize_to_vec().expect("Serialization to vec must succeed");
-
-            // Check that our largest_allowed_vec contains the maximum number of Outputs
-            prop_assert!((largest_allowed_vec.len() as u64) == Output::max_allocation());
-            // Check that our largest_allowed_vec is small enough to fit in a Zcash block.
-            prop_assert!((largest_allowed_serialized.len() as u64) < MAX_BLOCK_BYTES);
-        }
     }
 }
