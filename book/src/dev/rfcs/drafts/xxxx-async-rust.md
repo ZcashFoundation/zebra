@@ -266,7 +266,7 @@ make sure those futures are scheduled in separate tasks using `tokio::spawn`.
 [buffer-and-batch]: #buffer-and-batch
 
 The constraints imposed by the `tower::Buffer` and `tower::Batch` implementations are:
-1. `poll_ready` must be called **at least once** for each `call` 
+1. `poll_ready` must be called **at least once** for each `call`
 2. Once we've reserved a buffer slot, we always get `Poll::Ready` from a buffer, regardless of the
    current readiness of the buffer or its underlying service
 3. The `Buffer`/`Batch` capacity limits the number of concurrently waiting tasks. Once this limit
@@ -317,12 +317,18 @@ software, but it might be an issue if wallets, exchanges, or block explorers wan
 ## Awaiting Multiple Futures
 [awaiting-multiple-futures]: #awaiting-multiple-futures
 
+When awaiting multiple futures, Zebra can use biased or unbiased selection.
+
+Typically, we prefer unbiased selection, so that if multiple futures are ready,
+they each have a chance of completing. But if one of the futures needs to take
+priority (for example, cancellation), you might want to use biased selection.
+
 ### Unbiased Selection
 [unbiased-selection]: #unbiased-selection
 
 The [`futures::select!`](https://docs.rs/futures/0.3.13/futures/macro.select.html) and
 [`tokio::select!`](https://docs.rs/tokio/0.3.6/tokio/macro.select.html) macros select
-ready arguments at random. 
+ready arguments at random.
 
 Also consdier the `FuturesUnordered` stream for unbiased selection of a large number
 of futures. However, this macro and stream require mapping all arguments to the same
@@ -338,7 +344,7 @@ is biased towards its first argument. If the first argument is always ready, the
 argument will never be returned. (This behavior is not documented or guaranteed.) This
 bias can cause starvation or hangs. Consider edge cases where queues are full, or there
 are a lot of messages. If in doubt:
-- put cancel oneshots first, then timers, then other futures
+- put shutdown or cancel oneshots first, then timers, then other futures
 - use the `select!` macro to ensure fairness
 
 Select's bias can be useful to ensure that cancel oneshots and timers are always
