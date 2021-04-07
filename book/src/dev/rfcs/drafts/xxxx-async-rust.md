@@ -220,10 +220,9 @@ fn sync_large_checkpoints_mainnet() -> Result<()> {
 # Reference-level explanation
 [reference-level-explanation]: #reference-level-explanation
 
-When dealing with async code in Zebra make sure the code implements what is suggested for each case:
-
-- [Acquiring Buffer Slots or Mutexes](#acquiring-buffer-slots-or-mutexes)
+The reference section contains in-depth information about concurrency in Zebra:
 - [`Poll::Pending` and Wakeups](#poll-pending-and-wakeups)
+- [Acquiring Buffer Slots or Mutexes](#acquiring-buffer-slots-or-mutexes)
 - [Buffer and Batch](#buffer-and-batch)
   - [Buffered Services](#buffered-services)
     - [Choosing Buffer Bounds](#choosing-buffer-bounds)
@@ -231,6 +230,21 @@ When dealing with async code in Zebra make sure the code implements what is sugg
   - [Unbiased Selection](#unbiased-selection)
   - [Biased Selection](#biased-selection)
 - [Testing Async Code](#testing-async-code)
+
+Most Zebra designs or code changes will only touch on one or two of these areas.
+
+## `Poll::Pending` and Wakeups
+[poll-pending-and-wakeups]: #poll-pending-and-wakeups
+
+When returning `Poll::Pending`, `poll` functions must ensure that the task will be woken up when it is ready to make progress.
+
+In most cases, the `poll` function calls another `poll` function that schedules the task for wakeup.
+
+Any code that generates a new `Poll::Pending` should either have:
+* a `CORRECTNESS` comment explaining how the task is scheduled for wakeup, or
+* a wakeup implementation, with tests to ensure that the wakeup functions as expected.
+
+Note: `poll` functions often have a qualifier, like `poll_ready` or `poll_next`.
 
 ## Acquiring Buffer Slots or Mutexes
 [acquiring-buffer-slots-or-mutexes]: #acquiring-buffer-slots-or-mutexes
@@ -247,19 +261,6 @@ macro instead.
 
 If a task is waiting for service readiness, and that service depends on other futures to become ready,
 make sure those futures are scheduled in separate tasks using `tokio::spawn`.
-
-## `Poll::Pending` and Wakeups
-[poll-pending-and-wakeups]: #poll-pending-and-wakeups
-
-When returning `Poll::Pending`, `poll` functions must ensure that the task will be woken up when it is ready to make progress.
-
-In most cases, the `poll` function calls another `poll` function that schedules the task for wakeup.
-
-Any code that generates a new `Poll::Pending` should either have:
-* a `CORRECTNESS` comment explaining how the task is scheduled for wakeup, or
-* a wakeup implementation, with tests to ensure that the wakeup functions as expected.
-
-Note: `poll` functions often have a qualifier, like `poll_ready` or `poll_next`.
 
 ## Buffer and Batch
 [buffer-and-batch]: #buffer-and-batch
