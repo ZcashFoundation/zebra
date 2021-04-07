@@ -706,7 +706,7 @@ fn restart_stop_at_height() -> Result<()> {
         SMALL_CHECKPOINT_TIMEOUT,
         None,
     )?;
-    // if stopping corrupts the rocksdb database, zebrad might hang here
+    // if stopping corrupts the rocksdb database, zebrad might hang or crash here
     // if stopping does not write the rocksdb database to disk, Zebra will
     // sync, rather than stopping immediately at the configured height
     sync_until(
