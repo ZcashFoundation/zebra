@@ -10,7 +10,7 @@ Zebra programmers need to carefully write async code so it doesn't deadlock or h
 This is particularly important for `poll`, `select`, `Buffer`, `Batch`, and `Mutex`.
 
 Zebra executes concurrent tasks using [async Rust](https://rust-lang.github.io/async-book/),
-with the [tokio](https://docs.rs/tokio/0.3.6/tokio/index.html) executor.
+with the [tokio](https://docs.rs/tokio/) executor.
 
 At a higher level, Zebra also uses [`tower::Service`s](https://docs.rs/tower/0.4.1/tower/trait.Service.html),
 [`tower::Buffer`s](https://docs.rs/tower/0.4.1/tower/buffer/struct.Buffer.html),
