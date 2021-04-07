@@ -707,7 +707,8 @@ fn restart_stop_at_height() -> Result<()> {
         None,
     )?;
     // if stopping corrupts the rocksdb database, zebrad might hang here
-    // if stopping does not sync the rocksdb database, the logs will contain OnCommit
+    // if stopping does not write the rocksdb database to disk, Zebra will
+    // sync, rather than stopping immediately at the configured height
     sync_until(
         Height(0),
         Mainnet,
