@@ -72,6 +72,18 @@ Here's a deadlock avoidance example from [#1735](https://github.com/ZcashFoundat
 # Reference-level explanation
 [reference-level-explanation]: #reference-level-explanation
 
+When dealing with async code in Zebra make sure the code implements what is suggested for each case:
+
+- [Acquiring Buffer Slots or Mutexes](#acquiring-buffer-slots-or-mutexes)
+- [`Poll::Pending` and Wakeups](#poll-pending-and-wakeups)
+- [Buffer and Batch](#buffer-and-batch)
+  - [Buffered Services](#buffered-services)
+    - [Choosing Buffer Bounds](#choosing-buffer-bounds)
+- [Awaiting Multiple Futures](#awaiting-multiple-futures)
+  - [Unbiased Selection](#unbiased-selection)
+  - [Biased Selection](#biased-selection)
+- [Testing Async Code](#testing-async-code)
+
 ## Acquiring Buffer Slots or Mutexes
 [acquiring-buffer-slots-or-mutexes]: #acquiring-buffer-slots-or-mutexes
 
