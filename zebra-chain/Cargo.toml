@@ -1,6 +1,6 @@
 [package]
 name = "zebra-chain"
-version = "1.0.0-alpha.5"
+version = "1.0.0-alpha.6"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 edition = "2018"
