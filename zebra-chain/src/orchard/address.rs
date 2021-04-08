@@ -1,27 +1,13 @@
 //! Orchard shielded payment addresses.
 
-use std::{
-    fmt,
-    io::{self, Read, Write},
-};
-
-use bech32::{self, FromBase32, ToBase32, Variant};
+use std::fmt;
 
 #[cfg(test)]
 use proptest::prelude::*;
 
-use crate::{
-    parameters::Network,
-    serialization::{ReadZcashExt, SerializationError},
-};
+use crate::parameters::Network;
 
 use super::keys;
-
-/// Human-Readable Parts for input to bech32 encoding.
-mod human_readable_parts {
-    pub const MAINNET: &str = "zo";
-    pub const TESTNET: &str = "ztestorchard";
-}
 
 /// A Orchard _shielded payment address_.
 ///
@@ -43,50 +29,6 @@ impl fmt::Debug for Address {
             .field("diversifier", &self.diversifier)
             .field("transmission_key", &self.transmission_key)
             .finish()
-    }
-}
-
-impl fmt::Display for Address {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut bytes = io::Cursor::new(Vec::new());
-
-        let _ = bytes.write_all(&<[u8; 11]>::from(self.diversifier));
-        let _ = bytes.write_all(&<[u8; 32]>::from(self.transmission_key));
-
-        let hrp = match self.network {
-            Network::Mainnet => human_readable_parts::MAINNET,
-            Network::Testnet => human_readable_parts::TESTNET,
-        };
-
-        bech32::encode_to_fmt(f, hrp, bytes.get_ref().to_base32(), Variant::Bech32).unwrap()
-    }
-}
-
-impl std::str::FromStr for Address {
-    type Err = SerializationError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match bech32::decode(s) {
-            Ok((hrp, bytes, Variant::Bech32)) => {
-                let mut decoded_bytes = io::Cursor::new(Vec::<u8>::from_base32(&bytes).unwrap());
-
-                let mut diversifier_bytes = [0; 11];
-                decoded_bytes.read_exact(&mut diversifier_bytes)?;
-
-                let transmission_key_bytes = decoded_bytes.read_32_bytes()?;
-
-                Ok(Address {
-                    network: match hrp.as_str() {
-                        human_readable_parts::MAINNET => Network::Mainnet,
-                        human_readable_parts::TESTNET => Network::Testnet,
-                        _ => return Err(SerializationError::Parse("unknown network")),
-                    },
-                    diversifier: keys::Diversifier::from(diversifier_bytes),
-                    transmission_key: keys::TransmissionKey::from(transmission_key_bytes),
-                })
-            }
-            _ => Err(SerializationError::Parse("bech32 decoding error")),
-        }
     }
 }
 
@@ -139,21 +81,5 @@ mod tests {
             diversifier,
             transmission_key,
         };
-    }
-}
-
-#[cfg(test)]
-proptest! {
-
-    #[test]
-    fn orchard_address_roundtrip(zaddr in any::<Address>()) {
-        zebra_test::init();
-
-        let string = zaddr.to_string();
-
-        let zaddr2 = string.parse::<Address>()
-            .expect("randomized orchard z-addr should deserialize");
-
-        prop_assert_eq![zaddr, zaddr2];
     }
 }
