@@ -486,7 +486,11 @@ Zebra uses the following crates for monitoring and diagnostics:
 * [tracing-futures](https://docs.rs/tracing-futures/): future and async function instrumentation
 * [metrics](https://docs.rs/metrics-core/) with a [prometheus exporter](https://docs.rs/metrics-exporter-prometheus/)
 
-These introspection tools are also useful during testing.
+These introspection tools are also useful during testing:
+- `tracing` logs individual events 
+  - spans track related work through the download and verification pipeline
+- `metrics` monitors overall progress and error rates
+  - labels split counters or gauges into different categories (for example, by peer address)
 
 # Drawbacks
 [drawbacks]: #drawbacks
