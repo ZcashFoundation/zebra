@@ -317,6 +317,9 @@ We should limit `Buffer` lengths for services whose requests or responses contai
 data items, such as `Transaction` vectors). A long `Buffer` full of `Block`s can significantly increase memory
 usage.
 
+For example, parsing a malicious 2 MB block can take up to 12 MB of RAM. So a 5 slot buffer can use 60 MB
+of RAM.
+
 Long `Buffer`s can also increase request latency. Latency isn't a concern for Zebra's core use case as a node
 software, but it might be an issue if wallets, exchanges, or block explorers want to use Zebra.
 
