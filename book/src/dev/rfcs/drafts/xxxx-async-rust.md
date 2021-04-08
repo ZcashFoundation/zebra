@@ -280,9 +280,9 @@ The constraints imposed by the `tower::Buffer` and `tower::Batch` implementation
    If there are task dependencies, **the `Buffer`/`Batch` capacity must be larger than the
    maximum number of concurrently waiting tasks**, or Zebra could deadlock (hang).
 
-These constraints are mitigated by:
-- the timeouts on network messages, block downloads and block verification, which restart verification if it hangs
-- the `Buffer`/`Batch` reservation release when response future is returned by the buffer/batch, even if the future doesn't complete
+We also avoid hangs because:
+- the timeouts on network messages, block downloads, and block verification will restart verification if it hangs
+- `Buffer` and `Batch` release their reservations when response future is returned by the buffered/batched service, even if the returned future hangs
   - in general, we should move as much work into futures as possible, unless the design requires sequential `call`s
 - larger `Buffer`/`Batch` bounds
 
