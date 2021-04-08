@@ -305,10 +305,11 @@ https://docs.rs/tower/0.4.3/tower/buffer/struct.Buffer.html#method.new
 
 The extra slot protects us from future changes that add an extra caller, or extra concurrency.
 
-As a general rule, Zebra `Buffer`s should all have at least 3 slots (2 + 1), because most Zebra services can
+As a general rule, Zebra `Buffer`s should all have at least 5 slots, because most Zebra services can
 be called concurrently by:
-* the sync service, and
-* the inbound service.
+* the sync service,
+* the inbound service, and
+* multiple concurrent `zebra-client` blockchain scanning tasks.
 
 Services might also have other reasons for a larger bound. These reasons should be documented.
 
