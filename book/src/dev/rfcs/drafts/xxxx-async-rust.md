@@ -221,6 +221,56 @@ fn sync_large_checkpoints_mainnet() -> Result<()> {
 }
 ```
 
+## Instrumenting Async Functions
+[instrumenting-async-functions]: #instrumenting-async-functions
+
+Here's an example of instrumenting an async function using `tracing`
+from [`sync/downloads.rs`](https://github.com/ZcashFoundation/zebra/blob/306fa882148382299c8c31768d5360c0fa23c4d0/zebrad/src/components/sync/downloads.rs#L128):
+<!-- there is no original PR for this code, it has been changed a lot -->
+
+<!-- copied from commit 306fa882148382299c8c31768d5360c0fa23c4d0 on 2020-04-08 -->
+```rust
+/// Queue a block for download and verification.
+///
+/// This method waits for the network to become ready, and returns an error
+/// only if the network service fails. It returns immediately after queuing
+/// the request.
+#[instrument(level = "debug", skip(self), fields(%hash))]
+pub async fn download_and_verify(&mut self, hash: block::Hash) -> Result<(), Report> {
+    ...
+}
+```
+
+## Tracing and Metrics in Async Functions
+[tracing-metrics-async-functions]: #tracing-metrics-async-functions
+
+Here's an example from [`connection.rs`](https://github.com/ZcashFoundation/zebra/blob/375c8d8700764534871f02d2d44f847526179dab/zebra-network/src/peer/connection.rs#L585)
+<!-- there is no original PR for this code, it has been changed a lot -->
+which shows:
+- trace and debug logs using the `tracing` crate
+- spans using the `tracing` crate
+- counters using the `metrics` crate
+
+<!-- copied from commit 375c8d8700764534871f02d2d44f847526179dab on 2020-04-08 -->
+```rust
+/// Handle an incoming client request, possibly generating outgoing messages to the
+/// remote peer.
+///
+/// NOTE: the caller should use .instrument(msg.span) to instrument the function.
+async fn handle_client_request(&mut self, req: InProgressClientRequest) {
+    trace!(?req.request);
+
+    let InProgressClientRequest { request, tx, span } = req;
+
+    if tx.is_canceled() {
+        metrics::counter!("peer.canceled", 1);
+        tracing::debug!("ignoring canceled request");
+        return;
+    }
+    ...
+}
+```
+
 # Reference-level explanation
 [reference-level-explanation]: #reference-level-explanation
 
