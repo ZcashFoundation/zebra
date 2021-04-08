@@ -33,8 +33,13 @@ development, reviews, and testing.
 - `CORRECTNESS comment`: the documentation for a `constraint` in Zebra's code.
 - `task`: an async task can execute code independently of other tasks, using
         cooperative multitasking.
-- `deadlock`: a `hang` that stops an async task executing code.
-        For example: a task is never woken up.
+- `contention`: slower execution because multiple tasks are waiting to
+        acquire a lock, buffer/batch slot, or readiness.
+- `missed wakeup`: a task `hang`s because it is never scheduled for wakeup. 
+- `deadlock`: a `hang` that stops an async task executing code, because it
+        is waiting for a lock, slot, or task readiness.
+        For example: a task is waiting for a service to be ready, but the
+        service readiness depends on that task making progress.
 - `starvation` or `livelock`: a `hang` that executes code, but doesn't do
         anything useful. For example: a loop never terminates.
 
@@ -57,9 +62,15 @@ Here are some examples of concurrent designs and documentation in Zebra:
 ## Registering Wakeups Before Returning Poll::Pending
 [wakeups-poll-pending]: #wakeups-poll-pending
 
-Here's a wakeup correctness example from
-[unready_service.rs](https://github.com/ZcashFoundation/zebra/blob/de6d1c93f3e4f9f4fd849176bea6b39ffc5b260f/zebra-network/src/peer_set/unready_service.rs#L43)
-in [#1954](https://github.com/ZcashFoundation/zebra/pull/1954):
+To avoid missed wakeups, futures must schedule a wakeup before they return
+`Poll::Pending`. For more details, see the [`Poll::Pending` and Wakeups](#poll-pending-and-wakeups)
+section.
+
+Zebra's [unready_service.rs](https://github.com/ZcashFoundation/zebra/blob/de6d1c93f3e4f9f4fd849176bea6b39ffc5b260f/zebra-network/src/peer_set/unready_service.rs#L43) uses the `ready!` macro to correctly handle
+`Poll::Pending` from the inner service.
+
+You can see some similar constraints in
+[pull request #1954](https://github.com/ZcashFoundation/zebra/pull/1954).
 
 <!-- copied from commit de6d1c93f3e4f9f4fd849176bea6b39ffc5b260f on 2020-04-07 -->
 ```rust
@@ -82,20 +93,27 @@ let res = ready!(this
 ## Avoiding Deadlocks when Aquiring Buffer or Service Readiness
 [readiness-deadlock-avoidance]: #readiness-deadlock-avoidance
 
-Here's an example from [zebra-consensus/src/chain.rs](https://github.com/ZcashFoundation/zebra/blob/3af57ece7ae5d43cfbcb6a9215433705aad70b80/zebra-consensus/src/chain.rs#L73)
-in [#1735](https://github.com/ZcashFoundation/zebra/pull/1735)
-which covers:
-- calling `poll_ready` before each `call`
-- deadlock avoidance when acquiring buffer slots
-- buffer bounds
+To avoid deadlocks, readiness and locks must be acquired in a consistent order.
+For more details, see the [Acquiring Buffer Slots or Mutexes](#acquiring-buffer-slots-or-mutexes)
+section.
 
-<!-- copied from commit 306fa882148382299c8c31768d5360c0fa23c4d0 on 2020-04-07 -->
+Zebra's [`ChainVerifier`](https://github.com/ZcashFoundation/zebra/blob/3af57ece7ae5d43cfbcb6a9215433705aad70b80/zebra-consensus/src/chain.rs#L73)
+avoids deadlocks, contention, and errors by:
+- calling `poll_ready` before each `call`
+- acquiring buffer slots for the earlier verifier first (based on blockchain order)
+- ensuring that buffers are large enough for concurrent tasks
+
+<!-- This fix was in https://github.com/ZcashFoundation/zebra/pull/1735 , but it's
+a partial revert, so the PR is a bit confusing. -->
+
+<!-- edited from commit 306fa882148382299c8c31768d5360c0fa23c4d0 on 2020-04-07 -->
 ```rust
 // We acquire checkpoint readiness before block readiness, to avoid an unlikely
 // hang during the checkpoint to block verifier transition. If the checkpoint and
 // block verifiers are contending for the same buffer/batch, we want the checkpoint
 // verifier to win, so that checkpoint verification completes, and block verification
 // can start. (Buffers and batches have multiple slots, so this contention is unlikely.)
+//
 // The chain verifier holds one slot in each verifier, for each concurrent task.
 // Therefore, any shared buffers or batches polled by these verifiers should double
 // their bounds. (For example, the state service buffer.)
@@ -107,38 +125,22 @@ ready!(self.block.poll_ready(cx).map_err(VerifyChainError::Block))?;
 Poll::Ready(Ok(()))
 ```
 
-## Prioritising Cancellation Futures
-[prioritising-cancellation-futures]: #prioritising-cancellation-futures
-
-Here's an example from [connection.rs](https://github.com/ZcashFoundation/zebra/blob/375c8d8700764534871f02d2d44f847526179dab/zebra-network/src/peer/connection.rs#L423)
-in [#1950](https://github.com/ZcashFoundation/zebra/pull/1950)
-which shows biased future selection using the `select` function:
-
-<!-- copied from commit 375c8d8700764534871f02d2d44f847526179dab on 2020-04-08 -->
-```rust
-// CORRECTNESS
-//
-// Currently, select prefers the first future if multiple
-// futures are ready.
-//
-// If multiple futures are ready, we want the cancellation
-// to take priority, then the timeout, then peer responses.
-let cancel = future::select(tx.cancellation(), timer_ref);
-match future::select(cancel, peer_rx.next()) {
-    ...
-}
-```
-
 ## Sharing Progress between Multiple Futures
 [progress-multiple-futures]: #progress-multiple-futures
 
-Here's an example from [peer_set/initialize.rs](https://github.com/ZcashFoundation/zebra/blob/375c8d8700764534871f02d2d44f847526179dab/zebra-network/src/peer_set/initialize.rs#L326)
-in [#1950](https://github.com/ZcashFoundation/zebra/pull/1950)
-which shows:
-- biased future selection using the `select!` macro
-- deadlock avoidance with `Mutex` locks
-- spawning independent tasks to avoid hangs
+To avoid starvation and deadlocks, tasks that depend on multiple futures
+should make progress on all of those futures. This is particularly
+important for tasks that depend on their own outputs. For more details,
+see the [Unbiased Selection](#unbiased-selection)
+section.
+
+Zebra's [peer crawler task](https://github.com/ZcashFoundation/zebra/blob/375c8d8700764534871f02d2d44f847526179dab/zebra-network/src/peer_set/initialize.rs#L326)
+avoids starvation and deadlocks by:
+- sharing progress between any ready futures using the `select!` macro
+- spawning independent tasks to avoid hangs (see [Acquiring Buffer Slots or Mutexes](#acquiring-buffer-slots-or-mutexes))
 - using timeouts to avoid hangs
+
+You can see a range of hang fixes in [pull request #1950](https://github.com/ZcashFoundation/zebra/pull/1950).
 
 <!-- edited from commit 375c8d8700764534871f02d2d44f847526179dab on 2020-04-08 -->
 ```rust
@@ -183,15 +185,50 @@ loop {
 }
 ```
 
+## Prioritising Cancellation Futures
+[prioritising-cancellation-futures]: #prioritising-cancellation-futures
+
+To avoid starvation, cancellation futures must take priority over other futures,
+if multiple futures are ready. For more details, see the [Biased Selection](#biased-selection)
+section.
+
+Zebra's [connection.rs](https://github.com/ZcashFoundation/zebra/blob/375c8d8700764534871f02d2d44f847526179dab/zebra-network/src/peer/connection.rs#L423)
+avoids hangs by prioritising the cancel and timer futures over the peer
+receiver future. Under heavy load, the peer receiver future could always
+be ready with a new message, starving the cancel or timer futures.
+
+You can see a range of hang fixes in [pull request #1950](https://github.com/ZcashFoundation/zebra/pull/1950).
+
+<!-- copied from commit 375c8d8700764534871f02d2d44f847526179dab on 2020-04-08 -->
+```rust
+// CORRECTNESS
+//
+// Currently, select prefers the first future if multiple
+// futures are ready.
+//
+// If multiple futures are ready, we want the cancellation
+// to take priority, then the timeout, then peer responses.
+let cancel = future::select(tx.cancellation(), timer_ref);
+match future::select(cancel, peer_rx.next()) {
+    ...
+}
+```
+
 ## Integration Testing Async Code
 [integration-testing]: #integration-testing
 
-Here's an example from [`zebrad/tests/acceptance.rs`](https://github.com/ZcashFoundation/zebra/blob/5bf0a2954e9df3fad53ad57f6b3a673d9df47b9a/zebrad/tests/acceptance.rs#L699)
-in [#1193](https://github.com/ZcashFoundation/zebra/pull/1193)
-which shows:
-- tests for the async Zebra block download and verification pipeline
-- cancellation tests
-- reload tests after a restart
+Sometimes, it is difficult to unit test async code, because it has complex
+dependencies. For more details, see the [Testing Async Code](#testing-async-code)
+section.
+
+[`zebrad`'s acceptance tests](https://github.com/ZcashFoundation/zebra/blob/5bf0a2954e9df3fad53ad57f6b3a673d9df47b9a/zebrad/tests/acceptance.rs#L699)
+run short Zebra syncs on the Zcash mainnet or testnet. These acceptance tests
+make sure that `zebrad` can:
+- sync blocks using its async block download and verification pipeline
+- cancel a sync
+- reload disk state after a restart
+
+These tests were introduced in [pull request #1193](https://github.com/ZcashFoundation/zebra/pull/1193).
 
 <!-- edited from commit 5bf0a2954e9df3fad53ad57f6b3a673d9df47b9a on 2020-04-07 -->
 ```rust
@@ -224,8 +261,12 @@ fn sync_large_checkpoints_mainnet() -> Result<()> {
 ## Instrumenting Async Functions
 [instrumenting-async-functions]: #instrumenting-async-functions
 
-Here's an example of instrumenting an async function using `tracing`
-from [`sync/downloads.rs`](https://github.com/ZcashFoundation/zebra/blob/306fa882148382299c8c31768d5360c0fa23c4d0/zebrad/src/components/sync/downloads.rs#L128):
+Sometimes, it is difficult to debug async code, because there are many tasks
+running concurrently. For more details, see the [Monitoring Async Code](#monitoring-async-code)
+section.
+
+Zebra runs instrumentation on some of its async function using `tracing`.
+Here's an instrumentation example from Zebra's [sync block downloader](https://github.com/ZcashFoundation/zebra/blob/306fa882148382299c8c31768d5360c0fa23c4d0/zebrad/src/components/sync/downloads.rs#L128):
 <!-- there is no original PR for this code, it has been changed a lot -->
 
 <!-- copied from commit 306fa882148382299c8c31768d5360c0fa23c4d0 on 2020-04-08 -->
@@ -244,12 +285,17 @@ pub async fn download_and_verify(&mut self, hash: block::Hash) -> Result<(), Rep
 ## Tracing and Metrics in Async Functions
 [tracing-metrics-async-functions]: #tracing-metrics-async-functions
 
-Here's an example from [`connection.rs`](https://github.com/ZcashFoundation/zebra/blob/375c8d8700764534871f02d2d44f847526179dab/zebra-network/src/peer/connection.rs#L585)
-<!-- there is no original PR for this code, it has been changed a lot -->
-which shows:
-- trace and debug logs using the `tracing` crate
-- spans using the `tracing` crate
+Sometimes, it is difficult to monitor async code, because there are many tasks
+running concurrently. For more details, see the [Monitoring Async Code](#monitoring-async-code)
+section.
+
+Zebra's [client requests](https://github.com/ZcashFoundation/zebra/blob/375c8d8700764534871f02d2d44f847526179dab/zebra-network/src/peer/connection.rs#L585)
+are monitored via:
+- trace and debug logs using `tracing` crate
+- related work spans using the `tracing` crate
 - counters using the `metrics` crate
+
+<!-- there is no original PR for this code, it has been changed a lot -->
 
 <!-- copied from commit 375c8d8700764534871f02d2d44f847526179dab on 2020-04-08 -->
 ```rust
