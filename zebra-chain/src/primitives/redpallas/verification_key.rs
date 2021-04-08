@@ -86,7 +86,7 @@ impl<T: SigType> From<&pallas::Scalar> for VerificationKey<T> {
             _marker: PhantomData,
         };
 
-        Self { bytes, point }
+        Self { point, bytes }
     }
 }
 
