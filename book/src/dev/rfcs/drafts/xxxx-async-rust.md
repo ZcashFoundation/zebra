@@ -471,20 +471,20 @@ we revert the PR, and fix the failure.
 Some concurrency bugs only happen intermittently. Zebra developers should run regular
 full syncs to ensure that their code doesn't cause intermittent hangs. This is
 particularly important for code that modifies Zebra's highly concurrent crates:
-* `zebrad`
-* `zebra-network`
-* `zebra-state`
-* `zebra-consensus`
-* `tower-batch`
-* `tower-fallback`
+- `zebrad`
+- `zebra-network`
+- `zebra-state`
+- `zebra-consensus`
+- `tower-batch`
+- `tower-fallback`
 
 ## Monitoring Async Code
 [monitoring-async-code]: #monitoring-async-code
 
 Zebra uses the following crates for monitoring and diagnostics:
-* [tracing](https://tracing.rs/tracing/): tracing events, spans, logging
-* [tracing-futures](https://docs.rs/tracing-futures/): future and async function instrumentation
-* [metrics](https://docs.rs/metrics-core/) with a [prometheus exporter](https://docs.rs/metrics-exporter-prometheus/)
+- [tracing](https://tracing.rs/tracing/): tracing events, spans, logging
+- [tracing-futures](https://docs.rs/tracing-futures/): future and async function instrumentation
+- [metrics](https://docs.rs/metrics-core/) with a [prometheus exporter](https://docs.rs/metrics-exporter-prometheus/)
 
 These introspection tools are also useful during testing:
 - `tracing` logs individual events 
