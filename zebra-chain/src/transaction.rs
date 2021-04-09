@@ -106,6 +106,8 @@ pub enum Transaction {
         inputs: Vec<transparent::Input>,
         /// The transparent outputs from the transaction.
         outputs: Vec<transparent::Output>,
+        /// The sapling shielded data for this transaction, if any.
+        sapling_shielded_data: Option<sapling::ShieldedData<sapling::SharedAnchor>>,
         /// The rest of the transaction as bytes
         rest: Vec<u8>,
     },

@@ -134,6 +134,20 @@ impl ZcashSerialize for Spend<SharedAnchor> {
     }
 }
 
+impl ZcashDeserialize for Spend<SharedAnchor> {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        use crate::sapling::{commitment::ValueCommitment, note::Nullifier};
+        Ok(Spend {
+            cv: ValueCommitment::zcash_deserialize(&mut reader)?,
+            per_spend_anchor: FieldNotPresent,
+            nullifier: Nullifier::from(reader.read_32_bytes()?),
+            rk: reader.read_32_bytes()?.into(),
+            zkproof: Groth16Proof::zcash_deserialize(&mut reader)?,
+            spend_auth_sig: reader.read_64_bytes()?.into(),
+        })
+    }
+}
+
 // zkproof and spend_auth_sig are deserialized separately, so we can only
 // deserialize Spend<SharedAnchor> in the context of a transaction
 

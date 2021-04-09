@@ -187,6 +187,7 @@ impl ZcashSerialize for Transaction {
                 expiry_height,
                 inputs,
                 outputs,
+                sapling_shielded_data,
                 rest,
             } => {
                 // Write version 5 and set the fOverwintered bit.
@@ -196,6 +197,28 @@ impl ZcashSerialize for Transaction {
                 writer.write_u32::<LittleEndian>(expiry_height.0)?;
                 inputs.zcash_serialize(&mut writer)?;
                 outputs.zcash_serialize(&mut writer)?;
+
+                match sapling_shielded_data {
+                    None => {
+                        // Signal no value balance.
+                        writer.write_i64::<LittleEndian>(0)?;
+                        // Signal no shielded spends and no shielded outputs.
+                        writer.write_compactsize(0)?;
+                        writer.write_compactsize(0)?;
+                    }
+                    Some(shielded_data) => {
+                        shielded_data.value_balance.zcash_serialize(&mut writer)?;
+                        writer.write_compactsize(shielded_data.spends().count() as u64)?;
+                        for spend in shielded_data.spends() {
+                            spend.zcash_serialize(&mut writer)?;
+                        }
+                        writer.write_compactsize(shielded_data.outputs().count() as u64)?;
+                        for output in shielded_data.outputs() {
+                            output.zcash_serialize(&mut writer)?;
+                        }
+                        writer.write_all(&<[u8; 64]>::from(shielded_data.binding_sig)[..])?;
+                    }
+                }
 
                 // write the rest
                 writer.write_all(rest)?;
@@ -321,6 +344,40 @@ impl ZcashDeserialize for Transaction {
                 let inputs = Vec::zcash_deserialize(&mut reader)?;
                 let outputs = Vec::zcash_deserialize(&mut reader)?;
 
+                let value_balance = (&mut reader).zcash_deserialize_into()?;
+                let shared_anchor = sapling::tree::Root(reader.read_32_bytes()?);
+                let mut shielded_spends = Vec::zcash_deserialize(&mut reader)?;
+                let mut shielded_outputs = Vec::zcash_deserialize(&mut reader)?;
+
+                // We can deserialize all sapling data in one go in V5 as the
+                //  internal structure line up with the serialized structure.
+
+                use futures::future::Either::*;
+                // Arbitraily use a spend for `first`, if both are present
+                let sapling_shielded_data = if !shielded_spends.is_empty() {
+                    Some(sapling::ShieldedData {
+                        value_balance,
+                        shared_anchor,
+                        first: Left(shielded_spends.remove(0)),
+                        rest_spends: shielded_spends,
+                        rest_outputs: shielded_outputs,
+                        binding_sig: reader.read_64_bytes()?.into(),
+                    })
+                } else if !shielded_outputs.is_empty() {
+                    Some(sapling::ShieldedData {
+                        value_balance,
+                        shared_anchor,
+                        first: Right(shielded_outputs.remove(0)),
+                        // the spends are actually empty here, but we use the
+                        // vec for consistency and readability
+                        rest_spends: shielded_spends,
+                        rest_outputs: shielded_outputs,
+                        binding_sig: reader.read_64_bytes()?.into(),
+                    })
+                } else {
+                    None
+                };
+
                 let mut rest = Vec::new();
                 reader.read_to_end(&mut rest)?;
 
@@ -329,6 +386,7 @@ impl ZcashDeserialize for Transaction {
                     expiry_height,
                     inputs,
                     outputs,
+                    sapling_shielded_data,
                     rest,
                 })
             }
