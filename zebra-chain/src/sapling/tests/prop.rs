@@ -2,7 +2,7 @@ use proptest::prelude::*;
 
 use crate::{
     block,
-    sapling::{self, PerSpendAnchor},
+    sapling::{self, PerSpendAnchor, SharedAnchor},
     serialization::{ZcashDeserializeInto, ZcashSerialize},
     transaction::{LockTime, Transaction},
 };
@@ -10,25 +10,43 @@ use crate::{
 use futures::future::Either;
 
 proptest! {
-    // TODO: generalise this test for `ShieldedData<SharedAnchor>` (#1829)
+
+    // Serialize and deserialize `PerSpendAnchor` and `SharedAnchor` shielded data
+    //  by including them in V4 and V5 transactions respectivly.
     #[test]
-    fn shielded_data_roundtrip(shielded in any::<sapling::ShieldedData<PerSpendAnchor>>()) {
+    fn shielded_data_roundtrip(
+        shielded_v4 in any::<sapling::ShieldedData<PerSpendAnchor>>(),
+        shielded_v5 in any::<sapling::ShieldedData<SharedAnchor>>()
+    ) {
         zebra_test::init();
 
         // shielded data doesn't serialize by itself, so we have to stick it in
         // a transaction
+
+        // stick `PerSependAnchor` shielded data into a v4 transaction
         let tx = Transaction::V4 {
             inputs: Vec::new(),
             outputs: Vec::new(),
             lock_time: LockTime::min_lock_time(),
             expiry_height: block::Height(0),
             joinsplit_data: None,
-            sapling_shielded_data: Some(shielded),
+            sapling_shielded_data: Some(shielded_v4),
         };
-
         let data = tx.zcash_serialize_to_vec().expect("tx should serialize");
         let tx_parsed = data.zcash_deserialize_into().expect("randomized tx should deserialize");
+        prop_assert_eq![tx, tx_parsed];
 
+        // stick `SharedAnchor` shielded data into a v5 transaction
+        let tx = Transaction::V5 {
+            lock_time: LockTime::min_lock_time(),
+            expiry_height: block::Height(0),
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+            sapling_shielded_data: Some(shielded_v5),
+            rest: Vec::new(),
+        };
+        let data = tx.zcash_serialize_to_vec().expect("tx should serialize");
+        let tx_parsed = data.zcash_deserialize_into().expect("randomized tx should deserialize");
         prop_assert_eq![tx, tx_parsed];
     }
 

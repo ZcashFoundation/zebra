@@ -334,7 +334,7 @@ impl ZcashDeserialize for Transaction {
                     joinsplit_data,
                 })
             }
-            (5, false) => {
+            (5, true) => {
                 let id = reader.read_u32::<LittleEndian>()?;
                 if id != TX_V5_VERSION_GROUP_ID {
                     return Err(SerializationError::Parse("expected TX_V5_VERSION_GROUP_ID"));
