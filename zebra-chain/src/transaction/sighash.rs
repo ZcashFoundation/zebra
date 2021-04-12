@@ -1,16 +1,19 @@
 use super::Transaction;
+
 use crate::{
     parameters::{
         ConsensusBranchId, NetworkUpgrade, OVERWINTER_VERSION_GROUP_ID, SAPLING_VERSION_GROUP_ID,
         TX_V5_VERSION_GROUP_ID,
     },
+    sapling,
     serialization::{WriteZcashExt, ZcashSerialize},
     transparent,
 };
+
 use blake2b_simd::Hash;
 use byteorder::{LittleEndian, WriteBytesExt};
-use io::Write;
-use std::io;
+
+use std::io::{self, Write};
 
 static ZIP143_EXPLANATION: &str = "Invalid transaction version: after Overwinter activation transaction versions 1 and 2 are rejected";
 static ZIP243_EXPLANATION: &str = "Invalid transaction version: after Sapling activation transaction versions 1, 2, and 3 are rejected";
@@ -478,7 +481,12 @@ impl<'a> SigHasher<'a> {
             .personal(ZCASH_SHIELDED_OUTPUTS_HASH_PERSONALIZATION)
             .to_state();
 
-        for output in shielded_data.outputs() {
+        // Correctness: checked for V4 transaction above
+        for output in shielded_data
+            .outputs()
+            .cloned()
+            .map(sapling::OutputInTransactionV4)
+        {
             output.zcash_serialize(&mut hash)?;
         }
 

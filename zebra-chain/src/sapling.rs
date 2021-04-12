@@ -20,7 +20,7 @@ pub use address::Address;
 pub use commitment::{CommitmentRandomness, NoteCommitment, ValueCommitment};
 pub use keys::Diversifier;
 pub use note::{EncryptedNote, Note, Nullifier, WrappedNoteKey};
-pub use output::Output;
+pub use output::{Output, OutputInTransactionV4};
 pub use shielded_data::{
     AnchorVariant, FieldNotPresent, PerSpendAnchor, SharedAnchor, ShieldedData,
 };

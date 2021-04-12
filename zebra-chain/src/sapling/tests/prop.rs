@@ -8,22 +8,84 @@ use crate::{
 };
 
 use futures::future::Either;
+use sapling::OutputInTransactionV4;
 
 proptest! {
-
-    // Serialize and deserialize `PerSpendAnchor` and `SharedAnchor` shielded data
-    //  by including them in V4 and V5 transactions respectivly.
+    /// Serialize and deserialize `Spend<PerSpendAnchor>`
     #[test]
-    fn shielded_data_roundtrip(
+    fn spend_v4_roundtrip(
+        spend in any::<sapling::Spend<PerSpendAnchor>>(),
+    ) {
+        zebra_test::init();
+
+        let data = spend.zcash_serialize_to_vec().expect("spend should serialize");
+        let spend_parsed = data.zcash_deserialize_into().expect("randomized spend should deserialize");
+        prop_assert_eq![spend, spend_parsed];
+    }
+
+    /// Serialize and deserialize `Spend<SharedAnchor>`
+    #[test]
+    fn spend_v5_roundtrip(
+        spend in any::<sapling::Spend<SharedAnchor>>(),
+    ) {
+        zebra_test::init();
+
+        let (prefix, zkproof, spend_auth_sig) = spend.into_v5_parts();
+
+        let data = prefix.zcash_serialize_to_vec().expect("spend prefix should serialize");
+        let parsed = data.zcash_deserialize_into().expect("randomized spend prefix should deserialize");
+        prop_assert_eq![prefix, parsed];
+
+        let data = zkproof.zcash_serialize_to_vec().expect("spend zkproof should serialize");
+        let parsed = data.zcash_deserialize_into().expect("randomized spend zkproof should deserialize");
+        prop_assert_eq![zkproof, parsed];
+
+        let data = spend_auth_sig.zcash_serialize_to_vec().expect("spend auth sig should serialize");
+        let parsed = data.zcash_deserialize_into().expect("randomized spend auth sig should deserialize");
+        prop_assert_eq![spend_auth_sig, parsed];
+    }
+
+    /// Serialize and deserialize `Output`
+    #[test]
+    fn output_roundtrip(
+        output in any::<sapling::Output>(),
+    ) {
+        zebra_test::init();
+
+        // v4 format
+        let data = output.clone().into_v4().zcash_serialize_to_vec().expect("output should serialize");
+        let output_parsed = data.zcash_deserialize_into::<OutputInTransactionV4>().expect("randomized output should deserialize").into_output();
+        prop_assert_eq![&output, &output_parsed];
+
+        // v5 format
+        let (prefix, zkproof) = output.into_v5_parts();
+
+        let data = prefix.zcash_serialize_to_vec().expect("output prefix should serialize");
+        let parsed = data.zcash_deserialize_into().expect("randomized output prefix should deserialize");
+        prop_assert_eq![prefix, parsed];
+
+        let data = zkproof.zcash_serialize_to_vec().expect("output zkproof should serialize");
+        let parsed = data.zcash_deserialize_into().expect("randomized output zkproof should deserialize");
+        prop_assert_eq![zkproof, parsed];
+
+    }
+}
+
+proptest! {
+    /// Serialize and deserialize `PerSpendAnchor` shielded data by including it
+    /// in a V4 transaction
+    //
+    // TODO: write a similar test for `ShieldedData<SharedAnchor>` (#1829)
+    #[test]
+    fn shielded_data_v4_roundtrip(
         shielded_v4 in any::<sapling::ShieldedData<PerSpendAnchor>>(),
-        shielded_v5 in any::<sapling::ShieldedData<SharedAnchor>>()
     ) {
         zebra_test::init();
 
         // shielded data doesn't serialize by itself, so we have to stick it in
         // a transaction
 
-        // stick `PerSependAnchor` shielded data into a v4 transaction
+        // stick `PerSpendAnchor` shielded data into a v4 transaction
         let tx = Transaction::V4 {
             inputs: Vec::new(),
             outputs: Vec::new(),
@@ -35,25 +97,12 @@ proptest! {
         let data = tx.zcash_serialize_to_vec().expect("tx should serialize");
         let tx_parsed = data.zcash_deserialize_into().expect("randomized tx should deserialize");
         prop_assert_eq![tx, tx_parsed];
-
-        // stick `SharedAnchor` shielded data into a v5 transaction
-        let tx = Transaction::V5 {
-            lock_time: LockTime::min_lock_time(),
-            expiry_height: block::Height(0),
-            inputs: Vec::new(),
-            outputs: Vec::new(),
-            sapling_shielded_data: Some(shielded_v5),
-            rest: Vec::new(),
-        };
-        let data = tx.zcash_serialize_to_vec().expect("tx should serialize");
-        let tx_parsed = data.zcash_deserialize_into().expect("randomized tx should deserialize");
-        prop_assert_eq![tx, tx_parsed];
     }
 
     /// Check that ShieldedData<PerSpendAnchor> is equal when `first` is swapped
     /// between a spend and an output
     //
-    // TODO: generalise this test for `ShieldedData<SharedAnchor>` (#1829)
+    // TODO: write a similar test for `ShieldedData<SharedAnchor>` (#1829)
     #[test]
     fn shielded_data_per_spend_swap_first_eq(shielded1 in any::<sapling::ShieldedData<PerSpendAnchor>>()) {
         use Either::*;
@@ -111,7 +160,7 @@ proptest! {
     /// Check that ShieldedData<PerSpendAnchor> serialization is equal if
     /// `shielded1 == shielded2`
     //
-    // TODO: generalise this test for `ShieldedData<SharedAnchor>` (#1829)
+    // TODO: write a similar test for `ShieldedData<SharedAnchor>` (#1829)
     #[test]
     fn shielded_data_per_spend_serialize_eq(shielded1 in any::<sapling::ShieldedData<PerSpendAnchor>>(), shielded2 in any::<sapling::ShieldedData<PerSpendAnchor>>()) {
         zebra_test::init();
@@ -158,7 +207,7 @@ proptest! {
     ///
     /// This test checks for extra fields that are not in `ShieldedData::eq`.
     //
-    // TODO: generalise this test for `ShieldedData<SharedAnchor>` (#1829)
+    // TODO: write a similar test for `ShieldedData<SharedAnchor>` (#1829)
     #[test]
     fn shielded_data_per_spend_field_assign_eq(shielded1 in any::<sapling::ShieldedData<PerSpendAnchor>>(), shielded2 in any::<sapling::ShieldedData<PerSpendAnchor>>()) {
         zebra_test::init();
