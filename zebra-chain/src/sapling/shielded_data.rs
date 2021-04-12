@@ -5,17 +5,23 @@
 //! The anchor change is handled using the `AnchorVariant` type trait.
 
 use futures::future::Either;
+use serde::{de::DeserializeOwned, Serialize};
 
 use crate::{
     amount::Amount,
-    primitives::redjubjub::{Binding, Signature},
-    sapling::{tree, Nullifier, Output, Spend, ValueCommitment},
-    serialization::serde_helpers,
+    primitives::{
+        redjubjub::{Binding, Signature},
+        Groth16Proof,
+    },
+    sapling::{
+        output::OutputPrefixInTransactionV5, spend::SpendPrefixInTransactionV5, tree, Nullifier,
+        Output, Spend, ValueCommitment,
+    },
+    serialization::{serde_helpers, TrustedPreallocate},
 };
 
-use serde::{de::DeserializeOwned, Serialize};
 use std::{
-    cmp::{Eq, PartialEq},
+    cmp::{max, Eq, PartialEq},
     fmt::Debug,
 };
 
@@ -83,7 +89,13 @@ where
     pub value_balance: Amount,
     /// The shared anchor for all `Spend`s in this transaction.
     ///
-    /// Some transaction versions do not have this field.
+    /// The anchor is the root of the Sapling note commitment tree in a previous
+    /// block. This root should be in the best chain for a transaction to be
+    /// mined, and it must be in the relevant chain for a transaction to be
+    /// valid.
+    ///
+    /// Some transaction versions have a per-spend anchor, rather than a shared
+    /// anchor.
     pub shared_anchor: AnchorV::Shared,
     /// Either a spend or output description.
     ///
@@ -237,3 +249,17 @@ where
 
 impl<AnchorV> std::cmp::Eq for ShieldedData<AnchorV> where AnchorV: AnchorVariant + Clone + PartialEq
 {}
+
+impl TrustedPreallocate for Groth16Proof {
+    fn max_allocation() -> u64 {
+        // Each V5 transaction proof array entry must have a corresponding
+        // spend or output prefix. We use the larger limit, so we don't reject
+        // any valid large blocks.
+        //
+        // TODO: put a separate limit on proofs in spends and outputs
+        max(
+            SpendPrefixInTransactionV5::max_allocation(),
+            OutputPrefixInTransactionV5::max_allocation(),
+        )
+    }
+}
