@@ -74,6 +74,8 @@ proptest! {
 proptest! {
     /// Serialize and deserialize `PerSpendAnchor` shielded data by including it
     /// in a V4 transaction
+    //
+    // TODO: write a similar test for `ShieldedData<SharedAnchor>` (#1829)
     #[test]
     fn shielded_data_v4_roundtrip(
         shielded_v4 in any::<sapling::ShieldedData<PerSpendAnchor>>(),
@@ -91,33 +93,6 @@ proptest! {
             expiry_height: block::Height(0),
             joinsplit_data: None,
             sapling_shielded_data: Some(shielded_v4),
-        };
-        let data = tx.zcash_serialize_to_vec().expect("tx should serialize");
-        let tx_parsed = data.zcash_deserialize_into().expect("randomized tx should deserialize");
-        prop_assert_eq![tx, tx_parsed];
-    }
-
-    /// Serialize and deserialize `SharedAnchor` shielded data by including it
-    /// in a V5 transaction
-    // TODO: enable this test when V5 serialization is implemented (#1829)
-    // #[test]
-    #[allow(dead_code)]
-    fn shielded_data_v5_roundtrip(
-        shielded_v5 in any::<sapling::ShieldedData<SharedAnchor>>(),
-    ) {
-        zebra_test::init();
-
-        // shielded data doesn't serialize by itself, so we have to stick it in
-        // a transaction
-
-        // stick `SharedAnchor` shielded data into a v5 transaction
-        let tx = Transaction::V5 {
-            lock_time: LockTime::min_lock_time(),
-            expiry_height: block::Height(0),
-            inputs: Vec::new(),
-            outputs: Vec::new(),
-            sapling_shielded_data: Some(shielded_v5),
-            rest: Vec::new(),
         };
         let data = tx.zcash_serialize_to_vec().expect("tx should serialize");
         let tx_parsed = data.zcash_deserialize_into().expect("randomized tx should deserialize");
