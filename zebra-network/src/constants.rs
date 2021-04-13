@@ -53,13 +53,21 @@ pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(60);
 ///
 /// ## SECURITY
 ///
-/// The fanout should be greater than 1, to ensure that Zebra's address book is
-/// not dominated by a single peer.
-pub const GET_ADDR_FANOUT: usize = 2;
+/// The fanout should be greater than 2, so that Zebra avoids getting a majority
+/// of its initial address book entries from a single peer.
+///
+/// Zebra regularly crawls for new peers, initiating a new crawl every
+/// [`crawl_new_peer_interval`](crate::config::Config.crawl_new_peer_interval).
+///
+/// TODO: limit the number of addresses that Zebra uses from a single peer
+///       response (#1869)
+pub const GET_ADDR_FANOUT: usize = 3;
 
 /// Truncate timestamps in outbound address messages to this time interval.
 ///
-/// This is intended to prevent a peer from learning exactly when we received
+/// ## SECURITY
+///
+/// Timestamp truncation prevents a peer from learning exactly when we received
 /// messages from each of our peers.
 pub const TIMESTAMP_TRUNCATION_SECONDS: i64 = 30 * 60;
 
@@ -86,8 +94,7 @@ pub const CURRENT_VERSION: Version = Version(170_013);
 /// The minimum network upgrade is used to check the protocol versions of our
 /// peers. If their versions are too old, we will disconnect from them.
 //
-// TODO: replace with NetworkUpgrade::current(network, height).
-//       See the detailed comment in handshake.rs, where this constant is used.
+// TODO: replace with NetworkUpgrade::current(network, height). (#1334)
 pub const MIN_NETWORK_UPGRADE: NetworkUpgrade = NetworkUpgrade::Canopy;
 
 /// The default RTT estimate for peer responses.
@@ -97,8 +104,8 @@ pub const MIN_NETWORK_UPGRADE: NetworkUpgrade = NetworkUpgrade::Canopy;
 /// important on testnet, which has a small number of peers, which are often
 /// slow.
 ///
-/// Make the default RTT one second higher than the response timeout.
-pub const EWMA_DEFAULT_RTT: Duration = Duration::from_secs(20 + 1);
+/// Make the default RTT slightly higher than the request timeout.
+pub const EWMA_DEFAULT_RTT: Duration = Duration::from_secs(REQUEST_TIMEOUT.as_secs() + 1);
 
 /// The decay time for the EWMA response time metric used for load balancing.
 ///
