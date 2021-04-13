@@ -177,7 +177,7 @@ impl CompactDifficulty {
     ///
     /// Returns None for negative, zero, and overflow values. (zcashd rejects
     /// these values, before comparing the hash.)
-    pub fn to_expanded(&self) -> Option<ExpandedDifficulty> {
+    pub fn to_expanded(self) -> Option<ExpandedDifficulty> {
         // The constants for this floating-point representation.
         // Alias the struct constants here, so the code is easier to read.
         const BASE: u32 = CompactDifficulty::BASE;
@@ -251,7 +251,7 @@ impl CompactDifficulty {
     /// valid chain.
     ///
     /// [Zcash Specification]: https://zips.z.cash/protocol/protocol.pdf#workdef
-    pub fn to_work(&self) -> Option<Work> {
+    pub fn to_work(self) -> Option<Work> {
         let expanded = self.to_expanded()?;
         Work::try_from(expanded).ok()
     }
@@ -334,7 +334,7 @@ impl ExpandedDifficulty {
     ///     `target_difficulty_limit`.
     ///
     /// Neither of these methods yield zero values.
-    pub fn to_compact(&self) -> CompactDifficulty {
+    pub fn to_compact(self) -> CompactDifficulty {
         // The zcashd implementation supports negative and zero compact values.
         // These values are rejected by the protocol rules. Zebra is designed so
         // that invalid states are not representable. Therefore, this function
