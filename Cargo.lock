@@ -1633,12 +1633,11 @@ checksum = "830d08ce1d1d941e6b30645f1a0eb5643013d835ce3779a5fc208261dbe10f55"
 [[package]]
 name = "lexical-core"
 version = "0.7.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db65c6da02e61f55dae90a0ae427b2a5f6b3e8db09f58d10efab23af92592616"
+source = "git+https://github.com/Alexhuszagh/rust-lexical?rev=601c9bfe16c944948d4c4a07e3c67878d72f6445#601c9bfe16c944948d4c4a07e3c67878d72f6445"
 dependencies = [
  "arrayvec 0.5.2",
  "bitflags",
- "cfg-if 0.1.10",
+ "cfg-if 1.0.0",
  "ryu",
  "static_assertions",
 ]
