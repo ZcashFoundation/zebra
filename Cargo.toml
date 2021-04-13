@@ -30,3 +30,8 @@ hyper = { git = "https://github.com/hyperium/hyper", rev = "ed2b22a7f66899d33869
 metrics = { git = "https://github.com/ZcashFoundation/metrics", rev = "971133128e5aebe3ad177acffc6154449736cfa2" }
 metrics-exporter-prometheus = { git = "https://github.com/ZcashFoundation/metrics", rev = "971133128e5aebe3ad177acffc6154449736cfa2" }
 tower = { git = "https://github.com/tower-rs/tower", rev = "d4d1c67c6a0e4213a52abcc2b9df6cc58276ee39" }
+
+# lexical-core 0.7.4 is incompatible with rustc nightly >= ~2021-03-24
+# https://github.com/rust-lang/rust/issues/81654
+# remove when zcash_script and rocksdb transitively depend on lexical-core >= 0.7.5
+lexical-core = { git = "https://github.com/Alexhuszagh/rust-lexical", rev = "601c9bfe16c944948d4c4a07e3c67878d72f6445" }
