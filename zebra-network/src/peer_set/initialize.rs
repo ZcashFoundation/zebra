@@ -13,6 +13,7 @@ use futures::{
     future::{self, FutureExt},
     sink::SinkExt,
     stream::{FuturesUnordered, StreamExt},
+    TryFutureExt,
 };
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -445,8 +446,6 @@ where
         + 'static,
     C::Future: Send + 'static,
 {
-    use CrawlerAction::*;
-
     // CORRECTNESS
     //
     // To avoid hangs, the dialer must only await:
@@ -461,14 +460,22 @@ where
     // the handshake has timeouts, so it shouldn't hang
     connector
         .call(candidate.addr)
-        .map(move |res| match res {
+        .map_err(|e| (candidate, e))
+        .map(Into::into)
+        .await
+}
+
+impl From<Result<Change<SocketAddr, Client>, (MetaAddr, BoxError)>> for CrawlerAction {
+    fn from(dial_result: Result<Change<SocketAddr, Client>, (MetaAddr, BoxError)>) -> Self {
+        use CrawlerAction::*;
+        match dial_result {
             Ok(peer_set_change) => HandshakeConnected { peer_set_change },
-            Err(e) => {
+            Err((candidate, e)) => {
                 debug!(?candidate.addr, ?e, "failed to connect to candidate");
                 HandshakeFailed {
                     failed_addr: candidate,
                 }
             }
-        })
-        .await
+        }
+    }
 }
