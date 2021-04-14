@@ -6,9 +6,10 @@ use std::{io, sync::Arc};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 use crate::{
+    amount,
     block::MAX_BLOCK_BYTES,
     parameters::{OVERWINTER_VERSION_GROUP_ID, SAPLING_VERSION_GROUP_ID, TX_V5_VERSION_GROUP_ID},
-    primitives::ZkSnarkProof,
+    primitives::{Groth16Proof, ZkSnarkProof},
     serialization::{
         ReadZcashExt, SerializationError, TrustedPreallocate, WriteZcashExt, ZcashDeserialize,
         ZcashDeserializeInto, ZcashSerialize,
@@ -187,8 +188,7 @@ impl ZcashSerialize for Transaction {
                     None => {}
                 }
             }
-            // TODO: serialize sapling shielded data according to the V5 transaction spec
-            #[allow(unused_variables)]
+
             Transaction::V5 {
                 lock_time,
                 expiry_height,
@@ -200,13 +200,42 @@ impl ZcashSerialize for Transaction {
                 // Write version 5 and set the fOverwintered bit.
                 writer.write_u32::<LittleEndian>(5 | (1 << 31))?;
                 writer.write_u32::<LittleEndian>(TX_V5_VERSION_GROUP_ID)?;
+
                 lock_time.zcash_serialize(&mut writer)?;
                 writer.write_u32::<LittleEndian>(expiry_height.0)?;
                 inputs.zcash_serialize(&mut writer)?;
                 outputs.zcash_serialize(&mut writer)?;
 
-                // TODO: serialize sapling shielded data according to the V5 transaction spec
+                match sapling_shielded_data {
+                    None => {
+                        // Signal no value balance.
+                        writer.write_i64::<LittleEndian>(0)?;
+                        // Signal no shielded spends and no shielded outputs.
+                        writer.write_compactsize(0)?;
+                        writer.write_compactsize(0)?;
+                    }
+                    Some(shielded_data) => {
+                        shielded_data.value_balance.zcash_serialize(&mut writer)?;
+                        writer.write_all(&<[u8; 32]>::from(shielded_data.shared_anchor)[..])?;
 
+                        writer.write_compactsize(shielded_data.spends().count() as u64)?;
+                        for spend in shielded_data.spends().cloned() {
+                            let (prefix, zkproof, spend_auth_sig) = spend.into_v5_parts();
+                            prefix.zcash_serialize(&mut writer)?;
+                            zkproof.zcash_serialize(&mut writer)?;
+                            spend_auth_sig.zcash_serialize(&mut writer)?;
+                        }
+
+                        writer.write_compactsize(shielded_data.outputs().count() as u64)?;
+                        for output in shielded_data.outputs().cloned() {
+                            let (prefix, zkproof) = output.into_v5_parts();
+                            prefix.zcash_serialize(&mut writer)?;
+                            zkproof.zcash_serialize(&mut writer)?;
+                        }
+
+                        writer.write_all(&<[u8; 64]>::from(shielded_data.binding_sig)[..])?;
+                    }
+                }
                 // write the rest
                 writer.write_all(rest)?;
             }
@@ -335,7 +364,67 @@ impl ZcashDeserialize for Transaction {
                 let inputs = Vec::zcash_deserialize(&mut reader)?;
                 let outputs = Vec::zcash_deserialize(&mut reader)?;
 
-                // TODO: deserialize sapling shielded data according to the V5 transaction spec
+                let value_balance =
+                    amount::Amount::<amount::NegativeAllowed>::zcash_deserialize(&mut reader)?;
+                let shared_anchor = sapling::tree::Root(reader.read_32_bytes()?);
+
+                let mut shielded_spends = Vec::<sapling::Spend<sapling::SharedAnchor>>::new();
+                let spends_count = reader.read_compactsize()?;
+                if spends_count > 0 {
+                    for _ in 0..spends_count {
+                        let prefix = sapling::spend::SpendPrefixInTransactionV5::zcash_deserialize(
+                            &mut reader,
+                        )?;
+                        let zkproof = Groth16Proof::zcash_deserialize(&mut reader)?;
+                        let auth_sig =
+                            redjubjub::Signature::<redjubjub::SpendAuth>::zcash_deserialize(
+                                &mut reader,
+                            )?;
+
+                        shielded_spends
+                            .push(sapling::Spend::from_v5_parts(prefix, zkproof, auth_sig));
+                    }
+                }
+
+                let mut shielded_outputs = Vec::<sapling::Output>::new();
+                let outputs_count = reader.read_compactsize()?;
+                if outputs_count > 0 {
+                    for _ in 0..outputs_count {
+                        let prefix =
+                            sapling::output::OutputPrefixInTransactionV5::zcash_deserialize(
+                                &mut reader,
+                            )?;
+                        let zkproof = Groth16Proof::zcash_deserialize(&mut reader)?;
+
+                        shielded_outputs.push(sapling::Output::from_v5_parts(prefix, zkproof));
+                    }
+                }
+
+                use futures::future::Either::*;
+                // Arbitraily use a spend for `first`, if both are present
+                let sapling_shielded_data = if !shielded_spends.is_empty() {
+                    Some(sapling::ShieldedData {
+                        value_balance,
+                        shared_anchor,
+                        first: Left(shielded_spends.remove(0)),
+                        rest_spends: shielded_spends,
+                        rest_outputs: shielded_outputs,
+                        binding_sig: reader.read_64_bytes()?.into(),
+                    })
+                } else if !shielded_outputs.is_empty() {
+                    Some(sapling::ShieldedData {
+                        value_balance,
+                        shared_anchor,
+                        first: Right(shielded_outputs.remove(0)),
+                        // the spends are actually empty here, but we use the
+                        // vec for consistency and readability
+                        rest_spends: shielded_spends,
+                        rest_outputs: shielded_outputs,
+                        binding_sig: reader.read_64_bytes()?.into(),
+                    })
+                } else {
+                    None
+                };
 
                 let mut rest = Vec::new();
                 reader.read_to_end(&mut rest)?;
@@ -345,8 +434,7 @@ impl ZcashDeserialize for Transaction {
                     expiry_height,
                     inputs,
                     outputs,
-                    // TODO: use deserialized sapling shielded data
-                    sapling_shielded_data: None,
+                    sapling_shielded_data,
                     rest,
                 })
             }
