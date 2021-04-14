@@ -28,7 +28,7 @@ tokio = { version = "0.3.6", features = ["time", "rt-multi-thread", "stream", "m
 tower = { version = "0.4", features = ["hedge", "limit"] }
 pin-project = "0.4.23"
 
-color-eyre = { version = "0.5.10", features = ["issue-url"] }
+color-eyre = { version = "0.5.11", features = ["issue-url"] }
 thiserror = "1"
 
 tracing = "0.1"
