@@ -529,9 +529,8 @@ where
                         // shutting down. so do a heartbeat request.
                         //
                         // TODO: await heartbeat and shutdown. The select
-                        // function has some strict lifetime requirements,
-                        // try the select! macro with a custom enum mapping
-                        // (#1783, #1678)
+                        // function needs pinned types, but pinned generics
+                        // are hard (#1678)
                         let heartbeat = send_one_heartbeat(&mut server_tx);
                         if heartbeat_timeout(
                             heartbeat,
