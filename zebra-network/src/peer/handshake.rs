@@ -526,7 +526,7 @@ where
                         }
 
                         // We've reached another heartbeat interval without
-                        // shutting down. so do a heartbeat request.
+                        // shutting down, so do a heartbeat request.
                         //
                         // TODO: await heartbeat and shutdown. The select
                         // function needs pinned types, but pinned generics
