@@ -439,8 +439,8 @@ impl ZcashDeserialize for Transaction {
                     for i in 0..spends_count {
                         shielded_spends.push(sapling::Spend::from_v5_parts(
                             spend_prefixes[i].clone(),
-                            spend_proofs[i].clone(),
-                            spend_sigs[i].clone(),
+                            spend_proofs[i],
+                            spend_sigs[i],
                         ));
                     }
                 }
@@ -451,7 +451,7 @@ impl ZcashDeserialize for Transaction {
                     for i in 0..outputs_count {
                         shielded_outputs.push(sapling::Output::from_v5_parts(
                             output_prefixes[i].clone(),
-                            output_proofs[i].clone(),
+                            output_proofs[i],
                         ));
                     }
                 }
