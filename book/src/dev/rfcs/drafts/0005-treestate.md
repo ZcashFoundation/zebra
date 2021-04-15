@@ -144,7 +144,7 @@ the `RootHash` bytes in this block's header, as the `FinalSaplingRoot`. Once all
 other consensus and validation checks are done, this will be saved down to our
 finalized state to our `sapling_anchors` set, making it available for lookup by
 other Sapling descriptions in future transactions.
-
+TODO: explain Heartwood, Canopy, NU5 rule variants around anchors.
 For Sprout, we must compute/update interstitial `NoteCommitmentTree`s between
 `JoinSplit`s that may reference an earlier one's root as its anchor. If we do
 this at the transaction layer, we can iterate through all the `JoinSplit`s and
