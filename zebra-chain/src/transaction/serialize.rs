@@ -197,11 +197,11 @@ impl ZcashSerialize for Transaction {
                 sapling_shielded_data,
                 rest,
             } => {
-                // header: Write version 5 and set the fOverwintered bit.
+                // header: Write version 5 and set the fOverwintered bit
                 writer.write_u32::<LittleEndian>(5 | (1 << 31))?;
                 writer.write_u32::<LittleEndian>(TX_V5_VERSION_GROUP_ID)?;
 
-                // mining
+                // transaction validity time and height limits
                 lock_time.zcash_serialize(&mut writer)?;
                 writer.write_u32::<LittleEndian>(expiry_height.0)?;
 
@@ -209,6 +209,7 @@ impl ZcashSerialize for Transaction {
                 inputs.zcash_serialize(&mut writer)?;
                 outputs.zcash_serialize(&mut writer)?;
 
+                // sapling
                 match sapling_shielded_data {
                     None => {
                         // nSpendSapling
@@ -273,7 +274,9 @@ impl ZcashSerialize for Transaction {
                         writer.write_all(&<[u8; 64]>::from(shielded_data.binding_sig)[..])?;
                     }
                 }
-                // write the rest
+
+                // orchard
+                // TODO: parse orchard into structs
                 writer.write_all(rest)?;
             }
         }
@@ -392,32 +395,35 @@ impl ZcashDeserialize for Transaction {
                 })
             }
             (5, true) => {
-                // Deserialize header
+                // header
                 let id = reader.read_u32::<LittleEndian>()?;
                 if id != TX_V5_VERSION_GROUP_ID {
                     return Err(SerializationError::Parse("expected TX_V5_VERSION_GROUP_ID"));
                 }
 
-                // Deserialize mining
+                // transaction validity time and height limits
                 let lock_time = LockTime::zcash_deserialize(&mut reader)?;
                 let expiry_height = block::Height(reader.read_u32::<LittleEndian>()?);
 
-                // Deserialize transparent
+                // transparent
                 let inputs = Vec::zcash_deserialize(&mut reader)?;
                 let outputs = Vec::zcash_deserialize(&mut reader)?;
+
+                // sapling
 
                 // nSpendsSapling - vSpendsSapling
                 let spend_prefixes =
                     Vec::<sapling::spend::SpendPrefixInTransactionV5>::zcash_deserialize(
                         &mut reader,
                     )?;
+
                 // nOutputsSapling - vOutputsSapling
                 let output_prefixes =
                     Vec::<sapling::output::OutputPrefixInTransactionV5>::zcash_deserialize(
                         &mut reader,
                     )?;
 
-                // Cretate counters
+                // nSpendsSapling and nOutputsSapling as variables
                 let spends_count = spend_prefixes.len();
                 let outputs_count = output_prefixes.len();
 
@@ -426,6 +432,7 @@ impl ZcashDeserialize for Transaction {
                 if spends_count > 0 || outputs_count > 0 {
                     value_balance = Some((&mut reader).zcash_deserialize_into()?);
                 }
+
                 // anchorSapling
                 let mut shared_anchor = None;
                 if spends_count > 0 {
@@ -500,7 +507,8 @@ impl ZcashDeserialize for Transaction {
                     None
                 };
 
-                // Deserialize the rest of the transaction
+                // orchard
+                // TODO: parse orchard into structs
                 let mut rest = Vec::new();
                 reader.read_to_end(&mut rest)?;
 
