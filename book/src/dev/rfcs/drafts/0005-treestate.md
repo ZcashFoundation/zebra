@@ -167,6 +167,12 @@ state. The Sprout and Sapling nullifiers revealed in the block will be merged
 with the exising ones in our finalized state (ie, it should strictly grow over
 time).
 
+IMPORTANT: we need to save the incremental merkle tree / serialized nodes for:
+
+Sapling tip block
+~all Sprout blocks
+chains we're tracking in memory within the reorg limit, for both
+We can't just compute a fresh tree with just the note commitments within a block, we are adding them to the tree referenced by the anchor, but we cannot update that tree with just the anchor, we need the 'frontier' nodes and leaves of the incremental merkle tree.
 
 # Reference-level explanation
 [reference-level-explanation]: #reference-level-explanation
