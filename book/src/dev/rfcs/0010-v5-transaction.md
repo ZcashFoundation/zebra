@@ -248,10 +248,7 @@ These convenience methods convert `Output` to:
 * its v4 serialization wrapper `OutputInTransactionV4`, and
 * its v5 parts: `OutputPrefixInTransactionV5` and the output proof.
 
-## Orchard Additions
-[orchard-additions]: #orchard-additions
-
-### Adding V5 Transactions
+## Adding V5 Transactions
 [adding-v5-transactions]: #adding-v5-transactions
 
 Now lets see how the V5 transaction is specified in the protocol, this is the second table of [Transaction Encoding and Consensus](https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus) and how are we going to represent it based in the above changes for Sapling fields and the new Orchard fields.
@@ -278,6 +275,10 @@ because they can be serialized into a single byte vector:
 * `transparent::Input`
 * `transparent::Output`
 * `Option<sapling::ShieldedData<SharedAnchor>>` (new)
+* `Option<orchard::ShieldedData>` (new)
+
+## Orchard Additions
+[orchard-additions]: #orchard-additions
 
 ### Adding Orchard ShieldedData
 [adding-orchard-shieldeddata]: #adding-orchard-shieldeddata
