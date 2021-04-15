@@ -77,6 +77,8 @@ statement.
 # Guide-level explanation
 [guide-level-explanation]: #guide-level-explanation
 
+TODO: split into common, Sprout, Sapling, and probably Orchard sections
+
 As `Block`s are validated, the `NoteCommitment`s revealed by all the transactions
 within that block are used to construct `NoteCommitmentTree`s, with the
 `NoteCommitment`s aligned in their note positions in the bottom layer of the
