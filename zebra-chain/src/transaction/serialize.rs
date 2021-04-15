@@ -211,10 +211,9 @@ impl ZcashSerialize for Transaction {
 
                 match sapling_shielded_data {
                     None => {
-                        // Signal no value balance.
-                        writer.write_i64::<LittleEndian>(0)?;
-                        // Signal no shielded spends and no shielded outputs.
+                        // nSpendSapling
                         writer.write_compactsize(0)?;
+                        // nOutputSapling
                         writer.write_compactsize(0)?;
                     }
                     Some(shielded_data) => {
@@ -249,19 +248,24 @@ impl ZcashSerialize for Transaction {
                             })
                             .collect::<Vec<_>>();
 
-                        // Serialize spend and output prefixes
+                        // nSpendsSapling - vSpendsSapling
                         spend_prefixes.zcash_serialize(&mut writer)?;
+                        // nOutputsSapling - vOutputsSapling
                         output_prefixes.zcash_serialize(&mut writer)?;
 
-                        // Serialize value balance and shared anchor
+                        // valueBalanceSapling
                         shielded_data.value_balance.zcash_serialize(&mut writer)?;
-                        writer.write_all(&<[u8; 32]>::from(shielded_data.shared_anchor)[..])?;
 
-                        // Serialize spend zkproofs and auth sigs
+                        // anchorSapling
+                        if spend_prefixes.len() > 0 {
+                            writer.write_all(&<[u8; 32]>::from(shielded_data.shared_anchor)[..])?;
+                        }
+                        // vSpendProofSapling
                         zcash_serialize_external_count(&spend_proofs, &mut writer)?;
+                        // vSpendAuthSigsSapling
                         zcash_serialize_external_count(&spend_sigs, &mut writer)?;
 
-                        // Serialize output zkproofs
+                        // vOutputProofSapling
                         zcash_serialize_external_count(&output_proofs, &mut writer)?;
 
                         // Serialize binding sig
@@ -401,37 +405,48 @@ impl ZcashDeserialize for Transaction {
                 let inputs = Vec::zcash_deserialize(&mut reader)?;
                 let outputs = Vec::zcash_deserialize(&mut reader)?;
 
-                // Deserialize shielded data spend and output prefixes
+                // nSpendsSapling - vSpendsSapling
                 let spend_prefixes =
                     Vec::<sapling::spend::SpendPrefixInTransactionV5>::zcash_deserialize(
                         &mut reader,
                     )?;
+                // nOutputsSapling - vOutputsSapling
                 let output_prefixes =
                     Vec::<sapling::output::OutputPrefixInTransactionV5>::zcash_deserialize(
                         &mut reader,
                     )?;
 
-                // Deserialize value balance and shared anchor
-                let value_balance = (&mut reader).zcash_deserialize_into()?;
-                let shared_anchor = sapling::tree::Root(reader.read_32_bytes()?);
-
                 // Cretate counters
                 let spends_count = spend_prefixes.len();
                 let outputs_count = output_prefixes.len();
 
-                // Deserialize spend zkproofs and auth sigs
+                // valueBalanceSapling
+                let mut value_balance = None;
+                if spends_count > 0 || outputs_count > 0 {
+                    value_balance = Some((&mut reader).zcash_deserialize_into()?);
+                }
+                // anchorSapling
+                let mut shared_anchor = None;
+                if spends_count > 0 {
+                    shared_anchor = Some(sapling::tree::Root(reader.read_32_bytes()?));
+                }
+
+                // vSpendsProofSapling
                 let spend_proofs: Vec<Groth16Proof> =
                     zcash_deserialize_external_count(spends_count, &mut reader)?;
+                // vSpendAuthSigSapling
                 let spend_sigs: Vec<redjubjub::Signature<redjubjub::SpendAuth>> =
                     zcash_deserialize_external_count(spends_count, &mut reader)?;
 
-                // Deserialize output zkproofs
+                // vOutputProofsSapling
                 let output_proofs: Vec<Groth16Proof> =
                     zcash_deserialize_external_count(outputs_count, &mut reader)?;
 
-                // Deserialize binding sig
-                let binding_sig: redjubjub::Signature<redjubjub::Binding> =
-                    reader.read_64_bytes()?.into();
+                // bindingSigSapling
+                let mut binding_sig: Option<redjubjub::Signature<redjubjub::Binding>> = None;
+                if spends_count > 0 || outputs_count > 0 {
+                    binding_sig = Some(reader.read_64_bytes()?.into());
+                }
 
                 // Create shielded spends from deserialized parts
                 let mut shielded_spends = Vec::<sapling::Spend<sapling::SharedAnchor>>::new();
@@ -459,25 +474,26 @@ impl ZcashDeserialize for Transaction {
                 // Create shielded data
                 use futures::future::Either::*;
                 // Arbitraily use a spend for `first`, if both are present
-                let sapling_shielded_data = if !shielded_spends.is_empty() {
+                let sapling_shielded_data = if spends_count > 0 {
                     Some(sapling::ShieldedData {
-                        value_balance,
-                        shared_anchor,
+                        value_balance: value_balance.expect("present when spends_count > 0"),
+                        shared_anchor: shared_anchor.expect("present when spends_count > 0"),
                         first: Left(shielded_spends.remove(0)),
                         rest_spends: shielded_spends,
                         rest_outputs: shielded_outputs,
-                        binding_sig,
+                        binding_sig: binding_sig.expect("present when spends_count > 0"),
                     })
-                } else if !shielded_outputs.is_empty() {
+                } else if outputs_count > 0 {
                     Some(sapling::ShieldedData {
-                        value_balance,
-                        shared_anchor,
+                        value_balance: value_balance.expect("present when outputs_count > 0"),
+                        // TODO: delete shared anchor when there are no spends
+                        shared_anchor: shared_anchor.unwrap_or_default(),
                         first: Right(shielded_outputs.remove(0)),
                         // the spends are actually empty here, but we use the
                         // vec for consistency and readability
                         rest_spends: shielded_spends,
                         rest_outputs: shielded_outputs,
-                        binding_sig,
+                        binding_sig: binding_sig.expect("present when outputs_count > 0"),
                     })
                 } else {
                     None
