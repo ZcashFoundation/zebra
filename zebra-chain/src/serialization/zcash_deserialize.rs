@@ -1,7 +1,9 @@
-use std::{convert::TryInto, io};
+use std::{
+    convert::{TryFrom, TryInto},
+    io,
+};
 
 use super::{ReadZcashExt, SerializationError, MAX_PROTOCOL_MESSAGE_LEN};
-use byteorder::ReadBytesExt;
 
 /// Consensus-critical serialization for Zcash.
 ///
@@ -18,27 +20,92 @@ pub trait ZcashDeserialize: Sized {
     fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError>;
 }
 
+/// Deserialize a `Vec`, where the number of items is set by a compactsize
+/// prefix in the data. This is the most common format in Zcash.
+///
+/// See `zcash_deserialize_external_count` for more details, and usage
+/// information.
 impl<T: ZcashDeserialize + TrustedPreallocate> ZcashDeserialize for Vec<T> {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let len = reader.read_compactsize()?;
-        if len > T::max_allocation() {
-            return Err(SerializationError::Parse(
-                "Vector longer than max_allocation",
-            ));
-        }
-        let mut vec = Vec::with_capacity(len.try_into()?);
-        for _ in 0..len {
-            vec.push(T::zcash_deserialize(&mut reader)?);
-        }
-        Ok(vec)
+        let len = reader.read_compactsize()?.try_into()?;
+        zcash_deserialize_external_count(len, reader)
     }
 }
 
-/// Read a byte.
-impl ZcashDeserialize for u8 {
+/// Implement ZcashDeserialize for Vec<u8> directly instead of using the blanket Vec implementation
+///
+/// This allows us to optimize the inner loop into a single call to `read_exact()`
+/// Note that we don't implement TrustedPreallocate for u8.
+/// This allows the optimization without relying on specialization.
+impl ZcashDeserialize for Vec<u8> {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        Ok(reader.read_u8()?)
+        let len = reader.read_compactsize()?.try_into()?;
+        zcash_deserialize_bytes_external_count(len, reader)
     }
+}
+
+/// Deserialize a `Vec` containing `external_count` items.
+///
+/// In Zcash, most arrays are stored as a compactsize, followed by that number
+/// of items of type `T`. But in `Transaction::V5`, some types are serialized as
+/// multiple arrays in different locations, with a single compactsize before the
+/// first array.
+///
+/// ## Usage
+///
+/// Use `zcash_deserialize_external_count` when the array count is determined by
+/// other data, or a consensus rule.
+///
+/// Use `Vec::zcash_deserialize` for data that contains compactsize count,
+/// followed by the data array.
+///
+/// For example, when a single count applies to multiple arrays:
+/// 1. Use `Vec::zcash_deserialize` for the array that has a data count.
+/// 2. Use `zcash_deserialize_external_count` for the arrays with no count in the
+///    data, passing the length of the first array.
+///
+/// This function has a `zcash_` prefix to alert the reader that the
+/// serialization in use is consensus-critical serialization, rather than
+/// some other kind of serialization.
+pub fn zcash_deserialize_external_count<R: io::Read, T: ZcashDeserialize + TrustedPreallocate>(
+    external_count: usize,
+    mut reader: R,
+) -> Result<Vec<T>, SerializationError> {
+    match u64::try_from(external_count) {
+        Ok(external_count) if external_count > T::max_allocation() => {
+            return Err(SerializationError::Parse(
+                "Vector longer than max_allocation",
+            ))
+        }
+        Ok(_) => {}
+        Err(_) => return Err(SerializationError::Parse("Vector longer than u64::MAX")),
+    }
+    let mut vec = Vec::with_capacity(external_count);
+    for _ in 0..external_count {
+        vec.push(T::zcash_deserialize(&mut reader)?);
+    }
+    Ok(vec)
+}
+
+/// `zcash_deserialize_external_count`, specialised for raw bytes.
+///
+/// This allows us to optimize the inner loop into a single call to `read_exact()`.
+///
+/// This function has a `zcash_` prefix to alert the reader that the
+/// serialization in use is consensus-critical serialization, rather than
+/// some other kind of serialization.
+pub fn zcash_deserialize_bytes_external_count<R: io::Read>(
+    external_count: usize,
+    mut reader: R,
+) -> Result<Vec<u8>, SerializationError> {
+    if external_count > MAX_U8_ALLOCATION {
+        return Err(SerializationError::Parse(
+            "Byte vector longer than MAX_U8_ALLOCATION",
+        ));
+    }
+    let mut vec = vec![0u8; external_count];
+    reader.read_exact(&mut vec)?;
+    Ok(vec)
 }
 
 /// Read a Bitcoin-encoded UTF-8 string.
