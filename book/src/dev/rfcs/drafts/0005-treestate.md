@@ -69,6 +69,12 @@ an anchor of some previous `Block`'s `NoteCommitment` tree.
 **output descriptions**: A shielded Sapling transfer that creates a
 `Note`. Includes the u-coordinate of the `NoteCommitment` itself.
 
+**action descriptions**: A shielded Orchard transfer that spends and/or creates a `Note`. 
+Does not include an anchor, because that is encoded once in the `anchorOrchard` 
+field of a V5 `Transaction`.
+
+
+
 **joinsplit**: A shielded transfer that can spend Sprout `Note`s and transparent
 value, and create new Sprout `Note`s and transparent value, in one Groth16 proof
 statement.
