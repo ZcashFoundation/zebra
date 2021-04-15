@@ -57,11 +57,20 @@ with a single `compactsize` count before the first array. We add new
 `zcash_deserialize_external_count` and `zcash_serialize_external_count` utility functions,
 which make it easier to serialize and deserialize these arrays correctly.
 
-The order of some of the fields changed from V4 to V5. For example the `lock_time` and `expiry_height` were moved above the transparent inputs and outputs.
+The order of some of the fields changed from V4 to V5. For example the `lock_time` and
+`expiry_height` were moved above the transparent inputs and outputs.
 
-Zebra enums and structs put fields in serialized order.
-Composite structs and emnum variants are ordered based on **last** data
-deserialized for the composite.
+The serialized field order and field splits are in [the V5 transaction section in the NU5 spec](https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus).
+(Currently, the V5 spec is on a separate page after the V1-V4 specs.)
+
+Zebra's structs sometimes use a different order from the spec.
+We combine fields that occur together, to make it impossible to represent structurally
+invalid Zcash data.
+
+In general:
+* Zebra enums and structs put fields in serialized order.
+* Composite structs and emnum variants are ordered based on **last** data
+  deserialized for the composite.
 
 # Reference-level explanation
 [reference-level-explanation]: #reference-level-explanation
@@ -142,6 +151,8 @@ We use `AnchorVariant` in `ShieldedData` to model the anchor differences between
 struct sapling::ShieldedData<AnchorV: AnchorVariant> {
     value_balance: Amount,
     shared_anchor: AnchorV::Shared,
+    // The following fields are in a different order to the serialized data, see:
+    // https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus
     first: Either<Spend<AnchorV>, Output>,
     rest_spends: Vec<Spend<AnchorV>>,
     rest_outputs: Vec<Output>,
@@ -168,10 +179,11 @@ struct Spend<AnchorV: AnchorVariant> {
     per_spend_anchor: AnchorV::PerSpend,
     nullifier: note::Nullifier,
     rk: redjubjub::VerificationKeyBytes<SpendAuth>,
-    // note: stored in a separate array in v5 transactions
+    // This field is stored in a separate array in v5 transactions, see:
+    // https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus
     // parse using `zcash_deserialize_external_count` and `zcash_serialize_external_count`
     zkproof: Groth16Proof,
-    // note: stored in another separate array in v5 transactions
+    // This fields is stored in another separate array in v5 transactions
     spend_auth_sig: redjubjub::Signature<SpendAuth>,
 }
 
@@ -218,7 +230,8 @@ struct Output {
     ephemeral_key: keys::EphemeralPublicKey,
     enc_ciphertext: note::EncryptedNote,
     out_ciphertext: note::WrappedNoteKey,
-    // note: stored in a separate array in v5 transactions
+    // This field is stored in a separate array in v5 transactions, see:
+    // https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus
     // parse using `zcash_deserialize_external_count` and `zcash_serialize_external_count`
     zkproof: Groth16Proof,
 }
@@ -331,7 +344,8 @@ In `V5` transactions, there is one `SpendAuth` signature for every `Action`. To 
 /// Every authorized Orchard `Action` must have a corresponding `SpendAuth` signature.
 struct orchard::AuthorizedAction {
     action: Action,
-    // note: stored in a separate array in v5 transactions
+    // This field is stored in a separate array in v5 transactions, see:
+    // https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus
     // parse using `zcash_deserialize_external_count` and `zcash_serialize_external_count`
     spend_auth_sig: redpallas::Signature<SpendAuth>,
 }
