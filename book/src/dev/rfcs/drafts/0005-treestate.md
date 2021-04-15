@@ -127,9 +127,9 @@ anchor consensus check again, but against the output treestate roots of earlier
 `JoinSplit`s.
 
 Both Sprout and Sapling `NoteCommitment` trees must be computed for the whole
-block to validate, but Sprout, we need to compute interstitial treestates in
+block to validate. For Sprout, we need to compute interstitial treestates in
 between `JoinSplit`s in order to do the final consensus check for each/all
-`JoinSplit`s, not just for the whole block, like in Sapling.
+`JoinSplit`s, not just for the whole block, as in Sapling.
 
 For Sapling, at the block layer, we can iterate over all the transactions in
 order and if they have `Spend`s and/or `Output`s, we update our Nullifer set for
