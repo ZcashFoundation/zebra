@@ -36,7 +36,7 @@ To highlight changes most of the document comments from the code snippets in the
 ## Sapling Changes Overview
 [sapling-changes-overview]: #sapling-changes-overview
 
-V4 and V5 transactions both support sapling, but the underlying data structures are different. So need to make the sapling data types generic over the V4 and V5 structures.
+V4 and V5 transactions both support sapling, but the underlying data structures are different. So we need to make the sapling data types generic over the V4 and V5 structures.
 
 In V4, anchors are per-spend, but in V5, they are per-transaction.
 
@@ -51,6 +51,11 @@ Orchard uses `Halo2Proof`s with corresponding signature type changes. Each Orcha
 
 ## Other Transaction V5 Changes
 [other-transaction-v5-changes]: #other-transaction-v5-changes
+
+V5 transactions split `Spend`s, `Output`s, and `AuthorizedAction`s into multiple arrays,
+with a single `compactsize` count before the first array. We add new
+`zcash_deserialize_external_count` and `zcash_serialize_external_count` utility functions,
+which make it easier to serialize and deserialize these arrays correctly.
 
 The order of some of the fields changed from V4 to V5. For example the `lock_time` and `expiry_height` were moved above the transparent inputs and outputs.
 
@@ -163,7 +168,10 @@ struct Spend<AnchorV: AnchorVariant> {
     per_spend_anchor: AnchorV::PerSpend,
     nullifier: note::Nullifier,
     rk: redjubjub::VerificationKeyBytes<SpendAuth>,
+    // note: stored in a separate array in v5 transactions
+    // parse using `zcash_deserialize_external_count` and `zcash_serialize_external_count`
     zkproof: Groth16Proof,
+    // note: stored in another separate array in v5 transactions
     spend_auth_sig: redjubjub::Signature<SpendAuth>,
 }
 
@@ -210,6 +218,8 @@ struct Output {
     ephemeral_key: keys::EphemeralPublicKey,
     enc_ciphertext: note::EncryptedNote,
     out_ciphertext: note::WrappedNoteKey,
+    // note: stored in a separate array in v5 transactions
+    // parse using `zcash_deserialize_external_count` and `zcash_serialize_external_count`
     zkproof: Groth16Proof,
 }
 
@@ -321,6 +331,8 @@ In `V5` transactions, there is one `SpendAuth` signature for every `Action`. To 
 /// Every authorized Orchard `Action` must have a corresponding `SpendAuth` signature.
 struct orchard::AuthorizedAction {
     action: Action,
+    // note: stored in a separate array in v5 transactions
+    // parse using `zcash_deserialize_external_count` and `zcash_serialize_external_count`
     spend_auth_sig: redpallas::Signature<SpendAuth>,
 }
 ```
