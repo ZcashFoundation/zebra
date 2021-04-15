@@ -17,6 +17,7 @@ use crate::{
 };
 
 use super::*;
+use sapling::Output;
 
 impl ZcashDeserialize for jubjub::Fq {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
@@ -166,7 +167,11 @@ impl ZcashSerialize for Transaction {
                             spend.zcash_serialize(&mut writer)?;
                         }
                         writer.write_compactsize(shielded_data.outputs().count() as u64)?;
-                        for output in shielded_data.outputs() {
+                        for output in shielded_data
+                            .outputs()
+                            .cloned()
+                            .map(sapling::OutputInTransactionV4)
+                        {
                             output.zcash_serialize(&mut writer)?;
                         }
                     }
@@ -182,11 +187,14 @@ impl ZcashSerialize for Transaction {
                     None => {}
                 }
             }
+            // TODO: serialize sapling shielded data according to the V5 transaction spec
+            #[allow(unused_variables)]
             Transaction::V5 {
                 lock_time,
                 expiry_height,
                 inputs,
                 outputs,
+                sapling_shielded_data,
                 rest,
             } => {
                 // Write version 5 and set the fOverwintered bit.
@@ -196,6 +204,8 @@ impl ZcashSerialize for Transaction {
                 writer.write_u32::<LittleEndian>(expiry_height.0)?;
                 inputs.zcash_serialize(&mut writer)?;
                 outputs.zcash_serialize(&mut writer)?;
+
+                // TODO: serialize sapling shielded data according to the V5 transaction spec
 
                 // write the rest
                 writer.write_all(rest)?;
@@ -272,7 +282,11 @@ impl ZcashDeserialize for Transaction {
 
                 let value_balance = (&mut reader).zcash_deserialize_into()?;
                 let mut shielded_spends = Vec::zcash_deserialize(&mut reader)?;
-                let mut shielded_outputs = Vec::zcash_deserialize(&mut reader)?;
+                let mut shielded_outputs =
+                    Vec::<sapling::OutputInTransactionV4>::zcash_deserialize(&mut reader)?
+                        .into_iter()
+                        .map(Output::from_v4)
+                        .collect();
 
                 let joinsplit_data = OptV4Jsd::zcash_deserialize(&mut reader)?;
 
@@ -311,7 +325,7 @@ impl ZcashDeserialize for Transaction {
                     joinsplit_data,
                 })
             }
-            (5, false) => {
+            (5, true) => {
                 let id = reader.read_u32::<LittleEndian>()?;
                 if id != TX_V5_VERSION_GROUP_ID {
                     return Err(SerializationError::Parse("expected TX_V5_VERSION_GROUP_ID"));
@@ -321,6 +335,8 @@ impl ZcashDeserialize for Transaction {
                 let inputs = Vec::zcash_deserialize(&mut reader)?;
                 let outputs = Vec::zcash_deserialize(&mut reader)?;
 
+                // TODO: deserialize sapling shielded data according to the V5 transaction spec
+
                 let mut rest = Vec::new();
                 reader.read_to_end(&mut rest)?;
 
@@ -329,6 +345,8 @@ impl ZcashDeserialize for Transaction {
                     expiry_height,
                     inputs,
                     outputs,
+                    // TODO: use deserialized sapling shielded data
+                    sapling_shielded_data: None,
                     rest,
                 })
             }
