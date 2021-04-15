@@ -7,6 +7,8 @@ use crate::serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerializ
 
 use super::super::*;
 
+const DEFAULT_TEST_INPUT_PROPTEST_CASES: u32 = 64;
+
 #[test]
 fn equihash_solution_roundtrip() {
     zebra_test::init();
@@ -50,7 +52,7 @@ fn equihash_prop_test_solution() -> color_eyre::eyre::Result<()> {
         proptest!(Config::with_cases(env::var("PROPTEST_CASES")
                                       .ok()
                                       .and_then(|v| v.parse().ok())
-                                      .unwrap_or(64)),
+                                      .unwrap_or(DEFAULT_TEST_INPUT_PROPTEST_CASES)),
                 |(fake_header in randomized_solutions(block.header))| {
             fake_header.solution
                 .check(&fake_header)
@@ -121,7 +123,7 @@ fn equihash_prop_test_input() -> color_eyre::eyre::Result<()> {
         proptest!(Config::with_cases(env::var("PROPTEST_CASES")
                                   .ok()
                                   .and_then(|v| v.parse().ok())
-                                 .unwrap_or(64)),
+                                 .unwrap_or(DEFAULT_TEST_INPUT_PROPTEST_CASES)),
               |(fake_header in randomized_input(block.header))| {
             fake_header.solution
                 .check(&fake_header)

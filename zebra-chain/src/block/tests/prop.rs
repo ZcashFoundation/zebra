@@ -9,6 +9,8 @@ use crate::{block, parameters::Network, LedgerState};
 
 use super::super::{serialize::MAX_BLOCK_BYTES, *};
 
+const DEFAULT_BLOCK_ROUNDTRIP_PROPTEST_CASES: u32 = 16;
+
 proptest! {
     #[test]
     fn block_hash_roundtrip(hash in any::<Hash>()) {
@@ -63,7 +65,7 @@ proptest! {
     #![proptest_config(Config::with_cases(env::var("PROPTEST_CASES")
                                           .ok()
                                           .and_then(|v| v.parse().ok())
-                                          .unwrap_or(16)))]
+                                          .unwrap_or(DEFAULT_BLOCK_ROUNDTRIP_PROPTEST_CASES)))]
 
     #[test]
     fn block_roundtrip(block in any::<Block>(), network in any::<Network>()) {
