@@ -28,4 +28,4 @@ pub use zcash_serialize::{
 };
 
 #[cfg(test)]
-mod proptests;
+mod tests;

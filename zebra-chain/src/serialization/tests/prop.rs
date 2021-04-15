@@ -1,14 +1,12 @@
 //! Property-based tests for basic serialization primitives.
 
-use super::*;
 use proptest::prelude::*;
 
 use std::io::Cursor;
 
-proptest! {
-    // The tests below are cheap so we can run them a lot.
-    #![proptest_config(ProptestConfig::with_cases(100_000))]
+use crate::serialization::{ReadZcashExt, WriteZcashExt};
 
+proptest! {
     #[test]
     fn compactsize_write_then_read_round_trip(s in 0u64..0x2_0000u64) {
         zebra_test::init();
