@@ -411,10 +411,7 @@ mod tests {
         strategy::{NewTree, ValueTree},
         test_runner::TestRunner,
     };
-    use std::{
-        env,
-        sync::{Arc, Mutex},
-    };
+    use std::{env, sync::Arc};
 
     use zebra_chain::{
         block::Block,
@@ -428,6 +425,9 @@ mod tests {
 
     use self::assert_eq;
     use super::*;
+
+    const MAX_PARTIAL_CHAIN_BLOCKS: usize = 100;
+    const DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES: usize = 32;
 
     #[test]
     fn construct_empty() {
@@ -517,7 +517,8 @@ mod tests {
 
     #[derive(Debug, Default)]
     struct PreparedChain {
-        chain: Mutex<Option<Arc<Vec<PreparedBlock>>>>,
+        // the proptests are threaded (not async), so we want to use a threaded mutex here
+        chain: std::sync::Mutex<Option<Arc<Vec<PreparedBlock>>>>,
     }
 
     impl Strategy for PreparedChain {
@@ -527,11 +528,11 @@ mod tests {
         fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
             let mut chain = self.chain.lock().unwrap();
             if chain.is_none() {
-                let tip_height = NetworkUpgrade::Blossom
+                let tip_height = NetworkUpgrade::Canopy
                     .activation_height(Network::Mainnet)
                     .unwrap();
                 let ledger_state = LedgerState::new(tip_height, Network::Mainnet);
-                let blocks = Block::partial_chain_strategy(ledger_state, 100)
+                let blocks = Block::partial_chain_strategy(ledger_state, MAX_PARTIAL_CHAIN_BLOCKS)
                     .prop_map(|vec| vec.into_iter().map(|blk| blk.prepare()).collect::<Vec<_>>())
                     .new_tree(runner)?
                     .current();
@@ -551,7 +552,7 @@ mod tests {
         proptest!(ProptestConfig::with_cases(env::var("PROPTEST_CASES")
                                           .ok()
                                           .and_then(|v| v.parse().ok())
-                                          .unwrap_or(32)),
+                                          .unwrap_or(DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES)),
         |((chain, count) in PreparedChain::default())| {
             let fork_tip_hash = chain[count - 1].hash;
             let mut full_chain = Chain::default();
@@ -579,7 +580,7 @@ mod tests {
         proptest!(ProptestConfig::with_cases(env::var("PROPTEST_CASES")
                                           .ok()
                                           .and_then(|v| v.parse().ok())
-                                          .unwrap_or(32)),
+                                          .unwrap_or(DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES)),
         |((chain, end_count) in PreparedChain::default())| {
             let finalized_count = chain.len() - end_count;
             let mut full_chain = Chain::default();
