@@ -40,7 +40,8 @@ impl<T: ZcashSerialize> ZcashSerialize for Vec<T> {
     }
 }
 
-/// Serialize a `Vec` **without** writing the number of items as a compactsize.
+/// Serialize a typed `Vec` **without** writing the number of items as a
+/// compactsize.
 ///
 /// In Zcash, most arrays are stored as a compactsize, followed by that number
 /// of items of type `T`. But in `Transaction::V5`, some types are serialized as
@@ -50,8 +51,7 @@ impl<T: ZcashSerialize> ZcashSerialize for Vec<T> {
 /// ## Usage
 ///
 /// Use `zcash_serialize_external_count` when the array count is determined by
-/// other data, or a consensus rule. (For raw byte vectors and slices, use
-/// `writer.write_all(&vec)`.)
+/// other data, or a consensus rule.
 ///
 /// Use `Vec::zcash_serialize` for data that contains compactsize count,
 /// followed by the data array.
@@ -75,6 +75,20 @@ pub fn zcash_serialize_external_count<W: io::Write, T: ZcashSerialize>(
         x.zcash_serialize(&mut writer)?;
     }
     Ok(())
+}
+
+/// Serialize a raw byte `Vec` **without** writing the number of items as a
+/// compactsize.
+///
+/// This is a convenience alias for `writer.write_all(&vec)`.
+//
+// we specifically want to serialize `Vec`s here, rather than generic slices
+#[allow(clippy::ptr_arg)]
+pub fn zcash_serialize_bytes_external_count<W: io::Write>(
+    vec: &Vec<u8>,
+    mut writer: W,
+) -> Result<(), io::Error> {
+    writer.write_all(&vec)
 }
 
 /// The maximum length of a Zcash message, in bytes.
