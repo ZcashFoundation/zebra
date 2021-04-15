@@ -78,6 +78,9 @@ pub fn zcash_deserialize_external_count<R: io::Read, T: ZcashDeserialize + Trust
             ))
         }
         Ok(_) => {}
+        // As of 2021, usize is less than or equal to 64 bits on all (or almost all?) supported Rust platforms.
+        // So in practice this error is impossible. (But the check is required, because Rust is future-proof
+        // for 128 bit memory spaces.)
         Err(_) => return Err(SerializationError::Parse("Vector longer than u64::MAX")),
     }
     let mut vec = Vec::with_capacity(external_count);
