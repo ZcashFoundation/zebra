@@ -249,21 +249,18 @@ impl Application for ZebradApp {
             .unwrap_or(false);
 
         // Ignore the tracing filter for short-lived commands
+        let mut tracing_config = cfg_ref.tracing.clone();
         if is_server {
             // Override the default tracing filter based on the command-line verbosity.
-            let mut tracing_config = cfg_ref.tracing.clone();
             tracing_config.filter = tracing_config
                 .filter
                 .or_else(|| Some(default_filter.to_owned()));
-
-            components.push(Box::new(Tracing::new(tracing_config)?));
         } else {
             // Don't apply the configured filter for short-lived commands.
-            let mut tracing_config = cfg_ref.tracing.clone();
             tracing_config.filter = Some(default_filter.to_owned());
             tracing_config.flamegraph = None;
-            components.push(Box::new(Tracing::new(tracing_config)?));
         }
+        components.push(Box::new(Tracing::new(tracing_config)?));
 
         // Activate the global span, so it's visible when we load the other
         // components. Space is at a premium here, so we use an empty message,
