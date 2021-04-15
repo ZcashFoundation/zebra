@@ -219,7 +219,7 @@ struct OutputInTransactionV4(pub Output);
 /// The serialization prefix fields of an `Output` in Transaction V5.
 ///
 /// In `V5` transactions, spends are split into multiple arrays, so the prefix
-/// and must be serialised and deserialized separately.
+/// and proof must be serialised and deserialized separately.
 ///
 /// Serialized as `OutputDescriptionV5` in [protocol specification §7.3].
 struct OutputPrefixInTransactionV5 {
