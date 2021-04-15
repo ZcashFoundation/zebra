@@ -257,9 +257,10 @@ impl ZcashSerialize for Transaction {
                         shielded_data.value_balance.zcash_serialize(&mut writer)?;
 
                         // anchorSapling
-                        if spend_prefixes.len() > 0 {
+                        if !spend_prefixes.is_empty() {
                             writer.write_all(&<[u8; 32]>::from(shielded_data.shared_anchor)[..])?;
                         }
+
                         // vSpendProofSapling
                         zcash_serialize_external_count(&spend_proofs, &mut writer)?;
                         // vSpendAuthSigsSapling
