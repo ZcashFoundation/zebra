@@ -27,6 +27,8 @@ finalized state (for Sprout).
 # Definitions
 [definitions]: #definitions
 
+TODO: split up these definitions into common, Sprout, Sapling, and possibly Orchard sections
+
 Many terms used here are defined in the [Zcash Protocol Specification](https://zips.z.cash/protocol/protocol.pdf)
 
 **notes**: Represents a value bound to a shielded payment address (public key)
