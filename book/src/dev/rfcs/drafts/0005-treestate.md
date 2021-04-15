@@ -10,7 +10,7 @@
 
 To validate blocks involving shielded transactions, we have to check the
 computed treestate from the included transactions against the block header
-metadata (for Sapling) or previously finalized state (for Sprout). This document
+metadata (for Sapling and Orchard) or previously finalized state (for Sprout). This document
 describes how we compute and manage that data, assuming a finalized state
 service as described in the [State Updates RFC](https://zebra.zfnd.org/dev/rfcs/0005-state-updates.md).
 
