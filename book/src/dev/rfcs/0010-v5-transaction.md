@@ -401,6 +401,7 @@ This type is also defined in `orchard/shielded_data.rs`.
   - "Fake" Sapling-only and Sapling/Transparent transactions based on the existing test vectors, converted from V4 to V5 format
     - We can write a test utility function to automatically do these conversions
   - An empty transaction, with no Orchard, Sapling, or Transparent data
+    - A v5 transaction with no spends, but some outputs, to test the shared anchor serialization rule
   - Any available `zcashd` test vectors
 - After NU5 activation on testnet:
   - Add test vectors using the testnet activation block and 2 more post-activation blocks
