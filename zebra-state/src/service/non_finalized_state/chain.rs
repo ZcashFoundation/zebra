@@ -427,7 +427,7 @@ mod tests {
     use super::*;
 
     const MAX_PARTIAL_CHAIN_BLOCKS: usize = 100;
-    const DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES: usize = 32;
+    const DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES: u32 = 32;
 
     #[test]
     fn construct_empty() {
