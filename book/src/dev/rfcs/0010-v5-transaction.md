@@ -38,9 +38,9 @@ To highlight changes most of the document comments from the code snippets in the
 
 V4 and V5 transactions both support sapling, but the underlying data structures are different. So we need to make the sapling data types generic over the V4 and V5 structures.
 
-In V4, anchors are per-spend, but in V5, they are per-transaction.
+In V4, anchors are per-spend, but in V5, they are per-transaction. In V5, the shared anchor is only present if there is at least one spend.
 
-For consistency, also we move some fields into the `ShieldedData` type, and rename some fields and types.
+For consistency, we also move some fields into the `ShieldedData` type, and rename some fields and types.
 
 ## Orchard Additions Overview
 [orchard-additions-overview]: #orchard-additions-overview
@@ -128,11 +128,11 @@ struct FieldNotPresent;
 
 impl AnchorVariant for PerSpendAnchor {
     type Shared = FieldNotPresent;
-    type PerSpend = tree::Root;
+    type PerSpend = sapling::tree::Root;
 }
 
 impl AnchorVariant for SharedAnchor {
-    type Shared = tree::Root;
+    type Shared = sapling::tree::Root;
     type PerSpend = FieldNotPresent;
 }
 
@@ -146,19 +146,48 @@ trait AnchorVariant {
 [changes-to-sapling-shieldeddata]: #changes-to-sapling-shieldeddata
 
 We use `AnchorVariant` in `ShieldedData` to model the anchor differences between V4 and V5:
+* in V4, there is a per-spend anchor
+* in V5, there is a shared anchor, which is only present when there are spends
+
+If there are no spends and no outputs:
+* in v4, the value_balance is fixed to zero
+* in v5, the value balance field is not present
+* in both versions, the binding_sig field is not present
 
 ```rust
+/// ShieldedData ensures that value_balance and binding_sig are only present when
+/// there is at least one spend or output.
 struct sapling::ShieldedData<AnchorV: AnchorVariant> {
     value_balance: Amount,
-    shared_anchor: AnchorV::Shared,
-    // The following fields are in a different order to the serialized data, see:
-    // https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus
-    first: Either<Spend<AnchorV>, Output>,
-    rest_spends: Vec<Spend<AnchorV>>,
-    rest_outputs: Vec<Output>,
+    transfers: sapling::TransferData<AnchorV>,
     binding_sig: redjubjub::Signature<Binding>,
 }
+
+/// TransferData ensures that:
+/// * there is at least one spend or output, and
+/// * the shared anchor is only present when there are spends
+enum sapling::TransferData<AnchorV: AnchorVariant> {
+    /// In Transaction::V5, if there are any spends,
+    /// there must also be a shared spend anchor.
+    Spends {
+        shared_anchor: AnchorV::Shared,
+        first_spend: Spend<AnchorV>,
+        rest_spends: Vec<Spend<AnchorV>>,
+        maybe_outputs: Vec<Output>,
+    }
+
+    /// If there are no spends, there must not be a shared
+    /// anchor.
+    NoSpends {
+        first_output: Output,
+        rest_outputs: Vec<Output>,
+    }
+}
 ```
+
+Some of these fields are in a different order to the serialized data, see
+[the V4 and V5 transaction specs](https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus)
+for details.
 
 The following types have `ZcashSerialize` and `ZcashDeserialize` implementations,
 because they can be serialized into a single byte vector:

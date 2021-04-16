@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use chrono::{TimeZone, Utc};
-use futures::future::Either;
 use proptest::{arbitrary::any, array, collection::vec, option, prelude::*};
 
 use crate::LedgerState;
@@ -14,6 +13,7 @@ use crate::{
 };
 
 use super::{FieldNotPresent, JoinSplitData, LockTime, Memo, Transaction};
+use sapling::{AnchorVariant, PerSpendAnchor, SharedAnchor};
 
 impl Transaction {
     /// Generate a proptest strategy for V1 Transactions
@@ -206,32 +206,61 @@ impl<P: ZkSnarkProof + Arbitrary + 'static> Arbitrary for JoinSplitData<P> {
     type Strategy = BoxedStrategy<Self>;
 }
 
-impl Arbitrary for sapling::ShieldedData<sapling::PerSpendAnchor> {
+impl<AnchorV> Arbitrary for sapling::ShieldedData<AnchorV>
+where
+    AnchorV: AnchorVariant + Clone + std::fmt::Debug + 'static,
+    sapling::TransferData<AnchorV>: Arbitrary,
+{
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         (
             any::<Amount>(),
-            prop_oneof![
-                any::<sapling::Spend<sapling::PerSpendAnchor>>().prop_map(Either::Left),
-                any::<sapling::Output>().prop_map(Either::Right)
-            ],
-            vec(any::<sapling::Spend<sapling::PerSpendAnchor>>(), 0..10),
-            vec(any::<sapling::Output>(), 0..10),
+            any::<sapling::TransferData<AnchorV>>(),
             vec(any::<u8>(), 64),
         )
-            .prop_map(
-                |(value_balance, first, rest_spends, rest_outputs, sig_bytes)| Self {
-                    value_balance,
-                    shared_anchor: FieldNotPresent,
-                    first,
-                    rest_spends,
-                    rest_outputs,
-                    binding_sig: redjubjub::Signature::from({
-                        let mut b = [0u8; 64];
-                        b.copy_from_slice(sig_bytes.as_slice());
-                        b
-                    }),
+            .prop_map(|(value_balance, transfers, sig_bytes)| Self {
+                value_balance,
+                transfers,
+                binding_sig: redjubjub::Signature::from({
+                    let mut b = [0u8; 64];
+                    b.copy_from_slice(sig_bytes.as_slice());
+                    b
+                }),
+            })
+            .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
+
+impl Arbitrary for sapling::TransferData<PerSpendAnchor> {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        // TODO: add an extra spend or output using Either, and stop using filter_map
+        (
+            vec(any::<sapling::Spend<PerSpendAnchor>>(), 0..10),
+            vec(any::<sapling::Output>(), 0..10),
+        )
+            .prop_filter_map(
+                "arbitrary v4 transfers with no spends and no outputs",
+                |(mut spends, mut outputs)| {
+                    if !spends.is_empty() {
+                        Some(sapling::TransferData::Spends {
+                            shared_anchor: FieldNotPresent,
+                            first_spend: spends.remove(0),
+                            rest_spends: spends,
+                            maybe_outputs: outputs,
+                        })
+                    } else if !outputs.is_empty() {
+                        Some(sapling::TransferData::NoSpends {
+                            first_output: outputs.remove(0),
+                            rest_outputs: outputs,
+                        })
+                    } else {
+                        None
+                    }
                 },
             )
             .boxed()
@@ -240,40 +269,34 @@ impl Arbitrary for sapling::ShieldedData<sapling::PerSpendAnchor> {
     type Strategy = BoxedStrategy<Self>;
 }
 
-impl Arbitrary for sapling::ShieldedData<sapling::SharedAnchor> {
+impl Arbitrary for sapling::TransferData<SharedAnchor> {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        // TODO: add an extra spend or output using Either, and stop using filter_map
         (
-            any::<Amount>(),
             any::<sapling::tree::Root>(),
-            prop_oneof![
-                any::<sapling::Spend<sapling::SharedAnchor>>().prop_map(Either::Left),
-                any::<sapling::Output>().prop_map(Either::Right)
-            ],
-            vec(any::<sapling::Spend<sapling::SharedAnchor>>(), 0..10),
+            vec(any::<sapling::Spend<SharedAnchor>>(), 0..10),
             vec(any::<sapling::Output>(), 0..10),
-            vec(any::<u8>(), 64),
         )
-            .prop_map(
-                |(value_balance, shared_anchor, first, rest_spends, rest_outputs, sig_bytes)| {
-                    let mut shielded_data = Self {
-                        value_balance,
-                        shared_anchor,
-                        first,
-                        rest_spends,
-                        rest_outputs,
-                        binding_sig: redjubjub::Signature::from({
-                            let mut b = [0u8; 64];
-                            b.copy_from_slice(sig_bytes.as_slice());
-                            b
-                        }),
-                    };
-                    if shielded_data.spends().count() == 0 {
-                        // Todo: delete field when there is no spend
-                        shielded_data.shared_anchor = Default::default();
+            .prop_filter_map(
+                "arbitrary v5 transfers with no spends and no outputs",
+                |(shared_anchor, mut spends, mut outputs)| {
+                    if !spends.is_empty() {
+                        Some(sapling::TransferData::Spends {
+                            shared_anchor,
+                            first_spend: spends.remove(0),
+                            rest_spends: spends,
+                            maybe_outputs: outputs,
+                        })
+                    } else if !outputs.is_empty() {
+                        Some(sapling::TransferData::NoSpends {
+                            first_output: outputs.remove(0),
+                            rest_outputs: outputs,
+                        })
+                    } else {
+                        None
                     }
-                    shielded_data
                 },
             )
             .boxed()

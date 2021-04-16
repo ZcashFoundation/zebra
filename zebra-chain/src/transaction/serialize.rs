@@ -120,8 +120,10 @@ impl ZcashSerialize for sapling::ShieldedData<SharedAnchor> {
         self.value_balance.zcash_serialize(&mut writer)?;
 
         // anchorSapling
-        if !spend_prefixes.is_empty() {
-            writer.write_all(&<[u8; 32]>::from(self.shared_anchor)[..])?;
+        // `TransferData` ensures this field is only present when there is at
+        // least one spend.
+        if let Some(shared_anchor) = self.shared_anchor() {
+            writer.write_all(&<[u8; 32]>::from(shared_anchor)[..])?;
         }
 
         // vSpendProofsSapling
@@ -162,10 +164,11 @@ impl ZcashDeserialize for Option<sapling::ShieldedData<SharedAnchor>> {
         let value_balance = (&mut reader).zcash_deserialize_into()?;
 
         // anchorSapling
-        let mut shared_anchor = None;
-        if spends_count > 0 {
-            shared_anchor = Some(reader.read_32_bytes()?.into());
-        }
+        let shared_anchor = if spends_count > 0 {
+            Some(reader.read_32_bytes()?.into())
+        } else {
+            None
+        };
 
         // vSpendProofsSapling
         let spend_proofs = zcash_deserialize_external_count(spends_count, &mut reader)?;
@@ -193,38 +196,25 @@ impl ZcashDeserialize for Option<sapling::ShieldedData<SharedAnchor>> {
             .map(|(prefix, proof)| Output::from_v5_parts(prefix, proof))
             .collect();
 
-        // Create shielded data
-        use futures::future::Either::*;
-        // TODO: Use a Spend for first if both are present, because the first
-        //       spend activates the shared anchor.
-        if spends_count > 0 {
-            Ok(Some(sapling::ShieldedData {
-                value_balance,
-                // TODO: cleanup shared anchor parsing
-                shared_anchor: shared_anchor.expect("present when spends_count > 0"),
-                first: Left(spends.remove(0)),
+        // Create transfers
+        let transfers = match shared_anchor {
+            Some(shared_anchor) => sapling::TransferData::Spends {
+                shared_anchor,
+                first_spend: spends.remove(0),
                 rest_spends: spends,
+                maybe_outputs: outputs,
+            },
+            None => sapling::TransferData::NoSpends {
+                first_output: outputs.remove(0),
                 rest_outputs: outputs,
-                binding_sig,
-            }))
-        } else {
-            assert!(
-                outputs_count > 0,
-                "parsing returns early when there are no spends and no outputs"
-            );
+            },
+        };
 
-            Ok(Some(sapling::ShieldedData {
-                value_balance,
-                // TODO: delete shared anchor when there are no spends
-                shared_anchor: shared_anchor.unwrap_or_default(),
-                first: Right(outputs.remove(0)),
-                // the spends are actually empty here, but we use the
-                // vec for consistency and readability
-                rest_spends: spends,
-                rest_outputs: outputs,
-                binding_sig,
-            }))
-        }
+        Ok(Some(sapling::ShieldedData {
+            value_balance,
+            transfers,
+            binding_sig,
+        }))
     }
 }
 
@@ -458,30 +448,29 @@ impl ZcashDeserialize for Transaction {
 
                 let joinsplit_data = OptV4Jsd::zcash_deserialize(&mut reader)?;
 
-                use futures::future::Either::*;
-                // Arbitraily use a spend for `first`, if both are present
-                let sapling_shielded_data = if !shielded_spends.is_empty() {
-                    Some(sapling::ShieldedData {
-                        value_balance,
+                let sapling_transfers = if !shielded_spends.is_empty() {
+                    Some(sapling::TransferData::Spends {
                         shared_anchor: FieldNotPresent,
-                        first: Left(shielded_spends.remove(0)),
+                        first_spend: shielded_spends.remove(0),
                         rest_spends: shielded_spends,
-                        rest_outputs: shielded_outputs,
-                        binding_sig: reader.read_64_bytes()?.into(),
+                        maybe_outputs: shielded_outputs,
                     })
                 } else if !shielded_outputs.is_empty() {
-                    Some(sapling::ShieldedData {
-                        value_balance,
-                        shared_anchor: FieldNotPresent,
-                        first: Right(shielded_outputs.remove(0)),
-                        // the spends are actually empty here, but we use the
-                        // vec for consistency and readability
-                        rest_spends: shielded_spends,
+                    Some(sapling::TransferData::NoSpends {
+                        first_output: shielded_outputs.remove(0),
                         rest_outputs: shielded_outputs,
-                        binding_sig: reader.read_64_bytes()?.into(),
                     })
                 } else {
                     None
+                };
+
+                let sapling_shielded_data = match sapling_transfers {
+                    Some(transfers) => Some(sapling::ShieldedData {
+                        value_balance,
+                        transfers,
+                        binding_sig: reader.read_64_bytes()?.into(),
+                    }),
+                    None => None,
                 };
 
                 Ok(Transaction::V4 {
