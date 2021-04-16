@@ -18,7 +18,7 @@ use crate::{
 };
 
 use super::*;
-use sapling::{Output, SharedAnchor};
+use sapling::{Output, SharedAnchor, Spend};
 
 impl ZcashDeserialize for jubjub::Fq {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
@@ -88,34 +88,22 @@ impl ZcashSerialize for Option<sapling::ShieldedData<SharedAnchor>> {
                 writer.write_compactsize(0)?;
             }
             Some(shielded_data) => {
-                // Collect arrays for spends
-                let mut spend_prefixes = Vec::<sapling::spend::SpendPrefixInTransactionV5>::new();
-                let mut spend_proofs = Vec::<Groth16Proof>::new();
-                let mut spend_sigs = Vec::<redjubjub::Signature<redjubjub::SpendAuth>>::new();
-
-                let _ = shielded_data
+                // Collect arrays for Spends
+                // There's no unzip3, so we have to unzip twice.
+                let (spend_prefixes, spend_proofs_sigs): (Vec<_>, Vec<_>) = shielded_data
                     .spends()
-                    .map(|s| {
-                        let (prefix, proof, sig) = s.clone().into_v5_parts();
-                        spend_prefixes.push(prefix);
-                        spend_proofs.push(proof);
-                        spend_sigs.push(sig);
-                    })
-                    .collect::<Vec<_>>();
+                    .cloned()
+                    .map(sapling::Spend::<SharedAnchor>::into_v5_parts)
+                    .map(|(prefix, proof, sig)| (prefix, (proof, sig)))
+                    .unzip();
+                let (spend_proofs, spend_sigs) = spend_proofs_sigs.into_iter().unzip();
 
                 // Collect arrays for Outputs
-                let mut output_prefixes =
-                    Vec::<sapling::output::OutputPrefixInTransactionV5>::new();
-                let mut output_proofs = Vec::<Groth16Proof>::new();
-
-                let _ = shielded_data
+                let (output_prefixes, output_proofs): (Vec<_>, _) = shielded_data
                     .outputs()
-                    .map(|s| {
-                        let (prefix, proof) = s.clone().into_v5_parts();
-                        output_prefixes.push(prefix);
-                        output_proofs.push(proof);
-                    })
-                    .collect::<Vec<_>>();
+                    .cloned()
+                    .map(Output::into_v5_parts)
+                    .unzip();
 
                 // nSpendsSapling and vSpendsSapling
                 spend_prefixes.zcash_serialize(&mut writer)?;
@@ -150,95 +138,86 @@ impl ZcashSerialize for Option<sapling::ShieldedData<SharedAnchor>> {
 impl ZcashDeserialize for Option<sapling::ShieldedData<SharedAnchor>> {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         // nSpendsSapling and vSpendsSapling
-        let spend_prefixes =
-            Vec::<sapling::spend::SpendPrefixInTransactionV5>::zcash_deserialize(&mut reader)?;
+        let spend_prefixes: Vec<_> = (&mut reader).zcash_deserialize_into()?;
 
         // nOutputsSapling and vOutputsSapling
-        let output_prefixes =
-            Vec::<sapling::output::OutputPrefixInTransactionV5>::zcash_deserialize(&mut reader)?;
+        let output_prefixes: Vec<_> = (&mut reader).zcash_deserialize_into()?;
 
         // nSpendsSapling and nOutputsSapling as variables
         let spends_count = spend_prefixes.len();
         let outputs_count = output_prefixes.len();
 
-        // valueBalanceSapling
-        let mut value_balance = None;
-        if spends_count > 0 || outputs_count > 0 {
-            value_balance = Some((&mut reader).zcash_deserialize_into()?);
+        // All the other fields depend on having spends or outputs
+        if spend_prefixes.is_empty() && output_prefixes.is_empty() {
+            return Ok(None);
         }
+
+        // valueBalanceSapling
+        let value_balance = (&mut reader).zcash_deserialize_into()?;
 
         // anchorSapling
         let mut shared_anchor = None;
         if spends_count > 0 {
-            shared_anchor = Some(sapling::tree::Root(reader.read_32_bytes()?));
+            shared_anchor = Some(reader.read_32_bytes()?.into());
         }
 
         // vSpendProofsSapling
-        let spend_proofs: Vec<Groth16Proof> =
-            zcash_deserialize_external_count(spends_count, &mut reader)?;
+        let spend_proofs = zcash_deserialize_external_count(spends_count, &mut reader)?;
         // vSpendAuthSigsSapling
-        let spend_sigs: Vec<redjubjub::Signature<redjubjub::SpendAuth>> =
-            zcash_deserialize_external_count(spends_count, &mut reader)?;
+        let spend_sigs = zcash_deserialize_external_count(spends_count, &mut reader)?;
 
         // vOutputProofsSapling
-        let output_proofs: Vec<Groth16Proof> =
-            zcash_deserialize_external_count(outputs_count, &mut reader)?;
+        let output_proofs = zcash_deserialize_external_count(outputs_count, &mut reader)?;
 
         // bindingSigSapling
-        let mut binding_sig: Option<redjubjub::Signature<redjubjub::Binding>> = None;
-        if spends_count > 0 || outputs_count > 0 {
-            binding_sig = Some(reader.read_64_bytes()?.into());
-        }
+        let binding_sig = reader.read_64_bytes()?.into();
 
         // Create shielded spends from deserialized parts
-        let mut shielded_spends = Vec::<sapling::Spend<sapling::SharedAnchor>>::new();
-        if spends_count > 0 {
-            for i in 0..spends_count {
-                shielded_spends.push(sapling::Spend::from_v5_parts(
-                    spend_prefixes[i].clone(),
-                    spend_proofs[i],
-                    spend_sigs[i],
-                ));
-            }
-        }
+        let mut spends: Vec<_> = spend_prefixes
+            .into_iter()
+            .zip(spend_proofs.into_iter())
+            .zip(spend_sigs.into_iter())
+            .map(|((prefix, proof), sig)| Spend::<SharedAnchor>::from_v5_parts(prefix, proof, sig))
+            .collect();
 
         // Create shielded outputs from deserialized parts
-        let mut shielded_outputs = Vec::<sapling::Output>::new();
-        if outputs_count > 0 {
-            for i in 0..outputs_count {
-                shielded_outputs.push(sapling::Output::from_v5_parts(
-                    output_prefixes[i].clone(),
-                    output_proofs[i],
-                ));
-            }
-        }
+        let mut outputs = output_prefixes
+            .into_iter()
+            .zip(output_proofs.into_iter())
+            .map(|(prefix, proof)| Output::from_v5_parts(prefix, proof))
+            .collect();
 
         // Create shielded data
         use futures::future::Either::*;
-        // Arbitraily use a spend for `first`, if both are present
+        // TODO: Use a Spend for first if both are present, because the first
+        //       spend activates the shared anchor.
         if spends_count > 0 {
             Ok(Some(sapling::ShieldedData {
-                value_balance: value_balance.expect("present when spends_count > 0"),
+                value_balance,
+                // TODO: cleanup shared anchor parsing
                 shared_anchor: shared_anchor.expect("present when spends_count > 0"),
-                first: Left(shielded_spends.remove(0)),
-                rest_spends: shielded_spends,
-                rest_outputs: shielded_outputs,
-                binding_sig: binding_sig.expect("present when spends_count > 0"),
-            }))
-        } else if outputs_count > 0 {
-            Ok(Some(sapling::ShieldedData {
-                value_balance: value_balance.expect("present when outputs_count > 0"),
-                // TODO: delete shared anchor when there are no spends
-                shared_anchor: shared_anchor.unwrap_or_default(),
-                first: Right(shielded_outputs.remove(0)),
-                // the spends are actually empty here, but we use the
-                // vec for consistency and readability
-                rest_spends: shielded_spends,
-                rest_outputs: shielded_outputs,
-                binding_sig: binding_sig.expect("present when outputs_count > 0"),
+                first: Left(spends.remove(0)),
+                rest_spends: spends,
+                rest_outputs: outputs,
+                binding_sig,
             }))
         } else {
-            Ok(None)
+            assert!(
+                outputs_count > 0,
+                "parsing returns early when there are no spends and no outputs"
+            );
+
+            Ok(Some(sapling::ShieldedData {
+                value_balance,
+                // TODO: delete shared anchor when there are no spends
+                shared_anchor: shared_anchor.unwrap_or_default(),
+                first: Right(outputs.remove(0)),
+                // the spends are actually empty here, but we use the
+                // vec for consistency and readability
+                rest_spends: spends,
+                rest_outputs: outputs,
+                binding_sig,
+            }))
         }
     }
 }
