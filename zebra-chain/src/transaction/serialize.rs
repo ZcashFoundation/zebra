@@ -88,53 +88,59 @@ impl ZcashSerialize for Option<sapling::ShieldedData<SharedAnchor>> {
                 writer.write_compactsize(0)?;
             }
             Some(shielded_data) => {
-                // Collect arrays for Spends
-                // There's no unzip3, so we have to unzip twice.
-                let (spend_prefixes, spend_proofs_sigs): (Vec<_>, Vec<_>) = shielded_data
-                    .spends()
-                    .cloned()
-                    .map(sapling::Spend::<SharedAnchor>::into_v5_parts)
-                    .map(|(prefix, proof, sig)| (prefix, (proof, sig)))
-                    .unzip();
-                let (spend_proofs, spend_sigs) = spend_proofs_sigs.into_iter().unzip();
-
-                // Collect arrays for Outputs
-                let (output_prefixes, output_proofs): (Vec<_>, _) = shielded_data
-                    .outputs()
-                    .cloned()
-                    .map(Output::into_v5_parts)
-                    .unzip();
-
-                // nSpendsSapling and vSpendsSapling
-                spend_prefixes.zcash_serialize(&mut writer)?;
-                // nOutputsSapling and vOutputsSapling
-                output_prefixes.zcash_serialize(&mut writer)?;
-
-                // valueBalanceSapling
-                shielded_data.value_balance.zcash_serialize(&mut writer)?;
-
-                // anchorSapling
-                if !spend_prefixes.is_empty() {
-                    writer.write_all(&<[u8; 32]>::from(shielded_data.shared_anchor)[..])?;
-                }
-
-                // vSpendProofsSapling
-                zcash_serialize_external_count(&spend_proofs, &mut writer)?;
-                // vSpendAuthSigsSapling
-                zcash_serialize_external_count(&spend_sigs, &mut writer)?;
-
-                // vOutputProofsSapling
-                zcash_serialize_external_count(&output_proofs, &mut writer)?;
-
-                // bindingSigSapling
-                writer.write_all(&<[u8; 64]>::from(shielded_data.binding_sig)[..])?;
+                shielded_data.zcash_serialize(&mut writer)?;
             }
         }
+        Ok(())
+    }
+}
+
+impl ZcashSerialize for sapling::ShieldedData<SharedAnchor> {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        // Collect arrays for Spends
+        // There's no unzip3, so we have to unzip twice.
+        let (spend_prefixes, spend_proofs_sigs): (Vec<_>, Vec<_>) = self
+            .spends()
+            .cloned()
+            .map(sapling::Spend::<SharedAnchor>::into_v5_parts)
+            .map(|(prefix, proof, sig)| (prefix, (proof, sig)))
+            .unzip();
+        let (spend_proofs, spend_sigs) = spend_proofs_sigs.into_iter().unzip();
+
+        // Collect arrays for Outputs
+        let (output_prefixes, output_proofs): (Vec<_>, _) =
+            self.outputs().cloned().map(Output::into_v5_parts).unzip();
+
+        // nSpendsSapling and vSpendsSapling
+        spend_prefixes.zcash_serialize(&mut writer)?;
+        // nOutputsSapling and vOutputsSapling
+        output_prefixes.zcash_serialize(&mut writer)?;
+
+        // valueBalanceSapling
+        self.value_balance.zcash_serialize(&mut writer)?;
+
+        // anchorSapling
+        if !spend_prefixes.is_empty() {
+            writer.write_all(&<[u8; 32]>::from(self.shared_anchor)[..])?;
+        }
+
+        // vSpendProofsSapling
+        zcash_serialize_external_count(&spend_proofs, &mut writer)?;
+        // vSpendAuthSigsSapling
+        zcash_serialize_external_count(&spend_sigs, &mut writer)?;
+
+        // vOutputProofsSapling
+        zcash_serialize_external_count(&output_proofs, &mut writer)?;
+
+        // bindingSigSapling
+        writer.write_all(&<[u8; 64]>::from(self.binding_sig)[..])?;
 
         Ok(())
     }
 }
 
+// we can't split ShieldedData out of Option<ShieldedData> deserialization,
+// because the counts are read along with the arrays.
 impl ZcashDeserialize for Option<sapling::ShieldedData<SharedAnchor>> {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         // nSpendsSapling and vSpendsSapling
