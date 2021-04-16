@@ -19,7 +19,7 @@ tracing-error = "0.1.2"
 spandoc = "0.2.0"
 regex = "1.4.5"
 thiserror = "1.0.24"
-pretty_assertions = "0.7.1"
+pretty_assertions = "0.7.2"
 owo-colors = "2.0.0"
 proptest = "0.10.1"
 
