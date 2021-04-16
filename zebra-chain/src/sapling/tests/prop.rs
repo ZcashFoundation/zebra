@@ -167,6 +167,90 @@ proptest! {
         prop_assert_eq![data, data2, "data must be equal if structs are equal"];
     }
 
+    /// Test v4 with empty spends, but some outputs
+    #[test]
+    fn shielded_data_v4_outputs_only(
+        shielded_v4 in any::<sapling::ShieldedData<PerSpendAnchor>>(),
+    ) {
+        use Either::*;
+
+        zebra_test::init();
+
+        // we need at least one output to delete all the spends
+        prop_assume!(shielded_v4.outputs().count() > 0);
+
+        // TODO: modify the strategy, rather than the shielded data
+        let mut shielded_v4 = shielded_v4;
+        let mut outputs: Vec<_> = shielded_v4.outputs().cloned().collect();
+        shielded_v4.rest_spends = Vec::new();
+        shielded_v4.first = Right(outputs.remove(0));
+        shielded_v4.rest_outputs = outputs;
+
+        // shielded data doesn't serialize by itself, so we have to stick it in
+        // a transaction
+
+        // stick `PerSpendAnchor` shielded data into a v4 transaction
+        let tx = Transaction::V4 {
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+            lock_time: LockTime::min_lock_time(),
+            expiry_height: block::Height(0),
+            joinsplit_data: None,
+            sapling_shielded_data: Some(shielded_v4),
+        };
+        let data = tx.zcash_serialize_to_vec().expect("tx should serialize");
+        let tx_parsed = data.zcash_deserialize_into().expect("randomized tx should deserialize");
+        prop_assert_eq![&tx, &tx_parsed];
+
+        let data2 = tx_parsed
+            .zcash_serialize_to_vec()
+            .expect("vec serialization is infallible");
+        prop_assert_eq![data, data2, "data must be equal if structs are equal"];
+    }
+
+    /// Test the v5 shared anchor serialization condition: empty spends, but some outputs
+    #[test]
+    fn shielded_data_v5_outputs_only(
+        shielded_v5 in any::<sapling::ShieldedData<SharedAnchor>>(),
+    ) {
+        use Either::*;
+
+        zebra_test::init();
+
+        // we need at least one output to delete all the spends
+        prop_assume!(shielded_v5.outputs().count() > 0);
+
+        // TODO: modify the strategy, rather than the shielded data
+        let mut shielded_v5 = shielded_v5;
+        let mut outputs: Vec<_> = shielded_v5.outputs().cloned().collect();
+        shielded_v5.rest_spends = Vec::new();
+        shielded_v5.first = Right(outputs.remove(0));
+        shielded_v5.rest_outputs = outputs;
+        // TODO: delete the shared anchor when there are no spends
+        shielded_v5.shared_anchor = Default::default();
+
+        // shielded data doesn't serialize by itself, so we have to stick it in
+        // a transaction
+
+        // stick `SharedAnchor` shielded data into a v5 transaction
+        let tx = Transaction::V5 {
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+            lock_time: LockTime::min_lock_time(),
+            expiry_height: block::Height(0),
+            sapling_shielded_data: Some(shielded_v5),
+            rest: Vec::new(),
+        };
+        let data = tx.zcash_serialize_to_vec().expect("tx should serialize");
+        let tx_parsed = data.zcash_deserialize_into().expect("randomized tx should deserialize");
+        prop_assert_eq![&tx, &tx_parsed];
+
+        let data2 = tx_parsed
+            .zcash_serialize_to_vec()
+            .expect("vec serialization is infallible");
+        prop_assert_eq![data, data2, "data must be equal if structs are equal"];
+    }
+
     /// Check that ShieldedData<PerSpendAnchor> is equal when `first` is swapped
     /// between a spend and an output
     #[test]
