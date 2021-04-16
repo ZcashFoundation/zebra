@@ -117,9 +117,9 @@ impl ZcashSerialize for Option<sapling::ShieldedData<SharedAnchor>> {
                     })
                     .collect::<Vec<_>>();
 
-                // nSpendsSapling - vSpendsSapling
+                // nSpendsSapling and vSpendsSapling
                 spend_prefixes.zcash_serialize(&mut writer)?;
-                // nOutputsSapling - vOutputsSapling
+                // nOutputsSapling and vOutputsSapling
                 output_prefixes.zcash_serialize(&mut writer)?;
 
                 // valueBalanceSapling
@@ -130,15 +130,15 @@ impl ZcashSerialize for Option<sapling::ShieldedData<SharedAnchor>> {
                     writer.write_all(&<[u8; 32]>::from(shielded_data.shared_anchor)[..])?;
                 }
 
-                // vSpendProofSapling
+                // vSpendProofsSapling
                 zcash_serialize_external_count(&spend_proofs, &mut writer)?;
                 // vSpendAuthSigsSapling
                 zcash_serialize_external_count(&spend_sigs, &mut writer)?;
 
-                // vOutputProofSapling
+                // vOutputProofsSapling
                 zcash_serialize_external_count(&output_proofs, &mut writer)?;
 
-                // Serialize binding sig
+                // bindingSigSapling
                 writer.write_all(&<[u8; 64]>::from(shielded_data.binding_sig)[..])?;
             }
         }
@@ -149,11 +149,11 @@ impl ZcashSerialize for Option<sapling::ShieldedData<SharedAnchor>> {
 
 impl ZcashDeserialize for Option<sapling::ShieldedData<SharedAnchor>> {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        // nSpendsSapling - vSpendsSapling
+        // nSpendsSapling and vSpendsSapling
         let spend_prefixes =
             Vec::<sapling::spend::SpendPrefixInTransactionV5>::zcash_deserialize(&mut reader)?;
 
-        // nOutputsSapling - vOutputsSapling
+        // nOutputsSapling and vOutputsSapling
         let output_prefixes =
             Vec::<sapling::output::OutputPrefixInTransactionV5>::zcash_deserialize(&mut reader)?;
 
@@ -173,10 +173,10 @@ impl ZcashDeserialize for Option<sapling::ShieldedData<SharedAnchor>> {
             shared_anchor = Some(sapling::tree::Root(reader.read_32_bytes()?));
         }
 
-        // vSpendsProofSapling
+        // vSpendProofsSapling
         let spend_proofs: Vec<Groth16Proof> =
             zcash_deserialize_external_count(spends_count, &mut reader)?;
-        // vSpendAuthSigSapling
+        // vSpendAuthSigsSapling
         let spend_sigs: Vec<redjubjub::Signature<redjubjub::SpendAuth>> =
             zcash_deserialize_external_count(spends_count, &mut reader)?;
 
