@@ -17,7 +17,12 @@ proptest! {
         let bytes = hash.zcash_serialize_to_vec()?;
         let other_hash: Hash = bytes.zcash_deserialize_into()?;
 
-        prop_assert_eq![hash, other_hash];
+        prop_assert_eq![&hash, &other_hash];
+
+        let bytes2 = other_hash
+            .zcash_serialize_to_vec()
+            .expect("vec serialization is infallible");
+        prop_assert_eq![bytes, bytes2, "bytes must be equal if structs are equal"];
     }
 
     #[test]
@@ -36,7 +41,12 @@ proptest! {
         let bytes = header.zcash_serialize_to_vec()?;
         let other_header = bytes.zcash_deserialize_into()?;
 
-        prop_assert_eq![header, other_header];
+        prop_assert_eq![&header, &other_header];
+
+        let bytes2 = other_header
+            .zcash_serialize_to_vec()
+            .expect("vec serialization is infallible");
+        prop_assert_eq![bytes, bytes2, "bytes must be equal if structs are equal"];
     }
 
     #[test]
@@ -70,7 +80,6 @@ proptest! {
         zebra_test::init();
 
         let bytes = block.zcash_serialize_to_vec()?;
-        let bytes = &mut bytes.as_slice();
 
         // Check the block commitment
         let commitment = block.commitment(network);
@@ -84,7 +93,12 @@ proptest! {
             // Check deserialization
             let other_block = bytes.zcash_deserialize_into()?;
 
-            prop_assert_eq![block, other_block];
+            prop_assert_eq![&block, &other_block];
+
+            let bytes2 = other_block
+                .zcash_serialize_to_vec()
+                .expect("vec serialization is infallible");
+            prop_assert_eq![bytes, bytes2, "bytes must be equal if structs are equal"];
         } else {
             let serialization_err = bytes.zcash_deserialize_into::<Block>()
                 .expect_err("blocks larger than the maximum size should fail");

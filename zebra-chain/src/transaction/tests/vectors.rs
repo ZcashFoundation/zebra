@@ -1,6 +1,12 @@
 use super::super::*;
 
-use crate::serialization::{ZcashDeserialize, ZcashSerialize};
+use crate::{
+    block::Block,
+    sapling::{PerSpendAnchor, SharedAnchor},
+    serialization::{WriteZcashExt, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
+};
+
+use itertools::Itertools;
 
 #[test]
 fn librustzcash_tx_deserialize_and_round_trip() {
@@ -84,4 +90,84 @@ fn zip243_deserialize_and_round_trip() {
         .expect("tx should serialize");
 
     assert_eq!(&zebra_test::vectors::ZIP243_3[..], &data3[..]);
+}
+
+// Transaction V5 test vectors
+
+/// An empty transaction v5, with no Orchard, Sapling, or Transparent data
+///
+/// empty transaction are invalid, but Zebra only checks this rule in
+/// zebra_consensus::transaction::Verifier
+#[test]
+fn empty_v5_round_trip() {
+    zebra_test::init();
+
+    let tx = Transaction::V5 {
+        lock_time: LockTime::min_lock_time(),
+        expiry_height: block::Height(0),
+        inputs: Vec::new(),
+        outputs: Vec::new(),
+        sapling_shielded_data: None,
+        rest: empty_v5_orchard_data(),
+    };
+
+    let data = tx.zcash_serialize_to_vec().expect("tx should serialize");
+    let tx2 = data
+        .zcash_deserialize_into()
+        .expect("tx should deserialize");
+
+    assert_eq!(tx, tx2);
+
+    let data2 = tx2
+        .zcash_serialize_to_vec()
+        .expect("vec serialization is infallible");
+
+    assert_eq!(data, data2, "data must be equal if structs are equal");
+}
+
+/// An empty transaction v4, with no Sapling, Sprout, or Transparent data
+///
+/// empty transaction are invalid, but Zebra only checks this rule in
+/// zebra_consensus::transaction::Verifier
+#[test]
+fn empty_v4_round_trip() {
+    zebra_test::init();
+
+    let tx = Transaction::V4 {
+        inputs: Vec::new(),
+        outputs: Vec::new(),
+        lock_time: LockTime::min_lock_time(),
+        expiry_height: block::Height(0),
+        joinsplit_data: None,
+        sapling_shielded_data: None,
+    };
+
+    let data = tx.zcash_serialize_to_vec().expect("tx should serialize");
+    let tx2 = data
+        .zcash_deserialize_into()
+        .expect("tx should deserialize");
+
+    assert_eq!(tx, tx2);
+
+    let data2 = tx2
+        .zcash_serialize_to_vec()
+        .expect("vec serialization is infallible");
+
+    assert_eq!(data, data2, "data must be equal if structs are equal");
+}
+
+// Utility functions
+
+/// Return serialized empty Transaction::V5 Orchard data.
+///
+/// TODO: replace with orchard::ShieldedData (#1979)
+fn empty_v5_orchard_data() -> Vec<u8> {
+    let mut buf = Vec::new();
+
+    // nActionsOrchard
+    buf.write_compactsize(0)
+        .expect("serialize to Vec always succeeds");
+
+    // all other orchard fields are only present when `nActionsOrchard > 0`
+    buf
 }

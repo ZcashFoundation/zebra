@@ -20,7 +20,12 @@ proptest! {
 
         let data = spend.zcash_serialize_to_vec().expect("spend should serialize");
         let spend_parsed = data.zcash_deserialize_into().expect("randomized spend should deserialize");
-        prop_assert_eq![spend, spend_parsed];
+        prop_assert_eq![&spend, &spend_parsed];
+
+        let data2 = spend_parsed
+            .zcash_serialize_to_vec()
+            .expect("vec serialization is infallible");
+        prop_assert_eq![data, data2, "data must be equal if structs are equal"];
     }
 
     /// Serialize and deserialize `Spend<SharedAnchor>`
@@ -34,15 +39,30 @@ proptest! {
 
         let data = prefix.zcash_serialize_to_vec().expect("spend prefix should serialize");
         let parsed = data.zcash_deserialize_into().expect("randomized spend prefix should deserialize");
-        prop_assert_eq![prefix, parsed];
+        prop_assert_eq![&prefix, &parsed];
+
+        let data2 = parsed
+            .zcash_serialize_to_vec()
+            .expect("vec serialization is infallible");
+        prop_assert_eq![data, data2, "data must be equal if structs are equal"];
 
         let data = zkproof.zcash_serialize_to_vec().expect("spend zkproof should serialize");
         let parsed = data.zcash_deserialize_into().expect("randomized spend zkproof should deserialize");
-        prop_assert_eq![zkproof, parsed];
+        prop_assert_eq![&zkproof, &parsed];
+
+        let data2 = parsed
+            .zcash_serialize_to_vec()
+            .expect("vec serialization is infallible");
+        prop_assert_eq![data, data2, "data must be equal if structs are equal"];
 
         let data = spend_auth_sig.zcash_serialize_to_vec().expect("spend auth sig should serialize");
         let parsed = data.zcash_deserialize_into().expect("randomized spend auth sig should deserialize");
-        prop_assert_eq![spend_auth_sig, parsed];
+        prop_assert_eq![&spend_auth_sig, &parsed];
+
+        let data2 = parsed
+            .zcash_serialize_to_vec()
+            .expect("vec serialization is infallible");
+        prop_assert_eq![data, data2, "data must be equal if structs are equal"];
     }
 
     /// Serialize and deserialize `Output`
@@ -57,17 +77,32 @@ proptest! {
         let output_parsed = data.zcash_deserialize_into::<OutputInTransactionV4>().expect("randomized output should deserialize").into_output();
         prop_assert_eq![&output, &output_parsed];
 
+        let data2 = output_parsed
+            .into_v4()
+            .zcash_serialize_to_vec()
+            .expect("vec serialization is infallible");
+        prop_assert_eq![data, data2, "data must be equal if structs are equal"];
+
         // v5 format
         let (prefix, zkproof) = output.into_v5_parts();
 
         let data = prefix.zcash_serialize_to_vec().expect("output prefix should serialize");
         let parsed = data.zcash_deserialize_into().expect("randomized output prefix should deserialize");
-        prop_assert_eq![prefix, parsed];
+        prop_assert_eq![&prefix, &parsed];
+
+        let data2 = parsed
+            .zcash_serialize_to_vec()
+            .expect("vec serialization is infallible");
+        prop_assert_eq![data, data2, "data must be equal if structs are equal"];
 
         let data = zkproof.zcash_serialize_to_vec().expect("output zkproof should serialize");
         let parsed = data.zcash_deserialize_into().expect("randomized output zkproof should deserialize");
-        prop_assert_eq![zkproof, parsed];
+        prop_assert_eq![&zkproof, &parsed];
 
+        let data2 = parsed
+            .zcash_serialize_to_vec()
+            .expect("vec serialization is infallible");
+        prop_assert_eq![data, data2, "data must be equal if structs are equal"];
     }
 }
 
@@ -94,7 +129,12 @@ proptest! {
         };
         let data = tx.zcash_serialize_to_vec().expect("tx should serialize");
         let tx_parsed = data.zcash_deserialize_into().expect("randomized tx should deserialize");
-        prop_assert_eq![tx, tx_parsed];
+        prop_assert_eq![&tx, &tx_parsed];
+
+        let data2 = tx_parsed
+            .zcash_serialize_to_vec()
+            .expect("vec serialization is infallible");
+        prop_assert_eq![data, data2, "data must be equal if structs are equal"];
     }
 
     /// Serialize and deserialize `SharedAnchor` shielded data by including it
@@ -119,7 +159,12 @@ proptest! {
         };
         let data = tx.zcash_serialize_to_vec().expect("tx should serialize");
         let tx_parsed = data.zcash_deserialize_into().expect("randomized tx should deserialize");
-        prop_assert_eq![tx, tx_parsed];
+        prop_assert_eq![&tx, &tx_parsed];
+
+        let data2 = tx_parsed
+            .zcash_serialize_to_vec()
+            .expect("vec serialization is infallible");
+        prop_assert_eq![data, data2, "data must be equal if structs are equal"];
     }
 
     /// Check that ShieldedData<PerSpendAnchor> is equal when `first` is swapped
