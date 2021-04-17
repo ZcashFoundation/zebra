@@ -11,8 +11,8 @@ pub mod merkle;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 mod arbitrary;
-#[cfg(test)]
-mod tests;
+#[cfg(any(test, feature = "bench"))]
+pub mod tests;
 
 use std::fmt;
 

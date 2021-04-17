@@ -11,6 +11,7 @@ edition = "2018"
 
 default = []
 proptest-impl = ["proptest", "proptest-derive"]
+bench = ["zebra-test"]
 
 [dependencies]
 bech32 = "0.8.0"
@@ -43,6 +44,8 @@ proptest-derive = { version = "0.3.0", optional = true }
 # ZF deps
 ed25519-zebra = "2.2.0"
 redjubjub = "0.4"
+
+zebra-test = { path = "../zebra-test/", optional = true }
 
 [dev-dependencies]
 bincode = "1"
