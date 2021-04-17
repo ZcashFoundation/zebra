@@ -31,7 +31,6 @@ metrics = { git = "https://github.com/ZcashFoundation/metrics", rev = "971133128
 metrics-exporter-prometheus = { git = "https://github.com/ZcashFoundation/metrics", rev = "971133128e5aebe3ad177acffc6154449736cfa2" }
 tower = { git = "https://github.com/tower-rs/tower", rev = "d4d1c67c6a0e4213a52abcc2b9df6cc58276ee39" }
 
-# lexical-core 0.7.4 is incompatible with rustc nightly >= ~2021-03-24
-# https://github.com/rust-lang/rust/issues/81654
-# remove when zcash_script and rocksdb transitively depend on lexical-core >= 0.7.5
-lexical-core = { git = "https://github.com/Alexhuszagh/rust-lexical", rev = "601c9bfe16c944948d4c4a07e3c67878d72f6445" }
+# Apple M1
+rocksdb = { git = "https://github.com/rust-rocksdb/rust-rocksdb/", rev = "0b700fe70da8ee30483fde79f44df549f8fe11ec" }
+zcash_script = { git = "https://github.com/fanatid/zcash_script/", rev = "b2bac3a29db62e38673727eeeb4451681f950631" }
