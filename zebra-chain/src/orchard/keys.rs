@@ -642,7 +642,7 @@ impl FromStr for FullViewingKey {
 impl FullViewingKey {
     /// [4.2.3]: https://zips.z.cash/protocol/protocol.pdf#orchardkeycomponents
     #[allow(non_snake_case)]
-    pub fn to_R(&self) -> [u8; 64] {
+    pub fn to_R(self) -> [u8; 64] {
         // let K = I2LEBSP_l_sk(rivk)
         let K: [u8; 32] = self.ivk_commit_randomness.into();
 
