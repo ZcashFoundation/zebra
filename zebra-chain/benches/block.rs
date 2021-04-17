@@ -14,6 +14,8 @@ fn block_serialization(c: &mut Criterion) {
     let block141042 = Block::zcash_deserialize(Cursor::new(block141042_bytes)).unwrap();
     // zebra_chain::block::tests::generate::large_multi_transaction_block
     let block_gen = large_multi_transaction_block();
+    let block_gen_vec = block_gen.zcash_serialize_to_vec().unwrap();
+    let block_gen_bytes: &[u8] = block_gen_vec.as_ref();
 
     c.bench_with_input(
         BenchmarkId::new("zcash_serialize_to_vec", "BLOCK_TESTNET_141042"),
@@ -24,6 +26,17 @@ fn block_serialization(c: &mut Criterion) {
         BenchmarkId::new("zcash_serialize_to_vec", "large_multi_transaction_block"),
         &block_gen,
         |b, block| b.iter(|| block.zcash_serialize_to_vec().unwrap()),
+    );
+
+    c.bench_with_input(
+        BenchmarkId::new("zcash_deserialize", "BLOCK_TESTNET_141042"),
+        &block141042_bytes,
+        |b, bytes| b.iter(|| Block::zcash_deserialize(Cursor::new(bytes)).unwrap()),
+    );
+    c.bench_with_input(
+        BenchmarkId::new("zcash_deserialize", "large_multi_transaction_block"),
+        &block_gen_bytes,
+        |b, bytes| b.iter(|| Block::zcash_deserialize(Cursor::new(bytes)).unwrap()),
     );
 }
 
