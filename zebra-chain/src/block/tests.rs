@@ -1,8 +1,6 @@
 // XXX generate should be rewritten as strategies
-#[cfg(feature = "bench")]
+#[cfg(any(test, feature = "bench"))]
 pub mod generate;
-#[cfg(test)]
-mod generate;
 #[cfg(test)]
 mod preallocate;
 #[cfg(test)]
