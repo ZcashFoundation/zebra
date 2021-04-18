@@ -159,6 +159,15 @@ impl Application for ZebradApp {
         let panic_metadata = vec![
             ("version", env!("CARGO_PKG_VERSION").to_string()),
             ("git commit", Self::git_commit().to_string()),
+            (
+                "commit timestamp",
+                env!("VERGEN_GIT_COMMIT_TIMESTAMP").to_string(),
+            ),
+            (
+                "target triple",
+                env!("VERGEN_CARGO_TARGET_TRIPLE").to_string(),
+            ),
+            ("branch", env!("VERGEN_GIT_BRANCH").to_string()),
             ("Zcash network", network),
         ];
 
