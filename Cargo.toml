@@ -32,5 +32,4 @@ metrics-exporter-prometheus = { git = "https://github.com/ZcashFoundation/metric
 tower = { git = "https://github.com/tower-rs/tower", rev = "d4d1c67c6a0e4213a52abcc2b9df6cc58276ee39" }
 
 # Apple M1
-rocksdb = { git = "https://github.com/rust-rocksdb/rust-rocksdb/", rev = "0b700fe70da8ee30483fde79f44df549f8fe11ec" }
 zcash_script = { git = "https://github.com/fanatid/zcash_script/", rev = "48320355781547c7689230c38012d9860d7371ea" }
