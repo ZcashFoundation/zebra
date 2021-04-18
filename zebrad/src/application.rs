@@ -155,26 +155,19 @@ impl Application for ZebradApp {
         };
 
         // collect the common metadata for the issue URL and panic report
-        let network = config.network.network.to_string();
         let panic_metadata = vec![
-            ("version", env!("CARGO_PKG_VERSION").to_string()),
-            ("git commit", Self::git_commit().to_string()),
-            (
-                "commit timestamp",
-                env!("VERGEN_GIT_COMMIT_TIMESTAMP").to_string(),
-            ),
-            (
-                "target triple",
-                env!("VERGEN_CARGO_TARGET_TRIPLE").to_string(),
-            ),
-            ("branch", env!("VERGEN_GIT_BRANCH").to_string()),
-            ("Zcash network", network),
+            ("version", env!("CARGO_PKG_VERSION")),
+            ("git commit", Self::git_commit()),
+            ("commit timestamp", env!("VERGEN_GIT_COMMIT_TIMESTAMP")),
+            ("target triple", env!("VERGEN_CARGO_TARGET_TRIPLE")),
+            ("branch", env!("VERGEN_GIT_BRANCH")),
+            ("Zcash network", (&config.network.network).into()),
         ];
 
         let mut builder = color_eyre::config::HookBuilder::default();
         let mut metadata_section = "Metadata:".to_string();
         for (k, v) in panic_metadata {
-            builder = builder.add_issue_metadata(k, v.clone());
+            builder = builder.add_issue_metadata(k, v);
             metadata_section.push_str(&format!("\n{}: {}", k, v));
         }
 
