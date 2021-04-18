@@ -22,7 +22,6 @@ use crate::{
 use std::{
     cmp::{max, Eq, PartialEq},
     fmt::Debug,
-    iter,
 };
 
 /// Per-Spend Sapling anchors, used in Transaction V4 and the
@@ -282,35 +281,36 @@ where
     pub fn spends(&self) -> impl Iterator<Item = &Spend<AnchorV>> {
         use TransferData::*;
 
-        // TODO: replace with Box<dyn IntoIterator ...> for efficiency?
-        match self {
-            Spends {
-                first_spend,
-                rest_spends,
-                ..
-            } => iter::once(first_spend).chain(rest_spends.iter()).collect(),
-            NoSpends { .. } => Vec::new(),
-        }
-        .into_iter()
+        let first = match self {
+            Spends { first_spend, .. } => Some(first_spend),
+            NoSpends { .. } => None,
+        };
+
+        let rest = match self {
+            Spends { rest_spends, .. } => Some(rest_spends),
+            NoSpends { .. } => None,
+        };
+
+        // this slightly awkward construction avoids returning a newtype struct
+        // or a type-erased boxed iterator
+        first.into_iter().chain(rest.into_iter().flatten())
     }
 
     /// Iterate over the [`Output`]s for this transaction.
     pub fn outputs(&self) -> impl Iterator<Item = &Output> {
         use TransferData::*;
 
-        // TODO: replace with Box<dyn IntoIterator ...> for efficiency?
-        let outputs: Vec<_> = match self {
-            Spends { maybe_outputs, .. } => maybe_outputs.iter().collect(),
-            NoSpends {
-                first_output,
-                rest_outputs,
-                ..
-            } => iter::once(first_output)
-                .chain(rest_outputs.iter())
-                .collect(),
+        let first = match self {
+            Spends { .. } => None,
+            NoSpends { first_output, .. } => Some(first_output),
         };
 
-        outputs.into_iter()
+        let rest_or_maybe = match self {
+            Spends { maybe_outputs, .. } => Some(maybe_outputs),
+            NoSpends { rest_outputs, .. } => Some(rest_outputs),
+        };
+
+        first.into_iter().chain(rest_or_maybe.into_iter().flatten())
     }
 
     /// Provide the shared anchor for this transaction, if present.
