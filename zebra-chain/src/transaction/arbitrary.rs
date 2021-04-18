@@ -257,7 +257,7 @@ impl Arbitrary for sapling::ShieldedData<sapling::SharedAnchor> {
         )
             .prop_map(
                 |(value_balance, shared_anchor, first, rest_spends, rest_outputs, sig_bytes)| {
-                    Self {
+                    let mut shielded_data = Self {
                         value_balance,
                         shared_anchor,
                         first,
@@ -268,7 +268,12 @@ impl Arbitrary for sapling::ShieldedData<sapling::SharedAnchor> {
                             b.copy_from_slice(sig_bytes.as_slice());
                             b
                         }),
+                    };
+                    if shielded_data.spends().count() == 0 {
+                        // Todo: delete field when there is no spend
+                        shielded_data.shared_anchor = Default::default();
                     }
+                    shielded_data
                 },
             )
             .boxed()

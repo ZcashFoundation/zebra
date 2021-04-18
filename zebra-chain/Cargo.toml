@@ -46,9 +46,13 @@ redjubjub = "0.4"
 
 [dev-dependencies]
 bincode = "1"
+
 color-eyre = "0.5.11"
 spandoc = "0.2"
 tracing = "0.1.25"
+
+itertools = "0.10.0"
+
 proptest = "0.10"
 proptest-derive = "0.3"
 
