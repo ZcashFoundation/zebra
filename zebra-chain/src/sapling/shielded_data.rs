@@ -122,7 +122,7 @@ where
     ///
     /// In Transaction::V5, if there are any spends, there must also be a shared
     /// spend anchor.
-    Spends {
+    SpendsAndMaybeOutputs {
         /// The shared anchor for all `Spend`s in this transaction.
         ///
         /// The anchor is the root of the Sapling note commitment tree in a previous
@@ -150,7 +150,7 @@ where
 
         /// Maybe some outputs (can be empty).
         ///
-        /// See [`NoSpends::first_output`] for details.
+        /// See [`JustOutputs::first_output`] for details.
         maybe_outputs: Vec<Output>,
     },
 
@@ -159,7 +159,7 @@ where
     ///
     /// In Transaction::V5, if there are no spends, there must not be a shared
     /// anchor.
-    NoSpends {
+    JustOutputs {
         /// At least one output.
         ///
         /// Storing this separately ensures that it is impossible to construct
@@ -282,13 +282,13 @@ where
         use TransferData::*;
 
         let first = match self {
-            Spends { first_spend, .. } => Some(first_spend),
-            NoSpends { .. } => None,
+            SpendsAndMaybeOutputs { first_spend, .. } => Some(first_spend),
+            JustOutputs { .. } => None,
         };
 
         let rest = match self {
-            Spends { rest_spends, .. } => Some(rest_spends),
-            NoSpends { .. } => None,
+            SpendsAndMaybeOutputs { rest_spends, .. } => Some(rest_spends),
+            JustOutputs { .. } => None,
         };
 
         // this slightly awkward construction avoids returning a newtype struct
@@ -301,13 +301,13 @@ where
         use TransferData::*;
 
         let first = match self {
-            Spends { .. } => None,
-            NoSpends { first_output, .. } => Some(first_output),
+            SpendsAndMaybeOutputs { .. } => None,
+            JustOutputs { first_output, .. } => Some(first_output),
         };
 
         let rest_or_maybe = match self {
-            Spends { maybe_outputs, .. } => Some(maybe_outputs),
-            NoSpends { rest_outputs, .. } => Some(rest_outputs),
+            SpendsAndMaybeOutputs { maybe_outputs, .. } => Some(maybe_outputs),
+            JustOutputs { rest_outputs, .. } => Some(rest_outputs),
         };
 
         first.into_iter().chain(rest_or_maybe.into_iter().flatten())
@@ -322,8 +322,8 @@ where
         use TransferData::*;
 
         match self {
-            Spends { shared_anchor, .. } => Some(shared_anchor.clone()),
-            NoSpends { .. } => None,
+            SpendsAndMaybeOutputs { shared_anchor, .. } => Some(shared_anchor.clone()),
+            JustOutputs { .. } => None,
         }
     }
 }

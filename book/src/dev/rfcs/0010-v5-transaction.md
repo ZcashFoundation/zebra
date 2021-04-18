@@ -169,7 +169,7 @@ struct sapling::ShieldedData<AnchorV: AnchorVariant> {
 enum sapling::TransferData<AnchorV: AnchorVariant> {
     /// In Transaction::V5, if there are any spends,
     /// there must also be a shared spend anchor.
-    Spends {
+    SpendsAndMaybeOutputs {
         shared_anchor: AnchorV::Shared,
         first_spend: Spend<AnchorV>,
         rest_spends: Vec<Spend<AnchorV>>,
@@ -178,7 +178,7 @@ enum sapling::TransferData<AnchorV: AnchorVariant> {
 
     /// If there are no spends, there must not be a shared
     /// anchor.
-    NoSpends {
+    JustOutputs {
         first_output: Output,
         rest_outputs: Vec<Output>,
     }

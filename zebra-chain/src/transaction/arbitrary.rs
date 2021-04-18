@@ -247,14 +247,14 @@ impl Arbitrary for sapling::TransferData<PerSpendAnchor> {
                 "arbitrary v4 transfers with no spends and no outputs",
                 |(mut spends, mut outputs)| {
                     if !spends.is_empty() {
-                        Some(sapling::TransferData::Spends {
+                        Some(sapling::TransferData::SpendsAndMaybeOutputs {
                             shared_anchor: FieldNotPresent,
                             first_spend: spends.remove(0),
                             rest_spends: spends,
                             maybe_outputs: outputs,
                         })
                     } else if !outputs.is_empty() {
-                        Some(sapling::TransferData::NoSpends {
+                        Some(sapling::TransferData::JustOutputs {
                             first_output: outputs.remove(0),
                             rest_outputs: outputs,
                         })
@@ -283,14 +283,14 @@ impl Arbitrary for sapling::TransferData<SharedAnchor> {
                 "arbitrary v5 transfers with no spends and no outputs",
                 |(shared_anchor, mut spends, mut outputs)| {
                     if !spends.is_empty() {
-                        Some(sapling::TransferData::Spends {
+                        Some(sapling::TransferData::SpendsAndMaybeOutputs {
                             shared_anchor,
                             first_spend: spends.remove(0),
                             rest_spends: spends,
                             maybe_outputs: outputs,
                         })
                     } else if !outputs.is_empty() {
-                        Some(sapling::TransferData::NoSpends {
+                        Some(sapling::TransferData::JustOutputs {
                             first_output: outputs.remove(0),
                             rest_outputs: outputs,
                         })

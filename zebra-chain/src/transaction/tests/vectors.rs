@@ -388,24 +388,24 @@ fn sapling_shielded_v4_to_fake_v5(
         .collect();
 
     let transfers = match v4_shielded.transfers {
-        Spends { maybe_outputs, .. } => {
+        SpendsAndMaybeOutputs { maybe_outputs, .. } => {
             let shared_anchor = match unique_anchors.as_slice() {
                 [unique_anchor] => *unique_anchor,
                 // Multiple different anchors, can't convert to v5
                 _ => return None,
             };
 
-            Spends {
+            SpendsAndMaybeOutputs {
                 shared_anchor,
                 first_spend: fake_spends.remove(0),
                 rest_spends: fake_spends,
                 maybe_outputs,
             }
         }
-        NoSpends {
+        JustOutputs {
             first_output,
             rest_outputs,
-        } => NoSpends {
+        } => JustOutputs {
             first_output,
             rest_outputs,
         },

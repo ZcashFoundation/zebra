@@ -170,7 +170,7 @@ proptest! {
         // TODO: modify the strategy, rather than the shielded data
         let mut shielded_v4 = shielded_v4;
         let mut outputs: Vec<_> = shielded_v4.outputs().cloned().collect();
-        shielded_v4.transfers = sapling::TransferData::NoSpends {
+        shielded_v4.transfers = sapling::TransferData::JustOutputs {
             first_output: outputs.remove(0),
             rest_outputs: outputs,
         };
@@ -210,7 +210,7 @@ proptest! {
         // TODO: modify the strategy, rather than the shielded data
         let mut shielded_v5 = shielded_v5;
         let mut outputs: Vec<_> = shielded_v5.outputs().cloned().collect();
-        shielded_v5.transfers = sapling::TransferData::NoSpends {
+        shielded_v5.transfers = sapling::TransferData::JustOutputs {
             first_output: outputs.remove(0),
             rest_outputs: outputs,
         };

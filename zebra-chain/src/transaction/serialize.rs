@@ -198,13 +198,13 @@ impl ZcashDeserialize for Option<sapling::ShieldedData<SharedAnchor>> {
 
         // Create transfers
         let transfers = match shared_anchor {
-            Some(shared_anchor) => sapling::TransferData::Spends {
+            Some(shared_anchor) => sapling::TransferData::SpendsAndMaybeOutputs {
                 shared_anchor,
                 first_spend: spends.remove(0),
                 rest_spends: spends,
                 maybe_outputs: outputs,
             },
-            None => sapling::TransferData::NoSpends {
+            None => sapling::TransferData::JustOutputs {
                 first_output: outputs.remove(0),
                 rest_outputs: outputs,
             },
@@ -449,14 +449,14 @@ impl ZcashDeserialize for Transaction {
                 let joinsplit_data = OptV4Jsd::zcash_deserialize(&mut reader)?;
 
                 let sapling_transfers = if !shielded_spends.is_empty() {
-                    Some(sapling::TransferData::Spends {
+                    Some(sapling::TransferData::SpendsAndMaybeOutputs {
                         shared_anchor: FieldNotPresent,
                         first_spend: shielded_spends.remove(0),
                         rest_spends: shielded_spends,
                         maybe_outputs: shielded_outputs,
                     })
                 } else if !shielded_outputs.is_empty() {
-                    Some(sapling::TransferData::NoSpends {
+                    Some(sapling::TransferData::JustOutputs {
                         first_output: shielded_outputs.remove(0),
                         rest_outputs: shielded_outputs,
                     })
