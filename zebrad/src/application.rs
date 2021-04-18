@@ -54,7 +54,7 @@ impl ZebradApp {
     }
 
     pub fn git_commit() -> &'static str {
-        const GIT_COMMIT_VERGEN: &str = env!("VERGEN_SHA_SHORT");
+        const GIT_COMMIT_VERGEN: &str = env!("VERGEN_GIT_SHA_SHORT");
         const GIT_COMMIT_GCLOUD: Option<&str> = option_env!("SHORT_SHA");
 
         GIT_COMMIT_GCLOUD.unwrap_or(GIT_COMMIT_VERGEN)
