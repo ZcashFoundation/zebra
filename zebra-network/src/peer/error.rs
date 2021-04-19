@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use thiserror::Error;
 
@@ -64,10 +64,25 @@ pub enum PeerError {
     NotFound(Vec<InventoryHash>),
 }
 
+/// A shared error slot for peer errors.
+///
+/// # Correctness
+///
+/// Error slots are shared between sync and async code. In async code, the error
+/// mutex should be held for as short a time as possible. This avoids blocking
+/// the async task thread on acquiring the mutex.
 #[derive(Default, Clone)]
-pub(super) struct ErrorSlot(pub(super) Arc<Mutex<Option<SharedPeerError>>>);
+pub(super) struct ErrorSlot(Arc<std::sync::Mutex<Option<SharedPeerError>>>);
 
 impl ErrorSlot {
+    /// Read the current error in the slot.
+    ///
+    /// Returns `None` if there is no error in the slot.
+    ///
+    /// # Correctness
+    ///
+    /// Briefly locks the error slot's threaded `std::sync::Mutex`, to get a
+    /// reference to the error in the slot.
     pub fn try_get_error(&self) -> Option<SharedPeerError> {
         self.0
             .lock()
@@ -75,7 +90,30 @@ impl ErrorSlot {
             .as_ref()
             .cloned()
     }
+
+    /// Update the current error in the slot.
+    ///
+    /// Returns `Err(AlreadyErrored)` if there was already an error in the slot.
+    ///
+    /// # Correctness
+    ///
+    /// Briefly locks the error slot's threaded `std::sync::Mutex`, to check for
+    /// a previous error, then update the error in the slot.
+    pub fn try_update_error(&self, e: SharedPeerError) -> Result<(), AlreadyErrored> {
+        let mut guard = self.0.lock().expect("error mutex should be unpoisoned");
+
+        if let Some(original_error) = guard.clone() {
+            error!(?original_error, new_error = ?e, "peer connection already errored");
+            Err(AlreadyErrored)
+        } else {
+            *guard = Some(e);
+            Ok(())
+        }
+    }
 }
+
+/// The `ErrorSlot` already contains an error.
+pub struct AlreadyErrored;
 
 /// An error during a handshake with a remote peer.
 #[derive(Error, Debug)]
