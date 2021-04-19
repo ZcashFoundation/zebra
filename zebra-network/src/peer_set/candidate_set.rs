@@ -43,7 +43,7 @@ use crate::{constants, types::MetaAddr, AddressBook, BoxError, Request, Response
 ///  │                               │
 ///  │                               │
 ///  │ ┌──────────────────┐          │
-///  │ │  Listener Port   │          │
+///  │ │     Inbound      │          │
 ///  │ │ Peer Connections │          │
 ///  │ └──────────────────┘          │
 ///  │          │                    │
@@ -68,7 +68,7 @@ use crate::{constants, types::MetaAddr, AddressBook, BoxError, Request, Response
 ///          ╲ ╱      to remove live                                  │
 ///           V      `Responded` peers                                │
 ///           │                                                       │
-///           │                                                       │
+///           │ Try outbound connection                               │
 ///           ▼                                                       │
 ///    ┌────────────────┐                                             │
 ///    │`AttemptPending`│                                             │
