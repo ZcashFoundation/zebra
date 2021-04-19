@@ -16,7 +16,7 @@ use crate::{
         output::OutputPrefixInTransactionV5, spend::SpendPrefixInTransactionV5, tree, Nullifier,
         Output, Spend, ValueCommitment,
     },
-    serialization::TrustedPreallocate,
+    serialization::{AtLeastOne, TrustedPreallocate},
 };
 
 use std::{
@@ -109,9 +109,6 @@ where
 /// Specifically, TransferData ensures that:
 /// * there is at least one spend or output, and
 /// * the shared anchor is only present when there are spends.
-//
-// clippy warns because Outputs are a lot larger than Spends
-#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum TransferData<AnchorV>
 where
@@ -138,19 +135,14 @@ where
 
         /// At least one spend.
         ///
-        /// Storing this separately ensures that it is impossible to construct
-        /// an invalid `ShieldedData` with no spends or outputs.
-        ///
-        /// However, it's not necessary to access or process `first_spend` and
-        /// `rest_spends` separately, as the [`ShieldedData::spends`] method
-        /// provides an iterator over all of the [`Spend`]s.
-        first_spend: Spend<AnchorV>,
-        /// The rest of the spends, if any.
-        rest_spends: Vec<Spend<AnchorV>>,
+        /// Use the [`ShieldedData::spends`] method to get an iterator over the
+        /// [`Spend`]s in this `TransferData`.
+        spends: AtLeastOne<Spend<AnchorV>>,
 
         /// Maybe some outputs (can be empty).
         ///
-        /// See [`JustOutputs::first_output`] for details.
+        /// Use the [`ShieldedData::outputs`] method to get an iterator over the
+        /// [`Outputs`]s in this `TransferData`.
         maybe_outputs: Vec<Output>,
     },
 
@@ -162,16 +154,9 @@ where
     JustOutputs {
         /// At least one output.
         ///
-        /// Storing this separately ensures that it is impossible to construct
-        /// an invalid `ShieldedData` with no spends or outputs.
-        ///
-        /// However, it's not necessary to access or process `first_output`,
-        /// `rest_outputs`, and `maybe_outputs` separately, as the
-        /// [`ShieldedData::outputs`] method provides an iterator over all of the
-        /// [`Outputs`]s.
-        first_output: Output,
-        /// The rest of the outputs, if any.
-        rest_outputs: Vec<Output>,
+        /// Use the [`ShieldedData::outputs`] method to get an iterator over the
+        /// [`Outputs`]s in this `TransferData`.
+        outputs: AtLeastOne<Output>,
     },
 }
 
@@ -281,36 +266,25 @@ where
     pub fn spends(&self) -> impl Iterator<Item = &Spend<AnchorV>> {
         use TransferData::*;
 
-        let first = match self {
-            SpendsAndMaybeOutputs { first_spend, .. } => Some(first_spend),
+        let spends = match self {
+            SpendsAndMaybeOutputs { spends, .. } => Some(spends.iter()),
             JustOutputs { .. } => None,
         };
 
-        let rest = match self {
-            SpendsAndMaybeOutputs { rest_spends, .. } => Some(rest_spends),
-            JustOutputs { .. } => None,
-        };
-
-        // this slightly awkward construction avoids returning a newtype struct
-        // or a type-erased boxed iterator
-        first.into_iter().chain(rest.into_iter().flatten())
+        // this awkward construction avoids returning a newtype struct or
+        // type-erased boxed iterator
+        spends.into_iter().flatten()
     }
 
     /// Iterate over the [`Output`]s for this transaction.
     pub fn outputs(&self) -> impl Iterator<Item = &Output> {
         use TransferData::*;
 
-        let first = match self {
-            SpendsAndMaybeOutputs { .. } => None,
-            JustOutputs { first_output, .. } => Some(first_output),
-        };
-
-        let rest_or_maybe = match self {
-            SpendsAndMaybeOutputs { maybe_outputs, .. } => Some(maybe_outputs),
-            JustOutputs { rest_outputs, .. } => Some(rest_outputs),
-        };
-
-        first.into_iter().chain(rest_or_maybe.into_iter().flatten())
+        match self {
+            SpendsAndMaybeOutputs { maybe_outputs, .. } => maybe_outputs,
+            JustOutputs { outputs, .. } => outputs.as_vec(),
+        }
+        .iter()
     }
 
     /// Provide the shared anchor for this transaction, if present.

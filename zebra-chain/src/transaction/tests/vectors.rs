@@ -381,7 +381,7 @@ fn sapling_shielded_v4_to_fake_v5(
         .unique()
         .collect();
 
-    let mut fake_spends: Vec<_> = v4_shielded
+    let fake_spends: Vec<_> = v4_shielded
         .spends()
         .cloned()
         .map(sapling_spend_v4_to_fake_v5)
@@ -397,18 +397,11 @@ fn sapling_shielded_v4_to_fake_v5(
 
             SpendsAndMaybeOutputs {
                 shared_anchor,
-                first_spend: fake_spends.remove(0),
-                rest_spends: fake_spends,
+                spends: fake_spends.try_into().unwrap(),
                 maybe_outputs,
             }
         }
-        JustOutputs {
-            first_output,
-            rest_outputs,
-        } => JustOutputs {
-            first_output,
-            rest_outputs,
-        },
+        JustOutputs { outputs } => JustOutputs { outputs },
     };
 
     let fake_shielded_v5 = ShieldedData::<SharedAnchor> {

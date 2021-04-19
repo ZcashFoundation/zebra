@@ -171,19 +171,21 @@ enum sapling::TransferData<AnchorV: AnchorVariant> {
     /// there must also be a shared spend anchor.
     SpendsAndMaybeOutputs {
         shared_anchor: AnchorV::Shared,
-        first_spend: Spend<AnchorV>,
-        rest_spends: Vec<Spend<AnchorV>>,
+        spends: AtLeastOne<Spend<AnchorV>>,
         maybe_outputs: Vec<Output>,
     }
 
     /// If there are no spends, there must not be a shared
     /// anchor.
     JustOutputs {
-        first_output: Output,
-        rest_outputs: Vec<Output>,
+        outputs: AtLeastOne<Output>,
     }
 }
 ```
+
+The `AtLeastOne` type is a vector wrapper which always contains at least one
+element. For more details, see [its documentation](https://github.com/ZcashFoundation/zebra/blob/673b95dea5f0b057c11f2f450943b012fec75c00/zebra-chain/src/serialization/constraint.rs).
+<!-- TODO: update link to main branch when PR #2021 merges -->
 
 Some of these fields are in a different order to the serialized data, see
 [the V4 and V5 transaction specs](https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus)
@@ -343,12 +345,7 @@ struct orchard::ShieldedData {
     value_balance: Amount,
     shared_anchor: tree::Root,
     proof: Halo2Proof,
-    /// An authorized action description.
-    ///
-    /// Storing this separately ensures that it is impossible to construct
-    /// an invalid `ShieldedData` with no actions.
-    first: AuthorizedAction,
-    rest: Vec<AuthorizedAction>,
+    actions: AtLeastOne<AuthorizedAction>,
     binding_sig: redpallas::Signature<Binding>,
 }
 ```

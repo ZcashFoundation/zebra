@@ -6,6 +6,7 @@ use crate::{
     serialization::{ZcashDeserializeInto, ZcashSerialize},
     transaction::{LockTime, Transaction},
 };
+use std::convert::TryInto;
 
 proptest! {
     /// Serialize and deserialize `Spend<PerSpendAnchor>`
@@ -169,10 +170,9 @@ proptest! {
 
         // TODO: modify the strategy, rather than the shielded data
         let mut shielded_v4 = shielded_v4;
-        let mut outputs: Vec<_> = shielded_v4.outputs().cloned().collect();
+        let outputs: Vec<_> = shielded_v4.outputs().cloned().collect();
         shielded_v4.transfers = sapling::TransferData::JustOutputs {
-            first_output: outputs.remove(0),
-            rest_outputs: outputs,
+            outputs: outputs.try_into().unwrap(),
         };
 
         // shielded data doesn't serialize by itself, so we have to stick it in
@@ -209,10 +209,9 @@ proptest! {
 
         // TODO: modify the strategy, rather than the shielded data
         let mut shielded_v5 = shielded_v5;
-        let mut outputs: Vec<_> = shielded_v5.outputs().cloned().collect();
+        let outputs: Vec<_> = shielded_v5.outputs().cloned().collect();
         shielded_v5.transfers = sapling::TransferData::JustOutputs {
-            first_output: outputs.remove(0),
-            rest_outputs: outputs,
+            outputs: outputs.try_into().unwrap(),
         };
 
         let data = shielded_v5.zcash_serialize_to_vec().expect("shielded_v5 should serialize");

@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{convert::TryInto, sync::Arc};
 
 use chrono::{TimeZone, Utc};
 use proptest::{arbitrary::any, array, collection::vec, option, prelude::*};
@@ -245,18 +245,16 @@ impl Arbitrary for sapling::TransferData<PerSpendAnchor> {
         )
             .prop_filter_map(
                 "arbitrary v4 transfers with no spends and no outputs",
-                |(mut spends, mut outputs)| {
+                |(spends, outputs)| {
                     if !spends.is_empty() {
                         Some(sapling::TransferData::SpendsAndMaybeOutputs {
                             shared_anchor: FieldNotPresent,
-                            first_spend: spends.remove(0),
-                            rest_spends: spends,
+                            spends: spends.try_into().unwrap(),
                             maybe_outputs: outputs,
                         })
                     } else if !outputs.is_empty() {
                         Some(sapling::TransferData::JustOutputs {
-                            first_output: outputs.remove(0),
-                            rest_outputs: outputs,
+                            outputs: outputs.try_into().unwrap(),
                         })
                     } else {
                         None
@@ -281,18 +279,16 @@ impl Arbitrary for sapling::TransferData<SharedAnchor> {
         )
             .prop_filter_map(
                 "arbitrary v5 transfers with no spends and no outputs",
-                |(shared_anchor, mut spends, mut outputs)| {
+                |(shared_anchor, spends, outputs)| {
                     if !spends.is_empty() {
                         Some(sapling::TransferData::SpendsAndMaybeOutputs {
                             shared_anchor,
-                            first_spend: spends.remove(0),
-                            rest_spends: spends,
+                            spends: spends.try_into().unwrap(),
                             maybe_outputs: outputs,
                         })
                     } else if !outputs.is_empty() {
                         Some(sapling::TransferData::JustOutputs {
-                            first_output: outputs.remove(0),
-                            rest_outputs: outputs,
+                            outputs: outputs.try_into().unwrap(),
                         })
                     } else {
                         None

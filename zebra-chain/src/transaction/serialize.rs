@@ -1,7 +1,7 @@
 //! Contains impls of `ZcashSerialize`, `ZcashDeserialize` for all of the
 //! transaction types, so that all of the serialization logic is in one place.
 
-use std::{io, sync::Arc};
+use std::{convert::TryInto, io, sync::Arc};
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
@@ -182,7 +182,7 @@ impl ZcashDeserialize for Option<sapling::ShieldedData<SharedAnchor>> {
         let binding_sig = reader.read_64_bytes()?.into();
 
         // Create shielded spends from deserialized parts
-        let mut spends: Vec<_> = spend_prefixes
+        let spends: Vec<_> = spend_prefixes
             .into_iter()
             .zip(spend_proofs.into_iter())
             .zip(spend_sigs.into_iter())
@@ -190,7 +190,7 @@ impl ZcashDeserialize for Option<sapling::ShieldedData<SharedAnchor>> {
             .collect();
 
         // Create shielded outputs from deserialized parts
-        let mut outputs = output_prefixes
+        let outputs = output_prefixes
             .into_iter()
             .zip(output_proofs.into_iter())
             .map(|(prefix, proof)| Output::from_v5_parts(prefix, proof))
@@ -200,13 +200,15 @@ impl ZcashDeserialize for Option<sapling::ShieldedData<SharedAnchor>> {
         let transfers = match shared_anchor {
             Some(shared_anchor) => sapling::TransferData::SpendsAndMaybeOutputs {
                 shared_anchor,
-                first_spend: spends.remove(0),
-                rest_spends: spends,
+                spends: spends
+                    .try_into()
+                    .expect("checked spends when parsing shared anchor"),
                 maybe_outputs: outputs,
             },
             None => sapling::TransferData::JustOutputs {
-                first_output: outputs.remove(0),
-                rest_outputs: outputs,
+                outputs: outputs
+                    .try_into()
+                    .expect("checked spends or outputs and returned early"),
             },
         };
 
@@ -439,8 +441,8 @@ impl ZcashDeserialize for Transaction {
                 let expiry_height = block::Height(reader.read_u32::<LittleEndian>()?);
 
                 let value_balance = (&mut reader).zcash_deserialize_into()?;
-                let mut shielded_spends = Vec::zcash_deserialize(&mut reader)?;
-                let mut shielded_outputs =
+                let shielded_spends = Vec::zcash_deserialize(&mut reader)?;
+                let shielded_outputs =
                     Vec::<sapling::OutputInTransactionV4>::zcash_deserialize(&mut reader)?
                         .into_iter()
                         .map(Output::from_v4)
@@ -451,14 +453,12 @@ impl ZcashDeserialize for Transaction {
                 let sapling_transfers = if !shielded_spends.is_empty() {
                     Some(sapling::TransferData::SpendsAndMaybeOutputs {
                         shared_anchor: FieldNotPresent,
-                        first_spend: shielded_spends.remove(0),
-                        rest_spends: shielded_spends,
+                        spends: shielded_spends.try_into().expect("checked for spends"),
                         maybe_outputs: shielded_outputs,
                     })
                 } else if !shielded_outputs.is_empty() {
                     Some(sapling::TransferData::JustOutputs {
-                        first_output: shielded_outputs.remove(0),
-                        rest_outputs: shielded_outputs,
+                        outputs: shielded_outputs.try_into().expect("checked for outputs"),
                     })
                 } else {
                     None
