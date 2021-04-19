@@ -156,11 +156,14 @@ impl Application for ZebradApp {
 
         // collect the common metadata for the issue URL and panic report
         let panic_metadata = vec![
+            // git
             ("version", env!("CARGO_PKG_VERSION")),
+            ("branch", env!("VERGEN_GIT_BRANCH")),
             ("git commit", Self::git_commit()),
             ("commit timestamp", env!("VERGEN_GIT_COMMIT_TIMESTAMP")),
+            // build
             ("target triple", env!("VERGEN_CARGO_TARGET_TRIPLE")),
-            ("branch", env!("VERGEN_GIT_BRANCH")),
+            // config
             ("Zcash network", (&config.network.network).into()),
         ];
 
