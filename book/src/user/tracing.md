@@ -12,10 +12,15 @@ if the config had `endpoint_addr = '127.0.0.1:3000'`, then
 
 See the [`filter`][filter] documentation for more details.
 
-Zebra also has support for generating [flamegraphs] of tracing spans,
-configured using the [`flamegraph`][flamegraph] option.
+Zebra also have support:
+
+* Generating [flamegraphs] of tracing spans, configured using the
+[`flamegraph`][flamegraph] option.
+* Sending tracing spans and events to [systemd-journald][systemd_journald],
+on Linux distributions that use `systemd`.
 
 [tracing_section]: https://doc.zebra.zfnd.org/zebrad/config/struct.TracingSection.html
 [filter]: https://doc.zebra.zfnd.org/zebrad/config/struct.TracingSection.html#structfield.filter
 [flamegraph]: https://doc.zebra.zfnd.org/zebrad/config/struct.TracingSection.html#structfield.flamegraph
 [flamegraphs]: http://www.brendangregg.com/flamegraphs.html
+[systemd_journald]: https://www.freedesktop.org/software/systemd/man/systemd-journald.service.html
