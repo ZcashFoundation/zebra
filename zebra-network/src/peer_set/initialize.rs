@@ -3,10 +3,7 @@
 // Portions of this submodule were adapted from tower-balance,
 // which is (c) 2019 Tower Contributors (MIT licensed).
 
-use std::{
-    net::SocketAddr,
-    sync::{Arc, Mutex},
-};
+use std::{net::SocketAddr, sync::Arc};
 
 use futures::{
     channel::mpsc,
@@ -65,7 +62,7 @@ pub async fn init<S>(
     inbound_service: S,
 ) -> (
     Buffer<BoxService<Request, Response, BoxError>, Request>,
-    Arc<Mutex<AddressBook>>,
+    Arc<std::sync::Mutex<AddressBook>>,
 )
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
