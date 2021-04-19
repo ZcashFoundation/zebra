@@ -406,11 +406,15 @@ impl Ord for Chain {
 
 #[cfg(test)]
 mod tests {
+    use proptest::{
+        num::usize::BinarySearch,
+        strategy::{NewTree, ValueTree},
+        test_runner::TestRunner,
+    };
     use std::{env, sync::Arc};
 
     use zebra_chain::{
         block::Block,
-        fmt::SummaryDebug,
         parameters::{Network, NetworkUpgrade},
         serialization::ZcashDeserializeInto,
         LedgerState,
@@ -421,6 +425,9 @@ mod tests {
 
     use self::assert_eq;
     use super::*;
+
+    const MAX_PARTIAL_CHAIN_BLOCKS: usize = 100;
+    const DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES: u32 = 32;
 
     #[test]
     fn construct_empty() {
@@ -486,16 +493,55 @@ mod tests {
         Ok(())
     }
 
-    fn arbitrary_chain(tip_height: block::Height) -> BoxedStrategy<Vec<Arc<Block>>> {
-        Block::partial_chain_strategy(LedgerState::new(tip_height, Network::Mainnet), 100)
+    #[derive(Debug)]
+    struct PreparedChainTree {
+        chain: Arc<Vec<PreparedBlock>>,
+        count: BinarySearch,
     }
 
-    prop_compose! {
-        fn arbitrary_chain_and_count()
-            (chain in arbitrary_chain(NetworkUpgrade::Blossom.activation_height(Network::Mainnet).unwrap()))
-            (count in 1..chain.len(), chain in Just(chain)) -> (SummaryDebug<Vec<Arc<Block>>>, usize)
-        {
-            (SummaryDebug(chain), count)
+    impl ValueTree for PreparedChainTree {
+        type Value = (Arc<Vec<PreparedBlock>>, <BinarySearch as ValueTree>::Value);
+
+        fn current(&self) -> Self::Value {
+            (self.chain.clone(), self.count.current())
+        }
+
+        fn simplify(&mut self) -> bool {
+            self.count.simplify()
+        }
+
+        fn complicate(&mut self) -> bool {
+            self.count.complicate()
+        }
+    }
+
+    #[derive(Debug, Default)]
+    struct PreparedChain {
+        // the proptests are threaded (not async), so we want to use a threaded mutex here
+        chain: std::sync::Mutex<Option<Arc<Vec<PreparedBlock>>>>,
+    }
+
+    impl Strategy for PreparedChain {
+        type Tree = PreparedChainTree;
+        type Value = <PreparedChainTree as ValueTree>::Value;
+
+        fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
+            let mut chain = self.chain.lock().unwrap();
+            if chain.is_none() {
+                let tip_height = NetworkUpgrade::Canopy
+                    .activation_height(Network::Mainnet)
+                    .unwrap();
+                let ledger_state = LedgerState::new(tip_height, Network::Mainnet);
+                let blocks = Block::partial_chain_strategy(ledger_state, MAX_PARTIAL_CHAIN_BLOCKS)
+                    .prop_map(|vec| vec.into_iter().map(|blk| blk.prepare()).collect::<Vec<_>>())
+                    .new_tree(runner)?
+                    .current();
+                *chain = Some(Arc::new(blocks));
+            }
+
+            let chain = chain.clone().expect("should be generated");
+            let count = (1..chain.len()).new_tree(runner)?;
+            Ok(PreparedChainTree { chain, count })
         }
     }
 
@@ -506,25 +552,22 @@ mod tests {
         proptest!(ProptestConfig::with_cases(env::var("PROPTEST_CASES")
                                           .ok()
                                           .and_then(|v| v.parse().ok())
-                                          .unwrap_or(1)),
-        |((chain, count) in arbitrary_chain_and_count())| {
-            let chain = chain.0;
-            let fork_tip_hash = chain[count - 1].hash();
+                                          .unwrap_or(DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES)),
+        |((chain, count) in PreparedChain::default())| {
+            let fork_tip_hash = chain[count - 1].hash;
             let mut full_chain = Chain::default();
             let mut partial_chain = Chain::default();
 
             for block in chain.iter().take(count) {
-                partial_chain.push(block.clone().prepare());
+                partial_chain.push(block.clone());
             }
-
-            for block in chain {
-                full_chain.push(block.prepare());
+            for block in chain.iter() {
+                full_chain.push(block.clone());
             }
 
             let forked = full_chain.fork(fork_tip_hash).expect("hash is present");
 
             prop_assert_eq!(forked.blocks.len(), partial_chain.blocks.len());
-
         });
 
         Ok(())
@@ -537,19 +580,17 @@ mod tests {
         proptest!(ProptestConfig::with_cases(env::var("PROPTEST_CASES")
                                           .ok()
                                           .and_then(|v| v.parse().ok())
-                                          .unwrap_or(1)),
-        |((chain, end_count) in arbitrary_chain_and_count())| {
-            let chain = chain.0;
+                                          .unwrap_or(DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES)),
+        |((chain, end_count) in PreparedChain::default())| {
             let finalized_count = chain.len() - end_count;
             let mut full_chain = Chain::default();
             let mut partial_chain = Chain::default();
 
             for block in chain.iter().skip(finalized_count) {
-                partial_chain.push(block.clone().prepare());
+                partial_chain.push(block.clone());
             }
-
-            for block in chain {
-                full_chain.push(block.prepare());
+            for block in chain.iter() {
+                full_chain.push(block.clone());
             }
 
             for _ in 0..finalized_count {
@@ -557,7 +598,6 @@ mod tests {
             }
 
             prop_assert_eq!(full_chain.blocks.len(), partial_chain.blocks.len());
-
         });
 
         Ok(())

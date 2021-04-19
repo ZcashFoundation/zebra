@@ -29,7 +29,7 @@ jubjub = "0.6.0"
 lazy_static = "1.4.0"
 primitive-types = "0.9.0"
 rand_core = "0.6"
-ripemd160 = "0.8.0"
+ripemd160 = "0.9"
 secp256k1 = { version = "0.20.1", features = ["serde"] }
 serde = { version = "1", features = ["serde_derive", "rc"] }
 serde-big-array = "0.3.2"
@@ -46,9 +46,13 @@ redjubjub = "0.4"
 
 [dev-dependencies]
 bincode = "1"
+
 color-eyre = "0.5.11"
 spandoc = "0.2"
 tracing = "0.1.25"
+
+itertools = "0.10.0"
+
 proptest = "0.10"
 proptest-derive = "0.3"
 

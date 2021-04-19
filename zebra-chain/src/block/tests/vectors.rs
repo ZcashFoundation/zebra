@@ -72,14 +72,15 @@ fn deserialize_blockheader() {
 }
 
 #[test]
-fn deserialize_block() {
+fn round_trip_blocks() {
     zebra_test::init();
 
-    // this one has a bad version field
+    // this one has a bad version field, but it is still valid
     zebra_test::vectors::BLOCK_MAINNET_434873_BYTES
         .zcash_deserialize_into::<Block>()
-        .expect("block test vector should deserialize");
+        .expect("bad version block test vector should deserialize");
 
+    // now do a round-trip test on all the block test vectors
     for block_bytes in zebra_test::vectors::BLOCKS.iter() {
         let block = block_bytes
             .zcash_deserialize_into::<Block>()

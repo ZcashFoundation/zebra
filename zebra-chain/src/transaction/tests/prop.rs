@@ -13,7 +13,13 @@ proptest! {
         let data = tx.zcash_serialize_to_vec().expect("tx should serialize");
         let tx2 = data.zcash_deserialize_into().expect("randomized tx should deserialize");
 
-        prop_assert_eq![tx, tx2];
+        prop_assert_eq![&tx, &tx2];
+
+        let data2 = tx2
+            .zcash_serialize_to_vec()
+            .expect("vec serialization is infallible");
+
+        prop_assert_eq![data, data2, "data must be equal if structs are equal"];
     }
 
     #[test]
