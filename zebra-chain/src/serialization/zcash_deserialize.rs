@@ -3,7 +3,7 @@ use std::{
     io,
 };
 
-use super::{ReadZcashExt, SerializationError, MAX_PROTOCOL_MESSAGE_LEN};
+use super::{AtLeastOne, ReadZcashExt, SerializationError, MAX_PROTOCOL_MESSAGE_LEN};
 
 /// Consensus-critical serialization for Zcash.
 ///
@@ -29,6 +29,15 @@ impl<T: ZcashDeserialize + TrustedPreallocate> ZcashDeserialize for Vec<T> {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         let len = reader.read_compactsize()?.try_into()?;
         zcash_deserialize_external_count(len, reader)
+    }
+}
+
+/// Deserialize an `AtLeastOne` vector, where the number of items is set by a
+/// compactsize prefix in the data. This is the most common format in Zcash.
+impl<T: ZcashDeserialize + TrustedPreallocate> ZcashDeserialize for AtLeastOne<T> {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        let v: Vec<T> = (&mut reader).zcash_deserialize_into()?;
+        v.try_into()
     }
 }
 
