@@ -209,7 +209,7 @@ where
         let timestamp_collector = self.timestamp_collector.clone();
         let inv_collector = self.inv_collector.clone();
         let network = self.config.network;
-        let our_addr = self.config.listen_addr;
+        let our_addr = self.config.external_addr.unwrap_or(self.config.listen_addr);
         let user_agent = self.user_agent.clone();
         let our_services = self.our_services;
         let relay = self.relay;

@@ -14,10 +14,14 @@ const MAX_SINGLE_PEER_RETRIES: usize = 2;
 pub struct Config {
     /// The address on which this node should listen for connections.
     ///
-    /// Zebra will also advertise this address to other nodes. Advertising a
-    /// different external IP address is currently not supported, see #1890
-    /// for details.
+    /// Zebra will also advertise this address to other nodes if
+    /// `external_addr` is not defined.
     pub listen_addr: SocketAddr,
+
+    /// The address which will be advertised to peers for inbound connections.
+    /// 
+    /// Zebra will use `listen_addr` if this address is not defined.
+    pub external_addr: Option<SocketAddr>,
 
     /// The network to connect to.
     pub network: Network,
@@ -154,6 +158,7 @@ impl Default for Config {
             listen_addr: "0.0.0.0:8233"
                 .parse()
                 .expect("Hardcoded address should be parseable"),
+            external_addr: None,
             network: Network::Mainnet,
             initial_mainnet_peers: mainnet_peers,
             initial_testnet_peers: testnet_peers,
