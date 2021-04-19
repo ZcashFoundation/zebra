@@ -15,7 +15,7 @@ use crate::{constants, types::MetaAddr, PeerAddrState};
 
 /// A database of peers, their advertised services, and information on when they
 /// were last seen.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct AddressBook {
     /// Each known peer address has a matching `MetaAddr`
     by_addr: HashMap<SocketAddr, MetaAddr>,

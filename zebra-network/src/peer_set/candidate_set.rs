@@ -1,8 +1,4 @@
-use std::{
-    mem,
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+use std::{mem, sync::Arc, time::Duration};
 
 use futures::stream::{FuturesUnordered, StreamExt};
 use tokio::time::{sleep, sleep_until, timeout, Sleep};
@@ -105,7 +101,7 @@ use crate::{constants, types::MetaAddr, AddressBook, BoxError, Request, Response
 //   * draw arrow from the "peer message" box into the `Responded` state box
 //   * make the "disjoint states" box include `AttemptPending`
 pub(super) struct CandidateSet<S> {
-    pub(super) peer_set: Arc<Mutex<AddressBook>>,
+    pub(super) address_book: Arc<std::sync::Mutex<AddressBook>>,
     pub(super) peer_service: S,
     next_peer_min_wait: Sleep,
 }
@@ -123,10 +119,13 @@ where
     /// are initiated at least `MIN_PEER_CONNECTION_INTERVAL` apart.
     const MIN_PEER_CONNECTION_INTERVAL: Duration = Duration::from_millis(100);
 
-    /// Uses `peer_set` and `peer_service` to manage a [`CandidateSet`] of peers.
-    pub fn new(peer_set: Arc<Mutex<AddressBook>>, peer_service: S) -> CandidateSet<S> {
+    /// Uses `address_book` and `peer_service` to manage a [`CandidateSet`] of peers.
+    pub fn new(
+        address_book: Arc<std::sync::Mutex<AddressBook>>,
+        peer_service: S,
+    ) -> CandidateSet<S> {
         CandidateSet {
-            peer_set,
+            address_book,
             peer_service,
             next_peer_min_wait: sleep(Duration::from_secs(0)),
         }
@@ -163,9 +162,11 @@ where
         for _ in 0..constants::GET_ADDR_FANOUT {
             // CORRECTNESS
             //
-            // avoid deadlocks when there are no connected peers, and:
+            // Use a timeout to avoid deadlocks when there are no connected
+            // peers, and:
             // - we're waiting on a handshake to complete so there are peers, or
-            // - another task that handles or adds peers is waiting on this task to complete.
+            // - another task that handles or adds peers is waiting on this task
+            //   to complete.
             let peer_service =
                 match timeout(constants::REQUEST_TIMEOUT, self.peer_service.ready_and()).await {
                     // update must only return an error for permanent failures
@@ -185,20 +186,31 @@ where
             match rsp {
                 Ok(Response::Peers(rsp_addrs)) => {
                     // Filter new addresses to ensure that gossiped addresses are actually new
-                    let peer_set = &self.peer_set;
+                    let address_book = &self.address_book;
+                    // # Correctness
+                    //
+                    // Briefly hold the address book threaded mutex, each time we
+                    // check an address.
+                    //
                     // TODO: reduce mutex contention by moving the filtering into
-                    // the address book itself
+                    //       the address book itself (#1976)
                     let new_addrs = rsp_addrs
                         .iter()
-                        .filter(|meta| !peer_set.lock().unwrap().contains_addr(&meta.addr))
+                        .filter(|meta| !address_book.lock().unwrap().contains_addr(&meta.addr))
                         .collect::<Vec<_>>();
                     trace!(
                         ?rsp_addrs,
                         new_addr_count = ?new_addrs.len(),
                         "got response to GetPeers"
                     );
+
                     // New addresses are deserialized in the `NeverAttempted` state
-                    peer_set
+                    //
+                    // # Correctness
+                    //
+                    // Briefly hold the address book threaded mutex, to extend
+                    // the address list.
+                    address_book
                         .lock()
                         .unwrap()
                         .extend(new_addrs.into_iter().cloned());
@@ -242,9 +254,10 @@ where
         let mut sleep = sleep_until(current_deadline + Self::MIN_PEER_CONNECTION_INTERVAL);
         mem::swap(&mut self.next_peer_min_wait, &mut sleep);
 
-        // CORRECTNESS
+        // # Correctness
         //
-        // In this critical section, we hold the address mutex.
+        // In this critical section, we hold the address mutex, blocking the
+        // current thread, and all async tasks scheduled on that thread.
         //
         // To avoid deadlocks, the critical section:
         // - must not acquire any other locks
@@ -253,17 +266,17 @@ where
         // To avoid hangs, any computation in the critical section should
         // be kept to a minimum.
         let reconnect = {
-            let mut peer_set_guard = self.peer_set.lock().unwrap();
-            // It's okay to early return here because we're returning None
-            // instead of yielding the next connection.
-            let reconnect = peer_set_guard.reconnection_peers().next()?;
+            let mut guard = self.address_book.lock().unwrap();
+            // It's okay to return without sleeping here, because we're returning
+            // `None`. We only need to sleep before yielding an address.
+            let reconnect = guard.reconnection_peers().next()?;
 
             let reconnect = MetaAddr::new_reconnect(&reconnect.addr, &reconnect.services);
-            peer_set_guard.update(reconnect);
+            guard.update(reconnect);
             reconnect
         };
 
-        // This is the line that is most relevant to the above ## Security section
+        // SECURITY: rate-limit new candidate connections
         sleep.await;
 
         Some(reconnect)
@@ -272,6 +285,10 @@ where
     /// Mark `addr` as a failed peer.
     pub fn report_failed(&mut self, addr: &MetaAddr) {
         let addr = MetaAddr::new_errored(&addr.addr, &addr.services);
-        self.peer_set.lock().unwrap().update(addr);
+        // # Correctness
+        //
+        // Briefly hold the address book threaded mutex, to update the state for
+        // a single address.
+        self.address_book.lock().unwrap().update(addr);
     }
 }

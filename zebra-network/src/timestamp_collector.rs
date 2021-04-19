@@ -1,6 +1,6 @@
 //! The timestamp collector collects liveness information from peers.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use futures::{channel::mpsc, prelude::*};
 
@@ -14,11 +14,11 @@ impl TimestampCollector {
     /// Spawn a new [`TimestampCollector`] task, and return handles for the
     /// transmission channel for timestamp events and for the [`AddressBook`] it
     /// updates.
-    pub fn spawn() -> (Arc<Mutex<AddressBook>>, mpsc::Sender<MetaAddr>) {
+    pub fn spawn() -> (Arc<std::sync::Mutex<AddressBook>>, mpsc::Sender<MetaAddr>) {
         use tracing::Level;
         const TIMESTAMP_WORKER_BUFFER_SIZE: usize = 100;
         let (worker_tx, mut worker_rx) = mpsc::channel(TIMESTAMP_WORKER_BUFFER_SIZE);
-        let address_book = Arc::new(Mutex::new(AddressBook::new(span!(
+        let address_book = Arc::new(std::sync::Mutex::new(AddressBook::new(span!(
             Level::TRACE,
             "timestamp collector"
         ))));
@@ -26,6 +26,10 @@ impl TimestampCollector {
 
         let worker = async move {
             while let Some(event) = worker_rx.next().await {
+                // # Correctness
+                //
+                // Briefly hold the address book threaded mutex, to update the
+                // state for a single address.
                 worker_address_book
                     .lock()
                     .expect("mutex should be unpoisoned")
