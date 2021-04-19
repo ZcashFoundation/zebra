@@ -15,8 +15,8 @@ use zebra_chain::{
     block::{self, Block},
     parameters::Network,
     serialization::{
-        sha256d, ReadZcashExt, SerializationError as Error, WriteZcashExt, ZcashDeserialize,
-        ZcashSerialize,
+        sha256d, zcash_deserialize_bytes_external_count, ReadZcashExt, SerializationError as Error,
+        WriteZcashExt, ZcashDeserialize, ZcashSerialize, MAX_PROTOCOL_MESSAGE_LEN,
     },
     transaction::Transaction,
 };
@@ -30,9 +30,6 @@ use super::{
 
 /// The length of a Bitcoin message header.
 const HEADER_LEN: usize = 24usize;
-
-/// Maximum size of a protocol message body.
-pub use zebra_chain::serialization::MAX_PROTOCOL_MESSAGE_LEN;
 
 /// A codec which produces Bitcoin messages from byte streams and vice versa.
 pub struct Codec {
@@ -251,7 +248,9 @@ impl Codec {
                 writer.write_string(&message)?;
                 writer.write_u8(*ccode as u8)?;
                 writer.write_string(&reason)?;
-                writer.write_all(&data.unwrap())?;
+                if let Some(data) = data {
+                    writer.write_all(data)?;
+                }
             }
             Message::Addr(addrs) => addrs.zcash_serialize(&mut writer)?,
             Message::GetAddr => { /* Empty payload -- no-op */ }
@@ -511,7 +510,8 @@ impl Codec {
             // data (hash identifying the rejected object) or none (and we model
             // the Reject message that way), so instead of passing in the
             // body_len separately and calculating remaining bytes, just try to
-            // read 32 bytes and ignore any failures.
+            // read 32 bytes and ignore any failures. (The caller will log and
+            // ignore any trailing bytes.)
             data: reader.read_32_bytes().ok(),
         })
     }
@@ -597,10 +597,9 @@ impl Codec {
             return Err(Error::Parse("Invalid filterload message body length."));
         }
 
+        // Memory Denial of Service: we just limited the untrusted parsed length
         let filter_length: usize = body_len - FILTERLOAD_REMAINDER_LENGTH;
-
-        let mut filter_bytes = vec![0; filter_length];
-        reader.read_exact(&mut filter_bytes)?;
+        let filter_bytes = zcash_deserialize_bytes_external_count(filter_length, &mut reader)?;
 
         Ok(Message::FilterLoad {
             filter: Filter(filter_bytes),
@@ -613,11 +612,9 @@ impl Codec {
     fn read_filteradd<R: Read>(&self, mut reader: R, body_len: usize) -> Result<Message, Error> {
         const MAX_FILTERADD_LENGTH: usize = 520;
 
+        // Memory Denial of Service: limit the untrusted parsed length
         let filter_length: usize = min(body_len, MAX_FILTERADD_LENGTH);
-
-        // Memory Denial of Service: this length has just been bounded
-        let mut filter_bytes = vec![0; filter_length];
-        reader.read_exact(&mut filter_bytes)?;
+        let filter_bytes = zcash_deserialize_bytes_external_count(filter_length, &mut reader)?;
 
         Ok(Message::FilterAdd { data: filter_bytes })
     }
@@ -695,6 +692,78 @@ mod tests {
             hash_functions_count: 0,
             tweak: Tweak(0),
             flags: 0,
+        };
+
+        use tokio_util::codec::{FramedRead, FramedWrite};
+        let v_bytes = rt.block_on(async {
+            let mut bytes = Vec::new();
+            {
+                let mut fw = FramedWrite::new(&mut bytes, Codec::builder().finish());
+                fw.send(v.clone())
+                    .await
+                    .expect("message should be serialized");
+            }
+            bytes
+        });
+
+        let v_parsed = rt.block_on(async {
+            let mut fr = FramedRead::new(Cursor::new(&v_bytes), Codec::builder().finish());
+            fr.next()
+                .await
+                .expect("a next message should be available")
+                .expect("that message should deserialize")
+        });
+
+        assert_eq!(v, v_parsed);
+    }
+
+    #[test]
+    fn reject_message_no_extra_data_round_trip() {
+        zebra_test::init();
+
+        let rt = Runtime::new().unwrap();
+
+        let v = Message::Reject {
+            message: "experimental".to_string(),
+            ccode: RejectReason::Malformed,
+            reason: "message could not be decoded".to_string(),
+            data: None,
+        };
+
+        use tokio_util::codec::{FramedRead, FramedWrite};
+        let v_bytes = rt.block_on(async {
+            let mut bytes = Vec::new();
+            {
+                let mut fw = FramedWrite::new(&mut bytes, Codec::builder().finish());
+                fw.send(v.clone())
+                    .await
+                    .expect("message should be serialized");
+            }
+            bytes
+        });
+
+        let v_parsed = rt.block_on(async {
+            let mut fr = FramedRead::new(Cursor::new(&v_bytes), Codec::builder().finish());
+            fr.next()
+                .await
+                .expect("a next message should be available")
+                .expect("that message should deserialize")
+        });
+
+        assert_eq!(v, v_parsed);
+    }
+
+    #[test]
+    fn reject_message_extra_data_round_trip() {
+        zebra_test::init();
+
+        let rt = Runtime::new().unwrap();
+
+        let v = Message::Reject {
+            message: "block".to_string(),
+            ccode: RejectReason::Invalid,
+            reason: "invalid block difficulty".to_string(),
+            data: Some([0xff; 32]),
         };
 
         use tokio_util::codec::{FramedRead, FramedWrite};

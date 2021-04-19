@@ -108,15 +108,19 @@ impl Transaction {
             any::<block::Height>(),
             transparent::Input::vec_strategy(ledger_state, 10),
             vec(any::<transparent::Output>(), 0..10),
+            option::of(any::<sapling::ShieldedData<sapling::SharedAnchor>>()),
             any::<Vec<u8>>(),
         )
             .prop_map(
-                |(lock_time, expiry_height, inputs, outputs, rest)| Transaction::V5 {
-                    lock_time,
-                    expiry_height,
-                    inputs,
-                    outputs,
-                    rest,
+                |(lock_time, expiry_height, inputs, outputs, sapling_shielded_data, rest)| {
+                    Transaction::V5 {
+                        lock_time,
+                        expiry_height,
+                        inputs,
+                        outputs,
+                        sapling_shielded_data,
+                        rest,
+                    }
                 },
             )
             .boxed()
@@ -228,6 +232,48 @@ impl Arbitrary for sapling::ShieldedData<sapling::PerSpendAnchor> {
                         b.copy_from_slice(sig_bytes.as_slice());
                         b
                     }),
+                },
+            )
+            .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
+
+impl Arbitrary for sapling::ShieldedData<sapling::SharedAnchor> {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        (
+            any::<Amount>(),
+            any::<sapling::tree::Root>(),
+            prop_oneof![
+                any::<sapling::Spend<sapling::SharedAnchor>>().prop_map(Either::Left),
+                any::<sapling::Output>().prop_map(Either::Right)
+            ],
+            vec(any::<sapling::Spend<sapling::SharedAnchor>>(), 0..10),
+            vec(any::<sapling::Output>(), 0..10),
+            vec(any::<u8>(), 64),
+        )
+            .prop_map(
+                |(value_balance, shared_anchor, first, rest_spends, rest_outputs, sig_bytes)| {
+                    let mut shielded_data = Self {
+                        value_balance,
+                        shared_anchor,
+                        first,
+                        rest_spends,
+                        rest_outputs,
+                        binding_sig: redjubjub::Signature::from({
+                            let mut b = [0u8; 64];
+                            b.copy_from_slice(sig_bytes.as_slice());
+                            b
+                        }),
+                    };
+                    if shielded_data.spends().count() == 0 {
+                        // Todo: delete field when there is no spend
+                        shielded_data.shared_anchor = Default::default();
+                    }
+                    shielded_data
                 },
             )
             .boxed()

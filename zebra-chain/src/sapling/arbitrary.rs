@@ -4,8 +4,8 @@ use proptest::{arbitrary::any, array, collection::vec, prelude::*};
 use crate::primitives::Groth16Proof;
 
 use super::{
-    keys, note, tree, FieldNotPresent, NoteCommitment, Output, PerSpendAnchor, SharedAnchor, Spend,
-    ValueCommitment,
+    keys, note, tree, FieldNotPresent, NoteCommitment, Output, OutputInTransactionV4,
+    PerSpendAnchor, SharedAnchor, Spend, ValueCommitment,
 };
 
 impl Arbitrary for Spend<PerSpendAnchor> {
@@ -85,6 +85,16 @@ impl Arbitrary for Output {
                 zkproof,
             })
             .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
+
+impl Arbitrary for OutputInTransactionV4 {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        any::<Output>().prop_map(OutputInTransactionV4).boxed()
     }
 
     type Strategy = BoxedStrategy<Self>;

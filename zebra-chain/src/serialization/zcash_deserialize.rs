@@ -1,7 +1,9 @@
-use std::{convert::TryInto, io};
+use std::{
+    convert::{TryFrom, TryInto},
+    io,
+};
 
 use super::{ReadZcashExt, SerializationError, MAX_PROTOCOL_MESSAGE_LEN};
-use byteorder::ReadBytesExt;
 
 /// Consensus-critical serialization for Zcash.
 ///
@@ -18,27 +20,95 @@ pub trait ZcashDeserialize: Sized {
     fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError>;
 }
 
+/// Deserialize a `Vec`, where the number of items is set by a compactsize
+/// prefix in the data. This is the most common format in Zcash.
+///
+/// See `zcash_deserialize_external_count` for more details, and usage
+/// information.
 impl<T: ZcashDeserialize + TrustedPreallocate> ZcashDeserialize for Vec<T> {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let len = reader.read_compactsize()?;
-        if len > T::max_allocation() {
-            return Err(SerializationError::Parse(
-                "Vector longer than max_allocation",
-            ));
-        }
-        let mut vec = Vec::with_capacity(len.try_into()?);
-        for _ in 0..len {
-            vec.push(T::zcash_deserialize(&mut reader)?);
-        }
-        Ok(vec)
+        let len = reader.read_compactsize()?.try_into()?;
+        zcash_deserialize_external_count(len, reader)
     }
 }
 
-/// Read a byte.
-impl ZcashDeserialize for u8 {
+/// Implement ZcashDeserialize for Vec<u8> directly instead of using the blanket Vec implementation
+///
+/// This allows us to optimize the inner loop into a single call to `read_exact()`
+/// Note that we don't implement TrustedPreallocate for u8.
+/// This allows the optimization without relying on specialization.
+impl ZcashDeserialize for Vec<u8> {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        Ok(reader.read_u8()?)
+        let len = reader.read_compactsize()?.try_into()?;
+        zcash_deserialize_bytes_external_count(len, reader)
     }
+}
+
+/// Deserialize a `Vec` containing `external_count` items.
+///
+/// In Zcash, most arrays are stored as a compactsize, followed by that number
+/// of items of type `T`. But in `Transaction::V5`, some types are serialized as
+/// multiple arrays in different locations, with a single compactsize before the
+/// first array.
+///
+/// ## Usage
+///
+/// Use `zcash_deserialize_external_count` when the array count is determined by
+/// other data, or a consensus rule.
+///
+/// Use `Vec::zcash_deserialize` for data that contains compactsize count,
+/// followed by the data array.
+///
+/// For example, when a single count applies to multiple arrays:
+/// 1. Use `Vec::zcash_deserialize` for the array that has a data count.
+/// 2. Use `zcash_deserialize_external_count` for the arrays with no count in the
+///    data, passing the length of the first array.
+///
+/// This function has a `zcash_` prefix to alert the reader that the
+/// serialization in use is consensus-critical serialization, rather than
+/// some other kind of serialization.
+pub fn zcash_deserialize_external_count<R: io::Read, T: ZcashDeserialize + TrustedPreallocate>(
+    external_count: usize,
+    mut reader: R,
+) -> Result<Vec<T>, SerializationError> {
+    match u64::try_from(external_count) {
+        Ok(external_count) if external_count > T::max_allocation() => {
+            return Err(SerializationError::Parse(
+                "Vector longer than max_allocation",
+            ))
+        }
+        Ok(_) => {}
+        // As of 2021, usize is less than or equal to 64 bits on all (or almost all?) supported Rust platforms.
+        // So in practice this error is impossible. (But the check is required, because Rust is future-proof
+        // for 128 bit memory spaces.)
+        Err(_) => return Err(SerializationError::Parse("Vector longer than u64::MAX")),
+    }
+    let mut vec = Vec::with_capacity(external_count);
+    for _ in 0..external_count {
+        vec.push(T::zcash_deserialize(&mut reader)?);
+    }
+    Ok(vec)
+}
+
+/// `zcash_deserialize_external_count`, specialised for raw bytes.
+///
+/// This allows us to optimize the inner loop into a single call to `read_exact()`.
+///
+/// This function has a `zcash_` prefix to alert the reader that the
+/// serialization in use is consensus-critical serialization, rather than
+/// some other kind of serialization.
+pub fn zcash_deserialize_bytes_external_count<R: io::Read>(
+    external_count: usize,
+    mut reader: R,
+) -> Result<Vec<u8>, SerializationError> {
+    if external_count > MAX_U8_ALLOCATION {
+        return Err(SerializationError::Parse(
+            "Byte vector longer than MAX_U8_ALLOCATION",
+        ));
+    }
+    let mut vec = vec![0u8; external_count];
+    reader.read_exact(&mut vec)?;
+    Ok(vec)
 }
 
 /// Read a Bitcoin-encoded UTF-8 string.
@@ -83,120 +153,4 @@ pub trait TrustedPreallocate {
 /// It takes 5 bytes to encode a compactsize representing any number netween 2^16 and (2^32 - 1)
 /// MAX_PROTOCOL_MESSAGE_LEN is ~2^21, so the largest Vec<u8> that can be received from an honest peer is
 /// (MAX_PROTOCOL_MESSAGE_LEN - 5);
-const MAX_U8_ALLOCATION: usize = MAX_PROTOCOL_MESSAGE_LEN - 5;
-
-/// Implement ZcashDeserialize for Vec<u8> directly instead of using the blanket Vec implementation
-///
-/// This allows us to optimize the inner loop into a single call to `read_exact()`
-/// Note thate we don't implement TrustedPreallocate for u8.
-/// This allows the optimization without relying on specialization.
-impl ZcashDeserialize for Vec<u8> {
-    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let len = reader.read_compactsize()?.try_into()?;
-        if len > MAX_U8_ALLOCATION {
-            return Err(SerializationError::Parse(
-                "Vector longer than max_allocation",
-            ));
-        }
-        let mut vec = vec![0u8; len];
-        reader.read_exact(&mut vec)?;
-        Ok(vec)
-    }
-}
-
-#[cfg(test)]
-mod test_u8_deserialize {
-    use super::MAX_U8_ALLOCATION;
-    use crate::serialization::MAX_PROTOCOL_MESSAGE_LEN;
-    use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
-    use proptest::{collection::size_range, prelude::*};
-    use std::matches;
-
-    // Allow direct serialization of Vec<u8> for these tests. We don't usuall allow this because some types have
-    // specific rules for about serialization of their inner Vec<u8>. This method could be easily misused if it applied
-    // more generally.
-    impl ZcashSerialize for u8 {
-        fn zcash_serialize<W: std::io::Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
-            writer.write_all(&[*self])
-        }
-    }
-
-    proptest! {
-        #![proptest_config(ProptestConfig::with_cases(3))]
-        #[test]
-        /// Confirm that deserialize yields the expected result for any vec smaller than `MAX_U8_ALLOCATION`
-        fn u8_ser_deser_roundtrip(input in any_with::<Vec<u8>>(size_range(MAX_U8_ALLOCATION).lift()) ) {
-            let serialized = input.zcash_serialize_to_vec().expect("Serialization to vec must succeed");
-            let cursor = std::io::Cursor::new(serialized);
-            let deserialized = <Vec<u8>>::zcash_deserialize(cursor).expect("deserialization from vec must succeed");
-            prop_assert_eq!(deserialized, input)
-        }
-    }
-
-    #[test]
-    /// Confirm that deserialize allows vectors with length up to and including `MAX_U8_ALLOCATION`
-    fn u8_deser_accepts_max_valid_input() {
-        let serialized = vec![0u8; MAX_U8_ALLOCATION]
-            .zcash_serialize_to_vec()
-            .expect("Serialization to vec must succeed");
-        let cursor = std::io::Cursor::new(serialized);
-        let deserialized = <Vec<u8>>::zcash_deserialize(cursor);
-        assert!(deserialized.is_ok())
-    }
-    #[test]
-    /// Confirm that rejects vectors longer than `MAX_U8_ALLOCATION`
-    fn u8_deser_throws_when_input_too_large() {
-        let serialized = vec![0u8; MAX_U8_ALLOCATION + 1]
-            .zcash_serialize_to_vec()
-            .expect("Serialization to vec must succeed");
-        let cursor = std::io::Cursor::new(serialized);
-        let deserialized = <Vec<u8>>::zcash_deserialize(cursor);
-
-        assert!(matches!(
-            deserialized,
-            Err(SerializationError::Parse(
-                "Vector longer than max_allocation"
-            ))
-        ))
-    }
-
-    #[test]
-    /// Confirm that every u8 takes exactly 1 byte when serialized.
-    /// This verifies that our calculated `MAX_U8_ALLOCATION` is indeed an upper bound.
-    fn u8_size_is_correct() {
-        for byte in std::u8::MIN..=std::u8::MAX {
-            let serialized = byte
-                .zcash_serialize_to_vec()
-                .expect("Serialization to vec must succeed");
-            assert!(serialized.len() == 1)
-        }
-    }
-
-    #[test]
-    /// Verify that...
-    /// 1. The smallest disallowed `Vec<u8>` is too big to include in a Zcash Wire Protocol message
-    /// 2. The largest allowed `Vec<u8>`is exactly the size of a maximal Zcash Wire Protocol message
-    fn u8_max_allocation_is_correct() {
-        let mut shortest_disallowed_vec = vec![0u8; MAX_U8_ALLOCATION + 1];
-        let shortest_disallowed_serialized = shortest_disallowed_vec
-            .zcash_serialize_to_vec()
-            .expect("Serialization to vec must succeed");
-
-        // Confirm that shortest_disallowed_vec is only one item larger than the limit
-        assert_eq!((shortest_disallowed_vec.len() - 1), MAX_U8_ALLOCATION);
-        // Confirm that shortest_disallowed_vec is too large to be included in a valid zcash message
-        assert!(shortest_disallowed_serialized.len() > MAX_PROTOCOL_MESSAGE_LEN);
-
-        // Create largest_allowed_vec by removing one element from smallest_disallowed_vec without copying (for efficiency)
-        shortest_disallowed_vec.pop();
-        let longest_allowed_vec = shortest_disallowed_vec;
-        let longest_allowed_serialized = longest_allowed_vec
-            .zcash_serialize_to_vec()
-            .expect("serialization to vec must succed");
-
-        // Check that our largest_allowed_vec contains the maximum number of items
-        assert_eq!(longest_allowed_vec.len(), MAX_U8_ALLOCATION);
-        // Check that our largest_allowed_vec is the size of a maximal protocol message
-        assert_eq!(longest_allowed_serialized.len(), MAX_PROTOCOL_MESSAGE_LEN);
-    }
-}
+pub(crate) const MAX_U8_ALLOCATION: usize = MAX_PROTOCOL_MESSAGE_LEN - 5;

@@ -12,6 +12,7 @@ mod arbitrary;
 #[cfg(test)]
 mod tests;
 
-pub use codec::{Codec, MAX_PROTOCOL_MESSAGE_LEN};
+pub use codec::Codec;
 pub use inv::InventoryHash;
 pub use message::Message;
+pub use zebra_chain::serialization::MAX_PROTOCOL_MESSAGE_LEN;

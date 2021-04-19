@@ -38,11 +38,12 @@ pub struct Config {
     pub peerset_initial_target_size: usize,
 
     /// How frequently we attempt to crawl the network to discover new peer
-    /// connections.
+    /// addresses.
     ///
-    /// This duration only pertains to the rate at which zebra crawls for new
-    /// peers, not the rate zebra connects to new peers, which is restricted to
-    /// CandidateSet::PEER_CONNECTION_INTERVAL
+    /// Zebra asks its connected peers for more peer addresses:
+    /// - regularly, every time `crawl_new_peer_interval` elapses, and
+    /// - if the peer set is busy, and there aren't any peer addresses for the
+    ///   next connection attempt.
     #[serde(alias = "new_peer_interval")]
     pub crawl_new_peer_interval: Duration,
 }

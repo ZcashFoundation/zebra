@@ -106,6 +106,8 @@ pub enum Transaction {
         inputs: Vec<transparent::Input>,
         /// The transparent outputs from the transaction.
         outputs: Vec<transparent::Output>,
+        /// The sapling shielded data for this transaction, if any.
+        sapling_shielded_data: Option<sapling::ShieldedData<sapling::SharedAnchor>>,
         /// The rest of the transaction as bytes
         rest: Vec<u8>,
     },
@@ -188,12 +190,6 @@ impl Transaction {
                     .joinsplits()
                     .flat_map(|joinsplit| joinsplit.nullifiers.iter()),
             ),
-            // Maybe JoinSplits, maybe not, we're still deciding
-            Transaction::V5 { .. } => {
-                unimplemented!(
-                    "v5 transaction format as specified in ZIP-225 after decision on 2021-03-12"
-                )
-            }
             // No JoinSplits
             Transaction::V1 { .. }
             | Transaction::V2 {
@@ -207,7 +203,8 @@ impl Transaction {
             | Transaction::V4 {
                 joinsplit_data: None,
                 ..
-            } => Box::new(std::iter::empty()),
+            }
+            | Transaction::V5 { .. } => Box::new(std::iter::empty()),
         }
     }
 
@@ -216,19 +213,25 @@ impl Transaction {
         // This function returns a boxed iterator because the different
         // transaction variants end up having different iterator types
         match self {
-            // JoinSplits with Groth Proofs
+            // Spends with Groth Proofs
             Transaction::V4 {
                 sapling_shielded_data: Some(sapling_shielded_data),
                 ..
             } => Box::new(sapling_shielded_data.nullifiers()),
-            Transaction::V5 { .. } => {
-                unimplemented!("v5 transaction format as specified in ZIP-225")
-            }
-            // No JoinSplits
+            Transaction::V5 {
+                sapling_shielded_data: Some(sapling_shielded_data),
+                ..
+            } => Box::new(sapling_shielded_data.nullifiers()),
+
+            // No Spends
             Transaction::V1 { .. }
             | Transaction::V2 { .. }
             | Transaction::V3 { .. }
             | Transaction::V4 {
+                sapling_shielded_data: None,
+                ..
+            }
+            | Transaction::V5 {
                 sapling_shielded_data: None,
                 ..
             } => Box::new(std::iter::empty()),
