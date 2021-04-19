@@ -30,6 +30,3 @@ hyper = { git = "https://github.com/hyperium/hyper", rev = "ed2b22a7f66899d33869
 metrics = { git = "https://github.com/ZcashFoundation/metrics", rev = "971133128e5aebe3ad177acffc6154449736cfa2" }
 metrics-exporter-prometheus = { git = "https://github.com/ZcashFoundation/metrics", rev = "971133128e5aebe3ad177acffc6154449736cfa2" }
 tower = { git = "https://github.com/tower-rs/tower", rev = "d4d1c67c6a0e4213a52abcc2b9df6cc58276ee39" }
-
-# Apple M1
-zcash_script = { git = "https://github.com/fanatid/zcash_script/", rev = "48320355781547c7689230c38012d9860d7371ea" }
