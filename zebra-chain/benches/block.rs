@@ -37,7 +37,7 @@ fn block_serialization(c: &mut Criterion) {
 
         let block_bytes = block.zcash_serialize_to_vec().unwrap();
         c.bench_with_input(
-            BenchmarkId::new("zcash_deserialize", "BLOCK_TESTNET_141042"),
+            BenchmarkId::new("zcash_deserialize", name),
             &block_bytes,
             |b, bytes| b.iter(|| Block::zcash_deserialize(Cursor::new(bytes)).unwrap()),
         );
