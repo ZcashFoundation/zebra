@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     primitives::{ed25519, ZkSnarkProof},
-    sprout::JoinSplit,
+    sprout::{JoinSplit, Nullifier},
 };
 
 /// A bundle of [`JoinSplit`] descriptions and signature data.
@@ -47,5 +47,11 @@ impl<P: ZkSnarkProof> JoinSplitData<P> {
     /// Iterate over the [`JoinSplit`]s in `self`.
     pub fn joinsplits(&self) -> impl Iterator<Item = &JoinSplit<P>> {
         std::iter::once(&self.first).chain(self.rest.iter())
+    }
+
+    /// Iterate over the [`Nullifier`]s in `self`.
+    pub fn nullifiers(&self) -> impl Iterator<Item = &Nullifier> {
+        self.joinsplits()
+            .flat_map(|joinsplit| joinsplit.nullifiers.iter())
     }
 }

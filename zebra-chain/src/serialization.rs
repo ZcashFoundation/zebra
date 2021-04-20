@@ -6,6 +6,7 @@
 //! `ReadZcashExt`, extension traits for `io::Read` and `io::Write` with utility functions
 //! for reading and writing data (e.g., the Bitcoin variable-integer format).
 
+mod constraint;
 mod error;
 mod read_zcash;
 mod write_zcash;
@@ -16,6 +17,7 @@ pub(crate) mod serde_helpers;
 
 pub mod sha256d;
 
+pub use constraint::AtLeastOne;
 pub use error::SerializationError;
 pub use read_zcash::ReadZcashExt;
 pub use write_zcash::WriteZcashExt;

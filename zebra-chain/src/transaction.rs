@@ -167,6 +167,8 @@ impl Transaction {
     pub fn sprout_nullifiers(&self) -> Box<dyn Iterator<Item = &sprout::Nullifier> + '_> {
         // This function returns a boxed iterator because the different
         // transaction variants end up having different iterator types
+        // (we could extract bctv and groth as separate iterators, then chain
+        // them together, but that would be much harder to read and maintain)
         match self {
             // JoinSplits with Bctv14 Proofs
             Transaction::V2 {
@@ -176,20 +178,12 @@ impl Transaction {
             | Transaction::V3 {
                 joinsplit_data: Some(joinsplit_data),
                 ..
-            } => Box::new(
-                joinsplit_data
-                    .joinsplits()
-                    .flat_map(|joinsplit| joinsplit.nullifiers.iter()),
-            ),
+            } => Box::new(joinsplit_data.nullifiers()),
             // JoinSplits with Groth Proofs
             Transaction::V4 {
                 joinsplit_data: Some(joinsplit_data),
                 ..
-            } => Box::new(
-                joinsplit_data
-                    .joinsplits()
-                    .flat_map(|joinsplit| joinsplit.nullifiers.iter()),
-            ),
+            } => Box::new(joinsplit_data.nullifiers()),
             // No JoinSplits
             Transaction::V1 { .. }
             | Transaction::V2 {

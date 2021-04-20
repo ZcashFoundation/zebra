@@ -22,6 +22,6 @@ pub use keys::Diversifier;
 pub use note::{EncryptedNote, Note, Nullifier, WrappedNoteKey};
 pub use output::{Output, OutputInTransactionV4, OutputPrefixInTransactionV5};
 pub use shielded_data::{
-    AnchorVariant, FieldNotPresent, PerSpendAnchor, SharedAnchor, ShieldedData,
+    AnchorVariant, FieldNotPresent, PerSpendAnchor, SharedAnchor, ShieldedData, TransferData,
 };
 pub use spend::{Spend, SpendPrefixInTransactionV5};

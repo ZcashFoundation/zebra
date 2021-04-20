@@ -1,6 +1,6 @@
 use std::io;
 
-use super::WriteZcashExt;
+use super::{AtLeastOne, WriteZcashExt};
 
 /// Consensus-critical serialization for Zcash.
 ///
@@ -37,6 +37,14 @@ impl<T: ZcashSerialize> ZcashSerialize for Vec<T> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_compactsize(self.len() as u64)?;
         zcash_serialize_external_count(self, writer)
+    }
+}
+
+/// Serialize an `AtLeastOne` vector as a compactsize number of items, then the
+/// items. This is the most common format in Zcash.
+impl<T: ZcashSerialize> ZcashSerialize for AtLeastOne<T> {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        self.as_vec().zcash_serialize(&mut writer)
     }
 }
 

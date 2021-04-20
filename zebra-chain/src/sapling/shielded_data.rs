@@ -4,7 +4,6 @@
 //! The `value_balance` change is handled using the default zero value.
 //! The anchor change is handled using the `AnchorVariant` type trait.
 
-use futures::future::Either;
 use serde::{de::DeserializeOwned, Serialize};
 
 use crate::{
@@ -17,7 +16,7 @@ use crate::{
         output::OutputPrefixInTransactionV5, spend::SpendPrefixInTransactionV5, tree, Nullifier,
         Output, Spend, ValueCommitment,
     },
-    serialization::{serde_helpers, TrustedPreallocate},
+    serialization::{AtLeastOne, TrustedPreallocate},
 };
 
 use std::{
@@ -74,52 +73,91 @@ pub trait AnchorVariant {
 ///
 /// The Sapling `value_balance` field is optional in `Transaction::V5`, but
 /// required in `Transaction::V4`. In both cases, if there is no `ShieldedData`,
-/// then the field value must be zero. Therefore, only need to store
+/// then the field value must be zero. Therefore, we only need to store
 /// `value_balance` when there is some Sapling `ShieldedData`.
 ///
 /// In `Transaction::V4`, each `Spend` has its own anchor. In `Transaction::V5`,
-/// there is a single `shared_anchor` for the entire transaction. This
-/// structural difference is modeled using the `AnchorVariant` type trait.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+/// there is a single `shared_anchor` for the entire transaction, which is only
+/// present when there is at least one spend. These structural differences are
+/// modeled using the `AnchorVariant` type trait and `TransferData` enum.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ShieldedData<AnchorV>
 where
     AnchorV: AnchorVariant + Clone,
 {
     /// The net value of Sapling spend transfers minus output transfers.
     pub value_balance: Amount,
-    /// The shared anchor for all `Spend`s in this transaction.
+
+    /// A bundle of spends and outputs, containing at least one spend or
+    /// output.
     ///
-    /// The anchor is the root of the Sapling note commitment tree in a previous
-    /// block. This root should be in the best chain for a transaction to be
-    /// mined, and it must be in the relevant chain for a transaction to be
-    /// valid.
-    ///
-    /// Some transaction versions have a per-spend anchor, rather than a shared
-    /// anchor.
-    pub shared_anchor: AnchorV::Shared,
-    /// Either a spend or output description.
-    ///
-    /// Storing this separately ensures that it is impossible to construct
-    /// an invalid `ShieldedData` with no spends or outputs.
-    ///
-    /// However, it's not necessary to access or process `first` and `rest`
-    /// separately, as the [`ShieldedData::spends`] and [`ShieldedData::outputs`]
-    /// methods provide iterators over all of the [`Spend`]s and
-    /// [`Output`]s.
-    #[serde(with = "serde_helpers::Either")]
-    pub first: Either<Spend<AnchorV>, Output>,
-    /// The rest of the [`Spend`]s for this transaction.
-    ///
-    /// Note that the [`ShieldedData::spends`] method provides an iterator
-    /// over all spend descriptions.
-    pub rest_spends: Vec<Spend<AnchorV>>,
-    /// The rest of the [`Output`]s for this transaction.
-    ///
-    /// Note that the [`ShieldedData::outputs`] method provides an iterator
-    /// over all output descriptions.
-    pub rest_outputs: Vec<Output>,
+    /// In V5 transactions, also contains a shared anchor, if there are any
+    /// spends.
+    pub transfers: TransferData<AnchorV>,
+
     /// A signature on the transaction hash.
     pub binding_sig: Signature<Binding>,
+}
+
+/// A bundle of [`Spend`] and [`Output`] descriptions, and a shared anchor.
+///
+/// This wrapper type bundles at least one Spend or Output description with
+/// the required anchor data, so that an `Option<ShieldedData>` (which contains
+/// this type) correctly models the presence or absence of any spends and
+/// shielded data, across both V4 and V5 transactions.
+///
+/// Specifically, TransferData ensures that:
+/// * there is at least one spend or output, and
+/// * the shared anchor is only present when there are spends.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum TransferData<AnchorV>
+where
+    AnchorV: AnchorVariant + Clone,
+{
+    /// A bundle containing at least one spend, and the shared spend anchor.
+    /// There can also be zero or more outputs.
+    ///
+    /// In Transaction::V5, if there are any spends, there must also be a shared
+    /// spend anchor.
+    SpendsAndMaybeOutputs {
+        /// The shared anchor for all `Spend`s in this transaction.
+        ///
+        /// The anchor is the root of the Sapling note commitment tree in a previous
+        /// block. This root should be in the best chain for a transaction to be
+        /// mined, and it must be in the relevant chain for a transaction to be
+        /// valid.
+        ///
+        /// Some transaction versions have a per-spend anchor, rather than a shared
+        /// anchor.
+        ///
+        /// Use the `shared_anchor` method to access this field.
+        shared_anchor: AnchorV::Shared,
+
+        /// At least one spend.
+        ///
+        /// Use the [`ShieldedData::spends`] method to get an iterator over the
+        /// [`Spend`]s in this `TransferData`.
+        spends: AtLeastOne<Spend<AnchorV>>,
+
+        /// Maybe some outputs (can be empty).
+        ///
+        /// Use the [`ShieldedData::outputs`] method to get an iterator over the
+        /// [`Outputs`]s in this `TransferData`.
+        maybe_outputs: Vec<Output>,
+    },
+
+    /// A bundle containing at least one output, with no spends and no shared
+    /// spend anchor.
+    ///
+    /// In Transaction::V5, if there are no spends, there must not be a shared
+    /// anchor.
+    JustOutputs {
+        /// At least one output.
+        ///
+        /// Use the [`ShieldedData::outputs`] method to get an iterator over the
+        /// [`Outputs`]s in this `TransferData`.
+        outputs: AtLeastOne<Output>,
+    },
 }
 
 impl<AnchorV> ShieldedData<AnchorV>
@@ -136,9 +174,13 @@ where
     ///
     /// Do not use this function for serialization.
     pub fn spends_per_anchor(&self) -> impl Iterator<Item = Spend<PerSpendAnchor>> + '_ {
-        self.spends()
-            .cloned()
-            .map(move |spend| Spend::<PerSpendAnchor>::from((spend, self.shared_anchor.clone())))
+        self.spends().cloned().map(move |spend| {
+            Spend::<PerSpendAnchor>::from((
+                spend,
+                self.shared_anchor()
+                    .expect("shared anchor must be Some if there are any spends"),
+            ))
+        })
     }
 }
 
@@ -153,22 +195,21 @@ where
     ///
     /// Use this function for serialization.
     pub fn spends(&self) -> impl Iterator<Item = &Spend<AnchorV>> {
-        match self.first {
-            Either::Left(ref spend) => Some(spend),
-            Either::Right(_) => None,
-        }
-        .into_iter()
-        .chain(self.rest_spends.iter())
+        self.transfers.spends()
     }
 
     /// Iterate over the [`Output`]s for this transaction.
     pub fn outputs(&self) -> impl Iterator<Item = &Output> {
-        match self.first {
-            Either::Left(_) => None,
-            Either::Right(ref output) => Some(output),
-        }
-        .into_iter()
-        .chain(self.rest_outputs.iter())
+        self.transfers.outputs()
+    }
+
+    /// Provide the shared anchor for this transaction, if present.
+    ///
+    /// The shared anchor is only present if:
+    /// * there is at least one spend, and
+    /// * this is a `V5` transaction.
+    pub fn shared_anchor(&self) -> Option<AnchorV::Shared> {
+        self.transfers.shared_anchor()
     }
 
     /// Collect the [`Nullifier`]s for this transaction, if it contains
@@ -216,39 +257,50 @@ where
     }
 }
 
-// Technically, it's possible to construct two equivalent representations
-// of a ShieldedData with at least one spend and at least one output, depending
-// on which goes in the `first` slot.  This is annoying but a smallish price to
-// pay for structural validity.
-//
-// A `ShieldedData<PerSpendAnchor>` can never be equal to a
-// `ShieldedData<SharedAnchor>`, even if they have the same effects.
-
-impl<AnchorV> std::cmp::PartialEq for ShieldedData<AnchorV>
+impl<AnchorV> TransferData<AnchorV>
 where
-    AnchorV: AnchorVariant + Clone + PartialEq,
+    AnchorV: AnchorVariant + Clone,
 {
-    fn eq(&self, other: &Self) -> bool {
-        // First check that the lengths match, so we know it is safe to use zip,
-        // which truncates to the shorter of the two iterators.
-        if self.spends().count() != other.spends().count() {
-            return false;
-        }
-        if self.outputs().count() != other.outputs().count() {
-            return false;
-        }
+    /// Iterate over the [`Spend`]s for this transaction, returning them as
+    /// their generic type.
+    pub fn spends(&self) -> impl Iterator<Item = &Spend<AnchorV>> {
+        use TransferData::*;
 
-        // Now check that all the fields match
-        self.value_balance == other.value_balance
-            && self.shared_anchor == other.shared_anchor
-            && self.binding_sig == other.binding_sig
-            && self.spends().zip(other.spends()).all(|(a, b)| a == b)
-            && self.outputs().zip(other.outputs()).all(|(a, b)| a == b)
+        let spends = match self {
+            SpendsAndMaybeOutputs { spends, .. } => Some(spends.iter()),
+            JustOutputs { .. } => None,
+        };
+
+        // this awkward construction avoids returning a newtype struct or
+        // type-erased boxed iterator
+        spends.into_iter().flatten()
+    }
+
+    /// Iterate over the [`Output`]s for this transaction.
+    pub fn outputs(&self) -> impl Iterator<Item = &Output> {
+        use TransferData::*;
+
+        match self {
+            SpendsAndMaybeOutputs { maybe_outputs, .. } => maybe_outputs,
+            JustOutputs { outputs, .. } => outputs.as_vec(),
+        }
+        .iter()
+    }
+
+    /// Provide the shared anchor for this transaction, if present.
+    ///
+    /// The shared anchor is only present if:
+    /// * there is at least one spend, and
+    /// * this is a `V5` transaction.
+    pub fn shared_anchor(&self) -> Option<AnchorV::Shared> {
+        use TransferData::*;
+
+        match self {
+            SpendsAndMaybeOutputs { shared_anchor, .. } => Some(shared_anchor.clone()),
+            JustOutputs { .. } => None,
+        }
     }
 }
-
-impl<AnchorV> std::cmp::Eq for ShieldedData<AnchorV> where AnchorV: AnchorVariant + Clone + PartialEq
-{}
 
 impl TrustedPreallocate for Groth16Proof {
     fn max_allocation() -> u64 {

@@ -1,13 +1,13 @@
 use super::super::*;
 
 use crate::{
-    block::Block,
+    block::{Block, MAX_BLOCK_BYTES},
     sapling::{PerSpendAnchor, SharedAnchor},
     serialization::{WriteZcashExt, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
 };
 
-use block::MAX_BLOCK_BYTES;
 use itertools::Itertools;
+
 use std::convert::TryInto;
 
 #[test]
@@ -372,8 +372,8 @@ fn transaction_to_fake_v5(trans: &Transaction) -> Transaction {
 fn sapling_shielded_v4_to_fake_v5(
     v4_shielded: sapling::ShieldedData<PerSpendAnchor>,
 ) -> Option<sapling::ShieldedData<SharedAnchor>> {
-    use futures::future::Either::*;
     use sapling::ShieldedData;
+    use sapling::TransferData::*;
 
     let unique_anchors: Vec<_> = v4_shielded
         .spends()
@@ -381,30 +381,32 @@ fn sapling_shielded_v4_to_fake_v5(
         .unique()
         .collect();
 
-    let shared_anchor = match unique_anchors.as_slice() {
-        [unique_anchor] => *unique_anchor,
-        // TODO: remove shared anchor when there are no spends
-        [] => Default::default(),
-        // Multiple different anchors, can't convert to v5
-        _ => return None,
-    };
+    let fake_spends: Vec<_> = v4_shielded
+        .spends()
+        .cloned()
+        .map(sapling_spend_v4_to_fake_v5)
+        .collect();
 
-    let first = match v4_shielded.first {
-        Left(spend) => Left(sapling_spend_v4_to_fake_v5(spend)),
-        Right(output) => Right(output),
+    let transfers = match v4_shielded.transfers {
+        SpendsAndMaybeOutputs { maybe_outputs, .. } => {
+            let shared_anchor = match unique_anchors.as_slice() {
+                [unique_anchor] => *unique_anchor,
+                // Multiple different anchors, can't convert to v5
+                _ => return None,
+            };
+
+            SpendsAndMaybeOutputs {
+                shared_anchor,
+                spends: fake_spends.try_into().unwrap(),
+                maybe_outputs,
+            }
+        }
+        JustOutputs { outputs } => JustOutputs { outputs },
     };
 
     let fake_shielded_v5 = ShieldedData::<SharedAnchor> {
         value_balance: v4_shielded.value_balance,
-        shared_anchor,
-        first,
-        rest_spends: v4_shielded
-            .rest_spends
-            .iter()
-            .cloned()
-            .map(sapling_spend_v4_to_fake_v5)
-            .collect(),
-        rest_outputs: v4_shielded.rest_outputs,
+        transfers,
         binding_sig: v4_shielded.binding_sig,
     };
 
