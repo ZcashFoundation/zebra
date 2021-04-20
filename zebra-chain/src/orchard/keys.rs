@@ -1000,17 +1000,4 @@ impl From<&OutgoingCipherKey> for [u8; 32] {
     }
 }
 
-// impl
-//     From<(
-//         OutgoingViewingKey,
-//         ValueCommitment,
-//         NoteCommitment,
-//         EphemeralKey,
-//     )> for OutgoingCipherKey
-// {
-//     type Error = &'static str;
-
-//     fn from((): ()) -> Result<Self, Self::Error> {
-//         Self(prf_ock())
-//     }
-// }
+// TODO: derive `OutgoingCipherKey`: https://github.com/ZcashFoundation/zebra/issues/2041
