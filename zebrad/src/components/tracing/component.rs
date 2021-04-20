@@ -38,7 +38,7 @@ impl Tracing {
             (None, None)
         };
 
-        let journaldlayer = if config.journald {
+        let journaldlayer = if config.use_journald {
             let layer = tracing_journald::layer()
                 .map_err(|e| FrameworkErrorKind::ComponentError.context(e))?;
             Some(layer)

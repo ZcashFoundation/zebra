@@ -108,7 +108,7 @@ pub struct TracingSection {
 
     /// The journald flag is used for activating of sending tracing events to
     /// systemd-journald, on Linux distributions that use systemd.
-    pub journald: bool,
+    pub use_journald: bool,
 }
 
 impl Default for TracingSection {
@@ -118,7 +118,7 @@ impl Default for TracingSection {
             filter: None,
             endpoint_addr: None,
             flamegraph: None,
-            journald: false,
+            use_journald: false,
         }
     }
 }

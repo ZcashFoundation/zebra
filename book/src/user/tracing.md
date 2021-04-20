@@ -12,7 +12,7 @@ if the config had `endpoint_addr = '127.0.0.1:3000'`, then
 
 See the [`filter`][filter] documentation for more details.
 
-Zebra also have support:
+Zebra also have support for:
 
 * Generating [flamegraphs] of tracing spans, configured using the
 [`flamegraph`][flamegraph] option.
