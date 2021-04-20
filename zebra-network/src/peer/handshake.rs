@@ -10,9 +10,9 @@ use std::{
 use chrono::{TimeZone, Utc};
 use futures::{
     channel::{mpsc, oneshot},
-    prelude::*,
+    future, FutureExt, SinkExt, StreamExt,
 };
-use tokio::{net::TcpStream, sync::broadcast, time::timeout};
+use tokio::{net::TcpStream, sync::broadcast, task::JoinError, time::timeout};
 use tokio_util::codec::Framed;
 use tower::Service;
 use tracing::{span, Level, Span};
@@ -30,7 +30,7 @@ use crate::{
     BoxError, Config,
 };
 
-use super::{Client, Connection, ErrorSlot, HandshakeError, PeerError};
+use super::{Client, ClientRequest, Connection, ErrorSlot, HandshakeError, PeerError};
 
 /// A [`Service`] that handshakes with a remote peer and constructs a
 /// client/server pair.
@@ -180,6 +180,138 @@ where
     }
 }
 
+/// Negotiate the Zcash network protocol version with the remote peer
+/// at `addr`, using the connection `peer_conn`.
+///
+/// We split `Handshake` into its components before calling this function,
+/// to avoid infectious `Sync` bounds on the returned future.
+pub async fn negotiate_version(
+    peer_conn: &mut Framed<TcpStream, Codec>,
+    addr: &SocketAddr,
+    config: Config,
+    nonces: Arc<Mutex<HashSet<Nonce>>>,
+    user_agent: String,
+    our_services: PeerServices,
+    relay: bool,
+) -> Result<(Version, PeerServices), HandshakeError> {
+    // Create a random nonce for this connection
+    let local_nonce = Nonce::default();
+    nonces
+        .lock()
+        .expect("mutex should be unpoisoned")
+        .insert(local_nonce);
+
+    // Don't leak our exact clock skew to our peers. On the other hand,
+    // we can't deviate too much, or zcashd will get confused.
+    // Inspection of the zcashd source code reveals that the timestamp
+    // is only ever used at the end of parsing the version message, in
+    //
+    // pfrom->nTimeOffset = timeWarning.AddTimeData(pfrom->addr, nTime, GetTime());
+    //
+    // AddTimeData is defined in src/timedata.cpp and is a no-op as long
+    // as the difference between the specified timestamp and the
+    // zcashd's local time is less than TIMEDATA_WARNING_THRESHOLD, set
+    // to 10 * 60 seconds (10 minutes).
+    //
+    // nTimeOffset is peer metadata that is never used, except for
+    // statistics.
+    //
+    // To try to stay within the range where zcashd will ignore our clock skew,
+    // truncate the timestamp to the nearest 5 minutes.
+    let now = Utc::now().timestamp();
+    let timestamp = Utc.timestamp(now - now.rem_euclid(5 * 60), 0);
+
+    let our_version = Message::Version {
+        version: constants::CURRENT_VERSION,
+        services: our_services,
+        timestamp,
+        address_recv: (PeerServices::NODE_NETWORK, *addr),
+        // TODO: detect external address (#1893)
+        address_from: (our_services, config.listen_addr),
+        nonce: local_nonce,
+        user_agent: user_agent.clone(),
+        // The protocol works fine if we don't reveal our current block height,
+        // and not sending it means we don't need to be connected to the chain state.
+        start_height: block::Height(0),
+        relay,
+    };
+
+    debug!(?our_version, "sending initial version message");
+    peer_conn.send(our_version).await?;
+
+    let remote_msg = peer_conn
+        .next()
+        .await
+        .ok_or(HandshakeError::ConnectionClosed)??;
+
+    // Check that we got a Version and destructure its fields into the local scope.
+    debug!(?remote_msg, "got message from remote peer");
+    let (remote_nonce, remote_services, remote_version) = if let Message::Version {
+        nonce,
+        services,
+        version,
+        ..
+    } = remote_msg
+    {
+        (nonce, services, version)
+    } else {
+        Err(HandshakeError::UnexpectedMessage(Box::new(remote_msg)))?
+    };
+
+    // Check for nonce reuse, indicating self-connection.
+    let nonce_reuse = {
+        let mut locked_nonces = nonces.lock().expect("mutex should be unpoisoned");
+        let nonce_reuse = locked_nonces.contains(&remote_nonce);
+        // Regardless of whether we observed nonce reuse, clean up the nonce set.
+        locked_nonces.remove(&local_nonce);
+        nonce_reuse
+    };
+    if nonce_reuse {
+        Err(HandshakeError::NonceReuse)?;
+    }
+
+    peer_conn.send(Message::Verack).await?;
+
+    let remote_msg = peer_conn
+        .next()
+        .await
+        .ok_or(HandshakeError::ConnectionClosed)??;
+    if let Message::Verack = remote_msg {
+        debug!("got verack from remote peer");
+    } else {
+        Err(HandshakeError::UnexpectedMessage(Box::new(remote_msg)))?;
+    }
+
+    // XXX in zcashd remote peer can only send one version message and
+    // we would disconnect here if it received a second one. Is it even possible
+    // for that to happen to us here?
+
+    // TODO: Reject incoming connections from nodes that don't know about the current epoch.
+    // zcashd does this:
+    //  const Consensus::Params& consensusParams = chainparams.GetConsensus();
+    //  auto currentEpoch = CurrentEpoch(GetHeight(), consensusParams);
+    //  if (pfrom->nVersion < consensusParams.vUpgrades[currentEpoch].nProtocolVersion)
+    //
+    // For approximately 1.5 days before a network upgrade, zcashd also:
+    //  - avoids old peers, and
+    //  - prefers updated peers.
+    // We haven't decided if we need this behaviour in Zebra yet (see #706).
+    //
+    // At the network upgrade, we also need to disconnect from old peers (see #1334).
+    //
+    // TODO: replace min_for_upgrade(network, MIN_NETWORK_UPGRADE) with
+    //       current_min(network, height) where network is the
+    //       configured network, and height is the best tip's block
+    //       height.
+
+    if remote_version < Version::min_for_upgrade(config.network, constants::MIN_NETWORK_UPGRADE) {
+        // Disconnect if peer is using an obsolete version.
+        Err(HandshakeError::ObsoleteVersion(remote_version))?;
+    }
+
+    Ok((remote_version, remote_services))
+}
+
 impl<S> Service<(TcpStream, SocketAddr)> for Handshake<S>
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
@@ -197,148 +329,51 @@ where
     fn call(&mut self, req: (TcpStream, SocketAddr)) -> Self::Future {
         let (tcp_stream, addr) = req;
 
-        let connector_span = span!(Level::INFO, "connector", addr = ?addr);
+        let connector_span = span!(Level::INFO, "connector", ?addr);
         // set the peer connection span's parent to the global span, as it
         // should exist independently of its creation source (inbound
         // connection, crawler, initial peer, ...)
-        let connection_span = span!(parent: &self.parent_span, Level::INFO, "peer", addr = ?addr);
+        let connection_span = span!(parent: &self.parent_span, Level::INFO, "peer", ?addr);
 
         // Clone these upfront, so they can be moved into the future.
         let nonces = self.nonces.clone();
         let inbound_service = self.inbound_service.clone();
         let timestamp_collector = self.timestamp_collector.clone();
         let inv_collector = self.inv_collector.clone();
-        let network = self.config.network;
-        let our_addr = self.config.listen_addr;
+        let config = self.config.clone();
         let user_agent = self.user_agent.clone();
         let our_services = self.our_services;
         let relay = self.relay;
 
         let fut = async move {
-            debug!("connecting to remote peer");
+            debug!(?addr, "negotiating protocol version with remote peer");
 
             // CORRECTNESS
             //
             // As a defence-in-depth against hangs, every send or next on stream
             // should be wrapped in a timeout.
-            let mut stream = Framed::new(
+            let mut peer_conn = Framed::new(
                 tcp_stream,
                 Codec::builder()
-                    .for_network(network)
+                    .for_network(config.network)
                     .with_metrics_label(addr.ip().to_string())
                     .finish(),
             );
 
-            let local_nonce = Nonce::default();
-            nonces
-                .lock()
-                .expect("mutex should be unpoisoned")
-                .insert(local_nonce);
-
-            // Don't leak our exact clock skew to our peers. On the other hand,
-            // we can't deviate too much, or zcashd will get confused.
-            // Inspection of the zcashd source code reveals that the timestamp
-            // is only ever used at the end of parsing the version message, in
-            //
-            // pfrom->nTimeOffset = timeWarning.AddTimeData(pfrom->addr, nTime, GetTime());
-            //
-            // AddTimeData is defined in src/timedata.cpp and is a no-op as long
-            // as the difference between the specified timestamp and the
-            // zcashd's local time is less than TIMEDATA_WARNING_THRESHOLD, set
-            // to 10 * 60 seconds (10 minutes).
-            //
-            // nTimeOffset is peer metadata that is never used, except for
-            // statistics.
-            //
-            // To try to stay within the range where zcashd will ignore our clock skew,
-            // truncate the timestamp to the nearest 5 minutes.
-            let now = Utc::now().timestamp();
-            let timestamp = Utc.timestamp(now - now.rem_euclid(5 * 60), 0);
-
-            let version = Message::Version {
-                version: constants::CURRENT_VERSION,
-                services: our_services,
-                timestamp,
-                address_recv: (PeerServices::NODE_NETWORK, addr),
-                address_from: (our_services, our_addr),
-                nonce: local_nonce,
-                user_agent,
-                // The protocol works fine if we don't reveal our current block height,
-                // and not sending it means we don't need to be connected to the chain state.
-                start_height: block::Height(0),
-                relay,
-            };
-
-            debug!(?version, "sending initial version message");
-            timeout(constants::REQUEST_TIMEOUT, stream.send(version)).await??;
-
-            let remote_msg = timeout(constants::REQUEST_TIMEOUT, stream.next())
-                .await?
-                .ok_or(HandshakeError::ConnectionClosed)??;
-
-            // Check that we got a Version and destructure its fields into the local scope.
-            debug!(?remote_msg, "got message from remote peer");
-            let (remote_nonce, remote_services, remote_version) = if let Message::Version {
-                nonce,
-                services,
-                version,
-                ..
-            } = remote_msg
-            {
-                (nonce, services, version)
-            } else {
-                return Err(HandshakeError::UnexpectedMessage(Box::new(remote_msg)));
-            };
-
-            // Check for nonce reuse, indicating self-connection.
-            let nonce_reuse = {
-                let mut locked_nonces = nonces.lock().expect("mutex should be unpoisoned");
-                let nonce_reuse = locked_nonces.contains(&remote_nonce);
-                // Regardless of whether we observed nonce reuse, clean up the nonce set.
-                locked_nonces.remove(&local_nonce);
-                nonce_reuse
-            };
-            if nonce_reuse {
-                return Err(HandshakeError::NonceReuse);
-            }
-
-            timeout(constants::REQUEST_TIMEOUT, stream.send(Message::Verack)).await??;
-
-            let remote_msg = timeout(constants::REQUEST_TIMEOUT, stream.next())
-                .await?
-                .ok_or(HandshakeError::ConnectionClosed)??;
-            if let Message::Verack = remote_msg {
-                debug!("got verack from remote peer");
-            } else {
-                return Err(HandshakeError::UnexpectedMessage(Box::new(remote_msg)));
-            }
-
-            // XXX in zcashd remote peer can only send one version message and
-            // we would disconnect here if it received a second one. Is it even possible
-            // for that to happen to us here?
-
-            // TODO: Reject incoming connections from nodes that don't know about the current epoch.
-            // zcashd does this:
-            //  const Consensus::Params& consensusParams = chainparams.GetConsensus();
-            //  auto currentEpoch = CurrentEpoch(GetHeight(), consensusParams);
-            //  if (pfrom->nVersion < consensusParams.vUpgrades[currentEpoch].nProtocolVersion)
-            //
-            // For approximately 1.5 days before a network upgrade, zcashd also:
-            //  - avoids old peers, and
-            //  - prefers updated peers.
-            // We haven't decided if we need this behaviour in Zebra yet (see #706).
-            //
-            // At the network upgrade, we also need to disconnect from old peers (see #1334).
-            //
-            // TODO: replace min_for_upgrade(network, MIN_NETWORK_UPGRADE) with
-            //       current_min(network, height) where network is the
-            //       configured network, and height is the best tip's block
-            //       height.
-
-            if remote_version < Version::min_for_upgrade(network, constants::MIN_NETWORK_UPGRADE) {
-                // Disconnect if peer is using an obsolete version.
-                return Err(HandshakeError::ObsoleteVersion(remote_version));
-            }
+            // Wrap the entire initial connection setup in a timeout.
+            let (remote_version, remote_services) = timeout(
+                constants::HANDSHAKE_TIMEOUT,
+                negotiate_version(
+                    &mut peer_conn,
+                    &addr,
+                    config,
+                    nonces,
+                    user_agent,
+                    our_services,
+                    relay,
+                ),
+            )
+            .await??;
 
             // Set the connection's version to the minimum of the received version or our own.
             let negotiated_version = std::cmp::min(remote_version, constants::CURRENT_VERSION);
@@ -348,7 +383,7 @@ where
             // XXX The tokio documentation says not to do this while any frames are still being processed.
             // Since we don't know that here, another way might be to release the tcp
             // stream from the unversioned Framed wrapper and construct a new one with a versioned codec.
-            let bare_codec = stream.codec_mut();
+            let bare_codec = peer_conn.codec_mut();
             bare_codec.reconfigure_version(negotiated_version);
 
             debug!("constructing client, spawning server");
@@ -365,7 +400,7 @@ where
                 error_slot: slot.clone(),
             };
 
-            let (peer_tx, peer_rx) = stream.split();
+            let (peer_tx, peer_rx) = peer_conn.split();
 
             // Instrument the peer's rx and tx streams.
 
@@ -389,6 +424,7 @@ where
             // Every message and error must update the peer address state via
             // the inbound_ts_collector.
             let inbound_ts_collector = timestamp_collector.clone();
+            let inv_collector = inv_collector.clone();
             let peer_rx = peer_rx
                 .then(move |msg| {
                     // Add a metric for inbound messages and errors.
@@ -487,22 +523,22 @@ where
             // - every error/shutdown must update the address book state and return
             //
             // The address book state can be updated via `ClientRequest.tx`, or the
-            // timestamp_collector.
+            // heartbeat_ts_collector.
             //
             // Returning from the spawned closure terminates the connection's heartbeat task.
             let heartbeat_span = tracing::debug_span!(parent: connection_span, "heartbeat");
+            let heartbeat_ts_collector = timestamp_collector.clone();
             tokio::spawn(
                 async move {
-                    use super::ClientRequest;
                     use futures::future::Either;
 
                     let mut shutdown_rx = shutdown_rx;
                     let mut server_tx = server_tx;
-                    let mut timestamp_collector = timestamp_collector.clone();
+                    let mut timestamp_collector = heartbeat_ts_collector.clone();
                     let mut interval_stream = tokio::time::interval(constants::HEARTBEAT_INTERVAL);
+
                     loop {
                         let shutdown_rx_ref = Pin::new(&mut shutdown_rx);
-                        let mut send_addr_err = false;
 
                         // CORRECTNESS
                         //
@@ -513,105 +549,34 @@ where
                         // slow rate, and shutdown is a oneshot. If both futures
                         // are ready, we want the shutdown to take priority over
                         // sending a useless heartbeat.
-                        match future::select(shutdown_rx_ref, interval_stream.next()).await {
-                            Either::Right(_) => {
-                                let (tx, rx) = oneshot::channel();
-                                let request = Request::Ping(Nonce::default());
-                                tracing::trace!(?request, "queueing heartbeat request");
-                                match server_tx.try_send(ClientRequest {
-                                    request,
-                                    tx,
-                                    span: tracing::Span::current(),
-                                }) {
-                                    Ok(()) => {
-                                        // TODO: also wait on the shutdown_rx here
-                                        match timeout(
-                                            constants::HEARTBEAT_INTERVAL,
-                                            server_tx.flush(),
-                                        )
-                                        .await
-                                        {
-                                            Ok(Ok(())) => {
-                                            }
-                                            Ok(Err(e)) => {
-                                                tracing::warn!(
-                                                    ?e,
-                                                    "flushing client request failed, shutting down"
-                                                );
-                                                send_addr_err = true;
-                                            }
-                                            Err(e) => {
-                                                tracing::warn!(
-                                                    ?e,
-                                                    "flushing client request timed out, shutting down"
-                                                );
-                                                send_addr_err = true;
-                                            }
-                                        }
-                                    }
-                                    Err(e) => {
-                                        tracing::trace!(
-                                            ?e,
-                                            "error sending heartbeat request, shutting down"
-                                        );
-                                        if e.is_disconnected() {
-                                            let ClientRequest { tx, .. } = e.into_inner();
-                                            let _ =
-                                                tx.send(Err(PeerError::ConnectionClosed.into()));
-                                        } else if e.is_full() {
-                                            // TODO: wait for the sink to be ready, or wait for a timeout,
-                                            // then close the connection with an overloaded error (#1551)
-                                            let ClientRequest { tx, .. } = e.into_inner();
-                                            let _ = tx.send(Err(PeerError::Overloaded.into()));
-                                        } else {
-                                            // we need to map unexpected error types to PeerErrors
-                                            panic!("unexpected try_send error: {:?}", e);
-                                        }
-                                        return;
-                                    }
-                                }
-                                // Heartbeats are checked internally to the
-                                // connection logic, but we need to wait on the
-                                // response to avoid canceling the request.
-                                //
-                                // TODO: also wait on the shutdown_rx here
-                                match timeout(constants::HEARTBEAT_INTERVAL, rx).await {
-                                    Ok(Ok(_)) => tracing::trace!("got heartbeat response"),
-                                    Ok(Err(e)) => {
-                                        tracing::warn!(
-                                            ?e,
-                                            "error awaiting heartbeat response, shutting down"
-                                        );
-                                        send_addr_err = true;
-                                    }
-                                    Err(e) => {
-                                        tracing::warn!(
-                                            ?e,
-                                            "heartbeat response timed out, shutting down"
-                                        );
-                                        send_addr_err = true;
-                                    }
-                                }
-                            }
-                            Either::Left(_) => {
-                                tracing::trace!("shutting down due to Client shut down");
-                                // awaiting a local task won't hang
-                                let _ = timestamp_collector
-                                    .send(MetaAddr::new_shutdown(&addr, &remote_services))
-                                    .await;
-                                return;
-                            }
-                        }
-                        if send_addr_err {
-                            // We can't get the client request for this failure,
-                            // so we can't send an error back on `tx`. So
-                            // we just update the address book with a failure.
+                        if matches!(
+                            future::select(shutdown_rx_ref, interval_stream.next()).await,
+                            Either::Left(_)
+                        ) {
+                            tracing::trace!("shutting down due to Client shut down");
+                            // awaiting a local task won't hang
                             let _ = timestamp_collector
-                                .send(MetaAddr::new_errored(
-                                    &addr,
-                                    &remote_services,
-                                ))
+                                .send(MetaAddr::new_shutdown(&addr, &remote_services))
                                 .await;
+                            return;
+                        }
+
+                        // We've reached another heartbeat interval without
+                        // shutting down, so do a heartbeat request.
+                        //
+                        // TODO: await heartbeat and shutdown. The select
+                        // function needs pinned types, but pinned generics
+                        // are hard (#1678)
+                        let heartbeat = send_one_heartbeat(&mut server_tx);
+                        if heartbeat_timeout(
+                            heartbeat,
+                            &mut timestamp_collector,
+                            &addr,
+                            &remote_services,
+                        )
+                        .await
+                        .is_err()
+                        {
                             return;
                         }
                     }
@@ -625,13 +590,98 @@ where
 
         // Spawn a new task to drive this handshake.
         tokio::spawn(fut.instrument(connector_span))
-            // This is required to get error types to line up.
-            // Probably there's a nicer way to express this using combinators.
-            .map(|x| match x {
-                Ok(Ok(client)) => Ok(client),
-                Ok(Err(handshake_err)) => Err(handshake_err.into()),
-                Err(join_err) => Err(join_err.into()),
-            })
+            .map(|x: Result<Result<Client, HandshakeError>, JoinError>| Ok(x??))
             .boxed()
+    }
+}
+
+/// Send one heartbeat using `server_tx`.
+async fn send_one_heartbeat(server_tx: &mut mpsc::Sender<ClientRequest>) -> Result<(), BoxError> {
+    // We just reached a heartbeat interval, so start sending
+    // a heartbeat.
+    let (tx, rx) = oneshot::channel();
+
+    // Try to send the heartbeat request
+    let request = Request::Ping(Nonce::default());
+    tracing::trace!(?request, "queueing heartbeat request");
+    match server_tx.try_send(ClientRequest {
+        request,
+        tx,
+        span: tracing::Span::current(),
+    }) {
+        Ok(()) => {}
+        Err(e) => {
+            if e.is_disconnected() {
+                Err(PeerError::ConnectionClosed)?;
+            } else if e.is_full() {
+                // Send the message when the Client becomes ready.
+                // If sending takes too long, the heartbeat timeout will elapse
+                // and close the connection, reducing our load to busy peers.
+                server_tx.send(e.into_inner()).await?;
+            } else {
+                // we need to map unexpected error types to PeerErrors
+                warn!(?e, "unexpected try_send error");
+                Err(e)?;
+            };
+        }
+    }
+
+    // Flush the heartbeat request from the queue
+    server_tx.flush().await?;
+    tracing::trace!("sent heartbeat request");
+
+    // Heartbeats are checked internally to the
+    // connection logic, but we need to wait on the
+    // response to avoid canceling the request.
+    rx.await??;
+    tracing::trace!("got heartbeat response");
+
+    Ok(())
+}
+
+/// Wrap `fut` in a timeout, handing any inner or outer errors using
+/// `handle_heartbeat_error`.
+async fn heartbeat_timeout<F, T>(
+    fut: F,
+    timestamp_collector: &mut mpsc::Sender<MetaAddr>,
+    addr: &SocketAddr,
+    remote_services: &PeerServices,
+) -> Result<T, BoxError>
+where
+    F: Future<Output = Result<T, BoxError>>,
+{
+    let t = match timeout(constants::HEARTBEAT_INTERVAL, fut).await {
+        Ok(inner_result) => {
+            handle_heartbeat_error(inner_result, timestamp_collector, addr, remote_services).await?
+        }
+        Err(elapsed) => {
+            handle_heartbeat_error(Err(elapsed), timestamp_collector, addr, remote_services).await?
+        }
+    };
+
+    Ok(t)
+}
+
+/// If `result.is_err()`, mark `addr` as failed using `timestamp_collector`.
+async fn handle_heartbeat_error<T, E>(
+    result: Result<T, E>,
+    timestamp_collector: &mut mpsc::Sender<MetaAddr>,
+    addr: &SocketAddr,
+    remote_services: &PeerServices,
+) -> Result<T, E>
+where
+    E: std::fmt::Debug,
+{
+    match result {
+        Ok(t) => Ok(t),
+        Err(err) => {
+            tracing::debug!(?err, "heartbeat error, shutting down");
+
+            let _ = timestamp_collector
+                .send(MetaAddr::new_errored(&addr, &remote_services))
+                .await;
+
+            Err(err)
+        }
     }
 }

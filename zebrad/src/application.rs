@@ -54,7 +54,7 @@ impl ZebradApp {
     }
 
     pub fn git_commit() -> &'static str {
-        const GIT_COMMIT_VERGEN: &str = env!("VERGEN_SHA_SHORT");
+        const GIT_COMMIT_VERGEN: &str = env!("VERGEN_GIT_SHA_SHORT");
         const GIT_COMMIT_GCLOUD: Option<&str> = option_env!("SHORT_SHA");
 
         GIT_COMMIT_GCLOUD.unwrap_or(GIT_COMMIT_VERGEN)
@@ -155,17 +155,22 @@ impl Application for ZebradApp {
         };
 
         // collect the common metadata for the issue URL and panic report
-        let network = config.network.network.to_string();
         let panic_metadata = vec![
-            ("version", env!("CARGO_PKG_VERSION").to_string()),
-            ("git commit", Self::git_commit().to_string()),
-            ("Zcash network", network),
+            // git
+            ("version", env!("CARGO_PKG_VERSION")),
+            ("branch", env!("VERGEN_GIT_BRANCH")),
+            ("git commit", Self::git_commit()),
+            ("commit timestamp", env!("VERGEN_GIT_COMMIT_TIMESTAMP")),
+            // build
+            ("target triple", env!("VERGEN_CARGO_TARGET_TRIPLE")),
+            // config
+            ("Zcash network", (&config.network.network).into()),
         ];
 
         let mut builder = color_eyre::config::HookBuilder::default();
         let mut metadata_section = "Metadata:".to_string();
         for (k, v) in panic_metadata {
-            builder = builder.add_issue_metadata(k, v.clone());
+            builder = builder.add_issue_metadata(k, v);
             metadata_section.push_str(&format!("\n{}: {}", k, v));
         }
 

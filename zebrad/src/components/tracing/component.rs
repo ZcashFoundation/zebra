@@ -89,7 +89,7 @@ impl<A: abscissa_core::Application> Component<A> for Tracing {
     }
 
     fn version(&self) -> abscissa_core::Version {
-        abscissa_core::Version::parse("1.0.0-alpha.6").unwrap()
+        abscissa_core::Version::parse(env!("CARGO_PKG_VERSION")).unwrap()
     }
 
     fn before_shutdown(&self, _kind: Shutdown) -> Result<(), FrameworkError> {

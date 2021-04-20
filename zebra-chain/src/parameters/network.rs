@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{convert::From, fmt};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
@@ -13,12 +13,18 @@ pub enum Network {
     Testnet,
 }
 
+impl From<&Network> for &'static str {
+    fn from(network: &Network) -> &'static str {
+        match network {
+            Network::Mainnet => "Mainnet",
+            Network::Testnet => "Testnet",
+        }
+    }
+}
+
 impl fmt::Display for Network {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Network::Mainnet => f.write_str("Mainnet"),
-            Network::Testnet => f.write_str("Testnet"),
-        }
+        f.write_str(self.into())
     }
 }
 
