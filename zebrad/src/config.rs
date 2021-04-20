@@ -106,8 +106,8 @@ pub struct TracingSection {
     /// replaced with `.folded` and `.svg` for the respective files.
     pub flamegraph: Option<PathBuf>,
 
-    /// The journald flag is used for activating of sending tracing events to
-    /// systemd-journald, on Linux distributions that use systemd.
+    /// The use_journald flag sends tracing events to systemd-journald, on Linux
+    /// distributions that use systemd.
     pub use_journald: bool,
 }
 
