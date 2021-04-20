@@ -11,7 +11,8 @@ impl Arbitrary for TransmissionKey {
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         (any::<SpendingKey>())
             .prop_map(|spending_key| {
-                let full_viewing_key = FullViewingKey::from(spending_key);
+                let full_viewing_key =
+                    FullViewingKey::from_spending_key(spending_key, Network::Mainnet);
 
                 let diversifier_key = DiversifierKey::from(full_viewing_key);
 
