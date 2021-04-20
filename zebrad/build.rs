@@ -9,5 +9,11 @@ fn main() {
     *config.git_mut().semver_mut() = false;
     *config.git_mut().sha_kind_mut() = ShaKind::Short;
 
-    vergen(config).expect("Unable to generate the cargo keys!");
+    match vergen(config) {
+        Ok(_) => {}
+        Err(e) => eprintln!(
+            "skipping detailed git and target info due to vergen error: {:?}",
+            e
+        ),
+    }
 }

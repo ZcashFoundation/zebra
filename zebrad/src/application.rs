@@ -53,11 +53,18 @@ impl ZebradApp {
         atty::is(atty::Stream::Stdout) && atty::is(atty::Stream::Stderr)
     }
 
-    pub fn git_commit() -> &'static str {
-        const GIT_COMMIT_VERGEN: &str = env!("VERGEN_GIT_SHA_SHORT");
+    /// Returns the git commit for this build, if available.
+    ///
+    ///
+    /// # Accuracy
+    ///
+    /// If the user makes changes, but does not commit them, the git commit will
+    /// not match the compiled source code.
+    pub fn git_commit() -> Option<&'static str> {
         const GIT_COMMIT_GCLOUD: Option<&str> = option_env!("SHORT_SHA");
+        const GIT_COMMIT_VERGEN: Option<&str> = option_env!("VERGEN_GIT_SHA_SHORT");
 
-        GIT_COMMIT_GCLOUD.unwrap_or(GIT_COMMIT_VERGEN)
+        GIT_COMMIT_GCLOUD.or(GIT_COMMIT_VERGEN)
     }
 }
 
@@ -154,18 +161,26 @@ impl Application for ZebradApp {
             color_eyre::config::Theme::new()
         };
 
-        // collect the common metadata for the issue URL and panic report
-        let panic_metadata = vec![
+        // collect the common metadata for the issue URL and panic report,
+        // skipping any env vars that aren't present
+        let panic_metadata: Vec<(&'static str, &'static str)> = [
+            // cargo or git tag + short commit
+            ("version", Some(env!("CARGO_PKG_VERSION"))),
             // git
-            ("version", env!("CARGO_PKG_VERSION")),
-            ("branch", env!("VERGEN_GIT_BRANCH")),
+            ("branch", option_env!("VERGEN_GIT_BRANCH")),
             ("git commit", Self::git_commit()),
-            ("commit timestamp", env!("VERGEN_GIT_COMMIT_TIMESTAMP")),
+            (
+                "commit timestamp",
+                option_env!("VERGEN_GIT_COMMIT_TIMESTAMP"),
+            ),
             // build
-            ("target triple", env!("VERGEN_CARGO_TARGET_TRIPLE")),
+            ("target triple", option_env!("VERGEN_CARGO_TARGET_TRIPLE")),
             // config
-            ("Zcash network", (&config.network.network).into()),
-        ];
+            ("Zcash network", Some((&config.network.network).into())),
+        ]
+        .iter()
+        .filter_map(|(k, opt_v)| Some((*k, *opt_v.as_ref()?)))
+        .collect();
 
         let mut builder = color_eyre::config::HookBuilder::default();
         let mut metadata_section = "Metadata:".to_string();
@@ -218,7 +233,7 @@ impl Application for ZebradApp {
         let guard = sentry::init(
             sentry::ClientOptions {
                 debug: true,
-                release: Some(Self::git_commit().into()),
+                release: Self::git_commit().map(Into::into),
                 ..Default::default()
             }
             .add_integration(sentry_tracing::TracingIntegration::default()),
@@ -270,11 +285,13 @@ impl Application for ZebradApp {
         // Activate the global span, so it's visible when we load the other
         // components. Space is at a premium here, so we use an empty message,
         // short commit hash, and the unique part of the network name.
-        let global_span = error_span!(
-            "",
-            zebrad = ZebradApp::git_commit(),
-            net = &self.config.clone().unwrap().network.network.to_string()[..4],
-        );
+        let net = &self.config.clone().unwrap().network.network.to_string()[..4];
+        let global_span = if let Some(git_commit) = ZebradApp::git_commit() {
+            error_span!("", zebrad = git_commit, net)
+        } else {
+            error_span!("", net)
+        };
+
         let global_guard = global_span.enter();
         // leak the global span, to make sure it stays active
         std::mem::forget(global_guard);
