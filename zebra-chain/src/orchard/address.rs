@@ -66,7 +66,8 @@ mod tests {
 
         let spending_key = keys::SpendingKey::new(&mut OsRng);
 
-        let full_viewing_key = keys::FullViewingKey::from(spending_key);
+        let full_viewing_key =
+            keys::FullViewingKey::from_spending_key(spending_key, Network::Mainnet);
 
         // Default diversifier, where index = 0.
         let diversifier_key = keys::DiversifierKey::from(full_viewing_key);

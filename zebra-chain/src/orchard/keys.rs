@@ -568,8 +568,6 @@ pub struct FullViewingKey {
     ivk_commit_randomness: IvkCommitRandomness,
 }
 
-// TODO: impl a From that accepts a Network?
-
 impl fmt::Debug for FullViewingKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("FullViewingKey")
@@ -595,20 +593,6 @@ impl fmt::Display for FullViewingKey {
         };
 
         bech32::encode_to_fmt(f, hrp, bytes.get_ref().to_base32(), Variant::Bech32).unwrap()
-    }
-}
-
-impl From<SpendingKey> for FullViewingKey {
-    fn from(sk: SpendingKey) -> FullViewingKey {
-        let spend_authorizing_key = SpendAuthorizingKey::from(sk);
-
-        Self {
-            // TODO: handle setting the Network better.
-            network: Network::default(),
-            spend_validating_key: SpendValidatingKey::from(spend_authorizing_key),
-            nullifier_deriving_key: NullifierDerivingKey::from(sk),
-            ivk_commit_randomness: IvkCommitRandomness::from(sk),
-        }
     }
 }
 
@@ -656,6 +640,21 @@ impl FullViewingKey {
 
         // let R = PRF^expand_K( [0x82] || I2LEOSP256(ak) || I2LEOSP256(nk) )
         prf_expand(K, t)
+    }
+
+    /// Derive a full viewing key from a existing spending key and its network.
+    ///
+    /// https://zips.z.cash/protocol/nu5.pdf#addressesandkeys
+    /// https://zips.z.cash/protocol/nu5.pdf#orchardfullviewingkeyencoding
+    pub fn from_spending_key(sk: SpendingKey, network: Network) -> FullViewingKey {
+        let spend_authorizing_key = SpendAuthorizingKey::from(sk);
+
+        Self {
+            network,
+            spend_validating_key: SpendValidatingKey::from(spend_authorizing_key),
+            nullifier_deriving_key: NullifierDerivingKey::from(sk),
+            ivk_commit_randomness: IvkCommitRandomness::from(sk),
+        }
     }
 }
 
