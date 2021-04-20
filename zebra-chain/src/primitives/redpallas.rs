@@ -6,10 +6,7 @@ use halo2::pasta::pallas;
 // pub mod batch;
 mod constants;
 mod error;
-// pub mod frost;
-// mod hash;
-// mod scalar_mul;
-// mod signature;
+// TODO: full redpallas implementation https://github.com/ZcashFoundation/zebra/issues/2044
 mod signing_key;
 mod verification_key;
 
