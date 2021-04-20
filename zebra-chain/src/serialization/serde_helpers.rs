@@ -35,10 +35,3 @@ impl From<Fq> for jubjub::Fq {
         jubjub::Fq::from_bytes(&local.bytes).unwrap()
     }
 }
-
-#[derive(Deserialize, Serialize)]
-#[serde(remote = "futures::future::Either")]
-pub enum Either<A, B> {
-    Left(A),
-    Right(B),
-}
