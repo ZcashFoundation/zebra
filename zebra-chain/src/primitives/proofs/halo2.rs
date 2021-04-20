@@ -21,6 +21,7 @@ impl fmt::Debug for Halo2Proof {
 }
 
 // These impls all only exist because of array length restrictions.
+// TODO: use const generics https://github.com/ZcashFoundation/zebra/issues/2042
 
 // impl Copy for Halo2Proof {}
 
