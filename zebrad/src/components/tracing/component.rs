@@ -5,7 +5,7 @@ use tracing_subscriber::{
     FmtSubscriber,
 };
 
-use crate::config::TracingSection;
+use crate::{application::app_version, config::TracingSection};
 
 use super::flame;
 
@@ -77,7 +77,7 @@ impl<A: abscissa_core::Application> Component<A> for Tracing {
     }
 
     fn version(&self) -> abscissa_core::Version {
-        abscissa_core::Version::parse(env!("CARGO_PKG_VERSION")).unwrap()
+        app_version()
     }
 
     fn before_shutdown(&self, _kind: Shutdown) -> Result<(), FrameworkError> {

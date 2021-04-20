@@ -7,7 +7,7 @@ use abscissa_core::{
     config::Configurable,
     terminal::component::Terminal,
     terminal::ColorChoice,
-    Application, Component, EntryPoint, FrameworkError, Shutdown, StandardPaths,
+    Application, Component, EntryPoint, FrameworkError, Shutdown, StandardPaths, Version,
 };
 use application::fatal_error;
 use std::process;
@@ -35,6 +35,44 @@ pub fn app_writer() -> application::lock::Writer<ZebradApp> {
 /// Panics if the application configuration has not been loaded.
 pub fn app_config() -> config::Reader<ZebradApp> {
     config::Reader::new(&APPLICATION)
+}
+
+/// Returns the zebrad version for this build, in SemVer 2.0 format.
+///
+/// Includes the git commit and the number of commits since the last version
+/// tag, if available.
+///
+/// For details, see https://semver.org/
+pub fn app_version() -> Version {
+    const CARGO_PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
+    let vergen_git_semver: Option<&str> = option_env!("VERGEN_GIT_SEMVER");
+
+    match vergen_git_semver {
+        Some(vergen_git_semver) => {
+            // change the git semver format to the semver 2.0 format
+            let rparts: Vec<_> = vergen_git_semver.rsplitn(3, '-').collect();
+            assert_eq!(rparts.len(), 3, "");
+
+            if let [hash, commit_count, tag] = rparts.as_slice() {
+                // strip the leading "v"
+                let tag = &tag[1..];
+                let semver_fix = format!("{}+{}.{}", tag, commit_count, hash);
+                semver_fix.parse().unwrap_or_else(|_|
+                             panic!("VERGEN_GIT_SEMVER {:?} -> {:?} must be valid. Note: CARGO_PKG_VERSION was {:?}.",
+                                    vergen_git_semver, semver_fix, CARGO_PKG_VERSION))
+            } else {
+                unreachable!("git semver string must contain tag, commit count, and hash: {:?} split into {:?}",
+                             vergen_git_semver,
+                             rparts);
+            }
+        }
+        None => CARGO_PKG_VERSION.parse().unwrap_or_else(|_| {
+            panic!(
+                "CARGO_PKG_VERSION {:?} must be valid semver 2.0",
+                CARGO_PKG_VERSION
+            )
+        }),
+    }
 }
 
 /// Zebrad Application
@@ -163,30 +201,33 @@ impl Application for ZebradApp {
 
         // collect the common metadata for the issue URL and panic report,
         // skipping any env vars that aren't present
-        let panic_metadata: Vec<(&'static str, &'static str)> = [
+        let panic_metadata: Vec<(_, String)> = [
             // cargo or git tag + short commit
-            ("version", Some(env!("CARGO_PKG_VERSION"))),
+            ("version", Some(app_version().to_string())),
             // git
-            ("branch", option_env!("VERGEN_GIT_BRANCH")),
-            ("git commit", Self::git_commit()),
+            ("branch", option_env!("VERGEN_GIT_BRANCH").map(Into::into)),
+            ("git commit", Self::git_commit().map(Into::into)),
             (
                 "commit timestamp",
-                option_env!("VERGEN_GIT_COMMIT_TIMESTAMP"),
+                option_env!("VERGEN_GIT_COMMIT_TIMESTAMP").map(Into::into),
             ),
             // build
-            ("target triple", option_env!("VERGEN_CARGO_TARGET_TRIPLE")),
+            (
+                "target triple",
+                option_env!("VERGEN_CARGO_TARGET_TRIPLE").map(Into::into),
+            ),
             // config
-            ("Zcash network", Some((&config.network.network).into())),
+            ("Zcash network", Some(config.network.network.to_string())),
         ]
         .iter()
-        .filter_map(|(k, opt_v)| Some((*k, *opt_v.as_ref()?)))
+        .filter_map(|(k, opt_v)| Some((*k, opt_v.as_ref()?.clone())))
         .collect();
 
         let mut builder = color_eyre::config::HookBuilder::default();
         let mut metadata_section = "Metadata:".to_string();
         for (k, v) in panic_metadata {
-            builder = builder.add_issue_metadata(k, v);
-            metadata_section.push_str(&format!("\n{}: {}", k, v));
+            builder = builder.add_issue_metadata(k, v.clone());
+            metadata_section.push_str(&format!("\n{}: {}", k, v.clone()));
         }
 
         builder = builder
@@ -233,7 +274,7 @@ impl Application for ZebradApp {
         let guard = sentry::init(
             sentry::ClientOptions {
                 debug: true,
-                release: Self::git_commit().map(Into::into),
+                release: Some(app_version().to_string().into()),
                 ..Default::default()
             }
             .add_integration(sentry_tracing::TracingIntegration::default()),
@@ -346,5 +387,9 @@ impl Application for ZebradApp {
             Shutdown::Forced => process::exit(1),
             Shutdown::Crash => process::exit(2),
         }
+    }
+
+    fn version(&self) -> Version {
+        app_version()
     }
 }
