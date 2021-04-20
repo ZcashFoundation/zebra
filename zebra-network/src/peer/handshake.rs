@@ -227,7 +227,10 @@ pub async fn negotiate_version(
         timestamp,
         address_recv: (PeerServices::NODE_NETWORK, *addr),
         // TODO: detect external address (#1893)
-        address_from: (our_services, config.external_addr.unwrap_or(self.config.listen_addr)),
+        address_from: (
+            our_services,
+            config.external_addr.unwrap_or(self.config.listen_addr),
+        ),
         nonce: local_nonce,
         user_agent: user_agent.clone(),
         // The protocol works fine if we don't reveal our current block height,

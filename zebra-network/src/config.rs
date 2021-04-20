@@ -19,7 +19,7 @@ pub struct Config {
     pub listen_addr: SocketAddr,
 
     /// The address which will be advertised to peers for inbound connections.
-    /// 
+    ///
     /// Zebra will use `listen_addr` if this address is not defined.
     pub external_addr: Option<SocketAddr>,
 
