@@ -229,7 +229,7 @@ pub async fn negotiate_version(
         // TODO: detect external address (#1893)
         address_from: (
             our_services,
-            config.external_addr.unwrap_or(self.config.listen_addr),
+            config.external_addr.unwrap_or(config.listen_addr),
         ),
         nonce: local_nonce,
         user_agent: user_agent.clone(),
