@@ -447,8 +447,6 @@ pub struct IncomingViewingKey {
     scalar: pallas::Scalar,
 }
 
-// TODO: impl a From that accepts a Network?
-
 impl fmt::Debug for IncomingViewingKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_tuple("IncomingViewingKey")
@@ -493,8 +491,7 @@ impl From<FullViewingKey> for IncomingViewingKey {
         );
 
         Self {
-            // TODO: handle the network better, maybe an enum variant constraint?
-            network: Network::default(),
+            network: fvk.network,
             // mod r_P
             scalar: pallas::Scalar::from_bytes(&commit_x.into()).unwrap(),
         }
