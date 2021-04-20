@@ -52,7 +52,8 @@ pub fn app_version() -> Version {
             // change the git semver format to the semver 2.0 format
             let rparts: Vec<_> = vergen_git_semver.rsplitn(3, '-').collect();
             assert_eq!(rparts.len(), 3,
-                               "git semver format must have at least 3 '-' separated parts: {:?}",
+                               "git semver format {:?} must have at least 3 '-' separated parts: {:?}",
+                               vergen_git_semver
                                rparts);
 
             if let [hash, commit_count, tag] = rparts.as_slice() {
