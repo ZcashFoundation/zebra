@@ -1,4 +1,11 @@
-use std::{collections::HashSet, net::SocketAddr, string::String, time::Duration};
+use std::{
+    collections::HashSet,
+    net::{IpAddr, SocketAddr},
+    string::String,
+    time::Duration,
+};
+
+use serde::{de, Deserialize, Deserializer};
 
 use zebra_chain::parameters::Network;
 
@@ -9,10 +16,11 @@ use crate::BoxError;
 const MAX_SINGLE_PEER_RETRIES: usize = 2;
 
 /// Configuration for networking code.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields, default)]
+#[derive(Clone, Debug, Serialize)]
 pub struct Config {
     /// The address on which this node should listen for connections.
+    /// Can be `ip:port` or just `ip` (in this case `port` will be derived
+    /// from `network`).
     ///
     /// Zebra will also advertise this address to other nodes. Advertising a
     /// different external IP address is currently not supported, see #1890
@@ -173,6 +181,89 @@ impl Default for Config {
             // But the peer set for slow nodes is typically much smaller, due to
             // the handshake RTT timeout.
             peerset_initial_target_size: 50,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Config {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields, default)]
+        struct DConfig {
+            listen_addr: String,
+            network: Network,
+            initial_mainnet_peers: HashSet<String>,
+            initial_testnet_peers: HashSet<String>,
+            peerset_initial_target_size: usize,
+            #[serde(alias = "new_peer_interval")]
+            crawl_new_peer_interval: Duration,
+        }
+
+        impl Default for DConfig {
+            fn default() -> Self {
+                let config = Config::default();
+                Self {
+                    listen_addr: config.listen_addr.to_string(),
+                    network: config.network,
+                    initial_mainnet_peers: config.initial_mainnet_peers,
+                    initial_testnet_peers: config.initial_testnet_peers,
+                    peerset_initial_target_size: config.peerset_initial_target_size,
+                    crawl_new_peer_interval: config.crawl_new_peer_interval,
+                }
+            }
+        }
+
+        let config = DConfig::deserialize(deserializer)?;
+        let listen_addr = match config.listen_addr.parse::<SocketAddr>() {
+            Ok(socket) => Ok(socket),
+            Err(_) => match config.listen_addr.parse::<IpAddr>() {
+                Ok(ip) => {
+                    let port = match config.network {
+                        Network::Mainnet => 8233,
+                        Network::Testnet => 18233,
+                    };
+                    Ok(SocketAddr::new(ip, port))
+                }
+                Err(err) => Err(de::Error::custom(err)),
+            },
+        }?;
+
+        Ok(Config {
+            listen_addr,
+            network: config.network,
+            initial_mainnet_peers: config.initial_mainnet_peers,
+            initial_testnet_peers: config.initial_testnet_peers,
+            peerset_initial_target_size: config.peerset_initial_target_size,
+            crawl_new_peer_interval: config.crawl_new_peer_interval,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Config;
+
+    #[test]
+    fn parse_config_listen_addr() {
+        let fixtures = vec![
+            (r#"{"listen_addr": "0.0.0.0"}"#, "0.0.0.0:8233"),
+            (r#"{"listen_addr": "0.0.0.0:9999"}"#, "0.0.0.0:9999"),
+            (
+                r#"{"listen_addr": "0.0.0.0", "network": "Testnet"}"#,
+                "0.0.0.0:18233",
+            ),
+            (
+                r#"{"listen_addr": "0.0.0.0:8233", "network": "Testnet"}"#,
+                "0.0.0.0:8233",
+            ),
+        ];
+
+        for (config, value) in fixtures {
+            let config: Config = serde_json::from_str(config).unwrap();
+            assert_eq!(config.listen_addr.to_string(), value);
         }
     }
 }

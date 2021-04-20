@@ -4378,6 +4378,7 @@ dependencies = [
  "rand 0.8.1",
  "regex",
  "serde",
+ "serde_json",
  "thiserror",
  "tokio 0.3.6",
  "tokio-util 0.5.1",
