@@ -165,22 +165,14 @@ where
     AnchorV: AnchorVariant + Clone,
     Spend<PerSpendAnchor>: From<(Spend<AnchorV>, AnchorV::Shared)>,
 {
-    /// Iterate over the [`Spend`]s for this transaction.
-    ///
-    /// Returns `Spend<PerSpendAnchor>` regardless of the underlying transaction
-    /// version, to allow generic verification over V4 and V5 transactions.
+    /// Iterate over the [`Spend`]s for this transaction, returning
+    /// `Spend<PerSpendAnchor>` regardless of the underlying transaction version.
     ///
     /// # Correctness
     ///
     /// Do not use this function for serialization.
     pub fn spends_per_anchor(&self) -> impl Iterator<Item = Spend<PerSpendAnchor>> + '_ {
-        self.spends().cloned().map(move |spend| {
-            Spend::<PerSpendAnchor>::from((
-                spend,
-                self.shared_anchor()
-                    .expect("shared anchor must be Some if there are any spends"),
-            ))
-        })
+        self.transfers.spends_per_anchor()
     }
 }
 
@@ -254,6 +246,32 @@ where
         let key_bytes: [u8; 32] = (cv_old - cv_new - cv_balance).into();
 
         key_bytes.into()
+    }
+}
+
+impl<AnchorV> TransferData<AnchorV>
+where
+    AnchorV: AnchorVariant + Clone,
+    Spend<PerSpendAnchor>: From<(Spend<AnchorV>, AnchorV::Shared)>,
+{
+    /// Iterate over the [`Spend`]s for this transaction, returning
+    /// `Spend<PerSpendAnchor>` regardless of the underlying transaction version.
+    ///
+    /// Allows generic operations over V4 and V5 transactions, including:
+    /// * spend verification, and
+    /// * non-malleable transaction ID generation.
+    ///
+    /// # Correctness
+    ///
+    /// Do not use this function for serialization.
+    pub fn spends_per_anchor(&self) -> impl Iterator<Item = Spend<PerSpendAnchor>> + '_ {
+        self.spends().cloned().map(move |spend| {
+            Spend::<PerSpendAnchor>::from((
+                spend,
+                self.shared_anchor()
+                    .expect("shared anchor must be Some if there are any spends"),
+            ))
+        })
     }
 }
 
