@@ -71,13 +71,6 @@ pub trait WriteZcashExt: io::Write {
         self.write_u16::<BigEndian>(addr.port())
     }
 
-    /// Write a string in Bitcoin format.
-    #[inline]
-    fn write_string(&mut self, string: &str) -> io::Result<()> {
-        self.write_compactsize(string.len() as u64)?;
-        self.write_all(string.as_bytes())
-    }
-
     /// Convenience method to write exactly 32 u8's.
     #[inline]
     fn write_32_bytes(&mut self, bytes: &[u8; 32]) -> io::Result<()> {

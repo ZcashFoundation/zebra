@@ -99,6 +99,22 @@ pub fn zcash_serialize_bytes_external_count<W: io::Write>(
     writer.write_all(&vec)
 }
 
+/// Write a Bitcoin-encoded UTF-8 `&str`.
+impl ZcashSerialize for &str {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        let str_bytes = self.as_bytes();
+        writer.write_compactsize(str_bytes.len() as u64)?;
+        writer.write_all(str_bytes)
+    }
+}
+
+/// Write a Bitcoin-encoded UTF-8 `String`.
+impl ZcashSerialize for String {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        self.as_str().zcash_serialize(&mut writer)
+    }
+}
+
 /// The maximum length of a Zcash message, in bytes.
 ///
 /// This value is used to calculate safe preallocation limits for some types

@@ -228,7 +228,7 @@ impl Codec {
                 writer.write_socket_addr(*from_addr)?;
 
                 writer.write_u64::<LittleEndian>(nonce.0)?;
-                writer.write_string(&user_agent)?;
+                user_agent.zcash_serialize(&mut writer)?;
                 writer.write_u32::<LittleEndian>(start_height.0)?;
                 writer.write_u8(*relay as u8)?;
             }
@@ -245,9 +245,9 @@ impl Codec {
                 reason,
                 data,
             } => {
-                writer.write_string(&message)?;
+                message.zcash_serialize(&mut writer)?;
                 writer.write_u8(*ccode as u8)?;
-                writer.write_string(&reason)?;
+                reason.zcash_serialize(&mut writer)?;
                 if let Some(data) = data {
                     writer.write_all(data)?;
                 }
