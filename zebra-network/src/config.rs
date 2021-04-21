@@ -55,7 +55,6 @@ pub struct Config {
     /// - regularly, every time `crawl_new_peer_interval` elapses, and
     /// - if the peer set is busy, and there aren't any peer addresses for the
     ///   next connection attempt.
-    #[serde(alias = "new_peer_interval")]
     pub crawl_new_peer_interval: Duration,
 }
 
