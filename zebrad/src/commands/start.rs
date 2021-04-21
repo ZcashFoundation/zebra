@@ -54,7 +54,7 @@ impl StartCmd {
             config.network.network,
         ));
 
-        info!("initializing chain verifier");
+        info!("initializing verifiers");
         let verifier = zebra_consensus::chain::init(
             config.consensus.clone(),
             config.network.network,
@@ -63,7 +63,6 @@ impl StartCmd {
         .await;
 
         info!("initializing network");
-
         // The service that our node uses to respond to requests by peers. The
         // load_shed middleware ensures that we reduce the size of the peer set
         // in response to excess load.
