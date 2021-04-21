@@ -67,7 +67,7 @@ pub fn app_version() -> Version {
                     )
                 }),
 
-                // it's the "git semver" format, which doesn't quite match Semver 2.0
+                // it's the "git semver" format, which doesn't quite match SemVer 2.0
                 [hash, commit_count, tag] => {
                     let semver_fix = format!("{}+{}.{}", tag, commit_count, hash);
                     semver_fix.parse().unwrap_or_else(|_|
