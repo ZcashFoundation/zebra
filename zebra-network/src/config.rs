@@ -1,4 +1,11 @@
-use std::{collections::HashSet, net::SocketAddr, string::String, time::Duration};
+use std::{
+    collections::HashSet,
+    net::{IpAddr, SocketAddr},
+    string::String,
+    time::Duration,
+};
+
+use serde::{de, Deserialize, Deserializer};
 
 use zebra_chain::parameters::Network;
 
@@ -9,10 +16,14 @@ use crate::BoxError;
 const MAX_SINGLE_PEER_RETRIES: usize = 2;
 
 /// Configuration for networking code.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields, default)]
+#[derive(Clone, Debug, Serialize)]
 pub struct Config {
     /// The address on which this node should listen for connections.
+    ///
+    /// Can be `address:port` or just `address`. If there is no configured
+    /// port, Zebra will use the default port for the configured `network`.
+    /// `address` can be an IP address or a DNS name. DNS names are
+    /// only resolved once, when Zebra starts up.
     ///
     /// Zebra will also advertise this address to other nodes. Advertising a
     /// different external IP address is currently not supported, see #1890
@@ -44,7 +55,6 @@ pub struct Config {
     /// - regularly, every time `crawl_new_peer_interval` elapses, and
     /// - if the peer set is busy, and there aren't any peer addresses for the
     ///   next connection attempt.
-    #[serde(alias = "new_peer_interval")]
     pub crawl_new_peer_interval: Duration,
 }
 
@@ -176,3 +186,61 @@ impl Default for Config {
         }
     }
 }
+
+impl<'de> Deserialize<'de> for Config {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields, default)]
+        struct DConfig {
+            listen_addr: String,
+            network: Network,
+            initial_mainnet_peers: HashSet<String>,
+            initial_testnet_peers: HashSet<String>,
+            peerset_initial_target_size: usize,
+            #[serde(alias = "new_peer_interval")]
+            crawl_new_peer_interval: Duration,
+        }
+
+        impl Default for DConfig {
+            fn default() -> Self {
+                let config = Config::default();
+                Self {
+                    listen_addr: config.listen_addr.to_string(),
+                    network: config.network,
+                    initial_mainnet_peers: config.initial_mainnet_peers,
+                    initial_testnet_peers: config.initial_testnet_peers,
+                    peerset_initial_target_size: config.peerset_initial_target_size,
+                    crawl_new_peer_interval: config.crawl_new_peer_interval,
+                }
+            }
+        }
+
+        let config = DConfig::deserialize(deserializer)?;
+        // TODO: perform listener DNS lookups asynchronously with a timeout (#1631)
+        let listen_addr = match config.listen_addr.parse::<SocketAddr>() {
+            Ok(socket) => Ok(socket),
+            Err(_) => match config.listen_addr.parse::<IpAddr>() {
+                Ok(ip) => Ok(SocketAddr::new(ip, config.network.default_port())),
+                Err(err) => Err(de::Error::custom(format!(
+                    "{}; Hint: addresses can be a IPv4, IPv6 (with brackets), or a DNS name, the port is optional",
+                    err
+                ))),
+            },
+        }?;
+
+        Ok(Config {
+            listen_addr,
+            network: config.network,
+            initial_mainnet_peers: config.initial_mainnet_peers,
+            initial_testnet_peers: config.initial_testnet_peers,
+            peerset_initial_target_size: config.peerset_initial_target_size,
+            crawl_new_peer_interval: config.crawl_new_peer_interval,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests;
