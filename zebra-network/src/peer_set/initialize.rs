@@ -124,9 +124,10 @@ where
     // 1. Incoming peer connections, via a listener.
 
     // Warn if we're configured using the wrong network port.
+    use Network::*;
     let wrong_net = match config.network {
-        Network::Mainnet => Network::Testnet,
-        Network::Testnet => Network::Mainnet,
+        Mainnet => Testnet,
+        Testnet => Mainnet,
     };
     if config.listen_addr.port() == wrong_net.default_port() {
         warn!(
