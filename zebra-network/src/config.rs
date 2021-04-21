@@ -223,13 +223,7 @@ impl<'de> Deserialize<'de> for Config {
         let listen_addr = match config.listen_addr.parse::<SocketAddr>() {
             Ok(socket) => Ok(socket),
             Err(_) => match config.listen_addr.parse::<IpAddr>() {
-                Ok(ip) => {
-                    let port = match config.network {
-                        Network::Mainnet => 8233,
-                        Network::Testnet => 18233,
-                    };
-                    Ok(SocketAddr::new(ip, port))
-                }
+                Ok(ip) => Ok(SocketAddr::new(ip, config.network.default_port())),
                 Err(err) => Err(de::Error::custom(err)),
             },
         }?;
