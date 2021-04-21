@@ -240,27 +240,4 @@ impl<'de> Deserialize<'de> for Config {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::Config;
-
-    #[test]
-    fn parse_config_listen_addr() {
-        let fixtures = vec![
-            (r#"{"listen_addr": "0.0.0.0"}"#, "0.0.0.0:8233"),
-            (r#"{"listen_addr": "0.0.0.0:9999"}"#, "0.0.0.0:9999"),
-            (
-                r#"{"listen_addr": "0.0.0.0", "network": "Testnet"}"#,
-                "0.0.0.0:18233",
-            ),
-            (
-                r#"{"listen_addr": "0.0.0.0:8233", "network": "Testnet"}"#,
-                "0.0.0.0:8233",
-            ),
-        ];
-
-        for (config, value) in fixtures {
-            let config: Config = serde_json::from_str(config).unwrap();
-            assert_eq!(config.listen_addr.to_string(), value);
-        }
-    }
-}
+mod tests;
