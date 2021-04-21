@@ -22,6 +22,12 @@ impl From<&Network> for &'static str {
     }
 }
 
+impl From<Network> for &'static str {
+    fn from(network: Network) -> &'static str {
+        (&network).into()
+    }
+}
+
 impl fmt::Display for Network {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.into())
