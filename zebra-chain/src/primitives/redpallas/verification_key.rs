@@ -36,12 +36,7 @@ impl<T: SigType> From<VerificationKeyBytes<T>> for [u8; 32] {
     }
 }
 
-// impl<T: SigType> Hash for VerificationKeyBytes<T> {
-//     fn hash<H: Hasher>(&self, state: &mut H) {
-//         self.bytes.hash(state);
-//         self._marker.hash(state);
-//     }
-// }
+// TODO: impl Hash for VerificationKeyBytes, or import that impl: https://github.com/ZcashFoundation/zebra/issues/2044
 
 /// A valid RedPallas verification key.
 ///
