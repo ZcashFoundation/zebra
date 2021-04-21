@@ -48,28 +48,40 @@ pub fn app_version() -> Version {
     let vergen_git_semver: Option<&str> = option_env!("VERGEN_GIT_SEMVER");
 
     match vergen_git_semver {
-        Some(vergen_git_semver) => {
-            // change the git semver format to the semver 2.0 format
-            let rparts: Vec<_> = vergen_git_semver.rsplitn(3, '-').collect();
-            assert_eq!(rparts.len(), 3,
-                               "git semver format {:?} must have at least 3 '-' separated parts: {:?}",
-                               vergen_git_semver,
-                               rparts);
+        // change the git semver format to the semver 2.0 format
+        Some(mut vergen_git_semver) if !vergen_git_semver.is_empty() => {
+            // strip the leading "v", if present
+            if &vergen_git_semver[0..1] == "v" {
+                vergen_git_semver = &vergen_git_semver[1..];
+            }
 
-            if let [hash, commit_count, tag] = rparts.as_slice() {
-                // strip the leading "v"
-                let tag = &tag[1..];
-                let semver_fix = format!("{}+{}.{}", tag, commit_count, hash);
-                semver_fix.parse().unwrap_or_else(|_|
-                             panic!("VERGEN_GIT_SEMVER {:?} -> {:?} must be valid. Note: CARGO_PKG_VERSION was {:?}.",
-                                    vergen_git_semver, semver_fix, CARGO_PKG_VERSION))
-            } else {
-                unreachable!("git semver string must contain tag, commit count, and hash: {:?} split into {:?}",
-                             vergen_git_semver,
-                             rparts);
+            // split into tag, commit count, hash
+            let rparts: Vec<_> = vergen_git_semver.rsplitn(3, '-').collect();
+
+            match rparts.as_slice() {
+                // assume it's a cargo package version or a git tag with no hash
+                [_] | [_, _] => vergen_git_semver.parse().unwrap_or_else(|_| {
+                    panic!(
+                        "VERGEN_GIT_SEMVER without a hash {:?} must be valid semver 2.0",
+                        vergen_git_semver
+                    )
+                }),
+
+                // it's the "git semver" format, which doesn't quite match Semver 2.0
+                [hash, commit_count, tag] => {
+                    let semver_fix = format!("{}+{}.{}", tag, commit_count, hash);
+                    semver_fix.parse().unwrap_or_else(|_|
+                                                      panic!("Modified VERGEN_GIT_SEMVER {:?} -> {:?} -> {:?} must be valid. Note: CARGO_PKG_VERSION was {:?}.",
+                                                             vergen_git_semver,
+                                                             rparts,
+                                                             semver_fix,
+                                                             CARGO_PKG_VERSION))
+                }
+
+                _ => unreachable!("split is limited to 3 parts"),
             }
         }
-        None => CARGO_PKG_VERSION.parse().unwrap_or_else(|_| {
+        _ => CARGO_PKG_VERSION.parse().unwrap_or_else(|_| {
             panic!(
                 "CARGO_PKG_VERSION {:?} must be valid semver 2.0",
                 CARGO_PKG_VERSION
