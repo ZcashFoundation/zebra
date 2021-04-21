@@ -20,27 +20,6 @@ impl fmt::Debug for Halo2Proof {
     }
 }
 
-// These impls all only exist because of array length restrictions.
-// TODO: use const generics https://github.com/ZcashFoundation/zebra/issues/2042
-
-// impl Copy for Halo2Proof {}
-
-// impl Clone for Halo2Proof {
-//     fn clone(&self) -> Self {
-//         let mut bytes = [0; 192];
-//         bytes[..].copy_from_slice(&self.0[..]);
-//         Self(bytes)
-//     }
-// }
-
-// impl PartialEq for Halo2Proof {
-//     fn eq(&self, other: &Self) -> bool {
-//         self.0[..] == other.0[..]
-//     }
-// }
-
-// impl Eq for Halo2Proof {}
-
 impl ZcashSerialize for Halo2Proof {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_all(&self.0[..])?;
@@ -56,23 +35,16 @@ impl ZcashDeserialize for Halo2Proof {
         Ok(Self(bytes))
     }
 }
-// TODO: figure how a Halo2Proof Strategy for generating proofs for proptesting.
-// #[cfg(any(test, feature = "proptest-impl"))]
-// use proptest::{arbitrary::Arbitrary, collection::vec, prelude::*};
-//
-// #[cfg(any(test, feature = "proptest-impl"))]
-// impl Arbitrary for Halo2Proof {
-//     type Parameters = ();
+#[cfg(any(test, feature = "proptest-impl"))]
+use proptest::{arbitrary::Arbitrary, prelude::*};
 
-//     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-//         (vec(any::<u8>(), 192))
-//             .prop_map(|v| {
-//                 let mut bytes = [0; 192];
-//                 bytes.copy_from_slice(v.as_slice());
-//                 Self(bytes)
-//             })
-//             .boxed()
-//     }
+#[cfg(any(test, feature = "proptest-impl"))]
+impl Arbitrary for Halo2Proof {
+    type Parameters = ();
 
-//     type Strategy = BoxedStrategy<Self>;
-// }
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        (any::<Vec<u8>>()).prop_map(Self).boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
