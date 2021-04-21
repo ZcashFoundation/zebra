@@ -19,8 +19,11 @@ const MAX_SINGLE_PEER_RETRIES: usize = 2;
 #[derive(Clone, Debug, Serialize)]
 pub struct Config {
     /// The address on which this node should listen for connections.
-    /// Can be `ip:port` or just `ip` (in this case `port` will be derived
-    /// from `network`).
+    ///
+    /// Can be `address:port` or just `address`. If there is no configured
+    /// port, Zebra will use the default port for the configured `network`.
+    /// `address` can be an IP address or a DNS name. DNS names are
+    /// only resolved once, when Zebra starts up.
     ///
     /// Zebra will also advertise this address to other nodes. Advertising a
     /// different external IP address is currently not supported, see #1890
@@ -217,6 +220,7 @@ impl<'de> Deserialize<'de> for Config {
         }
 
         let config = DConfig::deserialize(deserializer)?;
+        // TODO: perform listener DNS lookups asynchronously with a timeout (#1631)
         let listen_addr = match config.listen_addr.parse::<SocketAddr>() {
             Ok(socket) => Ok(socket),
             Err(_) => match config.listen_addr.parse::<IpAddr>() {

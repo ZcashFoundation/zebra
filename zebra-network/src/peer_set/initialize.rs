@@ -124,8 +124,6 @@ where
     // 1. Incoming peer connections, via a listener.
 
     // Warn if we're configured using the wrong network port.
-    // TODO: use the right port if the port is unspecified
-    //       split the address and port configs?
     let (wrong_net, wrong_net_port) = match config.network {
         Network::Mainnet => (Network::Testnet, 18233),
         Network::Testnet => (Network::Mainnet, 8233),
