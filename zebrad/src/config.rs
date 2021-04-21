@@ -105,6 +105,10 @@ pub struct TracingSection {
     /// If you provide a path with an extension the extension will be ignored and
     /// replaced with `.folded` and `.svg` for the respective files.
     pub flamegraph: Option<PathBuf>,
+
+    /// The use_journald flag sends tracing events to systemd-journald, on Linux
+    /// distributions that use systemd.
+    pub use_journald: bool,
 }
 
 impl Default for TracingSection {
@@ -114,6 +118,7 @@ impl Default for TracingSection {
             filter: None,
             endpoint_addr: None,
             flamegraph: None,
+            use_journald: false,
         }
     }
 }

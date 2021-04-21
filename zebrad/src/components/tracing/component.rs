@@ -31,15 +31,27 @@ impl Tracing {
             .with_filter_reloading();
         let filter_handle = builder.reload_handle();
 
-        let subscriber = builder.finish().with(ErrorLayer::default());
-
-        let flamegrapher = if let Some(path) = flame_root {
+        let (flamelayer, flamegrapher) = if let Some(path) = flame_root {
             let (flamelayer, flamegrapher) = flame::layer(path);
-            subscriber.with(flamelayer).init();
-            Some(flamegrapher)
+            (Some(flamelayer), Some(flamegrapher))
         } else {
-            subscriber.init();
+            (None, None)
+        };
+
+        let journaldlayer = if config.use_journald {
+            let layer = tracing_journald::layer()
+                .map_err(|e| FrameworkErrorKind::ComponentError.context(e))?;
+            Some(layer)
+        } else {
             None
+        };
+
+        let subscriber = builder.finish().with(ErrorLayer::default());
+        match (flamelayer, journaldlayer) {
+            (None, None) => subscriber.init(),
+            (Some(layer1), None) => subscriber.with(layer1).init(),
+            (None, Some(layer2)) => subscriber.with(layer2).init(),
+            (Some(layer1), Some(layer2)) => subscriber.with(layer1).with(layer2).init(),
         };
 
         Ok(Self {

@@ -3739,6 +3739,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tracing-journald"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8fe1f0ed2b7a5fcb6da2bc9e783587d9a0c8b9535e50224afe04e543eae8a2d6"
+dependencies = [
+ "tracing-core",
+ "tracing-subscriber 0.2.17",
+]
+
+[[package]]
 name = "tracing-log"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4505,6 +4515,7 @@ dependencies = [
  "tracing-error",
  "tracing-flame",
  "tracing-futures",
+ "tracing-journald",
  "tracing-subscriber 0.2.17",
  "vergen",
  "zebra-chain",
