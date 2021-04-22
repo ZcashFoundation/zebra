@@ -221,10 +221,11 @@ As of April 2021, Zebra implements some shutdown checks using an atomic `bool`.
 
 Zebra's [shutdown.rs](https://github.com/ZcashFoundation/zebra/blob/24bf952e982bde28eb384b211659159d46150f63/zebra-chain/src/shutdown.rs)
 avoids data races and missed updates by using the strongest memory
-ordering (`SeqCst`).
+ordering ([`SeqCst`](https://doc.rust-lang.org/nomicon/atomics.html#sequentially-consistent)).
 
 We plan to replace this raw atomic code with a channel, see [#1678](https://github.com/ZcashFoundation/zebra/issues/1678).
 
+<!-- edited from commit 24bf952e982bde28eb384b211659159d46150f63 on 2020-04-22 -->
 ```rust
 /// A flag to indicate if Zebra is shutting down.
 ///
@@ -232,8 +233,6 @@ We plan to replace this raw atomic code with a channel, see [#1678](https://gith
 pub static IS_SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
 
 /// Returns true if the application is shutting down.
-///
-/// Returns false otherwise.
 pub fn is_shutting_down() -> bool {
     // ## Correctness:
     //
@@ -502,7 +501,7 @@ makes code hard to read and maintain. Map the `Either` to a custom enum.
 
 If you're considering using atomics, prefer:
 1. a safe, tested abstraction
-2. using the strongest memory ordering (`Ordering::SeqCst`)
+2. using the strongest memory ordering ([`SeqCst`](https://doc.rust-lang.org/nomicon/atomics.html#sequentially-consistent))
 3. using a weaker memory ordering, with:
   - a correctness comment,
   - multithreaded tests with a concurrency permutation harness like [loom](https://github.com/tokio-rs/loom), and
