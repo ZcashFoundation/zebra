@@ -214,6 +214,42 @@ match future::select(cancel, peer_rx.next()) {
 }
 ```
 
+## Atomic Shutdown Flag
+[atomic-shutdown-flag]: #atomic-shutdown-flag
+
+As of April 2021, Zebra implements some shutdown checks using an atomic `bool`.
+
+Zebra's [shutdown.rs](https://github.com/ZcashFoundation/zebra/blob/24bf952e982bde28eb384b211659159d46150f63/zebra-chain/src/shutdown.rs)
+avoids data races and missed updates by using the strongest memory
+ordering (`SeqCst`).
+
+We plan to replace this raw atomic code with a channel, see [#1678](https://github.com/ZcashFoundation/zebra/issues/1678).
+
+```rust
+/// A flag to indicate if Zebra is shutting down.
+///
+/// Initialized to `false` at startup.
+pub static IS_SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
+
+/// Returns true if the application is shutting down.
+///
+/// Returns false otherwise.
+pub fn is_shutting_down() -> bool {
+    // ## Correctness:
+    //
+    // Since we're shutting down, and this is a one-time operation,
+    // performance is not important. So we use the strongest memory
+    // ordering.
+    // https://doc.rust-lang.org/nomicon/atomics.html#sequentially-consistent
+    IS_SHUTTING_DOWN.load(Ordering::SeqCst)
+}
+
+/// Sets the Zebra shutdown flag to `true`.
+pub fn set_shutting_down() {
+    IS_SHUTTING_DOWN.store(true, Ordering::SeqCst);
+}
+```
+
 ## Integration Testing Async Code
 [integration-testing]: #integration-testing
 
@@ -329,6 +365,7 @@ The reference section contains in-depth information about concurrency in Zebra:
 - [Awaiting Multiple Futures](#awaiting-multiple-futures)
   - [Unbiased Selection](#unbiased-selection)
   - [Biased Selection](#biased-selection)
+- [Using Atomics](#using-atomics)
 - [Testing Async Code](#testing-async-code)
 - [Monitoring Async Code](#monitoring-async-code)
 
@@ -459,6 +496,22 @@ mapping all arguments to the same type.)
 
 The `futures::select` `Either` return type is complex, particularly when nested. This
 makes code hard to read and maintain. Map the `Either` to a custom enum.
+
+## Using Atomics
+[using-atomics]: #using-atomics
+
+If you're considering using atomics, prefer:
+1. a safe, tested abstraction
+2. using the strongest memory ordering (`Ordering::SeqCst`)
+3. using a weaker memory ordering, with:
+  - a correctness comment,
+  - multithreaded tests with a concurrency permutation harness like [loom](https://github.com/tokio-rs/loom), and
+  - benchmarks to prove that the low-level code is faster.
+
+In Zebra, we try to use safe abstractions, and write obviously correct code. It takes
+a lot of effort to write, test, and maintain low-level code. Almost all of our
+performance-critical code is in cryptographic libraries. And our biggest performance
+gains from those libraries come from async batch cryptography.
 
 ## Testing Async Code
 [testing-async-code]: #testing-async-code
