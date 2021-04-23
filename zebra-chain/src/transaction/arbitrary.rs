@@ -108,17 +108,15 @@ impl Transaction {
             transparent::Input::vec_strategy(ledger_state, 10),
             vec(any::<transparent::Output>(), 0..10),
             option::of(any::<sapling::ShieldedData<sapling::SharedAnchor>>()),
-            any::<Vec<u8>>(),
         )
             .prop_map(
-                |(lock_time, expiry_height, inputs, outputs, sapling_shielded_data, rest)| {
+                |(lock_time, expiry_height, inputs, outputs, sapling_shielded_data)| {
                     Transaction::V5 {
                         lock_time,
                         expiry_height,
                         inputs,
                         outputs,
                         sapling_shielded_data,
-                        rest,
                     }
                 },
             )

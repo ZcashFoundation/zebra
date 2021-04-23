@@ -3,7 +3,7 @@ use super::super::*;
 use crate::{
     block::{Block, MAX_BLOCK_BYTES},
     sapling::{PerSpendAnchor, SharedAnchor},
-    serialization::{WriteZcashExt, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
+    serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
 };
 
 use itertools::Itertools;
@@ -110,7 +110,6 @@ fn empty_v5_round_trip() {
         inputs: Vec::new(),
         outputs: Vec::new(),
         sapling_shielded_data: None,
-        rest: empty_v5_orchard_data(),
     };
 
     let data = tx.zcash_serialize_to_vec().expect("tx should serialize");
@@ -245,31 +244,13 @@ fn fake_v5_round_trip() {
         );
 
         // skip fake blocks which exceed the block size limit
-        // because of the changes we made
         if fake_bytes.len() > MAX_BLOCK_BYTES.try_into().unwrap() {
             continue;
         }
 
-        let fake_block2 = match fake_bytes.zcash_deserialize_into::<Block>() {
-            Ok(fake_block2) => fake_block2,
-            Err(err) => {
-                // TODO: work out why transaction parsing succeeds,
-                //       but block parsing doesn't
-                tracing::info!(
-                    ?err,
-                    ?original_block,
-                    ?fake_block,
-                    hex_original_bytes = ?hex::encode(&original_bytes),
-                    hex_fake_bytes = ?hex::encode(&fake_bytes),
-                    original_bytes_len = %original_bytes.len(),
-                    fake_bytes_len = %fake_bytes.len(),
-                    %MAX_BLOCK_BYTES,
-                    "unexpected structurally invalid block during deserialization"
-                );
-
-                continue;
-            }
-        };
+        let fake_block2 = fake_bytes
+            .zcash_deserialize_into::<Block>()
+            .expect("block is structurally valid");
 
         assert_eq!(fake_block, fake_block2);
 
@@ -285,20 +266,6 @@ fn fake_v5_round_trip() {
 }
 
 // Utility functions
-
-/// Return serialized empty Transaction::V5 Orchard data.
-///
-/// TODO: replace with orchard::ShieldedData (#1979)
-fn empty_v5_orchard_data() -> Vec<u8> {
-    let mut buf = Vec::new();
-
-    // nActionsOrchard
-    buf.write_compactsize(0)
-        .expect("serialize to Vec always succeeds");
-
-    // all other orchard fields are only present when `nActionsOrchard > 0`
-    buf
-}
 
 /// Convert `trans` into a fake v5 transaction,
 /// converting sapling shielded data from v4 to v5 if possible.
@@ -316,7 +283,6 @@ fn transaction_to_fake_v5(trans: &Transaction) -> Transaction {
             lock_time: *lock_time,
             expiry_height: block::Height(0),
             sapling_shielded_data: None,
-            rest: empty_v5_orchard_data(),
         },
         V2 {
             inputs,
@@ -329,7 +295,6 @@ fn transaction_to_fake_v5(trans: &Transaction) -> Transaction {
             lock_time: *lock_time,
             expiry_height: block::Height(0),
             sapling_shielded_data: None,
-            rest: empty_v5_orchard_data(),
         },
         V3 {
             inputs,
@@ -343,7 +308,6 @@ fn transaction_to_fake_v5(trans: &Transaction) -> Transaction {
             lock_time: *lock_time,
             expiry_height: *expiry_height,
             sapling_shielded_data: None,
-            rest: empty_v5_orchard_data(),
         },
         V4 {
             inputs,
@@ -361,7 +325,6 @@ fn transaction_to_fake_v5(trans: &Transaction) -> Transaction {
                 .clone()
                 .map(sapling_shielded_v4_to_fake_v5)
                 .flatten(),
-            rest: empty_v5_orchard_data(),
         },
         v5 @ V5 { .. } => v5.clone(),
     }
