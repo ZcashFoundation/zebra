@@ -7,12 +7,48 @@ use chrono::{TimeZone, Utc};
 use std::sync::Arc;
 
 use crate::{
-    parameters::Network,
+    parameters::{Network, NetworkUpgrade},
     work::{difficulty::CompactDifficulty, equihash},
-    LedgerState,
 };
 
 use super::*;
+
+#[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
+/// The configuration data for proptest when generating arbitrary chains
+pub struct LedgerState {
+    /// The tip height of the block or start of the chain
+    pub tip_height: Height,
+    /// The network to generate fake blocks for
+    pub network: Network,
+
+    /// Make this fake transaction a coinbase transaction
+    pub(crate) is_coinbase: bool,
+}
+
+impl LedgerState {
+    /// Construct a new ledger state for generating arbitrary chains via proptest
+    pub fn new(tip_height: Height, network: Network) -> Self {
+        Self {
+            tip_height,
+            is_coinbase: true,
+            network,
+        }
+    }
+}
+
+impl Default for LedgerState {
+    fn default() -> Self {
+        let network = Network::Mainnet;
+        let tip_height = NetworkUpgrade::Canopy.activation_height(network).unwrap();
+
+        Self {
+            tip_height,
+            is_coinbase: true,
+            network,
+        }
+    }
+}
 
 impl Arbitrary for Block {
     type Parameters = LedgerState;

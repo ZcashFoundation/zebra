@@ -22,6 +22,9 @@ pub use header::{BlockTimeError, CountedHeader, Header};
 pub use height::Height;
 pub use serialize::MAX_BLOCK_BYTES;
 
+#[cfg(any(test, feature = "proptest-impl"))]
+pub use arbitrary::LedgerState;
+
 use serde::{Deserialize, Serialize};
 
 use crate::{

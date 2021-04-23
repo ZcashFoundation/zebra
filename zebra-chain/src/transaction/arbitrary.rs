@@ -3,13 +3,12 @@ use std::{convert::TryInto, sync::Arc};
 use chrono::{TimeZone, Utc};
 use proptest::{arbitrary::any, array, collection::vec, option, prelude::*};
 
-use crate::LedgerState;
 use crate::{
     amount::Amount,
     block,
     parameters::NetworkUpgrade,
     primitives::{Bctv14Proof, Groth16Proof, ZkSnarkProof},
-    sapling, sprout, transparent,
+    sapling, sprout, transparent, LedgerState,
 };
 
 use super::{FieldNotPresent, JoinSplitData, LockTime, Memo, Transaction};
