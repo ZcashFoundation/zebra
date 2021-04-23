@@ -346,7 +346,6 @@ impl ZcashSerialize for Transaction {
                 inputs,
                 outputs,
                 sapling_shielded_data,
-                rest,
             } => {
                 // Transaction V5 spec:
                 // https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus
@@ -367,8 +366,10 @@ impl ZcashSerialize for Transaction {
                 sapling_shielded_data.zcash_serialize(&mut writer)?;
 
                 // orchard
-                // TODO: parse orchard into structs
-                writer.write_all(rest)?;
+                // TODO: Parse orchard into structs
+                //       In the meantime, to keep the transaction valid, we add `0`
+                //       as the nActionsOrchard field
+                writer.write_compactsize(0)?;
             }
         }
         Ok(())
@@ -501,9 +502,14 @@ impl ZcashDeserialize for Transaction {
                 let sapling_shielded_data = (&mut reader).zcash_deserialize_into()?;
 
                 // orchard
-                // TODO: parse orchard into structs
-                let mut rest = Vec::new();
-                reader.read_to_end(&mut rest)?;
+                // TODO: Parse orchard into structs
+                //       In the meantime, check the orchard section is just `0`
+                let empty_orchard_section = reader.read_compactsize()?;
+                if empty_orchard_section != 0 {
+                    return Err(SerializationError::Parse(
+                        "expected orchard section to be just a zero",
+                    ));
+                }
 
                 Ok(Transaction::V5 {
                     lock_time,
@@ -511,7 +517,6 @@ impl ZcashDeserialize for Transaction {
                     inputs,
                     outputs,
                     sapling_shielded_data,
-                    rest,
                 })
             }
             (_, _) => Err(SerializationError::Parse("bad tx header")),
