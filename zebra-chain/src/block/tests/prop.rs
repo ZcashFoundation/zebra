@@ -5,7 +5,7 @@ use proptest::{arbitrary::any, prelude::*, test_runner::Config};
 use zebra_test::prelude::*;
 
 use crate::serialization::{SerializationError, ZcashDeserializeInto, ZcashSerialize};
-use crate::{block, parameters::Network, LedgerState};
+use crate::{parameters::Network, LedgerState};
 
 use super::super::{serialize::MAX_BLOCK_BYTES, *};
 
@@ -121,13 +121,7 @@ proptest! {
 fn blocks_have_coinbase() -> Result<()> {
     zebra_test::init();
 
-    let strategy = any::<block::Height>()
-        .prop_map(|tip_height| LedgerState {
-            tip_height,
-            is_coinbase: true,
-            network: Network::Mainnet,
-        })
-        .prop_flat_map(Block::arbitrary_with);
+    let strategy = LedgerState::coinbase_strategy().prop_flat_map(Block::arbitrary_with);
 
     proptest!(|(block in strategy)| {
         let has_coinbase = block.coinbase_height().is_some();

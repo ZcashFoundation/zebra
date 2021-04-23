@@ -5,9 +5,9 @@ use crate::{block, LedgerState};
 use super::{CoinbaseData, Input, OutPoint, Script};
 
 impl Input {
-    /// Construct a strategy for creating validish vecs of Inputs.
+    /// Construct a strategy for creating valid-ish vecs of Inputs.
     pub fn vec_strategy(ledger_state: LedgerState, max_size: usize) -> BoxedStrategy<Vec<Self>> {
-        if ledger_state.is_coinbase {
+        if ledger_state.has_coinbase {
             let height = block::Height(ledger_state.tip_height.0 + 1);
             Self::arbitrary_with(Some(height))
                 .prop_map(|input| vec![input])

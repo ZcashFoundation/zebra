@@ -1,6 +1,6 @@
 use zebra_test::prelude::*;
 
-use crate::{block, parameters::Network, LedgerState};
+use crate::{block, LedgerState};
 
 use super::Input;
 
@@ -24,12 +24,7 @@ fn input_coinbase_vecs_only_have_coinbase_input() -> Result<()> {
     zebra_test::init();
 
     let max_size = 100;
-    let strategy = any::<block::Height>()
-        .prop_map(|tip_height| LedgerState {
-            tip_height,
-            is_coinbase: true,
-            network: Network::Mainnet,
-        })
+    let strategy = LedgerState::coinbase_strategy()
         .prop_flat_map(|ledger_state| Input::vec_strategy(ledger_state, max_size));
 
     proptest!(|(inputs in strategy)| {
