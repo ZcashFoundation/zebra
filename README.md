@@ -40,7 +40,7 @@ Building `zebrad` requires [Rust](https://www.rust-lang.org/tools/install),
 2. Install Zebra's build dependencies:
      - **libclang:** the `libclang`, `libclang-dev`, `llvm`, or `llvm-dev` packages, depending on your package manager
      - **clang** or another C++ compiler: `g++`, `Xcode`, or `MSVC`
-3. Run `cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-alpha.6 zebrad`
+3. Run `cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-alpha.7 zebrad`
 4. Run `zebrad start`
 
 If you're interested in testing out `zebrad` please feel free, but keep in mind
