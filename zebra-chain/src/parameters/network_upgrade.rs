@@ -161,7 +161,8 @@ impl NetworkUpgrade {
 
     /// Returns the next network upgrade for `network` and `height`.
     ///
-    /// Returns None if the name of the next upgrade has not been decided yet.
+    /// Returns None if the next upgrade has not been implemented in Zebra
+    /// yet.
     pub fn next(network: Network, height: block::Height) -> Option<NetworkUpgrade> {
         NetworkUpgrade::activation_list(network)
             .range((Excluded(height), Unbounded))
@@ -224,9 +225,6 @@ impl NetworkUpgrade {
     /// Returns `None` if the testnet minimum difficulty consensus rule is not active.
     ///
     /// Based on https://zips.z.cash/zip-0208#minimum-difficulty-blocks-on-the-test-network
-    ///
-    /// `zcashd` requires a gap that's strictly greater than 6 times the target
-    /// threshold, but ZIP-205 and ZIP-208 are ambiguous. See bug #1276.
     pub fn minimum_difficulty_spacing_for_height(
         network: Network,
         height: block::Height,
