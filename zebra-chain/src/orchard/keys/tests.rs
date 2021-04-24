@@ -11,8 +11,7 @@ impl Arbitrary for TransmissionKey {
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         (any::<SpendingKey>())
             .prop_map(|spending_key| {
-                let full_viewing_key =
-                    FullViewingKey::from_spending_key(spending_key, Network::Mainnet);
+                let full_viewing_key = FullViewingKey::from_spending_key(spending_key);
 
                 let diversifier_key = DiversifierKey::from(full_viewing_key);
 
@@ -56,9 +55,7 @@ proptest! {
         prop_assert_eq![full_viewing_key, full_viewing_key_2];
 
         let diversifier_key = DiversifierKey::from(full_viewing_key);
-
-        let mut incoming_viewing_key = IncomingViewingKey::from(full_viewing_key);
-        incoming_viewing_key.network = spending_key.network;
+        let incoming_viewing_key = IncomingViewingKey::from(full_viewing_key);
 
         let ivk_string = incoming_viewing_key.to_string();
         let incoming_viewing_key_2: IncomingViewingKey = ivk_string.parse().unwrap();
