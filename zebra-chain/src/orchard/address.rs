@@ -64,10 +64,11 @@ mod tests {
     fn derive_keys_and_addresses() {
         zebra_test::init();
 
-        let spending_key = keys::SpendingKey::new(&mut OsRng);
+        let network = Network::Mainnet;
 
-        let full_viewing_key =
-            keys::FullViewingKey::from_spending_key(spending_key, Network::Mainnet);
+        let spending_key = keys::SpendingKey::new(&mut OsRng, network);
+
+        let full_viewing_key = keys::FullViewingKey::from_spending_key(spending_key);
 
         // Default diversifier, where index = 0.
         let diversifier_key = keys::DiversifierKey::from(full_viewing_key);
@@ -78,7 +79,7 @@ mod tests {
         let transmission_key = keys::TransmissionKey::from((incoming_viewing_key, diversifier));
 
         let _orchard_shielded_address = Address {
-            network: Network::Mainnet,
+            network,
             diversifier,
             transmission_key,
         };

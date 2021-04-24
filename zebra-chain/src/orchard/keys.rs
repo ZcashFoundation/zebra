@@ -144,16 +144,6 @@ pub struct SpendingKey {
     bytes: [u8; 32],
 }
 
-impl From<[u8; 32]> for SpendingKey {
-    /// Generate a _SpendingKey_ from existing bytes.
-    fn from(bytes: [u8; 32]) -> Self {
-        Self {
-            network: Network::default(),
-            bytes,
-        }
-    }
-}
-
 impl From<SpendingKey> for [u8; 32] {
     fn from(sk: SpendingKey) -> Self {
         sk.bytes
@@ -203,7 +193,7 @@ impl SpendingKey {
     /// is not zero, else fail.
     ///
     /// [orchardkeycomponents]: https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents
-    pub fn new<T>(csprng: &mut T) -> Self
+    pub fn new<T>(csprng: &mut T, network: Network) -> Self
     where
         T: RngCore + CryptoRng,
     {
@@ -211,7 +201,7 @@ impl SpendingKey {
             let mut bytes = [0u8; 32];
             csprng.fill_bytes(&mut bytes);
 
-            let sk = Self::from(bytes);
+            let sk = Self::from_bytes(bytes, network);
 
             // "if ask = 0, discard this key and repeat with a new sk"
             if SpendAuthorizingKey::from(sk).0 == pallas::Scalar::zero() {
@@ -220,6 +210,11 @@ impl SpendingKey {
 
             break sk;
         }
+    }
+
+    /// Generate a `SpendingKey` from existing bytes.
+    fn from_bytes(bytes: [u8; 32], network: Network) -> Self {
+        Self { network, bytes }
     }
 }
 
@@ -643,11 +638,11 @@ impl FullViewingKey {
     ///
     /// https://zips.z.cash/protocol/nu5.pdf#addressesandkeys
     /// https://zips.z.cash/protocol/nu5.pdf#orchardfullviewingkeyencoding
-    pub fn from_spending_key(sk: SpendingKey, network: Network) -> FullViewingKey {
+    pub fn from_spending_key(sk: SpendingKey) -> FullViewingKey {
         let spend_authorizing_key = SpendAuthorizingKey::from(sk);
 
         Self {
-            network,
+            network: sk.network,
             spend_validating_key: SpendValidatingKey::from(spend_authorizing_key),
             nullifier_deriving_key: NullifierDerivingKey::from(sk),
             ivk_commit_randomness: IvkCommitRandomness::from(sk),
