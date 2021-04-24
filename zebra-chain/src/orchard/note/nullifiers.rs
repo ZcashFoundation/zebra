@@ -15,6 +15,7 @@ use super::super::{
 ///
 /// [poseidonhash]: https://zips.z.cash/protocol/nu5.pdf#poseidonhash
 fn poseidon_hash(_x: pallas::Base, _y: pallas::Base) -> pallas::Base {
+    // TODO: implement: #2064
     unimplemented!()
 }
 
