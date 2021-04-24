@@ -35,15 +35,7 @@ fn prf_nf(nk: pallas::Base, rho: pallas::Base) -> pallas::Base {
 }
 
 /// A Nullifier for Orchard transactions
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Eq, // Hash,
-    PartialEq,
-    Serialize,
-    Deserialize,
-)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Nullifier(#[serde(with = "serde_helpers::Base")] pallas::Base);
 
 impl From<[u8; 32]> for Nullifier {
