@@ -130,7 +130,7 @@ impl Transaction {
         len: usize,
     ) -> BoxedStrategy<Vec<Arc<Self>>> {
         let coinbase = Transaction::arbitrary_with(ledger_state).prop_map(Arc::new);
-        ledger_state.is_coinbase = false;
+        ledger_state.has_coinbase = false;
         let remainder = vec(
             Transaction::arbitrary_with(ledger_state).prop_map(Arc::new),
             len,
@@ -302,16 +302,7 @@ impl Arbitrary for Transaction {
     type Parameters = LedgerState;
 
     fn arbitrary_with(ledger_state: Self::Parameters) -> Self::Strategy {
-        let LedgerState {
-            tip_height,
-            network,
-            ..
-        } = ledger_state;
-
-        let height = block::Height(tip_height.0 + 1);
-        let network_upgrade = NetworkUpgrade::current(network, height);
-
-        match network_upgrade {
+        match ledger_state.network_upgrade() {
             NetworkUpgrade::Genesis | NetworkUpgrade::BeforeOverwinter => {
                 Self::v1_strategy(ledger_state)
             }

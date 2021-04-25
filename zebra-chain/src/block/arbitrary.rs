@@ -17,37 +17,105 @@ use super::*;
 #[non_exhaustive]
 /// The configuration data for proptest when generating arbitrary chains
 pub struct LedgerState {
-    /// The tip height of the block or start of the chain
+    /// The tip height of the block or start of the chain.
+    ///
+    /// To get the network upgrade, use the `network_upgrade` method.
     pub tip_height: Height,
-    /// The network to generate fake blocks for
+
+    /// The network to generate fake blocks for.
     pub network: Network,
 
-    /// Make this fake transaction a coinbase transaction
-    pub(crate) is_coinbase: bool,
+    /// Overrides the network upgrade calculated from `tip_height` and `network`.
+    ///
+    /// To get the network upgrade, use the `network_upgrade` method.
+    pub network_upgrade_override: Option<NetworkUpgrade>,
+
+    /// Generate coinbase transactions.
+    ///
+    /// In a block or transaction vector, make the first transaction a coinbase
+    /// transaction.
+    ///
+    /// For an individual transaction, make the transaction a coinbase
+    /// transaction.
+    pub(crate) has_coinbase: bool,
 }
 
 impl LedgerState {
-    /// Construct a new ledger state for generating arbitrary chains via proptest
-    pub fn new(tip_height: Height, network: Network) -> Self {
-        Self {
-            tip_height,
-            is_coinbase: true,
-            network,
+    /// Returns the network upgrade for this ledger state.
+    ///
+    /// If `network_upgrade_override` is set, it replaces the upgrade calculated
+    /// using `tip_height` and `network`.
+    pub fn network_upgrade(&self) -> NetworkUpgrade {
+        if let Some(network_upgrade_override) = self.network_upgrade_override {
+            network_upgrade_override
+        } else {
+            NetworkUpgrade::current(self.network, self.tip_height)
         }
+    }
+
+    /// Returns a strategy for creating `LedgerState`s that always have coinbase
+    /// transactions.
+    pub fn coinbase_strategy() -> BoxedStrategy<Self> {
+        Self::arbitrary_with(true)
     }
 }
 
 impl Default for LedgerState {
     fn default() -> Self {
         let network = Network::Mainnet;
-        let tip_height = NetworkUpgrade::Canopy.activation_height(network).unwrap();
+        let most_recent_nu = NetworkUpgrade::current(network, Height::MAX);
+        let most_recent_activation_height = most_recent_nu.activation_height(network).unwrap();
+
+        // TODO: dynamically select any future network upgrade (#1974)
+        let nu5_activation_height = NetworkUpgrade::Nu5.activation_height(network);
+        let nu5_override = if nu5_activation_height.is_some() {
+            None
+        } else {
+            Some(NetworkUpgrade::Nu5)
+        };
 
         Self {
-            tip_height,
-            is_coinbase: true,
+            tip_height: most_recent_activation_height,
             network,
+            network_upgrade_override: nu5_override,
+            has_coinbase: true,
         }
     }
+}
+
+impl Arbitrary for LedgerState {
+    type Parameters = bool;
+
+    /// Generate an arbitrary `LedgerState`.
+    ///
+    /// The default strategy arbitrarily skips some coinbase transactions. To
+    /// override, use `LedgerState::coinbase_strategy`.
+    fn arbitrary_with(require_coinbase: Self::Parameters) -> Self::Strategy {
+        (
+            any::<Height>(),
+            any::<Network>(),
+            any::<bool>(),
+            any::<bool>(),
+        )
+            .prop_map(move |(tip_height, network, nu5_override, has_coinbase)| {
+                // TODO: dynamically select any future network upgrade (#1974)
+                let network_upgrade_override = if nu5_override {
+                    Some(NetworkUpgrade::Nu5)
+                } else {
+                    None
+                };
+
+                LedgerState {
+                    tip_height,
+                    network,
+                    network_upgrade_override,
+                    has_coinbase: require_coinbase || has_coinbase,
+                }
+            })
+            .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
 }
 
 impl Arbitrary for Block {
