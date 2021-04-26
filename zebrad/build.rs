@@ -28,6 +28,7 @@ fn main() {
     disable_non_reproducible(&mut config);
 
     *config.git_mut().sha_kind_mut() = ShaKind::Short;
+    *config.git_mut().semver_kind_mut() = SemverKind::Lightweight;
 
     // Disable env vars we aren't using right now
     *config.cargo_mut().features_mut() = false;

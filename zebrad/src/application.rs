@@ -45,7 +45,7 @@ pub fn app_config() -> config::Reader<ZebradApp> {
 /// For details, see https://semver.org/
 pub fn app_version() -> Version {
     const CARGO_PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
-    let vergen_git_semver: Option<&str> = option_env!("VERGEN_GIT_SEMVER");
+    let vergen_git_semver: Option<&str> = option_env!("VERGEN_GIT_SEMVER_LIGHTWEIGHT");
 
     match vergen_git_semver {
         // change the git semver format to the semver 2.0 format
