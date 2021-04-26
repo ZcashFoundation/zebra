@@ -216,39 +216,50 @@ impl Application for ZebradApp {
 
         // collect the common metadata for the issue URL and panic report,
         // skipping any env vars that aren't present
-        let panic_metadata: Vec<(_, String)> = [
+
+        let app_metadata = vec![
             // cargo or git tag + short commit
-            ("version", Some(app_version().to_string())),
-            // git
-            // git env vars can be skipped if there is no `.git` during the
-            // build, so they must all be optional
-            ("branch", option_env!("VERGEN_GIT_BRANCH").map(Into::into)),
-            ("git commit", Self::git_commit().map(Into::into)),
+            ("version", app_version().to_string()),
+            // config
+            ("Zcash network", config.network.network.to_string()),
+        ];
+
+        // git env vars can be skipped if there is no `.git` during the
+        // build, so they must all be optional
+        let git_metadata: &[(_, Option<_>)] = &[
+            ("branch", option_env!("VERGEN_GIT_BRANCH")),
+            ("git commit", Self::git_commit()),
             (
                 "commit timestamp",
-                option_env!("VERGEN_GIT_COMMIT_TIMESTAMP").map(Into::into),
+                option_env!("VERGEN_GIT_COMMIT_TIMESTAMP"),
             ),
-            // build
-            (
-                "target triple",
-                Some(env!("VERGEN_CARGO_TARGET_TRIPLE")).map(Into::into),
-            ),
-            (
-                "build profile",
-                Some(env!("VERGEN_CARGO_PROFILE")).map(Into::into),
-            ),
-            // config
-            ("Zcash network", Some(config.network.network.to_string())),
+        ];
+        // skip missing metadata
+        let git_metadata: Vec<(_, String)> = git_metadata
+            .iter()
+            .filter_map(|(k, v)| Some((k, (*v)?)))
+            .map(|(k, v)| (*k, v.to_string()))
+            .collect();
+
+        let build_metadata: Vec<_> = [
+            ("target triple", env!("VERGEN_CARGO_TARGET_TRIPLE")),
+            ("build profile", env!("VERGEN_CARGO_PROFILE")),
         ]
         .iter()
-        .filter_map(|(k, opt_v)| Some((*k, opt_v.as_ref()?.clone())))
+        .map(|(k, v)| (*k, v.to_string()))
         .collect();
+
+        let panic_metadata: Vec<_> = app_metadata
+            .iter()
+            .chain(git_metadata.iter())
+            .chain(build_metadata.iter())
+            .collect();
 
         let mut builder = color_eyre::config::HookBuilder::default();
         let mut metadata_section = "Metadata:".to_string();
         for (k, v) in panic_metadata {
             builder = builder.add_issue_metadata(k, v.clone());
-            metadata_section.push_str(&format!("\n{}: {}", k, v.clone()));
+            metadata_section.push_str(&format!("\n{}: {}", k, &v));
         }
 
         builder = builder
