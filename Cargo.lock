@@ -1397,9 +1397,9 @@ checksum = "f6503fe142514ca4799d4c26297c4248239fe8838d827db6bd6065c6ed29a6ce"
 
 [[package]]
 name = "git2"
-version = "0.13.17"
+version = "0.13.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d250f5f82326884bd39c2853577e70a121775db76818ffa452ed1e80de12986"
+checksum = "b483c6c2145421099df1b4efd50e0f6205479a072199460eff852fa15e5603c7"
 dependencies = [
  "bitflags",
  "libc",
@@ -1873,9 +1873,9 @@ checksum = "9385f66bf6105b241aa65a61cb923ef20efc665cb9f9bb50ac2f0c4b7f378d41"
 
 [[package]]
 name = "libgit2-sys"
-version = "0.12.18+1.1.0"
+version = "0.12.19+1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3da6a42da88fc37ee1ecda212ffa254c25713532980005d5f7c0b0fbe7e6e885"
+checksum = "f322155d574c8b9ebe991a04f6908bb49e68a79463338d24a43d6274cb6443e6"
 dependencies = [
  "cc",
  "libc",
@@ -4052,9 +4052,9 @@ checksum = "f1bddf1187be692e79c5ffeab891132dfb0f236ed36a43c7ed39f1165ee20191"
 
 [[package]]
 name = "vergen"
-version = "5.1.2"
+version = "5.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0277ffac28b64e449a7a8c369ddd8591647c5a2d1fd513eebd6a153ff4c40ea4"
+checksum = "575b693376dacf6a9825ab3e61a033cf0e94040e620fca8447b055ef8ce82d2b"
 dependencies = [
  "anyhow",
  "cfg-if 1.0.0",

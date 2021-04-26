@@ -220,6 +220,8 @@ impl Application for ZebradApp {
             // cargo or git tag + short commit
             ("version", Some(app_version().to_string())),
             // git
+            // git env vars can be skipped if there is no `.git` during the
+            // build, so they must all be optional
             ("branch", option_env!("VERGEN_GIT_BRANCH").map(Into::into)),
             ("git commit", Self::git_commit().map(Into::into)),
             (
