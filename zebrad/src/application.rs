@@ -231,7 +231,11 @@ impl Application for ZebradApp {
             // build
             (
                 "target triple",
-                option_env!("VERGEN_CARGO_TARGET_TRIPLE").map(Into::into),
+                Some(env!("VERGEN_CARGO_TARGET_TRIPLE")).map(Into::into),
+            ),
+            (
+                "build profile",
+                Some(env!("VERGEN_CARGO_PROFILE")).map(Into::into),
             ),
             // config
             ("Zcash network", Some(config.network.network.to_string())),
