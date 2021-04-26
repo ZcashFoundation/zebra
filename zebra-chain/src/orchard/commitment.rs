@@ -8,6 +8,7 @@ use halo2::{
     arithmetic::{CurveAffine, FieldExt},
     pasta::pallas,
 };
+use lazy_static::lazy_static;
 use rand_core::{CryptoRng, RngCore};
 
 use crate::{
@@ -314,19 +315,21 @@ impl ValueCommitment {
         Self::new(rcv, value)
     }
 
-    /// Generate a new _ValueCommitment_ from an existing _rcv_ on a _value_.
+    /// Generate a new `ValueCommitment` from an existing `rcv on a `value`.
     ///
     /// ValueCommit^Orchard(v) :=
     ///
     /// https://zips.z.cash/protocol/protocol.pdf#concretehomomorphiccommit
     #[allow(non_snake_case)]
     pub fn new(rcv: pallas::Scalar, value: Amount) -> Self {
-        let V = pallas_group_hash(b"z.cash:Orchard-cv", b"v");
-        let R = pallas_group_hash(b"z.cash:Orchard-cv", b"r");
+        lazy_static! {
+            static ref V: pallas::Point = pallas_group_hash(b"z.cash:Orchard-cv", b"v");
+            static ref R: pallas::Point = pallas_group_hash(b"z.cash:Orchard-cv", b"r");
+        }
 
         let v = pallas::Scalar::from(value);
 
-        Self::from(V * v + R * rcv)
+        Self::from(*V * v + *R * rcv)
     }
 }
 
