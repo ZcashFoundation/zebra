@@ -10,7 +10,7 @@ mod serialize;
 mod sighash;
 
 #[cfg(any(test, feature = "proptest-impl"))]
-mod arbitrary;
+pub mod arbitrary;
 #[cfg(test)]
 mod tests;
 

@@ -55,8 +55,30 @@ pub fn has_inputs_and_outputs(tx: &Transaction) -> Result<(), TransactionError> 
         Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => {
             unreachable!("tx version is checked first")
         }
-        Transaction::V5 { .. } => {
-            unimplemented!("v5 transaction format as specified in ZIP-225")
+        Transaction::V5 {
+            inputs,
+            outputs,
+            sapling_shielded_data,
+            ..
+        } => {
+            let tx_in_count = inputs.len();
+            let tx_out_count = outputs.len();
+            let n_shielded_spend = sapling_shielded_data
+                .as_ref()
+                .map(|d| d.spends().count())
+                .unwrap_or(0);
+            let n_shielded_output = sapling_shielded_data
+                .as_ref()
+                .map(|d| d.outputs().count())
+                .unwrap_or(0);
+
+            if tx_in_count + n_shielded_spend == 0 {
+                Err(TransactionError::NoInputs)
+            } else if tx_out_count + n_shielded_output == 0 {
+                Err(TransactionError::NoOutputs)
+            } else {
+                Ok(())
+            }
         }
     }
 }
@@ -100,14 +122,17 @@ pub fn coinbase_tx_no_joinsplit_or_spend(tx: &Transaction) -> Result<(), Transac
                 Err(TransactionError::CoinbaseHasSpend)
             }
 
-            Transaction::V4 { .. } => Ok(()),
+            Transaction::V5 {
+                sapling_shielded_data: Some(sapling_shielded_data),
+                ..
+            } if sapling_shielded_data.spends().count() > 0 => {
+                Err(TransactionError::CoinbaseHasSpend)
+            }
+
+            Transaction::V4 { .. } | Transaction::V5 { .. } => Ok(()),
 
             Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => {
                 unreachable!("tx version is checked first")
-            }
-
-            Transaction::V5 { .. } => {
-                unimplemented!("v5 coinbase validation as specified in ZIP-225 and the draft spec")
             }
         }
     } else {
