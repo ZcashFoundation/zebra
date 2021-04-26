@@ -40,7 +40,7 @@ tracing-error = "0.1.2"
 metrics = "0.13.0-alpha.8"
 metrics-exporter-prometheus = "0.1.0-alpha.7"
 
-dirs = "3.0.1"
+dirs = "3.0.2"
 inferno = { version = "0.10.3", default-features = false }
 atty = "0.2.14"
 
