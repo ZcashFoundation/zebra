@@ -47,10 +47,13 @@ fn Q(D: &[u8]) -> pallas::Point {
 /// S: {0 .. 2^k - 1} -> P^*, aka 10 bits hashed into the group
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#concretesinsemillahash
-// XXX: should j be strictly limited to k=10 bits?
 #[allow(non_snake_case)]
-fn S(j: [u8; 2]) -> pallas::Point {
-    pallas_group_hash(b"z.cash:SinsemillaS", &j)
+fn S(j: &u16) -> pallas::Point {
+    // The value of j is a 10-bit value, therefore must never exceed 2^10 in
+    // value.
+    assert!(j < &1024u16);
+
+    pallas_group_hash(b"z.cash:SinsemillaS", &j.to_le_bytes())
 }
 
 /// "...an algebraic hash function with collision resistance (for fixed input
@@ -89,9 +92,13 @@ pub fn sinsemilla_hash_to_point(D: &[u8], M: &BitVec<Lsb0, u8>) -> pallas::Point
             .for_each(|(i, bit)| bits.set(i, *bit));
 
         // An instance of LEBS2IP_k
-        let j = &bits.iter().fold(0u16, |j, &bit| j * 2 + bit as u16);
+        // XXX: does Rust or bitvec have a better implementation?
+        let j = &bits
+            .iter()
+            .enumerate()
+            .fold(0u16, |j, (i, &bit)| j + if bit { 1 << i } else { 0 });
 
-        acc = acc + acc + S(j.to_le_bytes());
+        acc = acc + acc + S(j);
     }
 
     acc
