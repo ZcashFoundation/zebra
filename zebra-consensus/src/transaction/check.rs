@@ -83,17 +83,24 @@ pub fn has_inputs_and_outputs(tx: &Transaction) -> Result<(), TransactionError> 
     }
 }
 
-/// Check that if there are no Spends or Outputs, that valueBalance is also 0.
+/// Check that if there are no Spends or Outputs, the Sapling valueBalance is also 0.
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#consensusfrombitcoin
-pub fn shielded_balances_match<AnchorV>(
-    shielded_data: &ShieldedData<AnchorV>,
+/// If effectiveVersion = 4 and there are no Spend descriptions or Output descriptions,
+/// then valueBalanceSapling MUST be 0.
+///
+/// This check is redundant for `Transaction::V5`, because the transaction format
+/// omits `valueBalanceSapling` when there are no spends and no outputs. But it's
+/// simpler to just do the redundant check anyway.
+///
+/// https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
+pub fn sapling_balances_match<AnchorV>(
+    sapling_shielded_data: &ShieldedData<AnchorV>,
 ) -> Result<(), TransactionError>
 where
     AnchorV: AnchorVariant + Clone,
 {
-    if (shielded_data.spends().count() + shielded_data.outputs().count() != 0)
-        || i64::from(shielded_data.value_balance) == 0
+    if (sapling_shielded_data.spends().count() + sapling_shielded_data.outputs().count() != 0)
+        || i64::from(sapling_shielded_data.value_balance) == 0
     {
         Ok(())
     } else {
