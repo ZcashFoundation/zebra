@@ -137,3 +137,7 @@ pub fn sinsemilla_commit(r: pallas::Scalar, D: &[u8], M: &BitVec<Lsb0, u8>) -> p
 pub fn sinsemilla_short_commit(r: pallas::Scalar, D: &[u8], M: &BitVec<Lsb0, u8>) -> pallas::Base {
     extract_p(sinsemilla_commit(r, D, M))
 }
+
+// TODO: test the above correctness and compatibility with the zcash-hackworks test vectors
+// https://github.com/ZcashFoundation/zebra/issues/2079
+// https://github.com/zcash-hackworks/zcash-test-vectors/pulls
