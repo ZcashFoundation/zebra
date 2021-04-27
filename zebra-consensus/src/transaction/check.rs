@@ -11,10 +11,13 @@ use crate::error::TransactionError;
 
 /// Checks that the transaction has inputs and outputs.
 ///
-/// More specifically:
+/// For `Transaction::V4`:
+/// * at least one of `tx_in_count`, `nSpendsSapling`, and `nJoinSplit` MUST be non-zero.
+/// * at least one of `tx_out_count`, `nOutputsSapling`, and `nJoinSplit` MUST be non-zero.
 ///
-/// * at least one of tx_in_count, nShieldedSpend, and nJoinSplit MUST be non-zero.
-/// * at least one of tx_out_count, nShieldedOutput, and nJoinSplit MUST be non-zero.
+/// For `Transaction::V5`:
+/// * at least one of `tx_in_count`, `nSpendsSapling`, and `nActionsOrchard` MUST be non-zero.
+/// * at least one of `tx_out_count`, `nOutputsSapling`, and `nActionsOrchard` MUST be non-zero.
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
 pub fn has_inputs_and_outputs(tx: &Transaction) -> Result<(), TransactionError> {
@@ -22,6 +25,7 @@ pub fn has_inputs_and_outputs(tx: &Transaction) -> Result<(), TransactionError> 
     // hold enum'd data. Mixing pattern matching and numerical checks is risky,
     // so convert everything to counts and sum up.
     match tx {
+        // In Zebra, `inputs` contains both `PrevOut` (transparent) and `Coinbase` inputs.
         Transaction::V4 {
             inputs,
             outputs,
@@ -35,50 +39,57 @@ pub fn has_inputs_and_outputs(tx: &Transaction) -> Result<(), TransactionError> 
                 .as_ref()
                 .map(|d| d.joinsplits().count())
                 .unwrap_or(0);
-            let n_shielded_spend = sapling_shielded_data
+            let n_spends_sapling = sapling_shielded_data
                 .as_ref()
                 .map(|d| d.spends().count())
                 .unwrap_or(0);
-            let n_shielded_output = sapling_shielded_data
+            let n_outputs_sapling = sapling_shielded_data
                 .as_ref()
                 .map(|d| d.outputs().count())
                 .unwrap_or(0);
 
-            if tx_in_count + n_shielded_spend + n_joinsplit == 0 {
+            if tx_in_count + n_spends_sapling + n_joinsplit == 0 {
                 Err(TransactionError::NoInputs)
-            } else if tx_out_count + n_shielded_output + n_joinsplit == 0 {
+            } else if tx_out_count + n_outputs_sapling + n_joinsplit == 0 {
                 Err(TransactionError::NoOutputs)
             } else {
                 Ok(())
             }
         }
-        Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => {
-            unreachable!("tx version is checked first")
-        }
+
         Transaction::V5 {
             inputs,
             outputs,
             sapling_shielded_data,
+            // TODO: Orchard validation (#1980)
             ..
         } => {
             let tx_in_count = inputs.len();
             let tx_out_count = outputs.len();
-            let n_shielded_spend = sapling_shielded_data
+            let n_spends_sapling = sapling_shielded_data
                 .as_ref()
                 .map(|d| d.spends().count())
                 .unwrap_or(0);
-            let n_shielded_output = sapling_shielded_data
+            let n_outputs_sapling = sapling_shielded_data
                 .as_ref()
                 .map(|d| d.outputs().count())
                 .unwrap_or(0);
 
-            if tx_in_count + n_shielded_spend == 0 {
+            // TODO: Orchard validation (#1980)
+            // For `Transaction::V5`:
+            // * at least one of `tx_in_count`, `nSpendsSapling`, and `nActionsOrchard` MUST be non-zero.
+            // * at least one of `tx_out_count`, `nOutputsSapling`, and `nActionsOrchard` MUST be non-zero.
+            if tx_in_count + n_spends_sapling == 0 {
                 Err(TransactionError::NoInputs)
-            } else if tx_out_count + n_shielded_output == 0 {
+            } else if tx_out_count + n_outputs_sapling == 0 {
                 Err(TransactionError::NoOutputs)
             } else {
                 Ok(())
             }
+        }
+
+        Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => {
+            unreachable!("tx version is checked first")
         }
     }
 }
