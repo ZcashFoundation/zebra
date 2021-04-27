@@ -131,7 +131,7 @@ mod tests {
             );
             assert_eq!(user_agent, "");
             assert_eq!(start_height.0, 0);
-            assert_eq!(relay, false);
+            assert!(!relay);
         } else {
             panic!("handshake did not send version message");
         }
