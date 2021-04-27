@@ -108,7 +108,7 @@ proptest! {
     /// Serialize and deserialize `PerSpendAnchor` shielded data by including it
     /// in a V4 transaction
     #[test]
-    fn shielded_data_v4_roundtrip(
+    fn sapling_shielded_data_v4_roundtrip(
         shielded_v4 in any::<sapling::ShieldedData<PerSpendAnchor>>(),
     ) {
         zebra_test::init();
@@ -137,7 +137,7 @@ proptest! {
 
     /// Serialize and deserialize `SharedAnchor` shielded data
     #[test]
-    fn shielded_data_v5_roundtrip(
+    fn sapling_shielded_data_v5_roundtrip(
         shielded_v5 in any::<sapling::ShieldedData<SharedAnchor>>(),
     ) {
         zebra_test::init();
@@ -160,7 +160,7 @@ proptest! {
 
     /// Test v4 with empty spends, but some outputs
     #[test]
-    fn shielded_data_v4_outputs_only(
+    fn sapling_shielded_data_v4_outputs_only(
         shielded_v4 in any::<sapling::ShieldedData<PerSpendAnchor>>(),
     ) {
         zebra_test::init();
@@ -199,7 +199,7 @@ proptest! {
 
     /// Test the v5 shared anchor serialization condition: empty spends, but some outputs
     #[test]
-    fn shielded_data_v5_outputs_only(
+    fn sapling_shielded_data_v5_outputs_only(
         shielded_v5 in any::<sapling::ShieldedData<SharedAnchor>>(),
     ) {
         zebra_test::init();

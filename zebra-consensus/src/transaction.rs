@@ -212,10 +212,10 @@ where
                         async_checks.push(rsp.boxed());
                     }
 
-                    if let Some(shielded_data) = sapling_shielded_data {
-                        check::shielded_balances_match(&shielded_data)?;
+                    if let Some(sapling_shielded_data) = sapling_shielded_data {
+                        check::shielded_balances_match(&sapling_shielded_data)?;
 
-                        for spend in shielded_data.spends_per_anchor() {
+                        for spend in sapling_shielded_data.spends_per_anchor() {
                             // Consensus rule: cv and rk MUST NOT be of small
                             // order, i.e. [h_J]cv MUST NOT be 𝒪_J and [h_J]rk
                             // MUST NOT be 𝒪_J.
@@ -256,7 +256,7 @@ where
                             async_checks.push(rsp.boxed());
                         }
 
-                        for output in shielded_data.outputs() {
+                        for output in sapling_shielded_data.outputs() {
                             // Consensus rule: cv and wpk MUST NOT be of small
                             // order, i.e. [h_J]cv MUST NOT be 𝒪_J and [h_J]wpk
                             // MUST NOT be 𝒪_J.
@@ -281,11 +281,11 @@ where
                             async_checks.push(output_rsp.boxed());
                         }
 
-                        let bvk = shielded_data.binding_verification_key();
+                        let bvk = sapling_shielded_data.binding_verification_key();
 
                         // TODO: enable async verification and remove this block - #1939
                         {
-                            let item: zebra_chain::primitives::redjubjub::batch::Item = (bvk, shielded_data.binding_sig, &shielded_sighash).into();
+                            let item: zebra_chain::primitives::redjubjub::batch::Item = (bvk, sapling_shielded_data.binding_sig, &shielded_sighash).into();
                             item.verify_single().unwrap_or_else(|binding_sig_error| {
                                 let binding_sig_error = binding_sig_error.to_string();
                                 tracing::warn!(%binding_sig_error, "ignoring");
@@ -300,7 +300,7 @@ where
                         let _rsp = redjubjub_verifier
                             .ready_and()
                             .await?
-                            .call((bvk, shielded_data.binding_sig, &shielded_sighash).into())
+                            .call((bvk, sapling_shielded_data.binding_sig, &shielded_sighash).into())
                             .boxed();
 
                         // TODO: stop ignoring binding signature errors - #1939
