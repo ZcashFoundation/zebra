@@ -420,11 +420,11 @@ impl<'a> SigHasher<'a> {
     fn hash_shielded_spends<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         use Transaction::*;
 
-        let shielded_data = match self.trans {
+        let sapling_shielded_data = match self.trans {
             V4 {
-                sapling_shielded_data: Some(shielded_data),
+                sapling_shielded_data: Some(sapling_shielded_data),
                 ..
-            } => shielded_data,
+            } => sapling_shielded_data,
             V4 {
                 sapling_shielded_data: None,
                 ..
@@ -433,7 +433,7 @@ impl<'a> SigHasher<'a> {
             V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(ZIP243_EXPLANATION),
         };
 
-        if shielded_data.spends().next().is_none() {
+        if sapling_shielded_data.spends().next().is_none() {
             return writer.write_all(&[0; 32]);
         }
 
@@ -443,7 +443,7 @@ impl<'a> SigHasher<'a> {
             .to_state();
 
         // TODO: make a generic wrapper in `spends.rs` that does this serialization
-        for spend in shielded_data.spends() {
+        for spend in sapling_shielded_data.spends() {
             // This is the canonical transaction serialization, minus the `spendAuthSig`.
             spend.cv.zcash_serialize(&mut hash)?;
             // TODO: ZIP-243 Sapling to Canopy only
@@ -459,11 +459,11 @@ impl<'a> SigHasher<'a> {
     fn hash_shielded_outputs<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         use Transaction::*;
 
-        let shielded_data = match self.trans {
+        let sapling_shielded_data = match self.trans {
             V4 {
-                sapling_shielded_data: Some(shielded_data),
+                sapling_shielded_data: Some(sapling_shielded_data),
                 ..
-            } => shielded_data,
+            } => sapling_shielded_data,
             V4 {
                 sapling_shielded_data: None,
                 ..
@@ -472,7 +472,7 @@ impl<'a> SigHasher<'a> {
             V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(ZIP243_EXPLANATION),
         };
 
-        if shielded_data.outputs().next().is_none() {
+        if sapling_shielded_data.outputs().next().is_none() {
             return writer.write_all(&[0; 32]);
         }
 
@@ -482,7 +482,7 @@ impl<'a> SigHasher<'a> {
             .to_state();
 
         // Correctness: checked for V4 transaction above
-        for output in shielded_data
+        for output in sapling_shielded_data
             .outputs()
             .cloned()
             .map(sapling::OutputInTransactionV4)

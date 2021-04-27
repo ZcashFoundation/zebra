@@ -285,6 +285,8 @@ impl From<SpendingKey> for SpendAuthorizingKey {
 }
 
 impl PartialEq<[u8; 32]> for SpendAuthorizingKey {
+    // TODO: do we want to use constant-time comparison here?
+    #[allow(clippy::cmp_owned)]
     fn eq(&self, other: &[u8; 32]) -> bool {
         <[u8; 32]>::from(*self) == *other
     }
@@ -326,6 +328,8 @@ impl From<SpendingKey> for ProofAuthorizingKey {
 }
 
 impl PartialEq<[u8; 32]> for ProofAuthorizingKey {
+    // TODO: do we want to use constant-time comparison here?
+    #[allow(clippy::cmp_owned)]
     fn eq(&self, other: &[u8; 32]) -> bool {
         <[u8; 32]>::from(*self) == *other
     }
@@ -485,6 +489,8 @@ impl From<ProofAuthorizingKey> for NullifierDerivingKey {
 }
 
 impl PartialEq<[u8; 32]> for NullifierDerivingKey {
+    // TODO: do we want to use constant-time comparison here?
+    #[allow(clippy::cmp_owned)]
     fn eq(&self, other: &[u8; 32]) -> bool {
         <[u8; 32]>::from(*self) == *other
     }
@@ -776,6 +782,8 @@ impl From<(IncomingViewingKey, Diversifier)> for TransmissionKey {
 }
 
 impl PartialEq<[u8; 32]> for TransmissionKey {
+    // TODO: do we want to use constant-time comparison here?
+    #[allow(clippy::cmp_owned)]
     fn eq(&self, other: &[u8; 32]) -> bool {
         <[u8; 32]>::from(*self) == *other
     }
@@ -898,6 +906,8 @@ impl From<&EphemeralPublicKey> for [u8; 32] {
 }
 
 impl PartialEq<[u8; 32]> for EphemeralPublicKey {
+    // TODO: do we want to use constant-time comparison here?
+    #[allow(clippy::cmp_owned)]
     fn eq(&self, other: &[u8; 32]) -> bool {
         <[u8; 32]>::from(self) == *other
     }

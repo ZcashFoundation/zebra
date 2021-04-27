@@ -87,8 +87,8 @@ impl ZcashSerialize for Option<sapling::ShieldedData<SharedAnchor>> {
                 // nOutputsSapling
                 writer.write_compactsize(0)?;
             }
-            Some(shielded_data) => {
-                shielded_data.zcash_serialize(&mut writer)?;
+            Some(sapling_shielded_data) => {
+                sapling_shielded_data.zcash_serialize(&mut writer)?;
             }
         }
         Ok(())
@@ -312,14 +312,16 @@ impl ZcashSerialize for Transaction {
                         writer.write_compactsize(0)?;
                         writer.write_compactsize(0)?;
                     }
-                    Some(shielded_data) => {
-                        shielded_data.value_balance.zcash_serialize(&mut writer)?;
-                        writer.write_compactsize(shielded_data.spends().count() as u64)?;
-                        for spend in shielded_data.spends() {
+                    Some(sapling_shielded_data) => {
+                        sapling_shielded_data
+                            .value_balance
+                            .zcash_serialize(&mut writer)?;
+                        writer.write_compactsize(sapling_shielded_data.spends().count() as u64)?;
+                        for spend in sapling_shielded_data.spends() {
                             spend.zcash_serialize(&mut writer)?;
                         }
-                        writer.write_compactsize(shielded_data.outputs().count() as u64)?;
-                        for output in shielded_data
+                        writer.write_compactsize(sapling_shielded_data.outputs().count() as u64)?;
+                        for output in sapling_shielded_data
                             .outputs()
                             .cloned()
                             .map(sapling::OutputInTransactionV4)

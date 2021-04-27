@@ -13,7 +13,7 @@ use tower::buffer::Buffer;
 
 use zebra_chain::{
     block::{self, Block, Height},
-    parameters::{Network, NetworkUpgrade},
+    parameters::Network,
     serialization::{ZcashDeserialize, ZcashDeserializeInto},
     work::difficulty::{ExpandedDifficulty, INVALID_COMPACT_DIFFICULTY},
 };
@@ -283,9 +283,7 @@ fn subsidy_is_valid_for_network(network: Network) -> Result<(), Report> {
             .expect("block is structurally valid");
 
         // TODO: first halving, second halving, third halving, and very large halvings
-        if block::Height(height) > SLOW_START_INTERVAL
-            && block::Height(height) < NetworkUpgrade::Canopy.activation_height(network).unwrap()
-        {
+        if block::Height(height) > SLOW_START_INTERVAL {
             check::subsidy_is_valid(&block, network).expect("subsidies should pass for this block");
         }
     }

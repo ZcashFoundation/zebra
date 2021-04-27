@@ -34,8 +34,8 @@ where
                 sapling_shielded_data,
                 ..
             } => {
-                if let Some(shielded_data) = sapling_shielded_data {
-                    for spend in shielded_data.spends_per_anchor() {
+                if let Some(sapling_shielded_data) = sapling_shielded_data {
+                    for spend in sapling_shielded_data.spends_per_anchor() {
                         tracing::trace!(?spend);
 
                         let spend_rsp = spend_verifier
@@ -46,7 +46,7 @@ where
                         async_checks.push(spend_rsp);
                     }
 
-                    for output in shielded_data.outputs() {
+                    for output in sapling_shielded_data.outputs() {
                         tracing::trace!(?output);
 
                         let output_rsp = output_verifier
@@ -117,8 +117,8 @@ where
                 sapling_shielded_data,
                 ..
             } => {
-                if let Some(shielded_data) = sapling_shielded_data {
-                    for output in shielded_data.outputs() {
+                if let Some(sapling_shielded_data) = sapling_shielded_data {
+                    for output in sapling_shielded_data.outputs() {
                         // This changes the primary inputs to the proof
                         // verification, causing it to fail for this proof.
                         let mut modified_output = output.clone();
