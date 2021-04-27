@@ -50,7 +50,7 @@ fn merkle_crh_orchard(layer: u8, left: [u8; 32], right: [u8; 32]) -> [u8; 32] {
 lazy_static! {
     /// Orchard note commitment trees have a max depth of 32.
     ///
-    /// https://zips.z.cash/protocol/protocol.pdf#constants
+    /// https://zips.z.cash/protocol/nu5.pdf#constants
     static ref EMPTY_ROOTS: Vec<[u8; 32]> = {
         // Uncommitted^Orchard = I2LEBSP_l_MerkleOrchard(1)
         let mut v = vec![jubjub::Fq::one().to_bytes()];
@@ -68,7 +68,7 @@ lazy_static! {
 /// The index of a note’s commitment at the leafmost layer of its
 /// `NoteCommitmentTree`.
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#merkletree
+/// https://zips.z.cash/protocol/nu5.pdf#merkletree
 // XXX: dedupe with sapling?
 pub struct Position(pub(crate) u64);
 
