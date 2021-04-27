@@ -29,6 +29,10 @@ fn main() {
 
     *config.git_mut().sha_kind_mut() = ShaKind::Short;
     *config.git_mut().semver_kind_mut() = SemverKind::Lightweight;
+    // git typically uses "-dirty", but we change that so:
+    // - we're explicit and direct about source code state
+    // - it matches the SemVer 2.0 format, using dot separators
+    *config.git_mut().semver_dirty_mut() = Some(".modified");
 
     // Disable env vars we aren't using right now
     *config.cargo_mut().features_mut() = false;
