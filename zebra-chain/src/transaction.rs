@@ -219,6 +219,41 @@ impl Transaction {
 
     // sprout
 
+    /// Returns the number of `JoinSplit`s in this transaction, regardless of version.
+    pub fn joinsplit_count(&self) -> usize {
+        match self {
+            // JoinSplits with Bctv14 Proofs
+            Transaction::V2 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            }
+            | Transaction::V3 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => joinsplit_data.joinsplits().count(),
+            // JoinSplits with Groth Proofs
+            Transaction::V4 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => joinsplit_data.joinsplits().count(),
+            // No JoinSplits
+            Transaction::V1 { .. }
+            | Transaction::V2 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V3 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V4 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V5 { .. } => 0,
+        }
+    }
+
     /// Access the sprout::Nullifiers in this transaction, regardless of version.
     pub fn sprout_nullifiers(&self) -> Box<dyn Iterator<Item = &sprout::Nullifier> + '_> {
         // This function returns a boxed iterator because the different
@@ -259,6 +294,69 @@ impl Transaction {
     }
 
     // sapling
+
+    /// Iterate over the sapling [`Spend`](sapling::Spend)s for this transaction,
+    /// returning `Spend<PerSpendAnchor>` regardless of the underlying
+    /// transaction version.
+    ///
+    /// # Correctness
+    ///
+    /// Do not use this function for serialization.
+    pub fn sapling_spends_per_anchor(
+        &self,
+    ) -> Box<dyn Iterator<Item = sapling::Spend<sapling::PerSpendAnchor>> + '_> {
+        match self {
+            Transaction::V4 {
+                sapling_shielded_data: Some(sapling_shielded_data),
+                ..
+            } => Box::new(sapling_shielded_data.spends_per_anchor()),
+            Transaction::V5 {
+                sapling_shielded_data: Some(sapling_shielded_data),
+                ..
+            } => Box::new(sapling_shielded_data.spends_per_anchor()),
+
+            // No Spends
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V4 {
+                sapling_shielded_data: None,
+                ..
+            }
+            | Transaction::V5 {
+                sapling_shielded_data: None,
+                ..
+            } => Box::new(std::iter::empty()),
+        }
+    }
+
+    /// Iterate over the sapling [`Output`](sapling::Output)s for this
+    /// transaction
+    pub fn sapling_outputs(&self) -> Box<dyn Iterator<Item = &sapling::Output> + '_> {
+        match self {
+            Transaction::V4 {
+                sapling_shielded_data: Some(sapling_shielded_data),
+                ..
+            } => Box::new(sapling_shielded_data.outputs()),
+            Transaction::V5 {
+                sapling_shielded_data: Some(sapling_shielded_data),
+                ..
+            } => Box::new(sapling_shielded_data.outputs()),
+
+            // No Outputs
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V4 {
+                sapling_shielded_data: None,
+                ..
+            }
+            | Transaction::V5 {
+                sapling_shielded_data: None,
+                ..
+            } => Box::new(std::iter::empty()),
+        }
+    }
 
     /// Access the sapling::Nullifiers in this transaction, regardless of version.
     pub fn sapling_nullifiers(&self) -> Box<dyn Iterator<Item = &sapling::Nullifier> + '_> {
