@@ -26,7 +26,7 @@ pub fn extract_p(point: pallas::Point) -> pallas::Base {
 /// as a domain separator to distinguish uses of the group hash for different
 /// purposes; the second input element is the message.
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#concretegrouphashpallasandvesta
+/// https://zips.z.cash/protocol/nu5.pdf#concretegrouphashpallasandvesta
 #[allow(non_snake_case)]
 pub fn pallas_group_hash(D: &[u8], M: &[u8]) -> pallas::Point {
     let domain_separator = std::str::from_utf8(D).unwrap();
@@ -36,7 +36,7 @@ pub fn pallas_group_hash(D: &[u8], M: &[u8]) -> pallas::Point {
 
 /// Q(D) := GroupHash^P(︀“z.cash:SinsemillaQ”, D)
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#concretesinsemillahash
+/// https://zips.z.cash/protocol/nu5.pdf#concretesinsemillahash
 #[allow(non_snake_case)]
 fn Q(D: &[u8]) -> pallas::Point {
     pallas_group_hash(b"z.cash:SinsemillaQ", D)
@@ -46,7 +46,7 @@ fn Q(D: &[u8]) -> pallas::Point {
 ///
 /// S: {0 .. 2^k - 1} -> P^*, aka 10 bits hashed into the group
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#concretesinsemillahash
+/// https://zips.z.cash/protocol/nu5.pdf#concretesinsemillahash
 #[allow(non_snake_case)]
 fn S(j: &u16) -> pallas::Point {
     // The value of j is a 10-bit value, therefore must never exceed 2^10 in
@@ -64,7 +64,7 @@ fn S(j: &u16) -> pallas::Point {
 /// the Sinsemilla hash for the Orchard incremental Merkle tree (§ 5.4.1.3
 /// ‘MerkleCRH^Orchard Hash Function’).
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#concretesinsemillahash
+/// https://zips.z.cash/protocol/nu5.pdf#concretesinsemillahash
 ///
 /// # Panics
 ///
@@ -81,7 +81,7 @@ pub fn sinsemilla_hash_to_point(D: &[u8], M: &BitVec<Lsb0, u8>) -> pallas::Point
     // Split M into n segments of k bits, where k = 10 and c = 253, padding
     // the last segment with zeros.
     //
-    // https://zips.z.cash/protocol/protocol.pdf#concretesinsemillahash
+    // https://zips.z.cash/protocol/nu5.pdf#concretesinsemillahash
     for chunk in M.chunks(k) {
         // Pad each chunk with zeros.
         let mut store = 0u16;
@@ -113,7 +113,7 @@ pub fn sinsemilla_hash_to_point(D: &[u8], M: &BitVec<Lsb0, u8>) -> pallas::Point
 /// PedersenHash) is to make efcient use of the lookups available in recent
 /// proof systems including Halo 2."
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#concretesinsemillahash
+/// https://zips.z.cash/protocol/nu5.pdf#concretesinsemillahash
 ///
 /// # Panics
 ///

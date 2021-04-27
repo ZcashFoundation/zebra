@@ -28,7 +28,7 @@ fn poseidon_hash(_x: pallas::Base, _y: pallas::Base) -> pallas::Base {
 ///
 /// PRF^nfOrchard(nk*, ρ*) := PoseidonHash(nk*, ρ*)
 ///
-/// [concreteprfs]: https://zips.z.cash/protocol/protocol.pdf#concreteprfs
+/// [concreteprfs]: https://zips.z.cash/protocol/nu5.pdf#concreteprfs
 /// [poseidonhash]: https://zips.z.cash/protocol/nu5.pdf#poseidonhash
 fn prf_nf(nk: pallas::Base, rho: pallas::Base) -> pallas::Base {
     poseidon_hash(nk, rho)
