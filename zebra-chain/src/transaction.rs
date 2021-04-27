@@ -23,7 +23,7 @@ pub use sighash::HashType;
 
 use crate::{
     block,
-    parameters::NetworkUpgrade,
+    parameters::{ConsensusBranchId, NetworkUpgrade},
     primitives::{Bctv14Proof, Groth16Proof},
     sapling, sprout, transparent,
 };
@@ -97,6 +97,8 @@ pub enum Transaction {
     },
     /// A `version = 5` transaction, which supports `Sapling` and `Orchard`.
     V5 {
+        /// The Consensus branch ID for this transaction.
+        consensus_branch_id: ConsensusBranchId,
         /// The earliest time or block height that this transaction can be added to the
         /// chain.
         lock_time: LockTime,

@@ -6,7 +6,7 @@ use proptest::{arbitrary::any, array, collection::vec, option, prelude::*};
 use crate::{
     amount::Amount,
     block,
-    parameters::NetworkUpgrade,
+    parameters::{ConsensusBranchId, NetworkUpgrade},
     primitives::{Bctv14Proof, Groth16Proof, ZkSnarkProof},
     sapling, sprout, transparent, LedgerState,
 };
@@ -103,6 +103,7 @@ impl Transaction {
     /// Generate a proptest strategy for V5 Transactions
     pub fn v5_strategy(ledger_state: LedgerState) -> BoxedStrategy<Self> {
         (
+            any::<ConsensusBranchId>(),
             any::<LockTime>(),
             any::<block::Height>(),
             transparent::Input::vec_strategy(ledger_state, 10),
@@ -110,8 +111,16 @@ impl Transaction {
             option::of(any::<sapling::ShieldedData<sapling::SharedAnchor>>()),
         )
             .prop_map(
-                |(lock_time, expiry_height, inputs, outputs, sapling_shielded_data)| {
+                |(
+                    consensus_branch_id,
+                    lock_time,
+                    expiry_height,
+                    inputs,
+                    outputs,
+                    sapling_shielded_data,
+                )| {
                     Transaction::V5 {
+                        consensus_branch_id,
                         lock_time,
                         expiry_height,
                         inputs,
@@ -172,6 +181,18 @@ impl Arbitrary for LockTime {
                 .prop_map(|n| { LockTime::Time(Utc.timestamp(n as i64, 0)) })
         ]
         .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
+
+impl Arbitrary for ConsensusBranchId {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: ()) -> Self::Strategy {
+        (any::<u32>())
+            .prop_map(|n| ConsensusBranchId::from(n))
+            .boxed()
     }
 
     type Strategy = BoxedStrategy<Self>;

@@ -76,12 +76,18 @@ pub(crate) const TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] 
 
 /// The Consensus Branch Id, used to bind transactions and blocks to a
 /// particular network upgrade.
-#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct ConsensusBranchId(u32);
 
 impl From<ConsensusBranchId> for u32 {
     fn from(branch: ConsensusBranchId) -> u32 {
         branch.0
+    }
+}
+
+impl From<u32> for ConsensusBranchId {
+    fn from(branch_id: u32) -> ConsensusBranchId {
+        ConsensusBranchId(branch_id)
     }
 }
 

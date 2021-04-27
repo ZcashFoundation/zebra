@@ -343,6 +343,7 @@ impl ZcashSerialize for Transaction {
             }
 
             Transaction::V5 {
+                consensus_branch_id,
                 lock_time,
                 expiry_height,
                 inputs,
@@ -355,6 +356,9 @@ impl ZcashSerialize for Transaction {
                 // header: Write version 5 and set the fOverwintered bit
                 writer.write_u32::<LittleEndian>(5 | (1 << 31))?;
                 writer.write_u32::<LittleEndian>(TX_V5_VERSION_GROUP_ID)?;
+
+                // header: Write the nConsensusBranchId
+                writer.write_u32::<LittleEndian>(u32::from(*consensus_branch_id))?;
 
                 // transaction validity time and height limits
                 lock_time.zcash_serialize(&mut writer)?;
@@ -491,6 +495,8 @@ impl ZcashDeserialize for Transaction {
                 if id != TX_V5_VERSION_GROUP_ID {
                     return Err(SerializationError::Parse("expected TX_V5_VERSION_GROUP_ID"));
                 }
+                let consensus_branch_id =
+                    ConsensusBranchId::from(reader.read_u32::<LittleEndian>()?);
 
                 // transaction validity time and height limits
                 let lock_time = LockTime::zcash_deserialize(&mut reader)?;
@@ -514,6 +520,7 @@ impl ZcashDeserialize for Transaction {
                 }
 
                 Ok(Transaction::V5 {
+                    consensus_branch_id,
                     lock_time,
                     expiry_height,
                     inputs,
