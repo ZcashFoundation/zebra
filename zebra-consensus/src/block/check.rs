@@ -31,7 +31,7 @@ pub fn coinbase_is_first(block: &Block) -> Result<(), BlockError> {
         return Err(TransactionError::CoinbasePosition)?;
     }
     if rest.any(|tx| tx.contains_coinbase_input()) {
-        return Err(TransactionError::CoinbaseInputFound)?;
+        return Err(TransactionError::CoinbaseAfterFirst)?;
     }
 
     Ok(())

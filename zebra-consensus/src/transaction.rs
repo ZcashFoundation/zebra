@@ -162,7 +162,7 @@ where
 
                     // Handle transparent inputs and outputs.
                     if tx.is_coinbase() {
-                        check::coinbase_tx_no_joinsplit_or_spend(&tx)?;
+                        check::coinbase_tx_no_prevout_joinsplit_spend(&tx)?;
                     } else {
                         // feed all of the inputs to the script and shielded verifiers
                         // the script_verifier also checks transparent sighashes, using its own implementation

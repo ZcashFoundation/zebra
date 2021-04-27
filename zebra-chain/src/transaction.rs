@@ -238,6 +238,15 @@ impl Transaction {
             .any(|input| matches!(input, transparent::Input::Coinbase { .. }))
     }
 
+    /// Returns `true` if transaction contains any `PrevOut` inputs.
+    ///
+    /// `PrevOut` inputs are also known as `transparent` inputs in the spec.
+    pub fn contains_prevout_input(&self) -> bool {
+        self.inputs()
+            .iter()
+            .any(|input| matches!(input, transparent::Input::PrevOut { .. }))
+    }
+
     /// Returns `true` if this transaction is a coinbase transaction.
     pub fn is_coinbase(&self) -> bool {
         self.inputs().len() == 1

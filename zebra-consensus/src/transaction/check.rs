@@ -101,12 +101,20 @@ where
     }
 }
 
-/// Check that a coinbase tx does not have any JoinSplit or Spend descriptions.
+/// Check that a coinbase transaction has no PrevOut inputs, JoinSplits, or spends.
+///
+/// A coinbase transaction MUST NOT have any transparent inputs, JoinSplit descriptions,
+/// or Spend descriptions.
+///
+/// In a version 5 coinbase transaction, the enableSpendsOrchard flag MUST be 0.
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
-pub fn coinbase_tx_no_joinsplit_or_spend(tx: &Transaction) -> Result<(), TransactionError> {
+pub fn coinbase_tx_no_prevout_joinsplit_spend(tx: &Transaction) -> Result<(), TransactionError> {
     if tx.is_coinbase() {
         match tx {
+            // In Zebra, `inputs` contains both `PrevOut` (transparent) and `Coinbase` inputs.
+            tx if tx.contains_prevout_input() => Err(TransactionError::CoinbaseHasPrevOutInput),
+
             // Check if there is any JoinSplitData.
             Transaction::V4 {
                 joinsplit_data: Some(_),
@@ -129,6 +137,8 @@ pub fn coinbase_tx_no_joinsplit_or_spend(tx: &Transaction) -> Result<(), Transac
                 Err(TransactionError::CoinbaseHasSpend)
             }
 
+            // TODO: Orchard validation (#1980)
+            // In a version 5 coinbase transaction, the enableSpendsOrchard flag MUST be 0.
             Transaction::V4 { .. } | Transaction::V5 { .. } => Ok(()),
 
             Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => {

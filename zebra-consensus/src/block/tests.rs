@@ -356,7 +356,7 @@ fn coinbase_validation_failure() -> Result<(), Report> {
 
     // Validate the block using coinbase_is_first
     let result = check::coinbase_is_first(&block).unwrap_err();
-    let expected = BlockError::Transaction(TransactionError::CoinbaseInputFound);
+    let expected = BlockError::Transaction(TransactionError::CoinbaseAfterFirst);
     assert_eq!(expected, result);
 
     // Validate the block using subsidy_is_valid, which does not detect this error
