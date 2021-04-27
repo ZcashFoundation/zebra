@@ -340,17 +340,23 @@ impl<AnchorV> UpdateWith<Option<sapling::ShieldedData<AnchorV>>> for Chain
 where
     AnchorV: sapling::AnchorVariant + Clone,
 {
-    fn update_chain_state_with(&mut self, shielded_data: &Option<sapling::ShieldedData<AnchorV>>) {
-        if let Some(shielded_data) = shielded_data {
-            for nullifier in shielded_data.nullifiers() {
+    fn update_chain_state_with(
+        &mut self,
+        sapling_shielded_data: &Option<sapling::ShieldedData<AnchorV>>,
+    ) {
+        if let Some(sapling_shielded_data) = sapling_shielded_data {
+            for nullifier in sapling_shielded_data.nullifiers() {
                 self.sapling_nullifiers.insert(*nullifier);
             }
         }
     }
 
-    fn revert_chain_state_with(&mut self, shielded_data: &Option<sapling::ShieldedData<AnchorV>>) {
-        if let Some(shielded_data) = shielded_data {
-            for nullifier in shielded_data.nullifiers() {
+    fn revert_chain_state_with(
+        &mut self,
+        sapling_shielded_data: &Option<sapling::ShieldedData<AnchorV>>,
+    ) {
+        if let Some(sapling_shielded_data) = sapling_shielded_data {
+            for nullifier in sapling_shielded_data.nullifiers() {
                 assert!(
                     self.sapling_nullifiers.remove(nullifier),
                     "nullifier must be present if block was"
