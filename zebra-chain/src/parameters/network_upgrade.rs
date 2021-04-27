@@ -14,7 +14,7 @@ use chrono::{DateTime, Duration, Utc};
 ///
 /// Network upgrades can change the Zcash network protocol or consensus rules in
 /// incompatible ways.
-#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum NetworkUpgrade {
     /// The Zcash protocol for a Genesis block.
     ///
@@ -76,18 +76,12 @@ pub(crate) const TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] 
 
 /// The Consensus Branch Id, used to bind transactions and blocks to a
 /// particular network upgrade.
-#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
 pub struct ConsensusBranchId(u32);
 
 impl From<ConsensusBranchId> for u32 {
     fn from(branch: ConsensusBranchId) -> u32 {
         branch.0
-    }
-}
-
-impl From<u32> for ConsensusBranchId {
-    fn from(branch_id: u32) -> ConsensusBranchId {
-        ConsensusBranchId(branch_id)
     }
 }
 
@@ -306,6 +300,15 @@ impl NetworkUpgrade {
             Network::Mainnet => true,
             Network::Testnet => height >= TESTNET_MAX_TIME_START_HEIGHT,
         }
+    }
+    /// Returns the NetworkUpgrade given an u32 as ConsensusBranchId
+    pub fn network_upgrade(branch_id: u32) -> Option<NetworkUpgrade> {
+        for id in CONSENSUS_BRANCH_IDS.to_vec() {
+            if id.1 == ConsensusBranchId(branch_id) {
+                return Some(id.0);
+            }
+        }
+        None
     }
 }
 

@@ -6,7 +6,7 @@ use proptest::{arbitrary::any, array, collection::vec, option, prelude::*};
 use crate::{
     amount::Amount,
     block,
-    parameters::{ConsensusBranchId, NetworkUpgrade},
+    parameters::NetworkUpgrade,
     primitives::{Bctv14Proof, Groth16Proof, ZkSnarkProof},
     sapling, sprout, transparent, LedgerState,
 };
@@ -103,7 +103,7 @@ impl Transaction {
     /// Generate a proptest strategy for V5 Transactions
     pub fn v5_strategy(ledger_state: LedgerState) -> BoxedStrategy<Self> {
         (
-            any::<ConsensusBranchId>(),
+            any::<NetworkUpgrade>(),
             any::<LockTime>(),
             any::<block::Height>(),
             transparent::Input::vec_strategy(ledger_state, 10),
@@ -112,7 +112,7 @@ impl Transaction {
         )
             .prop_map(
                 |(
-                    consensus_branch_id,
+                    network_upgrade,
                     lock_time,
                     expiry_height,
                     inputs,
@@ -120,7 +120,7 @@ impl Transaction {
                     sapling_shielded_data,
                 )| {
                     Transaction::V5 {
-                        consensus_branch_id,
+                        network_upgrade,
                         lock_time,
                         expiry_height,
                         inputs,
@@ -186,11 +186,19 @@ impl Arbitrary for LockTime {
     type Strategy = BoxedStrategy<Self>;
 }
 
-impl Arbitrary for ConsensusBranchId {
+impl Arbitrary for NetworkUpgrade {
     type Parameters = ();
 
     fn arbitrary_with(_args: ()) -> Self::Strategy {
-        (any::<u32>()).prop_map(ConsensusBranchId::from).boxed()
+        prop_oneof![
+            Just(NetworkUpgrade::Overwinter),
+            Just(NetworkUpgrade::Sapling),
+            Just(NetworkUpgrade::Blossom),
+            Just(NetworkUpgrade::Heartwood),
+            Just(NetworkUpgrade::Canopy),
+            Just(NetworkUpgrade::Nu5),
+        ]
+        .boxed()
     }
 
     type Strategy = BoxedStrategy<Self>;

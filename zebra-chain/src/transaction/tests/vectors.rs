@@ -106,7 +106,7 @@ fn empty_v5_round_trip() {
     zebra_test::init();
 
     let tx = Transaction::V5 {
-        consensus_branch_id: Nu5.branch_id().expect("nu5 has a branch id"),
+        network_upgrade: Nu5,
         lock_time: LockTime::min_lock_time(),
         expiry_height: block::Height(0),
         inputs: Vec::new(),
@@ -280,7 +280,7 @@ fn transaction_to_fake_v5(trans: &Transaction) -> Transaction {
             outputs,
             lock_time,
         } => V5 {
-            consensus_branch_id: Nu5.branch_id().expect("nu5 has a branch id"),
+            network_upgrade: Nu5,
             inputs: inputs.to_vec(),
             outputs: outputs.to_vec(),
             lock_time: *lock_time,
@@ -293,7 +293,7 @@ fn transaction_to_fake_v5(trans: &Transaction) -> Transaction {
             lock_time,
             ..
         } => V5 {
-            consensus_branch_id: Nu5.branch_id().expect("nu5 has a branch id"),
+            network_upgrade: Nu5,
             inputs: inputs.to_vec(),
             outputs: outputs.to_vec(),
             lock_time: *lock_time,
@@ -307,7 +307,7 @@ fn transaction_to_fake_v5(trans: &Transaction) -> Transaction {
             expiry_height,
             ..
         } => V5 {
-            consensus_branch_id: Nu5.branch_id().expect("nu5 has a branch id"),
+            network_upgrade: Nu5,
             inputs: inputs.to_vec(),
             outputs: outputs.to_vec(),
             lock_time: *lock_time,
@@ -322,7 +322,7 @@ fn transaction_to_fake_v5(trans: &Transaction) -> Transaction {
             sapling_shielded_data,
             ..
         } => V5 {
-            consensus_branch_id: Nu5.branch_id().expect("nu5 has a branch id"),
+            network_upgrade: Nu5,
             inputs: inputs.to_vec(),
             outputs: outputs.to_vec(),
             lock_time: *lock_time,

@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 3623ba4090b942165aea1bd8e5be0fb9803eeff4ef633a545f9d0fb59ef14ad6 # shrinks to tx = V5 { network_upgrade: Genesis, lock_time: Height(Height(0)), expiry_height: Height(0), inputs: [Coinbase { height: Height(1046401), data: CoinbaseData(""), sequence: 0 }], outputs: [], sapling_shielded_data: None }

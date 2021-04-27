@@ -343,7 +343,7 @@ impl ZcashSerialize for Transaction {
             }
 
             Transaction::V5 {
-                consensus_branch_id,
+                network_upgrade,
                 lock_time,
                 expiry_height,
                 inputs,
@@ -358,7 +358,11 @@ impl ZcashSerialize for Transaction {
                 writer.write_u32::<LittleEndian>(TX_V5_VERSION_GROUP_ID)?;
 
                 // header: Write the nConsensusBranchId
-                writer.write_u32::<LittleEndian>(u32::from(*consensus_branch_id))?;
+                writer.write_u32::<LittleEndian>(u32::from(
+                    network_upgrade
+                        .branch_id()
+                        .expect("a network upgrade with a branch id"),
+                ))?;
 
                 // transaction validity time and height limits
                 lock_time.zcash_serialize(&mut writer)?;
@@ -495,8 +499,16 @@ impl ZcashDeserialize for Transaction {
                 if id != TX_V5_VERSION_GROUP_ID {
                     return Err(SerializationError::Parse("expected TX_V5_VERSION_GROUP_ID"));
                 }
-                let consensus_branch_id =
-                    ConsensusBranchId::from(reader.read_u32::<LittleEndian>()?);
+                // convert the nConsensusBranchId to a NetworkUpgrade
+                let network_upgrade =
+                    match NetworkUpgrade::network_upgrade(reader.read_u32::<LittleEndian>()?) {
+                        Some(nu) => nu,
+                        None => {
+                            return Err(SerializationError::Parse(
+                                "expected a valid network upgrade from the consensus branch id",
+                            ))
+                        }
+                    };
 
                 // transaction validity time and height limits
                 let lock_time = LockTime::zcash_deserialize(&mut reader)?;
@@ -520,7 +532,7 @@ impl ZcashDeserialize for Transaction {
                 }
 
                 Ok(Transaction::V5 {
-                    consensus_branch_id,
+                    network_upgrade,
                     lock_time,
                     expiry_height,
                     inputs,
