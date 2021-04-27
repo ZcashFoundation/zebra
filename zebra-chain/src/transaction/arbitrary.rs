@@ -191,7 +191,7 @@ impl Arbitrary for ConsensusBranchId {
 
     fn arbitrary_with(_args: ()) -> Self::Strategy {
         (any::<u32>())
-            .prop_map(|n| ConsensusBranchId::from(n))
+            .prop_map(ConsensusBranchId::from)
             .boxed()
     }
 
