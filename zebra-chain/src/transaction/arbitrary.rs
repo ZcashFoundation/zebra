@@ -190,9 +190,7 @@ impl Arbitrary for ConsensusBranchId {
     type Parameters = ();
 
     fn arbitrary_with(_args: ()) -> Self::Strategy {
-        (any::<u32>())
-            .prop_map(ConsensusBranchId::from)
-            .boxed()
+        (any::<u32>()).prop_map(ConsensusBranchId::from).boxed()
     }
 
     type Strategy = BoxedStrategy<Self>;
