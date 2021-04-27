@@ -215,7 +215,7 @@ where
                     }
 
                     if let Some(shielded_data) = sapling_shielded_data {
-                        check::shielded_balances_match(&shielded_data)?;
+                        check::sapling_balances_match(&shielded_data)?;
 
                         for spend in shielded_data.spends_per_anchor() {
                             // Consensus rule: cv and rk MUST NOT be of small
