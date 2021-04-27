@@ -38,7 +38,7 @@ fn v5_fake_transactions() -> Result<(), Report> {
             };
 
             // make sure there are no joinsplits nor spends in coinbase
-            super::check::coinbase_tx_no_joinsplit_or_spend(&transaction)?;
+            super::check::coinbase_tx_no_prevout_joinsplit_spend(&transaction)?;
 
             // validate the sapling shielded data
             match transaction {

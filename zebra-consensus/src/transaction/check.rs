@@ -11,75 +11,35 @@ use crate::error::TransactionError;
 
 /// Checks that the transaction has inputs and outputs.
 ///
-/// More specifically:
+/// For `Transaction::V4`:
+/// * at least one of `tx_in_count`, `nSpendsSapling`, and `nJoinSplit` MUST be non-zero.
+/// * at least one of `tx_out_count`, `nOutputsSapling`, and `nJoinSplit` MUST be non-zero.
 ///
-/// * at least one of tx_in_count, nShieldedSpend, and nJoinSplit MUST be non-zero.
-/// * at least one of tx_out_count, nShieldedOutput, and nJoinSplit MUST be non-zero.
+/// For `Transaction::V5`:
+/// * at least one of `tx_in_count`, `nSpendsSapling`, and `nActionsOrchard` MUST be non-zero.
+/// * at least one of `tx_out_count`, `nOutputsSapling`, and `nActionsOrchard` MUST be non-zero.
+///
+/// This check counts both `Coinbase` and `PrevOut` transparent inputs.
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
 pub fn has_inputs_and_outputs(tx: &Transaction) -> Result<(), TransactionError> {
-    // The consensus rule is written in terms of numbers, but our transactions
-    // hold enum'd data. Mixing pattern matching and numerical checks is risky,
-    // so convert everything to counts and sum up.
-    match tx {
-        Transaction::V4 {
-            inputs,
-            outputs,
-            joinsplit_data,
-            sapling_shielded_data,
-            ..
-        } => {
-            let tx_in_count = inputs.len();
-            let tx_out_count = outputs.len();
-            let n_joinsplit = joinsplit_data
-                .as_ref()
-                .map(|d| d.joinsplits().count())
-                .unwrap_or(0);
-            let n_shielded_spend = sapling_shielded_data
-                .as_ref()
-                .map(|d| d.spends().count())
-                .unwrap_or(0);
-            let n_shielded_output = sapling_shielded_data
-                .as_ref()
-                .map(|d| d.outputs().count())
-                .unwrap_or(0);
+    let tx_in_count = tx.inputs().len();
+    let tx_out_count = tx.outputs().len();
+    let n_joinsplit = tx.joinsplit_count();
+    let n_spends_sapling = tx.sapling_spends_per_anchor().count();
+    let n_outputs_sapling = tx.sapling_outputs().count();
 
-            if tx_in_count + n_shielded_spend + n_joinsplit == 0 {
-                Err(TransactionError::NoInputs)
-            } else if tx_out_count + n_shielded_output + n_joinsplit == 0 {
-                Err(TransactionError::NoOutputs)
-            } else {
-                Ok(())
-            }
-        }
-        Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => {
-            unreachable!("tx version is checked first")
-        }
-        Transaction::V5 {
-            inputs,
-            outputs,
-            sapling_shielded_data,
-            ..
-        } => {
-            let tx_in_count = inputs.len();
-            let tx_out_count = outputs.len();
-            let n_shielded_spend = sapling_shielded_data
-                .as_ref()
-                .map(|d| d.spends().count())
-                .unwrap_or(0);
-            let n_shielded_output = sapling_shielded_data
-                .as_ref()
-                .map(|d| d.outputs().count())
-                .unwrap_or(0);
+    // TODO: Orchard validation (#1980)
+    // For `Transaction::V5`:
+    // * at least one of `tx_in_count`, `nSpendsSapling`, and `nActionsOrchard` MUST be non-zero.
+    // * at least one of `tx_out_count`, `nOutputsSapling`, and `nActionsOrchard` MUST be non-zero.
 
-            if tx_in_count + n_shielded_spend == 0 {
-                Err(TransactionError::NoInputs)
-            } else if tx_out_count + n_shielded_output == 0 {
-                Err(TransactionError::NoOutputs)
-            } else {
-                Ok(())
-            }
-        }
+    if tx_in_count + n_spends_sapling + n_joinsplit == 0 {
+        Err(TransactionError::NoInputs)
+    } else if tx_out_count + n_outputs_sapling + n_joinsplit == 0 {
+        Err(TransactionError::NoOutputs)
+    } else {
+        Ok(())
     }
 }
 
@@ -108,43 +68,31 @@ where
     }
 }
 
-/// Check that a coinbase tx does not have any JoinSplit or Spend descriptions.
+/// Check that a coinbase transaction has no PrevOut inputs, JoinSplits, or spends.
+///
+/// A coinbase transaction MUST NOT have any transparent inputs, JoinSplit descriptions,
+/// or Spend descriptions.
+///
+/// In a version 5 coinbase transaction, the enableSpendsOrchard flag MUST be 0.
+///
+/// This check only counts `PrevOut` transparent inputs.
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
-pub fn coinbase_tx_no_joinsplit_or_spend(tx: &Transaction) -> Result<(), TransactionError> {
+pub fn coinbase_tx_no_prevout_joinsplit_spend(tx: &Transaction) -> Result<(), TransactionError> {
     if tx.is_coinbase() {
-        match tx {
-            // Check if there is any JoinSplitData.
-            Transaction::V4 {
-                joinsplit_data: Some(_),
-                ..
-            } => Err(TransactionError::CoinbaseHasJoinSplit),
-
-            // The ShieldedData contains both Spends and Outputs, and Outputs
-            // are allowed post-Heartwood, so we have to count Spends.
-            Transaction::V4 {
-                sapling_shielded_data: Some(sapling_shielded_data),
-                ..
-            } if sapling_shielded_data.spends().count() > 0 => {
-                Err(TransactionError::CoinbaseHasSpend)
-            }
-
-            Transaction::V5 {
-                sapling_shielded_data: Some(sapling_shielded_data),
-                ..
-            } if sapling_shielded_data.spends().count() > 0 => {
-                Err(TransactionError::CoinbaseHasSpend)
-            }
-
-            Transaction::V4 { .. } | Transaction::V5 { .. } => Ok(()),
-
-            Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => {
-                unreachable!("tx version is checked first")
-            }
+        if tx.contains_prevout_input() {
+            return Err(TransactionError::CoinbaseHasPrevOutInput);
+        } else if tx.joinsplit_count() > 0 {
+            return Err(TransactionError::CoinbaseHasJoinSplit);
+        } else if tx.sapling_spends_per_anchor().count() > 0 {
+            return Err(TransactionError::CoinbaseHasSpend);
         }
-    } else {
-        Ok(())
+
+        // TODO: Orchard validation (#1980)
+        // In a version 5 coinbase transaction, the enableSpendsOrchard flag MUST be 0.
     }
+
+    Ok(())
 }
 
 /// Check that a Spend description's cv and rk are not of small order,
