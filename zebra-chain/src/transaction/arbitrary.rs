@@ -186,6 +186,8 @@ impl Arbitrary for LockTime {
     type Strategy = BoxedStrategy<Self>;
 }
 
+// We manually implement here because not all the values from the
+// `NetworkUpgrade` are valid.
 impl Arbitrary for NetworkUpgrade {
     type Parameters = ();
 
