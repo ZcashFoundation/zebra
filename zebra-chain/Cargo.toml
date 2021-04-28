@@ -10,7 +10,7 @@ edition = "2018"
 [features]
 
 default = []
-proptest-impl = ["proptest", "proptest-derive"]
+proptest-impl = ["proptest", "proptest-derive", "itertools"]
 bench = ["zebra-test"]
 
 [dependencies]
@@ -40,6 +40,7 @@ x25519-dalek = { version = "1.1", features = ["serde"] }
 
 proptest = { version = "0.10", optional = true }
 proptest-derive = { version = "0.3.0", optional = true }
+itertools = { version = "0.10.0", optional = true }
 
 # ZF deps
 ed25519-zebra = "2.2.0"
@@ -55,10 +56,9 @@ criterion = { version = "0.3", features = ["html_reports"] }
 spandoc = "0.2"
 tracing = "0.1.25"
 
-itertools = "0.10.0"
-
 proptest = "0.10"
 proptest-derive = "0.3"
+itertools = "0.10.0"
 
 zebra-test = { path = "../zebra-test/" }
 

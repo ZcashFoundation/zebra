@@ -2,11 +2,8 @@ use super::super::*;
 
 use crate::{
     block::{Block, MAX_BLOCK_BYTES},
-    sapling::{PerSpendAnchor, SharedAnchor},
     serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
 };
-
-use itertools::Itertools;
 
 use std::convert::TryInto;
 
@@ -186,7 +183,7 @@ fn fake_v5_round_trip() {
             .transactions
             .iter()
             .map(AsRef::as_ref)
-            .map(transaction_to_fake_v5)
+            .map(arbitrary::transaction_to_fake_v5)
             .map(Into::into)
             .collect();
 
@@ -262,132 +259,5 @@ fn fake_v5_round_trip() {
             fake_bytes, fake_bytes2,
             "data must be equal if structs are equal"
         );
-    }
-}
-
-// Utility functions
-
-/// Convert `trans` into a fake v5 transaction,
-/// converting sapling shielded data from v4 to v5 if possible.
-fn transaction_to_fake_v5(trans: &Transaction) -> Transaction {
-    use Transaction::*;
-
-    match trans {
-        V1 {
-            inputs,
-            outputs,
-            lock_time,
-        } => V5 {
-            inputs: inputs.to_vec(),
-            outputs: outputs.to_vec(),
-            lock_time: *lock_time,
-            expiry_height: block::Height(0),
-            sapling_shielded_data: None,
-        },
-        V2 {
-            inputs,
-            outputs,
-            lock_time,
-            ..
-        } => V5 {
-            inputs: inputs.to_vec(),
-            outputs: outputs.to_vec(),
-            lock_time: *lock_time,
-            expiry_height: block::Height(0),
-            sapling_shielded_data: None,
-        },
-        V3 {
-            inputs,
-            outputs,
-            lock_time,
-            expiry_height,
-            ..
-        } => V5 {
-            inputs: inputs.to_vec(),
-            outputs: outputs.to_vec(),
-            lock_time: *lock_time,
-            expiry_height: *expiry_height,
-            sapling_shielded_data: None,
-        },
-        V4 {
-            inputs,
-            outputs,
-            lock_time,
-            expiry_height,
-            sapling_shielded_data,
-            ..
-        } => V5 {
-            inputs: inputs.to_vec(),
-            outputs: outputs.to_vec(),
-            lock_time: *lock_time,
-            expiry_height: *expiry_height,
-            sapling_shielded_data: sapling_shielded_data
-                .clone()
-                .map(sapling_shielded_v4_to_fake_v5)
-                .flatten(),
-        },
-        v5 @ V5 { .. } => v5.clone(),
-    }
-}
-
-/// Convert a v4 sapling shielded data into a fake v5 sapling shielded data,
-/// if possible.
-fn sapling_shielded_v4_to_fake_v5(
-    v4_shielded: sapling::ShieldedData<PerSpendAnchor>,
-) -> Option<sapling::ShieldedData<SharedAnchor>> {
-    use sapling::ShieldedData;
-    use sapling::TransferData::*;
-
-    let unique_anchors: Vec<_> = v4_shielded
-        .spends()
-        .map(|spend| spend.per_spend_anchor)
-        .unique()
-        .collect();
-
-    let fake_spends: Vec<_> = v4_shielded
-        .spends()
-        .cloned()
-        .map(sapling_spend_v4_to_fake_v5)
-        .collect();
-
-    let transfers = match v4_shielded.transfers {
-        SpendsAndMaybeOutputs { maybe_outputs, .. } => {
-            let shared_anchor = match unique_anchors.as_slice() {
-                [unique_anchor] => *unique_anchor,
-                // Multiple different anchors, can't convert to v5
-                _ => return None,
-            };
-
-            SpendsAndMaybeOutputs {
-                shared_anchor,
-                spends: fake_spends.try_into().unwrap(),
-                maybe_outputs,
-            }
-        }
-        JustOutputs { outputs } => JustOutputs { outputs },
-    };
-
-    let fake_shielded_v5 = ShieldedData::<SharedAnchor> {
-        value_balance: v4_shielded.value_balance,
-        transfers,
-        binding_sig: v4_shielded.binding_sig,
-    };
-
-    Some(fake_shielded_v5)
-}
-
-/// Convert a v4 sapling spend into a fake v5 sapling spend.
-fn sapling_spend_v4_to_fake_v5(
-    v4_spend: sapling::Spend<PerSpendAnchor>,
-) -> sapling::Spend<SharedAnchor> {
-    use sapling::Spend;
-
-    Spend::<SharedAnchor> {
-        cv: v4_spend.cv,
-        per_spend_anchor: FieldNotPresent,
-        nullifier: v4_spend.nullifier,
-        rk: v4_spend.rk,
-        zkproof: v4_spend.zkproof,
-        spend_auth_sig: v4_spend.spend_auth_sig,
     }
 }
