@@ -97,7 +97,9 @@ pub enum Transaction {
     },
     /// A `version = 5` transaction, which supports `Sapling` and `Orchard`.
     V5 {
-        /// The Consensus branch ID for this transaction.
+        /// The Network Upgrade for this transaction.
+        ///
+        /// Derived from the ConsensusBranchId field.
         network_upgrade: NetworkUpgrade,
         /// The earliest time or block height that this transaction can be added to the
         /// chain.

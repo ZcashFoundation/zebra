@@ -361,7 +361,7 @@ impl ZcashSerialize for Transaction {
                 writer.write_u32::<LittleEndian>(u32::from(
                     network_upgrade
                         .branch_id()
-                        .expect("a network upgrade with a branch id"),
+                        .expect("valid transactions must have a network upgrade with a branch id"),
                 ))?;
 
                 // transaction validity time and height limits
@@ -500,15 +500,12 @@ impl ZcashDeserialize for Transaction {
                     return Err(SerializationError::Parse("expected TX_V5_VERSION_GROUP_ID"));
                 }
                 // convert the nConsensusBranchId to a NetworkUpgrade
-                let network_upgrade =
-                    match NetworkUpgrade::from_branch_id(reader.read_u32::<LittleEndian>()?) {
-                        Some(nu) => nu,
-                        None => {
-                            return Err(SerializationError::Parse(
-                                "expected a valid network upgrade from the consensus branch id",
-                            ))
-                        }
-                    };
+                let network_upgrade = NetworkUpgrade::from_branch_id(
+                    reader.read_u32::<LittleEndian>()?,
+                )
+                .ok_or(SerializationError::Parse(
+                    "expected a valid network upgrade from the consensus branch id",
+                ))?;
 
                 // transaction validity time and height limits
                 let lock_time = LockTime::zcash_deserialize(&mut reader)?;
