@@ -501,7 +501,7 @@ impl ZcashDeserialize for Transaction {
                 }
                 // convert the nConsensusBranchId to a NetworkUpgrade
                 let network_upgrade =
-                    match NetworkUpgrade::network_upgrade(reader.read_u32::<LittleEndian>()?) {
+                    match NetworkUpgrade::from_branch_id(reader.read_u32::<LittleEndian>()?) {
                         Some(nu) => nu,
                         None => {
                             return Err(SerializationError::Parse(

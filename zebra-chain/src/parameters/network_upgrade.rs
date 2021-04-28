@@ -302,7 +302,7 @@ impl NetworkUpgrade {
         }
     }
     /// Returns the NetworkUpgrade given an u32 as ConsensusBranchId
-    pub fn network_upgrade(branch_id: u32) -> Option<NetworkUpgrade> {
+    pub fn from_branch_id(branch_id: u32) -> Option<NetworkUpgrade> {
         for id in CONSENSUS_BRANCH_IDS.to_vec() {
             if id.1 == ConsensusBranchId(branch_id) {
                 return Some(id.0);
