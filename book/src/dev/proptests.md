@@ -4,6 +4,13 @@ Zebra uses the [proptest](https://docs.rs/proptest/) crate for randomised proper
 
 Most types in `zebra-chain` have an `Arbitrary` implementation, which generates randomised test cases.
 
+We try ti derive `Arbitrary` impls whenever possible, so that they autoamtically update when we make structural changes.
+To derive, add the following attribute to the struct or enum:
+```rust
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
+struct Example(u32);
+```
+
 When we want to use those `Arbitrary` impls in proptests in other crates, we use the `proptest-impl` feature as a dev dependency:
 1. in `zebra-chain`: make the `Arbitrary` impl depend on `#[cfg(any(test, feature = "proptest-impl"))]`
 2. in the other crate: add zebra-chain as a dev dependency: `zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }`
