@@ -103,7 +103,7 @@ impl Transaction {
     /// Generate a proptest strategy for V5 Transactions
     pub fn v5_strategy(ledger_state: LedgerState) -> BoxedStrategy<Self> {
         (
-            any::<NetworkUpgrade>(),
+            Self::branch_id_strategy(),
             any::<LockTime>(),
             any::<block::Height>(),
             transparent::Input::vec_strategy(ledger_state, 10),
@@ -130,6 +130,19 @@ impl Transaction {
                 },
             )
             .boxed()
+    }
+
+    // A custom strategy to use only some of the NetworkUpgrade values
+    fn branch_id_strategy() -> BoxedStrategy<NetworkUpgrade> {
+        prop_oneof![
+            Just(NetworkUpgrade::Overwinter),
+            Just(NetworkUpgrade::Sapling),
+            Just(NetworkUpgrade::Blossom),
+            Just(NetworkUpgrade::Heartwood),
+            Just(NetworkUpgrade::Canopy),
+            Just(NetworkUpgrade::Nu5),
+        ]
+        .boxed()
     }
 
     /// Proptest Strategy for creating a Vector of transactions where the first
@@ -179,26 +192,6 @@ impl Arbitrary for LockTime {
                 .prop_map(|n| LockTime::Height(block::Height(n))),
             (LockTime::MIN_TIMESTAMP..=LockTime::MAX_TIMESTAMP)
                 .prop_map(|n| { LockTime::Time(Utc.timestamp(n as i64, 0)) })
-        ]
-        .boxed()
-    }
-
-    type Strategy = BoxedStrategy<Self>;
-}
-
-// We manually implement here because not all the values from the
-// `NetworkUpgrade` are valid.
-impl Arbitrary for NetworkUpgrade {
-    type Parameters = ();
-
-    fn arbitrary_with(_args: ()) -> Self::Strategy {
-        prop_oneof![
-            Just(NetworkUpgrade::Overwinter),
-            Just(NetworkUpgrade::Sapling),
-            Just(NetworkUpgrade::Blossom),
-            Just(NetworkUpgrade::Heartwood),
-            Just(NetworkUpgrade::Canopy),
-            Just(NetworkUpgrade::Nu5),
         ]
         .boxed()
     }
