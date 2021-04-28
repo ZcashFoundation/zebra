@@ -106,7 +106,7 @@ fn empty_v5_round_trip() {
     zebra_test::init();
 
     let tx = Transaction::V5 {
-        network_upgrade: Nu5,
+        network_upgrade: NETWORK_UPGRADE,
         lock_time: LockTime::min_lock_time(),
         expiry_height: block::Height(0),
         inputs: Vec::new(),
@@ -269,6 +269,9 @@ fn fake_v5_round_trip() {
 
 // Utility functions
 
+/// The network upgrade for any fake transactions we will create.
+const NETWORK_UPGRADE: NetworkUpgrade = Nu5;
+
 /// Convert `trans` into a fake v5 transaction,
 /// converting sapling shielded data from v4 to v5 if possible.
 fn transaction_to_fake_v5(trans: &Transaction) -> Transaction {
@@ -280,7 +283,7 @@ fn transaction_to_fake_v5(trans: &Transaction) -> Transaction {
             outputs,
             lock_time,
         } => V5 {
-            network_upgrade: Nu5,
+            network_upgrade: NETWORK_UPGRADE,
             inputs: inputs.to_vec(),
             outputs: outputs.to_vec(),
             lock_time: *lock_time,
@@ -293,7 +296,7 @@ fn transaction_to_fake_v5(trans: &Transaction) -> Transaction {
             lock_time,
             ..
         } => V5 {
-            network_upgrade: Nu5,
+            network_upgrade: NETWORK_UPGRADE,
             inputs: inputs.to_vec(),
             outputs: outputs.to_vec(),
             lock_time: *lock_time,
@@ -307,7 +310,7 @@ fn transaction_to_fake_v5(trans: &Transaction) -> Transaction {
             expiry_height,
             ..
         } => V5 {
-            network_upgrade: Nu5,
+            network_upgrade: NETWORK_UPGRADE,
             inputs: inputs.to_vec(),
             outputs: outputs.to_vec(),
             lock_time: *lock_time,
@@ -322,7 +325,7 @@ fn transaction_to_fake_v5(trans: &Transaction) -> Transaction {
             sapling_shielded_data,
             ..
         } => V5 {
-            network_upgrade: Nu5,
+            network_upgrade: NETWORK_UPGRADE,
             inputs: inputs.to_vec(),
             outputs: outputs.to_vec(),
             lock_time: *lock_time,
