@@ -14,7 +14,7 @@ use chrono::{DateTime, Duration, Utc};
 ///
 /// Network upgrades can change the Zcash network protocol or consensus rules in
 /// incompatible ways.
-#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum NetworkUpgrade {
     /// The Zcash protocol for a Genesis block.
     ///
@@ -300,6 +300,13 @@ impl NetworkUpgrade {
             Network::Mainnet => true,
             Network::Testnet => height >= TESTNET_MAX_TIME_START_HEIGHT,
         }
+    }
+    /// Returns the NetworkUpgrade given an u32 as ConsensusBranchId
+    pub fn from_branch_id(branch_id: u32) -> Option<NetworkUpgrade> {
+        CONSENSUS_BRANCH_IDS
+            .iter()
+            .find(|id| id.1 == ConsensusBranchId(branch_id))
+            .map(|nu| nu.0)
     }
 }
 
