@@ -9,18 +9,6 @@ on:
 
 jobs:
 
-  ci-success:
-    name: 🏁
-    runs-on: ubuntu-latest
-    needs:
-      - test
-      - build
-      - build-chain-no-features
-      - clippy
-      - fmt
-    steps:
-      - run: exit 0
-
   test:
     name: Test (+${{ matrix.rust }}) on ${{ matrix.os }}
     # The large timeout is to accommodate Windows builds
