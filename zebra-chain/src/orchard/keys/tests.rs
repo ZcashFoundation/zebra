@@ -30,12 +30,8 @@ impl Arbitrary for TransmissionKey {
 proptest! {
 
     #[test]
-    fn string_roundtrips(spending_key in any::<SpendingKey>()) {
+    fn generate_keys(spending_key in any::<SpendingKey>()) {
         zebra_test::init();
-
-        let sk_string = spending_key.to_string();
-        let spending_key_2: SpendingKey = sk_string.parse().unwrap();
-        prop_assert_eq![spending_key, spending_key_2];
 
         let spend_authorizing_key = SpendAuthorizingKey::from(spending_key);
 
@@ -50,16 +46,8 @@ proptest! {
             ivk_commit_randomness,
         };
 
-        let fvk_string = full_viewing_key.to_string();
-        let full_viewing_key_2: FullViewingKey = fvk_string.parse().unwrap();
-        prop_assert_eq![full_viewing_key, full_viewing_key_2];
-
         let diversifier_key = DiversifierKey::from(full_viewing_key);
         let incoming_viewing_key = IncomingViewingKey::from(full_viewing_key);
-
-        let ivk_string = incoming_viewing_key.to_string();
-        let incoming_viewing_key_2: IncomingViewingKey = ivk_string.parse().unwrap();
-        prop_assert_eq![incoming_viewing_key, incoming_viewing_key_2];
 
         let _outgoing_viewing_key = OutgoingViewingKey::from(full_viewing_key);
 
