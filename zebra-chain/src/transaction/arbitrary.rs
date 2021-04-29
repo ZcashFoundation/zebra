@@ -143,7 +143,7 @@ impl Transaction {
             Just(NetworkUpgrade::Heartwood),
             Just(NetworkUpgrade::Canopy),
             Just(NetworkUpgrade::Nu5),
-        // TODO: add future network upgrades
+            // TODO: add future network upgrades
         ]
         .boxed()
     }
@@ -347,7 +347,10 @@ impl Arbitrary for Transaction {
     type Strategy = BoxedStrategy<Self>;
 }
 
-/// Transaction utility tests functions
+// Utility functions
+
+/// The network upgrade for any fake transactions we will create.
+const FAKE_NETWORK_UPGRADE: NetworkUpgrade = NetworkUpgrade::Nu5;
 
 /// Convert `trans` into a fake v5 transaction,
 /// converting sapling shielded data from v4 to v5 if possible.
@@ -360,6 +363,7 @@ pub fn transaction_to_fake_v5(trans: &Transaction) -> Transaction {
             outputs,
             lock_time,
         } => V5 {
+            network_upgrade: FAKE_NETWORK_UPGRADE,
             inputs: inputs.to_vec(),
             outputs: outputs.to_vec(),
             lock_time: *lock_time,
@@ -372,6 +376,7 @@ pub fn transaction_to_fake_v5(trans: &Transaction) -> Transaction {
             lock_time,
             ..
         } => V5 {
+            network_upgrade: FAKE_NETWORK_UPGRADE,
             inputs: inputs.to_vec(),
             outputs: outputs.to_vec(),
             lock_time: *lock_time,
@@ -385,6 +390,7 @@ pub fn transaction_to_fake_v5(trans: &Transaction) -> Transaction {
             expiry_height,
             ..
         } => V5 {
+            network_upgrade: FAKE_NETWORK_UPGRADE,
             inputs: inputs.to_vec(),
             outputs: outputs.to_vec(),
             lock_time: *lock_time,
@@ -399,6 +405,7 @@ pub fn transaction_to_fake_v5(trans: &Transaction) -> Transaction {
             sapling_shielded_data,
             ..
         } => V5 {
+            network_upgrade: FAKE_NETWORK_UPGRADE,
             inputs: inputs.to_vec(),
             outputs: outputs.to_vec(),
             lock_time: *lock_time,
