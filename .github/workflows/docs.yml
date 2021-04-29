@@ -20,6 +20,7 @@ jobs:
       uses: actions-rs/toolchain@v1
       with:
         toolchain: beta
+        components: rust-docs
         override: true
 
     - name: Install mdbook
