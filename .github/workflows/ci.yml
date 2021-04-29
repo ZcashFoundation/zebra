@@ -112,13 +112,10 @@ jobs:
         run: cargo build --verbose --no-default-features
 
   build:
-    name: Build (+${{ matrix.rust }}) on ${{ matrix.os }}
+    name: Build (+stable) on ubuntu-latest
     timeout-minutes: 60
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest, macOS-latest]
-        rust: [stable, beta]
+    runs-on: ubuntu-latest
+
     env:
       CARGO_INCREMENTAL: 0
       RUST_BACKTRACE: full
@@ -127,15 +124,9 @@ jobs:
       - uses: actions/checkout@v1
       - uses: actions-rs/toolchain@v1
         with:
-          toolchain: ${{ matrix.rust }}
+          toolchain: stable
           profile: minimal
           override: true
-      - name: Install LLVM on Windows
-        if: matrix.os == 'windows-latest'
-        run: |
-          choco install llvm -y
-          echo "C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          echo "LIBCLANG_PATH=C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: cargo fetch
         uses: actions-rs/cargo@v1
         with:
