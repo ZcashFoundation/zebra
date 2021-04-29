@@ -11,11 +11,10 @@ use std::{
     convert::{From, Into, TryFrom, TryInto},
     fmt,
     io::{self, Write},
-    str::FromStr,
 };
 
 use aes::Aes256;
-use bech32::{self, FromBase32, ToBase32, Variant};
+use bech32::{self, ToBase32, Variant};
 use bitvec::prelude::*;
 use fpe::ff1::{BinaryNumeralString, FF1};
 use group::{Group, GroupEncoding};
@@ -158,31 +157,6 @@ impl fmt::Display for SpendingKey {
         };
 
         bech32::encode_to_fmt(f, hrp, &self.bytes.to_base32(), Variant::Bech32).unwrap()
-    }
-}
-
-impl FromStr for SpendingKey {
-    type Err = SerializationError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match bech32::decode(s) {
-            Ok((hrp, bytes, Variant::Bech32)) => {
-                let decoded = Vec::<u8>::from_base32(&bytes).unwrap();
-
-                let mut decoded_bytes = [0u8; 32];
-                decoded_bytes[..].copy_from_slice(&decoded[0..32]);
-
-                Ok(SpendingKey {
-                    network: match hrp.as_str() {
-                        sk_hrp::MAINNET => Network::Mainnet,
-                        sk_hrp::TESTNET => Network::Testnet,
-                        _ => return Err(SerializationError::Parse("unknown network")),
-                    },
-                    bytes: decoded_bytes,
-                })
-            }
-            _ => Err(SerializationError::Parse("bech32 decoding error")),
-        }
     }
 }
 
@@ -493,30 +467,6 @@ impl From<FullViewingKey> for IncomingViewingKey {
     }
 }
 
-impl FromStr for IncomingViewingKey {
-    type Err = SerializationError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match bech32::decode(s) {
-            Ok((hrp, bytes, Variant::Bech32)) => {
-                let decoded = Vec::<u8>::from_base32(&bytes).unwrap();
-
-                let mut scalar_bytes = [0u8; 32];
-                scalar_bytes[..].copy_from_slice(&decoded[0..32]);
-
-                Ok(IncomingViewingKey {
-                    network: match hrp.as_str() {
-                        ivk_hrp::MAINNET => Network::Mainnet,
-                        _ => Network::Testnet,
-                    },
-                    scalar: pallas::Scalar::from_bytes(&scalar_bytes).unwrap(),
-                })
-            }
-            _ => Err(SerializationError::Parse("bech32 decoding error")),
-        }
-    }
-}
-
 impl PartialEq<[u8; 32]> for IncomingViewingKey {
     fn eq(&self, other: &[u8; 32]) -> bool {
         self.scalar.to_bytes() == *other
@@ -585,33 +535,6 @@ impl fmt::Display for FullViewingKey {
         };
 
         bech32::encode_to_fmt(f, hrp, bytes.get_ref().to_base32(), Variant::Bech32).unwrap()
-    }
-}
-
-impl FromStr for FullViewingKey {
-    type Err = SerializationError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match bech32::decode(s) {
-            Ok((hrp, bytes, Variant::Bech32)) => {
-                let mut decoded_bytes = io::Cursor::new(Vec::<u8>::from_base32(&bytes).unwrap());
-
-                let ak_bytes = decoded_bytes.read_32_bytes()?;
-                let nk_bytes = decoded_bytes.read_32_bytes()?;
-                let rivk_bytes = decoded_bytes.read_32_bytes()?;
-
-                Ok(FullViewingKey {
-                    network: match hrp.as_str() {
-                        fvk_hrp::MAINNET => Network::Mainnet,
-                        _ => Network::Testnet,
-                    },
-                    spend_validating_key: SpendValidatingKey::from(ak_bytes),
-                    nullifier_deriving_key: NullifierDerivingKey::from(nk_bytes),
-                    ivk_commit_randomness: IvkCommitRandomness::try_from(rivk_bytes).unwrap(),
-                })
-            }
-            _ => Err(SerializationError::Parse("bech32 decoding error")),
-        }
     }
 }
 
