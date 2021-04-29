@@ -26,6 +26,8 @@ use zebra_state as zs;
 use crate::{error::TransactionError, primitives, script, BoxError};
 
 mod check;
+#[cfg(test)]
+mod tests;
 
 /// Asynchronous transaction verification.
 #[derive(Debug, Clone)]
@@ -160,7 +162,7 @@ where
 
                     // Handle transparent inputs and outputs.
                     if tx.is_coinbase() {
-                        check::coinbase_tx_no_joinsplit_or_spend(&tx)?;
+                        check::coinbase_tx_no_prevout_joinsplit_spend(&tx)?;
                     } else {
                         // feed all of the inputs to the script and shielded verifiers
                         // the script_verifier also checks transparent sighashes, using its own implementation
@@ -213,7 +215,7 @@ where
                     }
 
                     if let Some(sapling_shielded_data) = sapling_shielded_data {
-                        check::shielded_balances_match(&sapling_shielded_data)?;
+                        check::sapling_balances_match(&sapling_shielded_data)?;
 
                         for spend in sapling_shielded_data.spends_per_anchor() {
                             // Consensus rule: cv and rk MUST NOT be of small

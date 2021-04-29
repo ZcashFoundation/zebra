@@ -7,8 +7,6 @@ use crate::{
     serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
 };
 
-use itertools::Itertools;
-
 use std::convert::TryInto;
 
 #[test]
@@ -188,7 +186,7 @@ fn fake_v5_round_trip() {
             .transactions
             .iter()
             .map(AsRef::as_ref)
-            .map(transaction_to_fake_v5)
+            .map(arbitrary::transaction_to_fake_v5)
             .map(Into::into)
             .collect();
 
@@ -400,3 +398,4 @@ fn sapling_spend_v4_to_fake_v5(
         spend_auth_sig: v4_spend.spend_auth_sig,
     }
 }
+
