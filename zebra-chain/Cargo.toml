@@ -25,6 +25,7 @@ chrono = { version = "0.4", features = ["serde"] }
 displaydoc = "0.2.1"
 fpe = "0.4"
 # Temporary workaround for https://github.com/myrrlyn/funty/issues/3
+# TODO: remove: https://github.com/ZcashFoundation/zebra/issues/2082
 funty = "=1.1.0"
 futures = "0.3"
 group = "0.9"
