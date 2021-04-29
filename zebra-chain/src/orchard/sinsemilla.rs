@@ -3,7 +3,7 @@
 use bitvec::prelude::*;
 
 use halo2::{
-    arithmetic::{CurveAffine, CurveExt},
+    arithmetic::{Coordinates, CurveAffine, CurveExt},
     pasta::pallas,
 };
 
@@ -13,9 +13,12 @@ use halo2::{
 ///
 /// [concreteextractorpallas]: https://zips.z.cash/protocol/nu5.pdf#concreteextractorpallas
 pub fn extract_p(point: pallas::Point) -> pallas::Base {
-    match pallas::Affine::from(point).get_xy().into() {
+    let option: Option<Coordinates<pallas::Affine>> =
+        pallas::Affine::from(point).coordinates().into();
+
+    match option {
         // If Some, it's not the identity.
-        Some((x, _)) => x,
+        Some(coordinates) => *coordinates.x(),
         _ => pallas::Base::zero(),
     }
 }

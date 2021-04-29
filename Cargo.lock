@@ -1510,7 +1510,7 @@ checksum = "62aca2aba2d62b4a7f5b33f3712cb1b0692779a56fb510499d5c0aa594daeaf3"
 [[package]]
 name = "halo2"
 version = "0.0.1"
-source = "git+https://github.com/zcash/halo2.git?branch=main#b079624ea78b4a07d44cb3c725dd734093577062"
+source = "git+https://github.com/zcash/halo2.git?rev=dda60a363001373d564156ad0334e2022d85a5b4#dda60a363001373d564156ad0334e2022d85a5b4"
 dependencies = [
  "blake2b_simd",
  "crossbeam-utils 0.8.0",

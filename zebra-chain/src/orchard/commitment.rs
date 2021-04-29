@@ -5,7 +5,7 @@ use std::{convert::TryFrom, fmt, io};
 use bitvec::prelude::*;
 use group::{prime::PrimeCurveAffine, GroupEncoding};
 use halo2::{
-    arithmetic::{CurveAffine, FieldExt},
+    arithmetic::{Coordinates, CurveAffine, FieldExt},
     pasta::pallas,
 };
 use lazy_static::lazy_static;
@@ -61,10 +61,12 @@ impl fmt::Debug for NoteCommitment {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut d = f.debug_struct("NoteCommitment");
 
-        match self.0.get_xy().into() {
-            Some((x, y)) => d
-                .field("x", &hex::encode(x.to_bytes()))
-                .field("y", &hex::encode(y.to_bytes()))
+        let option: Option<Coordinates<pallas::Affine>> = self.0.coordinates().into();
+
+        match option {
+            Some(coordinates) => d
+                .field("x", &hex::encode(coordinates.x().to_bytes()))
+                .field("y", &hex::encode(coordinates.y().to_bytes()))
                 .finish(),
             None => d
                 .field("x", &hex::encode(pallas::Base::zero().to_bytes()))
@@ -167,9 +169,11 @@ impl NoteCommitment {
     ///
     /// https://zips.z.cash/protocol/nu5.pdf#concreteextractorpallas
     pub fn extract_x(&self) -> pallas::Base {
-        match self.0.get_xy().into() {
+        let option: Option<Coordinates<pallas::Affine>> = self.0.coordinates().into();
+
+        match option {
             // If Some, it's not the identity.
-            Some((x, _)) => x,
+            Some(coordinates) => *coordinates.x(),
             _ => pallas::Base::zero(),
         }
     }
@@ -208,10 +212,12 @@ impl fmt::Debug for ValueCommitment {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut d = f.debug_struct("ValueCommitment");
 
-        match self.0.get_xy().into() {
-            Some((x, y)) => d
-                .field("x", &hex::encode(x.to_bytes()))
-                .field("y", &hex::encode(y.to_bytes()))
+        let option: Option<Coordinates<pallas::Affine>> = self.0.coordinates().into();
+
+        match option {
+            Some(coordinates) => d
+                .field("x", &hex::encode(coordinates.x().to_bytes()))
+                .field("y", &hex::encode(coordinates.y().to_bytes()))
                 .finish(),
             None => d
                 .field("x", &hex::encode(pallas::Base::zero().to_bytes()))

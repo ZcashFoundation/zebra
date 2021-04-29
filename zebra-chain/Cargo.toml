@@ -29,7 +29,8 @@ fpe = "0.4"
 funty = "=1.1.0"
 futures = "0.3"
 group = "0.9"
-halo2 = { git = "https://github.com/zcash/halo2.git", branch = "main" }
+# TODO: replace w/ crate version when released: https://github.com/ZcashFoundation/zebra/issues/2083
+halo2 = { git = "https://github.com/zcash/halo2.git", rev = "dda60a363001373d564156ad0334e2022d85a5b4"}
 hex = "0.4"
 jubjub = "0.6.0"
 lazy_static = "1.4.0"

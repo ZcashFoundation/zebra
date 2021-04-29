@@ -20,7 +20,7 @@ use bitvec::prelude::*;
 use fpe::ff1::{BinaryNumeralString, FF1};
 use group::{Group, GroupEncoding};
 use halo2::{
-    arithmetic::{CurveAffine, FieldExt},
+    arithmetic::{Coordinates, CurveAffine, FieldExt},
     pasta::pallas,
 };
 use rand_core::{CryptoRng, RngCore};
@@ -854,10 +854,12 @@ impl fmt::Debug for TransmissionKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut d = f.debug_struct("TransmissionKey");
 
-        match self.0.get_xy().into() {
-            Some((x, y)) => d
-                .field("x", &hex::encode(x.to_bytes()))
-                .field("y", &hex::encode(y.to_bytes()))
+        let option: Option<Coordinates<pallas::Affine>> = self.0.coordinates().into();
+
+        match option {
+            Some(coordinates) => d
+                .field("x", &hex::encode(coordinates.x().to_bytes()))
+                .field("y", &hex::encode(coordinates.y().to_bytes()))
                 .finish(),
             None => d
                 .field("x", &hex::encode(pallas::Base::zero().to_bytes()))
@@ -917,10 +919,12 @@ impl fmt::Debug for EphemeralPublicKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut d = f.debug_struct("EphemeralPublicKey");
 
-        match self.0.get_xy().into() {
-            Some((x, y)) => d
-                .field("x", &hex::encode(x.to_bytes()))
-                .field("y", &hex::encode(y.to_bytes()))
+        let option: Option<Coordinates<pallas::Affine>> = self.0.coordinates().into();
+
+        match option {
+            Some(coordinates) => d
+                .field("x", &hex::encode(coordinates.x().to_bytes()))
+                .field("y", &hex::encode(coordinates.y().to_bytes()))
                 .finish(),
             None => d
                 .field("x", &hex::encode(pallas::Base::zero().to_bytes()))
