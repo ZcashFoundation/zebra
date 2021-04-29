@@ -141,6 +141,7 @@ impl Transaction {
             Just(NetworkUpgrade::Heartwood),
             Just(NetworkUpgrade::Canopy),
             Just(NetworkUpgrade::Nu5),
+        // TODO: add future network upgrades
         ]
         .boxed()
     }
