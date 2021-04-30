@@ -51,12 +51,12 @@ fn Q(D: &[u8]) -> pallas::Point {
 ///
 /// https://zips.z.cash/protocol/nu5.pdf#concretesinsemillahash
 #[allow(non_snake_case)]
-fn S(j: &u16) -> pallas::Point {
+fn S(j: &BitSlice<Lsb0, u8>) -> pallas::Point {
     // The value of j is a 10-bit value, therefore must never exceed 2^10 in
     // value.
-    assert!(j < &1024u16);
+    assert_eq!(j.len(), 10);
 
-    pallas_group_hash(b"z.cash:SinsemillaS", &j.to_le_bytes())
+    pallas_group_hash(b"z.cash:SinsemillaS", j.as_slice())
 }
 
 /// "...an algebraic hash function with collision resistance (for fixed input
@@ -87,21 +87,11 @@ pub fn sinsemilla_hash_to_point(D: &[u8], M: &BitVec<Lsb0, u8>) -> pallas::Point
     // https://zips.z.cash/protocol/nu5.pdf#concretesinsemillahash
     for chunk in M.chunks(k) {
         // Pad each chunk with zeros.
-        let mut store = 0u16;
+        let mut store = [0u8; 2];
         let bits = store.bits_mut::<Lsb0>();
-        chunk
-            .iter()
-            .enumerate()
-            .for_each(|(i, bit)| bits.set(i, *bit));
+        bits[..chunk.len()].copy_from_slice(&chunk);
 
-        // An instance of LEBS2IP_k
-        // XXX: does Rust or bitvec have a better implementation?
-        let j = &bits
-            .iter()
-            .enumerate()
-            .fold(0u16, |j, (i, &bit)| j + if bit { 1 << i } else { 0 });
-
-        acc = acc + acc + S(j);
+        acc = acc + acc + S(&bits[..k]);
     }
 
     acc
