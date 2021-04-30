@@ -178,6 +178,49 @@ ready!(self.block.poll_ready(cx).map_err(VerifyChainError::Block))?;
 Poll::Ready(Ok(()))
 ```
 
+## Critical Section Compiler Errors
+[critical-section-compiler-errors]: #critical-section-compiler-errors
+
+To avoid deadlocks or slowdowns, critical sections should be as short as
+possible, and they should not depend on any other tasks.
+For more details, see the [Acquiring Buffer Slots, Mutexes, or Readiness](#acquiring-buffer-slots-mutexes-readiness)
+section.
+
+Zebra's [`CandidateSet`](https://github.com/ZcashFoundation/zebra/blob/0203d1475a95e90eb6fd7c4101caa26aeddece5b/zebra-network/src/peer_set/candidate_set.rs#L257)
+must release a `std::sync::Mutex` lock before awaiting a `tokio::time::Sleep`
+future. This ensures that the threaded mutex lock isn't held over the `await`
+point.
+
+If the lock isn't dropped, compilation fails, because the mutex lock can't be
+sent between threads.
+
+<!-- edited from commit 0203d1475a95e90eb6fd7c4101caa26aeddece5b on 2020-04-30 -->
+```rust
+// # Correctness
+//
+// In this critical section, we hold the address mutex, blocking the
+// current thread, and all async tasks scheduled on that thread.
+//
+// To avoid deadlocks, the critical section:
+// - must not acquire any other locks
+// - must not await any futures
+//
+// To avoid hangs, any computation in the critical section should
+// be kept to a minimum.
+let reconnect = {
+    let mut guard = self.address_book.lock().unwrap();
+    ...
+    let reconnect = guard.reconnection_peers().next()?;
+
+    let reconnect = MetaAddr::new_reconnect(&reconnect.addr, &reconnect.services);
+    guard.update(reconnect);
+    reconnect
+};
+
+// SECURITY: rate-limit new candidate connections
+sleep.await;
+```
+
 ## Sharing Progress between Multiple Futures
 [progress-multiple-futures]: #progress-multiple-futures
 
