@@ -5,8 +5,6 @@ mod address;
 mod arbitrary;
 mod commitment;
 mod note;
-mod output;
-mod spend;
 #[cfg(test)]
 mod tests;
 

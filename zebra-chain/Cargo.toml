@@ -53,10 +53,10 @@ ed25519-zebra = "2"
 equihash = "0.1"
 redjubjub = "0.4"
 
+zebra-test = { path = "../zebra-test/", optional = true }
 
 [dev-dependencies]
 bincode = "1"
-
 color-eyre = "0.5.11"
 criterion = { version = "0.3", features = ["html_reports"] }
 spandoc = "0.2"

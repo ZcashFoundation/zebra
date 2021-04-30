@@ -76,10 +76,3 @@ impl From<Base> for pallas::Base {
         pallas::Base::from_bytes(&local.bytes).unwrap()
     }
 }
-
-#[derive(Deserialize, Serialize)]
-#[serde(remote = "futures::future::Either")]
-pub enum Either<A, B> {
-    Left(A),
-    Right(B),
-}
