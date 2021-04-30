@@ -90,6 +90,55 @@ let res = ready!(this
     .poll_ready(cx));
 ```
 
+## Futures-Aware Mutexes
+[futures-aware-mutexes]: #futures-aware-mutexes
+
+To avoid hangs or slowdowns, use futures-aware types. For more details, see the
+[Futures-Aware Types](#futures-aware-types) section.
+
+Zebra's [`Handshake`](https://github.com/ZcashFoundation/zebra/blob/a63c2e8c40fa847a86d00c754fb10a4729ba34e5/zebra-network/src/peer/handshake.rs#L204)
+won't block other tasks on its thread, because it uses `futures::lock::Mutex`:
+
+<!-- copied from commit a63c2e8c40fa847a86d00c754fb10a4729ba34e5 on 2020-04-30 -->
+```rust
+pub async fn negotiate_version(
+    peer_conn: &mut Framed<TcpStream, Codec>,
+    addr: &SocketAddr,
+    config: Config,
+    nonces: Arc<futures::lock::Mutex<HashSet<Nonce>>>,
+    user_agent: String,
+    our_services: PeerServices,
+    relay: bool,
+) -> Result<(Version, PeerServices), HandshakeError> {
+    // Create a random nonce for this connection
+    let local_nonce = Nonce::default();
+    // # Correctness
+    //
+    // It is ok to wait for the lock here, because handshakes have a short
+    // timeout, and the async mutex will be released when the task times
+    // out.
+    nonces.lock().await.insert(local_nonce);
+
+    ...
+}
+```
+
+Zebra's [`Inbound service`](https://github.com/ZcashFoundation/zebra/blob/0203d1475a95e90eb6fd7c4101caa26aeddece5b/zebrad/src/components/inbound.rs#L238)
+can't use an async-aware mutex for its `AddressBook`, because the mutex is shared
+with non-async code. It only holds the mutex to clone the address book, reducing
+the amount of time that other tasks on its thread are blocked:
+
+<!-- copied from commit 0203d1475a95e90eb6fd7c4101caa26aeddece5b on 2020-04-30 -->
+```rust
+// # Correctness
+//
+// Briefly hold the address book threaded mutex while
+// cloning the address book. Then sanitize after releasing
+// the lock.
+let peers = address_book.lock().unwrap().clone();
+let mut peers = peers.sanitized();
+```
+
 ## Avoiding Deadlocks when Aquiring Buffer or Service Readiness
 [readiness-deadlock-avoidance]: #readiness-deadlock-avoidance
 
@@ -357,6 +406,7 @@ async fn handle_client_request(&mut self, req: InProgressClientRequest) {
 
 The reference section contains in-depth information about concurrency in Zebra:
 - [`Poll::Pending` and Wakeups](#poll-pending-and-wakeups)
+- [Futures-Aware Types](#futures-aware-types)
 - [Acquiring Buffer Slots or Mutexes](#acquiring-buffer-slots-or-mutexes)
 - [Buffer and Batch](#buffer-and-batch)
   - [Buffered Services](#buffered-services)
@@ -382,6 +432,23 @@ Any code that generates a new `Poll::Pending` should either have:
 * a wakeup implementation, with tests to ensure that the wakeup functions as expected.
 
 Note: `poll` functions often have a qualifier, like `poll_ready` or `poll_next`.
+
+## Futures-Aware Types
+[futures-aware-types]: #futures-aware-types
+
+Use futures-aware types, rather than types which will block the current thread.
+
+For example:
+- Use `futures::lock::Mutex` rather than `std::sync::Mutex`
+- Use `tokio::time::{sleep, timeout}` rather than `std::thread::sleep`
+
+Always qualify ambiguous names like `Mutex` and `sleep`, so that it is obvious
+when a call will block.
+
+If you are unable to use futures-aware types:
+- block the thread for as short a time as possible
+- document the correctness of each blocking call
+- consider re-designing the code to use `tower::Services`, or other futures-aware types
 
 ## Acquiring Buffer Slots or Mutexes
 [acquiring-buffer-slots-or-mutexes]: #acquiring-buffer-slots-or-mutexes
