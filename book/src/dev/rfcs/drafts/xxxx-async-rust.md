@@ -539,7 +539,7 @@ Zebra uses the following crates for monitoring and diagnostics:
 - [metrics](https://docs.rs/metrics-core/) with a [prometheus exporter](https://docs.rs/metrics-exporter-prometheus/)
 
 These introspection tools are also useful during testing:
-- `tracing` logs individual events 
+- `tracing` logs individual events
   - spans track related work through the download and verification pipeline
 - `metrics` monitors overall progress and error rates
   - labels split counters or gauges into different categories (for example, by peer address)
@@ -557,3 +557,6 @@ those bugs can take a lot of developer effort.
 Can we catch these bugs using automated tests?
 
 How can we diagnose these kinds of issues faster and more reliably?
+  - [TurboWish](https://blog.pnkfx.org/blog/2021/04/26/road-to-turbowish-part-1-goals/)
+    looks really promising for task, channel, and future introspection. But as of April
+    2021, it's still in early development.
