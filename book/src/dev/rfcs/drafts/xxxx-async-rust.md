@@ -35,7 +35,11 @@ development, reviews, and testing.
         cooperative multitasking.
 - `contention`: slower execution because multiple tasks are waiting to
         acquire a lock, buffer/batch slot, or readiness.
-- `missed wakeup`: a task `hang`s because it is never scheduled for wakeup. 
+- `missed wakeup`: a task `hang`s because it is never scheduled for wakeup.
+- `lock`: exclusive access to a shared resource. Locks stop other code from
+          running until they are released. For example, a mutex, buffer slot,
+          or service readiness.
+- `critical section`: code that is executed while holding a lock.
 - `deadlock`: a `hang` that stops an async task executing code, because it
         is waiting for a lock, slot, or task readiness.
         For example: a task is waiting for a service to be ready, but the
@@ -143,7 +147,7 @@ let mut peers = peers.sanitized();
 [readiness-deadlock-avoidance]: #readiness-deadlock-avoidance
 
 To avoid deadlocks, readiness and locks must be acquired in a consistent order.
-For more details, see the [Acquiring Buffer Slots or Mutexes](#acquiring-buffer-slots-or-mutexes)
+For more details, see the [Acquiring Buffer Slots, Mutexes, or Readiness](#acquiring-buffer-slots-mutexes-readiness)
 section.
 
 Zebra's [`ChainVerifier`](https://github.com/ZcashFoundation/zebra/blob/3af57ece7ae5d43cfbcb6a9215433705aad70b80/zebra-consensus/src/chain.rs#L73)
@@ -186,7 +190,7 @@ section.
 Zebra's [peer crawler task](https://github.com/ZcashFoundation/zebra/blob/375c8d8700764534871f02d2d44f847526179dab/zebra-network/src/peer_set/initialize.rs#L326)
 avoids starvation and deadlocks by:
 - sharing progress between any ready futures using the `select!` macro
-- spawning independent tasks to avoid hangs (see [Acquiring Buffer Slots or Mutexes](#acquiring-buffer-slots-or-mutexes))
+- spawning independent tasks to avoid hangs (see [Acquiring Buffer Slots, Mutexes, or Readiness](#acquiring-buffer-slots-mutexes-readiness))
 - using timeouts to avoid hangs
 
 You can see a range of hang fixes in [pull request #1950](https://github.com/ZcashFoundation/zebra/pull/1950).
@@ -407,7 +411,7 @@ async fn handle_client_request(&mut self, req: InProgressClientRequest) {
 The reference section contains in-depth information about concurrency in Zebra:
 - [`Poll::Pending` and Wakeups](#poll-pending-and-wakeups)
 - [Futures-Aware Types](#futures-aware-types)
-- [Acquiring Buffer Slots or Mutexes](#acquiring-buffer-slots-or-mutexes)
+- [Acquiring Buffer Slots, Mutexes, or Readiness](#acquiring-buffer-slots-mutexes-readiness)
 - [Buffer and Batch](#buffer-and-batch)
   - [Buffered Services](#buffered-services)
     - [Choosing Buffer Bounds](#choosing-buffer-bounds)
@@ -450,21 +454,29 @@ If you are unable to use futures-aware types:
 - document the correctness of each blocking call
 - consider re-designing the code to use `tower::Services`, or other futures-aware types
 
-## Acquiring Buffer Slots or Mutexes
-[acquiring-buffer-slots-or-mutexes]: #acquiring-buffer-slots-or-mutexes
+## Acquiring Buffer Slots, Mutexes, or Readiness
+[acquiring-buffer-slots-mutexes-readiness]: #acquiring-buffer-slots-mutexes-readiness
 
-Ideally, buffer slots or mutexes should be acquired one at a time, and held for as short a time
-as possible.
+Ideally, buffer slots, mutexes, or readiness should be:
+- acquired with one lock per critical section, and
+- held for as short a time as possible.
 
-If that's not possible, acquire slots and mutexs in the same order across cooperating tasks.
-If tasks acquire the same slots and mutexes in different orders, they can deadlock, each holding
-a lock that the other needs.
+If multiple locks are required for a critical section, acquire them in the same
+order any time those locks are used. If tasks acquire multiple locks in different
+orders, they can deadlock, each holding a lock that the other needs.
+
+If a buffer, mutex, future or service has complex readiness dependencies,
+schedule those dependencies separate tasks using `tokio::spawn`. Otherwise,
+it might deadlock due to a dependency loop within a single executor task.
+
+In all of these cases:
+- make critical sections as short as possible, and
+- do not depend on other tasks or locks inside the critical section.
+
+### Acquiring Service Readiness
 
 Note: do not call `poll_ready` on multiple tasks, then match against the results. Use the `ready!`
-macro instead.
-
-If a task is waiting for service readiness, and that service depends on other futures to become ready,
-make sure those futures are scheduled in separate tasks using `tokio::spawn`.
+macro instead, to acquire service readiness in a consistent order.
 
 ## Buffer and Batch
 [buffer-and-batch]: #buffer-and-batch
