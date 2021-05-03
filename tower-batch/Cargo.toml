@@ -11,7 +11,7 @@ futures-core = "0.3.13"
 pin-project = "0.4.27"
 tokio = { version = "0.3.6", features = ["time", "sync", "stream", "tracing", "macros"] }
 tower = { version = "0.4", features = ["util", "buffer"] }
-tracing = "0.1.25"
+tracing = "0.1.26"
 tracing-futures = "0.2.5"
 
 [dev-dependencies]
@@ -22,7 +22,7 @@ tokio = { version = "0.3.6", features = ["full"]}
 tokio-test = "0.4.1"
 tower-fallback = { path = "../tower-fallback/" }
 tower-test = "0.4.0"
-tracing = "0.1.25"
+tracing = "0.1.26"
 zebra-test = { path = "../zebra-test/" }
 
 
