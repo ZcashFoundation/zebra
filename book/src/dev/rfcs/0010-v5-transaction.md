@@ -343,7 +343,7 @@ The new V5 structure will create a new `orchard::ShieldedData` type. This new ty
 struct orchard::ShieldedData {
     flags: Flags,
     value_balance: Amount,
-    shared_anchor: tree::Root,
+    shared_anchor: orchard::tree::Root,
     proof: Halo2Proof,
     actions: AtLeastOne<AuthorizedAction>,
     binding_sig: redpallas::Signature<Binding>,
