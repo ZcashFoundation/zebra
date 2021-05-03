@@ -146,4 +146,7 @@ pub enum BlockError {
         zebra_chain::work::difficulty::ExpandedDifficulty,
         zebra_chain::parameters::Network,
     ),
+
+    #[error("wrong network upgrade")]
+    WrongNetworkUpgrade,
 }

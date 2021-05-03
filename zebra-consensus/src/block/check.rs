@@ -169,9 +169,21 @@ pub fn time_is_valid_at(
 ///
 /// `transaction_hashes` is a precomputed list of transaction hashes.
 pub fn merkle_root_validity(
+    network: Network,
     block: &Block,
     transaction_hashes: &[transaction::Hash],
 ) -> Result<(), BlockError> {
+    let nu = NetworkUpgrade::current(network, block.coinbase_height().expect("a valid height"));
+
+    if !block.transactions.iter().all(|trans| match trans.as_ref() {
+        &transaction::Transaction::V5 {
+            network_upgrade, ..
+        } => network_upgrade == nu,
+        _ => true,
+    }) {
+        return Err(BlockError::WrongNetworkUpgrade);
+    }
+
     let merkle_root = transaction_hashes.iter().cloned().collect();
 
     if block.header.merkle_root != merkle_root {
