@@ -175,12 +175,16 @@ pub fn merkle_root_validity(
 ) -> Result<(), BlockError> {
     let nu = NetworkUpgrade::current(network, block.coinbase_height().expect("a valid height"));
 
-    if !block.transactions.iter().all(|trans| match trans.as_ref() {
-        &transaction::Transaction::V5 {
-            network_upgrade, ..
-        } => network_upgrade == nu,
-        _ => true,
-    }) {
+    if !block
+        .transactions
+        .iter()
+        .all(|trans| match *trans.as_ref() {
+            transaction::Transaction::V5 {
+                network_upgrade, ..
+            } => network_upgrade == nu,
+            _ => true,
+        })
+    {
         return Err(BlockError::WrongNetworkUpgrade);
     }
 
