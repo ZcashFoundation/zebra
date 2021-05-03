@@ -106,23 +106,23 @@ impl VerificationKey<SpendAuth> {
     /// Randomization is only supported for `SpendAuth` keys.
     pub fn randomize(&self, randomizer: &Randomizer) -> VerificationKey<SpendAuth> {
         use super::private::Sealed;
-        let point = &self.point + &(&SpendAuth::basepoint() * randomizer);
+        let point = self.point + (SpendAuth::basepoint() * randomizer);
         let bytes = VerificationKeyBytes {
-            bytes: pallas::Point::from(point).to_bytes(),
+            bytes: point.to_bytes(),
             _marker: PhantomData,
         };
-        VerificationKey { bytes, point }
+        VerificationKey { point, bytes }
     }
 }
 
 impl<T: SigType> VerificationKey<T> {
     pub(crate) fn from_scalar(s: &pallas::Scalar) -> VerificationKey<T> {
-        let point = &T::basepoint() * s;
+        let point = T::basepoint() * s;
         let bytes = VerificationKeyBytes {
-            bytes: pallas::Point::from(point).to_bytes(),
+            bytes: point.to_bytes(),
             _marker: PhantomData,
         };
-        VerificationKey { bytes, point }
+        VerificationKey { point, bytes }
     }
 
     /// Verify a purported `signature` over `msg` made by this verification key.
@@ -166,8 +166,8 @@ impl<T: SigType> VerificationKey<T> {
         // XXX rewrite as normal double scalar mul
         // Verify check is h * ( - s * B + R  + c * A) == 0
         //                 h * ( s * B - c * A - R) == 0
-        let sB = &T::basepoint() * &s;
-        let cA = &self.point * &c;
+        let sB = T::basepoint() * s;
+        let cA = self.point * c;
         let check = sB - cA - r;
 
         if check.is_small_order().into() {

@@ -66,7 +66,7 @@ impl<T: SigType> From<SigningKey<T>> for SerdeHelper {
 impl SigningKey<SpendAuth> {
     /// Randomize this public key with the given `randomizer`.
     pub fn randomize(&self, randomizer: &pallas::Scalar) -> SigningKey<SpendAuth> {
-        let sk = &self.sk + randomizer;
+        let sk = self.sk + randomizer;
         let pk = VerificationKey::from_scalar(&sk);
         SigningKey { sk, pk }
     }
@@ -106,7 +106,7 @@ impl<T: SigType> SigningKey<T> {
             .update(msg)
             .finalize();
 
-        let r_bytes = pallas::Affine::from(&T::basepoint() * &nonce).to_bytes();
+        let r_bytes = pallas::Affine::from(T::basepoint() * nonce).to_bytes();
 
         let c = HStar::default()
             .update(&r_bytes[..])
@@ -114,7 +114,7 @@ impl<T: SigType> SigningKey<T> {
             .update(msg)
             .finalize();
 
-        let s_bytes = (&nonce + &(&c * &self.sk)).to_bytes();
+        let s_bytes = (nonce + (c * self.sk)).to_bytes();
 
         Signature {
             r_bytes,
