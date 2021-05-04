@@ -168,6 +168,19 @@ pub fn time_is_valid_at(
 /// Check Merkle root validity.
 ///
 /// `transaction_hashes` is a precomputed list of transaction hashes.
+///
+/// # Consensus rules:
+///
+/// - The nConsensusBranchId field MUST match the consensus branch ID used for SIGHASH transaction hashes, as specifed in [ZIP-244] ([7.1]).
+/// - [7.6]
+///
+/// # Panics
+///
+/// - If block does not have a coinbase transaction.
+///
+/// [ZIP-244]: https://zips.z.cash/zip-0244
+/// [7.1]: https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus
+/// [7.6]: https://zips.z.cash/protocol/nu5.pdf#blockheader
 pub fn merkle_root_validity(
     network: Network,
     block: &Block,
