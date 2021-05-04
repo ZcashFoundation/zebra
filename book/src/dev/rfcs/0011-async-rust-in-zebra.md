@@ -1,4 +1,4 @@
-- Feature Name: async_rust_constraints
+- Feature Name: async_rust_in_zebra
 - Start Date: 2021-03-30
 - Design PR: [ZcashFoundation/zebra#1965](https://github.com/ZcashFoundation/zebra/pull/1965)
 - Zebra Issue: [ZcashFoundation/zebra#1593](https://github.com/ZcashFoundation/zebra/issues/1593)
