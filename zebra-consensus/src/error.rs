@@ -147,6 +147,6 @@ pub enum BlockError {
         zebra_chain::parameters::Network,
     ),
 
-    #[error("wrong network upgrade")]
-    WrongNetworkUpgrade,
+    #[error("transaction has wrong consensus branch id for block network upgrade")]
+    WrongTransactionConsensusBranchId,
 }
