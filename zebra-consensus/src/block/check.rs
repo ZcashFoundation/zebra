@@ -171,8 +171,11 @@ pub fn time_is_valid_at(
 ///
 /// # Consensus rules:
 ///
-/// - The nConsensusBranchId field MUST match the consensus branch ID used for SIGHASH transaction hashes, as specifed in [ZIP-244] ([7.1]).
-/// - [7.6]
+/// - The nConsensusBranchId field MUST match the consensus branch ID used for
+///  SIGHASH transaction hashes, as specifed in [ZIP-244] ([7.1]).
+/// - A SHA-256d hash in internal byte order. The merkle root is derived from the
+///  hashes of all transactions included in this block, ensuring that none of
+///  those transactions can be modified without modifying the header. [7.6]
 ///
 /// # Panics
 ///
