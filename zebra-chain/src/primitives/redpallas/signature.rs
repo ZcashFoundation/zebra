@@ -12,7 +12,7 @@ use std::marker::PhantomData;
 
 use super::SigType;
 
-/// A RedJubJub signature.
+/// A RedPallas signature.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Signature<T: SigType> {
