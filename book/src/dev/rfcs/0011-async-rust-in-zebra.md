@@ -680,5 +680,6 @@ Can we catch these bugs using automated tests?
 
 How can we diagnose these kinds of issues faster and more reliably?
   - [TurboWish](https://blog.pnkfx.org/blog/2021/04/26/road-to-turbowish-part-1-goals/)
-    looks really promising for task, channel, and future introspection. But as of April
-    2021, it's still in early development.
+    (also known as `tokio-console`)
+    looks really promising for task, channel, and future introspection. As of May 2020,
+    there is an [early prototype available](https://github.com/tokio-rs/console).
