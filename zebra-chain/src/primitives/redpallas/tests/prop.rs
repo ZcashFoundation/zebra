@@ -105,12 +105,10 @@ proptest! {
     #[test]
     fn tweak_signature(
         tweaks in prop::collection::vec(tweak_strategy(), (0,5)),
-        rng_seed in any::<u64>(),
+        rng_seed in prop::array::uniform32(any::<u8>()),
     ) {
         // Use a deterministic RNG so that test failures can be reproduced.
-        // Seeding with 64 bits of entropy is INSECURE and this code should
-        // not be copied outside of this test!
-        let mut rng = ChaChaRng::seed_from_u64(rng_seed);
+        let mut rng = ChaChaRng::from_seed(rng_seed);
 
         // Create a test case for each signature type.
         let msg = b"test message for proptests";
@@ -128,11 +126,9 @@ proptest! {
     }
 
     #[test]
-    fn randomization_commutes_with_pubkey_homomorphism(rng_seed in any::<u64>()) {
+    fn randomization_commutes_with_pubkey_homomorphism(rng_seed in prop::array::uniform32(any::<u8>())) {
         // Use a deterministic RNG so that test failures can be reproduced.
-        // Seeding with 64 bits of entropy is INSECURE and this code should
-        // not be copied outside of this test!
-        let mut rng = ChaChaRng::seed_from_u64(rng_seed);
+        let mut rng = ChaChaRng::from_seed(rng_seed);
 
         let r = {
             // XXX-jubjub: better API for this
