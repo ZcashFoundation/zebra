@@ -11,6 +11,7 @@ mod note;
 mod sinsemilla;
 
 pub mod keys;
+pub mod shielded_data;
 pub mod tree;
 
 pub use action::Action;
@@ -18,3 +19,4 @@ pub use address::Address;
 pub use commitment::{CommitmentRandomness, NoteCommitment, ValueCommitment};
 pub use keys::Diversifier;
 pub use note::{EncryptedNote, Note, Nullifier};
+pub use shielded_data::{AuthorizedAction, Flags, ShieldedData};

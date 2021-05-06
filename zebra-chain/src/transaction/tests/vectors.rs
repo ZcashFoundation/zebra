@@ -108,6 +108,7 @@ fn empty_v5_round_trip() {
         inputs: Vec::new(),
         outputs: Vec::new(),
         sapling_shielded_data: None,
+        orchard_shielded_data: None,
     };
 
     let data = tx.zcash_serialize_to_vec().expect("tx should serialize");

@@ -13,8 +13,7 @@ use std::marker::PhantomData;
 use super::SigType;
 
 /// A RedPallas signature.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct Signature<T: SigType> {
     pub(crate) r_bytes: [u8; 32],
     pub(crate) s_bytes: [u8; 32],

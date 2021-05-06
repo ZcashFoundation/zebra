@@ -45,12 +45,12 @@ pub type Randomizer = pallas::Scalar;
 pub trait SigType: private::Sealed {}
 
 /// A type variable corresponding to Zcash's `BindingSig`.
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
 pub enum Binding {}
 impl SigType for Binding {}
 
 /// A type variable corresponding to Zcash's `SpendAuthSig`.
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
 pub enum SpendAuth {}
 impl SigType for SpendAuth {}
 

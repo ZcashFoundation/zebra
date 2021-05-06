@@ -245,6 +245,50 @@ impl ZcashDeserialize for Option<sapling::ShieldedData<SharedAnchor>> {
     }
 }
 
+impl ZcashSerialize for Option<orchard::ShieldedData> {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        match self {
+            None => {
+                // nActionsOrchard
+                writer.write_compactsize(0)?;
+                // sizeProofsOrchard
+                writer.write_compactsize(0)?;
+            }
+            Some(orchard_shielded_data) => {
+                orchard_shielded_data.zcash_serialize(&mut writer)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl ZcashSerialize for orchard::ShieldedData {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        // TODO: Do this implementation
+
+        // nActionsOrchard
+        writer.write_compactsize(0)?;
+        // sizeProofsOrchard
+        writer.write_compactsize(0)?;
+
+        Ok(())
+    }
+}
+
+// we can't split ShieldedData out of Option<ShieldedData> deserialization,
+// because the counts are read along with the arrays.
+impl ZcashDeserialize for Option<orchard::ShieldedData> {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        // TODO: Do this implementation
+
+        // nActionsOrchard
+        let _ = reader.read_compactsize()?;
+        // sizeProofsOrchard
+        let _ = reader.read_compactsize()?;
+        Ok(None)
+    }
+}
+
 impl ZcashSerialize for Transaction {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         // Post-Sapling, transaction size is limited to MAX_BLOCK_BYTES.
@@ -374,6 +418,7 @@ impl ZcashSerialize for Transaction {
                 inputs,
                 outputs,
                 sapling_shielded_data,
+                orchard_shielded_data,
             } => {
                 // Transaction V5 spec:
                 // https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus
@@ -401,10 +446,7 @@ impl ZcashSerialize for Transaction {
                 sapling_shielded_data.zcash_serialize(&mut writer)?;
 
                 // orchard
-                // TODO: Parse orchard into structs
-                //       In the meantime, to keep the transaction valid, we add `0`
-                //       as the nActionsOrchard field
-                writer.write_compactsize(0)?;
+                orchard_shielded_data.zcash_serialize(&mut writer)?;
             }
         }
         Ok(())
@@ -544,14 +586,7 @@ impl ZcashDeserialize for Transaction {
                 let sapling_shielded_data = (&mut reader).zcash_deserialize_into()?;
 
                 // orchard
-                // TODO: Parse orchard into structs
-                //       In the meantime, check the orchard section is just `0`
-                let empty_orchard_section = reader.read_compactsize()?;
-                if empty_orchard_section != 0 {
-                    return Err(SerializationError::Parse(
-                        "expected orchard section to be just a zero",
-                    ));
-                }
+                let orchard_shielded_data = (&mut reader).zcash_deserialize_into()?;
 
                 Ok(Transaction::V5 {
                     network_upgrade,
@@ -560,6 +595,7 @@ impl ZcashDeserialize for Transaction {
                     inputs,
                     outputs,
                     sapling_shielded_data,
+                    orchard_shielded_data,
                 })
             }
             (_, _) => Err(SerializationError::Parse("bad tx header")),

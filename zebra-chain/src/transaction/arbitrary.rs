@@ -5,9 +5,12 @@ use proptest::{arbitrary::any, array, collection::vec, option, prelude::*};
 
 use crate::{
     amount::Amount,
-    block,
+    block, orchard,
     parameters::NetworkUpgrade,
-    primitives::{Bctv14Proof, Groth16Proof, ZkSnarkProof},
+    primitives::{
+        redpallas::{Binding, Signature},
+        Bctv14Proof, Groth16Proof, Halo2Proof, ZkSnarkProof,
+    },
     sapling, sprout, transparent, LedgerState,
 };
 
@@ -79,8 +82,8 @@ impl Transaction {
             vec(any::<transparent::Output>(), 0..10),
             any::<LockTime>(),
             any::<block::Height>(),
-            option::of(any::<sapling::ShieldedData<sapling::PerSpendAnchor>>()),
             option::of(any::<JoinSplitData<Groth16Proof>>()),
+            option::of(any::<sapling::ShieldedData<sapling::PerSpendAnchor>>()),
         )
             .prop_map(
                 |(
@@ -88,15 +91,15 @@ impl Transaction {
                     outputs,
                     lock_time,
                     expiry_height,
-                    sapling_shielded_data,
                     joinsplit_data,
+                    sapling_shielded_data,
                 )| Transaction::V4 {
                     inputs,
                     outputs,
                     lock_time,
                     expiry_height,
-                    sapling_shielded_data,
                     joinsplit_data,
+                    sapling_shielded_data,
                 },
             )
             .boxed()
@@ -111,6 +114,8 @@ impl Transaction {
             transparent::Input::vec_strategy(ledger_state, 10),
             vec(any::<transparent::Output>(), 0..10),
             option::of(any::<sapling::ShieldedData<sapling::SharedAnchor>>()),
+            // TODO: uncomment this after the serialization and deserialization is ready
+            //option::of(any::<orchard::ShieldedData>()),
         )
             .prop_map(
                 |(
@@ -120,6 +125,8 @@ impl Transaction {
                     inputs,
                     outputs,
                     sapling_shielded_data,
+                    // TODO: uncomment this after the serialization and deserialization is ready
+                    //orchard_shielded_data,
                 )| {
                     Transaction::V5 {
                         network_upgrade,
@@ -128,6 +135,8 @@ impl Transaction {
                         inputs,
                         outputs,
                         sapling_shielded_data,
+                        // TODO: remove the None after the serialization and deserialization is ready
+                        orchard_shielded_data: None,
                     }
                 },
             )
@@ -323,6 +332,38 @@ impl Arbitrary for sapling::TransferData<SharedAnchor> {
     type Strategy = BoxedStrategy<Self>;
 }
 
+impl Arbitrary for orchard::ShieldedData {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        (
+            vec(any::<orchard::shielded_data::AuthorizedAction>(), 1..10),
+            any::<orchard::shielded_data::Flags>(),
+            any::<Amount>(),
+            any::<orchard::tree::Root>(),
+            any::<Halo2Proof>(),
+            vec(any::<u8>(), 64),
+        )
+            .prop_map(
+                |(actions, flags, value_balance, shared_anchor, proof, sig_bytes)| Self {
+                    actions: actions.try_into().expect("we always should have something"),
+                    flags,
+                    value_balance,
+                    shared_anchor,
+                    proof,
+                    binding_sig: Signature::<Binding>::from({
+                        let mut b = [0u8; 64];
+                        b.copy_from_slice(sig_bytes.as_slice());
+                        b
+                    }),
+                },
+            )
+            .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
+
 impl Arbitrary for Transaction {
     type Parameters = LedgerState;
 
@@ -369,6 +410,7 @@ pub fn transaction_to_fake_v5(trans: &Transaction) -> Transaction {
             lock_time: *lock_time,
             expiry_height: block::Height(0),
             sapling_shielded_data: None,
+            orchard_shielded_data: None,
         },
         V2 {
             inputs,
@@ -382,6 +424,7 @@ pub fn transaction_to_fake_v5(trans: &Transaction) -> Transaction {
             lock_time: *lock_time,
             expiry_height: block::Height(0),
             sapling_shielded_data: None,
+            orchard_shielded_data: None,
         },
         V3 {
             inputs,
@@ -396,6 +439,7 @@ pub fn transaction_to_fake_v5(trans: &Transaction) -> Transaction {
             lock_time: *lock_time,
             expiry_height: *expiry_height,
             sapling_shielded_data: None,
+            orchard_shielded_data: None,
         },
         V4 {
             inputs,
@@ -414,6 +458,7 @@ pub fn transaction_to_fake_v5(trans: &Transaction) -> Transaction {
                 .clone()
                 .map(sapling_shielded_v4_to_fake_v5)
                 .flatten(),
+            orchard_shielded_data: None,
         },
         v5 @ V5 { .. } => v5.clone(),
     }
