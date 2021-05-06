@@ -40,7 +40,7 @@ ripemd160 = "0.9"
 secp256k1 = { version = "0.20.2", features = ["serde"] }
 serde = { version = "1", features = ["serde_derive", "rc"] }
 serde-big-array = "0.3.2"
-sha2 = { version = "0.9.3", features=["compress"] }
+sha2 = { version = "0.9.4", features=["compress"] }
 thiserror = "1"
 x25519-dalek = { version = "1.1", features = ["serde"] }
 
