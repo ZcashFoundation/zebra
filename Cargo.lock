@@ -4459,7 +4459,6 @@ dependencies = [
  "displaydoc",
  "futures 0.3.14",
  "futures-util",
- "halo2",
  "jubjub",
  "lazy_static",
  "metrics",
