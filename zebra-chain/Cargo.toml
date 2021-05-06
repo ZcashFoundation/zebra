@@ -59,12 +59,14 @@ zebra-test = { path = "../zebra-test/", optional = true }
 bincode = "1"
 color-eyre = "0.5.11"
 criterion = { version = "0.3", features = ["html_reports"] }
+itertools = "0.10.0"
 spandoc = "0.2"
 tracing = "0.1.26"
 
 proptest = "0.10"
 proptest-derive = "0.3"
-itertools = "0.10.0"
+rand = "0.8"
+rand_chacha = "0.3"
 
 zebra-test = { path = "../zebra-test/" }
 
