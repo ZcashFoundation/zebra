@@ -1730,9 +1730,9 @@ dependencies = [
 
 [[package]]
 name = "inferno"
-version = "0.10.4"
+version = "0.10.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "730c5d33ff7a5a587b7a92fc536d1e7c5bb6870814aefb98a85110066c76e7ef"
+checksum = "37fb405dbcc505ed20838c4f8dad7b901094de90add237755df54bd5dcda2fdd"
 dependencies = [
  "ahash 0.6.1",
  "atty",
