@@ -13,17 +13,17 @@ use crate::{
 /// A bundle of [`Action`] descriptions and signature data.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct ShieldedData {
-    /// The Orchard Actions.
-    pub actions: AtLeastOne<AuthorizedAction>,
     /// The orchard flags for this transaction.
     pub flags: Flags,
     /// The net value of Orchard spends minus outputs.
     pub value_balance: Amount,
     /// The shared anchor for all `Spend`s in this transaction.
     pub shared_anchor: tree::Root,
-    /// The aggregated zk-SNARK proof.
+    /// The aggregated zk-SNARK proof for all the actions in this transaction.
     pub proof: Halo2Proof,
-    /// A signature on the transaction hash.
+    /// The Orchard Actions.
+    pub actions: AtLeastOne<AuthorizedAction>,
+    /// A signature on the transaction `sighash`.
     pub binding_sig: Signature<Binding>,
 }
 
@@ -35,9 +35,6 @@ pub struct AuthorizedAction {
     /// The action description of this Action.
     pub action: Action,
     /// The spend signature.
-    // This field is stored in a separate array in v5 transactions, see:
-    // https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus
-    // parse using `zcash_deserialize_external_count` and `zcash_serialize_external_count`
     pub spend_auth_sig: Signature<SpendAuth>,
 }
 

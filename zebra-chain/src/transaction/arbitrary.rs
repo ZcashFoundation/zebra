@@ -337,20 +337,20 @@ impl Arbitrary for orchard::ShieldedData {
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         (
-            vec(any::<orchard::shielded_data::AuthorizedAction>(), 1..10),
             any::<orchard::shielded_data::Flags>(),
             any::<Amount>(),
             any::<orchard::tree::Root>(),
             any::<Halo2Proof>(),
+            vec(any::<orchard::shielded_data::AuthorizedAction>(), 1..10),
             vec(any::<u8>(), 64),
         )
             .prop_map(
-                |(actions, flags, value_balance, shared_anchor, proof, sig_bytes)| Self {
-                    actions: actions.try_into().expect("we always should have something"),
+                |(flags, value_balance, shared_anchor, proof, actions, sig_bytes)| Self {
                     flags,
                     value_balance,
                     shared_anchor,
                     proof,
+                    actions: actions.try_into().expect("we always should have something"),
                     binding_sig: Signature::<Binding>::from({
                         let mut b = [0u8; 64];
                         b.copy_from_slice(sig_bytes.as_slice());
