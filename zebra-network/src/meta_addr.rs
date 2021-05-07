@@ -191,6 +191,17 @@ impl MetaAddr {
         }
     }
 
+    /// Create a new `MetaAddr` for our own listener address.
+    pub fn new_local_listener(addr: &SocketAddr) -> MetaAddr {
+        MetaAddr {
+            addr: *addr,
+            // TODO: create a "local services" constant
+            services: PeerServices::NODE_NETWORK,
+            last_seen: Utc::now(),
+            last_connection_state: Responded,
+        }
+    }
+
     /// Create a new `MetaAddr` for a peer that has just had an error.
     pub fn new_errored(addr: &SocketAddr, services: &PeerServices) -> MetaAddr {
         MetaAddr {
@@ -240,8 +251,8 @@ impl MetaAddr {
         let last_seen = Utc.timestamp(ts - ts.rem_euclid(interval), 0);
         MetaAddr {
             addr: self.addr,
-            // services are sanitized during parsing, so we don't need to make
-            // any changes here
+            // services are sanitized during parsing, or set to a fixed valued by
+            // new_local_listener, so we don't need to sanitize here
             services: self.services,
             last_seen,
             // the state isn't sent to the remote peer, but sanitize it anyway

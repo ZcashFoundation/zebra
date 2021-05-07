@@ -48,13 +48,16 @@ use crate::{constants, types::MetaAddr, Config, PeerAddrState};
 /// - the canonical address of any connection.
 #[derive(Clone, Debug)]
 pub struct AddressBook {
-    /// Each known peer address has a matching `MetaAddr`
+    /// Each known peer address has a matching `MetaAddr`.
     by_addr: HashMap<SocketAddr, MetaAddr>,
+
+    /// The local listener address.
+    local_listener: SocketAddr,
 
     /// The span for operations on this address book.
     span: Span,
 
-    /// The last time we logged a message about the address metrics
+    /// The last time we logged a message about the address metrics.
     last_address_log: Option<Instant>,
 }
 
@@ -85,19 +88,25 @@ pub struct AddressMetrics {
 
 #[allow(clippy::len_without_is_empty)]
 impl AddressBook {
-    /// Construct an `AddressBook` with the given [`tracing::Span`].
-    pub fn new(span: Span) -> AddressBook {
+    /// Construct an `AddressBook` with the given `config` and [`tracing::Span`].
+    pub fn new(config: &Config, span: Span) -> AddressBook {
         let constructor_span = span.clone();
         let _guard = constructor_span.enter();
 
         let mut new_book = AddressBook {
             by_addr: HashMap::default(),
+            local_listener: config.listen_addr,
             span,
             last_address_log: None,
         };
 
         new_book.update_metrics();
         new_book
+    }
+
+    /// Get the local listener address.
+    pub fn get_local_listener(&self) -> MetaAddr {
+        MetaAddr::new_local_listener(&self.local_listener)
     }
 
     /// Get the contents of `self` in random order with sanitized timestamps.

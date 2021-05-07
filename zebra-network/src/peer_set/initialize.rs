@@ -64,7 +64,7 @@ where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
     S::Future: Send + 'static,
 {
-    let (address_book, timestamp_collector) = TimestampCollector::spawn();
+    let (address_book, timestamp_collector) = TimestampCollector::spawn(&config);
     let (inv_sender, inv_receiver) = broadcast::channel(100);
 
     // Construct services that handle inbound handshakes and perform outbound
