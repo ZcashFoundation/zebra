@@ -1,12 +1,31 @@
+use lazy_static::lazy_static;
+
+use zebra_test::zip0244;
+
 use super::super::*;
 
 use crate::{
     block::{Block, Height, MAX_BLOCK_BYTES},
     parameters::{Network, NetworkUpgrade},
     serialization::{SerializationError, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
+    transaction::txidhash::TxIdHasher,
 };
 
+use color_eyre::eyre::Result;
+
 use std::convert::TryInto;
+
+lazy_static! {
+    pub static ref EMPTY_V5_TX: Transaction = Transaction::V5 {
+        network_upgrade: NetworkUpgrade::Nu5,
+        lock_time: LockTime::min_lock_time(),
+        expiry_height: block::Height(0),
+        inputs: Vec::new(),
+        outputs: Vec::new(),
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+    };
+}
 
 #[test]
 fn librustzcash_tx_deserialize_and_round_trip() {
@@ -133,18 +152,10 @@ fn zip243_deserialize_and_round_trip() {
 fn empty_v5_round_trip() {
     zebra_test::init();
 
-    let tx = Transaction::V5 {
-        network_upgrade: NetworkUpgrade::Nu5,
-        lock_time: LockTime::min_lock_time(),
-        expiry_height: block::Height(0),
-        inputs: Vec::new(),
-        outputs: Vec::new(),
-        sapling_shielded_data: None,
-        orchard_shielded_data: None,
-    };
+    let tx: &Transaction = &*EMPTY_V5_TX;
 
     let data = tx.zcash_serialize_to_vec().expect("tx should serialize");
-    let tx2 = data
+    let tx2: &Transaction = &data
         .zcash_deserialize_into()
         .expect("tx should deserialize");
 
@@ -186,6 +197,17 @@ fn empty_v4_round_trip() {
         .expect("vec serialization is infallible");
 
     assert_eq!(data, data2, "data must be equal if structs are equal");
+}
+
+/// Check if an empty V5 transaction can be deserialized by librustzcash too.
+#[test]
+fn empty_v5_librustzcash_round_trip() {
+    zebra_test::init();
+
+    let tx: &Transaction = &*EMPTY_V5_TX;
+    let _alt_tx: zcash_primitives::transaction::Transaction = tx
+        .try_into()
+        .expect("librustzcash deserialization might work for empty zebra serialized transactions. Hint: if empty transactions fail, but other transactions work, delete this test");
 }
 
 /// Do a round-trip test on fake v5 transactions created from v4 transactions
@@ -340,4 +362,88 @@ fn invalid_orchard_nullifier() {
             .to_string(),
         SerializationError::Parse("Invalid pallas::Base value for orchard Nullifier").to_string()
     );
+}
+
+/// Do a round-trip test via librustzcash on fake v5 transactions created from v4 transactions
+/// in the block test vectors.
+/// Makes sure that zebra-serialized transactions can be deserialized by librustzcash.
+#[test]
+fn fake_v5_librustzcash_round_trip() {
+    zebra_test::init();
+
+    fake_v5_librustzcash_round_trip_for_network(Network::Mainnet);
+    fake_v5_librustzcash_round_trip_for_network(Network::Testnet);
+}
+
+fn fake_v5_librustzcash_round_trip_for_network(network: Network) {
+    let block_iter = match network {
+        Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
+        Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
+    };
+
+    for (height, original_bytes) in block_iter {
+        let original_block = original_bytes
+            .zcash_deserialize_into::<Block>()
+            .expect("block is structurally valid");
+
+        // skip blocks that are before overwinter as they will not have a valid consensus branch id
+        if *height
+            < NetworkUpgrade::Overwinter
+                .activation_height(network)
+                .expect("a valid height")
+                .0
+        {
+            continue;
+        }
+
+        let mut fake_block = original_block.clone();
+        fake_block.transactions = fake_block
+            .transactions
+            .iter()
+            .map(AsRef::as_ref)
+            .map(|t| arbitrary::transaction_to_fake_v5(t, network, Height(*height)))
+            .map(Into::into)
+            .collect();
+
+        // test each transaction
+        for (original_tx, fake_tx) in original_block
+            .transactions
+            .iter()
+            .zip(fake_block.transactions.iter())
+        {
+            assert_ne!(
+                &original_tx, &fake_tx,
+                "v1-v4 transactions must change when converted to fake v5"
+            );
+
+            let fake_bytes = fake_tx
+                .zcash_serialize_to_vec()
+                .expect("vec serialization is infallible");
+
+            assert_ne!(
+                &original_bytes[..],
+                fake_bytes,
+                "v1-v4 transaction data must change when converted to fake v5"
+            );
+
+            let _alt_tx: zcash_primitives::transaction::Transaction = fake_tx
+                .as_ref()
+                .try_into()
+                .expect("librustzcash deserialization must work for zebra serialized transactions");
+        }
+    }
+}
+
+#[test]
+fn zip244_txid() -> Result<()> {
+    zebra_test::init();
+
+    for test in zip0244::TEST_VECTORS.iter() {
+        let transaction = test.tx.zcash_deserialize_into::<Transaction>()?;
+        let hasher = TxIdHasher::new(&transaction);
+        let txid = hasher.txid()?;
+        assert_eq!(txid.0, test.txid);
+    }
+
+    Ok(())
 }

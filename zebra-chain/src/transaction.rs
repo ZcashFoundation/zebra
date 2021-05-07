@@ -8,6 +8,7 @@ mod lock_time;
 mod memo;
 mod serialize;
 mod sighash;
+mod txidhash;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub mod arbitrary;
