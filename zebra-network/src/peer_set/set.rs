@@ -40,6 +40,17 @@ use super::{
 
 /// A [`tower::Service`] that abstractly represents "the rest of the network".
 ///
+/// # Security
+///
+/// The `Discover::Key` must be the transient remote address of each peer. This
+/// address may only be valid for the duration of a single connection. (For
+/// example, inbound connections have an ephemeral remote port, and proxy
+/// connections have an ephemeral local or proxy port.)
+///
+/// Otherwise, malicious peers could interfere with other peers' `PeerSet` state.
+///
+/// # Implementation
+///
 /// This implementation is adapted from the one in `tower-balance`, and as
 /// described in that crate's documentation, it
 ///

@@ -1,7 +1,8 @@
 use std::{
     collections::HashSet,
+    fmt,
     future::Future,
-    net::SocketAddr,
+    net::{IpAddr, Ipv4Addr, SocketAddr},
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -12,6 +13,7 @@ use futures::{
     channel::{mpsc, oneshot},
     future, FutureExt, SinkExt, StreamExt,
 };
+use lazy_static::lazy_static;
 use tokio::{net::TcpStream, sync::broadcast, task::JoinError, time::timeout};
 use tokio_util::codec::Framed;
 use tower::Service;
@@ -53,6 +55,191 @@ pub struct Handshake<S> {
     parent_span: Span,
 }
 
+/// The peer address that we are handshaking with.
+///
+/// Typically, we can rely on outbound addresses, but inbound addresses don't
+/// give us enough information to reconnect to that peer.
+#[derive(Copy, Clone, PartialEq)]
+pub enum ConnectedAddr {
+    /// The address we used to make a direct outbound connection.
+    ///
+    /// In an honest network, a Zcash peer is listening on this exact address
+    /// and port.
+    OutboundDirect { addr: SocketAddr },
+
+    /// The address we received from the OS, when a remote peer directly
+    /// connected to our Zcash listener port.
+    ///
+    /// In an honest network, a Zcash peer might be listening on this address,
+    /// if its outbound address is the same as its listener address. But the port
+    /// is an ephemeral outbound TCP port, not a listener port.
+    InboundDirect {
+        maybe_ip: IpAddr,
+        transient_port: u16,
+    },
+
+    /// The proxy address we used to make an outbound connection.
+    ///
+    /// The proxy address can be used by many connections, but our own ephemeral
+    /// outbound address and port can be used as an identifier for the duration
+    /// of this connection.
+    OutboundProxy {
+        proxy_addr: SocketAddr,
+        transient_local_addr: SocketAddr,
+    },
+
+    /// The address we received from the OS, when a remote peer connected via an
+    /// inbound proxy.
+    ///
+    /// The proxy's ephemeral outbound address can be used as an identifier for
+    /// the duration of this connection.
+    InboundProxy { transient_addr: SocketAddr },
+
+    /// An isolated connection, where we deliberately don't connect any metadata.
+    Isolated,
+    //
+    // TODO: handle Tor onion addresses
+}
+
+lazy_static! {
+    /// An unspecified IPv4 address
+    pub static ref UNSPECIFIED_IPV4_ADDR: SocketAddr =
+        (Ipv4Addr::UNSPECIFIED, 0).into();
+}
+
+use ConnectedAddr::*;
+
+impl ConnectedAddr {
+    /// Returns a new outbound directly connected addr.
+    pub fn new_outbound_direct(addr: SocketAddr) -> ConnectedAddr {
+        OutboundDirect { addr }
+    }
+
+    /// Returns a new inbound directly connected addr.
+    pub fn new_inbound_direct(addr: SocketAddr) -> ConnectedAddr {
+        InboundDirect {
+            maybe_ip: addr.ip(),
+            transient_port: addr.port(),
+        }
+    }
+
+    /// Returns a new outbound connected addr via `proxy`.
+    ///
+    /// `local_addr` is the ephemeral local address of the connection.
+    #[allow(unused)]
+    pub fn new_outbound_proxy(proxy: SocketAddr, local_addr: SocketAddr) -> ConnectedAddr {
+        OutboundProxy {
+            proxy_addr: proxy,
+            transient_local_addr: local_addr,
+        }
+    }
+
+    /// Returns a new inbound connected addr from `proxy`.
+    //
+    // TODO: distinguish between direct listeners and proxy listeners in the
+    //       rest of zebra-network
+    #[allow(unused)]
+    pub fn new_inbound_proxy(proxy: SocketAddr) -> ConnectedAddr {
+        InboundProxy {
+            transient_addr: proxy,
+        }
+    }
+
+    /// Returns a new isolated connected addr, with no metadata.
+    pub fn new_isolated() -> ConnectedAddr {
+        Isolated
+    }
+
+    /// Returns a `SocketAddr` that can be used to track this connection in the
+    /// `AddressBook`.
+    ///
+    /// `None` for inbound connections, proxy connections, and isolated
+    /// connections.
+    ///
+    /// # Correctness
+    ///
+    /// This address can be used for reconnection attempts, or as a permanent
+    /// identifier.
+    ///
+    /// # Security
+    ///
+    /// This address must not depend on the canonical address from the `Version`
+    /// message. Otherwise, malicious peers could interfere with other peers
+    /// `AddressBook` state.
+    pub fn get_address_book_addr(&self) -> Option<SocketAddr> {
+        match self {
+            OutboundDirect { addr } => Some(*addr),
+            // TODO: consider using the canonical address of the peer to track
+            //       outbound proxy connections
+            InboundDirect { .. } | OutboundProxy { .. } | InboundProxy { .. } | Isolated => None,
+        }
+    }
+
+    /// Returns a `SocketAddr` that can be used to temporarily identify a
+    /// connection.
+    ///
+    /// Isolated connections must not change Zebra's peer set or address book
+    /// state, so they do not have an identifier.
+    ///
+    /// # Correctness
+    ///
+    /// The returned address is only valid while the original connection is
+    /// open. It must not be used in the `AddressBook`, for outbound connection
+    /// attempts, or as a permanent identifier.
+    ///
+    /// # Security
+    ///
+    /// This address must not depend on the canonical address from the `Version`
+    /// message. Otherwise, malicious peers could interfere with other peers'
+    /// `PeerSet` state.
+    pub fn get_transient_addr(&self) -> Option<SocketAddr> {
+        match self {
+            OutboundDirect { addr } => Some(*addr),
+            InboundDirect {
+                maybe_ip,
+                transient_port,
+            } => Some(SocketAddr::new(*maybe_ip, *transient_port)),
+            OutboundProxy {
+                transient_local_addr,
+                ..
+            } => Some(*transient_local_addr),
+            InboundProxy { transient_addr } => Some(*transient_addr),
+            Isolated => None,
+        }
+    }
+
+    /// Returns the metrics label for this connection's address.
+    pub fn get_transient_addr_label(&self) -> String {
+        self.get_transient_addr()
+            .map_or_else(|| "isolated".to_string(), |addr| addr.to_string())
+    }
+
+    /// Returns a short label for the kind of connection.
+    pub fn get_short_kind_label(&self) -> &'static str {
+        match self {
+            OutboundDirect { .. } => "Out",
+            InboundDirect { .. } => "In",
+            OutboundProxy { .. } => "ProxOut",
+            InboundProxy { .. } => "ProxIn",
+            Isolated => "Isol",
+        }
+    }
+}
+
+impl fmt::Debug for ConnectedAddr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let kind = self.get_short_kind_label();
+        let addr = self.get_transient_addr_label();
+
+        if matches!(self, Isolated) {
+            f.write_str(kind)
+        } else {
+            f.debug_tuple(kind).field(&addr).finish()
+        }
+    }
+}
+
+/// A builder for `Handshake`.
 pub struct Builder<S> {
     config: Option<Config>,
     inbound_service: Option<S>,
@@ -81,6 +268,9 @@ where
     }
 
     /// Provide a channel for registering inventory advertisements. Optional.
+    ///
+    /// This channel takes transient remote addresses, which the `PeerSet` uses
+    /// to look up peers that have specific inventory.
     pub fn with_inventory_collector(
         mut self,
         inv_collector: broadcast::Sender<(InventoryHash, SocketAddr)>,
@@ -91,7 +281,8 @@ where
 
     /// Provide a hook for timestamp collection. Optional.
     ///
-    /// If this is unset, timestamps will not be collected.
+    /// This channel takes `MetaAddr`s, permanent addresses which can be used to
+    /// make outbound connections to peers.
     pub fn with_timestamp_collector(mut self, timestamp_collector: mpsc::Sender<MetaAddr>) -> Self {
         self.timestamp_collector = Some(timestamp_collector);
         self
@@ -181,19 +372,19 @@ where
 }
 
 /// Negotiate the Zcash network protocol version with the remote peer
-/// at `addr`, using the connection `peer_conn`.
+/// at `connected_addr`, using the connection `peer_conn`.
 ///
 /// We split `Handshake` into its components before calling this function,
 /// to avoid infectious `Sync` bounds on the returned future.
 pub async fn negotiate_version(
     peer_conn: &mut Framed<TcpStream, Codec>,
-    addr: &SocketAddr,
+    connected_addr: &ConnectedAddr,
     config: Config,
     nonces: Arc<futures::lock::Mutex<HashSet<Nonce>>>,
     user_agent: String,
     our_services: PeerServices,
     relay: bool,
-) -> Result<(Version, PeerServices), HandshakeError> {
+) -> Result<(Version, PeerServices, SocketAddr), HandshakeError> {
     // Create a random nonce for this connection
     let local_nonce = Nonce::default();
     // # Correctness
@@ -227,7 +418,12 @@ pub async fn negotiate_version(
         version: constants::CURRENT_VERSION,
         services: our_services,
         timestamp,
-        address_recv: (PeerServices::NODE_NETWORK, *addr),
+        address_recv: (
+            PeerServices::NODE_NETWORK,
+            connected_addr
+                .get_transient_addr()
+                .unwrap_or_else(|| *UNSPECIFIED_IPV4_ADDR),
+        ),
         // TODO: detect external address (#1893)
         address_from: (our_services, config.listen_addr),
         nonce: local_nonce,
@@ -248,17 +444,28 @@ pub async fn negotiate_version(
 
     // Check that we got a Version and destructure its fields into the local scope.
     debug!(?remote_msg, "got message from remote peer");
-    let (remote_nonce, remote_services, remote_version) = if let Message::Version {
-        nonce,
-        services,
-        version,
-        ..
-    } = remote_msg
-    {
-        (nonce, services, version)
-    } else {
-        Err(HandshakeError::UnexpectedMessage(Box::new(remote_msg)))?
-    };
+    let (remote_nonce, remote_services, remote_version, remote_canonical_addr) =
+        if let Message::Version {
+            version,
+            services,
+            address_from,
+            nonce,
+            ..
+        } = remote_msg
+        {
+            let (address_services, canonical_addr) = address_from;
+            if address_services != services {
+                info!(
+                    ?services,
+                    ?address_services,
+                    "peer with inconsistent version services and version address services"
+                );
+            }
+
+            (nonce, services, version, canonical_addr)
+        } else {
+            Err(HandshakeError::UnexpectedMessage(Box::new(remote_msg)))?
+        };
 
     // Check for nonce reuse, indicating self-connection
     //
@@ -317,10 +524,12 @@ pub async fn negotiate_version(
         Err(HandshakeError::ObsoleteVersion(remote_version))?;
     }
 
-    Ok((remote_version, remote_services))
+    Ok((remote_version, remote_services, remote_canonical_addr))
 }
 
-impl<S> Service<(TcpStream, SocketAddr)> for Handshake<S>
+pub type HandshakeRequest = (TcpStream, ConnectedAddr);
+
+impl<S> Service<HandshakeRequest> for Handshake<S>
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
     S::Future: Send,
@@ -334,14 +543,15 @@ where
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, req: (TcpStream, SocketAddr)) -> Self::Future {
-        let (tcp_stream, addr) = req;
+    fn call(&mut self, req: HandshakeRequest) -> Self::Future {
+        let (tcp_stream, connected_addr) = req;
 
-        let connector_span = span!(Level::INFO, "connector", ?addr);
+        let negotiator_span = span!(Level::INFO, "negotiator", peer = ?connected_addr);
         // set the peer connection span's parent to the global span, as it
         // should exist independently of its creation source (inbound
         // connection, crawler, initial peer, ...)
-        let connection_span = span!(parent: &self.parent_span, Level::INFO, "peer", ?addr);
+        let connection_span =
+            span!(parent: &self.parent_span, Level::INFO, "", peer = ?connected_addr);
 
         // Clone these upfront, so they can be moved into the future.
         let nonces = self.nonces.clone();
@@ -354,7 +564,10 @@ where
         let relay = self.relay;
 
         let fut = async move {
-            debug!(?addr, "negotiating protocol version with remote peer");
+            debug!(
+                addr = ?connected_addr,
+                "negotiating protocol version with remote peer"
+            );
 
             // CORRECTNESS
             //
@@ -364,16 +577,16 @@ where
                 tcp_stream,
                 Codec::builder()
                     .for_network(config.network)
-                    .with_metrics_label(addr.ip().to_string())
+                    .with_metrics_addr_label(connected_addr.get_transient_addr_label())
                     .finish(),
             );
 
             // Wrap the entire initial connection setup in a timeout.
-            let (remote_version, remote_services) = timeout(
+            let (remote_version, remote_services, _remote_canonical_addr) = timeout(
                 constants::HANDSHAKE_TIMEOUT,
                 negotiate_version(
                     &mut peer_conn,
-                    &addr,
+                    &connected_addr,
                     config,
                     nonces,
                     user_agent,
@@ -418,7 +631,7 @@ where
                     "zcash.net.out.messages",
                     1,
                     "command" => msg.to_string(),
-                    "addr" => addr.to_string(),
+                    "addr" => connected_addr.get_transient_addr_label(),
                 );
                 // We need to use future::ready rather than an async block here,
                 // because we need the sink to be Unpin, and the With<Fut, ...>
@@ -445,24 +658,30 @@ where
                                     "zcash.net.in.messages",
                                     1,
                                     "command" => msg.to_string(),
-                                    "addr" => addr.to_string(),
+                                    "addr" => connected_addr.get_transient_addr_label(),
                                 );
-                                // the collector doesn't depend on network activity,
-                                // so this await should not hang
-                                let _ = inbound_ts_collector
-                                    .send(MetaAddr::new_responded(&addr, &remote_services))
-                                    .await;
+
+                                if let Some(book_addr) = connected_addr.get_address_book_addr() {
+                                    // the collector doesn't depend on network activity,
+                                    // so this await should not hang
+                                    let _ = inbound_ts_collector
+                                        .send(MetaAddr::new_responded(&book_addr, &remote_services))
+                                        .await;
+                                }
                             }
                             Err(err) => {
                                 metrics::counter!(
                                     "zebra.net.in.errors",
                                     1,
                                     "error" => err.to_string(),
-                                    "addr" => addr.to_string(),
+                                    "addr" => connected_addr.get_transient_addr_label(),
                                 );
-                                let _ = inbound_ts_collector
-                                    .send(MetaAddr::new_errored(&addr, &remote_services))
-                                    .await;
+
+                                if let Some(book_addr) = connected_addr.get_address_book_addr() {
+                                    let _ = inbound_ts_collector
+                                        .send(MetaAddr::new_errored(&book_addr, &remote_services))
+                                        .await;
+                                }
                             }
                         }
                         msg
@@ -472,7 +691,9 @@ where
                     let inv_collector = inv_collector.clone();
                     let span = debug_span!("inventory_filter");
                     async move {
-                        if let Ok(Message::Inv(hashes)) = &msg {
+                        if let (Ok(Message::Inv(hashes)), Some(transient_addr)) =
+                            (&msg, connected_addr.get_transient_addr())
+                        {
                             // We ignore inventory messages with more than one
                             // block, because they are most likely replies to a
                             // query, rather than a newly gossiped block.
@@ -487,13 +708,15 @@ where
                             // merged inv messages into separate inv messages. (#1799)
                             match hashes.as_slice() {
                                 [hash @ InventoryHash::Block(_)] => {
-                                    let _ = inv_collector.send((*hash, addr));
+                                    let _ = inv_collector.send((*hash, transient_addr));
                                 }
                                 [hashes @ ..] => {
                                     for hash in hashes {
                                         if matches!(hash, InventoryHash::Tx(_)) {
                                             debug!(?hash, "registering Tx inventory hash");
-                                            let _ = inv_collector.send((*hash, addr));
+                                            // The peer set and inv collector use the peer's remote
+                                            // address as an identifier
+                                            let _ = inv_collector.send((*hash, transient_addr));
                                         } else {
                                             trace!(?hash, "ignoring non Tx inventory hash")
                                         }
@@ -562,10 +785,12 @@ where
                             Either::Left(_)
                         ) {
                             tracing::trace!("shutting down due to Client shut down");
-                            // awaiting a local task won't hang
-                            let _ = timestamp_collector
-                                .send(MetaAddr::new_shutdown(&addr, &remote_services))
-                                .await;
+                            if let Some(book_addr) = connected_addr.get_address_book_addr() {
+                                // awaiting a local task won't hang
+                                let _ = timestamp_collector
+                                    .send(MetaAddr::new_shutdown(&book_addr, &remote_services))
+                                    .await;
+                            }
                             return;
                         }
 
@@ -579,7 +804,7 @@ where
                         if heartbeat_timeout(
                             heartbeat,
                             &mut timestamp_collector,
-                            &addr,
+                            &connected_addr,
                             &remote_services,
                         )
                         .await
@@ -597,7 +822,7 @@ where
         };
 
         // Spawn a new task to drive this handshake.
-        tokio::spawn(fut.instrument(connector_span))
+        tokio::spawn(fut.instrument(negotiator_span))
             .map(|x: Result<Result<Client, HandshakeError>, JoinError>| Ok(x??))
             .boxed()
     }
@@ -652,7 +877,7 @@ async fn send_one_heartbeat(server_tx: &mut mpsc::Sender<ClientRequest>) -> Resu
 async fn heartbeat_timeout<F, T>(
     fut: F,
     timestamp_collector: &mut mpsc::Sender<MetaAddr>,
-    addr: &SocketAddr,
+    connected_addr: &ConnectedAddr,
     remote_services: &PeerServices,
 ) -> Result<T, BoxError>
 where
@@ -660,21 +885,33 @@ where
 {
     let t = match timeout(constants::HEARTBEAT_INTERVAL, fut).await {
         Ok(inner_result) => {
-            handle_heartbeat_error(inner_result, timestamp_collector, addr, remote_services).await?
+            handle_heartbeat_error(
+                inner_result,
+                timestamp_collector,
+                connected_addr,
+                remote_services,
+            )
+            .await?
         }
         Err(elapsed) => {
-            handle_heartbeat_error(Err(elapsed), timestamp_collector, addr, remote_services).await?
+            handle_heartbeat_error(
+                Err(elapsed),
+                timestamp_collector,
+                connected_addr,
+                remote_services,
+            )
+            .await?
         }
     };
 
     Ok(t)
 }
 
-/// If `result.is_err()`, mark `addr` as failed using `timestamp_collector`.
+/// If `result.is_err()`, mark `connected_addr` as failed using `timestamp_collector`.
 async fn handle_heartbeat_error<T, E>(
     result: Result<T, E>,
     timestamp_collector: &mut mpsc::Sender<MetaAddr>,
-    addr: &SocketAddr,
+    connected_addr: &ConnectedAddr,
     remote_services: &PeerServices,
 ) -> Result<T, E>
 where
@@ -685,10 +922,11 @@ where
         Err(err) => {
             tracing::debug!(?err, "heartbeat error, shutting down");
 
-            let _ = timestamp_collector
-                .send(MetaAddr::new_errored(&addr, &remote_services))
-                .await;
-
+            if let Some(book_addr) = connected_addr.get_address_book_addr() {
+                let _ = timestamp_collector
+                    .send(MetaAddr::new_errored(&book_addr, &remote_services))
+                    .await;
+            }
             Err(err)
         }
     }

@@ -21,4 +21,4 @@ pub use client::Client;
 pub use connection::Connection;
 pub use connector::Connector;
 pub use error::{HandshakeError, PeerError, SharedPeerError};
-pub use handshake::Handshake;
+pub use handshake::{ConnectedAddr, Handshake, HandshakeRequest};
