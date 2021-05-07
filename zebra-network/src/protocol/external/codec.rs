@@ -45,8 +45,8 @@ pub struct Builder {
     version: Version,
     /// The maximum allowable message length.
     max_len: usize,
-    /// An optional label to use for reporting metrics.
-    metrics_label: Option<String>,
+    /// An optional address label, to use for reporting metrics.
+    metrics_addr_label: Option<String>,
 }
 
 impl Codec {
@@ -56,7 +56,7 @@ impl Codec {
             network: Network::Mainnet,
             version: constants::CURRENT_VERSION,
             max_len: MAX_PROTOCOL_MESSAGE_LEN,
-            metrics_label: None,
+            metrics_addr_label: None,
         }
     }
 
@@ -95,9 +95,9 @@ impl Builder {
         self
     }
 
-    /// Configure the codec for the given peer address.
-    pub fn with_metrics_label(mut self, metrics_label: String) -> Self {
-        self.metrics_label = Some(metrics_label);
+    /// Configure the codec with a label corresponding to the peer address.
+    pub fn with_metrics_addr_label(mut self, metrics_addr_label: String) -> Self {
+        self.metrics_addr_label = Some(metrics_addr_label);
         self
     }
 }
@@ -116,8 +116,10 @@ impl Encoder<Message> for Codec {
             return Err(Parse("body length exceeded maximum size"));
         }
 
-        if let Some(label) = self.builder.metrics_label.clone() {
-            metrics::counter!("zcash.net.out.bytes.total", (body_length + HEADER_LEN) as u64, "addr" => label);
+        if let Some(addr_label) = self.builder.metrics_addr_label.clone() {
+            metrics::counter!("zcash.net.out.bytes.total",
+                              (body_length + HEADER_LEN) as u64,
+                              "addr" => addr_label);
         }
 
         use Message::*;
@@ -367,7 +369,7 @@ impl Decoder for Codec {
                     return Err(Parse("body length exceeded maximum size"));
                 }
 
-                if let Some(label) = self.builder.metrics_label.clone() {
+                if let Some(label) = self.builder.metrics_addr_label.clone() {
                     metrics::counter!("zcash.net.in.bytes.total", (body_len + HEADER_LEN) as u64, "addr" =>  label);
                 }
 

@@ -44,7 +44,13 @@ pub enum PeerAddrState {
 
     /// The peer's address has just been fetched from a DNS seeder, or via peer
     /// gossip, but we haven't attempted to connect to it yet.
-    NeverAttempted,
+    NeverAttemptedGossiped,
+
+    /// The peer's address has just been received as part of a `Version` message,
+    /// so we might already be connected to this peer.
+    ///
+    /// Alternate addresses are attempted after gossiped addresses.
+    NeverAttemptedAlternate,
 
     /// The peer's TCP connection failed, or the peer sent us an unexpected
     /// Zcash protocol message, so we failed the connection.
@@ -54,9 +60,11 @@ pub enum PeerAddrState {
     AttemptPending,
 }
 
+// non-test code should explicitly specify the peer address state
+#[cfg(test)]
 impl Default for PeerAddrState {
     fn default() -> Self {
-        NeverAttempted
+        NeverAttemptedGossiped
     }
 }
 
@@ -66,19 +74,23 @@ impl Ord for PeerAddrState {
     ///
     /// See [`CandidateSet`] and [`MetaAddr::cmp`] for more details.
     fn cmp(&self, other: &Self) -> Ordering {
+        use Ordering::*;
         match (self, other) {
             (Responded, Responded)
-            | (NeverAttempted, NeverAttempted)
             | (Failed, Failed)
-            | (AttemptPending, AttemptPending) => Ordering::Equal,
+            | (NeverAttemptedGossiped, NeverAttemptedGossiped)
+            | (NeverAttemptedAlternate, NeverAttemptedAlternate)
+            | (AttemptPending, AttemptPending) => Equal,
             // We reconnect to `Responded` peers that have stopped sending messages,
             // then `NeverAttempted` peers, then `Failed` peers
-            (Responded, _) => Ordering::Less,
-            (_, Responded) => Ordering::Greater,
-            (NeverAttempted, _) => Ordering::Less,
-            (_, NeverAttempted) => Ordering::Greater,
-            (Failed, _) => Ordering::Less,
-            (_, Failed) => Ordering::Greater,
+            (Responded, _) => Less,
+            (_, Responded) => Greater,
+            (NeverAttemptedGossiped, _) => Less,
+            (_, NeverAttemptedGossiped) => Greater,
+            (NeverAttemptedAlternate, _) => Less,
+            (_, NeverAttemptedAlternate) => Greater,
+            (Failed, _) => Less,
+            (_, Failed) => Greater,
             // AttemptPending is covered by the other cases
         }
     }
@@ -124,8 +136,8 @@ pub struct MetaAddr {
 }
 
 impl MetaAddr {
-    /// Create a new `MetaAddr` from the deserialized fields in an `Addr`
-    /// message.
+    /// Create a new `MetaAddr` from the deserialized fields in a gossiped
+    /// peer `Addr` message.
     pub fn new_gossiped(
         addr: &SocketAddr,
         services: &PeerServices,
@@ -136,11 +148,19 @@ impl MetaAddr {
             services: *services,
             last_seen: *last_seen,
             // the state is Zebra-specific, it isn't part of the Zcash network protocol
-            last_connection_state: NeverAttempted,
+            last_connection_state: NeverAttemptedGossiped,
         }
     }
 
     /// Create a new `MetaAddr` for a peer that has just `Responded`.
+    ///
+    /// # Security
+    ///
+    /// This address must be the remote address from an outbound connection.
+    /// Otherwise:
+    /// - malicious peers could interfere with other peers' `AddressBook` state,
+    ///   or
+    /// - Zebra could advertise unreachable addresses to its own peers.
     pub fn new_responded(addr: &SocketAddr, services: &PeerServices) -> MetaAddr {
         MetaAddr {
             addr: *addr,
@@ -157,6 +177,17 @@ impl MetaAddr {
             services: *services,
             last_seen: Utc::now(),
             last_connection_state: AttemptPending,
+        }
+    }
+
+    /// Create a new `MetaAddr` for a peer's alternate address, received via a
+    /// `Version` message.
+    pub fn new_alternate(addr: &SocketAddr, services: &PeerServices) -> MetaAddr {
+        MetaAddr {
+            addr: *addr,
+            services: *services,
+            last_seen: Utc::now(),
+            last_connection_state: NeverAttemptedAlternate,
         }
     }
 
@@ -195,6 +226,13 @@ impl MetaAddr {
         self.last_seen
     }
 
+    /// Is this address valid for outbound connections?
+    pub fn is_valid_for_outbound(&self) -> bool {
+        self.services.contains(PeerServices::NODE_NETWORK)
+            && !self.addr.ip().is_unspecified()
+            && self.addr.port() != 0
+    }
+
     /// Return a sanitized version of this `MetaAddr`, for sending to a remote peer.
     pub fn sanitize(&self) -> MetaAddr {
         let interval = crate::constants::TIMESTAMP_TRUNCATION_SECONDS;
@@ -207,7 +245,7 @@ impl MetaAddr {
             services: self.services,
             last_seen,
             // the state isn't sent to the remote peer, but sanitize it anyway
-            last_connection_state: Default::default(),
+            last_connection_state: NeverAttemptedGossiped,
         }
     }
 }
@@ -222,6 +260,7 @@ impl Ord for MetaAddr {
     /// See [`CandidateSet`] for more details.
     fn cmp(&self, other: &Self) -> Ordering {
         use std::net::IpAddr::{V4, V6};
+        use Ordering::*;
 
         let oldest_first = self.get_last_seen().cmp(&other.get_last_seen());
         let newest_first = oldest_first.reverse();
@@ -229,22 +268,23 @@ impl Ord for MetaAddr {
         let connection_state = self.last_connection_state.cmp(&other.last_connection_state);
         let reconnection_time = match self.last_connection_state {
             Responded => oldest_first,
-            NeverAttempted => newest_first,
+            NeverAttemptedGossiped => newest_first,
+            NeverAttemptedAlternate => newest_first,
             Failed => oldest_first,
             AttemptPending => oldest_first,
         };
         let ip_numeric = match (self.addr.ip(), other.addr.ip()) {
             (V4(a), V4(b)) => a.octets().cmp(&b.octets()),
             (V6(a), V6(b)) => a.octets().cmp(&b.octets()),
-            (V4(_), V6(_)) => Ordering::Less,
-            (V6(_), V4(_)) => Ordering::Greater,
+            (V4(_), V6(_)) => Less,
+            (V6(_), V4(_)) => Greater,
         };
 
         connection_state
             .then(reconnection_time)
             // The remainder is meaningless as an ordering, but required so that we
             // have a total order on `MetaAddr` values: self and other must compare
-            // as Ordering::Equal iff they are equal.
+            // as Equal iff they are equal.
             .then(ip_numeric)
             .then(self.addr.port().cmp(&other.addr.port()))
             .then(self.services.bits().cmp(&other.services.bits()))
