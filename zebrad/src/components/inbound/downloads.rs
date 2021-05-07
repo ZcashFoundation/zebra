@@ -45,14 +45,14 @@ type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 /// Therefore, this attack can be carried out by a single malicious node.
 const MAX_INBOUND_CONCURRENCY: usize = 10;
 
-/// The action taken in response to a peer's gossipped block hash.
+/// The action taken in response to a peer's gossiped block hash.
 pub enum DownloadAction {
     /// The block hash was successfully queued for download and verification.
     AddedToQueue,
 
     /// The block hash is already queued, so this request was ignored.
     ///
-    /// Another peer has already gossipped the same hash to us.
+    /// Another peer has already gossiped the same hash to us.
     AlreadyQueued,
 
     /// The queue is at capacity, so this request was ignored.

@@ -95,7 +95,7 @@ especially the ability to make good connections to other Zcash network peers.
 
 Network:
 - synchronize the chain from peers
-- download gossipped blocks from peers
+- download gossiped blocks from peers
 - answer inbound peer requests for hashes, headers, and blocks
 
 State:
