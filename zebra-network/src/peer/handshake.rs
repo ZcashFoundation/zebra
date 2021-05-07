@@ -485,18 +485,6 @@ pub async fn negotiate_version(
         Err(HandshakeError::NonceReuse)?;
     }
 
-    peer_conn.send(Message::Verack).await?;
-
-    let remote_msg = peer_conn
-        .next()
-        .await
-        .ok_or(HandshakeError::ConnectionClosed)??;
-    if let Message::Verack = remote_msg {
-        debug!("got verack from remote peer");
-    } else {
-        Err(HandshakeError::UnexpectedMessage(Box::new(remote_msg)))?;
-    }
-
     // XXX in zcashd remote peer can only send one version message and
     // we would disconnect here if it received a second one. Is it even possible
     // for that to happen to us here?
@@ -522,6 +510,18 @@ pub async fn negotiate_version(
     if remote_version < Version::min_for_upgrade(config.network, constants::MIN_NETWORK_UPGRADE) {
         // Disconnect if peer is using an obsolete version.
         Err(HandshakeError::ObsoleteVersion(remote_version))?;
+    }
+
+    peer_conn.send(Message::Verack).await?;
+
+    let remote_msg = peer_conn
+        .next()
+        .await
+        .ok_or(HandshakeError::ConnectionClosed)??;
+    if let Message::Verack = remote_msg {
+        debug!("got verack from remote peer");
+    } else {
+        Err(HandshakeError::UnexpectedMessage(Box::new(remote_msg)))?;
     }
 
     Ok((remote_version, remote_services, remote_canonical_addr))
