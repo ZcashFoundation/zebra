@@ -222,6 +222,59 @@ impl ConnectedAddr {
             Isolated => "Isol",
         }
     }
+
+    /// Returns a list of alternate remote peer addresses, which can be used for
+    /// reconnection attempts.
+    ///
+    /// Uses the connected address, and the remote canonical address.
+    ///
+    /// Skips duplicates. If this is an outbound connection, also skips the
+    /// remote address that we're currently connected to.
+    pub fn get_alternate_addrs(
+        &self,
+        mut canonical_remote: SocketAddr,
+    ) -> impl Iterator<Item = SocketAddr> {
+        let addrs = match self {
+            OutboundDirect { addr } => {
+                // Fixup unspecified addresses and ports using known good data
+                if canonical_remote.ip().is_unspecified() {
+                    canonical_remote.set_ip(addr.ip());
+                }
+                if canonical_remote.port() == 0 {
+                    canonical_remote.set_port(addr.port());
+                }
+
+                // Try the canonical remote address, if it is different from the
+                // outbound address (which we already have in our address book)
+                if &canonical_remote != addr {
+                    vec![canonical_remote]
+                } else {
+                    Vec::new()
+                }
+            }
+
+            InboundDirect { maybe_ip, .. } => {
+                // Use the IP from the TCP connection, and the port the peer told us
+                let maybe_addr = SocketAddr::new(*maybe_ip, canonical_remote.port());
+
+                // Try both addresses, but remove one duplicate if they match
+                if canonical_remote != maybe_addr {
+                    vec![canonical_remote, maybe_addr]
+                } else {
+                    vec![canonical_remote]
+                }
+            }
+
+            // Proxy addresses can't be used for reconnection attempts, but we
+            // can try the canonical remote address
+            OutboundProxy { .. } | InboundProxy { .. } => vec![canonical_remote],
+
+            // Hide all metadata for isolated connections
+            Isolated => Vec::new(),
+        };
+
+        addrs.into_iter()
+    }
 }
 
 impl fmt::Debug for ConnectedAddr {
@@ -564,7 +617,7 @@ where
         // Clone these upfront, so they can be moved into the future.
         let nonces = self.nonces.clone();
         let inbound_service = self.inbound_service.clone();
-        let timestamp_collector = self.timestamp_collector.clone();
+        let mut timestamp_collector = self.timestamp_collector.clone();
         let inv_collector = self.inv_collector.clone();
         let config = self.config.clone();
         let user_agent = self.user_agent.clone();
@@ -590,7 +643,7 @@ where
             );
 
             // Wrap the entire initial connection setup in a timeout.
-            let (remote_version, remote_services, _remote_canonical_addr) = timeout(
+            let (remote_version, remote_services, remote_canonical_addr) = timeout(
                 constants::HANDSHAKE_TIMEOUT,
                 negotiate_version(
                     &mut peer_conn,
@@ -603,6 +656,30 @@ where
                 ),
             )
             .await??;
+
+            // If we've learned potential peer addresses from an inbound
+            // connection or handshake, add those addresses to our address book.
+            //
+            // # Security
+            //
+            // We must handle alternate addresses separately from connected
+            // addresses. Otherwise, malicious peers could interfere with the
+            // address book state of other peers by providing their addresses in
+            // `Version` messages.
+            let alternate_addrs = connected_addr.get_alternate_addrs(remote_canonical_addr);
+            for alt_addr in alternate_addrs {
+                let alt_addr = MetaAddr::new_alternate(&alt_addr, &remote_services);
+                if alt_addr.is_valid_for_outbound() {
+                    tracing::info!(
+                        ?alt_addr,
+                        "sending valid alternate peer address to the address book"
+                    );
+                    // awaiting a local task won't hang
+                    let _ = timestamp_collector.send(alt_addr).await;
+                } else {
+                    tracing::trace!(?alt_addr, "dropping invalid alternate peer address");
+                }
+            }
 
             // Set the connection's version to the minimum of the received version or our own.
             let negotiated_version = std::cmp::min(remote_version, constants::CURRENT_VERSION);
