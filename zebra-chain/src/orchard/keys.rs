@@ -23,6 +23,7 @@ use halo2::{
     pasta::pallas,
 };
 use rand_core::{CryptoRng, RngCore};
+use subtle::{Choice, ConstantTimeEq};
 
 use crate::{
     parameters::Network,
@@ -133,7 +134,7 @@ mod sk_hrp {
 /// key types derive from the [`SpendingKey`] value.
 ///
 /// [ps]: https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug)]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),
     derive(proptest_derive::Arbitrary)
@@ -141,6 +142,23 @@ mod sk_hrp {
 pub struct SpendingKey {
     network: Network,
     bytes: [u8; 32],
+}
+
+impl ConstantTimeEq for SpendingKey {
+    /// Check whether two `SpendingKey`s are equal, runtime independent of the
+    /// value of the secret.
+    ///
+    /// # Note
+    ///
+    /// This function short-circuits if the networks of the keys are different.
+    /// Otherwise, it should execute in time independent of the `bytes` value.
+    fn ct_eq(&self, other: &Self) -> Choice {
+        if self.network != other.network {
+            return Choice::from(0);
+        }
+
+        self.bytes.ct_eq(&other.bytes)
+    }
 }
 
 impl From<SpendingKey> for [u8; 32] {
@@ -157,6 +175,14 @@ impl fmt::Display for SpendingKey {
         };
 
         bech32::encode_to_fmt(f, hrp, &self.bytes.to_base32(), Variant::Bech32).unwrap()
+    }
+}
+
+impl Eq for SpendingKey {}
+
+impl PartialEq for SpendingKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.ct_eq(other).unwrap_u8() == 1u8
     }
 }
 
