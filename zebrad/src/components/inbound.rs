@@ -56,7 +56,7 @@ pub enum Setup {
         /// A shared list of peer addresses.
         address_book: Arc<std::sync::Mutex<zn::AddressBook>>,
 
-        /// A `futures::Stream` that downloads and verifies gossipped blocks.
+        /// A `futures::Stream` that downloads and verifies gossiped blocks.
         downloads: Pin<Box<InboundDownloads>>,
     },
 
