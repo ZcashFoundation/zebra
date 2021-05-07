@@ -381,15 +381,14 @@ where
             DemandHandshake { candidate } => {
                 // spawn each handshake into an independent task, so it can make
                 // progress independently of the crawls
-                let hs_join =
-                    tokio::spawn(dial(candidate, outbound_connector.clone())).map(move |res| {
-                        match res {
-                            Ok(crawler_action) => crawler_action,
-                            Err(e) => {
-                                panic!("panic during handshaking with {:?}: {:?} ", candidate, e);
-                            }
+                let hs_join = tokio::spawn(dial(candidate, outbound_connector.clone()))
+                    .map(move |res| match res {
+                        Ok(crawler_action) => crawler_action,
+                        Err(e) => {
+                            panic!("panic during handshaking with {:?}: {:?} ", candidate, e);
                         }
-                    });
+                    })
+                    .instrument(Span::current());
                 handshakes.push(Box::pin(hs_join));
             }
             DemandCrawl => {
