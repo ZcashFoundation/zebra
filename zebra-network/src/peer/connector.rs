@@ -11,7 +11,7 @@ use tower::{discover::Change, Service, ServiceExt};
 
 use crate::{BoxError, Request, Response};
 
-use super::{Client, Handshake};
+use super::{Client, ConnectedAddr, Handshake};
 
 /// A wrapper around [`peer::Handshake`] that opens a TCP connection before
 /// forwarding to the inner handshake service. Writing this as its own
@@ -53,7 +53,8 @@ where
         async move {
             let stream = TcpStream::connect(addr).await?;
             hs.ready_and().await?;
-            let client = hs.call((stream, addr)).await?;
+            let connected_addr = ConnectedAddr::new_outbound_direct(addr);
+            let client = hs.call((stream, connected_addr)).await?;
             Ok(Change::Insert(addr, client))
         }
         .boxed()

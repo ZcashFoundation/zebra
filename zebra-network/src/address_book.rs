@@ -1,4 +1,4 @@
-//! The addressbook manages information about what peers exist, when they were
+//! The `AddressBook` manages information about what peers exist, when they were
 //! seen, and what services they provide.
 
 use std::{
@@ -11,10 +11,41 @@ use std::{
 use chrono::{DateTime, Utc};
 use tracing::Span;
 
-use crate::{constants, types::MetaAddr, PeerAddrState};
+use crate::{constants, types::MetaAddr, Config, PeerAddrState};
 
-/// A database of peers, their advertised services, and information on when they
-/// were last seen.
+/// A database of peer listener addresses, their advertised services, and
+/// information on when they were last seen.
+///
+/// # Security
+///
+/// Address book state must be based on outbound connections to peers.
+///
+/// If the address book is updated incorrectly:
+/// - malicious peers can interfere with other peers' `AddressBook` state,
+///   or
+/// - Zebra can advertise unreachable addresses to its own peers.
+///
+/// ## Adding Addresses
+///
+/// The address book should only contain Zcash listener port addresses from peers
+/// on the configured network. These addresses can come from:
+/// - DNS seeders
+/// - addresses gossiped by other peers
+/// - the canonical address (`Version.address_from`) provided by each peer,
+///   particularly peers on inbound connections.
+///
+/// The remote addresses of inbound connections must not be added to the address
+/// book, because they contain ephemeral outbound ports, not listener ports.
+///
+/// Isolated connections must not add addresses or update the address book.
+///
+/// ## Updating Address State
+///
+/// Updates to address state must be based on outbound connections to peers.
+///
+/// Updates must not be based on:
+/// - the remote addresses of inbound connections, or
+/// - the canonical address of any connection.
 #[derive(Clone, Debug)]
 pub struct AddressBook {
     /// Each known peer address has a matching `MetaAddr`
@@ -33,8 +64,11 @@ pub struct AddressMetrics {
     /// The number of addresses in the `Responded` state.
     responded: usize,
 
-    /// The number of addresses in the `NeverAttempted` state.
-    never_attempted: usize,
+    /// The number of addresses in the `NeverAttemptedGossiped` state.
+    never_attempted_gossiped: usize,
+
+    /// The number of addresses in the `NeverAttemptedAlternate` state.
+    never_attempted_alternate: usize,
 
     /// The number of addresses in the `Failed` state.
     failed: usize,
@@ -93,9 +127,10 @@ impl AddressBook {
     /// Add `new` to the address book, updating the previous entry if `new` is
     /// more recent or discarding `new` if it is stale.
     ///
-    /// ## Note
+    /// # Correctness
     ///
-    /// All changes should go through `update` or `take`, to ensure accurate metrics.
+    /// All new addresses should go through `update`, so that the address book
+    /// only contains valid outbound addresses.
     pub fn update(&mut self, new: MetaAddr) {
         let _guard = self.span.enter();
         trace!(
@@ -103,6 +138,14 @@ impl AddressBook {
             total_peers = self.by_addr.len(),
             recent_peers = self.recently_live_peers().count(),
         );
+
+        // Drop any unspecified or client addresses.
+        //
+        // Communication with these addresses can be monitored via Zebra's
+        // metrics. (The address book is for valid peer addresses.)
+        if !new.is_valid_for_outbound() {
+            return;
+        }
 
         if let Some(prev) = self.get_by_addr(new.addr) {
             if prev.get_last_seen() > new.get_last_seen() {
@@ -117,9 +160,10 @@ impl AddressBook {
 
     /// Removes the entry with `addr`, returning it if it exists
     ///
-    /// ## Note
+    /// # Note
     ///
-    /// All changes should go through `update` or `take`, to ensure accurate metrics.
+    /// All address removals should go through `take`, so that the address
+    /// book metrics are accurate.
     fn take(&mut self, removed_addr: SocketAddr) -> Option<MetaAddr> {
         let _guard = self.span.enter();
         trace!(
@@ -254,7 +298,12 @@ impl AddressBook {
     /// Returns metrics for the addresses in this address book.
     pub fn address_metrics(&self) -> AddressMetrics {
         let responded = self.state_peers(PeerAddrState::Responded).count();
-        let never_attempted = self.state_peers(PeerAddrState::NeverAttempted).count();
+        let never_attempted_gossiped = self
+            .state_peers(PeerAddrState::NeverAttemptedGossiped)
+            .count();
+        let never_attempted_alternate = self
+            .state_peers(PeerAddrState::NeverAttemptedAlternate)
+            .count();
         let failed = self.state_peers(PeerAddrState::Failed).count();
         let attempt_pending = self.state_peers(PeerAddrState::AttemptPending).count();
 
@@ -265,7 +314,8 @@ impl AddressBook {
 
         AddressMetrics {
             responded,
-            never_attempted,
+            never_attempted_gossiped,
+            never_attempted_alternate,
             failed,
             attempt_pending,
             recently_live,
@@ -281,7 +331,11 @@ impl AddressBook {
 
         // TODO: rename to address_book.[state_name]
         metrics::gauge!("candidate_set.responded", m.responded as f64);
-        metrics::gauge!("candidate_set.gossiped", m.never_attempted as f64);
+        metrics::gauge!("candidate_set.gossiped", m.never_attempted_gossiped as f64);
+        metrics::gauge!(
+            "candidate_set.alternate",
+            m.never_attempted_alternate as f64
+        );
         metrics::gauge!("candidate_set.failed", m.failed as f64);
         metrics::gauge!("candidate_set.pending", m.attempt_pending as f64);
 
@@ -327,7 +381,12 @@ impl AddressBook {
 
         self.last_address_log = Some(Instant::now());
         // if all peers have failed
-        if m.responded + m.attempt_pending + m.never_attempted == 0 {
+        if m.responded
+            + m.attempt_pending
+            + m.never_attempted_gossiped
+            + m.never_attempted_alternate
+            == 0
+        {
             warn!(
                 address_metrics = ?m,
                 "all peer addresses have failed. Hint: check your network connection"

@@ -15,6 +15,7 @@ use tower::{
 };
 
 use crate::{peer, BoxError, Config, Request, Response};
+use peer::ConnectedAddr;
 
 /// Use the provided TCP connection to create a Zcash connection completely
 /// isolated from all other node state.
@@ -57,13 +58,11 @@ pub fn connect_isolated(
         .finish()
         .expect("provided mandatory builder parameters");
 
-    // We can't get the remote addr from conn, because it might be a tcp
-    // connection through a socks proxy, not directly to the remote. But it
-    // doesn't seem like zcashd cares if we give a bogus one, and Zebra doesn't
-    // touch it at all.
-    let remote_addr = "0.0.0.0:8233".parse().unwrap();
+    // Don't send any metadata about the connection
+    let connected_addr = ConnectedAddr::new_isolated();
 
-    Oneshot::new(handshake, (conn, remote_addr)).map_ok(|client| BoxService::new(Wrapper(client)))
+    Oneshot::new(handshake, (conn, connected_addr))
+        .map_ok(|client| BoxService::new(Wrapper(client)))
 }
 
 // This can be deleted when a new version of Tower with map_err is released.
