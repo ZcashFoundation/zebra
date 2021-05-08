@@ -13,7 +13,7 @@ use tower::buffer::Buffer;
 
 use zebra_chain::{
     block::{self, Block, Height},
-    parameters::Network,
+    parameters::{Network, NetworkUpgrade},
     serialization::{ZcashDeserialize, ZcashDeserializeInto},
     transaction::{arbitrary::transaction_to_fake_v5, Transaction},
     work::difficulty::{ExpandedDifficulty, INVALID_COMPACT_DIFFICULTY},
@@ -482,17 +482,27 @@ fn merkle_root_fake_v5_for_network(network: Network) -> Result<(), Report> {
         Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
     };
 
-    for (_height, block) in block_iter {
+    for (height, block) in block_iter {
         let mut block = block
             .zcash_deserialize_into::<Block>()
             .expect("block is structurally valid");
+
+        // skip blocks that are before overwinter as they will not have a valid consensus branch id
+        if *height
+            < NetworkUpgrade::Overwinter
+                .activation_height(network)
+                .expect("a valid overwinter activation height")
+                .0
+        {
+            continue;
+        }
 
         // convert all transactions from the block to V5
         let transactions: Vec<Arc<Transaction>> = block
             .transactions
             .iter()
             .map(AsRef::as_ref)
-            .map(transaction_to_fake_v5)
+            .map(|t| transaction_to_fake_v5(t, network, Height(*height)))
             .map(Into::into)
             .collect();
 
@@ -504,9 +514,10 @@ fn merkle_root_fake_v5_for_network(network: Network) -> Result<(), Report> {
             .map(|tx| tx.hash())
             .collect::<Vec<_>>();
 
-        check::merkle_root_validity(network, &block, &transaction_hashes).expect_err(
-            "network upgrade by block height do not match transaction ConsensusBranchId",
-        );
+        block.header.merkle_root = transaction_hashes.iter().cloned().collect();
+
+        check::merkle_root_validity(network, &block, &transaction_hashes)
+            .expect("merkle root should be valid for this block");
     }
 
     Ok(())

@@ -1,5 +1,6 @@
 use zebra_chain::{
-    block::Block,
+    block::{Block, Height},
+    parameters::Network,
     serialization::ZcashDeserializeInto,
     transaction::{arbitrary::transaction_to_fake_v5, Transaction},
 };
@@ -11,8 +12,22 @@ use color_eyre::eyre::Report;
 fn v5_fake_transactions() -> Result<(), Report> {
     zebra_test::init();
 
+    v5_fake_transactions_for_network(Network::Mainnet)?;
+    v5_fake_transactions_for_network(Network::Testnet)?;
+
+    Ok(())
+}
+
+fn v5_fake_transactions_for_network(network: Network) -> Result<(), Report> {
+    zebra_test::init();
+
     // get all the blocks we have available
-    for original_bytes in zebra_test::vectors::BLOCKS.iter() {
+    let block_iter = match network {
+        Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
+        Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
+    };
+
+    for (height, original_bytes) in block_iter {
         let original_block = original_bytes
             .zcash_deserialize_into::<Block>()
             .expect("block is structurally valid");
@@ -22,7 +37,7 @@ fn v5_fake_transactions() -> Result<(), Report> {
             .transactions
             .iter()
             .map(AsRef::as_ref)
-            .map(transaction_to_fake_v5)
+            .map(|t| transaction_to_fake_v5(t, network, Height(*height)))
             .map(Into::into)
             .collect();
 
