@@ -514,6 +514,9 @@ fn merkle_root_fake_v5_for_network(network: Network) -> Result<(), Report> {
             .map(|tx| tx.hash())
             .collect::<Vec<_>>();
 
+        // Replace the merkle root so that it matches the modified transactions.
+        // This test provides some transaction id and merkle root coverage,
+        // but we also need to test against zcashd test vectors.
         block.header.merkle_root = transaction_hashes.iter().cloned().collect();
 
         check::merkle_root_validity(network, &block, &transaction_hashes)
