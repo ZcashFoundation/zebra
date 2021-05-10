@@ -161,7 +161,7 @@ where
                 .map(|t| t.hash())
                 .collect::<Vec<_>>();
 
-            check::merkle_root_validity(&block, &transaction_hashes)?;
+            check::merkle_root_validity(network, &block, &transaction_hashes)?;
 
             // Since errors cause an early exit, try to do the
             // quick checks first.

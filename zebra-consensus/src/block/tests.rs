@@ -13,8 +13,9 @@ use tower::buffer::Buffer;
 
 use zebra_chain::{
     block::{self, Block, Height},
-    parameters::Network,
+    parameters::{Network, NetworkUpgrade},
     serialization::{ZcashDeserialize, ZcashDeserializeInto},
+    transaction::{arbitrary::transaction_to_fake_v5, Transaction},
     work::difficulty::{ExpandedDifficulty, INVALID_COMPACT_DIFFICULTY},
 };
 use zebra_test::transcript::{TransError, Transcript};
@@ -431,6 +432,95 @@ fn time_is_valid_for_historical_blocks() -> Result<(), Report> {
             &block.hash(),
         )
         .expect("the header time from a historical block should be valid, based on the test machine's local clock. Hint: check the test machine's time, date, and timezone.");
+    }
+
+    Ok(())
+}
+
+#[test]
+fn merkle_root_is_valid() -> Result<(), Report> {
+    zebra_test::init();
+
+    // test all original blocks available, all blocks validate
+    merkle_root_is_valid_for_network(Network::Mainnet)?;
+    merkle_root_is_valid_for_network(Network::Testnet)?;
+
+    // create and test fake blocks with v5 transactions, all blocks fail validation
+    merkle_root_fake_v5_for_network(Network::Mainnet)?;
+    merkle_root_fake_v5_for_network(Network::Testnet)?;
+
+    Ok(())
+}
+
+fn merkle_root_is_valid_for_network(network: Network) -> Result<(), Report> {
+    let block_iter = match network {
+        Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
+        Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
+    };
+
+    for (_height, block) in block_iter {
+        let block = block
+            .zcash_deserialize_into::<Block>()
+            .expect("block is structurally valid");
+
+        let transaction_hashes = block
+            .transactions
+            .iter()
+            .map(|tx| tx.hash())
+            .collect::<Vec<_>>();
+
+        check::merkle_root_validity(network, &block, &transaction_hashes)
+            .expect("merkle root should be valid for this block");
+    }
+
+    Ok(())
+}
+
+fn merkle_root_fake_v5_for_network(network: Network) -> Result<(), Report> {
+    let block_iter = match network {
+        Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
+        Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
+    };
+
+    for (height, block) in block_iter {
+        let mut block = block
+            .zcash_deserialize_into::<Block>()
+            .expect("block is structurally valid");
+
+        // skip blocks that are before overwinter as they will not have a valid consensus branch id
+        if *height
+            < NetworkUpgrade::Overwinter
+                .activation_height(network)
+                .expect("a valid overwinter activation height")
+                .0
+        {
+            continue;
+        }
+
+        // convert all transactions from the block to V5
+        let transactions: Vec<Arc<Transaction>> = block
+            .transactions
+            .iter()
+            .map(AsRef::as_ref)
+            .map(|t| transaction_to_fake_v5(t, network, Height(*height)))
+            .map(Into::into)
+            .collect();
+
+        block.transactions = transactions;
+
+        let transaction_hashes = block
+            .transactions
+            .iter()
+            .map(|tx| tx.hash())
+            .collect::<Vec<_>>();
+
+        // Replace the merkle root so that it matches the modified transactions.
+        // This test provides some transaction id and merkle root coverage,
+        // but we also need to test against zcashd test vectors.
+        block.header.merkle_root = transaction_hashes.iter().cloned().collect();
+
+        check::merkle_root_validity(network, &block, &transaction_hashes)
+            .expect("merkle root should be valid for this block");
     }
 
     Ok(())
