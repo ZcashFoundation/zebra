@@ -74,9 +74,10 @@ with the PR number.
 
 8. When the RFC is merged, take the next available RFC number (not conflicting
 with any existing RFCs or design PRs) and name the RFC file accordingly, e.g.,
-`0027-my-feature.md` for number 27. Make sure that `book/src/SUMMARY.md` links
-to the numbered RFC.
+`0027-my-feature.md` for number 27.
 
-7. After the RFC is accepted, create an issue for the implementation of the
+9. Make sure that `book/src/SUMMARY.md` links to the new number for the RFC.
+
+10. After the RFC is accepted, create an issue for the implementation of the
 design, and update the RFC header and PR description with the implementation
 issue number.
