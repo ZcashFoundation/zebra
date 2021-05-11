@@ -7,11 +7,12 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use halo2::{arithmetic::FieldExt, pasta::pallas};
 
 use crate::{
+    amount,
     block::MAX_BLOCK_BYTES,
     parameters::{OVERWINTER_VERSION_GROUP_ID, SAPLING_VERSION_GROUP_ID, TX_V5_VERSION_GROUP_ID},
-    primitives::{Groth16Proof, ZkSnarkProof},
+    primitives::{Groth16Proof, Halo2Proof, ZkSnarkProof},
     serialization::{
-        zcash_deserialize_external_count, zcash_serialize_external_count, ReadZcashExt,
+        zcash_deserialize_external_count, zcash_serialize_external_count, AtLeastOne, ReadZcashExt,
         SerializationError, TrustedPreallocate, WriteZcashExt, ZcashDeserialize,
         ZcashDeserializeInto, ZcashSerialize,
     },
@@ -264,12 +265,37 @@ impl ZcashSerialize for Option<orchard::ShieldedData> {
 
 impl ZcashSerialize for orchard::ShieldedData {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        // TODO: Do this implementation
-
         // nActionsOrchard
-        writer.write_compactsize(0)?;
-        // sizeProofsOrchard
-        writer.write_compactsize(0)?;
+        writer.write_compactsize(self.actions.len() as u64)?;
+
+        // flagsOrchard
+        writer.write_u8(self.flags.bits())?;
+
+        // valueBalanceOrchard
+        self.value_balance.zcash_serialize(&mut writer)?;
+
+        // anchorOrchard
+        writer.write_all(&<[u8; 32]>::from(self.shared_anchor)[..])?;
+
+        // proofsOrchard
+        self.proof.zcash_serialize(&mut writer)?;
+
+        // vSpendAuthSigsOrchard
+        self.actions.zcash_serialize(&mut writer)?;
+
+        // bindingSigOrchard
+        writer.write_all(&<[u8; 64]>::from(self.binding_sig)[..])?;
+
+        Ok(())
+    }
+}
+
+impl ZcashSerialize for AtLeastOne<orchard::AuthorizedAction> {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        for action in self.iter() {
+            action.action.zcash_serialize(&mut writer)?;
+            writer.write_all(&<[u8; 64]>::from(action.spend_auth_sig)[..])?;
+        }
 
         Ok(())
     }
@@ -279,13 +305,54 @@ impl ZcashSerialize for orchard::ShieldedData {
 // because the counts are read along with the arrays.
 impl ZcashDeserialize for Option<orchard::ShieldedData> {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        // TODO: Do this implementation
-
         // nActionsOrchard
-        let _ = reader.read_compactsize()?;
-        // sizeProofsOrchard
-        let _ = reader.read_compactsize()?;
-        Ok(None)
+        let nactions = reader.read_compactsize()?;
+
+        if nactions == 0 {
+            // read another 0 and get out
+            let _ = reader.read_compactsize()?;
+            return Ok(None);
+        }
+
+        // flagsOrchard
+        let flags: orchard::Flags = orchard::Flags::from_bits(reader.read_u8()?).unwrap();
+
+        // valueBalanceOrchard
+        let value_balance: amount::Amount = (&mut reader).zcash_deserialize_into()?;
+
+        // sharedAnchor
+        let shared_anchor: orchard::tree::Root = reader.read_32_bytes()?.into();
+
+        // proofsOrchard
+        let proof: Halo2Proof = (&mut reader).zcash_deserialize_into()?;
+
+        // vSpendAuthSigsOrchard
+        let actions: AtLeastOne<orchard::AuthorizedAction> =
+            zcash_deserialize_external_count(nactions.try_into().unwrap(), &mut reader)?
+                .try_into()?;
+
+        let binding_sig = reader.read_64_bytes()?.into();
+
+        Ok(Some(orchard::ShieldedData {
+            flags,
+            value_balance,
+            shared_anchor,
+            proof,
+            actions,
+            binding_sig,
+        }))
+    }
+}
+
+impl ZcashDeserialize for orchard::AuthorizedAction {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        let action = (&mut reader).zcash_deserialize_into()?;
+        let spend_auth_sig = reader.read_64_bytes()?.into();
+
+        return Ok(orchard::AuthorizedAction {
+            action,
+            spend_auth_sig,
+        });
     }
 }
 

@@ -114,8 +114,7 @@ impl Transaction {
             transparent::Input::vec_strategy(ledger_state, 10),
             vec(any::<transparent::Output>(), 0..10),
             option::of(any::<sapling::ShieldedData<sapling::SharedAnchor>>()),
-            // TODO: uncomment this after the serialization and deserialization is ready
-            //option::of(any::<orchard::ShieldedData>()),
+            option::of(any::<orchard::ShieldedData>()),
         )
             .prop_map(
                 |(
@@ -125,8 +124,7 @@ impl Transaction {
                     inputs,
                     outputs,
                     sapling_shielded_data,
-                    // TODO: uncomment this after the serialization and deserialization is ready
-                    //orchard_shielded_data,
+                    orchard_shielded_data,
                 )| {
                     Transaction::V5 {
                         network_upgrade,
@@ -135,8 +133,7 @@ impl Transaction {
                         inputs,
                         outputs,
                         sapling_shielded_data,
-                        // TODO: remove the None after the serialization and deserialization is ready
-                        orchard_shielded_data: None,
+                        orchard_shielded_data,
                     }
                 },
             )

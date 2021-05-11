@@ -7,7 +7,12 @@ use crate::{
         redpallas::{Binding, Signature, SpendAuth},
         Halo2Proof,
     },
-    serialization::AtLeastOne,
+    serialization::{AtLeastOne, TrustedPreallocate},
+};
+
+use std::{
+    cmp::{Eq, PartialEq},
+    fmt::Debug,
 };
 
 /// A bundle of [`Action`] descriptions and signature data.
@@ -36,6 +41,13 @@ pub struct AuthorizedAction {
     pub action: Action,
     /// The spend signature.
     pub spend_auth_sig: Signature<SpendAuth>,
+}
+
+impl TrustedPreallocate for AuthorizedAction {
+    fn max_allocation() -> u64 {
+        // TODO: fix this
+        1_000_000
+    }
 }
 
 bitflags! {
