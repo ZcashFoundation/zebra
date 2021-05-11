@@ -1,7 +1,8 @@
 use super::super::*;
 
 use crate::{
-    block::{Block, MAX_BLOCK_BYTES},
+    block::{Block, Height, MAX_BLOCK_BYTES},
+    parameters::{Network, NetworkUpgrade},
     serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
 };
 
@@ -165,10 +166,30 @@ fn empty_v4_round_trip() {
 fn fake_v5_round_trip() {
     zebra_test::init();
 
-    for original_bytes in zebra_test::vectors::BLOCKS.iter() {
+    fake_v5_round_trip_for_network(Network::Mainnet);
+    fake_v5_round_trip_for_network(Network::Testnet);
+}
+
+fn fake_v5_round_trip_for_network(network: Network) {
+    let block_iter = match network {
+        Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
+        Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
+    };
+
+    for (height, original_bytes) in block_iter {
         let original_block = original_bytes
             .zcash_deserialize_into::<Block>()
             .expect("block is structurally valid");
+
+        // skip blocks that are before overwinter as they will not have a valid consensus branch id
+        if *height
+            < NetworkUpgrade::Overwinter
+                .activation_height(network)
+                .expect("a valid height")
+                .0
+        {
+            continue;
+        }
 
         // skip this block if it only contains v5 transactions,
         // the block round-trip test covers it already
@@ -185,7 +206,7 @@ fn fake_v5_round_trip() {
             .transactions
             .iter()
             .map(AsRef::as_ref)
-            .map(arbitrary::transaction_to_fake_v5)
+            .map(|t| arbitrary::transaction_to_fake_v5(t, network, Height(*height)))
             .map(Into::into)
             .collect();
 

@@ -6,7 +6,7 @@ use proptest::{arbitrary::any, array, collection::vec, option, prelude::*};
 use crate::{
     amount::Amount,
     block, orchard,
-    parameters::NetworkUpgrade,
+    parameters::{Network, NetworkUpgrade},
     primitives::{
         redpallas::{Binding, Signature},
         Bctv14Proof, Groth16Proof, Halo2Proof, ZkSnarkProof,
@@ -387,13 +387,16 @@ impl Arbitrary for Transaction {
 
 // Utility functions
 
-/// The network upgrade for any fake transactions we will create.
-const FAKE_NETWORK_UPGRADE: NetworkUpgrade = NetworkUpgrade::Nu5;
-
 /// Convert `trans` into a fake v5 transaction,
 /// converting sapling shielded data from v4 to v5 if possible.
-pub fn transaction_to_fake_v5(trans: &Transaction) -> Transaction {
+pub fn transaction_to_fake_v5(
+    trans: &Transaction,
+    network: Network,
+    height: block::Height,
+) -> Transaction {
     use Transaction::*;
+
+    let block_nu = NetworkUpgrade::current(network, height);
 
     match trans {
         V1 {
@@ -401,7 +404,7 @@ pub fn transaction_to_fake_v5(trans: &Transaction) -> Transaction {
             outputs,
             lock_time,
         } => V5 {
-            network_upgrade: FAKE_NETWORK_UPGRADE,
+            network_upgrade: block_nu,
             inputs: inputs.to_vec(),
             outputs: outputs.to_vec(),
             lock_time: *lock_time,
@@ -415,7 +418,7 @@ pub fn transaction_to_fake_v5(trans: &Transaction) -> Transaction {
             lock_time,
             ..
         } => V5 {
-            network_upgrade: FAKE_NETWORK_UPGRADE,
+            network_upgrade: block_nu,
             inputs: inputs.to_vec(),
             outputs: outputs.to_vec(),
             lock_time: *lock_time,
@@ -430,7 +433,7 @@ pub fn transaction_to_fake_v5(trans: &Transaction) -> Transaction {
             expiry_height,
             ..
         } => V5 {
-            network_upgrade: FAKE_NETWORK_UPGRADE,
+            network_upgrade: block_nu,
             inputs: inputs.to_vec(),
             outputs: outputs.to_vec(),
             lock_time: *lock_time,
@@ -446,7 +449,7 @@ pub fn transaction_to_fake_v5(trans: &Transaction) -> Transaction {
             sapling_shielded_data,
             ..
         } => V5 {
-            network_upgrade: FAKE_NETWORK_UPGRADE,
+            network_upgrade: block_nu,
             inputs: inputs.to_vec(),
             outputs: outputs.to_vec(),
             lock_time: *lock_time,

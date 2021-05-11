@@ -168,10 +168,48 @@ pub fn time_is_valid_at(
 /// Check Merkle root validity.
 ///
 /// `transaction_hashes` is a precomputed list of transaction hashes.
+///
+/// # Consensus rules:
+///
+/// - The nConsensusBranchId field MUST match the consensus branch ID used for
+///  SIGHASH transaction hashes, as specifed in [ZIP-244] ([7.1]).
+/// - A SHA-256d hash in internal byte order. The merkle root is derived from the
+///  hashes of all transactions included in this block, ensuring that none of
+///  those transactions can be modified without modifying the header. [7.6]
+///
+/// # Panics
+///
+/// - If block does not have a coinbase transaction.
+///
+/// [ZIP-244]: https://zips.z.cash/zip-0244
+/// [7.1]: https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus
+/// [7.6]: https://zips.z.cash/protocol/nu5.pdf#blockheader
 pub fn merkle_root_validity(
+    network: Network,
     block: &Block,
     transaction_hashes: &[transaction::Hash],
 ) -> Result<(), BlockError> {
+    use transaction::Transaction;
+    let block_nu =
+        NetworkUpgrade::current(network, block.coinbase_height().expect("a valid height"));
+
+    if block
+        .transactions
+        .iter()
+        .filter_map(|trans| match *trans.as_ref() {
+            Transaction::V5 {
+                network_upgrade, ..
+            } => Some(network_upgrade),
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V4 { .. } => None,
+        })
+        .any(|trans_nu| trans_nu != block_nu)
+    {
+        return Err(BlockError::WrongTransactionConsensusBranchId);
+    }
+
     let merkle_root = transaction_hashes.iter().cloned().collect();
 
     if block.header.merkle_root != merkle_root {

@@ -21,7 +21,7 @@
 //!  * Inbound Service
 //!    * handles requests from peers for network data and chain data
 //!    * performs transaction and block diffusion
-//!    * downloads and verifies gossipped blocks and transactions
+//!    * downloads and verifies gossiped blocks and transactions
 
 use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
 use color_eyre::eyre::{eyre, Report};
