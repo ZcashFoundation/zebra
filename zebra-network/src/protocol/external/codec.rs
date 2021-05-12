@@ -217,6 +217,9 @@ impl Codec {
             } => {
                 writer.write_u32::<LittleEndian>(version.0)?;
                 writer.write_u64::<LittleEndian>(services.bits())?;
+                // # Security
+                // DateTime<Utc>::timestamp has a smaller range than i64, so
+                // serialization can not error.
                 writer.write_i64::<LittleEndian>(timestamp.timestamp())?;
 
                 let (recv_services, recv_addr) = address_recv;
@@ -456,7 +459,12 @@ impl Codec {
             version: Version(reader.read_u32::<LittleEndian>()?),
             // Use from_bits_truncate to discard unknown service bits.
             services: PeerServices::from_bits_truncate(reader.read_u64::<LittleEndian>()?),
-            timestamp: Utc.timestamp(reader.read_i64::<LittleEndian>()?, 0),
+            timestamp: Utc
+                .timestamp_opt(reader.read_i64::<LittleEndian>()?, 0)
+                .single()
+                .ok_or(Error::Parse(
+                    "version timestamp is out of range for DateTime",
+                ))?,
             address_recv: (
                 PeerServices::from_bits_truncate(reader.read_u64::<LittleEndian>()?),
                 reader.read_socket_addr()?,
@@ -628,35 +636,44 @@ impl Codec {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use chrono::{MAX_DATETIME, MIN_DATETIME};
     use futures::prelude::*;
+    use lazy_static::lazy_static;
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use tokio::runtime::Runtime;
 
+    lazy_static! {
+        static ref VERSION_TEST_VECTOR: Message = {
+            let services = PeerServices::NODE_NETWORK;
+            let timestamp = Utc.timestamp(1_568_000_000, 0);
+            Message::Version {
+                version: crate::constants::CURRENT_VERSION,
+                services,
+                timestamp,
+                address_recv: (
+                    services,
+                    SocketAddr::new(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 6)), 8233),
+                ),
+                address_from: (
+                    services,
+                    SocketAddr::new(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 6)), 8233),
+                ),
+                nonce: Nonce(0x9082_4908_8927_9238),
+                user_agent: "Zebra".to_owned(),
+                start_height: block::Height(540_000),
+                relay: true,
+            }
+        };
+    }
+
+    /// Check that the version test vector serializes and deserializes correctly
     #[test]
     fn version_message_round_trip() {
         zebra_test::init();
-        use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-        let services = PeerServices::NODE_NETWORK;
-        let timestamp = Utc.timestamp(1_568_000_000, 0);
-
         let rt = Runtime::new().unwrap();
 
-        let v = Message::Version {
-            version: crate::constants::CURRENT_VERSION,
-            services,
-            timestamp,
-            address_recv: (
-                services,
-                SocketAddr::new(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 6)), 8233),
-            ),
-            address_from: (
-                services,
-                SocketAddr::new(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 6)), 8233),
-            ),
-            nonce: Nonce(0x9082_4908_8927_9238),
-            user_agent: "Zebra".to_owned(),
-            start_height: block::Height(540_000),
-            relay: true,
-        };
+        let v = &*VERSION_TEST_VECTOR;
 
         use tokio_util::codec::{FramedRead, FramedWrite};
         let v_bytes = rt.block_on(async {
@@ -678,7 +695,73 @@ mod tests {
                 .expect("that message should deserialize")
         });
 
-        assert_eq!(v, v_parsed);
+        assert_eq!(*v, v_parsed);
+    }
+
+    /// Check that version deserialization rejects out-of-range timestamps with
+    /// an error.
+    #[test]
+    fn version_timestamp_out_of_range() {
+        let v_err = deserialize_version_with_time(i64::MAX);
+        assert!(
+            matches!(v_err, Err(Error::Parse(_))),
+            "expected error with version timestamp: {}",
+            i64::MAX
+        );
+
+        let v_err = deserialize_version_with_time(i64::MIN);
+        assert!(
+            matches!(v_err, Err(Error::Parse(_))),
+            "expected error with version timestamp: {}",
+            i64::MIN
+        );
+
+        deserialize_version_with_time(1620777600).expect("recent time is valid");
+        deserialize_version_with_time(0).expect("zero time is valid");
+        deserialize_version_with_time(MIN_DATETIME.timestamp()).expect("min time is valid");
+        deserialize_version_with_time(MAX_DATETIME.timestamp()).expect("max time is valid");
+    }
+
+    /// Deserialize a `Version` message containing `time`, and return the result.
+    fn deserialize_version_with_time(time: i64) -> Result<Message, Error> {
+        zebra_test::init();
+        let rt = Runtime::new().unwrap();
+
+        let v = &*VERSION_TEST_VECTOR;
+
+        use tokio_util::codec::{FramedRead, FramedWrite};
+        let v_bytes = rt.block_on(async {
+            let mut bytes = Vec::new();
+            {
+                let mut fw = FramedWrite::new(&mut bytes, Codec::builder().finish());
+                fw.send(v.clone())
+                    .await
+                    .expect("message should be serialized");
+            }
+
+            let old_bytes = bytes.clone();
+
+            // tweak the version bytes so they're out of range
+            // Version serialization is specified at:
+            // https://developer.bitcoin.org/reference/p2p_networking.html#version
+            bytes[36..44].copy_from_slice(&time.to_le_bytes());
+
+            // Checksum is specified at:
+            // https://developer.bitcoin.org/reference/p2p_networking.html#message-headers
+            let checksum = sha256d::Checksum::from(&bytes[HEADER_LEN..]);
+            bytes[20..24].copy_from_slice(&checksum.0);
+
+            debug!(?time,
+                   old_len = ?old_bytes.len(), new_len = ?bytes.len(),
+                   old_bytes = ?&old_bytes[36..44], new_bytes = ?&bytes[36..44]);
+
+            bytes
+        });
+
+        rt.block_on(async {
+            let mut fr = FramedRead::new(Cursor::new(&v_bytes), Codec::builder().finish());
+            fr.next().await.expect("a next message should be available")
+        })
     }
 
     #[test]
