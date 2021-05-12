@@ -11,7 +11,7 @@ edition = "2018"
 hex = "0.4.3"
 lazy_static = "1.4.0"
 tower = { version = "0.4", features = ["util"] }
-futures = "0.3.14"
+futures = "0.3.15"
 color-eyre = "0.5.11"
 tracing = "0.1.26"
 tracing-subscriber = "0.2.18"
