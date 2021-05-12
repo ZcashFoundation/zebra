@@ -76,6 +76,16 @@ fastmod --extensions rs,toml,md --fixed-strings '0.2.0' '0.2.1' tower-batch
 
 We skipped `tower-fallback`, because it hadn't changed since the last tag.
 
+### Reviewing Version Bump Pull Requests
+
+Check for missed changes by going to:
+`https://github.com/ZcashFoundation/zebra/tree/<commit-hash>/`
+Where `<commit-hash>` is the hash of the last commit in the version bump PR.
+
+If any Zebra or Tower crates have commit messages that are **not** a version bump, we have missed an update.
+
+Also check for crates that depend on crates that have changed. They should get a version bump as well.
+
 ## Initial Testing
 
 - [ ] After any changes, test that the `cargo install` command in `README.md` works (use `--path` instead of `--git` locally)
