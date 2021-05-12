@@ -6,6 +6,8 @@ use crate::primitives::redpallas::{Signature, SpendAuth, VerificationKeyBytes};
 
 use super::{keys, note, Action, AuthorizedAction, Flags, NoteCommitment, ValueCommitment};
 
+use std::marker::PhantomData;
+
 impl Arbitrary for Action {
     type Parameters = ();
 
@@ -62,7 +64,13 @@ impl Arbitrary for Signature<SpendAuth> {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        Just(Signature::<SpendAuth>::from([0; 64])).boxed()
+        (array::uniform32(any::<u8>()), array::uniform32(any::<u8>()))
+            .prop_map(|(r_bytes, s_bytes)| Self {
+                r_bytes,
+                s_bytes,
+                _marker: PhantomData,
+            })
+            .boxed()
     }
 
     type Strategy = BoxedStrategy<Self>;
