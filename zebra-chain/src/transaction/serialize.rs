@@ -349,10 +349,10 @@ impl ZcashDeserialize for orchard::AuthorizedAction {
         let action = (&mut reader).zcash_deserialize_into()?;
         let spend_auth_sig = reader.read_64_bytes()?.into();
 
-        return Ok(orchard::AuthorizedAction {
+        Ok(orchard::AuthorizedAction {
             action,
             spend_auth_sig,
-        });
+        })
     }
 }
 
