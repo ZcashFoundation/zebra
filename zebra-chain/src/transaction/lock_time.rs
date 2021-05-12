@@ -1,4 +1,4 @@
-use std::io;
+use std::{convert::TryInto, io};
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{DateTime, TimeZone, Utc};
@@ -65,7 +65,8 @@ impl ZcashSerialize for LockTime {
         // we can always compute a hash of a transaction object.
         match self {
             LockTime::Height(block::Height(n)) => writer.write_u32::<LittleEndian>(*n)?,
-            LockTime::Time(t) => writer.write_u32::<LittleEndian>(t.timestamp() as u32)?,
+            LockTime::Time(t) => writer
+                .write_u32::<LittleEndian>(t.timestamp().try_into().expect("time is in range"))?,
         }
         Ok(())
     }
@@ -77,7 +78,8 @@ impl ZcashDeserialize for LockTime {
         if n <= block::Height::MAX.0 {
             Ok(LockTime::Height(block::Height(n)))
         } else {
-            Ok(LockTime::Time(Utc.timestamp(n as i64, 0)))
+            // This can't panic, because all u32 values are valid `Utc.timestamp`s
+            Ok(LockTime::Time(Utc.timestamp(n.into(), 0)))
         }
     }
 }
