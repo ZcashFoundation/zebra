@@ -741,7 +741,7 @@ mod tests {
 
             let old_bytes = bytes.clone();
 
-            // tweak the version bytes so they're out of range
+            // tweak the version bytes so the timestamp is set to `time`
             // Version serialization is specified at:
             // https://developer.bitcoin.org/reference/p2p_networking.html#version
             bytes[36..44].copy_from_slice(&time.to_le_bytes());
