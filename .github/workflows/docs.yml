@@ -17,7 +17,7 @@ jobs:
       uses: actions/checkout@master
 
     - name: Install latest beta
-      uses: actions-rs/toolchain@v1
+      uses: actions-rs/toolchain@v1.0.7
       with:
         toolchain: beta
         components: rust-docs
