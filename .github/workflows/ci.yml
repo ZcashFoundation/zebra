@@ -151,7 +151,7 @@ jobs:
             echo "CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}"
             echo "RUST_BACKTRACE=${{ env.RUST_BACKTRACE }}"
       - name: Run clippy
-        uses: actions-rs/clippy-check@v1
+        uses: actions-rs/clippy-check@v1.0.7
         with:
           name: Clippy (stable)
           token: ${{ secrets.GITHUB_TOKEN }}
