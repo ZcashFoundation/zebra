@@ -40,7 +40,11 @@ pub struct Nullifier(#[serde(with = "serde_helpers::Base")] pallas::Base);
 
 impl From<[u8; 32]> for Nullifier {
     fn from(bytes: [u8; 32]) -> Self {
-        Self(pallas::Base::from_bytes(&bytes).unwrap())
+        // TODO:
+        // - previously this was just `unwrap()` but we started to get panics in prop tests
+        // - confirm the `unwrap_or()` is what we want here
+        // - change to the correct code and remove this TODO after confirmation
+        Self(pallas::Base::from_bytes(&bytes).unwrap_or(pallas::Base::zero()))
     }
 }
 
