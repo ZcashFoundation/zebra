@@ -10,7 +10,10 @@ use crate::{
     amount,
     block::MAX_BLOCK_BYTES,
     parameters::{OVERWINTER_VERSION_GROUP_ID, SAPLING_VERSION_GROUP_ID, TX_V5_VERSION_GROUP_ID},
-    primitives::{Groth16Proof, Halo2Proof, ZkSnarkProof},
+    primitives::{
+        redpallas::{Signature, SpendAuth},
+        Groth16Proof, Halo2Proof, ZkSnarkProof,
+    },
     serialization::{
         zcash_deserialize_external_count, zcash_serialize_external_count, AtLeastOne, ReadZcashExt,
         SerializationError, TrustedPreallocate, WriteZcashExt, ZcashDeserialize,
@@ -265,8 +268,16 @@ impl ZcashSerialize for Option<orchard::ShieldedData> {
 
 impl ZcashSerialize for orchard::ShieldedData {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        // nActionsOrchard
-        writer.write_compactsize(self.actions.len() as u64)?;
+        // Split the AuthorizedAction
+        let (actions, sigs): (Vec<orchard::Action>, Vec<Signature<SpendAuth>>) = self
+            .actions
+            .iter()
+            .cloned()
+            .map(orchard::AuthorizedAction::into_parts)
+            .unzip();
+
+        // nActionsOrchard and vActionsOrchard
+        actions.zcash_serialize(&mut writer)?;
 
         // flagsOrchard
         writer.write_u8(self.flags.bits())?;
@@ -277,25 +288,14 @@ impl ZcashSerialize for orchard::ShieldedData {
         // anchorOrchard
         writer.write_all(&<[u8; 32]>::from(self.shared_anchor)[..])?;
 
-        // proofsOrchard
+        // sizeProofsOrchard and proofsOrchard
         self.proof.zcash_serialize(&mut writer)?;
 
         // vSpendAuthSigsOrchard
-        self.actions.zcash_serialize(&mut writer)?;
+        zcash_serialize_external_count(&sigs, &mut writer)?;
 
         // bindingSigOrchard
         writer.write_all(&<[u8; 64]>::from(self.binding_sig)[..])?;
-
-        Ok(())
-    }
-}
-
-impl ZcashSerialize for AtLeastOne<orchard::AuthorizedAction> {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        for action in self.iter() {
-            action.action.zcash_serialize(&mut writer)?;
-            writer.write_all(&<[u8; 64]>::from(action.spend_auth_sig)[..])?;
-        }
 
         Ok(())
     }
@@ -305,11 +305,11 @@ impl ZcashSerialize for AtLeastOne<orchard::AuthorizedAction> {
 // because the counts are read along with the arrays.
 impl ZcashDeserialize for Option<orchard::ShieldedData> {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        // nActionsOrchard
-        let nactions = reader.read_compactsize()?;
+        // nActionsOrchard and vActionsOrchard
+        let actions: Vec<orchard::Action> = (&mut reader).zcash_deserialize_into()?;
 
-        if nactions == 0 {
-            // read another 0 and get out
+        if actions.is_empty() {
+            // read another compactsize and get out
             let _ = reader.read_compactsize()?;
             return Ok(None);
         }
@@ -320,18 +320,28 @@ impl ZcashDeserialize for Option<orchard::ShieldedData> {
         // valueBalanceOrchard
         let value_balance: amount::Amount = (&mut reader).zcash_deserialize_into()?;
 
-        // sharedAnchor
+        // anchorOrchard
         let shared_anchor: orchard::tree::Root = reader.read_32_bytes()?.into();
 
-        // proofsOrchard
+        // sizeProofsOrchard and proofsOrchard
         let proof: Halo2Proof = (&mut reader).zcash_deserialize_into()?;
 
         // vSpendAuthSigsOrchard
-        let actions: AtLeastOne<orchard::AuthorizedAction> =
-            zcash_deserialize_external_count(nactions.try_into().unwrap(), &mut reader)?
-                .try_into()?;
+        let sigs: Vec<Signature<SpendAuth>> =
+            zcash_deserialize_external_count(actions.len(), &mut reader)?;
 
+        // bindingSigOrchard
         let binding_sig = reader.read_64_bytes()?.into();
+
+        // Create the AuthorizedAction
+        let mut authorized_action = Vec::<orchard::AuthorizedAction>::with_capacity(actions.len());
+        for (count, action) in actions.iter().cloned().enumerate() {
+            authorized_action.push(orchard::AuthorizedAction {
+                action,
+                spend_auth_sig: sigs[count],
+            })
+        }
+        let actions: AtLeastOne<orchard::AuthorizedAction> = authorized_action.try_into()?;
 
         Ok(Some(orchard::ShieldedData {
             flags,

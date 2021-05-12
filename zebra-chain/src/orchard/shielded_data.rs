@@ -43,7 +43,22 @@ pub struct AuthorizedAction {
     pub spend_auth_sig: Signature<SpendAuth>,
 }
 
-impl TrustedPreallocate for AuthorizedAction {
+impl AuthorizedAction {
+    /// Split out the action and the signature for V5 transaction
+    /// serialization.
+    pub fn into_parts(self) -> (Action, Signature<SpendAuth>) {
+        (self.action, self.spend_auth_sig)
+    }
+}
+
+impl TrustedPreallocate for Action {
+    fn max_allocation() -> u64 {
+        // TODO: fix this
+        1_000_000
+    }
+}
+
+impl TrustedPreallocate for Signature<SpendAuth> {
     fn max_allocation() -> u64 {
         // TODO: fix this
         1_000_000
