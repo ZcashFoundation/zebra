@@ -354,18 +354,6 @@ impl ZcashDeserialize for Option<orchard::ShieldedData> {
     }
 }
 
-impl ZcashDeserialize for orchard::AuthorizedAction {
-    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let action = (&mut reader).zcash_deserialize_into()?;
-        let spend_auth_sig = reader.read_64_bytes()?.into();
-
-        Ok(orchard::AuthorizedAction {
-            action,
-            spend_auth_sig,
-        })
-    }
-}
-
 impl ZcashSerialize for Transaction {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         // Post-Sapling, transaction size is limited to MAX_BLOCK_BYTES.

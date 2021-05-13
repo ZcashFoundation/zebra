@@ -7,12 +7,16 @@ use crate::{
         redpallas::{Binding, Signature, SpendAuth},
         Halo2Proof,
     },
-    serialization::{AtLeastOne, TrustedPreallocate},
+    serialization::{
+        AtLeastOne, ReadZcashExt, SerializationError, TrustedPreallocate, ZcashDeserialize,
+        ZcashDeserializeInto,
+    },
 };
 
 use std::{
     cmp::{Eq, PartialEq},
     fmt::Debug,
+    io,
 };
 
 /// A bundle of [`Action`] descriptions and signature data.
@@ -48,6 +52,18 @@ impl AuthorizedAction {
     /// serialization.
     pub fn into_parts(self) -> (Action, Signature<SpendAuth>) {
         (self.action, self.spend_auth_sig)
+    }
+}
+
+impl ZcashDeserialize for AuthorizedAction {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        let action = (&mut reader).zcash_deserialize_into()?;
+        let spend_auth_sig = reader.read_64_bytes()?.into();
+
+        Ok(AuthorizedAction {
+            action,
+            spend_auth_sig,
+        })
     }
 }
 
