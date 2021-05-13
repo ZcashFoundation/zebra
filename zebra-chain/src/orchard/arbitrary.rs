@@ -80,7 +80,7 @@ impl Arbitrary for Flags {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        prop_oneof![Just(Flags::ENABLE_SPENDS), Just(Flags::ENABLE_OUTPUTS)].boxed()
+        (any::<u8>()).prop_map(Self::from_bits_truncate).boxed()
     }
 
     type Strategy = BoxedStrategy<Self>;
