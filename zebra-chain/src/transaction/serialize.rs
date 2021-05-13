@@ -311,6 +311,8 @@ impl ZcashDeserialize for Option<orchard::ShieldedData> {
         // nActionsOrchard and vActionsOrchard
         let actions: Vec<orchard::Action> = (&mut reader).zcash_deserialize_into()?;
 
+        // "sizeProofsOrchard ... [is] present if and only if nActionsOrchard > 0"
+        // https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus
         if actions.is_empty() {
             return Ok(None);
         }
