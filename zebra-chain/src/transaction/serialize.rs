@@ -11,7 +11,7 @@ use crate::{
     block::MAX_BLOCK_BYTES,
     parameters::{OVERWINTER_VERSION_GROUP_ID, SAPLING_VERSION_GROUP_ID, TX_V5_VERSION_GROUP_ID},
     primitives::{
-        redpallas::{Signature, SpendAuth},
+        redpallas::{Binding, Signature, SpendAuth},
         Groth16Proof, Halo2Proof, ZkSnarkProof,
     },
     serialization::{
@@ -298,7 +298,7 @@ impl ZcashSerialize for orchard::ShieldedData {
         zcash_serialize_external_count(&sigs, &mut writer)?;
 
         // bindingSigOrchard
-        writer.write_all(&<[u8; 64]>::from(self.binding_sig)[..])?;
+        self.binding_sig.zcash_serialize(&mut writer)?;
 
         Ok(())
     }
@@ -332,7 +332,7 @@ impl ZcashDeserialize for Option<orchard::ShieldedData> {
             zcash_deserialize_external_count(actions.len(), &mut reader)?;
 
         // bindingSigOrchard
-        let binding_sig = reader.read_64_bytes()?.into();
+        let binding_sig: Signature<Binding> = (&mut reader).zcash_deserialize_into()?;
 
         // Create the AuthorizedAction
         let mut authorized_action = Vec::<orchard::AuthorizedAction>::with_capacity(actions.len());
