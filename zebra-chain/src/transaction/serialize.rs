@@ -283,7 +283,7 @@ impl ZcashSerialize for orchard::ShieldedData {
         actions.zcash_serialize(&mut writer)?;
 
         // flagsOrchard
-        writer.write_u8(self.flags.bits())?;
+        self.flags.zcash_serialize(&mut writer)?;
 
         // valueBalanceOrchard
         self.value_balance.zcash_serialize(&mut writer)?;
@@ -316,7 +316,7 @@ impl ZcashDeserialize for Option<orchard::ShieldedData> {
         }
 
         // flagsOrchard
-        let flags: orchard::Flags = orchard::Flags::from_bits(reader.read_u8()?).unwrap();
+        let flags: orchard::Flags = (&mut reader).zcash_deserialize_into()?;
 
         // valueBalanceOrchard
         let value_balance: amount::Amount = (&mut reader).zcash_deserialize_into()?;

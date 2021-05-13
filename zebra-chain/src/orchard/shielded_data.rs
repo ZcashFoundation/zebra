@@ -9,9 +9,11 @@ use crate::{
     },
     serialization::{
         AtLeastOne, ReadZcashExt, SerializationError, TrustedPreallocate, ZcashDeserialize,
-        ZcashDeserializeInto,
+        ZcashDeserializeInto, ZcashSerialize,
     },
 };
+
+use byteorder::{ReadBytesExt, WriteBytesExt};
 
 use std::{
     cmp::{Eq, PartialEq},
@@ -95,5 +97,21 @@ bitflags! {
         /// Enable creating new non-zero valued Orchard notes.
         const ENABLE_OUTPUTS = 0b00000010;
         // Reserved, zeros (bits 2 .. 7)
+    }
+}
+
+impl ZcashSerialize for Flags {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        writer.write_u8(self.bits())?;
+
+        Ok(())
+    }
+}
+
+impl ZcashDeserialize for Flags {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        let flags = Flags::from_bits(reader.read_u8()?).unwrap();
+
+        Ok(flags)
     }
 }
