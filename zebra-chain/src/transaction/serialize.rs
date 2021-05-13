@@ -289,7 +289,7 @@ impl ZcashSerialize for orchard::ShieldedData {
         self.value_balance.zcash_serialize(&mut writer)?;
 
         // anchorOrchard
-        writer.write_all(&<[u8; 32]>::from(self.shared_anchor)[..])?;
+        self.shared_anchor.zcash_serialize(&mut writer)?;
 
         // sizeProofsOrchard and proofsOrchard
         self.proof.zcash_serialize(&mut writer)?;
@@ -322,7 +322,7 @@ impl ZcashDeserialize for Option<orchard::ShieldedData> {
         let value_balance: amount::Amount = (&mut reader).zcash_deserialize_into()?;
 
         // anchorOrchard
-        let shared_anchor: orchard::tree::Root = reader.read_32_bytes()?.into();
+        let shared_anchor: orchard::tree::Root = (&mut reader).zcash_deserialize_into()?;
 
         // sizeProofsOrchard and proofsOrchard
         let proof: Halo2Proof = (&mut reader).zcash_deserialize_into()?;
