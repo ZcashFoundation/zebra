@@ -95,7 +95,7 @@ pub enum ConnectedAddr {
     /// the duration of this connection.
     InboundProxy { transient_addr: SocketAddr },
 
-    /// An isolated connection, where we deliberately don't connect any metadata.
+    /// An isolated connection, where we deliberately don't have any connection metadata.
     Isolated,
     //
     // TODO: handle Tor onion addresses
