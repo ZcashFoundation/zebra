@@ -334,15 +334,16 @@ impl ZcashDeserialize for Option<orchard::ShieldedData> {
         // bindingSigOrchard
         let binding_sig: Signature<Binding> = (&mut reader).zcash_deserialize_into()?;
 
-        // Create the AuthorizedAction
-        let mut authorized_action = Vec::<orchard::AuthorizedAction>::with_capacity(actions.len());
-        for (count, action) in actions.iter().cloned().enumerate() {
-            authorized_action.push(orchard::AuthorizedAction {
-                action,
-                spend_auth_sig: sigs[count],
+        // Create the AuthorizedAction from deserialized parts
+        let authorized_actions: Vec<orchard::AuthorizedAction> = actions
+            .into_iter()
+            .zip(sigs.into_iter())
+            .map(|(action, spend_auth_sig)| {
+                orchard::AuthorizedAction::from_parts(action, spend_auth_sig)
             })
-        }
-        let actions: AtLeastOne<orchard::AuthorizedAction> = authorized_action.try_into()?;
+            .collect();
+
+        let actions: AtLeastOne<orchard::AuthorizedAction> = authorized_actions.try_into()?;
 
         Ok(Some(orchard::ShieldedData {
             flags,

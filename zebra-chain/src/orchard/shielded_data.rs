@@ -8,8 +8,7 @@ use crate::{
         Halo2Proof,
     },
     serialization::{
-        AtLeastOne, ReadZcashExt, SerializationError, TrustedPreallocate, ZcashDeserialize,
-        ZcashDeserializeInto, ZcashSerialize,
+        AtLeastOne, SerializationError, TrustedPreallocate, ZcashDeserialize, ZcashSerialize,
     },
 };
 
@@ -55,17 +54,14 @@ impl AuthorizedAction {
     pub fn into_parts(self) -> (Action, Signature<SpendAuth>) {
         (self.action, self.spend_auth_sig)
     }
-}
 
-impl ZcashDeserialize for AuthorizedAction {
-    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let action = (&mut reader).zcash_deserialize_into()?;
-        let spend_auth_sig = reader.read_64_bytes()?.into();
-
-        Ok(AuthorizedAction {
+    // Combine the action and the spend auth sig from V5 transaction
+    /// deserialization.
+    pub fn from_parts(action: Action, spend_auth_sig: Signature<SpendAuth>) -> AuthorizedAction {
+        AuthorizedAction {
             action,
             spend_auth_sig,
-        })
+        }
     }
 }
 
