@@ -1,9 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::{fmt, io};
 
-use crate::serialization::{
-    ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
-};
+use crate::serialization::{SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize};
 
 /// An encoding of a Halo2 proof, as used in [Zcash][halo2].
 ///
@@ -33,12 +31,9 @@ impl ZcashSerialize for Halo2Proof {
 
 impl ZcashDeserialize for Halo2Proof {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let nbytes = reader.read_compactsize()?;
-        let mut bytes = vec![0; nbytes as usize];
+        let proof = Vec::zcash_deserialize(&mut reader)?;
 
-        reader.read_exact(&mut bytes)?;
-
-        Ok(Self(bytes))
+        Ok(Self(proof))
     }
 }
 #[cfg(any(test, feature = "proptest-impl"))]
