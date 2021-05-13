@@ -347,7 +347,9 @@ impl Arbitrary for orchard::ShieldedData {
                     value_balance,
                     shared_anchor,
                     proof,
-                    actions: actions.try_into().expect("we always should have something"),
+                    actions: actions
+                        .try_into()
+                        .expect("arbitrary vector size range produces at least one action"),
                     binding_sig: Signature::<Binding>::from({
                         let mut b = [0u8; 64];
                         b.copy_from_slice(sig_bytes.as_slice());
