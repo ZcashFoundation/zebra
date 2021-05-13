@@ -339,10 +339,10 @@ impl Arbitrary for orchard::ShieldedData {
             any::<orchard::tree::Root>(),
             any::<Halo2Proof>(),
             vec(any::<orchard::shielded_data::AuthorizedAction>(), 1..10),
-            vec(any::<u8>(), 64),
+            any::<Signature<Binding>>(),
         )
             .prop_map(
-                |(flags, value_balance, shared_anchor, proof, actions, sig_bytes)| Self {
+                |(flags, value_balance, shared_anchor, proof, actions, binding_sig)| Self {
                     flags,
                     value_balance,
                     shared_anchor,
@@ -350,11 +350,29 @@ impl Arbitrary for orchard::ShieldedData {
                     actions: actions
                         .try_into()
                         .expect("arbitrary vector size range produces at least one action"),
-                    binding_sig: Signature::<Binding>::from({
-                        let mut b = [0u8; 64];
-                        b.copy_from_slice(sig_bytes.as_slice());
-                        b
-                    }),
+                    binding_sig,
+                },
+            )
+            .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
+
+impl Arbitrary for Signature<Binding> {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        (vec(any::<u8>(), 64))
+            .prop_filter_map(
+                "zero Signature::<Binding> values are invalid",
+                |sig_bytes| {
+                    let mut b = [0u8; 64];
+                    b.copy_from_slice(sig_bytes.as_slice());
+                    if b == [0u8; 64] {
+                        return None;
+                    }
+                    Some(Signature::<Binding>::from(b))
                 },
             )
             .boxed()
