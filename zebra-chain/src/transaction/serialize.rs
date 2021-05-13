@@ -255,8 +255,11 @@ impl ZcashSerialize for Option<orchard::ShieldedData> {
             None => {
                 // nActionsOrchard
                 writer.write_compactsize(0)?;
-                // sizeProofsOrchard
-                writer.write_compactsize(0)?;
+                // We don't need to write anything else here.
+                // "The fields flagsOrchard, valueBalanceOrchard, anchorOrchard, sizeProofsOrchard,
+                // proofsOrchard , and bindingSigOrchard are present if and only if nActionsOrchard > 0."
+                // https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus notes of the second
+                // table, section sign.
             }
             Some(orchard_shielded_data) => {
                 orchard_shielded_data.zcash_serialize(&mut writer)?;
@@ -309,8 +312,6 @@ impl ZcashDeserialize for Option<orchard::ShieldedData> {
         let actions: Vec<orchard::Action> = (&mut reader).zcash_deserialize_into()?;
 
         if actions.is_empty() {
-            // read another compactsize and get out
-            let _ = reader.read_compactsize()?;
             return Ok(None);
         }
 
