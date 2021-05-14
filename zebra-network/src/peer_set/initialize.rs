@@ -204,16 +204,22 @@ where
     // an indefinite period. We can use `CallAllUnordered` without filling
     // the underlying `Inbound` buffer, because we immediately drive this
     // single `CallAll` to completion, and handshakes have a short timeout.
-    use tower::util::CallAllUnordered;
-    let addr_stream = futures::stream::iter(initial_peers.into_iter());
-    let mut handshakes = CallAllUnordered::new(outbound_connector, addr_stream);
+    let mut handshakes: FuturesUnordered<_> = initial_peers
+        .into_iter()
+        .map(|addr| {
+            outbound_connector
+                .clone()
+                .oneshot(addr)
+                .map_err(move |e| (addr, e))
+        })
+        .collect();
 
     while let Some(handshake_result) = handshakes.next().await {
         // this is verbose, but it's better than just hanging with no output
-        if let Err(ref e) = handshake_result {
-            info!(?e, "an initial peer connection failed");
+        if let Err((addr, ref e)) = handshake_result {
+            info!(?addr, ?e, "an initial peer connection failed");
         }
-        tx.send(handshake_result).await?;
+        tx.send(handshake_result.map_err(|(_addr, e)| e)).await?;
     }
 
     Ok(())
