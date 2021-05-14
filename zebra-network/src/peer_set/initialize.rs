@@ -251,19 +251,26 @@ where
     info!("Opened Zcash protocol endpoint at {}", local_addr);
     loop {
         if let Ok((tcp_stream, addr)) = listener.accept().await {
-            debug!(?addr, "got incoming connection");
+            let connected_addr = peer::ConnectedAddr::new_inbound_direct(addr);
+            let accept_span = info_span!("listen_accept", peer = ?connected_addr);
+            let _guard = accept_span.enter();
+
+            debug!("got incoming connection");
             handshaker.ready_and().await?;
             // TODO: distinguish between proxied listeners and direct listeners
-            let connected_addr = peer::ConnectedAddr::new_inbound_direct(addr);
+            let handshaker_span = info_span!("listen_handshaker", peer = ?connected_addr);
             // Construct a handshake future but do not drive it yet....
             let handshake = handshaker.call((tcp_stream, connected_addr));
             // ... instead, spawn a new task to handle this connection
             let mut tx2 = tx.clone();
-            tokio::spawn(async move {
-                if let Ok(client) = handshake.await {
-                    let _ = tx2.send(Ok(Change::Insert(addr, client))).await;
+            tokio::spawn(
+                async move {
+                    if let Ok(client) = handshake.await {
+                        let _ = tx2.send(Ok(Change::Insert(addr, client))).await;
+                    }
                 }
-            });
+                .instrument(handshaker_span),
+            );
         }
     }
 }
