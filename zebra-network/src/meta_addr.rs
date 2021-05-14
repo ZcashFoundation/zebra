@@ -156,7 +156,9 @@ impl MetaAddr {
     ///
     /// # Security
     ///
-    /// This address must be the remote address from an outbound connection.
+    /// This address must be the remote address from an outbound connection,
+    /// and the services must be the services from that peer's handshake.
+    ///
     /// Otherwise:
     /// - malicious peers could interfere with other peers' `AddressBook` state,
     ///   or
@@ -224,6 +226,14 @@ impl MetaAddr {
     /// clock skew, or buggy or malicious peers.
     pub fn get_last_seen(&self) -> DateTime<Utc> {
         self.last_seen
+    }
+
+    /// Is this address a directly connected client?
+    pub fn is_direct_client(&self) -> bool {
+        match self.last_connection_state {
+            Responded => !self.services.contains(PeerServices::NODE_NETWORK),
+            NeverAttemptedGossiped | NeverAttemptedAlternate | Failed | AttemptPending => false,
+        }
     }
 
     /// Is this address valid for outbound connections?
