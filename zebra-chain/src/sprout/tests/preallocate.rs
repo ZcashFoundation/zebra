@@ -12,7 +12,7 @@ use proptest::{prelude::*, proptest};
 use std::convert::TryInto;
 
 proptest! {
-    /// Confirm that each  JoinSplit<Btcv14Proof> takes exactly BCTV14_JOINSPLIT_SIZE bytes when serialized.
+    /// Confirm that each JoinSplit<Btcv14Proof> takes exactly BCTV14_JOINSPLIT_SIZE bytes when serialized.
     /// This verifies that our calculated `TrustedPreallocate::max_allocation()` is indeed an upper bound.
     #[test]
     fn joinsplit_btcv14_size_is_correct(joinsplit in <JoinSplit<Bctv14Proof>>::arbitrary_with(())) {
@@ -48,7 +48,7 @@ proptest! {
         prop_assert!(((smallest_disallowed_vec.len() - 1) as u64) == <JoinSplit<Bctv14Proof>>::max_allocation());
         // Check that our smallest_disallowed_vec is too big to be included in a valid block
         // Note that a serialized block always includes at least one byte for the number of transactions,
-        // so any serialized Vec<<JoinSplit<Bctv14Proof>>> at least MAX_BLOCK_BYTES long is too large to fit in a block.
+        // so any serialized Vec<JoinSplit<Bctv14Proof>> at least MAX_BLOCK_BYTES long is too large to fit in a block.
         prop_assert!((smallest_disallowed_serialized.len() as u64) >= MAX_BLOCK_BYTES);
 
         // Create largest_allowed_vec by removing one element from smallest_disallowed_vec without copying (for efficiency)
@@ -78,7 +78,7 @@ proptest! {
         prop_assert!(((smallest_disallowed_vec.len() - 1) as u64) == <JoinSplit<Groth16Proof>>::max_allocation());
         // Check that our smallest_disallowed_vec is too big to be included in a valid block
         // Note that a serialized block always includes at least one byte for the number of transactions,
-        // so any serialized Vec<<JoinSplit<Groth16Proof>>> at least MAX_BLOCK_BYTES long is too large to fit in a block.
+        // so any serialized Vec<JoinSplit<Groth16Proof>> at least MAX_BLOCK_BYTES long is too large to fit in a block.
         prop_assert!((smallest_disallowed_serialized.len() as u64) >= MAX_BLOCK_BYTES);
 
         // Create largest_allowed_vec by removing one element from smallest_disallowed_vec without copying (for efficiency)
