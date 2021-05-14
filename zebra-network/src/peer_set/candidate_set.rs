@@ -131,13 +131,24 @@ where
         }
     }
 
-    /// Update the peer set from the network.
+    /// Update the peer set from the network, using the default fanout limit.
+    ///
+    /// See `update_initial` for details.
+    pub async fn update(&mut self) -> Result<(), BoxError> {
+        self.update_inner(None).await
+    }
+
+    /// Update the peer set from the network, limiting the fanout to
+    /// `fanout_limit`.
     ///
     /// - Ask a few live `Responded` peers to send us more peers.
     /// - Process all completed peer responses, adding new peers in the
     ///   `NeverAttempted` state.
     ///
     /// ## Correctness
+    ///
+    /// Pass the initial peer set size as `fanout_limit` during initialization,
+    /// so that Zebra does not send duplicate requests to the same peer.
     ///
     /// The crawler exits when update returns an error, so it must only return
     /// errors on permanent failures.
@@ -148,7 +159,15 @@ where
     /// `report_failed` puts peers into the `Failed` state.
     ///
     /// `next` puts peers into the `AttemptPending` state.
-    pub async fn update(&mut self) -> Result<(), BoxError> {
+    pub async fn update_initial(&mut self, fanout_limit: usize) -> Result<(), BoxError> {
+        self.update_inner(Some(fanout_limit)).await
+    }
+
+    /// Update the peer set from the network, limiting the fanout to
+    /// `fanout_limit`.
+    ///
+    /// See `update_initial` for details.
+    async fn update_inner(&mut self, fanout_limit: Option<usize>) -> Result<(), BoxError> {
         // Opportunistically crawl the network on every update call to ensure
         // we're actively fetching peers. Continue independently of whether we
         // actually receive any peers, but always ask the network for more.
@@ -159,7 +178,7 @@ where
         // called while the peer set is already loaded.
         let mut responses = FuturesUnordered::new();
         trace!("sending GetPeers requests");
-        for _ in 0..constants::GET_ADDR_FANOUT {
+        for _ in 0..fanout_limit.unwrap_or(constants::GET_ADDR_FANOUT) {
             // CORRECTNESS
             //
             // Use a timeout to avoid deadlocks when there are no connected
