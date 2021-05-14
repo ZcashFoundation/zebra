@@ -139,7 +139,15 @@ impl AddressBook {
             recent_peers = self.recently_live_peers().count(),
         );
 
-        // Drop any unspecified or client addresses.
+        // If a node that we are directly connected to has changed to a client,
+        // remove it from the address book.
+        if new.is_direct_client() && self.contains_addr(&new.addr) {
+            std::mem::drop(_guard);
+            self.take(new.addr);
+            return;
+        }
+
+        // Never add unspecified addresses or client services.
         //
         // Communication with these addresses can be monitored via Zebra's
         // metrics. (The address book is for valid peer addresses.)
