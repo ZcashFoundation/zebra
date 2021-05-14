@@ -19,7 +19,7 @@ use zebra_chain::{
     parameters::{Network, NetworkUpgrade},
     primitives::Groth16Proof,
     sapling,
-    transaction::{self, HashType, Transaction},
+    transaction::{self, HashType, SignatureHash, Transaction},
     transparent,
 };
 
@@ -398,7 +398,7 @@ where
     /// Verifies a transaction's Sprout shielded join split data.
     fn verify_sprout_shielded_data(
         joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
-        shielded_sighash: &blake2b_simd::Hash,
+        shielded_sighash: &SignatureHash,
     ) -> AsyncChecks {
         let mut checks = AsyncChecks::new();
 
@@ -434,7 +434,7 @@ where
     /// Verifies a transaction's Sapling shielded data.
     fn verify_sapling_shielded_data<A>(
         sapling_shielded_data: &Option<sapling::ShieldedData<A>>,
-        shielded_sighash: &blake2b_simd::Hash,
+        shielded_sighash: &SignatureHash,
     ) -> Result<AsyncChecks, TransactionError>
     where
         A: sapling::AnchorVariant + Clone,
