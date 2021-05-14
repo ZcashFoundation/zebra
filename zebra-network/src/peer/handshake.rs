@@ -13,14 +13,13 @@ use futures::{
     channel::{mpsc, oneshot},
     future, FutureExt, SinkExt, StreamExt,
 };
-use lazy_static::lazy_static;
 use tokio::{net::TcpStream, sync::broadcast, task::JoinError, time::timeout};
 use tokio_util::codec::Framed;
 use tower::Service;
 use tracing::{span, Level, Span};
 use tracing_futures::Instrument;
 
-use zebra_chain::block;
+use zebra_chain::{block, parameters::Network};
 
 use crate::{
     constants,
@@ -101,10 +100,9 @@ pub enum ConnectedAddr {
     // TODO: handle Tor onion addresses
 }
 
-lazy_static! {
-    /// An unspecified IPv4 address
-    pub static ref UNSPECIFIED_IPV4_ADDR: SocketAddr =
-        (Ipv4Addr::UNSPECIFIED, 0).into();
+/// Get an unspecified IPv4 address for `network`
+pub fn get_unspecified_ipv4_addr(network: Network) -> SocketAddr {
+    (Ipv4Addr::UNSPECIFIED, network.default_port()).into()
 }
 
 use ConnectedAddr::*;
@@ -414,18 +412,28 @@ pub async fn negotiate_version(
     let now = Utc::now().timestamp();
     let timestamp = Utc.timestamp(now - now.rem_euclid(5 * 60), 0);
 
+    let (their_addr, our_services, our_listen_addr) = match connected_addr {
+        // Version messages require an address, so we use
+        // an unspecified address for Isolated connections
+        Isolated => {
+            let unspec_ipv4 = get_unspecified_ipv4_addr(config.network);
+            (unspec_ipv4, PeerServices::empty(), unspec_ipv4)
+        }
+        _ => {
+            let their_addr = connected_addr
+                .get_transient_addr()
+                .expect("non-Isolated connections have a remote addr");
+            (their_addr, our_services, config.listen_addr)
+        }
+    };
+
     let our_version = Message::Version {
         version: constants::CURRENT_VERSION,
         services: our_services,
         timestamp,
-        address_recv: (
-            PeerServices::NODE_NETWORK,
-            connected_addr
-                .get_transient_addr()
-                .unwrap_or_else(|| *UNSPECIFIED_IPV4_ADDR),
-        ),
+        address_recv: (PeerServices::NODE_NETWORK, their_addr),
         // TODO: detect external address (#1893)
-        address_from: (our_services, config.listen_addr),
+        address_from: (our_services, our_listen_addr),
         nonce: local_nonce,
         user_agent: user_agent.clone(),
         // The protocol works fine if we don't reveal our current block height,
