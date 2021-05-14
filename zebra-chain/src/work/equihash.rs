@@ -108,6 +108,7 @@ impl ZcashDeserialize for Solution {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::block::MAX_BLOCK_BYTES;
 
     static EQUIHASH_SIZE_TESTS: &[u64] = &[
         0,
@@ -115,8 +116,8 @@ mod tests {
         (SOLUTION_SIZE - 1) as u64,
         SOLUTION_SIZE as u64,
         (SOLUTION_SIZE + 1) as u64,
-        u64::MAX - 1,
-        u64::MAX,
+        MAX_BLOCK_BYTES - 1,
+        MAX_BLOCK_BYTES,
     ];
 
     #[test]

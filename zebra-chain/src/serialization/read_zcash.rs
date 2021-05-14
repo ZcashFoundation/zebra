@@ -1,9 +1,12 @@
 use std::io;
-use std::net::{IpAddr, SocketAddr};
+use std::{
+    convert::TryInto,
+    net::{IpAddr, SocketAddr},
+};
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 
-use super::SerializationError;
+use super::{SerializationError, MAX_PROTOCOL_MESSAGE_LEN};
 
 /// Extends [`Read`] with methods for writing Zcash/Bitcoin types.
 ///
@@ -17,12 +20,17 @@ pub trait ReadZcashExt: io::Read {
     ///
     /// Preallocating vectors using untrusted `CompactSize`s allows memory
     /// denial of service attacks. Valid sizes must be less than
-    /// `MAX_BLOCK_BYTES / min_serialized_item_bytes` (or a lower limit
+    /// `MAX_PROTOCOL_MESSAGE_LEN / min_serialized_item_bytes` (or a lower limit
     /// specified by the Zcash consensus rules or Bitcoin network protocol).
+    ///
+    /// As a defence-in-depth for memory preallocation attacks,
+    /// Zebra rejects sizes greater than the protocol message length limit.
+    /// (These sizes should be impossible, because each array items takes at
+    /// least one byte.)
     ///
     /// # Examples
     ///
-    /// ```rust
+    /// ```
     /// use zebra_chain::serialization::ReadZcashExt;
     ///
     /// use std::io::Cursor;
@@ -41,22 +49,21 @@ pub trait ReadZcashExt: io::Read {
     ///     Cursor::new(b"\xfd\xfd\xaa")
     ///         .read_compactsize().unwrap()
     /// );
-    /// assert_eq!(
-    ///     0xbbaafd,
-    ///     Cursor::new(b"\xfe\xfd\xaa\xbb\x00")
-    ///         .read_compactsize().unwrap()
-    /// );
-    /// assert_eq!(
-    ///     0x22ccbbaafd,
-    ///     Cursor::new(b"\xff\xfd\xaa\xbb\xcc\x22\x00\x00\x00")
-    ///         .read_compactsize().unwrap()
-    /// );
+    /// ```
+    ///
+    /// Sizes greater than the maximum network message length are invalid,
+    /// they return a `Parse` error:
+    /// ```
+    /// # use zebra_chain::serialization::ReadZcashExt;
+    /// # use std::io::Cursor;
+    /// Cursor::new(b"\xfe\xfd\xaa\xbb\x00").read_compactsize().unwrap_err();
+    /// Cursor::new(b"\xff\xfd\xaa\xbb\xcc\x22\x00\x00\x00").read_compactsize().unwrap_err();
     /// ```
     #[inline]
     fn read_compactsize(&mut self) -> Result<u64, SerializationError> {
         use SerializationError::Parse;
         let flag_byte = self.read_u8()?;
-        match flag_byte {
+        let size = match flag_byte {
             n @ 0x00..=0xfc => Ok(n as u64),
             0xfd => match self.read_u16::<LittleEndian>()? {
                 n @ 0x0000_00fd..=0x0000_ffff => Ok(n as u64),
@@ -70,7 +77,19 @@ pub trait ReadZcashExt: io::Read {
                 n @ 0x1_0000_0000..=0xffff_ffff_ffff_ffff => Ok(n),
                 _ => Err(Parse("non-canonical compactsize")),
             },
+        }?;
+
+        // # Security
+        // Defence-in-depth for memory DoS via preallocation.
+        if size
+            > MAX_PROTOCOL_MESSAGE_LEN
+                .try_into()
+                .expect("usize fits in u64")
+        {
+            Err(Parse("compactsize larger than protocol message limit"))?;
         }
+
+        Ok(size)
     }
 
     /// Read an IP address in Bitcoin format.

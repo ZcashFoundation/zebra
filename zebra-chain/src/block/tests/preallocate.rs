@@ -3,7 +3,7 @@
 use crate::{
     block::{
         header::MIN_COUNTED_HEADER_LEN, CountedHeader, Hash, Header, BLOCK_HASH_SIZE,
-        MAX_PROTOCOL_MESSAGE_LEN,
+        MAX_BLOCK_BYTES, MAX_PROTOCOL_MESSAGE_LEN,
     },
     serialization::{TrustedPreallocate, ZcashSerialize},
 };
@@ -51,7 +51,7 @@ proptest! {
     /// Confirm that each counted header takes at least COUNTED_HEADER_LEN bytes when serialized.
     /// This verifies that our calculated `TrustedPreallocate::max_allocation()` is indeed an upper bound.
     #[test]
-    fn counted_header_min_length(header in Header::arbitrary_with(()), transaction_count in (0..std::u32::MAX)) {
+    fn counted_header_min_length(header in Header::arbitrary_with(()), transaction_count in (0..MAX_BLOCK_BYTES)) {
         let header = CountedHeader {
             header,
             transaction_count: transaction_count.try_into().expect("Must run test on platform with at least 32 bit address space"),
