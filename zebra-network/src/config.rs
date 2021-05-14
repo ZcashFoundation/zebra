@@ -67,6 +67,11 @@ impl Config {
     async fn resolve_peers(peers: &HashSet<String>) -> HashSet<SocketAddr> {
         use futures::stream::StreamExt;
 
+        if peers.is_empty() {
+            error!("no initial peers in the network config. Hint: you must configure at least one peer or DNS seeder to run Zebra");
+            return HashSet::new();
+        }
+
         loop {
             // We retry each peer individually, as well as retrying if there are
             // no peers in the combined list. DNS failures are correlated, so all
