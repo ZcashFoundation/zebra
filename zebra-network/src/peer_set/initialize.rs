@@ -140,12 +140,14 @@ where
     );
 
     // 2. Initial peers, specified in the config.
+    let (initial_peer_count_tx, initial_peer_count_rx) = tokio::sync::oneshot::channel();
     let initial_peers_fut = {
         let config = config.clone();
         let connector = connector.clone();
         let peerset_tx = peerset_tx.clone();
         async move {
             let initial_peers = config.initial_peers().await;
+            let _ = initial_peer_count_tx.send(initial_peers.len());
             // Connect the tx end to the 3 peer sources:
             add_initial_peers(initial_peers, connector, peerset_tx).await
         }
@@ -160,10 +162,11 @@ where
     // We need to await candidates.update() here, because zcashd only sends one
     // `addr` message per connection, and if we only have one initial peer we
     // need to ensure that its `addr` message is used by the crawler.
-    // XXX this should go in CandidateSet::new, but we need init() -> Result<_,_>
 
     info!("Sending initial request for peers");
-    let _ = candidates.update().await;
+    let _ = candidates
+        .update_initial(initial_peer_count_rx.await.expect("value sent before drop"))
+        .await;
 
     for _ in 0..config.peerset_initial_target_size {
         let _ = demand_tx.try_send(());
