@@ -9,6 +9,8 @@ mod arbitrary;
 mod commitment;
 mod note;
 mod sinsemilla;
+#[cfg(test)]
+mod tests;
 
 pub mod keys;
 pub mod shielded_data;

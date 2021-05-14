@@ -2,6 +2,7 @@
 
 use crate::{
     amount::Amount,
+    block::MAX_BLOCK_BYTES,
     orchard::{tree, Action},
     primitives::{
         redpallas::{Binding, Signature, SpendAuth},
@@ -65,17 +66,31 @@ impl AuthorizedAction {
     }
 }
 
+/// The size of a single Action
+///
+/// Actions are 5 * 32 + 580 + 80 bytes so the total size of each Action is 820 bytes.
+/// [7.5 Action Description Encoding and Consensus][ps]
+///
+/// [ps] https://zips.z.cash/protocol/nu5.pdf#actionencodingandconsensus
+pub const ACTION_SIZE: u64 = 5 * 32 + 580 + 80;
+
 impl TrustedPreallocate for Action {
     fn max_allocation() -> u64 {
-        // TODO: fix this
-        1_000_000
+        (MAX_BLOCK_BYTES - 1) / ACTION_SIZE
     }
 }
 
+/// The size of a single Signature<SpendAuth>
+///
+/// Each Signature is 64 bytes.
+/// [7.1 Transaction Encoding and Consensus][ps]
+///
+/// [ps] https://zips.z.cash/protocol/nu5.pdf#actionencodingandconsensus
+pub const SPEND_AUTH_SIG_SIZE: u64 = 64;
+
 impl TrustedPreallocate for Signature<SpendAuth> {
     fn max_allocation() -> u64 {
-        // TODO: fix this
-        1_000_000
+        (MAX_BLOCK_BYTES - 1) / SPEND_AUTH_SIG_SIZE
     }
 }
 
