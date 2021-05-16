@@ -25,6 +25,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2.3.4
+        with:
+          persist-credentials: false
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: ${{ matrix.rust }}
@@ -81,6 +83,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2.3.4
+        with:
+          persist-credentials: false
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: ${{ matrix.rust }}
@@ -110,6 +114,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2.3.4
+        with:
+          persist-credentials: false
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
@@ -140,6 +146,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2.3.4
+        with:
+          persist-credentials: false
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
@@ -167,6 +175,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2.3.4
+        with:
+          persist-credentials: false
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
