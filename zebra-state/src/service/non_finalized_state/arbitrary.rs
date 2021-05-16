@@ -49,18 +49,11 @@ impl Strategy for PreparedChain {
     fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
         let mut chain = self.chain.lock().unwrap();
         if chain.is_none() {
-            let ledger_strategy = LedgerState::coinbase_strategy();
+            // Only generate blocks from the most recent network upgrade
+            let mut ledger_state = LedgerState::default();
+            ledger_state.network_upgrade_override = None;
 
-            // Disable the NU5 override until UpdateWith is implemented for Tx v5 (#1982)
-            let ledger_strategy = ledger_strategy.prop_map(|mut ledger_state| {
-                ledger_state.network_upgrade_override = None;
-                ledger_state
-            });
-
-            let blocks = ledger_strategy
-                .prop_flat_map(|ledger_state| {
-                    Block::partial_chain_strategy(ledger_state, MAX_PARTIAL_CHAIN_BLOCKS)
-                })
+            let blocks = Block::partial_chain_strategy(ledger_state, MAX_PARTIAL_CHAIN_BLOCKS)
                 .prop_map(|vec| vec.into_iter().map(|blk| blk.prepare()).collect::<Vec<_>>())
                 .new_tree(runner)?
                 .current();
