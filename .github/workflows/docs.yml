@@ -15,7 +15,9 @@ jobs:
     steps:
     - name: Checkout the source code
       uses: actions/checkout@v2.3.4
-
+      with:
+        persist-credentials: false
+        
     - name: Install latest beta
       uses: actions-rs/toolchain@v1
       with:
