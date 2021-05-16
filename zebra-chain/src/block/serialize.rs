@@ -31,7 +31,7 @@ impl ZcashSerialize for Header {
             self.time
                 .timestamp()
                 .try_into()
-                .expect("deserialized and generated timestamps are u32 values"),```
+                .expect("deserialized and generated timestamps are u32 values"),
         )?;
         writer.write_u32::<LittleEndian>(self.difficulty_threshold.0)?;
         writer.write_all(&self.nonce[..])?;
