@@ -28,7 +28,7 @@ impl ZcashSerialize for Header {
         writer.write_all(&self.merkle_root.0[..])?;
         writer.write_all(&self.commitment_bytes[..])?;
         writer.write_u32::<LittleEndian>(
-            self.time.timestamp().try_into().expect("time is in range"),
+            self.time.timestamp().try_into().expect("deserialized and generated timestamps are u32 values"),
         )?;
         writer.write_u32::<LittleEndian>(self.difficulty_threshold.0)?;
         writer.write_all(&self.nonce[..])?;
