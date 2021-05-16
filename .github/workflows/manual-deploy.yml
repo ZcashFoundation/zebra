@@ -18,7 +18,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2.3.4
-
+      with:
+        persist-credentials: false
+        
     - name: Set project and image names
       run: |
         BRANCH_NAME=$(expr $GITHUB_REF : '.*/\(.*\)') && \
