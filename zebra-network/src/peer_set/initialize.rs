@@ -204,16 +204,22 @@ where
     // an indefinite period. We can use `CallAllUnordered` without filling
     // the underlying `Inbound` buffer, because we immediately drive this
     // single `CallAll` to completion, and handshakes have a short timeout.
-    use tower::util::CallAllUnordered;
-    let addr_stream = futures::stream::iter(initial_peers.into_iter());
-    let mut handshakes = CallAllUnordered::new(outbound_connector, addr_stream);
+    let mut handshakes: FuturesUnordered<_> = initial_peers
+        .into_iter()
+        .map(|addr| {
+            outbound_connector
+                .clone()
+                .oneshot(addr)
+                .map_err(move |e| (addr, e))
+        })
+        .collect();
 
     while let Some(handshake_result) = handshakes.next().await {
         // this is verbose, but it's better than just hanging with no output
-        if let Err(ref e) = handshake_result {
-            info!(?e, "an initial peer connection failed");
+        if let Err((addr, ref e)) = handshake_result {
+            info!(?addr, ?e, "an initial peer connection failed");
         }
-        tx.send(handshake_result).await?;
+        tx.send(handshake_result.map_err(|(_addr, e)| e)).await?;
     }
 
     Ok(())
@@ -251,19 +257,26 @@ where
     info!("Opened Zcash protocol endpoint at {}", local_addr);
     loop {
         if let Ok((tcp_stream, addr)) = listener.accept().await {
-            debug!(?addr, "got incoming connection");
+            let connected_addr = peer::ConnectedAddr::new_inbound_direct(addr);
+            let accept_span = info_span!("listen_accept", peer = ?connected_addr);
+            let _guard = accept_span.enter();
+
+            debug!("got incoming connection");
             handshaker.ready_and().await?;
             // TODO: distinguish between proxied listeners and direct listeners
-            let connected_addr = peer::ConnectedAddr::new_inbound_direct(addr);
+            let handshaker_span = info_span!("listen_handshaker", peer = ?connected_addr);
             // Construct a handshake future but do not drive it yet....
             let handshake = handshaker.call((tcp_stream, connected_addr));
             // ... instead, spawn a new task to handle this connection
             let mut tx2 = tx.clone();
-            tokio::spawn(async move {
-                if let Ok(client) = handshake.await {
-                    let _ = tx2.send(Ok(Change::Insert(addr, client))).await;
+            tokio::spawn(
+                async move {
+                    if let Ok(client) = handshake.await {
+                        let _ = tx2.send(Ok(Change::Insert(addr, client))).await;
+                    }
                 }
-            });
+                .instrument(handshaker_span),
+            );
         }
     }
 }
@@ -381,15 +394,14 @@ where
             DemandHandshake { candidate } => {
                 // spawn each handshake into an independent task, so it can make
                 // progress independently of the crawls
-                let hs_join =
-                    tokio::spawn(dial(candidate, outbound_connector.clone())).map(move |res| {
-                        match res {
-                            Ok(crawler_action) => crawler_action,
-                            Err(e) => {
-                                panic!("panic during handshaking with {:?}: {:?} ", candidate, e);
-                            }
+                let hs_join = tokio::spawn(dial(candidate, outbound_connector.clone()))
+                    .map(move |res| match res {
+                        Ok(crawler_action) => crawler_action,
+                        Err(e) => {
+                            panic!("panic during handshaking with {:?}: {:?} ", candidate, e);
                         }
-                    });
+                    })
+                    .instrument(Span::current());
                 handshakes.push(Box::pin(hs_join));
             }
             DemandCrawl => {

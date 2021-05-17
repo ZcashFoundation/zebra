@@ -8,6 +8,7 @@ use std::{
 use futures::prelude::*;
 use tokio::net::TcpStream;
 use tower::{discover::Change, Service, ServiceExt};
+use tracing_futures::Instrument;
 
 use crate::{BoxError, Request, Response};
 
@@ -50,13 +51,15 @@ where
 
     fn call(&mut self, addr: SocketAddr) -> Self::Future {
         let mut hs = self.handshaker.clone();
+        let connected_addr = ConnectedAddr::new_outbound_direct(addr);
+        let connector_span = info_span!("connector", peer = ?connected_addr);
         async move {
             let stream = TcpStream::connect(addr).await?;
             hs.ready_and().await?;
-            let connected_addr = ConnectedAddr::new_outbound_direct(addr);
             let client = hs.call((stream, connected_addr)).await?;
             Ok(Change::Insert(addr, client))
         }
+        .instrument(connector_span)
         .boxed()
     }
 }
