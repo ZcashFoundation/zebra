@@ -19,7 +19,7 @@ color-eyre = "0.5.11"
 ed25519-zebra = "2.2.0"
 rand = "0.8"
 tokio = { version = "0.3.6", features = ["full"]}
-tokio-test = "0.4.1"
+tokio-test = "0.4.2"
 tower-fallback = { path = "../tower-fallback/" }
 tower-test = "0.4.0"
 tracing = "0.1.26"
