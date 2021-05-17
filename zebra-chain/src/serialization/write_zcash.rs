@@ -1,6 +1,10 @@
 use std::io;
-use std::net::{IpAddr, SocketAddr};
+use std::{
+    convert::TryInto,
+    net::{IpAddr, SocketAddr},
+};
 
+use super::MAX_PROTOCOL_MESSAGE_LEN;
 use byteorder::{BigEndian, LittleEndian, WriteBytesExt};
 
 /// Extends [`Write`] with methods for writing Zcash/Bitcoin types.
@@ -9,9 +13,16 @@ use byteorder::{BigEndian, LittleEndian, WriteBytesExt};
 pub trait WriteZcashExt: io::Write {
     /// Writes a `u64` using the Bitcoin `CompactSize` encoding.
     ///
+    /// # Panics
+    ///
+    /// Zebra panics on sizes greater than the protocol message length limit.
+    /// This is a defence-in-depth for memory preallocation attacks.
+    /// (These sizes should be impossible, because each array item takes at
+    /// least one byte.)
+    ///
     /// # Examples
     ///
-    /// ```rust
+    /// ```
     /// use zebra_chain::serialization::WriteZcashExt;
     ///
     /// let mut buf = Vec::new();
@@ -25,17 +36,28 @@ pub trait WriteZcashExt: io::Write {
     /// let mut buf = Vec::new();
     /// buf.write_compactsize(0xaafd).unwrap();
     /// assert_eq!(buf, b"\xfd\xfd\xaa");
+    /// ```
     ///
+    /// Sizes greater than the maximum network message length are invalid
+    /// and cause a panic:
+    /// ```should_panic
+    /// # use zebra_chain::serialization::WriteZcashExt;
     /// let mut buf = Vec::new();
-    /// buf.write_compactsize(0xbbaafd).unwrap();
-    /// assert_eq!(buf, b"\xfe\xfd\xaa\xbb\x00");
-    ///
-    /// let mut buf = Vec::new();
-    /// buf.write_compactsize(0x22ccbbaafd).unwrap();
-    /// assert_eq!(buf, b"\xff\xfd\xaa\xbb\xcc\x22\x00\x00\x00");
+    /// buf.write_compactsize(0xbbaafd).unwrap_err();
+    /// buf.write_compactsize(0x22ccbbaafd).unwrap_err();
     /// ```
     #[inline]
     fn write_compactsize(&mut self, n: u64) -> io::Result<()> {
+        // # Security
+        // Defence-in-depth for memory DoS via preallocation.
+        //
+        if n > MAX_PROTOCOL_MESSAGE_LEN
+            .try_into()
+            .expect("usize fits in u64")
+        {
+            panic!("compactsize larger than protocol message limit");
+        }
+
         match n {
             0x0000_0000..=0x0000_00fc => self.write_u8(n as u8),
             0x0000_00fd..=0x0000_ffff => {
