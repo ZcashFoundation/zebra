@@ -27,10 +27,12 @@ impl ZcashSerialize for Header {
         self.previous_block_hash.zcash_serialize(&mut writer)?;
         writer.write_all(&self.merkle_root.0[..])?;
         writer.write_all(&self.commitment_bytes[..])?;
-        // this is a truncating cast, rather than a saturating cast
-        // but u32 times are valid until 2106, and our block verification time
-        // checks should detect any truncation.
-        writer.write_u32::<LittleEndian>(self.time.timestamp() as u32)?;
+        writer.write_u32::<LittleEndian>(
+            self.time
+                .timestamp()
+                .try_into()
+                .expect("deserialized and generated timestamps are u32 values"),
+        )?;
         writer.write_u32::<LittleEndian>(self.difficulty_threshold.0)?;
         writer.write_all(&self.nonce[..])?;
         self.solution.zcash_serialize(&mut writer)?;
@@ -76,7 +78,7 @@ impl ZcashDeserialize for Header {
             merkle_root: merkle::Root(reader.read_32_bytes()?),
             commitment_bytes: reader.read_32_bytes()?,
             // This can't panic, because all u32 values are valid `Utc.timestamp`s
-            time: Utc.timestamp(reader.read_u32::<LittleEndian>()? as i64, 0),
+            time: Utc.timestamp(reader.read_u32::<LittleEndian>()?.into(), 0),
             difficulty_threshold: CompactDifficulty(reader.read_u32::<LittleEndian>()?),
             nonce: reader.read_32_bytes()?,
             solution: equihash::Solution::zcash_deserialize(reader)?,

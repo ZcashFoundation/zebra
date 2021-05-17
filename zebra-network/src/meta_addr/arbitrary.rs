@@ -2,7 +2,8 @@ use proptest::{arbitrary::any, arbitrary::Arbitrary, prelude::*};
 
 use super::{MetaAddr, PeerAddrState, PeerServices};
 
-use std::{net::SocketAddr, time::SystemTime};
+use chrono::{TimeZone, Utc};
+use std::net::SocketAddr;
 
 impl Arbitrary for MetaAddr {
     type Parameters = ();
@@ -11,16 +12,15 @@ impl Arbitrary for MetaAddr {
         (
             any::<SocketAddr>(),
             any::<PeerServices>(),
-            any::<SystemTime>(),
+            any::<u32>(),
             any::<PeerAddrState>(),
         )
             .prop_map(
                 |(addr, services, last_seen, last_connection_state)| MetaAddr {
                     addr,
                     services,
-                    // TODO: implement constraints on last_seen as part of the
-                    // last_connection_state refactor in #1849
-                    last_seen: last_seen.into(),
+                    // This can't panic, because all u32 values are valid `Utc.timestamp`s
+                    last_seen: Utc.timestamp(last_seen.into(), 0),
                     last_connection_state,
                 },
             )

@@ -2,6 +2,7 @@
 
 use std::{
     cmp::{Ord, Ordering},
+    convert::TryInto,
     io::{Read, Write},
     net::SocketAddr,
 };
@@ -309,7 +310,12 @@ impl PartialOrd for MetaAddr {
 
 impl ZcashSerialize for MetaAddr {
     fn zcash_serialize<W: Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
-        writer.write_u32::<LittleEndian>(self.get_last_seen().timestamp() as u32)?;
+        writer.write_u32::<LittleEndian>(
+            self.get_last_seen()
+                .timestamp()
+                .try_into()
+                .expect("time is in range"),
+        )?;
         writer.write_u64::<LittleEndian>(self.services.bits())?;
         writer.write_socket_addr(self.addr)?;
         Ok(())
@@ -318,7 +324,8 @@ impl ZcashSerialize for MetaAddr {
 
 impl ZcashDeserialize for MetaAddr {
     fn zcash_deserialize<R: Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let last_seen = Utc.timestamp(reader.read_u32::<LittleEndian>()? as i64, 0);
+        // This can't panic, because all u32 values are valid `Utc.timestamp`s
+        let last_seen = Utc.timestamp(reader.read_u32::<LittleEndian>()?.into(), 0);
         let services = PeerServices::from_bits_truncate(reader.read_u64::<LittleEndian>()?);
         let addr = reader.read_socket_addr()?;
 
