@@ -39,7 +39,11 @@ impl Arbitrary for note::Nullifier {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        array::uniform32(any::<u8>()).prop_map(Self::from).boxed()
+        use halo2::arithmetic::FieldExt;
+
+        (any::<u64>())
+            .prop_map(|number| Self::from(pallas::Scalar::from_u64(number).to_bytes()))
+            .boxed()
     }
 
     type Strategy = BoxedStrategy<Self>;
