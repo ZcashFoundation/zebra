@@ -249,6 +249,8 @@ impl ConnectedAddr {
                 if &canonical_remote != addr {
                     vec![canonical_remote]
                 } else {
+                    // we didn't learn a new address from the handshake:
+                    // it's the same as the outbound address, which is already in our address book
                     Vec::new()
                 }
             }
