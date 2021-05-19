@@ -2,10 +2,7 @@
 
 use crate::{
     block::MAX_BLOCK_BYTES,
-    orchard::{
-        shielded_data::{ACTION_SIZE, SPEND_AUTH_SIG_SIZE},
-        Action,
-    },
+    orchard::{shielded_data::AUTHORIZED_ACTION_SIZE, Action, AuthorizedAction},
     primitives::redpallas::{Signature, SpendAuth},
     serialization::{TrustedPreallocate, ZcashSerialize},
 };
@@ -14,82 +11,77 @@ use proptest::{prelude::*, proptest};
 use std::convert::TryInto;
 
 proptest! {
-    /// Confirm that each Action takes exactly ACTION_SIZE bytes when serialized.
-    /// This verifies that our calculated `TrustedPreallocate::max_allocation()` is indeed an upper bound.
+    /// Confirm that each `AuthorizedAction` takes exactly AUTHORIZED_ACTION_SIZE
+    /// bytes when serialized.
     #[test]
-    fn action_size_is_correct(action in <Action>::arbitrary_with(())) {
-        let serialized = action.zcash_serialize_to_vec().expect("Serialization to vec must succeed");
-        prop_assert!(serialized.len() as u64 == ACTION_SIZE)
+    fn authorized_action_size_is_small_enough(authorized_action in <AuthorizedAction>::arbitrary_with(())) {
+        let (action, spend_auth_sig) = authorized_action.into_parts();
+        let mut serialized_len = action.zcash_serialize_to_vec().expect("Serialization to vec must succeed").len();
+        serialized_len += spend_auth_sig.zcash_serialize_to_vec().expect("Serialization to vec must succeed").len();
+        prop_assert!(serialized_len as u64 == AUTHORIZED_ACTION_SIZE)
     }
-    /// Confirm that each Signature<SpendAuth> takes exactly SPEND_AUTH_SIG_SIZE bytes when serialized.
-    /// This verifies that our calculated `TrustedPreallocate::max_allocation()` is indeed an upper bound.
+
+    /// Verify trusted preallocation for `AuthorizedAction` and its split fields
     #[test]
-    fn spend_auth_sig_size_is_correct(sig in <Signature<SpendAuth>>::arbitrary_with(())) {
-        let serialized = sig.zcash_serialize_to_vec().expect("Serialization to vec must succeed");
-        prop_assert!(serialized.len() as u64 == SPEND_AUTH_SIG_SIZE)
+    fn authorized_action_max_allocation_is_big_enough(authorized_action in <AuthorizedAction>::arbitrary_with(())) {
+        let (action, spend_auth_sig) = authorized_action.into_parts();
+
+        let (
+            smallest_disallowed_vec_len,
+            _smallest_disallowed_serialized_len,
+            largest_allowed_vec_len,
+            largest_allowed_serialized_len,
+        ) = max_allocation_is_big_enough(action);
+
+        // Check the serialization limits for `Action`
+        prop_assert!(((smallest_disallowed_vec_len - 1) as u64) == Action::max_allocation());
+        prop_assert!((largest_allowed_vec_len as u64) == Action::max_allocation());
+        prop_assert!((largest_allowed_serialized_len as u64) <= MAX_BLOCK_BYTES);
+
+        let (
+            smallest_disallowed_vec_len,
+            _smallest_disallowed_serialized_len,
+            largest_allowed_vec_len,
+            largest_allowed_serialized_len,
+        ) = max_allocation_is_big_enough(spend_auth_sig);
+
+        // Check the serialization limits for `Signature::<SpendAuth>`
+        prop_assert!(((smallest_disallowed_vec_len - 1) as u64) == Signature::<SpendAuth>::max_allocation());
+        prop_assert!((largest_allowed_vec_len as u64) == Signature::<SpendAuth>::max_allocation());
+        prop_assert!((largest_allowed_serialized_len as u64) <= MAX_BLOCK_BYTES);
     }
 }
 
-proptest! {
-    #![proptest_config(ProptestConfig::with_cases(128))]
-
-    /// Verify that...
-    /// 1. The smallest disallowed vector of `Action`s is too large to fit in a Zcash block
-    /// 2. The largest allowed vector is small enough to fit in a legal Zcash block
-    #[test]
-    fn action_max_allocation_is_correct(action in <Action>::arbitrary_with(())) {
-
-        let max_allocation: usize = <Action>::max_allocation().try_into().unwrap();
-        let mut smallest_disallowed_vec = Vec::with_capacity(max_allocation + 1);
-        for _ in 0..(<Action>::max_allocation()+1) {
-            smallest_disallowed_vec.push(action.clone());
-        }
-        let smallest_disallowed_serialized = smallest_disallowed_vec.zcash_serialize_to_vec().expect("Serialization to vec must succeed");
-        // Check that our smallest_disallowed_vec is only one item larger than the limit
-        prop_assert!(((smallest_disallowed_vec.len() - 1) as u64) == <Action>::max_allocation());
-        // Check that our smallest_disallowed_vec is too big to be included in a valid block
-        // Note that a serialized block always includes at least one byte for the number of transactions,
-        // so any serialized Vec<Action> at least MAX_BLOCK_BYTES long is too large to fit in a block.
-        prop_assert!((smallest_disallowed_serialized.len() as u64) >= MAX_BLOCK_BYTES);
-
-        // Create largest_allowed_vec by removing one element from smallest_disallowed_vec without copying (for efficiency)
-        smallest_disallowed_vec.pop();
-        let largest_allowed_vec = smallest_disallowed_vec;
-        let largest_allowed_serialized = largest_allowed_vec.zcash_serialize_to_vec().expect("Serialization to vec must succeed");
-
-        // Check that our largest_allowed_vec contains the maximum number of <Action>
-        prop_assert!((largest_allowed_vec.len() as u64) == <Action>::max_allocation());
-        // Check that our largest_allowed_vec is small enough to fit in a Zcash block.
-        prop_assert!((largest_allowed_serialized.len() as u64) < MAX_BLOCK_BYTES);
+/// Return the following calculations on `item`:
+///   smallest_disallowed_vec_len
+///   smallest_disallowed_serialized_len
+///   largest_allowed_vec_len
+///   largest_allowed_serialized_len
+fn max_allocation_is_big_enough<T>(item: T) -> (usize, usize, usize, usize)
+where
+    T: TrustedPreallocate + ZcashSerialize + Clone,
+{
+    let max_allocation: usize = T::max_allocation().try_into().unwrap();
+    let mut smallest_disallowed_vec = Vec::with_capacity(max_allocation + 1);
+    for _ in 0..(max_allocation + 1) {
+        smallest_disallowed_vec.push(item.clone());
     }
+    let smallest_disallowed_serialized = smallest_disallowed_vec
+        .zcash_serialize_to_vec()
+        .expect("Serialization to vec must succeed");
+    let smallest_disallowed_vec_len = smallest_disallowed_vec.len();
 
-    /// Verify that...
-    /// 1. The smallest disallowed vector of `Signature<SpendAuth>`s is too large to fit in a Zcash block
-    /// 2. The largest allowed vector is small enough to fit in a legal Zcash block
-    #[test]
-    fn spend_auth_sig_max_allocation_is_correct(sig in <Signature<SpendAuth>>::arbitrary_with(())) {
+    // Create largest_allowed_vec by removing one element from smallest_disallowed_vec without copying (for efficiency)
+    smallest_disallowed_vec.pop();
+    let largest_allowed_vec = smallest_disallowed_vec;
+    let largest_allowed_serialized = largest_allowed_vec
+        .zcash_serialize_to_vec()
+        .expect("Serialization to vec must succeed");
 
-        let max_allocation: usize = <Signature<SpendAuth>>::max_allocation().try_into().unwrap();
-        let mut smallest_disallowed_vec = Vec::with_capacity(max_allocation + 1);
-        for _ in 0..(<Signature<SpendAuth>>::max_allocation()+1) {
-            smallest_disallowed_vec.push(sig.clone());
-        }
-        let smallest_disallowed_serialized = smallest_disallowed_vec.zcash_serialize_to_vec().expect("Serialization to vec must succeed");
-        // Check that our smallest_disallowed_vec is only one item larger than the limit
-        prop_assert!(((smallest_disallowed_vec.len() - 1) as u64) == <Signature<SpendAuth>>::max_allocation());
-        // Check that our smallest_disallowed_vec is too big to be included in a valid block
-        // Note that a serialized block always includes at least one byte for the number of transactions,
-        // so any serialized Vec<Action> at least MAX_BLOCK_BYTES long is too large to fit in a block.
-        prop_assert!((smallest_disallowed_serialized.len() as u64) >= MAX_BLOCK_BYTES);
-
-        // Create largest_allowed_vec by removing one element from smallest_disallowed_vec without copying (for efficiency)
-        smallest_disallowed_vec.pop();
-        let largest_allowed_vec = smallest_disallowed_vec;
-        let largest_allowed_serialized = largest_allowed_vec.zcash_serialize_to_vec().expect("Serialization to vec must succeed");
-
-        // Check that our largest_allowed_vec contains the maximum number of <Action>
-        prop_assert!((largest_allowed_vec.len() as u64) == <Signature<SpendAuth>>::max_allocation());
-        // Check that our largest_allowed_vec is small enough to fit in a Zcash block.
-        prop_assert!((largest_allowed_serialized.len() as u64) < MAX_BLOCK_BYTES);
-    }
+    (
+        smallest_disallowed_vec_len,
+        smallest_disallowed_serialized.len(),
+        largest_allowed_vec.len(),
+        largest_allowed_serialized.len(),
+    )
 }

@@ -74,12 +74,6 @@ impl AuthorizedAction {
 /// [ps] https://zips.z.cash/protocol/nu5.pdf#actionencodingandconsensus
 pub const ACTION_SIZE: u64 = 5 * 32 + 580 + 80;
 
-impl TrustedPreallocate for Action {
-    fn max_allocation() -> u64 {
-        (MAX_BLOCK_BYTES - 1) / ACTION_SIZE
-    }
-}
-
 /// The size of a single Signature<SpendAuth>
 ///
 /// Each Signature is 64 bytes.
@@ -88,9 +82,34 @@ impl TrustedPreallocate for Action {
 /// [ps] https://zips.z.cash/protocol/nu5.pdf#actionencodingandconsensus
 pub const SPEND_AUTH_SIG_SIZE: u64 = 64;
 
+/// The size of a single AuthorizedAction
+///
+/// Is the size of an `Action` + a `Signature<SpendAuth>`
+pub const AUTHORIZED_ACTION_SIZE: u64 = ACTION_SIZE + SPEND_AUTH_SIG_SIZE;
+
+/// The maximum number of authorized orchard actions in a valid Zcash on-chain transaction V5.
+///
+/// If a transaction contains more actions than can fit in maximally large block, it might be
+/// valid on the network and in the mempool, but it can never be mined into a block. So
+/// rejecting these large edge-case transactions can never break consensus.
+impl TrustedPreallocate for AuthorizedAction {
+    fn max_allocation() -> u64 {
+        // Since a serialized Vec<AuthorizedAction> uses at least one byte for its length,
+        // and the associated fields are required,
+        // a valid max allocation can never exceed this size
+        (MAX_BLOCK_BYTES - 1) / AUTHORIZED_ACTION_SIZE
+    }
+}
+
+impl TrustedPreallocate for Action {
+    fn max_allocation() -> u64 {
+        AuthorizedAction::max_allocation()
+    }
+}
+
 impl TrustedPreallocate for Signature<SpendAuth> {
     fn max_allocation() -> u64 {
-        (MAX_BLOCK_BYTES - 1) / SPEND_AUTH_SIG_SIZE
+        AuthorizedAction::max_allocation()
     }
 }
 
