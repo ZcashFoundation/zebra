@@ -137,17 +137,17 @@ pub struct MetaAddr {
 }
 
 impl MetaAddr {
-    /// Create a new `MetaAddr` from the deserialized fields in a gossiped
-    /// peer `Addr` message.
-    pub fn new_gossiped(
-        addr: &SocketAddr,
-        services: &PeerServices,
-        last_seen: &DateTime<Utc>,
+    /// Create a new gossiped [`MetaAddr`], based on the deserialized fields from
+    /// a gossiped peer [`Addr`] message.
+    pub fn new_gossiped_meta_addr(
+        addr: SocketAddr,
+        untrusted_services: PeerServices,
+        untrusted_last_seen: DateTime<Utc>,
     ) -> MetaAddr {
         MetaAddr {
-            addr: *addr,
-            services: *services,
-            last_seen: *last_seen,
+            addr,
+            services: untrusted_services,
+            last_seen: untrusted_last_seen,
             // the state is Zebra-specific, it isn't part of the Zcash network protocol
             last_connection_state: NeverAttemptedGossiped,
         }
@@ -336,11 +336,16 @@ impl ZcashSerialize for MetaAddr {
 impl ZcashDeserialize for MetaAddr {
     fn zcash_deserialize<R: Read>(mut reader: R) -> Result<Self, SerializationError> {
         // This can't panic, because all u32 values are valid `Utc.timestamp`s
-        let last_seen = Utc.timestamp(reader.read_u32::<LittleEndian>()?.into(), 0);
-        let services = PeerServices::from_bits_truncate(reader.read_u64::<LittleEndian>()?);
+        let untrusted_last_seen = Utc.timestamp(reader.read_u32::<LittleEndian>()?.into(), 0);
+        let untrusted_services =
+            PeerServices::from_bits_truncate(reader.read_u64::<LittleEndian>()?);
         let addr = reader.read_socket_addr()?;
 
-        Ok(MetaAddr::new_gossiped(&addr, &services, &last_seen))
+        Ok(MetaAddr::new_gossiped_meta_addr(
+            addr,
+            untrusted_services,
+            untrusted_last_seen,
+        ))
     }
 }
 
