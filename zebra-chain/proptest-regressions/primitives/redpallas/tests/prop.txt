@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 68e194dd66b253f8e9ce1719d48859faee091b599b0eaa28f5565a0cb8dda0d7 # shrinks to tweaks = [ChangePubkey, ChangePubkey, ChangePubkey, ChangePubkey], rng_seed = [123, 133, 115, 59, 239, 12, 212, 123, 117, 56, 130, 93, 113, 174, 68, 31, 112, 35, 70, 148, 60, 142, 15, 200, 183, 123, 209, 36, 75, 164, 166, 174]
