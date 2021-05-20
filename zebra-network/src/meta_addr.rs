@@ -138,7 +138,7 @@ pub struct MetaAddr {
 
 impl MetaAddr {
     /// Create a new gossiped [`MetaAddr`], based on the deserialized fields from
-    /// a gossiped peer [`Addr`] message.
+    /// a gossiped peer [`Addr`][crate::protocol::external::Message::Addr] message.
     pub fn new_gossiped_meta_addr(
         addr: SocketAddr,
         untrusted_services: PeerServices,
