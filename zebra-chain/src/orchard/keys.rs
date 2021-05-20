@@ -221,12 +221,20 @@ impl SpendingKey {
 /// A Spend authorizing key (_ask_), as described in [protocol specification
 /// §4.2.3][orchardkeycomponents].
 ///
-/// Used to generate _spend authorization randomizers_ to sign each _Spend
-/// Description_, proving ownership of notes.
+/// Used to generate _spend authorization randomizers_ to sign each _Action
+/// Description_ that spends notes, proving ownership of notes.
 ///
 /// [orchardkeycomponents]: https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents
-#[derive(Copy, Clone, Eq, PartialEq)]
+#[derive(Copy, Clone)]
 pub struct SpendAuthorizingKey(pub pallas::Scalar);
+
+impl ConstantTimeEq for SpendAuthorizingKey {
+    /// Check whether two `SpendAuthorizingKey`s are equal, runtime independent
+    /// of the value of the secret.
+    fn ct_eq(&self, other: &Self) -> Choice {
+        self.0.to_bytes().ct_eq(&other.0.to_bytes())
+    }
+}
 
 impl fmt::Debug for SpendAuthorizingKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -258,11 +266,19 @@ impl From<SpendingKey> for SpendAuthorizingKey {
     }
 }
 
+impl Eq for SpendAuthorizingKey {}
+
+impl PartialEq for SpendAuthorizingKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.ct_eq(other).unwrap_u8() == 1u8
+    }
+}
+
 impl PartialEq<[u8; 32]> for SpendAuthorizingKey {
     // TODO: do we want to use constant-time comparison here?
     #[allow(clippy::cmp_owned)]
     fn eq(&self, other: &[u8; 32]) -> bool {
-        <[u8; 32]>::from(*self) == *other
+        self.0.to_bytes().ct_eq(other).unwrap_u8() == 1u8
     }
 }
 
@@ -318,8 +334,16 @@ impl PartialEq<[u8; 32]> for SpendValidatingKey {
 /// Used to create a _Nullifier_ per note.
 ///
 /// [orchardkeycomponents]: https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone)]
 pub struct NullifierDerivingKey(pub pallas::Base);
+
+impl ConstantTimeEq for NullifierDerivingKey {
+    /// Check whether two `NullifierDerivingKey`s are equal, runtime independent
+    /// of the value of the secret.
+    fn ct_eq(&self, other: &Self) -> Choice {
+        self.0.to_bytes().ct_eq(&other.0.to_bytes())
+    }
+}
 
 impl fmt::Debug for NullifierDerivingKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -366,6 +390,12 @@ impl From<SpendingKey> for NullifierDerivingKey {
 }
 
 impl Eq for NullifierDerivingKey {}
+
+impl PartialEq for NullifierDerivingKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.ct_eq(other).unwrap_u8() == 1u8
+    }
+}
 
 impl PartialEq<[u8; 32]> for NullifierDerivingKey {
     #[allow(clippy::cmp_owned)]
