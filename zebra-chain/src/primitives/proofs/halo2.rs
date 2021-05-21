@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::{fmt, io};
 
-use crate::serialization::{SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize};
+use crate::serialization::{
+    zcash_serialize_bytes, SerializationError, ZcashDeserialize, ZcashSerialize,
+};
 
 /// An encoding of a Halo2 proof, as used in [Zcash][halo2].
 ///
@@ -21,11 +23,8 @@ impl fmt::Debug for Halo2Proof {
 }
 
 impl ZcashSerialize for Halo2Proof {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        writer.write_compactsize(self.0.len() as u64)?;
-        writer.write_all(&self.0[..])?;
-
-        Ok(())
+    fn zcash_serialize<W: io::Write>(&self, writer: W) -> Result<(), io::Error> {
+        zcash_serialize_bytes(&self.0, writer)
     }
 }
 
