@@ -3,11 +3,11 @@ use proptest::{
     prelude::*,
 };
 
-use chrono::{TimeZone, Utc};
 use std::sync::Arc;
 
 use crate::{
     parameters::{Network, NetworkUpgrade},
+    primitives,
     work::{difficulty::CompactDifficulty, equihash},
 };
 
@@ -186,8 +186,7 @@ impl Arbitrary for Header {
             any::<Hash>(),
             any::<merkle::Root>(),
             any::<[u8; 32]>(),
-            // time is interpreted as u32 in the spec, but rust timestamps are i64
-            (0i64..(u32::MAX as i64)),
+            primitives::arbitrary::datetime_u32(),
             any::<CompactDifficulty>(),
             any::<[u8; 32]>(),
             any::<equihash::Solution>(),
@@ -198,7 +197,7 @@ impl Arbitrary for Header {
                     previous_block_hash,
                     merkle_root,
                     commitment_bytes,
-                    timestamp,
+                    time,
                     difficulty_threshold,
                     nonce,
                     solution,
@@ -207,7 +206,7 @@ impl Arbitrary for Header {
                     previous_block_hash,
                     merkle_root,
                     commitment_bytes,
-                    time: Utc.timestamp(timestamp, 0),
+                    time,
                     difficulty_threshold,
                     nonce,
                     solution,

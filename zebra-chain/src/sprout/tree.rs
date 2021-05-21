@@ -106,7 +106,7 @@ impl From<Root> for [u8; 32] {
 
 /// Sprout Note Commitment Tree
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-#[cfg_attr(test, derive(Arbitrary))]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 struct NoteCommitmentTree {
     /// The root node of the tree (often used as an anchor).
     root: Root,

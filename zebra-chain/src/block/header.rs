@@ -10,6 +10,9 @@ use crate::{
 
 use super::{merkle, Hash, Height};
 
+#[cfg(any(test, feature = "proptest-impl"))]
+use proptest_derive::Arbitrary;
+
 /// A block header, containing metadata about a block.
 ///
 /// How are blocks chained together? They are chained together via the
@@ -121,6 +124,7 @@ impl Header {
 ///
 /// This structure is used in the Bitcoin network protocol.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct CountedHeader {
     pub header: Header,
     pub transaction_count: usize,

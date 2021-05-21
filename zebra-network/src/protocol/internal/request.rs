@@ -7,6 +7,9 @@ use zebra_chain::{
 
 use super::super::types::Nonce;
 
+#[cfg(any(test, feature = "proptest-impl"))]
+use proptest_derive::Arbitrary;
+
 /// A network request, represented in internal format.
 ///
 /// The network layer aims to abstract away the details of the Bitcoin wire
@@ -27,6 +30,7 @@ use super::super::types::Nonce;
 /// a best-effort attempt to ignore any messages responsive to the cancelled
 /// request, subject to limitations in the underlying Zcash protocol.
 #[derive(Clone, Debug)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub enum Request {
     /// Requests additional peers from the server.
     ///

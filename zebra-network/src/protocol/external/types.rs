@@ -17,7 +17,7 @@ use proptest_derive::Arbitrary;
 
 /// A magic number identifying the network.
 #[derive(Copy, Clone, Eq, PartialEq)]
-#[cfg_attr(test, derive(Arbitrary))]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct Magic(pub [u8; 4]);
 
 impl fmt::Debug for Magic {
@@ -38,6 +38,7 @@ impl From<Network> for Magic {
 
 /// A protocol version number.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct Version(pub u32);
 
 impl Version {
@@ -89,6 +90,7 @@ bitflags! {
 
 /// A nonce used in the networking layer to identify messages.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct Nonce(pub u64);
 
 impl Default for Nonce {
@@ -100,6 +102,7 @@ impl Default for Nonce {
 
 /// A random value to add to the seed value in a hash function.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct Tweak(pub u32);
 
 impl Default for Tweak {
@@ -112,6 +115,7 @@ impl Default for Tweak {
 /// A Bloom filter consisting of a bit field of arbitrary byte-aligned
 /// size, maximum size is 36,000 bytes.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct Filter(pub Vec<u8>);
 
 #[cfg(test)]

@@ -14,6 +14,11 @@ use super::inv::InventoryHash;
 use super::types::*;
 use crate::meta_addr::MetaAddr;
 
+#[cfg(any(test, feature = "proptest-impl"))]
+use proptest_derive::Arbitrary;
+#[cfg(any(test, feature = "proptest-impl"))]
+use zebra_chain::primitives::arbitrary::datetime_full;
+
 /// A Bitcoin-like network message for the Zcash protocol.
 ///
 /// The Zcash network protocol is mostly inherited from Bitcoin, and a list of
@@ -31,6 +36,7 @@ use crate::meta_addr::MetaAddr;
 ///
 /// [btc_wiki_protocol]: https://en.bitcoin.it/wiki/Protocol_documentation
 #[derive(Clone, Eq, PartialEq, Debug)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub enum Message {
     /// A `version` message.
     ///
@@ -47,6 +53,12 @@ pub enum Message {
         services: PeerServices,
 
         /// The time when the version message was sent.
+        ///
+        /// This is a 64-bit field. Zebra rejects out-of-range times as invalid.
+        #[cfg_attr(
+            any(test, feature = "proptest-impl"),
+            proptest(strategy = "datetime_full()")
+        )]
         timestamp: DateTime<Utc>,
 
         /// The network address of the node receiving this message, and its
@@ -307,6 +319,7 @@ where
 ///
 /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#reject)
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 #[repr(u8)]
 #[allow(missing_docs)]
 pub enum RejectReason {
