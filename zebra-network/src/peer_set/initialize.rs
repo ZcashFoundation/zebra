@@ -12,7 +12,11 @@ use futures::{
     stream::{FuturesUnordered, StreamExt},
     TryFutureExt,
 };
-use tokio::{net::TcpListener, sync::broadcast, time::Instant};
+use tokio::{
+    net::TcpListener,
+    sync::{broadcast, watch},
+    time::Instant,
+};
 use tower::{
     buffer::Buffer, discover::Change, layer::Layer, load::peak_ewma::PeakEwmaDiscover,
     util::BoxService, Service, ServiceExt,
@@ -136,20 +140,21 @@ where
             .instrument(Span::current()),
     );
 
-    // 2. Initial peers, specified in the config.
-    let (initial_peer_count_tx, initial_peer_count_rx) = tokio::sync::oneshot::channel();
+    // 2. Initial peer connections, as specified in the config.
+
+    // Share the number of successful initial peers with the candidate set updater
+    let (initial_success_count_tx, mut initial_success_count_rx) = tokio::sync::watch::channel(0);
     let initial_peers_fut = {
         let config = config.clone();
         let outbound_connector = outbound_connector.clone();
         let peerset_tx = peerset_tx.clone();
         async move {
             let initial_peers = config.initial_peers().await;
-            let _ = initial_peer_count_tx.send(initial_peers.len());
-            // Connect the tx end to the 3 peer sources:
             add_initial_peers(
                 initial_peers,
                 outbound_connector,
                 peerset_tx,
+                initial_success_count_tx,
                 config.peerset_initial_target_size,
             )
             .await
@@ -166,9 +171,13 @@ where
     // `addr` message per connection, and if we only have one initial peer we
     // need to ensure that its `addr` message is used by the crawler.
 
-    info!("Sending initial request for peers");
+    info!("waiting for a successful initial peer connection");
+    // it doesn't matter if the sender has been dropped
+    let _ = initial_success_count_rx.changed().await;
+    info!(initial_successes = ?*initial_success_count_rx.borrow(),
+          "asking initial peers for new peers");
     let _ = candidates
-        .update_initial(initial_peer_count_rx.await.expect("value sent before drop"))
+        .update_initial(*initial_success_count_rx.borrow())
         .await;
 
     for _ in 0..config.peerset_initial_target_size {
@@ -199,11 +208,14 @@ where
 ///
 /// Stop trying peers once we've had `peerset_initial_target_size` successful
 /// handshakes.
-#[instrument(skip(initial_peers, outbound_connector, peerset_tx))]
+///
+/// Also updates `success_count_tx` with the number of successful peers.
+#[instrument(skip(initial_peers, outbound_connector, peerset_tx, success_count_tx))]
 async fn add_initial_peers<C>(
     initial_peers: std::collections::HashSet<SocketAddr>,
     outbound_connector: C,
     mut peerset_tx: mpsc::Sender<PeerChange>,
+    success_count_tx: watch::Sender<usize>,
     peerset_initial_target_size: usize,
 ) -> Result<(), BoxError>
 where
@@ -284,16 +296,19 @@ where
                     // the peer set is handled by an independent task, so this send
                     // shouldn't hang
                     peerset_tx.send(Ok(peer_set_change)).await?;
+                    // if the receiver has been dropped, we still want to process
+                    // the handshakes
+                    let _ = success_count_tx.send(success_count);
                 }
                 HandshakeFailed { failed_addr, error } => {
                     if success_count <= constants::GET_ADDR_FANOUT {
                         // this creates verbose logs, but it's better than just hanging on
                         // startup with no output
                         info!(addr = ?failed_addr.addr,
-                      ?error,
-                          ?success_count,
-                          ?peerset_initial_target_size,
-                      "an initial peer connection failed");
+                              ?error,
+                              ?success_count,
+                              ?peerset_initial_target_size,
+                              "an initial peer connection failed");
                     } else {
                         // switch to debug when we have enough peers
                         debug!(addr = ?failed_addr.addr,
@@ -329,8 +344,10 @@ where
         warn!(
             ?initial_peers_len,
             ?peerset_initial_target_size,
-            "no successful initial peer connections"
+            "no successful initial peer connections, starting crawler anyway"
         );
+        // this redundant update will start the crawler
+        let _ = success_count_tx.send(success_count);
     }
 
     Ok(())
