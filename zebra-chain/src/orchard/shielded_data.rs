@@ -84,32 +84,27 @@ pub const SPEND_AUTH_SIG_SIZE: u64 = 64;
 
 /// The size of a single AuthorizedAction
 ///
-/// Is the size of an `Action` + a `Signature<SpendAuth>`
+/// Each serialized `Action` has a corresponding `Signature<SpendAuth>`.
 pub const AUTHORIZED_ACTION_SIZE: u64 = ACTION_SIZE + SPEND_AUTH_SIG_SIZE;
 
-/// The maximum number of authorized orchard actions in a valid Zcash on-chain transaction V5.
+/// The maximum number of orchard actions in a valid Zcash on-chain transaction V5.
 ///
 /// If a transaction contains more actions than can fit in maximally large block, it might be
 /// valid on the network and in the mempool, but it can never be mined into a block. So
 /// rejecting these large edge-case transactions can never break consensus.
-impl TrustedPreallocate for AuthorizedAction {
+impl TrustedPreallocate for Action {
     fn max_allocation() -> u64 {
         // Since a serialized Vec<AuthorizedAction> uses at least one byte for its length,
-        // and the associated fields are required,
+        // and the signature is required,
         // a valid max allocation can never exceed this size
         (MAX_BLOCK_BYTES - 1) / AUTHORIZED_ACTION_SIZE
     }
 }
 
-impl TrustedPreallocate for Action {
-    fn max_allocation() -> u64 {
-        AuthorizedAction::max_allocation()
-    }
-}
-
 impl TrustedPreallocate for Signature<SpendAuth> {
     fn max_allocation() -> u64 {
-        AuthorizedAction::max_allocation()
+        // Each signature must have a corresponding action.
+        Action::max_allocation()
     }
 }
 

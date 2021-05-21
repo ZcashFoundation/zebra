@@ -2,7 +2,10 @@
 
 use crate::{
     block::MAX_BLOCK_BYTES,
-    orchard::{shielded_data::AUTHORIZED_ACTION_SIZE, Action, AuthorizedAction},
+    orchard::{
+        shielded_data::{ACTION_SIZE, AUTHORIZED_ACTION_SIZE},
+        Action, AuthorizedAction,
+    },
     primitives::redpallas::{Signature, SpendAuth},
     serialization::{TrustedPreallocate, ZcashSerialize},
 };
@@ -28,10 +31,14 @@ proptest! {
 
         let (
             smallest_disallowed_vec_len,
-            _smallest_disallowed_serialized_len,
+            smallest_disallowed_serialized_len,
             largest_allowed_vec_len,
             largest_allowed_serialized_len,
         ) = max_allocation_is_big_enough(action);
+
+        // Calculate the actual size of all required Action fields
+        prop_assert!((smallest_disallowed_serialized_len as u64)/ACTION_SIZE*AUTHORIZED_ACTION_SIZE >= MAX_BLOCK_BYTES);
+        prop_assert!((largest_allowed_serialized_len as u64)/ACTION_SIZE*AUTHORIZED_ACTION_SIZE <= MAX_BLOCK_BYTES);
 
         // Check the serialization limits for `Action`
         prop_assert!(((smallest_disallowed_vec_len - 1) as u64) == Action::max_allocation());
