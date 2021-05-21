@@ -280,6 +280,7 @@ struct Chain {
     sapling_anchors: HashSet<sapling::tree::Root>,
     sprout_nullifiers: HashSet<sprout::Nullifier>,
     sapling_nullifiers: HashSet<sapling::Nullifier>,
+    orchard_nullifiers: HashSet<orchard::Nullifier>,
     partial_cumulative_work: PartialCumulativeWork,
 }
 ```
@@ -608,6 +609,7 @@ We use the following rocksdb column families:
 | `utxo_by_outpoint`   | `OutPoint`            | `TransparentOutput`                 |
 | `sprout_nullifiers`  | `sprout::Nullifier`   | `()`                                |
 | `sapling_nullifiers` | `sapling::Nullifier`  | `()`                                |
+| `orchard_nullifiers` | `orchard::Nullifier`  | `()`                                |
 | `sprout_anchors`     | `sprout::tree::Root`  | `()`                                |
 | `sapling_anchors`    | `sapling::tree::Root` | `()`                                |
 
@@ -693,6 +695,9 @@ check that `block`'s parent hash is `null` (all zeroes) and its height is `0`.
 
    5. For each [`Spend`] description in the transaction, insert
    `(nullifier,())` into `sapling_nullifiers`.
+
+   6. For each [`Action`] description in the transaction, insert
+   `(nullifier,())` into `orchard_nullifiers`.
 
 **Note**: The Sprout and Sapling anchors are the roots of the Sprout and
 Sapling note commitment trees that have already been calculated for the last
