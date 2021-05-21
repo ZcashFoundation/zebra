@@ -137,7 +137,7 @@ pub struct MetaAddr {
 }
 
 impl MetaAddr {
-    /// Create a new seed [`MetaAddr`, based on the configured seed addresses.
+    /// Create a new seed [`MetaAddr`], based on the configured seed addresses.
     pub fn new_seed_meta_addr(addr: SocketAddr) -> MetaAddr {
         MetaAddr {
             addr,
