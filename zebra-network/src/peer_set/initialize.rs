@@ -261,7 +261,12 @@ where
         handshakes.push(Box::pin(hs_join));
 
         // 2. Check if any peers have finished their handshakes
-        while let Some(handshake_action) = handshakes.next().now_or_never().flatten() {
+        // If we've had enough successes, wait for all the handshakes to finish
+        while let Some(handshake_action) = if success_count < peerset_initial_target_size {
+            handshakes.next().now_or_never().flatten()
+        } else {
+            handshakes.next().await
+        } {
             use CrawlerAction::*;
             match handshake_action {
                 HandshakeConnected { peer_set_change } => {
@@ -297,7 +302,6 @@ where
                            ?peerset_initial_target_size,
                            "an initial peer connection failed");
                     }
-                    continue;
                 }
                 DemandCrawl | DemandDrop | DemandHandshake { .. } | TimerCrawl { .. } => {
                     unreachable!("unexpected CrawlerAction: should be handshake result")
