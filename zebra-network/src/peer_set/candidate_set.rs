@@ -1,8 +1,11 @@
-use std::{cmp::min, mem, sync::Arc, time::Duration};
+use std::{
+    cmp::{max, min},
+    sync::Arc,
+};
 
 use chrono::{DateTime, Utc};
 use futures::stream::{FuturesUnordered, StreamExt};
-use tokio::time::{sleep, sleep_until, timeout, Sleep};
+use tokio::time::{sleep_until, timeout, Instant};
 use tower::{Service, ServiceExt};
 
 use crate::{constants, types::MetaAddr, AddressBook, BoxError, Request, Response};
@@ -104,7 +107,7 @@ use crate::{constants, types::MetaAddr, AddressBook, BoxError, Request, Response
 pub(super) struct CandidateSet<S> {
     pub(super) address_book: Arc<std::sync::Mutex<AddressBook>>,
     pub(super) peer_service: S,
-    next_peer_min_wait: Sleep,
+    next_peer_sleep_until: Instant,
 }
 
 impl<S> CandidateSet<S>
@@ -128,7 +131,7 @@ where
         CandidateSet {
             address_book,
             peer_service,
-            next_peer_min_wait: sleep(Duration::from_secs(0)),
+            next_peer_sleep_until: Instant::now(),
         }
     }
 
@@ -278,10 +281,6 @@ where
     /// new peer connections are initiated at least
     /// `MIN_PEER_CONNECTION_INTERVAL` apart.
     pub async fn next(&mut self) -> Option<MetaAddr> {
-        let current_deadline = self.next_peer_min_wait.deadline();
-        let mut sleep = sleep_until(current_deadline + Self::MIN_PEER_CONNECTION_INTERVAL);
-        mem::swap(&mut self.next_peer_min_wait, &mut sleep);
-
         // # Correctness
         //
         // In this critical section, we hold the address mutex, blocking the
@@ -304,8 +303,18 @@ where
             reconnect
         };
 
-        // SECURITY: rate-limit new candidate connections
-        sleep.await;
+        // # Security
+        //
+        // Rate-limit new candidate connections to avoid denial of service.
+        //
+        // Update the deadline before sleeping, so we handle concurrent requests
+        // correctly.
+        let current_deadline = self.next_peer_sleep_until;
+        // If we recently had a connection, and we're about to sleep, base the
+        // next time off our sleep time. Otherwise, use the current time.
+        self.next_peer_sleep_until = max(self.next_peer_sleep_until, Instant::now());
+        self.next_peer_sleep_until += Self::MIN_PEER_CONNECTION_INTERVAL;
+        sleep_until(current_deadline).await;
 
         Some(reconnect)
     }
