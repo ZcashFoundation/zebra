@@ -31,4 +31,4 @@ pub use zcash_serialize::{
 };
 
 #[cfg(test)]
-mod tests;
+pub mod tests;
