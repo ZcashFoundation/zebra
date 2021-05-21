@@ -261,7 +261,7 @@ where
         handshakes.push(Box::pin(hs_join));
 
         // 2. Check if any peers have finished their handshakes
-        while let Some(handshake_action) = handshakes.next().await {
+        while let Some(handshake_action) = handshakes.next().now_or_never().flatten() {
             use CrawlerAction::*;
             match handshake_action {
                 HandshakeConnected { peer_set_change } => {
