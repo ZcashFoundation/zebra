@@ -17,7 +17,7 @@ use std::{convert::TryInto, sync::Arc};
 
 proptest! {
     /// Confirm that each spend takes at least MIN_TRANSPARENT_TX_SIZE bytes when serialized.
-    /// This verifies that our calculated `TrustedPreallocate::max_allocation()` is indeed an upper bound.
+    /// This verifies that our calculated [`TrustedPreallocate::max_allocation`] is indeed an upper bound.
     #[test]
     fn tx_size_is_small_enough(tx in Transaction::arbitrary()) {
         let serialized = tx.zcash_serialize_to_vec().expect("Serialization to vec must succeed");
@@ -25,7 +25,7 @@ proptest! {
     }
 
     /// Confirm that each spend takes at least MIN_TRANSPARENT_TX_SIZE bytes when serialized.
-    /// This verifies that our calculated `TrustedPreallocate::max_allocation()` is indeed an upper bound.
+    /// This verifies that our calculated [`TrustedPreallocate::max_allocation`] is indeed an upper bound.
     #[test]
     fn transparent_input_size_is_small_enough(input in Input::arbitrary()) {
         let serialized = input.zcash_serialize_to_vec().expect("Serialization to vec must succeed");
@@ -33,7 +33,7 @@ proptest! {
     }
 
     /// Confirm that each spend takes at least MIN_TRANSPARENT_TX_SIZE bytes when serialized.
-    /// This verifies that our calculated `TrustedPreallocate::max_allocation()` is indeed an upper bound.
+    /// This verifies that our calculated [`TrustedPreallocate::max_allocation`] is indeed an upper bound.
     #[test]
     fn transparent_output_size_is_small_enough(output in Output::arbitrary()) {
         let serialized = output.zcash_serialize_to_vec().expect("Serialization to vec must succeed");
