@@ -1,4 +1,4 @@
-use std::{collections::HashSet, sync::Arc};
+use std::{collections::HashSet, fmt, sync::Arc};
 
 use zebra_chain::{
     block,
@@ -174,4 +174,25 @@ pub enum Request {
     ///
     /// Returns [`Response::TransactionHashes`](super::Response::TransactionHashes).
     MempoolTransactions,
+}
+
+impl fmt::Display for Request {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(match self {
+            Request::Peers => "Peers",
+            Request::Ping(_) => "Ping",
+            // TODO: add length
+            Request::BlocksByHash(_) => "BlocksByHash",
+            Request::TransactionsByHash(_) => "TransactionsByHash",
+            // TODO: add length, stop Some/None
+            Request::FindBlocks { .. } => "FindBlocks",
+            Request::FindHeaders { .. } => "FindHeaders",
+            // TODO: add version, count of transparent, sprout, shielded, orchard
+            Request::PushTransaction(_) => "PushTransaction",
+            Request::AdvertiseTransactions(_) => "AdvertiseTransactions",
+            // TODO: add transaction count, versions?
+            Request::AdvertiseBlock(_) => "AdvertiseBlock",
+            Request::MempoolTransactions => "MempoolTransactions",
+        })
+    }
 }

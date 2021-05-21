@@ -18,11 +18,11 @@ use futures::{
 };
 use indexmap::IndexMap;
 use tokio::sync::{broadcast, oneshot::error::TryRecvError};
-use tokio::task::JoinHandle;
+use tokio::{task::JoinHandle, time::timeout};
 use tower::{
     discover::{Change, Discover},
     load::Load,
-    Service,
+    Service, ServiceExt,
 };
 
 use crate::{
@@ -37,6 +37,7 @@ use super::{
     unready_service::{Error as UnreadyError, UnreadyService},
     InventoryRegistry,
 };
+use tracing::{Instrument, Span};
 
 /// A [`tower::Service`] that abstractly represents "the rest of the network".
 ///
@@ -529,4 +530,78 @@ where
 
         fut
     }
+}
+
+/// Spawn `fanout_limit` copies of `request` to `peer_service`, each in a
+/// separate task.
+///
+/// Each task waits `readiness_timeout` for the peer service to be ready,
+/// and returns an error if there is a timeout.
+/// (There is no default timeout on peer service readiness.)
+///
+/// The readiness timeout happens before any request timeout on `peer_service`.
+/// (Requests have a default [`REQUEST_TIMEOUT`]. A shorter timeout can be
+/// applied using a [`tower::timeout::TimeoutLayer`] on `peer_service`.)
+///
+/// # Panics
+///
+/// If the peer service returns a permanent error.
+/// If the spawned task panics.
+///
+/// # Load Balancing
+///
+/// Because requests are load-balanced across existing peers, we can make
+/// multiple requests concurrently. These requests will be randomly assigned to
+/// existing peers. Avoid making too many requests, because fanouts may be called
+/// while the peer set is already loaded.
+///
+/// # Timeouts and Deadlocks
+///
+/// Use a small timeout to avoid deadlocks when there are no connected peers.
+///
+/// Deadlocks can happen when:
+/// - we're waiting on a handshake to complete so there are peers, or
+/// - another task that handles or adds peers is waiting on this task to
+///   complete.
+///
+/// The `readiness_timeout` should be long enough for:
+/// - some handshake tasks to complete, or
+/// - some requests to complete or timeout,
+/// and update the peer set readiness.
+///
+/// Use [`REQUEST_TIMEOUT`], unless you're sure you need a lower timeout.
+#[instrument(skip(peer_service))]
+pub fn spawn_fanout<P>(
+    peer_service: P,
+    request: Request,
+    fanout_limit: usize,
+    readiness_timeout: std::time::Duration,
+) -> impl futures::Stream<Item = Result<Response, BoxError>>
+where
+    P: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
+    P::Future: Send + 'static,
+{
+    let responses = FuturesUnordered::new();
+
+    for _ in 0..fanout_limit {
+        let mut peer_service = peer_service.clone();
+        let request = request.clone();
+        let response_fut = tokio::spawn(async move {
+            let ready_peer_service_fut = timeout(readiness_timeout, peer_service.ready_and());
+            if let Ok(peer_service) = ready_peer_service_fut.await {
+                // CORRECTNESS: peer set requests already have a timeout
+                peer_service
+                    .expect("unexpected peer service error")
+                    .call(request)
+                    .await
+            } else {
+                // timeouts are transient errors
+                debug!("timeout waiting for peer service readiness: skipping this fanout");
+                Err("peer set readiness timeout elapsed".into())
+            }
+        });
+        responses.push(response_fut.instrument(Span::current()));
+    }
+
+    responses.map(|rsp| rsp.expect("unexpected join error in spawned peer service request"))
 }

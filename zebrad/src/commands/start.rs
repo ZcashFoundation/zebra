@@ -22,6 +22,7 @@
 //!    * handles requests from peers for network data and chain data
 //!    * performs transaction and block diffusion
 //!    * downloads and verifies gossiped blocks and transactions
+use std::cmp::max;
 
 use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
 use color_eyre::eyre::{eyre, Report};
@@ -31,7 +32,7 @@ use tower::builder::ServiceBuilder;
 use crate::components::{tokio::RuntimeRun, Inbound};
 use crate::config::ZebradConfig;
 use crate::{
-    components::{tokio::TokioComponent, ChainSync},
+    components::{tokio::TokioComponent, ChainSync, MAX_INBOUND_DOWNLOAD_CONCURRENCY},
     prelude::*,
 };
 
@@ -49,10 +50,23 @@ impl StartCmd {
         info!(?config);
 
         info!("initializing node state");
-        let state = ServiceBuilder::new().buffer(20).service(zebra_state::init(
-            config.state.clone(),
-            config.network.network,
-        ));
+        // Add buffer slots based on the largest concurrent caller
+        //
+        // Note: Zebra is currently very sensitive to buffer size changes (#2193)
+        //
+        // SECURITY
+        //
+        // Keep this buffer small, to avoid memory denial of service
+        let state_limit = max(
+            config.sync.max_concurrent_block_requests,
+            MAX_INBOUND_DOWNLOAD_CONCURRENCY,
+        );
+        let state = ServiceBuilder::new()
+            .buffer(state_limit)
+            .service(zebra_state::init(
+                config.state.clone(),
+                config.network.network,
+            ));
 
         info!("initializing verifiers");
         let verifier = zebra_consensus::chain::init(
@@ -66,10 +80,27 @@ impl StartCmd {
         // The service that our node uses to respond to requests by peers. The
         // load_shed middleware ensures that we reduce the size of the peer set
         // in response to excess load.
+
+        // Add buffer slots based on the largest concurrent caller.
+        // But reserve two thirds the peer connections for outbound requests.
+        //
+        //
+        // Note: Zebra is currently very sensitive to buffer size changes (#2193)
+        //
+        // # SECURITY
+        //
+        // This buffer is a memory denial of service risk, because its
+        // blocks and transactions have only been structurally validated.
+        //
+        // TODO: Make this buffer smaller, to avoid memory denial of service (#1685, #2107)
+        let inbound_limit = max(
+            config.network.peerset_initial_target_size,
+            MAX_INBOUND_DOWNLOAD_CONCURRENCY,
+        ) / 3;
         let (setup_tx, setup_rx) = oneshot::channel();
         let inbound = ServiceBuilder::new()
             .load_shed()
-            .buffer(20)
+            .buffer(inbound_limit)
             .service(Inbound::new(setup_rx, state.clone(), verifier.clone()));
 
         let (peer_set, address_book) = zebra_network::init(config.network.clone(), inbound).await;

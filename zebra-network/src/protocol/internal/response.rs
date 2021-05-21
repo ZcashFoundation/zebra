@@ -5,7 +5,7 @@ use zebra_chain::{
 
 use crate::meta_addr::MetaAddr;
 
-use std::sync::Arc;
+use std::{fmt, sync::Arc};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
@@ -38,4 +38,19 @@ pub enum Response {
 
     /// A list of transaction hashes.
     TransactionHashes(Vec<transaction::Hash>),
+}
+
+impl fmt::Display for Response {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(match self {
+            Response::Nil => "Nil",
+            // TODO: add length
+            Response::Peers(_) => "Peers",
+            Response::Blocks(_) => "Blocks",
+            Response::BlockHashes(_) => "BlockHashes",
+            Response::BlockHeaders(_) => "BlockHeaders",
+            Response::Transactions(_) => "Transactions",
+            Response::TransactionHashes(_) => "TransactionHashes",
+        })
+    }
 }

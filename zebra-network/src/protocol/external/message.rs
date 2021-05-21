@@ -337,19 +337,23 @@ pub enum RejectReason {
 impl fmt::Display for Message {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str(match self {
+            // TODO: add network version, important fields
             Message::Version { .. } => "version",
             Message::Verack => "verack",
             Message::Ping(_) => "ping",
             Message::Pong(_) => "pong",
             Message::Reject { .. } => "reject",
             Message::GetAddr => "getaddr",
+            // TODO: add length
             Message::Addr(_) => "addr",
             Message::GetBlocks { .. } => "getblocks",
             Message::Inv(_) => "inv",
             Message::GetHeaders { .. } => "getheaders",
             Message::Headers(_) => "headers",
             Message::GetData(_) => "getdata",
+            // TODO: add transaction count, versions?
             Message::Block(_) => "block",
+            // TODO: add transparent, sprout, sapling, orchard counts?
             Message::Tx(_) => "tx",
             Message::NotFound(_) => "notfound",
             Message::Mempool => "mempool",

@@ -6,6 +6,8 @@
 //! This module contains a lot of undocumented state, assumptions and invariants.
 //! And it's unclear if these assumptions match the `zcashd` implementation.
 //! It should be refactored into a cleaner set of request/response pairs (#1515).
+//!
+//! Zebra is also very sensitive to order, timing, and buffer size changes (#2193).
 
 use std::{collections::HashSet, sync::Arc};
 
@@ -328,7 +330,7 @@ pub struct Connection<S, Tx> {
     /// State so that we can move the future out of it independently of
     /// other state handling.
     pub(super) request_timer: Option<Sleep>,
-    pub(super) svc: S,
+    pub(super) inbound_service: S,
     /// A `mpsc::Receiver<ClientRequest>` that converts its results to
     /// `InProgressClientRequest`
     pub(super) client_rx: ClientRequestReceiver,
@@ -904,30 +906,38 @@ where
     /// of connected peers.
     async fn drive_peer_request(&mut self, req: Request) {
         trace!(?req);
+        use futures::TryFutureExt;
+        use tokio::sync::oneshot::error::TryRecvError;
         use tower::{load_shed::error::Overloaded, ServiceExt};
 
-        if self.svc.ready_and().await.is_err() {
-            // Treat all service readiness errors as Overloaded
-            // TODO: treat `TryRecvError::Closed` in `Inbound::poll_ready` as a fatal error (#1655)
-            self.fail_with(PeerError::Overloaded);
-            return;
-        }
-
-        let rsp = match self.svc.call(req).await {
+        let rsp = match self
+            .inbound_service
+            .ready_and()
+            .and_then(|service| service.call(req.clone()))
+            .await
+        {
             Err(e) => {
-                if e.is::<Overloaded>() {
-                    tracing::warn!("inbound service is overloaded, closing connection");
-                    metrics::counter!("pool.closed.loadshed", 1);
-                    self.fail_with(PeerError::Overloaded);
+                if e.is::<TryRecvError>() {
+                    panic!(
+                        "unexpected initialization error in inbound service: {:?}",
+                        e
+                    );
+                } else if e.is::<Overloaded>() {
+                    // TODO: rate-limit closing connections during inbound service overload (#2107)
+                    // TODO: should we send a reject here?
+                    tracing::debug!(%req, "inbound service is overloaded, dropping request");
+                    metrics::counter!("pool.overloaded", 1);
                 } else {
                     // We could send a reject to the remote peer, but that might cause
                     // them to disconnect, and we might be using them to sync blocks.
                     // For similar reasons, we don't want to fail_with() here - we
                     // only close the connection if the peer is doing something wrong.
-                    error!(%e,
-                           connection_state = ?self.state,
-                           client_receiver = ?self.client_rx,
-                           "error processing peer request");
+                    error!(
+                        %e,
+                        connection_state = ?self.state,
+                        client_receiver = ?self.client_rx,
+                        "error processing peer request"
+                    );
                 }
                 return;
             }

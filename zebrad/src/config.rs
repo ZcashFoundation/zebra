@@ -151,6 +151,19 @@ pub struct SyncSection {
     /// network contention. Increasing this value may improve
     /// performance on machines with many cores and a fast network
     /// connection.
+    ///
+    /// Note: changing this config can make Zebra slower or less reliabile.
+    /// (See ticket #2193.)
+    ///
+    /// # SECURITY
+    ///
+    /// This config controls the syncer download and state buffer sizes.
+    /// Large values are a memory denial of service risk, because the
+    /// download buffer is before semantic verification, which checks
+    /// proof of work.
+    ///
+    /// The syncer fans out `FindBlocks` requests to random peers,
+    /// so the risk is lower than for inbound `AdvertiseBlock` requests.
     pub max_concurrent_block_requests: usize,
 
     /// Controls how far ahead of the chain tip the syncer tries to

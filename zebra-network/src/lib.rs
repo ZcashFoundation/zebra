@@ -80,7 +80,7 @@ pub use crate::{
     config::Config,
     isolated::connect_isolated,
     meta_addr::PeerAddrState,
-    peer_set::init,
+    peer_set::{init, spawn_fanout},
     policies::{RetryErrors, RetryLimit},
     protocol::internal::{Request, Response},
 };

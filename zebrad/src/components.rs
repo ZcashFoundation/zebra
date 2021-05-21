@@ -11,5 +11,5 @@ mod sync;
 pub mod tokio;
 pub mod tracing;
 
-pub use inbound::Inbound;
+pub use inbound::{Inbound, MAX_INBOUND_DOWNLOAD_CONCURRENCY};
 pub use sync::ChainSync;

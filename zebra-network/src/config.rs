@@ -46,6 +46,19 @@ pub struct Config {
     /// If you have a slow network connection, and Zebra is having trouble
     /// syncing, try reducing the peer set size. You can also reduce the peer
     /// set size to reduce Zebra's bandwidth usage.
+    ///
+    /// Note: changing this config can make Zebra slower or less reliabile.
+    /// (See ticket #2193.)
+    ///
+    /// # SECURITY
+    ///
+    /// This config controls the inbound download buffer size.
+    /// Large values are a memory denial of service risk, because the
+    /// inbound buffer is before semantic verification, which checks
+    /// proof of work.
+    ///
+    /// This buffer is high risk, because it accepts partially-validated blocks
+    /// from any peer.
     pub peerset_initial_target_size: usize,
 
     /// How frequently we attempt to crawl the network to discover new peer

@@ -9,9 +9,12 @@ use std::convert::TryInto;
 
 proptest! {
     /// Confirm that each MetaAddr takes exactly META_ADDR_SIZE bytes when serialized.
-    /// This verifies that our calculated `TrustedPreallocate::max_allocation()` is indeed an upper bound.
+    /// This verifies that our calculated [`TrustedPreallocate::max_allocation`] is indeed an upper bound.
     #[test]
     fn meta_addr_size_is_correct(addr in MetaAddr::arbitrary()) {
+        // TODO: make a strategy that has no None fields
+        prop_assume!(addr.sanitize().is_some());
+
         let serialized = addr
             .zcash_serialize_to_vec()
             .expect("Serialization to vec must succeed");
@@ -23,6 +26,9 @@ proptest! {
     /// 2. The largest allowed vector is small enough to fit in a legal Zcash message
     #[test]
     fn meta_addr_max_allocation_is_correct(addr in MetaAddr::arbitrary()) {
+        // TODO: make a strategy that has no None fields
+        prop_assume!(addr.sanitize().is_some());
+
         let max_allocation: usize = MetaAddr::max_allocation().try_into().unwrap();
         let mut smallest_disallowed_vec = Vec::with_capacity(max_allocation + 1);
         for _ in 0..(MetaAddr::max_allocation() + 1) {

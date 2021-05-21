@@ -1,10 +1,7 @@
 use std::{collections::HashSet, pin::Pin, sync::Arc, time::Duration};
 
 use color_eyre::eyre::{eyre, Report};
-use futures::{
-    future::FutureExt,
-    stream::{FuturesUnordered, StreamExt},
-};
+use futures::{future::FutureExt, stream::StreamExt};
 use tokio::time::sleep;
 use tower::{
     builder::ServiceBuilder, hedge::Hedge, limit::ConcurrencyLimit, retry::Retry, timeout::Timeout,
@@ -23,8 +20,7 @@ use crate::{config::ZebradConfig, BoxError};
 mod downloads;
 use downloads::{AlwaysHedge, Downloads};
 
-/// Controls the number of peers used for each ObtainTips and ExtendTips request.
-const FANOUT: usize = 4;
+use zn::constants::SYNC_FANOUT as FANOUT;
 
 /// Controls how many times we will retry each block download.
 ///
@@ -369,22 +365,20 @@ where
         tracing::info!(tip = ?block_locator.first().unwrap(), "trying to obtain new chain tips");
         tracing::debug!(?block_locator, "got block locator");
 
-        let mut requests = FuturesUnordered::new();
-        for _ in 0..FANOUT {
-            requests.push(
-                self.tip_network
-                    .ready_and()
-                    .await
-                    .map_err(|e| eyre!(e))?
-                    .call(zn::Request::FindBlocks {
-                        known_blocks: block_locator.clone(),
-                        stop: None,
-                    }),
-            );
-        }
+        let obtain_tips_req = zn::Request::FindBlocks {
+            known_blocks: block_locator.clone(),
+            stop: None,
+        };
+        let mut responses = zn::spawn_fanout(
+            self.tip_network.clone(),
+            obtain_tips_req,
+            // TODO: use a lower limit if there aren't many live peers (#1552)
+            FANOUT,
+            zn::constants::REQUEST_TIMEOUT,
+        );
 
         let mut download_set = HashSet::new();
-        while let Some(res) = requests.next().await {
+        while let Some(res) = responses.next().await {
             match res.map_err::<Report, _>(|e| eyre!(e)) {
                 Ok(zn::Response::BlockHashes(hashes)) => {
                     tracing::trace!(?hashes);
@@ -484,19 +478,19 @@ where
         tracing::info!(tips = ?tips.len(), "trying to extend chain tips");
         for tip in tips {
             tracing::debug!(?tip, "asking peers to extend chain tip");
-            let mut responses = FuturesUnordered::new();
-            for _ in 0..FANOUT {
-                responses.push(
-                    self.tip_network
-                        .ready_and()
-                        .await
-                        .map_err(|e| eyre!(e))?
-                        .call(zn::Request::FindBlocks {
-                            known_blocks: vec![tip.tip],
-                            stop: None,
-                        }),
-                );
-            }
+
+            let extend_tips_req = zn::Request::FindBlocks {
+                known_blocks: vec![tip.tip],
+                stop: None,
+            };
+            let mut responses = zn::spawn_fanout(
+                self.tip_network.clone(),
+                extend_tips_req,
+                // TODO: use a lower limit if there aren't many live peers (#1552)
+                FANOUT,
+                zn::constants::REQUEST_TIMEOUT,
+            );
+
             while let Some(res) = responses.next().await {
                 match res.map_err::<Report, _>(|e| eyre!(e)) {
                     Ok(zn::Response::BlockHashes(hashes)) => {

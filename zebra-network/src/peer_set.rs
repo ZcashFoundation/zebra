@@ -9,3 +9,4 @@ use inventory_registry::InventoryRegistry;
 use set::PeerSet;
 
 pub use initialize::init;
+pub use set::spawn_fanout;

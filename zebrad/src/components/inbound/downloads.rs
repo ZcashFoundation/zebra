@@ -19,8 +19,6 @@ use zebra_chain::block::{self, Block};
 use zebra_network as zn;
 use zebra_state as zs;
 
-type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
-
 /// The maximum number of concurrent inbound download and verify tasks.
 ///
 /// We expect the syncer to download and verify checkpoints, so this bound
@@ -32,10 +30,9 @@ type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 /// attacks.
 ///
 /// The maximum block size is 2 million bytes. A deserialized malicious
-/// block with ~225_000 transparent outputs can take up 9MB of RAM. As of
-/// February 2021, a growing `Vec` can allocate up to 2x its current length,
-/// leading to an overall memory usage of 18MB per malicious block. (See
-/// #1880 for more details.)
+/// block with ~225_000 transparent outputs can take up 9MB of RAM. (Since Zebra
+/// uses preallocation, the transparent output `Vec` won't have a large amount of
+/// unused allocated memory.)
 ///
 /// Malicious blocks will eventually timeout or fail contextual validation.
 /// Once validation fails, the block is dropped, and its memory is deallocated.
@@ -43,7 +40,9 @@ type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 /// Since Zebra keeps an `inv` index, inbound downloads for malicious blocks
 /// will be directed to the malicious node that originally gossiped the hash.
 /// Therefore, this attack can be carried out by a single malicious node.
-const MAX_INBOUND_CONCURRENCY: usize = 10;
+pub const MAX_INBOUND_DOWNLOAD_CONCURRENCY: usize = 10;
+
+type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 /// The action taken in response to a peer's gossiped block hash.
 pub enum DownloadAction {
@@ -58,7 +57,7 @@ pub enum DownloadAction {
     /// The queue is at capacity, so this request was ignored.
     ///
     /// The sync service should discover this block later, when we are closer
-    /// to the tip. The queue's capacity is [`MAX_INBOUND_CONCURRENCY`].
+    /// to the tip. The queue's capacity is [`MAX_INBOUND_DOWNLOAD_CONCURRENCY`].
     FullQueue,
 }
 
@@ -173,17 +172,17 @@ where
             tracing::debug!(
                 ?hash,
                 queue_len = self.pending.len(),
-                ?MAX_INBOUND_CONCURRENCY,
+                ?MAX_INBOUND_DOWNLOAD_CONCURRENCY,
                 "block hash already queued for inbound download: ignored block"
             );
             return DownloadAction::AlreadyQueued;
         }
 
-        if self.pending.len() >= MAX_INBOUND_CONCURRENCY {
+        if self.pending.len() >= MAX_INBOUND_DOWNLOAD_CONCURRENCY {
             tracing::info!(
                 ?hash,
                 queue_len = self.pending.len(),
-                ?MAX_INBOUND_CONCURRENCY,
+                ?MAX_INBOUND_DOWNLOAD_CONCURRENCY,
                 "too many blocks queued for inbound download: ignored block"
             );
             return DownloadAction::FullQueue;
@@ -254,7 +253,7 @@ where
         tracing::debug!(
             ?hash,
             queue_len = self.pending.len(),
-            ?MAX_INBOUND_CONCURRENCY,
+            ?MAX_INBOUND_DOWNLOAD_CONCURRENCY,
             "queued hash for download"
         );
         metrics::gauge!("gossip.queued.block.count", self.pending.len() as _);

@@ -25,6 +25,7 @@ use super::sync::{BLOCK_DOWNLOAD_TIMEOUT, BLOCK_VERIFY_TIMEOUT};
 
 mod downloads;
 use downloads::Downloads;
+pub use downloads::MAX_INBOUND_DOWNLOAD_CONCURRENCY;
 
 type Outbound = Buffer<BoxService<zn::Request, zn::Response, zn::BoxError>, zn::Request>;
 type State = Buffer<BoxService<zs::Request, zs::Response, zs::BoxError>, zs::Request>;
@@ -225,6 +226,15 @@ impl Service<zn::Request> for Inbound {
 
     #[instrument(name = "inbound", skip(self, req))]
     fn call(&mut self, req: zn::Request) -> Self::Future {
+        // Drop early requests to avoid load shedding during network setup
+        if !matches!(self.network_setup, Setup::Initialized { .. }) {
+            debug!(%req,
+                "ignoring request from remote peer during network setup"
+            );
+            trace!(?req, "full inbound request");
+            return async { Ok(zn::Response::Nil) }.boxed();
+        }
+
         match req {
             zn::Request::Peers => {
                 if let Setup::Initialized { address_book, .. } = &self.network_setup {
@@ -252,8 +262,7 @@ impl Service<zn::Request> for Inbound {
                     peers.truncate(MAX_ADDR);
                     async { Ok(zn::Response::Peers(peers)) }.boxed()
                 } else {
-                    info!("ignoring `Peers` request from remote peer during network setup");
-                    async { Ok(zn::Response::Nil) }.boxed()
+                    unreachable!("already checked for network setup");
                 }
             }
             zn::Request::BlocksByHash(hashes) => {
@@ -326,10 +335,7 @@ impl Service<zn::Request> for Inbound {
                 if let Setup::Initialized { downloads, .. } = &mut self.network_setup {
                     downloads.download_and_verify(hash);
                 } else {
-                    info!(
-                        ?hash,
-                        "ignoring `AdvertiseBlock` request from remote peer during network setup"
-                    );
+                    unreachable!("already checked for network setup");
                 }
                 async { Ok(zn::Response::Nil) }.boxed()
             }
