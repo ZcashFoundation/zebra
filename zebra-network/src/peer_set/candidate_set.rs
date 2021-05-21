@@ -115,14 +115,6 @@ where
     S: Service<Request, Response = Response, Error = BoxError>,
     S::Future: Send + 'static,
 {
-    /// The minimum time between successive calls to `CandidateSet::next()`.
-    ///
-    /// ## Security
-    ///
-    /// Zebra resists distributed denial of service attacks by making sure that new peer connections
-    /// are initiated at least `MIN_PEER_CONNECTION_INTERVAL` apart.
-    const MIN_PEER_CONNECTION_INTERVAL: Duration = Duration::from_millis(100);
-
     /// Uses `address_book` and `peer_service` to manage a [`CandidateSet`] of peers.
     pub fn new(
         address_book: Arc<std::sync::Mutex<AddressBook>>,
@@ -313,7 +305,7 @@ where
         // If we recently had a connection, and we're about to sleep, base the
         // next time off our sleep time. Otherwise, use the current time.
         self.next_peer_sleep_until = max(self.next_peer_sleep_until, Instant::now());
-        self.next_peer_sleep_until += Self::MIN_PEER_CONNECTION_INTERVAL;
+        self.next_peer_sleep_until += constants::MIN_PEER_CONNECTION_INTERVAL;
         sleep_until(current_deadline).await;
 
         Some(reconnect)

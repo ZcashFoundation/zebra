@@ -22,8 +22,22 @@ use zebra_chain::parameters::NetworkUpgrade;
 /// buffer adds up to 6 seconds worth of blocks to the queue.
 pub const PEERSET_BUFFER_SIZE: usize = 3;
 
-/// The timeout for requests made to a remote peer.
-pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
+/// The timeout for DNS lookups.
+///
+/// [6.1.3.3 Efficient Resource Usage] from [RFC 1123: Requirements for Internet Hosts]
+/// suggest no less than 5 seconds for resolving timeout.
+///
+/// [RFC 1123: Requirements for Internet Hosts] https://tools.ietf.org/rfcmarkup?doc=1123
+/// [6.1.3.3  Efficient Resource Usage] https://tools.ietf.org/rfcmarkup?doc=1123#page-77
+pub const DNS_LOOKUP_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// The minimum time between connections to initial or candidate peers.
+///
+/// ## Security
+///
+/// Zebra resists distributed denial of service attacks by making sure that new peer connections
+/// are initiated at least `MIN_PEER_CONNECTION_INTERVAL` apart.
+pub const MIN_PEER_CONNECTION_INTERVAL: Duration = Duration::from_millis(100);
 
 /// The timeout for handshakes when connecting to new peers.
 ///
@@ -31,6 +45,9 @@ pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 /// into the peer set. This is particularly important for network-constrained
 /// nodes, and on testnet.
 pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(4);
+
+/// The timeout for requests made to a remote peer.
+pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// We expect to receive a message from a live peer at least once in this time duration.
 ///
@@ -122,15 +139,6 @@ lazy_static! {
         Regex::new("(access a socket in a way forbidden by its access permissions)|(Only one usage of each socket address)")
     }.expect("regex is valid");
 }
-
-/// The timeout for DNS lookups.
-///
-/// [6.1.3.3 Efficient Resource Usage] from [RFC 1123: Requirements for Internet Hosts]
-/// suggest no less than 5 seconds for resolving timeout.
-///
-/// [RFC 1123: Requirements for Internet Hosts] https://tools.ietf.org/rfcmarkup?doc=1123
-/// [6.1.3.3  Efficient Resource Usage] https://tools.ietf.org/rfcmarkup?doc=1123#page-77
-pub const DNS_LOOKUP_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Magic numbers used to identify different Zcash networks.
 pub mod magics {
