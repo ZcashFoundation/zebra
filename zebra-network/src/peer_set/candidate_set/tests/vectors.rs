@@ -34,6 +34,25 @@ fn offsets_last_seen_times_in_the_future() {
     assert_eq!(validated_peers, expected_peers);
 }
 
+/// Test that offset is not applied if all addresses have `last_seen` times that are in the past.
+#[test]
+fn doesnt_offset_last_seen_times_in_the_past() {
+    let last_seen_limit = DateTime32::now();
+    let last_seen_limit_chrono = last_seen_limit.to_chrono();
+
+    let input_peers = mock_gossiped_peers(vec![
+        last_seen_limit_chrono - Duration::minutes(30),
+        last_seen_limit_chrono - Duration::minutes(45),
+        last_seen_limit_chrono - Duration::days(1),
+    ]);
+
+    let validated_peers: Vec<_> = validate_addrs(input_peers.clone(), last_seen_limit).collect();
+
+    let expected_peers = input_peers;
+
+    assert_eq!(validated_peers, expected_peers);
+}
+
 /// Create a mock list of gossiped [`MetaAddr`]s with the specified `last_seen_times`.
 ///
 /// The IP address and port of the generated ports should not matter for the test.
