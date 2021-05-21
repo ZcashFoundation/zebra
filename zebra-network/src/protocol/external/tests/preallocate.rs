@@ -9,7 +9,7 @@ use std::convert::TryInto;
 
 proptest! {
     /// Confirm that each InventoryHash takes exactly INV_HASH_SIZE bytes when serialized.
-    /// This verifies that our calculated `TrustedPreallocate::max_allocation()` is indeed an upper bound.
+    /// This verifies that our calculated [`TrustedPreallocate::max_allocation`] is indeed an upper bound.
     #[test]
     fn inv_hash_size_is_correct(inv in InventoryHash::arbitrary()) {
         let serialized_inv = inv

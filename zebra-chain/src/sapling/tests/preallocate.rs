@@ -24,7 +24,7 @@ proptest! {
     /// Confirm that each `Spend<PerSpendAnchor>` takes exactly
     /// ANCHOR_PER_SPEND_SIZE bytes when serialized.
     ///
-    /// This verifies that our calculated `TrustedPreallocate::max_allocation()`
+    /// This verifies that our calculated [`TrustedPreallocate::max_allocation`]
     /// is indeed an upper bound.
     #[test]
     fn anchor_per_spend_size_is_small_enough(spend in Spend::<PerSpendAnchor>::arbitrary_with(())) {
@@ -128,7 +128,7 @@ proptest! {
     /// Confirm that each output takes exactly OUTPUT_SIZE bytes when serialized
     /// in a V4 or V5 transaction.
     ///
-    /// This verifies that our calculated `TrustedPreallocate::max_allocation()`
+    /// This verifies that our calculated [`TrustedPreallocate::max_allocation`]
     /// is indeed an upper bound.
     #[test]
     fn output_size_is_small_enough(output in Output::arbitrary_with(())) {

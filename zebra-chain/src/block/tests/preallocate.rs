@@ -49,7 +49,7 @@ proptest! {
     }
 
     /// Confirm that each counted header takes at least COUNTED_HEADER_LEN bytes when serialized.
-    /// This verifies that our calculated `TrustedPreallocate::max_allocation()` is indeed an upper bound.
+    /// This verifies that our calculated [`TrustedPreallocate::max_allocation`] is indeed an upper bound.
     #[test]
     fn counted_header_min_length(header in Header::arbitrary_with(()), transaction_count in (0..MAX_BLOCK_BYTES)) {
         let header = CountedHeader {
