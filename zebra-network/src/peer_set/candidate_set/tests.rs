@@ -1,0 +1,3 @@
+//! [`CandidateSet`] tests.
+
+mod vectors;
