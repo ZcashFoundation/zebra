@@ -358,8 +358,16 @@ impl PartialEq<[u8; 32]> for SpendAuthorizingKey {
 /// Used in the _Spend Statement_ to prove nullifier integrity.
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
-#[derive(Copy, Clone, Eq, PartialEq)]
+#[derive(Copy, Clone)]
 pub struct ProofAuthorizingKey(pub(crate) Scalar);
+
+impl ConstantTimeEq for ProofAuthorizingKey {
+    /// Check whether two `ProofAuthorizingKey`s are equal, runtime independent
+    /// of the value of the secret.
+    fn ct_eq(&self, other: &Self) -> Choice {
+        self.0.to_bytes().ct_eq(&other.0.to_bytes())
+    }
+}
 
 impl fmt::Debug for ProofAuthorizingKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -368,6 +376,8 @@ impl fmt::Debug for ProofAuthorizingKey {
             .finish()
     }
 }
+
+impl Eq for ProofAuthorizingKey {}
 
 impl From<ProofAuthorizingKey> for [u8; 32] {
     fn from(nsk: ProofAuthorizingKey) -> Self {
@@ -387,11 +397,15 @@ impl From<SpendingKey> for ProofAuthorizingKey {
     }
 }
 
-impl PartialEq<[u8; 32]> for ProofAuthorizingKey {
-    // TODO: do we want to use constant-time comparison here?
+impl PartialEq for ProofAuthorizingKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.ct_eq(other).unwrap_u8() == 1u8
+    }
+}
 
+impl PartialEq<[u8; 32]> for ProofAuthorizingKey {
     fn eq(&self, other: &[u8; 32]) -> bool {
-        <[u8; 32]>::from(*self) == *other
+        self.0.to_bytes().ct_eq(other).unwrap_u8() == 1u8
     }
 }
 
@@ -479,13 +493,13 @@ impl From<SpendAuthorizingKey> for AuthorizingKey {
 
 impl PartialEq for AuthorizingKey {
     fn eq(&self, other: &Self) -> bool {
-        <[u8; 32]>::from(self.0) == <[u8; 32]>::from(other.0)
+        self == &<[u8; 32]>::from(*other)
     }
 }
 
 impl PartialEq<[u8; 32]> for AuthorizingKey {
     fn eq(&self, other: &[u8; 32]) -> bool {
-        <[u8; 32]>::from(self.0) == *other
+        &<[u8; 32]>::from(self.0) == other
     }
 }
 
@@ -855,7 +869,7 @@ impl From<(IncomingViewingKey, Diversifier)> for TransmissionKey {
 
 impl PartialEq<[u8; 32]> for TransmissionKey {
     fn eq(&self, other: &[u8; 32]) -> bool {
-        <[u8; 32]>::from(*self) == *other
+        &self.0.to_bytes() == other
     }
 }
 
@@ -977,7 +991,7 @@ impl From<&EphemeralPublicKey> for [u8; 32] {
 
 impl PartialEq<[u8; 32]> for EphemeralPublicKey {
     fn eq(&self, other: &[u8; 32]) -> bool {
-        <[u8; 32]>::from(self) == *other
+        &self.0.to_bytes() == other
     }
 }
 

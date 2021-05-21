@@ -317,6 +317,7 @@ impl From<SpendAuthorizingKey> for SpendValidatingKey {
 impl PartialEq for SpendValidatingKey {
     #[allow(clippy::cmp_owned)]
     fn eq(&self, other: &Self) -> bool {
+        // XXX: These redpallas::VerificationKey(Bytes) fields are pub(crate)
         self.0.bytes.bytes == other.0.bytes.bytes
     }
 }
@@ -324,6 +325,7 @@ impl PartialEq for SpendValidatingKey {
 impl PartialEq<[u8; 32]> for SpendValidatingKey {
     #[allow(clippy::cmp_owned)]
     fn eq(&self, other: &[u8; 32]) -> bool {
+        // XXX: These redpallas::VerificationKey(Bytes) fields are pub(crate)
         self.0.bytes.bytes == *other
     }
 }
