@@ -6,7 +6,7 @@ use std::{
 
 use tracing::{debug_span, instrument, trace};
 use zebra_chain::{
-    block, primitives::Groth16Proof, sapling, sprout, transaction, transparent,
+    block, orchard, primitives::Groth16Proof, sapling, sprout, transaction, transparent,
     work::difficulty::PartialCumulativeWork,
 };
 
@@ -24,6 +24,7 @@ pub struct Chain {
     sapling_anchors: HashSet<sapling::tree::Root>,
     sprout_nullifiers: HashSet<sprout::Nullifier>,
     sapling_nullifiers: HashSet<sapling::Nullifier>,
+    orchard_nullifiers: HashSet<orchard::Nullifier>,
     partial_cumulative_work: PartialCumulativeWork,
 }
 
@@ -359,6 +360,27 @@ where
             for nullifier in sapling_shielded_data.nullifiers() {
                 assert!(
                     self.sapling_nullifiers.remove(nullifier),
+                    "nullifier must be present if block was"
+                );
+            }
+        }
+    }
+}
+
+impl UpdateWith<Option<orchard::ShieldedData>> for Chain {
+    fn update_chain_state_with(&mut self, orchard_shielded_data: &Option<orchard::ShieldedData>) {
+        if let Some(orchard_shielded_data) = orchard_shielded_data {
+            for nullifier in orchard_shielded_data.nullifiers() {
+                self.orchard_nullifiers.insert(*nullifier);
+            }
+        }
+    }
+
+    fn revert_chain_state_with(&mut self, orchard_shielded_data: &Option<orchard::ShieldedData>) {
+        if let Some(orchard_shielded_data) = orchard_shielded_data {
+            for nullifier in orchard_shielded_data.nullifiers() {
+                assert!(
+                    self.orchard_nullifiers.remove(nullifier),
                     "nullifier must be present if block was"
                 );
             }
