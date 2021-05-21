@@ -133,7 +133,7 @@ where
 
     /// Update the peer set from the network, using the default fanout limit.
     ///
-    /// See [`update_initial`] for details.
+    /// See [`update_initial`][Self::update_initial] for details.
     pub async fn update(&mut self) -> Result<(), BoxError> {
         self.update_timeout(None).await
     }
@@ -156,9 +156,14 @@ where
     /// The handshaker sets up the peer message receiver so it also sends a
     /// [`Responded`] peer address update.
     ///
-    /// [`report_failed`] puts peers into the [`Failed`] state.
+    /// [`report_failed`][Self::report_failed] puts peers into the [`Failed`] state.
     ///
-    /// [`next`] puts peers into the [`AttemptPending`] state.
+    /// [`next`][Self::next] puts peers into the [`AttemptPending`] state.
+    ///
+    /// [`Responded`]: crate::PeerAddrState::Responded
+    /// [`NeverAttemptedGossiped`]: crate::PeerAddrState::NeverAttemptedGossiped
+    /// [`Failed`]: crate::PeerAddrState::Failed
+    /// [`AttemptPending`]: crate::PeerAddrState::AttemptPending
     pub async fn update_initial(&mut self, fanout_limit: usize) -> Result<(), BoxError> {
         self.update_timeout(Some(fanout_limit)).await
     }
@@ -166,7 +171,7 @@ where
     /// Update the peer set from the network, limiting the fanout to
     /// `fanout_limit`, and imposing a timeout on the entire fanout.
     ///
-    /// See [`update_initial`] for details.
+    /// See [`update_initial`][Self::update_initial] for details.
     async fn update_timeout(&mut self, fanout_limit: Option<usize>) -> Result<(), BoxError> {
         // CORRECTNESS
         //
@@ -190,11 +195,12 @@ where
     /// Update the peer set from the network, limiting the fanout to
     /// `fanout_limit`.
     ///
-    /// See [`update_initial`] for details.
+    /// See [`update_initial`][Self::update_initial]  for details.
     ///
     /// # Correctness
     ///
-    /// This function does not have a timeout. Use [`update_timeout`] instead.
+    /// This function does not have a timeout.
+    /// Use [`update_timeout`][Self::update_timeout] instead.
     async fn update_fanout(&mut self, fanout_limit: Option<usize>) -> Result<(), BoxError> {
         // Opportunistically crawl the network on every update call to ensure
         // we're actively fetching peers. Continue independently of whether we
