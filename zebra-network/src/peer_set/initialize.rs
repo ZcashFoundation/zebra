@@ -146,7 +146,13 @@ where
             let initial_peers = config.initial_peers().await;
             let _ = initial_peer_count_tx.send(initial_peers.len());
             // Connect the tx end to the 3 peer sources:
-            add_initial_peers(initial_peers, outbound_connector, peerset_tx).await
+            add_initial_peers(
+                initial_peers,
+                outbound_connector,
+                peerset_tx,
+                config.peerset_initial_target_size,
+            )
+            .await
         }
         .boxed()
     };
@@ -190,11 +196,15 @@ where
 
 /// Use the provided `outbound_connector` to connect to `initial_peers`, then
 /// send the results over `peerset_tx`.
+///
+/// Stop trying peers once we've had `peerset_initial_target_size` successful
+/// handshakes.
 #[instrument(skip(initial_peers, outbound_connector, peerset_tx))]
 async fn add_initial_peers<C>(
     initial_peers: std::collections::HashSet<SocketAddr>,
     outbound_connector: C,
     mut peerset_tx: mpsc::Sender<PeerChange>,
+    peerset_initial_target_size: usize,
 ) -> Result<(), BoxError>
 where
     C: Service<SocketAddr, Response = Change<SocketAddr, peer::Client>, Error = BoxError>
@@ -207,6 +217,7 @@ where
     info!(
         ?initial_peers_len,
         ?initial_peers,
+        ?peerset_initial_target_size,
         "connecting to initial peer set"
     );
 
@@ -217,9 +228,12 @@ where
     // ## Concurrency
     //
     // We spawn each handshake in a separate task. This avoids:
-    // - sequentially waiting on each handshake's timeout:
-    //   `4 seconds * initial peer count` maximum delay
+    // - sequentially waiting on each handshake's timeout, and
     // - dependencies between the first successful initial peer and other tasks
+    //
+    // ## Denial of Service
+    //
+    // We sleep for `MIN_PEER_CONNECTION_INTERVAL` between handshakes.
     //
     // ## Buffer Reservations
     //
@@ -228,7 +242,11 @@ where
     // underlying `Handshake` buffer, because we immediately drive this single
     // `FuturesUnordered` to completion, and handshakes have a short timeout.
     let mut handshakes = FuturesUnordered::new();
+    // TODO: replace with *success_count_tx.borrow() in Tokio 1.6
+    let mut success_count = 0;
     for candidate in initial_meta_addr {
+        // 1. Spawn a task to handshake with a new peer
+        let next_peer_sleep_until = Instant::now() + constants::MIN_PEER_CONNECTION_INTERVAL;
         let hs_join = tokio::spawn(dial(candidate, outbound_connector.clone()))
             .map(move |res| match res {
                 Ok(crawler_action) => crawler_action,
@@ -241,44 +259,58 @@ where
             })
             .instrument(Span::current());
         handshakes.push(Box::pin(hs_join));
-    }
 
-    // TODO: replace with *success_count_tx.borrow() in Tokio 1.6
-    let mut success_count = 0;
-    while let Some(handshake_action) = handshakes.next().await {
-        use CrawlerAction::*;
-        match handshake_action {
-            HandshakeConnected { peer_set_change } => {
-                success_count += 1;
-                if let Change::Insert(ref addr, _) = peer_set_change {
-                    debug!(?addr, ?success_count, "successfully dialed initial peer");
-                } else {
-                    unreachable!("unexpected handshake result: all changes should be Insert");
+        // 2. Check if any peers have finished their handshakes
+        while let Some(handshake_action) = handshakes.next().await {
+            use CrawlerAction::*;
+            match handshake_action {
+                HandshakeConnected { peer_set_change } => {
+                    success_count += 1;
+                    if let Change::Insert(ref addr, _) = peer_set_change {
+                        debug!(
+                            ?addr,
+                            ?success_count,
+                            ?peerset_initial_target_size,
+                            "successfully dialed initial peer"
+                        );
+                    } else {
+                        unreachable!("unexpected handshake result: all changes should be Insert");
+                    }
+                    // the peer set is handled by an independent task, so this send
+                    // shouldn't hang
+                    peerset_tx.send(Ok(peer_set_change)).await?;
                 }
-                // the peer set is handled by an independent task, so this send
-                // shouldn't hang
-                peerset_tx.send(Ok(peer_set_change)).await?;
-            }
-            HandshakeFailed { failed_addr, error } => {
-                if success_count <= constants::GET_ADDR_FANOUT {
-                    // this creates verbose logs, but it's better than just hanging on
-                    // startup with no output
-                    info!(addr = ?failed_addr.addr,
+                HandshakeFailed { failed_addr, error } => {
+                    if success_count <= constants::GET_ADDR_FANOUT {
+                        // this creates verbose logs, but it's better than just hanging on
+                        // startup with no output
+                        info!(addr = ?failed_addr.addr,
+                      ?error,
+                          ?success_count,
+                          ?peerset_initial_target_size,
+                      "an initial peer connection failed");
+                    } else {
+                        // switch to debug when we have enough peers
+                        debug!(addr = ?failed_addr.addr,
                       ?error,
                       ?success_count,
-                      "an initial peer connection failed");
-                } else {
-                    // switch to debug when we have enough peers
-                    debug!(addr = ?failed_addr.addr,
-                      ?error,
-                      ?success_count,
-                      "an initial peer connection failed");
+                           ?peerset_initial_target_size,
+                           "an initial peer connection failed");
+                    }
+                    continue;
                 }
-                continue;
+                DemandCrawl | DemandDrop | DemandHandshake { .. } | TimerCrawl { .. } => {
+                    unreachable!("unexpected CrawlerAction: should be handshake result")
+                }
             }
-            DemandCrawl | DemandDrop | DemandHandshake { .. } | TimerCrawl { .. } => {
-                unreachable!("unexpected CrawlerAction: should be handshake result")
-            }
+        }
+
+        // 3. If we haven't had enough successes, sleep for a while
+        if success_count < peerset_initial_target_size {
+            tokio::time::sleep_until(next_peer_sleep_until).await;
+        } else {
+            // TODO: put the rest in the address book
+            break;
         }
     }
 
@@ -286,10 +318,15 @@ where
         info!(
             ?success_count,
             ?initial_peers_len,
+            ?peerset_initial_target_size,
             "finished connection attempts to initial peer set"
         );
     } else {
-        warn!(?initial_peers_len, "no successful initial peer connections");
+        warn!(
+            ?initial_peers_len,
+            ?peerset_initial_target_size,
+            "no successful initial peer connections"
+        );
     }
 
     Ok(())
