@@ -1,5 +1,6 @@
 use std::{cmp::min, mem, sync::Arc, time::Duration};
 
+use chrono::{DateTime, Utc};
 use futures::stream::{FuturesUnordered, StreamExt};
 use tokio::time::{sleep, sleep_until, timeout, Sleep};
 use tower::{Service, ServiceExt};
@@ -228,7 +229,7 @@ where
                         ?addrs,
                         "got response to GetPeers"
                     );
-                    let addrs = self.validate_addrs(addrs);
+                    let addrs = validate_addrs(addrs, Utc::now());
                     self.send_addrs(addrs);
                 }
                 Err(e) => {
@@ -241,30 +242,6 @@ where
         }
 
         Ok(())
-    }
-
-    /// Check new `addrs` before adding them to the address book.
-    ///
-    /// If the data in an address is invalid, this function can:
-    /// - modify the address data, or
-    /// - delete the address.
-    fn validate_addrs(
-        &self,
-        addrs: impl IntoIterator<Item = MetaAddr>,
-    ) -> impl IntoIterator<Item = MetaAddr> {
-        // Note: The address book handles duplicate addresses internally,
-        // so we don't need to de-duplicate addresses here.
-
-        // TODO:
-        // We should eventually implement these checks in this function:
-        // - Zebra should stop believing far-future last_seen times from peers (#1871)
-        // - Zebra should ignore peers that are older than 3 weeks (part of #1865)
-        //   - Zebra should count back 3 weeks from the newest peer timestamp sent
-        //     by the other peer, to compensate for clock skew
-        // - Zebra should limit the number of addresses it uses from a single Addrs
-        //   response (#1869)
-
-        addrs
     }
 
     /// Add new `addrs` to the address book.
@@ -342,4 +319,34 @@ where
         // a single address.
         self.address_book.lock().unwrap().update(addr);
     }
+}
+
+/// Check new `addrs` before adding them to the address book.
+///
+/// `last_seen_limit` is the maximum permitted last seen time, typically
+/// [`Utc::now`].
+///
+/// If the data in an address is invalid, this function can:
+/// - modify the address data, or
+/// - delete the address.
+//
+// TODO: re-enable this lint when last_seen_limit is used
+#[allow(unused_variables)]
+fn validate_addrs(
+    addrs: impl IntoIterator<Item = MetaAddr>,
+    last_seen_limit: DateTime<Utc>,
+) -> impl IntoIterator<Item = MetaAddr> {
+    // Note: The address book handles duplicate addresses internally,
+    // so we don't need to de-duplicate addresses here.
+
+    // TODO:
+    // We should eventually implement these checks in this function:
+    // - Zebra should stop believing far-future last_seen times from peers (#1871)
+    // - Zebra should ignore peers that are older than 3 weeks (part of #1865)
+    //   - Zebra should count back 3 weeks from the newest peer timestamp sent
+    //     by the other peer, to compensate for clock skew
+    // - Zebra should limit the number of addresses it uses from a single Addrs
+    //   response (#1869)
+
+    addrs
 }
