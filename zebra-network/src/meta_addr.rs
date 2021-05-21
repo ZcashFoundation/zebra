@@ -137,6 +137,20 @@ pub struct MetaAddr {
 }
 
 impl MetaAddr {
+    /// Create a new seed [`MetaAddr`, based on the configured seed addresses.
+    pub fn new_seed_meta_addr(addr: SocketAddr) -> MetaAddr {
+        MetaAddr {
+            addr,
+            // TODO: stop guessing this field
+            services: PeerServices::NODE_NETWORK,
+            // TODO: remove this time, it's far too optimistic. Using `now` can
+            // keep invalid peers in the consensus peer set for a long time.
+            last_seen: Utc::now(),
+            // TODO: replace with NeverAttemptedSeed
+            last_connection_state: NeverAttemptedGossiped,
+        }
+    }
+
     /// Create a new gossiped [`MetaAddr`], based on the deserialized fields from
     /// a gossiped peer [`Addr`][crate::protocol::external::Message::Addr] message.
     pub fn new_gossiped_meta_addr(
