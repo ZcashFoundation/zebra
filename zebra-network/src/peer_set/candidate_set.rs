@@ -317,18 +317,18 @@ where
 
 /// Check new `addrs` before adding them to the address book.
 ///
-/// `max_last_seen` is the maximum permitted last seen time, typically
+/// `last_seen_limit` is the maximum permitted last seen time, typically
 /// [`Utc::now`].
 ///
 /// If the data in an address is invalid, this function can:
 /// - modify the address data, or
 /// - delete the address.
 //
-// TODO: re-enable this lint when max_last_seen is used
+// TODO: re-enable this lint when last_seen_limit is used
 #[allow(unused_variables)]
 fn validate_addrs(
     addrs: impl IntoIterator<Item = MetaAddr>,
-    max_last_seen: DateTime<Utc>,
+    last_seen_limit: DateTime<Utc>,
 ) -> impl IntoIterator<Item = MetaAddr> {
     // Note: The address book handles duplicate addresses internally,
     // so we don't need to de-duplicate addresses here.
