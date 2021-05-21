@@ -335,7 +335,7 @@ where
 fn validate_addrs(
     addrs: impl IntoIterator<Item = MetaAddr>,
     last_seen_limit: DateTime<Utc>,
-) -> impl IntoIterator<Item = MetaAddr> {
+) -> impl Iterator<Item = MetaAddr> {
     // Note: The address book handles duplicate addresses internally,
     // so we don't need to de-duplicate addresses here.
 
@@ -348,5 +348,5 @@ fn validate_addrs(
     // - Zebra should limit the number of addresses it uses from a single Addrs
     //   response (#1869)
 
-    addrs
+    addrs.into_iter()
 }
