@@ -7,11 +7,15 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use halo2::{arithmetic::FieldExt, pasta::pallas};
 
 use crate::{
+    amount,
     block::MAX_BLOCK_BYTES,
     parameters::{OVERWINTER_VERSION_GROUP_ID, SAPLING_VERSION_GROUP_ID, TX_V5_VERSION_GROUP_ID},
-    primitives::{Groth16Proof, ZkSnarkProof},
+    primitives::{
+        redpallas::{Binding, Signature, SpendAuth},
+        Groth16Proof, Halo2Proof, ZkSnarkProof,
+    },
     serialization::{
-        zcash_deserialize_external_count, zcash_serialize_external_count, ReadZcashExt,
+        zcash_deserialize_external_count, zcash_serialize_external_count, AtLeastOne, ReadZcashExt,
         SerializationError, TrustedPreallocate, WriteZcashExt, ZcashDeserialize,
         ZcashDeserializeInto, ZcashSerialize,
     },
@@ -245,6 +249,115 @@ impl ZcashDeserialize for Option<sapling::ShieldedData<SharedAnchor>> {
     }
 }
 
+impl ZcashSerialize for Option<orchard::ShieldedData> {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        match self {
+            None => {
+                // nActionsOrchard
+                writer.write_compactsize(0)?;
+                // We don't need to write anything else here.
+                // "The fields flagsOrchard, valueBalanceOrchard, anchorOrchard, sizeProofsOrchard,
+                // proofsOrchard , and bindingSigOrchard are present if and only if nActionsOrchard > 0."
+                // https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus notes of the second
+                // table, section sign.
+            }
+            Some(orchard_shielded_data) => {
+                orchard_shielded_data.zcash_serialize(&mut writer)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl ZcashSerialize for orchard::ShieldedData {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        // Split the AuthorizedAction
+        let (actions, sigs): (Vec<orchard::Action>, Vec<Signature<SpendAuth>>) = self
+            .actions
+            .iter()
+            .cloned()
+            .map(orchard::AuthorizedAction::into_parts)
+            .unzip();
+
+        // nActionsOrchard and vActionsOrchard
+        actions.zcash_serialize(&mut writer)?;
+
+        // flagsOrchard
+        self.flags.zcash_serialize(&mut writer)?;
+
+        // valueBalanceOrchard
+        self.value_balance.zcash_serialize(&mut writer)?;
+
+        // anchorOrchard
+        self.shared_anchor.zcash_serialize(&mut writer)?;
+
+        // sizeProofsOrchard and proofsOrchard
+        self.proof.zcash_serialize(&mut writer)?;
+
+        // vSpendAuthSigsOrchard
+        zcash_serialize_external_count(&sigs, &mut writer)?;
+
+        // bindingSigOrchard
+        self.binding_sig.zcash_serialize(&mut writer)?;
+
+        Ok(())
+    }
+}
+
+// we can't split ShieldedData out of Option<ShieldedData> deserialization,
+// because the counts are read along with the arrays.
+impl ZcashDeserialize for Option<orchard::ShieldedData> {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        // nActionsOrchard and vActionsOrchard
+        let actions: Vec<orchard::Action> = (&mut reader).zcash_deserialize_into()?;
+
+        // "sizeProofsOrchard ... [is] present if and only if nActionsOrchard > 0"
+        // https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus
+        if actions.is_empty() {
+            return Ok(None);
+        }
+
+        // flagsOrchard
+        let flags: orchard::Flags = (&mut reader).zcash_deserialize_into()?;
+
+        // valueBalanceOrchard
+        let value_balance: amount::Amount = (&mut reader).zcash_deserialize_into()?;
+
+        // anchorOrchard
+        let shared_anchor: orchard::tree::Root = (&mut reader).zcash_deserialize_into()?;
+
+        // sizeProofsOrchard and proofsOrchard
+        let proof: Halo2Proof = (&mut reader).zcash_deserialize_into()?;
+
+        // vSpendAuthSigsOrchard
+        let sigs: Vec<Signature<SpendAuth>> =
+            zcash_deserialize_external_count(actions.len(), &mut reader)?;
+
+        // bindingSigOrchard
+        let binding_sig: Signature<Binding> = (&mut reader).zcash_deserialize_into()?;
+
+        // Create the AuthorizedAction from deserialized parts
+        let authorized_actions: Vec<orchard::AuthorizedAction> = actions
+            .into_iter()
+            .zip(sigs.into_iter())
+            .map(|(action, spend_auth_sig)| {
+                orchard::AuthorizedAction::from_parts(action, spend_auth_sig)
+            })
+            .collect();
+
+        let actions: AtLeastOne<orchard::AuthorizedAction> = authorized_actions.try_into()?;
+
+        Ok(Some(orchard::ShieldedData {
+            flags,
+            value_balance,
+            shared_anchor,
+            proof,
+            actions,
+            binding_sig,
+        }))
+    }
+}
+
 impl ZcashSerialize for Transaction {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         // Post-Sapling, transaction size is limited to MAX_BLOCK_BYTES.
@@ -374,6 +487,7 @@ impl ZcashSerialize for Transaction {
                 inputs,
                 outputs,
                 sapling_shielded_data,
+                orchard_shielded_data,
             } => {
                 // Transaction V5 spec:
                 // https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus
@@ -401,10 +515,7 @@ impl ZcashSerialize for Transaction {
                 sapling_shielded_data.zcash_serialize(&mut writer)?;
 
                 // orchard
-                // TODO: Parse orchard into structs
-                //       In the meantime, to keep the transaction valid, we add `0`
-                //       as the nActionsOrchard field
-                writer.write_compactsize(0)?;
+                orchard_shielded_data.zcash_serialize(&mut writer)?;
             }
         }
         Ok(())
@@ -544,14 +655,7 @@ impl ZcashDeserialize for Transaction {
                 let sapling_shielded_data = (&mut reader).zcash_deserialize_into()?;
 
                 // orchard
-                // TODO: Parse orchard into structs
-                //       In the meantime, check the orchard section is just `0`
-                let empty_orchard_section = reader.read_compactsize()?;
-                if empty_orchard_section != 0 {
-                    return Err(SerializationError::Parse(
-                        "expected orchard section to be just a zero",
-                    ));
-                }
+                let orchard_shielded_data = (&mut reader).zcash_deserialize_into()?;
 
                 Ok(Transaction::V5 {
                     network_upgrade,
@@ -560,6 +664,7 @@ impl ZcashDeserialize for Transaction {
                     inputs,
                     outputs,
                     sapling_shielded_data,
+                    orchard_shielded_data,
                 })
             }
             (_, _) => Err(SerializationError::Parse("bad tx header")),

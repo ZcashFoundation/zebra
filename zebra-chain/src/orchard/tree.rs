@@ -13,7 +13,7 @@
 #![allow(clippy::unit_arg)]
 #![allow(dead_code)]
 
-use std::{collections::VecDeque, fmt};
+use std::{collections::VecDeque, fmt, io};
 
 use bitvec::prelude::*;
 use halo2::arithmetic::FieldExt;
@@ -22,6 +22,8 @@ use lazy_static::lazy_static;
 use proptest_derive::Arbitrary;
 
 use super::{commitment::NoteCommitment, sinsemilla::*};
+
+use crate::serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize};
 
 const MERKLE_DEPTH: usize = 32;
 
@@ -85,6 +87,34 @@ pub struct Root(pub [u8; 32]);
 impl fmt::Debug for Root {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_tuple("Root").field(&hex::encode(&self.0)).finish()
+    }
+}
+
+impl From<[u8; 32]> for Root {
+    fn from(bytes: [u8; 32]) -> Root {
+        Self(bytes)
+    }
+}
+
+impl From<Root> for [u8; 32] {
+    fn from(root: Root) -> Self {
+        root.0
+    }
+}
+
+impl ZcashSerialize for Root {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        writer.write_all(&<[u8; 32]>::from(*self)[..])?;
+
+        Ok(())
+    }
+}
+
+impl ZcashDeserialize for Root {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        let anchor = reader.read_32_bytes()?.into();
+
+        Ok(anchor)
     }
 }
 

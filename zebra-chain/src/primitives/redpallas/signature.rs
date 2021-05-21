@@ -8,13 +8,14 @@
 // - Henry de Valence <hdevalence@hdevalence.ca>
 // - Deirdre Connolly <deirdre@zfnd.org>
 
-use std::marker::PhantomData;
+use std::{io, marker::PhantomData};
 
 use super::SigType;
 
+use crate::serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize};
+
 /// A RedPallas signature.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct Signature<T: SigType> {
     pub(crate) r_bytes: [u8; 32],
     pub(crate) s_bytes: [u8; 32],
@@ -41,5 +42,18 @@ impl<T: SigType> From<Signature<T>> for [u8; 64] {
         bytes[0..32].copy_from_slice(&sig.r_bytes[..]);
         bytes[32..64].copy_from_slice(&sig.s_bytes[..]);
         bytes
+    }
+}
+
+impl<T: SigType> ZcashSerialize for Signature<T> {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        writer.write_all(&<[u8; 64]>::from(*self)[..])?;
+        Ok(())
+    }
+}
+
+impl<T: SigType> ZcashDeserialize for Signature<T> {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        Ok(reader.read_64_bytes()?.into())
     }
 }

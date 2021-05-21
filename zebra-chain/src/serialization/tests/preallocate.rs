@@ -2,11 +2,11 @@
 
 use proptest::{collection::size_range, prelude::*};
 
-use std::matches;
+use std::{convert::TryInto, matches};
 
 use crate::serialization::{
-    zcash_deserialize::MAX_U8_ALLOCATION, SerializationError, ZcashDeserialize, ZcashSerialize,
-    MAX_PROTOCOL_MESSAGE_LEN,
+    zcash_deserialize::MAX_U8_ALLOCATION, SerializationError, TrustedPreallocate, ZcashDeserialize,
+    ZcashSerialize, MAX_PROTOCOL_MESSAGE_LEN,
 };
 
 // Allow direct serialization of Vec<u8> for these tests. We don't usually
@@ -17,6 +17,40 @@ impl ZcashSerialize for u8 {
     fn zcash_serialize<W: std::io::Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
         writer.write_all(&[*self])
     }
+}
+
+/// Return the following calculations on `item`:
+///   smallest_disallowed_vec_len
+///   smallest_disallowed_serialized_len
+///   largest_allowed_vec_len
+///   largest_allowed_serialized_len
+pub fn max_allocation_is_big_enough<T>(item: T) -> (usize, usize, usize, usize)
+where
+    T: TrustedPreallocate + ZcashSerialize + Clone,
+{
+    let max_allocation: usize = T::max_allocation().try_into().unwrap();
+    let mut smallest_disallowed_vec = Vec::with_capacity(max_allocation + 1);
+    for _ in 0..(max_allocation + 1) {
+        smallest_disallowed_vec.push(item.clone());
+    }
+    let smallest_disallowed_serialized = smallest_disallowed_vec
+        .zcash_serialize_to_vec()
+        .expect("Serialization to vec must succeed");
+    let smallest_disallowed_vec_len = smallest_disallowed_vec.len();
+
+    // Create largest_allowed_vec by removing one element from smallest_disallowed_vec without copying (for efficiency)
+    smallest_disallowed_vec.pop();
+    let largest_allowed_vec = smallest_disallowed_vec;
+    let largest_allowed_serialized = largest_allowed_vec
+        .zcash_serialize_to_vec()
+        .expect("Serialization to vec must succeed");
+
+    (
+        smallest_disallowed_vec_len,
+        smallest_disallowed_serialized.len(),
+        largest_allowed_vec.len(),
+        largest_allowed_serialized.len(),
+    )
 }
 
 proptest! {

@@ -26,9 +26,9 @@ pub use zcash_deserialize::{
     ZcashDeserialize, ZcashDeserializeInto,
 };
 pub use zcash_serialize::{
-    zcash_serialize_bytes_external_count, zcash_serialize_external_count, ZcashSerialize,
-    MAX_PROTOCOL_MESSAGE_LEN,
+    zcash_serialize_bytes, zcash_serialize_bytes_external_count, zcash_serialize_external_count,
+    ZcashSerialize, MAX_PROTOCOL_MESSAGE_LEN,
 };
 
 #[cfg(test)]
-mod tests;
+pub mod tests;
