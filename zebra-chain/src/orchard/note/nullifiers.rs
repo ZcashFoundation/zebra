@@ -37,7 +37,7 @@ fn prf_nf(nk: pallas::Base, rho: pallas::Base) -> pallas::Base {
 }
 
 /// A Nullifier for Orchard transactions
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, Serialize, Deserialize)]
 pub struct Nullifier(#[serde(with = "serde_helpers::Base")] pub pallas::Base);
 
 impl Hash for Nullifier {
@@ -49,6 +49,13 @@ impl Hash for Nullifier {
 impl From<[u8; 32]> for Nullifier {
     fn from(bytes: [u8; 32]) -> Self {
         Self(pallas::Base::from_bytes(&bytes).unwrap())
+    }
+}
+// Clippy is failing if we derive `PartialEq` with implemented `Hash`
+// error: you are implementing `Hash` explicitly but have derived `PartialEq`
+impl PartialEq for Nullifier {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
     }
 }
 
