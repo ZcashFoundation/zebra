@@ -38,7 +38,7 @@ fn prf_nf(nk: pallas::Base, rho: pallas::Base) -> pallas::Base {
 
 /// A Nullifier for Orchard transactions
 #[derive(Clone, Copy, Debug, Eq, Serialize, Deserialize)]
-pub struct Nullifier(#[serde(with = "serde_helpers::Base")] pub pallas::Base);
+pub struct Nullifier(#[serde(with = "serde_helpers::Base")] pallas::Base);
 
 impl Hash for Nullifier {
     fn hash<H: Hasher>(&self, state: &mut H) {

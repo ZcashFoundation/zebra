@@ -167,7 +167,8 @@ impl IntoDisk for orchard::Nullifier {
     type Bytes = [u8; 32];
 
     fn as_bytes(&self) -> Self::Bytes {
-        <[u8; 32]>::from(self.0)
+        let nullifier: orchard::Nullifier = *self;
+        nullifier.into()
     }
 }
 
