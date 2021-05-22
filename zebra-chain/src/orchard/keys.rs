@@ -23,6 +23,7 @@ use halo2::{
     pasta::pallas,
 };
 use rand_core::{CryptoRng, RngCore};
+use subtle::{Choice, ConstantTimeEq};
 
 use crate::{
     parameters::Network,
@@ -133,7 +134,7 @@ mod sk_hrp {
 /// key types derive from the [`SpendingKey`] value.
 ///
 /// [ps]: https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug)]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),
     derive(proptest_derive::Arbitrary)
@@ -143,9 +144,20 @@ pub struct SpendingKey {
     bytes: [u8; 32],
 }
 
-impl From<SpendingKey> for [u8; 32] {
-    fn from(sk: SpendingKey) -> Self {
-        sk.bytes
+impl ConstantTimeEq for SpendingKey {
+    /// Check whether two `SpendingKey`s are equal, runtime independent of the
+    /// value of the secret.
+    ///
+    /// # Note
+    ///
+    /// This function short-circuits if the networks of the keys are different.
+    /// Otherwise, it should execute in time independent of the `bytes` value.
+    fn ct_eq(&self, other: &Self) -> Choice {
+        if self.network != other.network {
+            return Choice::from(0);
+        }
+
+        self.bytes.ct_eq(&other.bytes)
     }
 }
 
@@ -157,6 +169,20 @@ impl fmt::Display for SpendingKey {
         };
 
         bech32::encode_to_fmt(f, hrp, &self.bytes.to_base32(), Variant::Bech32).unwrap()
+    }
+}
+
+impl From<SpendingKey> for [u8; 32] {
+    fn from(sk: SpendingKey) -> Self {
+        sk.bytes
+    }
+}
+
+impl Eq for SpendingKey {}
+
+impl PartialEq for SpendingKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.ct_eq(other).unwrap_u8() == 1u8
     }
 }
 
@@ -195,12 +221,20 @@ impl SpendingKey {
 /// A Spend authorizing key (_ask_), as described in [protocol specification
 /// §4.2.3][orchardkeycomponents].
 ///
-/// Used to generate _spend authorization randomizers_ to sign each _Spend
-/// Description_, proving ownership of notes.
+/// Used to generate _spend authorization randomizers_ to sign each _Action
+/// Description_ that spends notes, proving ownership of notes.
 ///
 /// [orchardkeycomponents]: https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents
-#[derive(Copy, Clone, Eq, PartialEq)]
-pub struct SpendAuthorizingKey(pub pallas::Scalar);
+#[derive(Copy, Clone)]
+pub struct SpendAuthorizingKey(pub(crate) pallas::Scalar);
+
+impl ConstantTimeEq for SpendAuthorizingKey {
+    /// Check whether two `SpendAuthorizingKey`s are equal, runtime independent
+    /// of the value of the secret.
+    fn ct_eq(&self, other: &Self) -> Choice {
+        self.0.to_bytes().ct_eq(&other.0.to_bytes())
+    }
+}
 
 impl fmt::Debug for SpendAuthorizingKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -232,11 +266,19 @@ impl From<SpendingKey> for SpendAuthorizingKey {
     }
 }
 
+impl Eq for SpendAuthorizingKey {}
+
+impl PartialEq for SpendAuthorizingKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.ct_eq(other).unwrap_u8() == 1u8
+    }
+}
+
 impl PartialEq<[u8; 32]> for SpendAuthorizingKey {
     // TODO: do we want to use constant-time comparison here?
     #[allow(clippy::cmp_owned)]
     fn eq(&self, other: &[u8; 32]) -> bool {
-        <[u8; 32]>::from(*self) == *other
+        self.0.to_bytes().ct_eq(other).unwrap_u8() == 1u8
     }
 }
 
@@ -248,7 +290,7 @@ impl PartialEq<[u8; 32]> for SpendAuthorizingKey {
 ///
 /// [orchardkeycomponents]: https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents
 #[derive(Copy, Clone, Debug)]
-pub struct SpendValidatingKey(pub redpallas::VerificationKey<SpendAuth>);
+pub struct SpendValidatingKey(pub(crate) redpallas::VerificationKey<SpendAuth>);
 
 impl Eq for SpendValidatingKey {}
 
@@ -275,14 +317,16 @@ impl From<SpendAuthorizingKey> for SpendValidatingKey {
 impl PartialEq for SpendValidatingKey {
     #[allow(clippy::cmp_owned)]
     fn eq(&self, other: &Self) -> bool {
-        <[u8; 32]>::from(self.0) == <[u8; 32]>::from(other.0)
+        // XXX: These redpallas::VerificationKey(Bytes) fields are pub(crate)
+        self.0.bytes.bytes == other.0.bytes.bytes
     }
 }
 
 impl PartialEq<[u8; 32]> for SpendValidatingKey {
     #[allow(clippy::cmp_owned)]
     fn eq(&self, other: &[u8; 32]) -> bool {
-        <[u8; 32]>::from(self.0) == *other
+        // XXX: These redpallas::VerificationKey(Bytes) fields are pub(crate)
+        self.0.bytes.bytes == *other
     }
 }
 
@@ -292,8 +336,16 @@ impl PartialEq<[u8; 32]> for SpendValidatingKey {
 /// Used to create a _Nullifier_ per note.
 ///
 /// [orchardkeycomponents]: https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents
-#[derive(Copy, Clone, PartialEq)]
-pub struct NullifierDerivingKey(pub pallas::Base);
+#[derive(Copy, Clone)]
+pub struct NullifierDerivingKey(pub(crate) pallas::Base);
+
+impl ConstantTimeEq for NullifierDerivingKey {
+    /// Check whether two `NullifierDerivingKey`s are equal, runtime independent
+    /// of the value of the secret.
+    fn ct_eq(&self, other: &Self) -> Choice {
+        self.0.to_bytes().ct_eq(&other.0.to_bytes())
+    }
+}
 
 impl fmt::Debug for NullifierDerivingKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -302,6 +354,8 @@ impl fmt::Debug for NullifierDerivingKey {
             .finish()
     }
 }
+
+impl Eq for NullifierDerivingKey {}
 
 impl From<NullifierDerivingKey> for [u8; 32] {
     fn from(nk: NullifierDerivingKey) -> [u8; 32] {
@@ -339,12 +393,16 @@ impl From<SpendingKey> for NullifierDerivingKey {
     }
 }
 
-impl Eq for NullifierDerivingKey {}
+impl PartialEq for NullifierDerivingKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.ct_eq(other).unwrap_u8() == 1u8
+    }
+}
 
 impl PartialEq<[u8; 32]> for NullifierDerivingKey {
     #[allow(clippy::cmp_owned)]
     fn eq(&self, other: &[u8; 32]) -> bool {
-        <[u8; 32]>::from(*self) == *other
+        self.0.to_bytes().ct_eq(other).unwrap_u8() == 1u8
     }
 }
 
@@ -352,8 +410,16 @@ impl PartialEq<[u8; 32]> for NullifierDerivingKey {
 ///
 /// https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents
 // XXX: Should this be replaced by commitment::CommitmentRandomness?
-#[derive(Copy, Clone, Eq, PartialEq)]
-pub struct IvkCommitRandomness(pallas::Scalar);
+#[derive(Copy, Clone)]
+pub struct IvkCommitRandomness(pub(crate) pallas::Scalar);
+
+impl ConstantTimeEq for IvkCommitRandomness {
+    /// Check whether two `IvkCommitRandomness`s are equal, runtime independent
+    /// of the value of the secret.
+    fn ct_eq(&self, other: &Self) -> Choice {
+        self.0.to_bytes().ct_eq(&other.0.to_bytes())
+    }
+}
 
 impl fmt::Debug for IvkCommitRandomness {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -362,6 +428,8 @@ impl fmt::Debug for IvkCommitRandomness {
             .finish()
     }
 }
+
+impl Eq for IvkCommitRandomness {}
 
 impl From<SpendingKey> for IvkCommitRandomness {
     /// rivk = ToScalar^Orchard(PRF^expand_sk ([8]))
@@ -383,6 +451,18 @@ impl From<IvkCommitRandomness> for [u8; 32] {
 impl From<IvkCommitRandomness> for pallas::Scalar {
     fn from(rivk: IvkCommitRandomness) -> Self {
         rivk.0
+    }
+}
+
+impl PartialEq for IvkCommitRandomness {
+    fn eq(&self, other: &Self) -> bool {
+        self.ct_eq(other).unwrap_u8() == 1u8
+    }
+}
+
+impl PartialEq<[u8; 32]> for IvkCommitRandomness {
+    fn eq(&self, other: &[u8; 32]) -> bool {
+        self.0.to_bytes().ct_eq(other).unwrap_u8() == 1u8
     }
 }
 
@@ -415,10 +495,27 @@ mod ivk_hrp {
 /// Used to decrypt incoming notes without spending them.
 ///
 /// [ps]: https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents
-#[derive(Copy, Clone, Eq, PartialEq)]
+#[derive(Copy, Clone)]
 pub struct IncomingViewingKey {
     network: Network,
     scalar: pallas::Scalar,
+}
+
+impl ConstantTimeEq for IncomingViewingKey {
+    /// Check whether two `IncomingViewingKey`s are equal, runtime independent
+    /// of the value of the secret.
+    ///
+    /// # Note
+    ///
+    /// This function short-circuits if the networks of the keys are different.
+    /// Otherwise, it should execute in time independent of the `bytes` value.
+    fn ct_eq(&self, other: &Self) -> Choice {
+        if self.network != other.network {
+            return Choice::from(0);
+        }
+
+        self.scalar.to_bytes().ct_eq(&other.scalar.to_bytes())
+    }
 }
 
 impl fmt::Debug for IncomingViewingKey {
@@ -439,6 +536,8 @@ impl fmt::Display for IncomingViewingKey {
         bech32::encode_to_fmt(f, hrp, &self.scalar.to_bytes().to_base32(), Variant::Bech32).unwrap()
     }
 }
+
+impl Eq for IncomingViewingKey {}
 
 impl From<FullViewingKey> for IncomingViewingKey {
     /// Commit^ivk_rivk(ak, nk) :=
@@ -472,9 +571,15 @@ impl From<FullViewingKey> for IncomingViewingKey {
     }
 }
 
+impl PartialEq for IncomingViewingKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.ct_eq(other).unwrap_u8() == 1u8
+    }
+}
+
 impl PartialEq<[u8; 32]> for IncomingViewingKey {
     fn eq(&self, other: &[u8; 32]) -> bool {
-        self.scalar.to_bytes() == *other
+        self.scalar.to_bytes().ct_eq(other).unwrap_u8() == 1u8
     }
 }
 
@@ -515,34 +620,6 @@ pub struct FullViewingKey {
     ivk_commit_randomness: IvkCommitRandomness,
 }
 
-impl fmt::Debug for FullViewingKey {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("FullViewingKey")
-            .field("network", &self.network)
-            .field("spend_validating_key", &self.spend_validating_key)
-            .field("nullifier_deriving_key", &self.nullifier_deriving_key)
-            .field("ivk_commit_randomness", &self.ivk_commit_randomness)
-            .finish()
-    }
-}
-
-impl fmt::Display for FullViewingKey {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut bytes = io::Cursor::new(Vec::new());
-
-        let _ = bytes.write_all(&<[u8; 32]>::from(self.spend_validating_key));
-        let _ = bytes.write_all(&<[u8; 32]>::from(self.nullifier_deriving_key));
-        let _ = bytes.write_all(&<[u8; 32]>::from(self.ivk_commit_randomness));
-
-        let hrp = match self.network {
-            Network::Mainnet => fvk_hrp::MAINNET,
-            Network::Testnet => fvk_hrp::TESTNET,
-        };
-
-        bech32::encode_to_fmt(f, hrp, bytes.get_ref().to_base32(), Variant::Bech32).unwrap()
-    }
-}
-
 impl FullViewingKey {
     /// [4.2.3]: https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents
     #[allow(non_snake_case)]
@@ -578,14 +655,50 @@ impl FullViewingKey {
     }
 }
 
+impl fmt::Debug for FullViewingKey {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("FullViewingKey")
+            .field("network", &self.network)
+            .field("spend_validating_key", &self.spend_validating_key)
+            .field("nullifier_deriving_key", &self.nullifier_deriving_key)
+            .field("ivk_commit_randomness", &self.ivk_commit_randomness)
+            .finish()
+    }
+}
+
+impl fmt::Display for FullViewingKey {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut bytes = io::Cursor::new(Vec::new());
+
+        let _ = bytes.write_all(&<[u8; 32]>::from(self.spend_validating_key));
+        let _ = bytes.write_all(&<[u8; 32]>::from(self.nullifier_deriving_key));
+        let _ = bytes.write_all(&<[u8; 32]>::from(self.ivk_commit_randomness));
+
+        let hrp = match self.network {
+            Network::Mainnet => fvk_hrp::MAINNET,
+            Network::Testnet => fvk_hrp::TESTNET,
+        };
+
+        bech32::encode_to_fmt(f, hrp, bytes.get_ref().to_base32(), Variant::Bech32).unwrap()
+    }
+}
+
 /// An outgoing viewing key, as described in [protocol specification
 /// §4.2.3][ps].
 ///
 /// Used to decrypt outgoing notes without spending them.
 ///
 /// [ps]: https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents
-#[derive(Copy, Clone, Eq, PartialEq)]
-pub struct OutgoingViewingKey(pub [u8; 32]);
+#[derive(Copy, Clone)]
+pub struct OutgoingViewingKey(pub(crate) [u8; 32]);
+
+impl ConstantTimeEq for OutgoingViewingKey {
+    /// Check whether two `OutgoingViewingKey`s are equal, runtime independent
+    /// of the value of the secret.
+    fn ct_eq(&self, other: &Self) -> Choice {
+        self.0.ct_eq(&other.0)
+    }
+}
 
 impl fmt::Debug for OutgoingViewingKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -594,6 +707,8 @@ impl fmt::Debug for OutgoingViewingKey {
             .finish()
     }
 }
+
+impl Eq for OutgoingViewingKey {}
 
 impl From<[u8; 32]> for OutgoingViewingKey {
     /// Generate an `OutgoingViewingKey` from existing bytes.
@@ -623,9 +738,15 @@ impl From<FullViewingKey> for OutgoingViewingKey {
     }
 }
 
+impl PartialEq for OutgoingViewingKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.ct_eq(other).unwrap_u8() == 1u8
+    }
+}
+
 impl PartialEq<[u8; 32]> for OutgoingViewingKey {
     fn eq(&self, other: &[u8; 32]) -> bool {
-        self.0 == *other
+        self.0.ct_eq(other).unwrap_u8() == 1u8
     }
 }
 
@@ -685,7 +806,7 @@ impl From<DiversifierKey> for [u8; 32] {
     any(test, feature = "proptest-impl"),
     derive(proptest_derive::Arbitrary)
 )]
-pub struct Diversifier(pub [u8; 11]);
+pub struct Diversifier(pub(crate) [u8; 11]);
 
 impl fmt::Debug for Diversifier {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -776,7 +897,7 @@ impl Diversifier {
 /// [concretediversifyhash]: https://zips.z.cash/protocol/nu5.pdf#concretediversifyhash
 /// https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents
 #[derive(Copy, Clone, PartialEq)]
-pub struct TransmissionKey(pub pallas::Affine);
+pub struct TransmissionKey(pub(crate) pallas::Affine);
 
 impl fmt::Debug for TransmissionKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -833,7 +954,7 @@ impl From<(IncomingViewingKey, Diversifier)> for TransmissionKey {
 impl PartialEq<[u8; 32]> for TransmissionKey {
     #[allow(clippy::cmp_owned)]
     fn eq(&self, other: &[u8; 32]) -> bool {
-        <[u8; 32]>::from(*self) == *other
+        &self.0.to_bytes() == other
     }
 }
 
@@ -842,7 +963,7 @@ impl PartialEq<[u8; 32]> for TransmissionKey {
 /// https://zips.z.cash/protocol/nu5.pdf#concreteorchardkeyagreement
 /// https://zips.z.cash/protocol/nu5.pdf#saplingandorchardencrypt
 #[derive(Copy, Clone, Deserialize, PartialEq, Serialize)]
-pub struct EphemeralPublicKey(#[serde(with = "serde_helpers::Affine")] pub pallas::Affine);
+pub struct EphemeralPublicKey(#[serde(with = "serde_helpers::Affine")] pub(crate) pallas::Affine);
 
 impl fmt::Debug for EphemeralPublicKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -874,7 +995,7 @@ impl From<&EphemeralPublicKey> for [u8; 32] {
 impl PartialEq<[u8; 32]> for EphemeralPublicKey {
     #[allow(clippy::cmp_owned)]
     fn eq(&self, other: &[u8; 32]) -> bool {
-        <[u8; 32]>::from(self) == *other
+        &self.0.to_bytes() == other
     }
 }
 
