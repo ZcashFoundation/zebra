@@ -314,6 +314,7 @@ impl From<SpendAuthorizingKey> for SpendValidatingKey {
 
 impl PartialEq for SpendValidatingKey {
     fn eq(&self, other: &Self) -> bool {
+        // XXX: These redpallas::VerificationKey(Bytes) fields are pub(crate)
         self.0.bytes.bytes == other.0.bytes.bytes
     }
 }
