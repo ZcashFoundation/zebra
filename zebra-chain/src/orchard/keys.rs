@@ -321,6 +321,7 @@ impl PartialEq for SpendValidatingKey {
 
 impl PartialEq<[u8; 32]> for SpendValidatingKey {
     fn eq(&self, other: &[u8; 32]) -> bool {
+        // XXX: These redpallas::VerificationKey(Bytes) fields are pub(crate)
         self.0.bytes.bytes == *other
     }
 }
