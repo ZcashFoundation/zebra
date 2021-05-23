@@ -275,8 +275,6 @@ impl PartialEq for SpendAuthorizingKey {
 }
 
 impl PartialEq<[u8; 32]> for SpendAuthorizingKey {
-    // TODO: do we want to use constant-time comparison here?
-    #[allow(clippy::cmp_owned)]
     fn eq(&self, other: &[u8; 32]) -> bool {
         self.0.to_bytes().ct_eq(other).unwrap_u8() == 1u8
     }
@@ -315,7 +313,6 @@ impl From<SpendAuthorizingKey> for SpendValidatingKey {
 }
 
 impl PartialEq for SpendValidatingKey {
-    #[allow(clippy::cmp_owned)]
     fn eq(&self, other: &Self) -> bool {
         // XXX: These redpallas::VerificationKey(Bytes) fields are pub(crate)
         self.0.bytes.bytes == other.0.bytes.bytes
@@ -323,7 +320,6 @@ impl PartialEq for SpendValidatingKey {
 }
 
 impl PartialEq<[u8; 32]> for SpendValidatingKey {
-    #[allow(clippy::cmp_owned)]
     fn eq(&self, other: &[u8; 32]) -> bool {
         // XXX: These redpallas::VerificationKey(Bytes) fields are pub(crate)
         self.0.bytes.bytes == *other
@@ -400,7 +396,6 @@ impl PartialEq for NullifierDerivingKey {
 }
 
 impl PartialEq<[u8; 32]> for NullifierDerivingKey {
-    #[allow(clippy::cmp_owned)]
     fn eq(&self, other: &[u8; 32]) -> bool {
         self.0.to_bytes().ct_eq(other).unwrap_u8() == 1u8
     }
@@ -952,7 +947,6 @@ impl From<(IncomingViewingKey, Diversifier)> for TransmissionKey {
 }
 
 impl PartialEq<[u8; 32]> for TransmissionKey {
-    #[allow(clippy::cmp_owned)]
     fn eq(&self, other: &[u8; 32]) -> bool {
         &self.0.to_bytes() == other
     }
@@ -993,7 +987,6 @@ impl From<&EphemeralPublicKey> for [u8; 32] {
 }
 
 impl PartialEq<[u8; 32]> for EphemeralPublicKey {
-    #[allow(clippy::cmp_owned)]
     fn eq(&self, other: &[u8; 32]) -> bool {
         &self.0.to_bytes() == other
     }
