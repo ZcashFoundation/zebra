@@ -713,8 +713,9 @@ irrelevant for the mainnet and testnet chains.
 Hypothetically, if Sapling were activated from genesis, the specification requires
 a Sapling anchor, but `zcashd` would ignore that anchor.
 
-[`JoinSplit`]: https://doc.zebra.zfnd.org/zebra_chain/transaction/struct.JoinSplit.html
-[`Spend`]: https://doc.zebra.zfnd.org/zebra_chain/transaction/struct.Spend.html
+[`JoinSplit`]: https://doc.zebra.zfnd.org/zebra_chain/sprout/struct.JoinSplit.html
+[`Spend`]: https://doc.zebra.zfnd.org/zebra_chain/sapling/spend/struct.Spend.html
+[`Action`]: https://doc.zebra.zfnd.org/zebra_chain/orchard/struct.Action.html
 
 These updates can be performed in a batch or without necessarily iterating
 over all transactions, if the data is available by other means; they're
