@@ -496,6 +496,16 @@ pub struct IncomingViewingKey {
     scalar: pallas::Scalar,
 }
 
+impl IncomingViewingKey {
+    /// Generate an _IncomingViewingKey_ from existing bytes and a network variant.
+    fn from_bytes(bytes: [u8; 32], network: Network) -> Self {
+        Self {
+            network,
+            scalar: pallas::Scalar::from_bytes(&bytes).unwrap(),
+        }
+    }
+}
+
 impl ConstantTimeEq for IncomingViewingKey {
     /// Check whether two `IncomingViewingKey`s are equal, runtime independent
     /// of the value of the secret.
@@ -575,16 +585,6 @@ impl PartialEq for IncomingViewingKey {
 impl PartialEq<[u8; 32]> for IncomingViewingKey {
     fn eq(&self, other: &[u8; 32]) -> bool {
         self.scalar.to_bytes().ct_eq(other).unwrap_u8() == 1u8
-    }
-}
-
-impl IncomingViewingKey {
-    /// Generate an _IncomingViewingKey_ from existing bytes and a network variant.
-    fn from_bytes(bytes: [u8; 32], network: Network) -> Self {
-        Self {
-            network,
-            scalar: pallas::Scalar::from_bytes(&bytes).unwrap(),
-        }
     }
 }
 

@@ -33,11 +33,22 @@ proptest! {
     fn generate_keys(spending_key in any::<SpendingKey>()) {
         zebra_test::init();
 
+        // Test ConstantTimeEq, Eq, PartialEq
+        assert!(spending_key == SpendingKey::from_bytes(spending_key.bytes, spending_key.network));
+
         let spend_authorizing_key = SpendAuthorizingKey::from(spending_key);
+        // Test ConstantTimeEq, Eq, PartialEq
+        assert!(spend_authorizing_key == <[u8; 32]>::from(spend_authorizing_key));
 
         let spend_validating_key = SpendValidatingKey::from(spend_authorizing_key);
+
         let nullifier_deriving_key = NullifierDerivingKey::from(spending_key);
+        // Test ConstantTimeEq, Eq, PartialEq
+        assert!(nullifier_deriving_key == <[u8; 32]>::from(nullifier_deriving_key));
+
         let ivk_commit_randomness = IvkCommitRandomness::from(spending_key);
+         // Test ConstantTimeEq, Eq, PartialEq
+        assert!(ivk_commit_randomness == <[u8; 32]>::from(ivk_commit_randomness));
 
         let full_viewing_key = FullViewingKey {
             network: spending_key.network,
@@ -48,8 +59,16 @@ proptest! {
 
         let diversifier_key = DiversifierKey::from(full_viewing_key);
         let incoming_viewing_key = IncomingViewingKey::from(full_viewing_key);
+        // Test ConstantTimeEq, Eq, PartialEq
+        assert!(incoming_viewing_key ==
+                IncomingViewingKey::from_bytes(incoming_viewing_key.scalar.into(),
+                                               incoming_viewing_key.network));
 
-        let _outgoing_viewing_key = OutgoingViewingKey::from(full_viewing_key);
+
+        let outgoing_viewing_key = OutgoingViewingKey::from(full_viewing_key);
+
+        // Test ConstantTimeEq, Eq, PartialEq
+        assert!(outgoing_viewing_key == <[u8; 32]>::from(outgoing_viewing_key));
 
         let diversifier = Diversifier::from(diversifier_key);
         let _transmission_key = TransmissionKey::from((incoming_viewing_key, diversifier));
