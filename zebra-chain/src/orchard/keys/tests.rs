@@ -66,7 +66,6 @@ proptest! {
 
 
         let outgoing_viewing_key = OutgoingViewingKey::from(full_viewing_key);
-
         // Test ConstantTimeEq, Eq, PartialEq
         assert!(outgoing_viewing_key == <[u8; 32]>::from(outgoing_viewing_key));
 
