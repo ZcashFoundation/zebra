@@ -51,8 +51,7 @@ impl From<[u8; 32]> for Nullifier {
         Self(pallas::Base::from_bytes(&bytes).unwrap())
     }
 }
-// Clippy is failing if we derive `PartialEq` with implemented `Hash`
-// error: you are implementing `Hash` explicitly but have derived `PartialEq`
+
 impl PartialEq for Nullifier {
     fn eq(&self, other: &Self) -> bool {
         self.0 == other.0
