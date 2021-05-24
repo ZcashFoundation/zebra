@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use crate::{
     parameters::{Network, NetworkUpgrade},
-    primitives,
+    serialization,
     work::{difficulty::CompactDifficulty, equihash},
 };
 
@@ -186,7 +186,7 @@ impl Arbitrary for Header {
             any::<Hash>(),
             any::<merkle::Root>(),
             any::<[u8; 32]>(),
-            primitives::arbitrary::datetime_u32(),
+            serialization::arbitrary::datetime_u32(),
             any::<CompactDifficulty>(),
             any::<[u8; 32]>(),
             any::<equihash::Solution>(),

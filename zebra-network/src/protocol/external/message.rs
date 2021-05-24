@@ -17,7 +17,7 @@ use crate::meta_addr::MetaAddr;
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 #[cfg(any(test, feature = "proptest-impl"))]
-use zebra_chain::primitives::arbitrary::datetime_full;
+use zebra_chain::serialization::arbitrary::datetime_full;
 
 /// A Bitcoin-like network message for the Zcash protocol.
 ///

@@ -17,6 +17,9 @@ pub(crate) mod serde_helpers;
 
 pub mod sha256d;
 
+#[cfg(any(test, feature = "proptest-impl"))]
+pub mod arbitrary;
+
 pub use constraint::AtLeastOne;
 pub use error::SerializationError;
 pub use read_zcash::ReadZcashExt;
