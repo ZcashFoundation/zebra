@@ -366,18 +366,17 @@ fn validate_addrs(
 ///
 /// If the `addrs` list is empty.
 fn limit_last_seen_times(addrs: &mut Vec<MetaAddr>, last_seen_limit: DateTime32) {
-    let most_recent_reported_seen_time = addrs
+    let most_recent_reported_seen_timestamp = addrs
         .iter()
-        .map(|addr| addr.get_last_seen())
+        .map(|addr| addr.get_last_seen().timestamp())
         .max()
         .expect("unexpected empty address list");
 
-    let offset = most_recent_reported_seen_time.timestamp() - last_seen_limit.timestamp();
+    if most_recent_reported_seen_timestamp > last_seen_limit.timestamp() {
+        let offset = most_recent_reported_seen_timestamp - last_seen_limit.timestamp();
 
-    for addr in addrs {
-        let old_last_seen = addr.get_last_seen().timestamp();
-
-        if old_last_seen > last_seen_limit.timestamp() {
+        for addr in addrs {
+            let old_last_seen = addr.get_last_seen().timestamp();
             let new_last_seen = old_last_seen - offset;
 
             addr.set_last_seen(new_last_seen.into());
