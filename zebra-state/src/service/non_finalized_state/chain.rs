@@ -6,8 +6,8 @@ use std::{
 
 use tracing::{debug_span, instrument, trace};
 use zebra_chain::{
-    block, orchard, primitives::Groth16Proof, sapling, sprout, transaction, transparent,
-    work::difficulty::PartialCumulativeWork,
+    block, orchard, primitives::Groth16Proof, sapling, sprout, transaction,
+    transaction::Transaction::*, transparent, work::difficulty::PartialCumulativeWork,
 };
 
 use crate::{PreparedBlock, Utxo};
@@ -27,6 +27,8 @@ pub struct Chain {
     orchard_nullifiers: HashSet<orchard::Nullifier>,
     partial_cumulative_work: PartialCumulativeWork,
 }
+
+use either::Either;
 
 impl Chain {
     /// Push a contextually valid non-finalized block into a chain as the new tip.
@@ -166,19 +168,34 @@ impl UpdateWith<PreparedBlock> for Chain {
             .zip(transaction_hashes.iter().cloned())
             .enumerate()
         {
-            use transaction::Transaction::*;
-            let (inputs, joinsplit_data, sapling_shielded_data) = match transaction.deref() {
-                V4 {
-                    inputs,
-                    joinsplit_data,
-                    sapling_shielded_data,
-                    ..
-                } => (inputs, joinsplit_data, sapling_shielded_data),
-                V5 { .. } => unimplemented!("v5 transaction format as specified in ZIP-225"),
-                V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(
-                    "older transaction versions only exist in finalized blocks pre sapling",
-                ),
-            };
+            let (inputs, joinsplit_data, sapling_shielded_data, orchard_shielded_data) =
+                match transaction.deref() {
+                    V4 {
+                        inputs,
+                        joinsplit_data,
+                        sapling_shielded_data,
+                        ..
+                    } => (
+                        inputs,
+                        joinsplit_data,
+                        Either::Left(sapling_shielded_data),
+                        &None,
+                    ),
+                    V5 {
+                        inputs,
+                        sapling_shielded_data,
+                        orchard_shielded_data,
+                        ..
+                    } => (
+                        inputs,
+                        &None,
+                        Either::Right(sapling_shielded_data),
+                        orchard_shielded_data,
+                    ),
+                    V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(
+                        "older transaction versions only exist in finalized blocks pre sapling",
+                    ),
+                };
 
             // add key `transaction.hash` and value `(height, tx_index)` to `tx_by_hash`
             let prior_pair = self
@@ -196,7 +213,12 @@ impl UpdateWith<PreparedBlock> for Chain {
             // add sprout anchor and nullifiers
             self.update_chain_state_with(joinsplit_data);
             // add sapling anchor and nullifier
-            self.update_chain_state_with(sapling_shielded_data);
+            match sapling_shielded_data {
+                Either::Left(s) => self.update_chain_state_with(s),
+                Either::Right(s) => self.update_chain_state_with(s),
+            };
+            // add orchard anchor and nullifiers
+            self.update_chain_state_with(orchard_shielded_data);
         }
     }
 
@@ -226,19 +248,34 @@ impl UpdateWith<PreparedBlock> for Chain {
         for (transaction, transaction_hash) in
             block.transactions.iter().zip(transaction_hashes.iter())
         {
-            use transaction::Transaction::*;
-            let (inputs, joinsplit_data, sapling_shielded_data) = match transaction.deref() {
-                V4 {
-                    inputs,
-                    joinsplit_data,
-                    sapling_shielded_data,
-                    ..
-                } => (inputs, joinsplit_data, sapling_shielded_data),
-                V5 { .. } => unimplemented!("v5 transaction format as specified in ZIP-225"),
-                V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(
-                    "older transaction versions only exist in finalized blocks pre sapling",
-                ),
-            };
+            let (inputs, joinsplit_data, sapling_shielded_data, orchard_shielded_data) =
+                match transaction.deref() {
+                    V4 {
+                        inputs,
+                        joinsplit_data,
+                        sapling_shielded_data,
+                        ..
+                    } => (
+                        inputs,
+                        joinsplit_data,
+                        Either::Left(sapling_shielded_data),
+                        &None,
+                    ),
+                    V5 {
+                        inputs,
+                        sapling_shielded_data,
+                        orchard_shielded_data,
+                        ..
+                    } => (
+                        inputs,
+                        &None,
+                        Either::Right(sapling_shielded_data),
+                        orchard_shielded_data,
+                    ),
+                    V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(
+                        "older transaction versions only exist in finalized blocks pre sapling",
+                    ),
+                };
 
             // remove `transaction.hash` from `tx_by_hash`
             assert!(
@@ -252,8 +289,13 @@ impl UpdateWith<PreparedBlock> for Chain {
             self.revert_chain_state_with(inputs);
             // remove sprout anchor and nullifiers
             self.revert_chain_state_with(joinsplit_data);
-            // remove sapling anchor and nullfier
-            self.revert_chain_state_with(sapling_shielded_data);
+            // remove sapling anchor and nullifier
+            match sapling_shielded_data {
+                Either::Left(s) => self.revert_chain_state_with(s),
+                Either::Right(s) => self.revert_chain_state_with(s),
+            };
+            // add orchard anchor and nullifiers
+            self.revert_chain_state_with(orchard_shielded_data);
         }
     }
 }

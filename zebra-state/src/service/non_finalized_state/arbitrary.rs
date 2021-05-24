@@ -5,7 +5,7 @@ use proptest::{
 };
 use std::sync::Arc;
 
-use zebra_chain::{block::Block, LedgerState};
+use zebra_chain::{block::Block, parameters::NetworkUpgrade, LedgerState};
 use zebra_test::prelude::*;
 
 use crate::tests::Prepare;
@@ -51,7 +51,7 @@ impl Strategy for PreparedChain {
         if chain.is_none() {
             // Only generate blocks from the most recent network upgrade
             let mut ledger_state = LedgerState::default();
-            ledger_state.network_upgrade_override = None;
+            ledger_state.network_upgrade_override = Some(NetworkUpgrade::Nu5);
 
             let blocks = Block::partial_chain_strategy(ledger_state, MAX_PARTIAL_CHAIN_BLOCKS)
                 .prop_map(|vec| vec.into_iter().map(|blk| blk.prepare()).collect::<Vec<_>>())

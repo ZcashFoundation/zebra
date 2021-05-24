@@ -4545,6 +4545,7 @@ dependencies = [
  "color-eyre",
  "dirs",
  "displaydoc",
+ "either",
  "futures 0.3.15",
  "hex",
  "lazy_static",
