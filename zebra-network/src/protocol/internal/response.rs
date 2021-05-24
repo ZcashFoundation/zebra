@@ -4,10 +4,15 @@ use zebra_chain::{
 };
 
 use crate::meta_addr::MetaAddr;
+
 use std::sync::Arc;
+
+#[cfg(any(test, feature = "proptest-impl"))]
+use proptest_derive::Arbitrary;
 
 /// A response to a network request, represented in internal format.
 #[derive(Clone, Debug)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub enum Response {
     /// Do not send any response to this request.
     ///
