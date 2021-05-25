@@ -81,7 +81,7 @@ where
         C: Service<R, Response = S>,
         C::Error: Into<Error>,
     {
-        while let Some((req, expected_rsp)) = self.messages.next() {
+        for (req, expected_rsp) in &mut self.messages {
             // These unwraps could propagate errors with the correct
             // bound on C::Error
             let fut = to_check
