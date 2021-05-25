@@ -12,7 +12,20 @@ use std::{fmt, io};
     any(test, feature = "proptest-impl"),
     derive(proptest_derive::Arbitrary)
 )]
-pub struct Script(pub Vec<u8>);
+pub struct Script(Vec<u8>);
+
+impl Script {
+    /// Create a new Bitcoin script from its raw bytes.
+    /// The raw bytes must not contain the compact size prefix.
+    pub fn new(raw_bytes: Vec<u8>) -> Self {
+        Script(raw_bytes)
+    }
+
+    /// Return the raw bytes of the script without the compact size prefix.
+    pub fn raw_bytes(&self) -> &Vec<u8> {
+        &self.0
+    }
+}
 
 impl fmt::Debug for Script {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

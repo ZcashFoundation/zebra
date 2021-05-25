@@ -100,7 +100,7 @@ impl CachedFfiTransaction {
         (input_index, previous_output): (u32, transparent::Output),
     ) -> Result<(), Error> {
         let transparent::Output { value, lock_script } = previous_output;
-        let script_pub_key: &[u8] = lock_script.0.as_ref();
+        let script_pub_key: &[u8] = lock_script.raw_bytes();
         let n_in = input_index as _;
 
         let script_ptr = script_pub_key.as_ptr();
@@ -201,7 +201,7 @@ mod tests {
         let amount = 212 * coin;
         let output = transparent::Output {
             value: amount.try_into()?,
-            lock_script: transparent::Script(SCRIPT_PUBKEY.clone()),
+            lock_script: transparent::Script::new(SCRIPT_PUBKEY.clone()),
         };
         let input_index = 0;
         let branch_id = Blossom
@@ -224,7 +224,7 @@ mod tests {
         let amount = 211 * coin;
         let output = transparent::Output {
             value: amount.try_into()?,
-            lock_script: transparent::Script(SCRIPT_PUBKEY.clone()),
+            lock_script: transparent::Script::new(SCRIPT_PUBKEY.clone()),
         };
         let input_index = 0;
         let branch_id = Blossom
@@ -257,14 +257,14 @@ mod tests {
         let amount = 212 * coin;
         let output = transparent::Output {
             value: amount.try_into()?,
-            lock_script: transparent::Script(SCRIPT_PUBKEY.clone()),
+            lock_script: transparent::Script::new(SCRIPT_PUBKEY.clone()),
         };
         verifier.is_valid(branch_id, (input_index, output))?;
 
         let amount = 212 * coin;
         let output = transparent::Output {
             value: amount.try_into()?,
-            lock_script: transparent::Script(SCRIPT_PUBKEY.clone()),
+            lock_script: transparent::Script::new(SCRIPT_PUBKEY.clone()),
         };
         verifier.is_valid(branch_id, (input_index, output))?;
 
@@ -289,14 +289,14 @@ mod tests {
         let amount = 212 * coin;
         let output = transparent::Output {
             value: amount.try_into()?,
-            lock_script: transparent::Script(SCRIPT_PUBKEY.clone()),
+            lock_script: transparent::Script::new(SCRIPT_PUBKEY.clone()),
         };
         verifier.is_valid(branch_id, (input_index, output))?;
 
         let amount = 211 * coin;
         let output = transparent::Output {
             value: amount.try_into()?,
-            lock_script: transparent::Script(SCRIPT_PUBKEY.clone()),
+            lock_script: transparent::Script::new(SCRIPT_PUBKEY.clone()),
         };
         verifier
             .is_valid(branch_id, (input_index, output))
@@ -323,7 +323,7 @@ mod tests {
         let amount = 211 * coin;
         let output = transparent::Output {
             value: amount.try_into()?,
-            lock_script: transparent::Script(SCRIPT_PUBKEY.clone()),
+            lock_script: transparent::Script::new(SCRIPT_PUBKEY.clone()),
         };
         verifier
             .is_valid(branch_id, (input_index, output))
@@ -332,7 +332,7 @@ mod tests {
         let amount = 212 * coin;
         let output = transparent::Output {
             value: amount.try_into()?,
-            lock_script: transparent::Script(SCRIPT_PUBKEY.clone()),
+            lock_script: transparent::Script::new(SCRIPT_PUBKEY.clone()),
         };
         verifier.is_valid(branch_id, (input_index, output))?;
 
@@ -357,7 +357,7 @@ mod tests {
         let amount = 211 * coin;
         let output = transparent::Output {
             value: amount.try_into()?,
-            lock_script: transparent::Script(SCRIPT_PUBKEY.clone()),
+            lock_script: transparent::Script::new(SCRIPT_PUBKEY.clone()),
         };
         verifier
             .is_valid(branch_id, (input_index, output))
@@ -366,7 +366,7 @@ mod tests {
         let amount = 210 * coin;
         let output = transparent::Output {
             value: amount.try_into()?,
-            lock_script: transparent::Script(SCRIPT_PUBKEY.clone()),
+            lock_script: transparent::Script::new(SCRIPT_PUBKEY.clone()),
         };
         verifier
             .is_valid(branch_id, (input_index, output))
