@@ -607,7 +607,7 @@ mod fvk_hrp {
 /// test network, the Human-Readable Part is “zviewtestorchard”.
 ///
 /// https://zips.z.cash/protocol/nu5.pdf#orchardfullviewingkeyencoding
-#[derive(Copy, Clone, Eq, PartialEq)]
+#[derive(Copy, Clone)]
 pub struct FullViewingKey {
     network: Network,
     spend_validating_key: SpendValidatingKey,
@@ -636,8 +636,8 @@ impl FullViewingKey {
 
     /// Derive a full viewing key from a existing spending key and its network.
     ///
-    /// https://zips.z.cash/protocol/nu5.pdf#addressesandkeys
-    /// https://zips.z.cash/protocol/nu5.pdf#orchardfullviewingkeyencoding
+    /// <https://zips.z.cash/protocol/nu5.pdf#addressesandkeys>
+    /// <https://zips.z.cash/protocol/nu5.pdf#orchardfullviewingkeyencoding>
     pub fn from_spending_key(sk: SpendingKey) -> FullViewingKey {
         let spend_authorizing_key = SpendAuthorizingKey::from(sk);
 
@@ -647,6 +647,30 @@ impl FullViewingKey {
             nullifier_deriving_key: NullifierDerivingKey::from(sk),
             ivk_commit_randomness: IvkCommitRandomness::from(sk),
         }
+    }
+}
+
+impl ConstantTimeEq for FullViewingKey {
+    /// Check whether two `FullViewingKey`s are equal, runtime independent of
+    /// the value of the secrets.
+    ///
+    /// # Note
+    ///
+    /// This function short-circuits if the networks or spend validating keys
+    /// are different.  Otherwise, it should execute in time independent of the
+    /// secret component values.
+    fn ct_eq(&self, other: &Self) -> Choice {
+        if self.network != other.network || self.spend_validating_key != other.spend_validating_key
+        {
+            return Choice::from(0);
+        }
+
+        // Uses std::ops::BitAnd
+        self.nullifier_deriving_key
+            .ct_eq(&other.nullifier_deriving_key)
+            & self
+                .ivk_commit_randomness
+                .ct_eq(&other.ivk_commit_randomness)
     }
 }
 
@@ -758,8 +782,18 @@ impl PartialEq<[u8; 32]> for OutgoingViewingKey {
 ///
 /// [4.2.3]: https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents
 /// [ZIP-32]: https://zips.z.cash/zip-0032#orchard-diversifier-derivation
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone)]
 pub struct DiversifierKey([u8; 32]);
+
+impl ConstantTimeEq for DiversifierKey {
+    /// Check whether two `DiversifierKey`s are equal, runtime independent of
+    /// the value of the secret.
+    fn ct_eq(&self, other: &Self) -> Choice {
+        self.0.ct_eq(&other.0)
+    }
+}
+
+impl Eq for DiversifierKey {}
 
 impl From<FullViewingKey> for DiversifierKey {
     /// Derives a _diversifier key_ from a `FullViewingKey`.
@@ -787,6 +821,18 @@ impl From<FullViewingKey> for DiversifierKey {
 impl From<DiversifierKey> for [u8; 32] {
     fn from(dk: DiversifierKey) -> [u8; 32] {
         dk.0
+    }
+}
+
+impl PartialEq for DiversifierKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.ct_eq(other).unwrap_u8() == 1u8
+    }
+}
+
+impl PartialEq<[u8; 32]> for DiversifierKey {
+    fn eq(&self, other: &[u8; 32]) -> bool {
+        self.0.ct_eq(other).unwrap_u8() == 1u8
     }
 }
 
@@ -890,7 +936,7 @@ impl Diversifier {
 /// a `Diversifier` by the `IncomingViewingKey` scalar.
 ///
 /// [concretediversifyhash]: https://zips.z.cash/protocol/nu5.pdf#concretediversifyhash
-/// https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents
+/// <https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents>
 #[derive(Copy, Clone, PartialEq)]
 pub struct TransmissionKey(pub(crate) pallas::Affine);
 
@@ -951,6 +997,8 @@ impl PartialEq<[u8; 32]> for TransmissionKey {
         &self.0.to_bytes() == other
     }
 }
+
+// TODO: implement EphemeralPrivateKey: #2192
 
 /// An ephemeral public key for Orchard key agreement.
 ///
