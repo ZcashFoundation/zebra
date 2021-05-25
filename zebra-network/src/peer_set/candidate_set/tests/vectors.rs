@@ -99,6 +99,22 @@ fn doesnt_offsets_if_most_recent_last_seen_times_is_exactly_the_limit() {
     assert_eq!(validated_peers, expected_peers);
 }
 
+/// Rejects all addresses if underflow occurs when applying the offset.
+#[test]
+fn rejects_all_addresses_if_applying_offset_causes_an_underflow() {
+    let last_seen_limit = DateTime32::now();
+
+    let input_peers = mock_gossiped_peers(vec![
+        DateTime32::from(u32::MIN).to_chrono(),
+        last_seen_limit.to_chrono(),
+        DateTime32::from(u32::MAX).to_chrono(),
+    ]);
+
+    let validated_peers: Vec<_> = validate_addrs(input_peers.clone(), last_seen_limit).collect();
+
+    assert!(validated_peers.is_empty());
+}
+
 /// Create a mock list of gossiped [`MetaAddr`]s with the specified `last_seen_times`.
 ///
 /// The IP address and port of the generated ports should not matter for the test.
