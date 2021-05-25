@@ -261,7 +261,7 @@ where
                 started_once = true;
             }
 
-            tracing::info!("starting sync, obtaining new tips");
+            tracing::info!("starting sync, trying to obtain new tips");
             if let Err(e) = self.obtain_tips().await {
                 tracing::warn!(?e, "error obtaining tips");
                 continue 'sync;
@@ -329,7 +329,7 @@ where
                     tips.len = self.prospective_tips.len(),
                     in_flight = self.downloads.in_flight(),
                     lookahead_limit = self.lookahead_limit,
-                    "extending tips",
+                    "trying to extend tips",
                 );
 
                 if let Err(e) = self.extend_tips().await {
@@ -362,7 +362,11 @@ where
             })
             .map_err(|e| eyre!(e))?;
 
-        tracing::info!(tip = ?block_locator.first().unwrap(), "trying to obtain new chain tips");
+        tracing::info!(
+            len = ?block_locator.len(),
+            tip = ?block_locator.first().unwrap(),
+            "sending block locator to obtain new chain tips"
+        );
         tracing::debug!(?block_locator, "got block locator");
 
         let obtain_tips_req = zn::Request::FindBlocks {
@@ -475,7 +479,6 @@ where
         let tips = std::mem::take(&mut self.prospective_tips);
 
         let mut download_set = HashSet::new();
-        tracing::info!(tips = ?tips.len(), "trying to extend chain tips");
         for tip in tips {
             tracing::debug!(?tip, "asking peers to extend chain tip");
 
