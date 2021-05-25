@@ -4,19 +4,27 @@ use proptest::{arbitrary::any, prelude::*};
 /// Returns a strategy that produces an arbitrary [`chrono::DateTime<Utc>`],
 /// based on the full valid range of the type.
 ///
-/// Both the seconds and nanoseconds values are randomised. But leap nanoseconds
-/// are never present.
-/// https://docs.rs/chrono/0.4.19/chrono/struct.DateTime.html#method.timestamp_subsec_nanos
+/// Both the seconds and nanoseconds values are randomised, including leap seconds:
+/// https://docs.rs/chrono/0.4.19/chrono/naive/struct.NaiveTime.html#leap-second-handling
 ///
-/// Zebra uses these times internally, via [`Utc::now`].
+/// Wherever possible, Zebra should handle leap seconds by:
+/// - making durations and intervals 3 seconds or longer,
+/// - avoiding complex time-based calculations, and
+/// - avoiding relying on subsecond precision or time order.
+/// When monotonic times are needed, use the opaque `std::time::Instant` type.
+///
+/// # Usage
+///
+/// Zebra uses these times internally, typically via [`Utc::now`].
 ///
 /// Some parts of the Zcash network protocol ([`Version`] messages) also use times
 /// with an 8-byte seconds value. Unlike this function, they have zero
-/// nanoseconds values.
+/// nanoseconds values. (So they never have `chrono` leap seconds.)
 pub fn datetime_full() -> impl Strategy<Value = chrono::DateTime<Utc>> {
     (
+        // TODO: should we be subtracting 1 from the maximum timestamp?
         MIN_DATETIME.timestamp()..=MAX_DATETIME.timestamp(),
-        0..1_000_000_000_u32,
+        0..2_000_000_000_u32,
     )
         .prop_map(|(secs, nsecs)| Utc.timestamp(secs, nsecs))
 }
