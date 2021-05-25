@@ -449,14 +449,14 @@ where
                     let prev_download_len = download_set.len();
                     download_set.extend(unknown_hashes);
                     let new_download_len = download_set.len();
-                    tracing::debug!(
+                    tracing::info!(
                         new_hashes = new_download_len - prev_download_len,
                         "added hashes to download set"
                     );
                 }
                 Ok(_) => unreachable!("network returned wrong response"),
                 // We ignore this error because we made multiple fanout requests.
-                Err(e) => tracing::debug!(?e),
+                Err(e) => tracing::info!(?e, "ignored fanout error"),
             }
         }
 
@@ -576,14 +576,14 @@ where
                         let prev_download_len = download_set.len();
                         download_set.extend(unknown_hashes);
                         let new_download_len = download_set.len();
-                        tracing::debug!(
+                        tracing::info!(
                             new_hashes = new_download_len - prev_download_len,
                             "added hashes to download set"
                         );
                     }
                     Ok(_) => unreachable!("network returned wrong response"),
                     // We ignore this error because we made multiple fanout requests.
-                    Err(e) => tracing::debug!(?e),
+                    Err(e) => tracing::info!(?e, "ignored fanout error"),
                 }
             }
         }
