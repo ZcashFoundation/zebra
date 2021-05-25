@@ -2,6 +2,9 @@
 
 mod disk_format;
 
+#[cfg(test)]
+mod tests;
+
 use std::{collections::HashMap, convert::TryInto, sync::Arc};
 
 use zebra_chain::transparent;
