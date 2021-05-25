@@ -702,6 +702,12 @@ impl fmt::Display for FullViewingKey {
     }
 }
 
+impl PartialEq for FullViewingKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.ct_eq(other).unwrap_u8() == 1u8
+    }
+}
+
 /// An outgoing viewing key, as described in [protocol specification
 /// §4.2.3][ps].
 ///

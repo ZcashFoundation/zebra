@@ -48,7 +48,7 @@ proptest! {
         assert!(nullifier_deriving_key == <[u8; 32]>::from(nullifier_deriving_key));
 
         let ivk_commit_randomness = IvkCommitRandomness::from(spending_key);
-         // Test ConstantTimeEq, Eq, PartialEq
+        // Test ConstantTimeEq, Eq, PartialEq
         assert!(ivk_commit_randomness == <[u8; 32]>::from(ivk_commit_randomness));
 
         let full_viewing_key = FullViewingKey {
@@ -57,6 +57,8 @@ proptest! {
             nullifier_deriving_key,
             ivk_commit_randomness,
         };
+        // Test ConstantTimeEq, Eq, PartialEq
+        assert!(full_viewing_key == full_viewing_key.clone());
 
         let diversifier_key = DiversifierKey::from(full_viewing_key);
         // Test ConstantTimeEq, Eq, PartialEq
