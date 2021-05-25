@@ -388,7 +388,9 @@ where
     // Zebra has just started, and we're the only task that makes connections,
     // so the number of recently live peers must be zero here.
     //
-    // TODO: remove this check when recently live peers uses the PeerSet,
+    // TODO: replace with a live peers watch channel
+    //       include inbound live peers using the peer set (#1552)
+    //       remove this check when recently live peers uses the PeerSet,
     //       so we don't panic on early inbound connections
     assert_eq!(
         recently_live_peers, 0,
@@ -438,7 +440,6 @@ where
                 // congested it can generate a lot of demand signal very
                 // rapidly.
                 trace!("too many in-flight handshakes and crawls, dropping demand signal");
-                continue;
             }
             DemandHandshake => {
                 // spawn each handshake into an independent task, so it can make
@@ -459,7 +460,11 @@ where
             }
             DemandCrawl => {
                 debug!("demand for peers but no available candidates");
+
+                // Make sure we have some live peers before crawling
+                recently_live_peers = candidate_set.recently_live_peer_count().await;
                 needs_crawl = true;
+
                 // Try to connect to a new peer after the crawl.
                 let _ = demand_tx.try_send(());
             }
@@ -470,19 +475,20 @@ where
                     "crawling for more peers in response to the crawl timer"
                 );
                 debug!(?tick, "crawl timer value");
+
+                recently_live_peers = address_metrics.recently_live;
                 needs_crawl = true;
+
                 let _ = demand_tx.try_send(());
             }
             HandshakeConnected { addr } => {
                 trace!(?addr, "crawler cleared successful handshake");
+
                 // Assume an update for the peer that just connected is waiting
                 // in the channel.
-                //
-                // TODO: replace with a live peers watch channel
-                //       include inbound live peers using the peer set (#1552)
                 recently_live_peers = candidate_set.recently_live_peer_count().await + 1;
 
-                // Work around a zcashd rate-limit
+                // Do a crawl after the first few handshakes, to handle low peer numbers
                 needs_crawl = initial_crawls_left > 0;
             }
             HandshakeFailed { failed_addr, error } => {
@@ -512,11 +518,9 @@ where
             }
         }
 
-        // Only run one crawl at a time, to avoid congestion on testnet.
-        // TODO: do we want a small number of concurrent crawls on large networks
-        //       like mainnet?
-        if needs_crawl && crawls.is_empty() {
-            // avoid occupying our zcashd peers with requests they'll only answer infrequently
+        // Only run one crawl at a time, to avoid peer set congestion
+        if needs_crawl && crawls.is_empty() && recently_live_peers > 0 {
+            // limit our fanout, because zcashd has a response rate-limit
             let fanout_limit = max(
                 recently_live_peers / constants::GET_ADDR_FANOUT_LIVE_PEERS_DIVISOR,
                 1,

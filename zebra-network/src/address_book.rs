@@ -91,7 +91,7 @@ pub struct AddressMetrics {
     recently_attempted: usize,
 
     /// The number of peers that have recently sent us messages.
-    recently_live: usize,
+    pub(crate) recently_live: usize,
 
     /// The number of peers that have failed recently.
     recently_failed: usize,
