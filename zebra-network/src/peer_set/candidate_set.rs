@@ -336,6 +336,10 @@ where
 /// Adjusts untrusted last seen times so they are not in the future. This stops
 /// malicious peers keeping all their addresses at the front of the connection
 /// queue. Honest peers with future clock skew also get adjusted.
+///
+/// Rejects all addresses if there are at least two that have reported
+/// last_seen` times where one is so far in the future and another is so far in
+/// the past that they cause an overflow when offsetting the times.
 fn validate_addrs(
     addrs: impl IntoIterator<Item = MetaAddr>,
     last_seen_limit: DateTime32,
@@ -362,25 +366,34 @@ fn validate_addrs(
 
 /// Ensure all reported `last_seen` times are less than or equal to `last_seen_limit`.
 ///
-/// # Panics
-///
-/// If the `addrs` list is empty.
+/// This will consider all addresses as invalid if trying to offset their
+/// `last_seen` times to be before the limit causes an overflow.
 fn limit_last_seen_times(addrs: &mut Vec<MetaAddr>, last_seen_limit: DateTime32) {
-    let most_recent_reported_seen_timestamp = addrs
-        .iter()
-        .map(|addr| addr.get_last_seen().timestamp())
-        .max()
-        .expect("unexpected empty address list");
+    let (oldest_reported_seen_timestamp, newest_reported_seen_timestamp) =
+        addrs
+            .iter()
+            .fold((u32::MAX, u32::MIN), |(oldest, newest), addr| {
+                let last_seen = addr.get_last_seen().timestamp();
+                (oldest.min(last_seen), newest.max(last_seen))
+            });
 
     // If any time is in the future, adjust all times, to compensate for clock skew on honest peers
-    if most_recent_reported_seen_timestamp > last_seen_limit.timestamp() {
-        let offset = most_recent_reported_seen_timestamp - last_seen_limit.timestamp();
+    if newest_reported_seen_timestamp > last_seen_limit.timestamp() {
+        let offset = newest_reported_seen_timestamp - last_seen_limit.timestamp();
 
-        for addr in addrs {
-            let old_last_seen = addr.get_last_seen().timestamp();
-            let new_last_seen = old_last_seen - offset;
+        // Apply offset to oldest timestamp to check for underflow
+        let oldest_resulting_timestamp = oldest_reported_seen_timestamp as i64 - offset as i64;
+        if oldest_resulting_timestamp >= 0 {
+            // No overflow is possible, so apply offset to all addresses
+            for addr in addrs {
+                let old_last_seen = addr.get_last_seen().timestamp();
+                let new_last_seen = old_last_seen - offset;
 
-            addr.set_last_seen(new_last_seen.into());
+                addr.set_last_seen(new_last_seen.into());
+            }
+        } else {
+            // An overflow will occur, so reject all gossiped peers
+            addrs.clear();
         }
     }
 }
