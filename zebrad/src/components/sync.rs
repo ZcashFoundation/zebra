@@ -61,7 +61,7 @@ const MIN_LOOKAHEAD_LIMIT: usize = zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP * 
 ///
 /// If this timeout is set too low, the syncer will sometimes get stuck in a
 /// failure loop.
-const TIPS_RESPONSE_TIMEOUT: Duration = Duration::from_secs(6);
+const TIPS_RESPONSE_TIMEOUT: Duration = Duration::from_secs(12);
 
 /// Controls how long we wait for a block download request to complete.
 ///
