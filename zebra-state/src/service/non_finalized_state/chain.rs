@@ -20,6 +20,7 @@ pub struct Chain {
 
     pub created_utxos: HashMap<transparent::OutPoint, Utxo>,
     spent_utxos: HashSet<transparent::OutPoint>,
+    // TODO: add sprout, sapling and orchard anchors (#1320)
     sprout_anchors: HashSet<sprout::tree::Root>,
     sapling_anchors: HashSet<sapling::tree::Root>,
     sprout_nullifiers: HashSet<sprout::Nullifier>,
@@ -27,8 +28,6 @@ pub struct Chain {
     orchard_nullifiers: HashSet<orchard::Nullifier>,
     partial_cumulative_work: PartialCumulativeWork,
 }
-
-use either::Either;
 
 impl Chain {
     /// Push a contextually valid non-finalized block into a chain as the new tip.
@@ -168,34 +167,41 @@ impl UpdateWith<PreparedBlock> for Chain {
             .zip(transaction_hashes.iter().cloned())
             .enumerate()
         {
-            let (inputs, joinsplit_data, sapling_shielded_data, orchard_shielded_data) =
-                match transaction.deref() {
-                    V4 {
-                        inputs,
-                        joinsplit_data,
-                        sapling_shielded_data,
-                        ..
-                    } => (
-                        inputs,
-                        joinsplit_data,
-                        Either::Left(sapling_shielded_data),
-                        &None,
-                    ),
-                    V5 {
-                        inputs,
-                        sapling_shielded_data,
-                        orchard_shielded_data,
-                        ..
-                    } => (
-                        inputs,
-                        &None,
-                        Either::Right(sapling_shielded_data),
-                        orchard_shielded_data,
-                    ),
-                    V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(
-                        "older transaction versions only exist in finalized blocks pre sapling",
-                    ),
-                };
+            let (
+                inputs,
+                joinsplit_data,
+                sapling_shielded_data_per_spend_anchor,
+                sapling_shielded_data_shared_anchor,
+                orchard_shielded_data,
+            ) = match transaction.deref() {
+                V4 {
+                    inputs,
+                    joinsplit_data,
+                    sapling_shielded_data,
+                    ..
+                } => (
+                    inputs,
+                    joinsplit_data,
+                    Some(sapling_shielded_data),
+                    None,
+                    &None,
+                ),
+                V5 {
+                    inputs,
+                    sapling_shielded_data,
+                    orchard_shielded_data,
+                    ..
+                } => (
+                    inputs,
+                    &None,
+                    None,
+                    Some(sapling_shielded_data),
+                    orchard_shielded_data,
+                ),
+                V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(
+                    "older transaction versions only exist in finalized blocks pre sapling",
+                ),
+            };
 
             // add key `transaction.hash` and value `(height, tx_index)` to `tx_by_hash`
             let prior_pair = self
@@ -210,14 +216,15 @@ impl UpdateWith<PreparedBlock> for Chain {
             self.update_chain_state_with(&prepared.new_outputs);
             // add the utxos this consumed
             self.update_chain_state_with(inputs);
-            // add sprout anchor and nullifiers
+
+            // add the shielded data
             self.update_chain_state_with(joinsplit_data);
-            // add sapling anchor and nullifier
-            match sapling_shielded_data {
-                Either::Left(s) => self.update_chain_state_with(s),
-                Either::Right(s) => self.update_chain_state_with(s),
-            };
-            // add orchard anchor and nullifiers
+            if let Some(s) = sapling_shielded_data_per_spend_anchor {
+                self.update_chain_state_with(s);
+            }
+            if let Some(s) = sapling_shielded_data_shared_anchor {
+                self.update_chain_state_with(s);
+            }
             self.update_chain_state_with(orchard_shielded_data);
         }
     }
@@ -248,34 +255,41 @@ impl UpdateWith<PreparedBlock> for Chain {
         for (transaction, transaction_hash) in
             block.transactions.iter().zip(transaction_hashes.iter())
         {
-            let (inputs, joinsplit_data, sapling_shielded_data, orchard_shielded_data) =
-                match transaction.deref() {
-                    V4 {
-                        inputs,
-                        joinsplit_data,
-                        sapling_shielded_data,
-                        ..
-                    } => (
-                        inputs,
-                        joinsplit_data,
-                        Either::Left(sapling_shielded_data),
-                        &None,
-                    ),
-                    V5 {
-                        inputs,
-                        sapling_shielded_data,
-                        orchard_shielded_data,
-                        ..
-                    } => (
-                        inputs,
-                        &None,
-                        Either::Right(sapling_shielded_data),
-                        orchard_shielded_data,
-                    ),
-                    V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(
-                        "older transaction versions only exist in finalized blocks pre sapling",
-                    ),
-                };
+            let (
+                inputs,
+                joinsplit_data,
+                sapling_shielded_data_per_spend_anchor,
+                sapling_shielded_data_shared_anchor,
+                orchard_shielded_data,
+            ) = match transaction.deref() {
+                V4 {
+                    inputs,
+                    joinsplit_data,
+                    sapling_shielded_data,
+                    ..
+                } => (
+                    inputs,
+                    joinsplit_data,
+                    Some(sapling_shielded_data),
+                    None,
+                    &None,
+                ),
+                V5 {
+                    inputs,
+                    sapling_shielded_data,
+                    orchard_shielded_data,
+                    ..
+                } => (
+                    inputs,
+                    &None,
+                    None,
+                    Some(sapling_shielded_data),
+                    orchard_shielded_data,
+                ),
+                V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(
+                    "older transaction versions only exist in finalized blocks pre sapling",
+                ),
+            };
 
             // remove `transaction.hash` from `tx_by_hash`
             assert!(
@@ -287,14 +301,15 @@ impl UpdateWith<PreparedBlock> for Chain {
             self.revert_chain_state_with(&prepared.new_outputs);
             // remove the utxos this consumed
             self.revert_chain_state_with(inputs);
-            // remove sprout anchor and nullifiers
+
+            // remove the shielded data
             self.revert_chain_state_with(joinsplit_data);
-            // remove sapling anchor and nullifier
-            match sapling_shielded_data {
-                Either::Left(s) => self.revert_chain_state_with(s),
-                Either::Right(s) => self.revert_chain_state_with(s),
-            };
-            // add orchard anchor and nullifiers
+            if let Some(s) = sapling_shielded_data_per_spend_anchor {
+                self.revert_chain_state_with(s);
+            }
+            if let Some(s) = sapling_shielded_data_shared_anchor {
+                self.revert_chain_state_with(s);
+            }
             self.revert_chain_state_with(orchard_shielded_data);
         }
     }
