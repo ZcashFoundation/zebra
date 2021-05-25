@@ -5,7 +5,7 @@ use proptest::{arbitrary::any, prelude::*};
 /// based on the full valid range of the type.
 ///
 /// Both the seconds and nanoseconds values are randomised, including leap seconds:
-/// https://docs.rs/chrono/0.4.19/chrono/naive/struct.NaiveTime.html#leap-second-handling
+/// <https://docs.rs/chrono/0.4.19/chrono/naive/struct.NaiveTime.html#leap-second-handling>
 ///
 /// Wherever possible, Zebra should handle leap seconds by:
 /// - making durations and intervals 3 seconds or longer,
