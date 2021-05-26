@@ -262,9 +262,8 @@ impl MetaAddr {
         let last_seen = Utc.timestamp(ts - ts.rem_euclid(interval), 0);
         MetaAddr {
             addr: self.addr,
-            // services are sanitized during parsing, or set to a fixed valued by
-            // new_local_listener, so we don't need to sanitize here
-            services: self.services,
+            // deserialization also sanitizes services to known flags
+            services: self.services & PeerServices::all(),
             last_seen,
             // the state isn't sent to the remote peer, but sanitize it anyway
             last_connection_state: NeverAttemptedGossiped,
