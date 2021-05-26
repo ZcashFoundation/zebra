@@ -337,9 +337,7 @@ where
 /// malicious peers keeping all their addresses at the front of the connection
 /// queue. Honest peers with future clock skew also get adjusted.
 ///
-/// Rejects all addresses if there are at least two that have reported
-/// last_seen` times where one is so far in the future and another is so far in
-/// the past that they cause an overflow when offsetting the times.
+/// Rejects all addresses if any calculated times overflow or underflow.
 fn validate_addrs(
     addrs: impl IntoIterator<Item = MetaAddr>,
     last_seen_limit: DateTime32,
