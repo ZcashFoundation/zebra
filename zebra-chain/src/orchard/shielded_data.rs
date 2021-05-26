@@ -3,7 +3,7 @@
 use crate::{
     amount::Amount,
     block::MAX_BLOCK_BYTES,
-    orchard::{tree, Action},
+    orchard::{tree, Action, Nullifier},
     primitives::{
         redpallas::{Binding, Signature, SpendAuth},
         Halo2Proof,
@@ -36,6 +36,27 @@ pub struct ShieldedData {
     pub actions: AtLeastOne<AuthorizedAction>,
     /// A signature on the transaction `sighash`.
     pub binding_sig: Signature<Binding>,
+}
+
+impl ShieldedData {
+    /// Iterate over the [`Action`]s for the [`AuthorizedAction`]s in this transaction.
+    pub fn actions(&self) -> impl Iterator<Item = &Action> {
+        self.actions.actions()
+    }
+
+    /// Collect the [`Nullifier`]s for this transaction, if it contains
+    /// [`Action`]s.
+    pub fn nullifiers(&self) -> impl Iterator<Item = &Nullifier> {
+        self.actions().map(|action| &action.nullifier)
+    }
+}
+
+impl AtLeastOne<AuthorizedAction> {
+    /// Iterate over the [`Action`]s of each [`AuthorizedAction`].
+    pub fn actions(&self) -> impl Iterator<Item = &Action> {
+        self.iter()
+            .map(|authorized_action| &authorized_action.action)
+    }
 }
 
 /// An authorized action description.
