@@ -17,12 +17,12 @@ pub struct Script(Vec<u8>);
 impl Script {
     /// Create a new Bitcoin script from its raw bytes.
     /// The raw bytes must not contain the compact size prefix.
-    pub fn new(raw_bytes: Vec<u8>) -> Self {
-        Script(raw_bytes)
+    pub fn new(raw_bytes: &[u8]) -> Self {
+        Script(raw_bytes.to_vec())
     }
 
     /// Return the raw bytes of the script without the compact size prefix.
-    pub fn raw_bytes(&self) -> &Vec<u8> {
+    pub fn as_raw_bytes(&self) -> &[u8] {
         &self.0
     }
 }

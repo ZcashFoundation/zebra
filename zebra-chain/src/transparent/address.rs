@@ -177,7 +177,7 @@ impl ToAddressWithNetwork for Script {
     fn to_address(&self, network: Network) -> Address {
         Address::PayToScriptHash {
             network,
-            script_hash: Address::hash_payload(self.raw_bytes()),
+            script_hash: Address::hash_payload(self.as_raw_bytes()),
         }
     }
 }
@@ -289,7 +289,7 @@ mod tests {
     fn empty_script_mainnet() {
         zebra_test::init();
 
-        let script = Script::new(vec![0; 20]);
+        let script = Script::new(&[0u8; 20]);
 
         let t_addr = script.to_address(Network::Mainnet);
 
@@ -300,7 +300,7 @@ mod tests {
     fn empty_script_testnet() {
         zebra_test::init();
 
-        let script = Script::new(vec![0; 20]);
+        let script = Script::new(&[0; 20]);
 
         let t_addr = script.to_address(Network::Testnet);
 

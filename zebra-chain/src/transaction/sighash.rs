@@ -621,7 +621,7 @@ mod test {
         let transaction = ZIP143_2.zcash_deserialize_into::<Transaction>()?;
 
         let value = hex::decode("2f6e04963b4c0100")?.zcash_deserialize_into::<Amount<_>>()?;
-        let lock_script = Script::new(hex::decode("53")?);
+        let lock_script = Script::new(&hex::decode("53")?);
         let input_ind = 1;
 
         let hasher = SigHasher::new(
@@ -782,7 +782,7 @@ mod test {
         let transaction = ZIP243_2.zcash_deserialize_into::<Transaction>()?;
 
         let value = hex::decode("adedf02996510200")?.zcash_deserialize_into::<Amount<_>>()?;
-        let lock_script = Script::new(vec![]);
+        let lock_script = Script::new(&[]);
         let input_ind = 1;
 
         let hasher = SigHasher::new(
@@ -880,7 +880,7 @@ mod test {
         let transaction = ZIP243_3.zcash_deserialize_into::<Transaction>()?;
 
         let value = hex::decode("80f0fa0200000000")?.zcash_deserialize_into::<Amount<_>>()?;
-        let lock_script = Script::new(hex::decode(
+        let lock_script = Script::new(&hex::decode(
             "76a914507173527b4c3318a2aecd793bf1cfed705950cf88ac",
         )?);
         let input_ind = 0;
