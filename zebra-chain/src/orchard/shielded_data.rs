@@ -52,8 +52,7 @@ impl ShieldedData {
 }
 
 impl AtLeastOne<AuthorizedAction> {
-    /// Iterate over the [`Action`]s of the `AuthorizedAction` for this transaction,
-    /// returning them as their generic type.
+    /// Iterate over the [`Action`]s of each [`AuthorizedAction`].
     pub fn actions(&self) -> impl Iterator<Item = &Action> {
         self.iter()
             .map(|authorized_action| &authorized_action.action)
