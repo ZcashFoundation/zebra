@@ -106,7 +106,7 @@ impl PartialOrd for PeerAddrState {
 /// An address with metadata on its advertised services and last-seen time.
 ///
 /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#Network_address)
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug)]
 pub struct MetaAddr {
     /// The peer's address.
     pub addr: SocketAddr,
@@ -318,6 +318,14 @@ impl PartialOrd for MetaAddr {
         Some(self.cmp(other))
     }
 }
+
+impl PartialEq for MetaAddr {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == Ordering::Equal
+    }
+}
+
+impl Eq for MetaAddr {}
 
 impl ZcashSerialize for MetaAddr {
     fn zcash_serialize<W: Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
