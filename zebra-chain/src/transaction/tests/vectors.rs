@@ -1,12 +1,18 @@
 use super::super::*;
 
 use crate::{
+    amount::{Amount, NonNegative},
     block::{Block, Height, MAX_BLOCK_BYTES},
     parameters::{Network, NetworkUpgrade},
     serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
+    transaction::sighash::SigHasher,
+    transparent::Script,
 };
 
 use std::convert::TryInto;
+
+use color_eyre::eyre;
+use eyre::Result;
 
 #[test]
 fn librustzcash_tx_deserialize_and_round_trip() {
@@ -283,4 +289,49 @@ fn fake_v5_round_trip_for_network(network: Network) {
             "data must be equal if structs are equal"
         );
     }
+}
+
+#[test]
+fn zcashd_sighash() -> Result<()> {
+    zebra_test::init();
+
+    for test in zebra_test::vectors::SIGHASH.iter() {
+        let transaction = match test.raw_transaction.zcash_deserialize_into::<Transaction>() {
+            Ok(tx) => tx,
+            Err(err) => {
+                println!(
+                    "Skipping tx {}\nError: {}",
+                    hex::encode(&test.raw_transaction),
+                    err
+                );
+                continue;
+            }
+        };
+
+        let hash_type = test.hash_type as u32;
+        println!("Hash type = {}", hash_type);
+        // let hash_type: HashType = HashType::from_bits(hash_type).expect("Flags must be valid");
+        let hash_type: HashType = HashType::from_bits_truncate(hash_type);
+        let branch_id = test.branch_id as u32;
+        let network_upgrade = match NetworkUpgrade::from_branch_id(branch_id) {
+            Some(nu) => nu,
+            None => {
+                println!("Skipping branch id {} ({:02X})", branch_id, branch_id);
+                continue;
+            }
+        };
+        let input_ind = test.input_index as u32;
+        let value: Amount<NonNegative> = 0.try_into().unwrap();
+        let lock_script = Script::new(&test.script[..]);
+        let input = Some((input_ind, transparent::Output { value, lock_script }));
+
+        let hasher = SigHasher::new(&transaction, hash_type, network_upgrade, input);
+
+        let sighash = hasher.sighash();
+        let result = sighash.as_bytes();
+
+        assert_eq!(result, test.signature_hash);
+    }
+
+    Ok(())
 }

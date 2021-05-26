@@ -4579,6 +4579,7 @@ dependencies = [
  "pretty_assertions",
  "proptest",
  "regex",
+ "serde_json",
  "spandoc",
  "tempdir",
  "thiserror",
