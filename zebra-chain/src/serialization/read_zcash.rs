@@ -1,7 +1,7 @@
 use std::io;
 use std::{
     convert::TryInto,
-    net::{IpAddr, SocketAddr},
+    net::{IpAddr, Ipv6Addr, SocketAddr},
 };
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
@@ -95,16 +95,11 @@ pub trait ReadZcashExt: io::Read {
     /// Read an IP address in Bitcoin format.
     #[inline]
     fn read_ip_addr(&mut self) -> io::Result<IpAddr> {
-        use std::net::{IpAddr::*, Ipv6Addr};
-
         let mut octets = [0u8; 16];
         self.read_exact(&mut octets)?;
         let v6_addr = Ipv6Addr::from(octets);
 
-        match v6_addr.to_ipv4() {
-            Some(v4_addr) => Ok(V4(v4_addr)),
-            None => Ok(V6(v6_addr)),
-        }
+        Ok(canonical_ip_addr(&v6_addr))
     }
 
     /// Read a Bitcoin-encoded `SocketAddr`.
@@ -150,3 +145,20 @@ pub trait ReadZcashExt: io::Read {
 
 /// Mark all types implementing `Read` as implementing the extension.
 impl<R: io::Read + ?Sized> ReadZcashExt for R {}
+
+/// Transform a Zcash-deserialized IPv6 address into a canonical Zebra IP address.
+///
+/// Zcash uses IPv6-mapped IPv4 addresses in its network protocol. Zebra converts
+/// those addresses to `Ipv4Addr`s, for maximum compatibility with systems that
+/// don't understand IPv6.
+pub fn canonical_ip_addr(v6_addr: &Ipv6Addr) -> IpAddr {
+    use IpAddr::*;
+
+    // TODO: replace with `to_ipv4_mapped` when that stabilizes
+    // https://github.com/rust-lang/rust/issues/27709
+    match v6_addr.to_ipv4() {
+        // workaround for unstable `to_ipv4_mapped`
+        Some(v4_addr) if v4_addr.to_ipv6_mapped() == *v6_addr => V4(v4_addr),
+        Some(_) | None => V6(*v6_addr),
+    }
+}
