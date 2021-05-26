@@ -325,7 +325,7 @@ impl ZcashSerialize for MetaAddr {
             self.get_last_seen()
                 .timestamp()
                 .try_into()
-                .expect("time is in range"),
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?,
         )?;
         writer.write_u64::<LittleEndian>(self.services.bits())?;
         writer.write_socket_addr(self.addr)?;
