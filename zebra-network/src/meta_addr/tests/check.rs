@@ -2,13 +2,13 @@
 
 use super::super::MetaAddr;
 
-use crate::constants::TIMESTAMP_TRUNCATION_SECONDS;
+use crate::{constants::TIMESTAMP_TRUNCATION_SECONDS, types::PeerServices};
 
-/// Make sure that the sanitize function reduces time and state metadata
-/// leaks.
-pub(crate) fn sanitize_avoids_leaks(entry: &MetaAddr) {
-    let sanitized = entry.sanitize();
-
+/// Check that `sanitized_addr` has less time and state metadata than
+/// `original_addr`.
+///
+/// Also check that the time hasn't changed too much.
+pub(crate) fn sanitize_avoids_leaks(original: &MetaAddr, sanitized: &MetaAddr) {
     // We want the sanitized timestamp to:
     // - be a multiple of the truncation interval,
     // - have a zero nanoseconds component, and
@@ -20,11 +20,11 @@ pub(crate) fn sanitize_avoids_leaks(entry: &MetaAddr) {
     assert_eq!(sanitized.get_last_seen().timestamp_subsec_nanos(), 0);
     // handle underflow and overflow by skipping the check
     // the other check will ensure correctness
-    let lowest_time = entry
+    let lowest_time = original
         .get_last_seen()
         .timestamp()
         .checked_sub(TIMESTAMP_TRUNCATION_SECONDS);
-    let highest_time = entry
+    let highest_time = original
         .get_last_seen()
         .timestamp()
         .checked_add(TIMESTAMP_TRUNCATION_SECONDS);
@@ -37,9 +37,9 @@ pub(crate) fn sanitize_avoids_leaks(entry: &MetaAddr) {
 
     // Sanitize to the the default state, even though it's not serialized
     assert_eq!(sanitized.last_connection_state, Default::default());
+    // Sanitize to known flags
+    assert_eq!(sanitized.services, original.services & PeerServices::all());
+
     // We want the other fields to be unmodified
-    assert_eq!(sanitized.addr, entry.addr);
-    // Services are sanitized during parsing, so we don't need to make
-    // any changes in sanitize()
-    assert_eq!(sanitized.services, entry.services);
+    assert_eq!(sanitized.addr, original.addr);
 }

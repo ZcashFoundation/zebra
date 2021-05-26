@@ -23,6 +23,6 @@ fn sanitize_extremes() {
         last_connection_state: Default::default(),
     };
 
-    check::sanitize_avoids_leaks(&min_time_entry);
-    check::sanitize_avoids_leaks(&max_time_entry);
+    check::sanitize_avoids_leaks(&min_time_entry, &min_time_entry.sanitize());
+    check::sanitize_avoids_leaks(&max_time_entry, &max_time_entry.sanitize());
 }
