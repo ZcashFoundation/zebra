@@ -355,9 +355,7 @@ fn validate_addrs(
 
     let mut addrs: Vec<_> = addrs.into_iter().collect();
 
-    if !addrs.is_empty() {
-        limit_last_seen_times(&mut addrs, last_seen_limit);
-    }
+    limit_last_seen_times(&mut addrs, last_seen_limit);
 
     addrs.into_iter()
 }
