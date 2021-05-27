@@ -44,8 +44,7 @@ impl ShieldedData {
         self.actions.actions()
     }
 
-    /// Collect the [`Nullifier`]s for this transaction, if it contains
-    /// [`Action`]s.
+    /// Collect the [`Nullifier`]s for this transaction.
     pub fn nullifiers(&self) -> impl Iterator<Item = &Nullifier> {
         self.actions().map(|action| &action.nullifier)
     }

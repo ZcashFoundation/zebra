@@ -6,7 +6,7 @@ use proptest::{
 use std::sync::Arc;
 
 use crate::{
-    parameters::{Network, NetworkUpgrade},
+    parameters::{Network, NetworkUpgrade, GENESIS_PREVIOUS_BLOCK_HASH},
     serialization,
     work::{difficulty::CompactDifficulty, equihash},
 };
@@ -20,6 +20,9 @@ pub struct LedgerState {
     /// The tip height of the block or start of the chain.
     ///
     /// To get the network upgrade, use the `network_upgrade` method.
+    ///
+    /// If `network_upgrade_override` is not set, the network upgrade is derived
+    /// from the height and network.
     pub tip_height: Height,
 
     /// The network to generate fake blocks for.
@@ -38,6 +41,12 @@ pub struct LedgerState {
     /// For an individual transaction, make the transaction a coinbase
     /// transaction.
     pub(crate) has_coinbase: bool,
+
+    /// Should this block have a genesis (all-zeroes) previous block hash?
+    ///
+    /// In Zebra's proptests, the previous block hash can be overriden with
+    /// genesis at any block height.
+    genesis_previous_block_hash_override: bool,
 }
 
 impl LedgerState {
@@ -51,6 +60,14 @@ impl LedgerState {
         } else {
             NetworkUpgrade::current(self.network, self.tip_height)
         }
+    }
+
+    /// Should this block have a genesis (all-zeroes) previous block hash?
+    ///
+    /// In Zebra's proptests, the previous block hash can be overriden with
+    /// genesis at any block height.
+    pub fn use_genesis_previous_block_hash(&self) -> bool {
+        self.tip_height == Height(0) || self.genesis_previous_block_hash_override
     }
 
     /// Returns a strategy for creating `LedgerState`s that always have coinbase
@@ -79,6 +96,8 @@ impl Default for LedgerState {
             network,
             network_upgrade_override: nu5_override,
             has_coinbase: true,
+            // start each chain with a genesis previous block hash, regardless of height
+            genesis_previous_block_hash_override: true,
         }
     }
 }
@@ -110,6 +129,7 @@ impl Arbitrary for LedgerState {
                     network,
                     network_upgrade_override,
                     has_coinbase: require_coinbase || has_coinbase,
+                    genesis_previous_block_hash_override: true,
                 }
             })
             .boxed()
@@ -125,9 +145,14 @@ impl Arbitrary for Block {
         let transactions_strategy = Transaction::vec_strategy(ledger_state, 2);
 
         (any::<Header>(), transactions_strategy)
-            .prop_map(|(header, transactions)| Self {
-                header,
-                transactions,
+            .prop_map(move |(mut header, transactions)| {
+                if ledger_state.genesis_previous_block_hash_override {
+                    header.previous_block_hash = GENESIS_PREVIOUS_BLOCK_HASH;
+                }
+                Self {
+                    header,
+                    transactions,
+                }
             })
             .boxed()
     }
@@ -147,6 +172,7 @@ impl Block {
         for _ in 0..count {
             vec.push(Block::arbitrary_with(current).prop_map(Arc::new));
             current.tip_height.0 += 1;
+            current.genesis_previous_block_hash_override = false;
         }
 
         vec.boxed()

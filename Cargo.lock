@@ -1735,9 +1735,9 @@ dependencies = [
 
 [[package]]
 name = "inferno"
-version = "0.10.5"
+version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "37fb405dbcc505ed20838c4f8dad7b901094de90add237755df54bd5dcda2fdd"
+checksum = "3c3cbcc228d2ad2e99328c2b19f38d80ec387ca6a29f778e40e32ca9f25448c3"
 dependencies = [
  "ahash 0.6.1",
  "atty",
@@ -4052,9 +4052,9 @@ checksum = "f1bddf1187be692e79c5ffeab891132dfb0f236ed36a43c7ed39f1165ee20191"
 
 [[package]]
 name = "vergen"
-version = "5.1.7"
+version = "5.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "047405d0de369210f6364d8c0ab790d9291c5b31d2989697d7bf79999b763191"
+checksum = "59032138343003a17090952a1eaa7c1b260080b44d3dbb0d68905bd2230260ee"
 dependencies = [
  "anyhow",
  "cfg-if 1.0.0",

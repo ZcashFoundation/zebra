@@ -1,5 +1,7 @@
+use super::read_zcash::canonical_ip_addr;
 use chrono::{TimeZone, Utc, MAX_DATETIME, MIN_DATETIME};
 use proptest::{arbitrary::any, prelude::*};
+use std::net::SocketAddr;
 
 /// Returns a strategy that produces an arbitrary [`chrono::DateTime<Utc>`],
 /// based on the full valid range of the type.
@@ -38,4 +40,15 @@ pub fn datetime_full() -> impl Strategy<Value = chrono::DateTime<Utc>> {
 /// [`Version`] message.
 pub fn datetime_u32() -> impl Strategy<Value = chrono::DateTime<Utc>> {
     any::<u32>().prop_map(|secs| Utc.timestamp(secs.into(), 0))
+}
+
+/// Returns a random canonical Zebra `SocketAddr`.
+///
+/// See [`canonical_ip_addr`] for details.
+pub fn canonical_socket_addr() -> impl Strategy<Value = SocketAddr> {
+    use SocketAddr::*;
+    any::<SocketAddr>().prop_map(|addr| match addr {
+        V4(_) => addr,
+        V6(v6_addr) => SocketAddr::new(canonical_ip_addr(v6_addr.ip()), v6_addr.port()),
+    })
 }

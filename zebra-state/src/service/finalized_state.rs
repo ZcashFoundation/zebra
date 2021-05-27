@@ -203,8 +203,7 @@ impl FinalizedState {
         // Assert that callers (including unit tests) get the chain order correct
         if self.is_empty(hash_by_height) {
             assert_eq!(
-                block::Hash([0; 32]),
-                block.header.previous_block_hash,
+                GENESIS_PREVIOUS_BLOCK_HASH, block.header.previous_block_hash,
                 "the first block added to an empty state must be a genesis block"
             );
             assert_eq!(

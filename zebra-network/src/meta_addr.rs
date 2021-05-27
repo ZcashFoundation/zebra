@@ -106,7 +106,7 @@ impl PartialOrd for PeerAddrState {
 /// An address with metadata on its advertised services and last-seen time.
 ///
 /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#Network_address)
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug)]
 pub struct MetaAddr {
     /// The peer's address.
     pub addr: SocketAddr,
@@ -262,9 +262,8 @@ impl MetaAddr {
         let last_seen = Utc.timestamp(ts - ts.rem_euclid(interval), 0);
         MetaAddr {
             addr: self.addr,
-            // services are sanitized during parsing, or set to a fixed valued by
-            // new_local_listener, so we don't need to sanitize here
-            services: self.services,
+            // deserialization also sanitizes services to known flags
+            services: self.services & PeerServices::all(),
             last_seen,
             // the state isn't sent to the remote peer, but sanitize it anyway
             last_connection_state: NeverAttemptedGossiped,
@@ -319,13 +318,21 @@ impl PartialOrd for MetaAddr {
     }
 }
 
+impl PartialEq for MetaAddr {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == Ordering::Equal
+    }
+}
+
+impl Eq for MetaAddr {}
+
 impl ZcashSerialize for MetaAddr {
     fn zcash_serialize<W: Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
         writer.write_u32::<LittleEndian>(
             self.get_last_seen()
                 .timestamp()
                 .try_into()
-                .expect("time is in range"),
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?,
         )?;
         writer.write_u64::<LittleEndian>(self.services.bits())?;
         writer.write_socket_addr(self.addr)?;
