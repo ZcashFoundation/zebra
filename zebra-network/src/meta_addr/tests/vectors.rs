@@ -2,8 +2,6 @@
 
 use super::{super::MetaAddr, check};
 
-use chrono::{MAX_DATETIME, MIN_DATETIME};
-
 /// Make sure that the sanitize function handles minimum and maximum times.
 #[test]
 fn sanitize_extremes() {
@@ -12,14 +10,14 @@ fn sanitize_extremes() {
     let min_time_entry = MetaAddr {
         addr: "127.0.0.1:8233".parse().unwrap(),
         services: Default::default(),
-        last_seen: MIN_DATETIME,
+        last_seen: u32::MIN.into(),
         last_connection_state: Default::default(),
     };
 
     let max_time_entry = MetaAddr {
         addr: "127.0.0.1:8233".parse().unwrap(),
         services: Default::default(),
-        last_seen: MAX_DATETIME,
+        last_seen: u32::MAX.into(),
         last_connection_state: Default::default(),
     };
 

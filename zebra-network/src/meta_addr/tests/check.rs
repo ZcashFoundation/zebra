@@ -17,7 +17,7 @@ pub(crate) fn sanitize_avoids_leaks(original: &MetaAddr, sanitized: &MetaAddr) {
         sanitized.get_last_seen().timestamp() % TIMESTAMP_TRUNCATION_SECONDS,
         0
     );
-    assert_eq!(sanitized.get_last_seen().timestamp_subsec_nanos(), 0);
+
     // handle underflow and overflow by skipping the check
     // the other check will ensure correctness
     let lowest_time = original
