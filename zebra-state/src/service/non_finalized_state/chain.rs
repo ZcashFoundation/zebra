@@ -288,12 +288,8 @@ impl UpdateWith<PreparedBlock> for Chain {
 
             // remove the shielded data
             self.revert_chain_state_with(joinsplit_data);
-            if let Some(_) = sapling_shielded_data_per_spend_anchor {
-                self.revert_chain_state_with(sapling_shielded_data_per_spend_anchor);
-            }
-            if let Some(_) = sapling_shielded_data_shared_anchor {
-                self.revert_chain_state_with(sapling_shielded_data_shared_anchor);
-            }
+            self.revert_chain_state_with(sapling_shielded_data_per_spend_anchor);
+            self.revert_chain_state_with(sapling_shielded_data_shared_anchor);
             self.revert_chain_state_with(orchard_shielded_data);
         }
     }
