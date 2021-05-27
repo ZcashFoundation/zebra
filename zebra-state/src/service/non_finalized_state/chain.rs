@@ -179,13 +179,7 @@ impl UpdateWith<PreparedBlock> for Chain {
                     joinsplit_data,
                     sapling_shielded_data,
                     ..
-                } => (
-                    inputs,
-                    joinsplit_data,
-                    Some(sapling_shielded_data),
-                    None,
-                    &None,
-                ),
+                } => (inputs, joinsplit_data, sapling_shielded_data, &None, &None),
                 V5 {
                     inputs,
                     sapling_shielded_data,
@@ -194,12 +188,12 @@ impl UpdateWith<PreparedBlock> for Chain {
                 } => (
                     inputs,
                     &None,
-                    None,
-                    Some(sapling_shielded_data),
+                    &None,
+                    sapling_shielded_data,
                     orchard_shielded_data,
                 ),
                 V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(
-                    "older transaction versions only exist in finalized blocks pre sapling",
+                    "older transaction versions only exist in finalized blocks, because of the mandatory canopy checkpoint",
                 ),
             };
 
@@ -219,11 +213,11 @@ impl UpdateWith<PreparedBlock> for Chain {
 
             // add the shielded data
             self.update_chain_state_with(joinsplit_data);
-            if let Some(s) = sapling_shielded_data_per_spend_anchor {
-                self.update_chain_state_with(s);
+            if let Some(_) = sapling_shielded_data_per_spend_anchor {
+                self.update_chain_state_with(sapling_shielded_data_per_spend_anchor);
             }
-            if let Some(s) = sapling_shielded_data_shared_anchor {
-                self.update_chain_state_with(s);
+            if let Some(_) = sapling_shielded_data_shared_anchor {
+                self.update_chain_state_with(sapling_shielded_data_shared_anchor);
             }
             self.update_chain_state_with(orchard_shielded_data);
         }
@@ -267,13 +261,7 @@ impl UpdateWith<PreparedBlock> for Chain {
                     joinsplit_data,
                     sapling_shielded_data,
                     ..
-                } => (
-                    inputs,
-                    joinsplit_data,
-                    Some(sapling_shielded_data),
-                    None,
-                    &None,
-                ),
+                } => (inputs, joinsplit_data, sapling_shielded_data, &None, &None),
                 V5 {
                     inputs,
                     sapling_shielded_data,
@@ -282,12 +270,12 @@ impl UpdateWith<PreparedBlock> for Chain {
                 } => (
                     inputs,
                     &None,
-                    None,
-                    Some(sapling_shielded_data),
+                    &None,
+                    sapling_shielded_data,
                     orchard_shielded_data,
                 ),
                 V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(
-                    "older transaction versions only exist in finalized blocks pre sapling",
+                    "older transaction versions only exist in finalized blocks, because of the mandatory canopy checkpoint",
                 ),
             };
 
@@ -304,11 +292,11 @@ impl UpdateWith<PreparedBlock> for Chain {
 
             // remove the shielded data
             self.revert_chain_state_with(joinsplit_data);
-            if let Some(s) = sapling_shielded_data_per_spend_anchor {
-                self.revert_chain_state_with(s);
+            if let Some(_) = sapling_shielded_data_per_spend_anchor {
+                self.revert_chain_state_with(sapling_shielded_data_per_spend_anchor);
             }
-            if let Some(s) = sapling_shielded_data_shared_anchor {
-                self.revert_chain_state_with(s);
+            if let Some(_) = sapling_shielded_data_shared_anchor {
+                self.revert_chain_state_with(sapling_shielded_data_shared_anchor);
             }
             self.revert_chain_state_with(orchard_shielded_data);
         }
