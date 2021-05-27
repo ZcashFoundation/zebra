@@ -7,6 +7,7 @@
 //! for reading and writing data (e.g., the Bitcoin variable-integer format).
 
 mod constraint;
+mod date_time;
 mod error;
 mod read_zcash;
 mod write_zcash;
@@ -21,6 +22,7 @@ pub mod sha256d;
 pub mod arbitrary;
 
 pub use constraint::AtLeastOne;
+pub use date_time::DateTime32;
 pub use error::SerializationError;
 pub use read_zcash::ReadZcashExt;
 pub use write_zcash::WriteZcashExt;

@@ -1,7 +1,17 @@
-use super::read_zcash::canonical_ip_addr;
+use super::{read_zcash::canonical_ip_addr, DateTime32};
 use chrono::{TimeZone, Utc, MAX_DATETIME, MIN_DATETIME};
 use proptest::{arbitrary::any, prelude::*};
 use std::net::SocketAddr;
+
+impl Arbitrary for DateTime32 {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        any::<u32>().prop_map(Into::into).boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
 
 /// Returns a strategy that produces an arbitrary [`chrono::DateTime<Utc>`],
 /// based on the full valid range of the type.
@@ -38,8 +48,10 @@ pub fn datetime_full() -> impl Strategy<Value = chrono::DateTime<Utc>> {
 ///
 /// The Zcash protocol typically uses 4-byte seconds values, except for the
 /// [`Version`] message.
+///
+/// TODO: replace this strategy with `any::<DateTime32>()`.
 pub fn datetime_u32() -> impl Strategy<Value = chrono::DateTime<Utc>> {
-    any::<u32>().prop_map(|secs| Utc.timestamp(secs.into(), 0))
+    any::<DateTime32>().prop_map(Into::into)
 }
 
 /// Returns a random canonical Zebra `SocketAddr`.
