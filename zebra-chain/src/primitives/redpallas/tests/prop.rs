@@ -14,6 +14,7 @@ struct SignatureCase<T: SigType> {
     msg: Vec<u8>,
     sig: Signature<T>,
     pk_bytes: VerificationKeyBytes<T>,
+    invalid_pk_bytes: VerificationKeyBytes<T>,
     is_valid: bool,
 }
 
@@ -43,10 +44,12 @@ impl<T: SigType> SignatureCase<T> {
         let sk = SigningKey::new(&mut rng);
         let sig = sk.sign(&mut rng, &msg);
         let pk_bytes = VerificationKey::from(&sk).into();
+        let invalid_pk_bytes = VerificationKey::from(&SigningKey::new(&mut rng)).into();
         Self {
             msg,
             sig,
             pk_bytes,
+            invalid_pk_bytes,
             is_valid: true,
         }
     }
@@ -81,12 +84,7 @@ impl<T: SigType> SignatureCase<T> {
             }
             Tweak::ChangePubkey => {
                 // Changing the public key makes the signature invalid.
-                let mut bytes: [u8; 32] = self.pk_bytes.into();
-                let j = (bytes[2] & 31) as usize;
-                bytes[2] ^= 0x23;
-                bytes[2] |= 0x99;
-                bytes[j] ^= bytes[2];
-                self.pk_bytes = bytes.into();
+                self.pk_bytes = self.invalid_pk_bytes;
                 self.is_valid = false;
             }
         }
@@ -121,18 +119,8 @@ proptest! {
             spendauth.apply_tweak(t);
         }
 
-        // TODO: make these assertions pass
-        /*
         assert!(binding.check());
         assert!(spendauth.check());
-         */
-        // For now, just error loudly
-        if !binding.check() {
-            tracing::error!("test failed: binding.check()");
-        }
-        if !spendauth.check() {
-            tracing::error!("test failed: spendauth.check()");
-        }
     }
 
     #[test]
@@ -141,7 +129,7 @@ proptest! {
         let mut rng = ChaChaRng::from_seed(rng_seed);
 
         let r = {
-            // XXX-jubjub: better API for this
+            // XXX-pasta_curves: better API for this
             let mut bytes = [0; 64];
             rng.fill_bytes(&mut bytes[..]);
             Randomizer::from_bytes_wide(&bytes)
