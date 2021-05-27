@@ -213,12 +213,8 @@ impl UpdateWith<PreparedBlock> for Chain {
 
             // add the shielded data
             self.update_chain_state_with(joinsplit_data);
-            if let Some(_) = sapling_shielded_data_per_spend_anchor {
-                self.update_chain_state_with(sapling_shielded_data_per_spend_anchor);
-            }
-            if let Some(_) = sapling_shielded_data_shared_anchor {
-                self.update_chain_state_with(sapling_shielded_data_shared_anchor);
-            }
+            self.update_chain_state_with(sapling_shielded_data_per_spend_anchor);
+            self.update_chain_state_with(sapling_shielded_data_shared_anchor);
             self.update_chain_state_with(orchard_shielded_data);
         }
     }
