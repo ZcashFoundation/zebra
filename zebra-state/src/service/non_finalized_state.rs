@@ -6,7 +6,7 @@ mod chain;
 mod queued_blocks;
 
 #[cfg(any(test, feature = "proptest-impl"))]
-mod arbitrary;
+pub mod arbitrary;
 #[cfg(test)]
 mod tests;
 

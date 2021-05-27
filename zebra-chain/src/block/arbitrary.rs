@@ -6,7 +6,7 @@ use proptest::{
 use std::sync::Arc;
 
 use crate::{
-    parameters::{Network, NetworkUpgrade, GENESIS_PREVIOUS_BLOCK_HASH},
+    parameters::{genesis_hash, Network, NetworkUpgrade},
     serialization,
     work::{difficulty::CompactDifficulty, equihash},
 };
@@ -46,7 +46,7 @@ pub struct LedgerState {
     ///
     /// In Zebra's proptests, the previous block hash can be overriden with
     /// genesis at any block height.
-    genesis_previous_block_hash_override: bool,
+    pub genesis_previous_block_hash_override: bool,
 }
 
 impl LedgerState {
@@ -80,8 +80,6 @@ impl LedgerState {
 impl Default for LedgerState {
     fn default() -> Self {
         let network = Network::Mainnet;
-        let most_recent_nu = NetworkUpgrade::current(network, Height::MAX);
-        let most_recent_activation_height = most_recent_nu.activation_height(network).unwrap();
 
         // TODO: dynamically select any future network upgrade (#1974)
         let nu5_activation_height = NetworkUpgrade::Nu5.activation_height(network);
@@ -92,11 +90,12 @@ impl Default for LedgerState {
         };
 
         Self {
-            tip_height: most_recent_activation_height,
+            // start each chain with the tip in the genesis block
+            tip_height: Height(0),
             network,
             network_upgrade_override: nu5_override,
             has_coinbase: true,
-            // start each chain with a genesis previous block hash, regardless of height
+            // start each chain with a genesis previous block hash
             genesis_previous_block_hash_override: true,
         }
     }
@@ -147,7 +146,7 @@ impl Arbitrary for Block {
         (any::<Header>(), transactions_strategy)
             .prop_map(move |(mut header, transactions)| {
                 if ledger_state.genesis_previous_block_hash_override {
-                    header.previous_block_hash = GENESIS_PREVIOUS_BLOCK_HASH;
+                    header.previous_block_hash = genesis_hash(Network::Mainnet);
                 }
                 Self {
                     header,

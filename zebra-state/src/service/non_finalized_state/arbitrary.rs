@@ -52,6 +52,7 @@ impl Strategy for PreparedChain {
             // Only generate blocks from the most recent network upgrade
             let mut ledger_state = LedgerState::default();
             ledger_state.network_upgrade_override = Some(NetworkUpgrade::Nu5);
+            ledger_state.genesis_previous_block_hash_override = true;
 
             let blocks = Block::partial_chain_strategy(ledger_state, MAX_PARTIAL_CHAIN_BLOCKS)
                 .prop_map(|vec| vec.into_iter().map(|blk| blk.prepare()).collect::<Vec<_>>())
