@@ -12,7 +12,26 @@ use std::{fmt, io};
     any(test, feature = "proptest-impl"),
     derive(proptest_derive::Arbitrary)
 )]
-pub struct Script(pub Vec<u8>);
+pub struct Script(Vec<u8>);
+
+impl Script {
+    /// Create a new Bitcoin script from its raw bytes.
+    /// The raw bytes must not contain the length prefix.
+    pub fn new(raw_bytes: &[u8]) -> Self {
+        Script(raw_bytes.to_vec())
+    }
+
+    /// Return the raw bytes of the script without the length prefix.
+    ///
+    /// # Correctness
+    ///
+    /// These raw bytes do not have a length prefix.
+    /// The Zcash serialization format requires a length prefix; use `zcash_serialize`
+    /// and `zcash_deserialize` to create byte data with a length prefix.
+    pub fn as_raw_bytes(&self) -> &[u8] {
+        &self.0
+    }
+}
 
 impl fmt::Debug for Script {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
