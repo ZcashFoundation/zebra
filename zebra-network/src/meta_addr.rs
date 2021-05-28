@@ -257,6 +257,7 @@ impl MetaAddr {
     pub fn sanitize(&self) -> MetaAddr {
         let interval = crate::constants::TIMESTAMP_TRUNCATION_SECONDS;
         let ts = self.last_seen.timestamp();
+        // This can't underflow, because `0 <= rem_euclid < ts`
         let last_seen = ts - ts.rem_euclid(interval);
         MetaAddr {
             addr: self.addr,
