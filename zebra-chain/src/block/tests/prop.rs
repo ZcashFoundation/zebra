@@ -5,7 +5,10 @@ use proptest::{arbitrary::any, prelude::*, test_runner::Config};
 use zebra_test::prelude::*;
 
 use crate::serialization::{SerializationError, ZcashDeserializeInto, ZcashSerialize};
-use crate::{parameters::Network, LedgerState};
+use crate::{
+    parameters::{Network, GENESIS_PREVIOUS_BLOCK_HASH},
+    LedgerState,
+};
 
 use super::super::{serialize::MAX_BLOCK_BYTES, *};
 
@@ -117,15 +120,35 @@ proptest! {
     }
 }
 
+/// Test [`Block::coinbase_height`].
+///
+/// Also makes sure our coinbase strategy correctly generates blocks with
+/// coinbase transactions.
 #[test]
 fn blocks_have_coinbase() -> Result<()> {
     zebra_test::init();
 
-    let strategy = LedgerState::coinbase_strategy().prop_flat_map(Block::arbitrary_with);
+    let strategy = LedgerState::coinbase_strategy(None).prop_flat_map(Block::arbitrary_with);
 
     proptest!(|(block in strategy)| {
         let has_coinbase = block.coinbase_height().is_some();
         prop_assert!(has_coinbase);
+    });
+
+    Ok(())
+}
+
+/// Make sure our genesis strategy generates blocks with the correct coinbase
+/// height and previous block hash.
+#[test]
+fn block_genesis_strategy() -> Result<()> {
+    zebra_test::init();
+
+    let strategy = LedgerState::genesis_strategy(None).prop_flat_map(Block::arbitrary_with);
+
+    proptest!(|(block in strategy)| {
+        prop_assert_eq!(block.coinbase_height(), Some(Height(0)));
+        prop_assert_eq!(block.header.previous_block_hash, GENESIS_PREVIOUS_BLOCK_HASH);
     });
 
     Ok(())

@@ -24,7 +24,7 @@ fn input_coinbase_vecs_only_have_coinbase_input() -> Result<()> {
     zebra_test::init();
 
     let max_size = 100;
-    let strategy = LedgerState::coinbase_strategy()
+    let strategy = LedgerState::coinbase_strategy(None)
         .prop_flat_map(|ledger_state| Input::vec_strategy(ledger_state, max_size));
 
     proptest!(|(inputs in strategy)| {
