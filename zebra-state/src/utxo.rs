@@ -5,7 +5,10 @@ use zebra_chain::{block, transparent};
 
 /// An unspent `transparent::Output`, with accompanying metadata.
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
+#[cfg_attr(
+    any(test, feature = "proptest-impl"),
+    derive(proptest_derive::Arbitrary)
+)]
 pub struct Utxo {
     /// The output itself.
     pub output: transparent::Output,

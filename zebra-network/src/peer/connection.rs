@@ -843,7 +843,7 @@ where
             | Message::FilterAdd { .. }
             | Message::FilterClear { .. } => {
                 self.fail_with(PeerError::UnsupportedMessage(
-                    "got BIP11 message without advertising NODE_BLOOM",
+                    "got BIP111 message without advertising NODE_BLOOM",
                 ));
                 return;
             }

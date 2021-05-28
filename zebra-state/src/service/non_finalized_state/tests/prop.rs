@@ -14,7 +14,7 @@ fn forked_equals_pushed() -> Result<()> {
                                           .ok()
                                           .and_then(|v| v.parse().ok())
                                           .unwrap_or(DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES)),
-        |((chain, count) in PreparedChain::default())| {
+        |((chain, count, _network) in PreparedChain::default())| {
             let fork_tip_hash = chain[count - 1].hash;
             let mut full_chain = Chain::default();
             let mut partial_chain = Chain::default();
@@ -42,7 +42,7 @@ fn finalized_equals_pushed() -> Result<()> {
                                       .ok()
                                       .and_then(|v| v.parse().ok())
                                       .unwrap_or(DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES)),
-    |((chain, end_count) in PreparedChain::default())| {
+    |((chain, end_count, _network) in PreparedChain::default())| {
         let finalized_count = chain.len() - end_count;
         let mut full_chain = Chain::default();
         let mut partial_chain = Chain::default();
