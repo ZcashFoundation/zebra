@@ -153,3 +153,26 @@ fn block_genesis_strategy() -> Result<()> {
 
     Ok(())
 }
+
+/// Make sure our partial chain strategy generates a chain with the correct coinbase
+/// heights and previous block hashes.
+#[test]
+fn partial_chain_strategy() -> Result<()> {
+    zebra_test::init();
+
+    let strategy = LedgerState::genesis_strategy(None)
+        .prop_flat_map(|init| Block::partial_chain_strategy(init, 3));
+
+    proptest!(|(chain in strategy)| {
+        let mut height = Height(0);
+        let mut previous_block_hash = GENESIS_PREVIOUS_BLOCK_HASH;
+        for block in chain {
+            prop_assert_eq!(block.coinbase_height(), Some(height));
+            prop_assert_eq!(block.header.previous_block_hash, previous_block_hash);
+            height = Height(height.0 + 1);
+            previous_block_hash = block.hash();
+        }
+    });
+
+    Ok(())
+}
