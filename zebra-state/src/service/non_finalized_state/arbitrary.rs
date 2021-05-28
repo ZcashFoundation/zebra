@@ -12,19 +12,24 @@ use crate::tests::Prepare;
 
 use super::*;
 
-const MAX_PARTIAL_CHAIN_BLOCKS: usize = 100;
+const MAX_PARTIAL_CHAIN_BLOCKS: usize = 102;
 
 #[derive(Debug)]
 pub struct PreparedChainTree {
     chain: Arc<Vec<PreparedBlock>>,
     count: BinarySearch,
+    network: Network,
 }
 
 impl ValueTree for PreparedChainTree {
-    type Value = (Arc<Vec<PreparedBlock>>, <BinarySearch as ValueTree>::Value);
+    type Value = (
+        Arc<Vec<PreparedBlock>>,
+        <BinarySearch as ValueTree>::Value,
+        Network,
+    );
 
     fn current(&self) -> Self::Value {
-        (self.chain.clone(), self.count.current())
+        (self.chain.clone(), self.count.current(), self.network)
     }
 
     fn simplify(&mut self) -> bool {
@@ -39,7 +44,7 @@ impl ValueTree for PreparedChainTree {
 #[derive(Debug, Default)]
 pub struct PreparedChain {
     // the proptests are threaded (not async), so we want to use a threaded mutex here
-    chain: std::sync::Mutex<Option<Arc<Vec<PreparedBlock>>>>,
+    chain: std::sync::Mutex<Option<(Network, Arc<Vec<PreparedBlock>>)>>,
 }
 
 impl Strategy for PreparedChain {
@@ -49,19 +54,34 @@ impl Strategy for PreparedChain {
     fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
         let mut chain = self.chain.lock().unwrap();
         if chain.is_none() {
-            // Only generate blocks from the most recent network upgrade
-            let mut ledger_state = LedgerState::default();
-            ledger_state.network_upgrade_override = None;
+            // Disable NU5 for now
+            // `genesis_strategy(None)` re-enables the default Nu5 override
+            let ledger_strategy = LedgerState::genesis_strategy(Canopy);
 
-            let blocks = Block::partial_chain_strategy(ledger_state, MAX_PARTIAL_CHAIN_BLOCKS)
-                .prop_map(|vec| vec.into_iter().map(|blk| blk.prepare()).collect::<Vec<_>>())
+            let (network, blocks) = ledger_strategy
+                .prop_flat_map(|ledger| {
+                    (
+                        Just(ledger.network),
+                        Block::partial_chain_strategy(ledger, MAX_PARTIAL_CHAIN_BLOCKS),
+                    )
+                })
+                .prop_map(|(network, vec)| {
+                    (
+                        network,
+                        vec.into_iter().map(|blk| blk.prepare()).collect::<Vec<_>>(),
+                    )
+                })
                 .new_tree(runner)?
                 .current();
-            *chain = Some(Arc::new(blocks));
+            *chain = Some((network, Arc::new(blocks)));
         }
 
         let chain = chain.clone().expect("should be generated");
-        let count = (1..chain.len()).new_tree(runner)?;
-        Ok(PreparedChainTree { chain, count })
+        let count = (1..chain.1.len()).new_tree(runner)?;
+        Ok(PreparedChainTree {
+            chain: chain.1,
+            count,
+            network: chain.0,
+        })
     }
 }
