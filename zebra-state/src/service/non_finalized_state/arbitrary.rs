@@ -5,7 +5,7 @@ use proptest::{
 };
 use std::sync::Arc;
 
-use zebra_chain::{block::Block, parameters::NetworkUpgrade, LedgerState};
+use zebra_chain::{block::Block, LedgerState};
 use zebra_test::prelude::*;
 
 use crate::tests::Prepare;
