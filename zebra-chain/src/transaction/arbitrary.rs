@@ -108,7 +108,7 @@ impl Transaction {
     /// Generate a proptest strategy for V5 Transactions
     pub fn v5_strategy(ledger_state: LedgerState) -> BoxedStrategy<Self> {
         (
-            Self::branch_id_strategy(),
+            NetworkUpgrade::branch_id_strategy(),
             any::<LockTime>(),
             any::<block::Height>(),
             transparent::Input::vec_strategy(ledger_state, 10),
@@ -138,20 +138,6 @@ impl Transaction {
                 },
             )
             .boxed()
-    }
-
-    // A custom strategy to use only some of the NetworkUpgrade values
-    fn branch_id_strategy() -> BoxedStrategy<NetworkUpgrade> {
-        prop_oneof![
-            Just(NetworkUpgrade::Overwinter),
-            Just(NetworkUpgrade::Sapling),
-            Just(NetworkUpgrade::Blossom),
-            Just(NetworkUpgrade::Heartwood),
-            Just(NetworkUpgrade::Canopy),
-            Just(NetworkUpgrade::Nu5),
-            // TODO: add future network upgrades
-        ]
-        .boxed()
     }
 
     /// Proptest Strategy for creating a Vector of transactions where the first

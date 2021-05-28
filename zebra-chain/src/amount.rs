@@ -313,7 +313,7 @@ pub enum Error {
 /// );
 /// ```
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct NegativeAllowed {}
+pub struct NegativeAllowed;
 
 impl Constraint for NegativeAllowed {
     fn valid_range() -> RangeInclusive<i64> {
@@ -331,7 +331,7 @@ impl Constraint for NegativeAllowed {
 /// );
 /// ```
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
-pub struct NonNegative {}
+pub struct NonNegative;
 
 impl Constraint for NonNegative {
     fn valid_range() -> RangeInclusive<i64> {
