@@ -2,13 +2,11 @@
 
 use std::{
     cmp::{Ord, Ordering},
-    convert::TryInto,
     io::{Read, Write},
     net::SocketAddr,
 };
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use chrono::Utc;
 
 use zebra_chain::serialization::{
     DateTime32, ReadZcashExt, SerializationError, TrustedPreallocate, WriteZcashExt,
