@@ -17,6 +17,9 @@ mod network;
 mod network_upgrade;
 mod transaction;
 
+#[cfg(any(test, feature = "proptest-impl"))]
+pub mod arbitrary;
+
 pub use genesis::*;
 pub use network::Network;
 pub use network_upgrade::*;

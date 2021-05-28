@@ -1,3 +1,7 @@
+//! Property tests for transparent inputs and outputs.
+//!
+//! TODO: Move this module into a `tests` submodule.
+
 use zebra_test::prelude::*;
 
 use crate::{block, LedgerState};
