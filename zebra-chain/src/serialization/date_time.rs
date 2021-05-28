@@ -27,6 +27,13 @@ impl DateTime32 {
     pub fn to_chrono(self) -> chrono::DateTime<Utc> {
         self.into()
     }
+
+    /// Returns the current time
+    pub fn now() -> DateTime32 {
+        Utc::now()
+            .try_into()
+            .expect("unexpected out of range chrono::DateTime")
+    }
 }
 
 impl fmt::Debug for DateTime32 {

@@ -168,9 +168,7 @@ impl MetaAddr {
         MetaAddr {
             addr: *addr,
             services: *services,
-            last_seen: Utc::now()
-                .try_into()
-                .expect("unexpected out of range DateTime"),
+            last_seen: DateTime32::now(),
             last_connection_state: Responded,
         }
     }
@@ -180,9 +178,7 @@ impl MetaAddr {
         MetaAddr {
             addr: *addr,
             services: *services,
-            last_seen: Utc::now()
-                .try_into()
-                .expect("unexpected out of range DateTime"),
+            last_seen: DateTime32::now(),
             last_connection_state: AttemptPending,
         }
     }
@@ -193,9 +189,7 @@ impl MetaAddr {
         MetaAddr {
             addr: *addr,
             services: *services,
-            last_seen: Utc::now()
-                .try_into()
-                .expect("unexpected out of range DateTime"),
+            last_seen: DateTime32::now(),
             last_connection_state: NeverAttemptedAlternate,
         }
     }
@@ -206,9 +200,7 @@ impl MetaAddr {
             addr: *addr,
             // TODO: create a "local services" constant
             services: PeerServices::NODE_NETWORK,
-            last_seen: Utc::now()
-                .try_into()
-                .expect("unexpected out of range DateTime"),
+            last_seen: DateTime32::now(),
             last_connection_state: Responded,
         }
     }
@@ -218,9 +210,7 @@ impl MetaAddr {
         MetaAddr {
             addr: *addr,
             services: *services,
-            last_seen: Utc::now()
-                .try_into()
-                .expect("unexpected out of range DateTime"),
+            last_seen: DateTime32::now(),
             last_connection_state: Failed,
         }
     }
