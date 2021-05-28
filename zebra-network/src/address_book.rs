@@ -221,7 +221,7 @@ impl AddressBook {
             // NeverAttempted, Failed, and AttemptPending peers should never be live
             Some(peer) => {
                 peer.last_connection_state == PeerAddrState::Responded
-                    && peer.get_last_seen().as_chrono() > AddressBook::liveness_cutoff_time()
+                    && peer.get_last_seen().to_chrono() > AddressBook::liveness_cutoff_time()
             }
         }
     }

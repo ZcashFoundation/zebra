@@ -24,7 +24,7 @@ impl DateTime32 {
     }
 
     /// Returns the equivalent [`chrono::DateTime`].
-    pub fn as_chrono(&self) -> chrono::DateTime<Utc> {
+    pub fn to_chrono(self) -> chrono::DateTime<Utc> {
         self.into()
     }
 }
