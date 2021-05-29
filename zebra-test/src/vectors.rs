@@ -165,4 +165,14 @@ lazy_static! {
     // https://github.com/zcash/zips/blob/master/zip-0243.rst#test-vector-3
     pub static ref ZIP243_3: Vec<u8> = <Vec<u8>>::from_hex("0400008085202f8901a8c685478265f4c14dada651969c45a65e1aeb8cd6791f2f5bb6a1d9952104d9010000006b483045022100a61e5d557568c2ddc1d9b03a7173c6ce7c996c4daecab007ac8f34bee01e6b9702204d38fdc0bcf2728a69fde78462a10fb45a9baa27873e6a5fc45fb5c76764202a01210365ffea3efa3908918a8b8627724af852fc9b86d7375b103ab0543cf418bcaa7ffeffffff02005a6202000000001976a9148132712c3ff19f3a151234616777420a6d7ef22688ac8b959800000000001976a9145453e4698f02a38abdaa521cd1ff2dee6fac187188ac29b0040048b004000000000000000000000000")
         .expect("Transaction bytes are in valid hex representation");
+
+    // Test vectors to check the encoding of block height
+    //
+    // Unmodified block directly from the prop strategy: https://github.com/oxarbitrage/documentation/blob/master/zebra/v5_test_vectors.md#generated_v5_1
+    pub static ref GENERATED_V5_1: Vec<u8> = <Vec<u8>>::from_hex(include_str!("vectors/block-generated-v5-001.txt").trim()).expect("Block bytes are in valid hex representation");
+
+    // Change the height from `1_046_401` to lets say `155_642` by replacing `81F70F` with `FA5F02` in the original hex string.
+    pub static ref GENERATED_V5_2: Vec<u8> = <Vec<u8>>::from_hex(include_str!("vectors/block-generated-v5-002.txt").trim()).expect("Block bytes are in valid hex representation");
+
+
 }

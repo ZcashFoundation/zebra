@@ -351,3 +351,26 @@ fn time_check_fixed() {
         node_time_check(now, block_header_time).expect("the inverse comparison should be valid");
     }
 }
+
+#[test]
+fn block_height_encoding() {
+    zebra_test::init();
+
+    // deserialize the original block
+    let orig = zebra_test::vectors::GENERATED_V5_1
+        .zcash_deserialize_into::<Block>()
+        .expect("block test vector should deserialize");
+
+    assert_eq!(Some(Height(1_046_401)), orig.coinbase_height());
+
+    dbg!(&orig.transactions[0].inputs()[0]);
+
+    // deserialize the modified block
+    let modified = zebra_test::vectors::GENERATED_V5_2
+        .zcash_deserialize_into::<Block>()
+        .expect("block test vector should deserialize");
+
+    assert_eq!(Some(Height(155_642)), modified.coinbase_height());
+
+    dbg!(&modified.transactions[0].inputs()[0]);
+}
