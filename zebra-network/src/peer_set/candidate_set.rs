@@ -375,7 +375,12 @@ fn limit_last_seen_times(addrs: &mut Vec<MetaAddr>, last_seen_limit: DateTime32)
     let offset = most_recent_reported_seen_time.timestamp() - last_seen_limit.timestamp();
 
     for addr in addrs {
-        let last_seen = addr.get_last_seen().timestamp() - offset;
-        addr.set_last_seen(last_seen.into());
+        let old_last_seen = addr.get_last_seen().timestamp();
+
+        if old_last_seen > last_seen_limit.timestamp() {
+            let new_last_seen = old_last_seen - offset;
+
+            addr.set_last_seen(new_last_seen.into());
+        }
     }
 }
