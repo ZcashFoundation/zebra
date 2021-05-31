@@ -67,11 +67,12 @@ impl<T: SigType> SignatureCase<T> {
             VerificationKeyBytes::<T>::from(bytes)
         };
 
+        // Check that the verification key is a valid RedPallas verification key.
+        let pub_key = VerificationKey::try_from(pk_bytes)
+            .expect("The test verification key to be well-formed.");
+
         // Check that signature validation has the expected result.
-        self.is_valid
-            == VerificationKey::try_from(pk_bytes)
-                .and_then(|pk| pk.verify(&self.msg, &sig))
-                .is_ok()
+        self.is_valid == pub_key.verify(&self.msg, &sig).is_ok()
     }
 
     fn apply_tweak(&mut self, tweak: &Tweak) {
