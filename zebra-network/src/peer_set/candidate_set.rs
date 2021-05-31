@@ -331,9 +331,11 @@ where
 /// - modify the address data, or
 /// - delete the address.
 ///
-/// Currently, this method will offset the reported `last_seen` time to prevent clock skews
-/// from causing the peers to be placed too far back or in the front of the reconnection queue
-/// incorrectly.
+/// # Security
+///
+/// Adjusts untrusted last seen times so they are not in the future. This stops
+/// malicious peers keeping all their addresses at the front of the connection
+/// queue. Honest peers with future clock skew also get adjusted.
 fn validate_addrs(
     addrs: impl IntoIterator<Item = MetaAddr>,
     last_seen_limit: DateTime32,
@@ -360,7 +362,9 @@ fn validate_addrs(
 
 /// Ensure all reported `last_seen` times are less than or equal to `last_seen_limit`.
 ///
-/// This function assumes there is at least one address in the `addrs` list.
+/// # Panics
+///
+/// If the `addrs` list is empty.
 fn limit_last_seen_times(addrs: &mut Vec<MetaAddr>, last_seen_limit: DateTime32) {
     let most_recent_reported_seen_time = addrs
         .iter()
