@@ -330,9 +330,10 @@ where
 /// If the data in an address is invalid, this function can:
 /// - modify the address data, or
 /// - delete the address.
-//
-// TODO: re-enable this lint when last_seen_limit is used
-#[allow(unused_variables)]
+///
+/// Currently, this method will offset the reported `last_seen` time to prevent clock skews
+/// from causing the peers to be placed too far back or in the front of the reconnection queue
+/// incorrectly.
 fn validate_addrs(
     addrs: impl IntoIterator<Item = MetaAddr>,
     last_seen_limit: DateTime32,
@@ -342,12 +343,35 @@ fn validate_addrs(
 
     // TODO:
     // We should eventually implement these checks in this function:
-    // - Zebra should stop believing far-future last_seen times from peers (#1871)
     // - Zebra should ignore peers that are older than 3 weeks (part of #1865)
     //   - Zebra should count back 3 weeks from the newest peer timestamp sent
     //     by the other peer, to compensate for clock skew
     // - Zebra should limit the number of addresses it uses from a single Addrs
     //   response (#1869)
 
+    let mut addrs: Vec<_> = addrs.into_iter().collect();
+
+    if !addrs.is_empty() {
+        limit_last_seen_times(&mut addrs, last_seen_limit);
+    }
+
     addrs.into_iter()
+}
+
+/// Ensure all reported `last_seen` times are less than or equal to `last_seen_limit`.
+///
+/// This function assumes there is at least one address in the `addrs` list.
+fn limit_last_seen_times(addrs: &mut Vec<MetaAddr>, last_seen_limit: DateTime32) {
+    let most_recent_reported_seen_time = addrs
+        .iter()
+        .map(|addr| addr.get_last_seen())
+        .max()
+        .expect("unexpected empty address list");
+
+    let offset = most_recent_reported_seen_time.timestamp() - last_seen_limit.timestamp();
+
+    for addr in addrs {
+        let last_seen = addr.get_last_seen().timestamp() - offset;
+        addr.set_last_seen(last_seen.into());
+    }
 }
