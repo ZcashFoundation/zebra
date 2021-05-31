@@ -238,6 +238,11 @@ impl MetaAddr {
         self.last_seen
     }
 
+    /// Set the last time we interacted with this peer.
+    pub(crate) fn set_last_seen(&mut self, last_seen: DateTime32) {
+        self.last_seen = last_seen;
+    }
+
     /// Is this address a directly connected client?
     pub fn is_direct_client(&self) -> bool {
         match self.last_connection_state {
