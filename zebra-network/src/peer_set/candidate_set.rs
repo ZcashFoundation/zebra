@@ -1,9 +1,10 @@
 use std::{cmp::min, mem, sync::Arc, time::Duration};
 
-use chrono::{DateTime, Utc};
 use futures::stream::{FuturesUnordered, StreamExt};
 use tokio::time::{sleep, sleep_until, timeout, Sleep};
 use tower::{Service, ServiceExt};
+
+use zebra_chain::serialization::DateTime32;
 
 use crate::{constants, types::MetaAddr, AddressBook, BoxError, Request, Response};
 
@@ -229,7 +230,7 @@ where
                         ?addrs,
                         "got response to GetPeers"
                     );
-                    let addrs = validate_addrs(addrs, Utc::now());
+                    let addrs = validate_addrs(addrs, DateTime32::now());
                     self.send_addrs(addrs);
                 }
                 Err(e) => {
@@ -334,7 +335,7 @@ where
 #[allow(unused_variables)]
 fn validate_addrs(
     addrs: impl IntoIterator<Item = MetaAddr>,
-    last_seen_limit: DateTime<Utc>,
+    last_seen_limit: DateTime32,
 ) -> impl Iterator<Item = MetaAddr> {
     // Note: The address book handles duplicate addresses internally,
     // so we don't need to de-duplicate addresses here.
