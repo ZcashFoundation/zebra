@@ -2,17 +2,15 @@
 
 use std::{
     cmp::{Ord, Ordering},
-    convert::TryInto,
     io::{Read, Write},
     net::SocketAddr,
 };
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use chrono::{DateTime, TimeZone, Utc};
 
 use zebra_chain::serialization::{
-    ReadZcashExt, SerializationError, TrustedPreallocate, WriteZcashExt, ZcashDeserialize,
-    ZcashSerialize,
+    DateTime32, ReadZcashExt, SerializationError, TrustedPreallocate, WriteZcashExt,
+    ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
 };
 
 use crate::protocol::{external::MAX_PROTOCOL_MESSAGE_LEN, types::PeerServices};
@@ -130,7 +128,7 @@ pub struct MetaAddr {
     /// The last time we interacted with this peer.
     ///
     /// See `get_last_seen` for details.
-    last_seen: DateTime<Utc>,
+    last_seen: DateTime32,
 
     /// The outcome of our most recent communication attempt with this peer.
     pub last_connection_state: PeerAddrState,
@@ -142,7 +140,7 @@ impl MetaAddr {
     pub fn new_gossiped_meta_addr(
         addr: SocketAddr,
         untrusted_services: PeerServices,
-        untrusted_last_seen: DateTime<Utc>,
+        untrusted_last_seen: DateTime32,
     ) -> MetaAddr {
         MetaAddr {
             addr,
@@ -168,7 +166,7 @@ impl MetaAddr {
         MetaAddr {
             addr: *addr,
             services: *services,
-            last_seen: Utc::now(),
+            last_seen: DateTime32::now(),
             last_connection_state: Responded,
         }
     }
@@ -178,7 +176,7 @@ impl MetaAddr {
         MetaAddr {
             addr: *addr,
             services: *services,
-            last_seen: Utc::now(),
+            last_seen: DateTime32::now(),
             last_connection_state: AttemptPending,
         }
     }
@@ -189,7 +187,7 @@ impl MetaAddr {
         MetaAddr {
             addr: *addr,
             services: *services,
-            last_seen: Utc::now(),
+            last_seen: DateTime32::now(),
             last_connection_state: NeverAttemptedAlternate,
         }
     }
@@ -200,7 +198,7 @@ impl MetaAddr {
             addr: *addr,
             // TODO: create a "local services" constant
             services: PeerServices::NODE_NETWORK,
-            last_seen: Utc::now(),
+            last_seen: DateTime32::now(),
             last_connection_state: Responded,
         }
     }
@@ -210,7 +208,7 @@ impl MetaAddr {
         MetaAddr {
             addr: *addr,
             services: *services,
-            last_seen: Utc::now(),
+            last_seen: DateTime32::now(),
             last_connection_state: Failed,
         }
     }
@@ -236,7 +234,7 @@ impl MetaAddr {
     ///
     /// `last_seen` times from `NeverAttempted` peers may be invalid due to
     /// clock skew, or buggy or malicious peers.
-    pub fn get_last_seen(&self) -> DateTime<Utc> {
+    pub fn get_last_seen(&self) -> DateTime32 {
         self.last_seen
     }
 
@@ -258,13 +256,14 @@ impl MetaAddr {
     /// Return a sanitized version of this `MetaAddr`, for sending to a remote peer.
     pub fn sanitize(&self) -> MetaAddr {
         let interval = crate::constants::TIMESTAMP_TRUNCATION_SECONDS;
-        let ts = self.get_last_seen().timestamp();
-        let last_seen = Utc.timestamp(ts - ts.rem_euclid(interval), 0);
+        let ts = self.last_seen.timestamp();
+        // This can't underflow, because `0 <= rem_euclid < ts`
+        let last_seen = ts - ts.rem_euclid(interval);
         MetaAddr {
             addr: self.addr,
             // deserialization also sanitizes services to known flags
             services: self.services & PeerServices::all(),
-            last_seen,
+            last_seen: last_seen.into(),
             // the state isn't sent to the remote peer, but sanitize it anyway
             last_connection_state: NeverAttemptedGossiped,
         }
@@ -328,12 +327,7 @@ impl Eq for MetaAddr {}
 
 impl ZcashSerialize for MetaAddr {
     fn zcash_serialize<W: Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
-        writer.write_u32::<LittleEndian>(
-            self.get_last_seen()
-                .timestamp()
-                .try_into()
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?,
-        )?;
+        self.last_seen.zcash_serialize(&mut writer)?;
         writer.write_u64::<LittleEndian>(self.services.bits())?;
         writer.write_socket_addr(self.addr)?;
         Ok(())
@@ -342,8 +336,7 @@ impl ZcashSerialize for MetaAddr {
 
 impl ZcashDeserialize for MetaAddr {
     fn zcash_deserialize<R: Read>(mut reader: R) -> Result<Self, SerializationError> {
-        // This can't panic, because all u32 values are valid `Utc.timestamp`s
-        let untrusted_last_seen = Utc.timestamp(reader.read_u32::<LittleEndian>()?.into(), 0);
+        let untrusted_last_seen = (&mut reader).zcash_deserialize_into()?;
         let untrusted_services =
             PeerServices::from_bits_truncate(reader.read_u64::<LittleEndian>()?);
         let addr = reader.read_socket_addr()?;

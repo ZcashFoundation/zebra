@@ -208,9 +208,9 @@ impl AddressBook {
     /// [`constants::LIVE_PEER_DURATION`] ago, we know we should have
     /// disconnected from it. Otherwise, we could potentially be connected to it.
     fn liveness_cutoff_time() -> DateTime<Utc> {
-        // chrono uses signed durations while stdlib uses unsigned durations
-        use chrono::Duration as CD;
-        Utc::now() - CD::from_std(constants::LIVE_PEER_DURATION).unwrap()
+        Utc::now()
+            - chrono::Duration::from_std(constants::LIVE_PEER_DURATION)
+                .expect("unexpectedly large constant")
     }
 
     /// Returns true if the given [`SocketAddr`] has recently sent us a message.
@@ -221,7 +221,7 @@ impl AddressBook {
             // NeverAttempted, Failed, and AttemptPending peers should never be live
             Some(peer) => {
                 peer.last_connection_state == PeerAddrState::Responded
-                    && peer.get_last_seen() > AddressBook::liveness_cutoff_time()
+                    && peer.get_last_seen().to_chrono() > AddressBook::liveness_cutoff_time()
             }
         }
     }

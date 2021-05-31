@@ -69,7 +69,7 @@ pub const GET_ADDR_FANOUT: usize = 3;
 ///
 /// Timestamp truncation prevents a peer from learning exactly when we received
 /// messages from each of our peers.
-pub const TIMESTAMP_TRUNCATION_SECONDS: i64 = 30 * 60;
+pub const TIMESTAMP_TRUNCATION_SECONDS: u32 = 30 * 60;
 
 /// The User-Agent string provided by the node.
 ///
