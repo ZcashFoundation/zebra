@@ -5,7 +5,7 @@ use proptest::{
 };
 use std::sync::Arc;
 
-use zebra_chain::{block::Block, LedgerState};
+use zebra_chain::{block::Block, parameters::NetworkUpgrade::Nu5, LedgerState};
 use zebra_test::prelude::*;
 
 use crate::tests::Prepare;
@@ -54,9 +54,8 @@ impl Strategy for PreparedChain {
     fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
         let mut chain = self.chain.lock().unwrap();
         if chain.is_none() {
-            // Disable NU5 for now
-            // `genesis_strategy(None)` re-enables the default Nu5 override
-            let ledger_strategy = LedgerState::genesis_strategy(Canopy);
+            // TODO: use the latest network upgrade (#1974)
+            let ledger_strategy = LedgerState::genesis_strategy(Nu5);
 
             let (network, blocks) = ledger_strategy
                 .prop_flat_map(|ledger| {
