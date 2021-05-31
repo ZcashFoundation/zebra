@@ -28,15 +28,11 @@ pub fn has_inputs_and_outputs(tx: &Transaction) -> Result<(), TransactionError> 
     let n_joinsplit = tx.joinsplit_count();
     let n_spends_sapling = tx.sapling_spends_per_anchor().count();
     let n_outputs_sapling = tx.sapling_outputs().count();
+    let n_actions_orchard = tx.orchard_actions().count();
 
-    // TODO: Orchard validation (#1980)
-    // For `Transaction::V5`:
-    // * at least one of `tx_in_count`, `nSpendsSapling`, and `nActionsOrchard` MUST be non-zero.
-    // * at least one of `tx_out_count`, `nOutputsSapling`, and `nActionsOrchard` MUST be non-zero.
-
-    if tx_in_count + n_spends_sapling + n_joinsplit == 0 {
+    if tx_in_count + n_spends_sapling + n_joinsplit + n_actions_orchard == 0 {
         Err(TransactionError::NoInputs)
-    } else if tx_out_count + n_outputs_sapling + n_joinsplit == 0 {
+    } else if tx_out_count + n_outputs_sapling + n_joinsplit + n_actions_orchard == 0 {
         Err(TransactionError::NoOutputs)
     } else {
         Ok(())
