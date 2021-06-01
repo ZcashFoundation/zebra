@@ -93,9 +93,8 @@ where
     /// descriptions, then valueBalanceSapling MUST be 0."
     ///
     /// `value_balance` is a field in [`ShieldedData`], which must have at least
-    /// one spend or output in its first field, so it is impossible to have a
-    /// [`ShieldedData`] with no spends, no outputs, and a non-zero value
-    /// balance.
+    /// one spend or output in its `transfers` field. If [`ShieldedData`] is `None`
+    /// then the `value_balance` is always serialized as zero.
     pub value_balance: Amount,
 
     /// A bundle of spends and outputs, containing at least one spend or
