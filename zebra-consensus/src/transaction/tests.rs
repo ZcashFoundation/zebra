@@ -1,8 +1,6 @@
 use zebra_chain::{
-    block::{Block, Height},
     parameters::Network,
-    serialization::ZcashDeserializeInto,
-    transaction::{arbitrary::transaction_to_fake_v5, Transaction},
+    transaction::{arbitrary::fake_v5_transactions_for_network, Transaction},
 };
 
 use super::check;
@@ -53,21 +51,4 @@ fn v5_fake_transactions() -> Result<(), Report> {
     }
 
     Ok(())
-}
-
-fn fake_v5_transactions_for_network<'b>(
-    network: Network,
-    blocks: impl DoubleEndedIterator<Item = (&'b u32, &'b &'static [u8])> + 'b,
-) -> impl DoubleEndedIterator<Item = Transaction> + 'b {
-    blocks.flat_map(move |(height, original_bytes)| {
-        let original_block = original_bytes
-            .zcash_deserialize_into::<Block>()
-            .expect("block is structurally valid");
-
-        original_block
-            .transactions
-            .into_iter()
-            .map(move |transaction| transaction_to_fake_v5(&*transaction, network, Height(*height)))
-            .map(Transaction::from)
-    })
 }

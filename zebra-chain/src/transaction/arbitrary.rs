@@ -11,7 +11,9 @@ use crate::{
         redpallas::{Binding, Signature},
         Bctv14Proof, Groth16Proof, Halo2Proof, ZkSnarkProof,
     },
-    sapling, sprout, transparent, LedgerState,
+    sapling,
+    serialization::ZcashDeserializeInto,
+    sprout, transparent, LedgerState,
 };
 
 use itertools::Itertools;
@@ -530,4 +532,27 @@ fn sapling_spend_v4_to_fake_v5(
         zkproof: v4_spend.zkproof,
         spend_auth_sig: v4_spend.spend_auth_sig,
     }
+}
+
+/// Generate an iterator over fake V5 transactions.
+///
+/// These transactions are converted from non-V5 transactions that exist in the provided network
+/// blocks.
+pub fn fake_v5_transactions_for_network<'b>(
+    network: Network,
+    blocks: impl DoubleEndedIterator<Item = (&'b u32, &'b &'static [u8])> + 'b,
+) -> impl DoubleEndedIterator<Item = Transaction> + 'b {
+    blocks.flat_map(move |(height, original_bytes)| {
+        let original_block = original_bytes
+            .zcash_deserialize_into::<block::Block>()
+            .expect("block is structurally valid");
+
+        original_block
+            .transactions
+            .into_iter()
+            .map(move |transaction| {
+                transaction_to_fake_v5(&*transaction, network, block::Height(*height))
+            })
+            .map(Transaction::from)
+    })
 }
