@@ -1,13 +1,15 @@
 //! Contains code that interfaces with the zcash_history crate from
 //! librustzcash.
 
-use std::{collections::HashMap, convert::TryInto, io};
+// XXX: remove before completing PR
+#![allow(dead_code)]
+
+use std::{collections::HashMap, convert::TryInto, io, sync::Arc};
 
 use crate::{
-    block::Block,
-    parameters::{ConsensusBranchId, Network},
+    block::{Block, ChainHistoryMmrRootHash},
+    parameters::{ConsensusBranchId, Network, NetworkUpgrade},
     sapling,
-    transaction::Transaction,
 };
 
 /// A MMR Tree using zcash_history::Tree.
@@ -42,11 +44,14 @@ impl Tree {
     /// you don't need to pass every node, just the peaks of the tree (plus extra).
     fn new(
         network: Network,
-        branch_id: ConsensusBranchId,
+        network_upgrade: NetworkUpgrade,
         length: u32,
         peaks: &HashMap<u32, &Node>,
         extra: &HashMap<u32, &Node>,
     ) -> Result<Self, io::Error> {
+        let branch_id = network_upgrade
+            .branch_id()
+            .expect("unexpected pre-Overwinter MMR history tree");
         let mut peaks_vec = Vec::new();
         for (idx, node) in peaks {
             peaks_vec.push((*idx, node.to_entry(branch_id)?));
@@ -65,7 +70,7 @@ impl Tree {
     ///
     /// Returns a vector of nodes added to the tree (leaf + internal nodes).
     fn append_leaf(&mut self, block: Arc<Block>, sapling_root: &sapling::tree::Root) -> Vec<Node> {
-        let node_data = convert_block_to_librustzcash_data(block, self.network, sapling_root);
+        let node_data = block_to_history_node(block, self.network, sapling_root);
         // TODO: handle error
         let appended = self.tree.append_leaf(node_data).unwrap();
 
@@ -86,12 +91,9 @@ impl Tree {
     }
 
     /// Append multiple blocks to the tree.
-    fn append_leaf_iter(
-        &mut self,
-        vals: impl Iterator<Item = (Arc<Block>, sapling::tree::Root)>,
-    ) {
+    fn append_leaf_iter(&mut self, vals: impl Iterator<Item = (Arc<Block>, sapling::tree::Root)>) {
         for (block, root) in vals {
-            self.append_leaf(block, root);
+            self.append_leaf(block, &root);
         }
     }
 
@@ -104,7 +106,7 @@ impl Tree {
     }
 
     /// Return the root hash of the tree, i.e. `hashChainHistoryRoot`.
-    fn hash(&self) -> [u8; 32] {
+    fn hash(&self) -> ChainHistoryMmrRootHash {
         // Both append_leaf() and truncate_leaf() leave a root node, so it should
         // always exist.
         self.tree
@@ -112,21 +114,23 @@ impl Tree {
             .expect("must have root node")
             .data()
             .hash()
+            .into()
     }
 }
 
 /// Convert a Block into a zcash_history::NodeData used in the MMR tree.
 ///
 /// `sapling_root` is the root of the Sapling note commitment tree of the block.
-fn convert_block_to_librustzcash_data(
-    block: &Block,
+fn block_to_history_node(
+    block: Arc<Block>,
     network: Network,
     sapling_root: &sapling::tree::Root,
 ) -> zcash_history::NodeData {
     let height = block
         .coinbase_height()
         .expect("block must have coinbase height during contextual verification");
-    let branch_id = ConsensusBranchId::current(network, height).expect("must have branch ID for chain history network upgrades");
+    let branch_id = ConsensusBranchId::current(network, height)
+        .expect("must have branch ID for chain history network upgrades");
     let block_hash = block.hash().0;
     let time: u32 = block
         .header
@@ -135,7 +139,7 @@ fn convert_block_to_librustzcash_data(
         .try_into()
         .expect("deserialized and generated timestamps are u32 values");
     let target = block.header.difficulty_threshold.0;
-    let sapling_root: [u8; 32] = (*sapling_root).into();
+    let sapling_root: [u8; 32] = sapling_root.into();
     let work = block
         .header
         .difficulty_threshold
@@ -154,6 +158,7 @@ fn convert_block_to_librustzcash_data(
         end_target: target,
         start_sapling_root: sapling_root,
         end_sapling_root: sapling_root,
+        // Conversion from 128-bit value into 256-bit
         subtree_total_work: (&work[..]).into(),
         start_height: height.0 as u64,
         end_height: height.0 as u64,
@@ -164,28 +169,12 @@ fn convert_block_to_librustzcash_data(
 /// Count how many Sapling transactions exist in a block,
 /// i.e. transactions "where either of vSpendsSapling or vOutputsSapling is non-empty"
 /// (https://zips.z.cash/zip-0221#tree-node-specification).
-fn count_sapling_transactions(block: &Block) -> u64 {
+fn count_sapling_transactions(block: Arc<Block>) -> u64 {
     block
         .transactions
         .iter()
-        .map(|tx| -> u64 {
-            match &**tx {
-                Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => 0,
-                Transaction::V4 {
-                    sapling_shielded_data,
-                    ..
-                } => match sapling_shielded_data {
-                    Some(_) => 1,
-                    None => 0,
-                },
-                Transaction::V5 {
-                    sapling_shielded_data,
-                    ..
-                } => match sapling_shielded_data {
-                    Some(_) => 1,
-                    None => 0,
-                },
-            }
-        })
-        .sum()
+        .filter(|tx| tx.has_sapling_shielded_data())
+        .count()
+        .try_into()
+        .expect("number of transactions must fit u64")
 }

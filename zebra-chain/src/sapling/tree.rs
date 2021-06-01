@@ -108,6 +108,12 @@ impl From<&Root> for [u8; 32] {
     }
 }
 
+impl From<&Root> for [u8; 32] {
+    fn from(root: &Root) -> Self {
+        root.0
+    }
+}
+
 /// Sapling Note Commitment Tree
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct NoteCommitmentTree {
