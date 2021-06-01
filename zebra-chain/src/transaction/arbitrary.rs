@@ -19,12 +19,18 @@ use itertools::Itertools;
 use super::{FieldNotPresent, JoinSplitData, LockTime, Memo, Transaction};
 use sapling::{AnchorVariant, PerSpendAnchor, SharedAnchor};
 
+/// The maximum number of arbitrary transactions, inputs, or outputs.
+///
+/// This size is chosen to provide interesting behaviour, but not be too large
+/// for debugging.
+pub const MAX_ARBITRARY_TRANSACTIONS: usize = 4;
+
 impl Transaction {
     /// Generate a proptest strategy for V1 Transactions
     pub fn v1_strategy(ledger_state: LedgerState) -> BoxedStrategy<Self> {
         (
-            transparent::Input::vec_strategy(ledger_state, 10),
-            vec(any::<transparent::Output>(), 0..10),
+            transparent::Input::vec_strategy(ledger_state, MAX_ARBITRARY_TRANSACTIONS),
+            vec(any::<transparent::Output>(), 0..MAX_ARBITRARY_TRANSACTIONS),
             any::<LockTime>(),
         )
             .prop_map(|(inputs, outputs, lock_time)| Transaction::V1 {
@@ -38,8 +44,8 @@ impl Transaction {
     /// Generate a proptest strategy for V2 Transactions
     pub fn v2_strategy(ledger_state: LedgerState) -> BoxedStrategy<Self> {
         (
-            transparent::Input::vec_strategy(ledger_state, 10),
-            vec(any::<transparent::Output>(), 0..10),
+            transparent::Input::vec_strategy(ledger_state, MAX_ARBITRARY_TRANSACTIONS),
+            vec(any::<transparent::Output>(), 0..MAX_ARBITRARY_TRANSACTIONS),
             any::<LockTime>(),
             option::of(any::<JoinSplitData<Bctv14Proof>>()),
         )
@@ -57,8 +63,8 @@ impl Transaction {
     /// Generate a proptest strategy for V3 Transactions
     pub fn v3_strategy(ledger_state: LedgerState) -> BoxedStrategy<Self> {
         (
-            transparent::Input::vec_strategy(ledger_state, 10),
-            vec(any::<transparent::Output>(), 0..10),
+            transparent::Input::vec_strategy(ledger_state, MAX_ARBITRARY_TRANSACTIONS),
+            vec(any::<transparent::Output>(), 0..MAX_ARBITRARY_TRANSACTIONS),
             any::<LockTime>(),
             any::<block::Height>(),
             option::of(any::<JoinSplitData<Bctv14Proof>>()),
@@ -78,8 +84,8 @@ impl Transaction {
     /// Generate a proptest strategy for V4 Transactions
     pub fn v4_strategy(ledger_state: LedgerState) -> BoxedStrategy<Self> {
         (
-            transparent::Input::vec_strategy(ledger_state, 10),
-            vec(any::<transparent::Output>(), 0..10),
+            transparent::Input::vec_strategy(ledger_state, MAX_ARBITRARY_TRANSACTIONS),
+            vec(any::<transparent::Output>(), 0..MAX_ARBITRARY_TRANSACTIONS),
             any::<LockTime>(),
             any::<block::Height>(),
             option::of(any::<JoinSplitData<Groth16Proof>>()),
@@ -111,8 +117,8 @@ impl Transaction {
             NetworkUpgrade::branch_id_strategy(),
             any::<LockTime>(),
             any::<block::Height>(),
-            transparent::Input::vec_strategy(ledger_state, 10),
-            vec(any::<transparent::Output>(), 0..10),
+            transparent::Input::vec_strategy(ledger_state, MAX_ARBITRARY_TRANSACTIONS),
+            vec(any::<transparent::Output>(), 0..MAX_ARBITRARY_TRANSACTIONS),
             option::of(any::<sapling::ShieldedData<sapling::SharedAnchor>>()),
             option::of(any::<orchard::ShieldedData>()),
         )
@@ -200,7 +206,7 @@ impl<P: ZkSnarkProof + Arbitrary + 'static> Arbitrary for JoinSplitData<P> {
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         (
             any::<sprout::JoinSplit<P>>(),
-            vec(any::<sprout::JoinSplit<P>>(), 0..10),
+            vec(any::<sprout::JoinSplit<P>>(), 0..MAX_ARBITRARY_TRANSACTIONS),
             array::uniform32(any::<u8>()),
             vec(any::<u8>(), 64),
         )
@@ -254,8 +260,11 @@ impl Arbitrary for sapling::TransferData<PerSpendAnchor> {
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         // TODO: add an extra spend or output using Either, and stop using filter_map
         (
-            vec(any::<sapling::Spend<PerSpendAnchor>>(), 0..10),
-            vec(any::<sapling::Output>(), 0..10),
+            vec(
+                any::<sapling::Spend<PerSpendAnchor>>(),
+                0..MAX_ARBITRARY_TRANSACTIONS,
+            ),
+            vec(any::<sapling::Output>(), 0..MAX_ARBITRARY_TRANSACTIONS),
         )
             .prop_filter_map(
                 "arbitrary v4 transfers with no spends and no outputs",
@@ -288,8 +297,11 @@ impl Arbitrary for sapling::TransferData<SharedAnchor> {
         // TODO: add an extra spend or output using Either, and stop using filter_map
         (
             any::<sapling::tree::Root>(),
-            vec(any::<sapling::Spend<SharedAnchor>>(), 0..10),
-            vec(any::<sapling::Output>(), 0..10),
+            vec(
+                any::<sapling::Spend<SharedAnchor>>(),
+                0..MAX_ARBITRARY_TRANSACTIONS,
+            ),
+            vec(any::<sapling::Output>(), 0..MAX_ARBITRARY_TRANSACTIONS),
         )
             .prop_filter_map(
                 "arbitrary v5 transfers with no spends and no outputs",
@@ -324,7 +336,10 @@ impl Arbitrary for orchard::ShieldedData {
             any::<Amount>(),
             any::<orchard::tree::Root>(),
             any::<Halo2Proof>(),
-            vec(any::<orchard::shielded_data::AuthorizedAction>(), 1..10),
+            vec(
+                any::<orchard::shielded_data::AuthorizedAction>(),
+                1..MAX_ARBITRARY_TRANSACTIONS,
+            ),
             any::<Signature<Binding>>(),
         )
             .prop_map(
