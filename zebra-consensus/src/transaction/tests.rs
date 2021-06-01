@@ -52,3 +52,25 @@ fn v5_fake_transactions() -> Result<(), Report> {
 
     Ok(())
 }
+
+#[test]
+fn v5_transaction_with_no_inputs_fails_validation() {
+    let transaction = fake_v5_transactions_for_network(
+        Network::Mainnet,
+        zebra_test::vectors::MAINNET_BLOCKS.iter(),
+    )
+    .rev()
+    .find(|transaction| {
+        transaction.inputs().is_empty()
+            && transaction.sapling_spends_per_anchor().next().is_none()
+            && transaction.orchard_actions().next().is_none()
+            && transaction.joinsplit_count() == 0
+            && (!transaction.outputs().is_empty() || transaction.sapling_outputs().next().is_some())
+    })
+    .expect("At least one transaction with no inputs in the test vectors");
+
+    assert_eq!(
+        check::has_inputs_and_outputs(&transaction),
+        Err(TransactionError::NoInputs)
+    );
+}
