@@ -438,22 +438,9 @@ impl Transaction {
     pub fn orchard_nullifiers(&self) -> Box<dyn Iterator<Item = &orchard::Nullifier> + '_> {
         // This function returns a boxed iterator because the different
         // transaction variants can have different iterator types
-        match self {
-            // Actions
-            Transaction::V5 {
-                orchard_shielded_data: Some(orchard_shielded_data),
-                ..
-            } => Box::new(orchard_shielded_data.nullifiers()),
-
-            // No Actions
-            Transaction::V1 { .. }
-            | Transaction::V2 { .. }
-            | Transaction::V3 { .. }
-            | Transaction::V4 { .. }
-            | Transaction::V5 {
-                orchard_shielded_data: None,
-                ..
-            } => Box::new(std::iter::empty()),
+        match self.orchard_shielded_data() {
+            Some(orchard_shielded_data) => Box::new(orchard_shielded_data.nullifiers()),
+            None => Box::new(std::iter::empty()),
         }
     }
 }
