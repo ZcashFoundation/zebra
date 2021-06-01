@@ -64,7 +64,7 @@ impl Tree {
     /// `sapling_root` is the root of the Sapling note commitment tree of the block.
     ///
     /// Returns a vector of nodes added to the tree (leaf + internal nodes).
-    fn append_leaf(&mut self, block: &Block, sapling_root: &sapling::tree::Root) -> Vec<Node> {
+    fn append_leaf(&mut self, block: Arc<Block>, sapling_root: &sapling::tree::Root) -> Vec<Node> {
         let node_data = convert_block_to_librustzcash_data(block, self.network, sapling_root);
         // TODO: handle error
         let appended = self.tree.append_leaf(node_data).unwrap();
@@ -86,9 +86,9 @@ impl Tree {
     }
 
     /// Append multiple blocks to the tree.
-    fn append_leaf_iter<'a>(
+    fn append_leaf_iter(
         &mut self,
-        vals: impl Iterator<Item = (&'a Block, &'a sapling::tree::Root)>,
+        vals: impl Iterator<Item = (Arc<Block>, sapling::tree::Root)>,
     ) {
         for (block, root) in vals {
             self.append_leaf(block, root);
@@ -123,12 +123,10 @@ fn convert_block_to_librustzcash_data(
     network: Network,
     sapling_root: &sapling::tree::Root,
 ) -> zcash_history::NodeData {
-    // XXX: is this expect OK?
     let height = block
         .coinbase_height()
-        .expect("block must have coinbase height");
-    // XXX: is this expect OK?
-    let branch_id = ConsensusBranchId::current(network, height).expect("Must have branch ID");
+        .expect("block must have coinbase height during contextual verification");
+    let branch_id = ConsensusBranchId::current(network, height).expect("must have branch ID for chain history network upgrades");
     let block_hash = block.hash().0;
     let time: u32 = block
         .header
@@ -138,12 +136,11 @@ fn convert_block_to_librustzcash_data(
         .expect("deserialized and generated timestamps are u32 values");
     let target = block.header.difficulty_threshold.0;
     let sapling_root: [u8; 32] = (*sapling_root).into();
-    // XXX: is this expect OK?
     let work = block
         .header
         .difficulty_threshold
         .to_work()
-        .expect("must have work");
+        .expect("work must be valid during contextual verification");
     let work = work.as_u128().to_be_bytes();
 
     let sapling_tx_count = count_sapling_transactions(block);
