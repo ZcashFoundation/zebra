@@ -366,7 +366,7 @@ fn validate_addrs(
 /// Ensure all reported `last_seen` times are less than or equal to `last_seen_limit`.
 ///
 /// This will consider all addresses as invalid if trying to offset their
-/// `last_seen` times to be before the limit causes an overflow.
+/// `last_seen` times to be before the limit causes an underflow.
 fn limit_last_seen_times(addrs: &mut Vec<MetaAddr>, last_seen_limit: DateTime32) {
     let (oldest_reported_seen_timestamp, newest_reported_seen_timestamp) =
         addrs
@@ -383,7 +383,7 @@ fn limit_last_seen_times(addrs: &mut Vec<MetaAddr>, last_seen_limit: DateTime32)
         // Apply offset to oldest timestamp to check for underflow
         let oldest_resulting_timestamp = oldest_reported_seen_timestamp as i64 - offset as i64;
         if oldest_resulting_timestamp >= 0 {
-            // No overflow is possible, so apply offset to all addresses
+            // No underflow is possible, so apply offset to all addresses
             for addr in addrs {
                 let old_last_seen = addr.get_last_seen().timestamp();
                 let new_last_seen = old_last_seen - offset;
@@ -391,7 +391,7 @@ fn limit_last_seen_times(addrs: &mut Vec<MetaAddr>, last_seen_limit: DateTime32)
                 addr.set_last_seen(new_last_seen.into());
             }
         } else {
-            // An overflow will occur, so reject all gossiped peers
+            // An underflow will occur, so reject all gossiped peers
             addrs.clear();
         }
     }
