@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use crate::{
     block,
+    fmt::SummaryDebug,
     parameters::{Network, NetworkUpgrade, GENESIS_PREVIOUS_BLOCK_HASH},
     serialization,
     work::{difficulty::CompactDifficulty, equihash},
@@ -249,7 +250,7 @@ impl Block {
     pub fn partial_chain_strategy(
         mut current: LedgerState,
         count: usize,
-    ) -> BoxedStrategy<Vec<Arc<Self>>> {
+    ) -> BoxedStrategy<SummaryDebug<Vec<Arc<Self>>>> {
         let mut vec = Vec::with_capacity(count);
 
         // generate block strategies with the correct heights
@@ -267,7 +268,7 @@ impl Block {
                 }
                 previous_block_hash = Some(block.hash());
             }
-            vec.into_iter().map(Arc::new).collect()
+            SummaryDebug(vec.into_iter().map(Arc::new).collect())
         })
         .boxed()
     }

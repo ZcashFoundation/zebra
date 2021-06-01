@@ -5,7 +5,7 @@ use proptest::{
 };
 use std::sync::Arc;
 
-use zebra_chain::{block::Block, parameters::NetworkUpgrade::Nu5, LedgerState};
+use zebra_chain::{block::Block, fmt::SummaryDebug, parameters::NetworkUpgrade::Nu5, LedgerState};
 use zebra_test::prelude::*;
 
 use crate::tests::Prepare;
@@ -16,14 +16,14 @@ const MAX_PARTIAL_CHAIN_BLOCKS: usize = 102;
 
 #[derive(Debug)]
 pub struct PreparedChainTree {
-    chain: Arc<Vec<PreparedBlock>>,
+    chain: Arc<SummaryDebug<Vec<PreparedBlock>>>,
     count: BinarySearch,
     network: Network,
 }
 
 impl ValueTree for PreparedChainTree {
     type Value = (
-        Arc<Vec<PreparedBlock>>,
+        Arc<SummaryDebug<Vec<PreparedBlock>>>,
         <BinarySearch as ValueTree>::Value,
         Network,
     );
@@ -44,7 +44,7 @@ impl ValueTree for PreparedChainTree {
 #[derive(Debug, Default)]
 pub struct PreparedChain {
     // the proptests are threaded (not async), so we want to use a threaded mutex here
-    chain: std::sync::Mutex<Option<(Network, Arc<Vec<PreparedBlock>>)>>,
+    chain: std::sync::Mutex<Option<(Network, Arc<SummaryDebug<Vec<PreparedBlock>>>)>>,
 }
 
 impl Strategy for PreparedChain {
@@ -67,12 +67,14 @@ impl Strategy for PreparedChain {
                 .prop_map(|(network, vec)| {
                     (
                         network,
-                        vec.into_iter().map(|blk| blk.prepare()).collect::<Vec<_>>(),
+                        vec.iter()
+                            .map(|blk| blk.clone().prepare())
+                            .collect::<Vec<_>>(),
                     )
                 })
                 .new_tree(runner)?
                 .current();
-            *chain = Some((network, Arc::new(blocks)));
+            *chain = Some((network, Arc::new(SummaryDebug(blocks))));
         }
 
         let chain = chain.clone().expect("should be generated");

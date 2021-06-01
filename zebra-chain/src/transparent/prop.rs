@@ -4,7 +4,9 @@
 
 use zebra_test::prelude::*;
 
-use crate::{block, LedgerState};
+use crate::{
+    block, fmt::SummaryDebug, LedgerState,
+};
 
 use super::Input;
 
@@ -31,7 +33,7 @@ fn input_coinbase_vecs_only_have_coinbase_input() -> Result<()> {
     let strategy = LedgerState::coinbase_strategy(None)
         .prop_flat_map(|ledger_state| Input::vec_strategy(ledger_state, max_size));
 
-    proptest!(|(inputs in strategy)| {
+    proptest!(|(inputs in strategy.prop_map(SummaryDebug))| {
         let len = inputs.len();
         for (ind, input) in inputs.into_iter().enumerate() {
             let is_coinbase = matches!(input, Input::Coinbase { .. });
