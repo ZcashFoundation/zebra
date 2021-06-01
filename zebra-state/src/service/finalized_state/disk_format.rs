@@ -4,7 +4,7 @@ use std::{convert::TryInto, fmt::Debug, sync::Arc};
 use zebra_chain::{
     block,
     block::Block,
-    sapling,
+    orchard, sapling,
     serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
     sprout, transaction, transparent,
 };
@@ -160,6 +160,15 @@ impl IntoDisk for sapling::Nullifier {
 
     fn as_bytes(&self) -> Self::Bytes {
         self.0
+    }
+}
+
+impl IntoDisk for orchard::Nullifier {
+    type Bytes = [u8; 32];
+
+    fn as_bytes(&self) -> Self::Bytes {
+        let nullifier: orchard::Nullifier = *self;
+        nullifier.into()
     }
 }
 

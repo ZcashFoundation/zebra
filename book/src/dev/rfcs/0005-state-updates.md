@@ -280,6 +280,7 @@ struct Chain {
     sapling_anchors: HashSet<sapling::tree::Root>,
     sprout_nullifiers: HashSet<sprout::Nullifier>,
     sapling_nullifiers: HashSet<sapling::Nullifier>,
+    orchard_nullifiers: HashSet<orchard::Nullifier>,
     partial_cumulative_work: PartialCumulativeWork,
 }
 ```
@@ -608,6 +609,7 @@ We use the following rocksdb column families:
 | `utxo_by_outpoint`   | `OutPoint`            | `TransparentOutput`                 |
 | `sprout_nullifiers`  | `sprout::Nullifier`   | `()`                                |
 | `sapling_nullifiers` | `sapling::Nullifier`  | `()`                                |
+| `orchard_nullifiers` | `orchard::Nullifier`  | `()`                                |
 | `sprout_anchors`     | `sprout::tree::Root`  | `()`                                |
 | `sapling_anchors`    | `sapling::tree::Root` | `()`                                |
 
@@ -694,6 +696,9 @@ check that `block`'s parent hash is `null` (all zeroes) and its height is `0`.
    5. For each [`Spend`] description in the transaction, insert
    `(nullifier,())` into `sapling_nullifiers`.
 
+   6. For each [`Action`] description in the transaction, insert
+   `(nullifier,())` into `orchard_nullifiers`.
+
 **Note**: The Sprout and Sapling anchors are the roots of the Sprout and
 Sapling note commitment trees that have already been calculated for the last
 transaction(s) in the block that have `JoinSplit`s in the Sprout case and/or
@@ -708,8 +713,9 @@ irrelevant for the mainnet and testnet chains.
 Hypothetically, if Sapling were activated from genesis, the specification requires
 a Sapling anchor, but `zcashd` would ignore that anchor.
 
-[`JoinSplit`]: https://doc.zebra.zfnd.org/zebra_chain/transaction/struct.JoinSplit.html
-[`Spend`]: https://doc.zebra.zfnd.org/zebra_chain/transaction/struct.Spend.html
+[`JoinSplit`]: https://doc.zebra.zfnd.org/zebra_chain/sprout/struct.JoinSplit.html
+[`Spend`]: https://doc.zebra.zfnd.org/zebra_chain/sapling/spend/struct.Spend.html
+[`Action`]: https://doc.zebra.zfnd.org/zebra_chain/orchard/struct.Action.html
 
 These updates can be performed in a batch or without necessarily iterating
 over all transactions, if the data is available by other means; they're

@@ -2,6 +2,9 @@
 
 mod disk_format;
 
+#[cfg(test)]
+mod tests;
+
 use std::{collections::HashMap, convert::TryInto, sync::Arc};
 
 use zebra_chain::transparent;
@@ -44,6 +47,7 @@ impl FinalizedState {
             rocksdb::ColumnFamilyDescriptor::new("utxo_by_outpoint", db_options.clone()),
             rocksdb::ColumnFamilyDescriptor::new("sprout_nullifiers", db_options.clone()),
             rocksdb::ColumnFamilyDescriptor::new("sapling_nullifiers", db_options.clone()),
+            rocksdb::ColumnFamilyDescriptor::new("orchard_nullifiers", db_options.clone()),
         ];
         let db_result = rocksdb::DB::open_cf_descriptors(&db_options, &path, column_families);
 
@@ -194,6 +198,7 @@ impl FinalizedState {
         let utxo_by_outpoint = self.db.cf_handle("utxo_by_outpoint").unwrap();
         let sprout_nullifiers = self.db.cf_handle("sprout_nullifiers").unwrap();
         let sapling_nullifiers = self.db.cf_handle("sapling_nullifiers").unwrap();
+        let orchard_nullifiers = self.db.cf_handle("orchard_nullifiers").unwrap();
 
         // Assert that callers (including unit tests) get the chain order correct
         if self.is_empty(hash_by_height) {
@@ -273,12 +278,15 @@ impl FinalizedState {
                     }
                 }
 
-                // Mark sprout and sapling nullifiers as spent
+                // Mark sprout, sapling and orchard nullifiers as spent
                 for sprout_nullifier in transaction.sprout_nullifiers() {
                     batch.zs_insert(sprout_nullifiers, sprout_nullifier, ());
                 }
                 for sapling_nullifier in transaction.sapling_nullifiers() {
                     batch.zs_insert(sapling_nullifiers, sapling_nullifier, ());
+                }
+                for orchard_nullifier in transaction.orchard_nullifiers() {
+                    batch.zs_insert(orchard_nullifiers, orchard_nullifier, ());
                 }
             }
 
@@ -431,6 +439,12 @@ fn block_precommit_metrics(finalized: &FinalizedBlock) {
         .flat_map(|t| t.sapling_nullifiers())
         .count();
 
+    let orchard_nullifier_count = block
+        .transactions
+        .iter()
+        .flat_map(|t| t.orchard_nullifiers())
+        .count();
+
     tracing::debug!(
         ?hash,
         ?height,
@@ -439,6 +453,7 @@ fn block_precommit_metrics(finalized: &FinalizedBlock) {
         transparent_newout_count,
         sprout_nullifier_count,
         sapling_nullifier_count,
+        orchard_nullifier_count,
         "preparing to commit finalized block"
     );
     metrics::counter!(
@@ -460,5 +475,9 @@ fn block_precommit_metrics(finalized: &FinalizedBlock) {
     metrics::counter!(
         "state.finalized.cumulative.sapling_nullifiers",
         sapling_nullifier_count as u64
+    );
+    metrics::counter!(
+        "state.finalized.cumulative.orchard_nullifiers",
+        orchard_nullifier_count as u64
     );
 }

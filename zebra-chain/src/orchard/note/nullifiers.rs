@@ -9,6 +9,8 @@ use super::super::{
     commitment::NoteCommitment, keys::NullifierDerivingKey, note::Note, sinsemilla::*,
 };
 
+use std::hash::{Hash, Hasher};
+
 /// A cryptographic permutation, defined in [poseidonhash].
 ///
 /// PoseidonHash(x, y) = f([x, y, 0])_1 (using 1-based indexing).
@@ -35,12 +37,24 @@ fn prf_nf(nk: pallas::Base, rho: pallas::Base) -> pallas::Base {
 }
 
 /// A Nullifier for Orchard transactions
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, Serialize, Deserialize)]
 pub struct Nullifier(#[serde(with = "serde_helpers::Base")] pallas::Base);
+
+impl Hash for Nullifier {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.to_bytes().hash(state);
+    }
+}
 
 impl From<[u8; 32]> for Nullifier {
     fn from(bytes: [u8; 32]) -> Self {
         Self(pallas::Base::from_bytes(&bytes).unwrap())
+    }
+}
+
+impl PartialEq for Nullifier {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
     }
 }
 

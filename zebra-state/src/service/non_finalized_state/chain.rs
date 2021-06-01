@@ -6,8 +6,8 @@ use std::{
 
 use tracing::{debug_span, instrument, trace};
 use zebra_chain::{
-    block, primitives::Groth16Proof, sapling, sprout, transaction, transparent,
-    work::difficulty::PartialCumulativeWork,
+    block, orchard, primitives::Groth16Proof, sapling, sprout, transaction,
+    transaction::Transaction::*, transparent, work::difficulty::PartialCumulativeWork,
 };
 
 use crate::{PreparedBlock, Utxo};
@@ -20,10 +20,12 @@ pub struct Chain {
 
     pub created_utxos: HashMap<transparent::OutPoint, Utxo>,
     spent_utxos: HashSet<transparent::OutPoint>,
+    // TODO: add sprout, sapling and orchard anchors (#1320)
     sprout_anchors: HashSet<sprout::tree::Root>,
     sapling_anchors: HashSet<sapling::tree::Root>,
     sprout_nullifiers: HashSet<sprout::Nullifier>,
     sapling_nullifiers: HashSet<sapling::Nullifier>,
+    orchard_nullifiers: HashSet<orchard::Nullifier>,
     partial_cumulative_work: PartialCumulativeWork,
 }
 
@@ -165,17 +167,33 @@ impl UpdateWith<PreparedBlock> for Chain {
             .zip(transaction_hashes.iter().cloned())
             .enumerate()
         {
-            use transaction::Transaction::*;
-            let (inputs, joinsplit_data, sapling_shielded_data) = match transaction.deref() {
+            let (
+                inputs,
+                joinsplit_data,
+                sapling_shielded_data_per_spend_anchor,
+                sapling_shielded_data_shared_anchor,
+                orchard_shielded_data,
+            ) = match transaction.deref() {
                 V4 {
                     inputs,
                     joinsplit_data,
                     sapling_shielded_data,
                     ..
-                } => (inputs, joinsplit_data, sapling_shielded_data),
-                V5 { .. } => unimplemented!("v5 transaction format as specified in ZIP-225"),
+                } => (inputs, joinsplit_data, sapling_shielded_data, &None, &None),
+                V5 {
+                    inputs,
+                    sapling_shielded_data,
+                    orchard_shielded_data,
+                    ..
+                } => (
+                    inputs,
+                    &None,
+                    &None,
+                    sapling_shielded_data,
+                    orchard_shielded_data,
+                ),
                 V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(
-                    "older transaction versions only exist in finalized blocks pre sapling",
+                    "older transaction versions only exist in finalized blocks, because of the mandatory canopy checkpoint",
                 ),
             };
 
@@ -192,10 +210,12 @@ impl UpdateWith<PreparedBlock> for Chain {
             self.update_chain_state_with(&prepared.new_outputs);
             // add the utxos this consumed
             self.update_chain_state_with(inputs);
-            // add sprout anchor and nullifiers
+
+            // add the shielded data
             self.update_chain_state_with(joinsplit_data);
-            // add sapling anchor and nullifier
-            self.update_chain_state_with(sapling_shielded_data);
+            self.update_chain_state_with(sapling_shielded_data_per_spend_anchor);
+            self.update_chain_state_with(sapling_shielded_data_shared_anchor);
+            self.update_chain_state_with(orchard_shielded_data);
         }
     }
 
@@ -225,17 +245,33 @@ impl UpdateWith<PreparedBlock> for Chain {
         for (transaction, transaction_hash) in
             block.transactions.iter().zip(transaction_hashes.iter())
         {
-            use transaction::Transaction::*;
-            let (inputs, joinsplit_data, sapling_shielded_data) = match transaction.deref() {
+            let (
+                inputs,
+                joinsplit_data,
+                sapling_shielded_data_per_spend_anchor,
+                sapling_shielded_data_shared_anchor,
+                orchard_shielded_data,
+            ) = match transaction.deref() {
                 V4 {
                     inputs,
                     joinsplit_data,
                     sapling_shielded_data,
                     ..
-                } => (inputs, joinsplit_data, sapling_shielded_data),
-                V5 { .. } => unimplemented!("v5 transaction format as specified in ZIP-225"),
+                } => (inputs, joinsplit_data, sapling_shielded_data, &None, &None),
+                V5 {
+                    inputs,
+                    sapling_shielded_data,
+                    orchard_shielded_data,
+                    ..
+                } => (
+                    inputs,
+                    &None,
+                    &None,
+                    sapling_shielded_data,
+                    orchard_shielded_data,
+                ),
                 V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(
-                    "older transaction versions only exist in finalized blocks pre sapling",
+                    "older transaction versions only exist in finalized blocks, because of the mandatory canopy checkpoint",
                 ),
             };
 
@@ -249,10 +285,12 @@ impl UpdateWith<PreparedBlock> for Chain {
             self.revert_chain_state_with(&prepared.new_outputs);
             // remove the utxos this consumed
             self.revert_chain_state_with(inputs);
-            // remove sprout anchor and nullifiers
+
+            // remove the shielded data
             self.revert_chain_state_with(joinsplit_data);
-            // remove sapling anchor and nullfier
-            self.revert_chain_state_with(sapling_shielded_data);
+            self.revert_chain_state_with(sapling_shielded_data_per_spend_anchor);
+            self.revert_chain_state_with(sapling_shielded_data_shared_anchor);
+            self.revert_chain_state_with(orchard_shielded_data);
         }
     }
 }
@@ -359,6 +397,27 @@ where
             for nullifier in sapling_shielded_data.nullifiers() {
                 assert!(
                     self.sapling_nullifiers.remove(nullifier),
+                    "nullifier must be present if block was"
+                );
+            }
+        }
+    }
+}
+
+impl UpdateWith<Option<orchard::ShieldedData>> for Chain {
+    fn update_chain_state_with(&mut self, orchard_shielded_data: &Option<orchard::ShieldedData>) {
+        if let Some(orchard_shielded_data) = orchard_shielded_data {
+            for nullifier in orchard_shielded_data.nullifiers() {
+                self.orchard_nullifiers.insert(*nullifier);
+            }
+        }
+    }
+
+    fn revert_chain_state_with(&mut self, orchard_shielded_data: &Option<orchard::ShieldedData>) {
+        if let Some(orchard_shielded_data) = orchard_shielded_data {
+            for nullifier in orchard_shielded_data.nullifiers() {
+                assert!(
+                    self.orchard_nullifiers.remove(nullifier),
                     "nullifier must be present if block was"
                 );
             }
