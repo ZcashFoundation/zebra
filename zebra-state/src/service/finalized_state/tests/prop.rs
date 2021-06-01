@@ -28,7 +28,7 @@ fn blocks_with_v5_transactions() -> Result<()> {
                 let hash = state.commit_finalized_direct(FinalizedBlock::from(block.clone()));
                 prop_assert_eq!(Some(height), state.finalized_tip_height());
                 prop_assert_eq!(hash.unwrap(), block.hash);
-                // TODO: check that the nullifiers were correctly inserted (#1287)
+                // TODO: check that the nullifiers were correctly inserted (#2230)
                 height = Height(height.0 + 1);
             }
     });
