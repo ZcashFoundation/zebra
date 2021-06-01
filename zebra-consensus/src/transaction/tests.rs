@@ -67,7 +67,7 @@ fn v5_transaction_with_no_inputs_fails_validation() {
             && transaction.joinsplit_count() == 0
             && (!transaction.outputs().is_empty() || transaction.sapling_outputs().next().is_some())
     })
-    .expect("At least one transaction with no inputs in the test vectors");
+    .expect("At least one fake v5 transaction with no inputs in the test vectors");
 
     assert_eq!(
         check::has_inputs_and_outputs(&transaction),
@@ -90,7 +90,7 @@ fn v5_transaction_with_no_outputs_fails_validation() {
             && (!transaction.inputs().is_empty()
                 || transaction.sapling_spends_per_anchor().next().is_some())
     })
-    .expect("At least one transaction with no outputs in the test vectors");
+    .expect("At least one fake v5 transaction with no outputs in the test vectors");
 
     assert_eq!(
         check::has_inputs_and_outputs(&transaction),
