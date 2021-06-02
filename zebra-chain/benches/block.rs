@@ -46,7 +46,7 @@ fn block_serialization(c: &mut Criterion) {
 
 criterion_group!(
     name = benches;
-    config = Criterion::default().noise_threshold(0.05);
+    config = Criterion::default().noise_threshold(0.05).sample_size(50);
     targets = block_serialization
 );
 criterion_main!(benches);
