@@ -23,4 +23,10 @@ pub enum SerializationError {
         #[from]
         source: crate::amount::Error,
     },
+    /// Invalid transaction with a non-zero balance and no Sapling shielded spends or outputs.
+    ///
+    /// Transaction does not conform to the Sapling [consensus
+    /// rule](https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus).
+    #[error("transaction balance is non-zero but doesn't have Sapling shielded spends or outputs")]
+    BadTransactionBalance,
 }
