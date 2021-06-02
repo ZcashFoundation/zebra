@@ -4,9 +4,7 @@
 
 use zebra_test::prelude::*;
 
-use crate::{
-    block, fmt::SummaryDebug, transaction::arbitrary::MAX_ARBITRARY_TRANSACTIONS, LedgerState,
-};
+use crate::{block, fmt::SummaryDebug, transaction::arbitrary::MAX_ARBITRARY_ITEMS, LedgerState};
 
 use super::Input;
 
@@ -29,9 +27,8 @@ fn coinbase_has_height() -> Result<()> {
 fn input_coinbase_vecs_only_have_coinbase_input() -> Result<()> {
     zebra_test::init();
 
-    let strategy = LedgerState::coinbase_strategy(None).prop_flat_map(|ledger_state| {
-        Input::vec_strategy(ledger_state, MAX_ARBITRARY_TRANSACTIONS)
-    });
+    let strategy = LedgerState::coinbase_strategy(None)
+        .prop_flat_map(|ledger_state| Input::vec_strategy(ledger_state, MAX_ARBITRARY_ITEMS));
 
     proptest!(|(inputs in strategy.prop_map(SummaryDebug))| {
         let len = inputs.len();
