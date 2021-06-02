@@ -145,7 +145,8 @@ fn block_to_history_node(
         .difficulty_threshold
         .to_work()
         .expect("work must be valid during contextual verification");
-    let work = work.as_u128().to_be_bytes();
+    // There is no direct `std::primitive::u128` to `bigint::U256` conversion
+    let work = bigint::U256::from_big_endian(work.as_u128().to_be_bytes());
 
     let sapling_tx_count = count_sapling_transactions(block);
 
@@ -158,8 +159,7 @@ fn block_to_history_node(
         end_target: target,
         start_sapling_root: sapling_root,
         end_sapling_root: sapling_root,
-        // Conversion from 128-bit value into 256-bit
-        subtree_total_work: (&work[..]).into(),
+        subtree_total_work: work,
         start_height: height.0 as u64,
         end_height: height.0 as u64,
         sapling_tx: sapling_tx_count,
