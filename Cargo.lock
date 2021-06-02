@@ -273,10 +273,10 @@ dependencies = [
  "blake2s_simd",
  "byteorder",
  "crossbeam",
- "ff",
+ "ff 0.9.0",
  "futures 0.1.30",
  "futures-cpupool",
- "group",
+ "group 0.9.0",
  "num_cpus",
  "pairing",
  "rand_core 0.6.2",
@@ -439,8 +439,8 @@ version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1c56609cc42c628848e7b18e0baf42a4ef626b8c50442dc08b8094bd21d8ad32"
 dependencies = [
- "ff",
- "group",
+ "ff 0.9.0",
+ "group 0.9.0",
  "pairing",
  "rand_core 0.6.2",
  "subtle",
@@ -1133,6 +1133,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ff"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "63eec06c61e487eecf0f7e6e6372e596a81922c28d33e645d6983ca6493a1af0"
+dependencies = [
+ "rand_core 0.6.2",
+ "subtle",
+]
+
+[[package]]
 name = "fixed-hash"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1421,7 +1431,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "61b3c1e8b4f1ca07e6605ea1be903a5f6956aec5c8a67fd44d56076631675ed8"
 dependencies = [
  "byteorder",
- "ff",
+ "ff 0.9.0",
+ "rand_core 0.6.2",
+ "subtle",
+]
+
+[[package]]
+name = "group"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1c363a5301b8f153d80747126a04b3c82073b9fe3130571a9d170cacdeaf7912"
+dependencies = [
+ "byteorder",
+ "ff 0.10.0",
  "rand_core 0.6.2",
  "subtle",
 ]
@@ -1498,9 +1520,9 @@ source = "git+https://github.com/zcash/halo2.git?rev=dda60a363001373d564156ad033
 dependencies = [
  "blake2b_simd",
  "crossbeam-utils 0.8.0",
- "ff",
+ "ff 0.9.0",
  "funty",
- "group",
+ "group 0.9.0",
  "num_cpus",
  "pasta_curves",
  "rand 0.8.1",
@@ -1824,8 +1846,8 @@ checksum = "4d7e7fef85ae7b26dd89f34175b7f3c5ace64067a110c2ac86cf92407a6666ca"
 dependencies = [
  "bitvec 0.20.1",
  "bls12_381",
- "ff",
- "group",
+ "ff 0.9.0",
+ "group 0.9.0",
  "rand_core 0.6.2",
  "subtle",
 ]
@@ -2279,8 +2301,8 @@ version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9be899ebf10363f018353dba1baabb7e83145f3683c7b83b73b93b563e3167cc"
 dependencies = [
- "ff",
- "group",
+ "ff 0.9.0",
+ "group 0.9.0",
 ]
 
 [[package]]
@@ -2327,9 +2349,9 @@ version = "0.0.0"
 source = "git+https://github.com/zcash/pasta_curves.git?rev=b55a6960dfafd7f767e2820ddf1adaa499322f98#b55a6960dfafd7f767e2820ddf1adaa499322f98"
 dependencies = [
  "blake2b_simd",
- "ff",
+ "ff 0.9.0",
  "funty",
- "group",
+ "group 0.9.0",
  "lazy_static",
  "rand 0.8.1",
  "static_assertions",
@@ -4423,7 +4445,7 @@ dependencies = [
  "fpe",
  "funty",
  "futures 0.3.15",
- "group",
+ "group 0.10.0",
  "halo2",
  "hex",
  "itertools 0.10.0",
