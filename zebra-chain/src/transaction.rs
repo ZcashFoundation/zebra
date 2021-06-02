@@ -112,7 +112,7 @@ pub enum Transaction {
         outputs: Vec<transparent::Output>,
         /// The sapling shielded data for this transaction, if any.
         sapling_shielded_data: Option<sapling::ShieldedData<sapling::SharedAnchor>>,
-        // The orchard data for this transaction, if any.
+        /// The orchard data for this transaction, if any.
         orchard_shielded_data: Option<orchard::ShieldedData>,
     },
 }
@@ -395,7 +395,28 @@ impl Transaction {
 
     // orchard
 
-    /// Access the orchard::Nullifiers in this transaction, regardless of version.
+    /// Iterate over the [`orchard::Action`]s in this transaction, if there are any.
+    pub fn orchard_actions(&self) -> Box<dyn Iterator<Item = &orchard::Action> + '_> {
+        match self {
+            // Actions
+            Transaction::V5 {
+                orchard_shielded_data: Some(orchard_shielded_data),
+                ..
+            } => Box::new(orchard_shielded_data.actions()),
+
+            // No Actions
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V4 { .. }
+            | Transaction::V5 {
+                orchard_shielded_data: None,
+                ..
+            } => Box::new(std::iter::empty()),
+        }
+    }
+
+    /// Access the [`orchard::Nullifier`]s in this transaction, regardless of version.
     pub fn orchard_nullifiers(&self) -> Box<dyn Iterator<Item = &orchard::Nullifier> + '_> {
         // This function returns a boxed iterator because the different
         // transaction variants can have different iterator types
