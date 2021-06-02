@@ -81,9 +81,9 @@ impl NonFinalizedState {
         let (height, hash) = (prepared.height, prepared.hash);
 
         let canopy_activation_height = Canopy.activation_height(self.network).unwrap();
-        if height < canopy_activation_height {
+        if height <= canopy_activation_height {
             panic!(
-                "invalid non-finalized block height: the canopy checkpoint is mandatory, pre-canopy blocks must be committed to the state as finalized blocks"
+                "invalid non-finalized block height: the canopy checkpoint is mandatory, pre-canopy blocks, and the canopy activation block, must be committed to the state as finalized blocks"
             );
         }
 
