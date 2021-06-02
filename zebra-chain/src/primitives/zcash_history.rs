@@ -69,10 +69,13 @@ impl Tree {
     /// `sapling_root` is the root of the Sapling note commitment tree of the block.
     ///
     /// Returns a vector of nodes added to the tree (leaf + internal nodes).
-    fn append_leaf(&mut self, block: Arc<Block>, sapling_root: &sapling::tree::Root) -> Vec<Node> {
+    fn append_leaf(
+        &mut self,
+        block: Arc<Block>,
+        sapling_root: &sapling::tree::Root,
+    ) -> Result<Vec<Node>, zcash_history::Error> {
         let node_data = block_to_history_node(block, self.network, sapling_root);
-        // TODO: handle error
-        let appended = self.tree.append_leaf(node_data).unwrap();
+        let appended = self.tree.append_leaf(node_data)?;
 
         let mut new_nodes = Vec::new();
         for entry in appended {
@@ -87,22 +90,26 @@ impl Tree {
                 .expect("buffer was created with enough capacity");
             new_nodes.push(node);
         }
-        new_nodes
+        Ok(new_nodes)
     }
 
     /// Append multiple blocks to the tree.
-    fn append_leaf_iter(&mut self, vals: impl Iterator<Item = (Arc<Block>, sapling::tree::Root)>) {
+    fn append_leaf_iter(
+        &mut self,
+        vals: impl Iterator<Item = (Arc<Block>, sapling::tree::Root)>,
+    ) -> Result<Vec<Node>, zcash_history::Error> {
+        let mut new_nodes = Vec::new();
         for (block, root) in vals {
-            self.append_leaf(block, &root);
+            new_nodes.append(&mut self.append_leaf(block, &root)?);
         }
+        Ok(new_nodes)
     }
 
     /// Remove the last leaf (block) from the tree.
     ///
     /// Returns the number of nodes removed from the tree after the operation.
-    fn truncate_leaf(&mut self) -> u32 {
-        // XXX: handle error
-        self.tree.truncate_leaf().unwrap()
+    fn truncate_leaf(&mut self) -> Result<u32, zcash_history::Error> {
+        self.tree.truncate_leaf()
     }
 
     /// Return the root hash of the tree, i.e. `hashChainHistoryRoot`.
@@ -146,7 +153,7 @@ fn block_to_history_node(
         .to_work()
         .expect("work must be valid during contextual verification");
     // There is no direct `std::primitive::u128` to `bigint::U256` conversion
-    let work = bigint::U256::from_big_endian(work.as_u128().to_be_bytes());
+    let work = bigint::U256::from_big_endian(&work.as_u128().to_be_bytes());
 
     let sapling_tx_count = count_sapling_transactions(block);
 

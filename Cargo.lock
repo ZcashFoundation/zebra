@@ -4433,6 +4433,7 @@ version = "1.0.0-alpha.9"
 dependencies = [
  "aes",
  "bech32",
+ "bigint",
  "bincode",
  "bitflags",
  "bitvec 0.17.4",
