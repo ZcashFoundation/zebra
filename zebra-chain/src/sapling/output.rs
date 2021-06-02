@@ -1,3 +1,7 @@
+//! Sapling _Output Descriptions_, as described in [protocol specification §7.4][ps].
+//!
+//! [ps]: https://zips.z.cash/protocol/protocol.pdf#outputencoding
+
 use std::io;
 
 use crate::{

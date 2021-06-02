@@ -1,5 +1,7 @@
 //! Block test vectors
 
+#![allow(missing_docs)]
+
 use hex::FromHex;
 use lazy_static::lazy_static;
 

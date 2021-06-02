@@ -171,7 +171,7 @@ pub struct ChainHistoryBlockTxAuthCommitmentHash([u8; 32]);
 /// all possible verification failures enumerates the consensus rules we
 /// implement, and ensures that we don't reject blocks or transactions
 /// for a non-enumerated reason.
-#[allow(dead_code)]
+#[allow(dead_code, missing_docs)]
 #[derive(Error, Debug, PartialEq)]
 pub enum CommitmentError {
     #[error("invalid pre-Sapling reserved committment: expected all zeroes, actual: {actual:?}")]

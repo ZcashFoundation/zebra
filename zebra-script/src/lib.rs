@@ -2,6 +2,11 @@
 #![doc(html_favicon_url = "https://www.zfnd.org/images/zebra-favicon-128.png")]
 #![doc(html_logo_url = "https://www.zfnd.org/images/zebra-icon.png")]
 #![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_script")]
+// Standard lints
+#![warn(missing_docs)]
+#![allow(clippy::try_err)]
+#![deny(clippy::await_holding_lock)]
+// we allow unsafe code to call zcash_script
 
 use displaydoc::Display;
 #[cfg(windows)]
@@ -82,6 +87,7 @@ impl CachedFfiTransaction {
         }
     }
 
+    /// Returns the transparent inputs for this transaction.
     pub fn inputs(&self) -> &[transparent::Input] {
         self.transaction.inputs()
     }

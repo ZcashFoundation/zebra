@@ -1,3 +1,9 @@
+// Standard lints
+#![warn(missing_docs)]
+#![allow(clippy::try_err)]
+#![deny(clippy::await_holding_lock)]
+#![forbid(unsafe_code)]
+
 use std::time::Duration;
 use tokio_test::{assert_pending, assert_ready, assert_ready_err, task};
 use tower::{Service, ServiceExt};

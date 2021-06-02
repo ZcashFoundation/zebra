@@ -1,3 +1,5 @@
+//! RedPallas cryptographic primitives.
+
 // -*- mode: rust; -*-
 //
 // This file is part of redjubjub.
@@ -12,6 +14,7 @@ use group::GroupEncoding;
 use halo2::pasta::pallas;
 
 mod constants;
+#[allow(missing_docs)]
 mod error;
 mod hash;
 mod signature;

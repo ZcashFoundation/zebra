@@ -15,19 +15,25 @@ use tower::{Service, ServiceExt};
 
 type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 
+/// An error-checking function: is the value an expected error?
 pub type ErrorChecker = fn(Option<Error>) -> Result<(), Error>;
 
+/// An expected error in a transcript.
 #[derive(Debug, Clone)]
 pub enum TransError {
+    /// Match any error
     Any,
+    /// Use a validator function to check for matching errors
     Exact(Arc<ErrorChecker>),
 }
 
 impl TransError {
+    /// Convert the `verifier` function into an exact error checker
     pub fn exact(verifier: ErrorChecker) -> Self {
         TransError::Exact(verifier.into())
     }
 
+    /// Check the actual error `e` against this expected error.
     fn check(&self, e: Error) -> Result<(), Report> {
         match self {
             TransError::Any => Ok(()),
@@ -51,6 +57,7 @@ impl TransError {
 #[error("ErrorChecker Error: {0}")]
 struct ErrorCheckerError(Error);
 
+/// A transcript: a list of requests and expected results.
 #[must_use]
 pub struct Transcript<R, S, I>
 where
@@ -76,6 +83,7 @@ where
     R: Debug,
     S: Debug + Eq,
 {
+    /// Check this transcript against the responses from the `to_check` service
     pub async fn check<C>(mut self, mut to_check: C) -> Result<(), Report>
     where
         C: Service<R, Response = S>,

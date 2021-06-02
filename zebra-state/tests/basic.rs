@@ -1,3 +1,9 @@
+// Standard lints
+#![warn(missing_docs)]
+#![allow(clippy::try_err)]
+#![deny(clippy::await_holding_lock)]
+#![forbid(unsafe_code)]
+
 use color_eyre::eyre::Report;
 use once_cell::sync::Lazy;
 use std::sync::Arc;

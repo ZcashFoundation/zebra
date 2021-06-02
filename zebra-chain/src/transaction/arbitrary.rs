@@ -1,3 +1,5 @@
+//! Arbitrary data generation for transaction proptests
+
 use std::{convert::TryInto, sync::Arc};
 
 use chrono::{TimeZone, Utc};

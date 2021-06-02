@@ -33,18 +33,12 @@
 #![doc(html_favicon_url = "https://www.zfnd.org/images/zebra-favicon-128.png")]
 #![doc(html_logo_url = "https://www.zfnd.org/images/zebra-icon.png")]
 #![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_consensus")]
-// Re-enable this after cleaning the API surface.
-//#![deny(missing_docs)]
+// Standard lints
+// Warn on missing docs for all modules after cleaning the API surface
+#![warn(missing_docs)]
 #![allow(clippy::try_err)]
-// Disable some broken or unwanted clippy nightly lints
-// Build without warnings on nightly 2021-01-17 and later and stable 1.51 and later
-#![allow(unknown_lints)]
-// Disable old lint warnings on nightly until 1.51 is stable
-#![allow(renamed_and_removed_lints)]
-// Use the old lint name to build without warnings on stable until 1.51 is stable
-#![allow(clippy::unknown_clippy_lints)]
-// The actual lints we want to disable
-#![allow(clippy::unnecessary_wraps)]
+#![deny(clippy::await_holding_lock)]
+#![forbid(unsafe_code)]
 
 mod block;
 mod checkpoint;
@@ -56,6 +50,7 @@ mod script;
 mod transaction;
 
 pub mod chain;
+#[allow(missing_docs)]
 pub mod error;
 
 pub use checkpoint::MAX_CHECKPOINT_BYTE_COUNT;

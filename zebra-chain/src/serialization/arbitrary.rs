@@ -1,3 +1,5 @@
+//! Arbitrary data generation for serialization proptests
+
 use super::{read_zcash::canonical_ip_addr, DateTime32};
 use chrono::{TimeZone, Utc, MAX_DATETIME, MIN_DATETIME};
 use proptest::{arbitrary::any, prelude::*};

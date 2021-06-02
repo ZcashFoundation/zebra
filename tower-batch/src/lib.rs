@@ -85,6 +85,12 @@
 //! control logic, as it will receive explicit [`Flush`](BatchControl::Flush)
 //! requests from the wrapper.
 
+// Standard lints
+#![warn(missing_docs)]
+#![allow(clippy::try_err)]
+#![deny(clippy::await_holding_lock)]
+#![forbid(unsafe_code)]
+
 pub mod error;
 pub mod future;
 mod layer;

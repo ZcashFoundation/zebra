@@ -1,3 +1,5 @@
+//! Launching test commands for Zebra integration and acceptance tests.
+
 use color_eyre::{
     eyre::{eyre, Context, Report, Result},
     Help, SectionExt,
@@ -24,6 +26,7 @@ pub fn test_cmd(command_path: &str, tempdir: &Path) -> Result<Command> {
     Ok(cmd)
 }
 
+/// Wrappers for `Command` methods to integrate with [`zebra_test`].
 pub trait CommandExt {
     /// wrapper for `status` fn on `Command` that constructs informative error
     /// reports
