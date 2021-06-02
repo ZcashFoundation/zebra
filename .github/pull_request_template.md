@@ -1,47 +1,48 @@
-<!--
-Thank you for your Pull Request.
-Please provide a description above and fill in the information below.
-
-Contributors guide: https://zebra.zfnd.org/CONTRIBUTING.html
--->
-
 ## Motivation
 
 <!--
-Explain the context and why you're making that change.
-What is the problem you're trying to solve?
-If there's no specific problem, what is the motivation for your change?
+Thank you for your Pull Request.
+How does this change improve Zebra?
+-->
+
+### Specifications
+
+<!--
+If this PR changes consensus rules, quote them, and link to the Zcash spec or ZIP:
+https://zips.z.cash/#nu5-zips
+If this PR changes network behaviour, quote and link to the Bitcoin network reference:
+https://developer.bitcoin.org/reference/p2p_networking.html
+-->
+
+### Designs
+
+<!--
+If this PR implements a Zebra design, quote and link to the RFC:
+https://github.com/ZcashFoundation/zebra/tree/main/book/src/dev/rfcs/
 -->
 
 ## Solution
 
 <!--
-Summarize the solution and provide any necessary context needed to understand
-the code change.
-If this PR implements parts of a design RFC or ticket, list those parts here.
+Summarize the changes in this PR.
+Does it close any issues?
 -->
-
-The code in this pull request has:
-  - [ ] Documentation Comments
-  - [ ] Unit Tests and Property Tests
 
 ## Review
 
 <!--
-How urgent is this code review?
 Is this PR blocking any other work?
 If you want a specific reviewer for this PR, tag them here.
 -->
 
-## Related Issues
+### Reviewer Checklist
 
-<!--
-Please link to any existing GitHub issues pertaining to this PR.
--->
+  - [ ] Code implements Specs and Designs
+  - [ ] Tests for Expected Behaviour
+  - [ ] Tests for Errors
 
 ## Follow Up Work
 
 <!--
 Is there anything missing from the solution?
-What still needs to be done?
 -->

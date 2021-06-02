@@ -25,11 +25,12 @@ Explain the proposal as if it was already included in the project and you were t
 
 - Introducing new named concepts.
 - Explaining the feature largely in terms of examples.
-- Explaining how Zebra programmers should *think* about the feature, and how it should impact the way they use Zebra. It should explain the impact as concretely as possible.
-- If applicable, provide sample error messages, deprecation warnings, migration guidance, or test strategies.
-- If applicable, describe the differences between teaching this to existing Zebra programmers and new Zebra programmers.
+- Explaining how Zebra users should *think* about the feature, and how it should impact the way they use Zebra. It should explain the impact as concretely as possible.
+- If applicable, provide sample error messages or test strategies.
 
-For implementation-oriented RFCs (e.g. for Zebra internals), this section should focus on how Zebra contributors should think about the change, and give examples of its concrete impact. For policy RFCs, this section should provide an example-driven introduction to the policy, and explain its impact in concrete terms.
+For implementation-oriented RFCs (e.g. for Zebra internals), this section should focus on how Zebra contributors should think about the change, and give examples of its concrete impact.
+
+For policy RFCs, this section should provide an example-driven introduction to the policy, and explain its impact in concrete terms.
 
 # Reference-level explanation
 [reference-level-explanation]: #reference-level-explanation
@@ -41,6 +42,17 @@ This is the technical portion of the RFC. Explain the design in sufficient detai
 - Corner cases are dissected by example.
 
 The section should return to the examples given in the previous section, and explain more fully how the detailed proposal makes those examples work.
+
+## Specifications
+[specifications]: #specifications
+
+If this design is based on Zcash consensus rules, quote them, and link to the Zcash spec or ZIP:
+https://zips.z.cash/protocol/nu5.pdf#contents
+https://zips.z.cash/#nu5-zips
+
+If this design changes network behaviour, quote and link to the Bitcoin network reference or wiki:
+https://developer.bitcoin.org/reference/p2p_networking.html
+https://en.bitcoin.it/wiki/Protocol_documentation
 
 ## Module Structure
 [module-structure]: #module-structure

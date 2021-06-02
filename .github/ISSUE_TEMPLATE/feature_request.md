@@ -1,20 +1,49 @@
 ---
-name: Feature request
-about: Suggest an idea for this project
+name: Change request
+about: Suggest a feature or change for this project
 title: ''
 labels: C-enhancement, S-needs-triage
 assignees: ''
 
 ---
 
-**Is your feature request related to a problem? Please describe.**
-A clear and concise description of what the problem is. Ex. I'm always frustrated when [...]
+## Motivation
 
-**Describe the solution you'd like**
-A clear and concise description of what you want to happen.
+<!--
+Is your feature request related to a problem?
+How does this change improve Zebra?
+-->
 
-**Describe alternatives you've considered**
-A clear and concise description of any alternative solutions or features you've considered.
+### Specifications
 
-**Additional context**
-Add any other context or screenshots about the feature request here.
+<!--
+If this change is based on consensus rules, quote them, and link to the Zcash spec or ZIP:
+https://zips.z.cash/#nu5-zips
+If this changes network behaviour, quote and link to the Bitcoin network reference:
+https://developer.bitcoin.org/reference/p2p_networking.html
+-->
+
+### Designs
+
+<!--
+If this change is part of a Zebra design, quote and link to the RFC:
+https://github.com/ZcashFoundation/zebra/tree/main/book/src/dev/rfcs/
+-->
+
+## Solution
+
+<!--
+Summarize the changes that you want to happen
+-->
+
+### Alternatives
+
+<!--
+Are there any alternative solutions?
+-->
+
+## Related Work
+
+<!--
+Is this change related to other features or tickets?
+-->
