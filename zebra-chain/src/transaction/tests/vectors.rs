@@ -3,7 +3,7 @@ use super::super::*;
 use crate::{
     block::{Block, Height, MAX_BLOCK_BYTES},
     parameters::{Network, NetworkUpgrade},
-    serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
+    serialization::{SerializationError, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
 };
 
 use std::convert::TryInto;
@@ -35,6 +35,34 @@ fn librustzcash_tx_hash() {
         .expect("hash should parse correctly");
 
     assert_eq!(hash, expected);
+}
+
+#[test]
+fn doesnt_deserialize_transaction_with_invalid_value_balance() {
+    zebra_test::init();
+
+    let dummy_transaction = Transaction::V4 {
+        inputs: vec![],
+        outputs: vec![],
+        lock_time: LockTime::Height(Height(1)),
+        expiry_height: Height(10),
+        joinsplit_data: None,
+        sapling_shielded_data: None,
+    };
+
+    let mut input_bytes = Vec::new();
+    dummy_transaction
+        .zcash_serialize(&mut input_bytes)
+        .expect("dummy transaction should serialize");
+    // Set value balance to non-zero
+    input_bytes[24] = 1;
+
+    let result = Transaction::zcash_deserialize(&input_bytes[..]);
+
+    assert!(matches!(
+        result,
+        Err(SerializationError::BadTransactionBalance)
+    ));
 }
 
 #[test]
