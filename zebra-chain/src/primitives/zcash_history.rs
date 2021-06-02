@@ -1,7 +1,7 @@
 //! Contains code that interfaces with the zcash_history crate from
 //! librustzcash.
 
-// XXX: remove before completing PR
+// TODO: remove after this module gets to be used
 #![allow(dead_code)]
 
 use std::{collections::HashMap, convert::TryInto, io, sync::Arc};
@@ -21,15 +21,67 @@ pub struct Tree {
     tree: zcash_history::Tree,
 }
 
-/// An encoded tree Node.
-pub struct Node {
-    node: [u8; zcash_history::MAX_NODE_DATA_SIZE],
+/// An encoded tree node data.
+pub struct NodeData {
+    encoded: [u8; zcash_history::MAX_NODE_DATA_SIZE],
 }
 
-impl Node {
-    /// Convert a Node into a zcash_history::Entry.
-    fn to_entry(&self, branch_id: ConsensusBranchId) -> Result<zcash_history::Entry, io::Error> {
-        zcash_history::Entry::from_bytes(branch_id.into(), self.node)
+impl From<&zcash_history::NodeData> for NodeData {
+    /// Convert from librustzcash.
+    fn from(low_node: &zcash_history::NodeData) -> Self {
+        let mut node = NodeData {
+            encoded: [0; zcash_history::MAX_NODE_DATA_SIZE],
+        };
+        low_node
+            .write(&mut &mut node.encoded[..])
+            .expect("buffer has the proper size");
+        node
+    }
+}
+
+/// An encoded entry in the tree.
+/// Contains the node data and information about its position in the tree.
+pub struct Entry {
+    encoded: [u8; zcash_history::MAX_ENTRY_SIZE],
+}
+
+impl From<zcash_history::Entry> for Entry {
+    /// Convert from librustzcash.
+    fn from(low_entry: zcash_history::Entry) -> Self {
+        let mut entry = Entry {
+            encoded: [0; zcash_history::MAX_ENTRY_SIZE],
+        };
+        low_entry
+            .write(&mut &mut entry.encoded[..])
+            .expect("buffer has the proper size");
+        entry
+    }
+}
+
+impl Entry {
+    /// Create a leaf Entry for the given block, its netwrok, and the root of its
+    /// Sapling note commitment tree.
+    fn new_leaf(block: Arc<Block>, network: Network, sapling_root: &sapling::tree::Root) -> Self {
+        let node_data = block_to_history_node(block, network, sapling_root);
+        let low_entry: zcash_history::Entry = node_data.into();
+        low_entry.into()
+    }
+
+    /// Create a node (non-leaf) Entry from the encoded node data and the indices of
+    /// its children (in the array representation of the MMR tree).
+    fn new_node(
+        branch_id: ConsensusBranchId,
+        data: NodeData,
+        left_idx: u32,
+        right_idx: u32,
+    ) -> Result<Self, io::Error> {
+        let node_data = zcash_history::NodeData::from_bytes(branch_id.into(), data.encoded)?;
+        let low_entry = zcash_history::Entry::new(
+            node_data,
+            zcash_history::EntryLink::Stored(left_idx),
+            zcash_history::EntryLink::Stored(right_idx),
+        );
+        Ok(low_entry.into())
     }
 }
 
@@ -46,19 +98,21 @@ impl Tree {
         network: Network,
         network_upgrade: NetworkUpgrade,
         length: u32,
-        peaks: &HashMap<u32, &Node>,
-        extra: &HashMap<u32, &Node>,
+        peaks: &HashMap<u32, &Entry>,
+        extra: &HashMap<u32, &Entry>,
     ) -> Result<Self, io::Error> {
         let branch_id = network_upgrade
             .branch_id()
             .expect("unexpected pre-Overwinter MMR history tree");
         let mut peaks_vec = Vec::new();
-        for (idx, node) in peaks {
-            peaks_vec.push((*idx, node.to_entry(branch_id)?));
+        for (idx, entry) in peaks {
+            let low_entry = zcash_history::Entry::from_bytes(branch_id.into(), entry.encoded)?;
+            peaks_vec.push((*idx, low_entry));
         }
         let mut extra_vec = Vec::new();
-        for (idx, node) in extra {
-            extra_vec.push((*idx, node.to_entry(branch_id)?));
+        for (idx, entry) in extra {
+            let low_entry = zcash_history::Entry::from_bytes(branch_id.into(), entry.encoded)?;
+            extra_vec.push((*idx, low_entry));
         }
         let tree = zcash_history::Tree::new(length, peaks_vec, extra_vec);
         Ok(Tree { network, tree })
@@ -73,20 +127,20 @@ impl Tree {
         &mut self,
         block: Arc<Block>,
         sapling_root: &sapling::tree::Root,
-    ) -> Result<Vec<Node>, zcash_history::Error> {
+    ) -> Result<Vec<NodeData>, zcash_history::Error> {
         let node_data = block_to_history_node(block, self.network, sapling_root);
         let appended = self.tree.append_leaf(node_data)?;
 
         let mut new_nodes = Vec::new();
         for entry in appended {
-            let mut node = Node {
-                node: [0; zcash_history::MAX_NODE_DATA_SIZE],
+            let mut node = NodeData {
+                encoded: [0; zcash_history::MAX_NODE_DATA_SIZE],
             };
             self.tree
                 .resolve_link(entry)
                 .expect("entry was just generated so it must be valid")
                 .data()
-                .write(&mut &mut node.node[..])
+                .write(&mut &mut node.encoded[..])
                 .expect("buffer was created with enough capacity");
             new_nodes.push(node);
         }
@@ -97,7 +151,7 @@ impl Tree {
     fn append_leaf_iter(
         &mut self,
         vals: impl Iterator<Item = (Arc<Block>, sapling::tree::Root)>,
-    ) -> Result<Vec<Node>, zcash_history::Error> {
+    ) -> Result<Vec<NodeData>, zcash_history::Error> {
         let mut new_nodes = Vec::new();
         for (block, root) in vals {
             new_nodes.append(&mut self.append_leaf(block, &root)?);
@@ -184,4 +238,92 @@ fn count_sapling_transactions(block: Arc<Block>) -> u64 {
         .count()
         .try_into()
         .expect("number of transactions must fit u64")
+}
+
+#[cfg(test)]
+mod test {
+    use crate::{
+        block::Commitment::{self, ChainHistoryActivationReserved},
+        serialization::ZcashDeserializeInto,
+    };
+
+    use super::*;
+    use color_eyre::eyre;
+    use eyre::Result;
+    use zebra_test::vectors::{
+        MAINNET_BLOCKS, MAINNET_FINAL_SAPLING_ROOTS, TESTNET_BLOCKS, TESTNET_FINAL_SAPLING_ROOTS,
+    };
+
+    #[test]
+    fn tree() -> Result<()> {
+        tree_for_network(Network::Mainnet, 903_000)?;
+        tree_for_network(Network::Testnet, 903_800)?;
+        Ok(())
+    }
+
+    fn tree_for_network(network: Network, height: u32) -> Result<()> {
+        let (blocks, sapling_roots) = match network {
+            Network::Mainnet => (&*MAINNET_BLOCKS, &*MAINNET_FINAL_SAPLING_ROOTS),
+            Network::Testnet => (&*TESTNET_BLOCKS, &*TESTNET_FINAL_SAPLING_ROOTS),
+        };
+
+        // Load Block 0 (Heartwood activation block)
+        let block0 = Arc::new(
+            blocks
+                .get(&height)
+                .expect("test vector exists")
+                .zcash_deserialize_into::<Block>()
+                .expect("block is structurally valid"),
+        );
+
+        // Check its commitment
+        let commitment0 = block0.commitment(network)?;
+        assert_eq!(commitment0, ChainHistoryActivationReserved);
+
+        // Build initial MMR tree with only Block 0
+        let sapling_root0 =
+            sapling::tree::Root(**sapling_roots.get(&height).expect("test vector exists"));
+        let entry0 = Entry::new_leaf(block0, network, &sapling_root0);
+        let mut peaks = HashMap::new();
+        peaks.insert(0u32, &entry0);
+        let mut tree = Tree::new(
+            network,
+            NetworkUpgrade::Heartwood,
+            1,
+            &peaks,
+            &HashMap::new(),
+        )?;
+
+        // Compute root hash of the MMR tree, which will be included in the next block
+        let hash0 = tree.hash();
+
+        // Load Block 1 (Heartwood + 1)
+        let block1 = Arc::new(
+            blocks
+                .get(&(height + 1))
+                .expect("test vector exists")
+                .zcash_deserialize_into::<Block>()
+                .expect("block is structurally valid"),
+        );
+
+        // Check its commitment
+        let commitment1 = block1.commitment(network)?;
+        assert_eq!(commitment1, Commitment::ChainHistoryRoot(hash0));
+
+        // Append Block to MMR tree
+        let sapling_root1 = sapling::tree::Root(
+            **sapling_roots
+                .get(&(height + 1))
+                .expect("test vector exists"),
+        );
+        let append = tree.append_leaf(block1, &sapling_root1).unwrap();
+
+        // Tree how has 3 nodes: two leafs for each block, and one parent node
+        // which is the new root
+        assert_eq!(tree.tree.len(), 3);
+        // Two nodes were appended: the new leaf and the parent node
+        assert_eq!(append.len(), 2);
+
+        Ok(())
+    }
 }
