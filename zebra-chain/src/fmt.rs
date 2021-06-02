@@ -2,6 +2,7 @@
 
 use std::{fmt, ops};
 
+/// Wrapper to override `Debug`, redirecting it to the `Display` impl.
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct DisplayToDebug<T>(pub T);
 
