@@ -3,10 +3,17 @@ use std::io::{Cursor, Write};
 
 use chrono::{DateTime, Duration, LocalResult, TimeZone, Utc};
 
-use crate::serialization::{sha256d, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize};
-use crate::transaction::LockTime;
+use crate::block::{Block, BlockTimeError, Height};
+use crate::{
+    block::{serialize::MAX_BLOCK_BYTES, Hash, Header},
+    parameters::{
+        Network::{self, *},
+        NetworkUpgrade::*,
+    },
+    serialization::{sha256d, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
+    transaction::LockTime,
+};
 
-use super::super::{serialize::MAX_BLOCK_BYTES, *};
 use super::generate; // XXX this should be rewritten as strategies
 
 #[test]
@@ -129,20 +136,26 @@ fn block_test_vectors_unique() {
 fn block_test_vectors_height_mainnet() {
     zebra_test::init();
 
-    block_test_vectors_height(Network::Mainnet);
+    block_test_vectors_height(Mainnet);
 }
 
 #[test]
 fn block_test_vectors_height_testnet() {
     zebra_test::init();
 
-    block_test_vectors_height(Network::Testnet);
+    block_test_vectors_height(Testnet);
 }
 
 fn block_test_vectors_height(network: Network) {
-    let block_iter = match network {
-        Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
-        Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
+    let (block_iter, sapling_roots) = match network {
+        Mainnet => (
+            zebra_test::vectors::MAINNET_BLOCKS.iter(),
+            zebra_test::vectors::MAINNET_FINAL_SAPLING_ROOTS.clone(),
+        ),
+        Testnet => (
+            zebra_test::vectors::TESTNET_BLOCKS.iter(),
+            zebra_test::vectors::TESTNET_FINAL_SAPLING_ROOTS.clone(),
+        ),
     };
 
     for (&height, block) in block_iter {
@@ -154,6 +167,20 @@ fn block_test_vectors_height(network: Network) {
             height,
             "deserialized height must match BTreeMap key height"
         );
+
+        if height
+            >= Sapling
+                .activation_height(network)
+                .expect("sapling activation height is set")
+                .0
+        {
+            assert!(
+                sapling_roots.contains_key(&height),
+                "post-sapling block test vectors must have sapling roots: missing {} {}",
+                network,
+                height
+            );
+        }
     }
 }
 
