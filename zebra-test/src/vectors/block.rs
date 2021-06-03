@@ -92,7 +92,8 @@ lazy_static! {
 
     /// Mainnet final sapling roots, indexed by height
     ///
-    /// This is actually a bijective map, the tests ensure that values are unique.
+    /// Pre-sapling roots are all-zeroes.
+    /// If there are no sapling inputs or outputs in a block, the final sapling root is the same as the previous block.
     pub static ref MAINNET_FINAL_SAPLING_ROOTS: BTreeMap<u32, &'static [u8; 32]> = [
             // Sapling
             (419_200, SAPLING_FINAL_ROOT_MAINNET_419200_BYTES.as_ref().try_into().unwrap()),
@@ -182,7 +183,8 @@ lazy_static! {
 
     /// Testnet final sapling roots, indexed by height
     ///
-    /// This is actually a bijective map, the tests ensure that values are unique.
+    /// Pre-sapling roots are all-zeroes.
+    /// If there are no sapling inputs or outputs in a block, the final sapling root is the same as the previous block.
     pub static ref TESTNET_FINAL_SAPLING_ROOTS: BTreeMap<u32, &'static [u8; 32]> = [
             // Sapling
             (280_000, SAPLING_FINAL_ROOT_TESTNET_280000_BYTES.as_ref().try_into().unwrap()),
