@@ -1,4 +1,4 @@
-//! Sapling _Output Descriptions_, as described in [protocol specification §7.4][ps].
+//! Sapling _Output descriptions_, as described in [protocol specification §7.4][ps].
 //!
 //! [ps]: https://zips.z.cash/protocol/protocol.pdf#outputencoding
 
