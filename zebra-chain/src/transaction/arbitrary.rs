@@ -1,20 +1,23 @@
 //! Arbitrary data generation for transaction proptests
 
-use std::{convert::TryInto, sync::Arc};
+use std::{
+    convert::{TryFrom, TryInto},
+    sync::Arc,
+};
 
 use chrono::{TimeZone, Utc};
 use proptest::{arbitrary::any, array, collection::vec, option, prelude::*};
 
 use crate::{
     amount::Amount,
-    block, orchard,
+    at_least_one, block, orchard,
     parameters::{Network, NetworkUpgrade},
     primitives::{
         redpallas::{Binding, Signature},
         Bctv14Proof, Groth16Proof, Halo2Proof, ZkSnarkProof,
     },
     sapling,
-    serialization::ZcashDeserializeInto,
+    serialization::{ZcashDeserialize, ZcashDeserializeInto},
     sprout, transparent, LedgerState,
 };
 
@@ -572,4 +575,57 @@ pub fn fake_v5_transactions_for_network<'b>(
             })
             .map(Transaction::from)
     })
+}
+
+/// Modify a V5 transaction to insert fake Orchard shielded data.
+///
+/// Creates a fake instance of [`orchard::ShieldedData`] with one fake action. Note that both the
+/// action and the shielded data are invalid and shouldn't be used in tests that require them to be
+/// valid.
+///
+/// A mutable reference to the inserted shielded data is returned, so that the caller can further
+/// customize it if required.
+///
+/// # Panics
+///
+/// Panics if the transaction to be modified is not V5.
+pub fn insert_fake_orchard_shielded_data(
+    transaction: &mut Transaction,
+) -> &mut orchard::ShieldedData {
+    // Create a dummy action, it doesn't need to be valid
+    let dummy_action_bytes = [0u8; 820];
+    let mut dummy_action_bytes_reader = &dummy_action_bytes[..];
+    let dummy_action = orchard::Action::zcash_deserialize(&mut dummy_action_bytes_reader)
+        .expect("Dummy action should deserialize");
+
+    // Pair the dummy action with a fake signature
+    let dummy_authorized_action = orchard::AuthorizedAction {
+        action: dummy_action,
+        spend_auth_sig: Signature::from([0u8; 64]),
+    };
+
+    // Place the dummy action inside the Orchard shielded data
+    let dummy_shielded_data = orchard::ShieldedData {
+        flags: orchard::Flags::empty(),
+        value_balance: Amount::try_from(0).expect("invalid transaction amount"),
+        shared_anchor: orchard::tree::Root::default(),
+        proof: Halo2Proof(vec![]),
+        actions: at_least_one![dummy_authorized_action],
+        binding_sig: Signature::from([0u8; 64]),
+    };
+
+    // Replace the shielded data in the transaction
+    match transaction {
+        Transaction::V5 {
+            orchard_shielded_data,
+            ..
+        } => {
+            *orchard_shielded_data = Some(dummy_shielded_data);
+
+            orchard_shielded_data
+                .as_mut()
+                .expect("shielded data was just inserted")
+        }
+        _ => panic!("Fake V5 transaction is not V5"),
+    }
 }
