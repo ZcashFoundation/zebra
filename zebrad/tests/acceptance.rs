@@ -748,7 +748,7 @@ fn sync_large_checkpoints_mainnet() -> Result<()> {
     Ok(())
 }
 
-// Todo: We had a `sync_large_checkpoints_testnet` here but it was removed because
+// TODO: We had a `sync_large_checkpoints_testnet` here but it was removed because
 // the testnet is unreliable (#1222). Enable after we have more testnet instances (#1791).
 
 /// Sync `network` until `zebrad` reaches `height`, and ensure that
@@ -1061,7 +1061,7 @@ async fn tracing_endpoint() -> Result<()> {
 
     // Make sure tracing endpoint was started
     output.stdout_contains(format!(r"Opened tracing endpoint at {}", endpoint).as_str())?;
-    // Todo: Match some trace level messages from output
+    // TODO: Match some trace level messages from output
 
     // [Note on port conflict](#Note on port conflict)
     output
