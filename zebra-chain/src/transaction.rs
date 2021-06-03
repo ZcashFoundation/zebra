@@ -395,47 +395,39 @@ impl Transaction {
 
     // orchard
 
-    /// Iterate over the [`orchard::Action`]s in this transaction, if there are any.
-    pub fn orchard_actions(&self) -> Box<dyn Iterator<Item = &orchard::Action> + '_> {
+    /// Access the [`orchard::ShieldedData`] in this transaction, if there are any,
+    /// regardless of version.
+    pub fn orchard_shielded_data(&self) -> Option<&orchard::ShieldedData> {
         match self {
-            // Actions
+            // Maybe Orchard shielded data
             Transaction::V5 {
-                orchard_shielded_data: Some(orchard_shielded_data),
+                orchard_shielded_data,
                 ..
-            } => Box::new(orchard_shielded_data.actions()),
+            } => orchard_shielded_data.as_ref(),
 
-            // No Actions
+            // No Orchard shielded data
             Transaction::V1 { .. }
             | Transaction::V2 { .. }
             | Transaction::V3 { .. }
-            | Transaction::V4 { .. }
-            | Transaction::V5 {
-                orchard_shielded_data: None,
-                ..
-            } => Box::new(std::iter::empty()),
+            | Transaction::V4 { .. } => None,
         }
     }
 
-    /// Access the [`orchard::Nullifier`]s in this transaction, regardless of version.
-    pub fn orchard_nullifiers(&self) -> Box<dyn Iterator<Item = &orchard::Nullifier> + '_> {
-        // This function returns a boxed iterator because the different
-        // transaction variants can have different iterator types
-        match self {
-            // Actions
-            Transaction::V5 {
-                orchard_shielded_data: Some(orchard_shielded_data),
-                ..
-            } => Box::new(orchard_shielded_data.nullifiers()),
+    /// Iterate over the [`orchard::Action`]s in this transaction, if there are any,
+    /// regardless of version.
+    pub fn orchard_actions(&self) -> impl Iterator<Item = &orchard::Action> {
+        self.orchard_shielded_data()
+            .into_iter()
+            .map(orchard::ShieldedData::actions)
+            .flatten()
+    }
 
-            // No Actions
-            Transaction::V1 { .. }
-            | Transaction::V2 { .. }
-            | Transaction::V3 { .. }
-            | Transaction::V4 { .. }
-            | Transaction::V5 {
-                orchard_shielded_data: None,
-                ..
-            } => Box::new(std::iter::empty()),
-        }
+    /// Access the [`orchard::Nullifier`]s in this transaction, if there are any,
+    /// regardless of version.
+    pub fn orchard_nullifiers(&self) -> impl Iterator<Item = &orchard::Nullifier> {
+        self.orchard_shielded_data()
+            .into_iter()
+            .map(orchard::ShieldedData::nullifiers)
+            .flatten()
     }
 }

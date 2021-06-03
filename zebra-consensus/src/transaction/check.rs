@@ -3,6 +3,7 @@
 //! Code in this file can freely assume that no pre-V4 transactions are present.
 
 use zebra_chain::{
+    orchard::Flags,
     sapling::{AnchorVariant, Output, PerSpendAnchor, ShieldedData, Spend},
     transaction::Transaction,
 };
@@ -84,8 +85,11 @@ pub fn coinbase_tx_no_prevout_joinsplit_spend(tx: &Transaction) -> Result<(), Tr
             return Err(TransactionError::CoinbaseHasSpend);
         }
 
-        // TODO: Orchard validation (#1980)
-        // In a version 5 coinbase transaction, the enableSpendsOrchard flag MUST be 0.
+        if let Some(orchard_shielded_data) = tx.orchard_shielded_data() {
+            if orchard_shielded_data.flags.contains(Flags::ENABLE_SPENDS) {
+                return Err(TransactionError::CoinbaseHasEnableSpendsOrchard);
+            }
+        }
     }
 
     Ok(())
