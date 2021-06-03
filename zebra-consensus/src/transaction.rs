@@ -215,8 +215,6 @@ where
                     }
 
                     if let Some(sapling_shielded_data) = sapling_shielded_data {
-                        check::sapling_balances_match(&sapling_shielded_data)?;
-
                         for spend in sapling_shielded_data.spends_per_anchor() {
                             // Consensus rule: cv and rk MUST NOT be of small
                             // order, i.e. [h_J]cv MUST NOT be 𝒪_J and [h_J]rk

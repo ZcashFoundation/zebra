@@ -4,7 +4,7 @@
 
 use zebra_chain::{
     orchard::Flags,
-    sapling::{AnchorVariant, Output, PerSpendAnchor, ShieldedData, Spend},
+    sapling::{Output, PerSpendAnchor, Spend},
     transaction::Transaction,
 };
 
@@ -37,31 +37,6 @@ pub fn has_inputs_and_outputs(tx: &Transaction) -> Result<(), TransactionError> 
         Err(TransactionError::NoOutputs)
     } else {
         Ok(())
-    }
-}
-
-/// Check that if there are no Spends or Outputs, the Sapling valueBalance is also 0.
-///
-/// If effectiveVersion = 4 and there are no Spend descriptions or Output descriptions,
-/// then valueBalanceSapling MUST be 0.
-///
-/// This check is redundant for `Transaction::V5`, because the transaction format
-/// omits `valueBalanceSapling` when there are no spends and no outputs. But it's
-/// simpler to just do the redundant check anyway.
-///
-/// https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
-pub fn sapling_balances_match<AnchorV>(
-    sapling_shielded_data: &ShieldedData<AnchorV>,
-) -> Result<(), TransactionError>
-where
-    AnchorV: AnchorVariant + Clone,
-{
-    if (sapling_shielded_data.spends().count() + sapling_shielded_data.outputs().count() != 0)
-        || i64::from(sapling_shielded_data.value_balance) == 0
-    {
-        Ok(())
-    } else {
-        Err(TransactionError::BadBalance)
     }
 }
 

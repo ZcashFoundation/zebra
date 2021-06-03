@@ -35,8 +35,6 @@ fn v5_fake_transactions() -> Result<(), Report> {
                     ..
                 } => {
                     if let Some(s) = sapling_shielded_data {
-                        check::sapling_balances_match(&s)?;
-
                         for spend in s.spends_per_anchor() {
                             check::spend_cv_rk_not_small_order(&spend)?
                         }
