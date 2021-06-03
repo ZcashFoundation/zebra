@@ -1,15 +1,16 @@
 # Zebra checkpoints
 
-Zebra validates pre-Canopy blocks using a list of `Mainnet` and `Testnet` block hash checkpoints:
+Zebra validates pre-Canopy blocks, and the Canopy activation block, using a list of `Mainnet` and `Testnet` block hash checkpoints:
 
 - [Mainnet checkpoints](https://github.com/ZcashFoundation/zebra/blob/main/zebra-consensus/src/checkpoint/main-checkpoints.txt)
 - [Testnet checkpoints](https://github.com/ZcashFoundation/zebra/blob/main/zebra-consensus/src/checkpoint/test-checkpoints.txt)
 
-Zebra can also be configured to use these checkpoints after Canopy:
+Zebra can also be configured to use these checkpoints after Canopy activation:
 ```
 [consensus]
 checkpoint_sync = true
 ```
+
 ## Update checkpoints
 
 Checkpoint lists are distributed with Zebra, maintainers should update them about every few months to get newer hashes. Here we explain how this process is done.
@@ -27,7 +28,7 @@ It is easier if `zcash-cli` is in your execution path however you can specify th
 Lets pretend `106474` is the last height from the mainnet list, to get the next ones we will run:
 
 ```
-$ ../target/release/zebra-checkpoints -l 106474 
+$ ../target/release/zebra-checkpoints -l 106474
 106517 00000000659a1034bcbf7abafced7db1d413244bd2d02fceb6f6100b93925c9d
 106556 000000000321575aa7d91c0db15413ad47451a9d185ccb43927acabeff715f6d
 106604 00000000293cea40c781a3c8a23d45ae53aa6f18739d310e03bd745f7ec71b14
@@ -40,7 +41,7 @@ $ ../target/release/zebra-checkpoints -l 106474
 107037 000000006ad5ccc970853e8b96fe5351fcf8c9428e7c3bf6376b1edbe115db37
 107088 000000005d71664dc23bcc71482b773de106c46b6ade43eb9618126308a91618
 107149 000000002adb0de730ec66e120f8b77b9f8d05989b7a305a0c7e42b7f1db202a
-... 
+...
 ```
 
 If we are looking to update the testnet hashes we must make sure the cli is connected with a testnet chain. If we have our `zcashd` running locally we can make this by starting with `zcashd -testnet`.
@@ -61,5 +62,5 @@ $ ../target/release/zebra-checkpoints -- -testnet
 ```
 ### Submit new hashes as pull request
 
-- If you started from a block different than the genesis append the obtained list of hashes at the end of the existing files. If you started from genesis you can replace the entire list files.  
-- Open a pull request with the updated lists into the zebra `main` branch. 
+- If you started from a block different than the genesis append the obtained list of hashes at the end of the existing files. If you started from genesis you can replace the entire list files.
+- Open a pull request with the updated lists into the zebra `main` branch.

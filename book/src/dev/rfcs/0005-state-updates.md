@@ -420,7 +420,7 @@ chain and updates all side chains to match.
 
 Commit `block` to the non-finalized state.
 
-1. If the block is a pre-Canopy block, panic.
+1. If the block is a pre-Canopy block, or the canopy activation block, panic.
 
 2. If any chains tip hash equal `block.header.previous_block_hash` remove that chain from `self.chain_set`
 

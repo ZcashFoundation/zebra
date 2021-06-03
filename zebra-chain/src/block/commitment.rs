@@ -63,6 +63,13 @@ pub enum Commitment {
     /// chain history hash in their activation block, via the previous block
     /// hash field.)
     ///
+    /// Since Zebra's mandatory checkpoint includes Canopy activation, we only
+    /// need to verify the chain history root from `Canopy + 1 block` onwards,
+    /// using a new history tree based on the `Canopy` activation block.
+    ///
+    /// NU5 and later upgrades use the [`ChainHistoryBlockTxAuthCommitment`]
+    /// variant.
+    ///
     /// TODO: this field is verified during contextual verification
     ChainHistoryRoot(ChainHistoryMmrRootHash),
 
@@ -71,8 +78,10 @@ pub enum Commitment {
     /// - the auth data merkle tree covering this block.
     ///
     /// The chain history Merkle Mountain Range tree commits to the previous
-    /// block and all ancestors in the current network upgrade. The auth data
-    /// merkle tree commits to this block.
+    /// block and all ancestors in the current network upgrade. (A new chain
+    /// history tree starts from each network upgrade's activation block.)
+    ///
+    /// The auth data merkle tree commits to this block.
     ///
     /// This commitment supports the FlyClient protocol and non-malleable
     /// transaction IDs. See ZIP-221 and ZIP-244 for details.

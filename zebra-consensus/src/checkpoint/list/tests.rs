@@ -250,7 +250,8 @@ fn checkpoint_list_hard_coded_canopy_testnet() -> Result<(), BoxError> {
     checkpoint_list_hard_coded_canopy(Testnet)
 }
 
-/// Check that the hard-coded lists cover the Canopy network upgrade
+/// Check that the hard-coded lists cover the Canopy network upgrade, and the
+/// Canopy activation block
 fn checkpoint_list_hard_coded_canopy(network: Network) -> Result<(), BoxError> {
     zebra_test::init();
 
@@ -262,7 +263,7 @@ fn checkpoint_list_hard_coded_canopy(network: Network) -> Result<(), BoxError> {
 
     assert!(
         list.max_height() >= canopy_activation,
-        "Pre-Canopy blocks must be verified by checkpoints"
+        "Pre-Canopy blocks and the Canopy activation block must be verified by checkpoints"
     );
 
     Ok(())
