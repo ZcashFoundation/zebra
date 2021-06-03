@@ -1,3 +1,5 @@
+//! Signature hashes for Zcash transactions
+
 use super::Transaction;
 
 use crate::{
@@ -29,9 +31,13 @@ const ZCASH_SHIELDED_OUTPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashSOutputHas
 bitflags::bitflags! {
     /// The different SigHash types, as defined in https://zips.z.cash/zip-0143
     pub struct HashType: u32 {
+        /// Sign all the outputs
         const ALL = 0b0000_0001;
+        /// Sign none of the outputs - anyone can spend
         const NONE = 0b0000_0010;
+        /// Sign one of the outputs - anyone can spend the rest
         const SINGLE = Self::ALL.bits | Self::NONE.bits;
+        /// Anyone can add inputs to this transaction
         const ANYONECANPAY = 0b1000_0000;
     }
 }

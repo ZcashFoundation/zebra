@@ -1,3 +1,5 @@
+//! Common [`zebra_test`] types, traits, and functions.
+
 pub use crate::command::{test_cmd, CommandExt, TestChild};
 pub use std::process::Stdio;
 

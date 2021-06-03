@@ -84,6 +84,7 @@ pub struct Header {
 /// TODO: Use this error as the source for zebra_consensus::error::BlockError::Time,
 /// and make `BlockError::Time` add additional context.
 /// See https://github.com/ZcashFoundation/zebra/issues/1021 for more details.
+#[allow(missing_docs)]
 #[derive(Error, Debug)]
 pub enum BlockTimeError {
     #[error("invalid time {0:?} in block header {1:?} {2:?}: block time is more than 2 hours in the future ({3:?}). Hint: check your machine's date, time, and time zone.")]
@@ -126,7 +127,11 @@ impl Header {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct CountedHeader {
+    /// The header for a block
     pub header: Header,
+    /// The number of transactions that come after the header
+    ///
+    /// TODO: should this always be zero? (#1924)
     pub transaction_count: usize,
 }
 

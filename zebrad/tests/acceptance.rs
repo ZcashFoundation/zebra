@@ -12,10 +12,11 @@
 //!   - run zebrad on a custom cache path and port,
 //!   - run zcashd on a custom port.
 
-#![warn(warnings, missing_docs, trivial_casts, unused_qualifications)]
-#![forbid(unsafe_code)]
-#![allow(dead_code)]
+// Standard lints
+#![warn(missing_docs)]
 #![allow(clippy::try_err)]
+#![deny(clippy::await_holding_lock)]
+#![forbid(unsafe_code)]
 
 use color_eyre::eyre::Result;
 use eyre::WrapErr;
@@ -747,8 +748,8 @@ fn sync_large_checkpoints_mainnet() -> Result<()> {
     Ok(())
 }
 
-// Todo: We had a `sync_large_checkpoints_testnet` here but it was removed because
-// the testnet is unreliable(#1222). Enable after we have more testnet instances(#1791).
+// TODO: We had a `sync_large_checkpoints_testnet` here but it was removed because
+// the testnet is unreliable (#1222). Enable after we have more testnet instances (#1791).
 
 /// Sync `network` until `zebrad` reaches `height`, and ensure that
 /// the output contains `stop_regex`. If `reuse_tempdir` is supplied,
@@ -851,7 +852,8 @@ fn sync_past_canopy(network: Network) -> Result<()> {
 // drives populated by the first two tests, snapshot those drives, and then use
 // those to more quickly run the second two tests.
 
-// Sync up to the canopy activation height on mainnet and stop.
+/// Sync up to the canopy activation height on mainnet and stop.
+#[allow(dead_code)]
 #[cfg_attr(feature = "test_sync_to_canopy_mainnet", test)]
 fn sync_to_canopy_mainnet() {
     zebra_test::init();
@@ -859,7 +861,8 @@ fn sync_to_canopy_mainnet() {
     create_cached_database(network).unwrap();
 }
 
-// Sync to the canopy activation height testnet and stop.
+/// Sync to the canopy activation height testnet and stop.
+#[allow(dead_code)]
 #[cfg_attr(feature = "test_sync_to_canopy_testnet", test)]
 fn sync_to_canopy_testnet() {
     zebra_test::init();
@@ -872,6 +875,7 @@ fn sync_to_canopy_testnet() {
 /// This assumes that the config'd state is already synced at or near Canopy
 /// activation on mainnet. If the state has already synced past Canopy
 /// activation by 1200 blocks, it will fail.
+#[allow(dead_code)]
 #[cfg_attr(feature = "test_sync_past_canopy_mainnet", test)]
 fn sync_past_canopy_mainnet() {
     zebra_test::init();
@@ -884,6 +888,7 @@ fn sync_past_canopy_mainnet() {
 /// This assumes that the config'd state is already synced at or near Canopy
 /// activation on testnet. If the state has already synced past Canopy
 /// activation by 1200 blocks, it will fail.
+#[allow(dead_code)]
 #[cfg_attr(feature = "test_sync_past_canopy_testnet", test)]
 fn sync_past_canopy_testnet() {
     zebra_test::init();
@@ -1056,7 +1061,7 @@ async fn tracing_endpoint() -> Result<()> {
 
     // Make sure tracing endpoint was started
     output.stdout_contains(format!(r"Opened tracing endpoint at {}", endpoint).as_str())?;
-    // Todo: Match some trace level messages from output
+    // TODO: Match some trace level messages from output
 
     // [Note on port conflict](#Note on port conflict)
     output

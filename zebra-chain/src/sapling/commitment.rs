@@ -147,7 +147,7 @@ impl NoteCommitment {
 }
 
 /// A Homomorphic Pedersen commitment to the value of a note, used in Spend and
-/// Output Descriptions.
+/// Output descriptions.
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#concretehomomorphiccommit
 #[derive(Clone, Copy, Deserialize, PartialEq, Serialize)]

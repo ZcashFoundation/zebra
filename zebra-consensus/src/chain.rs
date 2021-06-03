@@ -1,3 +1,8 @@
+//! Top-level semantic block verification for Zebra.
+//!
+//! Verifies blocks using the [`CheckpointVerifier`] or full [`BlockVerifier`],
+//! depending on the config and block height.
+
 #[cfg(test)]
 mod tests;
 
@@ -52,6 +57,7 @@ where
     max_checkpoint_height: block::Height,
 }
 
+/// An error while semantically verifying a block.
 #[derive(Debug, Display, Error)]
 pub enum VerifyChainError {
     /// block could not be checkpointed

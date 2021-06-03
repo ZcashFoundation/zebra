@@ -17,7 +17,10 @@
 #![doc(html_favicon_url = "https://www.zfnd.org/images/zebra-favicon-128.png")]
 #![doc(html_logo_url = "https://www.zfnd.org/images/zebra-icon.png")]
 #![doc(html_root_url = "https://doc.zebra.zfnd.org/zebrad")]
-//#![deny(warnings, missing_docs, trivial_casts, unused_qualifications)]
+// Standard lints
+#![warn(missing_docs)]
+#![allow(clippy::try_err)]
+#![deny(clippy::await_holding_lock)]
 #![forbid(unsafe_code)]
 // Tracing causes false positives on this lint:
 // https://github.com/tokio-rs/tracing/issues/553

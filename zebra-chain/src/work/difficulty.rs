@@ -132,6 +132,7 @@ impl fmt::Debug for ExpandedDifficulty {
 pub struct Work(u128);
 
 impl Work {
+    /// Return the inner `u128` value.
     pub fn as_u128(self) -> u128 {
         self.0
     }

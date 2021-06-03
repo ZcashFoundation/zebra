@@ -30,7 +30,7 @@ impl Arbitrary for TransmissionKey {
 proptest! {
 
     #[test]
-    #[allow(clone_on_copy, cmp_owned)]
+    #[allow(clippy::clone_on_copy, clippy::cmp_owned)]
     fn generate_keys(spending_key in any::<SpendingKey>()) {
         zebra_test::init();
 
