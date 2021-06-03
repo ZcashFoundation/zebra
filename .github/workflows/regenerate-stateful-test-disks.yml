@@ -49,6 +49,7 @@ jobs:
           --boot-disk-type pd-ssd \
           --container-image rust:buster \
           --container-mount-disk mount-path='/mainnet',name="zebrad-cache-$SHORT_SHA-mainnet-1046400" \
+          --container-mount-disk mount-path='/testnet',name="zebrad-cache-$SHORT_SHA-testnet-1028500" \
           --container-restart-policy never \
           --create-disk name="zebrad-cache-$SHORT_SHA-mainnet-1046400",size=100GB,type=pd-balanced,auto-delete=no \
           --create-disk name="zebrad-cache-$SHORT_SHA-testnet-1028500",size=100GB,type=pd-balanced,auto-delete=no \
@@ -57,7 +58,7 @@ jobs:
           --scopes cloud-platform \
           --tags zebrad \
           --zone "$ZONE"
-      # Build and run test container to sync up to activation and no further, for mainnet and then tesnet
+      # Build and run test container to sync up to activation and no further, for mainnet and then testnet
       - name: Run all tests
         run: |
           gcloud compute ssh "zebrad-tests-$BRANCH_NAME-$SHORT_SHA" --zone "$ZONE" --command \
