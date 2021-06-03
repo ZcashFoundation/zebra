@@ -1,6 +1,6 @@
 [package]
 name = "tower-fallback"
-version = "0.2.6"
+version = "0.2.7"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT"
 edition = "2018"
