@@ -1,6 +1,9 @@
 //! Main entry point for Zebrad
 
-#![deny(missing_docs, trivial_casts, unused_qualifications)]
+// Standard lints
+#![warn(missing_docs)]
+#![allow(clippy::try_err)]
+#![deny(clippy::await_holding_lock)]
 #![forbid(unsafe_code)]
 
 use zebrad::application::APPLICATION;
