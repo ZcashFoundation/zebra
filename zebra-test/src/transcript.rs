@@ -49,9 +49,11 @@ impl ExpectedTranscriptError {
     fn mock(&self) -> Report {
         match self {
             ExpectedTranscriptError::Any => eyre!("mock error"),
-            ExpectedTranscriptError::Exact(checker) => checker(None).map_err(|e| eyre!(e)).expect_err(
-                "transcript should correctly produce the expected mock error when passed None",
-            ),
+            ExpectedTranscriptError::Exact(checker) => {
+                checker(None).map_err(|e| eyre!(e)).expect_err(
+                    "transcript should correctly produce the expected mock error when passed None",
+                )
+            }
         }
     }
 }

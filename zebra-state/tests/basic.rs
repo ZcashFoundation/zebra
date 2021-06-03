@@ -13,45 +13,47 @@ use zebra_test::transcript::{ExpectedTranscriptError, Transcript};
 
 use zebra_state::*;
 
-static COMMIT_FINALIZED_BLOCK_MAINNET: Lazy<Vec<(Request, Result<Response, ExpectedTranscriptError>)>> =
-    Lazy::new(|| {
-        let block: Arc<_> =
-            Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
-                .unwrap()
-                .into();
-        let block2 = block.clone();
-        let hash = block.hash();
-        vec![
-            (
-                Request::CommitFinalizedBlock(block.into()),
-                Ok(Response::Committed(hash)),
-            ),
-            (
-                Request::Block(hash.into()),
-                Ok(Response::Block(Some(block2))),
-            ),
-        ]
-    });
+static COMMIT_FINALIZED_BLOCK_MAINNET: Lazy<
+    Vec<(Request, Result<Response, ExpectedTranscriptError>)>,
+> = Lazy::new(|| {
+    let block: Arc<_> =
+        Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
+            .unwrap()
+            .into();
+    let block2 = block.clone();
+    let hash = block.hash();
+    vec![
+        (
+            Request::CommitFinalizedBlock(block.into()),
+            Ok(Response::Committed(hash)),
+        ),
+        (
+            Request::Block(hash.into()),
+            Ok(Response::Block(Some(block2))),
+        ),
+    ]
+});
 
-static COMMIT_FINALIZED_BLOCK_TESTNET: Lazy<Vec<(Request, Result<Response, ExpectedTranscriptError>)>> =
-    Lazy::new(|| {
-        let block: Arc<_> =
-            Block::zcash_deserialize(&zebra_test::vectors::BLOCK_TESTNET_GENESIS_BYTES[..])
-                .unwrap()
-                .into();
-        let block2 = block.clone();
-        let hash = block.hash();
-        vec![
-            (
-                Request::CommitFinalizedBlock(block.into()),
-                Ok(Response::Committed(hash)),
-            ),
-            (
-                Request::Block(hash.into()),
-                Ok(Response::Block(Some(block2))),
-            ),
-        ]
-    });
+static COMMIT_FINALIZED_BLOCK_TESTNET: Lazy<
+    Vec<(Request, Result<Response, ExpectedTranscriptError>)>,
+> = Lazy::new(|| {
+    let block: Arc<_> =
+        Block::zcash_deserialize(&zebra_test::vectors::BLOCK_TESTNET_GENESIS_BYTES[..])
+            .unwrap()
+            .into();
+    let block2 = block.clone();
+    let hash = block.hash();
+    vec![
+        (
+            Request::CommitFinalizedBlock(block.into()),
+            Ok(Response::Committed(hash)),
+        ),
+        (
+            Request::Block(hash.into()),
+            Ok(Response::Block(Some(block2))),
+        ),
+    ]
+});
 
 #[tokio::test]
 async fn check_transcripts_mainnet() -> Result<(), Report> {

@@ -72,16 +72,17 @@ async fn verifiers_from_network(
     (chain_verifier, state_service)
 }
 
-static BLOCK_VERIFY_TRANSCRIPT_GENESIS: Lazy<Vec<(Arc<Block>, Result<block::Hash, ExpectedTranscriptError>)>> =
-    Lazy::new(|| {
-        let block: Arc<_> =
-            Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
-                .unwrap()
-                .into();
-        let hash = Ok(block.hash());
+static BLOCK_VERIFY_TRANSCRIPT_GENESIS: Lazy<
+    Vec<(Arc<Block>, Result<block::Hash, ExpectedTranscriptError>)>,
+> = Lazy::new(|| {
+    let block: Arc<_> =
+        Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
+            .unwrap()
+            .into();
+    let hash = Ok(block.hash());
 
-        vec![(block, hash)]
-    });
+    vec![(block, hash)]
+});
 
 static BLOCK_VERIFY_TRANSCRIPT_GENESIS_FAIL: Lazy<
     Vec<(Arc<Block>, Result<block::Hash, ExpectedTranscriptError>)>,
@@ -94,37 +95,40 @@ static BLOCK_VERIFY_TRANSCRIPT_GENESIS_FAIL: Lazy<
     vec![(block, Err(ExpectedTranscriptError::Any))]
 });
 
-static NO_COINBASE_TRANSCRIPT: Lazy<Vec<(Arc<Block>, Result<block::Hash, ExpectedTranscriptError>)>> =
-    Lazy::new(|| {
-        let block = block_no_transactions();
+static NO_COINBASE_TRANSCRIPT: Lazy<
+    Vec<(Arc<Block>, Result<block::Hash, ExpectedTranscriptError>)>,
+> = Lazy::new(|| {
+    let block = block_no_transactions();
 
-        vec![(Arc::new(block), Err(ExpectedTranscriptError::Any))]
-    });
+    vec![(Arc::new(block), Err(ExpectedTranscriptError::Any))]
+});
 
-static NO_COINBASE_STATE_TRANSCRIPT: Lazy<Vec<(zs::Request, Result<zs::Response, ExpectedTranscriptError>)>> =
-    Lazy::new(|| {
-        let block = block_no_transactions();
-        let hash = block.hash();
+static NO_COINBASE_STATE_TRANSCRIPT: Lazy<
+    Vec<(zs::Request, Result<zs::Response, ExpectedTranscriptError>)>,
+> = Lazy::new(|| {
+    let block = block_no_transactions();
+    let hash = block.hash();
 
-        vec![(
-            zs::Request::Block(hash.into()),
-            Ok(zs::Response::Block(None)),
-        )]
-    });
+    vec![(
+        zs::Request::Block(hash.into()),
+        Ok(zs::Response::Block(None)),
+    )]
+});
 
-static STATE_VERIFY_TRANSCRIPT_GENESIS: Lazy<Vec<(zs::Request, Result<zs::Response, ExpectedTranscriptError>)>> =
-    Lazy::new(|| {
-        let block: Arc<_> =
-            Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
-                .unwrap()
-                .into();
-        let hash = block.hash();
+static STATE_VERIFY_TRANSCRIPT_GENESIS: Lazy<
+    Vec<(zs::Request, Result<zs::Response, ExpectedTranscriptError>)>,
+> = Lazy::new(|| {
+    let block: Arc<_> =
+        Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
+            .unwrap()
+            .into();
+    let hash = block.hash();
 
-        vec![(
-            zs::Request::Block(hash.into()),
-            Ok(zs::Response::Block(Some(block))),
-        )]
-    });
+    vec![(
+        zs::Request::Block(hash.into()),
+        Ok(zs::Response::Block(Some(block))),
+    )]
+});
 
 #[tokio::test]
 async fn verify_checkpoint_test() -> Result<(), Report> {
