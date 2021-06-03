@@ -1,4 +1,5 @@
 use zebra_chain::{
+    orchard,
     parameters::Network,
     transaction::{
         arbitrary::{fake_v5_transactions_for_network, insert_fake_orchard_shielded_data},
@@ -122,5 +123,25 @@ fn v5_transaction_with_no_outputs_fails_validation() {
     assert_eq!(
         check::has_inputs_and_outputs(&transaction),
         Err(TransactionError::NoOutputs)
+    );
+}
+
+#[test]
+fn v5_coinbase_transaction_with_enable_spends_flag_fails_validation() {
+    let mut transaction = fake_v5_transactions_for_network(
+        Network::Mainnet,
+        zebra_test::vectors::MAINNET_BLOCKS.iter(),
+    )
+    .rev()
+    .find(|transaction| transaction.is_coinbase())
+    .expect("At least one fake V5 coinbase transaction in the test vectors");
+
+    let shielded_data = insert_fake_orchard_shielded_data(&mut transaction);
+
+    shielded_data.flags = orchard::Flags::ENABLE_SPENDS;
+
+    assert_eq!(
+        check::coinbase_tx_no_prevout_joinsplit_spend(&transaction),
+        Err(TransactionError::CoinbaseHasEnableSpendsOrchard)
     );
 }
