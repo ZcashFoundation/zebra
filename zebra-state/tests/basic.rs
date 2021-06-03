@@ -9,11 +9,11 @@ use once_cell::sync::Lazy;
 use std::sync::Arc;
 use tempdir::TempDir;
 use zebra_chain::{block::Block, parameters::Network, serialization::ZcashDeserialize};
-use zebra_test::transcript::{TransError, Transcript};
+use zebra_test::transcript::{ExpectedTranscriptError, Transcript};
 
 use zebra_state::*;
 
-static COMMIT_FINALIZED_BLOCK_MAINNET: Lazy<Vec<(Request, Result<Response, TransError>)>> =
+static COMMIT_FINALIZED_BLOCK_MAINNET: Lazy<Vec<(Request, Result<Response, ExpectedTranscriptError>)>> =
     Lazy::new(|| {
         let block: Arc<_> =
             Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
@@ -33,7 +33,7 @@ static COMMIT_FINALIZED_BLOCK_MAINNET: Lazy<Vec<(Request, Result<Response, Trans
         ]
     });
 
-static COMMIT_FINALIZED_BLOCK_TESTNET: Lazy<Vec<(Request, Result<Response, TransError>)>> =
+static COMMIT_FINALIZED_BLOCK_TESTNET: Lazy<Vec<(Request, Result<Response, ExpectedTranscriptError>)>> =
     Lazy::new(|| {
         let block: Arc<_> =
             Block::zcash_deserialize(&zebra_test::vectors::BLOCK_TESTNET_GENESIS_BYTES[..])

@@ -5,10 +5,10 @@
 #![forbid(unsafe_code)]
 
 use tower::{Service, ServiceExt};
-use zebra_test::transcript::TransError;
+use zebra_test::transcript::ExpectedTranscriptError;
 use zebra_test::transcript::Transcript;
 
-const TRANSCRIPT_DATA: [(&str, Result<&str, TransError>); 4] = [
+const TRANSCRIPT_DATA: [(&str, Result<&str, ExpectedTranscriptError>); 4] = [
     ("req1", Ok("rsp1")),
     ("req2", Ok("rsp2")),
     ("req3", Ok("rsp3")),
@@ -56,11 +56,11 @@ async fn self_check() {
 #[error("Error")]
 struct Error;
 
-const TRANSCRIPT_DATA2: [(&str, Result<&str, TransError>); 4] = [
+const TRANSCRIPT_DATA2: [(&str, Result<&str, ExpectedTranscriptError>); 4] = [
     ("req1", Ok("rsp1")),
     ("req2", Ok("rsp2")),
     ("req3", Ok("rsp3")),
-    ("req4", Err(TransError::Any)),
+    ("req4", Err(ExpectedTranscriptError::Any)),
 ];
 
 #[tokio::test]

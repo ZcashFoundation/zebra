@@ -18,9 +18,9 @@ use zebra_chain::{
     transaction::{arbitrary::transaction_to_fake_v5, Transaction},
     work::difficulty::{ExpandedDifficulty, INVALID_COMPACT_DIFFICULTY},
 };
-use zebra_test::transcript::{TransError, Transcript};
+use zebra_test::transcript::{ExpectedTranscriptError, Transcript};
 
-static VALID_BLOCK_TRANSCRIPT: Lazy<Vec<(Arc<Block>, Result<block::Hash, TransError>)>> =
+static VALID_BLOCK_TRANSCRIPT: Lazy<Vec<(Arc<Block>, Result<block::Hash, ExpectedTranscriptError>)>> =
     Lazy::new(|| {
         let block: Arc<_> =
             Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
@@ -30,7 +30,7 @@ static VALID_BLOCK_TRANSCRIPT: Lazy<Vec<(Arc<Block>, Result<block::Hash, TransEr
         vec![(block, hash)]
     });
 
-static INVALID_TIME_BLOCK_TRANSCRIPT: Lazy<Vec<(Arc<Block>, Result<block::Hash, TransError>)>> =
+static INVALID_TIME_BLOCK_TRANSCRIPT: Lazy<Vec<(Arc<Block>, Result<block::Hash, ExpectedTranscriptError>)>> =
     Lazy::new(|| {
         let mut block: Block =
             Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
@@ -46,11 +46,11 @@ static INVALID_TIME_BLOCK_TRANSCRIPT: Lazy<Vec<(Arc<Block>, Result<block::Hash, 
             .unwrap();
         block.header.time = three_hours_in_the_future;
 
-        vec![(Arc::new(block), Err(TransError::Any))]
+        vec![(Arc::new(block), Err(ExpectedTranscriptError::Any))]
     });
 
 static INVALID_HEADER_SOLUTION_TRANSCRIPT: Lazy<
-    Vec<(Arc<Block>, Result<block::Hash, TransError>)>,
+    Vec<(Arc<Block>, Result<block::Hash, ExpectedTranscriptError>)>,
 > = Lazy::new(|| {
     let mut block: Block =
         Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..]).unwrap();
@@ -58,10 +58,10 @@ static INVALID_HEADER_SOLUTION_TRANSCRIPT: Lazy<
     // Change nonce to something invalid
     block.header.nonce = [0; 32];
 
-    vec![(Arc::new(block), Err(TransError::Any))]
+    vec![(Arc::new(block), Err(ExpectedTranscriptError::Any))]
 });
 
-static INVALID_COINBASE_TRANSCRIPT: Lazy<Vec<(Arc<Block>, Result<block::Hash, TransError>)>> =
+static INVALID_COINBASE_TRANSCRIPT: Lazy<Vec<(Arc<Block>, Result<block::Hash, ExpectedTranscriptError>)>> =
     Lazy::new(|| {
         let header =
             block::Header::zcash_deserialize(&zebra_test::vectors::DUMMY_HEADER[..]).unwrap();
@@ -97,9 +97,9 @@ static INVALID_COINBASE_TRANSCRIPT: Lazy<Vec<(Arc<Block>, Result<block::Hash, Tr
         assert_eq!(block3.transactions.len(), 2);
 
         vec![
-            (Arc::new(block1), Err(TransError::Any)),
-            (Arc::new(block2), Err(TransError::Any)),
-            (Arc::new(block3), Err(TransError::Any)),
+            (Arc::new(block1), Err(ExpectedTranscriptError::Any)),
+            (Arc::new(block2), Err(ExpectedTranscriptError::Any)),
+            (Arc::new(block3), Err(ExpectedTranscriptError::Any)),
         ]
     });
 

@@ -12,7 +12,7 @@ use zebra_chain::{
     serialization::ZcashDeserialize,
 };
 use zebra_state as zs;
-use zebra_test::transcript::{TransError, Transcript};
+use zebra_test::transcript::{ExpectedTranscriptError, Transcript};
 
 use crate::Config;
 
@@ -72,7 +72,7 @@ async fn verifiers_from_network(
     (chain_verifier, state_service)
 }
 
-static BLOCK_VERIFY_TRANSCRIPT_GENESIS: Lazy<Vec<(Arc<Block>, Result<block::Hash, TransError>)>> =
+static BLOCK_VERIFY_TRANSCRIPT_GENESIS: Lazy<Vec<(Arc<Block>, Result<block::Hash, ExpectedTranscriptError>)>> =
     Lazy::new(|| {
         let block: Arc<_> =
             Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
@@ -84,24 +84,24 @@ static BLOCK_VERIFY_TRANSCRIPT_GENESIS: Lazy<Vec<(Arc<Block>, Result<block::Hash
     });
 
 static BLOCK_VERIFY_TRANSCRIPT_GENESIS_FAIL: Lazy<
-    Vec<(Arc<Block>, Result<block::Hash, TransError>)>,
+    Vec<(Arc<Block>, Result<block::Hash, ExpectedTranscriptError>)>,
 > = Lazy::new(|| {
     let block: Arc<_> =
         Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
             .unwrap()
             .into();
 
-    vec![(block, Err(TransError::Any))]
+    vec![(block, Err(ExpectedTranscriptError::Any))]
 });
 
-static NO_COINBASE_TRANSCRIPT: Lazy<Vec<(Arc<Block>, Result<block::Hash, TransError>)>> =
+static NO_COINBASE_TRANSCRIPT: Lazy<Vec<(Arc<Block>, Result<block::Hash, ExpectedTranscriptError>)>> =
     Lazy::new(|| {
         let block = block_no_transactions();
 
-        vec![(Arc::new(block), Err(TransError::Any))]
+        vec![(Arc::new(block), Err(ExpectedTranscriptError::Any))]
     });
 
-static NO_COINBASE_STATE_TRANSCRIPT: Lazy<Vec<(zs::Request, Result<zs::Response, TransError>)>> =
+static NO_COINBASE_STATE_TRANSCRIPT: Lazy<Vec<(zs::Request, Result<zs::Response, ExpectedTranscriptError>)>> =
     Lazy::new(|| {
         let block = block_no_transactions();
         let hash = block.hash();
@@ -112,7 +112,7 @@ static NO_COINBASE_STATE_TRANSCRIPT: Lazy<Vec<(zs::Request, Result<zs::Response,
         )]
     });
 
-static STATE_VERIFY_TRANSCRIPT_GENESIS: Lazy<Vec<(zs::Request, Result<zs::Response, TransError>)>> =
+static STATE_VERIFY_TRANSCRIPT_GENESIS: Lazy<Vec<(zs::Request, Result<zs::Response, ExpectedTranscriptError>)>> =
     Lazy::new(|| {
         let block: Arc<_> =
             Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])

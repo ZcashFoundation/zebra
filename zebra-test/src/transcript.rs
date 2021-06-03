@@ -23,24 +23,24 @@ pub type ErrorChecker = fn(Option<BoxError>) -> Result<(), BoxError>;
 
 /// An expected error in a transcript.
 #[derive(Debug, Clone)]
-pub enum TransError {
+pub enum ExpectedTranscriptError {
     /// Match any error
     Any,
     /// Use a validator function to check for matching errors
     Exact(Arc<ErrorChecker>),
 }
 
-impl TransError {
+impl ExpectedTranscriptError {
     /// Convert the `verifier` function into an exact error checker
     pub fn exact(verifier: ErrorChecker) -> Self {
-        TransError::Exact(verifier.into())
+        ExpectedTranscriptError::Exact(verifier.into())
     }
 
     /// Check the actual error `e` against this expected error.
     fn check(&self, e: BoxError) -> Result<(), Report> {
         match self {
-            TransError::Any => Ok(()),
-            TransError::Exact(checker) => checker(Some(e)),
+            ExpectedTranscriptError::Any => Ok(()),
+            ExpectedTranscriptError::Exact(checker) => checker(Some(e)),
         }
         .map_err(ErrorCheckerError)
         .wrap_err("service returned an error but it didn't match the expected error")
@@ -48,8 +48,8 @@ impl TransError {
 
     fn mock(&self) -> Report {
         match self {
-            TransError::Any => eyre!("mock error"),
-            TransError::Exact(checker) => checker(None).map_err(|e| eyre!(e)).expect_err(
+            ExpectedTranscriptError::Any => eyre!("mock error"),
+            ExpectedTranscriptError::Exact(checker) => checker(None).map_err(|e| eyre!(e)).expect_err(
                 "transcript should correctly produce the expected mock error when passed None",
             ),
         }
@@ -64,14 +64,14 @@ struct ErrorCheckerError(BoxError);
 #[must_use]
 pub struct Transcript<R, S, I>
 where
-    I: Iterator<Item = (R, Result<S, TransError>)>,
+    I: Iterator<Item = (R, Result<S, ExpectedTranscriptError>)>,
 {
     messages: I,
 }
 
 impl<R, S, I> From<I> for Transcript<R, S, I::IntoIter>
 where
-    I: IntoIterator<Item = (R, Result<S, TransError>)>,
+    I: IntoIterator<Item = (R, Result<S, ExpectedTranscriptError>)>,
 {
     fn from(messages: I) -> Self {
         Self {
@@ -82,7 +82,7 @@ where
 
 impl<R, S, I> Transcript<R, S, I>
 where
-    I: Iterator<Item = (R, Result<S, TransError>)>,
+    I: Iterator<Item = (R, Result<S, ExpectedTranscriptError>)>,
     R: Debug,
     S: Debug + Eq,
 {
@@ -157,7 +157,7 @@ where
 impl<R, S, I> Service<R> for Transcript<R, S, I>
 where
     R: Debug + Eq,
-    I: Iterator<Item = (R, Result<S, TransError>)>,
+    I: Iterator<Item = (R, Result<S, ExpectedTranscriptError>)>,
 {
     type Response = S;
     type Error = Report;
