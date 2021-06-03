@@ -13,10 +13,13 @@ use std::{
 };
 use tower::{Service, ServiceExt};
 
-type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
+type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 /// An error-checking function: is the value an expected error?
-pub type ErrorChecker = fn(Option<Error>) -> Result<(), Error>;
+///
+/// If the checked error is the expected error, the function should return `Ok(())`.
+/// Otherwise, it should just return the checked error, wrapped inside `Err`.
+pub type ErrorChecker = fn(Option<BoxError>) -> Result<(), BoxError>;
 
 /// An expected error in a transcript.
 #[derive(Debug, Clone)]
@@ -34,7 +37,7 @@ impl TransError {
     }
 
     /// Check the actual error `e` against this expected error.
-    fn check(&self, e: Error) -> Result<(), Report> {
+    fn check(&self, e: BoxError) -> Result<(), Report> {
         match self {
             TransError::Any => Ok(()),
             TransError::Exact(checker) => checker(Some(e)),
@@ -55,7 +58,7 @@ impl TransError {
 
 #[derive(Debug, thiserror::Error)]
 #[error("ErrorChecker Error: {0}")]
-struct ErrorCheckerError(Error);
+struct ErrorCheckerError(BoxError);
 
 /// A transcript: a list of requests and expected results.
 #[must_use]
@@ -87,7 +90,7 @@ where
     pub async fn check<C>(mut self, mut to_check: C) -> Result<(), Report>
     where
         C: Service<R, Response = S>,
-        C::Error: Into<Error>,
+        C::Error: Into<BoxError>,
     {
         for (req, expected_rsp) in &mut self.messages {
             // These unwraps could propagate errors with the correct
