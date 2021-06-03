@@ -127,6 +127,21 @@ fn v5_transaction_with_no_outputs_fails_validation() {
 }
 
 #[test]
+fn v5_coinbase_transaction_without_enable_spends_flag_passes_validation() {
+    let mut transaction = fake_v5_transactions_for_network(
+        Network::Mainnet,
+        zebra_test::vectors::MAINNET_BLOCKS.iter(),
+    )
+    .rev()
+    .find(|transaction| transaction.is_coinbase())
+    .expect("At least one fake V5 coinbase transaction in the test vectors");
+
+    insert_fake_orchard_shielded_data(&mut transaction);
+
+    assert!(check::coinbase_tx_no_prevout_joinsplit_spend(&transaction).is_ok(),);
+}
+
+#[test]
 fn v5_coinbase_transaction_with_enable_spends_flag_fails_validation() {
     let mut transaction = fake_v5_transactions_for_network(
         Network::Mainnet,
