@@ -5,6 +5,18 @@ use lazy_static::lazy_static;
 
 use std::{collections::BTreeMap, convert::TryInto};
 
+trait ReverseCollection {
+    /// Return a reversed copy of this collection
+    fn rev(self) -> Self;
+}
+
+impl ReverseCollection for [u8; 32] {
+    fn rev(mut self) -> [u8; 32] {
+        self.reverse();
+        self
+    }
+}
+
 lazy_static! {
 
     /// All block test vectors
@@ -296,11 +308,14 @@ lazy_static! {
     //     zcash-cli getblock $i 0 > block-main-$[i/1000000]-$[i/1000%1000]-$[i%1000].txt
     // done
     //
+    // zcashd provides final sapling roots in big-endian order, but Zebra stores
+    // that field in block order internally.
+    //
     // for i in `cat post_sapling_mainnet_heights`; do
     //     zcash-cli z_gettreestate "$i" | \
     //         jq --arg i "$i" \
     //            --raw-output \
-    //            '"pub static ref SAPLING_FINAL_ROOT_MAINNET_\($i)_BYTES: [u8; 32] = <[u8; 32]>::from_hex(\"\(.sapling.commitments.finalRoot)\").expect(\"final root bytes are in valid hex representation\");"'
+    //            '"pub static ref SAPLING_FINAL_ROOT_MAINNET_\($i)_BYTES: [u8; 32] = <[u8; 32]>::from_hex(\"\(.sapling.commitments.finalRoot)\").expect(\"final root bytes are in valid hex representation\").rev();"'
     // done
     pub static ref BLOCK_MAINNET_419199_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("block-main-0-419-199.txt").trim())
@@ -313,10 +328,10 @@ lazy_static! {
         .expect("Block bytes are in valid hex representation");
     pub static ref SAPLING_FINAL_ROOT_MAINNET_419200_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("3e49b5f954aa9d3545bc6c37744661eea48d7c34e3000d82b7f0010c30f4c2fb")
-        .expect("final root bytes are in valid hex representation");
+        .expect("final root bytes are in valid hex representation").rev();
     pub static ref SAPLING_FINAL_ROOT_MAINNET_419201_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("638d7e5ba37ab7921c51a4f3ae1b32d71c605a0ed9be7477928111a637f7421b")
-        .expect("final root bytes are in valid hex representation");
+        .expect("final root bytes are in valid hex representation").rev();
 
     // this one has a bad version field
     // zcash-cli getblock 434873 0 > block-main-0-434-873.txt
@@ -325,7 +340,7 @@ lazy_static! {
         .expect("Block bytes are in valid hex representation");
     pub static ref SAPLING_FINAL_ROOT_MAINNET_434873_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("56e33199bc41d146cb24d24a65db35101248a1d12fff33affef56f90081a9517")
-        .expect("final root bytes are in valid hex representation");
+        .expect("final root bytes are in valid hex representation").rev();
 
     // Blossom transition
     // for i in 653599 653600 653601; do
@@ -342,13 +357,13 @@ lazy_static! {
         .expect("Block bytes are in valid hex representation");
     pub static ref SAPLING_FINAL_ROOT_MAINNET_653599_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("3d532d101b9171769423a9f45a65b6312e28e7aa92b627cb81810f7a6fe21c6a")
-        .expect("final root bytes are in valid hex representation");
+        .expect("final root bytes are in valid hex representation").rev();
     pub static ref SAPLING_FINAL_ROOT_MAINNET_653600_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("3d532d101b9171769423a9f45a65b6312e28e7aa92b627cb81810f7a6fe21c6a")
-        .expect("final root bytes are in valid hex representation");
+        .expect("final root bytes are in valid hex representation").rev();
     pub static ref SAPLING_FINAL_ROOT_MAINNET_653601_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("612c62e54ef55f7bf8a60281debf1df904bf1fa6d1fa65d9656302b44ea98427")
-        .expect("final root bytes are in valid hex representation");
+        .expect("final root bytes are in valid hex representation").rev();
 
     // Heartwood transition
     // i=902999
@@ -367,13 +382,13 @@ lazy_static! {
         .expect("Block bytes are in valid hex representation");
     pub static ref SAPLING_FINAL_ROOT_MAINNET_902999_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("49df1a6e62458b0226b9d6c0c28fb7e94d9ca840582878b10d0117fd028b4e91")
-        .expect("final root bytes are in valid hex representation");
+        .expect("final root bytes are in valid hex representation").rev();
     pub static ref SAPLING_FINAL_ROOT_MAINNET_903000_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("11e48300f0e2296d5c413340b26426eddada1155155f4e959ebe307396976c79")
-        .expect("final root bytes are in valid hex representation");
+        .expect("final root bytes are in valid hex representation").rev();
     pub static ref SAPLING_FINAL_ROOT_MAINNET_903001_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("14e3c2b8af239bc4e17486573c20824292d5e1a6670dedf58bf865159e389cce")
-        .expect("final root bytes are in valid hex representation");
+        .expect("final root bytes are in valid hex representation").rev();
 
     // Shielded coinbase
     // for i in 949496 982681; do
@@ -395,13 +410,13 @@ lazy_static! {
         .expect("Block bytes are in valid hex representation");
     pub static ref SAPLING_FINAL_ROOT_MAINNET_949496_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("4db238913a86284f5bddb9bcfe76f96a46d097ec681aad1da846cc276bfa7263")
-        .expect("final root bytes are in valid hex representation");
+        .expect("final root bytes are in valid hex representation").rev();
     pub static ref SAPLING_FINAL_ROOT_MAINNET_975066_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("2f62381b6decd0e0f937f6aa23faa7d19444b784701be93ad7e4df31bd4da1f9")
-        .expect("final root bytes are in valid hex representation");
+        .expect("final root bytes are in valid hex representation").rev();
     pub static ref SAPLING_FINAL_ROOT_MAINNET_982681_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("4fd1cb6d1e5c479baa44fcb7c3a1c6fafdaa54c0456d254918cd63839805848d")
-        .expect("final root bytes are in valid hex representation");
+        .expect("final root bytes are in valid hex representation").rev();
 
     // Canopy transition and Coinbase Halving
     // (On mainnet, Canopy happens at the same block as the first coinbase halving)
@@ -422,13 +437,13 @@ lazy_static! {
         .to_vec();
     pub static ref SAPLING_FINAL_ROOT_MAINNET_1046399_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("0f12c92f737e84142792bddc82e36481de4a7679d5778a27389793933c8742e1")
-        .expect("final root bytes are in valid hex representation");
+        .expect("final root bytes are in valid hex representation").rev();
     pub static ref SAPLING_FINAL_ROOT_MAINNET_1046400_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("0f12c92f737e84142792bddc82e36481de4a7679d5778a27389793933c8742e1")
-        .expect("final root bytes are in valid hex representation");
+        .expect("final root bytes are in valid hex representation").rev();
     pub static ref SAPLING_FINAL_ROOT_MAINNET_1046401_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("1cb7a61a31354384957eea0b98661e1cf85a5de8e43f0e3bef522c8b375b26cb")
-        .expect("final root bytes are in valid hex representation");
+        .expect("final root bytes are in valid hex representation").rev();
 
     // One more Canopy/Post-Halving block
     // (so that we have at least 3 blocks after canopy/halving)
@@ -439,7 +454,7 @@ lazy_static! {
         .expect("Block bytes are in valid hex representation");
     pub static ref SAPLING_FINAL_ROOT_MAINNET_1180900_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("4a51c1b879f49637873ac4b261e9c625e16d9400b22d8aa4f27cd6fd1138ddda")
-        .expect("final root bytes are in valid hex representation");
+        .expect("final root bytes are in valid hex representation").rev();
 
     // Testnet
 
@@ -514,11 +529,12 @@ lazy_static! {
     // for i in 280000 280001; do
     //     zcash-cli -testnet getblock $i 0 > block-test-$[i/1000000]-$[i/1000%1000]-00$[i%1000].txt
     // done
+    //
     // for i in `cat post_sapling_testnet_heights`; do
     //     zcash-cli -testnet z_gettreestate "$i" | \
     //         jq --arg i "$i" \
     //            --raw-output \
-    //            '"pub static ref SAPLING_FINAL_ROOT_TESTNET_\($i)_BYTES: [u8; 32] = <[u8; 32]>::from_hex(\"\(.sapling.commitments.finalRoot)\").expect(\"final root bytes are in valid hex representation\");"'
+    //            '"pub static ref SAPLING_FINAL_ROOT_TESTNET_\($i)_BYTES: [u8; 32] = <[u8; 32]>::from_hex(\"\(.sapling.commitments.finalRoot)\").expect(\"final root bytes are in valid hex representation\").rev();"'
     // done
     pub static ref BLOCK_TESTNET_279999_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("block-test-0-279-999.txt").trim())
@@ -531,10 +547,10 @@ lazy_static! {
         .expect("Block bytes are in valid hex representation");
     pub static ref SAPLING_FINAL_ROOT_TESTNET_280000_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("3e49b5f954aa9d3545bc6c37744661eea48d7c34e3000d82b7f0010c30f4c2fb")
-        .expect("final root bytes are in valid hex representation");
+        .expect("final root bytes are in valid hex representation").rev();
     pub static ref SAPLING_FINAL_ROOT_TESTNET_280001_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("3e49b5f954aa9d3545bc6c37744661eea48d7c34e3000d82b7f0010c30f4c2fb")
-        .expect("final root bytes are in valid hex representation");
+        .expect("final root bytes are in valid hex representation").rev();
 
     // The first minimum difficulty blocks 299188, 299189, 299202 and their previous blocks for context
     // (pre-Blossom minimum difficulty)
@@ -559,19 +575,19 @@ lazy_static! {
         .expect("Block bytes are in valid hex representation");
     pub static ref SAPLING_FINAL_ROOT_TESTNET_299187_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("6815df99f9f7ec9486a0b3a4e992ff9348dba7101c2ac91be41ceab392aa5521")
-        .expect("final root bytes are in valid hex representation");
+        .expect("final root bytes are in valid hex representation").rev();
     pub static ref SAPLING_FINAL_ROOT_TESTNET_299188_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("6815df99f9f7ec9486a0b3a4e992ff9348dba7101c2ac91be41ceab392aa5521")
-        .expect("final root bytes are in valid hex representation");
+        .expect("final root bytes are in valid hex representation").rev();
     pub static ref SAPLING_FINAL_ROOT_TESTNET_299189_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("6815df99f9f7ec9486a0b3a4e992ff9348dba7101c2ac91be41ceab392aa5521")
-        .expect("final root bytes are in valid hex representation");
+        .expect("final root bytes are in valid hex representation").rev();
     pub static ref SAPLING_FINAL_ROOT_TESTNET_299201_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("6815df99f9f7ec9486a0b3a4e992ff9348dba7101c2ac91be41ceab392aa5521")
-        .expect("final root bytes are in valid hex representation");
+        .expect("final root bytes are in valid hex representation").rev();
     pub static ref SAPLING_FINAL_ROOT_TESTNET_299202_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("6815df99f9f7ec9486a0b3a4e992ff9348dba7101c2ac91be41ceab392aa5521")
-        .expect("final root bytes are in valid hex representation");
+        .expect("final root bytes are in valid hex representation").rev();
 
     // Blossom transition
     // i=583999
@@ -591,13 +607,13 @@ lazy_static! {
         .expect("Block bytes are in valid hex representation");
     pub static ref SAPLING_FINAL_ROOT_TESTNET_583999_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("13746c0c426cdddd05f85d86231f8bc647f5b024277c606c309ef707d85fd652")
-        .expect("final root bytes are in valid hex representation");
+        .expect("final root bytes are in valid hex representation").rev();
     pub static ref SAPLING_FINAL_ROOT_TESTNET_584000_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("13746c0c426cdddd05f85d86231f8bc647f5b024277c606c309ef707d85fd652")
-        .expect("final root bytes are in valid hex representation");
+        .expect("final root bytes are in valid hex representation").rev();
     pub static ref SAPLING_FINAL_ROOT_TESTNET_584001_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("13746c0c426cdddd05f85d86231f8bc647f5b024277c606c309ef707d85fd652")
-        .expect("final root bytes are in valid hex representation");
+        .expect("final root bytes are in valid hex representation").rev();
 
     // Heartwood transition
     // for i in 903799 903800 903801; do
@@ -614,13 +630,13 @@ lazy_static! {
         .expect("Block bytes are in valid hex representation");
     pub static ref SAPLING_FINAL_ROOT_TESTNET_903799_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("626444395cd5963d3dba2652ee5bd73ef57555cca4d9f0d52e887a3bf44488e2")
-        .expect("final root bytes are in valid hex representation");
+        .expect("final root bytes are in valid hex representation").rev();
     pub static ref SAPLING_FINAL_ROOT_TESTNET_903800_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("626444395cd5963d3dba2652ee5bd73ef57555cca4d9f0d52e887a3bf44488e2")
-        .expect("final root bytes are in valid hex representation");
+        .expect("final root bytes are in valid hex representation").rev();
     pub static ref SAPLING_FINAL_ROOT_TESTNET_903801_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("626444395cd5963d3dba2652ee5bd73ef57555cca4d9f0d52e887a3bf44488e2")
-        .expect("final root bytes are in valid hex representation");
+        .expect("final root bytes are in valid hex representation").rev();
 
     // Shielded coinbase
     // for i in 914678 925483; do
@@ -636,10 +652,10 @@ lazy_static! {
         .expect("Block bytes are in valid hex representation");
     pub static ref SAPLING_FINAL_ROOT_TESTNET_914678_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("0ba286a3fb00d8a63b6ea52064bcc58ffb859aaa881745157d9a67d20afd7a8d")
-        .expect("final root bytes are in valid hex representation");
+        .expect("final root bytes are in valid hex representation").rev();
     pub static ref SAPLING_FINAL_ROOT_TESTNET_925483_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("271370ff86c2a9cc452334098d3337cddffc478e66a356dc0c00aebb58a4b6ac")
-        .expect("final root bytes are in valid hex representation");
+        .expect("final root bytes are in valid hex representation").rev();
 
     // Canopy transition
     // for i in 1028499 1028500 1028501; do
@@ -656,13 +672,13 @@ lazy_static! {
         .expect("Block bytes are in valid hex representation");
     pub static ref SAPLING_FINAL_ROOT_TESTNET_1028499_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("580adc0253cd0545250039267b7b49445ca0550df735920b7466bba1a64f7cf7")
-        .expect("final root bytes are in valid hex representation");
+        .expect("final root bytes are in valid hex representation").rev();
     pub static ref SAPLING_FINAL_ROOT_TESTNET_1028500_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("580adc0253cd0545250039267b7b49445ca0550df735920b7466bba1a64f7cf7")
-        .expect("final root bytes are in valid hex representation");
+        .expect("final root bytes are in valid hex representation").rev();
     pub static ref SAPLING_FINAL_ROOT_TESTNET_1028501_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("580adc0253cd0545250039267b7b49445ca0550df735920b7466bba1a64f7cf7")
-        .expect("final root bytes are in valid hex representation");
+        .expect("final root bytes are in valid hex representation").rev();
 
     // One more Canopy block
     // (so that we have at least 3 blocks from Canopy)
@@ -673,7 +689,7 @@ lazy_static! {
         .expect("Block bytes are in valid hex representation");
     pub static ref SAPLING_FINAL_ROOT_TESTNET_1095000_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("1781d73666ceb7675323130defd5fae426f1ee7d5fbb83adc9393aa8ff7e8a8d")
-        .expect("final root bytes are in valid hex representation");
+        .expect("final root bytes are in valid hex representation").rev();
 
     // Shielded coinbase + Canopy
     // i=1101629
@@ -684,7 +700,7 @@ lazy_static! {
         .expect("Block bytes are in valid hex representation");
     pub static ref SAPLING_FINAL_ROOT_TESTNET_1101629_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("14c7c827cd05c73c052c2a9faa6d7fc7b45ec2e386d8894eb65c420175c43745")
-        .expect("final root bytes are in valid hex representation");
+        .expect("final root bytes are in valid hex representation").rev();
 
     // Testnet Coinbase Halving
     // i=1115999
@@ -703,13 +719,13 @@ lazy_static! {
         .expect("Block bytes are in valid hex representation");
     pub static ref SAPLING_FINAL_ROOT_TESTNET_1115999_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("14b41a6dd7cd3c113d98f72543c4f57ff4e444bd5995366e0da420169c861f37")
-        .expect("final root bytes are in valid hex representation");
+        .expect("final root bytes are in valid hex representation").rev();
     pub static ref SAPLING_FINAL_ROOT_TESTNET_1116000_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("14b41a6dd7cd3c113d98f72543c4f57ff4e444bd5995366e0da420169c861f37")
-        .expect("final root bytes are in valid hex representation");
+        .expect("final root bytes are in valid hex representation").rev();
     pub static ref SAPLING_FINAL_ROOT_TESTNET_1116001_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("14b41a6dd7cd3c113d98f72543c4f57ff4e444bd5995366e0da420169c861f37")
-        .expect("final root bytes are in valid hex representation");
+        .expect("final root bytes are in valid hex representation").rev();
 
     // One more Post-Halving block
     // (so that we have at least 3 blocks after the halving)
@@ -720,7 +736,7 @@ lazy_static! {
         .expect("Block bytes are in valid hex representation");
     pub static ref SAPLING_FINAL_ROOT_TESTNET_1326100_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("2b30b19f4254709fe365bd0b381b2e3d9d0c933eb4dba4dd1d07f0f6e196a183")
-        .expect("final root bytes are in valid hex representation");
+        .expect("final root bytes are in valid hex representation").rev();
 }
 
 #[cfg(test)]
