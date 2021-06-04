@@ -115,6 +115,8 @@ fn rejects_all_addresses_if_applying_offset_causes_an_underflow() {
     assert!(validated_peers.next().is_none());
 }
 
+// Utility functions
+
 /// Create a mock list of gossiped [`MetaAddr`]s with the specified `last_seen_times`.
 ///
 /// The IP address and port of the generated ports should not matter for the test.
