@@ -133,7 +133,7 @@ lazy_static! {
     /// OS-specific error when the port attempting to be opened is already in use.
     pub static ref PORT_IN_USE_ERROR: Regex = if cfg!(unix) {
         #[allow(clippy::trivial_regex)]
-        Regex::new("already in use")
+        Regex::new(&regex::escape("already in use"))
     } else {
         Regex::new("(access a socket in a way forbidden by its access permissions)|(Only one usage of each socket address)")
     }.expect("regex is valid");

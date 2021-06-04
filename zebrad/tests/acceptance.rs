@@ -18,8 +18,10 @@
 #![deny(clippy::await_holding_lock)]
 #![forbid(unsafe_code)]
 
-use color_eyre::eyre::Result;
-use eyre::WrapErr;
+use color_eyre::{
+    eyre::{Result, WrapErr},
+    Help,
+};
 use tempdir::TempDir;
 
 use std::{collections::HashSet, convert::TryInto, env, path::Path, path::PathBuf, time::Duration};
@@ -44,11 +46,6 @@ use zebrad::config::ZebradConfig;
 /// Previously, this value was 3 seconds, which caused rare
 /// metrics or tracing test failures in Windows CI.
 const LAUNCH_DELAY: Duration = Duration::from_secs(10);
-
-/// A regular expression that matches `zebrad` versions.
-///
-/// `zebrad` uses [semantic versioning](https://semver.org/).
-const ZEBRAD_VERSION_REGEX: &str = r"zebrad [0-9].[0-9].[0-9]-[A-Za-z]*.[0-9]+";
 
 fn default_test_config() -> Result<ZebradConfig> {
     let auto_port_ipv4_local = zebra_network::Config {
@@ -218,7 +215,7 @@ fn generate_no_args() -> Result<()> {
     let output = output.assert_success()?;
 
     // First line
-    output.stdout_contains(r"# Default configuration for zebrad.")?;
+    output.stdout_line_contains("# Default configuration for zebrad")?;
 
     Ok(())
 }
@@ -301,6 +298,17 @@ fn generate_args() -> Result<()> {
     Ok(())
 }
 
+/// Is `s` a valid `zebrad` version string?
+///
+/// Trims whitespace before parsing the version.
+///
+/// Returns false if the version is invalid, or if there is anything else on the
+/// line that contains the version. In particular, this check will fail if `s`
+/// includes any terminal formatting.
+fn is_zebrad_version(s: &str) -> bool {
+    semver::Version::parse(s.replace("zebrad", "").trim()).is_ok()
+}
+
 #[test]
 fn help_no_args() -> Result<()> {
     zebra_test::init();
@@ -311,11 +319,16 @@ fn help_no_args() -> Result<()> {
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
-    // First line haves the version
-    output.stdout_contains(ZEBRAD_VERSION_REGEX)?;
+    // The first line should have the version
+    output.any_output_line(
+        is_zebrad_version,
+        &output.output.stdout,
+        "stdout",
+        "a valid zebrad semantic version",
+    )?;
 
     // Make sure we are in help by looking usage string
-    output.stdout_contains(r"USAGE:")?;
+    output.stdout_line_contains("USAGE:")?;
 
     Ok(())
 }
@@ -356,7 +369,7 @@ fn start_no_args() -> Result<()> {
     let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
 
-    output.stdout_contains(r"Starting zebrad$")?;
+    output.stdout_line_contains("Starting zebrad")?;
 
     // Make sure the command was killed
     output.assert_was_killed()?;
@@ -563,7 +576,7 @@ fn app_no_args() -> Result<()> {
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
-    output.stdout_contains(r"USAGE:")?;
+    output.stdout_line_contains("USAGE:")?;
 
     Ok(())
 }
@@ -578,7 +591,13 @@ fn version_no_args() -> Result<()> {
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
-    output.stdout_contains(ZEBRAD_VERSION_REGEX)?;
+    // The output should only contain the version
+    output.output_check(
+        is_zebrad_version,
+        &output.output.stdout,
+        "stdout",
+        "a valid zebrad semantic version",
+    )?;
 
     Ok(())
 }
@@ -608,12 +627,12 @@ fn valid_generated_config_test() -> Result<()> {
     // Unlike the other tests, these tests can not be run in parallel, because
     // they use the generated config. So parallel execution can cause port and
     // cache conflicts.
-    valid_generated_config("start", r"Starting zebrad$")?;
+    valid_generated_config("start", "Starting zebrad")?;
 
     Ok(())
 }
 
-fn valid_generated_config(command: &str, expected_output: &str) -> Result<()> {
+fn valid_generated_config(command: &str, expect_stdout_line_contains: &str) -> Result<()> {
     zebra_test::init();
 
     let testdir = testdir()?;
@@ -643,7 +662,7 @@ fn valid_generated_config(command: &str, expected_output: &str) -> Result<()> {
     let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
 
-    output.stdout_contains(expected_output)?;
+    output.stdout_line_contains(expect_stdout_line_contains)?;
 
     // [Note on port conflict](#Note on port conflict)
     output.assert_was_killed().wrap_err("Possible port or cache conflict. Are there other acceptance test, zebrad, or zcashd processes running?")?;
@@ -800,8 +819,8 @@ fn sync_until(
     let mut child = tempdir.spawn_child(&["start"])?.with_timeout(timeout);
 
     let network = format!("network: {},", network);
-    child.expect_stdout(&network)?;
-    child.expect_stdout(stop_regex)?;
+    child.expect_stdout_line_matches(&network)?;
+    child.expect_stdout_line_matches(stop_regex)?;
     child.kill()?;
 
     Ok(child.dir)
@@ -833,8 +852,8 @@ fn create_cached_database_height(network: Network, height: Height) -> Result<()>
         .bypass_test_capture(true);
 
     let network = format!("network: {},", network);
-    child.expect_stdout(&network)?;
-    child.expect_stdout(STOP_AT_HEIGHT_REGEX)?;
+    child.expect_stdout_line_matches(&network)?;
+    child.expect_stdout_line_matches(STOP_AT_HEIGHT_REGEX)?;
     child.kill()?;
 
     Ok(())
@@ -980,20 +999,21 @@ async fn metrics_endpoint() -> Result<()> {
     assert!(res.status().is_success());
     let body = hyper::body::to_bytes(res).await;
     let (body, mut child) = child.kill_on_error(body)?;
-    assert!(
-        std::str::from_utf8(&body)
-            .expect("metrics response is valid UTF-8")
-            .contains("metrics snapshot"),
-        "metrics exporter returns data in the expected format"
-    );
-
     child.kill()?;
 
     let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
 
+    output.any_output_line_contains(
+        "metrics snapshot",
+        &body,
+        "metrics exporter response",
+        "the metrics response header",
+    )?;
+    std::str::from_utf8(&body).expect("unexpected invalid UTF-8 in metrics exporter response");
+
     // Make sure metrics was started
-    output.stdout_contains(format!(r"Opened metrics endpoint at {}", endpoint).as_str())?;
+    output.stdout_line_contains(format!("Opened metrics endpoint at {}", endpoint).as_str())?;
 
     // [Note on port conflict](#Note on port conflict)
     output
@@ -1037,9 +1057,6 @@ async fn tracing_endpoint() -> Result<()> {
     assert!(res.status().is_success());
     let body = hyper::body::to_bytes(res).await;
     let (body, child) = child.kill_on_error(body)?;
-    assert!(std::str::from_utf8(&body).unwrap().contains(
-        "This HTTP endpoint allows dynamic control of the filter applied to\ntracing events."
-    ));
 
     // Set a filter and make sure it was changed
     let request = Request::post(url_filter.clone())
@@ -1055,9 +1072,6 @@ async fn tracing_endpoint() -> Result<()> {
     assert!(tracing_res.status().is_success());
     let tracing_body = hyper::body::to_bytes(tracing_res).await;
     let (tracing_body, mut child) = child.kill_on_error(tracing_body)?;
-    assert!(std::str::from_utf8(&tracing_body)
-        .unwrap()
-        .contains("zebrad=debug"));
 
     child.kill()?;
 
@@ -1065,8 +1079,35 @@ async fn tracing_endpoint() -> Result<()> {
     let output = output.assert_failure()?;
 
     // Make sure tracing endpoint was started
-    output.stdout_contains(format!(r"Opened tracing endpoint at {}", endpoint).as_str())?;
+    output.stdout_line_contains(format!("Opened tracing endpoint at {}", endpoint).as_str())?;
     // TODO: Match some trace level messages from output
+
+    // Make sure the endpoint header is correct
+    // The header is split over two lines. But we don't want to require line
+    // breaks at a specific word, so we run two checks for different substrings.
+    output.any_output_line_contains(
+        "HTTP endpoint allows dynamic control of the filter",
+        &body,
+        "tracing filter endpoint response",
+        "the tracing response header",
+    )?;
+    output.any_output_line_contains(
+        "tracing events",
+        &body,
+        "tracing filter endpoint response",
+        "the tracing response header",
+    )?;
+    std::str::from_utf8(&body).expect("unexpected invalid UTF-8 in tracing filter response");
+
+    // Make sure endpoint requests change the filter
+    output.any_output_line_contains(
+        "zebrad=debug",
+        &tracing_body,
+        "tracing filter endpoint response",
+        "the modified tracing filter",
+    )?;
+    std::str::from_utf8(&tracing_body)
+        .expect("unexpected invalid UTF-8 in modified tracing filter response");
 
     // [Note on port conflict](#Note on port conflict)
     output
@@ -1091,7 +1132,10 @@ fn zebra_zcash_listener_conflict() -> Result<()> {
     let mut config = default_test_config()?;
     config.network.listen_addr = listen_addr.parse().unwrap();
     let dir1 = TempDir::new("zebrad_tests")?.with_config(&mut config)?;
-    let regex1 = format!(r"Opened Zcash protocol endpoint at {}", listen_addr);
+    let regex1 = regex::escape(&format!(
+        "Opened Zcash protocol endpoint at {}",
+        listen_addr
+    ));
 
     // From another folder create a configuration with the same listener.
     // `network.listen_addr` will be the same in the 2 nodes.
@@ -1119,7 +1163,7 @@ fn zebra_metrics_conflict() -> Result<()> {
     let mut config = default_test_config()?;
     config.metrics.endpoint_addr = Some(listen_addr.parse().unwrap());
     let dir1 = TempDir::new("zebrad_tests")?.with_config(&mut config)?;
-    let regex1 = format!(r"Opened metrics endpoint at {}", listen_addr);
+    let regex1 = regex::escape(&format!(r"Opened metrics endpoint at {}", listen_addr));
 
     // From another folder create a configuration with the same endpoint.
     // `metrics.endpoint_addr` will be the same in the 2 nodes.
@@ -1147,7 +1191,7 @@ fn zebra_tracing_conflict() -> Result<()> {
     let mut config = default_test_config()?;
     config.tracing.endpoint_addr = Some(listen_addr.parse().unwrap());
     let dir1 = TempDir::new("zebrad_tests")?.with_config(&mut config)?;
-    let regex1 = format!(r"Opened tracing endpoint at {}", listen_addr);
+    let regex1 = regex::escape(&format!(r"Opened tracing endpoint at {}", listen_addr));
 
     // From another folder create a configuration with the same endpoint.
     // `tracing.endpoint_addr` will be the same in the 2 nodes.
@@ -1173,7 +1217,7 @@ fn zebra_state_conflict() -> Result<()> {
 
     // Windows problems with this match will be worked on at #1654
     // We are matching the whole opened path only for unix by now.
-    let regex = if cfg!(unix) {
+    let contains = if cfg!(unix) {
         let mut dir_conflict_full = PathBuf::new();
         dir_conflict_full.push(dir_conflict.path());
         dir_conflict_full.push("state");
@@ -1193,7 +1237,7 @@ fn zebra_state_conflict() -> Result<()> {
 
     check_config_conflict(
         dir_conflict.path(),
-        regex.as_str(),
+        regex::escape(&contains).as_str(),
         dir_conflict.path(),
         LOCK_FILE_ERROR.as_str(),
     )?;
@@ -1259,9 +1303,8 @@ where
 
     // Look for the success regex
     output1
-        .stdout_contains(first_stdout_regex)
+        .stdout_line_matches(first_stdout_regex)
         .context_from(&output2)?;
-    use color_eyre::Help;
     output1
         .assert_was_killed()
         .warning("Possible port conflict. Are there other acceptance tests running?")
@@ -1269,7 +1312,7 @@ where
 
     // In the second node we look for the conflict regex
     output2
-        .stderr_contains(second_stderr_regex)
+        .stderr_line_matches(second_stderr_regex)
         .context_from(&output1)?;
     output2
         .assert_was_not_killed()

@@ -19,7 +19,7 @@ dependencies = [
  "once_cell",
  "regex",
  "secrecy",
- "semver",
+ "semver 0.9.0",
  "serde",
  "signal-hook",
  "termcolor",
@@ -2954,7 +2954,7 @@ version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "138e3e0acb6c9fb258b19b67cb8abd63c00679d2851805ea151465464fe9030a"
 dependencies = [
- "semver",
+ "semver 0.9.0",
 ]
 
 [[package]]
@@ -3063,6 +3063,12 @@ dependencies = [
  "semver-parser",
  "serde",
 ]
+
+[[package]]
+name = "semver"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5f3aac57ee7f3272d8395c6e4f502f434f0e289fcd62876f70daa008c20dcabe"
 
 [[package]]
 name = "semver-parser"
@@ -4622,6 +4628,8 @@ dependencies = [
  "once_cell",
  "pin-project 0.4.27",
  "rand 0.8.1",
+ "regex",
+ "semver 1.0.3",
  "sentry",
  "sentry-tracing",
  "serde",

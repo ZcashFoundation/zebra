@@ -63,9 +63,11 @@ fn kill_on_timeout_output_continuous_lines() -> Result<()> {
         .spawn_child_with_command(TEST_CMD, &["-v", "/dev/zero"])?
         .with_timeout(Duration::from_secs(2));
 
-    // We need to use expect_stdout, because wait_with_output ignores timeouts.
+    // We need to use expect_stdout_line_matches, because wait_with_output ignores timeouts.
     // We use a non-matching regex, to trigger the timeout.
-    assert!(child.expect_stdout("this regex should not match").is_err());
+    assert!(child
+        .expect_stdout_line_matches("this regex should not match")
+        .is_err());
 
     Ok(())
 }
@@ -88,9 +90,11 @@ fn finish_before_timeout_output_single_line() -> Result<()> {
         .spawn_child_with_command(TEST_CMD, &["zebra_test_output"])?
         .with_timeout(Duration::from_secs(2));
 
-    // We need to use expect_stdout, because wait_with_output ignores timeouts.
+    // We need to use expect_stdout_line_matches, because wait_with_output ignores timeouts.
     // We use a non-matching regex, to trigger the timeout.
-    assert!(child.expect_stdout("this regex should not match").is_err());
+    assert!(child
+        .expect_stdout_line_matches("this regex should not match")
+        .is_err());
 
     Ok(())
 }
@@ -115,9 +119,11 @@ fn kill_on_timeout_continuous_output_no_newlines() -> Result<()> {
         .spawn_child_with_command(TEST_CMD, &["/dev/zero"])?
         .with_timeout(Duration::from_secs(2));
 
-    // We need to use expect_stdout, because wait_with_output ignores timeouts.
+    // We need to use expect_stdout_line_matches, because wait_with_output ignores timeouts.
     // We use a non-matching regex, to trigger the timeout.
-    assert!(child.expect_stdout("this regex should not match").is_err());
+    assert!(child
+        .expect_stdout_line_matches("this regex should not match")
+        .is_err());
 
     Ok(())
 }
@@ -141,9 +147,11 @@ fn finish_before_timeout_short_output_no_newlines() -> Result<()> {
         .spawn_child_with_command(TEST_CMD, &["zebra_test_output"])?
         .with_timeout(Duration::from_secs(2));
 
-    // We need to use expect_stdout, because wait_with_output ignores timeouts.
+    // We need to use expect_stdout_line_matches, because wait_with_output ignores timeouts.
     // We use a non-matching regex, to trigger the timeout.
-    assert!(child.expect_stdout("this regex should not match").is_err());
+    assert!(child
+        .expect_stdout_line_matches("this regex should not match")
+        .is_err());
 
     Ok(())
 }
@@ -167,9 +175,11 @@ fn kill_on_timeout_no_output() -> Result<()> {
         .spawn_child_with_command(TEST_CMD, &["120"])?
         .with_timeout(Duration::from_secs(2));
 
-    // We need to use expect_stdout, because wait_with_output ignores timeouts.
+    // We need to use expect_stdout_line_matches, because wait_with_output ignores timeouts.
     // We use a non-matching regex, to trigger the timeout.
-    assert!(child.expect_stdout("this regex should not match").is_err());
+    assert!(child
+        .expect_stdout_line_matches("this regex should not match")
+        .is_err());
 
     Ok(())
 }
