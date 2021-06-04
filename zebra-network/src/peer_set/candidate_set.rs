@@ -109,6 +109,7 @@ pub(super) struct CandidateSet<S> {
     pub(super) address_book: Arc<std::sync::Mutex<AddressBook>>,
     pub(super) peer_service: S,
     wait_next_handshake: Sleep,
+    min_next_crawl: Instant,
 }
 
 impl<S> CandidateSet<S>
@@ -125,14 +126,27 @@ where
             address_book,
             peer_service,
             wait_next_handshake: sleep(Duration::from_secs(0)),
+            min_next_crawl: Instant::now(),
         }
     }
 
     /// Update the peer set from the network, using the default fanout limit.
     ///
     /// See [`update_initial`][Self::update_initial] for details.
+    ///
+    /// ## Security
+    ///
+    /// This call is rate-limited to prevent sending a burst of repeated requests for new peer
+    /// addresses to the same peers. Each call will only update the [`CandidateSet`] if more time
+    /// than [`MIN_PEER_GET_ADDR_INTERVAL`][constants::MIN_PEER_GET_ADDR_INTERVAL] has passed since
+    /// the last call.
     pub async fn update(&mut self) -> Result<(), BoxError> {
-        self.update_timeout(None).await
+        if self.min_next_crawl <= Instant::now() {
+            self.update_timeout(None).await?;
+            self.min_next_crawl = Instant::now() + constants::MIN_PEER_GET_ADDR_INTERVAL;
+        }
+
+        Ok(())
     }
 
     /// Update the peer set from the network, limiting the fanout to
