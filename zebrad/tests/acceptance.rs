@@ -45,6 +45,11 @@ use zebrad::config::ZebradConfig;
 /// metrics or tracing test failures in Windows CI.
 const LAUNCH_DELAY: Duration = Duration::from_secs(10);
 
+/// A regular expression that matches `zebrad` versions.
+///
+/// `zebrad` uses [semantic versioning](https://semver.org/).
+const ZEBRAD_VERSION_REGEX: &str = r"zebrad [0-9].[0-9].[0-9]-[A-Za-z]*.[0-9]+";
+
 fn default_test_config() -> Result<ZebradConfig> {
     let auto_port_ipv4_local = zebra_network::Config {
         listen_addr: "127.0.0.1:0".parse()?,
@@ -307,7 +312,7 @@ fn help_no_args() -> Result<()> {
     let output = output.assert_success()?;
 
     // First line haves the version
-    output.stdout_contains(r"zebrad [0-9].[0-9].[0-9]")?;
+    output.stdout_contains(ZEBRAD_VERSION_REGEX)?;
 
     // Make sure we are in help by looking usage string
     output.stdout_contains(r"USAGE:")?;
@@ -573,7 +578,7 @@ fn version_no_args() -> Result<()> {
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
-    output.stdout_matches(r"^zebrad [0-9].[0-9].[0-9]-[A-Za-z]*.[0-9]\n$")?;
+    output.stdout_contains(ZEBRAD_VERSION_REGEX)?;
 
     Ok(())
 }
