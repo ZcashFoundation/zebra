@@ -16,12 +16,10 @@ use super::super::block;
 /// activation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum Commitment {
-    /// [Pre-Sapling] Reserved field.
+    /// [Pre-Sapling] "A reserved field, to be ignored."
     ///
-    /// The value of this field MUST be all zeroes.
-    ///
-    /// This field is verified in `Commitment::from_bytes`.
-    PreSaplingReserved,
+    /// This field is not verified.
+    PreSaplingReserved([u8; 32]),
 
     /// [Sapling and Blossom] The final Sapling treestate of this block.
     ///
@@ -93,7 +91,7 @@ pub enum Commitment {
 }
 
 /// The required value of reserved `Commitment`s.
-pub(crate) const RESERVED_BYTES: [u8; 32] = [0; 32];
+pub(crate) const CHAIN_HISTORY_ACTIVATION_RESERVED: [u8; 32] = [0; 32];
 
 impl Commitment {
     /// Returns `bytes` as the Commitment variant for `network` and `height`.
@@ -106,16 +104,10 @@ impl Commitment {
         use CommitmentError::*;
 
         match NetworkUpgrade::current(network, height) {
-            Genesis | BeforeOverwinter | Overwinter => {
-                if bytes == RESERVED_BYTES {
-                    Ok(PreSaplingReserved)
-                } else {
-                    Err(InvalidPreSaplingReserved { actual: bytes })
-                }
-            }
+            Genesis | BeforeOverwinter | Overwinter => Ok(PreSaplingReserved(bytes)),
             Sapling | Blossom => Ok(FinalSaplingRoot(sapling::tree::Root(bytes))),
             Heartwood if Some(height) == Heartwood.activation_height(network) => {
-                if bytes == RESERVED_BYTES {
+                if bytes == CHAIN_HISTORY_ACTIVATION_RESERVED {
                     Ok(ChainHistoryActivationReserved)
                 } else {
                     Err(InvalidChainHistoryActivationReserved { actual: bytes })
@@ -134,9 +126,9 @@ impl Commitment {
         use Commitment::*;
 
         match self {
-            PreSaplingReserved => RESERVED_BYTES,
+            PreSaplingReserved(bytes) => bytes,
             FinalSaplingRoot(hash) => hash.0,
-            ChainHistoryActivationReserved => RESERVED_BYTES,
+            ChainHistoryActivationReserved => CHAIN_HISTORY_ACTIVATION_RESERVED,
             ChainHistoryRoot(hash) => hash.0,
             ChainHistoryBlockTxAuthCommitment(hash) => hash.0,
         }
@@ -174,15 +166,10 @@ pub struct ChainHistoryBlockTxAuthCommitmentHash([u8; 32]);
 #[allow(dead_code, missing_docs)]
 #[derive(Error, Debug, PartialEq)]
 pub enum CommitmentError {
-    #[error("invalid pre-Sapling reserved committment: expected all zeroes, actual: {actual:?}")]
-    InvalidPreSaplingReserved {
-        // TODO: are these fields a security risk? If so, open a ticket to remove
-        // similar fields across Zebra
-        actual: [u8; 32],
-    },
-
     #[error("invalid final sapling root: expected {expected:?}, actual: {actual:?}")]
     InvalidFinalSaplingRoot {
+        // TODO: are these fields a security risk? If so, open a ticket to remove
+        // similar fields across Zebra
         expected: [u8; 32],
         actual: [u8; 32],
     },

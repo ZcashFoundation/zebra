@@ -1,12 +1,22 @@
-use std::collections::HashSet;
-use std::io::{Cursor, Write};
+use std::{
+    collections::HashSet,
+    io::{Cursor, Write},
+};
 
 use chrono::{DateTime, Duration, LocalResult, TimeZone, Utc};
 
-use crate::serialization::{sha256d, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize};
-use crate::transaction::LockTime;
+use crate::{
+    block::{
+        serialize::MAX_BLOCK_BYTES, Block, BlockTimeError, Commitment::*, Hash, Header, Height,
+    },
+    parameters::{
+        Network::{self, *},
+        NetworkUpgrade::*,
+    },
+    serialization::{sha256d, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
+    transaction::LockTime,
+};
 
-use super::super::{serialize::MAX_BLOCK_BYTES, *};
 use super::generate; // XXX this should be rewritten as strategies
 
 #[test]
@@ -129,20 +139,28 @@ fn block_test_vectors_unique() {
 fn block_test_vectors_height_mainnet() {
     zebra_test::init();
 
-    block_test_vectors_height(Network::Mainnet);
+    block_test_vectors_height(Mainnet);
 }
 
 #[test]
 fn block_test_vectors_height_testnet() {
     zebra_test::init();
 
-    block_test_vectors_height(Network::Testnet);
+    block_test_vectors_height(Testnet);
 }
 
+/// Test that the block test vector indexes match the heights in the block data,
+/// and that each post-sapling block has a corresponding final sapling root.
 fn block_test_vectors_height(network: Network) {
-    let block_iter = match network {
-        Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
-        Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
+    let (block_iter, sapling_roots) = match network {
+        Mainnet => (
+            zebra_test::vectors::MAINNET_BLOCKS.iter(),
+            zebra_test::vectors::MAINNET_FINAL_SAPLING_ROOTS.clone(),
+        ),
+        Testnet => (
+            zebra_test::vectors::TESTNET_BLOCKS.iter(),
+            zebra_test::vectors::TESTNET_FINAL_SAPLING_ROOTS.clone(),
+        ),
     };
 
     for (&height, block) in block_iter {
@@ -154,6 +172,77 @@ fn block_test_vectors_height(network: Network) {
             height,
             "deserialized height must match BTreeMap key height"
         );
+
+        if height
+            >= Sapling
+                .activation_height(network)
+                .expect("sapling activation height is set")
+                .0
+        {
+            assert!(
+                sapling_roots.contains_key(&height),
+                "post-sapling block test vectors must have matching sapling root test vectors: missing {} {}",
+                network,
+                height
+            );
+        }
+    }
+}
+
+#[test]
+fn block_commitment_mainnet() {
+    zebra_test::init();
+
+    block_commitment(Mainnet);
+}
+
+#[test]
+fn block_commitment_testnet() {
+    zebra_test::init();
+
+    block_commitment(Testnet);
+}
+
+/// Check that the block commitment field parses without errors.
+/// For sapling and blossom blocks, also check the final sapling root value.
+///
+/// TODO: add chain history test vectors?
+fn block_commitment(network: Network) {
+    let (block_iter, sapling_roots) = match network {
+        Mainnet => (
+            zebra_test::vectors::MAINNET_BLOCKS.iter(),
+            zebra_test::vectors::MAINNET_FINAL_SAPLING_ROOTS.clone(),
+        ),
+        Testnet => (
+            zebra_test::vectors::TESTNET_BLOCKS.iter(),
+            zebra_test::vectors::TESTNET_FINAL_SAPLING_ROOTS.clone(),
+        ),
+    };
+
+    for (height, block) in block_iter {
+        let block = block
+            .zcash_deserialize_into::<Block>()
+            .expect("block is structurally valid");
+
+        let commitment = block.commitment(network).unwrap_or_else(|_| {
+            panic!(
+                "unexpected structurally invalid block commitment at {} {}",
+                network, height
+            )
+        });
+
+        if let FinalSaplingRoot(final_sapling_root) = commitment {
+            let expected_final_sapling_root = *sapling_roots
+                .get(&height)
+                .expect("unexpected missing final sapling root test vector");
+            assert_eq!(
+                final_sapling_root,
+                expected_final_sapling_root.into(),
+                "unexpected invalid final sapling root commitment at {} {}",
+                network,
+                height
+            );
+        }
     }
 }
 

@@ -96,6 +96,18 @@ impl From<Root> for [u8; 32] {
     }
 }
 
+impl From<&[u8; 32]> for Root {
+    fn from(bytes: &[u8; 32]) -> Root {
+        (*bytes).into()
+    }
+}
+
+impl From<&Root> for [u8; 32] {
+    fn from(root: &Root) -> Self {
+        (*root).into()
+    }
+}
+
 /// Sapling Note Commitment Tree
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct NoteCommitmentTree {
