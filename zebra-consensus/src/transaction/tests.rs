@@ -76,7 +76,7 @@ fn fake_v5_transaction_with_orchard_actions_has_inputs_and_outputs() {
     // guaranteed structurally by `orchard::ShieldedData`)
     insert_fake_orchard_shielded_data(&mut transaction);
 
-    // If a transaction has at least one Orhcard shielded action, it should be considered to have
+    // If a transaction has at least one Orchard shielded action, it should be considered to have
     // inputs and/or outputs
     assert!(check::has_inputs_and_outputs(&transaction).is_ok());
 }
