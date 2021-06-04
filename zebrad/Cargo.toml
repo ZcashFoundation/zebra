@@ -53,6 +53,8 @@ vergen = { version = "5.1.8", default-features = false, features = ["cargo", "gi
 [dev-dependencies]
 abscissa_core = { version = "0.5", features = ["testing"] }
 once_cell = "1.7"
+regex = "1.4.6"
+semver = "1.0.3"
 tempdir = "0.3.7"
 zebra-test = { path = "../zebra-test" }
 
