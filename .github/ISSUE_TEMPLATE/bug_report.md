@@ -7,48 +7,63 @@ assignees: ''
 
 ---
 
-**Version**
+## Description
 
-For bugs in `zebrad`, run
-
-`zebrad version`
-
-For bugs in the `zebra` libraries, list the versions of all `zebra` crates you
-are using. The easiest way to get this information is using `cargo-tree`.
-
-`cargo install cargo-tree`
-(see install here: https://github.com/sfackler/cargo-tree)
-
-Then:
-
-`cargo tree | grep zebra`
-
-
-**Platform**
-
-The output of `uname -a` (UNIX), or version and 32 or 64-bit (Windows)
-
-**Description**
-
+<!--
 Enter your issue details here.
-One way to structure the description:
+-->
 
 [short summary of the bug]
+
+### Steps to Reproduce
 
 I tried this:
 
 [behavior or code sample that causes the bug]
 
+```sh
+copy and paste the exact commands or code here
+```
+
+### Expected Behaviour
+
 I expected to see this happen: [explanation]
+
+### Actual Behaviour
 
 Instead, this happened: [explanation]
 
-**Commands**
+### Zebra Logs
 
-Copy and paste the exact commands you used, so the team can try to reproduce the issue.
-
-**Logs**
-
+<!--
 Copy and paste the last 100 Zebra log lines.
+Or upload the full logs to https://gist.github.com/ and add a link to them here.
+-->
 
-If you can, upload the full logs to [Gist](https://gist.github.com/), and add a link to them here.
+<details>
+
+```
+copy and paste the logs here
+```
+
+</details>
+
+## Environment
+
+### Zebra Version
+
+<!--
+For bugs in `zebrad`, run `zebrad version`.
+
+For bugs in the `zebra` libraries, list the `zebra` crate versions.
+You can get this information using cargo-tree:
+cargo install cargo-tree
+cargo tree | grep zebra
+-->
+
+### Operating System
+
+<!--
+Linux, macOS, BSD: the output of `uname -a`
+Windows: Windows version and 32-bit or 64-bit
+-->
