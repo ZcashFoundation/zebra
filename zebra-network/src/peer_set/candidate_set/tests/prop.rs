@@ -85,7 +85,7 @@ where
 
     for _ in 0..candidates {
         assert!(candidate_set.next().await.is_some());
-        assert!(Instant::now() > minimum_reconnect_instant);
+        assert!(Instant::now() >= minimum_reconnect_instant);
 
         minimum_reconnect_instant += CandidateSet::<S>::MIN_PEER_CONNECTION_INTERVAL;
     }
