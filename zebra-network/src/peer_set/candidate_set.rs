@@ -116,7 +116,7 @@ where
     S: Service<Request, Response = Response, Error = BoxError>,
     S::Future: Send + 'static,
 {
-    /// The minimum time between successive calls to `CandidateSet::next()`.
+    /// The minimum time between successive calls to [`CandidateSet::next()`][Self::next].
     ///
     /// ## Security
     ///
