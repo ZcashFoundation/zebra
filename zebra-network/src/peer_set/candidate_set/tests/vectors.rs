@@ -1,14 +1,28 @@
 use std::{
+    collections::VecDeque,
     convert::TryInto,
+    iter,
     net::{IpAddr, SocketAddr},
+    sync::{Arc, Mutex},
+    time::Duration as StdDuration,
 };
 
 use chrono::{DateTime, Duration, Utc};
+use futures::future;
+use tokio::{
+    runtime::Runtime,
+    time::{self, Instant},
+};
+use tracing::Span;
 
 use zebra_chain::serialization::DateTime32;
 
-use super::super::validate_addrs;
-use crate::types::{MetaAddr, PeerServices};
+use super::super::{validate_addrs, CandidateSet};
+use crate::{
+    constants::{GET_ADDR_FANOUT, MIN_PEER_GET_ADDR_INTERVAL},
+    types::{MetaAddr, PeerServices},
+    AddressBook, Config, Request, Response,
+};
 
 /// Test that offset is applied when all addresses have `last_seen` times in the future.
 #[test]
@@ -113,6 +127,62 @@ fn rejects_all_addresses_if_applying_offset_causes_an_underflow() {
     let mut validated_peers = validate_addrs(input_peers, last_seen_limit);
 
     assert!(validated_peers.next().is_none());
+}
+
+/// Test that calls to [`CandidateSet::update`] are rate limited.
+#[test]
+fn candidate_set_updates_are_rate_limited() {
+    // Run the test for enough time for `update` to actually run three times
+    const INTERVALS_TO_RUN: u32 = 3;
+    // How faster should `update` be called than the expected interval
+    const POLL_FREQUENCY_FACTOR: u32 = 3;
+
+    let runtime = Runtime::new().expect("Failed to create Tokio runtime");
+    let _guard = runtime.enter();
+
+    let mut peer_request_tracker: VecDeque<_> =
+        iter::repeat(Instant::now()).take(GET_ADDR_FANOUT).collect();
+
+    let rate_limit_interval = MIN_PEER_GET_ADDR_INTERVAL;
+
+    let peer_service = tower::service_fn(move |request| {
+        match request {
+            Request::Peers => {
+                // Get time from queue that the request is authorized to be sent
+                let authorized_request_time = peer_request_tracker
+                    .pop_front()
+                    .expect("peer_request_tracker should always have GET_ADDR_FANOUT elements");
+                // Check that the request was rate limited
+                assert!(Instant::now() >= authorized_request_time);
+                // Push a new authorization, updated by the rate limit interval
+                peer_request_tracker.push_back(Instant::now() + rate_limit_interval);
+
+                // Return an empty list of peer addresses
+                future::ok(Response::Peers(vec![]))
+            }
+            _ => unreachable!("Received an unexpected internal message: {:?}", request),
+        }
+    });
+
+    let address_book = AddressBook::new(&Config::default(), Span::none());
+    let mut candidate_set = CandidateSet::new(Arc::new(Mutex::new(address_book)), peer_service);
+
+    runtime.block_on(async move {
+        time::pause();
+
+        let time_limit = Instant::now()
+            + INTERVALS_TO_RUN * MIN_PEER_GET_ADDR_INTERVAL
+            + StdDuration::from_secs(1);
+
+        while Instant::now() <= time_limit {
+            candidate_set
+                .update()
+                .await
+                .expect("Call to CandidateSet::update should not fail");
+
+            time::advance(MIN_PEER_GET_ADDR_INTERVAL / POLL_FREQUENCY_FACTOR).await;
+        }
+    });
 }
 
 // Utility functions
