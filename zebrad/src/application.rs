@@ -13,7 +13,7 @@ use application::fatal_error;
 use std::process;
 
 use zebra_network::constants::PORT_IN_USE_ERROR;
-use zebra_state::constants::LOCK_FILE_ERROR;
+use zebra_state::constants::{DATABASE_FORMAT_VERSION, LOCK_FILE_ERROR};
 
 /// Application state
 pub static APPLICATION: AppCell<ZebradApp> = AppCell::new();
@@ -222,6 +222,8 @@ impl Application for ZebradApp {
             ("version", app_version().to_string()),
             // config
             ("Zcash network", config.network.network.to_string()),
+            // constants
+            ("state version", DATABASE_FORMAT_VERSION.to_string()),
         ];
 
         // git env vars can be skipped if there is no `.git` during the
