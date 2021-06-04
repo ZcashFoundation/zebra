@@ -8,7 +8,11 @@ use std::sync::Arc;
 use crate::{
     block,
     fmt::SummaryDebug,
-    parameters::{Network, NetworkUpgrade, GENESIS_PREVIOUS_BLOCK_HASH},
+    parameters::{
+        Network,
+        NetworkUpgrade::{self, *},
+        GENESIS_PREVIOUS_BLOCK_HASH,
+    },
     serialization,
     work::{difficulty::CompactDifficulty, equihash},
 };
@@ -171,11 +175,11 @@ impl Default for LedgerStateOverride {
         let default_network = Network::default();
 
         // TODO: dynamically select any future network upgrade (#1974)
-        let nu5_activation_height = NetworkUpgrade::Nu5.activation_height(default_network);
+        let nu5_activation_height = Nu5.activation_height(default_network);
         let nu5_override = if nu5_activation_height.is_some() {
             None
         } else {
-            Some(NetworkUpgrade::Nu5)
+            Some(Nu5)
         };
 
         LedgerStateOverride {
@@ -205,11 +209,7 @@ impl Arbitrary for LedgerState {
         )
             .prop_map(move |(height, network, nu5_override, has_coinbase)| {
                 // TODO: dynamically select any future network upgrade (#1974)
-                let nu5_override = if nu5_override {
-                    Some(NetworkUpgrade::Nu5)
-                } else {
-                    None
-                };
+                let nu5_override = if nu5_override { Some(Nu5) } else { None };
 
                 LedgerState {
                     height: ledger_override.height_override.unwrap_or(height),
@@ -280,15 +280,11 @@ impl Arbitrary for Commitment {
     fn arbitrary_with(_args: ()) -> Self::Strategy {
         (any::<[u8; 32]>(), any::<Network>(), any::<Height>())
             .prop_map(|(commitment_bytes, network, block_height)| {
-                match Commitment::from_bytes(commitment_bytes, network, block_height) {
-                    Ok(commitment) => commitment,
-                    // just fix up the reserved values when they fail
-                    Err(_) => Commitment::from_bytes(
-                        super::commitment::RESERVED_BYTES,
-                        network,
-                        block_height,
-                    )
-                    .expect("from_bytes only fails due to reserved bytes"),
+                if block_height == Heartwood.activation_height(network).unwrap() {
+                    Commitment::ChainHistoryActivationReserved
+                } else {
+                    Commitment::from_bytes(commitment_bytes, network, block_height)
+                        .expect("unexpected failure in from_bytes parsing")
                 }
             })
             .boxed()
