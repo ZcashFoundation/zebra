@@ -1291,7 +1291,7 @@ where
 /// We setup 2 nodes one connected to the other for this test.
 #[test]
 // #[ignore]
-fn genesis_check() -> Result<()> {
+fn genesis_download_check() -> Result<()> {
     // get some random ports for the 2 nodes
     let node1_port = random_known_port();
     let node2_port = random_known_port();
@@ -1351,7 +1351,7 @@ fn genesis_check() -> Result<()> {
     // make sure we always have 3 lines
     assert!(times.len() == 3);
 
-    // make sure the retry if at least GENESIS_TIMEOUT_RETRY after failure
+    // make sure the retry is at least GENESIS_TIMEOUT_RETRY after failure
     assert!(times[2] >= times[1] + genesis_timeout_retry);
 
     Ok(())
