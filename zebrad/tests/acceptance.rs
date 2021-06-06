@@ -1301,7 +1301,7 @@ fn genesis_download_check() -> Result<()> {
     seeds.insert(format!("127.0.0.1:{}", node2_port));
     let testdir1 = testdir()?.with_config(&mut custom_seeds_test_config(
         seeds.clone(),
-        seeds.clone(),
+        seeds,
         node1_port,
     )?)?;
 
@@ -1316,13 +1316,13 @@ fn genesis_download_check() -> Result<()> {
     seeds.insert(format!("127.0.0.1:{}", node1_port));
     let testdir2 = testdir()?.with_config(&mut custom_seeds_test_config(
         seeds.clone(),
-        seeds.clone(),
+        seeds,
         node2_port,
     )?)?;
     let mut node2 = testdir2.spawn_child(&["start"])?;
 
     // we need to wait a lot
-    std::thread::sleep(Duration::from_secs(80));
+    std::thread::sleep(Duration::from_secs(100));
 
     // kill both nodes
     node1.kill()?;
@@ -1343,13 +1343,13 @@ fn genesis_download_check() -> Result<()> {
     // get the time of each line
     let mut times = Vec::new();
     for line in lines.unwrap() {
-        let pieces: Vec<&str> = line.split("  ").flat_map(|l| l.split(" ")).collect();
+        let pieces: Vec<&str> = line.split("  ").flat_map(|l| l.split(' ')).collect();
         let time = chrono::NaiveTime::parse_from_str(pieces[2], "%H:%M:%S%.3f")?;
         times.push(time);
     }
 
-    // make sure we always have 3 lines
-    assert!(times.len() == 3);
+    // make sure we always have at least 3 lines
+    assert!(times.len() >= 3);
 
     // make sure the retry is at least GENESIS_TIMEOUT_RETRY after failure
     assert!(times[2] >= times[1] + genesis_timeout_retry);
