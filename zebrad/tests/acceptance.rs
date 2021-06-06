@@ -1290,6 +1290,7 @@ where
 ///
 /// We setup 2 nodes one connected to the other for this test.
 #[test]
+#[cfg(target_family = "unix")]
 // #[ignore]
 fn genesis_download_check() -> Result<()> {
     // get some random ports for the 2 nodes
@@ -1322,7 +1323,7 @@ fn genesis_download_check() -> Result<()> {
     let mut node2 = testdir2.spawn_child(&["start"])?;
 
     // we need to wait a lot
-    std::thread::sleep(Duration::from_secs(100));
+    std::thread::sleep(Duration::from_secs(80));
 
     // kill both nodes
     node1.kill()?;
