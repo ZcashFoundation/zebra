@@ -130,6 +130,17 @@ pub(super) const BLOCK_VERIFY_TIMEOUT: Duration = Duration::from_secs(180);
 /// previous sync runs.
 const SYNC_RESTART_DELAY: Duration = Duration::from_secs(61);
 
+/// Controls how long we wait to retry in a failed attempt to download
+/// and verify the genesis block.
+///
+/// This timeout gives the crawler time to find better peers.
+///
+/// ## Correctness
+///
+/// If this timeout is removed (or set too low), Zebra will retry
+/// inmediatly to download and verify the genesis block from its peers.
+const GENESIS_TIMEOUT_RETRY: Duration = Duration::from_secs(5);
+
 /// Helps work around defects in the bitcoin protocol by checking whether
 /// the returned hashes actually extend a chain tip.
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
@@ -618,6 +629,7 @@ where
                     tracing::warn!(?e, "could not download or verify genesis block, retrying")
                 }
             }
+            tokio::time::sleep(GENESIS_TIMEOUT_RETRY).await;
         }
 
         Ok(())

@@ -65,6 +65,18 @@ fn persistent_test_config() -> Result<ZebradConfig> {
     Ok(config)
 }
 
+fn custom_seeds_test_config(
+    mainnet_seeds: HashSet<std::string::String>,
+    testnet_seeds: HashSet<std::string::String>,
+    network_port: u16,
+) -> Result<ZebradConfig> {
+    let mut config = default_test_config()?;
+    config.network.initial_mainnet_peers = mainnet_seeds;
+    config.network.initial_testnet_peers = testnet_seeds;
+    config.network.listen_addr = format!("127.0.0.1:{}", network_port).parse()?;
+    Ok(config)
+}
+
 fn testdir() -> Result<TempDir> {
     TempDir::new("zebrad_tests").map_err(Into::into)
 }
@@ -1270,6 +1282,77 @@ where
         .assert_was_not_killed()
         .warning("Possible port conflict. Are there other acceptance tests running?")
         .context_from(&output1)?;
+
+    Ok(())
+}
+
+/// Test that a failed attempt to download a genesis block will not be retried inmediatly.
+///
+/// We setup 2 nodes one connected to the other for this test.
+#[test]
+// #[ignore]
+fn genesis_check() -> Result<()> {
+    // get some random ports for the 2 nodes
+    let node1_port = random_known_port();
+    let node2_port = random_known_port();
+
+    // add the seed of node2 to node1
+    let mut seeds = HashSet::new();
+    seeds.insert(format!("127.0.0.1:{}", node2_port));
+    let testdir1 = testdir()?.with_config(&mut custom_seeds_test_config(
+        seeds.clone(),
+        seeds.clone(),
+        node1_port,
+    )?)?;
+
+    // start node1
+    let mut node1 = testdir1.spawn_child(&["start"])?;
+
+    // wait to make sure node1 is ready
+    std::thread::sleep(LAUNCH_DELAY);
+
+    // start node2 with the node1 as the seed
+    let mut seeds = HashSet::new();
+    seeds.insert(format!("127.0.0.1:{}", node1_port));
+    let testdir2 = testdir()?.with_config(&mut custom_seeds_test_config(
+        seeds.clone(),
+        seeds.clone(),
+        node2_port,
+    )?)?;
+    let mut node2 = testdir2.spawn_child(&["start"])?;
+
+    // we need to wait a lot
+    std::thread::sleep(Duration::from_secs(80));
+
+    // kill both nodes
+    node1.kill()?;
+    node2.kill()?;
+
+    // we are going to testing the output in node2
+    let output2 = node2.wait_with_output()?;
+
+    // this should be the same as zebrad::components::sync::GENESIS_TIMEOUT_RETRY
+    let genesis_timeout_retry: chrono::Duration = chrono::Duration::seconds(5);
+
+    // get all lines from output2 that match "genesis". We shoud always get something as:
+    // Jun 06 10:31:51.528  INFO {zebrad="c453fbf" net="Main"}:sync: zebrad::components::sync: starting genesis block download and verify
+    // Jun 06 10:32:36.534  WARN {zebrad="c453fbf" net="Main"}:sync: zebrad::components::sync: could not download or verify genesis block, retrying e=Elapsed(())
+    // Jun 06 10:32:41.537  INFO {zebrad="c453fbf" net="Main"}:sync: zebrad::components::sync: starting genesis block download and verify
+    let lines = output2.stdout_match_line(r"genesis");
+
+    // get the time of each line
+    let mut times = Vec::new();
+    for line in lines.unwrap() {
+        let pieces: Vec<&str> = line.split("  ").flat_map(|l| l.split(" ")).collect();
+        let time = chrono::NaiveTime::parse_from_str(pieces[2], "%H:%M:%S%.3f")?;
+        times.push(time);
+    }
+
+    // make sure we always have 3 lines
+    assert!(times.len() == 3);
+
+    // make sure the retry if at least GENESIS_TIMEOUT_RETRY after failure
+    assert!(times[2] >= times[1] + genesis_timeout_retry);
 
     Ok(())
 }
