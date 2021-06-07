@@ -184,7 +184,10 @@ impl<T> AtLeastOne<T> {
 /// This macro is similar to the [`vec!`][`std::vec!`] macro, but doesn't support creating an empty
 /// `AtLeastOne` instance.
 ///
-/// Note: This is currently only used for testing.
+/// # Security
+///
+/// This macro must only be used in tests, because it skips the `TrustedPreallocate` memory
+/// denial of service checks.
 #[cfg(any(test, feature = "proptest-impl"))]
 #[macro_export]
 macro_rules! at_least_one {
