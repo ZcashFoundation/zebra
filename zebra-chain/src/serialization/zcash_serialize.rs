@@ -112,7 +112,7 @@ pub fn zcash_serialize_bytes_external_count<W: io::Write>(
     vec: &Vec<u8>,
     mut writer: W,
 ) -> Result<(), io::Error> {
-    writer.write_all(&vec)
+    writer.write_all(vec)
 }
 
 /// Write a Bitcoin-encoded UTF-8 `&str`.

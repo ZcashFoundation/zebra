@@ -1018,7 +1018,7 @@ where
 
             if let Some(book_addr) = connected_addr.get_address_book_addr() {
                 let _ = timestamp_collector
-                    .send(MetaAddr::new_errored(&book_addr, &remote_services))
+                    .send(MetaAddr::new_errored(&book_addr, remote_services))
                     .await;
             }
             Err(err)

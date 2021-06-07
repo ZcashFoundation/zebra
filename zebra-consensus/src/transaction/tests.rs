@@ -43,7 +43,7 @@ fn v5_fake_transactions() -> Result<(), Report> {
                             check::spend_cv_rk_not_small_order(&spend)?
                         }
                         for output in s.outputs() {
-                            check::output_cv_epk_not_small_order(&output)?;
+                            check::output_cv_epk_not_small_order(output)?;
                         }
                     }
                 }

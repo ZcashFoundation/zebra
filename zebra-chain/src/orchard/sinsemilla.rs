@@ -89,7 +89,7 @@ pub fn sinsemilla_hash_to_point(D: &[u8], M: &BitVec<Lsb0, u8>) -> pallas::Point
         // Pad each chunk with zeros.
         let mut store = [0u8; 2];
         let bits = store.bits_mut::<Lsb0>();
-        bits[..chunk.len()].copy_from_slice(&chunk);
+        bits[..chunk.len()].copy_from_slice(chunk);
 
         acc = acc + acc + S(&bits[..k]);
     }

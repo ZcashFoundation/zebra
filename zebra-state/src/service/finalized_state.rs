@@ -339,7 +339,7 @@ impl FinalizedState {
     /// Returns the height of the given block if it exists.
     pub fn height(&self, hash: block::Hash) -> Option<block::Height> {
         let height_by_hash = self.db.cf_handle("height_by_hash").unwrap();
-        self.db.zs_get(&height_by_hash, &hash)
+        self.db.zs_get(height_by_hash, &hash)
     }
 
     /// Returns the given block if it exists.
