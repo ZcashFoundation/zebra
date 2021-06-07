@@ -90,7 +90,7 @@ pub fn difficulty_is_valid(
 
 /// Returns `Ok(())` if the `EquihashSolution` is valid for `header`
 pub fn equihash_solution_is_valid(header: &Header) -> Result<(), equihash::Error> {
-    header.solution.check(&header)
+    header.solution.check(header)
 }
 
 /// Returns `Ok(())` if the block subsidy and miner fees in `block` are valid for `network`

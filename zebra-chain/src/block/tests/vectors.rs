@@ -233,7 +233,7 @@ fn block_commitment(network: Network) {
 
         if let FinalSaplingRoot(final_sapling_root) = commitment {
             let expected_final_sapling_root = *sapling_roots
-                .get(&height)
+                .get(height)
                 .expect("unexpected missing final sapling root test vector");
             assert_eq!(
                 final_sapling_root,

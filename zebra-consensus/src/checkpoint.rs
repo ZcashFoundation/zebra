@@ -464,7 +464,7 @@ where
             .map(|tx| tx.hash())
             .collect::<Vec<_>>();
 
-        crate::block::check::merkle_root_validity(self.network, &block, &transaction_hashes)?;
+        crate::block::check::merkle_root_validity(self.network, block, &transaction_hashes)?;
 
         Ok(height)
     }

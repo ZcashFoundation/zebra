@@ -198,7 +198,7 @@ impl NetworkUpgrade {
     ///
     /// Returns None if this network upgrade has no consensus branch id.
     pub fn branch_id(&self) -> Option<ConsensusBranchId> {
-        NetworkUpgrade::branch_id_list().get(&self).cloned()
+        NetworkUpgrade::branch_id_list().get(self).cloned()
     }
 
     /// Returns the target block spacing for the network upgrade.

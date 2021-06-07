@@ -110,7 +110,7 @@ fn prf_ock(ovk: [u8; 32], cv: [u8; 32], cm_x: [u8; 32], ephemeral_key: [u8; 32])
 ///
 /// <https://zips.z.cash/protocol/nu5.pdf#concretediversifyhash>
 fn diversify_hash(d: &[u8]) -> pallas::Point {
-    let p = pallas_group_hash(b"z.cash:Orchard-gd", &d);
+    let p = pallas_group_hash(b"z.cash:Orchard-gd", d);
 
     if <bool>::from(p.is_identity()) {
         pallas_group_hash(b"z.cash:Orchard-gd", b"")

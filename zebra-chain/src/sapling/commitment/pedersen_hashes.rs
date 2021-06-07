@@ -82,7 +82,7 @@ pub fn pedersen_hash_to_point(domain: [u8; 8], M: &BitVec<Lsb0, u8>) -> jubjub::
         .enumerate()
         .map(|(i, segment)| (i + 1, segment))
     {
-        result += I_i(domain, i as u32) * M_i(&segment);
+        result += I_i(domain, i as u32) * M_i(segment);
     }
 
     result
@@ -124,5 +124,5 @@ pub fn mixing_pedersen_hash(P: jubjub::ExtendedPoint, x: jubjub::Fr) -> jubjub::
 pub fn windowed_pedersen_commitment(r: jubjub::Fr, s: &BitVec<Lsb0, u8>) -> jubjub::ExtendedPoint {
     const D: [u8; 8] = *b"Zcash_PH";
 
-    pedersen_hash_to_point(D, &s) + find_group_hash(D, b"r") * r
+    pedersen_hash_to_point(D, s) + find_group_hash(D, b"r") * r
 }
