@@ -272,7 +272,7 @@ where
     ///
     /// Zebra resists distributed denial of service attacks by making sure that
     /// new peer connections are initiated at least
-    /// `MIN_PEER_CONNECTION_INTERVAL` apart.
+    /// [`MIN_PEER_CONNECTION_INTERVAL`][constants::MIN_PEER_CONNECTION_INTERVAL] apart.
     pub async fn next(&mut self) -> Option<MetaAddr> {
         let current_deadline = self.wait_next_handshake.deadline().max(Instant::now());
         let mut sleep = sleep_until(current_deadline + constants::MIN_PEER_CONNECTION_INTERVAL);
