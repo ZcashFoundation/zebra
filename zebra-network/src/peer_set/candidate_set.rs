@@ -181,7 +181,7 @@ where
     async fn update_timeout(&mut self, fanout_limit: Option<usize>) -> Result<(), BoxError> {
         // SECURITY
         //
-        // Rate limit sending `GetAddr` messages to random peers.
+        // Rate limit sending `GetAddr` messages to peers.
         if self.min_next_crawl <= Instant::now() {
             // CORRECTNESS
             //
