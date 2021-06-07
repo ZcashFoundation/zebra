@@ -1,7 +1,7 @@
 use std::{cmp::min, mem, sync::Arc, time::Duration};
 
 use futures::stream::{FuturesUnordered, StreamExt};
-use tokio::time::{sleep, sleep_until, timeout, Sleep};
+use tokio::time::{sleep, sleep_until, timeout, Instant, Sleep};
 use tower::{Service, ServiceExt};
 
 use zebra_chain::serialization::DateTime32;
@@ -282,7 +282,7 @@ where
     /// new peer connections are initiated at least
     /// `MIN_PEER_CONNECTION_INTERVAL` apart.
     pub async fn next(&mut self) -> Option<MetaAddr> {
-        let current_deadline = self.next_peer_min_wait.deadline();
+        let current_deadline = self.next_peer_min_wait.deadline().max(Instant::now());
         let mut sleep = sleep_until(current_deadline + Self::MIN_PEER_CONNECTION_INTERVAL);
         mem::swap(&mut self.next_peer_min_wait, &mut sleep);
 

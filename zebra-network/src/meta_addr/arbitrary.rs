@@ -16,6 +16,12 @@ impl MetaAddr {
             })
             .boxed()
     }
+
+    pub fn alternate_node_strategy() -> BoxedStrategy<Self> {
+        canonical_socket_addr()
+            .prop_map(|address| MetaAddr::new_alternate(&address, &PeerServices::NODE_NETWORK))
+            .boxed()
+    }
 }
 
 impl Arbitrary for MetaAddr {
