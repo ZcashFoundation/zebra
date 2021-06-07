@@ -164,7 +164,7 @@ where
     /// This call is rate-limited to prevent sending a burst of repeated requests for new peer
     /// addresses. Each call will only update the [`CandidateSet`] if more time
     /// than [`MIN_PEER_GET_ADDR_INTERVAL`][constants::MIN_PEER_GET_ADDR_INTERVAL] has passed since
-    /// the last call.
+    /// the last call. Otherwise, the update is skipped.
     ///
     /// [`Responded`]: crate::PeerAddrState::Responded
     /// [`NeverAttemptedGossiped`]: crate::PeerAddrState::NeverAttemptedGossiped
