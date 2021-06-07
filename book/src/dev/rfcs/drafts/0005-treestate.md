@@ -179,9 +179,13 @@ time).
 
 IMPORTANT: we need to save the incremental merkle tree / serialized nodes for:
 
-Sapling tip block
-~all Sprout blocks
-chains we're tracking in memory within the reorg limit, for both
+Sapling tip: 
+- When finalizing state, for Sapling, the tip saves a serialization of the Sapling Note Commitment Tree
+- 
+All Sprout blocks:
+- Every finalized block needs its own copy of the Sprout note commitment tree (😿)
+- When non-finalized state is being updated, each non-finalized chain gets its own copy of the Note Commitment Tree, cloned from the finalized block note commitment tree of its parent block, and then subsequently updated/extended as new Sprout note commitments are discovered when processing blocks.
+
 We can't just compute a fresh tree with just the note commitments within a block, we are adding them to the tree referenced by the anchor, but we cannot update that tree with just the anchor, we need the 'frontier' nodes and leaves of the incremental merkle tree.
 
 # Reference-level explanation
