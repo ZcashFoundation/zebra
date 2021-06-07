@@ -179,11 +179,16 @@ time).
 
 IMPORTANT: we need to save the incremental merkle tree / serialized nodes for:
 
+Orchard tip: 
+- When finalizing state, for Orchard, the tip of the chain (latest finalized block) saves a serialization of the Orchard Note Commitment Tree
+- When non-finalized state is being updated, each non-finalized chain gets its own copy of the Orchard Note Commitment Tree, cloned from the finalized block note commitment tree of its parent block, and then subsequently updated/extended as new Orchard note commitments are discovered when processing blocks.
+
 Sapling tip: 
-- When finalizing state, for Sapling, the tip saves a serialization of the Sapling Note Commitment Tree
-- 
+- When finalizing state, for Sapling, the tip of the chain (latest finalized block) saves a serialization of the Sapling Note Commitment Tree
+- When non-finalized state is being updated, each non-finalized chain gets its own copy of the Sapling Note Commitment Tree, cloned from the finalized block note commitment tree of its parent block, and then subsequently updated/extended as new Sapling note commitments are discovered when processing blocks.
+
 All Sprout blocks:
-- Every finalized block needs its own copy of the Sprout note commitment tree (😿)
+- Every finalized block needs its own copy of the Sprout note commitment tree accurate to that block (😿)
 - When non-finalized state is being updated, each non-finalized chain gets its own copy of the Note Commitment Tree, cloned from the finalized block note commitment tree of its parent block, and then subsequently updated/extended as new Sprout note commitments are discovered when processing blocks.
 
 We can't just compute a fresh tree with just the note commitments within a block, we are adding them to the tree referenced by the anchor, but we cannot update that tree with just the anchor, we need the 'frontier' nodes and leaves of the incremental merkle tree.
