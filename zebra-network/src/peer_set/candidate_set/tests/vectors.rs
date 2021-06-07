@@ -206,7 +206,7 @@ fn candidate_set_update_after_update_initial_is_rate_limited() {
 
         assert_eq!(call_count.load(Ordering::SeqCst), GET_ADDR_FANOUT);
 
-        // After waiting for the minimum interval the call to `update` should succeed
+        // After waiting for at least the minimum interval the call to `update` should succeed
         time::advance(MIN_PEER_GET_ADDR_INTERVAL).await;
         candidate_set
             .update()
