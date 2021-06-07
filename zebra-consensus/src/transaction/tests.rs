@@ -1,6 +1,10 @@
 use zebra_chain::{
+    orchard,
     parameters::Network,
-    transaction::{arbitrary::fake_v5_transactions_for_network, Transaction},
+    transaction::{
+        arbitrary::{fake_v5_transactions_for_network, insert_fake_orchard_shielded_data},
+        Transaction,
+    },
 };
 
 use super::check;
@@ -52,6 +56,32 @@ fn v5_fake_transactions() -> Result<(), Report> {
 }
 
 #[test]
+fn fake_v5_transaction_with_orchard_actions_has_inputs_and_outputs() {
+    // Find a transaction with no inputs or outputs to use as base
+    let mut transaction = fake_v5_transactions_for_network(
+        Network::Mainnet,
+        zebra_test::vectors::MAINNET_BLOCKS.iter(),
+    )
+    .rev()
+    .find(|transaction| {
+        transaction.inputs().is_empty()
+            && transaction.outputs().is_empty()
+            && transaction.sapling_spends_per_anchor().next().is_none()
+            && transaction.sapling_outputs().next().is_none()
+            && transaction.joinsplit_count() == 0
+    })
+    .expect("At least one fake V5 transaction with no inputs and no outputs");
+
+    // Insert fake Orchard shielded data to the transaction, which has at least one action (this is
+    // guaranteed structurally by `orchard::ShieldedData`)
+    insert_fake_orchard_shielded_data(&mut transaction);
+
+    // If a transaction has at least one Orchard shielded action, it should be considered to have
+    // inputs and/or outputs
+    assert!(check::has_inputs_and_outputs(&transaction).is_ok());
+}
+
+#[test]
 fn v5_transaction_with_no_inputs_fails_validation() {
     let transaction = fake_v5_transactions_for_network(
         Network::Mainnet,
@@ -93,5 +123,40 @@ fn v5_transaction_with_no_outputs_fails_validation() {
     assert_eq!(
         check::has_inputs_and_outputs(&transaction),
         Err(TransactionError::NoOutputs)
+    );
+}
+
+#[test]
+fn v5_coinbase_transaction_without_enable_spends_flag_passes_validation() {
+    let mut transaction = fake_v5_transactions_for_network(
+        Network::Mainnet,
+        zebra_test::vectors::MAINNET_BLOCKS.iter(),
+    )
+    .rev()
+    .find(|transaction| transaction.is_coinbase())
+    .expect("At least one fake V5 coinbase transaction in the test vectors");
+
+    insert_fake_orchard_shielded_data(&mut transaction);
+
+    assert!(check::coinbase_tx_no_prevout_joinsplit_spend(&transaction).is_ok(),);
+}
+
+#[test]
+fn v5_coinbase_transaction_with_enable_spends_flag_fails_validation() {
+    let mut transaction = fake_v5_transactions_for_network(
+        Network::Mainnet,
+        zebra_test::vectors::MAINNET_BLOCKS.iter(),
+    )
+    .rev()
+    .find(|transaction| transaction.is_coinbase())
+    .expect("At least one fake V5 coinbase transaction in the test vectors");
+
+    let shielded_data = insert_fake_orchard_shielded_data(&mut transaction);
+
+    shielded_data.flags = orchard::Flags::ENABLE_SPENDS;
+
+    assert_eq!(
+        check::coinbase_tx_no_prevout_joinsplit_spend(&transaction),
+        Err(TransactionError::CoinbaseHasEnableSpendsOrchard)
     );
 }

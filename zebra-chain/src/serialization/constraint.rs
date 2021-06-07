@@ -178,3 +178,36 @@ impl<T> AtLeastOne<T> {
 
 // TODO: consider implementing `push`, `append`, and `Extend`,
 // because adding elements can't break the constraint.
+
+/// Create an initialized [`AtLeastOne`] instance.
+///
+/// This macro is similar to the [`vec!`][`std::vec!`] macro, but doesn't support creating an empty
+/// `AtLeastOne` instance.
+///
+/// # Security
+///
+/// This macro must only be used in tests, because it skips the `TrustedPreallocate` memory
+/// denial of service checks.
+#[cfg(any(test, feature = "proptest-impl"))]
+#[macro_export]
+macro_rules! at_least_one {
+    ($element:expr; 0) => (
+        compile_error!("At least one element needed to create an `AtLeastOne<T>`")
+    );
+
+    ($element:expr; $count:expr) => (
+        {
+            <Vec<_> as std::convert::TryInto<$crate::serialization::AtLeastOne<_>>>::try_into(
+                vec![$element; $expr],
+            ).expect("at least one element in `AtLeastOne<_>`")
+        }
+    );
+
+    ($($element:expr),+ $(,)?) => (
+        {
+            <Vec<_> as std::convert::TryInto<$crate::serialization::AtLeastOne<_>>>::try_into(
+                vec![$($element),*],
+            ).expect("at least one element in `AtLeastOne<_>`")
+        }
+    );
+}
