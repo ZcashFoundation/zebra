@@ -49,6 +49,14 @@ pub const LIVE_PEER_DURATION: Duration = Duration::from_secs(60 + 20 + 20 + 20);
 /// connected peer.
 pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(60);
 
+/// The minimum time between successive calls to [`CandidateSet::next()`][Self::next].
+///
+/// ## Security
+///
+/// Zebra resists distributed denial of service attacks by making sure that new peer connections
+/// are initiated at least `MIN_PEER_CONNECTION_INTERVAL` apart.
+pub const MIN_PEER_CONNECTION_INTERVAL: Duration = Duration::from_millis(100);
+
 /// The number of GetAddr requests sent when crawling for new peers.
 ///
 /// ## SECURITY
