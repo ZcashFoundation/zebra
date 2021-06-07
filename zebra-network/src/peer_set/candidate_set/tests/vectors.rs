@@ -171,6 +171,52 @@ fn candidate_set_updates_are_rate_limited() {
     });
 }
 
+/// Test that a call to [`CandidateSet::update`] after a call to [`CandidateSet::update_inital`] is
+/// rate limited.
+#[test]
+fn candidate_set_update_after_update_initial_is_rate_limited() {
+    let runtime = Runtime::new().expect("Failed to create Tokio runtime");
+    let _guard = runtime.enter();
+
+    let address_book = AddressBook::new(&Config::default(), Span::none());
+    let (peer_service, call_count) = mock_peer_service();
+    let mut candidate_set = CandidateSet::new(Arc::new(Mutex::new(address_book)), peer_service);
+
+    runtime.block_on(async move {
+        time::pause();
+
+        // Call `update_initial` first
+        candidate_set
+            .update_initial(GET_ADDR_FANOUT)
+            .await
+            .expect("Call to CandidateSet::update should not fail");
+
+        assert_eq!(call_count.load(Ordering::SeqCst), GET_ADDR_FANOUT);
+
+        // The following two calls to `update` should be skipped
+        candidate_set
+            .update()
+            .await
+            .expect("Call to CandidateSet::update should not fail");
+        time::advance(MIN_PEER_GET_ADDR_INTERVAL / 2).await;
+        candidate_set
+            .update()
+            .await
+            .expect("Call to CandidateSet::update should not fail");
+
+        assert_eq!(call_count.load(Ordering::SeqCst), GET_ADDR_FANOUT);
+
+        // After waiting for the minimum interval the call to `update` should succeed
+        time::advance(MIN_PEER_GET_ADDR_INTERVAL).await;
+        candidate_set
+            .update()
+            .await
+            .expect("Call to CandidateSet::update should not fail");
+
+        assert_eq!(call_count.load(Ordering::SeqCst), 2 * GET_ADDR_FANOUT);
+    });
+}
+
 // Utility functions
 
 /// Create a mock list of gossiped [`MetaAddr`]s with the specified `last_seen_times`.
