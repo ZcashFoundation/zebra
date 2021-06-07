@@ -1,0 +1,76 @@
+name: Regenerate test state
+
+on:
+  workflow_dispatch:
+
+env:
+  PROJECT_ID: zealous-zebra
+  ZONE: europe-west1-b
+
+jobs:
+
+  regenerate:
+    name: Regenerate test state
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2.3.4
+        with:
+          persist-credentials: false
+        
+      - name: Set project and image names
+        run: |
+          BRANCH_NAME=$(expr $GITHUB_REF : '.*/\(.*\)') && \
+          BRANCH_NAME=${BRANCH_NAME,,} && \
+          REPOSITORY=${GITHUB_REPOSITORY,,} && \
+          echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV && \
+          echo "SHORT_SHA=$(git rev-parse --short=7 $GITHUB_SHA)" >> $GITHUB_ENV && \
+          echo "REPOSITORY=$REPOSITORY" >> $GITHUB_ENV
+      - name: Set up gcloud
+        uses: GoogleCloudPlatform/github-actions/setup-gcloud@master
+        with:
+          version: '295.0.0'
+          project_id: ${{ env.PROJECT_ID }}
+          service_account_key: ${{ secrets.GCLOUD_AUTH }}
+
+      # Run once: create firewall rule to allow incoming traffic to the nodes
+      # - name: Create Zcash incoming traffic firewall rule
+      #   run: |
+      #     gcloud compute firewall-rules create "allow-zcash" \
+      #     --target-tags zebrad \
+      #     --allow tcp:8233,tcp:18233 \
+      #     --source-ranges 0.0.0.0/0 \
+      #     --description="Allow incoming Zcash traffic from anywhere" \
+
+      # Creates Compute Engine virtual machine instance w/ disks
+      - name: Create instance
+        run: |
+          gcloud compute instances create-with-container "zebrad-tests-$BRANCH_NAME-$SHORT_SHA" \
+          --boot-disk-size 100GB \
+          --boot-disk-type pd-ssd \
+          --container-image rust:buster \
+          --container-mount-disk mount-path='/mainnet',name="zebrad-cache-$SHORT_SHA-mainnet-1046400" \
+          --container-mount-disk mount-path='/testnet',name="zebrad-cache-$SHORT_SHA-testnet-1028500" \
+          --container-restart-policy never \
+          --create-disk name="zebrad-cache-$SHORT_SHA-mainnet-1046400",size=100GB,type=pd-balanced,auto-delete=no \
+          --create-disk name="zebrad-cache-$SHORT_SHA-testnet-1028500",size=100GB,type=pd-balanced,auto-delete=no \
+          --machine-type n2-standard-4 \
+          --service-account cos-vm@zealous-zebra.iam.gserviceaccount.com \
+          --scopes cloud-platform \
+          --tags zebrad \
+          --zone "$ZONE"
+      # Build and run test container to sync up to activation and no further, for mainnet and then testnet
+      - name: Run all tests
+        run: |
+          gcloud compute ssh "zebrad-tests-$BRANCH_NAME-$SHORT_SHA" --zone "$ZONE" --command \
+          "git clone -b $BRANCH_NAME https://github.com/ZcashFoundation/zebra.git;
+          cd zebra/;
+          docker build --build-arg SHORT_SHA=$SHORT_SHA -f docker/Dockerfile.test -t zebrad-test .;
+          docker run -i --mount type=bind,source=/mnt/disks/gce-containers-mounts/gce-persistent-disks/zebrad-cache-$SHORT_SHA-mainnet-1046400,target=/zebrad-cache zebrad-test:latest cargo test --verbose --features test_sync_past_canopy_mainnet --manifest-path zebrad/Cargo.toml sync_past_canopy_mainnet;
+          docker run -i --mount type=bind,source=/mnt/disks/gce-containers-mounts/gce-persistent-disks/zebrad-cache-$SHORT_SHA-testnet-1028500,target=/zebrad-cache zebrad-test:latest cargo test --verbose --features test_sync_past_canopy_testnet --manifest-path zebrad/Cargo.toml sync_past_canopy_testnet;
+          "
+      # Clean up
+      - name: Delete test instance
+        # Always run even if the earlier step fails
+        if: ${{ always() }}
+        run: |
+          gcloud compute instances delete "zebrad-tests-$BRANCH_NAME-$SHORT_SHA" --delete-disks boot --zone "$ZONE"
