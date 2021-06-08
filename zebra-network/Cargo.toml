@@ -38,6 +38,7 @@ zebra-chain = { path = "../zebra-chain" }
 [dev-dependencies]
 proptest = "0.10"
 proptest-derive = "0.3"
+tokio = { version = "0.3.6", features = ["test-util"] }
 toml = "0.5"
 
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }

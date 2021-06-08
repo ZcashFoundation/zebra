@@ -13,7 +13,10 @@ use tracing::Span;
 use zebra_chain::serialization::DateTime32;
 
 use super::super::{validate_addrs, CandidateSet};
-use crate::{types::MetaAddr, AddressBook, BoxError, Config, Request, Response};
+use crate::{
+    constants::MIN_PEER_CONNECTION_INTERVAL, types::MetaAddr, AddressBook, BoxError, Config,
+    Request, Response,
+};
 
 proptest! {
     /// Test that validated gossiped peers never have a `last_seen` time that's in the future.
@@ -87,6 +90,6 @@ where
         assert!(candidate_set.next().await.is_some());
         assert!(Instant::now() >= minimum_reconnect_instant);
 
-        minimum_reconnect_instant += CandidateSet::<S>::MIN_PEER_CONNECTION_INTERVAL;
+        minimum_reconnect_instant += MIN_PEER_CONNECTION_INTERVAL;
     }
 }

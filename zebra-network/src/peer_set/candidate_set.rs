@@ -108,7 +108,8 @@ mod tests;
 pub(super) struct CandidateSet<S> {
     pub(super) address_book: Arc<std::sync::Mutex<AddressBook>>,
     pub(super) peer_service: S,
-    next_peer_min_wait: Sleep,
+    wait_next_handshake: Sleep,
+    min_next_crawl: Instant,
 }
 
 impl<S> CandidateSet<S>
@@ -116,14 +117,6 @@ where
     S: Service<Request, Response = Response, Error = BoxError>,
     S::Future: Send + 'static,
 {
-    /// The minimum time between successive calls to `CandidateSet::next()`.
-    ///
-    /// ## Security
-    ///
-    /// Zebra resists distributed denial of service attacks by making sure that new peer connections
-    /// are initiated at least `MIN_PEER_CONNECTION_INTERVAL` apart.
-    const MIN_PEER_CONNECTION_INTERVAL: Duration = Duration::from_millis(100);
-
     /// Uses `address_book` and `peer_service` to manage a [`CandidateSet`] of peers.
     pub fn new(
         address_book: Arc<std::sync::Mutex<AddressBook>>,
@@ -132,7 +125,8 @@ where
         CandidateSet {
             address_book,
             peer_service,
-            next_peer_min_wait: sleep(Duration::from_secs(0)),
+            wait_next_handshake: sleep(Duration::from_secs(0)),
+            min_next_crawl: Instant::now(),
         }
     }
 
@@ -165,6 +159,13 @@ where
     ///
     /// [`next`][Self::next] puts peers into the [`AttemptPending`] state.
     ///
+    /// ## Security
+    ///
+    /// This call is rate-limited to prevent sending a burst of repeated requests for new peer
+    /// addresses. Each call will only update the [`CandidateSet`] if more time
+    /// than [`MIN_PEER_GET_ADDR_INTERVAL`][constants::MIN_PEER_GET_ADDR_INTERVAL] has passed since
+    /// the last call. Otherwise, the update is skipped.
+    ///
     /// [`Responded`]: crate::PeerAddrState::Responded
     /// [`NeverAttemptedGossiped`]: crate::PeerAddrState::NeverAttemptedGossiped
     /// [`Failed`]: crate::PeerAddrState::Failed
@@ -178,20 +179,27 @@ where
     ///
     /// See [`update_initial`][Self::update_initial] for details.
     async fn update_timeout(&mut self, fanout_limit: Option<usize>) -> Result<(), BoxError> {
-        // CORRECTNESS
+        // SECURITY
         //
-        // Use a timeout to avoid deadlocks when there are no connected
-        // peers, and:
-        // - we're waiting on a handshake to complete so there are peers, or
-        // - another task that handles or adds peers is waiting on this task
-        //   to complete.
-        if let Ok(fanout_result) =
-            timeout(constants::REQUEST_TIMEOUT, self.update_fanout(fanout_limit)).await
-        {
-            fanout_result?;
-        } else {
-            // update must only return an error for permanent failures
-            info!("timeout waiting for the peer service to become ready");
+        // Rate limit sending `GetAddr` messages to peers.
+        if self.min_next_crawl <= Instant::now() {
+            // CORRECTNESS
+            //
+            // Use a timeout to avoid deadlocks when there are no connected
+            // peers, and:
+            // - we're waiting on a handshake to complete so there are peers, or
+            // - another task that handles or adds peers is waiting on this task
+            //   to complete.
+            if let Ok(fanout_result) =
+                timeout(constants::REQUEST_TIMEOUT, self.update_fanout(fanout_limit)).await
+            {
+                fanout_result?;
+            } else {
+                // update must only return an error for permanent failures
+                info!("timeout waiting for the peer service to become ready");
+            }
+
+            self.min_next_crawl = Instant::now() + constants::MIN_PEER_GET_ADDR_INTERVAL;
         }
 
         Ok(())
@@ -280,11 +288,11 @@ where
     ///
     /// Zebra resists distributed denial of service attacks by making sure that
     /// new peer connections are initiated at least
-    /// `MIN_PEER_CONNECTION_INTERVAL` apart.
+    /// [`MIN_PEER_CONNECTION_INTERVAL`][constants::MIN_PEER_CONNECTION_INTERVAL] apart.
     pub async fn next(&mut self) -> Option<MetaAddr> {
-        let current_deadline = self.next_peer_min_wait.deadline().max(Instant::now());
-        let mut sleep = sleep_until(current_deadline + Self::MIN_PEER_CONNECTION_INTERVAL);
-        mem::swap(&mut self.next_peer_min_wait, &mut sleep);
+        let current_deadline = self.wait_next_handshake.deadline().max(Instant::now());
+        let mut sleep = sleep_until(current_deadline + constants::MIN_PEER_CONNECTION_INTERVAL);
+        mem::swap(&mut self.wait_next_handshake, &mut sleep);
 
         // # Correctness
         //
