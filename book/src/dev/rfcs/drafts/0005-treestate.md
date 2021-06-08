@@ -191,7 +191,7 @@ IMPORTANT: we need to save the incremental merkle tree / serialized nodes for:
 - When finalizing a block, the finalized tip is updated with a serialization of the Sapling Note Commitment Tree. (The previous tree should be deleted as part of the same database transaction.)
 - When non-finalized state is being updated, each non-finalized chain gets its own copy of the Sapling Note Commitment Tree, cloned from the finalized block note commitment tree of its parent block, and then subsequently updated/extended as new Sapling note commitments are discovered when processing blocks.
 
-All Sprout blocks:
+### Sprout
 - Every finalized block needs its own copy of the Sprout note commitment tree accurate to that block (😿)
 - When non-finalized state is being updated, each non-finalized chain gets its own copy of the Note Commitment Tree, cloned from the finalized block note commitment tree of its parent block, and then subsequently updated/extended as new Sprout note commitments are discovered when processing blocks.
 
