@@ -637,12 +637,14 @@ gains from those libraries come from async batch cryptography.
 ### Atomic Details
 [atomic-details]: #atomic-details
 
-x86 processors [don't implement `Relaxed` orderings](https://stackoverflow.com/questions/10537810/memory-ordering-restrictions-on-x86-architecture#18512212).
-Since Zebra's CI all runs on x86 (as of June 2021), our tests get a minimum `AcqRel` ordering.
-But ARM processors like the Apple M1 [implement weaker memory orderings, including `Relaxed`](https://stackoverflow.com/questions/59089084/loads-and-stores-reordering-on-arm#59089757).
+x86 processors [guarantee strong orderings, even for `Relaxed` accesses](https://stackoverflow.com/questions/10537810/memory-ordering-restrictions-on-x86-architecture#18512212).
+Since Zebra's CI all runs on x86 (as of June 2021), our tests get `AcqRel` orderings, even when we specify `Relaxed`.
+But ARM processors like the Apple M1 [implement weaker memory orderings, including genuinely `Relaxed` access](https://stackoverflow.com/questions/59089084/loads-and-stores-reordering-on-arm#59089757).
+For more details, see the [hardware reordering](https://doc.rust-lang.org/nomicon/atomics.html#hardware-reordering)
+section of the Rust nomicon.
 
 Tokio's watch channel [uses `SeqCst` for reads and writes](https://docs.rs/tokio/1.6.1/src/tokio/sync/watch.rs.html#286)
-to its internal atomics.
+to its internal atomics. So unless we're very sure, Zebra should do the same.
 
 ## Testing Async Code
 [testing-async-code]: #testing-async-code
