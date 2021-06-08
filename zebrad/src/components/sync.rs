@@ -21,6 +21,9 @@ use zebra_state as zs;
 use crate::{config::ZebradConfig, BoxError};
 
 mod downloads;
+#[cfg(test)]
+mod tests;
+
 use downloads::{AlwaysHedge, Downloads};
 
 /// Controls the number of peers used for each ObtainTips and ExtendTips request.
