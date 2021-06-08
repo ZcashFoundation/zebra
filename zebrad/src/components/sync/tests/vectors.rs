@@ -8,8 +8,8 @@ use tokio::{
     time::{timeout, Duration},
 };
 
-use crate::config::ZebradConfig;
 use super::super::*;
+use crate::config::ZebradConfig;
 
 /// Make sure the timeout values are consistent with each other.
 #[test]
@@ -18,26 +18,26 @@ fn ensure_timeouts_consistent() {
 
     // This constraint clears the download pipeline during a restart
     assert!(
-       SYNC_RESTART_DELAY.as_secs() > 2 * BLOCK_DOWNLOAD_TIMEOUT.as_secs(),
-       "Sync restart should allow for pending and buffered requests to complete"
+        SYNC_RESTART_DELAY.as_secs() > 2 * BLOCK_DOWNLOAD_TIMEOUT.as_secs(),
+        "Sync restart should allow for pending and buffered requests to complete"
     );
 
     // This constraint avoids spurious failures due to block retries timing out.
     // We multiply by 2, because the Hedge can wait up to BLOCK_DOWNLOAD_TIMEOUT
     // seconds before retrying.
     const BLOCK_DOWNLOAD_HEDGE_TIMEOUT: u64 =
-       2 * BLOCK_DOWNLOAD_RETRY_LIMIT as u64 * BLOCK_DOWNLOAD_TIMEOUT.as_secs();
+        2 * BLOCK_DOWNLOAD_RETRY_LIMIT as u64 * BLOCK_DOWNLOAD_TIMEOUT.as_secs();
     assert!(
-       SYNC_RESTART_DELAY.as_secs() > BLOCK_DOWNLOAD_HEDGE_TIMEOUT,
-       "Sync restart should allow for block downloads to time out on every retry"
+        SYNC_RESTART_DELAY.as_secs() > BLOCK_DOWNLOAD_HEDGE_TIMEOUT,
+        "Sync restart should allow for block downloads to time out on every retry"
     );
 
     // This constraint avoids spurious failures due to block download timeouts
     assert!(
         BLOCK_VERIFY_TIMEOUT.as_secs()
-        > SYNC_RESTART_DELAY.as_secs()
-        + BLOCK_DOWNLOAD_HEDGE_TIMEOUT
-        + BLOCK_DOWNLOAD_TIMEOUT.as_secs(),
+            > SYNC_RESTART_DELAY.as_secs()
+                + BLOCK_DOWNLOAD_HEDGE_TIMEOUT
+                + BLOCK_DOWNLOAD_TIMEOUT.as_secs(),
         "Block verify should allow for a block timeout, a sync restart, and some block fetches"
     );
 
@@ -52,9 +52,11 @@ fn ensure_timeouts_consistent() {
 
     // This constraint avoids spurious failures after checkpointing has finished
     assert!(
-       BLOCK_VERIFY_TIMEOUT.as_secs()
-           > 2 * zebra_chain::parameters::NetworkUpgrade::Blossom.target_spacing().num_seconds() as u64,
-       "Block verify should allow for at least one new block to be generated and distributed"
+        BLOCK_VERIFY_TIMEOUT.as_secs()
+            > 2 * zebra_chain::parameters::NetworkUpgrade::Blossom
+                .target_spacing()
+                .num_seconds() as u64,
+        "Block verify should allow for at least one new block to be generated and distributed"
     );
 }
 
