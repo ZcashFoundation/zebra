@@ -194,7 +194,8 @@ time).
 - When a block is rolled back from a non-finalized chain tip... (TODO)
 
 ### Sprout
-- Every finalized block needs its own copy of the Sprout note commitment tree accurate to that block (😿)
+- Every finalized block stores a separate copy of the Sprout note commitment tree (😿), as of that block.
+- When finalizing a block, the Sprout note commitment tree for that block is stored in the state. (The trees for previous blocks also remain in the state.)
 - Every block in each non-finalized chain gets its own copy of the Sprout note commitment tree. The initial tree is cloned from the note commitment tree of the finalized tip or fork root.
 - When a block is added to a non-finalized chain tip, the Sprout note commitment tree is cloned, then updated with the note commitments from that block.
 - When a block is rolled back from a non-finalized chain tip, the trees for each block are deleted, along with that block.
