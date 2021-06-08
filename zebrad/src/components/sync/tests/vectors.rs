@@ -68,8 +68,6 @@ fn request_genesis_is_rate_limited() {
     let peer_requests_counter_clone = Arc::clone(&peer_requests_counter);
     let state_requests_counter = Arc::new(AtomicU8::new(0));
     let state_requests_counter_clone = Arc::clone(&state_requests_counter);
-    let verifier_requests_counter = Arc::new(AtomicU8::new(0));
-    let verifier_requests_counter_clone = Arc::clone(&verifier_requests_counter);
 
     let runtime = Runtime::new().expect("Failed to create Tokio runtime");
     let _guard = runtime.enter();
@@ -102,13 +100,11 @@ fn request_genesis_is_rate_limited() {
         }
     });
 
-    // create a verifier service that respond always with `GENESIS_PREVIOUS_BLOCK_HASH`
-    let verifier_service = tower::service_fn(move |_| {
-        // Track the call
-        verifier_requests_counter_clone.fetch_add(1, Ordering::SeqCst);
-        // Respond with `GENESIS_PREVIOUS_BLOCK_HASH`
-        future::ok(zebra_chain::parameters::GENESIS_PREVIOUS_BLOCK_HASH)
-    });
+    // create a verifier service that will always panic as it will never be called
+    let verifier_service =
+        tower::service_fn(
+            move |_| async move { unreachable!("no request to this service is allowed") },
+        );
 
     // start the sync
     let mut chain_sync = ChainSync::new(
@@ -129,6 +125,4 @@ fn request_genesis_is_rate_limited() {
     assert_eq!(peer_requests_counter.load(Ordering::SeqCst), 3);
     // we should have 3 calls to the state service
     assert_eq!(state_requests_counter.load(Ordering::SeqCst), 3);
-    // we should have 3 calls to the verifier
-    assert_eq!(verifier_requests_counter.load(Ordering::SeqCst), 0);
 }
