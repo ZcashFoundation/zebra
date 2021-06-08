@@ -138,7 +138,7 @@ fn rejects_all_addresses_if_applying_offset_causes_an_underflow() {
 fn candidate_set_updates_are_rate_limited() {
     // Run the test for enough time for `update` to actually run three times
     const INTERVALS_TO_RUN: u32 = 3;
-    // How faster should `update` be called than the expected interval
+    // How many times should `update` be called in each rate limit interval
     const POLL_FREQUENCY_FACTOR: u32 = 3;
 
     let runtime = Runtime::new().expect("Failed to create Tokio runtime");
