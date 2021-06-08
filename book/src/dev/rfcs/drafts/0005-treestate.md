@@ -195,7 +195,9 @@ time).
 
 ### Sprout
 - Every finalized block needs its own copy of the Sprout note commitment tree accurate to that block (😿)
-- When non-finalized state is being updated, each non-finalized chain gets its own copy of the Note Commitment Tree, cloned from the finalized block note commitment tree of its parent block, and then subsequently updated/extended as new Sprout note commitments are discovered when processing blocks.
+- Every block in each non-finalized chain gets its own copy of the Sprout note commitment tree. The initial tree is cloned from the note commitment tree of the finalized tip or fork root.
+- When a block is added to a non-finalized chain tip, the Sprout note commitment tree is cloned, then updated with the note commitments from that block.
+- When a block is rolled back from a non-finalized chain tip, the trees for each block are deleted, along with that block.
 
 We can't just compute a fresh tree with just the note commitments within a block, we are adding them to the tree referenced by the anchor, but we cannot update that tree with just the anchor, we need the 'frontier' nodes and leaves of the incremental merkle tree.
 
