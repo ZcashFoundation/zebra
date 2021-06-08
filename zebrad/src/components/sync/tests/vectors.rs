@@ -103,15 +103,11 @@ fn request_genesis_is_rate_limited() {
     });
 
     // create a verifier service that respond always with `GENESIS_PREVIOUS_BLOCK_HASH`
-    let verifier_service = tower::service_fn(move |request| {
-        match request {
-            _ => {
-                // Track the call
-                verifier_requests_counter_clone.fetch_add(1, Ordering::SeqCst);
-                // Respond with `GENESIS_PREVIOUS_BLOCK_HASH`
-                future::ok(zebra_chain::parameters::GENESIS_PREVIOUS_BLOCK_HASH)
-            }
-        }
+    let verifier_service = tower::service_fn(move |_| {
+        // Track the call
+        verifier_requests_counter_clone.fetch_add(1, Ordering::SeqCst);
+        // Respond with `GENESIS_PREVIOUS_BLOCK_HASH`
+        future::ok(zebra_chain::parameters::GENESIS_PREVIOUS_BLOCK_HASH)
     });
 
     // start the sync
