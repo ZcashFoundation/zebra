@@ -3,7 +3,10 @@ use std::{
     convert::TryInto,
     iter,
     net::{IpAddr, SocketAddr},
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
+    },
     time::Duration as StdDuration,
 };
 
@@ -142,8 +145,8 @@ fn candidate_set_updates_are_rate_limited() {
     let _guard = runtime.enter();
 
     let address_book = AddressBook::new(&Config::default(), Span::none());
-    let mut candidate_set =
-        CandidateSet::new(Arc::new(Mutex::new(address_book)), mock_peer_service());
+    let (peer_service, call_count) = mock_peer_service();
+    let mut candidate_set = CandidateSet::new(Arc::new(Mutex::new(address_book)), peer_service);
 
     runtime.block_on(async move {
         time::pause();
@@ -160,6 +163,11 @@ fn candidate_set_updates_are_rate_limited() {
 
             time::advance(MIN_PEER_GET_ADDR_INTERVAL / POLL_FREQUENCY_FACTOR).await;
         }
+
+        assert_eq!(
+            call_count.load(Ordering::SeqCst),
+            INTERVALS_TO_RUN as usize * GET_ADDR_FANOUT
+        );
     });
 }
 
@@ -187,15 +195,27 @@ fn mock_gossiped_peers(last_seen_times: impl IntoIterator<Item = DateTime<Utc>>)
 }
 
 /// Create a mock `PeerSet` service that checks that requests to it are rate limited.
-fn mock_peer_service<E>(
-) -> impl Service<Request, Response = Response, Future = future::Ready<Result<Response, E>>, Error = E>
-       + 'static {
+///
+/// The function also returns an atomic counter, that can be used for checking how many times the
+/// service was called.
+fn mock_peer_service<E>() -> (
+    impl Service<
+            Request,
+            Response = Response,
+            Future = future::Ready<Result<Response, E>>,
+            Error = E,
+        > + 'static,
+    Arc<AtomicUsize>,
+) {
     let rate_limit_interval = MIN_PEER_GET_ADDR_INTERVAL;
+
+    let call_counter = Arc::new(AtomicUsize::new(0));
+    let call_counter_to_return = call_counter.clone();
 
     let mut peer_request_tracker: VecDeque<_> =
         iter::repeat(Instant::now()).take(GET_ADDR_FANOUT).collect();
 
-    tower::service_fn(move |request| {
+    let service = tower::service_fn(move |request| {
         match request {
             Request::Peers => {
                 // Get time from queue that the request is authorized to be sent
@@ -207,10 +227,15 @@ fn mock_peer_service<E>(
                 // Push a new authorization, updated by the rate limit interval
                 peer_request_tracker.push_back(Instant::now() + rate_limit_interval);
 
+                // Increment count of calls
+                call_counter.fetch_add(1, Ordering::SeqCst);
+
                 // Return an empty list of peer addresses
                 future::ok(Response::Peers(vec![]))
             }
             _ => unreachable!("Received an unexpected internal message: {:?}", request),
         }
-    })
+    });
+
+    (service, call_counter_to_return)
 }
