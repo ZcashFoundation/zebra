@@ -445,28 +445,6 @@ impl<T> TestOutput<T> {
     }
 
     #[instrument(skip(self))]
-    pub fn stdout_match_line(&self, regex: &str) -> Result<Vec<String>> {
-        let re = regex::Regex::new(regex)?;
-        let stdout = String::from_utf8_lossy(&self.output.stdout);
-
-        let mut matched_lines = Vec::new();
-        for line in stdout.lines() {
-            if re.is_match(line) {
-                matched_lines.push(String::from(line));
-            }
-        }
-        if !matched_lines.is_empty() {
-            return Ok(matched_lines);
-        }
-
-        Err(eyre!(
-            "stdout of command did not contain any line that matches the given regex"
-        ))
-        .context_from(self)
-        .with_section(|| format!("{:?}", regex).header("Match Regex:"))
-    }
-
-    #[instrument(skip(self))]
     pub fn stderr_contains(&self, regex: &str) -> Result<&Self> {
         let re = regex::Regex::new(regex)?;
         let stderr = String::from_utf8_lossy(&self.output.stderr);
