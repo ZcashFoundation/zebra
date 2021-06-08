@@ -189,7 +189,9 @@ time).
 ### Sapling
 - There is a single copy of the latest Sapling Note Commitment Tree for the finalized tip.
 - When finalizing a block, the finalized tip is updated with a serialization of the Sapling Note Commitment Tree. (The previous tree should be deleted as part of the same database transaction.)
-- When non-finalized state is being updated, each non-finalized chain gets its own copy of the Sapling Note Commitment Tree, cloned from the finalized block note commitment tree of its parent block, and then subsequently updated/extended as new Sapling note commitments are discovered when processing blocks.
+- Each non-finalized chain gets its own copy of the Sapling note commitment tree, cloned from the note commitment tree of the finalized tip or fork root.
+- When a block is added to a non-finalized chain tip, the Sapling note commitment tree is updated with the note commitments from that block.
+- When a block is rolled back from a non-finalized chain tip... (TODO)
 
 ### Sprout
 - Every finalized block needs its own copy of the Sprout note commitment tree accurate to that block (😿)
