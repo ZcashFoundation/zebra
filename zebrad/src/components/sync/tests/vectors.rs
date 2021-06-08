@@ -65,24 +65,24 @@ fn ensure_timeouts_consistent() {
 fn request_genesis_is_rate_limited() {
     // create some counters that will be updated inside async blocks
     let peer_requests_counter = Arc::new(AtomicU8::new(0));
-    let peer_requests_counter_clone = Arc::clone(&peer_requests_counter);
+    let peer_requests_counter_in_service = Arc::clone(&peer_requests_counter);
     let state_requests_counter = Arc::new(AtomicU8::new(0));
-    let state_requests_counter_clone = Arc::clone(&state_requests_counter);
+    let state_requests_counter_in_service = Arc::clone(&state_requests_counter);
 
     let runtime = Runtime::new().expect("Failed to create Tokio runtime");
     let _guard = runtime.enter();
 
-    // create a fake peer service that respond with `Nil` to `BlocksByHash` or
+    // create a fake peer service that respond with `Error` to `BlocksByHash` or
     // panic in any other type of request.
     let peer_service = tower::service_fn(move |request| {
         match request {
             zebra_network::Request::BlocksByHash(_) => {
                 // Track the call
-                peer_requests_counter_clone.fetch_add(1, Ordering::SeqCst);
-                // Respond with `Nil`
-                future::ok(zebra_network::Response::Nil)
+                peer_requests_counter_in_service.fetch_add(1, Ordering::SeqCst);
+                // Respond with `Error`
+                future::err("block not found".into())
             }
-            _ => panic!("no other request is allowed"),
+            _ => unreachable!("no other request is allowed"),
         }
     });
 
@@ -92,11 +92,11 @@ fn request_genesis_is_rate_limited() {
         match request {
             zebra_state::Request::Depth(_) => {
                 // Track the call
-                state_requests_counter_clone.fetch_add(1, Ordering::SeqCst);
+                state_requests_counter_in_service.fetch_add(1, Ordering::SeqCst);
                 // Respond with `None`
                 future::ok(zebra_state::Response::Depth(None))
             }
-            _ => panic!("no other request is allowed"),
+            _ => unreachable!("no other request is allowed"),
         }
     });
 
@@ -114,15 +114,15 @@ fn request_genesis_is_rate_limited() {
         verifier_service,
     );
 
-    // run `request_genesis()` with a timeout of 15 seconds
+    // run `request_genesis()` with a timeout of 13 seconds
     runtime.block_on(async move {
-        let _ = timeout(Duration::from_secs(15), chain_sync.request_genesis()).await;
+        let _ = timeout(Duration::from_secs(13), chain_sync.request_genesis()).await;
     });
 
-    // In 15 seconds and as we have a rate limit of 5 seconds in `request_genesis()` ...
+    // In 13 seconds and as we have a rate limit of 5 seconds in `request_genesis()` ...
 
     // we should have 3 calls to the peer service
-    assert_eq!(peer_requests_counter.load(Ordering::SeqCst), 3);
+    assert_eq!(peer_requests_counter.load(Ordering::SeqCst), 9);
     // we should have 3 calls to the state service
     assert_eq!(state_requests_counter.load(Ordering::SeqCst), 3);
 }

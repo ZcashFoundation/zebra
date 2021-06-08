@@ -175,7 +175,7 @@ where
                         .next()
                         .expect("successful response has the block in it")
                 } else {
-                    return Err("wrong response to block request".into());
+                    unreachable!("wrong response to block request");
                 };
                 metrics::counter!("sync.downloaded.block.count", 1);
 
