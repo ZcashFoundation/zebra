@@ -182,7 +182,9 @@ time).
 ### Orchard
 - There is a single copy of the latest Orchard Note Commitment Tree for the finalized tip.
 - When finalizing a block, the finalized tip is updated with a serialization of the latest Orchard Note Commitment Tree. (The previous tree should be deleted as part of the same database transaction.)
-- When non-finalized state is being updated, each non-finalized chain gets its own copy of the Orchard Note Commitment Tree, cloned from the finalized block note commitment tree of its parent block, and then subsequently updated/extended as new Orchard note commitments are discovered when processing blocks.
+- Each non-finalized chain gets its own copy of the Orchard note commitment tree, cloned from the note commitment tree of the finalized tip or fork root.
+- When a block is added to a non-finalized chain tip, the Orchard note commitment tree is updated with the note commitments from that block.
+- When a block is rolled back from a non-finalized chain tip... (TODO)
 
 ### Sapling
 - There is a single copy of the latest Sapling Note Commitment Tree for the finalized tip.
