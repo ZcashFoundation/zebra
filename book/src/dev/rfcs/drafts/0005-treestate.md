@@ -177,8 +177,6 @@ state. The Sprout and Sapling nullifiers revealed in the block will be merged
 with the exising ones in our finalized state (ie, it should strictly grow over
 time).
 
-IMPORTANT: we need to save the incremental merkle tree / serialized nodes for:
-
 ## State Management
 
 ### Orchard
