@@ -622,17 +622,29 @@ makes code hard to read and maintain. Map the `Either` to a custom enum.
 [using-atomics]: #using-atomics
 
 If you're considering using atomics, prefer:
-1. a safe, tested abstraction
+1. a safe, tested abstraction, like tokio's [watch](https://docs.rs/tokio/*/tokio/sync/watch/index.html) or [oneshot](https://docs.rs/tokio/*/tokio/sync/oneshot/index.html) channels
 2. using the strongest memory ordering ([`SeqCst`](https://doc.rust-lang.org/nomicon/atomics.html#sequentially-consistent))
 3. using a weaker memory ordering, with:
   - a correctness comment,
-  - multithreaded tests with a concurrency permutation harness like [loom](https://github.com/tokio-rs/loom), and
+  - multithreaded tests with a concurrency permutation harness like [loom](https://github.com/tokio-rs/loom), ideally on x86 and ARM, and
   - benchmarks to prove that the low-level code is faster.
 
 In Zebra, we try to use safe abstractions, and write obviously correct code. It takes
 a lot of effort to write, test, and maintain low-level code. Almost all of our
 performance-critical code is in cryptographic libraries. And our biggest performance
 gains from those libraries come from async batch cryptography.
+
+### Atomic Details
+[atomic-details]: #atomic-details
+
+x86 processors [guarantee strong orderings, even for `Relaxed` accesses](https://stackoverflow.com/questions/10537810/memory-ordering-restrictions-on-x86-architecture#18512212).
+Since Zebra's CI all runs on x86 (as of June 2021), our tests get `AcqRel` orderings, even when we specify `Relaxed`.
+But ARM processors like the Apple M1 [implement weaker memory orderings, including genuinely `Relaxed` access](https://stackoverflow.com/questions/59089084/loads-and-stores-reordering-on-arm#59089757).
+For more details, see the [hardware reordering](https://doc.rust-lang.org/nomicon/atomics.html#hardware-reordering)
+section of the Rust nomicon.
+
+Tokio's watch channel [uses `SeqCst` for reads and writes](https://docs.rs/tokio/1.6.1/src/tokio/sync/watch.rs.html#286)
+to its internal atomics. So unless we're very sure, Zebra should do the same.
 
 ## Testing Async Code
 [testing-async-code]: #testing-async-code
