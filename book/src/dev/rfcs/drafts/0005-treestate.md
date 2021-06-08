@@ -185,7 +185,8 @@ Orchard tip:
 - When non-finalized state is being updated, each non-finalized chain gets its own copy of the Orchard Note Commitment Tree, cloned from the finalized block note commitment tree of its parent block, and then subsequently updated/extended as new Orchard note commitments are discovered when processing blocks.
 
 Sapling tip: 
-- When finalizing state, for Sapling, the tip of the chain (latest finalized block) saves a serialization of the Sapling Note Commitment Tree
+- There is a single copy of the latest Sapling Note Commitment Tree for the finalized tip.
+- When finalizing a block, the finalized tip is updated with a serialization of the Sapling Note Commitment Tree. (The previous tree should be deleted as part of the same database transaction.)
 - When non-finalized state is being updated, each non-finalized chain gets its own copy of the Sapling Note Commitment Tree, cloned from the finalized block note commitment tree of its parent block, and then subsequently updated/extended as new Sapling note commitments are discovered when processing blocks.
 
 All Sprout blocks:
