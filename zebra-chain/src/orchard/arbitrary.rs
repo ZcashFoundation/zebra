@@ -6,7 +6,7 @@ use crate::primitives::redpallas::{Signature, SpendAuth, VerificationKeyBytes};
 
 use super::{keys, note, Action, AuthorizedAction, Flags, NoteCommitment, ValueCommitment};
 
-use std::marker::PhantomData;
+use std::{convert::TryFrom, marker::PhantomData};
 
 impl Arbitrary for Action {
     type Parameters = ();
@@ -42,7 +42,10 @@ impl Arbitrary for note::Nullifier {
         use halo2::arithmetic::FieldExt;
 
         (any::<u64>())
-            .prop_map(|number| Self::from(pallas::Scalar::from_u64(number).to_bytes()))
+            .prop_map(|number| {
+                Self::try_from(pallas::Scalar::from_u64(number).to_bytes())
+                    .expect("a valid generated nullifier")
+            })
             .boxed()
     }
 

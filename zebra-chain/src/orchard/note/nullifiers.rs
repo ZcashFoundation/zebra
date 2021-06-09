@@ -3,13 +3,16 @@
 
 use halo2::{arithmetic::FieldExt, pasta::pallas};
 
-use crate::serialization::serde_helpers;
+use crate::serialization::{serde_helpers, SerializationError};
 
 use super::super::{
     commitment::NoteCommitment, keys::NullifierDerivingKey, note::Note, sinsemilla::*,
 };
 
-use std::hash::{Hash, Hasher};
+use std::{
+    convert::TryFrom,
+    hash::{Hash, Hasher},
+};
 
 /// A cryptographic permutation, defined in [poseidonhash].
 ///
@@ -46,9 +49,17 @@ impl Hash for Nullifier {
     }
 }
 
-impl From<[u8; 32]> for Nullifier {
-    fn from(bytes: [u8; 32]) -> Self {
-        Self(pallas::Base::from_bytes(&bytes).unwrap())
+impl TryFrom<[u8; 32]> for Nullifier {
+    type Error = SerializationError;
+
+    fn try_from(bytes: [u8; 32]) -> Result<Self, Self::Error> {
+        let possible_point = pallas::Base::from_bytes(&bytes);
+
+        if possible_point.is_some().into() {
+            Ok(Self(possible_point.unwrap()))
+        } else {
+            Err(SerializationError::Parse("Invalid pallas::Base value"))
+        }
     }
 }
 
