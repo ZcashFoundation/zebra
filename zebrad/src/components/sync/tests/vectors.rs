@@ -63,6 +63,9 @@ fn ensure_timeouts_consistent() {
 /// Test that calls to [`ChainSync::request_genesis`] are rate limited.
 #[test]
 fn request_genesis_is_rate_limited() {
+    // The number of calls to `request_genesis()` we are going to be testing for
+    const RETRIES_TO_RUN: u8 = 3;
+
     // create some counters that will be updated inside async blocks
     let peer_requests_counter = Arc::new(AtomicU8::new(0));
     let peer_requests_counter_in_service = Arc::clone(&peer_requests_counter);
@@ -116,13 +119,21 @@ fn request_genesis_is_rate_limited() {
 
     // run `request_genesis()` with a timeout of 13 seconds
     runtime.block_on(async move {
-        let _ = timeout(Duration::from_secs(13), chain_sync.request_genesis()).await;
+        // allow extra wall clock time for tests on CPU-bound machines
+        let retries_timeout = (RETRIES_TO_RUN - 1) as u64 * GENESIS_TIMEOUT_RETRY.as_secs()
+            + GENESIS_TIMEOUT_RETRY.as_secs() / 2;
+        let _ = timeout(
+            Duration::from_secs(retries_timeout),
+            chain_sync.request_genesis(),
+        )
+        .await;
     });
 
-    // In 13 seconds and as we have a rate limit of 5 seconds in `request_genesis()` ...
-
-    // we should have 3 calls to the peer service
-    assert_eq!(peer_requests_counter.load(Ordering::SeqCst), 9);
-    // we should have 3 calls to the state service
-    assert_eq!(state_requests_counter.load(Ordering::SeqCst), 3);
+    let peer_requests_counter = peer_requests_counter.load(Ordering::SeqCst);
+    assert!(peer_requests_counter >= RETRIES_TO_RUN);
+    assert!(peer_requests_counter <= RETRIES_TO_RUN * (BLOCK_DOWNLOAD_RETRY_LIMIT as u8) * 2);
+    assert_eq!(
+        state_requests_counter.load(Ordering::SeqCst),
+        RETRIES_TO_RUN
+    );
 }
