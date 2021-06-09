@@ -70,6 +70,8 @@ fn ensure_timeouts_consistent() {
 /// Test that calls to [`ChainSync::request_genesis`] are rate limited.
 #[test]
 fn request_genesis_is_rate_limited() {
+    zebra_test::init();
+
     // The number of calls to `request_genesis()` we are going to be testing for
     const RETRIES_TO_RUN: u8 = 3;
 
