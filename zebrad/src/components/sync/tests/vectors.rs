@@ -59,11 +59,11 @@ fn ensure_timeouts_consistent() {
         "Block verify should allow for at least one new block to be generated and distributed"
     );
 
-    // This constraint avoids potential denial of service in the genesis download
+    // This constraint makes genesis retries more likely to succeed
     assert!(
         GENESIS_TIMEOUT_RETRY.as_secs() > zebra_network::constants::HANDSHAKE_TIMEOUT.as_secs()
             && GENESIS_TIMEOUT_RETRY.as_secs() < BLOCK_DOWNLOAD_TIMEOUT.as_secs(),
-        "Genesis timeout should allow a handshake but never a block download timeout"
+        "Genesis retries should wait for new peers, but they shouldn't wait too long"
     );
 }
 
