@@ -58,6 +58,13 @@ fn ensure_timeouts_consistent() {
                 .num_seconds() as u64,
         "Block verify should allow for at least one new block to be generated and distributed"
     );
+
+    // This constraint avoids potential denial of service in the genesis download
+    assert!(
+        GENESIS_TIMEOUT_RETRY.as_secs() > zebra_network::constants::HANDSHAKE_TIMEOUT.as_secs()
+            && GENESIS_TIMEOUT_RETRY.as_secs() < BLOCK_DOWNLOAD_TIMEOUT.as_secs(),
+        "Genesis timeout should allow a handshake but never a block download timeout"
+    );
 }
 
 /// Test that calls to [`ChainSync::request_genesis`] are rate limited.
