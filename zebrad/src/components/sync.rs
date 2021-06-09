@@ -21,6 +21,9 @@ use zebra_state as zs;
 use crate::{config::ZebradConfig, BoxError};
 
 mod downloads;
+#[cfg(test)]
+mod tests;
+
 use downloads::{AlwaysHedge, Downloads};
 
 /// Controls the number of peers used for each ObtainTips and ExtendTips request.
@@ -129,6 +132,18 @@ pub(super) const BLOCK_VERIFY_TIMEOUT: Duration = Duration::from_secs(180);
 /// sometimes get stuck in a failure loop, due to leftover downloads from
 /// previous sync runs.
 const SYNC_RESTART_DELAY: Duration = Duration::from_secs(61);
+
+/// Controls how long we wait to retry a failed attempt to download
+/// and verify the genesis block.
+///
+/// This timeout gives the crawler time to find better peers.
+///
+/// ## Security
+///
+/// If this timeout is removed (or set too low), Zebra will immediately retry
+/// to download and verify the genesis block from its peers. This can cause
+/// a denial of service on those peers.
+const GENESIS_TIMEOUT_RETRY: Duration = Duration::from_secs(5);
 
 /// Helps work around defects in the bitcoin protocol by checking whether
 /// the returned hashes actually extend a chain tip.
@@ -615,7 +630,8 @@ where
             match self.downloads.next().await.expect("downloads is nonempty") {
                 Ok(hash) => tracing::trace!(?hash, "verified and committed block to state"),
                 Err(e) => {
-                    tracing::warn!(?e, "could not download or verify genesis block, retrying")
+                    tracing::warn!(?e, "could not download or verify genesis block, retrying");
+                    tokio::time::sleep(GENESIS_TIMEOUT_RETRY).await;
                 }
             }
         }
@@ -662,60 +678,6 @@ where
         metrics::gauge!(
             "sync.downloads.in_flight",
             self.downloads.in_flight() as f64
-        );
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use zebra_chain::parameters::NetworkUpgrade;
-
-    use super::*;
-
-    /// Make sure the timeout values are consistent with each other.
-    #[test]
-    fn ensure_timeouts_consistent() {
-        zebra_test::init();
-
-        // This constraint clears the download pipeline during a restart
-        assert!(
-            SYNC_RESTART_DELAY.as_secs() > 2 * BLOCK_DOWNLOAD_TIMEOUT.as_secs(),
-            "Sync restart should allow for pending and buffered requests to complete"
-        );
-
-        // This constraint avoids spurious failures due to block retries timing out.
-        // We multiply by 2, because the Hedge can wait up to BLOCK_DOWNLOAD_TIMEOUT
-        // seconds before retrying.
-        const BLOCK_DOWNLOAD_HEDGE_TIMEOUT: u64 =
-            2 * BLOCK_DOWNLOAD_RETRY_LIMIT as u64 * BLOCK_DOWNLOAD_TIMEOUT.as_secs();
-        assert!(
-            SYNC_RESTART_DELAY.as_secs() > BLOCK_DOWNLOAD_HEDGE_TIMEOUT,
-            "Sync restart should allow for block downloads to time out on every retry"
-        );
-
-        // This constraint avoids spurious failures due to block download timeouts
-        assert!(
-            BLOCK_VERIFY_TIMEOUT.as_secs()
-                > SYNC_RESTART_DELAY.as_secs()
-                    + BLOCK_DOWNLOAD_HEDGE_TIMEOUT
-                    + BLOCK_DOWNLOAD_TIMEOUT.as_secs(),
-            "Block verify should allow for a block timeout, a sync restart, and some block fetches"
-        );
-
-        // The minimum recommended network speed for Zebra, in bytes per second.
-        const MIN_NETWORK_SPEED_BYTES_PER_SEC: u64 = 10 * 1024 * 1024 / 8;
-
-        // This constraint avoids spurious failures when restarting large checkpoints
-        assert!(
-            BLOCK_VERIFY_TIMEOUT.as_secs() > SYNC_RESTART_DELAY.as_secs() + 2 * zebra_consensus::MAX_CHECKPOINT_BYTE_COUNT / MIN_NETWORK_SPEED_BYTES_PER_SEC,
-            "Block verify should allow for a full checkpoint download, a sync restart, then a full checkpoint re-download"
-        );
-
-        // This constraint avoids spurious failures after checkpointing has finished
-        assert!(
-            BLOCK_VERIFY_TIMEOUT.as_secs()
-                > 2 * NetworkUpgrade::Blossom.target_spacing().num_seconds() as u64,
-            "Block verify should allow for at least one new block to be generated and distributed"
         );
     }
 }
