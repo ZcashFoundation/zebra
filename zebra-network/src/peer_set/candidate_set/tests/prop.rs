@@ -30,7 +30,7 @@ proptest! {
         let validated_peers = validate_addrs(gossiped_peers, last_seen_limit);
 
         for peer in validated_peers {
-            prop_assert![peer.get_last_seen() <= last_seen_limit];
+            prop_assert!(peer.untrusted_last_seen().unwrap() <= last_seen_limit);
         }
     }
 }
@@ -41,7 +41,7 @@ proptest! {
     /// Test that new outbound peer connections are rate-limited.
     #[test]
     fn new_outbound_peer_connections_are_rate_limited(
-        peers in vec(MetaAddr::alternate_node_strategy(), 10),
+        peers in vec(MetaAddr::alternate_change_strategy(), 10),
         initial_candidates in 0..4usize,
         extra_candidates in 0..4usize,
     ) {

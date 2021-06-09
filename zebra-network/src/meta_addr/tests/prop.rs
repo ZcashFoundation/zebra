@@ -1,7 +1,8 @@
 //! Randomised property tests for MetaAddr.
 
 use super::check;
-use crate::{meta_addr::MetaAddr, types::PeerServices};
+
+use crate::meta_addr::MetaAddr;
 
 use proptest::prelude::*;
 
@@ -14,18 +15,22 @@ proptest! {
     fn sanitize_avoids_leaks(addr in MetaAddr::arbitrary()) {
         zebra_test::init();
 
-        check::sanitize_avoids_leaks(&addr, &addr.sanitize());
+        if let Some(sanitized) = addr.sanitize() {
+            check::sanitize_avoids_leaks(&addr, &sanitized);
+        }
     }
 
     /// Test round-trip serialization for gossiped MetaAddrs
     #[test]
     fn gossiped_roundtrip(
-        mut gossiped_addr in MetaAddr::gossiped_strategy()
+        gossiped_addr in MetaAddr::gossiped_strategy()
     ) {
         zebra_test::init();
 
-        // Zebra's deserialization sanitizes `services` to known flags
-        gossiped_addr.services &= PeerServices::all();
+        // We require sanitization before serialization
+        let gossiped_addr = gossiped_addr.sanitize();
+        prop_assume!(gossiped_addr.is_some());
+        let gossiped_addr = gossiped_addr.unwrap();
 
         // Check that malicious peers can't make Zebra's serialization fail
         let addr_bytes = gossiped_addr.zcash_serialize_to_vec();
@@ -88,7 +93,12 @@ proptest! {
     ) {
         zebra_test::init();
 
+        // We require sanitization before serialization,
+        // but we also need the original address for this test
         let sanitized_addr = addr.sanitize();
+        prop_assume!(sanitized_addr.is_some());
+        let sanitized_addr = sanitized_addr.unwrap();
+
         // Make sure sanitization avoids leaks on this address, to avoid spurious errors
         check::sanitize_avoids_leaks(&addr, &sanitized_addr);
 
