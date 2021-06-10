@@ -87,7 +87,7 @@ impl Entry {
 }
 
 impl Tree {
-    /// Create a MMR tree with the given length.
+    /// Create a MMR tree with the given length from the given cache of nodes.
     ///
     /// The `peaks` are the peaks of the MMR tree to build and their position in the
     /// array representation of the tree.
@@ -95,7 +95,11 @@ impl Tree {
     ///
     /// Note that the length is usually larger than the length of `peaks` and `extra`, since
     /// you don't need to pass every node, just the peaks of the tree (plus extra).
-    fn new(
+    ///
+    /// # Panics
+    ///
+    /// Will panic if `peaks` is empty.
+    fn new_from_cache(
         network: Network,
         network_upgrade: NetworkUpgrade,
         length: u32,
@@ -123,11 +127,34 @@ impl Tree {
         })
     }
 
+    /// Create a single-node MMR tree for the given block.
+    ///
+    /// `sapling_root` is the root of the Sapling note commitment tree of the block.
+    fn new_from_block(
+        network: Network,
+        block: Arc<Block>,
+        sapling_root: &sapling::tree::Root,
+    ) -> Result<Self, io::Error> {
+        let height = block
+            .coinbase_height()
+            .expect("block must have coinbase height during contextual verification");
+        let network_upgrade = NetworkUpgrade::current(network, height);
+        let entry0 = Entry::new_leaf(block, network, sapling_root);
+        let mut peaks = HashMap::new();
+        peaks.insert(0u32, &entry0);
+        Tree::new_from_cache(network, network_upgrade, 1, &peaks, &HashMap::new())
+    }
+
     /// Append a new block to the tree, as a new leaf.
     ///
     /// `sapling_root` is the root of the Sapling note commitment tree of the block.
     ///
     /// Returns a vector of nodes added to the tree (leaf + internal nodes).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the network upgrade of the given block is different from
+    /// the network upgrade of the other blocks in the tree.
     fn append_leaf(
         &mut self,
         block: Arc<Block>,
@@ -309,10 +336,7 @@ mod test {
         // Build initial MMR tree with only Block 0
         let sapling_root0 =
             sapling::tree::Root(**sapling_roots.get(&height).expect("test vector exists"));
-        let entry0 = Entry::new_leaf(block0, network, &sapling_root0);
-        let mut peaks = HashMap::new();
-        peaks.insert(0u32, &entry0);
-        let mut tree = Tree::new(network, network_upgrade, 1, &peaks, &HashMap::new())?;
+        let mut tree = Tree::new_from_block(network, block0, &sapling_root0)?;
 
         // Compute root hash of the MMR tree, which will be included in the next block
         let hash0 = tree.hash();
