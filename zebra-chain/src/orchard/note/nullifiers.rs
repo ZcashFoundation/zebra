@@ -58,7 +58,9 @@ impl TryFrom<[u8; 32]> for Nullifier {
         if possible_point.is_some().into() {
             Ok(Self(possible_point.unwrap()))
         } else {
-            Err(SerializationError::Parse("Invalid pallas::Base value"))
+            Err(SerializationError::Parse(
+                "Invalid pallas::Base value for orchard Nullifier",
+            ))
         }
     }
 }

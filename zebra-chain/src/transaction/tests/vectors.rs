@@ -338,6 +338,6 @@ fn invalid_orchard_nullifier() {
             .err()
             .unwrap()
             .to_string(),
-        SerializationError::Parse("Invalid pallas::Base value").to_string()
+        SerializationError::Parse("Invalid pallas::Base value for orchard Nullifier").to_string()
     );
 }
